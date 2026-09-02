@@ -161,3 +161,28 @@
 - [x] T039 Route `CopyPath` and `ShowInExplorer` context-menu actions in `src/app/ui/tree/render.rs` (`show_dir_context_menu`, `show_file_context_menu`) and `src/app/ui/panels/center.rs` tab context menu through `UserCommand::CopyPath` / `ShowInExplorer` instead of `ui.copy_text` / `crate::ui::show_in_file_explorer` direct calls per FR-001, FR-003, SC-001, T035 (partial)
 - [x] T040 Route center-panel tab label click (`src/app/ui/panels/center.rs:187`) and Edit/Open-in-editor branches through `Bus<UserCommand>` (`SelectFile` / `OpenInEditor`) instead of direct `*app.selection_mut().selected_file_mut() =` and `app.orchestrator.text_buffer.open` / `open_in_system_editor` mutations per FR-003, SC-002, US2/AC1 (contradicts)
 - [x] T041 Clean stale `write_back` references in `src/app/ui/tree/context.rs` module docs (`//!` header and `from_app_state` doc) and remove obsolete `CommandIntent` comment mentions in `src/app/ui/panels/bottom_tests.rs` now that the bus routing and `write_back` removal are complete per T027, T031, T036, RUST-011 (partial)
+
+---
+
+## Phase 9: Convergence
+
+**Purpose**: Address remaining gaps where tasks marked complete still have direct UI→orchestrator mutations violating FR-003/SC-002, and missing UserCommand variants for center panel close button, task toggles, and debug window.
+
+### Critical - Direct Mutations Still Present (Contradicts FR-003, SC-002)
+
+- [x] T042 Add `ClearAgentSession` variant to `UserCommand` enum in `src/app/bus/events/user_command.rs` and handle in `CommandExecutor::apply_user_command` per F2 (missing)
+- [x] T043 Migrate center panel close button (`clear_agent_session_state` at `src/app/ui/panels/center.rs:19-26`) to publish `UserCommand::ClearAgentSession` instead of directly mutating `app.orchestrator.agent_*` state per F2 (contradicts)
+- [x] T044 Add `ApplyTaskToggles` variant to `UserCommand` enum in `src/app/bus/events/user_command.rs` and handle in `CommandExecutor::apply_user_command` per F3 (missing)
+- [x] T045 Migrate center panel task checkbox handlers (`src/app/ui/panels/center.rs:138-143`) to publish `UserCommand::ApplyTaskToggles` instead of directly mutating `app.orchestrator.agent_transcript.content` per F3 (contradicts)
+- [x] T046 Add `ClearCommandInput` variant to `UserCommand` enum in `src/app/bus/events/user_command.rs` and handle in `CommandExecutor::apply_user_command` per F1 (missing)
+- [x] T047 Migrate bottom panel send click (`src/app/ui/panels/bottom.rs:143`) to publish `UserCommand::ClearCommandInput` instead of directly mutating `app.orchestrator.agent_panel_state.command_input.clear()` per F1 (contradicts)
+- [x] T048 Add `ToggleDebugWindow` / `UpdateDebugState` variants to `UserCommand` enum and handle in `CommandExecutor::apply_user_command` per F4 (missing)
+- [x] T049 Migrate agent debug window (`src/app/ui/panels/agent_debug_window.rs:35,41,51,140,148`) to publish debug commands instead of directly mutating `agent_panel_state` and `agent.state_mut()` per F4 (contradicts)
+
+### Medium - Documentation Cleanup
+
+- [x] T050 Clean stale `write_back` references in `src/app/ui/tree/context.rs` module docs (lines 20, 39) per F5 (partial)
+
+### High - Test Coverage Completion
+
+- [x] T051 Complete Tier-4 test coverage in `src/app/ui/tree/render_tests.rs` and `src/app/ui/panels/center_tests.rs` for new command variants (`ClearAgentSession`, `ApplyTaskToggles`, `ClearCommandInput`, debug commands) per F6, FR-006, SC-004 (partial)
