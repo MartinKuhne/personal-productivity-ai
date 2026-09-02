@@ -303,28 +303,6 @@ pub fn render_tabs_and_content_capture(
     ui.separator();
 
     if let Some(selected_path) = app.selection().selected_file() {
-        ui.push_id("selected_file_header", |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(
-                    RichText::new(
-                        selected_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy(),
-                    )
-                    .size(18.0)
-                    .strong(),
-                );
-                ui.label(
-                    RichText::new(format!("({})", selected_path.to_string_lossy()))
-                        .size(11.0)
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            });
-        });
-        ui.separator();
-
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
         let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
         let deficit_strategy = app.orchestrator.config.deficit_strategy();
