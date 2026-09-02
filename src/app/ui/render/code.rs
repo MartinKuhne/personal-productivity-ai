@@ -44,7 +44,11 @@ pub(crate) fn render_code_block(ui: &mut egui::Ui, language: Option<&str>, conte
                         ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
                     },
                 );
-                if ui.button("📋").on_hover_text("Copy code").clicked() {
+                if ui
+                    .button(egui_phosphor::regular::COPY)
+                    .on_hover_text("Copy code")
+                    .clicked()
+                {
                     copy_code_to_output(ui, content);
                 }
             });

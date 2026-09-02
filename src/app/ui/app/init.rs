@@ -67,6 +67,12 @@ impl FastMdApp {
         ctx.set_visuals_of(egui::Theme::Dark, visuals);
     }
 
+    /// Configure fonts for FastMD including typography defaults, Phosphor icon font,
+    /// and fallback symbol fonts (for arrows, math, and box-drawing glyphs).
+    pub fn configure_fonts(ctx: &egui::Context) {
+        crate::ui::fonts::configure_fonts(ctx);
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, config_bus: Bus<ConfigArrived>) -> Self {
         // egui 0.35 split the global style into a Dark and a Light
         // theme, picked at runtime by `ThemePreference` (default
@@ -77,19 +83,10 @@ impl FastMdApp {
         // dark background is lost. Force the dark theme and apply
         // our custom visuals to the dark theme explicitly.
         Self::configure_dark_theme(&cc.egui_ctx);
-
-        let mut fonts = egui::FontDefinitions::default();
-        let font_bytes = egui_phosphor::Variant::Regular.font_bytes();
-        fonts.font_data.insert(
-            "phosphor".to_owned(),
-            std::sync::Arc::new(egui::FontData::from_static(font_bytes)),
-        );
-        if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-            font_keys.insert(1, "phosphor".to_owned());
-        }
-        cc.egui_ctx.set_fonts(fonts);
+        Self::configure_fonts(&cc.egui_ctx);
 
         // Subscribe before any worker is spawned so the first
+
         // `ConfigArrived` publish reaches every reader.
         let config_reader = config_bus.subscribe();
 

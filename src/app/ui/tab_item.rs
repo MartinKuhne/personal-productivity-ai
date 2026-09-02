@@ -46,7 +46,7 @@ impl TabItem {
                 .map(|name| name.rsplit(['/', '\\']).next().unwrap_or(name))
                 .unwrap_or("")
                 .to_string(),
-            TabItem::Agent => "🤖 FastMD Agent Session".to_string(),
+            TabItem::Agent => crate::ui::strings::AGENT_SESSION_HEADER.to_string(),
         }
     }
 
@@ -100,7 +100,7 @@ mod tests {
         assert!(agent_tab.is_agent());
 
         // Test label helper
-        assert_eq!(agent_tab.label(), "🤖 FastMD Agent Session");
+        assert_eq!(agent_tab.label(), crate::ui::strings::AGENT_SESSION_HEADER);
 
         // Test file_path helper (should return None for Agent)
         assert!(agent_tab.file_path().is_none());
