@@ -1,0 +1,25 @@
+[package]
+name = "fastmd-pdf"
+version = "0.2.0"
+edition = "2024"
+description = "Markdown to PDF conversion via Typst - independent crate extracted from fastmd"
+license = "MIT"
+repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
+categories = ["text-editors"]
+keywords = ["markdown", "pdf", "typst"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+pulldown-cmark = { version = "0.13", features = ["html"] }
+typst-as-lib = { version = "0.16", features = ["typst-kit-fonts", "typst-kit-embed-fonts"] }
+typst-layout = { version = "0.15" }
+typst-pdf = { version = "0.15" }
+typst = { version = "0.15" }
+typst-kit = { version = "0.15" }
+
+[dev-dependencies]
+tempfile = "3.8"
+proptest = "1.4"
+pdf_oxide = "0.3.77"

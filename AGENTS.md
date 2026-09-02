@@ -29,6 +29,14 @@
 - [RUST-024] Functions persisting configuration or application state MUST use an injected storage handler (e.g. `ConfigStorageHandler`), NEVER hardcoding direct writes to platform-default user locations (`%APPDATA%`, `~/.fastmd*`, `USERPROFILE`).
 
 ## Tests
+| Crate | Directory | Command |
+|-------|-----------|---------|
+| `fastmd` | `src/app/` | `cargo nextest run -p fastmd` |
+| `fastmd-agent` | `src/agent/` | `cargo nextest run -p fastmd-agent` |
+| `fastmd-pdf` | `src/md2pdf/` | `cargo nextest run -p fastmd-pdf` |
+| `fastmd-tool-macros` | `src/fastmd-tool-macros/` | `cargo nextest run -p fastmd-tool-macros` |
+| workspace | `/` | `cargo nextest run --workspace` |
+
 - [RUST-001] Unit tests SHOULD be kept in a separate file. The file MUST be named <file>_tests.rs.
 - [RUST-002] You MUST use `cargo nextest`. If you don't, you will be fired for wasting my time.
 - [RUST-003] All changes MUST be covered by unit tests. Happy path, corner cases, failure modes, all code paths MUST be covered.
