@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Tier 1 test for the `apply_send_click` effect: a bare
-/// `/models` prompt dispatches to `CommandIntent::ShowModels`,
+/// `/models` prompt dispatches to `UserCommand::ShowModels`,
 /// which sets the agent status, response, and show_results
 /// flag. We verify the effect without driving the egui
 /// harness.
@@ -57,7 +57,7 @@ fn test_apply_send_click_show_models_dispatch() {
     );
 }
 
-/// Tier 1 test: an empty prompt produces `CommandIntent::Empty`
+/// Tier 1 test: an empty prompt produces `None`
 /// and `apply_send_click` is a no-op (no status change, no
 /// show_results toggle, command_input is still cleared).
 #[test]
@@ -80,7 +80,7 @@ fn test_apply_send_click_empty_prompt_is_noop() {
 }
 
 /// Tier 1 test: an unknown `/foo` style command produces
-/// `CommandIntent::RunAgent("/foo")` and starts an agent
+/// `UserCommand::RunAgent("/foo")` and starts an agent
 /// session. We don't verify the full session state (that
 /// requires the background LLM machinery) — just that
 /// show_results is toggled and the command_input is cleared.

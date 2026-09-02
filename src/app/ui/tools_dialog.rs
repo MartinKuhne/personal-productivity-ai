@@ -6,7 +6,7 @@
 //! applicable).
 //!
 //! All state changes go through [`crate::agent::tools::registry`]
-//! free functions (which lock the global [`ToolRegistry`]) and
+//! free functions (which lock the global `ToolRegistry`) and
 //! [`crate::config::save_config`] (which persists the toggle to
 //! `config.yaml`).
 

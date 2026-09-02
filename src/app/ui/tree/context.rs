@@ -15,17 +15,28 @@
 //! # Usage pattern (view object)
 //!
 //! The context is built once per `show_left_panel` call from
-//! the orchestrator's state, rendered into (mutating the
-//! owned values), then `write_back`-ed to the orchestrator so
-//! the changes persist. The `from_app_state` constructor and
-//! the `write_back` method are the two ends of this swap.
+//! the orchestrator's state and rendered into. UI intents are
+//! published via `user_command_bus` rather than mutated through a
+//! `write_back` swap — the `CommandExecutor` drains the bus and
+//! applies the mutations centrally.
 //!
 //! ```ignore
-//! let mut ctx = TreeOpsContext::from_app_state(&mut app, &ui);
+//! let mut ctx = TreeNodeContext::from_app_state(
+//!     &app.orchestrator.selection,
+//!     &app.orchestrator.tabs,
+//!     &app.layout,
+//!     &app.orchestrator.content_libraries,
+//!     Some(app.orchestrator.tx.clone()),
+//!     app.orchestrator.file_event_bus.clone(),
+//!     app.orchestrator.inline_editor_enabled,
+//!     ui.input(|i| i.modifiers),
+//!     app.pdf_backing_tracker().clone(),
+//!     app.orchestrator.user_command_bus.clone(),
+//! );
 //! for row in &tree_rows {
 //!     render_flat_row(ui, row, &mut ctx);
 //! }
-//! ctx.write_back(&mut app);
+//! // No write_back — intents were published to `Bus<UserCommand>`.
 //! ```
 
 use crate::bus::core::Bus;
@@ -197,15 +208,9 @@ impl TreeOpsContext {
     /// Build a context from the orchestrator's current state.
     /// Clones the small per-frame state (`Vec<PathBuf>`,
     /// `HashSet<PathBuf>`, etc.) into owned fields. The
-    /// orchestrator's state is not modified; the caller is
-    /// expected to call [`Self::write_back`] after the render
-    /// pass to commit any changes the render function made.
-    ///
-    /// `open_editor` is taken as a value (not cloned) because
-    /// the call site owns the consumer — `None` starts the
-    /// frame with no pending open, and the render-row click
-    /// handlers in `tree/render.rs` write into the owned
-    /// `ctx.open_editor` field directly.
+    /// orchestrator's state is not modified directly; UI
+    /// intents are published to `Bus<UserCommand>` and applied
+    /// centrally by `CommandExecutor::apply_user_command`.
     #[allow(clippy::too_many_arguments)]
     pub fn from_app_state(
         selection: &FileSelection,

@@ -419,3 +419,38 @@ fn orchestrator_user_commands_persist_via_injected_config_storage() {
     assert!(!orch.config.tool_groups.weather);
     assert!(!storage.latest_config().unwrap().tool_groups.weather);
 }
+
+#[test]
+fn test_select_file_command_loads_markdown_content() {
+    let mut orch = harness();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Loaded Markdown\n").unwrap();
+
+    // Select the file via UserCommand::SelectFile
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::SelectFile {
+        path: path.clone(),
+        multi: false,
+    });
+
+    // Regression check: selecting a file must not prematurely set loaded_path
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "loaded_path must remain None until file content is actually read into memory"
+    );
+
+    // Drive handle_file_selection() as update_ui does each frame
+    orch.handle_file_selection();
+
+    // Drain background channel to receive ProcessEvent::FileLoaded
+    for _ in 0..100 {
+        orch.drain_background_channel();
+        if orch.tabs.loaded_path == Some(path.clone()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(orch.tabs.loaded_path, Some(path.clone()));
+    assert!(orch.tabs.current_markdown.contains("Loaded Markdown"));
+}

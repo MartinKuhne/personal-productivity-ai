@@ -2,8 +2,8 @@
 //!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
+use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{FastMdApp, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
@@ -159,11 +159,11 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     render_tabs_and_content_capture(ui, app, |_| {});
 }
 
-/// Tier 4 test variant of [`render_tabs_and_content`]. The
+/// Tier 4 test variant of `render_tabs_and_content`. The
 /// `on_click` callback is invoked after every tab-strip click
 /// (`×` close button, label click, context-menu items) with a
 /// stable event name. The production caller
-/// ([`render_tabs_and_content`]) passes a no-op closure; the
+/// (`render_tabs_and_content`) passes a no-op closure; the
 /// test caller in `tests::test_tab_close_button_captures_event`
 /// passes a closure that pushes the event into the harness's
 /// persistent state.
@@ -184,7 +184,12 @@ pub fn render_tabs_and_content_capture(
                 ui.selectable_label(is_selected, title)
             });
             if response.inner.clicked() {
-                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+                app.orchestrator.user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::SelectFile {
+                        path: tab_path.clone(),
+                        multi: false,
+                    },
+                );
             }
             if response.inner.middle_clicked() {
                 app.orchestrator
@@ -194,16 +199,11 @@ pub fn render_tabs_and_content_capture(
             }
             response.inner.context_menu(|ui| {
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-                    if app.orchestrator.inline_editor_enabled {
-                        if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(tab_path);
-                            if !is_pdf_backed {
-                                app.orchestrator.text_buffer.open(tab_path, &content, None);
-                            }
-                        }
-                    } else {
-                        open_in_system_editor(tab_path);
-                    }
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::OpenInEditor(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
                 ui.separator();
@@ -230,23 +230,31 @@ pub fn render_tabs_and_content_capture(
                 }
                 ui.separator();
                 if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                    // egui 0.35: `PlatformOutput::copied_text` was
-                    // removed; use the dedicated `Ui::copy_text` helper.
-                    ui.copy_text(tab_path.to_string_lossy().to_string());
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::CopyPath(tab_path.clone()),
+                    );
                     ui.close();
                 }
                 if ui
                     .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
                     .clicked()
                 {
-                    show_in_file_explorer(tab_path);
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::ShowInExplorer(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
                 if ui
                     .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
                     .clicked()
                 {
-                    open_in_system_editor(tab_path);
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::OpenInEditor(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
 

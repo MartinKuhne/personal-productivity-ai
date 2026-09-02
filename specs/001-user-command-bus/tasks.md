@@ -143,21 +143,21 @@
 
 ## Phase 6: Convergence
 
-- [ ] T030 Refactor `src/app/ui/panels/bottom.rs` to publish commands for agent cancellation and prompting instead of directly mutating `app.agent_mut()` per US2 (partial)
-- [ ] T031 Remove redundant and impure `ctx.write_back()` call in `src/app/ui/panels/left.rs` and the corresponding logic in `TreeNodeContext` per US2 (partial)
-- [ ] T032 Rewrite and restore commented-out Tier-4 tests in `src/app/ui/tree/render_tests.rs` and `src/app/ui/panels/center_tests.rs` to assert on published commands per US3 (partial)
+- [x] T030 Refactor `src/app/ui/panels/bottom.rs` to publish commands for agent cancellation and prompting instead of directly mutating `app.agent_mut()` per US2 (partial)
+- [x] T031 Remove redundant and impure `ctx.write_back()` call in `src/app/ui/panels/left.rs` and the corresponding logic in `TreeNodeContext` per US2 (partial)
+- [x] T032 Rewrite and restore commented-out Tier-4 tests in `src/app/ui/tree/render_tests.rs` and `src/app/ui/panels/center_tests.rs` to assert on published commands per US3 (partial)
 
 ## Phase 7: Convergence
 
-- [ ] T033 Migrate `show_tools_dialog` row handlers in `src/app/ui/tools_dialog.rs` to publish `UserCommand::SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` / `ForgetMcpAuth` instead of directly mutating `AppConfig` and `ToolContext` per FR-001, FR-003, T016 (partial)
-- [ ] T034 Route file-tree single- and multi-select `Delete` / `Move` actions through `Bus<UserCommand>` in `src/app/ui/tree/render.rs` instead of calling `recycle_bin::delete` and `FileEventProducer::publish_removed` inline per FR-001, FR-003, T017 (partial)
-- [ ] T035 Implement `UserCommand::CopyPath` handling in `src/app/command_executor.rs` (currently `tracing::warn` stub) or delegate clipboard via UI plumbing so spec SC-001 routing is complete per FR-004 (partial)
-- [ ] T036 Remove or justify retention of obsolete `CommandIntent` enum in `src/app/ui/panels/bottom.rs` and satisfy `CommandExecutor::_ => {}` wildcard by handling all variants explicitly per T026, RUST-011 (partial)
+- [x] T033 Migrate `show_tools_dialog` row handlers in `src/app/ui/tools_dialog.rs` to publish `UserCommand::SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` / `ForgetMcpAuth` instead of directly mutating `AppConfig` and `ToolContext` per FR-001, FR-003, T016 (partial)
+- [x] T034 Route file-tree single- and multi-select `Delete` / `Move` actions through `Bus<UserCommand>` in `src/app/ui/tree/render.rs` instead of calling `recycle_bin::delete` and `FileEventProducer::publish_removed` inline per FR-001, FR-003, T017 (partial)
+- [x] T035 Implement `UserCommand::CopyPath` handling in `src/app/command_executor.rs` (currently `tracing::warn` stub) or delegate clipboard via UI plumbing so spec SC-001 routing is complete per FR-004 (partial)
+- [x] T036 Remove or justify retention of obsolete `CommandIntent` enum in `src/app/ui/panels/bottom.rs` and satisfy `CommandExecutor::_ => {}` wildcard by handling all variants explicitly per T026, RUST-011 (partial)
 
 ## Phase 8: Convergence
 
-- [ ] T037 Rewrite and restore Tier-4 capture tests in `src/app/ui/tree/render_tests.rs` (currently stub) and expand `src/app/ui/panels/center_tests.rs` to assert tab-strip interactions via published `UserCommand` instead of direct state mutation per FR-006, SC-004, US3/AC1, T032 (partial)
-- [ ] T038 Route multi-select file-delete action in `src/app/ui/tree/render.rs:show_multi_select_file_context_menu` through `Bus<UserCommand>` (`UserCommand::Delete` per-file or batched) instead of calling `recycle_bin::delete` and `FileEventProducer::publish_removed` inline per FR-001, FR-003, T017, T034 (partial)
-- [ ] T039 Route `CopyPath` and `ShowInExplorer` context-menu actions in `src/app/ui/tree/render.rs` (`show_dir_context_menu`, `show_file_context_menu`) and `src/app/ui/panels/center.rs` tab context menu through `UserCommand::CopyPath` / `ShowInExplorer` instead of `ui.copy_text` / `crate::ui::show_in_file_explorer` direct calls per FR-001, FR-003, SC-001, T035 (partial)
-- [ ] T040 Route center-panel tab label click (`src/app/ui/panels/center.rs:187`) and Edit/Open-in-editor branches through `Bus<UserCommand>` (`SelectFile` / `OpenInEditor`) instead of direct `*app.selection_mut().selected_file_mut() =` and `app.orchestrator.text_buffer.open` / `open_in_system_editor` mutations per FR-003, SC-002, US2/AC1 (contradicts)
-- [ ] T041 Clean stale `write_back` references in `src/app/ui/tree/context.rs` module docs (`//!` header and `from_app_state` doc) and remove obsolete `CommandIntent` comment mentions in `src/app/ui/panels/bottom_tests.rs` now that the bus routing and `write_back` removal are complete per T027, T031, T036, RUST-011 (partial)
+- [x] T037 Rewrite and restore Tier-4 capture tests in `src/app/ui/tree/render_tests.rs` (currently stub) and expand `src/app/ui/panels/center_tests.rs` to assert tab-strip interactions via published `UserCommand` instead of direct state mutation per FR-006, SC-004, US3/AC1, T032 (partial)
+- [x] T038 Route multi-select file-delete action in `src/app/ui/tree/render.rs:show_multi_select_file_context_menu` through `Bus<UserCommand>` (`UserCommand::Delete` per-file or batched) instead of calling `recycle_bin::delete` and `FileEventProducer::publish_removed` inline per FR-001, FR-003, T017, T034 (partial)
+- [x] T039 Route `CopyPath` and `ShowInExplorer` context-menu actions in `src/app/ui/tree/render.rs` (`show_dir_context_menu`, `show_file_context_menu`) and `src/app/ui/panels/center.rs` tab context menu through `UserCommand::CopyPath` / `ShowInExplorer` instead of `ui.copy_text` / `crate::ui::show_in_file_explorer` direct calls per FR-001, FR-003, SC-001, T035 (partial)
+- [x] T040 Route center-panel tab label click (`src/app/ui/panels/center.rs:187`) and Edit/Open-in-editor branches through `Bus<UserCommand>` (`SelectFile` / `OpenInEditor`) instead of direct `*app.selection_mut().selected_file_mut() =` and `app.orchestrator.text_buffer.open` / `open_in_system_editor` mutations per FR-003, SC-002, US2/AC1 (contradicts)
+- [x] T041 Clean stale `write_back` references in `src/app/ui/tree/context.rs` module docs (`//!` header and `from_app_state` doc) and remove obsolete `CommandIntent` comment mentions in `src/app/ui/panels/bottom_tests.rs` now that the bus routing and `write_back` removal are complete per T027, T031, T036, RUST-011 (partial)

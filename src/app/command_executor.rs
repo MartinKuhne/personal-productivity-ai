@@ -167,11 +167,10 @@ impl AppOrchestrator {
                     self.selection.selected_file = Some(path.clone());
                 }
 
-                // Also open the file
-                if !self.tabs.tabs.contains(&path) {
-                    self.tabs.tabs.push(path.clone());
-                }
-                self.tabs.loaded_path = Some(path);
+                self.selection.selected_dir = path.parent().map(|p| p.to_path_buf());
+
+                // Also open the file tab
+                self.tabs.open_tab(path);
             }
             UserCommand::SelectDirectory {
                 path,

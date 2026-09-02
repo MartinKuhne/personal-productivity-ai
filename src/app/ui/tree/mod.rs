@@ -7,8 +7,8 @@
 //! |-----------|----------|
 //! | [`context`] | [`TreeOpsContext`] flat context struct + [`TreeNodeContext`] alias |
 //! | [`flatten`] | [`FlatRow`], [`flatten_tree`], constants |
-//! | [`handlers`] | Click handlers: [`apply_file_row_click`], [`apply_directory_row_click`] |
-//! | [`render`] | Row drawing: [`render_flat_row`], [`draw_tree_node`] |
+//! | `handlers` | Click handlers: `apply_file_row_click`, `apply_directory_row_click` |
+//! | `render` | Row drawing: [`render_flat_row`], [`draw_tree_node`] |
 
 pub mod context;
 pub mod flatten;

@@ -24,11 +24,16 @@ fn show_dir_context_menu(
         .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
         .clicked()
     {
-        crate::ui::show_in_file_explorer(path);
+        ctx.user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::ShowInExplorer(path.to_path_buf()),
+        );
         ui.close();
     }
     if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-        ui.copy_text(path.to_string_lossy().to_string());
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::CopyPath(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
@@ -125,17 +130,9 @@ fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeCont
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
         let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
-        for file in files.iter() {
-            if let Err(e) = crate::utils::recycle_bin::delete(file) {
-                tracing::error!(
-                    name = "ui.file.multi_delete_failed",
-                    path = %file.display(),
-                    error = %e,
-                    "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
-                );
-            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                producer.publish_removed(file);
-            }
+        for file in files {
+            ctx.user_command_bus
+                .publish(crate::bus::events::user_command::UserCommand::Delete(file));
         }
         ctx.selected_files().clear();
         ui.close();
@@ -151,24 +148,26 @@ fn show_file_context_menu(
     ctx: &mut TreeNodeContext,
 ) {
     if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-        if ctx.inline_editor_enabled() {
-            ctx.user_command_bus.publish(
-                crate::bus::events::user_command::UserCommand::OpenInEditor(path.to_path_buf()),
-            );
-        } else {
-            crate::ui::open_in_system_editor(path);
-        }
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::OpenInEditor(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui
         .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
         .clicked()
     {
-        crate::ui::show_in_file_explorer(path);
+        ctx.user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::ShowInExplorer(path.to_path_buf()),
+        );
         ui.close();
     }
     if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-        ui.copy_text(path.to_string_lossy().to_string());
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::CopyPath(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui

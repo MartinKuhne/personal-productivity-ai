@@ -40,7 +40,7 @@ pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
 
 /// Purpose: Determines the next selected file after the active tag filter changes.
 /// Inputs: selected_file (current selected file path), selected_tag (currently active tag filter), file_tags (mapping of files to their tags)
-/// Outputs: Option<PathBuf> representing the new selected file.
+/// Outputs: `Option<PathBuf>` representing the new selected file.
 /// Purity: Pure function.
 /// Preconditions: None.
 /// Postconditions: Returns `None` if an active tag is selected and it is not associated with the selected file. Otherwise returns the original selected file.
