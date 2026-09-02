@@ -203,14 +203,6 @@ impl FastMdApp {
         &mut self.orchestrator.config
     }
 
-    pub fn submit_prompt(&self) -> &Option<String> {
-        &self.orchestrator.submit_prompt
-    }
-
-    pub fn submit_prompt_mut(&mut self) -> &mut Option<String> {
-        &mut self.orchestrator.submit_prompt
-    }
-
     pub fn inline_editor_enabled(&self) -> bool {
         self.orchestrator.inline_editor_enabled
     }

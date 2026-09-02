@@ -2,11 +2,11 @@
 //!
 //! This is the egui presentation layer for the batch subsystem. The domain
 //! logic and data types live in [`crate::agent::batch`]; this module only renders
-//! the dialog and translates UI state into a [`BatchDialogResult`].
+//! the dialog and translates UI state into UserCommands.
 
 use crate::agent::batch::prompts::resolve_prompts;
 use crate::agent::batch::types::{
-    BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
+    BatchConfig, BatchDialogConfig, BatchMode, validate_batch_params,
 };
 use crate::ui::FastMdApp;
 use crate::ui::strings;
@@ -14,12 +14,7 @@ use eframe::egui;
 
 /// Shows the batch prompt processing dialog.
 /// Returns `Some(result)` when dialog closes, `None` if still open.
-pub fn show_batch_modal(
-    app: &mut FastMdApp,
-    ctx: &egui::Context,
-    config: &mut BatchDialogConfig,
-) -> Option<BatchDialogResult> {
-    let mut result = None;
+pub fn show_batch_modal(app: &mut FastMdApp, ctx: &egui::Context, config: &mut BatchDialogConfig) {
     let is_running = app.dialogs().batch_handle.is_some();
     let mut dialog_open = app.dialogs().batch_dialog_open;
 
@@ -46,31 +41,26 @@ pub fn show_batch_modal(
             ui.spacing_mut().item_spacing.y = 10.0;
 
             if is_running {
-                show_running_view(ui, app, &mut result);
+                show_running_view(ui, app);
             } else {
-                show_config_view(ui, app, config, &mut result);
+                show_config_view(ui, app, config);
             }
         });
 
     app.dialogs_mut().batch_dialog_open = dialog_open;
 
-    if !dialog_open && result.is_none() {
+    if !dialog_open {
         if let Some(handle) = &app.dialogs().batch_handle {
             handle.cancel();
         }
-        result = Some(BatchDialogResult::Cancel);
+        app.orchestrator
+            .user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
     }
-
-    result
 }
 
 /// Shows the configuration view (idle state).
-fn show_config_view(
-    ui: &mut egui::Ui,
-    _app: &mut FastMdApp,
-    config: &mut BatchDialogConfig,
-    result: &mut Option<BatchDialogResult>,
-) {
+fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDialogConfig) {
     // Directory selector
     ui.horizontal(|ui| {
         ui.label(strings::BATCH_DIALOG_DIRECTORY_LABEL);
@@ -184,22 +174,22 @@ fn show_config_view(
                     mode: config.mode,
                     concurrency: config.concurrency,
                 };
-                *result = Some(BatchDialogResult::Process(batch_config));
+                app.orchestrator.user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
+                );
             }
 
             if ui.button(strings::CANCEL_BUTTON).clicked() {
-                *result = Some(BatchDialogResult::Cancel);
+                app.orchestrator
+                    .user_command_bus
+                    .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
             }
         });
     });
 }
 
 /// Shows the running/progress view during batch processing.
-fn show_running_view(
-    ui: &mut egui::Ui,
-    app: &mut FastMdApp,
-    result: &mut Option<BatchDialogResult>,
-) {
+fn show_running_view(ui: &mut egui::Ui, app: &mut FastMdApp) {
     let is_finished = app
         .dialogs()
         .batch_handle
@@ -229,7 +219,9 @@ fn show_running_view(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if is_finished {
                 if ui.button(strings::BATCH_CLOSE_BUTTON).clicked() {
-                    *result = Some(BatchDialogResult::Cancel);
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
                 }
             } else {
                 if ui.button(strings::CANCEL_BUTTON).clicked()

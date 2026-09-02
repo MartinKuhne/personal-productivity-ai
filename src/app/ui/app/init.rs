@@ -227,6 +227,9 @@ impl FastMdApp {
 
         let dialogs = Dialogs::new();
 
+        let user_command_bus = crate::bus::core::Bus::new();
+        let user_command_reader = user_command_bus.subscribe();
+
         Self {
             orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries: Vec::new(),
@@ -243,11 +246,13 @@ impl FastMdApp {
                 _watcher: None,
                 agent,
                 dialogs,
-                submit_prompt: None,
                 text_buffer: TextBuffer::new(),
                 inline_editor_enabled: false,
                 background_manager,
                 config: AppConfig::default(),
+                config_storage: std::sync::Arc::new(crate::config::FileConfigStorage::new(
+                    crate::config::get_config_path(),
+                )),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
                 finished_watcher_slot,
@@ -257,6 +262,8 @@ impl FastMdApp {
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
                 agent_panel_state: AgentPanelState::new(),
+                user_command_bus,
+                user_command_reader: Some(user_command_reader),
             },
             layout,
             cached_tree_rows: None,
@@ -369,6 +376,9 @@ impl FastMdApp {
         let content_libraries = config.content_libraries.clone();
         let inline_editor_enabled = config.inline_editor_enabled;
 
+        let user_command_bus = crate::bus::core::Bus::new();
+        let user_command_reader = user_command_bus.subscribe();
+
         Self {
             orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries,
@@ -384,12 +394,12 @@ impl FastMdApp {
                 _watcher: None,
                 agent,
                 dialogs,
-                submit_prompt: None,
                 text_buffer: TextBuffer::new(),
                 inline_editor_enabled,
                 background_manager,
                 directory_tracker: dir_tracker,
                 config,
+                config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
                 config_reader: None,
                 pending_file_load: None,
                 finished_watcher_slot,
@@ -399,6 +409,8 @@ impl FastMdApp {
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
                 agent_panel_state: AgentPanelState::new(),
+                user_command_bus,
+                user_command_reader: Some(user_command_reader),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

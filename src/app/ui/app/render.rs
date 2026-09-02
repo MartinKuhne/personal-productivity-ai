@@ -57,38 +57,29 @@ impl FastMdApp {
                 &mut self.orchestrator.dialogs,
                 &self.orchestrator.content_libraries,
                 &self.orchestrator.file_processor,
-                &self.orchestrator.file_event_bus,
+                &self.orchestrator.user_command_bus,
                 ctx,
             );
         }
         if self.orchestrator.dialogs.create_dir_dialog_open {
             crate::ui::modals::show_create_dir_dialog(
                 &mut self.orchestrator.dialogs,
-                &mut self.orchestrator.file_processor,
-                &mut self.orchestrator._watcher,
-                &self.orchestrator.file_event_bus,
+                &self.orchestrator.user_command_bus,
                 ctx,
             );
         }
         if self.orchestrator.dialogs.rename_dialog_open {
-            let selection = &mut self.orchestrator.selection;
+            let _selection = &mut self.orchestrator.selection;
             crate::ui::modals::show_rename_dialog(crate::ui::modals::RenameDialogCtx {
                 dialogs: &mut self.orchestrator.dialogs,
-                file_event_bus: &self.orchestrator.file_event_bus,
-                loaded_path: &mut self.orchestrator.tabs.loaded_path,
-                selected_file: &mut selection.selected_file,
-                selected_dir: &mut selection.selected_dir,
-                tabs: &mut self.orchestrator.tabs.tabs,
-                file_processor: &mut self.orchestrator.file_processor,
-                app_tags: &mut self.orchestrator.tags,
-                expanded_dirs: &mut selection.expanded_dirs,
+                user_command_bus: &self.orchestrator.user_command_bus,
                 ctx,
             });
         }
         if self.orchestrator.dialogs.create_document_dialog_open {
             crate::ui::modals::show_create_document_dialog(
                 &mut self.orchestrator.dialogs,
-                &self.orchestrator.file_event_bus,
+                &self.orchestrator.user_command_bus,
                 ctx,
             );
         }
@@ -112,39 +103,7 @@ impl FastMdApp {
                 .as_ref()
                 .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
 
-            if let Some(result) =
-                crate::ui::batch_dialog::show_batch_modal(self, ctx, &mut dialog_config)
-            {
-                match result {
-                    crate::agent::batch::types::BatchDialogResult::Process(config) => {
-                        if self.orchestrator.dialogs.batch_handle.is_none() {
-                            let prompt_text = dialog_config
-                                .available_prompts
-                                .get(dialog_config.selected_prompt_idx.unwrap_or(0))
-                                .map(|p| p.content.clone())
-                                .unwrap_or_default();
-
-                            let (coordinator, cancel_flag) =
-                                crate::agent::batch::coordinator::BatchCoordinator::new(
-                                    config,
-                                    self.orchestrator.config.clone(),
-                                    self.orchestrator.tx.clone(),
-                                    self.orchestrator.file_event_bus.clone(),
-                                    prompt_text,
-                                    std::sync::Arc::new(crate::utils::clock::SystemClock),
-                                );
-                            let handle = coordinator.execute();
-                            self.orchestrator.dialogs.batch_handle = Some(handle);
-                            self.orchestrator.dialogs.batch_cancel_flag = Some(cancel_flag);
-                        }
-                    }
-                    crate::agent::batch::types::BatchDialogResult::Cancel => {
-                        self.orchestrator.dialogs.batch_dialog_open = false;
-                        dialog_config.available_prompts.clear();
-                        dialog_config.selected_prompt_idx = None;
-                    }
-                }
-            }
+            crate::ui::batch_dialog::show_batch_modal(self, ctx, &mut dialog_config);
             self.orchestrator.dialogs.batch_dialog_config = dialog_config;
         }
     }

@@ -66,11 +66,11 @@ fn harness() -> AppOrchestrator {
         _watcher: None,
         agent,
         dialogs: Dialogs::new(),
-        submit_prompt: None,
         text_buffer: TextBuffer::new(),
         inline_editor_enabled: false,
         background_manager: Arc::new(Mutex::new(BackgroundLogs::new())),
         config: AppConfig::default(),
+        config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
         config_reader: None,
         pending_file_load: None,
         finished_watcher_slot: Arc::new(Mutex::new(None)),
@@ -80,6 +80,8 @@ fn harness() -> AppOrchestrator {
         agent_event_lagged: false,
         agent_transcript: AgentTranscript::new(Uuid::nil()),
         agent_panel_state: AgentPanelState::new(),
+        user_command_bus: crate::bus::core::Bus::new(),
+        user_command_reader: None,
     }
 }
 
@@ -382,4 +384,73 @@ fn handle_file_selection_spawns_background_load() {
 
     assert_eq!(orch.tabs.loaded_path, Some(path.clone()));
     assert!(orch.tabs.current_markdown.contains("Loaded"));
+}
+
+#[test]
+fn orchestrator_user_commands_persist_via_injected_config_storage() {
+    let mut orch = harness();
+    let storage = std::sync::Arc::new(crate::config::InMemoryConfigStorage::new());
+    orch.config_storage = storage.clone();
+
+    // Table width strategy change
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ChangeTableWidthStrategy(
+            crate::ui::table_width::DeficitStrategy::WaterFillRatio,
+        ),
+    );
+    assert_eq!(
+        orch.config.deficit_strategy(),
+        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+    );
+    assert_eq!(
+        storage.latest_config().unwrap().deficit_strategy(),
+        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+    );
+
+    // Tool group enable/disable
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::SetToolGroupEnabled {
+            id: crate::agent::tools::registry::ToolGroupId::Internal(
+                crate::agent::tools::registry::InternalToolGroup::Weather,
+            ),
+            enabled: false,
+        },
+    );
+    assert!(!orch.config.tool_groups.weather);
+    assert!(!storage.latest_config().unwrap().tool_groups.weather);
+}
+
+#[test]
+fn test_select_file_command_loads_markdown_content() {
+    let mut orch = harness();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Loaded Markdown\n").unwrap();
+
+    // Select the file via UserCommand::SelectFile
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::SelectFile {
+        path: path.clone(),
+        multi: false,
+    });
+
+    // Regression check: selecting a file must not prematurely set loaded_path
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "loaded_path must remain None until file content is actually read into memory"
+    );
+
+    // Drive handle_file_selection() as update_ui does each frame
+    orch.handle_file_selection();
+
+    // Drain background channel to receive ProcessEvent::FileLoaded
+    for _ in 0..100 {
+        orch.drain_background_channel();
+        if orch.tabs.loaded_path == Some(path.clone()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(orch.tabs.loaded_path, Some(path.clone()));
+    assert!(orch.tabs.current_markdown.contains("Loaded Markdown"));
 }

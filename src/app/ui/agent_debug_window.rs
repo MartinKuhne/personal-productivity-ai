@@ -1,6 +1,7 @@
 //! Agent debug window — scrollable log of raw LLM API traffic with collapsible entry rows.
 
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
+use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use eframe::egui;
 
@@ -48,7 +49,9 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                     });
 
                 if ui.button(crate::ui::strings::CLEAR_BUTTON).clicked() {
-                    app.orchestrator.agent.state_mut().debug_entries.clear();
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(UserCommand::ClearDebugEntries);
                 }
             });
 
@@ -145,7 +148,11 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 });
         });
 
-    app.orchestrator.agent_panel_state.show_debug_window = open;
+    if open != app.orchestrator.agent_panel_state.show_debug_window {
+        app.orchestrator
+            .user_command_bus
+            .publish(UserCommand::ToggleDebugWindow(open));
+    }
 }
 
 fn render_entry_row(ui: &mut egui::Ui, entry: &AgentDebugEntry, id_salt: usize, json_rows: usize) {

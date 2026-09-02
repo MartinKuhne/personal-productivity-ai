@@ -2,22 +2,12 @@
 //!
 //! Unit tests live in the sibling `modals_tests.rs` sidecar.
 
-use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::config::ContentLibrary;
 use crate::ui::dialogs::Dialogs;
 use crate::workspace::watcher::FileEventProcessor;
 use eframe::egui;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-
-/// Result of a shared name-entry dialog.
-pub enum NameEntryAction {
-    /// The user confirmed the name.
-    Submit,
-    /// The user dismissed the dialog.
-    Cancel,
-}
 
 /// Shared name-entry window used by the create-directory and
 /// create-document dialogs (UI-011, UI-015).
@@ -37,7 +27,7 @@ fn show_name_entry_window(
     title: &str,
     prompt: &str,
     name: &mut String,
-) -> Option<NameEntryAction> {
+) -> Option<bool> {
     let window_id = egui::Id::new(title);
     let fallback = ctx
         .pointer_interact_pos()
@@ -63,10 +53,10 @@ fn show_name_entry_window(
 
             ui.horizontal(|ui| {
                 if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
-                    action = Some(NameEntryAction::Submit);
+                    action = Some(true);
                 }
                 if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                    action = Some(NameEntryAction::Cancel);
+                    action = Some(false);
                 }
             });
         });
@@ -77,7 +67,7 @@ pub fn show_move_modal_dialog(
     dm: &mut Dialogs,
     content_libraries: &[ContentLibrary],
     file_processor: &FileEventProcessor,
-    file_event_bus: &Bus<FileEvent>,
+    user_command_bus: &crate::bus::core::Bus<crate::bus::events::user_command::UserCommand>,
     ctx: &egui::Context,
 ) {
     let mut close_modal = false;
@@ -106,8 +96,9 @@ pub fn show_move_modal_dialog(
                     .max_height(200.0)
                     .show(ui, |ui| {
                         for folder in folders {
-                            let display = crate::config::library_display_label(content_libraries, &folder)
-                                .unwrap_or_else(|| folder.to_string_lossy().into_owned());
+                            let display =
+                                crate::config::library_display_label(content_libraries, &folder)
+                                    .unwrap_or_else(|| folder.to_string_lossy().into_owned());
                             if ui
                                 .selectable_label(
                                     dm.selected_move_folder.as_ref() == Some(&folder),
@@ -120,25 +111,22 @@ pub fn show_move_modal_dialog(
                         }
                     });
 
-                let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                let submit =
+                    ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || (submit && dm.selected_move_folder.is_some()) {
-                        if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
-                            && let Some(name) = file.file_name() {
-                                let new_path = folder.join(name);
-                                if let Err(e) = std::fs::rename(file, &new_path) {
-                                    tracing::error!(
-                                        name = "ui.file.move_failed",
-                                        source = %file.display(),
-                                        destination = %new_path.display(),
-                                        error = %e,
-                                        "Failed to move file to new destination. Likely cause: permission denied or file in use. Operator should check file locks."
-                                    );
-                                } else {
-                                    let producer = FileEventProducer::new(file_event_bus.clone());
-                                    producer.publish_rename(file, &new_path);
-                                }
-                            }
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked()
+                        || (submit && dm.selected_move_folder.is_some())
+                    {
+                        if let (Some(file), Some(folder)) =
+                            (&dm.file_to_move, &dm.selected_move_folder)
+                        {
+                            user_command_bus.publish(
+                                crate::bus::events::user_command::UserCommand::ConfirmMove {
+                                    file: file.clone(),
+                                    destination: folder.clone(),
+                                },
+                            );
+                        }
                         close_modal = true;
                     }
                     if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
@@ -157,9 +145,7 @@ pub fn show_move_modal_dialog(
 
 pub fn show_create_dir_dialog(
     dm: &mut Dialogs,
-    file_processor: &mut FileEventProcessor,
-    watcher: &mut Option<notify::RecommendedWatcher>,
-    file_event_bus: &Bus<FileEvent>,
+    user_command_bus: &crate::bus::core::Bus<crate::bus::events::user_command::UserCommand>,
     ctx: &egui::Context,
 ) {
     if !dm.create_dir_dialog_open {
@@ -172,36 +158,16 @@ pub fn show_create_dir_dialog(
         &mut dm.create_dir_name,
     );
     match action {
-        Some(NameEntryAction::Submit) => {
+        Some(true) => {
             if let Some(parent) = &dm.create_dir_parent
                 && !dm.create_dir_name.trim().is_empty()
             {
-                let dir_name = dm.create_dir_name.trim();
-                if !crate::utils::path::is_safe_basename(dir_name) {
-                    tracing::warn!(
-                        name = "ui.directory.invalid_name",
-                        name_input = %dir_name,
-                        "User attempted to create directory with invalid characters. Operation skipped. Operator should advise user of valid names."
-                    );
-                } else {
-                    let new_dir_path = parent.join(dir_name);
-                    if let Err(e) = std::fs::create_dir_all(&new_dir_path) {
-                        tracing::error!(
-                            name = "ui.directory.create_failed",
-                            path = %new_dir_path.display(),
-                            error = %e,
-                            "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
-                        );
-                    } else {
-                        file_processor.add_dir(new_dir_path.clone());
-                        let producer = FileEventProducer::new(file_event_bus.clone());
-                        producer.publish_dir_discovered(&new_dir_path);
-                        if let Some(watcher) = watcher {
-                            use notify::Watcher;
-                            let _ = watcher.watch(&new_dir_path, notify::RecursiveMode::Recursive);
-                        }
-                    }
-                }
+                user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::ConfirmCreateDirectory {
+                        parent: parent.clone(),
+                        name: dm.create_dir_name.trim().to_string(),
+                    },
+                );
             }
             dm.create_dir_dialog_open = false;
             dm.create_dir_parent = None;
@@ -212,7 +178,7 @@ pub fn show_create_dir_dialog(
                 ));
             });
         }
-        Some(NameEntryAction::Cancel) => {
+        Some(false) => {
             dm.create_dir_dialog_open = false;
             dm.create_dir_parent = None;
             dm.create_dir_name.clear();
@@ -236,7 +202,7 @@ pub fn show_create_dir_dialog(
 /// the tree, tab list and tag manager refresh immediately.
 pub fn show_create_document_dialog(
     dm: &mut Dialogs,
-    file_event_bus: &Bus<FileEvent>,
+    user_command_bus: &crate::bus::core::Bus<crate::bus::events::user_command::UserCommand>,
     ctx: &egui::Context,
 ) {
     if !dm.create_document_dialog_open {
@@ -249,31 +215,16 @@ pub fn show_create_document_dialog(
         &mut dm.create_document_name,
     );
     match action {
-        Some(NameEntryAction::Submit) => {
+        Some(true) => {
             if let Some(parent) = &dm.create_document_parent
                 && !dm.create_document_name.trim().is_empty()
             {
-                let entered = dm.create_document_name.trim();
-                if !crate::utils::path::is_safe_basename(entered) {
-                    tracing::warn!(
-                        name = "ui.file.invalid_name",
-                        name_input = %entered,
-                        "User attempted to create document with invalid characters. Operation skipped. Operator should advise user of valid names."
-                    );
-                } else {
-                    match write_new_document(parent, entered) {
-                        Ok(new_path) => {
-                            let producer = FileEventProducer::new(file_event_bus.clone());
-                            producer.publish_discovered(&new_path);
-                        }
-                        Err(e) => tracing::error!(
-                            name = "ui.file.create_failed",
-                            parent = %parent.display(),
-                            error = %e,
-                            "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
-                        ),
-                    }
-                }
+                user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::ConfirmCreateDocument {
+                        parent: parent.clone(),
+                        name: dm.create_document_name.trim().to_string(),
+                    },
+                );
             }
             dm.create_document_dialog_open = false;
             dm.create_document_parent = None;
@@ -284,7 +235,7 @@ pub fn show_create_document_dialog(
                 ));
             });
         }
-        Some(NameEntryAction::Cancel) => {
+        Some(false) => {
             dm.create_document_dialog_open = false;
             dm.create_document_parent = None;
             dm.create_document_name.clear();
@@ -300,7 +251,7 @@ pub fn show_create_document_dialog(
 
 /// Append `.md` to a user-entered document name when it has no
 /// extension, so the created file is always a markdown document.
-fn unique_document_name(entered: &str) -> String {
+pub fn unique_document_name(entered: &str) -> String {
     if Path::new(entered).extension().is_some() {
         entered.to_owned()
     } else {
@@ -313,7 +264,7 @@ fn unique_document_name(entered: &str) -> String {
 /// If a file with the preferred name already exists, a
 /// `<stem> <date-time><ext>` name is generated instead so the created
 /// file is always unique. Returns the created file's path.
-fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> {
+pub fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> {
     let file_name = unique_document_name(entered);
     let mut new_path = parent.join(&file_name);
     if new_path.exists() {
@@ -325,7 +276,7 @@ fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> 
 
 /// Build `<stem> <timestamp><ext>` for a file name, used when the
 /// preferred document name already exists.
-fn date_suffixed_name(file_name: &str) -> String {
+pub fn date_suffixed_name(file_name: &str) -> String {
     let path = Path::new(file_name);
     let stem = path
         .file_stem()
@@ -347,14 +298,7 @@ fn date_suffixed_name(file_name: &str) -> String {
 /// each field from `&mut self`.
 pub struct RenameDialogCtx<'a> {
     pub dialogs: &'a mut Dialogs,
-    pub file_event_bus: &'a Bus<FileEvent>,
-    pub loaded_path: &'a mut Option<PathBuf>,
-    pub selected_file: &'a mut Option<PathBuf>,
-    pub selected_dir: &'a mut Option<PathBuf>,
-    pub tabs: &'a mut [PathBuf],
-    pub file_processor: &'a mut FileEventProcessor,
-    pub app_tags: &'a mut crate::workspace::Tags,
-    pub expanded_dirs: &'a mut std::collections::HashSet<PathBuf>,
+    pub user_command_bus: &'a crate::bus::core::Bus<crate::bus::events::user_command::UserCommand>,
     pub ctx: &'a egui::Context,
 }
 
@@ -364,14 +308,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
     }
     let RenameDialogCtx {
         dialogs: dm,
-        file_event_bus,
-        loaded_path,
-        selected_file,
-        selected_dir,
-        tabs,
-        file_processor,
-        app_tags,
-        expanded_dirs,
+        user_command_bus,
         ctx,
     } = ctx;
     let action = show_name_entry_window(
@@ -381,68 +318,16 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
         &mut dm.rename_new_name,
     );
     match action {
-        Some(NameEntryAction::Submit) => {
+        Some(true) => {
             if let Some(file) = &dm.file_to_rename
                 && !dm.rename_new_name.trim().is_empty()
             {
-                let new_name = dm.rename_new_name.trim();
-                if !crate::utils::path::is_safe_basename(new_name) {
-                    tracing::warn!(
-                        name = "ui.file.invalid_rename",
-                        name_input = %new_name,
-                        "User attempted to rename file with invalid characters. Operation skipped. Operator should advise user of valid names."
-                    );
-                } else {
-                    let ext = file
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| format!(".{}", e))
-                        .unwrap_or_default();
-                    let new_name_with_ext = format!("{}{}", new_name, ext);
-                    let mut new_path = file.clone();
-                    new_path.set_file_name(&new_name_with_ext);
-                    if let Err(e) = std::fs::rename(file, &new_path) {
-                        tracing::error!(
-                            name = "ui.file.rename_failed",
-                            source = %file.display(),
-                            destination = %new_path.display(),
-                            error = %e,
-                            "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
-                        );
-                    } else {
-                        let producer = FileEventProducer::new(file_event_bus.clone());
-                        producer.publish_rename(file, &new_path);
-                        if loaded_path.as_ref() == Some(file) {
-                            *loaded_path = Some(new_path.clone());
-                        }
-                        if selected_file.as_ref() == Some(file) {
-                            *selected_file = Some(new_path.clone());
-                        }
-                        if selected_dir.as_ref() == Some(file) {
-                            *selected_dir = Some(new_path.clone());
-                        }
-                        for tab in tabs.iter_mut() {
-                            if *tab == *file {
-                                *tab = new_path.clone();
-                            }
-                        }
-                        file_processor.remove_file(file);
-                        if file_processor.contains_dir(file) {
-                            file_processor.remove_dir(file);
-                            file_processor.add_dir(new_path.clone());
-                        }
-                        let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        if ext == "md" || ext == "markdown" {
-                            file_processor.add_file(new_path.clone());
-                        }
-                        let tags = crate::utils::tags::extract_tags_from_file(&new_path);
-                        app_tags.remove_file(file);
-                        app_tags.add_tags(new_path.clone(), tags);
-                        if expanded_dirs.remove(file) {
-                            expanded_dirs.insert(new_path.clone());
-                        }
-                    }
-                }
+                user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::ConfirmRename {
+                        path: file.clone(),
+                        new_name: dm.rename_new_name.trim().to_string(),
+                    },
+                );
             }
             dm.rename_dialog_open = false;
             dm.file_to_rename = None;
@@ -451,7 +336,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                 data.remove_temp::<egui::Pos2>(egui::Id::new(crate::ui::strings::RENAME_WINDOW));
             });
         }
-        Some(NameEntryAction::Cancel) => {
+        Some(false) => {
             dm.rename_dialog_open = false;
             dm.file_to_rename = None;
             dm.rename_new_name.clear();

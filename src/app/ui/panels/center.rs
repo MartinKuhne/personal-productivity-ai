@@ -2,77 +2,32 @@
 //!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
+use crate::bus::events::user_command::UserCommand;
+use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{FastMdApp, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
 use std::path::PathBuf;
 
-/// Action that can be applied to tabs.
-#[derive(Debug, PartialEq, Clone)]
-pub enum TabAction {
-    Close(usize),
-    CloseOthers(usize),
-    CloseAll,
+/// Purpose: Creates a `UserCommand` to clear all agent-related session state.
+/// Inputs: None
+/// Outputs: `UserCommand::ClearAgentSession`
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns command that, when executed, hides agent results, clears history and text buffers, and cancels any running agent.
+pub fn clear_agent_session_command() -> UserCommand {
+    UserCommand::ClearAgentSession
 }
 
-/// Purpose: Clears all agent-related session state from the application state.
-/// Inputs: `app` - A mutable reference to the `FastMdApp` state.
-/// Outputs: None
-/// Purity: Impure (mutates application state).
-/// Preconditions: `app.orchestrator.agent_panel_state.show_results` must be true.
-/// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
-pub fn clear_agent_session_state(app: &mut FastMdApp) {
-    app.orchestrator.agent_panel_state.show_results = false;
-    app.orchestrator.agent_panel_state.scroll_to_id = None;
-    app.agent_mut().clear_history();
-    app.agent_mut().set_response(String::new());
-    app.agent_mut().set_thinking(String::new());
-    app.orchestrator.agent_transcript.reset();
-    if app.agent().state().running {
-        app.agent_mut().cancel();
-    }
-}
-
-/// Purpose: Modifies the list of open tabs and the currently selected file based on a tab action.
-/// Inputs: `tabs` - Mutable list of tab paths, `selected_file` - Mutable selected file option, `action` - The tab action to perform.
-/// Outputs: None.
-/// Purity: Impure (mutates arguments).
-/// Preconditions: `tabs` must not be empty if `CloseOthers` or `Close` is called with an index.
-/// Postconditions: `tabs` is updated according to the action. `selected_file` falls back to the last tab if the currently selected file was closed.
-pub fn apply_tab_action(
-    tabs: &mut Vec<PathBuf>,
-    selected_file: &mut Option<PathBuf>,
-    action: TabAction,
-) {
-    match action {
-        TabAction::Close(i) => {
-            if i < tabs.len() {
-                tabs.remove(i);
-            }
-        }
-        TabAction::CloseOthers(i) => {
-            if i < tabs.len() {
-                let keep = tabs[i].clone();
-                tabs.clear();
-                tabs.push(keep);
-            }
-        }
-        TabAction::CloseAll => {
-            tabs.clear();
-        }
-    }
-
-    if let Some(selected) = selected_file {
-        if !tabs.contains(selected) {
-            *selected_file = tabs.last().cloned();
-        }
-    } else if !tabs.is_empty() {
-        *selected_file = tabs.last().cloned();
-    } else {
-        *selected_file = None;
-    }
+/// Purpose: Creates a `UserCommand` to apply task checkbox toggles to the transcript.
+/// Inputs: `toggles` - vector of (index, checked) pairs
+/// Outputs: `UserCommand::ApplyTaskToggles`
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns command that, when executed, applies the toggles to the transcript content.
+pub fn apply_task_toggles_command(toggles: Vec<(usize, bool)>) -> UserCommand {
+    UserCommand::ApplyTaskToggles { toggles }
 }
 
 /// Purpose: Applies the side effect of clicking the tab close `×`
@@ -95,49 +50,16 @@ pub fn apply_tab_action(
 /// `apply_tab_action` cover the underlying logic; this wrapper just
 /// adapts the `&mut FastMdApp` API to the field-level `apply_tab_action`
 /// API.
-pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
-    apply_tab_action(
-        &mut app.orchestrator.tabs.tabs,
-        app.orchestrator.selection.selected_file_mut(),
-        TabAction::Close(i),
-    );
+pub fn apply_tab_close_click(i: usize) -> UserCommand {
+    UserCommand::CloseTab(i)
 }
 
-/// Purpose: Applies the side effect of clicking the context menu's
-/// "Close Other Tabs" item.
-/// Inputs: app (the application state), i (the index of the tab to
-/// keep, as it appeared in the tab strip on the frame the menu
-/// item was clicked)
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tabs.tabs` and
-/// `app.orchestrator.selection.selected_file`).
-/// Preconditions: None — `i` is bounds-checked inside
-/// `apply_tab_action`.
-/// Postconditions: All tabs except the one at index `i` are
-/// removed. The kept tab is `app.orchestrator.tabs.tabs[0]` after the
-/// call. `selected_file` is updated if it was a closed tab.
-pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
-    apply_tab_action(
-        &mut app.orchestrator.tabs.tabs,
-        app.orchestrator.selection.selected_file_mut(),
-        TabAction::CloseOthers(i),
-    );
+pub fn apply_tab_close_others_click(i: usize) -> UserCommand {
+    UserCommand::CloseOtherTabs(i)
 }
 
-/// Purpose: Applies the side effect of clicking the context menu's
-/// "Close All Tabs" item.
-/// Inputs: app (the application state)
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tabs.tabs` and
-/// `app.orchestrator.selection.selected_file`).
-/// Preconditions: None.
-/// Postconditions: All tabs are removed. `selected_file` is `None`.
-pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
-    apply_tab_action(
-        &mut app.orchestrator.tabs.tabs,
-        app.orchestrator.selection.selected_file_mut(),
-        TabAction::CloseAll,
-    );
+pub fn apply_tab_close_all_click() -> UserCommand {
+    UserCommand::CloseAllTabs
 }
 
 /// Purpose: Renders the agent session view in the center panel.
@@ -159,7 +81,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
             .clicked()
         {
-            clear_agent_session_state(app);
+            app.orchestrator
+                .user_command_bus
+                .publish(clear_agent_session_command());
         }
     });
     ui.separator();
@@ -213,13 +137,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 // content (the new render source, replacing
                 // `AgentState::response`).
                 if !toggles.is_empty() {
-                    for (idx, checked) in toggles {
-                        crate::ui::render::apply_task_toggle(
-                            &mut app.orchestrator.agent_transcript.content,
-                            idx,
-                            checked,
-                        );
-                    }
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(apply_task_toggles_command(toggles));
                 }
                 // `stick_to_bottom(true)` on the ScrollArea handles
                 // auto-scroll; an explicit `scroll_to_cursor` here would
@@ -238,11 +158,11 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     render_tabs_and_content_capture(ui, app, |_| {});
 }
 
-/// Tier 4 test variant of [`render_tabs_and_content`]. The
+/// Tier 4 test variant of `render_tabs_and_content`. The
 /// `on_click` callback is invoked after every tab-strip click
 /// (`×` close button, label click, context-menu items) with a
 /// stable event name. The production caller
-/// ([`render_tabs_and_content`]) passes a no-op closure; the
+/// (`render_tabs_and_content`) passes a no-op closure; the
 /// test caller in `tests::test_tab_close_button_captures_event`
 /// passes a closure that pushes the event into the harness's
 /// persistent state.
@@ -263,61 +183,77 @@ pub fn render_tabs_and_content_capture(
                 ui.selectable_label(is_selected, title)
             });
             if response.inner.clicked() {
-                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+                app.orchestrator.user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::SelectFile {
+                        path: tab_path.clone(),
+                        multi: false,
+                    },
+                );
             }
             if response.inner.middle_clicked() {
-                apply_tab_close_click(app, i);
+                app.orchestrator
+                    .user_command_bus
+                    .publish(apply_tab_close_click(i));
                 on_click("tab_middle_click");
             }
             response.inner.context_menu(|ui| {
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-                    if app.orchestrator.inline_editor_enabled {
-                        if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(tab_path);
-                            if !is_pdf_backed {
-                                app.orchestrator.text_buffer.open(tab_path, &content, None);
-                            }
-                        }
-                    } else {
-                        open_in_system_editor(tab_path);
-                    }
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::OpenInEditor(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
                 ui.separator();
                 if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
-                    apply_tab_close_click(app, i);
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(apply_tab_close_click(i));
                     on_click("tab_close_menu");
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
-                    apply_tab_close_others_click(app, i);
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(apply_tab_close_others_click(i));
                     on_click("tab_close_others_menu");
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
-                    apply_tab_close_all_click(app);
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(apply_tab_close_all_click());
                     on_click("tab_close_all_menu");
                     ui.close();
                 }
                 ui.separator();
                 if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                    // egui 0.35: `PlatformOutput::copied_text` was
-                    // removed; use the dedicated `Ui::copy_text` helper.
-                    ui.copy_text(tab_path.to_string_lossy().to_string());
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::CopyPath(tab_path.clone()),
+                    );
                     ui.close();
                 }
                 if ui
                     .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
                     .clicked()
                 {
-                    show_in_file_explorer(tab_path);
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::ShowInExplorer(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
                 if ui
                     .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
                     .clicked()
                 {
-                    open_in_system_editor(tab_path);
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::OpenInEditor(
+                            tab_path.clone(),
+                        ),
+                    );
                     ui.close();
                 }
 
@@ -330,8 +266,13 @@ pub fn render_tabs_and_content_capture(
                             if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
                                 let content =
                                     crate::markdown::DocumentContent::parse(&raw_content).body;
-                                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
-                                *app.submit_prompt_mut() = Some(content);
+                                app.orchestrator.user_command_bus.publish(
+                                    crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+                                        content,
+                                        target_dir: None,
+                                        target_file: Some(tab_path.clone()),
+                                    },
+                                );
                             } else {
                                 tracing::error!(
                                     name = "ui.tab.skill_prompt_failed",
@@ -350,7 +291,9 @@ pub fn render_tabs_and_content_capture(
                 .inner
                 .clicked()
             {
-                apply_tab_close_click(app, i);
+                app.orchestrator
+                    .user_command_bus
+                    .publish(apply_tab_close_click(i));
                 on_click("tab_close_button");
             }
             ui.separator();
@@ -359,28 +302,6 @@ pub fn render_tabs_and_content_capture(
     ui.separator();
 
     if let Some(selected_path) = app.selection().selected_file() {
-        ui.push_id("selected_file_header", |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(
-                    RichText::new(
-                        selected_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy(),
-                    )
-                    .size(18.0)
-                    .strong(),
-                );
-                ui.label(
-                    RichText::new(format!("({})", selected_path.to_string_lossy()))
-                        .size(11.0)
-                        .italics()
-                        .color(egui::Color32::GRAY),
-                );
-            });
-        });
-        ui.separator();
-
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
         let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
         let deficit_strategy = app.orchestrator.config.deficit_strategy();

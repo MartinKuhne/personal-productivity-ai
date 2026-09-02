@@ -263,24 +263,17 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // and tests can construct a `TreeNodeContext` directly
             // without any `Box::leak`.
             //
-            // `open_editor` starts as `None`; render-row click
-            // handlers in `tree/render.rs` write into
-            // `ctx.open_editor` directly when a user requests an
-            // inline edit. The consumer below then reads
-            // `ctx.open_editor()` to perform the file open.
             let mut ctx = TreeNodeContext::from_app_state(
                 &app.orchestrator.selection,
                 &app.orchestrator.tabs,
-                &app.orchestrator.dialogs,
                 &app.layout,
-                &app.orchestrator.submit_prompt,
                 &app.orchestrator.content_libraries,
                 Some(app.orchestrator.tx.clone()),
                 app.orchestrator.file_event_bus.clone(),
                 app.orchestrator.inline_editor_enabled,
                 ui.input(|i| i.modifiers),
-                None,
                 app.pdf_backing_tracker().clone(),
+                app.orchestrator.user_command_bus.clone(),
             );
 
             egui::ScrollArea::vertical()
@@ -295,16 +288,6 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
             // Commit the (possibly mutated) view object back to
             // the orchestrator. `bg_tx`, `file_event_producer`,
-            // `modifiers`, `inline_editor_enabled`, `layout`,
-            // `content_libraries`, and `pdf_backing_tracker` are
-            // not written back — those are inputs, not outputs.
-            ctx.write_back(
-                &mut app.orchestrator.selection,
-                &mut app.orchestrator.tabs,
-                &mut app.orchestrator.dialogs,
-                &mut app.orchestrator.submit_prompt,
-            );
-
             // Empty-state placeholder must be rendered outside the
             // virtual-scroll `show_rows` (which would allocate zero
             // rows for an empty tree) and outside any conditional
@@ -318,15 +301,6 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         .italics()
                         .color(egui::Color32::GRAY),
                 );
-            }
-
-            if let Some(ref path) = ctx.open_editor().clone()
-                && let Ok(content) = std::fs::read_to_string(path)
-            {
-                let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(path);
-                if !is_pdf_backed {
-                    app.editor_mut().open(path, &content, None);
-                }
             }
         });
     // Capture the panel's actual width after user interaction

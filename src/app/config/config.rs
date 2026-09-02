@@ -661,13 +661,96 @@ impl AppConfig {
     }
 }
 
+/// Resolve the configuration file path. Respects `FASTMD_CONFIG_PATH` if set,
+/// falling back to `%APPDATA%\fastmd\config.yaml` on Windows or `~/.fastmd.yaml`.
 pub fn get_config_path() -> PathBuf {
+    if let Ok(override_path) = std::env::var("FASTMD_CONFIG_PATH")
+        && !override_path.is_empty()
+    {
+        return PathBuf::from(override_path);
+    }
     if let Ok(app_data) = std::env::var("APPDATA") {
         PathBuf::from(app_data).join("fastmd").join("config.yaml")
     } else if let Ok(user_profile) = std::env::var("USERPROFILE") {
         PathBuf::from(user_profile).join(".fastmd.yaml")
     } else {
         PathBuf::from(".fastmd.yaml")
+    }
+}
+
+/// Handler for persisting application configuration.
+///
+/// Implementations decouple configuration serialization and persistence from
+/// application and command logic, allowing tests to run with mock or noop
+/// storage without touching production configuration files.
+pub trait ConfigStorageHandler: Send + Sync {
+    /// Persist the application configuration.
+    fn save_config(&self, config: &AppConfig) -> Result<PathBuf, String>;
+}
+
+/// A [`ConfigStorageHandler`] implementation that saves to a filesystem path.
+#[derive(Debug, Clone)]
+pub struct FileConfigStorage {
+    path: PathBuf,
+}
+
+impl FileConfigStorage {
+    /// Create a new [`FileConfigStorage`] pointing to `path`.
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Returns the path where configuration is saved.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl ConfigStorageHandler for FileConfigStorage {
+    fn save_config(&self, config: &AppConfig) -> Result<PathBuf, String> {
+        save_config_to_path(config, &self.path)
+    }
+}
+
+/// A [`ConfigStorageHandler`] implementation that discards writes.
+/// Used in test harnesses and empty app states to guarantee no files on disk are touched.
+#[derive(Debug, Clone, Default)]
+pub struct NoopConfigStorage;
+
+impl ConfigStorageHandler for NoopConfigStorage {
+    fn save_config(&self, _config: &AppConfig) -> Result<PathBuf, String> {
+        Ok(PathBuf::new())
+    }
+}
+
+/// A [`ConfigStorageHandler`] implementation that records saved configurations in memory.
+/// Useful for unit testing configuration updates without performing disk I/O.
+#[derive(Debug, Default)]
+pub struct InMemoryConfigStorage {
+    saved: std::sync::Mutex<Vec<AppConfig>>,
+}
+
+impl InMemoryConfigStorage {
+    /// Create a new empty in-memory config storage.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Retrieve clones of all configurations saved so far.
+    pub fn saved_configs(&self) -> Vec<AppConfig> {
+        self.saved.lock().unwrap().clone()
+    }
+
+    /// Retrieve the most recently saved configuration, if any.
+    pub fn latest_config(&self) -> Option<AppConfig> {
+        self.saved.lock().unwrap().last().cloned()
+    }
+}
+
+impl ConfigStorageHandler for InMemoryConfigStorage {
+    fn save_config(&self, config: &AppConfig) -> Result<PathBuf, String> {
+        self.saved.lock().unwrap().push(config.clone());
+        Ok(PathBuf::from("in-memory"))
     }
 }
 
@@ -681,8 +764,29 @@ pub fn load_config() -> AppConfig {
 /// Persist the supplied configuration to the platform-default
 /// location. Returns the path written on success. The parent
 /// directory is created if it does not exist.
+///
+/// # Safety Guard
+/// In test environments (under `cargo test` or `cargo nextest`), this function
+/// panics to prevent accidental overwriting of live user configurations.
+/// Production code running inside the orchestrator MUST use the injected
+/// [`ConfigStorageHandler`] instead.
 pub fn save_config(config: &AppConfig) -> Result<PathBuf, String> {
-    save_config_to_path(config, &get_config_path())
+    #[cfg(test)]
+    {
+        let _ = config;
+        panic!(
+            "FATAL: save_config() was called in a test context. Production config must never be mutated during tests; use an injected ConfigStorageHandler or save_config_to_path with a temporary file."
+        );
+    }
+    #[allow(unreachable_code)]
+    {
+        if std::env::var("NEXTEST").is_ok() || std::env::var("FASTMD_IS_TESTING").is_ok() {
+            panic!(
+                "FATAL: save_config() was called under a test runner. Production config must never be mutated during tests; use an injected ConfigStorageHandler or save_config_to_path with a temporary file."
+            );
+        }
+        save_config_to_path(config, &get_config_path())
+    }
 }
 
 /// Persist the supplied configuration to an explicit path. See
