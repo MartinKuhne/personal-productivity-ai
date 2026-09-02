@@ -21,6 +21,7 @@
 pub mod agent;
 pub mod background;
 pub mod bus;
+pub mod command_executor;
 pub mod export;
 pub mod integrations;
 pub mod markdown;

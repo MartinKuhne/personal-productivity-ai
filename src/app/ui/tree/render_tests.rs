@@ -264,7 +264,12 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
         is_expanded: false,
     };
 
-    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
+    let uc_bus = crate::bus::core::Bus::<crate::bus::events::user_command::UserCommand>::new();
+    let reader = uc_bus.subscribe();
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext {
+        user_command_bus: uc_bus.clone(),
+        ..Default::default()
+    }));
     let dm_cell: Rc<RefCell<Dialogs>> = Rc::new(RefCell::new(Dialogs::new()));
     let bus = Bus::<FileEvent>::new();
 
@@ -272,7 +277,8 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     let ctx_for_closure = Rc::clone(&ctx_cell);
     let dm_for_closure = Rc::clone(&dm_cell);
     let temp_dir_for_closure = Arc::clone(&temp_dir_arc);
-    let bus_for_closure = bus.clone();
+    let _bus_for_closure = bus.clone();
+    let uc_bus_closure = uc_bus.clone();
 
     let mut harness = stateful_harness((), move |ui, _| {
         {
@@ -287,7 +293,7 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
                 dm.create_document_dialog_open = true;
                 dm.create_document_parent = ctx.create_document_parent().clone();
                 drop(ctx); // release the ctx borrow before show_create_document_dialog
-                show_create_document_dialog(&mut dm, &bus_for_closure, ui.ctx());
+                show_create_document_dialog(&mut dm, &uc_bus_closure, ui.ctx());
                 // Mark the parent explicitly so the closure can use
                 // the temp_dir if needed.
                 let _ = temp_dir_for_closure.as_ref();
@@ -340,13 +346,23 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let created = temp_dir.join("notes.md");
+    let mut found = false;
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        if let crate::bus::events::user_command::UserCommand::ConfirmCreateDocument {
+            parent,
+            name,
+        } = cmd
+        {
+            if parent == temp_dir && name == "notes" {
+                found = true;
+                break;
+            }
+        }
+    }
     assert!(
-        created.exists(),
-        "submitting the dialog must create the document inside the right-clicked directory"
+        found,
+        "submitting the dialog must publish ConfirmCreateDocument inside the right-clicked directory"
     );
-    let content = fs::read_to_string(&created).unwrap();
-    assert_eq!(content, "");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
@@ -504,6 +520,7 @@ fn test_multi_select_merge_action_generates_prompt() {
     harness.run_steps(2);
     harness.run_steps(2);
 
+    let reader = ctx_cell.borrow().user_command_bus.subscribe();
     // Choose [Merge]; verify submit_prompt updates
     harness
         .get_by_label(crate::ui::strings::MERGE_ACTION)
@@ -511,17 +528,17 @@ fn test_multi_select_merge_action_generates_prompt() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    {
-        let mut ctx = ctx_cell.borrow_mut();
+    let event = reader.try_recv().expect("must publish command");
+    if let crate::bus::events::user_command::UserCommand::MergePrompt(files) = event {
+        let f = files
+            .iter()
+            .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
+            .collect::<Vec<_>>();
         assert!(
-            ctx.submit_prompt().is_some(),
-            "choosing Merge must generate a prompt into submit_prompt"
+            f.contains(&"test_file_1.md".to_string()) && f.contains(&"test_file_2.md".to_string())
         );
-        let prompt = ctx.submit_prompt().as_ref().unwrap();
-        assert!(
-            prompt.contains("test_file_1.md") && prompt.contains("test_file_2.md"),
-            "prompt must contain both file names"
-        );
+    } else {
+        panic!("expected MergePrompt");
     }
 }
 
@@ -561,6 +578,7 @@ fn test_note_skill_context_menu_action() {
         }],
         ..Default::default()
     }));
+    let reader = ctx_cell.borrow().user_command_bus.subscribe();
     let row_for_closure = row.clone();
     let ctx_for_closure = Rc::clone(&ctx_cell);
 
@@ -585,18 +603,26 @@ fn test_note_skill_context_menu_action() {
     harness.run_steps(2);
     harness.run_steps(2);
 
+    let event = reader
+        .try_recv()
+        .expect("must publish RunSkillPrompt command");
+    if let crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+        content,
+        target_file: tf,
+        ..
+    } = event
     {
-        let mut ctx = ctx_cell.borrow_mut();
         assert_eq!(
-            *ctx.submit_prompt(),
-            Some("Please proofread this document carefully.".to_string()),
-            "choosing Note skill must populate submit_prompt with file contents"
+            content, "Please proofread this document carefully.",
+            "choosing Note skill must publish skill file contents"
         );
         assert_eq!(
-            *ctx.selected_file(),
+            tf,
             Some(target_file),
-            "choosing Note skill must set target file as selected"
+            "choosing Note skill must set target file"
         );
+    } else {
+        panic!("expected RunSkillPrompt, got {:?}", event);
     }
 }
 
@@ -636,6 +662,7 @@ fn test_folder_skill_context_menu_action() {
         }],
         ..Default::default()
     }));
+    let reader = ctx_cell.borrow().user_command_bus.subscribe();
     let row_for_closure = row.clone();
     let ctx_for_closure = Rc::clone(&ctx_cell);
 
@@ -658,17 +685,25 @@ fn test_folder_skill_context_menu_action() {
     harness.run_steps(2);
     harness.run_steps(2);
 
+    let event = reader
+        .try_recv()
+        .expect("must publish RunSkillPrompt command");
+    if let crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+        content,
+        target_dir,
+        ..
+    } = event
     {
-        let mut ctx = ctx_cell.borrow_mut();
         assert_eq!(
-            *ctx.submit_prompt(),
-            Some("Please build an index of all notes in this directory.".to_string()),
-            "choosing Folder skill must populate submit_prompt with file contents"
+            content, "Please build an index of all notes in this directory.",
+            "choosing Folder skill must publish skill file contents"
         );
         assert_eq!(
-            *ctx.selected_dir(),
+            target_dir,
             Some(target_folder),
-            "choosing Folder skill must set target directory as selected"
+            "choosing Folder skill must set target dir"
         );
+    } else {
+        panic!("expected RunSkillPrompt, got {:?}", event);
     }
 }

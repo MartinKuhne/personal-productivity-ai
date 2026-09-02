@@ -3,8 +3,8 @@
 //! Unit tests live in the sibling `render_tests.rs` sidecar.
 
 use super::context::TreeNodeContext;
-use super::flatten::{FlatRow, initial_rename_value};
-use super::handlers::{apply_directory_row_click, apply_file_row_click, build_merge_prompt};
+use super::flatten::FlatRow;
+use super::handlers::{apply_directory_row_click, apply_file_row_click};
 #[cfg(feature = "pdf-export")]
 use crate::export::pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
 use crate::export::print::{PrintJob, execute_print_blocking};
@@ -32,27 +32,22 @@ fn show_dir_context_menu(
         ui.close();
     }
     if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-        *ctx.file_to_rename() = Some(path.to_path_buf());
-        *ctx.rename_new_name() = initial_rename_value(path, name);
-        *ctx.rename_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Rename(path.to_path_buf()));
         ui.close();
     }
     if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-        *ctx.file_to_move() = Some(path.to_path_buf());
-        *ctx.move_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Move(path.to_path_buf()));
         ui.close();
     }
     if ui
         .button(crate::ui::strings::CREATE_DIRECTORY_ACTION)
         .clicked()
     {
-        *ctx.create_dir_parent() = Some(path.to_path_buf());
-        *ctx.create_dir_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CreateDirectory { parent: path.to_path_buf() });
         ui.close();
     }
     if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-        *ctx.create_document_parent() = Some(path.to_path_buf());
-        *ctx.create_document_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CreateDocument { parent: path.to_path_buf() });
         ui.close();
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
@@ -88,9 +83,13 @@ fn show_dir_context_menu(
             if ui.button(&skill.name).clicked() {
                 if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
                     let content = crate::markdown::DocumentContent::parse(&raw_content).body;
-                    *ctx.selected_dir() = Some(path.to_path_buf());
-                    *ctx.selected_file() = Some(path.to_path_buf());
-                    *ctx.submit_prompt() = Some(content);
+                    ctx.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+                            content,
+                            target_dir: Some(path.to_path_buf()),
+                            target_file: Some(path.to_path_buf()),
+                        },
+                    );
                 } else {
                     tracing::error!(
                         name = "ui.dir.skill_prompt_failed",
@@ -109,8 +108,10 @@ fn show_dir_context_menu(
 fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeContext) {
     if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
         let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
-        let prompt = build_merge_prompt(ctx.content_libraries(), &files);
-        *ctx.submit_prompt() = Some(prompt);
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::MergePrompt(
+                files.into_iter().collect(),
+            ));
         ui.close();
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
@@ -142,7 +143,7 @@ fn show_file_context_menu(
 ) {
     if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
         if ctx.inline_editor_enabled() {
-            *ctx.open_editor() = Some(path.to_path_buf());
+            ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::OpenInEditor(path.to_path_buf()));
         } else {
             crate::ui::open_in_system_editor(path);
         }
@@ -163,8 +164,15 @@ fn show_file_context_menu(
         .button(crate::ui::strings::RUN_AS_PROMPT_ACTION)
         .clicked()
     {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            *ctx.submit_prompt() = Some(content);
+        if let Ok(raw_content) = std::fs::read_to_string(path) {
+            let content = crate::markdown::DocumentContent::parse(&raw_content).body;
+            ctx.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+                    content,
+                    target_dir: None,
+                    target_file: Some(path.to_path_buf()),
+                },
+            );
         } else {
             tracing::error!(
                 name = "ui.file.run_as_prompt_failed",
@@ -271,14 +279,11 @@ fn show_file_context_menu(
         ui.close();
     }
     if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-        *ctx.file_to_rename() = Some(path.to_path_buf());
-        *ctx.rename_new_name() = initial_rename_value(path, name);
-        *ctx.rename_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Rename(path.to_path_buf()));
         ui.close();
     }
     if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-        *ctx.file_to_move() = Some(path.to_path_buf());
-        *ctx.move_dialog_open() = true;
+        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Move(path.to_path_buf()));
         ui.close();
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
@@ -316,8 +321,13 @@ fn show_file_context_menu(
             if ui.button(&skill.name).clicked() {
                 if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
                     let content = crate::markdown::DocumentContent::parse(&raw_content).body;
-                    *ctx.selected_file() = Some(path.to_path_buf());
-                    *ctx.submit_prompt() = Some(content);
+                    ctx.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+                            content,
+                            target_dir: None,
+                            target_file: Some(path.to_path_buf()),
+                        },
+                    );
                 } else {
                     tracing::error!(
                         name = "ui.file.skill_prompt_failed",
@@ -365,7 +375,8 @@ pub fn render_flat_row_capture(
                 ui.add_space(clamped_depth as f32 * 18.0);
                 let response = ui.selectable_label(false, label);
                 if response.clicked() {
-                    apply_directory_row_click(ctx, row);
+                    let cmd = apply_directory_row_click(ctx, row);
+                    ctx.user_command_bus.publish(cmd);
                     on_click("dir_row");
                     // Do NOT call mark_dirty() here: it would trigger a
                     // full calc_max_width re-shaping pass and, before the
@@ -412,11 +423,11 @@ pub fn render_flat_row_capture(
                 }
 
                 if response.double_clicked() {
-                    if ctx.inline_editor_enabled() {
-                        *ctx.open_editor() = Some(row.path.clone());
-                    } else {
-                        crate::ui::open_in_system_editor(&row.path);
-                    }
+                    ctx.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::OpenInEditor(
+                            row.path.clone(),
+                        ),
+                    );
                 }
 
                 response.context_menu(|ui| {
@@ -443,7 +454,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
 
         let response = ui.selectable_label(false, label);
         if response.clicked() {
-            apply_directory_row_click(
+            let cmd = apply_directory_row_click(
                 ctx,
                 &FlatRow {
                     depth: 0,
@@ -453,6 +464,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     is_expanded,
                 },
             );
+            ctx.user_command_bus.publish(cmd);
             // Do NOT call mark_dirty() here — see render_flat_row
             // for the rationale (render-audit P1-4/P1-9).
         }
@@ -489,7 +501,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
 
         if response.clicked() {
             let is_expanded = ctx.expanded_dirs().contains(&node.path);
-            apply_file_row_click(
+            let cmd = apply_file_row_click(
                 ctx,
                 &FlatRow {
                     depth: 0,
@@ -499,14 +511,13 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     is_expanded,
                 },
             );
+            ctx.user_command_bus.publish(cmd);
         }
 
         if response.double_clicked() {
-            if ctx.inline_editor_enabled() {
-                *ctx.open_editor() = Some(node.path.clone());
-            } else {
-                crate::ui::open_in_system_editor(&node.path);
-            }
+            ctx.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::OpenInEditor(node.path.clone()),
+            );
         }
 
         response.context_menu(|ui| {

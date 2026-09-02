@@ -33,7 +33,7 @@ use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::ContentLibrary;
 use crate::ui::panel_layout::PanelLayout;
-use crate::ui::{Dialogs, FileSelection, Tabs};
+use crate::ui::{FileSelection, Tabs};
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -74,38 +74,25 @@ pub struct TreeOpsContext {
     /// Selected directory (for context menu operations and bottom-panel prefix).
     pub selected_dir: Option<PathBuf>,
     /// Whether create-directory dialog is open.
-    pub create_dir_dialog_open: bool,
     /// Parent directory for new directory creation.
-    pub create_dir_parent: Option<PathBuf>,
-
     // ---- File operations -----------------------------------------------
     /// File currently queued for move operation.
-    pub file_to_move: Option<PathBuf>,
     /// Whether move dialog is open.
-    pub move_dialog_open: bool,
     /// File currently queued for rename operation.
-    pub file_to_rename: Option<PathBuf>,
     /// Whether rename dialog is open.
-    pub rename_dialog_open: bool,
     /// New name input for rename dialog.
-    pub rename_new_name: String,
     /// Whether create-document dialog is open.
-    pub create_document_dialog_open: bool,
     /// Parent directory for new document creation.
-    pub create_document_parent: Option<PathBuf>,
-
     // ---- Application integration ---------------------------------------
     /// Panel layout state (widths, dirty flags).
     pub layout: PanelLayout,
     /// Prompt to submit to agent (from context menu actions).
-    pub submit_prompt: Option<String>,
     /// Content libraries configuration. Read-only in render
     /// passes; cloned in `from_app_state` because the per-frame
     /// diff is bounded (1-3 items) and avoids the lifetime
     /// question entirely.
     pub content_libraries: Vec<ContentLibrary>,
     /// File path to open in inline editor.
-    pub open_editor: Option<PathBuf>,
     /// Keyboard modifiers state (shift, ctrl, command).
     pub modifiers: egui::Modifiers,
     /// Whether inline editor is enabled.
@@ -132,7 +119,62 @@ pub struct TreeOpsContext {
 /// All public functions and call sites that accepted `TreeNodeContext`
 /// continue to compile without change. New code should prefer
 /// `TreeOpsContext` directly.
-pub type TreeNodeContext = TreeOpsContext;
+pub struct TreeNodeContext {
+    pub ctx: TreeOpsContext,
+    pub user_command_bus: Bus<crate::bus::events::user_command::UserCommand>,
+}
+
+impl std::ops::Deref for TreeNodeContext {
+    type Target = TreeOpsContext;
+    fn deref(&self) -> &Self::Target {
+        &self.ctx
+    }
+}
+
+impl std::ops::DerefMut for TreeNodeContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.ctx
+    }
+}
+
+impl TreeNodeContext {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_app_state(
+        selection: &crate::ui::FileSelection,
+        tabs: &crate::ui::Tabs,
+        layout: &crate::ui::panel_layout::PanelLayout,
+        content_libraries: &[crate::config::ContentLibrary],
+        bg_tx: Option<crate::bus::events::typed::BackgroundEventSender>,
+        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+        inline_editor_enabled: bool,
+        modifiers: eframe::egui::Modifiers,
+        pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
+        user_command_bus: Bus<crate::bus::events::user_command::UserCommand>,
+    ) -> Self {
+        Self {
+            ctx: TreeOpsContext::from_app_state(
+                selection,
+                tabs,
+                layout,
+                content_libraries,
+                bg_tx,
+                file_event_bus,
+                inline_editor_enabled,
+                modifiers,
+                pdf_backing_tracker,
+            ),
+            user_command_bus,
+        }
+    }
+
+    pub fn write_back(
+        &self,
+        selection: &mut crate::ui::FileSelection,
+        tabs: &mut crate::ui::Tabs,
+        ) {
+        self.ctx.write_back(selection, tabs);}
+}
+
 
 impl Default for TreeOpsContext {
     /// All-defaults construction. Used by tests to build a
@@ -147,19 +189,8 @@ impl Default for TreeOpsContext {
             expanded_dirs: HashSet::new(),
             tabs: Vec::new(),
             selected_dir: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            file_to_move: None,
-            move_dialog_open: false,
-            file_to_rename: None,
-            rename_dialog_open: false,
-            rename_new_name: String::new(),
-            create_document_dialog_open: false,
-            create_document_parent: None,
             layout: PanelLayout::default(),
-            submit_prompt: None,
             content_libraries: Vec::new(),
-            open_editor: None,
             modifiers: egui::Modifiers::default(),
             inline_editor_enabled: false,
             bg_tx: None,
@@ -187,15 +218,12 @@ impl TreeOpsContext {
     pub fn from_app_state(
         selection: &FileSelection,
         tabs: &Tabs,
-        dialogs: &Dialogs,
         layout: &PanelLayout,
-        submit_prompt: &Option<String>,
         content_libraries: &[ContentLibrary],
         bg_tx: Option<BackgroundEventSender>,
         file_event_bus: Bus<FileEvent>,
         inline_editor_enabled: bool,
         modifiers: egui::Modifiers,
-        open_editor: Option<PathBuf>,
         pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
     ) -> Self {
         Self {
@@ -204,19 +232,8 @@ impl TreeOpsContext {
             expanded_dirs: selection.expanded_dirs.clone(),
             tabs: tabs.tabs.clone(),
             selected_dir: selection.selected_dir.clone(),
-            create_dir_dialog_open: dialogs.create_dir_dialog_open,
-            create_dir_parent: dialogs.create_dir_parent.clone(),
-            file_to_move: dialogs.file_to_move.clone(),
-            move_dialog_open: dialogs.move_dialog_open,
-            file_to_rename: dialogs.file_to_rename.clone(),
-            rename_dialog_open: dialogs.rename_dialog_open,
-            rename_new_name: dialogs.rename_new_name.clone(),
-            create_document_dialog_open: dialogs.create_document_dialog_open,
-            create_document_parent: dialogs.create_document_parent.clone(),
             layout: layout.clone(),
-            submit_prompt: submit_prompt.clone(),
             content_libraries: content_libraries.to_vec(),
-            open_editor,
             modifiers,
             inline_editor_enabled,
             bg_tx,
@@ -237,26 +254,14 @@ impl TreeOpsContext {
         &self,
         selection: &mut FileSelection,
         tabs: &mut Tabs,
-        dialogs: &mut Dialogs,
-        submit_prompt: &mut Option<String>,
-    ) {
+        ) {
         selection.selected_file = self.selected_file.clone();
         selection.selected_files = self.selected_files.clone();
         selection.expanded_dirs = self.expanded_dirs.clone();
         selection.selected_dir = self.selected_dir.clone();
         selection.tree_dirty = self.tree_dirty;
         tabs.tabs = self.tabs.clone();
-        dialogs.create_dir_dialog_open = self.create_dir_dialog_open;
-        dialogs.create_dir_parent = self.create_dir_parent.clone();
-        dialogs.file_to_move = self.file_to_move.clone();
-        dialogs.move_dialog_open = self.move_dialog_open;
-        dialogs.file_to_rename = self.file_to_rename.clone();
-        dialogs.rename_dialog_open = self.rename_dialog_open;
-        dialogs.rename_new_name = self.rename_new_name.clone();
-        dialogs.create_document_dialog_open = self.create_document_dialog_open;
-        dialogs.create_document_parent = self.create_document_parent.clone();
-        *submit_prompt = self.submit_prompt.clone();
-    }
+        }
 
     /// Access expanded directories set.
     pub fn expanded_dirs(&mut self) -> &mut HashSet<PathBuf> {
@@ -278,29 +283,9 @@ impl TreeOpsContext {
         &mut self.tabs
     }
 
-    /// Access file to move.
-    pub fn file_to_move(&mut self) -> &mut Option<PathBuf> {
-        &mut self.file_to_move
-    }
-
-    /// Access move dialog open flag.
-    pub fn move_dialog_open(&mut self) -> &mut bool {
-        &mut self.move_dialog_open
-    }
-
     /// Access selected directory.
     pub fn selected_dir(&mut self) -> &mut Option<PathBuf> {
         &mut self.selected_dir
-    }
-
-    /// Access create directory dialog open flag.
-    pub fn create_dir_dialog_open(&mut self) -> &mut bool {
-        &mut self.create_dir_dialog_open
-    }
-
-    /// Access create directory parent.
-    pub fn create_dir_parent(&mut self) -> &mut Option<PathBuf> {
-        &mut self.create_dir_parent
     }
 
     /// Access layout.
@@ -308,49 +293,14 @@ impl TreeOpsContext {
         &mut self.layout
     }
 
-    /// Access rename dialog open flag.
-    pub fn rename_dialog_open(&mut self) -> &mut bool {
-        &mut self.rename_dialog_open
-    }
-
-    /// Access file to rename.
-    pub fn file_to_rename(&mut self) -> &mut Option<PathBuf> {
-        &mut self.file_to_rename
-    }
-
-    /// Access rename new name.
-    pub fn rename_new_name(&mut self) -> &mut String {
-        &mut self.rename_new_name
-    }
-
-    /// Access create-document dialog open flag.
-    pub fn create_document_dialog_open(&mut self) -> &mut bool {
-        &mut self.create_document_dialog_open
-    }
-
-    /// Access create-document parent directory.
-    pub fn create_document_parent(&mut self) -> &mut Option<PathBuf> {
-        &mut self.create_document_parent
-    }
-
     /// Access modifiers.
     pub fn modifiers(&self) -> egui::Modifiers {
         self.modifiers
     }
 
-    /// Access submit prompt.
-    pub fn submit_prompt(&mut self) -> &mut Option<String> {
-        &mut self.submit_prompt
-    }
-
     /// Access content libraries.
     pub fn content_libraries(&self) -> &[ContentLibrary] {
         &self.content_libraries
-    }
-
-    /// Access open editor.
-    pub fn open_editor(&mut self) -> &mut Option<PathBuf> {
-        &mut self.open_editor
     }
 
     /// Access inline editor enabled flag.

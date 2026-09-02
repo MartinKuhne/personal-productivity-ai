@@ -150,7 +150,9 @@ pub fn format_models_list(
 /// The Enter-key handler in `show_bottom_panel` calls this
 /// function. It is extracted so the dispatch can be unit-tested
 /// without driving the egui harness.
-pub fn apply_send_click(app: &mut FastMdApp) {
+pub fn apply_send_click(
+    app: &mut FastMdApp,
+) -> Option<crate::bus::events::user_command::UserCommand> {
     let prompt = app
         .orchestrator
         .agent_panel_state
@@ -161,21 +163,15 @@ pub fn apply_send_click(app: &mut FastMdApp) {
 
     match parse_command_intent(&prompt) {
         CommandIntent::ShowModels => {
-            app.agent_mut().set_status("Done".to_string());
-            let models_response = format_models_list(&app.orchestrator.config.models);
-            app.agent_mut().set_response(models_response);
-            app.orchestrator.agent_panel_state.show_results = true;
+            Some(crate::bus::events::user_command::UserCommand::ShowModels)
         }
         CommandIntent::ShowDeprecatedModelMessage => {
-            app.agent_mut().set_status("Error".to_string());
-            app.agent_mut()
-                .set_response(crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string());
-            app.orchestrator.agent_panel_state.show_results = true;
+            Some(crate::bus::events::user_command::UserCommand::ShowDeprecatedModelMessage)
         }
-        CommandIntent::RunAgent(agent_prompt) => {
-            app.orchestrator.start_agent_session(agent_prompt);
-        }
-        CommandIntent::Empty => {}
+        CommandIntent::RunAgent(agent_prompt) => Some(
+            crate::bus::events::user_command::UserCommand::RunAgent(agent_prompt),
+        ),
+        CommandIntent::Empty => None,
     }
 }
 
@@ -307,7 +303,9 @@ pub fn show_bottom_panel_capture(
                             }
                         } else {
                             // Agent is idle - submit normally
-                            apply_send_click(app);
+                            if let Some(cmd) = apply_send_click(app) {
+                                app.orchestrator.user_command_bus.publish(cmd);
+                            }
                             on_click("send");
                         }
                     }

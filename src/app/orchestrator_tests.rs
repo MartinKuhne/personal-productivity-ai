@@ -66,7 +66,6 @@ fn harness() -> AppOrchestrator {
         _watcher: None,
         agent,
         dialogs: Dialogs::new(),
-        submit_prompt: None,
         text_buffer: TextBuffer::new(),
         inline_editor_enabled: false,
         background_manager: Arc::new(Mutex::new(BackgroundLogs::new())),
@@ -80,6 +79,8 @@ fn harness() -> AppOrchestrator {
         agent_event_lagged: false,
         agent_transcript: AgentTranscript::new(Uuid::nil()),
         agent_panel_state: AgentPanelState::new(),
+        user_command_bus: crate::bus::core::Bus::new(),
+        user_command_reader: None,
     }
 }
 

@@ -48,82 +48,29 @@ use std::path::PathBuf;
 /// without driving the egui harness. The directory-row click
 /// path is unchanged — it has a different effect (toggle
 /// expansion + set `selected_dir`).
-pub fn apply_file_row_click(ctx: &mut TreeNodeContext, row: &FlatRow) {
-    let modifiers = ctx.modifiers();
-    // The fields are owned (no `&'a mut T`). We access them
-    // through the `&mut self` accessor methods; the borrow
-    // checker accepts the calls because each method takes
-    // `&mut self` for the whole struct and the calls don't
-    // overlap (we drop each `&mut` borrow before requesting
-    // the next).
-    if modifiers.shift || modifiers.ctrl || modifiers.command {
-        let was_in_selection = ctx.selected_files().contains(&row.path);
-        if was_in_selection {
-            ctx.selected_files().remove(&row.path);
-            if ctx.selected_file().as_ref() == Some(&row.path) {
-                *ctx.selected_file() = None;
-            }
-        } else {
-            ctx.selected_files().insert(row.path.clone());
-            *ctx.selected_file() = Some(row.path.clone());
-        }
-    } else {
-        ctx.selected_files().clear();
-        ctx.selected_files().insert(row.path.clone());
-        *ctx.selected_file() = Some(row.path.clone());
-        if !ctx.tabs().contains(&row.path) {
-            ctx.tabs().push(row.path.clone());
-        }
+pub fn apply_file_row_click(
+    ctx: &mut TreeNodeContext,
+    row: &FlatRow,
+) -> crate::bus::events::user_command::UserCommand {
+    crate::bus::events::user_command::UserCommand::SelectFile {
+        path: row.path.clone(),
+        multi: ctx.modifiers().command || ctx.modifiers().ctrl || ctx.modifiers().shift,
     }
-    // Always refresh the current directory context to the file's
-    // containing directory. The bottom-panel prompt prefix and
-    // the agent session dispatch both read `selected_dir`, so a
-    // stale value would mislead both surfaces after a file click.
-    // `Path::parent` returns `None` for bare filenames (no parent
-    // component), which is the right neutral state for the bottom
-    // panel's `>` prefix.
-    *ctx.selected_dir() = row.path.parent().map(|p| p.to_path_buf());
 }
 
-/// Purpose: Applies the side effect of clicking a directory row in
-/// the left panel's tree view.
-/// Inputs: ctx (the `TreeNodeContext`; its `expanded_dirs`,
-/// `selected_dir`, `selected_file`, and `selected_files` are
-/// mutated), row (the clicked `FlatRow`; `row.is_dir` is `true`).
-/// Outputs: ()
-/// Purity: Impure (mutates the tree's expand/collapse state, the
-/// current-directory context, and clears file selection).
-/// Preconditions: `row.is_dir` is `true`.
-/// Postconditions:
-///   * Toggles `ctx.expanded_dirs()` for `row.path` — adds it if
-///     the folder was collapsed, removes it if it was already
-///     expanded.
-///   * Updates `ctx.selected_dir()` to `Some(row.path.clone())`
-///     so the bottom-panel prompt prefix and the agent session
-///     reflect the folder the user just browsed to.
-///   * Clears `ctx.selected_file()` and `ctx.selected_files()` so
-///     the file context in the agent prompt clears when the user
-///     navigates to a different directory.
-pub fn apply_directory_row_click(ctx: &mut TreeNodeContext, row: &FlatRow) {
-    if ctx.expanded_dirs().contains(&row.path) {
-        ctx.expanded_dirs().remove(&row.path);
-    } else {
-        ctx.expanded_dirs().insert(row.path.clone());
-    }
-    *ctx.selected_dir() = Some(row.path.clone());
-    // Clear file selection when user navigates to a directory
-    *ctx.selected_file() = None;
-    ctx.selected_files().clear();
-    // Toggling `expanded_dirs` changes which rows are visible in the
-    // tree, so the cached `Vec<FlatRow>` in `FastMdApp` (the P0
-    // perf-optimization cache) is now stale. Mark it dirty so the
-    // next `show_left_panel` pass rebuilds the flat rows. This is
-    // independent of `left_panel_dirty` (the panel-width recalc
-    // flag): a directory click does NOT need to recompute the panel
-    // width, only the flat row cache. See the regression test
-    // `test_directory_click_invalidates_tree_cache` in
-    // `ui/panels/left.rs` for the user-visible invariant.
+pub fn apply_directory_row_click(
+    ctx: &mut TreeNodeContext,
+    row: &FlatRow,
+) -> crate::bus::events::user_command::UserCommand {
+    // We still mark tree_dirty because the expansion state will change in Executor
+    // Wait, tree_dirty is specific to TreeOpsContext cache. So we should keep tree_dirty = true here?
+    // Actually, Executor will mutate AppOrchestrator's expanded_dirs, but TreeOpsContext tree_dirty is on the context.
+    // Let's just set it here so the UI knows to rebuild the tree cache.
     *ctx.tree_dirty() = true;
+    crate::bus::events::user_command::UserCommand::SelectDirectory {
+        path: row.path.clone(),
+        toggle_expand: true,
+    }
 }
 
 pub fn build_merge_prompt(

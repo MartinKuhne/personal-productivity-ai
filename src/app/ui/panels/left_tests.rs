@@ -198,7 +198,6 @@ fn test_directory_click_invalidates_tree_cache() {
             &app.orchestrator.tabs,
             &app.orchestrator.dialogs,
             &app.layout,
-            &app.orchestrator.submit_prompt,
             &app.orchestrator.content_libraries,
             Some(app.orchestrator.tx.clone()),
             app.orchestrator.file_event_bus.clone(),
@@ -206,14 +205,15 @@ fn test_directory_click_invalidates_tree_cache() {
             egui::Modifiers::default(),
             None,
             app.pdf_backing_tracker().clone(),
+            app.orchestrator.user_command_bus.clone(),
         );
-        crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
+        let cmd = crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
         ctx.write_back(
             &mut app.orchestrator.selection,
             &mut app.orchestrator.tabs,
             &mut app.orchestrator.dialogs,
-            &mut app.orchestrator.submit_prompt,
         );
+        app.orchestrator.apply_user_command(cmd);
     }
 
     // The click must invalidate the cached flat rows.

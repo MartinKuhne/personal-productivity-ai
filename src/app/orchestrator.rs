@@ -11,6 +11,7 @@ use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{
     BackgroundEvent, BackgroundEventSender, FsEvent, McpAuthEvent, ProcessEvent,
 };
+use crate::bus::events::user_command::UserCommand;
 use crate::markdown::Document;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
@@ -41,7 +42,6 @@ pub struct AppOrchestrator {
     pub _watcher: Option<notify::RecommendedWatcher>,
     pub agent: AgentSession,
     pub dialogs: Dialogs,
-    pub submit_prompt: Option<String>,
     pub text_buffer: TextBuffer,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedBackgroundLogs,
@@ -68,9 +68,45 @@ pub struct AppOrchestrator {
     /// command_input, etc.) — extracted from `AgentSession` in
     /// migration step 6 (FR-013, SC-007).
     pub agent_panel_state: AgentPanelState,
+    /// Event bus for centralized UI user commands.
+    pub user_command_bus: Bus<UserCommand>,
+    /// Reader for the `Bus<UserCommand>` channel.
+    pub user_command_reader: Option<BusReader<UserCommand>>,
 }
 
 impl AppOrchestrator {
+    #[tracing::instrument(
+        skip_all,
+        name = "orchestrator.drain_user_command_bus",
+        level = "debug"
+    )]
+    pub fn drain_user_command_bus(&mut self) {
+        let mut events = Vec::new();
+        if let Some(reader) = self.user_command_reader.as_mut() {
+            loop {
+                match reader.try_recv_exposing_lag() {
+                    Ok(event) => events.push(event),
+                    Err(BroadcastRecvError::Empty) => break,
+                    Err(BroadcastRecvError::Closed) => {
+                        self.user_command_reader = None;
+                        break;
+                    }
+                    Err(BroadcastRecvError::Lagged(n)) => {
+                        tracing::warn!(
+                            name = "orchestrator.user_command_bus.lagged",
+                            lagged_events = n,
+                            "BusReader<UserCommand> lagged — UI fell behind; dropping events"
+                        );
+                        continue;
+                    }
+                }
+            }
+        }
+        for event in events {
+            self.apply_user_command(event);
+        }
+    }
+
     #[tracing::instrument(skip_all, name = "orchestrator.process_file_events", level = "debug")]
     pub fn process_file_events(&mut self) -> bool {
         use crate::bus::events::file::FileEventKind;

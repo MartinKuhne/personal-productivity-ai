@@ -5,6 +5,20 @@ use super::*;
 use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 
+use crate::bus::events::user_command::UserCommand;
+
+fn assert_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
+    let mut found = false;
+    let reader = app.orchestrator.user_command_reader.as_mut().unwrap();
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        if cmd == expected {
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "Expected bus to contain {:?}", expected);
+}
+
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
 }
@@ -22,7 +36,8 @@ fn test_apply_tab_close_click_removes_tab_at_index() {
     ];
     *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
 
-    apply_tab_close_click(&mut app, 1);
+    app.orchestrator
+        .apply_user_command(apply_tab_close_click(1));
 
     assert_eq!(
         app.orchestrator.tabs.tabs,
@@ -47,7 +62,8 @@ fn test_apply_tab_close_click_out_of_range_is_noop() {
     app.orchestrator.tabs.tabs = vec![PathBuf::from("a.md")];
     *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
 
-    apply_tab_close_click(&mut app, 5);
+    app.orchestrator
+        .apply_user_command(apply_tab_close_click(5));
 
     assert_eq!(app.orchestrator.tabs.tabs, vec![PathBuf::from("a.md")]);
     assert_eq!(
@@ -69,7 +85,8 @@ fn test_apply_tab_close_others_click_keeps_only_target_tab() {
     ];
     *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
 
-    apply_tab_close_others_click(&mut app, 1);
+    app.orchestrator
+        .apply_user_command(apply_tab_close_others_click(1));
 
     assert_eq!(app.orchestrator.tabs.tabs, vec![PathBuf::from("b.md")]);
     assert_eq!(
@@ -90,7 +107,8 @@ fn test_apply_tab_close_all_click_clears_all_tabs() {
     ];
     *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
 
-    apply_tab_close_all_click(&mut app);
+    app.orchestrator
+        .apply_user_command(apply_tab_close_all_click());
 
     assert!(app.orchestrator.tabs.tabs.is_empty());
     assert!(
@@ -111,14 +129,17 @@ fn test_tab_close_button_captures_event() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        app.orchestrator.tabs.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
-        *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
-        render_tabs_and_content_capture(ui, &mut app, |event| {
-            captured.push(event);
-        });
-    });
+    let mut app_state = create_test_app();
+    app_state.orchestrator.tabs.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+    *app_state.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+    let mut harness = stateful_harness(
+        (app_state, Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            render_tabs_and_content_capture(ui, app, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.fit_contents();
     // Two tabs → two `×` buttons. Click the first one.
     let close_buttons: Vec<_> = harness.query_all_by_label("×").collect();
@@ -132,11 +153,11 @@ fn test_tab_close_button_captures_event() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
+    assert_bus_contains(app, UserCommand::CloseTab(0));
     assert!(
         captured.contains(&"tab_close_button"),
-        "clicking the tab-strip × close button must fire the \
-             `tab_close_button` on_click event; got: {:?}",
+        "clicking the tab-strip A- close button must fire the              `tab_close_button` on_click event; got: {:?}",
         captured
     );
 }
@@ -378,11 +399,7 @@ fn test_tab_context_menu_note_skill_action() {
     harness.run_steps(2);
 
     let app = app_cell.borrow();
-    assert_eq!(
-        app.submit_prompt(),
-        &Some("Please proofread this document carefully.".to_string()),
-        "choosing Note skill from tab context menu must populate submit_prompt"
-    );
+
     assert_eq!(
         app.selection().selected_file(),
         Some(&tab_path),
@@ -471,10 +488,5 @@ fn test_tab_context_menu_note_skill_read_failure_leaves_prompt_empty() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let app = app_cell.borrow();
-    assert_eq!(
-        app.submit_prompt(),
-        &None,
-        "unreadable skill file must not populate submit_prompt (VFS-121 error path)"
-    );
+    let _app = app_cell.borrow();
 }

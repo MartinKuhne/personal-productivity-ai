@@ -33,7 +33,9 @@ fn test_apply_send_click_show_models_dispatch() {
         "show_results must start false"
     );
 
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     assert_eq!(app.orchestrator.agent.state().status, "Done");
     assert!(
@@ -63,7 +65,9 @@ fn test_apply_send_click_empty_prompt_is_noop() {
     let mut app = create_test_app();
     app.orchestrator.agent_panel_state.command_input = "   ".to_string();
 
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     assert!(
         !app.orchestrator.agent_panel_state.show_results,
@@ -86,7 +90,9 @@ fn test_apply_send_click_run_agent_dispatches_with_prompt() {
     let mut app = create_test_app_with_api_url(&mock.uri());
     app.orchestrator.agent_panel_state.command_input = "hello world".to_string();
 
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     assert!(
         app.orchestrator.agent_panel_state.show_results,
@@ -108,7 +114,9 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
     let mut app = create_test_app_with_api_url(&mock.uri());
     app.orchestrator.agent_panel_state.command_input = "first prompt".to_string();
 
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     assert!(app.orchestrator.agent_panel_state.show_results);
     let session_id_1 = app
@@ -118,7 +126,9 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
 
     // Second prompt while agent results are still displayed
     app.orchestrator.agent_panel_state.command_input = "second prompt".to_string();
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     let session_id_2 = app
         .agent()
@@ -143,7 +153,9 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
 
     // Third prompt after closing results must start a new session
     app.orchestrator.agent_panel_state.command_input = "third prompt".to_string();
-    apply_send_click(&mut app);
+    if let Some(cmd) = apply_send_click(&mut app) {
+        app.orchestrator.apply_user_command(cmd);
+    }
 
     let session_id_3 = app
         .agent()

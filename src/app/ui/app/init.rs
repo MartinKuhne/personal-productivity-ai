@@ -230,6 +230,9 @@ impl FastMdApp {
 
         let dialogs = Dialogs::new();
 
+        let user_command_bus = crate::bus::core::Bus::new();
+        let user_command_reader = user_command_bus.subscribe();
+
         Self {
             orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries: Vec::new(),
@@ -246,7 +249,6 @@ impl FastMdApp {
                 _watcher: None,
                 agent,
                 dialogs,
-                submit_prompt: None,
                 text_buffer: TextBuffer::new(),
                 inline_editor_enabled: false,
                 background_manager,
@@ -260,6 +262,8 @@ impl FastMdApp {
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
                 agent_panel_state: AgentPanelState::new(),
+                user_command_bus,
+                user_command_reader: Some(user_command_reader),
             },
             layout,
             cached_tree_rows: None,
@@ -372,6 +376,9 @@ impl FastMdApp {
         let content_libraries = config.content_libraries.clone();
         let inline_editor_enabled = config.inline_editor_enabled;
 
+        let user_command_bus = crate::bus::core::Bus::new();
+        let user_command_reader = user_command_bus.subscribe();
+
         Self {
             orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries,
@@ -387,7 +394,6 @@ impl FastMdApp {
                 _watcher: None,
                 agent,
                 dialogs,
-                submit_prompt: None,
                 text_buffer: TextBuffer::new(),
                 inline_editor_enabled,
                 background_manager,
@@ -402,6 +408,8 @@ impl FastMdApp {
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
                 agent_panel_state: AgentPanelState::new(),
+                user_command_bus,
+                user_command_reader: Some(user_command_reader),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,
