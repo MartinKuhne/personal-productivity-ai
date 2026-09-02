@@ -40,7 +40,8 @@ fn test_apply_toc_row_click_sets_scroll_to_header_id() {
         app.orchestrator.tabs.scroll_to_header_id.is_none(),
         "scroll_to_header_id must start as None"
     );
-    apply_toc_row_click(&mut app, &id);
+    app.orchestrator
+        .apply_user_command(apply_toc_row_click(&id));
     assert_eq!(
         app.orchestrator.tabs.scroll_to_header_id,
         Some(id),
@@ -58,8 +59,10 @@ fn test_apply_toc_row_click_overwrites_previous_scroll_target() {
     let mut app = create_test_app();
     let id_a = "a".to_string();
     let id_b = "b".to_string();
-    apply_toc_row_click(&mut app, &id_a);
-    apply_toc_row_click(&mut app, &id_b);
+    app.orchestrator
+        .apply_user_command(apply_toc_row_click(&id_a));
+    app.orchestrator
+        .apply_user_command(apply_toc_row_click(&id_b));
     assert_eq!(app.orchestrator.tabs.scroll_to_header_id, Some(id_b));
 }
 
@@ -75,15 +78,16 @@ fn test_toc_row_click_captures_event() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        app.tabs_mut().toc.push(crate::ui::ToCEntry {
-            title: "Introduction".to_string(),
-            level: 1,
-            id: "intro".to_string(),
-        });
-        *app.selection_mut().selected_file_mut() = Some(std::path::PathBuf::from("doc.md"));
-        show_right_panel_capture(&mut app, ui, |event| {
+    let mut app = create_test_app();
+    app.tabs_mut().toc.push(crate::ui::ToCEntry {
+        title: "Introduction".to_string(),
+        level: 1,
+        id: "intro".to_string(),
+    });
+    *app.selection_mut().selected_file_mut() = Some(std::path::PathBuf::from("doc.md"));
+
+    let mut harness = stateful_harness((app, Vec::<&'static str>::new()), |ui, (app, captured)| {
+        show_right_panel_capture(app, ui, |event| {
             captured.push(event);
         });
     });
@@ -97,11 +101,11 @@ fn test_toc_row_click_captures_event() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
+    assert_bus_contains(app, UserCommand::ScrollToHeader("intro".to_string()));
     assert!(
         captured.contains(&"toc_row"),
-        "clicking a TOC row must fire the `toc_row` on_click event; \
-             got: {:?}",
+        "clicking a TOC row must fire the              `toc_row` on_click event; got: {:?}",
         captured
     );
 }
@@ -130,6 +134,20 @@ fn test_calculate_font_size() {
 
 use crate::ui::ToCEntry;
 use std::path::PathBuf;
+
+use crate::bus::events::user_command::UserCommand;
+
+fn assert_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
+    let mut found = false;
+    let reader = app.orchestrator.user_command_reader.as_mut().unwrap();
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        if cmd == expected {
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "Expected bus to contain {:?}", expected);
+}
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())

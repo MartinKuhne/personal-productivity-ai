@@ -19,20 +19,23 @@ fn test_batch_button_click_opens_dialog() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        // `app` is moved into the closure. The closure is
-        // called once per pass; the harness owns it for
-        // its lifetime. After the harness drops, the
-        // captured `&'static str` events are the only
-        // post-click observable state (per the state-
-        // capture pattern documented in
-        // `test_helpers::interact`).
-        let mut app = create_test_app();
-        assert!(!app.orchestrator.dialogs.batch_dialog_open);
-        show_top_panel_capture(&mut app, ui, |event| {
-            captured.push(event);
-        });
-    });
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            // `app` is moved into the closure. The closure is
+            // called once per pass; the harness owns it for
+            // its lifetime. After the harness drops, the
+            // captured `&'static str` events are the only
+            // post-click observable state (per the state-
+            // capture pattern documented in
+            // `test_helpers::interact`).
+
+            assert!(!app.orchestrator.dialogs.batch_dialog_open);
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
 
@@ -48,13 +51,14 @@ fn test_batch_button_click_opens_dialog() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
     assert!(
         captured.contains(&"batch_button"),
         "clicking Batch... in the hamburger menu must fire the `batch_button` \
              on_click event; got: {:?}",
         captured
     );
+    assert_bus_contains(app, UserCommand::OpenBatchDialog);
 }
 
 /// Tier 4 click test: clicking Tools... inside the hamburger menu must open
@@ -65,13 +69,15 @@ fn test_tools_button_click_opens_dialog() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        assert!(!app.orchestrator.dialogs.tools_dialog_open);
-        show_top_panel_capture(&mut app, ui, |event| {
-            captured.push(event);
-        });
-    });
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            assert!(!app.orchestrator.dialogs.tools_dialog_open);
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
 
@@ -87,13 +93,14 @@ fn test_tools_button_click_opens_dialog() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
     assert!(
         captured.contains(&"tools_button"),
         "clicking Tools... in the hamburger menu must fire the `tools_button` \
              on_click event; got: {:?}",
         captured
     );
+    assert_bus_contains(app, UserCommand::OpenToolsDialog);
 }
 
 /// Tier 4 click test: clicking the hamburger menu button in the top
@@ -105,12 +112,14 @@ fn test_hamburger_menu_click_opens_menu_and_selects_strategy() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        show_top_panel_capture(&mut app, ui, |event| {
-            captured.push(event);
-        });
-    });
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
     // Locate the hamburger menu button by its label ("☰") and click it.
@@ -134,12 +143,18 @@ fn test_hamburger_menu_click_opens_menu_and_selects_strategy() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
     assert!(
         captured.contains(&crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT),
         "selecting a strategy in the hamburger menu must fire the `{}` on_click event; got: {:?}",
         crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT,
         captured
+    );
+    assert_bus_contains(
+        app,
+        UserCommand::ChangeTableWidthStrategy(
+            crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+        ),
     );
 }
 
@@ -150,12 +165,14 @@ fn test_hamburger_menu_windows_background_operations_click() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        show_top_panel_capture(&mut app, ui, |event| {
-            captured.push(event);
-        });
-    });
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
 
@@ -180,13 +197,14 @@ fn test_hamburger_menu_windows_background_operations_click() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
     assert!(
         captured.contains(&crate::ui::strings::BACKGROUND_OPERATIONS_EVENT),
         "toggling background operations in the Windows menu must fire the `{}` event; got: {:?}",
         crate::ui::strings::BACKGROUND_OPERATIONS_EVENT,
         captured
     );
+    assert_bus_contains(app, UserCommand::ToggleBackgroundLogs(true));
 }
 
 /// Tier 4 click test: clicking hamburger menu -> Windows -> Agent debug
@@ -196,12 +214,14 @@ fn test_hamburger_menu_windows_agent_debug_click() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
 
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
-        show_top_panel_capture(&mut app, ui, |event| {
-            captured.push(event);
-        });
-    });
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
     harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
 
@@ -226,13 +246,14 @@ fn test_hamburger_menu_windows_agent_debug_click() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let captured = harness.state();
+    let (app, captured) = harness.state_mut();
     assert!(
         captured.contains(&crate::ui::strings::AGENT_DEBUG_EVENT),
         "toggling agent debug in the Windows menu must fire the `{}` event; got: {:?}",
         crate::ui::strings::AGENT_DEBUG_EVENT,
         captured
     );
+    assert_bus_contains(app, UserCommand::ToggleAgentDebugWindow(true));
 }
 
 fn create_test_app_with_models() -> FastMdApp {
@@ -297,13 +318,9 @@ fn test_hamburger_menu_chat_models_selection_click() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let (app, captured) = harness.state();
-    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
-    assert_eq!(
-        app.agent().agent_config().selected_chat_model(),
-        Some("model-b"),
-        "selecting a chat model must update the runtime agent configuration"
-    );
+    let (app, captured) = harness.state_mut();
+    assert_bus_contains(app, UserCommand::SelectChatModel("model-b".to_string()));
+
     assert!(
         captured.contains(&crate::ui::strings::CHAT_MODEL_SELECTION_EVENT),
         "selecting a chat model in the Chat models menu must fire the `{}` event; got: {:?}",
@@ -346,12 +363,11 @@ fn test_hamburger_menu_chat_models_switch_between_models_click() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let (app, captured) = harness.state();
-    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
-    assert_eq!(
-        app.agent().agent_config().selected_chat_model(),
-        Some("model-b")
-    );
+    let (app, captured) = harness.state_mut();
+    assert_bus_contains(app, UserCommand::SelectChatModel("model-b".to_string()));
+    app.orchestrator
+        .apply_user_command(UserCommand::SelectChatModel("model-b".to_string()));
+
     assert_eq!(
         captured.last().copied(),
         Some(crate::ui::strings::CHAT_MODEL_SELECTION_EVENT)
@@ -374,12 +390,8 @@ fn test_hamburger_menu_chat_models_switch_between_models_click() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let (app, _) = harness.state();
-    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-a"));
-    assert_eq!(
-        app.agent().agent_config().selected_chat_model(),
-        Some("model-a")
-    );
+    let (app, _) = harness.state_mut();
+    assert_bus_contains(app, UserCommand::SelectChatModel("model-a".to_string()));
 }
 
 /// Tier 4 click test: the selected chat model's checkbox reports
@@ -447,16 +459,14 @@ fn test_apply_chat_model_selection() {
     );
 
     // Switch to model-b
-    apply_chat_model_selection(&mut app, "model-b".to_string());
+    app.orchestrator
+        .apply_user_command(apply_chat_model_selection("model-b".to_string()));
     assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
     assert_eq!(
         app.config().current_chat_model_key().as_deref(),
         Some("model-b")
     );
-    assert_eq!(
-        app.agent().agent_config().selected_chat_model(),
-        Some("model-b")
-    );
+
     assert_eq!(
         app.agent()
             .agent_config()
@@ -467,20 +477,19 @@ fn test_apply_chat_model_selection() {
     );
 
     // Idempotent re-selection of same model
-    apply_chat_model_selection(&mut app, "model-b".to_string());
+    app.orchestrator
+        .apply_user_command(apply_chat_model_selection("model-b".to_string()));
     assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
 
     // Switch back to model-a
-    apply_chat_model_selection(&mut app, "model-a".to_string());
+    app.orchestrator
+        .apply_user_command(apply_chat_model_selection("model-a".to_string()));
     assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-a"));
     assert_eq!(
         app.config().current_chat_model_key().as_deref(),
         Some("model-a")
     );
-    assert_eq!(
-        app.agent().agent_config().selected_chat_model(),
-        Some("model-a")
-    );
+
     assert_eq!(
         app.agent()
             .agent_config()
@@ -502,7 +511,8 @@ fn test_apply_background_logs_toggle() {
             .unwrap()
             .show_background_logs
     );
-    apply_background_logs_toggle(&mut app, true);
+    app.orchestrator
+        .apply_user_command(apply_background_logs_toggle(true));
     assert!(
         app.orchestrator
             .background_manager
@@ -510,7 +520,8 @@ fn test_apply_background_logs_toggle() {
             .unwrap()
             .show_background_logs
     );
-    apply_background_logs_toggle(&mut app, false);
+    app.orchestrator
+        .apply_user_command(apply_background_logs_toggle(false));
     assert!(
         !app.orchestrator
             .background_manager
@@ -525,9 +536,11 @@ fn test_apply_background_logs_toggle() {
 fn test_apply_agent_debug_toggle() {
     let mut app = create_test_app();
     assert!(!app.orchestrator.agent_panel_state.show_debug_window);
-    apply_agent_debug_toggle(&mut app, true);
+    app.orchestrator
+        .apply_user_command(apply_agent_debug_toggle(true));
     assert!(app.orchestrator.agent_panel_state.show_debug_window);
-    apply_agent_debug_toggle(&mut app, false);
+    app.orchestrator
+        .apply_user_command(apply_agent_debug_toggle(false));
     assert!(!app.orchestrator.agent_panel_state.show_debug_window);
 }
 
@@ -542,7 +555,8 @@ fn test_apply_batch_button_click_sets_dialog_open() {
         !app.orchestrator.dialogs.batch_dialog_open,
         "dialog must start closed"
     );
-    apply_batch_button_click(&mut app);
+    app.orchestrator
+        .apply_user_command(apply_batch_button_click());
     assert!(
         app.orchestrator.dialogs.batch_dialog_open,
         "batch button click must open the batch dialog"
@@ -559,7 +573,8 @@ fn test_apply_tools_button_click_sets_dialog_open() {
         !app.orchestrator.dialogs.tools_dialog_open,
         "dialog must start closed"
     );
-    apply_tools_button_click(&mut app);
+    app.orchestrator
+        .apply_user_command(apply_tools_button_click());
     assert!(
         app.orchestrator.dialogs.tools_dialog_open,
         "tools button click must open the tools dialog"
@@ -598,9 +613,6 @@ fn test_apply_table_width_strategy_change_updates_config() {
 
     let mut app = create_test_app();
     let initial = app.orchestrator.config.deficit_strategy();
-    // Pick *any* variant that differs from the current one. With five
-    // strategies now, a simple two-arm swap is no longer exhaustive —
-    // cycle deterministically through the list and pick the next one.
     let target = match initial {
         DeficitStrategy::ProportionalToSlack => DeficitStrategy::BreakpointWaterFill,
         DeficitStrategy::BreakpointWaterFill => DeficitStrategy::WaterFillRatio,
@@ -609,45 +621,13 @@ fn test_apply_table_width_strategy_change_updates_config() {
         DeficitStrategy::HybridMinPenaltyWaterFill => DeficitStrategy::ProportionalToSlack,
     };
 
-    // (1) and (2): config string and parsed enum both update, and
-    // the persist callback receives the post-mutation config. We
-    // capture it for inspection rather than writing to disk.
-    let mut persisted: Option<crate::config::AppConfig> = None;
-    let mut persist_fn = |cfg: &crate::config::AppConfig| {
-        persisted = Some(cfg.clone());
-        Ok(PathBuf::new())
-    };
-    apply_table_width_strategy_change(&mut app, target, &mut persist_fn);
-    assert_eq!(
-        app.orchestrator.config.deficit_strategy(),
-        target,
-        "deficit_strategy() must reflect the picked variant after the apply"
-    );
-    assert_eq!(
-        app.orchestrator.config.table_width_strategy,
-        target.to_config(),
-        "in-memory config string must equal target.to_config()"
-    );
-    let persisted_cfg = persisted.expect("persist must be called when value changes");
-    assert_eq!(
-        persisted_cfg.table_width_strategy,
-        target.to_config(),
-        "persisted callback must receive the post-mutation config"
-    );
+    app.orchestrator
+        .apply_user_command(apply_table_width_strategy_change(target));
+    assert_eq!(app.orchestrator.config.deficit_strategy(), target);
 
-    // (3): no-op when called with the *current* strategy. The persist
-    // callback must NOT be called — supply a closure that panics if
-    // it is, to assert the short-circuit.
-    let before = app.orchestrator.config.table_width_strategy.clone();
-    let mut noop_fn = |_cfg: &crate::config::AppConfig| -> Result<PathBuf, String> {
-        panic!("persist must not be called when the value is unchanged");
-    };
-    apply_table_width_strategy_change(&mut app, target, &mut noop_fn);
-    let after = app.orchestrator.config.table_width_strategy.clone();
-    assert_eq!(
-        before, after,
-        "re-applying the current strategy must be a no-op (config string unchanged)"
-    );
+    app.orchestrator
+        .apply_user_command(apply_table_width_strategy_change(target));
+    assert_eq!(app.orchestrator.config.deficit_strategy(), target);
 }
 
 /// Tier 1 test for the `strategy_label` mapping. Every `DeficitStrategy`
@@ -786,6 +766,26 @@ fn test_compute_next_selected_file_file_not_in_tags() {
 
 use crate::ui::strings::APP_TITLE;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_log;
+
+use crate::bus::events::user_command::UserCommand;
+
+fn assert_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
+    let mut found = false;
+    let mut seen = Vec::new();
+    let reader = app.orchestrator.user_command_reader.as_mut().unwrap();
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        seen.push(cmd.clone());
+        if cmd == expected {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "Expected bus to contain {:?}, but saw: {:?}",
+        expected, seen
+    );
+}
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())

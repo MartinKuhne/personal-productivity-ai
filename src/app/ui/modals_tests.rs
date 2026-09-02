@@ -1,11 +1,31 @@
 //! Tests for `ui/modals.rs`.
 
 use super::*;
+use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::ui::FastMdApp;
 use crate::ui::test_helpers::run_ui_test;
-use notify::RecommendedWatcher;
 use std::fs;
+
+fn assert_bus_contains(
+    reader: &mut crate::bus::core::BusReader<UserCommand>,
+    expected: UserCommand,
+) {
+    let mut found = false;
+    let mut received = Vec::new();
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        received.push(cmd.clone());
+        if cmd == expected {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "Expected bus to contain {:?}, but received {:?}",
+        expected, received
+    );
+}
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(AppConfig::default())
@@ -36,7 +56,7 @@ fn test_move_modal_rendering_and_state() {
         &mut app.orchestrator.dialogs,
         &app.orchestrator.content_libraries,
         &app.orchestrator.file_processor,
-        &app.orchestrator.file_event_bus,
+        &app.orchestrator.user_command_bus,
         &ctx,
     );
     assert!(!app.orchestrator.dialogs.move_dialog_open);
@@ -69,7 +89,7 @@ fn test_move_modal_rendering_and_state() {
             &mut app.orchestrator.dialogs,
             &app.orchestrator.content_libraries,
             &app.orchestrator.file_processor,
-            &app.orchestrator.file_event_bus,
+            &app.orchestrator.user_command_bus,
             ui.ctx(),
         );
     });
@@ -83,16 +103,13 @@ fn test_move_modal_rendering_and_state() {
 fn test_create_dir_modal() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
-    let mut watcher: Option<RecommendedWatcher> = None;
 
     let temp_dir = std::env::temp_dir().join("fastmd_create_dir_test");
     let _ = fs::create_dir_all(&temp_dir);
 
     show_create_dir_dialog(
         &mut app.orchestrator.dialogs,
-        &mut app.orchestrator.file_processor,
-        &mut watcher,
-        &app.orchestrator.file_event_bus,
+        &app.orchestrator.user_command_bus,
         &ctx,
     );
     assert!(!app.orchestrator.dialogs.create_dir_dialog_open);
@@ -106,9 +123,7 @@ fn test_create_dir_modal() {
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
         show_create_dir_dialog(
             &mut app.orchestrator.dialogs,
-            &mut app.orchestrator.file_processor,
-            &mut watcher,
-            &app.orchestrator.file_event_bus,
+            &app.orchestrator.user_command_bus,
             ui.ctx(),
         );
     });
@@ -119,9 +134,7 @@ fn test_create_dir_modal() {
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
         show_create_dir_dialog(
             &mut app.orchestrator.dialogs,
-            &mut app.orchestrator.file_processor,
-            &mut watcher,
-            &app.orchestrator.file_event_bus,
+            &app.orchestrator.user_command_bus,
             ui.ctx(),
         );
     });
@@ -141,22 +154,16 @@ fn test_rename_modal() {
     let _ = fs::write(&file_path, "sample text");
 
     {
-        let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialogs: &mut app.orchestrator.dialogs,
-            file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tabs.loaded_path,
-            selected_file: &mut sel.selected_file,
-            selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tabs.tabs,
-            file_processor: &mut app.orchestrator.file_processor,
-            app_tags: &mut app.orchestrator.tags,
-            expanded_dirs: &mut sel.expanded_dirs,
+            user_command_bus: &app.orchestrator.user_command_bus,
+
             ctx: &ctx,
         });
     }
     assert!(!app.orchestrator.dialogs.rename_dialog_open);
 
+    let _reader = app.orchestrator.user_command_bus.subscribe();
     app.orchestrator.dialogs.rename_dialog_open = true;
     app.orchestrator.dialogs.file_to_rename = Some(file_path.clone());
     app.orchestrator.dialogs.rename_new_name = "new_name".to_string();
@@ -166,17 +173,10 @@ fn test_rename_modal() {
     // See `test_move_modal_rendering_and_state` for the rationale
     // on why the modal's rendered text is not asserted here.
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
-        let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialogs: &mut app.orchestrator.dialogs,
-            file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tabs.loaded_path,
-            selected_file: &mut sel.selected_file,
-            selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tabs.tabs,
-            file_processor: &mut app.orchestrator.file_processor,
-            app_tags: &mut app.orchestrator.tags,
-            expanded_dirs: &mut sel.expanded_dirs,
+            user_command_bus: &app.orchestrator.user_command_bus,
+
             ctx: ui.ctx(),
         });
     });
@@ -185,17 +185,10 @@ fn test_rename_modal() {
 
     app.orchestrator.dialogs.rename_new_name = "invalid/name".to_string();
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
-        let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialogs: &mut app.orchestrator.dialogs,
-            file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tabs.loaded_path,
-            selected_file: &mut sel.selected_file,
-            selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tabs.tabs,
-            file_processor: &mut app.orchestrator.file_processor,
-            app_tags: &mut app.orchestrator.tags,
-            expanded_dirs: &mut sel.expanded_dirs,
+            user_command_bus: &app.orchestrator.user_command_bus,
+
             ctx: ui.ctx(),
         });
     });
@@ -214,29 +207,34 @@ fn test_rename_preserves_extension() {
     let md_file = temp_dir.join("my_document.md");
     let _ = fs::write(&md_file, "# Test");
 
+    let mut reader = app.orchestrator.user_command_bus.subscribe();
     app.orchestrator.dialogs.rename_dialog_open = true;
     app.orchestrator.dialogs.file_to_rename = Some(md_file.clone());
     app.orchestrator.dialogs.rename_new_name = "renamed_doc".to_string();
 
-    let _ = run_ui_test(&ctx, Default::default(), |ui| {
-        let sel = &mut app.orchestrator.selection;
+    let mut raw_input = egui::RawInput::default();
+    raw_input.events.push(egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         show_rename_dialog(RenameDialogCtx {
             dialogs: &mut app.orchestrator.dialogs,
-            file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tabs.loaded_path,
-            selected_file: &mut sel.selected_file,
-            selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tabs.tabs,
-            file_processor: &mut app.orchestrator.file_processor,
-            app_tags: &mut app.orchestrator.tags,
-            expanded_dirs: &mut sel.expanded_dirs,
+            user_command_bus: &app.orchestrator.user_command_bus,
             ctx: ui.ctx(),
         });
     });
 
-    assert!(
-        !temp_dir.join("renamed_doc.md").exists() || temp_dir.join("my_document.md").exists(),
-        "Rename should complete without error"
+    assert_bus_contains(
+        &mut reader,
+        UserCommand::ConfirmRename {
+            path: md_file,
+            new_name: "renamed_doc".to_string(),
+        },
     );
 
     let _ = fs::remove_dir_all(&temp_dir);
@@ -326,13 +324,14 @@ fn test_create_document_dialog_writes_file_on_submit() {
     dm.create_document_dialog_open = true;
     dm.create_document_parent = Some(temp_dir.clone());
     dm.create_document_name = "from dialog".to_string();
-    let bus = Bus::new();
-    let dm = Mutex::new(Some(dm));
+    let bus = crate::bus::core::Bus::<UserCommand>::new();
+    let mut reader = bus.subscribe();
+    let dm = Mutex::new(Some((dm, bus.clone())));
 
     let mut harness = stateful_harness((), move |ui, _| {
         let mut guard = dm.lock().unwrap();
-        if let Some(dm) = guard.as_mut() {
-            show_create_document_dialog(dm, &bus, ui.ctx());
+        if let Some((dm, bus)) = guard.as_mut() {
+            show_create_document_dialog(dm, bus, ui.ctx());
         }
     });
     harness.fit_contents();
@@ -340,10 +339,13 @@ fn test_create_document_dialog_writes_file_on_submit() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let created = temp_dir.join("from dialog.md");
-    assert!(created.exists(), "Ok must create the document file");
-    let content = fs::read_to_string(&created).unwrap();
-    assert_eq!(content, "");
+    assert_bus_contains(
+        &mut reader,
+        UserCommand::ConfirmCreateDocument {
+            parent: temp_dir.clone(),
+            name: "from dialog".to_string(),
+        },
+    );
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
@@ -368,26 +370,22 @@ fn test_rename_dialog_renames_file_on_submit() {
     let file_path = temp_dir.join("original.txt");
     let _ = fs::write(&file_path, "content");
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let _reader = app.orchestrator.user_command_bus.subscribe();
     app.orchestrator.dialogs.rename_dialog_open = true;
     app.orchestrator.dialogs.file_to_rename = Some(file_path.clone());
     app.orchestrator.dialogs.rename_new_name = "renamed".to_string();
     *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
+    let bus = app.orchestrator.user_command_bus.clone();
+    let mut reader = bus.subscribe();
     let app = Mutex::new(Some(app));
 
     let mut harness = stateful_harness((), move |ui, _| {
         let mut guard = app.lock().unwrap();
         if let Some(app) = guard.as_mut() {
-            let sel = &mut app.orchestrator.selection;
             show_rename_dialog(RenameDialogCtx {
                 dialogs: &mut app.orchestrator.dialogs,
-                file_event_bus: &app.orchestrator.file_event_bus,
-                loaded_path: &mut app.orchestrator.tabs.loaded_path,
-                selected_file: &mut sel.selected_file,
-                selected_dir: &mut sel.selected_dir,
-                tabs: &mut app.orchestrator.tabs.tabs,
-                file_processor: &mut app.orchestrator.file_processor,
-                app_tags: &mut app.orchestrator.tags,
-                expanded_dirs: &mut sel.expanded_dirs,
+                user_command_bus: &app.orchestrator.user_command_bus,
+
                 ctx: ui.ctx(),
             });
         }
@@ -397,12 +395,13 @@ fn test_rename_dialog_renames_file_on_submit() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let renamed = temp_dir.join("renamed.txt");
-    assert!(
-        renamed.exists(),
-        "Ok must rename the file (preserving extension)"
+    assert_bus_contains(
+        &mut reader,
+        UserCommand::ConfirmRename {
+            path: temp_dir.join("original.txt"),
+            new_name: "renamed".to_string(),
+        },
     );
-    assert!(!temp_dir.join("original.txt").exists());
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

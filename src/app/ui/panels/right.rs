@@ -70,8 +70,8 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// The TOC row click in `show_right_panel` calls this function. It
 /// is extracted so the side effect can be unit-tested without
 /// driving the egui harness.
-pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: &str) {
-    app.orchestrator.tabs.scroll_to_header_id = Some(entry_id.to_string());
+pub fn apply_toc_row_click(entry_id: &str) -> crate::bus::events::user_command::UserCommand {
+    crate::bus::events::user_command::UserCommand::ScrollToHeader(entry_id.to_string())
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -84,7 +84,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 /// a no-op closure; the test caller in
 /// `tests::test_toc_row_click_captures_event` passes a closure
 /// that pushes the event into the harness's persistent state. See
-/// the matching doc-comment on [`show_top_panel_capture`] for the
+/// the matching doc-comment on `show_top_panel_capture` for the
 /// full rationale.
 #[tracing::instrument(skip_all, name = "ui.panel.right", level = "debug")]
 pub fn show_right_panel_capture(
@@ -194,7 +194,9 @@ pub fn show_right_panel_capture(
                                         )
                                         .truncate();
                                         if ui.add(label).clicked() {
-                                            apply_toc_row_click(app, &entry.id);
+                                            app.orchestrator
+                                                .user_command_bus
+                                                .publish(apply_toc_row_click(&entry.id));
                                             on_click("toc_row");
                                         }
                                     });

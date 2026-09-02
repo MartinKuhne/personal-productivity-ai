@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
-use crate::config::AppConfig;
+use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::table_width::DeficitStrategy;
 use eframe::egui;
@@ -40,7 +40,7 @@ pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
 
 /// Purpose: Determines the next selected file after the active tag filter changes.
 /// Inputs: selected_file (current selected file path), selected_tag (currently active tag filter), file_tags (mapping of files to their tags)
-/// Outputs: Option<PathBuf> representing the new selected file.
+/// Outputs: `Option<PathBuf>` representing the new selected file.
 /// Purity: Pure function.
 /// Preconditions: None.
 /// Postconditions: Returns `None` if an active tag is selected and it is not associated with the selected file. Otherwise returns the original selected file.
@@ -61,83 +61,34 @@ pub fn compute_next_selected_file(
     Some(selected.clone())
 }
 
-/// Purpose: Applies the side effect of clicking the batch-processing
-/// button in the top toolbar.
-/// Inputs: app (the application state)
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.dialogs.batch_dialog_open`).
-/// Preconditions: None.
-/// Postconditions: `app.orchestrator.dialogs.batch_dialog_open` is `true` after
-/// the call. The flag is sticky; the batch dialog itself resets the
-/// flag to `false` when it closes (`ui/app.rs:749`).
-///
-/// The button click in `show_top_panel` calls this function. It is
-/// extracted so the side effect can be unit-tested without driving
-/// the egui harness.
-pub fn apply_batch_button_click(app: &mut FastMdApp) {
-    app.dialogs_mut().batch_dialog_open = true;
+/// Returns the command for clicking the batch-processing button.
+pub fn apply_batch_button_click() -> UserCommand {
+    UserCommand::OpenBatchDialog
 }
 
-/// Purpose: Applies the side effect of clicking the
-/// "Tools..." button in the top toolbar.
-///
-/// Inputs: app (the application state)
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.dialogs.tools_dialog_open`).
-/// Preconditions: None.
-/// Postconditions: `app.orchestrator.dialogs.tools_dialog_open` is `true` after
-/// the call. The dialog itself resets the flag to `false` when it
-/// closes.
-///
-/// The button click in `show_top_panel` calls this function. It is
-/// extracted so the side effect can be unit-tested without driving
-/// the egui harness.
-pub fn apply_tools_button_click(app: &mut FastMdApp) {
-    app.dialogs_mut().tools_dialog_open = true;
+/// Returns the command for clicking the "Tools..." button.
+pub fn apply_tools_button_click() -> UserCommand {
+    UserCommand::OpenToolsDialog
 }
 
-/// Purpose: Applies the side effect of toggling the background logs window from the Windows menu.
-///
-/// Inputs: app (the application state), `show`: the new boolean state
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.background_manager.show_background_logs`).
-/// Preconditions: None.
-/// Postconditions: `show_background_logs` matches `show`.
-pub fn apply_background_logs_toggle(app: &mut FastMdApp, show: bool) {
-    app.orchestrator
-        .background_manager
-        .lock()
-        .unwrap()
-        .show_background_logs = show;
+/// Returns the command for toggling the background logs window.
+pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
+    UserCommand::ToggleBackgroundLogs(show)
 }
 
-/// Purpose: Applies the side effect of toggling the agent debug window from the Windows menu.
-///
-/// Inputs: app (the application state), `show`: the new boolean state
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.agent_panel_state.show_debug_window`).
-/// Preconditions: None.
-/// Postconditions: `show_debug_window` matches `show`.
-pub fn apply_agent_debug_toggle(app: &mut FastMdApp, show: bool) {
-    app.orchestrator.agent_panel_state.show_debug_window = show;
+/// Returns the command for toggling the agent debug window.
+pub fn apply_agent_debug_toggle(show: bool) -> UserCommand {
+    UserCommand::ToggleAgentDebugWindow(show)
 }
 
-/// Purpose: Applies the side effect of picking a new chat model from the Chat Models menu.
-///
-/// Inputs: `app` (application state), `model_name` (selected model name).
-/// Outputs: ()
-/// Purity: Impure (mutates the app and agent configuration in memory).
-/// Preconditions: None.
-/// Postconditions: Both app and agent configuration select `model_name`.
-pub fn apply_chat_model_selection(app: &mut FastMdApp, model_name: String) {
-    let mut new_config = app.config().clone();
-    if new_config.selected_chat_model.as_deref() == Some(&model_name) {
-        return;
-    }
-    new_config.selected_chat_model = Some(model_name);
-    app.agent_mut()
-        .set_agent_config(new_config.to_agent_config());
-    *app.config_mut() = new_config;
+/// Returns the command for picking a new chat model.
+pub fn apply_chat_model_selection(model_name: String) -> UserCommand {
+    UserCommand::SelectChatModel(model_name)
+}
+
+/// Returns the command for changing the table-width deficit strategy.
+pub fn apply_table_width_strategy_change(strategy: DeficitStrategy) -> UserCommand {
+    UserCommand::ChangeTableWidthStrategy(strategy)
 }
 
 /// Human-readable label for a [`DeficitStrategy`] variant, used as the
@@ -160,112 +111,19 @@ pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
     }
 }
 
-/// Purpose: Applies the side effect of picking a new table-width
-/// deficit strategy in the top toolbar's combobox.
-///
-/// Inputs:
-///   - `app`: the application state
-///   - `strategy`: the newly selected [`DeficitStrategy`]
-///   - `persist`: a callback invoked exactly once when the strategy
-///     actually changes. Receives a reference to the post-mutation
-///     `AppConfig` (with the new `table_width_strategy` set) and is
-///     expected to persist it. The signature matches
-///     [`crate::config::save_config`] / [`crate::config::save_config_to_path`]
-///     so production can pass those as function pointers without an
-///     extra closure wrapper. A `Result::Err` is logged via
-///     `tracing::error!` but does not propagate — the in-memory
-///     config is still updated (matches the `tools_dialog::render_row`
-///     policy).
-///
-/// Outputs: ()
-///
-/// Purity: Impure. Clones `app.orchestrator.config`, mutates
-///   `table_width_strategy`, invokes `persist` on the new config, and
-///   replaces the in-memory config. The markdown renderer reads
-///   `deficit_strategy()` on every frame so the change takes effect
-///   on the very next paint without any invalidation hook.
-///
-/// Preconditions: None.
-///
-/// Postconditions:
-///   - `app.config().table_width_strategy == strategy.to_config()`
-///   - `app.config().deficit_strategy() == strategy`
-///   - `persist` is called exactly once with the post-mutation config
-///     iff the value actually changed; otherwise it is not called at
-///     all (so a no-op re-pick from egui's re-fired dropdown events
-///     does not trigger a redundant write).
-///
-/// # Why a callback
-///
-/// Decoupling persistence from the in-memory mutation keeps the
-/// function testable without a filesystem: tests pass a closure that
-/// captures the saved config (or panics, to assert it wasn't called).
-/// Production passes `crate::config::save_config` directly. An
-/// earlier version hard-coded `save_config` (the APPDATA-path
-/// version) and a test was silently overwriting the user's real
-/// `config.yaml` at `%APPDATA%\fastmd\config.yaml` on every test run.
-/// A previous attempt split the function into a `_to_path` variant;
-/// the callback form is cleaner because the persistence choice lives
-/// at the call site (production = "write to APPDATA", test = "do
-/// nothing" or "write to a tempdir").
-pub fn apply_table_width_strategy_change<F>(
-    app: &mut FastMdApp,
-    strategy: DeficitStrategy,
-    persist: &mut F,
-) where
-    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
-{
-    let new_value = strategy.to_config();
-    let mut new_config = app.config().clone();
-    if new_config.table_width_strategy == new_value {
-        // No-op: the persisted value already matches the pick.
-        // Skipping the persist call avoids redundant disk writes when
-        // egui re-fires the dropdown's selected-value event across
-        // frames.
-        return;
-    }
-    new_config.table_width_strategy = new_value.to_string();
-    if let Err(e) = persist(&new_config) {
-        tracing::error!(
-            error = %e,
-            strategy = new_value,
-            "failed to persist AppConfig after table-width-strategy change"
-        );
-    }
-    *app.config_mut() = new_config;
-}
-
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_top_panel_capture_with_persist(app, parent_ui, crate::config::save_config, |_| {});
+    show_top_panel_capture(app, parent_ui, |_| {});
 }
 
 /// Tier 4 test variant of [`show_top_panel`]. The `on_click` callback
 /// is invoked after every button click in the toolbar, with a stable
-/// event name. The test persister is a no-op so tests do not touch disk.
-#[cfg(test)]
+/// event name.
+#[tracing::instrument(skip_all, name = "ui.panel.top", level = "debug")]
 pub fn show_top_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    on_click: impl FnMut(&'static str),
-) {
-    show_top_panel_capture_with_persist(
-        app,
-        parent_ui,
-        |_| Ok(std::path::PathBuf::new()),
-        on_click,
-    );
-}
-
-/// Variant of [`show_top_panel_capture`] allowing custom persistence handler.
-#[tracing::instrument(skip_all, name = "ui.panel.top", level = "debug")]
-pub fn show_top_panel_capture_with_persist<F>(
-    app: &mut FastMdApp,
-    parent_ui: &mut egui::Ui,
-    mut persist: F,
     mut on_click: impl FnMut(&'static str),
-) where
-    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
-{
+) {
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
@@ -348,14 +206,18 @@ pub fn show_top_panel_capture_with_persist<F>(
                 ui.menu_button(crate::ui::strings::HAMBURGER_MENU_BUTTON, |ui| {
                     ui.set_min_width(180.0);
 
-                    // Direct action items — open dialogs immediately on click.
+                    // Direct action items ?" open dialogs immediately on click.
                     if ui.button(crate::ui::strings::MENU_BATCH).clicked() {
-                        apply_batch_button_click(app);
+                        app.orchestrator
+                            .user_command_bus
+                            .publish(apply_batch_button_click());
                         on_click("batch_button");
                         ui.close();
                     }
                     if ui.button(crate::ui::strings::MENU_TOOLS).clicked() {
-                        apply_tools_button_click(app);
+                        app.orchestrator
+                            .user_command_bus
+                            .publish(apply_tools_button_click());
                         on_click("tools_button");
                         ui.close();
                     }
@@ -385,7 +247,9 @@ pub fn show_top_panel_capture_with_persist<F>(
                             )
                             .clicked()
                         {
-                            apply_background_logs_toggle(app, background_checked);
+                            app.orchestrator
+                                .user_command_bus
+                                .publish(apply_background_logs_toggle(background_checked));
                             on_click(crate::ui::strings::BACKGROUND_OPERATIONS_EVENT);
                             ui.close();
                         }
@@ -396,7 +260,9 @@ pub fn show_top_panel_capture_with_persist<F>(
                             .checkbox(&mut debug_checked, crate::ui::strings::MENU_AGENT_DEBUG)
                             .clicked()
                         {
-                            apply_agent_debug_toggle(app, debug_checked);
+                            app.orchestrator
+                                .user_command_bus
+                                .publish(apply_agent_debug_toggle(debug_checked));
                             on_click(crate::ui::strings::AGENT_DEBUG_EVENT);
                             ui.close();
                         }
@@ -446,7 +312,9 @@ pub fn show_top_panel_capture_with_persist<F>(
                             }
 
                             if let Some(picked) = pending_model {
-                                apply_chat_model_selection(app, picked);
+                                app.orchestrator
+                                    .user_command_bus
+                                    .publish(apply_chat_model_selection(picked));
                                 on_click(crate::ui::strings::CHAT_MODEL_SELECTION_EVENT);
                             }
                         }
@@ -482,7 +350,9 @@ pub fn show_top_panel_capture_with_persist<F>(
                         }
 
                         if let Some(picked) = pending {
-                            apply_table_width_strategy_change(app, picked, &mut persist);
+                            app.orchestrator
+                                .user_command_bus
+                                .publish(apply_table_width_strategy_change(picked));
                             on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
                         }
                     });

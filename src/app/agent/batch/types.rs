@@ -252,15 +252,6 @@ impl Default for BatchDialogConfig {
     }
 }
 
-/// Result of dialog interaction
-#[derive(Debug, Clone, PartialEq)]
-pub enum BatchDialogResult {
-    /// User clicked Process with valid config
-    Process(BatchConfig),
-    /// User clicked Cancel or closed dialog
-    Cancel,
-}
-
 /// Log phase for batch logging
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BatchLogPhase {

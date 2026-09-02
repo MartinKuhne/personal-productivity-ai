@@ -52,10 +52,12 @@ impl FastMdApp {
         self.orchestrator.drain_background_channel();
         self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_agent_event_bus();
+        self.orchestrator.drain_user_command_bus();
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::A)) {
-            self.orchestrator.agent_panel_state.show_debug_window =
-                !self.orchestrator.agent_panel_state.show_debug_window;
+            self.orchestrator.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::ToggleAgentDebugWindowShortcut,
+            );
         }
 
         self.orchestrator.handle_file_selection();
@@ -149,10 +151,6 @@ impl FastMdApp {
 
     #[tracing::instrument(skip_all, name = "ui.handle_deferred_actions", level = "debug")]
     fn handle_deferred_actions(&mut self) {
-        if let Some(prompt) = self.orchestrator.submit_prompt.take() {
-            self.orchestrator.start_agent_session(prompt);
-        }
-
         if let Some(handle) = self.orchestrator.dialogs.batch_handle.take() {
             if handle.thread.is_finished() {
                 let result = handle.join();
