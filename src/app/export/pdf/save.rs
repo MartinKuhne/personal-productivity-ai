@@ -84,17 +84,7 @@ impl SaveAsPdfJob {
     }
 }
 
-/// Compile markdown to a PDF byte vector.
-///
-/// Delegates to `fastmd-pdf::compile_markdown_to_pdf`. This is the
-/// core, side-effect-free function, preserved at the original path so
-/// `fastmd::export::pdf::compile_markdown_to_pdf` stays stable for the
-/// integration test `tests/commonmark_spec_test.rs`.
-pub use fastmd_pdf::compile_markdown_to_pdf;
-
-/// Typst compiler requires an 8MB stack — re-exported from the
-/// independent crate so callers do not need to depend on it directly.
-pub use fastmd_pdf::TYPST_THREAD_STACK_SIZE;
+use fastmd_pdf::compile_markdown_to_pdf;
 
 /// Compile the markdown content to a PDF file at
 /// `job.resolved_output_path()`. Suitable to be called from a

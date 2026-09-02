@@ -265,7 +265,7 @@ fn show_file_context_menu(
                 let target_for_log = target.clone();
                 std::thread::Builder::new()
                     .name("pdf-export".into())
-                    .stack_size(crate::export::pdf::TYPST_THREAD_STACK_SIZE)
+                    .stack_size(fastmd_pdf::TYPST_THREAD_STACK_SIZE)
                     .spawn(move || {
                         if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
                             tracing::error!(
