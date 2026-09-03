@@ -12,9 +12,7 @@ use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
 
 /// Idle-CPU regression: when the app is fully idle (no file events
 /// arrived, indexing is finished, and no raw input is pending),

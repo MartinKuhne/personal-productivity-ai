@@ -284,3 +284,26 @@ pub(crate) fn render_table(
         &crate::ui::table_width::TableRenderConfig::default(),
     )
 }
+
+// ---------------------------------------------------------------------------
+// FlushInline extraction helpers (W3-04 deduplication).
+// ---------------------------------------------------------------------------
+
+/// Extract the first `FlushInline` event's `elems`, if any.
+///
+/// Pure helper with no side effects. Searches `events` for
+/// `RenderEvent::FlushInline` and clones its `elems`.
+pub(crate) fn flush_inline(events: &[RenderEvent]) -> Option<Vec<InlineElem>> {
+    events.iter().find_map(|e| match e {
+        RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
+        _ => None,
+    })
+}
+
+/// Extract the first `FlushInline` event's `elems`, panicking if absent.
+///
+/// Uses the standard expect message `"expected a FlushInline event"` when
+/// `events` contains no `FlushInline`.
+pub(crate) fn expect_flush_inline(events: &[RenderEvent]) -> Vec<InlineElem> {
+    flush_inline(events).expect("expected a FlushInline event")
+}
