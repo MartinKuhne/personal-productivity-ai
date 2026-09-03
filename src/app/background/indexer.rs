@@ -70,7 +70,7 @@ impl Indexer {
                             path = %path.display()
                         )
                         .entered();
-                        crate::utils::tags::extract_tags_from_file(&path)
+                        crate::agent::utils::tags::extract_tags_from_file(&path)
                     };
                     let _ = tx_clone.send(FsEvent::FileParsed { path, tags }.into());
                     std::thread::yield_now();

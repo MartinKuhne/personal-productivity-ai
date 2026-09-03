@@ -1,5 +1,7 @@
 //! Centralised modal-dialog state — open/closed flags and temporary inputs for every dialog in the application.
 
+use crate::agent::batch::BatchHandle;
+use crate::agent::batch::types::BatchDialogConfig;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -44,8 +46,8 @@ pub struct Dialogs {
 
     // Batch processing dialog
     pub batch_dialog_open: bool,
-    pub batch_dialog_config: crate::agent::batch::types::BatchDialogConfig,
-    pub batch_handle: Option<crate::agent::batch::BatchHandle>,
+    pub batch_dialog_config: BatchDialogConfig,
+    pub batch_handle: Option<BatchHandle>,
     pub batch_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 
     // Tools dialog (UI-051)
@@ -79,7 +81,7 @@ impl Dialogs {
             rename_new_name: String::new(),
 
             batch_dialog_open: false,
-            batch_dialog_config: crate::agent::batch::types::BatchDialogConfig::default(),
+            batch_dialog_config: BatchDialogConfig::default(),
             batch_handle: None,
             batch_cancel_flag: None,
 

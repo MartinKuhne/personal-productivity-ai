@@ -152,7 +152,9 @@ impl FileWatcher {
                                 notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
                                     if path.is_file() {
                                         let tags =
-                                            crate::utils::tags::extract_tags_from_file(&path);
+                                            crate::agent::utils::tags::extract_tags_from_file(
+                                                &path,
+                                            );
                                         let _ = tx_notify.send(
                                             FsEvent::FileModified {
                                                 path: path.clone(),

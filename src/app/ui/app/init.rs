@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::agent::AgentSession;
 use crate::background::{BackgroundLogs, Task};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -20,6 +19,7 @@ use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use fastmd_agent::AgentSession;
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
 
@@ -110,7 +110,7 @@ impl FastMdApp {
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
-        crate::agent::session::spawn_config_subscription(
+        crate::agent::spawn_config_subscription(
             tool_context.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
@@ -126,7 +126,7 @@ impl FastMdApp {
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily
         // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
+        let browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
@@ -305,7 +305,7 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
-        let test_browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
+        let test_browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();

@@ -69,6 +69,8 @@ concern and expose its public API through a `mod.rs` that re-exports symbols.
 - [RUST-057] **Sidecar header note.** When an implementation file has a test sidecar, the implementation file's `//!` module doc comment MUST end with a one-line pointer: `//! Unit tests live in the sibling \`<filename>.rs\` sidecar.`
 - [RUST-058] **`app/` is egui-free.** No `.rs` file under `app/` MAY import `eframe::egui`, `egui`, or any other UI crate. Rendering concerns MUST go in `ui/`.
 
+- [RUST-059] **No re-export shims.** Do not add `pub use` re-exports in `mod.rs` or `lib.rs` files solely to shorten import paths. Consumers MUST use the full module path (e.g., `crate::agent::session::BrowserSession` not `crate::agent::BrowserSession`). Only re-export at the crate root (`lib.rs`) when an external consumer (binary, integration test, or downstream crate) actually uses the short path and the type is a genuine top-level entry point. Before adding any re-export, verify it has ≥2 independent consumers; if it has 0 or 1, use the full path instead.
+
 ## Quality Gate
 
 Before marking any task as complete, run the following from `/` and ensure they all pass cleanly:

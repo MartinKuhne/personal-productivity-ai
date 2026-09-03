@@ -1,10 +1,10 @@
 //! Background subscription that initializes and refreshes MCP tools on configuration arrivals.
 
-use crate::agent::AgentToolContext;
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
+use fastmd_agent::AgentToolContext;
 use std::sync::Arc;
 
 /// Spawns a background thread that listens for [`ConfigArrived`] events on `config_bus`,

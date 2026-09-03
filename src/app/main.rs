@@ -2,6 +2,7 @@
 //! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
+use fastmd::bus::events::config::ConfigArrived;
 #[cfg(feature = "discord")]
 use fastmd::integrations::discord::run_discord_bot;
 use fastmd::ui::FastMdApp;
@@ -157,7 +158,7 @@ fn main() -> eframe::Result<()> {
             // would fall back to the default (empty) config and
             // never start scanning.
             let app = FastMdApp::new(cc, config_bus.clone());
-            config_bus.publish(fastmd::ConfigArrived::new(config.clone()));
+            config_bus.publish(ConfigArrived::new(config.clone()));
             Ok(Box::new(app))
         }),
     )

@@ -1,6 +1,6 @@
 //! Conversation context management for Discord bot.
 
-use crate::utils::uuid::UuidGenerator;
+use fastmd_agent::utils::uuid::UuidGenerator;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
