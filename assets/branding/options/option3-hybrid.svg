@@ -1,0 +1,16 @@
+<!-- Option 3 — Hybrid: Lightning + FMD
+     Rounded indigo badge, FMD wordmark where the I-gap is a bolt.
+     F  ⚡  MD  with bolt forming negative space. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="FMD hybrid bolt">
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#6366F1"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="white" stroke-opacity="0.08"/>
+  <!-- F -->
+  <text x="7.2" y="20.2" font-family="Inter, 'Segoe UI', system-ui, sans-serif"
+        font-weight="800" font-size="13" letter-spacing="-0.7" fill="white">F</text>
+  <!-- bolt as separator (slightly overlapping) -->
+  <path d="M15.9 6.2 L12.4 14.6 H14.6 L13.7 21.2 L18.2 12.2 H15.4 Z"
+        fill="#64C8FF" stroke="white" stroke-width="0.35" stroke-linejoin="round"/>
+  <!-- MD -->
+  <text x="18.6" y="20.2" font-family="Inter, 'Segoe UI', system-ui, sans-serif"
+        font-weight="800" font-size="13" letter-spacing="-0.7" fill="white">MD</text>
+</svg>

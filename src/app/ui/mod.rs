@@ -8,6 +8,7 @@ pub mod batch_dialog;
 pub mod dialogs;
 pub mod editor_egui;
 pub mod fonts;
+pub mod logo;
 pub mod modals;
 pub mod os_shell;
 pub mod panel_layout;

@@ -89,6 +89,10 @@ fastmd-agent = { path = "src/agent" }
 qdrant-client = { version = "1.13", optional = true }
 egui-phosphor = "0.13.0"
 arboard = "3.6.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

@@ -8,8 +8,8 @@
 //!
 //! # Pipeline
 //!
-//! 1. [`super::typst_translator::render_markdown_to_typst`] — pure markdown
-//!    to Typst markup, see [`super::typst_translator`] for the
+//! 1. `fastmd_pdf::compile_markdown_to_pdf` — pure markdown
+//!    to Typst markup, see `src/md2pdf/` for the
 //!    translator.
 //! 2. `TypstEngine::compile` — in-process Typst engine from
 //!    `typst-as-lib`, fed the translated body inside a fixed
