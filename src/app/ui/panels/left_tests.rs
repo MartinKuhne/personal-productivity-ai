@@ -4,9 +4,7 @@ use super::*;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 use crate::ui::test_helpers::run_ui_test;
 
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
 
 #[test]
 fn test_show_left_panel_empty() {

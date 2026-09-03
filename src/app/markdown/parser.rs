@@ -223,18 +223,24 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
         *task = None;
     };
 
+    macro_rules! flush_buffered {
+        () => {
+            push_inline(
+                &mut events,
+                &mut buffered_inline,
+                &mut needs_bullet,
+                &mut task_checked,
+                list_depth,
+                list_ordinal_stack.last().copied().flatten(),
+            )
+        };
+    }
+
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 in_code_block = true;
                 code_block_content.clear();
@@ -256,14 +262,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::Heading { level, .. }) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 in_heading = true;
                 heading_level = match level {
@@ -286,113 +285,50 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::Paragraph) => {
                 if !in_table_cell && !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
             }
             Event::End(TagEnd::Paragraph) => {
                 if !in_table_cell {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                     events.push(RenderEvent::Space(4.0));
                 }
             }
             Event::Start(Tag::List(list_kind)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 list_depth += 1;
                 list_ordinal_stack.push(list_kind);
             }
             Event::End(TagEnd::List(_)) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
                 list_depth = list_depth.saturating_sub(1);
                 list_ordinal_stack.pop();
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 needs_bullet = true;
             }
             Event::End(TagEnd::Item) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
                 if let Some(Some(n)) = list_ordinal_stack.last_mut() {
                     *n += 1;
                 }
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
             }
             Event::End(TagEnd::BlockQuote(_)) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 table_cells.clear();
             }
@@ -422,14 +358,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::Start(Tag::TableCell) => {
                 in_table_cell = true;
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
             }
             Event::End(TagEnd::TableCell) => {
@@ -508,28 +437,14 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::HardBreak => {
                 if !in_code_block && !in_heading {
                     if !in_table_cell {
-                        push_inline(
-                            &mut events,
-                            &mut buffered_inline,
-                            &mut needs_bullet,
-                            &mut task_checked,
-                            list_depth,
-                            list_ordinal_stack.last().copied().flatten(),
-                        );
+                        flush_buffered!();
                     } else {
                         buffered_inline.push(InlineElem::SoftBreak);
                     }
                 }
             }
             Event::Rule => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
                 events.push(RenderEvent::Separator);
             }
             Event::TaskListMarker(checked) => {
@@ -550,14 +465,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::FootnoteDefinition(name)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
                 events.push(RenderEvent::Separator);
                 let text = format!("[^{}]: ", name);
@@ -566,48 +474,20 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 buffered_inline.push(InlineElem::Text(text, s));
             }
             Event::End(TagEnd::FootnoteDefinition) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
             }
             Event::Start(Tag::HtmlBlock) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                    );
+                    flush_buffered!();
                 }
             }
             Event::End(TagEnd::HtmlBlock) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                );
+                flush_buffered!();
             }
             _ => {}
         }
     }
-    push_inline(
-        &mut events,
-        &mut buffered_inline,
-        &mut needs_bullet,
-        &mut task_checked,
-        list_depth,
-        list_ordinal_stack.last().copied().flatten(),
-    );
+    flush_buffered!();
 
     events
 }

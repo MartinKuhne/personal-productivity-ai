@@ -1,18 +1,12 @@
 //! Tests for `background/vision_processor.rs`.
 
 use super::*;
-use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::config::{AppConfig, LlmConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-/// Build a `FileEventProducer` backed by a throwaway bus.
-/// Useful for tests that exercise `process_image` without
-/// caring about what (if anything) is published.
-fn noop_producer() -> FileEventProducer {
-    FileEventProducer::new(Bus::new())
-}
+use crate::ui::test_helpers::app::noop_producer;
 
 #[tokio::test]
 async fn test_process_image_no_model() {

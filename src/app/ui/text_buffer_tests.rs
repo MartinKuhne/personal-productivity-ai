@@ -1,16 +1,10 @@
 //! Tests for `app/text_buffer.rs`.
 
 use super::*;
-use crate::bus::core::Bus;
 use std::fs;
 use tempfile::tempdir;
 
-/// A producer that publishes to a throwaway bus. Tests don't need
-/// to consume the events — they only care about the file I/O
-/// outcome.
-fn noop_producer() -> FileEventProducer {
-    FileEventProducer::new(Bus::new())
-}
+use crate::ui::test_helpers::app::noop_producer;
 
 // ---- Cursor ----
 

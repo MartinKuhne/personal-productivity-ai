@@ -245,16 +245,7 @@ impl ToolExecutor {
                 join_set.spawn_blocking(move || {
                     let snapshot = tc_arc.load();
                     let dispatcher = &snapshot.registry;
-                    let ctx = crate::tools::context::ToolContextBuilder::new(cfg, bus)
-                        .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
-                            cache,
-                        )))
-                        .with_extension(std::sync::Arc::new(
-                            crate::tools::context::UuidGeneratorExt(uuid_gen),
-                        ))
-                        .with_tool_call_policy(pdf)
-                        .with_extensions(extensions.clone())
-                        .build();
+                    let ctx = build_tool_ctx(cfg, bus, cache, uuid_gen, pdf, extensions.clone());
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     ToolCallRecord {
                         call_id,
@@ -284,19 +275,14 @@ impl ToolExecutor {
             let pdf = self.policy.clone();
             let snapshot = self.tool_context.load();
             let dispatcher = &snapshot.registry;
-            let ctx = crate::tools::context::ToolContextBuilder::new(
+            let ctx = build_tool_ctx(
                 self.config.clone(),
                 self.file_observer.clone(),
-            )
-            .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
                 self.cache.clone(),
-            )))
-            .with_extension(std::sync::Arc::new(
-                crate::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
-            ))
-            .with_tool_call_policy(pdf)
-            .with_extensions(extensions.clone())
-            .build();
+                self.uuid_gen.clone(),
+                pdf,
+                extensions.clone(),
+            );
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
             results.push(ToolCallRecord {
                 call_id,
@@ -334,34 +320,48 @@ impl ToolExecutor {
                         Err(_) => continue,
                     };
                 let vpath = Path::new(&path_owned);
-                let mut comps = vpath.components().peekable();
-                while let Some(c) = comps.peek() {
-                    match c {
-                        std::path::Component::RootDir | std::path::Component::CurDir => {
-                            comps.next();
-                        }
-                        _ => break,
-                    }
-                }
-                if let Some(std::path::Component::Normal(first)) = comps.next() {
-                    let lib_name = first.to_string_lossy();
-                    for lib in self.config.content_libraries() {
-                        if lib.name == lib_name {
-                            let rest: std::path::PathBuf = comps.collect();
-                            let abs_path = Path::new(&lib.root_folder).join(rest);
-                            let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                            effects.push(ToolSideEffect::FileCreated {
-                                path: abs_path,
-                                tags,
-                            });
-                            break;
-                        }
+                let Some((lib_name, rest)) = crate::utils::path::split_library_prefix(vpath) else {
+                    continue;
+                };
+                for lib in self.config.content_libraries() {
+                    if lib.name == lib_name {
+                        let abs_path = Path::new(&lib.root_folder).join(rest);
+                        let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
+                        effects.push(ToolSideEffect::FileCreated {
+                            path: abs_path,
+                            tags,
+                        });
+                        break;
                     }
                 }
             }
         }
         effects
     }
+}
+
+/// Build a [`crate::tools::context::ToolContext`] from shared parts.
+///
+/// Pure helper — single place to change tool-context creation for both
+/// parallel and sequential dispatch.
+fn build_tool_ctx(
+    cfg: Arc<AgentConfig>,
+    bus: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
+    cache: SharedCache,
+    uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+    policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
+    extensions: crate::tools::extensions::Extensions,
+) -> crate::tools::context::ToolContext {
+    crate::tools::context::ToolContextBuilder::new(cfg, bus)
+        .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+            cache,
+        )))
+        .with_extension(std::sync::Arc::new(
+            crate::tools::context::UuidGeneratorExt(uuid_gen),
+        ))
+        .with_tool_call_policy(policy)
+        .with_extensions(extensions)
+        .build()
 }
 
 fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {

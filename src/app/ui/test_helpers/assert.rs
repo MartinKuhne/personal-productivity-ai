@@ -56,6 +56,9 @@
 //!
 //! Unit tests live in the sibling `assert_tests.rs` sidecar.
 
+use crate::bus::core::BusReader;
+use crate::bus::events::user_command::UserCommand;
+use crate::ui::app::FastMdApp;
 use eframe::egui;
 
 /// Assert that no "widget rect changed id between passes" warnings were
@@ -130,6 +133,39 @@ pub fn assert_no_id_change_in_log(log_msgs: &[String]) {
         "id-stability regression: {log_warns} log warning(s). See \
          AGENTS.md §\"Conditional rendering\" for the fix pattern."
     );
+}
+
+/// Assert that the bus contains the expected [`UserCommand`].
+///
+/// Drains `reader` via `try_recv_exposing_lag` and asserts the expected
+/// command was published. Pure helper with no global state.
+pub fn assert_bus_contains(reader: &mut BusReader<UserCommand>, expected: UserCommand) {
+    let mut found = false;
+    let mut seen = Vec::new();
+    while let Ok(cmd) = reader.try_recv_exposing_lag() {
+        seen.push(cmd.clone());
+        if cmd == expected {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "Expected bus to contain {expected:?}, but saw: {seen:?}"
+    );
+}
+
+/// Assert that the app's user-command bus contains the expected [`UserCommand`].
+///
+/// Convenience wrapper for panel tests that own a `FastMdApp`. Reads from
+/// `app.orchestrator.user_command_reader`.
+pub fn assert_app_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
+    let reader = app
+        .orchestrator
+        .user_command_reader
+        .as_mut()
+        .expect("user_command_reader must be set on test app");
+    assert_bus_contains(reader, expected);
 }
 
 #[cfg(test)]
