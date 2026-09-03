@@ -769,27 +769,8 @@ use crate::ui::test_helpers::assert::assert_no_id_change_in_log;
 
 use crate::bus::events::user_command::UserCommand;
 
-fn assert_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
-    let mut found = false;
-    let mut seen = Vec::new();
-    let reader = app.orchestrator.user_command_reader.as_mut().unwrap();
-    while let Ok(cmd) = reader.try_recv_exposing_lag() {
-        seen.push(cmd.clone());
-        if cmd == expected {
-            found = true;
-            break;
-        }
-    }
-    assert!(
-        found,
-        "Expected bus to contain {:?}, but saw: {:?}",
-        expected, seen
-    );
-}
-
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
+use crate::ui::test_helpers::assert::assert_app_bus_contains as assert_bus_contains;
 
 #[test]
 fn test_show_top_panel_indexing_unfinished() {

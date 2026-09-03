@@ -137,21 +137,8 @@ use std::path::PathBuf;
 
 use crate::bus::events::user_command::UserCommand;
 
-fn assert_bus_contains(app: &mut FastMdApp, expected: UserCommand) {
-    let mut found = false;
-    let reader = app.orchestrator.user_command_reader.as_mut().unwrap();
-    while let Ok(cmd) = reader.try_recv_exposing_lag() {
-        if cmd == expected {
-            found = true;
-            break;
-        }
-    }
-    assert!(found, "Expected bus to contain {:?}", expected);
-}
-
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
+use crate::ui::test_helpers::assert::assert_app_bus_contains as assert_bus_contains;
 
 #[test]
 fn test_show_right_panel_hidden_when_no_file() {

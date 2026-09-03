@@ -94,7 +94,95 @@ impl FastMdApp {
         // collide with the `&mut ui` reborrow in
         // `self.render_panels(ui)`.
         let commands = ui.ctx().output(|o| o.commands.clone());
-        os_shell::dispatch_platform_commands(&commands, os_shell::open_url);
+        self.handle_platform_commands(&commands, ui.ctx());
+    }
+
+    /// Processes drained platform commands (hyperlinks and URLs), resolving them
+    /// to in-app document navigation, anchor scrolling, or external browser dispatch.
+    pub(crate) fn handle_platform_commands(
+        &mut self,
+        commands: &[egui::OutputCommand],
+        ctx: &egui::Context,
+    ) {
+        for cmd in commands {
+            if let egui::OutputCommand::OpenUrl(open_url_cmd) = cmd {
+                self.handle_open_link(&open_url_cmd.url, ctx);
+            }
+        }
+    }
+
+    /// Handles an activated link URL by inspecting its target and executing the appropriate action.
+    fn handle_open_link(&mut self, link: &str, ctx: &egui::Context) {
+        let current_file = self.selection().selected_file().cloned();
+        let content_roots: Vec<std::path::PathBuf> = self
+            .orchestrator
+            .content_libraries
+            .iter()
+            .map(|lib| std::path::PathBuf::from(&lib.root_folder))
+            .collect();
+
+        let action = crate::ui::resolve_link(
+            link,
+            current_file.as_deref(),
+            &self.orchestrator.file_processor.all_files,
+            &content_roots,
+        );
+
+        match action {
+            crate::ui::LinkAction::OpenWorkspaceFile { path, anchor } => {
+                let is_md = path.extension().is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+                });
+                if is_md {
+                    self.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::SelectFile {
+                            path,
+                            multi: false,
+                        },
+                    );
+                    if let Some(a) = anchor {
+                        self.orchestrator.tabs.scroll_to_header_id = Some(a);
+                    }
+                    ctx.request_repaint();
+                } else {
+                    os_shell::open_in_system_editor(&path);
+                }
+            }
+            crate::ui::LinkAction::ScrollToAnchor { anchor } => {
+                let matched = self
+                    .orchestrator
+                    .tabs
+                    .toc
+                    .iter()
+                    .find(|entry| {
+                        entry.id.eq_ignore_ascii_case(&anchor)
+                            || entry.title.eq_ignore_ascii_case(&anchor)
+                            || entry.id.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
+                            || entry.title.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
+                            || anchor.to_lowercase().replace('-', " ") == entry.id.to_lowercase()
+                            || anchor.to_lowercase().replace('-', " ") == entry.title.to_lowercase()
+                    })
+                    .map(|entry| entry.id.clone())
+                    .or_else(|| {
+                        self.orchestrator
+                            .tabs
+                            .heading_ids()
+                            .iter()
+                            .find(|id| {
+                                id.eq_ignore_ascii_case(&anchor)
+                                    || id.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
+                                    || anchor.to_lowercase().replace('-', " ") == id.to_lowercase()
+                            })
+                            .cloned()
+                    })
+                    .unwrap_or(anchor);
+                self.orchestrator.tabs.scroll_to_header_id = Some(matched);
+                ctx.request_repaint();
+            }
+            crate::ui::LinkAction::OpenExternal(external_url) => {
+                os_shell::open_url(&external_url);
+            }
+        }
     }
 
     #[tracing::instrument(skip_all, name = "ui.process_file_events_and_repaint", level = "debug")]

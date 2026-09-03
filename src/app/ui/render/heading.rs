@@ -71,7 +71,13 @@ pub(crate) fn render_heading(
                     ui.label(rt);
                 }
                 InlineElem::Link(url, text) => {
-                    ui.hyperlink_to(egui::RichText::new(text).size(size), url);
+                    let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
+                        format!("Note: {target}")
+                    } else {
+                        url.clone()
+                    };
+                    ui.hyperlink_to(egui::RichText::new(text).size(size), url)
+                        .on_hover_text(hover_tip);
                 }
                 InlineElem::Image(url) => {
                     ui.label(RichText::new(format!("[Image: {}]", url)).size(size));

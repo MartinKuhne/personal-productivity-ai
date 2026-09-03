@@ -12,9 +12,7 @@ use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
 
 /// Idle-CPU regression: when the app is fully idle (no file events
 /// arrived, indexing is finished, and no raw input is pending),
@@ -1382,5 +1380,83 @@ fn test_broadcast_lag_handled_with_truncation_marker() {
             .contains("[output truncated"),
         "transcript content must contain truncation marker; got: {:?}",
         app.orchestrator.agent_transcript.content
+    );
+}
+
+#[test]
+fn test_handle_platform_commands_local_markdown_publishes_select_file() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+    let rx = app.orchestrator.user_command_bus.subscribe();
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "docs/guide.md".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    let received = rx
+        .try_recv_exposing_lag()
+        .expect("must receive UserCommand");
+    match received {
+        crate::bus::events::user_command::UserCommand::SelectFile { path, multi } => {
+            assert!(!multi);
+            assert!(path.ends_with("docs/guide.md") || path.ends_with("docs\\guide.md"));
+        }
+        other => panic!("expected SelectFile, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_handle_platform_commands_wikilink_publishes_select_file() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+    let rx = app.orchestrator.user_command_bus.subscribe();
+
+    let target_file = PathBuf::from("/workspace/Personal/Journal-2023-10-15.md");
+    app.orchestrator.file_processor.all_files = vec![target_file.clone()];
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "wikilink:Journal-2023-10-15".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    let received = rx
+        .try_recv_exposing_lag()
+        .expect("must receive UserCommand");
+    match received {
+        crate::bus::events::user_command::UserCommand::SelectFile { path, multi } => {
+            assert!(!multi);
+            assert_eq!(path, target_file);
+        }
+        other => panic!("expected SelectFile, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_handle_platform_commands_anchor_scrolls_heading() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+
+    // Populate TOC / heading_ids
+    app.orchestrator.tabs.toc = vec![crate::ui::ToCEntry::new(
+        "Quick Start Guide",
+        2,
+        "Quick Start Guide",
+    )];
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "#quick-start-guide".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    assert_eq!(
+        app.orchestrator.tabs.scroll_to_header_id.as_deref(),
+        Some("Quick Start Guide")
     );
 }
