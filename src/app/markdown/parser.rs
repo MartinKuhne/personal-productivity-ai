@@ -160,6 +160,33 @@ fn push_link_coalesce(buffer: &mut Vec<InlineElem>, url: &str, text: &str) {
     buffer.push(InlineElem::Link(url.to_string(), text.to_string()));
 }
 
+/// Scans text for bare URLs and wikilinks, coalescing with the previous
+/// text element if one exists with the same style to prevent delimiter
+/// fragmentation from splitting URLs.
+fn push_scanned_text(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyle) {
+    let combined_text;
+    let text_to_scan = if let Some(InlineElem::Text(prev, prev_style)) = buffer.last() {
+        if prev_style == style {
+            combined_text = format!("{prev}{text}");
+            buffer.pop();
+            &combined_text
+        } else {
+            text
+        }
+    } else {
+        text
+    };
+
+    let scanned = crate::markdown::scan_text_for_links(text_to_scan, style);
+    for elem in scanned {
+        match elem {
+            InlineElem::Text(t, s) => push_text_coalesce(buffer, &t, &s),
+            InlineElem::Link(u, t) => push_link_coalesce(buffer, &u, &t),
+            other => buffer.push(other),
+        }
+    }
+}
+
 /// Parses markdown text into a sequence of render events.
 #[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
 pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
@@ -411,14 +438,20 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         push_link_coalesce(&mut buffered_inline, &link_url, &text);
                     }
                 } else if in_heading {
-                    push_text_coalesce(&mut heading_elems, &text, &current_style);
+                    push_scanned_text(&mut heading_elems, &text, &current_style);
                 } else {
-                    push_text_coalesce(&mut buffered_inline, &text, &current_style);
+                    push_scanned_text(&mut buffered_inline, &text, &current_style);
                 }
             }
             Event::Code(code) => {
                 if in_code_block {
                     code_block_content.push_str(&code);
+                } else if in_link {
+                    if in_heading {
+                        push_link_coalesce(&mut heading_elems, &link_url, &code);
+                    } else {
+                        push_link_coalesce(&mut buffered_inline, &link_url, &code);
+                    }
                 } else if in_heading {
                     let mut s = current_style.clone();
                     s.code = true;
@@ -1270,6 +1303,67 @@ mod tests {
         // returns None.
         let scalar: serde_norway::Value = serde_norway::from_str("just a string").unwrap();
         assert!(parse_yaml_to_pairs(&scalar).is_none());
+    }
+
+    #[test]
+    fn parse_markdown_bare_url_becomes_link() {
+        let md = "Check out https://github.com/fastmd for code.";
+        let events = parse_markdown_to_events(md);
+        let flush = events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::FlushInline { elems, .. } => Some(elems),
+                _ => None,
+            })
+            .expect("must produce FlushInline");
+
+        assert_eq!(flush.len(), 3);
+        assert!(matches!(&flush[0], InlineElem::Text(t, _) if t == "Check out "));
+        assert!(matches!(
+            &flush[1],
+            InlineElem::Link(url, text) if url == "https://github.com/fastmd" && text == "https://github.com/fastmd"
+        ));
+        assert!(matches!(&flush[2], InlineElem::Text(t, _) if t == " for code."));
+    }
+
+    #[test]
+    fn parse_markdown_wikilink_becomes_link() {
+        let md = "See [[Getting-Started|Quickstart]] guide.";
+        let events = parse_markdown_to_events(md);
+        let flush = events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::FlushInline { elems, .. } => Some(elems),
+                _ => None,
+            })
+            .expect("must produce FlushInline");
+
+        assert_eq!(flush.len(), 3);
+        assert!(matches!(&flush[0], InlineElem::Text(t, _) if t == "See "));
+        assert!(matches!(
+            &flush[1],
+            InlineElem::Link(url, text) if url == "wikilink:Getting-Started" && text == "Quickstart"
+        ));
+        assert!(matches!(&flush[2], InlineElem::Text(t, _) if t == " guide."));
+    }
+
+    #[test]
+    fn parse_markdown_code_inside_link_coalesces() {
+        let md = "[`run()`](https://example.com)";
+        let events = parse_markdown_to_events(md);
+        let flush = events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::FlushInline { elems, .. } => Some(elems),
+                _ => None,
+            })
+            .expect("must produce FlushInline");
+
+        assert_eq!(flush.len(), 1);
+        assert!(matches!(
+            &flush[0],
+            InlineElem::Link(url, text) if url == "https://example.com" && text == "run()"
+        ));
     }
 }
 

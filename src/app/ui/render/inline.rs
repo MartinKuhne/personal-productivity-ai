@@ -166,7 +166,12 @@ pub(super) fn render_inline_inner(
                 ui.add(egui::Label::new(rt).wrap());
             }
             InlineElem::Link(url, text) => {
-                ui.hyperlink_to(text, url);
+                let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
+                    format!("Note: {target}")
+                } else {
+                    url.clone()
+                };
+                ui.hyperlink_to(text, url).on_hover_text(hover_tip);
             }
             InlineElem::Image(url) => {
                 // Same egui 0.35 wrap-mode default-off hazard as
