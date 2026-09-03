@@ -26,7 +26,7 @@
 //!    something else entirely would break the agent loop's
 //!    downstream parsing.
 //! 3. **Bounded runtime.** A pathological `args_str` (e.g. a deeply
-//!    nested JSON, a huge string, a malicious `evalexpr` predicate
+//!    nested JSON, a huge string, a malicious predicate expression
 //!    for the CSV query tool) must not hang the dispatch. We
 //!    enforce a 5-second wall-clock ceiling per call. A regression
 //!    that introduces a DoS surface — a tight loop, a recursive

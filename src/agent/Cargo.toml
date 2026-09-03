@@ -28,7 +28,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 arc-swap = "1.9.2"
 fastmd-tool-macros = { path = "../fastmd-tool-macros" }
 csv = "1.4.0"
-evalexpr = "13.1.0"
 encoding_rs = "0.8.35"
 walkdir = "2.4"
 url = "2.5"
