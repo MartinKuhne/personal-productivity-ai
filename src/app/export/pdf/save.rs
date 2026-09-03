@@ -84,22 +84,7 @@ impl SaveAsPdfJob {
     }
 }
 
-/// Compile markdown to a PDF byte vector.
-///
-/// This is the core, side-effect-free function. It is exercised by
-/// the unit tests and is the right entry point when the caller
-/// wants the PDF bytes directly (e.g. for in-app preview, email
-/// attachment, or non-`fastmd` consumers).
-pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, String> {
-    let body = super::typst_translator::render_markdown_to_typst(markdown);
-    super::generate(title, &body)
-}
-
-/// Typst compiler requires an 8MB stack to process deeply nested
-/// documents. The default thread stack (2MB on Linux, 512KB on macOS)
-/// will reliably SIGABRT on complex documents. Use this constant when
-/// spawning threads that compile Typst.
-pub const TYPST_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+use fastmd_pdf::compile_markdown_to_pdf;
 
 /// Compile the markdown content to a PDF file at
 /// `job.resolved_output_path()`. Suitable to be called from a

@@ -1014,7 +1014,7 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
 ///   would otherwise be parsed as a labelled content item
 ///   (`name: value`), with the value swallowing the surrounding
 ///   link brackets.
-fn escape_typst(s: &str) -> String {
+pub fn escape_typst(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -1054,7 +1054,7 @@ fn escape_typst(s: &str) -> String {
 /// `\#` inside a string is two chars, not a literal `#`. That is
 /// why the markup escape function (which emits `\#` for `#`) must
 /// NOT be used for string content.
-fn escape_typst_string(s: &str) -> String {
+pub fn escape_typst_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -1091,7 +1091,7 @@ fn escape_typst_string(s: &str) -> String {
 /// `[text](url)` markdown links leave the user's text verbatim
 /// — they wrote it and may want a real `:` to be a label, a
 /// real `/` to be a line break, etc.
-fn escape_typst_autolink(s: &str) -> String {
+pub fn escape_typst_autolink(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
         match c {
@@ -1115,21 +1115,12 @@ fn escape_typst_autolink(s: &str) -> String {
     out
 }
 
-// Unit tests live in the sibling `typst_tests.rs` sidecar
-// (AGENTS.md RUST-056 / RUST-057).
-//
-// see: `src/markdown/typst_tests.rs`
-
+/// Unit tests live in the sibling `translator_tests.rs` sidecar.
 #[cfg(test)]
-#[path = "typst_translator_tests.rs"]
+#[path = "translator_tests.rs"]
 mod tests;
 
-// Property tests for the escape_typst* family. The four closed
-// escape gaps from the ADR (gaps #2, #5, #8, #9) have
-// example-based unit tests; this proptest layers a stronger
-// property check on top — every char in the documented escape
-// set is verified against random inputs. Sidecar of
-// 	ypst_translator.rs per AGENTS.md RUST-056 / RUST-057.
+/// Property tests for the escape families.
 #[cfg(test)]
-#[path = "typst_translator_proptests.rs"]
+#[path = "translator_proptests.rs"]
 mod proptests;

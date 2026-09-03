@@ -2329,6 +2329,7 @@ dependencies = [
  "egui_extras",
  "egui_kittest",
  "fastmd-agent",
+ "fastmd-pdf",
  "filetime",
  "futures-util",
  "glob",
@@ -2359,11 +2360,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trash",
- "typst",
- "typst-as-lib",
- "typst-kit",
- "typst-layout",
- "typst-pdf",
  "uuid",
  "walkdir",
  "webbrowser",
@@ -2408,6 +2404,21 @@ dependencies = [
  "walkdir",
  "webbrowser",
  "wiremock",
+]
+
+[[package]]
+name = "fastmd-pdf"
+version = "0.2.0"
+dependencies = [
+ "pdf_oxide",
+ "proptest",
+ "pulldown-cmark 0.13.4",
+ "tempfile",
+ "typst",
+ "typst-as-lib",
+ "typst-kit",
+ "typst-layout",
+ "typst-pdf",
 ]
 
 [[package]]
