@@ -223,16 +223,36 @@ pub struct WriteYamlHeaderResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CalDavEventDetails {
+    pub client: String,
+    pub id: String,
+    pub href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub organizer: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchCalendarInput {
     pub keyword: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchCalendarResponse {
-    pub results: String,
+    pub results: Vec<CalDavEventDetails>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
@@ -241,9 +261,11 @@ pub struct SearchCalendarResponse {
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarInput {
     pub start_date: String,
     pub end_date: String,
@@ -251,9 +273,10 @@ pub struct GetCalendarInput {
     #[serde(default)]
     pub cursor: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarResponse {
-    pub results: String,
+    pub results: Vec<CalDavEventDetails>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
@@ -262,19 +285,29 @@ pub struct GetCalendarResponse {
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarItemInput {
+    #[schemars(description = strings::FIELD_CALENDAR_HREF_DESC)]
+    #[serde(alias = "id")]
     pub href: String,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarItemResponse {
-    pub result: String,
+    pub item: Option<CalDavEventDetails>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct AddCalendarItemInput {
+    #[schemars(description = strings::FIELD_CALENDAR_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     #[schemars(description = strings::FIELD_CALENDAR_SUMMARY_DESC)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -291,15 +324,20 @@ pub struct AddCalendarItemInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct AddCalendarItemResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct UpdateCalendarItemInput {
     #[schemars(description = strings::FIELD_CALENDAR_HREF_DESC)]
-    pub id: String,
+    #[serde(alias = "id")]
+    pub href: String,
+    #[schemars(description = strings::FIELD_CALENDAR_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     #[schemars(description = strings::FIELD_CALENDAR_SUMMARY_DESC)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -316,16 +354,23 @@ pub struct UpdateCalendarItemInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct UpdateCalendarItemResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct DeleteCalendarItemInput {
-    pub id: String,
+    #[schemars(description = strings::FIELD_CALENDAR_HREF_DESC)]
+    #[serde(alias = "id")]
+    pub href: String,
+    #[schemars(description = strings::FIELD_CALENDAR_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct DeleteCalendarItemResponse {
     pub result: String,
 }
@@ -397,16 +442,39 @@ pub struct DeleteEmailResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+/// One contact representation returned by CardDAV tools.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CardDavContactDetails {
+    pub client: String,
+    pub id: String,
+    pub href: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fn_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bday: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<AddressInput>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub vcard: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchContactInput {
     pub keyword: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchContactResponse {
-    pub results: String,
+    pub results: Vec<CardDavContactDetails>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
@@ -415,18 +483,25 @@ pub struct SearchContactResponse {
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetContactInput {
-    pub id: String,
-}
-#[derive(Serialize, Debug, JsonSchema)]
-pub struct GetContactResponse {
-    pub result: String,
+    #[schemars(description = strings::FIELD_CONTACT_HREF_DESC)]
+    #[serde(alias = "id")]
+    pub href: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+pub struct GetContactResponse {
+    pub contact: Option<CardDavContactDetails>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct AddressInput {
     #[schemars(description = strings::FIELD_ADDRESS_TYPE_DESC)]
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
@@ -454,8 +529,11 @@ pub struct AddressInput {
     pub ext: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct AddContactInput {
+    #[schemars(description = strings::FIELD_CONTACT_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     #[schemars(description = strings::FIELD_CONTACT_NAME_DESC)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -481,16 +559,20 @@ pub struct AddContactInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub addresses: Option<Vec<AddressInput>>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct AddContactResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct UpdateContactInput {
     #[schemars(description = strings::FIELD_CONTACT_HREF_DESC)]
-    #[serde(skip_serializing)]
-    pub id: String,
+    #[serde(alias = "id")]
+    pub href: String,
+    #[schemars(description = strings::FIELD_CONTACT_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
     #[schemars(description = strings::FIELD_CONTACT_NAME_DESC)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -516,18 +598,23 @@ pub struct UpdateContactInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub addresses: Option<Vec<AddressInput>>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct UpdateContactResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct DeleteContactInput {
-    /// The href of the contact to delete. Use the value returned by
-    /// `get_contact` or `search_contact`.
-    pub id: String,
+    #[schemars(description = strings::FIELD_CONTACT_HREF_DESC)]
+    #[serde(alias = "id")]
+    pub href: String,
+    #[schemars(description = strings::FIELD_CONTACT_CLIENT_DESC)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, PartialEq, Eq)]
 pub struct DeleteContactResponse {
     pub result: String,
 }

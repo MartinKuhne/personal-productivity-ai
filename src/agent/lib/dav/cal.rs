@@ -3,8 +3,8 @@
 //! Layering:
 //!
 //! 1. [`DavClient`] (in `dav::client`) owns the per-server
-//!    connection. It wraps both a `fast_dav_rs::CalDavClient` and
-//!    a `fast_dav_rs::CardDavClient` plus the per-server metadata
+//!    connection. It wraps a native `reqwest::Client`
+//!    plus the per-server metadata
 //!    (name, base URL, username). The CalDAV methods
 //!    (`search_calendar`, `get_calendar`, `get_calendar_item`,
 //!    `add_calendar_item`, `update_calendar_item`,
@@ -31,24 +31,7 @@ use crate::tools::dtos::{
 // without reaching into `client` directly.
 use super::DavClient;
 
-#[derive(serde::Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct CalDavEventDetails {
-    pub client: String,
-    pub id: String,
-    pub href: String,
-    pub summary: Option<String>,
-    pub start: Option<String>,
-    pub end: Option<String>,
-    pub description: Option<String>,
-    pub location: Option<String>,
-    pub organizer: Option<String>,
-}
-
-#[derive(serde::Serialize, Debug, Default)]
-pub struct CalDavResponse {
-    pub results: Vec<CalDavEventDetails>,
-    pub errors: Vec<String>,
-}
+pub use crate::tools::dtos::CalDavEventDetails;
 
 pub(crate) fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
     let mut event = CalDavEventDetails {
@@ -326,30 +309,6 @@ where
     (results, errors)
 }
 
-/// Serialize a [`CalDavResponse`] to a pretty JSON string. Falls back
-/// to `"{}"` if the JSON encoder chokes (it shouldn't — the type
-/// fields are all `String` / `Option<String>` — but the inline
-/// fallback matches the previous behaviour so the LLM never sees an
-/// empty error).
-fn serialize_response(resp: &CalDavResponse) -> String {
-    serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
-}
-
-fn format_calendar_page(items: &[String], errors: &[String]) -> String {
-    let mut parts = Vec::new();
-    if !items.is_empty() {
-        parts.push(items.join("\n\n"));
-    }
-    for err in errors {
-        parts.push(err.clone());
-    }
-    if parts.is_empty() {
-        "{}".to_string()
-    } else {
-        parts.join("\n\n")
-    }
-}
-
 pub fn tool_search_calendar(
     config: &crate::config::AgentConfig,
     keyword: &str,
@@ -360,40 +319,35 @@ pub fn tool_search_calendar(
     if let Some(cursor) = cursor {
         let page = cache.calendar_search_sessions.next_page(&cursor)?;
         return Ok(SearchCalendarResponse {
-            results: format_calendar_page(&page.items, &[]),
+            results: page.items,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
+            errors: Vec::new(),
         });
     }
 
     let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
-    let items: Vec<String> = results
-        .into_iter()
-        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
-        .collect();
 
-    if items.is_empty() {
+    if results.is_empty() {
         return Ok(SearchCalendarResponse {
-            results: if errors.is_empty() {
-                "No events found.".to_string()
-            } else {
-                errors.join("\n\n")
-            },
+            results: Vec::new(),
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+            errors,
         });
     }
 
     let page = cache
         .calendar_search_sessions
-        .create_session(items, uuid_gen);
+        .create_session(results, uuid_gen);
     Ok(SearchCalendarResponse {
-        results: format_calendar_page(&page.items, &errors),
+        results: page.items,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
+        errors,
     })
 }
 
@@ -408,61 +362,80 @@ pub fn tool_get_calendar(
     if let Some(cursor) = cursor {
         let page = cache.calendar_get_sessions.next_page(&cursor)?;
         return Ok(GetCalendarResponse {
-            results: format_calendar_page(&page.items, &[]),
+            results: page.items,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
+            errors: Vec::new(),
         });
     }
 
     let (results, errors) = for_each_client_vec(config, |_, c| c.get_calendar(start, end));
-    let items: Vec<String> = results
-        .into_iter()
-        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
-        .collect();
 
-    if items.is_empty() {
+    if results.is_empty() {
         return Ok(GetCalendarResponse {
-            results: if errors.is_empty() {
-                "No events found.".to_string()
-            } else {
-                errors.join("\n\n")
-            },
+            results: Vec::new(),
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+            errors,
         });
     }
 
-    let page = cache.calendar_get_sessions.create_session(items, uuid_gen);
+    let page = cache
+        .calendar_get_sessions
+        .create_session(results, uuid_gen);
     Ok(GetCalendarResponse {
-        results: format_calendar_page(&page.items, &errors),
+        results: page.items,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
+        errors,
     })
 }
 
 pub fn tool_get_calendar_item(
     config: &crate::config::AgentConfig,
-    id: &str,
+    href: &str,
 ) -> Result<GetCalendarItemResponse, String> {
-    let (results, errors) = for_each_client(config, |_, c| c.get_calendar_item(id));
+    let (results, errors) = for_each_client(config, |_, c| c.get_calendar_item(href));
+    let item = results.into_iter().next();
+    let filtered_errors = if item.is_some() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
     Ok(GetCalendarItemResponse {
-        result: serialize_response(&CalDavResponse { results, errors }),
+        item,
+        errors: filtered_errors,
     })
 }
 
 pub fn tool_add_calendar_item(
     config: &crate::config::AgentConfig,
+    client_target: Option<&str>,
     item_json: &str,
 ) -> Result<AddCalendarItemResponse, String> {
-    // `add_calendar_item` is special: it acts on the *first* configured
-    // CalDAV client (no "default calendar" concept in CalDAV). The
-    // per-server output is a single status string, so the aggregation
-    // shape doesn't fit `for_each_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, cc)) = config.caldav_clients().iter().next() {
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match DavClient::new(name.clone(), cc).and_then(|c| c.add_calendar_item(item_json))
+                {
+                    Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
+                    Err(e) => return Err(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CalDAV client '{}' not found", target)),
+        }
+    } else if let Some((name, cc)) = config.caldav_clients().iter().next() {
         match DavClient::new(name.clone(), cc).and_then(|c| c.add_calendar_item(item_json)) {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
@@ -479,44 +452,113 @@ pub fn tool_add_calendar_item(
 
 pub fn tool_update_calendar_item(
     config: &crate::config::AgentConfig,
-    id: &str,
+    href: &str,
+    client_target: Option<&str>,
     update_json: &str,
 ) -> Result<UpdateCalendarItemResponse, String> {
-    let mut all_results = Vec::new();
-    for (name, cc) in config.caldav_clients() {
-        match DavClient::new(name.clone(), cc).and_then(|c| c.update_calendar_item(id, update_json))
-        {
-            Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
-            Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
+    let mut successes = Vec::new();
+    let mut errors = Vec::new();
+
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match DavClient::new(name.clone(), cc)
+                    .and_then(|c| c.update_calendar_item(href, update_json))
+                {
+                    Ok(s) => successes.push(format!("--- Client: {} ---\n{}", name, s)),
+                    Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CalDAV client '{}' not found", target)),
+        }
+    } else {
+        for (name, cc) in config.caldav_clients() {
+            match DavClient::new(name.clone(), cc)
+                .and_then(|c| c.update_calendar_item(href, update_json))
+            {
+                Ok(s) => successes.push(format!("--- Client: {} ---\n{}", name, s)),
+                Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+            }
         }
     }
-    if all_results.is_empty() {
-        Err("No CalDAV clients configured.".to_string())
-    } else {
-        Ok(UpdateCalendarItemResponse {
-            result: all_results.join("\n\n"),
-        })
+
+    if successes.is_empty() && errors.is_empty() {
+        return Err("No CalDAV clients configured.".to_string());
     }
+
+    let final_errors: Vec<String> = if !successes.is_empty() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
+
+    let mut parts = successes;
+    parts.extend(final_errors);
+
+    Ok(UpdateCalendarItemResponse {
+        result: parts.join("\n\n"),
+    })
 }
 
 pub fn tool_delete_calendar_item(
     config: &crate::config::AgentConfig,
-    id: &str,
+    href: &str,
+    client_target: Option<&str>,
 ) -> Result<DeleteCalendarItemResponse, String> {
-    let mut all_results = Vec::new();
-    for (name, cc) in config.caldav_clients() {
-        match DavClient::new(name.clone(), cc).and_then(|c| c.delete_calendar_item(id)) {
-            Ok(()) => all_results.push(format!("--- Client: {} ---\nDeleted successfully", name)),
-            Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
+    let mut successes = Vec::new();
+    let mut errors = Vec::new();
+
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match DavClient::new(name.clone(), cc).and_then(|c| c.delete_calendar_item(href)) {
+                    Ok(()) => {
+                        successes.push(format!("--- Client: {} ---\nDeleted successfully", name))
+                    }
+                    Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CalDAV client '{}' not found", target)),
+        }
+    } else {
+        for (name, cc) in config.caldav_clients() {
+            match DavClient::new(name.clone(), cc).and_then(|c| c.delete_calendar_item(href)) {
+                Ok(()) => successes.push(format!("--- Client: {} ---\nDeleted successfully", name)),
+                Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+            }
         }
     }
-    if all_results.is_empty() {
-        Err("No CalDAV clients configured.".to_string())
-    } else {
-        Ok(DeleteCalendarItemResponse {
-            result: all_results.join("\n\n"),
-        })
+
+    if successes.is_empty() && errors.is_empty() {
+        return Err("No CalDAV clients configured.".to_string());
     }
+
+    let final_errors: Vec<String> = if !successes.is_empty() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
+
+    let mut parts = successes;
+    parts.extend(final_errors);
+
+    Ok(DeleteCalendarItemResponse {
+        result: parts.join("\n\n"),
+    })
 }
 
 pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
