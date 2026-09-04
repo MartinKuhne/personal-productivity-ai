@@ -371,9 +371,9 @@ pub fn render_flat_row_capture(
     ui.push_id((&row.path, row.is_dir), |ui| {
         if row.is_dir {
             let icon = if row.is_expanded {
-                egui_phosphor::regular::CARET_DOWN
+                crate::ui::strings::ICON_CARET_DOWN
             } else {
-                egui_phosphor::regular::CARET_RIGHT
+                crate::ui::strings::ICON_CARET_RIGHT
             };
             let label = format!("{} {}", icon, row.name);
 
@@ -455,9 +455,9 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
     if node.is_dir {
         let is_expanded = ctx.expanded_dirs().contains(&node.path);
         let icon = if is_expanded {
-            egui_phosphor::regular::CARET_DOWN
+            crate::ui::strings::ICON_CARET_DOWN
         } else {
-            egui_phosphor::regular::CARET_RIGHT
+            crate::ui::strings::ICON_CARET_RIGHT
         };
         let label = format!("{} {}", icon, node.name);
 

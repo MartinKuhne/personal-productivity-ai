@@ -168,7 +168,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             }
             if depth > 0 {
                 let icon = if node.is_dir {
-                    egui_phosphor::regular::CARET_RIGHT
+                    crate::ui::strings::ICON_CARET_RIGHT
                 } else {
                     " "
                 };
@@ -248,7 +248,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
                 let enter_pressed = text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let search_clicked = ui
-                    .button(egui_phosphor::regular::MAGNIFYING_GLASS)
+                    .button(crate::ui::strings::ICON_MAGNIFYING_GLASS)
                     .on_hover_text(crate::ui::strings::SEARCH_TRIGGER_TOOLTIP)
                     .clicked();
 
@@ -263,7 +263,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
                 if app.search().is_searching()
                     && ui
-                        .button(egui_phosphor::regular::X)
+                        .button(crate::ui::strings::ICON_X)
                         .on_hover_text(crate::ui::strings::SEARCH_CLEAR_TOOLTIP)
                         .clicked()
                 {
