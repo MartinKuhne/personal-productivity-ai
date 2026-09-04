@@ -6,8 +6,8 @@ use super::*;
 fn all_entries_have_valid_fields() {
     assert_eq!(
         DIRECT_DEPENDENCIES.len(),
-        58,
-        "expected 58 direct dependencies, got {}",
+        52,
+        "expected 52 direct dependencies, got {}",
         DIRECT_DEPENDENCIES.len()
     );
     for attr in DIRECT_DEPENDENCIES {
@@ -115,7 +115,7 @@ fn completeness_against_cargo_manifests() {
         }
     }
 
-    // The plan's 58 list is authoritative; ensure our parser found at least that many.
+    // The manifest set is authoritative; ensure our parser found at least that many.
     // Some manifests include optional deps (e.g., rfd) which are direct deps but optional.
     // They should still be counted as direct dependencies per spec (all direct across all crates).
     // Verify that DIRECT_DEPENDENCIES covers every expected name.

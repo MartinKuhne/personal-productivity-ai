@@ -73,11 +73,6 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/emilk/egui",
     },
     Attribution {
-        name: "egui-phosphor",
-        authors: "amPerl",
-        github_url: "https://github.com/amPerl/egui-phosphor",
-    },
-    Attribution {
         name: "egui_extras",
         authors: "Dominik Rössler, Emil Ernerfeldt, René Rössler",
         github_url: "https://github.com/emilk/egui",
@@ -261,31 +256,6 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         name: "trash",
         authors: "Artur Kovacs",
         github_url: "https://github.com/ArturKovacs/trash",
-    },
-    Attribution {
-        name: "typst",
-        authors: "The Typst Project Developers",
-        github_url: "https://github.com/typst/typst",
-    },
-    Attribution {
-        name: "typst-as-lib",
-        authors: "Laurenz Mädje",
-        github_url: "https://github.com/typst/typst",
-    },
-    Attribution {
-        name: "typst-kit",
-        authors: "The Typst Project Developers",
-        github_url: "https://github.com/typst/typst",
-    },
-    Attribution {
-        name: "typst-layout",
-        authors: "The Typst Project Developers",
-        github_url: "https://github.com/typst/typst",
-    },
-    Attribution {
-        name: "typst-pdf",
-        authors: "The Typst Project Developers",
-        github_url: "https://github.com/typst/typst",
     },
     Attribution {
         name: "url",
