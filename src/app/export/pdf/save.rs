@@ -102,6 +102,12 @@ pub fn compile_and_save_pdf(
     job: &SaveAsPdfJob,
     tx: Option<&crate::bus::events::typed::BackgroundEventSender>,
 ) -> Result<PathBuf, String> {
+    if job.markdown_content.is_empty() {
+        return Err(format!(
+            "Markdown content is empty for {}",
+            job.markdown_path.display()
+        ));
+    }
     if !fastmd_pdf::is_typst_available() {
         let err_msg = "Typst CLI binary not found in PATH".to_string();
         let _ = tx.as_ref().map(|sender| {
@@ -114,12 +120,6 @@ pub fn compile_and_save_pdf(
             );
         });
         return Err(err_msg);
-    }
-    if job.markdown_content.is_empty() {
-        return Err(format!(
-            "Markdown content is empty for {}",
-            job.markdown_path.display()
-        ));
     }
     let output_path = job.resolved_output_path();
     let _ = tx.as_ref().map(|sender| {

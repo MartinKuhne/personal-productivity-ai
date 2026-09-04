@@ -1,10 +1,19 @@
-//! Compilation tests for the PDF pipeline (pure, no IO).
+//! Compilation tests for the PDF pipeline.
 //!
-//! Sidecar of lib.rs in astmd-md2pdf.
+//! Sidecar of lib.rs in fastmd-pdf.
 
-use super::compile_markdown_to_pdf;
+use super::{compile_markdown_to_pdf, is_typst_available};
+
+macro_rules! require_typst {
+    () => {
+        if !is_typst_available() {
+            return;
+        }
+    };
+}
 #[test]
 fn compile_markdown_to_pdf_handles_full_gfm() {
+    require_typst!();
     // A representative Markdown document: heading, paragraph,
     // list, code block, table, blockquote. If any of these
     // produce malformed Typst, compilation will fail and this test
@@ -63,6 +72,7 @@ fn main() {
 /// was generated with no glyphs.
 #[test]
 fn compiled_pdf_contains_text_content() {
+    require_typst!();
     let md = "Hello world\n\n# Heading 1\n\nA paragraph of body text.\n";
     let bytes = compile_markdown_to_pdf(md, "text-content").expect("compile");
     // The PDF is binary data; scan it as bytes to avoid the
@@ -118,6 +128,7 @@ fn compiled_pdf_contains_text_content() {
 /// triggered strong/emphasis, `@` triggered a reference).
 #[test]
 fn typst_syntax_reference_compliance_every_markup_char() {
+    require_typst!();
     let md = r#"
 # Test
 
@@ -144,6 +155,7 @@ $ literal dollar, ~ literal tilde, ' apostrophe,
 /// entry, and used to break compilation before the fix.
 #[test]
 fn dollar_sign_in_text() {
+    require_typst!();
     let md = "C# is a language. It costs $5 to buy a license.\n";
     compile_markdown_to_pdf(md, "cs").expect("$ and # in body must compile");
 }
@@ -153,6 +165,7 @@ fn dollar_sign_in_text() {
 /// escape on the URL. The string escape now runs instead.
 #[test]
 fn url_with_hash_and_ampersand_compiles() {
+    require_typst!();
     let md = "Visit [example](https://example.com/page?x=1&y=2#section-3) for details.\n";
     let bytes =
         compile_markdown_to_pdf(md, "urls").expect("URLs with # and & must compile to a valid PDF");
@@ -165,6 +178,7 @@ fn url_with_hash_and_ampersand_compiles() {
 /// escape now preserves the literal character.
 #[test]
 fn smart_quote_chars_preserved_in_output() {
+    require_typst!();
     let md = "He said \"don't worry\" and walked away.\n";
     let bytes = compile_markdown_to_pdf(md, "smartquote")
         .expect("smart-quote chars in user content must compile");
@@ -175,6 +189,7 @@ fn smart_quote_chars_preserved_in_output() {
 /// for a non-breaking space. Now escaped.
 #[test]
 fn tilde_in_text_compiles() {
+    require_typst!();
     let md = "Saved ~50% of the bytes.\n";
     compile_markdown_to_pdf(md, "tilde").expect("~ in body must compile");
 }
@@ -184,6 +199,7 @@ fn tilde_in_text_compiles() {
 /// handles one char but not another would still fail here.
 #[test]
 fn combined_special_chars_in_paragraph_compile() {
+    require_typst!();
     let md = "Try `a*b_c` and `c#lang` and `cost $5` and `~50%` — all literal.\n";
     let bytes =
         compile_markdown_to_pdf(md, "combined").expect("combined special chars must compile");
@@ -201,6 +217,7 @@ fn combined_special_chars_in_paragraph_compile() {
 /// original failing document.
 #[test]
 fn ordered_list_with_long_item_compiles() {
+    require_typst!();
     let md = "\
 ### Phase 1: Pre-Start Assessment
 
@@ -280,6 +297,7 @@ fn assert_text_contains(rendered: &str, needle: &str, test_name: &str) {
 /// header/footer-only tests cannot catch.
 #[test]
 fn pdf_renders_h1_through_h3() {
+    require_typst!();
     let md = "# Top level\n\n## Section\n\n### Subsection\n\nBody text.\n";
     let out = compile_and_extract(md, "headings");
     assert_text_contains(&out, "Top level", "pdf_renders_h1_through_h3");
@@ -294,6 +312,7 @@ fn pdf_renders_h1_through_h3() {
 /// by a content-mode / emphasis-marker bug in the translator.
 #[test]
 fn pdf_renders_lists() {
+    require_typst!();
     let md = "- alpha\n- beta\n- gamma\n\n1. first\n2. second\n\n- [ ] todo one\n- [x] todo two\n";
     let out = compile_and_extract(md, "lists");
     for needle in [
@@ -318,6 +337,7 @@ fn pdf_renders_lists() {
 /// `block + text` pattern; see `pdf_renders_fenced_code_block`.
 #[test]
 fn pdf_renders_inline_code_and_strong_and_emphasis() {
+    require_typst!();
     let md = r#"
 Strong: **this is bold**.
 
@@ -380,6 +400,7 @@ Inline code: `let x = 1`.
 /// which routes the body through a `text` call.
 #[test]
 fn pdf_renders_inline_code() {
+    require_typst!();
     let md = "Use `let x = 1` to assign.\n";
     let out = compile_and_extract(md, "inline-code");
     assert_text_contains(&out, "let x = 1", "pdf_renders_inline_code");
@@ -398,6 +419,7 @@ fn pdf_renders_inline_code() {
 /// `pdf_renders_inline_code_and_strong_and_emphasis`.
 #[test]
 fn pdf_renders_fenced_code_block() {
+    require_typst!();
     let md = "```rust\nfn main() {\n    let x: i32 = 1;\n    println!(\"{}\", x);\n}\n```\n";
     let out = compile_and_extract(md, "code-block");
     assert_text_contains(&out, "fn main()", "pdf_renders_fenced_code_block");
@@ -414,6 +436,7 @@ fn pdf_renders_fenced_code_block() {
 /// count patcher.
 #[test]
 fn pdf_renders_gfm_table() {
+    require_typst!();
     let md = "| Header A | Header B |\n|----------|----------|\n| alpha    | beta     |\n|          | gamma    |\n";
     let out = compile_and_extract(md, "table");
     for needle in ["Header A", "Header B", "alpha", "beta", "gamma"] {
@@ -427,6 +450,7 @@ fn pdf_renders_gfm_table() {
 /// the same line.
 #[test]
 fn pdf_renders_link_text() {
+    require_typst!();
     let md = "See [the example](https://example.com) for details.\n";
     let out = compile_and_extract(md, "link");
     assert_text_contains(&out, "the example", "pdf_renders_link_text");
@@ -440,6 +464,7 @@ fn pdf_renders_link_text() {
 /// quoted text.
 #[test]
 fn pdf_renders_blockquote() {
+    require_typst!();
     let md = "> A famous quotation.\n>\n> Attribution, year.\n";
     let out = compile_and_extract(md, "quote");
     assert_text_contains(&out, "A famous quotation.", "pdf_renders_blockquote");
@@ -462,6 +487,7 @@ fn pdf_renders_blockquote() {
 /// contain the literal chars.
 #[test]
 fn pdf_renders_special_chars_verbatim() {
+    require_typst!();
     let md = r#"C# costs $5 @mention "quoted" (parens) \backslash 'apostrophe
 "#;
     let out = compile_and_extract(md, "special");
@@ -484,6 +510,7 @@ fn pdf_renders_special_chars_verbatim() {
 /// the next block with a single blank line.
 #[test]
 fn pdf_renders_horizontal_rule() {
+    require_typst!();
     let md = "Before rule.\n\n---\n\nAfter rule.\n";
     let out = compile_and_extract(md, "rule");
     assert_text_contains(&out, "Before rule.", "pdf_renders_horizontal_rule");
@@ -503,6 +530,7 @@ fn pdf_renders_horizontal_rule() {
 /// text is missing, the translator or escape is wrong.
 #[test]
 fn pdf_has_font_dictionary() {
+    require_typst!();
     let md = "Hello world\n";
     let bytes = compile_markdown_to_pdf(md, "font-dict").expect("compile_markdown_to_pdf");
     let needle = b"/Type/Font";
@@ -530,6 +558,7 @@ fn pdf_has_font_dictionary() {
 /// translator.
 #[test]
 fn math_compiles_to_a_valid_pdf() {
+    require_typst!();
     let md =
         "Pythagoras: $a^2 + b^2 = c^2$.\n\nGreek letter: $alpha$.\n\nFraction: $frac(1, 2)$.\n";
     let bytes = compile_markdown_to_pdf(md, "math").expect("math markdown must compile");
@@ -557,6 +586,7 @@ fn math_compiles_to_a_valid_pdf() {
 /// compile check catches it.
 #[test]
 fn footnotes_compile_to_a_valid_pdf() {
+    require_typst!();
     let md = "\
 First[^1] ref, then later: second[^1] ref.
 
@@ -578,6 +608,7 @@ Footnotes can have **bold** in the body[^2].
 
 #[test]
 fn pdf_font_sizes_match_spec() {
+    require_typst!();
     let md = "# Heading 1\n\n## Heading 2\n\n### Heading 3\n\nBody text.\n";
     let bytes =
         compile_markdown_to_pdf(md, "font-sizes").expect("font-sizes markdown must compile");
