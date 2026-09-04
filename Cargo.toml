@@ -109,6 +109,7 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
+rayon = "1.10"
 # `criterion` is the project-wide micro-benchmark harness.
 criterion = { version = "0.5", features = ["html_reports"] }
 egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }

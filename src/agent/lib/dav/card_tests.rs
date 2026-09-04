@@ -347,17 +347,52 @@ fn test_tool_search_contact_handles_empty_clients_gracefully() {
 
     assert!(res.is_ok());
     let response = res.unwrap();
-    assert_eq!(response.results, "No contacts found.");
+    assert!(response.results.is_empty());
     assert_eq!(response.total, 0);
     assert_eq!(response.hint.as_deref(), Some("Final page."));
     assert!(response.cursor.is_none());
 }
 
 #[test]
+fn test_carddav_tools_empty_config() {
+    let config = crate::config::AgentConfig::default();
+
+    assert_eq!(
+        tool_add_contact(&config, None, "{}").unwrap_err(),
+        "No CardDAV clients configured."
+    );
+    assert_eq!(
+        tool_update_contact(&config, "/c.vcf", None, "{}").unwrap_err(),
+        "No CardDAV clients configured."
+    );
+    assert_eq!(
+        tool_delete_contact(&config, "/c.vcf", None).unwrap_err(),
+        "No CardDAV clients configured."
+    );
+
+    let get_res = tool_get_contact(&config, "/c.vcf").unwrap();
+    assert_eq!(get_res.contact, None);
+    assert!(get_res.errors.is_empty());
+}
+
+#[test]
 fn test_search_contact_cursor_sessions() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let contacts: Vec<String> = (1..=70).map(|i| format!("Contact {}", i)).collect();
+    let contacts: Vec<CardDavContactDetails> = (1..=70)
+        .map(|i| CardDavContactDetails {
+            client: "c".to_string(),
+            id: format!("/c/{}.vcf", i),
+            href: format!("/c/{}.vcf", i),
+            fn_name: Some(format!("Contact {}", i)),
+            email: None,
+            tel: None,
+            org: None,
+            bday: None,
+            addresses: Vec::new(),
+            vcard: String::new(),
+        })
+        .collect();
 
     let page1 = cache
         .contact_search_sessions
@@ -924,7 +959,7 @@ fn test_parse_vcard_extracts_single_adr() {
     let contact = parse_vcard("c", "/h", data);
     assert_eq!(contact.addresses.len(), 1);
     let addr = &contact.addresses[0];
-    assert_eq!(addr.kind, Some("HOME".to_string()));
+    assert_eq!(addr.addr_type, Some("HOME".to_string()));
     assert_eq!(addr.street, Some("123 Main St".to_string()));
     assert_eq!(addr.city, Some("Springfield".to_string()));
     assert_eq!(addr.region, Some("IL".to_string()));
@@ -942,9 +977,9 @@ fn test_parse_vcard_extracts_multiple_adrs() {
                 END:VCARD";
     let contact = parse_vcard("c", "/h", data);
     assert_eq!(contact.addresses.len(), 2);
-    assert_eq!(contact.addresses[0].kind, Some("HOME".to_string()));
+    assert_eq!(contact.addresses[0].addr_type, Some("HOME".to_string()));
     assert_eq!(contact.addresses[0].city, Some("Springfield".to_string()));
-    assert_eq!(contact.addresses[1].kind, Some("WORK".to_string()));
+    assert_eq!(contact.addresses[1].addr_type, Some("WORK".to_string()));
     assert_eq!(contact.addresses[1].city, Some("Metropolis".to_string()));
 }
 
@@ -990,7 +1025,7 @@ fn test_parse_vcard_adr_no_type_prefix() {
                 END:VCARD";
     let contact = parse_vcard("c", "/h", data);
     let addr = &contact.addresses[0];
-    assert_eq!(addr.kind, None);
+    assert_eq!(addr.addr_type, None);
     assert_eq!(addr.street, Some("123 Main".to_string()));
 }
 
@@ -1218,4 +1253,368 @@ fn test_split_vcard_value_pads_short_input() {
     // components are empty). The split must not crash.
     let parts = split_vcard_value(";;only street", ';');
     assert_eq!(parts, vec!["", "", "only street"]);
+}
+
+// =====================================================================
+// WireMock integration tests for CardDAV agent tools
+// =====================================================================
+
+use wiremock::matchers::{method, path as wm_path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+struct WiremockGuard {
+    server: MockServer,
+    _runtime: tokio::runtime::Runtime,
+}
+
+impl WiremockGuard {
+    fn start() -> Self {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime");
+        let server = runtime.block_on(MockServer::start());
+        Self {
+            server,
+            _runtime: runtime,
+        }
+    }
+
+    fn uri(&self) -> String {
+        self.server.uri()
+    }
+
+    fn register(&self, mock: Mock) {
+        self._runtime.block_on(self.server.register(mock));
+    }
+}
+
+const CARD_PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/</d:href>
+  <d:propstat>
+   <d:prop>
+    <d:resourcetype><d:collection/><c:addressbook/></d:resourcetype>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#;
+
+const CARD_REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/alice.vcf</d:href>
+  <d:propstat>
+   <d:prop>
+    <c:address-data>BEGIN:VCARD
+VERSION:3.0
+FN:Alice Example
+UID:alice-1
+EMAIL:alice@example.com
+TEL:555-1234
+END:VCARD</c:address-data>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#;
+
+const ALICE_VCARD_BODY: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice Example\r\nUID:alice-1\r\nEMAIL:alice@example.com\r\nTEL:555-1234\r\nEND:VCARD";
+
+fn register_carddav_tool_stubs(mock: &WiremockGuard) {
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(CARD_PROPFIND_BODY),
+        ),
+    );
+    mock.register(
+        Mock::given(method("REPORT")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(CARD_REPORT_BODY),
+        ),
+    );
+    mock.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/addressbooks/primary/alice.vcf"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/vcard")
+                    .set_body_string(ALICE_VCARD_BODY),
+            ),
+    );
+    mock.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/notfound.vcf"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("Not Found"),
+            ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(201)
+                .insert_header("ETag", "\"tag123\"")
+                .set_body_string(""),
+        ),
+    );
+    mock.register(
+        Mock::given(method("DELETE"))
+            .and(wm_path("/addressbooks/primary/alice.vcf"))
+            .respond_with(ResponseTemplate::new(204).set_body_string("")),
+    );
+    mock.register(
+        Mock::given(method("DELETE"))
+            .and(wm_path("/fail.vcf"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("Error"),
+            ),
+    );
+}
+
+fn card_config_for(uri: String) -> crate::config::AgentConfig {
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "mock_card".to_string(),
+        crate::config::CalDavClient {
+            url: uri,
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+    config
+}
+
+#[test]
+fn test_carddav_tools_mock_server() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_carddav_tool_stubs(&mock);
+    let config = card_config_for(mock.uri());
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+
+    // 1. Search contact
+    let search_res = tool_search_contact(&config, "Alice", None, &cache, &uuid_gen).unwrap();
+    assert!(
+        search_res
+            .results
+            .iter()
+            .any(|c| c.fn_name.as_deref() == Some("Alice Example"))
+    );
+
+    // 2. Get contact success
+    let get_res = tool_get_contact(&config, "/addressbooks/primary/alice.vcf").unwrap();
+    assert_eq!(
+        get_res.contact.as_ref().and_then(|c| c.fn_name.as_deref()),
+        Some("Alice Example")
+    );
+
+    // 3. Get contact 404
+    let get_res_404 = tool_get_contact(&config, "/notfound.vcf").unwrap();
+    assert!(get_res_404.contact.is_none());
+    assert!(
+        get_res_404
+            .errors
+            .iter()
+            .any(|e| e.contains("Not found by href"))
+    );
+
+    // 4. Add contact
+    let add_res = tool_add_contact(
+        &config,
+        None,
+        r#"{"name":"Bob Example","email":"b@example.com"}"#,
+    )
+    .unwrap();
+    assert!(add_res.result.contains("Created at /addressbooks/primary/"));
+
+    // 5. Update contact success
+    let update_res = tool_update_contact(
+        &config,
+        "/addressbooks/primary/alice.vcf",
+        None,
+        r#"{"email":"new@example.com"}"#,
+    )
+    .unwrap();
+    assert!(update_res.result.contains("Updated"));
+
+    // 6. Delete contact success
+    let delete_res = tool_delete_contact(&config, "/addressbooks/primary/alice.vcf", None).unwrap();
+    assert!(delete_res.result.contains("Deleted"));
+
+    // 7. Delete contact 500 error
+    let delete_res_err = tool_delete_contact(&config, "/fail.vcf", None).unwrap();
+    assert!(delete_res_err.result.contains("Failed to DELETE"));
+}
+
+#[test]
+fn test_carddav_tools_targeted_client_routing() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock_personal = WiremockGuard::start();
+    let mock_work = WiremockGuard::start();
+    register_carddav_tool_stubs(&mock_personal);
+    register_carddav_tool_stubs(&mock_work);
+
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "personal".to_string(),
+        crate::config::CalDavClient {
+            url: mock_personal.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+    config.caldav_clients.insert(
+        "work".to_string(),
+        crate::config::CalDavClient {
+            url: mock_work.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+
+    // 1. Add contact targeted to work
+    let add_res = tool_add_contact(&config, Some("work"), r#"{"name":"Work Colleague"}"#).unwrap();
+    assert!(add_res.result.contains("--- Client: work ---"));
+    assert!(!add_res.result.contains("--- Client: personal ---"));
+
+    // 2. Add contact targeted to invalid client
+    let add_err = tool_add_contact(&config, Some("nonexistent"), r#"{"name":"X"}"#).unwrap_err();
+    assert!(add_err.contains("CardDAV client 'nonexistent' not found"));
+
+    // 3. Update contact targeted to personal
+    let update_res = tool_update_contact(
+        &config,
+        "/addressbooks/primary/alice.vcf",
+        Some("personal"),
+        r#"{"email":"alice@p.com"}"#,
+    )
+    .unwrap();
+    assert!(update_res.result.contains("--- Client: personal ---"));
+    assert!(!update_res.result.contains("--- Client: work ---"));
+
+    // 4. Update contact targeted to invalid client
+    let update_err = tool_update_contact(
+        &config,
+        "/addressbooks/primary/alice.vcf",
+        Some("nonexistent"),
+        r#"{"email":"x@x.com"}"#,
+    )
+    .unwrap_err();
+    assert!(update_err.contains("CardDAV client 'nonexistent' not found"));
+
+    // 5. Delete contact targeted to work
+    let delete_res =
+        tool_delete_contact(&config, "/addressbooks/primary/alice.vcf", Some("work")).unwrap();
+    assert!(delete_res.result.contains("--- Client: work ---"));
+    assert!(!delete_res.result.contains("--- Client: personal ---"));
+
+    // 6. Delete contact targeted to invalid client
+    let delete_err = tool_delete_contact(
+        &config,
+        "/addressbooks/primary/alice.vcf",
+        Some("nonexistent"),
+    )
+    .unwrap_err();
+    assert!(delete_err.contains("CardDAV client 'nonexistent' not found"));
+}
+
+#[test]
+fn test_carddav_tools_multi_server_404_suppression() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock_found = WiremockGuard::start();
+    let mock_missing = WiremockGuard::start();
+
+    register_carddav_tool_stubs(&mock_found);
+
+    mock_missing.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(CARD_PROPFIND_BODY),
+        ),
+    );
+    mock_missing.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/addressbooks/primary/alice.vcf"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found")),
+    );
+    mock_missing.register(
+        Mock::given(method("DELETE"))
+            .and(wm_path("/addressbooks/primary/alice.vcf"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found")),
+    );
+
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "found_client".to_string(),
+        crate::config::CalDavClient {
+            url: mock_found.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+    config.caldav_clients.insert(
+        "missing_client".to_string(),
+        crate::config::CalDavClient {
+            url: mock_missing.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+
+    // 1. Get contact: found_client succeeds, missing_client returns 404.
+    // 404 error from missing_client should be suppressed!
+    let get_res = tool_get_contact(&config, "/addressbooks/primary/alice.vcf").unwrap();
+    assert_eq!(
+        get_res.contact.as_ref().and_then(|c| c.fn_name.as_deref()),
+        Some("Alice Example")
+    );
+    assert!(
+        get_res.errors.is_empty(),
+        "404 error should be suppressed, got: {:?}",
+        get_res.errors
+    );
+
+    // 2. Update contact: found_client succeeds, missing_client returns 404.
+    // Result should contain found_client success, and missing_client 404 is suppressed!
+    let update_res = tool_update_contact(
+        &config,
+        "/addressbooks/primary/alice.vcf",
+        None,
+        r#"{"email":"updated@a.com"}"#,
+    )
+    .unwrap();
+    assert!(update_res.result.contains("--- Client: found_client ---"));
+    assert!(update_res.result.contains("Updated"));
+    assert!(
+        !update_res.result.contains("missing_client"),
+        "404 from missing_client should be suppressed, got: {}",
+        update_res.result
+    );
+
+    // 3. Delete contact: found_client succeeds, missing_client returns 404.
+    // Result should contain found_client success, and missing_client 404 is suppressed!
+    let delete_res = tool_delete_contact(&config, "/addressbooks/primary/alice.vcf", None).unwrap();
+    assert!(delete_res.result.contains("--- Client: found_client ---"));
+    assert!(delete_res.result.contains("Deleted"));
+    assert!(
+        !delete_res.result.contains("missing_client"),
+        "404 from missing_client should be suppressed, got: {}",
+        delete_res.result
+    );
+
+    // 4. Update when BOTH fail with 404: error is NOT suppressed.
+    let update_all_fail =
+        tool_update_contact(&config, "/notfound.vcf", None, r#"{"email":"x@x.com"}"#).unwrap();
+    assert!(update_all_fail.result.contains("found_client"));
+    assert!(update_all_fail.result.contains("missing_client"));
 }
