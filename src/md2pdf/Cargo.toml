@@ -12,7 +12,7 @@ keywords = ["markdown", "pdf", "typst"]
 path = "src/lib.rs"
 
 [dependencies]
-pulldown-cmark = { version = "0.13", features = ["html"] }
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.8"
