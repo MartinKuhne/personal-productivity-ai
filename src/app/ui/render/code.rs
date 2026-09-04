@@ -56,7 +56,7 @@ pub(crate) fn render_code_block_scroll(
                     },
                 );
                 if ui
-                    .button(egui_phosphor::regular::COPY)
+                    .button(crate::ui::strings::ICON_COPY)
                     .on_hover_text("Copy code")
                     .clicked()
                 {

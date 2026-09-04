@@ -1,19 +1,19 @@
 ---
 name: code-quality
-description: Run code quality audits for test coverage, logging, duplication, module boundaries, spec drift, spec gaps, and architecture drift
+description: Run code quality audits for test coverage, logging, duplication, module boundaries, spec drift, spec gaps, architecture drift, and performance (dependencies, binary size, compile times)
 ---
 
 # Code Quality Skill
 
 ## Purpose
 
-This skill supports the code quality agent. It defines 7 workflows. Each workflow audits one quality dimension. Each workflow produces a report and a remediation plan. This skill does not change code or specs. It only analyzes and plans.
+This skill supports the code quality agent. It defines 8 workflows. Each workflow audits one quality dimension. Each workflow produces a report and a remediation plan. This skill does not change code or specs. It only analyzes and plans.
 
 ## When to Use
 
 - Use this skill when you invoke `@code-quality` with any workflow name.
 - Use this skill when you run `/code-quality` or any `/code-quality-*` command.
-- Use this skill when the user asks for coverage gaps, logging audits, duplication checks, boundary reviews, spec drift, spec gaps, or architecture drift.
+- Use this skill when the user asks for coverage gaps, logging audits, duplication checks, boundary reviews, spec drift, spec gaps, architecture drift, or performance audits (dependencies, binary bloat, compile times).
 
 ## Prerequisites
 
@@ -27,12 +27,12 @@ Do these checks before any workflow:
 
 Parse user input as `<workflow> [scope]`.
 
-- `workflow` is one of: `coverage`, `logging`, `duplication`, `boundaries`, `spec-drift`, `spec-gaps`, `arch-drift`, `all`.
+- `workflow` is one of: `coverage`, `logging`, `duplication`, `boundaries`, `spec-drift`, `spec-gaps`, `arch-drift`, `perf`, `all`.
 - `scope` is a path glob, for example `src/agent` or `src/app/workspace`.
 - If the user omits workflow, use `all`.
 - If the user omits scope, use the full workspace (`src/` and `doc/technical-context/`).
 
-Then run the matching workflow below. For `all`, run workflows W1 to W7 in order and aggregate the report.
+Then run the matching workflow below. For `all`, run workflows W1 to W8 in order and aggregate the report.
 
 ## Workflow W1 — coverage
 
@@ -132,6 +132,28 @@ Then run the matching workflow below. For `all`, run workflows W1 to W7 in order
 4. Verify that the Folder Layout block matches `Get-ChildItem -Recurse src`.
 
 **Output:** Drift table and a patch for `ARCHITECTURE_C4.md` prose and mermaid diagrams.
+
+## Workflow W8 — perf
+
+**Goal:** Audit dependency footprints, binary size bloat, and compile-time configuration. Produce an actionable remediation plan.
+
+**Tooling & Scripts:**
+- Automation runner: `.opencode/skills/code-quality/scripts/audit-perf.py`
+- Dependency analyzer: `.opencode/skills/code-quality/scripts/analyze-deps.py`
+- Binary bloat analyzer: `.opencode/skills/code-quality/scripts/analyze-bloat.py`
+- Reference best practices: `doc/distill/perf.md`
+
+**Steps:**
+
+1. Run `.opencode/skills/code-quality/scripts/analyze-deps.py` on the target package.
+2. Identify heavy dependencies where exclusive crate count exceeds 50 packages. Check for unneeded default features.
+3. Check for duplicate crate versions using `cargo tree -d` or `analyze-deps.py`.
+4. Run `.opencode/skills/code-quality/scripts/analyze-bloat.py`. Audit release profile settings in `Cargo.toml` and `.cargo/config.toml` (`strip = true`, `lto`, `codegen-units = 1`, `opt-level = "z"`, `panic = "abort"`).
+5. Audit static embedded assets (e.g. `typst-kit-embed-fonts`) that inflate executable sizes.
+6. Verify linker configuration in `.cargo/config.toml` (e.g. `lld-link` on Windows MSVC, `mold` on Linux).
+7. Flag dev profile settings that unnecessarily generate heavy debuginfo (`debug = "line-tables-only"` recommended).
+
+**Output:** Performance audit table with findings, metrics, and remediation plan.
 
 ## Report Format
 
