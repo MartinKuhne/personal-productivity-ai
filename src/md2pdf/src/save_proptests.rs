@@ -38,6 +38,9 @@ proptest! {
     /// the content a real block context.
     #[test]
     fn random_printable_ascii_compiles(body in printable_ascii_string()) {
+        if !super::is_typst_available() {
+            return Ok(());
+        }
         let md = format!("# Heading\n\n{body}\n");
         let result = compile_markdown_to_pdf(&md, "proptest");
         // The pipeline must either succeed or fail with a clean
@@ -69,6 +72,9 @@ proptest! {
     /// escape pipelines.
     #[test]
     fn random_printable_ascii_in_code_block_compiles(body in printable_ascii_string()) {
+        if !super::is_typst_available() {
+            return Ok(());
+        }
         let md = format!("```\n{body}\n```\n");
         let bytes = compile_markdown_to_pdf(&md, "proptest-code")
             .expect("code block must compile for any printable ASCII");
@@ -90,6 +96,9 @@ proptest! {
     /// tolerated.
     #[test]
     fn random_printable_ascii_as_link_url_compiles(url in printable_ascii_string()) {
+        if !super::is_typst_available() {
+            return Ok(());
+        }
         // Skip URLs that the markdown parser can't form into
         // a link with content (empty, or just a `)` that
         // closes the link syntax prematurely).

@@ -74,8 +74,35 @@ pub const SEARCH_NO_RESULTS: &str = "No matching files found";
 /// Header label for the search result list.
 pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
 
+/// Phosphor icon: caret down (U+E136)
+pub const ICON_CARET_DOWN: &str = "\u{E136}";
+
+/// Phosphor icon: caret right (U+E13A)
+pub const ICON_CARET_RIGHT: &str = "\u{E13A}";
+
+/// Phosphor icon: magnifying glass (U+E30C)
+pub const ICON_MAGNIFYING_GLASS: &str = "\u{E30C}";
+
+/// Phosphor icon: x / close (U+E4F6)
+pub const ICON_X: &str = "\u{E4F6}";
+
+/// Phosphor icon: copy (U+E1CA)
+pub const ICON_COPY: &str = "\u{E1CA}";
+
+/// Phosphor icon: list / hamburger menu (U+E2F0)
+pub const ICON_LIST: &str = "\u{E2F0}";
+
+/// Phosphor icon: stop (U+E46C)
+pub const ICON_STOP: &str = "\u{E46C}";
+
+/// Phosphor icon: robot (U+E762)
+pub const ICON_ROBOT: &str = "\u{E762}";
+
+/// Phosphor icon: lightning (U+E2DE)
+pub const ICON_LIGHTNING: &str = "\u{E2DE}";
+
 /// Label for the hamburger menu button in the top toolbar.
-pub const HAMBURGER_MENU_BUTTON: &str = egui_phosphor::regular::LIST;
+pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
 
 /// ID salt for the hamburger menu in egui.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
@@ -172,7 +199,7 @@ pub const COMMAND_INPUT_HINT: &str = "Type command (Enter to submit, Shift+Enter
 pub const FORMAT_MARKDOWN_ACTION: &str = "Format Markdown";
 
 /// Button label to cancel/stop a running agent task.
-/// Uses Phosphor [`egui_phosphor::regular::STOP`] icon.
+/// Uses Phosphor [`ICON_STOP`] icon.
 pub const STOP_AGENT_BUTTON: &str = "\u{E46C} Stop";
 
 /// Header text for the available models list output.
@@ -200,7 +227,7 @@ pub const TABLE_OF_CONTENTS_HEADER: &str = "Table of Contents";
 
 // Center Panel
 /// Header for the agent session view in the center panel.
-/// Uses Phosphor [`egui_phosphor::regular::ROBOT`] icon.
+/// Uses Phosphor [`ICON_ROBOT`] icon.
 pub const AGENT_SESSION_HEADER: &str = "\u{E762} FastMD Agent Session";
 
 /// Button label to close the agent session view (replaces "Back to document").
@@ -392,10 +419,9 @@ pub const RUN_AS_PROMPT_ACTION: &str = "Run as prompt";
 pub const PRINT_ACTION: &str = "Print";
 
 /// Context menu item to export the current Markdown file to PDF via
-/// the in-process Typst compiler. Sits next to `PRINT_ACTION` in the
-/// file context menu; the underlying feature is gated by the
-/// `pdf-export` Cargo feature, so the menu entry is only registered
-/// when the feature is on.
+/// the official `typst` CLI binary. Sits next to `PRINT_ACTION` in the
+/// file context menu; dynamically displayed only when `typst` is found
+/// in the system PATH.
 pub const SAVE_AS_PDF_ACTION: &str = "Save as PDF...";
 
 // Background Logs Window
@@ -525,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_hamburger_menu_strings() {
-        assert_eq!(HAMBURGER_MENU_BUTTON, egui_phosphor::regular::LIST);
+        assert_eq!(HAMBURGER_MENU_BUTTON, ICON_LIST);
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
         assert_eq!(MENU_WINDOWS, "Windows");
@@ -547,7 +573,7 @@ mod tests {
             "APP_TITLE is plain text; logo is painted via ui::logo::paint_logo"
         );
         assert!(
-            !APP_TITLE.contains(egui_phosphor::regular::LIGHTNING),
+            !APP_TITLE.contains(ICON_LIGHTNING),
             "APP_TITLE should not embed Phosphor glyph; use logo module"
         );
         assert!(
@@ -556,13 +582,12 @@ mod tests {
         );
 
         assert_eq!(
-            HAMBURGER_MENU_BUTTON,
-            egui_phosphor::regular::LIST,
+            HAMBURGER_MENU_BUTTON, ICON_LIST,
             "HAMBURGER_MENU_BUTTON should use Phosphor LIST icon"
         );
 
         assert!(
-            STOP_AGENT_BUTTON.contains(egui_phosphor::regular::STOP),
+            STOP_AGENT_BUTTON.contains(ICON_STOP),
             "STOP_AGENT_BUTTON should use Phosphor STOP icon"
         );
         assert!(
@@ -571,7 +596,7 @@ mod tests {
         );
 
         assert!(
-            AGENT_SESSION_HEADER.contains(egui_phosphor::regular::ROBOT),
+            AGENT_SESSION_HEADER.contains(ICON_ROBOT),
             "AGENT_SESSION_HEADER should use Phosphor ROBOT icon"
         );
         assert!(

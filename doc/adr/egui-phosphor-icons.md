@@ -13,24 +13,15 @@ To fix this, we want to use an icon font like Phosphor. The `egui-phosphor` crat
 
 ## Decision
 
-We have adopted the `egui-phosphor` crate as a dependency but bypassed its helper functions.
+Initially, the `egui-phosphor` crate was adopted to provide the TTF font and icon codepoints. However, `egui-phosphor 0.13.0` was pinned to `egui 0.35.0`, which pulled in an entire duplicate egui/epaint/font-shaping tree (~40 crates).
 
-Instead of calling `egui_phosphor::add_to_fonts`, we manually read the `&'static [u8]` TTF byte slice via `egui_phosphor::Variant::Regular.font_bytes()`. We then wrap those bytes in an `std::sync::Arc<egui::FontData>` and inject them into our `egui 0.36.0` `FontDefinitions` directly during app initialization.
-
-For the directory tree arrows, we are now using `egui_phosphor::regular::CARET_DOWN` and `egui_phosphor::regular::CARET_RIGHT`.
-
-### Alternatives considered
-
-| Option | Outcome |
-|--------|---------|
-| Rely on default OS font fallback | Failed on many Windows machines, resulting in bug reports of unprintable checkboxes. |
-| Use ASCII (`[+]`, `[-]`) | 100% reliable but visually dated and inconsistent with modern UI aesthetics. |
-| Use `egui::CollapsingHeader` custom polygon | Robust, but requires replacing `ui.selectable_label` with a custom `ui.horizontal` layout everywhere a tree node is drawn. Harder to maintain. |
-| **Inject Phosphor TTF Bytes (chosen)** | Guaranteed to render perfectly on all OSes. Allows us to use `egui-phosphor` constants immediately without waiting for a crate update to `0.36.0`. |
+To eliminate this massive dependency duplication while retaining the exact same visual glyphs:
+1. `Phosphor-Regular.ttf` is embedded directly into the binary via `include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf")` in `src/app/ui/fonts.rs`.
+2. The required Phosphor icon codepoints are defined as string constants in `src/app/ui/strings.rs` (`ICON_CARET_DOWN`, `ICON_CARET_RIGHT`, `ICON_MAGNIFYING_GLASS`, `ICON_X`, `ICON_COPY`, `ICON_LIST`, `ICON_STOP`, `ICON_ROBOT`, `ICON_LIGHTNING`).
+3. The `egui-phosphor` dependency has been completely removed from `Cargo.toml`.
 
 ## Consequences
 
-- The application binary size increases slightly due to the embedded Phosphor TTF font.
-- We have access to the entire Phosphor icon library for future UI components.
-- The directory tree UI is completely immune to missing-glyph bugs on Windows.
-- We have a small piece of manual font-loading boilerplate in `init.rs` that can be removed and replaced with `egui_phosphor::add_to_fonts` once `egui-phosphor` updates to `egui 0.36.0`.
+- Completely eliminates the duplicate `egui 0.35` / `epaint 0.35` tree, resolving 10 duplicate crate versions across font parsers and egui sub-crates.
+- Zero external runtime or build-time dependency on third-party icon crates.
+- Retains 100% glyph visual compatibility and zero platform-fallback fragility.

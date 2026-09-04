@@ -36,8 +36,6 @@
 //! the runtime is acceptable. See `doc/adr/pdf-export-test-gaps.md`
 //! gaps #1, #4, #10 for the contract being verified.
 
-#![cfg(feature = "pdf-export")]
-
 use std::sync::OnceLock;
 
 use fastmd_pdf::compile_markdown_to_pdf;
@@ -192,6 +190,10 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
 /// Run with `cargo nextest run -E 'test(/commonmark/)'` to time it.
 #[test]
 fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
+    if !fastmd_pdf::is_typst_available() {
+        eprintln!("Skipping test: typst CLI not found in PATH");
+        return;
+    }
     use rayon::prelude::*;
 
     let examples = spec_examples();
@@ -872,6 +874,10 @@ fn strip_list_markers(md: &str) -> String {
 /// occurrence of a word; "at least one" is the contract.
 #[test]
 fn all_commonmark_examples_render_content_into_pdf() {
+    if !fastmd_pdf::is_typst_available() {
+        eprintln!("Skipping test: typst CLI not found in PATH");
+        return;
+    }
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
@@ -1081,6 +1087,10 @@ fn all_commonmark_examples_render_content_into_pdf() {
 /// numbers).
 #[test]
 fn content_fidelity_known_gaps() {
+    if !fastmd_pdf::is_typst_available() {
+        eprintln!("Skipping test: typst CLI not found in PATH");
+        return;
+    }
     // (label, source) — sources are the markdown half of
     // the spec example, i.e. the text between the opening
     // 32-backtick fence line and the `\n.\n` separator.

@@ -1,5 +1,5 @@
 ---
-description: Code quality auditor for test coverage, logging, duplication, module boundaries, spec drift, spec gaps, and architecture drift
+description: Code quality auditor for test coverage, logging, duplication, module boundaries, spec drift, spec gaps, architecture drift, and performance (dependencies, binary size, compile times)
 mode: subagent
 temperature: 0.1
 permission:
@@ -11,6 +11,8 @@ permission:
     "cargo fmt*": allow
     "cargo nextest*": allow
     "cargo doc*": allow
+    "cargo tree*": allow
+    "python*": allow
     "git status": allow
     "git diff*": allow
     "git log*": allow
@@ -25,7 +27,7 @@ permission:
 
 ## Purpose
 
-This agent audits code quality. It checks test coverage, logging, duplication, module boundaries, spec drift, spec gaps, and architecture drift. It produces a report and a remediation plan. It does not change code or specs without approval.
+This agent audits code quality. It checks test coverage, logging, duplication, module boundaries, spec drift, spec gaps, architecture drift, and performance (dependencies, binary bloat, compile times). It produces a report and a remediation plan. It does not change code or specs without approval.
 
 ## Core Rules
 
@@ -42,7 +44,7 @@ This agent audits code quality. It checks test coverage, logging, duplication, m
 
 - Use `@code-quality <workflow> [scope]` in chat.
 - Use `/code-quality <workflow> [scope]` as a command.
-- `workflow` is one of: `coverage`, `logging`, `duplication`, `boundaries`, `spec-drift`, `spec-gaps`, `arch-drift`, `all`.
+- `workflow` is one of: `coverage`, `logging`, `duplication`, `boundaries`, `spec-drift`, `spec-gaps`, `arch-drift`, `perf`, `all`.
 - `scope` is a path glob, for example `src/agent` or `src/app/workspace`. If you omit scope, audit the full workspace.
 - If you omit workflow, run `all` and aggregate the results.
 
@@ -157,6 +159,24 @@ Do these steps for every invocation:
 4. Verify the Folder Layout block matches `Get-ChildItem -Recurse src`.
 
 **Output:** Drift table and a patch for `ARCHITECTURE_C4.md` prose and mermaid diagrams.
+
+### W8 — perf — Audit Dependencies, Binary Size, and Compile-Time Bottlenecks
+
+**Objective:** Audit dependency footprints, binary size bloat, and compile-time configuration. Produce an actionable remediation plan.
+
+**Inputs:** Cargo dependency graph (`cargo tree`), release profile in `Cargo.toml` and `.cargo/config.toml`, `.rlib` files in `target/release/deps`, and `doc/distill/perf.md`.
+
+**Steps:**
+
+1. Run `.opencode/skills/code-quality/scripts/analyze-deps.py` on the target package.
+2. Identify heavy dependencies where exclusive crate count exceeds 50 packages. Check for unneeded default features.
+3. Check for duplicate crate versions using `cargo tree -d` or `analyze-deps.py`.
+4. Run `.opencode/skills/code-quality/scripts/analyze-bloat.py`. Audit release profile settings (`strip = true`, `lto`, `codegen-units = 1`, `opt-level = "z"`, `panic = "abort"`).
+5. Audit static embedded assets (e.g. `typst-kit-embed-fonts`) that inflate executable sizes.
+6. Verify linker configuration in `.cargo/config.toml` (e.g. `lld-link` on Windows MSVC, `mold` on Linux).
+7. Flag dev profile settings that unnecessarily generate heavy debuginfo (`debug = "line-tables-only"` recommended).
+
+**Output:** Performance audit table with findings, metrics, and remediation plan.
 
 ## Report Format
 
