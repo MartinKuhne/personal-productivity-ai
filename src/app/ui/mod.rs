@@ -43,4 +43,4 @@ pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,
     render_flat_row,
 };
-pub use tree_search::TreeSearch;
+pub use tree_search::{SearchResultEntry, TreeSearch};

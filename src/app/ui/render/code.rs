@@ -20,8 +20,19 @@ use egui::RichText;
 /// Inputs: `ui` (mut), `content`
 ///
 /// Purity: Impure (modifies UI state). Thin adapter.
+#[allow(dead_code)]
 pub(crate) fn render_code_block(ui: &mut egui::Ui, language: Option<&str>, content: &str) {
-    egui::Frame::NONE
+    render_code_block_scroll(ui, language, content, false);
+}
+
+/// Purpose: Renders a code block with optional auto-scroll.
+pub(crate) fn render_code_block_scroll(
+    ui: &mut egui::Ui,
+    language: Option<&str>,
+    content: &str,
+    scroll_to_me: bool,
+) {
+    let frame_resp = egui::Frame::NONE
         .fill(egui::Color32::from_rgb(20, 20, 22))
         .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
         .inner_margin(8.0)
@@ -53,6 +64,9 @@ pub(crate) fn render_code_block(ui: &mut egui::Ui, language: Option<&str>, conte
                 }
             });
         });
+    if scroll_to_me {
+        frame_resp.response.scroll_to_me(Some(egui::Align::Center));
+    }
 }
 
 /// Copy the supplied content to the UI's `copied_text` output.

@@ -356,10 +356,11 @@ fn show_markdown_scroll_area(
                 render_yaml_table(ui, yaml);
             }
             let heading_ids = tabs.heading_ids().to_vec();
-            render_markdown(
+            crate::ui::render::render_markdown_with_search(
                 ui,
                 &tabs.current_markdown,
                 &mut tabs.scroll_to_header_id,
+                &mut tabs.scroll_to_search,
                 &mut tabs.pending_task_toggles,
                 deficit_strategy,
                 Some(&heading_ids),

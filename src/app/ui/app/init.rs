@@ -271,6 +271,7 @@ impl FastMdApp {
             persisted_font_applied: false,
             os_baseline_ppp: None,
             applied_font_scale: 1.0,
+            search: crate::ui::TreeSearch::new(),
         }
     }
 
@@ -418,6 +419,7 @@ impl FastMdApp {
             persisted_font_applied: false,
             os_baseline_ppp: None,
             applied_font_scale: 1.0,
+            search: crate::ui::TreeSearch::new(),
         }
     }
 }
