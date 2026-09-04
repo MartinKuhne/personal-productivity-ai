@@ -330,15 +330,15 @@ fn test_caldav_tools_empty_config() {
     let config = AgentConfig::default();
 
     assert_eq!(
-        tool_add_calendar_item(&config, "{}").unwrap_err(),
+        tool_add_calendar_item(&config, None, "{}").unwrap_err(),
         "No CalDAV clients configured."
     );
     assert_eq!(
-        tool_update_calendar_item(&config, "/item.ics", "{}").unwrap_err(),
+        tool_update_calendar_item(&config, "/item.ics", None, "{}").unwrap_err(),
         "No CalDAV clients configured."
     );
     assert_eq!(
-        tool_delete_calendar_item(&config, "/item.ics").unwrap_err(),
+        tool_delete_calendar_item(&config, "/item.ics", None).unwrap_err(),
         "No CalDAV clients configured."
     );
 
@@ -346,25 +346,19 @@ fn test_caldav_tools_empty_config() {
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
-    assert_eq!(search_res.results, "No events found.");
+    assert!(search_res.results.is_empty());
     assert_eq!(search_res.total, 0);
     assert_eq!(search_res.hint.as_deref(), Some("Final page."));
 
     let get_res =
         tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
-    assert_eq!(get_res.results, "No events found.");
+    assert!(get_res.results.is_empty());
     assert_eq!(get_res.total, 0);
     assert_eq!(get_res.hint.as_deref(), Some("Final page."));
 
     let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
-    assert_eq!(
-        item_res.result,
-        serde_json::to_string_pretty(&CalDavResponse {
-            results: vec![],
-            errors: vec![]
-        })
-        .unwrap()
-    );
+    assert_eq!(item_res.item, None);
+    assert!(item_res.errors.is_empty());
 }
 
 #[test]
@@ -386,22 +380,37 @@ fn test_caldav_tools_unreachable_client() {
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
-    assert!(search_res.results.contains("Error on client test_client"));
+    assert!(
+        search_res
+            .errors
+            .iter()
+            .any(|e| e.contains("Error on client test_client"))
+    );
 
     let get_res =
         tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
-    assert!(get_res.results.contains("Error on client test_client"));
+    assert!(
+        get_res
+            .errors
+            .iter()
+            .any(|e| e.contains("Error on client test_client"))
+    );
 
     let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
-    assert!(item_res.result.contains("Error on client test_client"));
+    assert!(
+        item_res
+            .errors
+            .iter()
+            .any(|e| e.contains("Error on client test_client"))
+    );
 
-    let add_res = tool_add_calendar_item(&config, "{}").unwrap();
+    let add_res = tool_add_calendar_item(&config, None, "{}").unwrap();
     assert!(add_res.result.contains("Error on client test_client"));
 
-    let update_res = tool_update_calendar_item(&config, "/item.ics", "{}").unwrap();
+    let update_res = tool_update_calendar_item(&config, "/item.ics", None, "{}").unwrap();
     assert!(update_res.result.contains("Error on client test_client"));
 
-    let delete_res = tool_delete_calendar_item(&config, "/item.ics").unwrap();
+    let delete_res = tool_delete_calendar_item(&config, "/item.ics", None).unwrap();
     assert!(delete_res.result.contains("Error on client test_client"));
 }
 
@@ -432,33 +441,54 @@ fn test_caldav_tools_mock_server() {
 
     // 1. Search calendar
     let search_res = tool_search_calendar(&config, "Bob", None, &cache, &uuid_gen).unwrap();
-    assert!(search_res.results.contains("Meeting with Bob"));
+    assert!(
+        search_res
+            .results
+            .iter()
+            .any(|r| r.summary.as_deref() == Some("Meeting with Bob"))
+    );
 
     // 2. Get calendar (date range)
     let get_res =
         tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
-    assert!(get_res.results.contains("Meeting with Bob"));
+    assert!(
+        get_res
+            .results
+            .iter()
+            .any(|r| r.summary.as_deref() == Some("Meeting with Bob"))
+    );
 
     // 3. Get calendar item success
     let item_res = tool_get_calendar_item(&config, "/item1.ics").unwrap();
-    assert!(item_res.result.contains("Existing Item"));
+    assert_eq!(
+        item_res.item.as_ref().and_then(|it| it.summary.as_deref()),
+        Some("Existing Item")
+    );
 
     // 4. Get calendar item 404
     let item_res_404 = tool_get_calendar_item(&config, "/notfound").unwrap();
-    assert!(item_res_404.result.contains("Not found by href"));
+    assert!(item_res_404.item.is_none());
+    assert!(
+        item_res_404
+            .errors
+            .iter()
+            .any(|e| e.contains("Not found by href"))
+    );
 
     // 5. Add calendar item
-    let add_res = tool_add_calendar_item(&config, r#"{"summary":"New Mtg"}"#).unwrap();
+    let add_res = tool_add_calendar_item(&config, None, r#"{"summary":"New Mtg"}"#).unwrap();
     assert!(add_res.result.contains("Created at /calendars/primary/"));
 
     // 6. Update calendar item success
     let update_res =
-        tool_update_calendar_item(&config, "/item1.ics", r#"{"summary":"Updated Mtg"}"#).unwrap();
+        tool_update_calendar_item(&config, "/item1.ics", None, r#"{"summary":"Updated Mtg"}"#)
+            .unwrap();
     assert!(update_res.result.contains("Updated successfully"));
 
     // 7. Update calendar item 404
     let update_res_404 =
-        tool_update_calendar_item(&config, "/notfound", r#"{"summary":"Updated Mtg"}"#).unwrap();
+        tool_update_calendar_item(&config, "/notfound", None, r#"{"summary":"Updated Mtg"}"#)
+            .unwrap();
     assert!(
         update_res_404
             .result
@@ -466,11 +496,11 @@ fn test_caldav_tools_mock_server() {
     );
 
     // 8. Delete calendar item success
-    let delete_res = tool_delete_calendar_item(&config, "/item1.ics").unwrap();
+    let delete_res = tool_delete_calendar_item(&config, "/item1.ics", None).unwrap();
     assert!(delete_res.result.contains("Deleted successfully"));
 
     // 9. Delete calendar item 500 error
-    let delete_res_err = tool_delete_calendar_item(&config, "/fail").unwrap();
+    let delete_res_err = tool_delete_calendar_item(&config, "/fail", None).unwrap();
     assert!(delete_res_err.result.contains("Failed to DELETE event"));
 }
 
@@ -499,11 +529,172 @@ fn test_caldav_tools_mock_server_keep_alive() {
             tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen)
                 .unwrap();
         assert!(
-            get_res.results.contains("Meeting with Bob"),
-            "expected REPORT response on reused connection, got: {}",
+            get_res
+                .results
+                .iter()
+                .any(|r| r.summary.as_deref() == Some("Meeting with Bob")),
+            "expected REPORT response on reused connection, got: {:?}",
             get_res.results
         );
     }
+}
+
+#[test]
+fn test_caldav_tools_targeted_client_routing() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock_personal = WiremockGuard::start();
+    let mock_work = WiremockGuard::start();
+    register_caldav_stubs(&mock_personal);
+    register_caldav_stubs(&mock_work);
+
+    let mut config = AgentConfig::default();
+    config.caldav_clients.insert(
+        "personal".to_string(),
+        crate::config::CalDavClient {
+            url: mock_personal.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+    config.caldav_clients.insert(
+        "work".to_string(),
+        crate::config::CalDavClient {
+            url: mock_work.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+
+    // 1. Add targeted to work
+    let add_res =
+        tool_add_calendar_item(&config, Some("work"), r#"{"summary":"Work Project"}"#).unwrap();
+    assert!(add_res.result.contains("--- Client: work ---"));
+    assert!(!add_res.result.contains("--- Client: personal ---"));
+
+    // 2. Add targeted to invalid client
+    let add_err =
+        tool_add_calendar_item(&config, Some("nonexistent"), r#"{"summary":"X"}"#).unwrap_err();
+    assert!(add_err.contains("CalDAV client 'nonexistent' not found"));
+
+    // 3. Update targeted to personal
+    let update_res = tool_update_calendar_item(
+        &config,
+        "/item1.ics",
+        Some("personal"),
+        r#"{"summary":"Personal Event"}"#,
+    )
+    .unwrap();
+    assert!(update_res.result.contains("--- Client: personal ---"));
+    assert!(!update_res.result.contains("--- Client: work ---"));
+
+    // 4. Update targeted to invalid client
+    let update_err = tool_update_calendar_item(
+        &config,
+        "/item1.ics",
+        Some("nonexistent"),
+        r#"{"summary":"X"}"#,
+    )
+    .unwrap_err();
+    assert!(update_err.contains("CalDAV client 'nonexistent' not found"));
+
+    // 5. Delete targeted to work
+    let delete_res = tool_delete_calendar_item(&config, "/item1.ics", Some("work")).unwrap();
+    assert!(delete_res.result.contains("--- Client: work ---"));
+    assert!(!delete_res.result.contains("--- Client: personal ---"));
+
+    // 6. Delete targeted to invalid client
+    let delete_err =
+        tool_delete_calendar_item(&config, "/item1.ics", Some("nonexistent")).unwrap_err();
+    assert!(delete_err.contains("CalDAV client 'nonexistent' not found"));
+}
+
+#[test]
+fn test_caldav_tools_multi_server_404_suppression() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock_found = WiremockGuard::start();
+    let mock_missing = WiremockGuard::start();
+
+    // mock_found has calendar discovery, GET /item1.ics (200), PUT (201), DELETE /item1.ics (204)
+    register_caldav_stubs(&mock_found);
+
+    // mock_missing has calendar discovery, but GET /item1.ics returns 404, DELETE /item1.ics returns 404
+    mock_missing.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(PROPFIND_BODY),
+        ),
+    );
+    mock_missing.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/item1.ics"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found")),
+    );
+    mock_missing.register(
+        Mock::given(method("DELETE"))
+            .and(wm_path("/item1.ics"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("Not Found")),
+    );
+
+    let mut config = AgentConfig::default();
+    config.caldav_clients.insert(
+        "found_client".to_string(),
+        crate::config::CalDavClient {
+            url: mock_found.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+    config.caldav_clients.insert(
+        "missing_client".to_string(),
+        crate::config::CalDavClient {
+            url: mock_missing.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+
+    // 1. Get calendar item: found_client succeeds, missing_client returns 404.
+    // 404 error from missing_client should be suppressed!
+    let get_res = tool_get_calendar_item(&config, "/item1.ics").unwrap();
+    assert_eq!(
+        get_res.item.as_ref().and_then(|i| i.summary.as_deref()),
+        Some("Existing Item")
+    );
+    assert!(
+        get_res.errors.is_empty(),
+        "404 error should be suppressed, got: {:?}",
+        get_res.errors
+    );
+
+    // 2. Update calendar item: found_client updates, missing_client returns 404.
+    // Result should contain found_client success, and missing_client 404 is suppressed!
+    let update_res =
+        tool_update_calendar_item(&config, "/item1.ics", None, r#"{"summary":"Updated"}"#).unwrap();
+    assert!(update_res.result.contains("--- Client: found_client ---"));
+    assert!(update_res.result.contains("Updated successfully"));
+    assert!(
+        !update_res.result.contains("missing_client"),
+        "404 from missing_client should be suppressed, got: {}",
+        update_res.result
+    );
+
+    // 3. Delete calendar item: found_client deletes, missing_client returns 404.
+    // Result should contain found_client success, and missing_client 404 is suppressed!
+    let delete_res = tool_delete_calendar_item(&config, "/item1.ics", None).unwrap();
+    assert!(delete_res.result.contains("--- Client: found_client ---"));
+    assert!(delete_res.result.contains("Deleted successfully"));
+    assert!(
+        !delete_res.result.contains("missing_client"),
+        "404 from missing_client should be suppressed, got: {}",
+        delete_res.result
+    );
+
+    // 4. Update when BOTH fail with 404: error is NOT suppressed because nothing succeeded.
+    let update_all_fail =
+        tool_update_calendar_item(&config, "/notfound", None, r#"{"summary":"Updated"}"#).unwrap();
+    assert!(update_all_fail.result.contains("found_client"));
+    assert!(update_all_fail.result.contains("missing_client"));
 }
 
 /// Regression: many sequential requests through one `DavClient` —
@@ -807,7 +998,19 @@ fn dav_client_get_contact_404_includes_status() {
 fn test_calendar_cursor_sessions() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let events: Vec<String> = (1..=70).map(|i| format!("Event {}", i)).collect();
+    let events: Vec<CalDavEventDetails> = (1..=70)
+        .map(|i| CalDavEventDetails {
+            client: "c".to_string(),
+            id: format!("/cal/{}.ics", i),
+            href: format!("/cal/{}.ics", i),
+            summary: Some(format!("Event {}", i)),
+            start: None,
+            end: None,
+            description: None,
+            location: None,
+            organizer: None,
+        })
+        .collect();
 
     let page1 = cache
         .calendar_search_sessions

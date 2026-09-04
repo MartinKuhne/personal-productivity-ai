@@ -101,6 +101,36 @@ impl serde::Serialize for StructuredAddress {
     }
 }
 
+impl From<StructuredAddress> for crate::tools::dtos::AddressInput {
+    fn from(a: StructuredAddress) -> Self {
+        Self {
+            addr_type: a.kind,
+            street: a.street,
+            city: a.city,
+            region: a.region,
+            postal_code: a.postal_code,
+            country: a.country,
+            po_box: a.po_box,
+            ext: a.ext,
+        }
+    }
+}
+
+impl From<crate::tools::dtos::AddressInput> for StructuredAddress {
+    fn from(a: crate::tools::dtos::AddressInput) -> Self {
+        Self {
+            kind: a.addr_type,
+            street: a.street,
+            city: a.city,
+            region: a.region,
+            postal_code: a.postal_code,
+            country: a.country,
+            po_box: a.po_box,
+            ext: a.ext,
+        }
+    }
+}
+
 /// Extract the `UID` property value from a vCard body.
 ///
 /// vCard 3.0 line folding is handled (lines starting with space/tab are
@@ -443,27 +473,7 @@ pub(super) fn merge_vcard_update(
     out.push_str("END:VCARD\r\n");
     out
 }
-#[derive(serde::Serialize, Debug, Clone)]
-pub struct CardDavContactDetails {
-    pub client: String,
-    pub href: String,
-    pub fn_name: Option<String>,
-    pub email: Option<String>,
-    pub tel: Option<String>,
-    pub org: Option<String>,
-    /// vCard `BDAY` (typically `YYYY-MM-DD`).
-    pub bday: Option<String>,
-    /// All vCard `ADR` properties on the contact, in source order.
-    /// Empty when the contact has no structured address.
-    pub addresses: Vec<StructuredAddress>,
-    pub vcard: String,
-}
-
-#[derive(serde::Serialize)]
-pub struct CardDavResponse {
-    results: Vec<CardDavContactDetails>,
-    errors: Vec<String>,
-}
+pub use crate::tools::dtos::CardDavContactDetails;
 
 pub(super) async fn get_all_addressbooks(
     client: &DavClient,
@@ -558,6 +568,7 @@ pub(super) async fn fetch_contacts_from_book(
 pub(crate) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {
     let mut contact = CardDavContactDetails {
         client: client.to_string(),
+        id: href.to_string(),
         href: href.to_string(),
         fn_name: None,
         email: None,
@@ -585,7 +596,7 @@ pub(crate) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContac
                 let kind = extract_type_from_prefix(prop);
                 let mut addr = parse_vcard_adr_value(value);
                 addr.kind = kind;
-                contact.addresses.push(addr);
+                contact.addresses.push(addr.into());
             }
             _ => {}
         }
@@ -862,25 +873,6 @@ where
     (results, errors)
 }
 
-fn serialize_card_response(resp: &CardDavResponse) -> String {
-    serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
-}
-
-fn format_contact_page(items: &[String], errors: &[String]) -> String {
-    let mut parts = Vec::new();
-    if !items.is_empty() {
-        parts.push(items.join("\n\n"));
-    }
-    for err in errors {
-        parts.push(err.clone());
-    }
-    if parts.is_empty() {
-        "{}".to_string()
-    } else {
-        parts.join("\n\n")
-    }
-}
-
 pub fn tool_search_contact(
     config: &AgentConfig,
     keyword: &str,
@@ -891,63 +883,83 @@ pub fn tool_search_contact(
     if let Some(cursor) = cursor {
         let page = cache.contact_search_sessions.next_page(&cursor)?;
         return Ok(crate::tools::dtos::SearchContactResponse {
-            results: format_contact_page(&page.items, &[]),
+            results: page.items,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
+            errors: Vec::new(),
         });
     }
 
     let (results, errors) = for_each_card_client_vec(config, |_, c| c.search_contact(keyword));
-    let items: Vec<String> = results
-        .into_iter()
-        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
-        .collect();
 
-    if items.is_empty() {
+    if results.is_empty() {
         return Ok(crate::tools::dtos::SearchContactResponse {
-            results: if errors.is_empty() {
-                "No contacts found.".to_string()
-            } else {
-                errors.join("\n\n")
-            },
+            results: Vec::new(),
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+            errors,
         });
     }
 
     let page = cache
         .contact_search_sessions
-        .create_session(items, uuid_gen);
+        .create_session(results, uuid_gen);
     Ok(crate::tools::dtos::SearchContactResponse {
-        results: format_contact_page(&page.items, &errors),
+        results: page.items,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
+        errors,
     })
 }
 
 pub fn tool_get_contact(
     config: &AgentConfig,
-    id: &str,
+    href: &str,
 ) -> Result<crate::tools::dtos::GetContactResponse, String> {
-    let (results, errors) = for_each_card_client(config, |_, c| c.get_contact(id));
+    let (results, errors) = for_each_card_client(config, |_, c| c.get_contact(href));
+    let contact = results.into_iter().next();
+    let filtered_errors = if contact.is_some() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
     Ok(crate::tools::dtos::GetContactResponse {
-        result: serialize_card_response(&CardDavResponse { results, errors }),
+        contact,
+        errors: filtered_errors,
     })
 }
 
 pub fn tool_add_contact(
     config: &AgentConfig,
+    client_target: Option<&str>,
     contact_json: &str,
 ) -> Result<crate::tools::dtos::AddContactResponse, String> {
-    // `add_contact` is special: it acts on the *first* configured CalDAV
-    // client (no "default addressbook" concept in CardDAV). The
-    // per-server output is a single status string, so the aggregation
-    // shape doesn't fit `for_each_card_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, cc)) = config.caldav_clients().iter().next() {
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match crate::lib::dav::client::DavClient::new(name.clone(), cc)
+                    .and_then(|c| c.add_contact(contact_json))
+                {
+                    Ok(path) => {
+                        all_results.push(format!("--- Client: {} ---\nCreated at {}", name, path))
+                    }
+                    Err(e) => return Err(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CardDAV client '{}' not found", target)),
+        }
+    } else if let Some((name, cc)) = config.caldav_clients().iter().next() {
         match crate::lib::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| c.add_contact(contact_json))
         {
@@ -965,63 +977,127 @@ pub fn tool_add_contact(
     }
 }
 
-/// Update an existing contact at `href` with new data from `contact_json`.
-///
-/// Thin wrapper that delegates to
-/// [`crate::lib::dav::client::DavClient::update_contact`]
-/// per configured DAV server, then aggregates the per-server
-/// results. See that method for the GET → If-Match PUT flow.
 pub fn tool_update_contact(
     config: &AgentConfig,
     href: &str,
+    client_target: Option<&str>,
     contact_json: &str,
 ) -> Result<crate::tools::dtos::UpdateContactResponse, String> {
-    let mut all_results = Vec::new();
-    for (name, cc) in config.caldav_clients() {
-        match crate::lib::dav::client::DavClient::new(name.clone(), cc)
-            .and_then(|c| c.update_contact(href, contact_json))
-        {
-            Ok(summary) => all_results.push(format!("--- Client: {} ---\n{}", name, summary)),
-            Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
+    let mut successes = Vec::new();
+    let mut errors = Vec::new();
+
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match crate::lib::dav::client::DavClient::new(name.clone(), cc)
+                    .and_then(|c| c.update_contact(href, contact_json))
+                {
+                    Ok(summary) => successes.push(format!("--- Client: {} ---\n{}", name, summary)),
+                    Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CardDAV client '{}' not found", target)),
+        }
+    } else {
+        for (name, cc) in config.caldav_clients() {
+            match crate::lib::dav::client::DavClient::new(name.clone(), cc)
+                .and_then(|c| c.update_contact(href, contact_json))
+            {
+                Ok(summary) => successes.push(format!("--- Client: {} ---\n{}", name, summary)),
+                Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+            }
         }
     }
-    if all_results.is_empty() {
-        Err("No CardDAV clients configured.".to_string())
-    } else {
-        Ok(crate::tools::dtos::UpdateContactResponse {
-            result: all_results.join("\n\n"),
-        })
+
+    if successes.is_empty() && errors.is_empty() {
+        return Err("No CardDAV clients configured.".to_string());
     }
+
+    let final_errors: Vec<String> = if !successes.is_empty() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
+
+    let mut parts = successes;
+    parts.extend(final_errors);
+
+    Ok(crate::tools::dtos::UpdateContactResponse {
+        result: parts.join("\n\n"),
+    })
 }
 
-/// Delete the contact at `href`.
-///
-/// Returns Ok with "Deleted" on 2xx (typically 204 No Content) and 404
-/// (already gone — treat as success so the LLM can retry idempotently).
-/// Thin wrapper that delegates to
-/// [`crate::lib::dav::client::DavClient::delete_contact`]
-/// per configured DAV server.
 pub fn tool_delete_contact(
     config: &AgentConfig,
     href: &str,
+    client_target: Option<&str>,
 ) -> Result<crate::tools::dtos::DeleteContactResponse, String> {
-    let mut all_results = Vec::new();
-    for (name, cc) in config.caldav_clients() {
-        match crate::lib::dav::client::DavClient::new(name.clone(), cc)
-            .and_then(|c| c.delete_contact(href))
-        {
-            Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
-            Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
+    let mut successes = Vec::new();
+    let mut errors = Vec::new();
+
+    if let Some(target) = client_target {
+        let found = config
+            .caldav_clients()
+            .iter()
+            .find(|(name, _)| *name == target);
+        match found {
+            Some((name, cc)) => {
+                match crate::lib::dav::client::DavClient::new(name.clone(), cc)
+                    .and_then(|c| c.delete_contact(href))
+                {
+                    Ok(s) => successes.push(format!("--- Client: {} ---\n{}", name, s)),
+                    Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+                }
+            }
+            None => return Err(format!("CardDAV client '{}' not found", target)),
+        }
+    } else {
+        for (name, cc) in config.caldav_clients() {
+            match crate::lib::dav::client::DavClient::new(name.clone(), cc)
+                .and_then(|c| c.delete_contact(href))
+            {
+                Ok(s) => successes.push(format!("--- Client: {} ---\n{}", name, s)),
+                Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+            }
         }
     }
 
-    if all_results.is_empty() {
-        Err("No CardDAV clients configured.".to_string())
-    } else {
-        Ok(crate::tools::dtos::DeleteContactResponse {
-            result: all_results.join("\n\n"),
-        })
+    if successes.is_empty() && errors.is_empty() {
+        return Err("No CardDAV clients configured.".to_string());
     }
+
+    let has_actual_delete = successes.iter().any(|s| !s.contains("Already absent"));
+    let filtered_successes: Vec<String> = if has_actual_delete {
+        successes
+            .into_iter()
+            .filter(|s| !s.contains("Already absent"))
+            .collect()
+    } else {
+        successes
+    };
+
+    let final_errors: Vec<String> = if !filtered_successes.is_empty() {
+        errors
+            .into_iter()
+            .filter(|e| !e.contains("404") && !e.to_lowercase().contains("not found"))
+            .collect()
+    } else {
+        errors
+    };
+
+    let mut parts = filtered_successes;
+    parts.extend(final_errors);
+
+    Ok(crate::tools::dtos::DeleteContactResponse {
+        result: parts.join("\n\n"),
+    })
 }
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `carddav_tests.rs` sidecar.
