@@ -8,8 +8,8 @@
 //!
 //! Unit tests live in the sibling `carddav_tests.rs` sidecar.
 
+use super::DavClient;
 use crate::config::AgentConfig;
-use fast_dav_rs::CardDavClient;
 
 /// Cap on the number of body bytes echoed into a single tracing event.
 /// CardDAV error bodies are typically small (XML error envelopes), but
@@ -466,23 +466,22 @@ pub struct CardDavResponse {
 }
 
 pub(super) async fn get_all_addressbooks(
-    client: &CardDavClient,
+    client: &DavClient,
     base_url: &str,
     username: &str,
 ) -> anyhow::Result<Vec<String>> {
     if let Ok(books) = client.list_addressbooks(base_url).await
         && !books.is_empty()
     {
-        let hrefs: Vec<String> = books.into_iter().map(|b| b.href).collect();
         tracing::info!(
             name = "tool.carddav.addressbook.discovered",
             base_url = %base_url,
             strategy = "list_addressbooks",
-            count = hrefs.len(),
-            hrefs = ?hrefs,
+            count = books.len(),
+            hrefs = ?books,
             "Discovered addressbooks via direct PROPFIND on base URL"
         );
-        return Ok(hrefs);
+        return Ok(books);
     }
 
     if let Ok(homes) = client.discover_addressbook_home_set(base_url).await
@@ -490,17 +489,16 @@ pub(super) async fn get_all_addressbooks(
         && let Ok(books) = client.list_addressbooks(home).await
         && !books.is_empty()
     {
-        let hrefs: Vec<String> = books.into_iter().map(|b| b.href).collect();
         tracing::info!(
             name = "tool.carddav.addressbook.discovered",
             base_url = %base_url,
             strategy = "home_set",
             home = %home,
-            count = hrefs.len(),
-            hrefs = ?hrefs,
+            count = books.len(),
+            hrefs = ?books,
             "Discovered addressbooks via addressbook-home-set on base URL"
         );
-        return Ok(hrefs);
+        return Ok(books);
     }
 
     let mut principal_opt = client
@@ -537,37 +535,24 @@ pub(super) async fn get_all_addressbooks(
         anyhow::anyhow!("No addressbook home found")
     })?;
     let books = client.list_addressbooks(home).await?;
-    let hrefs: Vec<String> = books.into_iter().map(|b| b.href).collect();
     tracing::info!(
         name = "tool.carddav.addressbook.discovered",
         base_url = %base_url,
         strategy = "principal",
         principal = %principal,
         home = %home,
-        count = hrefs.len(),
-        hrefs = ?hrefs,
+        count = books.len(),
+        hrefs = ?books,
         "Discovered addressbooks via principal URL"
     );
-    Ok(hrefs)
+    Ok(books)
 }
 
 pub(super) async fn fetch_contacts_from_book(
-    client: &CardDavClient,
+    client: &DavClient,
     book_path: &str,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    let sync = client
-        .sync_collection(book_path, None, Some(10000), true)
-        .await?;
-    let mut contacts = Vec::new();
-    for item in sync.items {
-        if item.is_deleted {
-            continue;
-        }
-        if let Some(data) = item.address_data {
-            contacts.push((item.href, data));
-        }
-    }
-    Ok(contacts)
+    client.fetch_contacts_from_book(book_path).await
 }
 
 pub(crate) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {

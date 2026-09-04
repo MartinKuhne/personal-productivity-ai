@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::config::AgentConfig;
-use fast_dav_rs::CalDavClient;
 
 // --- parse_ical_data tests ---
 
@@ -221,9 +220,9 @@ impl WiremockGuard {
 
 /// XML body returned by the mock for any PROPFIND that probes for
 /// calendars. Declares a single calendar at `/calendars/primary/`
-/// so `fast_dav_rs::CalDavClient::list_calendars` succeeds on the
+/// so `DavClient::get_all_calendars` succeeds on the
 /// first try and never falls through to the principal-discovery
-/// branches of `get_all_calendars`.
+/// branches.
 const PROPFIND_BODY: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
  <d:response>
@@ -475,7 +474,7 @@ fn test_caldav_tools_mock_server() {
     assert!(delete_res_err.result.contains("Failed to DELETE event"));
 }
 
-/// Regression: `fast-dav-rs` uses hyper-util connection pooling, so
+/// Regression: `DavClient` uses reqwest connection pooling, so
 /// `tool_get_calendar` reuses the same TCP connection for its internal
 /// PROPFIND + REPORT sequence. A mock server that drops the connection
 /// after one request turns the second request into a connection-closed
@@ -507,7 +506,7 @@ fn test_caldav_tools_mock_server_keep_alive() {
     }
 }
 
-/// Regression: many sequential requests through one `CalDavClient` —
+/// Regression: many sequential requests through one `DavClient` —
 /// the most aggressive form of the keep-alive race. A mock that drops
 /// the connection after each response will see every other request
 /// fail with `connection closed before message completed`.
@@ -520,7 +519,8 @@ fn test_caldav_tools_mock_server_single_client_reuse() {
     register_caldav_stubs(&mock);
 
     block_on(async {
-        let client = CalDavClient::new(&mock.uri(), Some("user"), Some("password")).unwrap();
+        let cfg = dav_client_config(mock.uri());
+        let client = DavClient::new("primary".to_string(), &cfg).unwrap();
         for _ in 0..32 {
             let items = client
                 .calendar_query_timerange(
@@ -528,7 +528,6 @@ fn test_caldav_tools_mock_server_single_client_reuse() {
                     "VEVENT",
                     Some("20240101T000000Z"),
                     Some("20240102T000000Z"),
-                    true,
                 )
                 .await
                 .expect("REPORT should succeed on a kept-alive connection");
@@ -560,8 +559,7 @@ fn dav_client_config(uri: String) -> crate::config::CalDavClient {
     }
 }
 
-/// All DavClient tests must call this. `CalDavClient::new` (which
-/// `DavClient::new` wraps) initialises the rustls crypto stack the
+/// All DavClient tests must call this. Initialises the rustls crypto stack the
 /// first time it runs in a process. Under `cargo test` the earlier
 /// `test_caldav_tools_*` tests install the provider before this
 /// one runs; under `cargo nextest` each test runs in its own

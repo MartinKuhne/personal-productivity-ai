@@ -32,7 +32,7 @@ evalexpr = "13.1.0"
 encoding_rs = "0.8.35"
 walkdir = "2.4"
 url = "2.5"
-fast-dav-rs = "0.4.4"
+roxmltree = "0.20"
 fast_h2m = "^0.4"
 jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
 bytes = "1"

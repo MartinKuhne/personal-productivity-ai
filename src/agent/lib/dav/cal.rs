@@ -3,8 +3,8 @@
 //! Layering:
 //!
 //! 1. [`DavClient`] (in `dav::client`) owns the per-server
-//!    connection. It wraps both a `fast_dav_rs::CalDavClient` and
-//!    a `fast_dav_rs::CardDavClient` plus the per-server metadata
+//!    connection. It wraps a native `reqwest::Client`
+//!    plus the per-server metadata
 //!    (name, base URL, username). The CalDAV methods
 //!    (`search_calendar`, `get_calendar`, `get_calendar_item`,
 //!    `add_calendar_item`, `update_calendar_item`,
