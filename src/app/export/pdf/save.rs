@@ -20,13 +20,11 @@
 //!    dependency) so the user lands in their default PDF viewer, the
 //!    same UX the existing `print.rs` provides.
 //!
-//! # Spec traceability
+//! # Dynamic Detection
 //!
-//! The `pdf-export` Cargo feature gates this module off entirely
-//! (the optional dep `typst-as-lib` is also gated on the same
-//! feature). When the feature is disabled, this file is not compiled
-//! and `crate::export::pdf` simply does not exist. The UI wires
-//! the "Save as PDF" menu entry only when the feature is on — see
+//! PDF export uses the official `typst` CLI binary found dynamically in
+//! the system `PATH`. The UI wires the "Save as PDF..." menu entry only
+//! when `fastmd_pdf::is_typst_available()` returns true — see
 //! `src/ui/tree/render.rs`.
 //!
 //! Unit tests live in the sibling `save_tests.rs` sidecar.
@@ -104,6 +102,19 @@ pub fn compile_and_save_pdf(
     job: &SaveAsPdfJob,
     tx: Option<&crate::bus::events::typed::BackgroundEventSender>,
 ) -> Result<PathBuf, String> {
+    if !fastmd_pdf::is_typst_available() {
+        let err_msg = "Typst CLI binary not found in PATH".to_string();
+        let _ = tx.as_ref().map(|sender| {
+            let _ = sender.send(
+                BackgroundLogEntry::new(
+                    LogCategory::Print,
+                    format!("PDF compile failed for {}: {}", job.title, err_msg),
+                )
+                .into(),
+            );
+        });
+        return Err(err_msg);
+    }
     if job.markdown_content.is_empty() {
         return Err(format!(
             "Markdown content is empty for {}",

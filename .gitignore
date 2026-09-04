@@ -33,3 +33,7 @@ deploy/data/
 # assertion fails; contains a minimal failing input you can
 # replay with `PROPTEST_REGRESSIONS_FILE=...`).
 **/proptest-regressions/
+
+# Python cache
+__pycache__/
+*.py[cod]

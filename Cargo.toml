@@ -20,7 +20,7 @@ members = [
 path = "src/app/lib.rs"
 
 [features]
-default = ["pdf-export"]
+default = []
 
 # Vector search (via qdrant)
 vector-search = [
@@ -38,9 +38,6 @@ browser = ["dep:playwright-rs", "fastmd-agent/browser"]
 
 # Image library. UNFINISHED/UNTESTED
 image-library = []
-
-# PDF export via `typst-as-lib` (now delegated to `fastmd-pdf`)
-pdf-export = ["dep:rfd", "dep:fastmd-pdf"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -80,8 +77,8 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 html-escape = "0.2"
 tempfile = "3.8"
 # `rfd` — Rusty File Dialogs. Used by "Save as PDF..."
-rfd = { version = "0.17", optional = true }
-fastmd-pdf = { path = "src/md2pdf", optional = true }
+rfd = "0.17"
+fastmd-pdf = { path = "src/md2pdf" }
 arc-swap = "1.9.2"
 async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
 text-splitter = { version = "0.32", optional = true }

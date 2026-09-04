@@ -1,11 +1,12 @@
-//! Typst engine and PDF generation.
+//! Typst CLI engine and PDF generation.
 //!
-//! Wraps the in-process `typst-as-lib` engine with a fixed template and
-//! cached font book. Font discovery is expensive, so the font list is
-//! cached process-wide via a `OnceLock` — this is the preservation of
-//! the original `get_cached_fonts` caching behaviour.
-//!
-//! Unit tests live in the sibling `save_tests.rs` sidecar via `lib.rs`.
+//! Wraps the official `typst` CLI binary with a fixed template.
+//! Unit tests live in the sibling `save_tests.rs` sidecar.
+
+use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 const TEMPLATE: &str = r##"
 #set page(
@@ -66,54 +67,130 @@ fn build_typst_document(title: &str, body: &str) -> String {
         .replace("#body", body)
 }
 
-/// Cached font book — embedded plus system fonts, initialized once.
-///
-/// This preserves the original `get_cached_fonts` behaviour from
-/// `src/app/export/pdf/mod.rs:82` which used a `static OnceLock` to
-/// avoid re-discovering fonts on every PDF compilation.
-fn get_cached_fonts() -> &'static [typst::text::Font] {
-    static CACHED_FONTS: std::sync::OnceLock<Vec<typst::text::Font>> = std::sync::OnceLock::new();
-    CACHED_FONTS.get_or_init(|| {
-        let mut fonts = Vec::new();
-        for (font, _) in typst_kit::fonts::embedded() {
-            fonts.push(font);
-        }
-        for (font_path, _) in typst_kit::fonts::system() {
-            use typst_kit::fonts::FontSource;
-            if let Some(font) = font_path.load() {
-                fonts.push(font);
+/// Search for the official `typst` binary in system PATH.
+pub fn find_typst_binary() -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        #[cfg(windows)]
+        {
+            for ext in &["exe", "cmd", "bat"] {
+                let candidate = dir.join(format!("typst.{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
             }
         }
-        fonts
-    })
+        let candidate = dir.join("typst");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
-/// Generate a PDF byte vector from a Typst body and title.
+/// Check if the official `typst` binary is available in system PATH.
+pub fn is_typst_available() -> bool {
+    find_typst_binary().is_some()
+}
+
+/// Generate a PDF byte vector from a Typst body and title by invoking the Typst CLI.
 ///
 /// The `typst_body` is the output of [`crate::translator::render_markdown_to_typst`],
 /// already escaped and shaped as Typst markup. The `title` is interpolated
 /// as the page header.
 pub fn generate(title: &str, typst_body: &str) -> Result<Vec<u8>, String> {
+    let typst_bin = find_typst_binary()
+        .ok_or_else(|| "Typst binary ('typst') was not found in PATH".to_string())?;
+
     let document = build_typst_document(title, typst_body);
-    use typst_as_lib::TypstEngine;
 
-    let engine = TypstEngine::builder()
-        .main_file(document.to_string())
-        .fonts(get_cached_fonts().iter().cloned())
-        .build();
+    use std::io::Write;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
 
-    let result = engine.compile();
-    let doc: typst_layout::PagedDocument = result
-        .output
-        .map_err(|e| format!("Typst compilation failed: {e}"))?;
+    let mut cmd = Command::new(&typst_bin);
+    cmd.arg("compile")
+        .arg("-")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let options = typst_pdf::PdfOptions::default();
-    let pdf_bytes = typst_pdf::pdf(&doc, &options)
-        .map_err(|e| format!("Typst PDF serialisation failed: {e:?}"))?;
-
-    if pdf_bytes.is_empty() {
-        return Err("Typst PDF serialisation produced an empty PDF".to_string());
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    Ok(pdf_bytes)
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn typst process: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(document.as_bytes())
+            .map_err(|e| format!("Failed to write to typst stdin: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for typst process: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Typst compilation failed: {stderr}"));
+    }
+
+    if output.stdout.is_empty() {
+        return Err("Typst compilation produced an empty PDF".to_string());
+    }
+
+    Ok(output.stdout)
+}
+
+/// Generate a PDF file directly at `output_path` by invoking the Typst CLI.
+pub fn generate_to_file(title: &str, typst_body: &str, output_path: &Path) -> Result<(), String> {
+    let typst_bin = find_typst_binary()
+        .ok_or_else(|| "Typst binary ('typst') was not found in PATH".to_string())?;
+
+    let document = build_typst_document(title, typst_body);
+
+    use std::io::Write;
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    let mut cmd = Command::new(&typst_bin);
+    cmd.arg("compile")
+        .arg("-")
+        .arg(output_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn typst process: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(document.as_bytes())
+            .map_err(|e| format!("Failed to write to typst stdin: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to wait for typst process: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Typst compilation failed: {stderr}"));
+    }
+
+    Ok(())
 }

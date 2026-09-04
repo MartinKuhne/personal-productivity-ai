@@ -5,7 +5,6 @@
 use super::context::TreeNodeContext;
 use super::flatten::FlatRow;
 use super::handlers::{apply_directory_row_click, apply_file_row_click};
-#[cfg(feature = "pdf-export")]
 use crate::export::pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
 use crate::export::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
@@ -224,11 +223,11 @@ fn show_file_context_menu(
     //      user's default viewer (matches the prior behaviour for
     //      the "I just saved a PDF" feedback loop).
     //
-    // The whole menu item disappears when the `pdf-export` feature
-    // is off — the compile-time `#[cfg]` here is matched against the
-    // same gate that hides the `app::print_pdf` module itself.
-    #[cfg(feature = "pdf-export")]
-    if ui.button(crate::ui::strings::SAVE_AS_PDF_ACTION).clicked() {
+    // The "Save as PDF..." menu item is only displayed when the official
+    // `typst` binary is available in PATH.
+    if fastmd_pdf::is_typst_available()
+        && ui.button(crate::ui::strings::SAVE_AS_PDF_ACTION).clicked()
+    {
         let path_to_export = path.to_path_buf();
         // Default the dialog to the source file's directory and
         // stem — most users want to save next to the `.md` they

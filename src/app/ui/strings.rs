@@ -377,10 +377,9 @@ pub const RUN_AS_PROMPT_ACTION: &str = "Run as prompt";
 pub const PRINT_ACTION: &str = "Print";
 
 /// Context menu item to export the current Markdown file to PDF via
-/// the in-process Typst compiler. Sits next to `PRINT_ACTION` in the
-/// file context menu; the underlying feature is gated by the
-/// `pdf-export` Cargo feature, so the menu entry is only registered
-/// when the feature is on.
+/// the official `typst` CLI binary. Sits next to `PRINT_ACTION` in the
+/// file context menu; dynamically displayed only when `typst` is found
+/// in the system PATH.
 pub const SAVE_AS_PDF_ACTION: &str = "Save as PDF...";
 
 // Background Logs Window
