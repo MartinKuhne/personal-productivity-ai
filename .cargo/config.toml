@@ -1,4 +1,4 @@
-﻿# Cargo build configuration
+# Cargo build configuration
 # Optimized for local development on Ryzen 7950X (Zen 4 / znver4).
 # target-cpu=native enables AVX2, AVX-512, BMI2, and all other Zen 4 extensions.
 # NOTE: binaries built with this config will NOT run on older CPUs.
@@ -11,3 +11,7 @@ rustflags = ["-C", "target-cpu=native"]
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+
