@@ -9,6 +9,7 @@ pub mod dialogs;
 pub mod editor_egui;
 pub mod fonts;
 pub mod link_resolver;
+pub mod logo;
 pub mod modals;
 pub mod os_shell;
 pub mod panel_layout;

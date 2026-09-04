@@ -2,8 +2,10 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-/// Uses Phosphor [`egui_phosphor::regular::LIGHTNING`] icon.
-pub const APP_TITLE: &str = "\u{E2DE} FastMD Viewer";
+/// The Document + Bolt logo is painted separately via [`crate::ui::logo::paint_logo`] —
+///
+/// the title itself is plain text so it remains searchable and accessible.
+pub const APP_TITLE: &str = "FastMD Viewer";
 
 /// Label for the batch prompt processing button (now in the hamburger menu).
 pub const BATCH_BUTTON: &str = "Batch...";
@@ -525,9 +527,13 @@ mod tests {
 
     #[test]
     fn test_ui_strings_use_phosphor_icons() {
+        assert_eq!(
+            APP_TITLE, "FastMD Viewer",
+            "APP_TITLE is plain text; logo is painted via ui::logo::paint_logo"
+        );
         assert!(
-            APP_TITLE.contains(egui_phosphor::regular::LIGHTNING),
-            "APP_TITLE should use Phosphor LIGHTNING icon"
+            !APP_TITLE.contains(egui_phosphor::regular::LIGHTNING),
+            "APP_TITLE should not embed Phosphor glyph; use logo module"
         );
         assert!(
             !APP_TITLE.contains('⚡'),
