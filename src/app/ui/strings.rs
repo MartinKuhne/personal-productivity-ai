@@ -59,6 +59,21 @@ pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 /// Default label shown when no tag is selected in the tag filter.
 pub const TAG_FILTER_DEFAULT: &str = "Filter by Tag: All";
 
+/// Placeholder text for the workspace content search box.
+pub const SEARCH_PLACEHOLDER: &str = "Search workspace...";
+
+/// Tooltip for the magnifying glass button that triggers search.
+pub const SEARCH_TRIGGER_TOOLTIP: &str = "Search";
+
+/// Tooltip for the button that clears the search query and restores the tree view.
+pub const SEARCH_CLEAR_TOOLTIP: &str = "Clear search";
+
+/// Empty-state message when content search yields zero matching files.
+pub const SEARCH_NO_RESULTS: &str = "No matching files found";
+
+/// Header label for the search result list.
+pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
+
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = egui_phosphor::regular::LIST;
 

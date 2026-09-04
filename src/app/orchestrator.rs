@@ -543,6 +543,7 @@ impl AppOrchestrator {
                         self.tabs.invalidate_heading_ids_cache();
                         self.tabs.toc.clear();
                         self.tabs.scroll_to_header_id = None;
+                        self.tabs.scroll_to_search = None;
 
                         // Log the failure to the background log.
                         if let Ok(mut mgr) = self.background_manager.lock() {

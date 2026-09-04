@@ -416,7 +416,9 @@ fn test_full_app_paste_then_enter_starts_agent() {
         !candidates.is_empty(),
         "expected the command input TextEdit in the full app"
     );
-    candidates[0].click();
+    // The bottom-panel command input is the last TextInput in the full-app layout
+    // (rendered after the left-panel search input).
+    candidates.last().unwrap().click();
     harness.run_steps(2);
 
     harness.event(egui::Event::Paste("summarize the doc\n".to_owned()));
