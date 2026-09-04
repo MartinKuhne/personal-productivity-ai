@@ -5,6 +5,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
+
 use crate::config::ContentLibrary;
 
 /// A single matching file in a content search result list.
@@ -322,7 +324,7 @@ pub fn find_search_results(
         .filter(|dir| content_libraries.is_empty() || is_in_content_library(dir, content_libraries))
         .collect();
 
-    let mut results: Vec<SearchResultEntry> = all_files
+    let candidate_files: Vec<&PathBuf> = all_files
         .iter()
         .filter(|path| {
             is_markdown_file(path)
@@ -331,6 +333,10 @@ pub fn find_search_results(
                     .parent()
                     .is_some_and(|parent| markdown_dirs.contains(parent))
         })
+        .collect();
+
+    let mut results: Vec<SearchResultEntry> = candidate_files
+        .par_iter()
         .filter_map(|path| extract_file_result(path, term_lower, content_libraries))
         .collect();
 
@@ -353,16 +359,20 @@ pub fn filter_files_by_content(all_files: &[PathBuf], term_lower: &str) -> HashS
         .filter_map(|path| path.parent())
         .collect();
 
-    all_files
+    let candidate_files: Vec<&PathBuf> = all_files
         .iter()
         .filter(|path| {
             is_markdown_file(path)
                 && path
                     .parent()
                     .is_some_and(|parent| markdown_dirs.contains(parent))
-                && file_contains_term(path, term_lower)
         })
-        .cloned()
+        .collect();
+
+    candidate_files
+        .par_iter()
+        .filter(|path| file_contains_term(path, term_lower))
+        .map(|p| (*p).clone())
         .collect()
 }
 
