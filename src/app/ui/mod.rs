@@ -1,8 +1,10 @@
 //! UI subsystem — app, panels, rendering, tree, tab/selection/dialog managers, and OS-shell helpers.
 
+pub mod about_dialog;
 pub mod agent;
 pub mod agent_debug_window;
 pub mod app;
+pub mod attributions;
 pub mod background_logs;
 pub mod batch_dialog;
 pub mod dialogs;

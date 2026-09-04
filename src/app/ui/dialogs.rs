@@ -51,6 +51,9 @@ pub struct Dialogs {
     // Tools dialog (UI-051)
     pub tools_dialog_open: bool,
 
+    // About dialog
+    pub about_dialog_open: bool,
+
     // OAuth in-flight state (MCP-021)
     /// Per-server OAuth flow status. Present (InProgress) while the
     /// background thread running `McpClients::authenticate` is
@@ -84,6 +87,7 @@ impl Dialogs {
             batch_cancel_flag: None,
 
             tools_dialog_open: false,
+            about_dialog_open: false,
 
             oauth_status: HashMap::new(),
         }
@@ -135,6 +139,7 @@ mod tests {
         assert!(!dm.rename_dialog_open);
         assert!(dm.file_to_rename.is_none());
         assert!(!dm.batch_dialog_open);
+        assert!(!dm.about_dialog_open);
     }
 
     #[test]

@@ -22,6 +22,58 @@ pub const MENU_TOOLS: &str = "Tools...";
 /// Title of the tools dialog modal.
 pub const TOOLS_DIALOG_TITLE: &str = "Tools";
 
+// ── About Dialog ───────────────────────────────────────────────────────────
+/// Label for the about dialog entry in the hamburger menu.
+pub const MENU_ABOUT: &str = "About FastMD...";
+
+/// Title of the about dialog modal window.
+pub const ABOUT_DIALOG_TITLE: &str = "About FastMD";
+
+/// Application name displayed in the about dialog header.
+pub const ABOUT_APP_NAME: &str = "FastMD Viewer";
+
+/// Copyright notice displayed in the about dialog header.
+pub const ABOUT_COPYRIGHT: &str = "Copyright (c) 2026 Martin Kuhne";
+
+/// Label for the build branch in the about dialog.
+pub const ABOUT_BRANCH_LABEL: &str = "Branch:";
+
+/// Label for the commit hash in the about dialog.
+pub const ABOUT_COMMIT_LABEL: &str = "Commit:";
+
+/// Label for the build date in the about dialog.
+pub const ABOUT_DATE_LABEL: &str = "Built:";
+
+/// Header for the license section in the about dialog.
+pub const ABOUT_LICENSE_HEADER: &str = "License";
+
+/// Header for the attributions section in the about dialog.
+pub const ABOUT_ATTRIBUTIONS_HEADER: &str = "Third-Party Attributions";
+
+/// Tooltip explaining that clicking the commit hash copies the full hash.
+pub const ABOUT_COPY_COMMIT_TOOLTIP: &str = "Click to copy full commit hash";
+
+/// Prefix for the commit hash hover tooltip, followed by the full hash.
+pub const ABOUT_FULL_COMMIT_PREFIX: &str = "Full commit:";
+
+/// Tooltip notification shown when the commit hash has been copied.
+pub const ABOUT_COPIED_NOTIFICATION: &str = "Commit hash copied to clipboard";
+
+/// Fallback string when author metadata is not available.
+pub const ABOUT_UNKNOWN_AUTHOR: &str = "Unknown";
+
+/// Column header for crate name in the attributions list.
+pub const ABOUT_COL_CRATE: &str = "Crate";
+
+/// Column header for author(s) in the attributions list.
+pub const ABOUT_COL_AUTHORS: &str = "Authors";
+
+/// Column header for repository URL in the attributions list.
+pub const ABOUT_COL_REPO: &str = "Repository";
+
+/// `on_click` event name fired when the user clicks About FastMD from the hamburger menu.
+pub const ABOUT_EVENT: &str = "about_button";
+
 /// Kind label for an internal (built-in) tool group row.
 pub const TOOLS_KIND_INTERNAL: &str = "Internal";
 
@@ -527,6 +579,10 @@ mod tests {
     fn test_hamburger_menu_strings() {
         assert_eq!(HAMBURGER_MENU_BUTTON, egui_phosphor::regular::LIST);
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
+        assert_eq!(MENU_ABOUT, "About FastMD...");
+        assert_eq!(ABOUT_EVENT, "about_button");
+        assert_eq!(ABOUT_DIALOG_TITLE, "About FastMD");
+        assert_eq!(ABOUT_APP_NAME, "FastMD Viewer");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
         assert_eq!(MENU_WINDOWS, "Windows");
         assert_eq!(MENU_BACKGROUND_OPERATIONS, "Background operations");

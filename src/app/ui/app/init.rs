@@ -225,7 +225,17 @@ impl FastMdApp {
             selection.expanded_dirs.insert(dir.clone());
         }
 
-        let dialogs = Dialogs::new();
+        let mut dialogs = Dialogs::new();
+
+        // First-run auto-show (spec FR-016): fresh UI state or a version
+        // upgrade opens the About dialog once and records the version so
+        // later starts stay quiet. Missing or corrupt state restores to
+        // default (unseen above), which fails open to a single auto-show.
+        crate::ui::about_dialog::apply_first_run_auto_show(
+            &mut persisted_ui_state,
+            &mut dialogs,
+            crate::ui::about_dialog::APP_VERSION,
+        );
 
         let user_command_bus = crate::bus::core::Bus::new();
         let user_command_reader = user_command_bus.subscribe();

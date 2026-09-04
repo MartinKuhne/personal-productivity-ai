@@ -69,6 +69,9 @@ impl AppOrchestrator {
             UserCommand::OpenToolsDialog => {
                 self.dialogs.tools_dialog_open = true;
             }
+            UserCommand::OpenAboutDialog => {
+                self.dialogs.about_dialog_open = true;
+            }
             UserCommand::ToggleBackgroundLogs(show) => {
                 self.background_manager.lock().unwrap().show_background_logs = show;
             }
