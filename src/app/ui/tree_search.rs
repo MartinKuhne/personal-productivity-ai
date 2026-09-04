@@ -92,12 +92,14 @@ impl TreeSearch {
         &self.matching_files
     }
 
-    /// Commits the current query text as the active filter.
-    ///
-    /// A blank/whitespace query clears the filter (show all files).
-    /// A non-blank query is matched case-insensitively against file
-    /// content; unreadable files never match.
-    pub fn apply(&mut self, all_files: &[PathBuf], content_libraries: &[ContentLibrary]) {
+    /// Commits the current query text as the active filter, optionally restricting
+    /// the search to a specific set of allowed directories (such as those in the directory tree).
+    pub fn apply_with_allowed_dirs(
+        &mut self,
+        all_files: &[PathBuf],
+        content_libraries: &[ContentLibrary],
+        allowed_dirs: Option<&HashSet<PathBuf>>,
+    ) {
         let trimmed = self.query.trim();
         if trimmed.is_empty() {
             self.clear();
@@ -105,8 +107,18 @@ impl TreeSearch {
         }
         self.active_filter = Some(trimmed.to_string());
         let term_lower = trimmed.to_lowercase();
-        self.results = find_search_results(all_files, &term_lower, content_libraries);
+        self.results =
+            find_search_results_scoped(all_files, &term_lower, content_libraries, allowed_dirs);
         self.matching_files = self.results.iter().map(|r| r.path.clone()).collect();
+    }
+
+    /// Commits the current query text as the active filter across all files in content libraries.
+    ///
+    /// A blank/whitespace query clears the filter (show all files).
+    /// A non-blank query is matched case-insensitively against file
+    /// content; unreadable files never match.
+    pub fn apply(&mut self, all_files: &[PathBuf], content_libraries: &[ContentLibrary]) {
+        self.apply_with_allowed_dirs(all_files, content_libraries, None);
     }
 
     /// Clears the query text, the active filter, and all search results.
@@ -309,19 +321,25 @@ fn extract_file_result(
 
 /// Returns structured search results across `all_files` for `term_lower`.
 ///
-/// Only directories containing markdown files within configured content libraries
-/// are searched, and only markdown files within those directories are scanned.
-/// One entry per matching file.
-pub fn find_search_results(
+/// Returns structured search results across `all_files` for `term_lower`,
+/// optionally restricted to a specific set of allowed directories (such as those
+/// present in the directory window).
+pub fn find_search_results_scoped(
     all_files: &[PathBuf],
     term_lower: &str,
     content_libraries: &[ContentLibrary],
+    allowed_dirs: Option<&HashSet<PathBuf>>,
 ) -> Vec<SearchResultEntry> {
     let markdown_dirs: HashSet<&Path> = all_files
         .iter()
         .filter(|path| is_markdown_file(path))
         .filter_map(|path| path.parent())
-        .filter(|dir| content_libraries.is_empty() || is_in_content_library(dir, content_libraries))
+        .filter(|dir| {
+            if allowed_dirs.is_some_and(|allowed| !allowed.contains(*dir)) {
+                return false;
+            }
+            content_libraries.is_empty() || is_in_content_library(dir, content_libraries)
+        })
         .collect();
 
     let candidate_files: Vec<&PathBuf> = all_files
@@ -347,6 +365,19 @@ pub fn find_search_results(
             .then(a.relative_path.cmp(&b.relative_path))
     });
     results
+}
+
+/// Returns structured search results across `all_files` for `term_lower`.
+///
+/// Only directories containing markdown files within configured content libraries
+/// are searched, and only markdown files within those directories are scanned.
+/// One entry per matching file.
+pub fn find_search_results(
+    all_files: &[PathBuf],
+    term_lower: &str,
+    content_libraries: &[ContentLibrary],
+) -> Vec<SearchResultEntry> {
+    find_search_results_scoped(all_files, term_lower, content_libraries, None)
 }
 
 /// Returns the subset of `all_files` whose content contains `term_lower`.

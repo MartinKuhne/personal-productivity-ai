@@ -253,9 +253,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     .clicked();
 
                 if (search_clicked || enter_pressed) && !app.search().query().trim().is_empty() {
+                    let root_node = build_workspace_tree(app);
+                    let mut allowed_dirs = std::collections::HashSet::new();
+                    root_node.collect_dirs(&mut allowed_dirs);
                     let files = app.file_processor().all_files.clone();
                     let libs = app.content_libraries().to_vec();
-                    app.search_mut().apply(&files, &libs);
+                    app.search_mut().apply_with_allowed_dirs(&files, &libs, Some(&allowed_dirs));
                 }
 
                 if app.search().is_searching()

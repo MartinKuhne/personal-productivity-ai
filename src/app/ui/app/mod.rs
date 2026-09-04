@@ -84,6 +84,16 @@ impl TreeNode {
             children: BTreeMap::new(),
         }
     }
+
+    /// Recursively collects all directory paths present in this tree node and its descendants.
+    pub fn collect_dirs(&self, out: &mut HashSet<PathBuf>) {
+        if self.is_dir && !self.path.as_os_str().is_empty() {
+            out.insert(self.path.clone());
+        }
+        for child in self.children.values() {
+            child.collect_dirs(out);
+        }
+    }
 }
 
 pub struct FastMdApp {

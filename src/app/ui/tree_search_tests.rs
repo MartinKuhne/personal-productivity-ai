@@ -228,3 +228,54 @@ fn test_search_skips_directories_outside_content_libraries() {
     assert_eq!(search.results()[0].path, md_in_lib);
     assert!(!search.matching_files().contains(&md_outside_lib));
 }
+
+#[test]
+fn test_search_scoped_to_allowed_directories() {
+    let dir1 = temp_dir("allowed_dir1");
+    let md1 = dir1.join("note1.md");
+    write_file(&md1, "same keyword everywhere");
+
+    let dir2 = temp_dir("disallowed_dir2");
+    let md2 = dir2.join("note2.md");
+    write_file(&md2, "same keyword everywhere");
+
+    let mut allowed_dirs = HashSet::new();
+    allowed_dirs.insert(dir1.clone());
+
+    let mut search = TreeSearch::new();
+    *search.query_mut() = "keyword".to_string();
+    search.apply_with_allowed_dirs(&[md1.clone(), md2.clone()], &[], Some(&allowed_dirs));
+
+    assert_eq!(
+        search.results().len(),
+        1,
+        "Only directories in allowed_dirs should be searched"
+    );
+    assert_eq!(search.results()[0].path, md1);
+    assert!(!search.matching_files().contains(&md2));
+}
+
+#[test]
+fn test_tree_node_collect_dirs() {
+    let mut root = crate::ui::TreeNode::new("Workspace".to_string(), PathBuf::new(), true);
+    let dir_a = PathBuf::from("/lib/dir_a");
+    let dir_b = PathBuf::from("/lib/dir_b");
+    let file_c = PathBuf::from("/lib/dir_a/file.md");
+
+    let mut node_a = crate::ui::TreeNode::new("dir_a".to_string(), dir_a.clone(), true);
+    node_a.children.insert(
+        "file.md".to_string(),
+        crate::ui::TreeNode::new("file.md".to_string(), file_c, false),
+    );
+    let node_b = crate::ui::TreeNode::new("dir_b".to_string(), dir_b.clone(), true);
+
+    root.children.insert("dir_a".to_string(), node_a);
+    root.children.insert("dir_b".to_string(), node_b);
+
+    let mut dirs = HashSet::new();
+    root.collect_dirs(&mut dirs);
+
+    assert_eq!(dirs.len(), 2);
+    assert!(dirs.contains(&dir_a));
+    assert!(dirs.contains(&dir_b));
+}
