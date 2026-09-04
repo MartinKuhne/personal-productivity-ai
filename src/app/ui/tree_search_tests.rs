@@ -197,3 +197,34 @@ fn test_search_skips_non_markdown_files() {
     );
     assert_eq!(search.results()[0].path, md_file);
 }
+
+#[test]
+fn test_search_skips_directories_outside_content_libraries() {
+    let lib_dir = temp_dir("in_library");
+    let md_in_lib = lib_dir.join("inside.md");
+    write_file(&md_in_lib, "shared secret phrase");
+
+    let outside_dir = temp_dir("outside_library");
+    let md_outside_lib = outside_dir.join("outside.md");
+    write_file(&md_outside_lib, "shared secret phrase");
+
+    let libraries = vec![ContentLibrary {
+        root_folder: lib_dir.to_string_lossy().to_string(),
+        name: "MyLib".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let mut search = TreeSearch::new();
+    *search.query_mut() = "secret".to_string();
+    search.apply(&[md_in_lib.clone(), md_outside_lib.clone()], &libraries);
+
+    assert_eq!(
+        search.results().len(),
+        1,
+        "Only files in directories within content libraries should be searched"
+    );
+    assert_eq!(search.results()[0].path, md_in_lib);
+    assert!(!search.matching_files().contains(&md_outside_lib));
+}

@@ -157,6 +157,53 @@ pub fn extract_snippet(line: &str, term_lower: &str) -> String {
     }
 }
 
+/// Returns `true` if `path` begins with `root`, matching case-insensitively on Windows.
+pub fn path_starts_with_root(path: &Path, root: &Path) -> bool {
+    if path.starts_with(root) {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::path::Component;
+        let mut path_comps = path.components();
+        for root_comp in root.components() {
+            match (path_comps.next(), root_comp) {
+                (Some(Component::Prefix(p_pref)), Component::Prefix(r_pref)) => {
+                    if p_pref.as_os_str().to_string_lossy().to_lowercase()
+                        != r_pref.as_os_str().to_string_lossy().to_lowercase()
+                    {
+                        return false;
+                    }
+                }
+                (Some(p_c), r_c) => {
+                    if p_c.as_os_str().to_string_lossy().to_lowercase()
+                        != r_c.as_os_str().to_string_lossy().to_lowercase()
+                    {
+                        return false;
+                    }
+                }
+                (None, _) => return false,
+            }
+        }
+        true
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Returns `true` if `path` is within at least one of the configured content libraries.
+pub fn is_in_content_library(path: &Path, content_libraries: &[ContentLibrary]) -> bool {
+    if content_libraries.is_empty() {
+        return false;
+    }
+    content_libraries.iter().any(|lib| {
+        let lib_root = Path::new(&lib.root_folder);
+        path_starts_with_root(path, lib_root)
+    })
+}
+
 /// Returns `true` if `path` has a markdown extension (`.md` or `.markdown`), case-insensitively.
 pub fn is_markdown_file(path: &Path) -> bool {
     matches!(
@@ -260,8 +307,9 @@ fn extract_file_result(
 
 /// Returns structured search results across `all_files` for `term_lower`.
 ///
-/// Only directories containing markdown files are searched, and only markdown
-/// files within those directories are scanned. One entry per matching file.
+/// Only directories containing markdown files within configured content libraries
+/// are searched, and only markdown files within those directories are scanned.
+/// One entry per matching file.
 pub fn find_search_results(
     all_files: &[PathBuf],
     term_lower: &str,
@@ -271,12 +319,14 @@ pub fn find_search_results(
         .iter()
         .filter(|path| is_markdown_file(path))
         .filter_map(|path| path.parent())
+        .filter(|dir| content_libraries.is_empty() || is_in_content_library(dir, content_libraries))
         .collect();
 
     let mut results: Vec<SearchResultEntry> = all_files
         .iter()
         .filter(|path| {
             is_markdown_file(path)
+                && (content_libraries.is_empty() || is_in_content_library(path, content_libraries))
                 && path
                     .parent()
                     .is_some_and(|parent| markdown_dirs.contains(parent))
