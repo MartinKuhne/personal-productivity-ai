@@ -115,7 +115,7 @@ log = "0.4"
 # `image` is used by `egui_kittest::snapshot`
 image = { version = "0.25", default-features = false, features = ["png"] }
 wiremock = "0.6"
-pdf_oxide = "0.3.77"
+typst-syntax = "0.15"
 
 [[bin]]
 name = "fastmd"
