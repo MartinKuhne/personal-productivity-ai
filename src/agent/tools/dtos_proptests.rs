@@ -171,84 +171,99 @@ macro_rules! roundtrips_through_value {
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(fs_search_notes_no_panic, SearchNotesInput);
-no_panic_on_garbage_value!(fs_search_notes_value_no_panic, SearchNotesInput);
+no_panic_on_garbage_value!(slow_fs_search_notes_value_no_panic, SearchNotesInput);
 
 no_panic_on_garbage_str!(fs_read_tags_no_panic, ReadTagsInput);
-no_panic_on_garbage_value!(fs_read_tags_value_no_panic, ReadTagsInput);
+no_panic_on_garbage_value!(slow_fs_read_tags_value_no_panic, ReadTagsInput);
 
 no_panic_on_garbage_str!(fs_list_notes_by_tag_no_panic, ListNotesByTagInput);
-no_panic_on_garbage_value!(fs_list_notes_by_tag_value_no_panic, ListNotesByTagInput);
+no_panic_on_garbage_value!(
+    slow_fs_list_notes_by_tag_value_no_panic,
+    ListNotesByTagInput
+);
 
 no_panic_on_garbage_str!(fs_list_notes_no_panic, ListNotesInput);
-no_panic_on_garbage_value!(fs_list_notes_value_no_panic, ListNotesInput);
+no_panic_on_garbage_value!(slow_fs_list_notes_value_no_panic, ListNotesInput);
 
 no_panic_on_garbage_str!(fs_read_note_no_panic, ReadNoteInput);
-no_panic_on_garbage_value!(fs_read_note_value_no_panic, ReadNoteInput);
+no_panic_on_garbage_value!(slow_fs_read_note_value_no_panic, ReadNoteInput);
 
 no_panic_on_garbage_str!(fs_window_note_no_panic, WindowNoteInput);
-no_panic_on_garbage_value!(fs_window_note_value_no_panic, WindowNoteInput);
+no_panic_on_garbage_value!(slow_fs_window_note_value_no_panic, WindowNoteInput);
 
 no_panic_on_garbage_str!(fs_create_note_no_panic, CreateNoteInput);
-no_panic_on_garbage_value!(fs_create_note_value_no_panic, CreateNoteInput);
+no_panic_on_garbage_value!(slow_fs_create_note_value_no_panic, CreateNoteInput);
 
 no_panic_on_garbage_str!(fs_insert_into_note_no_panic, InsertIntoNoteInput);
-no_panic_on_garbage_value!(fs_insert_into_note_value_no_panic, InsertIntoNoteInput);
+no_panic_on_garbage_value!(slow_fs_insert_into_note_value_no_panic, InsertIntoNoteInput);
 
 no_panic_on_garbage_str!(fs_patch_note_no_panic, PatchNoteInput);
-no_panic_on_garbage_value!(fs_patch_note_value_no_panic, PatchNoteInput);
+no_panic_on_garbage_value!(slow_fs_patch_note_value_no_panic, PatchNoteInput);
 
 no_panic_on_garbage_str!(fs_move_note_no_panic, MoveNoteInput);
-no_panic_on_garbage_value!(fs_move_note_value_no_panic, MoveNoteInput);
+no_panic_on_garbage_value!(slow_fs_move_note_value_no_panic, MoveNoteInput);
 
 no_panic_on_garbage_str!(fs_read_yaml_header_no_panic, ReadYamlHeaderInput);
-no_panic_on_garbage_value!(fs_read_yaml_header_value_no_panic, ReadYamlHeaderInput);
+no_panic_on_garbage_value!(slow_fs_read_yaml_header_value_no_panic, ReadYamlHeaderInput);
 
 no_panic_on_garbage_str!(fs_write_yaml_header_no_panic, WriteYamlHeaderInput);
-no_panic_on_garbage_value!(fs_write_yaml_header_value_no_panic, WriteYamlHeaderInput);
+no_panic_on_garbage_value!(
+    slow_fs_write_yaml_header_value_no_panic,
+    WriteYamlHeaderInput
+);
 
 // ---------------------------------------------------------------------------
 // Web tools
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(web_fetch_no_panic, WebFetchInput);
-no_panic_on_garbage_value!(web_fetch_value_no_panic, WebFetchInput);
+no_panic_on_garbage_value!(slow_web_fetch_value_no_panic, WebFetchInput);
 
 no_panic_on_garbage_str!(web_search_no_panic, WebSearchInput);
-no_panic_on_garbage_value!(web_search_value_no_panic, WebSearchInput);
+no_panic_on_garbage_value!(slow_web_search_value_no_panic, WebSearchInput);
 
 no_panic_on_garbage_str!(web_delegate_no_panic, WebDelegateInput);
-no_panic_on_garbage_value!(web_delegate_value_no_panic, WebDelegateInput);
+no_panic_on_garbage_value!(slow_web_delegate_value_no_panic, WebDelegateInput);
 
 // ---------------------------------------------------------------------------
 // Calendar tools (CalDAV)
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(cal_search_calendar_no_panic, SearchCalendarInput);
-no_panic_on_garbage_value!(cal_search_calendar_value_no_panic, SearchCalendarInput);
+no_panic_on_garbage_value!(slow_cal_search_calendar_value_no_panic, SearchCalendarInput);
 
 no_panic_on_garbage_str!(cal_get_calendar_no_panic, GetCalendarInput);
-no_panic_on_garbage_value!(cal_get_calendar_value_no_panic, GetCalendarInput);
+no_panic_on_garbage_value!(slow_cal_get_calendar_value_no_panic, GetCalendarInput);
 
 no_panic_on_garbage_str!(cal_get_calendar_item_no_panic, GetCalendarItemInput);
-no_panic_on_garbage_value!(cal_get_calendar_item_value_no_panic, GetCalendarItemInput);
+no_panic_on_garbage_value!(
+    slow_cal_get_calendar_item_value_no_panic,
+    GetCalendarItemInput
+);
 
 // `AddCalendarItemInput` and `UpdateCalendarItemInput` derive
 // `Serialize` (the agent loop can echo them back), so they get the
 // round-trip property too.
 no_panic_on_garbage_str!(cal_add_calendar_item_no_panic, AddCalendarItemInput);
-no_panic_on_garbage_value!(cal_add_calendar_item_value_no_panic, AddCalendarItemInput);
-roundtrips_through_value!(cal_add_calendar_item_roundtrips, AddCalendarItemInput);
+no_panic_on_garbage_value!(
+    slow_cal_add_calendar_item_value_no_panic,
+    AddCalendarItemInput
+);
+roundtrips_through_value!(slow_cal_add_calendar_item_roundtrips, AddCalendarItemInput);
 
 no_panic_on_garbage_str!(cal_update_calendar_item_no_panic, UpdateCalendarItemInput);
 no_panic_on_garbage_value!(
-    cal_update_calendar_item_value_no_panic,
+    slow_cal_update_calendar_item_value_no_panic,
     UpdateCalendarItemInput
 );
-roundtrips_through_value!(cal_update_calendar_item_roundtrips, UpdateCalendarItemInput);
+roundtrips_through_value!(
+    slow_cal_update_calendar_item_roundtrips,
+    UpdateCalendarItemInput
+);
 
 no_panic_on_garbage_str!(cal_delete_calendar_item_no_panic, DeleteCalendarItemInput);
 no_panic_on_garbage_value!(
-    cal_delete_calendar_item_value_no_panic,
+    slow_cal_delete_calendar_item_value_no_panic,
     DeleteCalendarItemInput
 );
 
@@ -257,26 +272,26 @@ no_panic_on_garbage_value!(
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(email_search_no_panic, SearchEmailInput);
-no_panic_on_garbage_value!(email_search_value_no_panic, SearchEmailInput);
+no_panic_on_garbage_value!(slow_email_search_value_no_panic, SearchEmailInput);
 
 no_panic_on_garbage_str!(email_get_by_id_no_panic, GetEmailByIdInput);
-no_panic_on_garbage_value!(email_get_by_id_value_no_panic, GetEmailByIdInput);
+no_panic_on_garbage_value!(slow_email_get_by_id_value_no_panic, GetEmailByIdInput);
 
 no_panic_on_garbage_str!(email_send_no_panic, SendEmailInput);
-no_panic_on_garbage_value!(email_send_value_no_panic, SendEmailInput);
+no_panic_on_garbage_value!(slow_email_send_value_no_panic, SendEmailInput);
 
 no_panic_on_garbage_str!(email_delete_no_panic, DeleteEmailInput);
-no_panic_on_garbage_value!(email_delete_value_no_panic, DeleteEmailInput);
+no_panic_on_garbage_value!(slow_email_delete_value_no_panic, DeleteEmailInput);
 
 // ---------------------------------------------------------------------------
 // Contact tools (CardDAV)
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(contact_search_no_panic, SearchContactInput);
-no_panic_on_garbage_value!(contact_search_value_no_panic, SearchContactInput);
+no_panic_on_garbage_value!(slow_contact_search_value_no_panic, SearchContactInput);
 
 no_panic_on_garbage_str!(contact_get_no_panic, GetContactInput);
-no_panic_on_garbage_value!(contact_get_value_no_panic, GetContactInput);
+no_panic_on_garbage_value!(slow_contact_get_value_no_panic, GetContactInput);
 
 // `AddContactInput` and `UpdateContactInput` derive `Serialize`.
 // `AddressInput` (the addresses sub-DTO) is nested inside both; it
@@ -284,27 +299,27 @@ no_panic_on_garbage_value!(contact_get_value_no_panic, GetContactInput);
 // property through the parent DTOs, but a direct property is
 // cheap and pins the sub-DTO's contract.
 no_panic_on_garbage_str!(contact_add_no_panic, AddContactInput);
-no_panic_on_garbage_value!(contact_add_value_no_panic, AddContactInput);
-roundtrips_through_value!(contact_add_roundtrips, AddContactInput);
+no_panic_on_garbage_value!(slow_contact_add_value_no_panic, AddContactInput);
+roundtrips_through_value!(slow_contact_add_roundtrips, AddContactInput);
 
 no_panic_on_garbage_str!(contact_update_no_panic, UpdateContactInput);
-no_panic_on_garbage_value!(contact_update_value_no_panic, UpdateContactInput);
-roundtrips_through_value!(contact_update_roundtrips, UpdateContactInput);
+no_panic_on_garbage_value!(slow_contact_update_value_no_panic, UpdateContactInput);
+roundtrips_through_value!(slow_contact_update_roundtrips, UpdateContactInput);
 
 no_panic_on_garbage_str!(contact_delete_no_panic, DeleteContactInput);
-no_panic_on_garbage_value!(contact_delete_value_no_panic, DeleteContactInput);
+no_panic_on_garbage_value!(slow_contact_delete_value_no_panic, DeleteContactInput);
 
 // `AddressInput` sub-DTO: round-trip is a cheap additional check.
 no_panic_on_garbage_str!(contact_address_no_panic, AddressInput);
-no_panic_on_garbage_value!(contact_address_value_no_panic, AddressInput);
-roundtrips_through_value!(contact_address_roundtrips, AddressInput);
+no_panic_on_garbage_value!(slow_contact_address_value_no_panic, AddressInput);
+roundtrips_through_value!(slow_contact_address_roundtrips, AddressInput);
 
 // ---------------------------------------------------------------------------
 // Weather tool
 // ---------------------------------------------------------------------------
 
 no_panic_on_garbage_str!(weather_get_no_panic, GetWeatherInput);
-no_panic_on_garbage_value!(weather_get_value_no_panic, GetWeatherInput);
+no_panic_on_garbage_value!(slow_weather_get_value_no_panic, GetWeatherInput);
 
 // ---------------------------------------------------------------------------
 // Browser tools — gated on the `browser` feature. Compiled out
@@ -316,26 +331,35 @@ mod browser_dtos {
     use super::*;
 
     no_panic_on_garbage_str!(browser_navigate_no_panic, BrowserNavigateInput);
-    no_panic_on_garbage_value!(browser_navigate_value_no_panic, BrowserNavigateInput);
+    no_panic_on_garbage_value!(slow_browser_navigate_value_no_panic, BrowserNavigateInput);
 
     no_panic_on_garbage_str!(browser_click_no_panic, BrowserClickInput);
-    no_panic_on_garbage_value!(browser_click_value_no_panic, BrowserClickInput);
+    no_panic_on_garbage_value!(slow_browser_click_value_no_panic, BrowserClickInput);
 
     no_panic_on_garbage_str!(browser_fill_input_no_panic, BrowserFillInputInput);
-    no_panic_on_garbage_value!(browser_fill_input_value_no_panic, BrowserFillInputInput);
+    no_panic_on_garbage_value!(
+        slow_browser_fill_input_value_no_panic,
+        BrowserFillInputInput
+    );
 
     no_panic_on_garbage_str!(browser_select_dropdown_no_panic, BrowserSelectDropdownInput);
     no_panic_on_garbage_value!(
-        browser_select_dropdown_value_no_panic,
+        slow_browser_select_dropdown_value_no_panic,
         BrowserSelectDropdownInput
     );
 
     no_panic_on_garbage_str!(browser_press_key_no_panic, BrowserPressKeyInput);
-    no_panic_on_garbage_value!(browser_press_key_value_no_panic, BrowserPressKeyInput);
+    no_panic_on_garbage_value!(slow_browser_press_key_value_no_panic, BrowserPressKeyInput);
 
     no_panic_on_garbage_str!(browser_evaluate_js_no_panic, BrowserEvaluateJsInput);
-    no_panic_on_garbage_value!(browser_evaluate_js_value_no_panic, BrowserEvaluateJsInput);
+    no_panic_on_garbage_value!(
+        slow_browser_evaluate_js_value_no_panic,
+        BrowserEvaluateJsInput
+    );
 
     no_panic_on_garbage_str!(browser_screenshot_no_panic, BrowserScreenshotInput);
-    no_panic_on_garbage_value!(browser_screenshot_value_no_panic, BrowserScreenshotInput);
+    no_panic_on_garbage_value!(
+        slow_browser_screenshot_value_no_panic,
+        BrowserScreenshotInput
+    );
 }
