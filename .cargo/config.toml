@@ -15,3 +15,6 @@ codegen-units = 1
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
 
+[alias]
+fast = "nextest run --profile fast --workspace --all-features --status-level fail --show-progress none"
+
