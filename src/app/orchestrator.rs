@@ -512,8 +512,14 @@ impl AppOrchestrator {
         match ev {
             ProcessEvent::LogEntry(entry) => {
                 if let Ok(mut mgr) = self.background_manager.lock() {
-                    mgr.push_log(entry);
+                    mgr.push_log(entry.clone());
                 }
+                tracing::info!(
+                    target: crate::background::logs::TARGET_BACKGROUND_CHANNEL,
+                    category = %entry.category,
+                    "{}",
+                    entry.message
+                );
             }
             ProcessEvent::FileLoaded { path, content } => {
                 self.pending_file_load = None;
@@ -546,12 +552,19 @@ impl AppOrchestrator {
                         self.tabs.scroll_to_search = None;
 
                         // Log the failure to the background log.
+                        let msg = format!("Failed to load file {}: {}", path.display(), err);
                         if let Ok(mut mgr) = self.background_manager.lock() {
                             mgr.push_log(BackgroundLogEntry::new(
                                 LogCategory::Watcher,
-                                format!("Failed to load file {}: {}", path.display(), err),
+                                msg.clone(),
                             ));
                         }
+                        tracing::error!(
+                            target: crate::background::logs::TARGET_BACKGROUND_CHANNEL,
+                            category = "Watcher",
+                            "{}",
+                            msg
+                        );
                     }
                 }
             }

@@ -30,19 +30,12 @@ fn main() -> eframe::Result<()> {
         );
     }));
 
-    // Initialize tracing.
-    // `FmtSpan::CLOSE` prints `time.busy` (CPU) and `time.idle` (async wait)
-    // for every span when it closes — enabling zero-overhead profiling of
-    // instrumented hot paths via `RUST_LOG`.
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
-        .init();
+    // Initialize non-blocking background logging framework.
+    // Writes to `%APPDATA%\fastmd\logs\background-process.log` (or `FASTMD_LOG_DIR`)
+    // asynchronously via a dedicated worker thread, while outputting to stdout/stderr
+    // with `FmtSpan::CLOSE` profiling and bridging to the in-memory UI panel.
+    let log_dir = fastmd::background::logs::get_log_dir();
+    let _log_guard = fastmd::background::logs::init_logging(log_dir).ok();
 
     // Install rustls crypto provider
     rustls::crypto::ring::default_provider()

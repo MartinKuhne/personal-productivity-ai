@@ -122,6 +122,7 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
+        crate::background::logs::register_ui_logs(background_manager.clone());
         // One BrowserSession for the whole app lifetime; shared
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily

@@ -248,6 +248,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/tokio-rs/tracing",
     },
     Attribution {
+        name: "tracing-appender",
+        authors: "Eliza Weisman, Tokio Contributors",
+        github_url: "https://github.com/tokio-rs/tracing",
+    },
+    Attribution {
         name: "tracing-subscriber",
         authors: "Eliza Weisman, David Barsky, Tokio Contributors",
         github_url: "https://github.com/tokio-rs/tracing",
