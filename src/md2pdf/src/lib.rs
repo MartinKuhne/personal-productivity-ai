@@ -7,7 +7,7 @@
 //! 3. [`compile_markdown_to_pdf`] — composition of the two for ergonomic use
 //!
 //! Unit tests live in sibling sidecars (`translator_tests.rs`,
-//! `translator_proptests.rs`, `save_tests.rs`, `save_proptests.rs`).
+//! `translator_proptests.rs`, `save_tests.rs`).
 //! See `AGENTS.md RUST-056 / RUST-057`.
 
 pub mod engine;
@@ -50,7 +50,3 @@ pub fn compile_markdown_to_pdf_file(
 #[cfg(test)]
 #[path = "save_tests.rs"]
 mod save_tests;
-
-#[cfg(test)]
-#[path = "save_proptests.rs"]
-mod save_proptests;

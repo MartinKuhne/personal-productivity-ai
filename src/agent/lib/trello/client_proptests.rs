@@ -74,9 +74,35 @@ static RUNTIME: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLo
         .expect("build tokio runtime for trello client proptests")
 });
 
-/// Start a wiremock server on a random localhost port.
-fn start_mock() -> MockServer {
-    RUNTIME.block_on(MockServer::start())
+/// Singleton wiremock server for proptests.
+///
+/// Starting a `MockServer` binds an ephemeral TCP port and spawns a background
+/// task. Doing that for every one of hundreds of proptest iterations is
+/// prohibitively slow. Instead, a singleton server is started once and reset
+/// per iteration. A mutex synchronizes access across concurrent test runs.
+static MOCK_SERVER: std::sync::LazyLock<MockServer> =
+    std::sync::LazyLock::new(|| RUNTIME.block_on(MockServer::start()));
+
+static MOCK_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Mount a response on the singleton mock server and invoke `trello_http_call`.
+fn mock_trello_get(response: ResponseTemplate) -> Result<serde_json::Value, String> {
+    let _guard = MOCK_MUTEX
+        .lock()
+        .expect("lock trello proptest mock server mutex");
+    let server = &*MOCK_SERVER;
+    RUNTIME.block_on(async {
+        server.reset().await;
+        Mock::given(wiremock::matchers::any())
+            .respond_with(response)
+            .mount(server)
+            .await;
+    });
+    trello_http_call(
+        reqwest::Method::GET,
+        &format!("{}/test", server.uri()),
+        None,
+    )
 }
 
 proptest! {
@@ -88,18 +114,7 @@ proptest! {
     /// unwinding.
     #[test]
     fn trello_http_call_never_panics_on_any_input(value in json_value_strategy()) {
-        let server = start_mock();
-        RUNTIME.block_on(async {
-            Mock::given(wiremock::matchers::any())
-                .respond_with(ResponseTemplate::new(200).set_body_json(&value))
-                .mount(&server)
-                .await;
-        });
-        let result = trello_http_call(
-            reqwest::Method::GET,
-            &format!("{}/test", server.uri()),
-            None,
-        );
+        let result = mock_trello_get(ResponseTemplate::new(200).set_body_json(&value));
         // The function returns `Result<Value, String>`; any
         // value is either Ok or Err.
         let _ = result;
@@ -109,18 +124,7 @@ proptest! {
     /// A literal `null` is valid JSON.
     #[test]
     fn trello_http_call_null_body_is_ok(_unused in 0..1u8) {
-        let server = start_mock();
-        RUNTIME.block_on(async {
-            Mock::given(wiremock::matchers::any())
-                .respond_with(ResponseTemplate::new(200).set_body_string("null"))
-                .mount(&server)
-                .await;
-        });
-        let result = trello_http_call(
-            reqwest::Method::GET,
-            &format!("{}/test", server.uri()),
-            None,
-        );
+        let result = mock_trello_get(ResponseTemplate::new(200).set_body_string("null"));
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), serde_json::Value::Null);
     }
@@ -129,18 +133,7 @@ proptest! {
     /// panic.
     #[test]
     fn trello_http_call_empty_body_is_err(_unused in 0..1u8) {
-        let server = start_mock();
-        RUNTIME.block_on(async {
-            Mock::given(wiremock::matchers::any())
-                .respond_with(ResponseTemplate::new(200).set_body_string(""))
-                .mount(&server)
-                .await;
-        });
-        let result = trello_http_call(
-            reqwest::Method::GET,
-            &format!("{}/test", server.uri()),
-            None,
-        );
+        let result = mock_trello_get(ResponseTemplate::new(200).set_body_string(""));
         assert!(result.is_err());
     }
 
@@ -150,18 +143,7 @@ proptest! {
     fn trello_http_call_non_json_body_is_err(
         body in prop::string::string_regex(r"<[a-z]{1,16}>[A-Za-z ]{1,64}</[a-z]{1,16}>").unwrap()
     ) {
-        let server = start_mock();
-        RUNTIME.block_on(async {
-            Mock::given(wiremock::matchers::any())
-                .respond_with(ResponseTemplate::new(200).set_body_string(&body))
-                .mount(&server)
-                .await;
-        });
-        let result = trello_http_call(
-            reqwest::Method::GET,
-            &format!("{}/test", server.uri()),
-            None,
-        );
+        let result = mock_trello_get(ResponseTemplate::new(200).set_body_string(&body));
         assert!(result.is_err());
     }
 
@@ -173,18 +155,7 @@ proptest! {
     fn trello_http_call_5xx_response_is_err(
         body in prop::string::string_regex(r"[A-Za-z0-9 ]{1,64}").unwrap()
     ) {
-        let server = start_mock();
-        RUNTIME.block_on(async {
-            Mock::given(wiremock::matchers::any())
-                .respond_with(ResponseTemplate::new(500).set_body_string(&body))
-                .mount(&server)
-                .await;
-        });
-        let result = trello_http_call(
-            reqwest::Method::GET,
-            &format!("{}/test", server.uri()),
-            None,
-        );
+        let result = mock_trello_get(ResponseTemplate::new(500).set_body_string(&body));
         assert!(result.is_err());
     }
 }

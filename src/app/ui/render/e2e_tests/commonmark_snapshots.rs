@@ -291,10 +291,10 @@ Autolink: <https://rust-lang.org> and email <user@example.com>
 /// frame before snapshotting, so the expensive one-time init is paid once
 /// for all 19 baselines instead of once per baseline.
 #[test]
-fn cm_snapshot_all_cases() {
+fn slow_cm_snapshot_all_cases() {
     let currently_rendering = Rc::new(RefCell::new(String::new()));
     let shared_md = Rc::clone(&currently_rendering);
-    let mut harness = snapshot_harness("cm_snapshot_all_cases", DEFAULT_VIEWPORT, move |ui| {
+    let mut harness = snapshot_harness("slow_cm_snapshot_all_cases", DEFAULT_VIEWPORT, move |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll = None;
             let mut toggles = Vec::new();

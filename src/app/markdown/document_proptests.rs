@@ -61,7 +61,7 @@ proptest! {
     /// The function is total: any input produces a
     /// `Document` value.
     #[test]
-    fn document_new_never_panics_on_any_input(source in any_utf8()) {
+    fn slow_document_new_never_panics_on_any_input(source in any_utf8()) {
         let _ = Document::new(source);
     }
 
@@ -71,7 +71,7 @@ proptest! {
     /// produces at most 2-3 events per byte of input for
     /// realistic markdown.
     #[test]
-    fn document_events_bounded(source in any_utf8()) {
+    fn slow_document_events_bounded(source in any_utf8()) {
         let doc = Document::new(source.clone());
         let upper = source.len() * 4 + 64;
         prop_assert!(
@@ -87,7 +87,7 @@ proptest! {
     /// surfaces a malformed level would break the table of
     /// contents builder (which uses the level as a key).
     #[test]
-    fn document_heading_levels_in_range(source in any_utf8()) {
+    fn slow_document_heading_levels_in_range(source in any_utf8()) {
         let doc = Document::new(source);
         for event in doc.events() {
             if let RenderEvent::Heading { level, .. } = event {
@@ -103,7 +103,7 @@ proptest! {
     /// have the same cell count; a non-rectangular result is
     /// a parser bug.
     #[test]
-    fn document_tables_are_rectangular(source in any_utf8()) {
+    fn slow_document_tables_are_rectangular(source in any_utf8()) {
         let doc = Document::new(source);
         for event in doc.events() {
             if let RenderEvent::Table(rows) = event
@@ -129,7 +129,7 @@ proptest! {
     /// re-encodes the source (e.g. normalises line endings)
     /// would break the editor's save round-trip.
     #[test]
-    fn document_source_round_trips(source in any_utf8()) {
+    fn slow_document_source_round_trips(source in any_utf8()) {
         let doc = Document::new(source.clone());
         prop_assert_eq!(doc.source(), source.as_str());
     }
@@ -173,7 +173,7 @@ proptest! {
     /// that re-parses unconditionally would corrupt the
     /// "no work to do" fast path.
     #[test]
-    fn document_update_source_same_is_noop(source in any_utf8()) {
+    fn slow_document_update_source_same_is_noop(source in any_utf8()) {
         let mut doc = Document::new(source.clone());
         let before = doc.revision();
         doc.update_source(source);

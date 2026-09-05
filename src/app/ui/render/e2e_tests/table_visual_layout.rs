@@ -537,7 +537,7 @@ fn test_problematic_table() {
 }
 
 #[test]
-fn test_wide_table_fuzz_widths() {
+fn slow_wide_table_fuzz_widths() {
     let md = r#"| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |
 |------|----------------------|-------------|---------|-----------|------------------------|---------|
 | BrandD | Model 16 AI (Example-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Example Core Ultra 7 256V (8C/8T Example Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ExampleReview, ExampleMag, and ExampleCheck. Great everyday performance and portability. |"#;

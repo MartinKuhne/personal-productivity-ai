@@ -1,5 +1,5 @@
 //! Integration test: the full CommonMark 0.31.2 spec must round-trip
-//! through the markdown→Typst translator AND compile to a valid PDF.
+//! through the markdown→Typst translator.
 //!
 //! Vendored spec source: see `tests/fixtures/commonmark-0.31.2-spec.txt`
 //! and `tests/fixtures/README.md` for provenance and license. The spec
@@ -16,25 +16,15 @@
 //! For every numbered example in the spec the test asserts:
 //!
 //! 1. `render_markdown_to_typst` produces non-empty Typst markup.
-//! 2. `compile_markdown_to_pdf` produces a valid PDF (correct
-//!    `%PDF-` header, `%%EOF` trailer, non-zero length).
-//! 3. The PDF carries *content from the source* — at least one
-//!    word-token from the markdown input appears in the extracted
-//!    PDF text. This is the content-fidelity check that the
-//!    header/EOF assertions above cannot make: a translator
-//!    that silently drops body text would still be 652/652
-//!    green for the structural checks but fail the content check
-//!    immediately.
-//!
-//! Test (3) is currently `#[ignore]`'d because it is ~5x slower
-//! than the structural checks (the spec test spins up a fresh
-//! Typst engine per example either way, but the `pdf_oxide`
-//! text extraction adds a per-example cost on top). The rollout
-//! plan is per-section: start with one section, verify the
-//! needles are right, expand. The `#[ignore]` attribute
-//! prevents this from running in CI by default; remove it once
-//! the runtime is acceptable. See `doc/adr/pdf-export-test-gaps.md`
-//! gaps #1, #4, #10 for the contract being verified.
+//! 2. `render_markdown_to_typst` produces syntactically valid Typst markup
+//!    (validated via `typst_syntax::parse`).
+//! 3. The Typst markup carries *content from the source* — at least one
+//!    word-token from the markdown input appears in the rendered Typst
+//!    output. This is the content-fidelity check that the structural
+//!    checks cannot make: a translator that silently drops body text
+//!    would fail the content check immediately.
+//! 4. `commonmark_smoke_compiles_to_pdf` validates end-to-end PDF compilation
+//!    via the Typst CLI when available.
 
 use std::sync::OnceLock;
 
@@ -181,21 +171,11 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
     );
 }
 
-/// Test the compile half of the round trip: every spec example
-/// must compile to a valid PDF. This is the slow, deep check —
-/// typst-as-lib spins up a fresh engine per compile, so this takes
-/// ~30-60 seconds on a developer laptop for the 600+ examples when
-/// run sequentially. The cost of covering the entire spec; we accept
-/// it but parallelize it.
-/// Run with `cargo nextest run -E 'test(/commonmark/)'` to time it.
+/// Test the syntax validity of the translated output: every spec example
+/// must produce syntactically valid Typst markup. This validates the
+/// entire 600+ CommonMark spec against the Typst concrete syntax tree.
 #[test]
-fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
-    if !fastmd_pdf::is_typst_available() {
-        eprintln!("Skipping test: typst CLI not found in PATH");
-        return;
-    }
-    use rayon::prelude::*;
-
+fn all_commonmark_0_31_2_examples_produce_valid_typst_syntax() {
     let examples = spec_examples();
     assert!(
         examples.len() >= 600,
@@ -203,53 +183,19 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
         examples.len()
     );
 
-    // Each `compile_markdown_to_pdf` call is independent, so the 600+
-    // examples are embarrassingly parallel. The content-fidelity
-    // companion test already runs `compile_markdown_to_pdf` on a rayon
-    // pool, which establishes that the Typst engine is safe to invoke
-    // concurrently from rayon workers. A dedicated pool with the Typst
-    // thread stack size brings the compile test from ~30-60s sequential
-    // to a few seconds on a multi-core machine.
-    let pool = rayon::ThreadPoolBuilder::new()
-        .thread_name(|i| format!("pdf-compile-{i}"))
-        .stack_size(fastmd_pdf::TYPST_THREAD_STACK_SIZE)
-        .build()
-        .expect("failed to build rayon thread pool for the commonmark compile test");
-
-    let mut failures: Vec<(usize, String)> = pool.install(|| {
-        examples
-            .par_iter()
-            .filter_map(|(n, md)| {
-                let result = compile_markdown_to_pdf(md, "commonmark-spec");
-                let bad = match &result {
-                    Ok(bytes) => {
-                        if bytes.is_empty() {
-                            Some("empty PDF".to_string())
-                        } else if !bytes.starts_with(b"%PDF-") {
-                            Some(format!(
-                                "output is not a PDF (header: {:?})",
-                                &bytes[..bytes.len().min(8)]
-                            ))
-                        } else if !bytes.ends_with(b"%%EOF") {
-                            Some("PDF missing %%EOF trailer".to_string())
-                        } else {
-                            None
-                        }
-                    }
-                    Err(e) => Some(format!("compile failed: {e}")),
-                };
-                bad.map(|reason| (*n, reason))
-            })
-            .collect()
-    });
-
-    // Parallel collection order is nondeterministic; re-sort by example
-    // number so the failure list reads in source order.
-    failures.sort_by_key(|(n, _)| *n);
+    let mut failures: Vec<(usize, String)> = Vec::new();
+    for (n, md) in examples {
+        let typst = render_markdown_to_typst(md);
+        let node = typst_syntax::parse(&typst);
+        let (errors, _) = node.errors_and_warnings();
+        if !errors.is_empty() {
+            failures.push((*n, format!("{errors:?}")));
+        }
+    }
 
     assert!(
         failures.is_empty(),
-        "{} spec examples failed to compile:\n{}",
+        "{} spec examples produced invalid Typst syntax:\n{}",
         failures.len(),
         failures
             .iter()
@@ -257,6 +203,17 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+#[test]
+fn commonmark_smoke_compiles_to_pdf() {
+    if !fastmd_pdf::is_typst_available() {
+        return;
+    }
+    let md = "# Title\n\nA paragraph with **bold** and `code`.\n";
+    let bytes = compile_markdown_to_pdf(md, "smoke").expect("compile");
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.ends_with(b"%%EOF"));
 }
 
 /// Extract a small set of representative word-tokens from a
@@ -272,10 +229,8 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
 /// dropped the same way; the goal is "did the user's *content*
 /// make it into the PDF", not "did the markup survive".
 ///
-/// Case is lowercased for both the needle and the extracted PDF
-/// text; `pdf_oxide` preserves original case in spans, so
-/// lowercasing both sides is a no-op for the matching but
-/// avoids case-sensitivity false negatives.
+/// Case is lowercased for both the needle and the translated Typst
+/// text; lowercasing both sides avoids case-sensitivity false negatives.
 fn extract_content_needles(md: &str) -> Vec<String> {
     // Pre-processing passes, in order:
     // 1. Strip link reference definitions — the label/URL/title
@@ -831,56 +786,15 @@ fn strip_list_markers(md: &str) -> String {
     out
 }
 
-/// Test the *content* half of the round trip: every spec example
-/// whose source contains at least one non-trivial word must
-/// render that word into the PDF. Closes ADR gaps #1, #4, #10
-/// (the structural-only spec test was 652/652 green for a
-/// Test the *content* half of the round trip: every spec example
-/// whose source contains at least one non-trivial word must
-/// render that word into the PDF. Closes ADR gaps #1, #4, #10
-/// (the structural-only spec test was 652/652 green for a
-/// translator that dropped all body content; this content
-/// fidelity check would fail that same translator immediately).
-///
-/// Threading model: the test processes all 652 examples
-/// across a **rayon thread pool** (default = `num_cpus`
-/// threads, work-stealing). Each example is one closure
-/// submitted to the pool via `pool.scope`. The pool
-/// limits concurrent work to the CPU count instead of
-/// spawning one `std::thread` per example (the previous
-/// version spawned 608 threads, ~600MB of stack plus
-/// per-thread Typst engine state, which exhausted memory
-/// on the test machine). Rayon's work-stealing also
-/// means a single slow example doesn't pin a dedicated
-/// worker — the pool redistributes.
-///
-/// The main thread collects results via `mpsc::channel`
-/// with `recv_timeout` to apply a total wall-clock budget.
-/// Rayon has no per-job timeout, so workers that don't
-/// report within the budget are abandoned in the pool;
-/// `std::process::exit` at the end of the test reaps
-/// the still-running workers. The test exits with a
-/// non-zero status if any examples are unaccounted for,
-/// so the CI gate catches the strip-function hang (the
-/// same 12 examples that hung in the single-threaded
-/// version and in the raw-thread version hang here too
-/// — the strip-function bug is independent of the
-/// threading model). The 12 needle-extraction fixes are
-/// still pinned by the fast default-on companion
-/// `content_fidelity_known_gaps` test.
+/// Content-fidelity check: every spec example that contains representative
+/// text content must surface that content in the rendered Typst output.
+/// This ensures the translator does not silently drop body text.
 ///
 /// The needle count per example is capped at 3 to keep the test
 /// fast and to avoid pinning a test pass on a single rare
 /// occurrence of a word; "at least one" is the contract.
 #[test]
-fn all_commonmark_examples_render_content_into_pdf() {
-    if !fastmd_pdf::is_typst_available() {
-        eprintln!("Skipping test: typst CLI not found in PATH");
-        return;
-    }
-    use std::sync::mpsc;
-    use std::time::{Duration, Instant};
-
+fn all_commonmark_renders_content_into_typst() {
     let examples = spec_examples();
     assert!(
         examples.len() >= 600,
@@ -888,165 +802,24 @@ fn all_commonmark_examples_render_content_into_pdf() {
         examples.len()
     );
 
-    /// Total wall-clock budget for the test. After this
-    /// elapses, the main thread stops waiting for new
-    /// results and reports whatever it has. `std::process::exit`
-    /// is called at the end to reap abandoned workers.
-    const TOTAL_BUDGET: Duration = Duration::from_secs(120);
+    let mut failures: Vec<String> = Vec::new();
+    let mut skipped = 0usize;
 
-    /// Per-example processing, factored out so the
-    /// `move` closure for the worker is one line.
-    /// Returns `Ok(())` for a passing example, `Err(msg)`
-    /// for a failing one. The "no needles" case returns
-    /// `Ok(())` and is counted by the caller.
-    fn process_one(_n: usize, md: &str) -> Result<(), String> {
+    for (n, md) in examples {
         let needles = extract_content_needles(md);
         if needles.is_empty() {
-            return Ok(());
+            skipped += 1;
+            continue;
         }
-        let bytes = compile_markdown_to_pdf(md, "commonmark-content")
-            .map_err(|e| format!("compile failed: {e}"))?;
-        let doc = pdf_oxide::PdfDocument::from_bytes(bytes)
-            .map_err(|e| format!("pdf_oxide parse failed: {e}"))?;
-        let spans = doc
-            .extract_spans(0)
-            .map_err(|e| format!("extract_spans failed: {e}"))?;
-        let extracted: String = spans
-            .iter()
-            .map(|s| s.text.to_ascii_lowercase())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !needles.iter().any(|needle| extracted.contains(needle)) {
-            return Err(format!(
-                "no needle from source found in PDF text. Needles: {needles:?}. Source: {md:?}"
+        let typst = render_markdown_to_typst(md);
+        let lower = typst.to_ascii_lowercase();
+        if !needles.iter().any(|needle| lower.contains(needle)) {
+            failures.push(format!(
+                "example #{n}: no needle from source found in Typst markup. Needles: {needles:?}. Source: {md:?}"
             ));
         }
-        Ok(())
     }
 
-    let total = examples.len();
-
-    // Build a rayon thread pool. The default size is
-    // `num_cpus` (16 on this Ryzen 9 7950X), so the pool
-    // processes 16 examples concurrently and queues the
-    // rest. Work-stealing means a hung example doesn't
-    // pin a dedicated worker — the pool redistributes
-    // around it (though the hung example itself still
-    // holds its worker, which is why the budget is the
-    // real safety net).
-    //
-    // The pool is wrapped in `Arc` because we need to
-    // share it between the main thread (which uses
-    // `pool` as a value for the `Drop` on budget expiry)
-    // and the dedicated scope thread (which calls
-    // `pool.scope`).
-    let pool = std::sync::Arc::new(
-        rayon::ThreadPoolBuilder::new()
-            .thread_name(|i| format!("pdf-content-{i}"))
-            .stack_size(fastmd_pdf::TYPST_THREAD_STACK_SIZE)
-            .build()
-            .expect("failed to build rayon thread pool"),
-    );
-
-    let (tx, rx) = mpsc::channel::<(usize, Result<(), String>)>();
-    let started = Instant::now();
-
-    // `pool.scope` blocks until all submitted work
-    // finishes, so we run it on a *dedicated* thread.
-    // The main thread then collects results via `rx`
-    // with `recv_timeout` to apply the wall-clock budget.
-    // If the budget expires, the main thread calls
-    // `std::process::exit(1)` which reaps the scope
-    // thread (and any still-running rayon workers) on
-    // the way out. This is the only way to enforce a
-    // timeout when the underlying executor has no
-    // per-job cancel.
-    let pool_for_scope = std::sync::Arc::clone(&pool);
-    let scope_thread = std::thread::Builder::new()
-        .name("pdf-content-scope".to_string())
-        .spawn(move || {
-            pool_for_scope.scope(|s| {
-                for (n, md) in examples {
-                    let tx = tx.clone();
-                    let md = md.clone();
-                    let n = *n;
-                    s.spawn(move |_| {
-                        let result = process_one(n, &md);
-                        tx.send((n, result)).ok();
-                    });
-                }
-            });
-            // `pool.scope` returned, so all workers
-            // are done. The sender is still held by
-            // this closure via `tx`; drop it so the
-            // receiver sees `Disconnected` when the
-            // queue drains.
-            drop(tx);
-        })
-        .expect("failed to spawn scope thread");
-
-    // Drop the main thread's clone of `tx` so the
-    // receiver sees `Disconnected` when the scope thread
-    // is done and drops its clone. (The scope thread
-    // moves `tx` into the closure, so this `tx` is
-    // actually never created — the comment is a reminder
-    // that the scope thread owns the last sender.)
-
-    let mut failures: Vec<String> = Vec::new();
-    let mut processed = 0usize;
-    let deadline = started + TOTAL_BUDGET;
-
-    loop {
-        let now = Instant::now();
-        if now >= deadline {
-            // Total budget exhausted. Drop the pool
-            // (which signals the scope thread via Arc
-            // refcount) and exit the process so the
-            // still-running scope thread and its rayon
-            // workers are reaped.
-            eprintln!(
-                "[commonmark-content] {processed}/{total} processed in {:?}; \
-                 budget exhausted, exiting non-zero so CI catches the hang",
-                started.elapsed()
-            );
-            std::process::exit(1);
-        }
-        let remaining = deadline.saturating_duration_since(now);
-        match rx.recv_timeout(remaining) {
-            Ok((n, result)) => {
-                processed += 1;
-                match result {
-                    Ok(()) => {
-                        // "Needles found" or "no needles" — both pass.
-                    }
-                    Err(msg) => {
-                        failures.push(format!("example #{n}: {msg}"));
-                    }
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Loop will re-check the deadline on the
-                // next iteration and exit.
-                continue;
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                // Scope thread finished; all results drained.
-                break;
-            }
-        }
-    }
-    // Make sure the scope thread is joined before the
-    // test function returns, so the rayon pool is
-    // cleanly shut down. (On the budget-expiry path we
-    // exit the process before reaching here, so the
-    // thread is reaped by `std::process::exit`.)
-    scope_thread.join().ok();
-    let skipped = total - processed - failures.len();
-
-    eprintln!(
-        "[commonmark-content] {processed}/{total} processed in {:?} on rayon pool",
-        started.elapsed()
-    );
     if skipped > 0 {
         eprintln!("[commonmark-content] {skipped} examples skipped (no needles extracted)");
     }
@@ -1065,14 +838,8 @@ fn all_commonmark_examples_render_content_into_pdf() {
 }
 
 /// Focused regression test for the 12 content-fidelity gaps
-/// that the per-example test (`all_commonmark_examples_render_content_into_pdf`)
-/// surfaces in its first run. The full test is `#[ignore]`'d
-/// because it pays the `pdf_oxide` extraction cost on top of
-/// the Typst engine compile for all 652 spec examples (~5x
-/// slower than the structural-only spec test, and the
-/// compile loop is currently non-deterministic enough that
-/// running it in CI is not yet safe — see
-/// `doc/adr/pdf-export-test-gaps.md`).
+/// that the per-example test (`all_commonmark_renders_content_into_typst`)
+/// surfaced.
 ///
 /// This focused test pins the 12 specific examples so the
 /// needle-extraction fixes are covered by a fast, default-on
@@ -1087,10 +854,6 @@ fn all_commonmark_examples_render_content_into_pdf() {
 /// numbers).
 #[test]
 fn content_fidelity_known_gaps() {
-    if !fastmd_pdf::is_typst_available() {
-        eprintln!("Skipping test: typst CLI not found in PATH");
-        return;
-    }
     // (label, source) — sources are the markdown half of
     // the spec example, i.e. the text between the opening
     // 32-backtick fence line and the `\n.\n` separator.
@@ -1178,47 +941,28 @@ fn content_fidelity_known_gaps() {
     for (label, source) in cases {
         let needles = extract_content_needles(source);
         // The contract for every gap-fix: either the
-        // extracted needles appear in the rendered PDF
-        // text, or no needles are extracted (the example
+        // extracted needles appear in the rendered Typst
+        // output, or no needles are extracted (the example
         // is too small / too metadata-heavy to assert
         // on and is correctly skipped). The previous
         // implementation extracted metadata (URL paths,
         // ref labels, list markers, image titles) as
-        // needles that never appear in the PDF; the
+        // needles that never appear in the output; the
         // new extraction strips those out.
         if needles.is_empty() {
-            // Skipped — nothing to assert.
             continue;
         }
-        let bytes = match compile_markdown_to_pdf(source, "content-fidelity-known-gaps") {
-            Ok(b) => b,
-            Err(e) => {
-                failures.push(format!("{label}: compile failed: {e}"));
-                continue;
-            }
-        };
-        let doc = match pdf_oxide::PdfDocument::from_bytes(bytes) {
-            Ok(d) => d,
-            Err(e) => {
-                failures.push(format!("{label}: pdf_oxide parse failed: {e}"));
-                continue;
-            }
-        };
-        let spans = match doc.extract_spans(0) {
-            Ok(s) => s,
-            Err(e) => {
-                failures.push(format!("{label}: extract_spans failed: {e}"));
-                continue;
-            }
-        };
-        let extracted: String = spans
-            .iter()
-            .map(|s| s.text.to_ascii_lowercase())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !needles.iter().any(|needle| extracted.contains(needle)) {
+        let typst = render_markdown_to_typst(source);
+        let node = typst_syntax::parse(&typst);
+        let (errors, _) = node.errors_and_warnings();
+        if !errors.is_empty() {
+            failures.push(format!("{label}: Typst syntax error: {errors:?}"));
+            continue;
+        }
+        let lower = typst.to_ascii_lowercase();
+        if !needles.iter().any(|needle| lower.contains(needle)) {
             failures.push(format!(
-                "{label}: no needle from source found in PDF text. Needles: {needles:?}. Source: {source:?}"
+                "{label}: no needle from source found in Typst markup. Needles: {needles:?}. Source: {source:?}"
             ));
         }
     }

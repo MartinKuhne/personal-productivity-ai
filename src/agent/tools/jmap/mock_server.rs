@@ -206,7 +206,6 @@ fn spawn_mock_server_inner(
                 );
                 let _ = stream.write_all(response_str.as_bytes());
             }
-            std::thread::sleep(std::time::Duration::from_millis(200));
         }
     });
     format!("http://127.0.0.1:{}", port)

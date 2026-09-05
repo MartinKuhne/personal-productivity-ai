@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-const TEMPLATE: &str = r##"
+pub(crate) const TEMPLATE: &str = r##"
 #set page(
   paper: "a4",
   margin: (x: 2.4cm, y: 2.6cm),
