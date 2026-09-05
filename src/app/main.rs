@@ -50,11 +50,16 @@ fn main() -> eframe::Result<()> {
         .install_default()
         .ok();
 
+    let icon = fastmd::ui::logo::load_app_icon();
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_app_id("fastmd")
+        .with_inner_size([1000.0, 700.0])
+        .with_title("FastMD Viewer");
+    if let Some(icon) = icon {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_app_id("fastmd")
-            .with_inner_size([1000.0, 700.0])
-            .with_title("⚡ FastMD Viewer"),
+        viewport,
         ..Default::default()
     };
 

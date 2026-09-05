@@ -35,6 +35,8 @@ pub(crate) struct InlineRenderItem<'a> {
     pub list_ordinal: Option<u64>,
     /// Sequential index of the task item within the document.
     pub task_index: usize,
+    /// Whether this inline block should scroll into view (e.g. search jump match).
+    pub scroll_to_me: bool,
 }
 
 impl<'a> InlineRenderItem<'a> {
@@ -48,6 +50,7 @@ impl<'a> InlineRenderItem<'a> {
             indent: 0,
             list_ordinal: None,
             task_index: 0,
+            scroll_to_me: false,
         }
     }
 }
@@ -91,7 +94,7 @@ pub(crate) fn render_inline(
         ui.available_size_before_wrap().x,
         ui.spacing().interact_size.y,
     );
-    ui.allocate_ui_with_layout(
+    let inner_resp = ui.allocate_ui_with_layout(
         initial_size,
         egui::Layout::left_to_right(egui::Align::Center)
             .with_main_align(egui::Align::Min)
@@ -100,6 +103,9 @@ pub(crate) fn render_inline(
             render_inline_inner(ui, item, pending_toggles);
         },
     );
+    if item.scroll_to_me {
+        inner_resp.response.scroll_to_me(Some(egui::Align::Center));
+    }
 }
 
 /// Inner inline rendering — actually paints the styled `InlineElem` runs.
@@ -166,7 +172,12 @@ pub(super) fn render_inline_inner(
                 ui.add(egui::Label::new(rt).wrap());
             }
             InlineElem::Link(url, text) => {
-                ui.hyperlink_to(text, url);
+                let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
+                    format!("Note: {target}")
+                } else {
+                    url.clone()
+                };
+                ui.hyperlink_to(text, url).on_hover_text(hover_tip);
             }
             InlineElem::Image(url) => {
                 // Same egui 0.35 wrap-mode default-off hazard as

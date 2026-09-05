@@ -8,9 +8,8 @@
 //!
 //! # Pipeline
 //!
-//! 1. [`super::typst_translator::render_markdown_to_typst`] — pure markdown
-//!    to Typst markup, see [`super::typst_translator`] for the
-//!    translator.
+//! 1. `fastmd_pdf::render_markdown_to_typst` — pure markdown
+//!    to Typst markup.
 //! 2. `TypstEngine::compile` — in-process Typst engine from
 //!    `typst-as-lib`, fed the translated body inside a fixed
 //!    `TEMPLATE` that sets page geometry, fonts, and a small style
@@ -21,13 +20,11 @@
 //!    dependency) so the user lands in their default PDF viewer, the
 //!    same UX the existing `print.rs` provides.
 //!
-//! # Spec traceability
+//! # Dynamic Detection
 //!
-//! The `pdf-export` Cargo feature gates this module off entirely
-//! (the optional dep `typst-as-lib` is also gated on the same
-//! feature). When the feature is disabled, this file is not compiled
-//! and `crate::export::pdf` simply does not exist. The UI wires
-//! the "Save as PDF" menu entry only when the feature is on — see
+//! PDF export uses the official `typst` CLI binary found dynamically in
+//! the system `PATH`. The UI wires the "Save as PDF..." menu entry only
+//! when `fastmd_pdf::is_typst_available()` returns true — see
 //! `src/ui/tree/render.rs`.
 //!
 //! Unit tests live in the sibling `save_tests.rs` sidecar.
@@ -110,6 +107,19 @@ pub fn compile_and_save_pdf(
             "Markdown content is empty for {}",
             job.markdown_path.display()
         ));
+    }
+    if !fastmd_pdf::is_typst_available() {
+        let err_msg = "Typst CLI binary not found in PATH".to_string();
+        let _ = tx.as_ref().map(|sender| {
+            let _ = sender.send(
+                BackgroundLogEntry::new(
+                    LogCategory::Print,
+                    format!("PDF compile failed for {}: {}", job.title, err_msg),
+                )
+                .into(),
+            );
+        });
+        return Err(err_msg);
     }
     let output_path = job.resolved_output_path();
     let _ = tx.as_ref().map(|sender| {

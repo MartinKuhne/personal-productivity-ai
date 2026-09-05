@@ -303,9 +303,7 @@ mod tests {
         }
     }
 
-    fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state(crate::config::AppConfig::default())
-    }
+    use crate::ui::test_helpers::app::test_app as create_test_app;
 
     #[test]
     fn test_show_agent_debug_window_closed() {

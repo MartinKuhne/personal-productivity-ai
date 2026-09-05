@@ -175,20 +175,24 @@ pub const FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED: &str =
 
 // --- caldav (calendar) ---
 
-pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar items by keyword. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar items by keyword. Returns up to 32 structured event items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
-pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range. Returns up to 32 structured event items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
-pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get a calendar item by its full href path. Provide the exact href value returned by search or get tools instead of a UUID.";
+pub const GET_CALENDAR_ITEM_DESCRIPTION: &str =
+    "Get a calendar item by its full href path (or id). Returns structured event details.";
 
-pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event to the first configured CalDAV calendar. All fields are optional — only include fields you know. The tool generates a UID automatically.";
+pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event to the configured CalDAV calendar. All event fields are optional — only include fields you know. An optional `client` specifies the target account (defaults to primary). The tool generates a UID automatically.";
 
-pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar event identified by `id` (the href returned by search or get tools). Only the fields you provide are changed; all other event properties are preserved.";
+pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar event identified by `href` (or `id`). An optional `client` specifies the target account. Only the fields you provide are changed; all other event properties are preserved.";
 
-pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
+pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item identified by `href` (or `id`). An optional `client` specifies the target account.";
+
+pub const FIELD_CALENDAR_CLIENT_DESC: &str =
+    "Optional CalDAV account name to target. If omitted, uses the default account.";
 
 pub const FIELD_CALENDAR_HREF_DESC: &str =
-    "The full href path of the calendar item, as returned by search or get tools.";
+    "The full href path (or id) of the calendar item, as returned by search or get tools.";
 
 pub const FIELD_CALENDAR_SUMMARY_DESC: &str =
     "Event title/summary. Defaults to 'New Event' if omitted.";
@@ -205,8 +209,11 @@ pub const FIELD_CALENDAR_LOCATION_DESC: &str = "Event location (e.g. room name, 
 
 // --- carddav (contacts) ---
 
+pub const FIELD_CONTACT_CLIENT_DESC: &str =
+    "Optional CardDAV account name to target. If omitted, uses the default account.";
+
 pub const FIELD_CONTACT_HREF_DESC: &str =
-    "The href of the contact, as returned by `get_contact` or `search_contact`.";
+    "The href (or id) of the contact, as returned by `get_contact` or `search_contact`.";
 
 pub const FIELD_CONTACT_NAME_DESC: &str = "The contact's display name.";
 
@@ -241,21 +248,15 @@ pub const FIELD_ADDRESS_PO_BOX_DESC: &str = "P.O. box number.";
 
 pub const FIELD_ADDRESS_EXT_DESC: &str = "Extended address (e.g. apartment or suite).";
 
-pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Returns up to 32 structured contact items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. The created resource is returned with its href, Location, and ETag.";
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. An optional `client` specifies the target account. The created resource is returned with its href and path.";
 
-pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
-raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
-`bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
-objects with the same shape as `add_contact`).";
+pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its href (or id). Returns structured fields: `fn_name`, `email`, `tel`, `org`, `bday`, `addresses`, and raw `vcard`.";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href returned by `get_contact` or `search_contact`). Only the fields you provide are touched; every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is preserved verbatim, so this is safe to call with a partial payload. The contact's vCard `UID` is preserved across the update so the addressbook href stays stable. `addresses` is list-valued: when provided, the new list replaces every existing ADR on the contact. The update is performed with `If-Match` so concurrent edits are detected — if the server returns 412 the caller should re-`get_contact` and retry.";
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `href` (or `id`). An optional `client` specifies the target account. Only the fields you provide are touched; every other vCard property on the contact is preserved verbatim. The contact's vCard `UID` is preserved across the update so the addressbook href stays stable.";
 
-pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
-`get_contact` or `search_contact`). A 404 (already absent) is treated as a \
-successful no-op so the call is idempotent. Other non-2xx responses are \
-propagated as errors with the truncated response body for diagnosis.";
+pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `href` (or `id`). An optional `client` specifies the target account. A 404 (already absent) is treated as a successful no-op so the call is idempotent.";
 
 // --- csv (database) ---
 

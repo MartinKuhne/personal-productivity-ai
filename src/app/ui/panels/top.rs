@@ -71,6 +71,11 @@ pub fn apply_tools_button_click() -> UserCommand {
     UserCommand::OpenToolsDialog
 }
 
+/// Returns the command for clicking the "About FastMD..." button.
+pub fn apply_about_button_click() -> UserCommand {
+    UserCommand::OpenAboutDialog
+}
+
 /// Returns the command for toggling the background logs window.
 pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
     UserCommand::ToggleBackgroundLogs(show)
@@ -127,6 +132,15 @@ pub fn show_top_panel_capture(
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
+            // Document + Bolt logo badge (20×20) — vector painted so no texture dependency.
+            let logo_rect = {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+                crate::ui::logo::paint_logo(ui, rect);
+                rect
+            };
+            // Keep the heading accessible; `APP_TITLE` is plain text and the logo conveys the mark.
+            let _ = logo_rect;
             ui.heading(
                 RichText::new(crate::ui::strings::APP_TITLE)
                     .strong()
@@ -356,6 +370,16 @@ pub fn show_top_panel_capture(
                             on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
                         }
                     });
+
+                    ui.separator();
+
+                    if ui.button(crate::ui::strings::MENU_ABOUT).clicked() {
+                        app.orchestrator
+                            .user_command_bus
+                            .publish(apply_about_button_click());
+                        on_click(crate::ui::strings::ABOUT_EVENT);
+                        ui.close();
+                    }
                 });
             });
         });

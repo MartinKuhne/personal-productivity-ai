@@ -12,9 +12,7 @@ use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
 
 /// Idle-CPU regression: when the app is fully idle (no file events
 /// arrived, indexing is finished, and no raw input is pending),
@@ -1383,4 +1381,133 @@ fn test_broadcast_lag_handled_with_truncation_marker() {
         "transcript content must contain truncation marker; got: {:?}",
         app.orchestrator.agent_transcript.content
     );
+}
+
+#[test]
+fn test_handle_platform_commands_local_markdown_publishes_select_file() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+    let rx = app.orchestrator.user_command_bus.subscribe();
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "docs/guide.md".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    let received = rx
+        .try_recv_exposing_lag()
+        .expect("must receive UserCommand");
+    match received {
+        crate::bus::events::user_command::UserCommand::SelectFile { path, multi } => {
+            assert!(!multi);
+            assert!(path.ends_with("docs/guide.md") || path.ends_with("docs\\guide.md"));
+        }
+        other => panic!("expected SelectFile, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_handle_platform_commands_wikilink_publishes_select_file() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+    let rx = app.orchestrator.user_command_bus.subscribe();
+
+    let target_file = PathBuf::from("/workspace/Personal/Journal-2023-10-15.md");
+    app.orchestrator.file_processor.all_files = vec![target_file.clone()];
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "wikilink:Journal-2023-10-15".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    let received = rx
+        .try_recv_exposing_lag()
+        .expect("must receive UserCommand");
+    match received {
+        crate::bus::events::user_command::UserCommand::SelectFile { path, multi } => {
+            assert!(!multi);
+            assert_eq!(path, target_file);
+        }
+        other => panic!("expected SelectFile, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_handle_platform_commands_anchor_scrolls_heading() {
+    let mut app = create_test_app();
+    let ctx = egui::Context::default();
+
+    // Populate TOC / heading_ids
+    app.orchestrator.tabs.toc = vec![crate::ui::ToCEntry::new(
+        "Quick Start Guide",
+        2,
+        "Quick Start Guide",
+    )];
+
+    let cmd = egui::OutputCommand::OpenUrl(egui::output::OpenUrl {
+        url: "#quick-start-guide".to_string(),
+        new_tab: false,
+    });
+
+    app.handle_platform_commands(&[cmd], &ctx);
+
+    assert_eq!(
+        app.orchestrator.tabs.scroll_to_header_id.as_deref(),
+        Some("Quick Start Guide")
+    );
+}
+
+/// Startup must evaluate the first-run helper against the restored state
+/// (spec FR-016): fresh state opens the dialog and records the version,
+/// a same-version restart stays quiet, and an older recorded version
+/// re-opens once and is overwritten. State is restored through the same
+/// serde path `FastMdApp::new` uses; the helper itself is invoked inline
+/// here because `new` requires an eframe::CreationContext.
+#[test]
+fn test_startup_first_run_auto_show_wiring() {
+    use crate::ui::about_dialog::{APP_VERSION, apply_first_run_auto_show};
+
+    // Fresh state (pre-field JSON deserialises to unseen) opens + records.
+    let mut fresh: PersistedUiState = serde_json::from_str("{}").unwrap();
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        dialogs.about_dialog_open,
+        "first run must open the About dialog"
+    );
+    assert_eq!(fresh.about_shown_for_version.as_deref(), Some(APP_VERSION));
+
+    // Same-version restart stays quiet.
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(!apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        !dialogs.about_dialog_open,
+        "same version must not re-display the dialog"
+    );
+
+    // Older recorded version re-opens once and is overwritten.
+    fresh.about_shown_for_version = Some("0.1.0".to_owned());
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        dialogs.about_dialog_open,
+        "upgraded version must auto-show once"
+    );
+    assert_eq!(fresh.about_shown_for_version.as_deref(), Some(APP_VERSION));
 }
