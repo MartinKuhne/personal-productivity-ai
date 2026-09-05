@@ -240,8 +240,9 @@ struct StdioTransport {
     /// `take()` it on shutdown for `wait()`/`kill()` while the rest
     /// of the transport is read-only.
     child: Arc<Mutex<Option<Child>>>,
-    /// Serialized writer for stdin.
-    stdin: Arc<Mutex<ChildStdin>>,
+    /// Serialized writer for stdin, wrapped in `Option` so we can
+    /// `take()` it on shutdown to drop the handle and close the pipe.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
     /// Channel of lines from a background reader thread, wrapped
     /// in `Arc<Mutex<…>>` so the call-site can `Arc::clone` the
     /// receiver and use it without holding the session-level
@@ -253,10 +254,13 @@ struct StdioTransport {
 
 impl Drop for StdioTransport {
     fn drop(&mut self) {
-        // Best-effort cleanup if `shutdown` wasn't called: kill the
+        // Best-effort cleanup if `shutdown` wasn't called: close stdin, kill the
         // child and let the OS reap it. We don't wait synchronously
         // (Drop is sync); the child handle will be released as
         // soon as the process exits.
+        if let Ok(mut stdin_guard) = self.stdin.lock() {
+            let _ = stdin_guard.take();
+        }
         if let Some(mut child) = self.child.lock().ok().and_then(|mut g| g.take()) {
             let _ = child.kill();
             // Reap in the background so the OS handle doesn't leak.
@@ -603,84 +607,33 @@ impl McpClientSession {
         }
     }
 
-    fn shutdown_stdio_transport(mut transport: StdioTransport) {
-        // Spec §2.4 stdio shutdown:
-        //   1. Close input stream to the server process
-        //   2. Wait for the server to exit
-        //   3. Send SIGTERM if the server does not exit within a
-        //      reasonable time
-        //   4. Send SIGKILL if the server still does not exit
-        //
-        // We implement this as four discrete steps, each with a
-        // short grace period. The total worst-case shutdown time
-        // is bounded by the sum of the grace periods (~4s).
-
-        // Step 1: close stdin. Since `Arc::get_mut` succeeds when
-        // there's exactly one strong reference and we hold the
-        // only one, we can take the inner Mutex out, drop the lock
-        // guard (which drops the ChildStdin), and close the pipe.
-        if let Ok(stdin_guard) = transport.stdin.lock() {
-            drop(stdin_guard);
+    fn shutdown_stdio_transport(transport: StdioTransport) {
+        // Step 1: close stdin pipe to signal EOF to the child process.
+        if let Ok(mut stdin_guard) = transport.stdin.lock() {
+            let _ = stdin_guard.take();
         }
 
-        let Some(child_arc) = Arc::get_mut(&mut transport.child) else {
-            return;
-        };
-        let Some(mut child) = child_arc.get_mut().ok().and_then(|g| g.take()) else {
+        let Some(mut child) = transport.child.lock().ok().and_then(|mut g| g.take()) else {
             return;
         };
 
-        // Step 2: wait briefly for a clean exit. A well-behaved
-        // server notices the closed stdin and shuts down within
-        // ~100ms.
-        if wait_for_exit(&mut child, std::time::Duration::from_secs(2)) {
+        // Step 2: wait up to 1 second for the MCP server to exit cleanly after closing stdin.
+        // wait_for_exit periodically polls child.try_wait() every 20ms.
+        if wait_for_exit(&mut child, std::time::Duration::from_secs(1)) {
             return;
         }
 
-        // Step 3: SIGTERM (Unix) or direct kill (Windows — no
-        // SIGTERM equivalent). On Unix we spawn `kill -TERM` to
-        // give the server a chance to flush and exit cleanly
-        // before escalating.
-        Self::send_sigterm(&mut child);
-        if wait_for_exit(&mut child, std::time::Duration::from_secs(2)) {
-            return;
-        }
-
-        // Step 4: SIGKILL. `Child::kill()` is the cross-platform
-        // hard-kill (TerminateProcess on Windows, SIGKILL on
-        // Unix). Reap the child to avoid a zombie.
-        let _ = child.kill();
-        let _ = child.wait();
-        // When `transport` is dropped here, the line_rx Receiver
-        // is dropped (the reader thread sees the channel close
-        // and exits), and any leftover stdin Arc references are
-        // dropped.
-    }
-
-    /// Send SIGTERM to the child process. Unix-only; no-op on
-    /// Windows (where there is no SIGTERM equivalent and the
-    /// caller will fall straight through to `Child::kill()`).
-    /// Implemented by spawning the standard `kill` command rather
-    /// than pulling in a direct `libc` dependency.
-    #[cfg(unix)]
-    fn send_sigterm(child: &mut std::process::Child) {
+        // Step 3: if not exited within 1s, log an error and terminate the process.
+        // Do not wait any further after terminating the process.
         let pid = child.id();
-        if pid == 0 {
-            return;
-        }
-        // Best-effort. If `kill` isn't on PATH (extremely rare on
-        // Unix) the call fails silently and we fall through to
-        // SIGKILL on the next step.
-        let _ = std::process::Command::new("kill")
-            .arg("-TERM")
-            .arg(pid.to_string())
-            .status();
+        tracing::error!(
+            name = "mcp.stdio.shutdown.timeout",
+            error_code = "MCP-4001",
+            pid = pid,
+            "MCP stdio server did not exit within 1s after closing stdin; terminating process"
+        );
+        let _ = child.kill();
     }
-
-    /// No-op on Windows — there is no SIGTERM. The caller's next
-    /// step is `Child::kill()` which uses TerminateProcess.
-    #[cfg(not(unix))]
-    fn send_sigterm(_child: &mut std::process::Child) {}
 
     /// Initialize the session if it is not yet active. Idempotent.
     pub async fn ensure_initialized(&self) -> Result<(), McpError> {
@@ -981,10 +934,13 @@ impl McpClientSession {
                 .stdio
                 .as_ref()
                 .expect("ensure_stdio_transport_locked just installed one");
-            let mut stdin = transport
+            let mut stdin_guard = transport
                 .stdin
                 .lock()
                 .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
+            let stdin = stdin_guard
+                .as_mut()
+                .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
             Self::write_json_line(&mut *stdin, &payload)
         };
         if let Err(e) = write_result {
@@ -1174,9 +1130,12 @@ impl McpClientSession {
                 .stdin
                 .clone()
         };
-        let mut stdin = transport
+        let mut stdin_guard = transport
             .lock()
             .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
+        let stdin = stdin_guard
+            .as_mut()
+            .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
         if let Err(e) = Self::write_json_line(&mut *stdin, payload) {
             tracing::warn!(
                 server = %self.config_label(),
@@ -1184,7 +1143,7 @@ impl McpClientSession {
                 error = %e,
                 "stdio write failed; transport will be marked dead"
             );
-            drop(stdin);
+            drop(stdin_guard);
             self.mark_stdio_dead("write", e);
         }
         Ok(())
@@ -1275,7 +1234,7 @@ impl McpClientSession {
 
         state.stdio = Some(StdioTransport {
             child: Arc::new(Mutex::new(Some(child))),
-            stdin: Arc::new(Mutex::new(stdin)),
+            stdin: Arc::new(Mutex::new(Some(stdin))),
             line_rx,
         });
         Ok(())
@@ -2350,6 +2309,92 @@ mod tests {
         assert!(sess.protocol_version().is_none());
         assert!(sess.server_capabilities().is_none());
         assert!(sess.server_info().is_none());
+    }
+
+    #[test]
+    fn wait_for_exit_returns_true_early_on_fast_process() {
+        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
+        let mut child = cmd.spawn().expect("spawn cargo --version");
+        let start = std::time::Instant::now();
+        let exited = wait_for_exit(&mut child, std::time::Duration::from_secs(1));
+        let elapsed = start.elapsed();
+        assert!(exited, "process should have exited cleanly");
+        assert!(
+            elapsed < std::time::Duration::from_millis(800),
+            "should return as soon as child exits, not sleep full 1s; elapsed={elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn wait_for_exit_returns_false_when_child_keeps_running() {
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("ping");
+        #[cfg(windows)]
+        cmd.args(["127.0.0.1", "-n", "4"]);
+        #[cfg(not(windows))]
+        let mut cmd = std::process::Command::new("sleep");
+        #[cfg(not(windows))]
+        cmd.arg("4");
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+        let mut child = cmd.spawn().expect("spawn long-running process");
+        let start = std::time::Instant::now();
+        let exited = wait_for_exit(&mut child, std::time::Duration::from_millis(100));
+        let elapsed = start.elapsed();
+        assert!(!exited, "process should still be running");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(90),
+            "should poll until timeout; elapsed={elapsed:?}"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn shutdown_stdio_transport_fast_exit() {
+        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
+        let child = cmd.spawn().expect("spawn cargo --version");
+        let line_rx = Arc::new(Mutex::new(std::sync::mpsc::channel().1));
+        let transport = StdioTransport {
+            child: Arc::new(Mutex::new(Some(child))),
+            stdin: Arc::new(Mutex::new(None)),
+            line_rx,
+        };
+        let start = std::time::Instant::now();
+        McpClientSession::shutdown_stdio_transport(transport);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(800),
+            "clean exit should complete well before 1s"
+        );
+    }
+
+    #[test]
+    fn shutdown_stdio_transport_times_out_and_terminates() {
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("ping");
+        #[cfg(windows)]
+        cmd.args(["127.0.0.1", "-n", "6"]);
+        #[cfg(not(windows))]
+        let mut cmd = std::process::Command::new("sleep");
+        #[cfg(not(windows))]
+        cmd.arg("6");
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+        let child = cmd.spawn().expect("spawn sleep process");
+        let line_rx = Arc::new(Mutex::new(std::sync::mpsc::channel().1));
+        let transport = StdioTransport {
+            child: Arc::new(Mutex::new(Some(child))),
+            stdin: Arc::new(Mutex::new(None)),
+            line_rx,
+        };
+        let start = std::time::Instant::now();
+        McpClientSession::shutdown_stdio_transport(transport);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= std::time::Duration::from_millis(950)
+                && elapsed < std::time::Duration::from_millis(2500),
+            "shutdown should wait ~1s then terminate immediately without waiting further; elapsed={elapsed:?}"
+        );
     }
 }
 
