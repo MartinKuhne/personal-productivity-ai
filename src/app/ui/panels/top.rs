@@ -71,6 +71,11 @@ pub fn apply_tools_button_click() -> UserCommand {
     UserCommand::OpenToolsDialog
 }
 
+/// Returns the command for clicking the "About FastMD..." button.
+pub fn apply_about_button_click() -> UserCommand {
+    UserCommand::OpenAboutDialog
+}
+
 /// Returns the command for toggling the background logs window.
 pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
     UserCommand::ToggleBackgroundLogs(show)
@@ -365,6 +370,16 @@ pub fn show_top_panel_capture(
                             on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
                         }
                     });
+
+                    ui.separator();
+
+                    if ui.button(crate::ui::strings::MENU_ABOUT).clicked() {
+                        app.orchestrator
+                            .user_command_bus
+                            .publish(apply_about_button_click());
+                        on_click(crate::ui::strings::ABOUT_EVENT);
+                        ui.close();
+                    }
                 });
             });
         });

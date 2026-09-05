@@ -10,7 +10,7 @@
 //! | Bottom panel (B) | `RunAgent`, `ShowModels`, `ShowDeprecatedModelMessage`, `CancelAgent` |
 //! | Tabs (C) | `CloseTab`, `CloseOtherTabs`, `CloseAllTabs` |
 //! | TOC (D) | `ScrollToHeader` |
-//! | Toolbar + hamburger (A) | `OpenBatchDialog`, `OpenToolsDialog`, `ToggleBackgroundLogs`, `ToggleAgentDebugWindow`, `SelectChatModel`, `ChangeTableWidthStrategy`, `SelectTagFilter` |
+//! | Toolbar + hamburger (A) | `OpenBatchDialog`, `OpenToolsDialog`, `OpenAboutDialog`, `ToggleBackgroundLogs`, `ToggleAgentDebugWindow`, `SelectChatModel`, `ChangeTableWidthStrategy`, `SelectTagFilter` |
 //! | Tools dialog (F) | `SetToolGroupEnabled`, `ClearToolGroupError`, `StartMcpAuth`, `ForgetMcpAuth` |
 //! | File tree (E) | `SelectFile`, `SelectDirectory`, `OpenInEditor`, `ShowInExplorer`, `CopyPath`, `SaveAsPdf`, `Rename`, `Move`, `Delete`, `CreateDirectory`, `CreateDocument`, `RunSkillPrompt`, `MergePrompt` |
 //! | Dialog confirmations (F) | `ConfirmMove`, `ConfirmCreateDirectory`, `ConfirmCreateDocument`, `ConfirmRename`, `StartBatch`, `CancelBatch` |
@@ -64,6 +64,8 @@ pub enum UserCommand {
     OpenBatchDialog,
     /// Open the tools (MCP / tool-group) dialog.
     OpenToolsDialog,
+    /// Open the about dialog.
+    OpenAboutDialog,
     /// Toggle the background-operations log window.
     ToggleBackgroundLogs(bool),
     /// Toggle the agent debug window.

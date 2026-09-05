@@ -1460,3 +1460,54 @@ fn test_handle_platform_commands_anchor_scrolls_heading() {
         Some("Quick Start Guide")
     );
 }
+
+/// Startup must evaluate the first-run helper against the restored state
+/// (spec FR-016): fresh state opens the dialog and records the version,
+/// a same-version restart stays quiet, and an older recorded version
+/// re-opens once and is overwritten. State is restored through the same
+/// serde path `FastMdApp::new` uses; the helper itself is invoked inline
+/// here because `new` requires an eframe::CreationContext.
+#[test]
+fn test_startup_first_run_auto_show_wiring() {
+    use crate::ui::about_dialog::{APP_VERSION, apply_first_run_auto_show};
+
+    // Fresh state (pre-field JSON deserialises to unseen) opens + records.
+    let mut fresh: PersistedUiState = serde_json::from_str("{}").unwrap();
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        dialogs.about_dialog_open,
+        "first run must open the About dialog"
+    );
+    assert_eq!(fresh.about_shown_for_version.as_deref(), Some(APP_VERSION));
+
+    // Same-version restart stays quiet.
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(!apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        !dialogs.about_dialog_open,
+        "same version must not re-display the dialog"
+    );
+
+    // Older recorded version re-opens once and is overwritten.
+    fresh.about_shown_for_version = Some("0.1.0".to_owned());
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(apply_first_run_auto_show(
+        &mut fresh,
+        &mut dialogs,
+        APP_VERSION
+    ));
+    assert!(
+        dialogs.about_dialog_open,
+        "upgraded version must auto-show once"
+    );
+    assert_eq!(fresh.about_shown_for_version.as_deref(), Some(APP_VERSION));
+}

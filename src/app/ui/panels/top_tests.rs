@@ -103,6 +103,49 @@ fn test_tools_button_click_opens_dialog() {
     assert_bus_contains(app, UserCommand::OpenToolsDialog);
 }
 
+/// Tier 4 click test: clicking About FastMD... inside the hamburger menu must open
+/// the about dialog (sets `app.orchestrator.dialogs.about_dialog_open = true`)
+/// and fire the `on_click(crate::ui::strings::ABOUT_EVENT)` callback.
+#[test]
+fn test_about_button_click_opens_dialog() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(
+        (create_test_app(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            assert!(!app.orchestrator.dialogs.about_dialog_open);
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open the hamburger menu.
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click About FastMD... inside the dropdown.
+    harness.get_by_label(crate::ui::strings::MENU_ABOUT).click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let (app, captured) = harness.state_mut();
+    assert!(
+        captured.contains(&crate::ui::strings::ABOUT_EVENT),
+        "clicking About FastMD... in the hamburger menu must fire the `{}` \
+             on_click event; got: {:?}",
+        crate::ui::strings::ABOUT_EVENT,
+        captured
+    );
+    assert_bus_contains(app, UserCommand::OpenAboutDialog);
+}
+
 /// Tier 4 click test: clicking the hamburger menu button in the top
 /// toolbar opens the menu dropdown, navigates into the Table wrap algorithm
 /// submenu, and clicking a strategy option fires the
