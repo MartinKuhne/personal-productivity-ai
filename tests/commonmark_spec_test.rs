@@ -189,7 +189,7 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
 /// it but parallelize it.
 /// Run with `cargo nextest run -E 'test(/commonmark/)'` to time it.
 #[test]
-fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
+fn slow_commonmark_0_31_2_compiles_to_valid_pdf() {
     if !fastmd_pdf::is_typst_available() {
         eprintln!("Skipping test: typst CLI not found in PATH");
         return;
@@ -873,7 +873,7 @@ fn strip_list_markers(md: &str) -> String {
 /// fast and to avoid pinning a test pass on a single rare
 /// occurrence of a word; "at least one" is the contract.
 #[test]
-fn all_commonmark_examples_render_content_into_pdf() {
+fn slow_commonmark_renders_content_into_pdf() {
     if !fastmd_pdf::is_typst_available() {
         eprintln!("Skipping test: typst CLI not found in PATH");
         return;
@@ -1065,7 +1065,7 @@ fn all_commonmark_examples_render_content_into_pdf() {
 }
 
 /// Focused regression test for the 12 content-fidelity gaps
-/// that the per-example test (`all_commonmark_examples_render_content_into_pdf`)
+/// that the per-example test (`slow_commonmark_renders_content_into_pdf`)
 /// surfaces in its first run. The full test is `#[ignore]`'d
 /// because it pays the `pdf_oxide` extraction cost on top of
 /// the Typst engine compile for all 652 spec examples (~5x

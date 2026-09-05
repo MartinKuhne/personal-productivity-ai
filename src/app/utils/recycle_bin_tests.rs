@@ -4,7 +4,9 @@
 
 use super::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -196,4 +198,163 @@ fn delete_twice_second_is_io() {
     assert!(!path.exists());
     let err = delete(&path).unwrap_err();
     assert!(matches!(err, RecycleBinError::Io { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Backend injection & Swappable handler tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn delete_with_backend_uses_explicit_backend() {
+    let mock = MockRecycleBinBackend::new();
+    let path = PathBuf::from("mock_target.md");
+    delete_with_backend(&path, &mock).unwrap();
+    assert_eq!(mock.recorded_paths(), vec![path]);
+}
+
+#[test]
+fn with_thread_backend_overrides_delete_scoped() {
+    let mock = Arc::new(MockRecycleBinBackend::new());
+    let path = PathBuf::from("thread_scoped.md");
+
+    with_thread_backend(mock.clone(), || {
+        delete(&path).unwrap();
+    });
+
+    assert_eq!(mock.recorded_paths(), vec![path.clone()]);
+
+    // After exiting the scope, the thread-local override is reverted
+    // and subsequent calls do not hit the mock.
+    let dir = tempfile::tempdir().unwrap();
+    let real_file = temp_file_with_content(&dir, "after_scope.md", "after");
+    delete(&real_file).unwrap();
+    assert_eq!(mock.recorded_paths().len(), 1);
+}
+
+#[test]
+fn set_thread_backend_manual_override_and_clear() {
+    let mock = Arc::new(MockRecycleBinBackend::new());
+    set_thread_backend(Some(mock.clone()));
+
+    let path = PathBuf::from("manual_thread.md");
+    delete(&path).unwrap();
+    assert_eq!(mock.recorded_paths(), vec![path]);
+
+    set_thread_backend(None);
+
+    let dir = tempfile::tempdir().unwrap();
+    let real_file = temp_file_with_content(&dir, "cleared_thread.md", "data");
+    delete(&real_file).unwrap();
+    assert_eq!(mock.recorded_paths().len(), 1);
+}
+
+#[test]
+fn mock_backend_simulates_aborted() {
+    let mock = MockRecycleBinBackend::aborted();
+    let path = PathBuf::from("aborted.md");
+    let err = mock.delete(&path).unwrap_err();
+    assert!(matches!(err, RecycleBinError::Aborted));
+    assert_eq!(mock.recorded_paths(), vec![path]);
+}
+
+#[test]
+fn mock_backend_with_error_simulates_custom_error() {
+    #[cfg(windows)]
+    let factory = || RecycleBinError::Com {
+        step: "PerformOperations",
+        source: windows::core::Error::from(windows::core::HRESULT(0x80004005u32 as i32)),
+    };
+    #[cfg(not(windows))]
+    let factory = || RecycleBinError::Aborted;
+
+    let mock = MockRecycleBinBackend::with_error(factory);
+    let path = PathBuf::from("fail.md");
+    let err = mock.delete(&path).unwrap_err();
+    #[cfg(windows)]
+    assert!(matches!(
+        err,
+        RecycleBinError::Com {
+            step: "PerformOperations",
+            ..
+        }
+    ));
+    #[cfg(not(windows))]
+    assert!(matches!(err, RecycleBinError::Aborted));
+}
+
+#[test]
+fn isolated_backend_records_deleted_paths() {
+    let backend = IsolatedRecycleBinBackend::new();
+    let dir = tempfile::tempdir().unwrap();
+    let file = temp_file_with_content(&dir, "isolated.md", "content");
+    backend.delete(&file).unwrap();
+    assert!(!file.exists());
+    let deleted = backend.deleted_paths();
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(
+        deleted[0],
+        std::fs::canonicalize(dir.path())
+            .unwrap()
+            .join("isolated.md")
+    );
+}
+
+#[test]
+fn closure_implements_recycle_bin_backend() {
+    let called = AtomicBool::new(false);
+    let closure = |p: &Path| {
+        if p.ends_with("closure.md") {
+            called.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    };
+
+    delete_with_backend(Path::new("closure.md"), &closure).unwrap();
+    assert!(called.load(Ordering::SeqCst));
+}
+
+#[test]
+fn native_backend_panic_shield_in_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = temp_file_with_content(&dir, "shield.md", "shield");
+    let result = std::panic::catch_unwind(|| {
+        let _ = NativeRecycleBinBackend.delete(&path);
+    });
+    assert!(
+        result.is_err(),
+        "RUST-006: NativeRecycleBinBackend must panic on existing files in test environments"
+    );
+}
+
+#[test]
+fn native_backend_missing_path_returns_io() {
+    let bogus = PathBuf::from("C:\\nonexistent_native_test_path_12345.tmp");
+    let err = NativeRecycleBinBackend.delete(&bogus).unwrap_err();
+    assert!(matches!(err, RecycleBinError::Io { .. }));
+}
+
+#[test]
+fn global_backend_get_and_set() {
+    let original = get_backend();
+    let mock: Arc<dyn RecycleBinBackend> = Arc::new(MockRecycleBinBackend::new());
+    set_backend(mock.clone());
+    assert!(Arc::ptr_eq(&get_backend(), &mock));
+    set_backend(original);
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "live Windows Shell COM operation (slow, mutates OS Recycle Bin)"]
+fn native_backend_live_delete() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = temp_file_with_content(&dir, "live_native.md", "content");
+    unsafe {
+        std::env::set_var("FASTMD_ALLOW_LIVE_RECYCLE_BIN", "1");
+    }
+    let res = NativeRecycleBinBackend.delete(&path);
+    unsafe {
+        std::env::remove_var("FASTMD_ALLOW_LIVE_RECYCLE_BIN");
+    }
+    res.expect("live native delete should succeed when FASTMD_ALLOW_LIVE_RECYCLE_BIN=1");
+    assert!(!path.exists());
 }

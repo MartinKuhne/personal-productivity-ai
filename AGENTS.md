@@ -16,7 +16,6 @@
 - Break tasks into logical, contained and testable steps. Confirm tests pass between steps.
 - When - and only when - the current branch is 'main' you MUST create a branch before changing ANY files.
 - You MUST name the branch feature/<change>, bugfix/<change> or chore/<change>.
-- Compile and unit test MUST succeed before starting any work.
 - Quality gates MUST pass to call a task complete.
 - You SHOULD assess if the existing codebase is suitable for the modification you are being asked to make. You SHOULD suggest to the user any refactorings needed before implementation can start.
 - You MUST refuse a task if the requirements or context are unclear. You MUST ask clarifying questions.

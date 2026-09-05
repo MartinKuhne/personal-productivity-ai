@@ -26,6 +26,14 @@ retries = 2
 test-threads = "num-cpus"
 slow-timeout = "30s"
 
+# Fast profile for rapid local iteration (`cargo nextest run --profile fast`).
+# Excludes slow tests and keeps terminal output concise.
+[profile.fast]
+inherits = "default"
+default-filter = 'not test(/slow_/)'
+status-level = "fail"
+final-status-level = "fail"
+
 # Profile used by CI (`cargo nextest run --profile ci`).
 [profile.ci]
 inherits = "default"
@@ -50,11 +58,11 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # `#[ignore]`'d content-fidelity test) from being killed
 # spuriously.
 [[profile.ci.overrides]]
-filter = 'test(/all_commonmark/)'
+filter = 'test(/all_commonmark/) | test(/slow_commonmark/)'
 slow-timeout = { period = "60s", terminate-after = 30 }
 # Local CI profile mirrors the GH Actions profile so
 # `cargo nextest run --profile ci` on a developer machine
 # catches the same timeout the runner would.
 [[profile.default.overrides]]
-filter = 'test(/all_commonmark/)'
+filter = 'test(/all_commonmark/) | test(/slow_commonmark/)'
 slow-timeout = { period = "60s", terminate-after = 30 }

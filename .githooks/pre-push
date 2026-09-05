@@ -1,0 +1,14 @@
+#!/bin/sh
+# Git pre-push hook: run fast test suite before pushing.
+# Prevents broken builds from reaching remotes.
+
+echo "Running pre-push hook: cargo nextest run --profile fast --workspace --all-features --status-level fail --show-progress none"
+cargo nextest run --profile fast --workspace --all-features --status-level fail --show-progress none
+
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+    echo >&2 "Pre-push check failed (exit code $exit_code). Push aborted."
+    exit $exit_code
+fi
+
+exit 0
