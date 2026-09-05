@@ -47,7 +47,20 @@ pub(crate) fn commit_tooltip_text() -> String {
     )
 }
 
-/// Copies the full commit hash to the clipboard and records the copy time
+/// Reflows the hard-wrapped `LICENSE_TEXT` (fixed ~78-char lines) into
+/// flowing paragraphs so the label wraps at the available width and the
+/// license section fills the dialog like every other section. Single
+/// newlines become spaces; blank lines stay as paragraph breaks; the word
+/// sequence is preserved verbatim.
+///
+/// Pure and unit-tested; see `about_dialog_tests.rs`.
+pub(crate) fn license_display_text() -> String {
+    LICENSE_TEXT
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
 /// so the confirmation label shows. No-op when build metadata is unknown
 /// (there is nothing meaningful to copy). Side effects isolated here for
 /// testability.
@@ -118,7 +131,7 @@ pub fn show_about_dialog(ctx: &egui::Context, app: &mut FastMdApp) {
         .id(egui::Id::new("about_dialog"))
         .open(&mut open)
         .resizable(true)
-        .default_size([620.0, 580.0])
+        .default_size([620.0, 780.0])
         .min_size([480.0, 400.0])
         .show(ctx, |ui| {
             render_contents(ui, ctx);
@@ -174,10 +187,10 @@ fn render_contents(ui: &mut egui::Ui, ctx: &egui::Context) {
     ui.strong(strings::ABOUT_LICENSE_HEADER);
     egui::ScrollArea::vertical()
         .id_salt("about_license_scroll")
-        .max_height(140.0)
+        .max_height(200.0)
         .show(ui, |ui| {
             egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.label(LICENSE_TEXT);
+                ui.label(license_display_text());
             });
         });
 
@@ -192,7 +205,7 @@ fn render_contents(ui: &mut egui::Ui, ctx: &egui::Context) {
     });
     egui::ScrollArea::vertical()
         .id_salt("about_attributions_scroll")
-        .max_height(240.0)
+        .max_height(340.0)
         .show(ui, |ui| {
             for attr in DIRECT_DEPENDENCIES {
                 ui.push_id((attr.name, "attribution_row"), |ui| {

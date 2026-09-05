@@ -30,6 +30,103 @@ fn render_dialog_once(app: &mut crate::ui::FastMdApp) -> egui::FullOutput {
 }
 
 #[test]
+fn license_reflow_preserves_words() {
+    // The reflowed license must contain exactly the same words in the same
+    // order (whitespace-only change), keep paragraph breaks, and leave no
+    // single newlines that would pin the label to the file's hard wrap.
+    let words_original: Vec<&str> = LICENSE_TEXT.split_whitespace().collect();
+    let reflowed = license_display_text();
+    let words_reflowed: Vec<&str> = reflowed.split_whitespace().collect();
+    assert_eq!(words_reflowed, words_original);
+    assert_eq!(
+        reflowed.matches("\n\n").count(),
+        LICENSE_TEXT.matches("\n\n").count(),
+        "paragraph breaks must survive the reflow"
+    );
+    let singles = reflowed.replace("\n\n", "").matches('\n').count();
+    assert_eq!(singles, 0, "no single newlines may remain");
+}
+
+/// Collects `(rect, is_text)` shapes, recursing into `Shape::Vec`.
+fn collect_rects_and_texts(output: &egui::FullOutput) -> (Vec<egui::Rect>, Vec<(f32, String)>) {
+    fn walk(shape: &egui::Shape, rects: &mut Vec<egui::Rect>, texts: &mut Vec<(f32, String)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for s in shapes {
+                    walk(s, rects, texts);
+                }
+            }
+            egui::Shape::Rect(r) => rects.push(r.rect),
+            egui::Shape::Text(t) => {
+                texts.push((t.pos.x + t.galley.rect.max.x, t.galley.text().to_owned()));
+            }
+            _ => {}
+        }
+    }
+    let mut rects = Vec::new();
+    let mut texts = Vec::new();
+    for s in &output.shapes {
+        walk(&s.shape, &mut rects, &mut texts);
+    }
+    (rects, texts)
+}
+
+#[test]
+fn license_section_spans_full_content_width() {
+    // The license text's right edge must align with the attributions
+    // scrollbar (the full-width marker) — previously the hard-wrapped
+    // license file pinned the section ~115px narrower than the dialog.
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let output = render_dialog_once(&mut app);
+    let (rects, texts) = collect_rects_and_texts(&output);
+    let license_x1 = texts
+        .iter()
+        .find(|(_, text)| text.contains("Permission is hereby granted"))
+        .map(|(x1, _)| *x1)
+        .expect("license body text should render");
+    let attr_scrollbar_x = rects
+        .iter()
+        .filter(|r| r.width() < 2.0 && r.height() > 300.0)
+        .map(|r| r.min.x)
+        .fold(f32::NAN, f32::min);
+    assert!(
+        !attr_scrollbar_x.is_nan(),
+        "attributions scrollbar should render"
+    );
+    assert!(
+        (attr_scrollbar_x - license_x1).abs() <= 24.0,
+        "license right edge ({license_x1}) should align with attributions width ({attr_scrollbar_x})"
+    );
+}
+
+#[test]
+fn dialog_viewports_use_taller_budget() {
+    // The dialog opens taller than the old 580px default and both scroll
+    // viewports use their raised caps (license 200, attributions 340).
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let output = render_dialog_once(&mut app);
+    let (rects, _) = collect_rects_and_texts(&output);
+    assert!(
+        rects
+            .iter()
+            .any(|r| r.width() > 600.0 && r.height() >= 700.0),
+        "window should open at least 700px tall"
+    );
+    assert!(
+        rects
+            .iter()
+            .any(|r| r.width() < 2.0 && (190.0..210.0).contains(&r.height())),
+        "license viewport should use the 200px cap"
+    );
+    assert!(
+        rects
+            .iter()
+            .any(|r| r.width() < 2.0 && (330.0..350.0).contains(&r.height())),
+        "attributions viewport should use the 340px cap"
+    );
+}
+
+#[test]
 fn dialog_renders_without_panic() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     let _ = render_dialog_once(&mut app);
