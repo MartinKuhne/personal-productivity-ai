@@ -214,8 +214,8 @@ fn attributions_all_52_rendered_and_scrollable() {
         );
     }
     // Full catalog completeness is verified by attributions_tests; here we just ensure
-    // the catalog length is 52.
-    assert_eq!(crate::ui::attributions::DIRECT_DEPENDENCIES.len(), 52);
+    // the catalog length is 53.
+    assert_eq!(crate::ui::attributions::DIRECT_DEPENDENCIES.len(), 53);
 }
 
 #[test]

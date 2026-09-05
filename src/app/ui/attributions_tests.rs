@@ -6,8 +6,8 @@ use super::*;
 fn all_entries_have_valid_fields() {
     assert_eq!(
         DIRECT_DEPENDENCIES.len(),
-        52,
-        "expected 52 direct dependencies, got {}",
+        53,
+        "expected 53 direct dependencies, got {}",
         DIRECT_DEPENDENCIES.len()
     );
     for attr in DIRECT_DEPENDENCIES {

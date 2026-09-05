@@ -244,13 +244,7 @@ pub fn generate_format_prompt(date_str: &str) -> String {
 impl eframe::App for FastMdApp {
     fn on_exit(&mut self) {
         crate::export::print::cleanup_temp_files();
-        if let Ok(mgr) = self.orchestrator.background_manager.lock() {
-            let log_path = crate::config::get_config_path()
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .join("logs/background-process.log");
-            let _ = mgr.save_logs(&log_path);
-        }
+        crate::background::logs::unregister_ui_logs();
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
