@@ -409,7 +409,7 @@ impl AppOrchestrator {
                                 pending_side_effects.push((path.clone(), tags.clone()));
                             }
                             ToolSideEffect::FileChanged { path } => {
-                                let tags = crate::utils::tags::extract_tags_from_file(path);
+                                let tags = crate::agent::utils::tags::extract_tags_from_file(path);
                                 pending_side_effects.push((path.clone(), tags));
                             }
                         },
@@ -615,7 +615,8 @@ impl AppOrchestrator {
             let tx = self.tx.clone();
             let path = selected_path.clone();
             std::thread::spawn(move || {
-                let content = crate::utils::read_text_file(&path).map_err(|e| e.to_string());
+                let content =
+                    crate::agent::utils::encoding::read_text_file(&path).map_err(|e| e.to_string());
                 if tx
                     .send(ProcessEvent::FileLoaded { path, content }.into())
                     .is_err()

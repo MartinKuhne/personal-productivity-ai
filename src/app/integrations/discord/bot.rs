@@ -63,7 +63,7 @@ impl DiscordBot {
         let context_manager = Arc::new(DiscordContext::new(
             config.max_history,
             3600,
-            Arc::new(crate::utils::uuid::SystemUuidGenerator),
+            Arc::new(fastmd_agent::utils::uuid::SystemUuidGenerator),
         )); // 1 hour TTL
         let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit_per_minute));
         let safety_filter = Arc::new(SafetyFilter::with_patterns(config.blocked_patterns.clone()));

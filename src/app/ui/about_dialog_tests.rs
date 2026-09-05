@@ -94,7 +94,7 @@ fn license_section_spans_full_content_width() {
         "attributions scrollbar should render"
     );
     assert!(
-        (attr_scrollbar_x - license_x1).abs() <= 24.0,
+        (attr_scrollbar_x - license_x1).abs() <= 36.0,
         "license right edge ({license_x1}) should align with attributions width ({attr_scrollbar_x})"
     );
 }

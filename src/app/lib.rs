@@ -45,18 +45,5 @@ pub mod config;
 // `fastmd::Name` form. Types that are only used inside the crate are
 // reachable through their `pub mod` path only — see the module-level docs
 // above.
-
-/// Re-export the `mcp` subsystem module under the crate root so
-/// `fastmd::mcp::oauth::...` works for short-path consumers. The
-/// canonical path is `fastmd::agent::lib::mcp`; the short alias
-/// stays for backward compatibility.
-pub use agent::lib::mcp;
-
-/// The `ConfigArrived` event is the first event the main binary
-/// publishes onto the configuration bus after constructing the
-/// `FastMdApp`, so it is the only bus payload type exposed at the
-/// crate root.
-pub use bus::events::ConfigArrived;
-
-/// The `eframe::App` impl that `main.rs` hands to `eframe::run_native`.
-pub use ui::FastMdApp;
+//
+// No re-exports at this time — all consumers use full module paths.
