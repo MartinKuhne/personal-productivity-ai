@@ -57,6 +57,32 @@
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+/// Strip YAML front matter (enclosed between opening `---` and closing `---`)
+/// from markdown source. Returns the remaining body.
+pub fn strip_yaml_front_matter(markdown: &str) -> &str {
+    let clean = markdown.strip_prefix('\u{feff}').unwrap_or(markdown);
+    if let Some(rest) = clean.strip_prefix("---")
+        && (rest.starts_with('\n') || rest.starts_with("\r\n"))
+    {
+        let mut search_idx = 0;
+        while let Some(rel_idx) = rest[search_idx..].find("---") {
+            let idx = search_idx + rel_idx;
+            let before = &rest[..idx];
+            if before.ends_with('\n') {
+                let after = &rest[idx + 3..];
+                let trimmed = after.trim_start_matches([' ', '\t']);
+                if let Some(body) = trimmed.strip_prefix("\r\n") {
+                    return body;
+                } else if let Some(body) = trimmed.strip_prefix('\n') {
+                    return body;
+                }
+            }
+            search_idx = idx + 3;
+        }
+    }
+    markdown
+}
+
 /// Translate a Markdown source string into a Typst source string.
 ///
 /// The returned Typst source is the body of a `.typ` document — it
@@ -64,6 +90,7 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 /// (the caller wraps the result in a `TEMPLATE` constant that
 /// applies the user's chosen paper, font, and margin settings).
 pub fn render_markdown_to_typst(markdown: &str) -> String {
+    let markdown = strip_yaml_front_matter(markdown);
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);

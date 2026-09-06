@@ -12,7 +12,6 @@ pub(crate) const TEMPLATE: &str = r##"
 #set page(
   paper: "a4",
   margin: (x: 2.4cm, y: 2.6cm),
-  header: align(right, text(size: 9pt, fill: luma(120))[#title]),
   numbering: "1 / 1",
 )
 #set text(
