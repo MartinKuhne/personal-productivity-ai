@@ -5,14 +5,52 @@
 use crate::config::AgentConfig;
 use crate::datamark::{self, SECURITY_HEADER};
 use crate::events::DelegateToolCall;
+use crate::tools::registry::builtin::strings;
 use crate::tools::registry::cache::CachedWebDocument;
 use fast_h2m::convert;
 use std::collections::HashMap;
 
+/// Fetches a web page, automatically using headless Chrome when available with seamless HTTP fallback.
+///
+/// Complies with FR-001 through FR-010: executes headless Chrome for client-side rendered DOM,
+/// transparently falls back to HTTP on error/timeout, and enforces line cursor pagination and caching.
 pub fn tool_web_fetch(
     input: &crate::tools::dtos::WebFetchInput,
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
+) -> Result<crate::tools::dtos::WebFetchResponse, String> {
+    #[cfg(test)]
+    let default_locator: Option<&dyn crate::tools::browser_locator::BrowserLocator> = None;
+    #[cfg(not(test))]
+    let default_loc_val = crate::tools::browser_locator::SystemBrowserLocator::default();
+    #[cfg(not(test))]
+    let default_locator: Option<&dyn crate::tools::browser_locator::BrowserLocator> =
+        Some(&default_loc_val);
+
+    tool_web_fetch_with_locator(input, cache, uuid_gen, default_locator, None)
+}
+
+/// Convenience helper for executing web fetch with an injected browser runner.
+///
+/// Complies with FR-002 and FR-004 for testable headless execution.
+pub fn tool_web_fetch_with_runner(
+    input: &crate::tools::dtos::WebFetchInput,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
+    custom_runner: Option<&dyn crate::tools::browser_runner::BrowserRunner>,
+) -> Result<crate::tools::dtos::WebFetchResponse, String> {
+    tool_web_fetch_with_locator(input, cache, uuid_gen, None, custom_runner)
+}
+
+/// Variant of `tool_web_fetch` supporting runner and locator injection for testing and customization.
+///
+/// Complies with FR-001 through FR-010.
+pub fn tool_web_fetch_with_locator(
+    input: &crate::tools::dtos::WebFetchInput,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
+    locator: Option<&dyn crate::tools::browser_locator::BrowserLocator>,
+    custom_runner: Option<&dyn crate::tools::browser_runner::BrowserRunner>,
 ) -> Result<crate::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
@@ -36,68 +74,51 @@ pub fn tool_web_fetch(
         (doc, true)
     } else {
         cache.web_documents.invalidate(url);
-        match reqwest::blocking::Client::new()
-            .get(url)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-            )
-            .header(
-                "Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .header("Accept-Language", "en-US,en;q=0.9")
-            .send()
-        {
-            Ok(response) => {
-                let mut response_headers = HashMap::new();
-                for (name, value) in response.headers() {
-                    if let Ok(val) = value.to_str() {
-                        response_headers.insert(name.as_str().to_string(), val.to_string());
-                    }
+
+        let mut fetched_doc: Option<CachedWebDocument> = None;
+
+        // Try headless browser fetch if runner or locator available
+        if let Some(runner) = custom_runner {
+            match fetch_url_via_browser(runner, url) {
+                Ok(doc) => {
+                    fetched_doc = Some(doc);
                 }
-                match response.text() {
-                    Ok(body) => match convert(&body, None) {
-                        Ok(res) => {
-                            let md_content = res.content.unwrap_or_default();
-                            let doc = CachedWebDocument {
-                                content: md_content,
-                                response_headers,
-                            };
-                            cache.web_documents.insert(url.clone(), doc.clone());
-                            Ok((doc, false))
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                name = "tool.web.html2md_failed",
-                                error = %e,
-                                url = %url,
-                                "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML."
-                            );
-                            Err(format!("Failed to convert HTML to Markdown: {}", e))
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!(
-                            name = "tool.web.read_body_failed",
-                            error = %e,
-                            url = %url,
-                            "Failed to read response body from web fetch. Operator should check network connectivity or URL validity."
-                        );
-                        Err(format!("Failed to read web response body: {}", e))
-                    }
+                Err(e) => {
+                    tracing::warn!(
+                        code = crate::tools::registry::builtin::strings::TOOL_W001_BROWSER_FETCH_FAILED,
+                        error = %e,
+                        url = %url,
+                        "Headless browser fetch failed; falling back to standard HTTP GET."
+                    );
                 }
             }
-            Err(e) => {
-                tracing::error!(
-                    name = "tool.web.fetch_failed",
-                    error = %e,
-                    url = %url,
-                    "Failed to fetch URL. Likely cause: network error or invalid URL. Operator should verify network connectivity."
-                );
-                Err(format!("Failed to fetch URL: {}", e))
+        } else if let Some(installation) = locator.and_then(|l| l.locate()) {
+            let runner =
+                crate::tools::browser_runner::SystemChromeRunner::new(installation.executable_path)
+                    .with_capture_headers(input.headers);
+            match fetch_url_via_browser(&runner, url) {
+                Ok(doc) => {
+                    fetched_doc = Some(doc);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        code = crate::tools::registry::builtin::strings::TOOL_W001_BROWSER_FETCH_FAILED,
+                        error = %e,
+                        url = %url,
+                        "Headless browser fetch failed; falling back to standard HTTP GET."
+                    );
+                }
             }
-        }?
+        }
+
+        // Fallback to standard HTTP GET if browser fetch was absent or failed
+        let doc = match fetched_doc {
+            Some(d) => d,
+            None => fetch_url_via_http(url)?,
+        };
+
+        cache.web_documents.insert(url.clone(), doc.clone());
+        (doc, false)
     };
 
     // 4. Create cursor pagination session over markdown lines
@@ -118,7 +139,89 @@ pub fn tool_web_fetch(
     })
 }
 
-// Reference: https://docs.searxng.org/dev/search_api.html
+fn fetch_url_via_browser(
+    runner: &dyn crate::tools::browser_runner::BrowserRunner,
+    url: &str,
+) -> Result<CachedWebDocument, String> {
+    let rendered = runner
+        .render_url(url, std::time::Duration::from_secs(15))
+        .map_err(|e| e.to_string())?;
+
+    let res = convert(&rendered.html_body, None)
+        .map_err(|e| format!("Failed to convert rendered HTML to Markdown: {}", e))?;
+
+    Ok(CachedWebDocument {
+        content: res.content.unwrap_or_default(),
+        response_headers: rendered.headers,
+    })
+}
+
+fn fetch_url_via_http(url: &str) -> Result<CachedWebDocument, String> {
+    match reqwest::blocking::Client::new()
+        .get(url)
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        )
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .send()
+    {
+        Ok(response) => {
+            let mut response_headers = HashMap::new();
+            for (name, value) in response.headers() {
+                if let Ok(val) = value.to_str() {
+                    response_headers.insert(name.as_str().to_string(), val.to_string());
+                }
+            }
+            match response.text() {
+                Ok(body) => match convert(&body, None) {
+                    Ok(res) => {
+                        let md_content = res.content.unwrap_or_default();
+                        Ok(CachedWebDocument {
+                            content: md_content,
+                            response_headers,
+                        })
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            name = "tool.web.html2md_failed",
+                            error = %e,
+                            url = %url,
+                            "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML."
+                        );
+                        Err(format!("Failed to convert HTML to Markdown: {}", e))
+                    }
+                },
+                Err(e) => {
+                    tracing::error!(
+                        name = "tool.web.read_body_failed",
+                        error = %e,
+                        url = %url,
+                        "Failed to read response body from web fetch. Operator should check network connectivity or URL validity."
+                    );
+                    Err(format!("Failed to read web response body: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                name = "tool.web.fetch_failed",
+                error = %e,
+                url = %url,
+                "Failed to fetch URL. Likely cause: network error or invalid URL. Operator should verify network connectivity."
+            );
+            Err(format!("Failed to fetch URL: {}", e))
+        }
+    }
+}
+
+/// Searches the web for query results via a configured SearXNG instance.
+///
+/// Reference: <https://docs.searxng.org/dev/search_api.html>
 pub fn tool_web_search(
     url: &str,
     query: &str,
@@ -195,8 +298,8 @@ pub fn tool_web_search(
                 }
             }
             Err(e) => {
-                tracing::error!(name = "tool.web_search.read_body_failed", error = %e, url = %endpoint, "Failed to read response body from search provider. Operator should verify search provider status.");
-                Err(format!("Failed to read body: {}", e))
+                tracing::error!(name = "tool.web_search.read_body_failed", error = %e, url = %endpoint, "Failed to read body from search response. Operator should verify search provider stability.");
+                Err(format!("Failed to read response body: {}", e))
             }
         },
         Err(e) => {
@@ -206,6 +309,7 @@ pub fn tool_web_search(
     }
 }
 
+/// Delegates web research tasks to a dedicated sub-agent turn loop using LLM completions.
 pub fn tool_web_delegate(
     config: &AgentConfig,
     instruction: &str,
@@ -245,7 +349,7 @@ pub fn tool_web_delegate(
         "type": "function",
         "function": {
             "name": "web_fetch",
-            "description": "Fetch a URL and convert the content to Markdown. Returns up to 64 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.",
+            "description": strings::WEB_FETCH_DESCRIPTION,
             "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
         }
     })];
@@ -255,7 +359,7 @@ pub fn tool_web_delegate(
             "type": "function",
             "function": {
                 "name": "web_search",
-                "description": "Search the web using SearXNG.",
+                "description": strings::WEB_SEARCH_DESCRIPTION,
                 "parameters": schemars::schema_for!(crate::tools::dtos::WebSearchInput)
             }
         }));

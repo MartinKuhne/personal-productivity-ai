@@ -7,8 +7,8 @@ the skills and how they relate to the rest of the repo.
 ## 1. Skills are the canonical workflow
 - For any feature/spec/plan/tasks work, prefer the speckit skills over ad-hoc
   edits: `speckit-specify` → `speckit-clarify` → `speckit-plan` →
-  `speckit-tasks` → `speckit-implement` → `speckit-converge` →
-  `speckit-analyze`.
+  `speckit-tasks` → `speckit-implement` → `speckit-unit-tests` (post-implement hook) →
+  `speckit-converge` → `speckit-analyze`.
 - Each skill's `SKILL.md` is the source of truth for its own steps; do not
   reimplement the workflow inline in code or docs.
 

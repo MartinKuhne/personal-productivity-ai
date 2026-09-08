@@ -1,0 +1,15 @@
+schema_version: "1.0"
+extension:
+  id: "unit-tests"
+  name: "Unit Test Implementation Hook"
+  version: "1.0.0"
+  description: "Spec-Kit post-implementation hook to implement comprehensive unit tests focusing on all code paths, error conditions, and boundary conditions."
+  author: "Personal Productivity AI"
+  commands:
+    - name: "speckit.unit-tests"
+      description: "Implement comprehensive unit tests focusing on all code paths, error and boundary conditions."
+  hooks:
+    after_implement:
+      - command: "speckit.unit-tests"
+        optional: false
+        description: "Implement comprehensive unit tests focusing on all code paths, error and boundary conditions."
