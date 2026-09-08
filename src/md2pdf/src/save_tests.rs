@@ -361,3 +361,27 @@ fn compile_markdown_to_pdf_smoke_test() {
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.ends_with(b"%%EOF"));
 }
+
+#[test]
+fn yaml_header_is_stripped_from_typst_output() {
+    let md = "---\ntitle: \"Packing List\"\nsummary: \"Test summary\"\n---\n\n# Packing List\n\nBody content.\n";
+    let typst = render_markdown_to_typst(md);
+    assert!(
+        !typst.contains("Test summary"),
+        "YAML header summary should not appear in Typst output: {typst}"
+    );
+    assert!(typst.contains("= Packing List"));
+    assert!(typst.contains("Body content."));
+}
+
+#[test]
+fn typst_template_does_not_contain_header_with_title() {
+    assert!(
+        !TEMPLATE.contains("header:"),
+        "Typst template should not define a page header printing the title"
+    );
+    assert!(
+        !TEMPLATE.contains("#title"),
+        "Typst template should not contain #title"
+    );
+}
