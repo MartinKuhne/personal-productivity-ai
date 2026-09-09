@@ -287,8 +287,7 @@ pub const FIELD_SEND_EMAIL_INPUT_SUBJECT: &str = "The email subject line.";
 
 pub const FIELD_SEND_EMAIL_INPUT_BODY: &str = "The email body text.";
 
-pub const FIELD_SEARCH_EMAIL_INPUT_KEYWORD: &str =
-    "Search email subjects, bodies, and headers using text keywords.";
+pub const FIELD_SEARCH_EMAIL_INPUT_KEYWORD: &str = "Search email subjects, bodies, and headers using text keywords. Matching is case-insensitive. Bare words must all be present but may appear in any order, so `new balance` matches any email containing both words. To match an exact word sequence, wrap it in double quotes, like `\"new balance\"`.";
 
 pub const FIELD_SEARCH_EMAIL_INPUT_FOLDER: &str =
     "Optional mailbox folder name (such as Inbox or Sent).";
