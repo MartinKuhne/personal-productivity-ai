@@ -794,9 +794,11 @@ fn test_mcp_char_count_bug() {
     // Also, what happens when mcp tool doesn't have mcp_ prefixed name?
     mgr.register_mcp_tool("test_mcp", "test_tool", "desc", serde_json::json!({}));
     let count2 = mgr.tool_char_count("test_mcp/test_tool", &config, "");
-    // Now it uses the prefixed name "devstack/list_projects" (which adds 9 chars)
-    assert_eq!(char_count, Some(125));
-    assert_eq!(count2, Some(112));
+    // Now it uses the prefixed name "devstack/list_projects" (which adds 9 chars).
+    // MCP descriptions carry the `[test_mcp] ` source prefix (11 chars), so both
+    // counts include the prefixed description `[test_mcp] desc`.
+    assert_eq!(char_count, Some(136));
+    assert_eq!(count2, Some(123));
 }
 
 #[test]

@@ -47,6 +47,7 @@ pub struct ReadTagsResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListNotesByTagInput {
+    #[schemars(description = strings::FIELD_LIST_NOTES_BY_TAG_INPUT_TAG)]
     pub tag: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
@@ -69,6 +70,7 @@ pub struct ListNotesByTagResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListNotesInput {
+    #[schemars(description = strings::FIELD_LIST_NOTES_INPUT_PATH)]
     pub path: String,
     #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
@@ -89,29 +91,35 @@ pub struct ListNotesResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ReadNoteInput {
+    #[schemars(description = strings::FIELD_READ_NOTE_INPUT_PATH)]
     pub path: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ReadNoteResponse {
+    #[schemars(description = strings::FIELD_READ_NOTE_RESPONSE_CONTENT)]
     pub content: String,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WindowNoteInput {
+    #[schemars(description = strings::FIELD_WINDOW_NOTE_INPUT_PATH)]
     pub path: String,
-    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_WINDOW_NOTE_INPUT_OFFSET)]
     pub offset: Option<usize>,
-    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_WINDOW_NOTE_INPUT_LIMIT)]
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WindowNoteResponse {
+    #[schemars(description = strings::FIELD_WINDOW_NOTE_RESPONSE_CONTENT)]
     pub content: String,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct CreateNoteInput {
+    #[schemars(description = strings::FIELD_CREATE_NOTE_INPUT_PATH)]
     pub path: String,
+    #[schemars(description = strings::FIELD_CREATE_NOTE_INPUT_CONTENT)]
     pub content: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -122,10 +130,11 @@ pub struct CreateNoteResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct InsertIntoNoteInput {
+    #[schemars(description = strings::FIELD_INSERT_INTO_NOTE_INPUT_PATH)]
     pub path: String,
-    /// 0-indexed position in the file at which to insert `lines`.
-    /// `offset == 0` inserts at the top; `offset == lines.len()` appends.
+    #[schemars(description = strings::FIELD_INSERT_INTO_NOTE_INPUT_OFFSET)]
     pub offset: usize,
+    #[schemars(description = strings::FIELD_INSERT_INTO_NOTE_INPUT_LINES)]
     pub lines: Vec<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -154,9 +163,12 @@ pub struct MoveNoteResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebFetchInput {
+    #[schemars(description = strings::FIELD_WEB_FETCH_INPUT_URL)]
     pub url: String,
+    #[schemars(description = strings::FIELD_WEB_FETCH_INPUT_HEADERS)]
     #[serde(default)]
     pub headers: bool,
+    #[schemars(description = strings::FIELD_WEB_FETCH_INPUT_FORCE_REFETCH)]
     #[serde(default)]
     pub force_refetch: bool,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
@@ -165,6 +177,7 @@ pub struct WebFetchInput {
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebFetchResponse {
+    #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_CONTENT)]
     pub content: String,
     #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
     pub total_lines: usize,
@@ -189,6 +202,7 @@ pub struct WebSearchInput {
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebSearchResponse {
+    #[schemars(description = strings::FIELD_WEB_SEARCH_RESPONSE_RESULTS)]
     pub results: String,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
@@ -202,6 +216,7 @@ pub struct WebSearchResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ReadYamlHeaderInput {
+    #[schemars(description = strings::FIELD_READ_YAML_HEADER_INPUT_PATH)]
     pub path: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -211,10 +226,15 @@ pub struct ReadYamlHeaderResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WriteYamlHeaderInput {
+    #[schemars(description = strings::FIELD_WRITE_YAML_HEADER_INPUT_PATH)]
     pub path: String,
+    #[schemars(description = strings::FIELD_WRITE_YAML_HEADER_INPUT_TITLE)]
     pub title: Option<String>,
+    #[schemars(description = strings::FIELD_WRITE_YAML_HEADER_INPUT_SUMMARY)]
     pub summary: Option<String>,
+    #[schemars(description = strings::FIELD_WRITE_YAML_HEADER_INPUT_TAGS)]
     pub tags: Option<Vec<String>>,
+    #[schemars(description = strings::FIELD_WRITE_YAML_HEADER_INPUT_HEADER_DATE)]
     #[serde(rename = "header-date")]
     pub header_date: Option<String>,
 }
@@ -244,6 +264,7 @@ pub struct CalDavEventDetails {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchCalendarInput {
+    #[schemars(description = strings::FIELD_SEARCH_CALENDAR_INPUT_KEYWORD)]
     pub keyword: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
@@ -267,7 +288,9 @@ pub struct SearchCalendarResponse {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarInput {
+    #[schemars(description = strings::FIELD_GET_CALENDAR_INPUT_START_DATE)]
     pub start_date: String,
+    #[schemars(description = strings::FIELD_GET_CALENDAR_INPUT_END_DATE)]
     pub end_date: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
@@ -415,6 +438,7 @@ pub struct SearchEmailResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct GetEmailByIdInput {
+    #[schemars(description = strings::FIELD_GET_EMAIL_BY_ID_INPUT_ID)]
     pub id: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -424,8 +448,11 @@ pub struct GetEmailByIdResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SendEmailInput {
+    #[schemars(description = strings::FIELD_SEND_EMAIL_INPUT_TO)]
     pub to: String,
+    #[schemars(description = strings::FIELD_SEND_EMAIL_INPUT_SUBJECT)]
     pub subject: String,
+    #[schemars(description = strings::FIELD_SEND_EMAIL_INPUT_BODY)]
     pub body: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -466,6 +493,7 @@ pub struct CardDavContactDetails {
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchContactInput {
+    #[schemars(description = strings::FIELD_SEARCH_CONTACT_INPUT_KEYWORD)]
     pub keyword: String,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
@@ -621,7 +649,9 @@ pub struct DeleteContactResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct GetWeatherInput {
+    #[schemars(description = strings::FIELD_WEATHER_INPUT_LOCATION)]
     pub location: String,
+    #[schemars(description = strings::FIELD_WEATHER_INPUT_DATE_RANGE)]
     pub date_range: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -631,8 +661,11 @@ pub struct GetWeatherResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct PatchNoteInput {
+    #[schemars(description = strings::FIELD_PATCH_NOTE_INPUT_PATH)]
     pub path: String,
+    #[schemars(description = strings::FIELD_PATCH_NOTE_INPUT_OLD_STRING)]
     pub old_string: String,
+    #[schemars(description = strings::FIELD_PATCH_NOTE_INPUT_NEW_STRING)]
     pub new_string: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -642,6 +675,7 @@ pub struct PatchNoteResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebDelegateInput {
+    #[schemars(description = strings::FIELD_WEB_DELEGATE_INPUT_INSTRUCTION)]
     pub instruction: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]

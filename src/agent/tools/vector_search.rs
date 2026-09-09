@@ -51,30 +51,19 @@ impl ToolContext {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct VectorSearchInput {
-    /// Semantic search query. Use descriptive phrases, natural language questions,
-    /// or conceptual summaries (e.g., 'monthly bank account statements from First Tech')
-    /// rather than isolated single keywords. For exact text matching, use `grep_search`.
+    #[schemars(description = crate::tools::registry::builtin::strings::FIELD_VECTOR_SEARCH_INPUT_QUERY)]
     #[serde(default)]
     query: String,
-    /// Optional maximum cosine distance cutoff (0.0 to 2.0, default: 0.6).
-    /// Results with distance above this threshold are excluded.
-    /// Use 0.3–0.5 for strict high-precision matches; use 0.8–1.0 for broader thematic exploration.
+    #[schemars(description = crate::tools::registry::builtin::strings::FIELD_VECTOR_SEARCH_INPUT_MAX_DISTANCE)]
     #[serde(default)]
     max_distance: Option<f32>,
-    /// Optional cursor token for continuing multi-page retrieval (TOOL-028, TOOL-029).
+    #[schemars(description = crate::tools::registry::builtin::strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     cursor: Option<String>,
 }
 
-const VECTOR_SEARCH_DESCRIPTION: &str = "\
-Search indexed Markdown notes by semantic meaning and concepts. \
-Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. \
-When all results have been returned, the response includes a `hint` field and no `cursor`. \
-Formulate queries as descriptive phrases, natural language questions, or conceptual summaries \
-(e.g., 'checking account statements from credit union' rather than single keywords). \
-For exact keywords, timestamps, or filenames, prefer `grep_search`. \
-Optionally pass `max_distance` (0.0 to 2.0, default 0.6) to tune sensitivity: \
-use 0.3–0.5 for strict matches or 0.8–1.0 for broader exploration.";
+const VECTOR_SEARCH_DESCRIPTION: &str =
+    crate::tools::registry::builtin::strings::VECTOR_SEARCH_DESCRIPTION;
 
 /// LLM tool for searching the optional Markdown vector index.
 #[derive(ToolDescriptor)]
