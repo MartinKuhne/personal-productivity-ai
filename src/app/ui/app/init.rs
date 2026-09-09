@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::agent::AgentSession;
 use crate::background::{BackgroundLogs, Task};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -20,6 +19,7 @@ use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use fastmd_agent::AgentSession;
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
 
@@ -110,7 +110,7 @@ impl FastMdApp {
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
-        crate::agent::session::spawn_config_subscription(
+        crate::agent::spawn_config_subscription(
             tool_context.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
@@ -122,11 +122,12 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
+        crate::background::logs::register_ui_logs(background_manager.clone());
         // One BrowserSession for the whole app lifetime; shared
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily
         // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
+        let browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
@@ -225,7 +226,17 @@ impl FastMdApp {
             selection.expanded_dirs.insert(dir.clone());
         }
 
-        let dialogs = Dialogs::new();
+        let mut dialogs = Dialogs::new();
+
+        // First-run auto-show (spec FR-016): fresh UI state or a version
+        // upgrade opens the About dialog once and records the version so
+        // later starts stay quiet. Missing or corrupt state restores to
+        // default (unseen above), which fails open to a single auto-show.
+        crate::ui::about_dialog::apply_first_run_auto_show(
+            &mut persisted_ui_state,
+            &mut dialogs,
+            crate::ui::about_dialog::APP_VERSION,
+        );
 
         let user_command_bus = crate::bus::core::Bus::new();
         let user_command_reader = user_command_bus.subscribe();
@@ -271,6 +282,7 @@ impl FastMdApp {
             persisted_font_applied: false,
             os_baseline_ppp: None,
             applied_font_scale: 1.0,
+            search: crate::ui::TreeSearch::new(),
         }
     }
 
@@ -305,7 +317,7 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
-        let test_browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
+        let test_browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
@@ -418,6 +430,7 @@ impl FastMdApp {
             persisted_font_applied: false,
             os_baseline_ppp: None,
             applied_font_scale: 1.0,
+            search: crate::ui::TreeSearch::new(),
         }
     }
 }

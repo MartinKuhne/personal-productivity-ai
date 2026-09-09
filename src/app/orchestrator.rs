@@ -409,7 +409,7 @@ impl AppOrchestrator {
                                 pending_side_effects.push((path.clone(), tags.clone()));
                             }
                             ToolSideEffect::FileChanged { path } => {
-                                let tags = crate::utils::tags::extract_tags_from_file(path);
+                                let tags = crate::agent::utils::tags::extract_tags_from_file(path);
                                 pending_side_effects.push((path.clone(), tags));
                             }
                         },
@@ -512,8 +512,14 @@ impl AppOrchestrator {
         match ev {
             ProcessEvent::LogEntry(entry) => {
                 if let Ok(mut mgr) = self.background_manager.lock() {
-                    mgr.push_log(entry);
+                    mgr.push_log(entry.clone());
                 }
+                tracing::info!(
+                    target: crate::background::logs::TARGET_BACKGROUND_CHANNEL,
+                    category = %entry.category,
+                    "{}",
+                    entry.message
+                );
             }
             ProcessEvent::FileLoaded { path, content } => {
                 self.pending_file_load = None;
@@ -543,14 +549,22 @@ impl AppOrchestrator {
                         self.tabs.invalidate_heading_ids_cache();
                         self.tabs.toc.clear();
                         self.tabs.scroll_to_header_id = None;
+                        self.tabs.scroll_to_search = None;
 
                         // Log the failure to the background log.
+                        let msg = format!("Failed to load file {}: {}", path.display(), err);
                         if let Ok(mut mgr) = self.background_manager.lock() {
                             mgr.push_log(BackgroundLogEntry::new(
                                 LogCategory::Watcher,
-                                format!("Failed to load file {}: {}", path.display(), err),
+                                msg.clone(),
                             ));
                         }
+                        tracing::error!(
+                            target: crate::background::logs::TARGET_BACKGROUND_CHANNEL,
+                            category = "Watcher",
+                            "{}",
+                            msg
+                        );
                     }
                 }
             }
@@ -601,7 +615,8 @@ impl AppOrchestrator {
             let tx = self.tx.clone();
             let path = selected_path.clone();
             std::thread::spawn(move || {
-                let content = crate::utils::read_text_file(&path).map_err(|e| e.to_string());
+                let content =
+                    crate::agent::utils::encoding::read_text_file(&path).map_err(|e| e.to_string());
                 if tx
                     .send(ProcessEvent::FileLoaded { path, content }.into())
                     .is_err()

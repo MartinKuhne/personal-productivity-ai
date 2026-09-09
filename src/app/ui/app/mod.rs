@@ -84,6 +84,16 @@ impl TreeNode {
             children: BTreeMap::new(),
         }
     }
+
+    /// Recursively collects all directory paths present in this tree node and its descendants.
+    pub fn collect_dirs(&self, out: &mut HashSet<PathBuf>) {
+        if self.is_dir && !self.path.as_os_str().is_empty() {
+            out.insert(self.path.clone());
+        }
+        for child in self.children.values() {
+            child.collect_dirs(out);
+        }
+    }
 }
 
 pub struct FastMdApp {
@@ -116,6 +126,8 @@ pub struct FastMdApp {
     /// `ctx.pixels_per_point()` still returns the pre-apply
     /// value).
     applied_font_scale: f32,
+    /// Workspace content search state (UI-050).
+    pub search: crate::ui::TreeSearch,
 }
 
 impl FastMdApp {
@@ -206,6 +218,14 @@ impl FastMdApp {
     pub fn inline_editor_enabled(&self) -> bool {
         self.orchestrator.inline_editor_enabled
     }
+
+    pub fn search(&self) -> &crate::ui::TreeSearch {
+        &self.search
+    }
+
+    pub fn search_mut(&mut self) -> &mut crate::ui::TreeSearch {
+        &mut self.search
+    }
 }
 
 /// Purpose: Generates the markdown formatting prompt with a dynamic date.
@@ -224,13 +244,7 @@ pub fn generate_format_prompt(date_str: &str) -> String {
 impl eframe::App for FastMdApp {
     fn on_exit(&mut self) {
         crate::export::print::cleanup_temp_files();
-        if let Ok(mgr) = self.orchestrator.background_manager.lock() {
-            let log_path = crate::config::get_config_path()
-                .parent()
-                .unwrap_or(std::path::Path::new("."))
-                .join("logs/background-process.log");
-            let _ = mgr.save_logs(&log_path);
-        }
+        crate::background::logs::unregister_ui_logs();
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

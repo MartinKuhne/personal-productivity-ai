@@ -2,8 +2,10 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-/// Uses Phosphor [`egui_phosphor::regular::LIGHTNING`] icon.
-pub const APP_TITLE: &str = "\u{E2DE} FastMD Viewer";
+/// The Document + Bolt logo is painted separately via [`crate::ui::logo::paint_logo`] —
+///
+/// the title itself is plain text so it remains searchable and accessible.
+pub const APP_TITLE: &str = "FastMD Viewer";
 
 /// Label for the batch prompt processing button (now in the hamburger menu).
 pub const BATCH_BUTTON: &str = "Batch...";
@@ -19,6 +21,58 @@ pub const MENU_TOOLS: &str = "Tools...";
 
 /// Title of the tools dialog modal.
 pub const TOOLS_DIALOG_TITLE: &str = "Tools";
+
+// ── About Dialog ───────────────────────────────────────────────────────────
+/// Label for the about dialog entry in the hamburger menu.
+pub const MENU_ABOUT: &str = "About FastMD...";
+
+/// Title of the about dialog modal window.
+pub const ABOUT_DIALOG_TITLE: &str = "About FastMD";
+
+/// Application name displayed in the about dialog header.
+pub const ABOUT_APP_NAME: &str = "FastMD Viewer";
+
+/// Copyright notice displayed in the about dialog header.
+pub const ABOUT_COPYRIGHT: &str = "Copyright (c) 2026 Martin Kuhne";
+
+/// Label for the build branch in the about dialog.
+pub const ABOUT_BRANCH_LABEL: &str = "Branch:";
+
+/// Label for the commit hash in the about dialog.
+pub const ABOUT_COMMIT_LABEL: &str = "Commit:";
+
+/// Label for the build date in the about dialog.
+pub const ABOUT_DATE_LABEL: &str = "Built:";
+
+/// Header for the license section in the about dialog.
+pub const ABOUT_LICENSE_HEADER: &str = "License";
+
+/// Header for the attributions section in the about dialog.
+pub const ABOUT_ATTRIBUTIONS_HEADER: &str = "Third-Party Attributions";
+
+/// Tooltip explaining that clicking the commit hash copies the full hash.
+pub const ABOUT_COPY_COMMIT_TOOLTIP: &str = "Click to copy full commit hash";
+
+/// Prefix for the commit hash hover tooltip, followed by the full hash.
+pub const ABOUT_FULL_COMMIT_PREFIX: &str = "Full commit:";
+
+/// Tooltip notification shown when the commit hash has been copied.
+pub const ABOUT_COPIED_NOTIFICATION: &str = "Commit hash copied to clipboard";
+
+/// Fallback string when author metadata is not available.
+pub const ABOUT_UNKNOWN_AUTHOR: &str = "Unknown";
+
+/// Column header for crate name in the attributions list.
+pub const ABOUT_COL_CRATE: &str = "Crate";
+
+/// Column header for author(s) in the attributions list.
+pub const ABOUT_COL_AUTHORS: &str = "Authors";
+
+/// Column header for repository URL in the attributions list.
+pub const ABOUT_COL_REPO: &str = "Repository";
+
+/// `on_click` event name fired when the user clicks About FastMD from the hamburger menu.
+pub const ABOUT_EVENT: &str = "about_button";
 
 /// Kind label for an internal (built-in) tool group row.
 pub const TOOLS_KIND_INTERNAL: &str = "Internal";
@@ -57,8 +111,50 @@ pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 /// Default label shown when no tag is selected in the tag filter.
 pub const TAG_FILTER_DEFAULT: &str = "Filter by Tag: All";
 
+/// Placeholder text for the workspace content search box.
+pub const SEARCH_PLACEHOLDER: &str = "Search workspace...";
+
+/// Tooltip for the magnifying glass button that triggers search.
+pub const SEARCH_TRIGGER_TOOLTIP: &str = "Search";
+
+/// Tooltip for the button that clears the search query and restores the tree view.
+pub const SEARCH_CLEAR_TOOLTIP: &str = "Clear search";
+
+/// Empty-state message when content search yields zero matching files.
+pub const SEARCH_NO_RESULTS: &str = "No matching files found";
+
+/// Header label for the search result list.
+pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
+
+/// Phosphor icon: caret down (U+E136)
+pub const ICON_CARET_DOWN: &str = "\u{E136}";
+
+/// Phosphor icon: caret right (U+E13A)
+pub const ICON_CARET_RIGHT: &str = "\u{E13A}";
+
+/// Phosphor icon: magnifying glass (U+E30C)
+pub const ICON_MAGNIFYING_GLASS: &str = "\u{E30C}";
+
+/// Phosphor icon: x / close (U+E4F6)
+pub const ICON_X: &str = "\u{E4F6}";
+
+/// Phosphor icon: copy (U+E1CA)
+pub const ICON_COPY: &str = "\u{E1CA}";
+
+/// Phosphor icon: list / hamburger menu (U+E2F0)
+pub const ICON_LIST: &str = "\u{E2F0}";
+
+/// Phosphor icon: stop (U+E46C)
+pub const ICON_STOP: &str = "\u{E46C}";
+
+/// Phosphor icon: robot (U+E762)
+pub const ICON_ROBOT: &str = "\u{E762}";
+
+/// Phosphor icon: lightning (U+E2DE)
+pub const ICON_LIGHTNING: &str = "\u{E2DE}";
+
 /// Label for the hamburger menu button in the top toolbar.
-pub const HAMBURGER_MENU_BUTTON: &str = egui_phosphor::regular::LIST;
+pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
 
 /// ID salt for the hamburger menu in egui.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
@@ -155,7 +251,7 @@ pub const COMMAND_INPUT_HINT: &str = "Type command (Enter to submit, Shift+Enter
 pub const FORMAT_MARKDOWN_ACTION: &str = "Format Markdown";
 
 /// Button label to cancel/stop a running agent task.
-/// Uses Phosphor [`egui_phosphor::regular::STOP`] icon.
+/// Uses Phosphor [`ICON_STOP`] icon.
 pub const STOP_AGENT_BUTTON: &str = "\u{E46C} Stop";
 
 /// Header text for the available models list output.
@@ -183,7 +279,7 @@ pub const TABLE_OF_CONTENTS_HEADER: &str = "Table of Contents";
 
 // Center Panel
 /// Header for the agent session view in the center panel.
-/// Uses Phosphor [`egui_phosphor::regular::ROBOT`] icon.
+/// Uses Phosphor [`ICON_ROBOT`] icon.
 pub const AGENT_SESSION_HEADER: &str = "\u{E762} FastMD Agent Session";
 
 /// Button label to close the agent session view (replaces "Back to document").
@@ -375,10 +471,9 @@ pub const RUN_AS_PROMPT_ACTION: &str = "Run as prompt";
 pub const PRINT_ACTION: &str = "Print";
 
 /// Context menu item to export the current Markdown file to PDF via
-/// the in-process Typst compiler. Sits next to `PRINT_ACTION` in the
-/// file context menu; the underlying feature is gated by the
-/// `pdf-export` Cargo feature, so the menu entry is only registered
-/// when the feature is on.
+/// the official `typst` CLI binary. Sits next to `PRINT_ACTION` in the
+/// file context menu; dynamically displayed only when `typst` is found
+/// in the system PATH.
 pub const SAVE_AS_PDF_ACTION: &str = "Save as PDF...";
 
 // Background Logs Window
@@ -508,8 +603,12 @@ mod tests {
 
     #[test]
     fn test_hamburger_menu_strings() {
-        assert_eq!(HAMBURGER_MENU_BUTTON, egui_phosphor::regular::LIST);
+        assert_eq!(HAMBURGER_MENU_BUTTON, ICON_LIST);
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
+        assert_eq!(MENU_ABOUT, "About FastMD...");
+        assert_eq!(ABOUT_EVENT, "about_button");
+        assert_eq!(ABOUT_DIALOG_TITLE, "About FastMD");
+        assert_eq!(ABOUT_APP_NAME, "FastMD Viewer");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
         assert_eq!(MENU_WINDOWS, "Windows");
         assert_eq!(MENU_BACKGROUND_OPERATIONS, "Background operations");
@@ -525,9 +624,13 @@ mod tests {
 
     #[test]
     fn test_ui_strings_use_phosphor_icons() {
+        assert_eq!(
+            APP_TITLE, "FastMD Viewer",
+            "APP_TITLE is plain text; logo is painted via ui::logo::paint_logo"
+        );
         assert!(
-            APP_TITLE.contains(egui_phosphor::regular::LIGHTNING),
-            "APP_TITLE should use Phosphor LIGHTNING icon"
+            !APP_TITLE.contains(ICON_LIGHTNING),
+            "APP_TITLE should not embed Phosphor glyph; use logo module"
         );
         assert!(
             !APP_TITLE.contains('⚡'),
@@ -535,13 +638,12 @@ mod tests {
         );
 
         assert_eq!(
-            HAMBURGER_MENU_BUTTON,
-            egui_phosphor::regular::LIST,
+            HAMBURGER_MENU_BUTTON, ICON_LIST,
             "HAMBURGER_MENU_BUTTON should use Phosphor LIST icon"
         );
 
         assert!(
-            STOP_AGENT_BUTTON.contains(egui_phosphor::regular::STOP),
+            STOP_AGENT_BUTTON.contains(ICON_STOP),
             "STOP_AGENT_BUTTON should use Phosphor STOP icon"
         );
         assert!(
@@ -550,7 +652,7 @@ mod tests {
         );
 
         assert!(
-            AGENT_SESSION_HEADER.contains(egui_phosphor::regular::ROBOT),
+            AGENT_SESSION_HEADER.contains(ICON_ROBOT),
             "AGENT_SESSION_HEADER should use Phosphor ROBOT icon"
         );
         assert!(

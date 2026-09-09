@@ -1,9 +1,8 @@
 //! DAV integration — CalDAV (RFC 4791) and CardDAV (RFC 6352) over
-//! HTTP, backed by the `fast_dav_rs` SDK.
+//! HTTP, backed by a native reqwest client.
 //!
-//! `client` is the unified `DavClient` — one struct that owns
-//! both a `CalDavClient` and a `CardDavClient` against the same
-//! DAV server, exposing both protocols' tools.
+//! `client` is the unified `DavClient` — one struct that communicates
+//! with a DAV server for both CalDAV and CardDAV protocols.
 //! `cal` and `card` are the protocol-specific helpers
 //! (iCal/vCard parsing, JSON serialisation) and the per-protocol
 //! `tool_*` LLM-adapter wrappers that aggregate per-server
@@ -21,5 +20,6 @@
 pub mod cal;
 pub mod card;
 pub mod client;
+pub mod xml;
 
 pub use client::DavClient;

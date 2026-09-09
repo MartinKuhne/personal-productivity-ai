@@ -27,6 +27,10 @@ pub struct Tabs {
     /// `egui::Id` at render time. Stored as a string so the
     /// manager is egui-independent.
     pub scroll_to_header_id: Option<String>,
+    /// Pending search jump target query. The center panel scrolls
+    /// to the first occurrence of this query within the document,
+    /// then clears it.
+    pub scroll_to_search: Option<String>,
     /// Pending task checkbox toggles queued by `render_markdown`.
     /// Drained and applied to `current_markdown` after each frame.
     pub pending_task_toggles: Vec<(usize, bool)>,
@@ -47,6 +51,7 @@ impl Tabs {
             tabs_set: HashSet::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
+            scroll_to_search: None,
             pending_task_toggles: Vec::new(),
             tab_strip_cache: TabStripCache::default(),
             heading_ids_cache: None,
@@ -160,6 +165,7 @@ impl Tabs {
         self.current_markdown = String::new();
         self.toc.clear();
         self.scroll_to_header_id = None;
+        self.scroll_to_search = None;
         self.heading_ids_cache = None;
     }
 }
@@ -183,6 +189,7 @@ mod tests {
         assert!(manager.tabs.is_empty());
         assert!(manager.toc.is_empty());
         assert!(manager.scroll_to_header_id.is_none());
+        assert!(manager.scroll_to_search.is_none());
     }
 
     #[test]

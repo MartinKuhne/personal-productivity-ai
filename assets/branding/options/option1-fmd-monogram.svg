@@ -1,0 +1,15 @@
+<!-- Option 1 — FMD Geometric Monogram
+     Rounded square indigo badge, tight Inter-style wordmark.
+     Colors: bg #6366F1 (selection), text #FFFFFF, accent #64C8FF underline.
+     Designed for maximum legibility at 16×16. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="FMD monogram">
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#6366F1"/>
+  <!-- subtle inner highlight for depth -->
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="white" stroke-opacity="0.08"/>
+  <text x="16" y="19.8" text-anchor="middle"
+        font-family="Inter, 'Segoe UI', system-ui, sans-serif"
+        font-weight="800" font-size="12.5" letter-spacing="-0.5"
+        fill="white">FMD</text>
+  <!-- accent: tiny lightning tick under M -->
+  <path d="M14.6 22.2 L15.6 20.8 H14.8 L16.2 18.2 L15.0 19.7 H16.0 Z" fill="#64C8FF" opacity="0.95"/>
+</svg>

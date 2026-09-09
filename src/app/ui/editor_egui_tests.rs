@@ -1,16 +1,10 @@
 //! Tests for `ui/editor_egui.rs`
 
 use super::*;
-use crate::bus::core::Bus;
 use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::extract_text;
 
-/// A producer that publishes to a throwaway bus. Editor tests
-/// don't need to consume the events — they only care about the
-/// rendered output / early-return path.
-fn noop_producer() -> FileEventProducer {
-    FileEventProducer::new(Bus::new())
-}
+use crate::ui::test_helpers::app::noop_producer;
 
 #[test]
 fn test_show_text_editor_is_a_noop_when_buffer_closed() {

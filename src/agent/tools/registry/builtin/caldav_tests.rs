@@ -83,33 +83,52 @@ fn dto_get_calendar_round_trip() {
 
 #[test]
 fn dto_get_calendar_item_round_trip() {
-    let p: dtos::GetCalendarItemInput =
+    let p1: dtos::GetCalendarItemInput =
         serde_json::from_str(r#"{"href":"/cal/event1.ics"}"#).unwrap();
-    assert_eq!(p.href, "/cal/event1.ics");
+    assert_eq!(p1.href, "/cal/event1.ics");
+
+    let p2: dtos::GetCalendarItemInput =
+        serde_json::from_str(r#"{"id":"/cal/event1.ics"}"#).unwrap();
+    assert_eq!(p2.href, "/cal/event1.ics");
 }
 
 #[test]
 fn dto_add_calendar_item_round_trip() {
-    let p: dtos::AddCalendarItemInput =
-        serde_json::from_str(r#"{"summary":"Standup","start":"2024-01-01T09:00:00Z"}"#).unwrap();
+    let p: dtos::AddCalendarItemInput = serde_json::from_str(
+        r#"{"client":"personal","summary":"Standup","start":"2024-01-01T09:00:00Z"}"#,
+    )
+    .unwrap();
+    assert_eq!(p.client.as_deref(), Some("personal"));
     assert_eq!(p.summary.as_deref(), Some("Standup"));
     let v = serde_json::to_value(&p).unwrap();
     assert_eq!(v["summary"], "Standup");
+    assert_eq!(v["client"], "personal");
 }
 
 #[test]
 fn dto_update_calendar_item_round_trip() {
-    let p: dtos::UpdateCalendarItemInput =
-        serde_json::from_str(r#"{"id":"/cal/event1.ics","summary":"New"}"#).unwrap();
-    assert_eq!(p.id, "/cal/event1.ics");
-    assert_eq!(p.summary.as_deref(), Some("New"));
+    let p1: dtos::UpdateCalendarItemInput =
+        serde_json::from_str(r#"{"id":"/cal/event1.ics","summary":"New","client":"work"}"#)
+            .unwrap();
+    assert_eq!(p1.href, "/cal/event1.ics");
+    assert_eq!(p1.summary.as_deref(), Some("New"));
+    assert_eq!(p1.client.as_deref(), Some("work"));
+
+    let p2: dtos::UpdateCalendarItemInput =
+        serde_json::from_str(r#"{"href":"/cal/event1.ics","summary":"New"}"#).unwrap();
+    assert_eq!(p2.href, "/cal/event1.ics");
 }
 
 #[test]
 fn dto_delete_calendar_item_round_trip() {
-    let p: dtos::DeleteCalendarItemInput =
-        serde_json::from_str(r#"{"id":"/cal/event1.ics"}"#).unwrap();
-    assert_eq!(p.id, "/cal/event1.ics");
+    let p1: dtos::DeleteCalendarItemInput =
+        serde_json::from_str(r#"{"id":"/cal/event1.ics","client":"work"}"#).unwrap();
+    assert_eq!(p1.href, "/cal/event1.ics");
+    assert_eq!(p1.client.as_deref(), Some("work"));
+
+    let p2: dtos::DeleteCalendarItemInput =
+        serde_json::from_str(r#"{"href":"/cal/event1.ics"}"#).unwrap();
+    assert_eq!(p2.href, "/cal/event1.ics");
 }
 
 #[test]

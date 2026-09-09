@@ -1,4 +1,6 @@
 //! Renders markdown to HTML and drives physical printing (or PDF export) via an embedded web-view pipeline.
+//!
+//! Unit tests live in the sibling `print_tests.rs` sidecar.
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use std::io::Write;
@@ -51,16 +53,17 @@ impl PrintJob {
 }
 
 fn markdown_to_html(markdown: &str) -> String {
-    crate::markdown::render_markdown_to_html(markdown)
+    let doc = crate::markdown::Document::new(markdown.to_string());
+    crate::markdown::render_markdown_to_html(doc.body())
 }
 
-fn build_html_document(title: &str, content: &str) -> String {
+fn build_html_document(_title: &str, content: &str) -> String {
     format!(
         r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>{title}</title>
+    <title></title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -108,14 +111,21 @@ fn build_html_document(title: &str, content: &str) -> String {
         th, td {{ border: 1px solid #dfe2e5; padding: 6px 13px; }}
         th {{ background-color: #f6f8fa; }}
         img {{ max-width: 100%; height: auto; }}
-        @media print {{ body {{ padding: 0; max-width: none; }} }}
+        @page {{
+            margin: 0;
+        }}
+        @media print {{
+            body {{
+                padding: 1.6cm 2cm;
+                max-width: none;
+            }}
+        }}
     </style>
 </head>
 <body>
     {content}
 </body>
 </html>"#,
-        title = html_escape::encode_text(title),
         content = content
     )
 }
@@ -188,58 +198,5 @@ pub fn execute_print_blocking(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_print_job_new() {
-        let dir = tempdir().unwrap();
-        let md_path = dir.path().join("test.md");
-        std::fs::write(&md_path, "# Test\n\nContent").unwrap();
-
-        let job = PrintJob::new(md_path.clone());
-        assert_eq!(job.markdown_path, md_path);
-        assert_eq!(job.title, "test");
-        assert_eq!(job.markdown_content, "# Test\n\nContent");
-    }
-
-    #[test]
-    fn test_print_job_new_missing_file_falls_back_to_empty() {
-        let missing = PathBuf::from("definitely_missing_file_12345.md");
-        let job = PrintJob::new(missing.clone());
-        // Missing file -> empty content, but the stem still provides a title.
-        assert_eq!(job.markdown_content, "");
-        assert_eq!(job.title, "definitely_missing_file_12345");
-    }
-
-    #[test]
-    fn test_print_job_new_without_stem_uses_document_title() {
-        // A path with no file name/stem falls back to the default title.
-        let job = PrintJob::new(PathBuf::from(""));
-        assert_eq!(job.title, "Document");
-        assert_eq!(job.markdown_content, "");
-    }
-
-    #[test]
-    fn test_print_job_from_content() {
-        let job = PrintJob::from_content("# Test\n\nContent".to_string(), "My Doc".to_string());
-        assert_eq!(job.title, "My Doc");
-        assert_eq!(job.markdown_content, "# Test\n\nContent");
-    }
-
-    #[test]
-    fn test_markdown_to_html() {
-        let html = markdown_to_html("# Hello\n\n**Bold** text");
-        assert!(html.contains("<h1>Hello</h1>"));
-        assert!(html.contains("<strong>Bold</strong>"));
-    }
-
-    #[test]
-    fn test_build_html_document() {
-        let html = markdown_to_html("# Hi");
-        let doc = build_html_document("Test", &html);
-        assert!(doc.contains("<!DOCTYPE html>"));
-        assert!(doc.contains("<title>Test</title>"));
-    }
-}
+#[path = "print_tests.rs"]
+mod tests;

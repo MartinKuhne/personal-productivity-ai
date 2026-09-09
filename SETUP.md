@@ -22,6 +22,38 @@ To enable semantic vector search with Qdrant:
 cargo install --git https://github.com/MartinKuhne/personal-productivity-ai --features vector-search
 ```
 
+### PDF Export (Typst)
+
+FastMD supports exporting Markdown documents directly to styled PDF documents. To keep FastMD's binary footprint lightweight and build times fast, PDF compilation is delegated to the official [Typst](https://typst.app/) CLI.
+
+FastMD automatically detects whether `typst` is present in your system `PATH`. When found, the **"Save as PDF..."** action is automatically available in the file context menu.
+
+#### Installing Typst
+
+- **Windows** (winget):
+  ```bash
+  winget install --id Typst.Typst
+  ```
+- **macOS** (Homebrew):
+  ```bash
+  brew install typst
+  ```
+- **Linux**:
+  ```bash
+  # Arch Linux
+  pacman -S typst
+  # Or download prebuilt release from https://github.com/typst/typst/releases
+  ```
+- **Cargo**:
+  ```bash
+  cargo install --locked typst-cli
+  ```
+
+Verify the installation in your terminal:
+```bash
+typst --version
+```
+
 ---
 
 ## Infrastructure Services (Docker Compose)

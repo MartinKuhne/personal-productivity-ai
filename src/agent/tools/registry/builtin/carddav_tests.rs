@@ -98,29 +98,45 @@ fn dto_search_contact_round_trip() {
 #[test]
 fn dto_add_contact_round_trip() {
     let p: dtos::AddContactInput =
-        serde_json::from_str(r#"{"name":"Alice","email":"a@example.com"}"#).unwrap();
+        serde_json::from_str(r#"{"client":"personal","name":"Alice","email":"a@example.com"}"#)
+            .unwrap();
+    assert_eq!(p.client.as_deref(), Some("personal"));
     assert_eq!(p.name.as_deref(), Some("Alice"));
     assert_eq!(p.email.as_deref(), Some("a@example.com"));
 }
 
 #[test]
 fn dto_get_contact_round_trip() {
-    let p: dtos::GetContactInput = serde_json::from_str(r#"{"id":"/addr/1.vcf"}"#).unwrap();
-    assert_eq!(p.id, "/addr/1.vcf");
+    let p1: dtos::GetContactInput = serde_json::from_str(r#"{"id":"/addr/1.vcf"}"#).unwrap();
+    assert_eq!(p1.href, "/addr/1.vcf");
+
+    let p2: dtos::GetContactInput = serde_json::from_str(r#"{"href":"/addr/1.vcf"}"#).unwrap();
+    assert_eq!(p2.href, "/addr/1.vcf");
 }
 
 #[test]
 fn dto_update_contact_round_trip() {
-    let p: dtos::UpdateContactInput =
-        serde_json::from_str(r#"{"id":"/addr/1.vcf","email":"new@example.com"}"#).unwrap();
-    assert_eq!(p.id, "/addr/1.vcf");
-    assert_eq!(p.email.as_deref(), Some("new@example.com"));
+    let p1: dtos::UpdateContactInput =
+        serde_json::from_str(r#"{"id":"/addr/1.vcf","email":"new@example.com","client":"work"}"#)
+            .unwrap();
+    assert_eq!(p1.href, "/addr/1.vcf");
+    assert_eq!(p1.client.as_deref(), Some("work"));
+    assert_eq!(p1.email.as_deref(), Some("new@example.com"));
+
+    let p2: dtos::UpdateContactInput =
+        serde_json::from_str(r#"{"href":"/addr/1.vcf","email":"new@example.com"}"#).unwrap();
+    assert_eq!(p2.href, "/addr/1.vcf");
 }
 
 #[test]
 fn dto_delete_contact_round_trip() {
-    let p: dtos::DeleteContactInput = serde_json::from_str(r#"{"id":"/addr/1.vcf"}"#).unwrap();
-    assert_eq!(p.id, "/addr/1.vcf");
+    let p1: dtos::DeleteContactInput =
+        serde_json::from_str(r#"{"id":"/addr/1.vcf","client":"work"}"#).unwrap();
+    assert_eq!(p1.href, "/addr/1.vcf");
+    assert_eq!(p1.client.as_deref(), Some("work"));
+
+    let p2: dtos::DeleteContactInput = serde_json::from_str(r#"{"href":"/addr/1.vcf"}"#).unwrap();
+    assert_eq!(p2.href, "/addr/1.vcf");
 }
 
 #[test]

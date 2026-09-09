@@ -55,6 +55,12 @@ pub struct PersistedUiState {
     pub font_size_scale: Option<f32>,
     #[serde(default)]
     pub expanded_dirs: HashSet<PathBuf>,
+    /// App version the About dialog was last shown for (`None` = never
+    /// shown, including state written before this field existed). Drives
+    /// the first-run auto-show (spec FR-016): fresh or upgraded versions
+    /// open the dialog once; the same version stays quiet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about_shown_for_version: Option<String>,
 }
 
 #[cfg(test)]
@@ -210,5 +216,36 @@ mod tests {
         let json = r#"{"left_panel_width": NaN}"#;
         let result: Result<PersistedUiState, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_about_shown_for_version_round_trips() {
+        // Spec FR-016: the first-run version stamp defaults to unseen,
+        // survives a serde round-trip, and is absent (not an error) in
+        // state written before the field existed.
+        let default = PersistedUiState::default();
+        assert_eq!(default.about_shown_for_version, None);
+
+        let mut s = PersistedUiState {
+            about_shown_for_version: Some("0.2.0".to_owned()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.about_shown_for_version, Some("0.2.0".to_owned()));
+
+        s.about_shown_for_version = None;
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(
+            !json.contains("about_shown_for_version"),
+            "unseen state should omit the field (skip_serializing_if); got {json}"
+        );
+
+        let legacy_json = r#"{"left_panel_width": null, "expanded_dirs": []}"#;
+        let legacy: PersistedUiState = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(
+            legacy.about_shown_for_version, None,
+            "pre-field state must deserialize to unseen, triggering one post-upgrade auto-show"
+        );
     }
 }

@@ -21,6 +21,7 @@
 //! These helpers are `#[cfg(test)]`-gated by their declaration in
 //! `crate::ui::mod` — they are not part of the production crate.
 
+pub mod app;
 pub mod assert;
 #[cfg(test)]
 pub mod interact;

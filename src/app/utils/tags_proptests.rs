@@ -37,7 +37,7 @@
 //!
 //! `cases = 1024` per property.
 
-use crate::utils::tags::extract_tags_from_file;
+use fastmd_agent::utils::tags::extract_tags_from_file;
 use proptest::prelude::*;
 use std::fs;
 use tempfile::TempDir;

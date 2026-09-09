@@ -69,6 +69,9 @@ impl AppOrchestrator {
             UserCommand::OpenToolsDialog => {
                 self.dialogs.tools_dialog_open = true;
             }
+            UserCommand::OpenAboutDialog => {
+                self.dialogs.about_dialog_open = true;
+            }
             UserCommand::ToggleBackgroundLogs(show) => {
                 self.background_manager.lock().unwrap().show_background_logs = show;
             }
@@ -141,7 +144,7 @@ impl AppOrchestrator {
                     if ext == "md" || ext == "markdown" {
                         self.file_processor.add_file(new_path.clone());
                     }
-                    let tags = crate::utils::tags::extract_tags_from_file(&new_path);
+                    let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
                     self.tags.remove_file(&file);
                     self.tags.add_tags(new_path.clone(), tags);
                     if self.selection.expanded_dirs.remove(&file) {
@@ -219,8 +222,11 @@ impl AppOrchestrator {
                     tracing::error!("Failed to initialize clipboard for CopyPath");
                 }
             }
-            #[cfg(feature = "pdf-export")]
             UserCommand::SaveAsPdf(path) => {
+                if !fastmd_pdf::is_typst_available() {
+                    tracing::warn!("SaveAsPdf requested but Typst CLI is not available in PATH");
+                    return;
+                }
                 let path_to_export = path;
                 let default_dir = path_to_export.parent().map(|p| p.to_path_buf());
                 let default_name = path_to_export
@@ -244,8 +250,6 @@ impl AppOrchestrator {
                     );
                 }
             }
-            #[cfg(not(feature = "pdf-export"))]
-            UserCommand::SaveAsPdf(_) => {}
             UserCommand::Rename(path) => {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 self.dialogs.file_to_rename = Some(path.clone());
@@ -409,7 +413,7 @@ impl AppOrchestrator {
                         if ext == "md" || ext == "markdown" {
                             self.file_processor.add_file(new_path.clone());
                         }
-                        let tags = crate::utils::tags::extract_tags_from_file(&new_path);
+                        let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
                         self.tags.remove_file(&file);
                         self.tags.add_tags(new_path.clone(), tags);
                         if self.selection.expanded_dirs.remove(&file) {
@@ -529,15 +533,14 @@ impl AppOrchestrator {
                         )
                         .map(|p| p.content.clone())
                         .unwrap_or_default();
-                    let (coordinator, cancel_flag) =
-                        crate::agent::batch::coordinator::BatchCoordinator::new(
-                            config,
-                            self.config.clone(),
-                            self.tx.clone(),
-                            self.file_event_bus.clone(),
-                            prompt_text,
-                            std::sync::Arc::new(crate::utils::clock::SystemClock),
-                        );
+                    let (coordinator, cancel_flag) = crate::agent::batch::BatchCoordinator::new(
+                        config,
+                        self.config.clone(),
+                        self.tx.clone(),
+                        self.file_event_bus.clone(),
+                        prompt_text,
+                        std::sync::Arc::new(crate::utils::clock::SystemClock),
+                    );
                     let handle = coordinator.execute();
                     self.dialogs.batch_handle = Some(handle);
                     self.dialogs.batch_cancel_flag = Some(cancel_flag);

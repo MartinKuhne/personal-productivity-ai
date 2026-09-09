@@ -2,34 +2,11 @@
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
-use crate::config::AppConfig;
-use crate::ui::FastMdApp;
 use crate::ui::test_helpers::run_ui_test;
 use std::fs;
 
-fn assert_bus_contains(
-    reader: &mut crate::bus::core::BusReader<UserCommand>,
-    expected: UserCommand,
-) {
-    let mut found = false;
-    let mut received = Vec::new();
-    while let Ok(cmd) = reader.try_recv_exposing_lag() {
-        received.push(cmd.clone());
-        if cmd == expected {
-            found = true;
-            break;
-        }
-    }
-    assert!(
-        found,
-        "Expected bus to contain {:?}, but received {:?}",
-        expected, received
-    );
-}
-
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
+use crate::ui::test_helpers::assert::assert_bus_contains;
 
 /// Modal dialogs are drawn into the root `egui::Context`, and
 /// `egui::Window::show` requires a non-trivial viewport for the

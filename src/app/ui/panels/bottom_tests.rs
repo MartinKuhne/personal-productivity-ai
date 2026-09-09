@@ -416,7 +416,9 @@ fn test_full_app_paste_then_enter_starts_agent() {
         !candidates.is_empty(),
         "expected the command input TextEdit in the full app"
     );
-    candidates[0].click();
+    // The bottom-panel command input is the last TextInput in the full-app layout
+    // (rendered after the left-panel search input).
+    candidates.last().unwrap().click();
     harness.run_steps(2);
 
     harness.event(egui::Event::Paste("summarize the doc\n".to_owned()));
@@ -717,31 +719,7 @@ fn create_test_app() -> FastMdApp {
     create_test_app_with_api_url("http://localhost:0")
 }
 
-/// Build a test app whose chat model posts to `api_url`. Tests that
-/// drive a `RunAgent` dispatch must route the LLM call to an
-/// in-process wiremock endpoint (see [`WiremockLlm`]) instead of the
-/// dead `localhost:0` default, which made the agent driver thread
-/// retry the connection (1+2+4+8s of sleeps) so the test then blocked
-/// for ~15s when `AgentSession`'s drop joined that thread.
-fn create_test_app_with_api_url(api_url: &str) -> FastMdApp {
-    use std::collections::HashMap;
-    let mut models = HashMap::new();
-    models.insert(
-        "test".to_string(),
-        crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: api_url.to_string(),
-            api_key: "test-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        },
-    );
-    let config = crate::config::AppConfig {
-        models,
-        ..crate::config::AppConfig::default()
-    };
-    FastMdApp::empty_state(config)
-}
+use crate::ui::test_helpers::app::test_app_with_api_url as create_test_app_with_api_url;
 
 /// In-process OpenAI-compatible endpoint for the tests that drive a
 /// `RunAgent` dispatch. The wiremock server runs on its own OS

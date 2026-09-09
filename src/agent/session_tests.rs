@@ -244,7 +244,7 @@ fn test_debug_entries_never_cleared_on_new_session() {
 /// on each `submit_prompt` call and is a valid `Uuid`. Uses
 /// `Bus<AgentEvent>` since the agent no longer publishes on `tx_gui`.
 #[test]
-fn test_current_session_id_set_on_submit_prompt() {
+fn slow_session_exponential_backoff() {
     use std::collections::HashMap;
     let mut models = HashMap::new();
     models.insert(

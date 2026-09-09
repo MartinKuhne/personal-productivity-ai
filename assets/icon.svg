@@ -1,0 +1,17 @@
+<!-- FastMD App Icon — Document + Bolt (Option 4)
+     Primary icon for taskbar, window, installer, and header badge.
+     Copy of branding/options/option4-document-bolt.svg — single source of truth.
+     Colors: badge #6366F1, document #FFFFFF, fold #C7D2FE, bolt #64C8FF. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="FastMD document bolt">
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#6366F1"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="white" stroke-opacity="0.08"/>
+  <path d="M9.2 6.2 H19.1 L23.0 10.2 V26.4 H9.2 Z" fill="white"/>
+  <path d="M19.1 6.2 L19.1 10.2 L23.0 10.2 Z" fill="#C7D2FE"/>
+  <path d="M19.1 6.2 L19.1 10.2 L23.0 10.2" fill="none" stroke="#A5B4FC" stroke-width="0.5" stroke-linejoin="round"/>
+  <rect x="11.4" y="13.2" width="8.6" height="1.1" rx="0.5" fill="#C7D2FE" opacity="0.9"/>
+  <rect x="11.4" y="15.4" width="6.2" height="1.1" rx="0.5" fill="#C7D2FE" opacity="0.65"/>
+  <rect x="11.4" y="17.6" width="7.4" height="1.1" rx="0.5" fill="#C7D2FE" opacity="0.45"/>
+  <path d="M17.9 13.0 L12.1 19.4 H14.9 L13.8 24.8 L20.0 17.2 H17.0 Z" fill="none" stroke="#4338CA" stroke-width="1.0" stroke-linejoin="round" opacity="0.85"/>
+  <path d="M17.9 13.0 L12.1 19.4 H14.9 L13.8 24.8 L20.0 17.2 H17.0 Z" fill="#64C8FF" stroke="white" stroke-width="0.35" stroke-linejoin="round"/>
+  <path d="M17.4 14.3 L13.6 18.6 H15.2 L14.6 22.0 L18.3 17.9 H16.4 Z" fill="white" opacity="0.22"/>
+</svg>

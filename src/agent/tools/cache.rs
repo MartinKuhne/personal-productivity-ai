@@ -61,11 +61,11 @@ pub struct ToolCache {
     /// Item-based pagination sessions for `search_email` (TOOL-026a: 32 emails).
     pub email_sessions: CursorSessionManager<SearchEmailItem>,
     /// Calendar search sessions for `search_calendar` (TOOL-026f: 32 events).
-    pub calendar_search_sessions: CursorSessionManager<String>,
+    pub calendar_search_sessions: CursorSessionManager<crate::tools::dtos::CalDavEventDetails>,
     /// Calendar range sessions for `get_calendar` (TOOL-026g: 32 events).
-    pub calendar_get_sessions: CursorSessionManager<String>,
+    pub calendar_get_sessions: CursorSessionManager<crate::tools::dtos::CalDavEventDetails>,
     /// Contact search sessions for `search_contact` (TOOL-026h: 32 contacts).
-    pub contact_search_sessions: CursorSessionManager<String>,
+    pub contact_search_sessions: CursorSessionManager<crate::tools::dtos::CardDavContactDetails>,
     /// Hit-based pagination sessions for `vector_search` (TOOL-026i: 32 hits).
     #[cfg(feature = "vector-search")]
     pub vector_sessions: CursorSessionManager<crate::tools::vector_search::VectorSearchHit>,

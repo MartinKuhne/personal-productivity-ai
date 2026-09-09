@@ -79,14 +79,16 @@ pub fn load_fallback_font() -> Option<Vec<u8>> {
     None
 }
 
+/// Embedded Phosphor Regular icon font bytes.
+const PHOSPHOR_REGULAR_FONT: &[u8] = include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf");
+
 /// Builds [`egui::FontDefinitions`] configured with default typography,
 /// the Phosphor icon font, and fallback symbols.
 pub fn build_font_definitions() -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
-    let font_bytes = egui_phosphor::Variant::Regular.font_bytes();
     fonts.font_data.insert(
         "phosphor".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(font_bytes)),
+        std::sync::Arc::new(egui::FontData::from_static(PHOSPHOR_REGULAR_FONT)),
     );
     if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
         font_keys.insert(1, "phosphor".to_owned());

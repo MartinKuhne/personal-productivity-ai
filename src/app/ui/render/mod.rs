@@ -43,7 +43,9 @@ pub use crate::markdown::{
 // `pub(crate)` so the re-exports don't cause E0364.
 #[cfg(test)]
 pub(crate) use code::copy_code_to_output;
+#[cfg(test)]
 pub(crate) use code::render_code_block;
+pub(crate) use code::render_code_block_scroll;
 pub(crate) use heading::render_heading;
 pub(crate) use inline::{InlineRenderItem, render_inline};
 pub(crate) use table::render_table_with_config;
@@ -65,12 +67,52 @@ use eframe::egui;
 ///
 /// `heading_ids` is an optional pre-computed slice of heading IDs
 /// (with duplicate disambiguation). If provided, avoids re-parsing
-/// headings and re-computing IDs on every frame.
+/// Concatenate the plain-text content of inline elements.
+fn inline_elems_contain(elems: &[crate::markdown::InlineElem], term_lower: &str) -> bool {
+    elems.iter().any(|e| match e {
+        crate::markdown::InlineElem::Text(t, _) => t.to_lowercase().contains(term_lower),
+        crate::markdown::InlineElem::Link(_, t) => t.to_lowercase().contains(term_lower),
+        crate::markdown::InlineElem::Html(h) => h.to_lowercase().contains(term_lower),
+        _ => false,
+    })
+}
+
+/// Returns `true` if any cell in the table contains `term_lower`.
+fn table_cells_contain(cells: &[Vec<Vec<crate::markdown::InlineElem>>], term_lower: &str) -> bool {
+    cells.iter().any(|row| {
+        row.iter()
+            .any(|cell| inline_elems_contain(cell, term_lower))
+    })
+}
+
+/// Render parsed markdown events with support for TOC scroll targets.
 #[tracing::instrument(skip_all, name = "ui.render_markdown", level = "debug")]
 pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,
     scroll_to_id_str: &mut Option<String>,
+    pending_toggles: &mut Vec<(usize, bool)>,
+    strategy: crate::ui::table_width::DeficitStrategy,
+    heading_ids: Option<&[String]>,
+) {
+    render_markdown_with_search(
+        ui,
+        markdown_text,
+        scroll_to_id_str,
+        &mut None,
+        pending_toggles,
+        strategy,
+        heading_ids,
+    );
+}
+
+/// Render parsed markdown events with support for both TOC and content-search jump targets.
+#[tracing::instrument(skip_all, name = "ui.render_markdown_with_search", level = "debug")]
+pub fn render_markdown_with_search(
+    ui: &mut egui::Ui,
+    markdown_text: &str,
+    scroll_to_id_str: &mut Option<String>,
+    scroll_to_search: &mut Option<String>,
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
     heading_ids: Option<&[String]>,
@@ -123,10 +165,11 @@ pub fn render_markdown(
 
     let clip = ui.clip_rect();
     let viewport_margin = 400.0_f32;
+    let can_cull = scroll_to_id_str.is_none() && scroll_to_search.is_none();
 
     for event in events.iter() {
         let top_y = ui.cursor().min.y;
-        if clip.is_positive() && top_y > clip.max.y + viewport_margin {
+        if can_cull && clip.is_positive() && top_y > clip.max.y + viewport_margin {
             match event {
                 RenderEvent::FlushInline {
                     elems,
@@ -182,8 +225,11 @@ pub fn render_markdown(
                 indent,
                 list_ordinal,
             } => {
-                // P0-2: Assign a task index to each task list item so
-                // checkbox toggles can be mapped back to the source.
+                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
+                    inline_elems_contain(elems, &target.to_lowercase())
+                } else {
+                    false
+                };
                 let item = InlineRenderItem {
                     elems,
                     needs_bullet: *needs_bullet,
@@ -191,14 +237,26 @@ pub fn render_markdown(
                     indent: *indent,
                     list_ordinal: *list_ordinal,
                     task_index,
+                    scroll_to_me: should_scroll,
                 };
                 render_inline(ui, &item, pending_toggles);
+                if should_scroll {
+                    *scroll_to_search = None;
+                }
                 if task_checked.is_some() {
                     task_index += 1;
                 }
             }
             RenderEvent::CodeBlock { language, content } => {
-                render_code_block(ui, language.as_deref(), content);
+                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
+                    content.to_lowercase().contains(&target.to_lowercase())
+                } else {
+                    false
+                };
+                render_code_block_scroll(ui, language.as_deref(), content, should_scroll);
+                if should_scroll {
+                    *scroll_to_search = None;
+                }
             }
             RenderEvent::Heading { level, elems } => {
                 let text = heading_plain_text(elems);
@@ -211,9 +269,20 @@ pub fn render_markdown(
                 } else {
                     heading_id_for(trimmed)
                 };
+                if let Some(target) = scroll_to_search.as_deref()
+                    && trimmed.to_lowercase().contains(&target.to_lowercase())
+                {
+                    *scroll_to_id_str = Some(heading_id_str.clone());
+                    *scroll_to_search = None;
+                }
                 render_heading(ui, elems, *level, scroll_to_id_str, &heading_id_str);
             }
             RenderEvent::Table(cells) => {
+                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
+                    table_cells_contain(cells, &target.to_lowercase())
+                } else {
+                    false
+                };
                 render_table_with_config(
                     ui,
                     cells,
@@ -221,6 +290,10 @@ pub fn render_markdown(
                     strategy,
                     &crate::ui::table_width::TableRenderConfig::default(),
                 );
+                if should_scroll {
+                    ui.scroll_to_cursor(Some(egui::Align::Center));
+                    *scroll_to_search = None;
+                }
                 table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {

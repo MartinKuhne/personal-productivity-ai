@@ -247,3 +247,142 @@ fn test_auto_scroll_default_true() {
     let mgr = BackgroundLogs::new();
     assert!(mgr.auto_scroll);
 }
+
+#[test]
+fn test_parse_log_category() {
+    assert_eq!(
+        parse_log_category("fastmd::background::indexer"),
+        Some(LogCategory::Indexer)
+    );
+    assert_eq!(parse_log_category("WATCHER"), Some(LogCategory::Watcher));
+    assert_eq!(
+        parse_log_category("pdf_converter"),
+        Some(LogCategory::PdfConverter)
+    );
+    assert_eq!(
+        parse_log_category("image_vision"),
+        Some(LogCategory::ImageVision)
+    );
+    assert_eq!(parse_log_category("llm_tools"), Some(LogCategory::LlmTools));
+    assert_eq!(parse_log_category("print"), Some(LogCategory::Print));
+    assert_eq!(parse_log_category("batch"), Some(LogCategory::Batch));
+    assert_eq!(parse_log_category("external_crate"), None);
+}
+
+#[test]
+fn test_log_dir_from_env_resolution() {
+    // 1. Explicit log_dir override takes highest precedence
+    let p = log_dir_from_env(
+        Some("/custom/logs"),
+        Some("/cfg/config.yaml"),
+        Some("/appdata"),
+        Some("/user"),
+    );
+    assert_eq!(p, PathBuf::from("/custom/logs"));
+
+    // 2. Config path parent / logs
+    let p = log_dir_from_env(
+        None,
+        Some("/cfg/config.yaml"),
+        Some("/appdata"),
+        Some("/user"),
+    );
+    assert_eq!(p, PathBuf::from("/cfg/logs"));
+
+    // 3. APPDATA fallback
+    let p = log_dir_from_env(None, None, Some("/appdata"), Some("/user"));
+    assert_eq!(p, PathBuf::from("/appdata/fastmd/logs"));
+
+    // 4. USERPROFILE fallback
+    let p = log_dir_from_env(None, None, None, Some("/user"));
+    assert_eq!(p, PathBuf::from("/user/.fastmd/logs"));
+
+    // 5. Default fallback
+    let p = log_dir_from_env(None, None, None, None);
+    assert_eq!(p, PathBuf::from("logs"));
+}
+
+#[test]
+fn test_get_log_dir_panic_shield_in_tests() {
+    // Under test, calling get_log_dir without FASTMD_LOG_DIR must panic per RUST-006
+    if std::env::var("FASTMD_LOG_DIR").is_err() && std::env::var("FASTMD_CONFIG_PATH").is_err() {
+        let result = std::panic::catch_unwind(|| {
+            get_log_dir();
+        });
+        assert!(
+            result.is_err(),
+            "RUST-006: get_log_dir must panic in test environment when env vars are unset"
+        );
+    }
+}
+
+#[test]
+fn test_ui_background_log_layer_captures_and_filters() {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let shared_logs = Arc::new(Mutex::new(BackgroundLogs::new()));
+    register_ui_logs(shared_logs.clone());
+
+    let subscriber = tracing_subscriber::registry().with(UiBackgroundLogLayer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        // 1. FastMD indexer event -> captured with LogCategory::Indexer
+        tracing::info!(target: "fastmd::background::indexer", "Indexed 42 files");
+
+        // 2. FastMD watcher event -> captured with LogCategory::Watcher
+        tracing::warn!(target: "fastmd::watcher", "File changed");
+
+        // 3. Channel event -> must be ignored to prevent double-logging
+        tracing::info!(target: TARGET_BACKGROUND_CHANNEL, "Channel event");
+
+        // 4. Third-party event -> must be ignored
+        tracing::info!(target: "hyper::proto", "HTTP connection opened");
+    });
+
+    unregister_ui_logs();
+
+    let logs = shared_logs.lock().unwrap();
+    let entries = logs.get_logs();
+    assert_eq!(
+        entries.len(),
+        2,
+        "Expected exactly 2 events captured (indexer and watcher)"
+    );
+    assert_eq!(entries[0].category, LogCategory::Indexer);
+    assert!(entries[0].message.contains("Indexed 42 files"));
+    assert_eq!(entries[1].category, LogCategory::Watcher);
+    assert!(entries[1].message.contains("File changed"));
+}
+
+#[test]
+fn test_non_blocking_file_appender_persists_to_disk() {
+    use tracing_subscriber::layer::SubscriberExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let log_path = dir.path().join(LOG_FILENAME);
+
+    let appender = tracing_appender::rolling::never(dir.path(), LOG_FILENAME);
+    let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false);
+
+    let subscriber = tracing_subscriber::registry().with(file_layer);
+
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!("Non-blocking disk write test line 1");
+        tracing::warn!("Non-blocking disk write test line 2");
+    });
+
+    // Dropping the WorkerGuard flushes the non-blocking background queue to disk
+    drop(guard);
+
+    assert!(
+        log_path.exists(),
+        "Log file should have been created on disk"
+    );
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    assert!(content.contains("Non-blocking disk write test line 1"));
+    assert!(content.contains("Non-blocking disk write test line 2"));
+}

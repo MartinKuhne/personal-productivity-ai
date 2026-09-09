@@ -4,9 +4,7 @@ use super::*;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 use crate::ui::test_helpers::run_ui_test;
 
-fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
-}
+use crate::ui::test_helpers::app::test_app as create_test_app;
 
 #[test]
 fn test_show_left_panel_empty() {
@@ -520,5 +518,112 @@ fn test_show_left_panel_tag_filter_hides_directories_without_matching_files() {
     assert!(
         !tree.children.contains_key("EmptyLib"),
         "EmptyLib (library without matching files) should NOT be in the tree when filtering by target_tag"
+    );
+}
+
+#[test]
+fn test_left_panel_search_input_renders() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    app.layout_mut().left_panel_dirty = false;
+
+    let output = run_ui_test(&ctx, Default::default(), |ui| {
+        show_left_panel(&mut app, ui);
+    });
+
+    let texts = crate::ui::test_helpers::text::extract_text(&output.shapes);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains(crate::ui::strings::WORKSPACE_HEADER))
+    );
+}
+
+#[test]
+fn test_left_panel_search_replaces_tree_view() {
+    use std::io::Write;
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    app.layout_mut().left_panel_dirty = false;
+
+    let temp_dir = std::env::temp_dir().join("fastmd_left_search_test");
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let match_file = temp_dir.join("apples.md");
+    let other_file = temp_dir.join("oranges.md");
+    let mut f1 = std::fs::File::create(&match_file).unwrap();
+    f1.write_all(b"# Apples\nCrisp apples are great.").unwrap();
+    let mut f2 = std::fs::File::create(&other_file).unwrap();
+    f2.write_all(b"# Oranges\nJust citrus.").unwrap();
+
+    app.file_processor_mut().all_files = vec![match_file.clone(), other_file.clone()];
+
+    // Before search: is_searching is false
+    assert!(!app.search().is_searching());
+
+    // Apply search for "crisp"
+    *app.search_mut().query_mut() = "crisp".to_string();
+    app.search_mut()
+        .apply(&[match_file.clone(), other_file.clone()], &[]);
+    assert!(app.search().is_searching());
+    assert_eq!(app.search().results().len(), 1);
+
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        )),
+        ..egui::RawInput::default()
+    };
+
+    let output = run_ui_test(&ctx, raw_input, |ui| {
+        show_left_panel(&mut app, ui);
+    });
+
+    let texts = crate::ui::test_helpers::text::extract_text(&output.shapes);
+    assert!(
+        texts.iter().any(|t| t.contains("apples.md")),
+        "Matching file must be rendered"
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("Crisp apples")),
+        "Matching snippet must be rendered"
+    );
+    assert!(
+        !texts.iter().any(|t| t.contains("oranges.md")),
+        "Non-matching file must NOT be in search results"
+    );
+
+    // Clear search and verify tree view is restored
+    app.search_mut().clear();
+    assert!(!app.search().is_searching());
+}
+
+#[test]
+fn test_left_panel_search_empty_results() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    app.layout_mut().left_panel_dirty = false;
+
+    *app.search_mut().query_mut() = "nonexistent_query_xyz".to_string();
+    app.search_mut().apply(&[], &[]);
+    assert!(app.search().is_searching());
+
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        )),
+        ..egui::RawInput::default()
+    };
+
+    let output = run_ui_test(&ctx, raw_input, |ui| {
+        show_left_panel(&mut app, ui);
+    });
+
+    let texts = crate::ui::test_helpers::text::extract_text(&output.shapes);
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains(crate::ui::strings::SEARCH_NO_RESULTS))
     );
 }

@@ -120,9 +120,10 @@ fn execute_add_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let item_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::lib::dav::cal::tool_add_calendar_item(&ctx.config, &item_json).map(|r| {
-        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-    })
+    crate::lib::dav::cal::tool_add_calendar_item(&ctx.config, input.client.as_deref(), &item_json)
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
 }
 
 /// Tool that updates an existing calendar item.
@@ -146,7 +147,13 @@ fn execute_update_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let update_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::lib::dav::cal::tool_update_calendar_item(&ctx.config, &input.id, &update_json).map(|r| {
+    crate::lib::dav::cal::tool_update_calendar_item(
+        &ctx.config,
+        &input.href,
+        input.client.as_deref(),
+        &update_json,
+    )
+    .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -170,7 +177,12 @@ fn execute_delete_calendar_item(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::DeleteCalendarItemInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::lib::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
+    crate::lib::dav::cal::tool_delete_calendar_item(
+        &ctx.config,
+        &input.href,
+        input.client.as_deref(),
+    )
+    .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

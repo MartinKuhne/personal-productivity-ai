@@ -107,11 +107,11 @@ fn test_box_drawing_and_math_coverage() {
 fn test_phosphor_icons_still_resolve_in_proportional() {
     let ctx = setup_test_context();
     let phosphor_icons = [
-        egui_phosphor::regular::LIGHTNING.chars().next().unwrap(),
-        egui_phosphor::regular::ROBOT.chars().next().unwrap(),
-        egui_phosphor::regular::STOP.chars().next().unwrap(),
-        egui_phosphor::regular::LIST.chars().next().unwrap(),
-        egui_phosphor::regular::COPY.chars().next().unwrap(),
+        crate::ui::strings::ICON_LIGHTNING.chars().next().unwrap(),
+        crate::ui::strings::ICON_ROBOT.chars().next().unwrap(),
+        crate::ui::strings::ICON_STOP.chars().next().unwrap(),
+        crate::ui::strings::ICON_LIST.chars().next().unwrap(),
+        crate::ui::strings::ICON_COPY.chars().next().unwrap(),
     ];
     for icon in phosphor_icons {
         assert!(

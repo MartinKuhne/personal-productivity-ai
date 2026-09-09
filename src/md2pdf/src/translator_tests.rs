@@ -5,7 +5,10 @@
 //!
 //! Per AGENTS.md RUST-056 / RUST-057 — extracted to a sidecar.
 
-use super::{escape_typst, escape_typst_autolink, escape_typst_string, render_markdown_to_typst};
+use super::{
+    escape_typst, escape_typst_autolink, escape_typst_string, render_markdown_to_typst,
+    strip_yaml_front_matter,
+};
 
 #[test]
 fn empty_input_emits_empty_string() {
@@ -1020,4 +1023,46 @@ fn multiple_references_to_same_footnote_emit_each_time() {
         "expected two `#footnote[shared body.]` calls (one per \
          reference site), got {count} in: {out}"
     );
+}
+
+#[test]
+fn strip_yaml_front_matter_standard() {
+    let md = "---\ntitle: \"Packing List\"\ntags: [a, b]\n---\n# Real Heading\nContent";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, "# Real Heading\nContent");
+}
+
+#[test]
+fn strip_yaml_front_matter_crlf() {
+    let md = "---\r\ntitle: \"Packing List\"\r\n---\r\n# Real Heading\r\nContent";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, "# Real Heading\r\nContent");
+}
+
+#[test]
+fn strip_yaml_front_matter_empty_front_matter() {
+    let md = "---\n---\n# Real Heading";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, "# Real Heading");
+}
+
+#[test]
+fn strip_yaml_front_matter_none_present() {
+    let md = "# Just a heading\nSome text";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, md);
+}
+
+#[test]
+fn strip_yaml_front_matter_horizontal_rule_in_body_preserved() {
+    let md = "Some text before rule\n\n---\n\nText after rule";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, md);
+}
+
+#[test]
+fn strip_yaml_front_matter_unclosed_preserved() {
+    let md = "---\ntitle: unclosed without closing delimiter\nSome text";
+    let body = strip_yaml_front_matter(md);
+    assert_eq!(body, md);
 }

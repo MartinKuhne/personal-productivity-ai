@@ -163,7 +163,7 @@ fn test_run_agent_missing_api_key() {
 }
 
 #[test]
-fn test_run_agent_network_error() {
+fn slow_run_agent_network_error() {
     use std::collections::HashMap;
     let mut models = HashMap::new();
     models.insert(

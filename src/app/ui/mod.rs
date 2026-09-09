@@ -1,14 +1,17 @@
 //! UI subsystem — app, panels, rendering, tree, tab/selection/dialog managers, and OS-shell helpers.
 
+pub mod about_dialog;
 pub mod agent;
 pub mod agent_debug_window;
 pub mod app;
+pub mod attributions;
 pub mod background_logs;
 pub mod batch_dialog;
 pub mod dialogs;
 pub mod editor_egui;
 pub mod fonts;
 pub mod link_resolver;
+pub mod logo;
 pub mod modals;
 pub mod os_shell;
 pub mod panel_layout;
@@ -42,4 +45,4 @@ pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,
     render_flat_row,
 };
-pub use tree_search::TreeSearch;
+pub use tree_search::{SearchResultEntry, TreeSearch};

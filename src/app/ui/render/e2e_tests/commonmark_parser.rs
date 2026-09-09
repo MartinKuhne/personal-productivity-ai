@@ -944,13 +944,7 @@ fn cm_block_quotes_grouping() {
     let md = "> Paragraph in block quote.";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event inside block quote");
+    let flush = flush_inline(&events).expect("expected a FlushInline event inside block quote");
 
     assert_eq!(flush.len(), 1);
     assert!(matches!(&flush[0], InlineElem::Text(t, _) if t.contains("Paragraph in block quote")),);
@@ -1164,13 +1158,7 @@ fn cm_code_spans_simple() {
     let md = "`code`";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert_eq!(flush.len(), 1);
     assert!(
@@ -1187,13 +1175,7 @@ fn cm_code_spaces_edge_cases() {
     let md = "`` ` ` ``";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert_eq!(flush.len(), 1);
     let InlineElem::Text(t, s) = &flush[0] else {
@@ -1208,13 +1190,7 @@ fn cm_code_spaces_edge_cases() {
     // CM-547: multiple backticks to include backtick in content
     let md_multi = "``foo ` bar``";
     let events = parse_markdown_to_events(md_multi);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert!(
         matches!(&flush[0], InlineElem::Text(t, s) if t == "foo ` bar" && s.code),
@@ -1234,13 +1210,7 @@ fn cm_emphasis_style_flags() {
     // Bold
     let md_bold = "**bold**";
     let events = parse_markdown_to_events(md_bold);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
     assert!(
         matches!(&flush[0], InlineElem::Text(t, s) if t == "bold" && s.bold),
         "bold should set TextStyle::bold",
@@ -1249,13 +1219,7 @@ fn cm_emphasis_style_flags() {
     // Italic
     let md_italic = "*italic*";
     let events = parse_markdown_to_events(md_italic);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
     assert!(
         matches!(&flush[0], InlineElem::Text(t, s) if t == "italic" && s.italic),
         "italic should set TextStyle::italic",
@@ -1264,13 +1228,7 @@ fn cm_emphasis_style_flags() {
     // Strikethrough
     let md_strike = "~~strikethrough~~";
     let events = parse_markdown_to_events(md_strike);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
     assert!(
         matches!(&flush[0], InlineElem::Text(t, s) if t == "strikethrough" && s.strikethrough),
         "strikethrough should set TextStyle::strikethrough",
@@ -1282,13 +1240,7 @@ fn cm_emphasis_style_flags() {
 fn cm_emphasis_nested() {
     let md = "***triple***";
     let events = parse_markdown_to_events(md);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     // Triple emphasis (`***text***`) produces bold+italic.
     assert_eq!(flush.len(), 1);
@@ -1305,13 +1257,7 @@ fn cm_emphasis_no_space_boundary() {
     // (a space after `*` means it's not left-flanking).
     let md1 = "a * foo bar*";
     let events1 = parse_markdown_to_events(md1);
-    let flush = events1
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events1);
     // The text should be plain (no emphasis) since space after `*`
     // prevents left-flanking.
     assert!(
@@ -1326,13 +1272,7 @@ fn cm_emphasis_no_space_boundary() {
     // `*` followed by space IS right-flanking, so emphasis forms.
     let md2 = "not *emphasized* ";
     let events2 = parse_markdown_to_events(md2);
-    let flush = events2
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events2);
     // Emphasis should form: "not " + "emphasized" (italic)
     assert!(
         flush.iter().any(|e| matches!(
@@ -1350,13 +1290,7 @@ fn cm_emphasis_code_and_double_delimiters() {
     // CM-600: double underscore/bang for strong emphasis
     let md = "__bold__";
     let events = parse_markdown_to_events(md);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
     assert!(
         matches!(&flush[0], InlineElem::Text(t, s) if t == "bold" && s.bold),
         "__text__ should produce bold",
@@ -1373,13 +1307,7 @@ fn cm_links_inline() {
     let md = "[link text](https://example.com)";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert_eq!(flush.len(), 1);
     assert!(
@@ -1395,13 +1323,7 @@ fn cm_links_with_title_and_reference() {
     let md = "[link](/url \"title\")";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert!(matches!(&flush[0], InlineElem::Link(url, text) if url == "/url" && text == "link"),);
 
@@ -1409,13 +1331,7 @@ fn cm_links_with_title_and_reference() {
     // when pulldown-cmark resolves the reference.
     let md_ref = "[ref][id]\n\n[id]: /url";
     let events = parse_markdown_to_events(md_ref);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event for reference link");
+    let flush = flush_inline(&events).expect("expected a FlushInline event for reference link");
     assert!(matches!(&flush[0], InlineElem::Link(url, text) if url == "/url" && text == "ref"),);
 }
 
@@ -1425,13 +1341,7 @@ fn cm_links_autolinks() {
     let md = "<https://example.com>";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event for autolink");
+    let flush = flush_inline(&events).expect("expected a FlushInline event for autolink");
 
     assert_eq!(flush.len(), 1);
     assert!(
@@ -1450,13 +1360,7 @@ fn cm_images() {
     let md = "![alt text](https://example.com/image.png)";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert!(matches!(&flush[0], InlineElem::Image(url) if url == "https://example.com/image.png"),);
 }
@@ -1539,13 +1443,7 @@ fn cm_soft_line_breaks() {
     let md = "first line\nsecond line";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     let soft_breaks = flush
         .iter()
@@ -1774,13 +1672,7 @@ fn cm_raw_html_inline() {
     let md = "<a href=\"\">link</a>";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     let has_html = flush.iter().any(|e| matches!(e, InlineElem::Html(_)));
     assert!(
@@ -1854,13 +1746,7 @@ fn cm_entity_references() {
     // CM-025: named entity references
     let md = "&amp;";
     let events = parse_markdown_to_events(md);
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
     assert!(
         matches!(&flush[0], InlineElem::Text(t, _) if t == "&"),
         "entity &amp; should resolve to literal &",
@@ -1950,13 +1836,7 @@ fn cm_backslash_escapes_all_ascii_punct() {
     let md = r"\*not italic\* \[not a link\]\(not url\)";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     // Asterisks and brackets escaped -> no italic, no link, plain text.
     let has_italic = flush
@@ -1974,13 +1854,7 @@ fn cm_backslash_escapes_non_punct() {
     let md = r"\a \1 \ ";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     let text: String = flush
         .iter()
@@ -2031,13 +1905,7 @@ fn cm_autolinks_email() {
     let md = "<foo@bar.example.com>";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     assert_eq!(flush.len(), 1);
     assert!(
@@ -2057,13 +1925,7 @@ fn cm_textual_content_unicode_and_emoji() {
     let md = "Hello 🌍! Δt = 5s. ὐ→a.";
     let events = parse_markdown_to_events(md);
 
-    let flush = events
-        .iter()
-        .find_map(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => Some(elems.clone()),
-            _ => None,
-        })
-        .expect("expected a FlushInline event");
+    let flush = expect_flush_inline(&events);
 
     let text: String = flush
         .iter()
