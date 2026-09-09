@@ -1,7 +1,7 @@
 //! Property-based tests for the csv_db query builder.
 //!
 //! The csv_db query builder evaluates a user-supplied
-//! `evalexpr` predicate against CSV row values. The
+//! predicate expression against CSV row values. The
 //! builder has two contract surfaces:
 //!
 //! - **No panics** on any input. A panic in the predicate
@@ -34,7 +34,7 @@
 //! 7. The query builder does not panic on a random
 //!    predicate (predicate-freedom is the
 //!    panic-freedom property — the builder must handle
-//!    any syntactically valid `evalexpr` expression
+//!    any syntactically valid predicate expression
 //!    without panicking).
 //!
 //! The proptest creates a fresh CSV per test run (via
@@ -71,7 +71,7 @@ use tempfile::tempdir;
 /// values are deterministic (not proptest-generated)
 /// because the property under test is the *builder's*
 /// behaviour on a known input, not the behaviour of
-/// `evalexpr` on random inputs.
+/// the predicate evaluator on random inputs.
 fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, String>>) {
     let db_name = "proptest".to_string();
     create_csv(
@@ -284,7 +284,7 @@ proptest! {
 
     /// Property 7: the query builder does not panic on a
     /// random predicate. The predicate is a syntactically
-    /// valid `evalexpr` expression that compares a random
+    /// valid expression that compares a random
     /// column to a random literal; the proptest explores the
     /// space of "real predicates" the LLM might emit.
     ///
@@ -292,8 +292,8 @@ proptest! {
     /// editor would crash on a bad query. The proptest
     /// asserts the *predicate evaluation itself* does not
     /// panic; an invalid predicate that produces an
-    /// `Err` from `evalexpr::build_operator_tree` is
-    /// expected and the test skips it (the `evalexpr`
+    /// `Err` from `Predicate::parse` is
+    /// expected and the test skips it (the parser
     /// surface itself is not what we're testing).
     #[test]
     fn query_does_not_panic_on_random_predicate(
@@ -308,7 +308,7 @@ proptest! {
         };
         let (db_name, _) = build_fixture_csv(&config);
         // Quote the value to handle non-numeric predicates
-        // (evalexpr requires string operands to be quoted).
+        // (string operands must be quoted).
         let predicate = format!("{column} {op} \"{value}\"");
         // The query MUST NOT panic. The result may be Ok
         // (any number of rows) or Err (predicate or

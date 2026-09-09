@@ -107,7 +107,7 @@ fn execute_delete_rows(
     })
 }
 
-/// Tool that queries a CSV file database using an evalexpr predicate.
+/// Tool that queries a CSV file database using an expression predicate.
 #[derive(ToolDescriptor)]
 #[tool(
     name = "query",

@@ -83,11 +83,6 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/hsivonen/encoding_rs",
     },
     Attribution {
-        name: "evalexpr",
-        authors: "isibboi",
-        github_url: "https://github.com/ISibboI/evalexpr",
-    },
-    Attribution {
         name: "fast_h2m",
         authors: "Na'aman Hirschfeld, Yehor Smoliakov",
         github_url: "https://github.com/MartinKuhne/fast_h2m",

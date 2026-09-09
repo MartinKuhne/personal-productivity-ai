@@ -1,20 +1,20 @@
-//! CSV-database query and delete operations — expression-based (evalexpr) predicate evaluation against row values.
+//! CSV-database query and delete operations — expression-based predicate evaluation against row values.
 
+use super::predicate::{Predicate, Value};
 use super::schema::{DeleteRowsInput, QueryRequest, QueryResponse};
 
-use evalexpr::{ContextWithMutableVariables, HashMapContext, Value};
 use std::collections::HashMap;
 
-fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashMapContext {
-    let mut context = HashMapContext::new();
+fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashMap<String, Value> {
+    let mut context = HashMap::new();
     for (i, header) in headers.iter().enumerate() {
         if let Some(val) = row.get(i) {
             if let Ok(num) = val.parse::<i64>() {
-                let _ = context.set_value(header.into(), Value::Int(num));
+                context.insert(header.to_string(), Value::Int(num));
             } else if let Ok(num) = val.parse::<f64>() {
-                let _ = context.set_value(header.into(), Value::Float(num));
+                context.insert(header.to_string(), Value::Float(num));
             } else {
-                let _ = context.set_value(header.into(), Value::String(val.to_string()));
+                context.insert(header.to_string(), Value::String(val.to_string()));
             }
         }
     }
@@ -40,15 +40,12 @@ pub fn delete_rows(
     let mut kept_rows = Vec::new();
     let mut deleted_count = 0;
 
-    let predicate = evalexpr::build_operator_tree(&input.predicate)
-        .map_err(|e| format!("Invalid predicate: {}", e))?;
+    let predicate = Predicate::parse(&input.predicate)?;
 
     for result in rdr.records() {
         let record = result.map_err(|e| format!("Invalid record: {}", e))?;
         let context = create_context(&record, &headers);
-        let eval_res = predicate
-            .eval_boolean_with_context(&context)
-            .map_err(|e| format!("Evaluation error: {}", e))?;
+        let eval_res = predicate.eval_boolean(&context)?;
 
         if eval_res {
             deleted_count += 1;
@@ -88,19 +85,16 @@ pub fn query_csv(
 
     let mut matched_rows = Vec::new();
 
-    let predicate = if let Some(p) = &input.predicate {
-        Some(evalexpr::build_operator_tree(p).map_err(|e| format!("Invalid predicate: {}", e))?)
-    } else {
-        None
+    let predicate = match &input.predicate {
+        Some(p) => Some(Predicate::parse(p)?),
+        None => None,
     };
 
     for result in rdr.records() {
         let record = result.map_err(|e| format!("Invalid record: {}", e))?;
         if let Some(ref pred) = predicate {
             let context = create_context(&record, &headers);
-            let eval_res = pred
-                .eval_boolean_with_context(&context)
-                .map_err(|e| format!("Evaluation error: {}", e))?;
+            let eval_res = pred.eval_boolean(&context)?;
             if !eval_res {
                 continue;
             }
@@ -328,7 +322,7 @@ mod tests {
         );
 
         // Predicate references a column that does not exist in the schema:
-        // evalexpr treats the identifier as unbound and raises an
+        // The predicate evaluator treats the identifier as unbound and raises an
         // Evaluation error rather than silently matching zero rows.
         let err = query_csv(
             &test_ctx(&config),
