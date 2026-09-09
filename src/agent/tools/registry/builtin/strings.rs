@@ -50,7 +50,7 @@ pub const FIELD_CURSOR_DESCRIPTION: &str = "Pass this pagination token back unch
 pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. Returns up to 32 matching emails per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 /// Description for `web_fetch` cursor-based pagination (TOOL-026b).
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Automatically renders client-side JavaScript via headless Chrome if installed on the host. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to bypass.";
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to re-fetch the page from it's source and read it from the beginning.";
 
 /// Hint string emitted on the final page of a cursor pagination (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";

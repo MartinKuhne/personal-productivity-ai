@@ -515,6 +515,76 @@ fn test_tool_web_fetch_chrome_force_refetch_invalidates_cache() {
 }
 
 #[test]
+fn test_tool_web_fetch_browser_markdown_conversion() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let html = "<html><body><h1>Title Heading</h1><p>Text with <strong>bold</strong> and <a href=\"https://example.com/target\">link text</a>.</p><ul><li>Item A</li><li>Item B</li></ul></body></html>";
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/browser-md".to_string(),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert!(result.content.contains("# Title Heading"));
+    assert!(result.content.contains("**bold**"));
+    assert!(
+        result
+            .content
+            .contains("[link text](https://example.com/target)")
+    );
+    assert!(!result.content.contains("<h1>"));
+    assert!(!result.content.contains("<strong>"));
+    assert!(!result.content.contains("<a href="));
+}
+
+#[test]
+fn test_tool_web_fetch_http_markdown_conversion() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let html = "<html><body><h1>Title Heading</h1><p>Text with <strong>bold</strong> and <a href=\"https://example.com/target\">link text</a>.</p><ul><li>Item A</li><li>Item B</li></ul></body></html>";
+    let server_url = spawn_mock_server(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: server_url,
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_locator(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(result.content.contains("# Title Heading"));
+    assert!(result.content.contains("**bold**"));
+    assert!(
+        result
+            .content
+            .contains("[link text](https://example.com/target)")
+    );
+    assert!(!result.content.contains("<h1>"));
+    assert!(!result.content.contains("<strong>"));
+    assert!(!result.content.contains("<a href="));
+}
+
+#[test]
 fn test_tool_web_search_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
