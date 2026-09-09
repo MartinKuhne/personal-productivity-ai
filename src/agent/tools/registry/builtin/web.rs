@@ -92,7 +92,7 @@ fn execute_web_search(
         .ok_or_else(|| "web_search is disabled (no SearXNG URL configured).".to_string())?;
     crate::tools::web::tool_web_search(
         url,
-        &input.query,
+        input.query.as_deref(),
         input.cursor,
         &ctx.cache(),
         ctx.uuid_gen().as_ref(),

@@ -875,11 +875,15 @@ where
 
 pub fn tool_search_contact(
     config: &AgentConfig,
-    keyword: &str,
+    keyword: Option<&str>,
     cursor: Option<String>,
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::SearchContactResponse, String> {
+    // A call takes `cursor` or a fresh `keyword`, never both.
+    let has_fresh_params = keyword.is_some_and(|k| !k.trim().is_empty());
+    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
+
     if let Some(cursor) = cursor {
         let page = cache.contact_search_sessions.next_page(&cursor)?;
         return Ok(crate::tools::dtos::SearchContactResponse {
@@ -892,6 +896,9 @@ pub fn tool_search_contact(
         });
     }
 
+    let keyword = keyword.filter(|k| !k.trim().is_empty()).ok_or_else(|| {
+        "No `keyword` and no `cursor` were given. Give `keyword` to start a new search, or `cursor` to read the next page.".to_string()
+    })?;
     let (results, errors) = for_each_card_client_vec(config, |_, c| c.search_contact(keyword));
 
     if results.is_empty() {

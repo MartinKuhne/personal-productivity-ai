@@ -19,7 +19,8 @@ pub enum ToolResponse<T> {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SearchNotesInput {
     #[schemars(description = strings::FIELD_SEARCH_NOTES_INPUT_QUERY)]
-    pub query: String,
+    #[serde(default)]
+    pub query: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
@@ -50,7 +51,8 @@ pub struct ReadTagsResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListNotesByTagInput {
     #[schemars(description = strings::FIELD_LIST_NOTES_BY_TAG_INPUT_TAG)]
-    pub tag: String,
+    #[serde(default)]
+    pub tag: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
@@ -170,7 +172,8 @@ pub struct MoveNoteResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebFetchInput {
     #[schemars(description = strings::FIELD_WEB_FETCH_INPUT_URL)]
-    pub url: String,
+    #[serde(default)]
+    pub url: Option<String>,
     #[schemars(description = strings::FIELD_WEB_FETCH_INPUT_HEADERS)]
     #[serde(default)]
     pub headers: bool,
@@ -204,7 +207,8 @@ pub struct WebFetchResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebSearchInput {
     #[schemars(description = strings::FIELD_WEB_SEARCH_INPUT_QUERY)]
-    pub query: String,
+    #[serde(default)]
+    pub query: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
@@ -276,7 +280,8 @@ pub struct CalDavEventDetails {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchCalendarInput {
     #[schemars(description = strings::FIELD_SEARCH_CALENDAR_INPUT_KEYWORD)]
-    pub keyword: String,
+    #[serde(default)]
+    pub keyword: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
@@ -303,9 +308,11 @@ pub struct SearchCalendarResponse {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarInput {
     #[schemars(description = strings::FIELD_GET_CALENDAR_INPUT_START_DATE)]
-    pub start_date: String,
+    #[serde(default)]
+    pub start_date: Option<String>,
     #[schemars(description = strings::FIELD_GET_CALENDAR_INPUT_END_DATE)]
-    pub end_date: String,
+    #[serde(default)]
+    pub end_date: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
@@ -418,22 +425,31 @@ pub struct DeleteCalendarItemResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SearchEmailInput {
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_KEYWORD)]
+    #[serde(default)]
     pub keyword: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_FOLDER)]
+    #[serde(default)]
     pub folder: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_START_DATE)]
+    #[serde(default)]
     pub start_date: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_END_DATE)]
+    #[serde(default)]
     pub end_date: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_FROM)]
+    #[serde(default)]
     pub from: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_TO)]
+    #[serde(default)]
     pub to: Option<String>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_IS_UNREAD)]
+    #[serde(default)]
     pub is_unread: Option<bool>,
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
+    #[serde(default)]
     pub is_flagged: Option<bool>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[serde(default)]
     pub cursor: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -513,7 +529,8 @@ pub struct CardDavContactDetails {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchContactInput {
     #[schemars(description = strings::FIELD_SEARCH_CONTACT_INPUT_KEYWORD)]
-    pub keyword: String,
+    #[serde(default)]
+    pub keyword: Option<String>,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,

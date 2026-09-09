@@ -483,6 +483,40 @@ fn test_tool_search_email_no_clients() {
 }
 
 #[test]
+fn test_tool_search_email_rejects_cursor_with_filters() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let config = AgentConfig::default();
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+    for filters in [
+        SearchEmailFilters {
+            keyword: Some("test"),
+            ..Default::default()
+        },
+        SearchEmailFilters {
+            folder: Some("INBOX"),
+            ..Default::default()
+        },
+        SearchEmailFilters {
+            is_unread: Some(true),
+            ..Default::default()
+        },
+    ] {
+        let err = tool_search_email(
+            &config,
+            filters,
+            Some("c_00000000".to_string()),
+            &cache,
+            &uuid,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+        );
+    }
+}
+
+#[test]
 fn test_tool_search_email_success() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
@@ -886,12 +920,11 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
     );
     // A bogus cursor that does not match any live cache entry
     // must return the documented "expired or unknown" error.
+    // The call sends only the cursor: sending filters together
+    // with a cursor is rejected by the either-or rule.
     let res = tool_search_email(
         &config,
-        SearchEmailFilters {
-            keyword: Some("test"),
-            ..Default::default()
-        },
+        SearchEmailFilters::default(),
         Some("00000000-0000-0000-0000-000000000000".to_string()),
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -994,9 +1027,15 @@ fn test_tool_search_email_cursor_pagination() {
             .any(|i| subject_of(i) == format!("Subject {total_emails}"))
     );
 
-    // Second call: with cursor, must return remaining items + final hint.
-    let second = tool_search_email(&config, filters, Some(cursor.clone()), &cache, &uuid)
-        .expect("second call with cursor must succeed");
+    // Second call: with cursor only (no filters), must return remaining items + final hint.
+    let second = tool_search_email(
+        &config,
+        SearchEmailFilters::default(),
+        Some(cursor.clone()),
+        &cache,
+        &uuid,
+    )
+    .expect("second call with cursor must succeed");
     assert_eq!(second.total, total_emails);
     assert!(
         second.cursor.is_none(),

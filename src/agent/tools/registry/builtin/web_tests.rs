@@ -78,7 +78,7 @@ fn dto_web_delegate_round_trip() {
 #[test]
 fn dto_web_fetch_round_trip() {
     let p: dtos::WebFetchInput = serde_json::from_str(r#"{"url":"https://example.com"}"#).unwrap();
-    assert_eq!(p.url, "https://example.com");
+    assert_eq!(p.url.as_deref(), Some("https://example.com"));
     assert!(!p.headers);
     let with_headers: dtos::WebFetchInput =
         serde_json::from_str(r#"{"url":"https://example.com","headers":true,"cursor":"c"}"#)
@@ -90,7 +90,7 @@ fn dto_web_fetch_round_trip() {
 #[test]
 fn dto_web_search_round_trip() {
     let p: dtos::WebSearchInput = serde_json::from_str(r#"{"query":"hello"}"#).unwrap();
-    assert_eq!(p.query, "hello");
+    assert_eq!(p.query.as_deref(), Some("hello"));
     assert!(p.cursor.is_none());
 }
 

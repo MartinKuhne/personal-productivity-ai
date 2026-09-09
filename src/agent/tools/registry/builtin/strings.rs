@@ -34,8 +34,7 @@ pub const FIELD_TOTAL_DESCRIPTION: &str =
 pub const FIELD_COUNT_DESCRIPTION: &str = "The number of items on THIS page. Compare it with `total`. When `count` is less than `total`, more pages remain.";
 
 /// `hint` response field description. Used on every list-paginated tool's `hint` field.
-pub const FIELD_HINT_DESCRIPTION: &str =
-    "The value is `Final page` on the last page. No more pages remain. Do not call the tool again with a cursor.";
+pub const FIELD_HINT_DESCRIPTION: &str = "The value is `Final page` on the last page. No more pages remain. Do not call the tool again with a cursor.";
 
 /// `results` response field description for `search_email`: a JSON array of the
 /// matching emails on this page, one `{ client, preview }` object per email.
@@ -53,27 +52,32 @@ pub const FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION: &str =
 
 /// Standard cursor-based pagination description paragraph (TOOL-028).
 #[allow(dead_code)]
-pub const CURSOR_PAGINATION_CANONICAL_DESCRIPTION: &str = "This tool uses cursor pages. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. The last page has a `hint` field and no `cursor`.";
+pub const CURSOR_PAGINATION_CANONICAL_DESCRIPTION: &str = "This tool uses cursor pages. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. The last page has a `hint` field and no `cursor`.";
 
 /// `cursor` field description. Used on the input `cursor` fields of
 /// cursor-paginated tools because the LLM passes back whatever the tool returned.
-pub const FIELD_CURSOR_DESCRIPTION: &str = "Omit this field on the first call. To get the next page, give back the `cursor` value unchanged.";
+pub const FIELD_CURSOR_DESCRIPTION: &str = "Omit this field on the first call. To get the next page, give back the `cursor` value unchanged and no other parameters. Never give `cursor` together with search parameters.";
 
 /// `cursor` output field description. Used on the output `cursor` fields of
 /// cursor-paginated tools. A present cursor means more items remain.
 pub const FIELD_CURSOR_OUTPUT_DESCRIPTION: &str = "Token for the next page. Absent on the last page. If present, more items remain that you have NOT received.";
 
+/// Error returned when a cursor-paginated tool call gives both `cursor`
+/// and fresh search parameters. The call must do only one thing, so the
+/// message instructs the LLM how to call again.
+pub const CURSOR_WITH_FRESH_PARAMS_ERROR: &str = "Both `cursor` and new search parameters were given. Give only one. To read the next page, send only `cursor`. To start a new search, omit `cursor`.";
+
 /// Canonical page-vs-total block for cursor tools. Each cursor tool description
 /// ends with these sentences so the LLM does not mistake `total` for the
 /// received item count.
 #[allow(dead_code)]
-pub const CURSOR_PAGE_VS_TOTAL_BLOCK: &str = "This tool returns one page. The results field has only the items on THIS page. The `count` field is the number of items on THIS page. The `total` field is the count on ALL pages. You have NOT received all items. Example: `total` 252 with `count` 32 means you received 32 items, and 220 remain. To get the next page, give back the `cursor` value unchanged. When the response has no `cursor`, you have all pages.";
+pub const CURSOR_PAGE_VS_TOTAL_BLOCK: &str = "This tool returns one page. The results field has only the items on THIS page. The `count` field is the number of items on THIS page. The `total` field is the count on ALL pages. You have NOT received all items. Example: `total` 252 with `count` 32 means you received 32 items, and 220 remain. To get the next page, give back the `cursor` value unchanged and no other parameters. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 /// Description for `search_email` (TOOL-026a).
-pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date, sender, recipient, or status. Give one or more filters. This tool returns one page with a maximum of 32 emails. The results field has only the emails on THIS page. The `count` field is the number of emails on THIS page. The `total` field is the count on ALL pages. You have NOT received all emails. Example: `total` 252 with `count` 32 means you received 32 emails, and 220 remain. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages.";
+pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date, sender, recipient, or status. Give one or more filters. This tool returns one page with a maximum of 32 emails. The results field has only the emails on THIS page. The `count` field is the number of emails on THIS page. The `total` field is the count on ALL pages. You have NOT received all emails. Example: `total` 252 with `count` 32 means you received 32 emails, and 220 remain. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 /// Description for `web_fetch` cursor-based pagination (TOOL-026b).
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Get a URL and change its content to Markdown. This tool returns one page with a maximum of 64 lines. The content field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total_lines` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. To read from the start again, use `force_refetch`.";
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Get a URL and change its content to Markdown. This tool returns one page with a maximum of 64 lines. The content field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total_lines` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. To read from the start again, use `force_refetch`.";
 
 /// Hint string emitted on the final page of a cursor pagination (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";
@@ -102,12 +106,11 @@ pub const FIELD_PATCH_NOTE_INPUT_NEW_STRING: &str = "The new text. It replaces t
 
 // --- search_notes ---
 
-pub const SEARCH_NOTES_DESCRIPTION: &str = "Search notes for exact text. Use this tool for exact words, not for ideas. For ideas and concepts, use `vector_search`. This tool returns one page with a maximum of 64 matching lines. The matches field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages.";
+pub const SEARCH_NOTES_DESCRIPTION: &str = "Search notes for exact text. Use this tool for exact words, not for ideas. For ideas and concepts, use `vector_search`. This tool returns one page with a maximum of 64 matching lines. The matches field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Give the text to find. Use exact words.";
 
-pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str =
-    "Only the matching lines on THIS page. These are NOT all matches. Compare the line count with `total`. Contains `\"No matches found.\"` when there are no matches.";
+pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Only the matching lines on THIS page. These are NOT all matches. Compare the line count with `total`. Contains `\"No matches found.\"` when there are no matches.";
 
 pub const FIELD_SEARCH_NOTES_RESPONSE_TOTAL: &str =
     "The count on ALL pages. Not the count on this page. You received only `count` lines.";
@@ -118,7 +121,7 @@ pub const READ_TAGS_DESCRIPTION: &str = "Get all tags from note headers. Use the
 
 // --- list_notes_by_tag ---
 
-pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "List notes that contain a tag in the header. Give the tag name. This tool returns one page with a maximum of 64 file names. The files field has only the names on THIS page. The `count` field is the number of names on THIS page. The `total` field is the count on ALL pages. You have NOT received all names. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages. To see all tags first, use `read_tags`.";
+pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "List notes that contain a tag in the header. Give the tag name. This tool returns one page with a maximum of 64 file names. The files field has only the names on THIS page. The `count` field is the number of names on THIS page. The `total` field is the count on ALL pages. You have NOT received all names. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To see all tags first, use `read_tags`.";
 
 pub const FIELD_LIST_NOTES_BY_TAG_INPUT_TAG: &str =
     "The tag name to find. Omit the `#` prefix. Example: `project`.";
@@ -207,8 +210,7 @@ pub const FIELD_WEB_FETCH_INPUT_HEADERS: &str =
 pub const FIELD_WEB_FETCH_INPUT_FORCE_REFETCH: &str =
     "Set to `true` to read from the source again and start at the first page. Default: `false`.";
 
-pub const FIELD_WEB_FETCH_RESPONSE_CONTENT: &str =
-    "Only the Markdown lines on THIS page. These are NOT all lines. Compare the line count with `total_lines`.";
+pub const FIELD_WEB_FETCH_RESPONSE_CONTENT: &str = "Only the Markdown lines on THIS page. These are NOT all lines. Compare the line count with `total_lines`.";
 
 pub const FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES: &str =
     "The line count on ALL pages. Not the count on this page. You received only `count` lines.";
@@ -263,7 +265,7 @@ pub const CHROME_FLAG_VIRTUAL_TIME_BUDGET_PREFIX: &str = "--virtual-time-budget=
 
 // --- web_search ---
 
-pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web. Give a search phrase. This tool returns one page with a maximum of 32 results. The results field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages. To read a result page, use `web_fetch`. For one fact with low context use, use `web_delegate`.";
+pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web. Give a search phrase. This tool returns one page with a maximum of 32 results. The results field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To read a result page, use `web_fetch`. For one fact with low context use, use `web_delegate`.";
 
 pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Give the search phrase.";
 
@@ -309,9 +311,9 @@ pub const FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED: &str =
 
 // --- caldav (calendar) ---
 
-pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar events by keyword. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages. To search by date, use `get_calendar`.";
+pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar events by keyword. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To search by date, use `get_calendar`.";
 
-pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar events in a date range. Give a start date and an end date. Use ISO format `YYYY-MM-DD`. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages.";
+pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar events in a date range. Give a start date and an end date. Use ISO format `YYYY-MM-DD`. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get one calendar event. Give the `href` or `id` from a search result. Returns the full event data.";
 
@@ -400,7 +402,7 @@ pub const FIELD_SEARCH_CONTACT_INPUT_KEYWORD: &str =
 /// `results` response field description for `search_contact`.
 pub const FIELD_CONTACT_RESULTS_DESCRIPTION: &str = "Only the contacts on THIS page. These are NOT all contacts. Compare the item count with `total`.";
 
-pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Give one keyword. This tool returns one page with a maximum of 32 contacts. The results field has only the contacts on THIS page. The `count` field is the number of contacts on THIS page. The `total` field is the count on ALL pages. You have NOT received all contacts. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages. To read one contact, use `get_contact`.";
+pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Give one keyword. This tool returns one page with a maximum of 32 contacts. The results field has only the contacts on THIS page. The `count` field is the number of contacts on THIS page. The `total` field is the count on ALL pages. You have NOT received all contacts. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To read one contact, use `get_contact`.";
 
 pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact. Only give fields that you know. All fields are optional. Give `client` to select an account. If you omit `client`, the tool uses the primary account. The tool returns the new `href`.";
 
@@ -516,7 +518,7 @@ pub const FIELD_TRELLO_UPDATE_ID_LIST_DESCRIPTION: &str =
 
 /// Description for `vector_search`. Only used with the `vector-search` feature.
 #[allow(dead_code)]
-pub const VECTOR_SEARCH_DESCRIPTION: &str = "Search notes by meaning and concepts. Give a phrase, question, or summary. Example: `checking account statements from credit union`. For exact words, use `search_notes`. This tool returns one page with a maximum of 32 results. The items field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. When the response has no `cursor`, you have all pages.";
+pub const VECTOR_SEARCH_DESCRIPTION: &str = "Search notes by meaning and concepts. Give a phrase, question, or summary. Example: `checking account statements from credit union`. For exact words, use `search_notes`. This tool returns one page with a maximum of 32 results. The items field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 #[allow(dead_code)]
 pub const FIELD_VECTOR_SEARCH_INPUT_QUERY: &str = "A phrase, question, or summary. Do not use single keywords. For exact text, use `search_notes`.";

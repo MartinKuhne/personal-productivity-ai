@@ -91,7 +91,7 @@ fn descriptors_have_input_schemas() {
 #[test]
 fn dto_search_contact_round_trip() {
     let p: dtos::SearchContactInput = serde_json::from_str(r#"{"keyword":"alice"}"#).unwrap();
-    assert_eq!(p.keyword, "alice");
+    assert_eq!(p.keyword.as_deref(), Some("alice"));
     assert!(p.cursor.is_none());
 }
 

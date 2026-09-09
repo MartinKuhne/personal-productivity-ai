@@ -34,7 +34,7 @@ fn execute_search_contact(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     crate::lib::dav::card::tool_search_contact(
         &ctx.config,
-        &input.keyword,
+        input.keyword.as_deref(),
         input.cursor,
         &ctx.cache(),
         ctx.uuid_gen().as_ref(),

@@ -358,6 +358,25 @@ pub struct SearchEmailFilters<'a> {
     pub is_flagged: Option<bool>,
 }
 
+impl SearchEmailFilters<'_> {
+    /// Report whether any filter that starts a new search was given.
+    /// Blank strings count as absent. Used to enforce the either-or
+    /// rule: a call takes `cursor` or fresh filters, never both.
+    fn has_any(&self) -> bool {
+        fn present(value: Option<&str>) -> bool {
+            value.is_some_and(|s| !s.trim().is_empty())
+        }
+        present(self.keyword)
+            || present(self.folder)
+            || present(self.start_date)
+            || present(self.end_date)
+            || present(self.from)
+            || present(self.to)
+            || self.is_unread.is_some()
+            || self.is_flagged.is_some()
+    }
+}
+
 /// Page size for `tool_search_email` (cursor mode, TOOL-026a).
 pub const SEARCH_EMAIL_PAGE_SIZE: usize = 32;
 
@@ -571,6 +590,9 @@ pub fn tool_search_email(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
+    // A call takes `cursor` or fresh filters, never both.
+    crate::tools::cursor::require_cursor_xor_params(&cursor, filters.has_any())?;
+
     if let Some(cursor) = cursor {
         let page = cache.email_sessions.next_page(&cursor)?;
         return Ok(crate::tools::dtos::SearchEmailResponse {

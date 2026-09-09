@@ -345,13 +345,20 @@ fn test_caldav_tools_empty_config() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
-    let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
+    let search_res = tool_search_calendar(&config, Some("test"), None, &cache, &uuid_gen).unwrap();
     assert!(search_res.results.is_empty());
     assert_eq!(search_res.total, 0);
     assert_eq!(search_res.hint.as_deref(), Some("Final page."));
 
-    let get_res =
-        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
+    let get_res = tool_get_calendar(
+        &config,
+        Some("2024-01-01"),
+        Some("2024-01-02"),
+        None,
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap();
     assert!(get_res.results.is_empty());
     assert_eq!(get_res.total, 0);
     assert_eq!(get_res.hint.as_deref(), Some("Final page."));
@@ -359,6 +366,48 @@ fn test_caldav_tools_empty_config() {
     let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
     assert_eq!(item_res.item, None);
     assert!(item_res.errors.is_empty());
+}
+
+#[test]
+fn test_calendar_tools_reject_cursor_with_fresh_params() {
+    let config = AgentConfig::default();
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let expected = crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR;
+
+    let err = tool_search_calendar(
+        &config,
+        Some("meeting"),
+        Some("c_00000000".to_string()),
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap_err();
+    assert_eq!(err, expected);
+
+    let err = tool_get_calendar(
+        &config,
+        Some("2024-01-01"),
+        Some("2024-01-02"),
+        Some("c_00000000".to_string()),
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap_err();
+    assert_eq!(err, expected);
+}
+
+#[test]
+fn test_calendar_tools_reject_missing_params_and_cursor() {
+    let config = AgentConfig::default();
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+
+    let err = tool_search_calendar(&config, None, None, &cache, &uuid_gen).unwrap_err();
+    assert!(err.contains("Give `keyword`"), "unexpected error: {err}");
+
+    let err = tool_get_calendar(&config, None, None, None, &cache, &uuid_gen).unwrap_err();
+    assert!(err.contains("`start_date`"), "unexpected error: {err}");
 }
 
 #[test]
@@ -379,7 +428,7 @@ fn test_caldav_tools_unreachable_client() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
-    let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
+    let search_res = tool_search_calendar(&config, Some("test"), None, &cache, &uuid_gen).unwrap();
     assert!(
         search_res
             .errors
@@ -387,8 +436,15 @@ fn test_caldav_tools_unreachable_client() {
             .any(|e| e.contains("Error on client test_client"))
     );
 
-    let get_res =
-        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
+    let get_res = tool_get_calendar(
+        &config,
+        Some("2024-01-01"),
+        Some("2024-01-02"),
+        None,
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap();
     assert!(
         get_res
             .errors
@@ -440,7 +496,7 @@ fn test_caldav_tools_mock_server() {
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     // 1. Search calendar
-    let search_res = tool_search_calendar(&config, "Bob", None, &cache, &uuid_gen).unwrap();
+    let search_res = tool_search_calendar(&config, Some("Bob"), None, &cache, &uuid_gen).unwrap();
     assert!(
         search_res
             .results
@@ -449,8 +505,15 @@ fn test_caldav_tools_mock_server() {
     );
 
     // 2. Get calendar (date range)
-    let get_res =
-        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
+    let get_res = tool_get_calendar(
+        &config,
+        Some("2024-01-01"),
+        Some("2024-01-02"),
+        None,
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap();
     assert!(
         get_res
             .results
@@ -525,9 +588,15 @@ fn test_caldav_tools_mock_server_keep_alive() {
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     for _ in 0..16 {
-        let get_res =
-            tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen)
-                .unwrap();
+        let get_res = tool_get_calendar(
+            &config,
+            Some("2024-01-01"),
+            Some("2024-01-02"),
+            None,
+            &cache,
+            &uuid_gen,
+        )
+        .unwrap();
         assert!(
             get_res
                 .results

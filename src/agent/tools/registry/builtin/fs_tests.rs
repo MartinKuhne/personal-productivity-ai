@@ -1,8 +1,8 @@
 //! Tests for filesystem registry provider — descriptor, safety, DTOs, pagination.
 
 use super::*;
-use crate::tools::registry::groups::ToolGroupId;
 use crate::tools::Safety;
+use crate::tools::registry::groups::ToolGroupId;
 
 // ---------------------------------------------------------------------------
 // Provider registration
@@ -130,6 +130,45 @@ fn dto_read_note_requires_path() {
 }
 
 #[test]
+fn execute_search_notes_rejects_cursor_with_query() {
+    let ctx = crate::tools::context::ToolContext::default();
+    let err = super::execute_search_notes(
+        &super::SearchNotesTool,
+        &ctx,
+        r#"{"query":"hello","cursor":"c1"}"#,
+    )
+    .unwrap_err();
+    assert_eq!(err, strings::CURSOR_WITH_FRESH_PARAMS_ERROR);
+}
+
+#[test]
+fn execute_search_notes_rejects_missing_query_and_cursor() {
+    let ctx = crate::tools::context::ToolContext::default();
+    let err = super::execute_search_notes(&super::SearchNotesTool, &ctx, r#"{}"#).unwrap_err();
+    assert!(err.contains("Give `query`"), "unexpected error: {err}");
+}
+
+#[test]
+fn execute_list_notes_by_tag_rejects_cursor_with_tag() {
+    let ctx = crate::tools::context::ToolContext::default();
+    let err = super::execute_list_notes_by_tag(
+        &super::ListNotesByTagTool,
+        &ctx,
+        r#"{"tag":"rust","cursor":"c1"}"#,
+    )
+    .unwrap_err();
+    assert_eq!(err, strings::CURSOR_WITH_FRESH_PARAMS_ERROR);
+}
+
+#[test]
+fn execute_list_notes_by_tag_rejects_missing_tag_and_cursor() {
+    let ctx = crate::tools::context::ToolContext::default();
+    let err =
+        super::execute_list_notes_by_tag(&super::ListNotesByTagTool, &ctx, r#"{}"#).unwrap_err();
+    assert!(err.contains("Give `tag`"), "unexpected error: {err}");
+}
+
+#[test]
 fn dto_window_note_defaults() {
     let p: dtos::WindowNoteInput = serde_json::from_str(r#"{"path":"x.md"}"#).unwrap();
     assert!(p.offset.is_none());
@@ -178,7 +217,7 @@ fn dto_read_tags_and_list_by_tag() {
     let p: dtos::ReadTagsInput = serde_json::from_str(r#"{}"#).unwrap();
     let _ = p;
     let p2: dtos::ListNotesByTagInput = serde_json::from_str(r#"{"tag":"rust"}"#).unwrap();
-    assert_eq!(p2.tag, "rust");
+    assert_eq!(p2.tag.as_deref(), Some("rust"));
     assert!(p2.cursor.is_none());
     let p3: dtos::ListNotesByTagInput =
         serde_json::from_str(r#"{"tag":"rust","cursor":"c"}"#).unwrap();

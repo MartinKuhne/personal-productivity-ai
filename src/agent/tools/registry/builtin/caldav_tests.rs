@@ -66,7 +66,7 @@ fn descriptors_have_input_schemas() {
 #[test]
 fn dto_search_calendar_round_trip() {
     let p: dtos::SearchCalendarInput = serde_json::from_str(r#"{"keyword":"meeting"}"#).unwrap();
-    assert_eq!(p.keyword, "meeting");
+    assert_eq!(p.keyword.as_deref(), Some("meeting"));
     assert!(p.cursor.is_none());
     let with_cursor: dtos::SearchCalendarInput =
         serde_json::from_str(r#"{"keyword":"meeting","cursor":"c1"}"#).unwrap();
@@ -77,8 +77,8 @@ fn dto_search_calendar_round_trip() {
 fn dto_get_calendar_round_trip() {
     let p: dtos::GetCalendarInput =
         serde_json::from_str(r#"{"start_date":"2024-01-01","end_date":"2024-01-31"}"#).unwrap();
-    assert_eq!(p.start_date, "2024-01-01");
-    assert_eq!(p.end_date, "2024-01-31");
+    assert_eq!(p.start_date.as_deref(), Some("2024-01-01"));
+    assert_eq!(p.end_date.as_deref(), Some("2024-01-31"));
 }
 
 #[test]
