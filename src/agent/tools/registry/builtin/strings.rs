@@ -30,8 +30,11 @@ pub const FIELD_HINT_DESCRIPTION: &str =
     "Displays a message when the offset exceeds total results or when no matches exist.";
 
 /// `results` response field description for `search_email`: a JSON array of the
-/// matching emails on this page, one `{ client, email }` object per email.
-pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "An array of matching emails on this page. Each item has `client` (the account the email came from) and `email` (the simplified email object).";
+/// matching emails on this page, one `{ client, preview }` object per email.
+pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "An array of matching emails on this page. Each item has `client` (the account the email came from) and `preview` (partial email content; use `get_email_by_id` with the email `id` to read the full content).";
+
+/// `preview` response field description for `SearchEmailItem`: partial email preview.
+pub const FIELD_SEARCH_EMAIL_ITEM_PREVIEW_DESC: &str = "Partial email content preview. Use `get_email_by_id` with the email `id` to read the full content.";
 
 /// `errors` response field description for `search_email`: per-account failures.
 pub const FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION: &str = "Per-account failure notes while querying the email servers. Empty when every account succeeded.";

@@ -448,6 +448,22 @@ fn enrich_method_response(resp_arr: &mut [serde_json::Value], method_name: &str)
                             .or_insert(json!({"inbox-id": true}));
                         email_obj.entry("size").or_insert(json!(1024));
                         email_obj.entry("keywords").or_insert(json!({}));
+                        if !email_obj.contains_key("preview") {
+                            let preview_val = if let Some(body_vals) =
+                                email_obj.get("bodyValues").and_then(|v| v.as_object())
+                            {
+                                body_vals
+                                    .values()
+                                    .find_map(|v| v.get("value").and_then(|s| s.as_str()))
+                                    .unwrap_or("")
+                            } else {
+                                ""
+                            };
+                            email_obj.insert(
+                                "preview".to_string(),
+                                json!(preview_val.chars().take(256).collect::<String>()),
+                            );
+                        }
                     }
                 }
             }

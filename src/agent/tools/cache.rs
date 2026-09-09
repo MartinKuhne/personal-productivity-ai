@@ -23,15 +23,18 @@ pub const CURSOR_EXPIRED_ERROR: &str =
 /// Standard final page hint string (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";
 
-/// One `search_email` item: the JMAP client name and the simplified email JSON value.
+/// One `search_email` item: the JMAP client name and the simplified email preview value.
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct SearchEmailItem {
     /// JMAP account / client identifier.
     pub client: String,
-    /// Email body / summary payload.
-    pub email: Value,
+    /// Partial email content preview. Use `get_email_by_id` with the email `id` to read the full content.
+    #[schemars(
+        description = crate::tools::registry::builtin::strings::FIELD_SEARCH_EMAIL_ITEM_PREVIEW_DESC
+    )]
+    pub preview: Value,
 }
 
 /// A cached web document (HTML-converted Markdown plus headers).

@@ -459,7 +459,10 @@ fn test_simplify_cc_and_bcc_preserved() {
     assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
 }
 
-use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
+use super::{
+    SearchEmailFilters, simplify_email_for_search, tool_get_email_by_id, tool_search_email,
+    tool_send_email,
+};
 use crate::config::JmapClient;
 use crate::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
 #[test]
@@ -970,14 +973,14 @@ fn test_tool_search_email_cursor_pagination() {
         "first page must contain exactly SEARCH_EMAIL_PAGE_SIZE items"
     );
     let subject_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
-        item.email
+        item.preview
             .get("subject")
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string()
     };
     let id_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
-        item.email
+        item.preview
             .get("id")
             .and_then(|s| s.as_str())
             .unwrap_or("")
@@ -1190,4 +1193,162 @@ fn test_tool_search_email_logs_tracing() {
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);
+}
+
+#[test]
+fn test_tool_search_email_returns_preview_without_body() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let body = r#"{
+        "apiUrl": "{API_URL}",
+        "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
+        "methodResponses": [
+            ["Email/query", {"ids": ["e1"]}, "0"],
+            ["Email/get", {
+                "list": [{
+                    "id": "e1",
+                    "subject": "Preview Test",
+                    "preview": "Here is the short preview snippet without bloat"
+                }],
+                "notFound": []
+            }, "1"]
+        ]
+    }"#;
+    let url = spawn_mock_server(body);
+    let mut config = AgentConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let res = tool_search_email(
+        &config,
+        SearchEmailFilters {
+            keyword: Some("test"),
+            ..Default::default()
+        },
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .expect("tool_search_email should succeed");
+
+    assert_eq!(res.results.len(), 1);
+    let email_item = &res.results[0].preview;
+    assert_eq!(
+        email_item["preview"],
+        "Here is the short preview snippet without bloat"
+    );
+    assert!(
+        email_item.get("body").is_none(),
+        "Search results must not contain body bloat"
+    );
+}
+
+#[test]
+fn test_tool_search_email_sends_lightweight_get_request() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let body = r#"{
+        "apiUrl": "{API_URL}",
+        "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
+        "methodResponses": [
+            ["Email/query", {"ids": ["e1"]}, "0"],
+            ["Email/get", {
+                "list": [{
+                    "id": "e1",
+                    "subject": "Preview Test",
+                    "preview": "Snippet"
+                }],
+                "notFound": []
+            }, "1"]
+        ]
+    }"#;
+    let (url, recorder) = spawn_recording_mock_server(body);
+    let mut config = AgentConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let res = tool_search_email(
+        &config,
+        SearchEmailFilters {
+            keyword: Some("test"),
+            ..Default::default()
+        },
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
+    assert!(res.is_ok());
+
+    let recorded = recorder.lock().expect("mock recorder poisoned");
+    let get_call = recorded
+        .iter()
+        .find(|bytes| {
+            let s = std::str::from_utf8(bytes).unwrap_or("");
+            s.contains("Email/get")
+        })
+        .expect("Email/get request must be made");
+    let get_call_str = std::str::from_utf8(get_call).unwrap();
+    assert!(
+        !get_call_str.contains("maxBodyValueBytes"),
+        "search Email/get request must NOT request heavy body values; got: {get_call_str}"
+    );
+    assert!(
+        !get_call_str.contains("\"fetchTextBodyValues\":true"),
+        "search Email/get request must NOT opt into text body values; got: {get_call_str}"
+    );
+    assert!(
+        !get_call_str.contains("\"fetchHTMLBodyValues\":true"),
+        "search Email/get request must NOT opt into HTML body values; got: {get_call_str}"
+    );
+}
+
+#[test]
+fn test_simplify_email_for_search_uses_native_preview() {
+    let email_json = serde_json::json!({
+        "id": "email-preview-1",
+        "subject": "Hello with Preview",
+        "receivedAt": "2026-07-19T10:00:00Z",
+        "from": [{ "name": "Alice", "email": "alice@test.com" }],
+        "to": [{ "name": "Bob", "email": "bob@test.com" }],
+        "preview": "This is RFC 8621 preview content."
+    });
+    let mut email: jmap_client::email::Email<jmap_client::Get> =
+        serde_json::from_value(email_json).expect("valid Email");
+    let simplified = simplify_email_for_search(&mut email);
+    assert_eq!(simplified["id"], "email-preview-1");
+    assert_eq!(simplified["preview"], "This is RFC 8621 preview content.");
+    assert!(simplified.get("body").is_none());
+}
+
+#[test]
+fn test_simplify_email_for_search_fallback_when_preview_missing() {
+    let email_json = serde_json::json!({
+        "id": "email-fallback-1",
+        "subject": "Fallback Test",
+        "receivedAt": "2026-07-19T10:00:00Z",
+        "from": [{ "name": "Alice", "email": "alice@test.com" }],
+        "to": [{ "name": "Bob", "email": "bob@test.com" }],
+        "textBody": [{ "partId": "tp1" }],
+        "bodyValues": {
+            "tp1": { "value": "Fallback plain text body content.", "isTruncated": false }
+        }
+    });
+    let mut email: jmap_client::email::Email<jmap_client::Get> =
+        serde_json::from_value(email_json).expect("valid Email");
+    let simplified = simplify_email_for_search(&mut email);
+    assert_eq!(simplified["id"], "email-fallback-1");
+    assert_eq!(simplified["preview"], "Fallback plain text body content.");
+    assert!(simplified.get("body").is_none());
 }
