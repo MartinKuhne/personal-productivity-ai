@@ -884,6 +884,7 @@ pub fn tool_search_contact(
         let page = cache.contact_search_sessions.next_page(&cursor)?;
         return Ok(crate::tools::dtos::SearchContactResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -896,6 +897,7 @@ pub fn tool_search_contact(
     if results.is_empty() {
         return Ok(crate::tools::dtos::SearchContactResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -908,6 +910,7 @@ pub fn tool_search_contact(
         .create_session(results, uuid_gen);
     Ok(crate::tools::dtos::SearchContactResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,

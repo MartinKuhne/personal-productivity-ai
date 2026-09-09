@@ -28,9 +28,11 @@ pub struct SearchNotesInput {
 pub struct SearchNotesResponse {
     #[schemars(description = strings::FIELD_SEARCH_NOTES_RESPONSE_MATCHES)]
     pub matches: String,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_SEARCH_NOTES_RESPONSE_TOTAL)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -58,9 +60,11 @@ pub struct ListNotesByTagResponse {
     #[schemars(description = strings::FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -82,6 +86,8 @@ pub struct ListNotesResponse {
     #[schemars(description = strings::FIELD_LIST_NOTES_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -179,8 +185,11 @@ pub struct WebFetchInput {
 pub struct WebFetchResponse {
     #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_CONTENT)]
     pub content: String,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
     pub total_lines: usize,
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -204,9 +213,11 @@ pub struct WebSearchInput {
 pub struct WebSearchResponse {
     #[schemars(description = strings::FIELD_WEB_SEARCH_RESPONSE_RESULTS)]
     pub results: String,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -273,10 +284,13 @@ pub struct SearchCalendarInput {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchCalendarResponse {
+    #[schemars(description = strings::FIELD_CALENDAR_RESULTS_DESCRIPTION)]
     pub results: Vec<CalDavEventDetails>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -299,10 +313,13 @@ pub struct GetCalendarInput {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct GetCalendarResponse {
+    #[schemars(description = strings::FIELD_CALENDAR_RESULTS_DESCRIPTION)]
     pub results: Vec<CalDavEventDetails>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -423,9 +440,11 @@ pub struct SearchEmailInput {
 pub struct SearchEmailResponse {
     #[schemars(description = strings::FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION)]
     pub results: Vec<crate::tools::cache::SearchEmailItem>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
@@ -502,10 +521,13 @@ pub struct SearchContactInput {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 pub struct SearchContactResponse {
+    #[schemars(description = strings::FIELD_CONTACT_RESULTS_DESCRIPTION)]
     pub results: Vec<CardDavContactDetails>,
+    #[schemars(description = strings::FIELD_COUNT_DESCRIPTION)]
+    pub count: usize,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_OUTPUT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]

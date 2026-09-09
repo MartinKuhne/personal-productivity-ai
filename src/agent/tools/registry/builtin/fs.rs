@@ -3,11 +3,11 @@
 //! Unit tests live in the sibling `fs_tests.rs` sidecar.
 
 use crate::config::ContentLibraryExt;
-use crate::tools::Tool;
 use crate::tools::context::ToolContext;
 use crate::tools::dtos;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -81,6 +81,7 @@ fn execute_search_notes(
         };
         return Ok(serde_json::to_value(dtos::SearchNotesResponse {
             matches,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -105,6 +106,7 @@ fn execute_search_notes(
     if all_matches.is_empty() {
         return Ok(serde_json::to_value(dtos::SearchNotesResponse {
             matches: "No matches found.".to_string(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(strings::FINAL_PAGE_HINT.to_string()),
@@ -118,6 +120,7 @@ fn execute_search_notes(
         .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::SearchNotesResponse {
         matches: page.items.join("\n"),
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -180,6 +183,7 @@ fn execute_list_notes_by_tag(
         let page = ctx.cache().list_notes_by_tag_sessions.next_page(cursor)?;
         return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
             files: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -207,6 +211,7 @@ fn execute_list_notes_by_tag(
     if all_matches.is_empty() {
         return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
             files: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(strings::NO_MATCHING_TAGGED_FILES_HINT.to_string()),
@@ -220,6 +225,7 @@ fn execute_list_notes_by_tag(
         .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
         files: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -272,6 +278,7 @@ fn execute_list_notes(
     };
     let (page_files, hint) = paginate_in_range(&all_matches, offset, limit, total, plural);
     Ok(serde_json::to_value(dtos::ListNotesResponse {
+        count: page_files.len(),
         files: page_files,
         total,
         hint,

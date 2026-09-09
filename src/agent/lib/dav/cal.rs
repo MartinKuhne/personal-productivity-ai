@@ -320,6 +320,7 @@ pub fn tool_search_calendar(
         let page = cache.calendar_search_sessions.next_page(&cursor)?;
         return Ok(SearchCalendarResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -332,6 +333,7 @@ pub fn tool_search_calendar(
     if results.is_empty() {
         return Ok(SearchCalendarResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -344,6 +346,7 @@ pub fn tool_search_calendar(
         .create_session(results, uuid_gen);
     Ok(SearchCalendarResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -363,6 +366,7 @@ pub fn tool_get_calendar(
         let page = cache.calendar_get_sessions.next_page(&cursor)?;
         return Ok(GetCalendarResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -375,6 +379,7 @@ pub fn tool_get_calendar(
     if results.is_empty() {
         return Ok(GetCalendarResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -387,6 +392,7 @@ pub fn tool_get_calendar(
         .create_session(results, uuid_gen);
     Ok(GetCalendarResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,

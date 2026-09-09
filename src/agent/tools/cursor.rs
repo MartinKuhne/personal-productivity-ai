@@ -16,9 +16,13 @@ pub const DEFAULT_CURSOR_CAPACITY: u64 = 256;
 pub struct CursorPage<T> {
     /// Items in this page slice.
     pub items: Vec<T>,
+    /// Number of items in this page slice. Compare with `total`:
+    /// when `count` is less than `total`, more pages remain.
+    pub count: usize,
     /// Next cursor to continue fetching, or `None` if this was the last page.
+    /// A present cursor means more items remain that the caller has not received.
     pub cursor: Option<String>,
-    /// Total items across all pages.
+    /// Total items across all pages. Not the number of items in this page.
     pub total: usize,
     /// Informative terminal hint when pagination is complete.
     pub hint: Option<String>,
@@ -91,6 +95,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if total == 0 {
             return CursorPage {
                 items: Vec::new(),
+                count: 0,
                 cursor: None,
                 total: 0,
                 hint: Some(self.final_page_hint.to_string()),
@@ -100,6 +105,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if total <= self.page_size {
             return CursorPage {
                 items,
+                count: total,
                 cursor: None,
                 total,
                 hint: Some(self.final_page_hint.to_string()),
@@ -117,6 +123,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         self.sessions.sync();
 
         CursorPage {
+            count: page_items.len(),
             items: page_items,
             cursor: Some(cursor_id),
             total,
@@ -150,6 +157,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             self.sessions.invalidate(&cursor_key);
             self.sessions.sync();
             Ok(CursorPage {
+                count: page_items.len(),
                 items: page_items,
                 cursor: None,
                 total,
@@ -165,6 +173,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             self.sessions.insert(cursor_key, updated);
             self.sessions.sync();
             Ok(CursorPage {
+                count: page_items.len(),
                 items: page_items,
                 cursor: Some(cursor.to_string()),
                 total,

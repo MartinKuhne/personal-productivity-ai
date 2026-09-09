@@ -1,8 +1,8 @@
 //! Tests for filesystem registry provider — descriptor, safety, DTOs, pagination.
 
 use super::*;
-use crate::tools::Safety;
 use crate::tools::registry::groups::ToolGroupId;
+use crate::tools::Safety;
 
 // ---------------------------------------------------------------------------
 // Provider registration

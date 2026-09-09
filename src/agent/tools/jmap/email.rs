@@ -575,6 +575,7 @@ pub fn tool_search_email(
         let page = cache.email_sessions.next_page(&cursor)?;
         return Ok(crate::tools::dtos::SearchEmailResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -586,6 +587,7 @@ pub fn tool_search_email(
     if search_res.items.is_empty() {
         return Ok(crate::tools::dtos::SearchEmailResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some("No matching emails found.".to_string()),
@@ -599,6 +601,7 @@ pub fn tool_search_email(
 
     Ok(crate::tools::dtos::SearchEmailResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,

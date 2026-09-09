@@ -59,6 +59,7 @@ pub fn tool_web_fetch_with_locator(
         let page = cache.web_lines.next_page(cursor)?;
         return Ok(crate::tools::dtos::WebFetchResponse {
             content: page.items.join("\n"),
+            count: page.count,
             total_lines: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -127,6 +128,7 @@ pub fn tool_web_fetch_with_locator(
 
     Ok(crate::tools::dtos::WebFetchResponse {
         content: page.items.join("\n"),
+        count: page.count,
         total_lines: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -238,6 +240,7 @@ pub fn tool_web_search(
         };
         return Ok(crate::tools::dtos::WebSearchResponse {
             results,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -275,6 +278,7 @@ pub fn tool_web_search(
                         if items.is_empty() {
                             Ok(crate::tools::dtos::WebSearchResponse {
                                 results: "No results found.".to_string(),
+                                count: 0,
                                 total: 0,
                                 cursor: None,
                                 hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -283,6 +287,7 @@ pub fn tool_web_search(
                             let page = cache.web_search_sessions.create_session(items, uuid_gen);
                             Ok(crate::tools::dtos::WebSearchResponse {
                                 results: page.items.join("\n\n"),
+                                count: page.count,
                                 total: page.total,
                                 cursor: page.cursor,
                                 hint: page.hint,

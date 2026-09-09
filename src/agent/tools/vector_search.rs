@@ -105,6 +105,7 @@ fn execute_vector_search(
         let page: crate::tools::registry::cursor::CursorPage<VectorSearchHit> =
             crate::tools::registry::cursor::CursorPage {
                 items: Vec::new(),
+                count: 0,
                 total: 0,
                 cursor: None,
                 hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
