@@ -30,7 +30,7 @@ pub const FINAL_PAGE_HINT: &str = "Final page.";
 pub struct SearchEmailItem {
     /// JMAP account / client identifier.
     pub client: String,
-    /// Email body / summary payload.
+    /// Email preview / summary payload.
     pub email: Value,
 }
 

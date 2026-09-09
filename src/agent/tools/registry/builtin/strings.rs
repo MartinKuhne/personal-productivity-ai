@@ -31,7 +31,7 @@ pub const FIELD_HINT_DESCRIPTION: &str =
 
 /// `results` response field description for `search_email`: a JSON array of the
 /// matching emails on this page, one `{ client, email }` object per email.
-pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "An array of matching emails on this page. Each item has `client` (the account the email came from) and `email` (the simplified email object).";
+pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "An array of matching emails on this page. Each item has `client` (the account the email came from) and `email` (the simplified email object with id, subject, date, from, to, and preview snippet).";
 
 /// `errors` response field description for `search_email`: per-account failures.
 pub const FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION: &str = "Per-account failure notes while querying the email servers. Empty when every account succeeded.";

@@ -61,6 +61,24 @@ fn email_get_full(
     Ok(response.take_list().into_iter().next())
 }
 
+/// Fetch a single email by ID for search results without inlining heavy body values.
+///
+/// Under RFC 8621 §4.1.1, `preview` is a standard metadata property computed by the JMAP
+/// server. By omitting `fetchTextBodyValues`, `fetchHTMLBodyValues`, and `maxBodyValueBytes`,
+/// the server returns email metadata and the native `preview` snippet (up to 256 characters)
+/// without the substantial network overhead and context bloat of full body extraction.
+fn email_get_preview(
+    session: &JmapSession,
+    id: &str,
+) -> Result<Option<jmap_client::email::Email<jmap_client::Get>>, String> {
+    let mut request = session.inner().build();
+    request.get_email().ids([id]);
+    let mut response = request
+        .send_get_email()
+        .map_err(|e| format!("Email/get request failed: {e}"))?;
+    Ok(response.take_list().into_iter().next())
+}
+
 /// Convert HTML body values in a JMAP response to Markdown using `fast_h2m`.
 #[allow(dead_code)]
 pub(crate) fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
@@ -215,7 +233,94 @@ fn simplify_email(
         body_str.push_str("\n... (truncated - use the get_email_by_id tool with the email id to read the full content)");
     }
 
+    if let Some(p) = email.preview() {
+        simplified.insert(
+            "preview".to_string(),
+            serde_json::Value::String(p.to_string()),
+        );
+    }
+
     simplified.insert("body".to_string(), serde_json::Value::String(body_str));
+    serde_json::Value::Object(simplified)
+}
+
+/// Extract a fallback plain-text snippet (up to 256 chars) if `preview` was not
+/// provided by the server or mock response.
+fn extract_fallback_preview(email: &jmap_client::email::Email<jmap_client::Get>) -> String {
+    if let Some(text_parts) = email.text_body()
+        && let Some(first) = text_parts.first()
+        && let Some(part_id) = first.part_id()
+        && let Some(body_val) = email.body_value(part_id)
+    {
+        return body_val.value().chars().take(256).collect();
+    }
+    if let Some(html_parts) = email.html_body()
+        && let Some(first) = html_parts.first()
+        && let Some(part_id) = first.part_id()
+        && let Some(body_val) = email.body_value(part_id)
+    {
+        let raw = body_val.value();
+        if let Ok(conv) = convert(raw, None)
+            && let Some(md) = conv.content
+        {
+            return md.chars().take(256).collect();
+        }
+        return raw.chars().take(256).collect();
+    }
+    String::new()
+}
+
+/// Simplify a single `Email<Get>` for search results using JMAP RFC 8621 `preview`.
+///
+/// Under RFC 8621 §4.1.1, `preview` is a pre-computed plain text snippet of the first
+/// 256 characters. Omitting the full Markdown converted body and truncation disclaimers
+/// eliminates significant context bloat from search result payloads.
+pub(crate) fn simplify_email_for_search(
+    email: &mut jmap_client::email::Email<jmap_client::Get>,
+) -> serde_json::Value {
+    let mut simplified = serde_json::Map::new();
+
+    simplified.insert("id".to_string(), serde_json::Value::String(email.take_id()));
+
+    simplified.insert(
+        "subject".to_string(),
+        email
+            .subject()
+            .map(|s| serde_json::Value::String(s.to_string()))
+            .unwrap_or(serde_json::Value::Null),
+    );
+
+    if let Some(ts) = email.received_at() {
+        simplified.insert(
+            "date".to_string(),
+            serde_json::Value::String(
+                chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|| ts.to_string()),
+            ),
+        );
+    }
+
+    if let Some(val) = serialize_address_list(email.from()) {
+        simplified.insert("from".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.to()) {
+        simplified.insert("to".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.cc()) {
+        simplified.insert("cc".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.bcc()) {
+        simplified.insert("bcc".to_string(), val);
+    }
+
+    let preview = if let Some(p) = email.preview() {
+        p.to_string()
+    } else {
+        extract_fallback_preview(email)
+    };
+    simplified.insert("preview".to_string(), serde_json::Value::String(preview));
+
     serde_json::Value::Object(simplified)
 }
 
@@ -409,7 +514,7 @@ fn fetch_full_search_result(
         }
 
         for email_id in &email_ids {
-            match email_get_full(&session, email_id) {
+            match email_get_preview(&session, email_id) {
                 Ok(Some(mut email)) => {
                     tracing::debug!(
                         client = %name,
@@ -417,7 +522,7 @@ fn fetch_full_search_result(
                         "[email] email_get succeeded for id={}",
                         email_id
                     );
-                    let email_json = simplify_email(&mut email, Some(10));
+                    let email_json = simplify_email_for_search(&mut email);
                     all_items.push(SearchEmailItem {
                         client: name.clone(),
                         email: email_json,
