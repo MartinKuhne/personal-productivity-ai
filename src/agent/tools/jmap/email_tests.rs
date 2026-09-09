@@ -973,14 +973,14 @@ fn test_tool_search_email_cursor_pagination() {
         "first page must contain exactly SEARCH_EMAIL_PAGE_SIZE items"
     );
     let subject_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
-        item.email
+        item.preview
             .get("subject")
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string()
     };
     let id_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
-        item.email
+        item.preview
             .get("id")
             .and_then(|s| s.as_str())
             .unwrap_or("")
@@ -1238,7 +1238,7 @@ fn test_tool_search_email_returns_preview_without_body() {
     .expect("tool_search_email should succeed");
 
     assert_eq!(res.results.len(), 1);
-    let email_item = &res.results[0].email;
+    let email_item = &res.results[0].preview;
     assert_eq!(
         email_item["preview"],
         "Here is the short preview snippet without bloat"

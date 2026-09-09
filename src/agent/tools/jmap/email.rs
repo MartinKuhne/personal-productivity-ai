@@ -525,7 +525,7 @@ fn fetch_full_search_result(
                     let email_json = simplify_email_for_search(&mut email);
                     all_items.push(SearchEmailItem {
                         client: name.clone(),
-                        email: email_json,
+                        preview: email_json,
                     });
                 }
                 Ok(None) => {
