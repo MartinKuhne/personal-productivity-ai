@@ -1,0 +1,17 @@
+# Spec-Kit Extensions Configuration
+# Manages installed extensions and lifecycle hooks across SDD commands.
+
+installed:
+  - unit-tests
+
+settings:
+  auto_execute_hooks: true
+
+hooks:
+  after_implement:
+    - extension: unit-tests
+      command: speckit.unit-tests
+      enabled: true
+      optional: false
+      priority: 10
+      description: "Implement comprehensive unit tests focusing on all code paths, error conditions, and boundary conditions"

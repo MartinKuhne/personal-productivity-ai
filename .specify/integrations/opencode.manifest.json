@@ -12,6 +12,7 @@
     ".opencode/commands/speckit.checklist.md": "af968349453b93c16346b5363fee75ea2957b2dca8a2eb6090a13e3521061a13",
     ".opencode/commands/speckit.specify.md": "e24c01f27d269dab73c4178ce5bb1c31198dbfc36b9198cc6e407ef1122f4745",
     ".opencode/commands/speckit.tasks.md": "b5e4a51c9917c3c7f6343bb88bf260f182f6ed79b83537125db7ec59d44c6dbf",
-    ".opencode/commands/speckit.taskstoissues.md": "990d4fbb822457ff9f5546a59046b7239dc857e4ca2603f71cabedcbbfa28a44"
+    ".opencode/commands/speckit.taskstoissues.md": "990d4fbb822457ff9f5546a59046b7239dc857e4ca2603f71cabedcbbfa28a44",
+    ".opencode/commands/speckit.unit-tests.md": "56e8eb4030594ce84bc332980d68e478000a65182e466eb6b0fa67c9253bdff9"
   }
 }

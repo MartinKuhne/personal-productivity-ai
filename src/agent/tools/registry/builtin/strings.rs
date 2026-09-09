@@ -50,7 +50,7 @@ pub const FIELD_CURSOR_DESCRIPTION: &str = "Pass this pagination token back unch
 pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. Returns up to 32 matching emails per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 /// Description for `web_fetch` cursor-based pagination (TOOL-026b).
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to bypass.";
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to re-fetch the page from it's source and read it from the beginning.";
 
 /// Hint string emitted on the final page of a cursor pagination (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";
@@ -136,6 +136,51 @@ pub const FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES: &str =
 
 pub const FIELD_WEB_FETCH_RESPONSE_FROM_CACHE: &str =
     "Set to `true` when the response comes from cache.";
+
+/// Warning code emitted when headless browser rendering fails and triggers HTTP fallback.
+pub const TOOL_W001_BROWSER_FETCH_FAILED: &str = "TOOL-W001";
+
+/// Error code emitted when headless browser execution exceeds the safety timeout.
+pub const TOOL_E001_BROWSER_TIMEOUT: &str = "TOOL-E001";
+
+/// Standard CLI flag to run Chromium in modern headless mode.
+pub const CHROME_FLAG_HEADLESS: &str = "--headless=new";
+
+/// Standard CLI flag to disable hardware GPU acceleration in headless mode.
+pub const CHROME_FLAG_DISABLE_GPU: &str = "--disable-gpu";
+
+/// Standard CLI flag to skip the initial welcome dialog.
+pub const CHROME_FLAG_NO_FIRST_RUN: &str = "--no-first-run";
+
+/// Standard CLI flag to bypass default browser check prompt.
+pub const CHROME_FLAG_NO_DEFAULT_BROWSER_CHECK: &str = "--no-default-browser-check";
+
+/// Standard CLI flag to enforce incognito / ephemeral browsing session.
+pub const CHROME_FLAG_INCOGNITO: &str = "--incognito";
+
+/// Standard CLI flag to disable background network activity.
+pub const CHROME_FLAG_DISABLE_BACKGROUND_NETWORKING: &str = "--disable-background-networking";
+
+/// Standard CLI flag to disable profile synchronization.
+pub const CHROME_FLAG_DISABLE_SYNC: &str = "--disable-sync";
+
+/// Standard CLI flag to disable default pre-installed apps.
+pub const CHROME_FLAG_DISABLE_DEFAULT_APPS: &str = "--disable-default-apps";
+
+/// Standard CLI flag to disable all browser extensions.
+pub const CHROME_FLAG_DISABLE_EXTENSIONS: &str = "--disable-extensions";
+
+/// Standard CLI flag to mute any audio output.
+pub const CHROME_FLAG_MUTE_AUDIO: &str = "--mute-audio";
+
+/// Standard CLI flag to dump the rendered DOM HTML to stdout and exit.
+pub const CHROME_FLAG_DUMP_DOM: &str = "--dump-dom";
+
+/// Prefix for setting the user data directory.
+pub const CHROME_FLAG_USER_DATA_DIR_PREFIX: &str = "--user-data-dir=";
+
+/// Prefix for setting the virtual time budget in milliseconds.
+pub const CHROME_FLAG_VIRTUAL_TIME_BUDGET_PREFIX: &str = "--virtual-time-budget=";
 
 // --- web_search ---
 

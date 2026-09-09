@@ -250,6 +250,341 @@ fn test_tool_web_fetch_force_refetch() {
 }
 
 #[test]
+fn test_tool_web_fetch_chrome_happy_path() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let mut headers = HashMap::new();
+    headers.insert("server".to_string(), "mock-chrome".to_string());
+
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new()
+        .with_html("<html><body><div id='app'><h1>Hydrated by Client JS</h1><p>Dynamic Content</p></div></body></html>");
+    let mut runner_with_headers = runner;
+    runner_with_headers.return_headers = headers;
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/spa".to_string(),
+        headers: true,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner_with_headers),
+    )
+    .unwrap();
+
+    assert!(result.content.contains("Hydrated by Client JS"));
+    assert!(result.content.contains("Dynamic Content"));
+    assert!(!result.from_cache);
+    assert!(result.total_lines > 0);
+    assert_eq!(
+        result.response_headers.unwrap().get("server").unwrap(),
+        "mock-chrome"
+    );
+}
+
+#[test]
+fn test_tool_web_fetch_fallback_when_browser_absent() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let server_url = spawn_mock_server("<html><body><p>Static Fallback</p></body></html>");
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: server_url,
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    // No runner and no locator provided -> standard HTTP fallback
+    let result = tool_web_fetch_with_locator(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(result.content.contains("Static Fallback"));
+    assert!(!result.from_cache);
+}
+
+#[test]
+fn test_tool_web_fetch_fallback_on_browser_crash_or_error() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let server_url = spawn_mock_server("<html><body><p>HTTP Content After Crash</p></body></html>");
+
+    let failing_runner =
+        crate::tools::browser_runner::tests::MockBrowserRunner::new().with_failure(1);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: server_url,
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&failing_runner),
+    )
+    .unwrap();
+
+    assert!(result.content.contains("HTTP Content After Crash"));
+    assert!(!result.from_cache);
+}
+
+#[test]
+fn test_tool_web_fetch_fallback_on_timeout() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let server_url =
+        spawn_mock_server("<html><body><p>HTTP Content After Timeout</p></body></html>");
+
+    let timing_out_runner =
+        crate::tools::browser_runner::tests::MockBrowserRunner::new().with_timeout();
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: server_url,
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&timing_out_runner),
+    )
+    .unwrap();
+
+    assert!(result.content.contains("HTTP Content After Timeout"));
+    assert!(!result.from_cache);
+}
+
+#[test]
+fn test_tool_web_fetch_chrome_cursor_pagination() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+
+    // Generate 150 distinct HTML lines
+    let mut body = String::from("<html><body>");
+    for i in 1..=150 {
+        body.push_str(&format!("<p>Rendered Item {}</p>\n", i));
+    }
+    body.push_str("</body></html>");
+
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(body);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/long-page".to_string(),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let first = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert!(first.total_lines > 64);
+    assert!(!first.content.is_empty());
+    assert!(first.cursor.is_some());
+
+    // Second page
+    let second_input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/long-page".to_string(),
+        headers: false,
+        force_refetch: false,
+        cursor: first.cursor,
+    };
+    let second = tool_web_fetch_with_runner(
+        &second_input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert_eq!(second.total_lines, first.total_lines);
+    assert!(!second.content.is_empty());
+    assert!(second.cursor.is_some());
+
+    // Verify disjoint progress between pages
+    let first_page_lines: Vec<&str> = first.content.lines().filter(|l| !l.is_empty()).collect();
+    let second_page_lines: Vec<&str> = second.content.lines().filter(|l| !l.is_empty()).collect();
+    let first_set: std::collections::HashSet<&str> = first_page_lines.iter().copied().collect();
+    let second_set: std::collections::HashSet<&str> = second_page_lines.iter().copied().collect();
+    assert!(first_set.is_disjoint(&second_set));
+}
+
+#[test]
+fn test_tool_web_fetch_chrome_cache_hit_bypasses_browser() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new()
+        .with_html("<html><body><p>Cache Target</p></body></html>");
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/cache-target".to_string(),
+        headers: false,
+        force_refetch: false,
+        cursor: None,
+    };
+
+    let first = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+    assert!(!first.from_cache);
+    assert!(runner.was_called.load(std::sync::atomic::Ordering::SeqCst));
+
+    // Reset called flag
+    runner
+        .was_called
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+
+    // Second call: should serve from cache without calling runner
+    let second = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+    assert!(second.from_cache);
+    assert_eq!(first.content, second.content);
+    assert!(!runner.was_called.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+#[test]
+fn test_tool_web_fetch_chrome_force_refetch_invalidates_cache() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new()
+        .with_html("<html><body><p>Force Refetch Target</p></body></html>");
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/refetch-target".to_string(),
+        headers: false,
+        force_refetch: false,
+        cursor: None,
+    };
+
+    let first = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+    assert!(!first.from_cache);
+
+    let force_input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/refetch-target".to_string(),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let second = tool_web_fetch_with_runner(
+        &force_input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+    assert!(!second.from_cache);
+}
+
+#[test]
+fn test_tool_web_fetch_browser_markdown_conversion() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let html = "<html><body><h1>Title Heading</h1><p>Text with <strong>bold</strong> and <a href=\"https://example.com/target\">link text</a>.</p><ul><li>Item A</li><li>Item B</li></ul></body></html>";
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: "https://example.com/browser-md".to_string(),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert!(result.content.contains("# Title Heading"));
+    assert!(result.content.contains("**bold**"));
+    assert!(
+        result
+            .content
+            .contains("[link text](https://example.com/target)")
+    );
+    assert!(!result.content.contains("<h1>"));
+    assert!(!result.content.contains("<strong>"));
+    assert!(!result.content.contains("<a href="));
+}
+
+#[test]
+fn test_tool_web_fetch_http_markdown_conversion() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let html = "<html><body><h1>Title Heading</h1><p>Text with <strong>bold</strong> and <a href=\"https://example.com/target\">link text</a>.</p><ul><li>Item A</li><li>Item B</li></ul></body></html>";
+    let server_url = spawn_mock_server(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: server_url,
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_locator(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(result.content.contains("# Title Heading"));
+    assert!(result.content.contains("**bold**"));
+    assert!(
+        result
+            .content
+            .contains("[link text](https://example.com/target)")
+    );
+    assert!(!result.content.contains("<h1>"));
+    assert!(!result.content.contains("<strong>"));
+    assert!(!result.content.contains("<a href="));
+}
+
+#[test]
 fn test_tool_web_search_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
