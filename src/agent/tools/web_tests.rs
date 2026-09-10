@@ -591,7 +591,7 @@ fn test_tool_web_fetch_replaces_inline_data_uri_with_alt_text() {
     let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/data-uri-test".to_string(),
+        url: Some("https://example.com/data-uri-test".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -616,7 +616,7 @@ fn test_tool_web_fetch_replaces_inline_data_uri_without_alt_text() {
     let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/data-uri-no-alt".to_string(),
+        url: Some("https://example.com/data-uri-no-alt".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -644,7 +644,7 @@ fn test_tool_web_fetch_replaces_inline_data_uri_http_fallback() {
     let server_url = spawn_mock_server(html);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url,
+        url: Some(server_url),
         headers: false,
         force_refetch: true,
         cursor: None,
