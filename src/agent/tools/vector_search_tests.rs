@@ -108,23 +108,39 @@ fn execute_vector_search_cursor_session_pagination() {
 }
 
 #[test]
-fn execute_vector_search_rejects_cursor_with_fresh_params() {
+fn execute_vector_search_uses_cursor_and_ignores_fresh_params() {
     let mock = Arc::new(MockVectorSearchService::default());
     let cache = Arc::new(crate::tools::registry::cache::ToolCache::new());
     let mut ctx = ToolContext::default();
     ctx.extensions.insert(Arc::new(VectorSearchExt(mock)));
     ctx.extensions
-        .insert(Arc::new(crate::tools::context::ToolCacheExt(cache)));
+        .insert(Arc::new(crate::tools::context::ToolCacheExt(cache.clone())));
+    let uuid_gen = crate::utils::uuid::FixedUuidGenerator::new(uuid::Uuid::nil());
+    let hits: Vec<VectorSearchHit> = (0..35)
+        .map(|i| VectorSearchHit {
+            path: format!("note{i}.md"),
+            distance: 0.1,
+            offset: 0,
+            limit: 5,
+            content: format!("chunk {i}"),
+        })
+        .collect();
+    let page = cache.vector_sessions.create_session(hits, &uuid_gen);
+    let cursor = page.cursor.expect("session should have cursor");
     let tool = VectorSearchTool;
-    let expected = crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR;
 
-    let err = execute_vector_search(&tool, &ctx, r#"{"query":"credit union","cursor":"c_1"}"#)
-        .unwrap_err();
-    assert_eq!(err, expected);
-
-    let err =
-        execute_vector_search(&tool, &ctx, r#"{"max_distance":0.5,"cursor":"c_1"}"#).unwrap_err();
-    assert_eq!(err, expected);
+    for payload in [
+        format!(r#"{{"query":"credit union","cursor":"{cursor}"}}"#),
+        format!(r#"{{"max_distance":0.5,"cursor":"{cursor}"}}"#),
+        format!(r#"{{"query":"credit union","max_distance":0.5,"cursor":"{cursor}"}}"#),
+    ] {
+        let res = execute_vector_search(&tool, &ctx, &payload)
+            .expect("execute_vector_search should succeed with cursor and ignore fresh params");
+        let parsed: crate::tools::registry::cursor::CursorPage<VectorSearchHit> =
+            serde_json::from_value(res).unwrap();
+        assert_eq!(parsed.count, 3);
+        assert_eq!(parsed.total, 35);
+    }
 }
 
 #[test]

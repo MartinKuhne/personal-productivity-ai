@@ -20,23 +20,6 @@ pub fn is_non_blank(value: &Option<String>) -> bool {
     value.as_deref().is_some_and(|s| !s.trim().is_empty())
 }
 
-/// Enforce the either-or rule for cursor-paginated tools: a call takes
-/// `cursor` or fresh search parameters, never both.
-///
-/// When both are present the fresh parameters would be silently ignored
-/// (the cursor branch runs first), so fail with instructions instead.
-pub fn require_cursor_xor_params(
-    cursor: &Option<String>,
-    has_fresh_params: bool,
-) -> Result<(), String> {
-    if cursor.is_some() && has_fresh_params {
-        return Err(
-            crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR.to_string(),
-        );
-    }
-    Ok(())
-}
-
 /// A single page slice returned by cursor pagination.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CursorPage<T> {

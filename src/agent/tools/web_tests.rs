@@ -856,35 +856,29 @@ fn test_tool_web_delegate_handles_api_error_gracefully() {
 }
 
 #[test]
-fn test_tool_web_fetch_rejects_cursor_with_url() {
+fn test_tool_web_fetch_uses_cursor_and_ignores_fresh_params() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    let input = crate::tools::dtos::WebFetchInput {
-        url: Some("https://example.com/page".to_string()),
-        headers: false,
-        force_refetch: false,
-        cursor: Some("c_00000000".to_string()),
-    };
-    let err = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap_err();
-    assert_eq!(
-        err,
-        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-    );
-}
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let lines: Vec<String> = (0..70).map(|i| format!("line {i}")).collect();
 
-#[test]
-fn test_tool_web_fetch_rejects_cursor_with_force_refetch() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    let input = crate::tools::dtos::WebFetchInput {
-        url: None,
-        headers: false,
-        force_refetch: true,
-        cursor: Some("c_00000000".to_string()),
-    };
-    let err = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap_err();
-    assert_eq!(
-        err,
-        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-    );
+    for (url, force_refetch) in [
+        (Some("https://example.com/page".to_string()), false),
+        (None, true),
+        (Some("https://example.com/page".to_string()), true),
+    ] {
+        let first_page = cache.web_lines.create_session(lines.clone(), &uuid);
+        let cursor = first_page.cursor.expect("session should have cursor");
+        let input = crate::tools::dtos::WebFetchInput {
+            url,
+            headers: false,
+            force_refetch,
+            cursor: Some(cursor),
+        };
+        let res = tool_web_fetch(&input, &cache, &uuid)
+            .expect("tool_web_fetch with cursor should succeed and ignore fresh params");
+        assert_eq!(res.count, 6);
+        assert_eq!(res.total_lines, 70);
+    }
 }
 
 #[test]
@@ -901,20 +895,23 @@ fn test_tool_web_fetch_rejects_missing_url_and_cursor() {
 }
 
 #[test]
-fn test_tool_web_search_rejects_cursor_with_query() {
+fn test_tool_web_search_uses_cursor_and_ignores_query() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    let err = tool_web_search(
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let items: Vec<String> = (0..70).map(|i| format!("result {i}")).collect();
+    let first_page = cache.web_search_sessions.create_session(items, &uuid);
+    let cursor = first_page.cursor.expect("session should have cursor");
+
+    let res = tool_web_search(
         "http://127.0.0.1:1",
-        Some("fresh query"),
-        Some("c_00000000".to_string()),
+        Some("fresh query to ignore"),
+        Some(cursor),
         &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
+        &uuid,
     )
-    .unwrap_err();
-    assert_eq!(
-        err,
-        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-    );
+    .expect("tool_web_search with cursor should succeed and ignore query");
+    assert_eq!(res.count, 32);
+    assert_eq!(res.total, 70);
 }
 
 #[test]

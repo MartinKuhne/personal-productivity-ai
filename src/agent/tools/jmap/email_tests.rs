@@ -483,10 +483,16 @@ fn test_tool_search_email_no_clients() {
 }
 
 #[test]
-fn test_tool_search_email_rejects_cursor_with_filters() {
+fn test_tool_search_email_uses_cursor_and_ignores_filters() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    let config = AgentConfig::default();
     let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let items: Vec<crate::tools::registry::cache::SearchEmailItem> = (0..35)
+        .map(|i| crate::tools::registry::cache::SearchEmailItem {
+            client: "test".to_string(),
+            preview: serde_json::json!({ "id": format!("e{i}") }),
+        })
+        .collect();
+    let config = AgentConfig::default();
     for filters in [
         SearchEmailFilters {
             keyword: Some("test"),
@@ -501,18 +507,12 @@ fn test_tool_search_email_rejects_cursor_with_filters() {
             ..Default::default()
         },
     ] {
-        let err = tool_search_email(
-            &config,
-            filters,
-            Some("c_00000000".to_string()),
-            &cache,
-            &uuid,
-        )
-        .unwrap_err();
-        assert_eq!(
-            err,
-            crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-        );
+        let first_page = cache.email_sessions.create_session(items.clone(), &uuid);
+        let cursor = first_page.cursor.expect("session should have cursor");
+        let res = tool_search_email(&config, filters, Some(cursor), &cache, &uuid)
+            .expect("tool_search_email with cursor should succeed and ignore filters");
+        assert_eq!(res.count, 3);
+        assert_eq!(res.total, 35);
     }
 }
 

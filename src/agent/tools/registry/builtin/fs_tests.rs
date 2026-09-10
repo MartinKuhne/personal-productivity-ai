@@ -130,15 +130,30 @@ fn dto_read_note_requires_path() {
 }
 
 #[test]
-fn execute_search_notes_rejects_cursor_with_query() {
-    let ctx = crate::tools::context::ToolContext::default();
-    let err = super::execute_search_notes(
+fn execute_search_notes_uses_cursor_and_ignores_query() {
+    let mut ctx = crate::tools::context::ToolContext::default();
+    let cache = std::sync::Arc::new(crate::tools::registry::cache::ToolCache::new());
+    ctx.extensions
+        .insert(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+            cache,
+        )));
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let items: Vec<String> = (0..70).map(|i| format!("note line {i}")).collect();
+    let first_page = ctx
+        .cache()
+        .search_notes_sessions
+        .create_session(items, &uuid);
+    let cursor = first_page.cursor.expect("session should have cursor");
+
+    let res = super::execute_search_notes(
         &super::SearchNotesTool,
         &ctx,
-        r#"{"query":"hello","cursor":"c1"}"#,
+        &format!(r#"{{"query":"ignored_query","cursor":"{cursor}"}}"#),
     )
-    .unwrap_err();
-    assert_eq!(err, strings::CURSOR_WITH_FRESH_PARAMS_ERROR);
+    .expect("execute_search_notes should succeed with cursor even if query is present");
+
+    assert_eq!(res["count"], 6);
+    assert_eq!(res["total"], 70);
 }
 
 #[test]
@@ -149,15 +164,30 @@ fn execute_search_notes_rejects_missing_query_and_cursor() {
 }
 
 #[test]
-fn execute_list_notes_by_tag_rejects_cursor_with_tag() {
-    let ctx = crate::tools::context::ToolContext::default();
-    let err = super::execute_list_notes_by_tag(
+fn execute_list_notes_by_tag_uses_cursor_and_ignores_tag() {
+    let mut ctx = crate::tools::context::ToolContext::default();
+    let cache = std::sync::Arc::new(crate::tools::registry::cache::ToolCache::new());
+    ctx.extensions
+        .insert(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+            cache,
+        )));
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let items: Vec<String> = (0..70).map(|i| format!("notes/note_{i}.md")).collect();
+    let first_page = ctx
+        .cache()
+        .list_notes_by_tag_sessions
+        .create_session(items, &uuid);
+    let cursor = first_page.cursor.expect("session should have cursor");
+
+    let res = super::execute_list_notes_by_tag(
         &super::ListNotesByTagTool,
         &ctx,
-        r#"{"tag":"rust","cursor":"c1"}"#,
+        &format!(r#"{{"tag":"ignored_tag","cursor":"{cursor}"}}"#),
     )
-    .unwrap_err();
-    assert_eq!(err, strings::CURSOR_WITH_FRESH_PARAMS_ERROR);
+    .expect("execute_list_notes_by_tag should succeed with cursor even if tag is present");
+
+    assert_eq!(res["count"], 6);
+    assert_eq!(res["total"], 70);
 }
 
 #[test]
