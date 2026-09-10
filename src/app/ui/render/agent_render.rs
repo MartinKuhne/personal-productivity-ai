@@ -256,11 +256,24 @@ fn format_search_notes_result(func_name: &str, data: &serde_json::Value) -> Stri
 }
 
 fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> String {
-    let content = data.get("result").and_then(|f| f.as_str()).unwrap_or("");
+    let line_count = if let Some(body) = data.get("body").and_then(|b| b.as_str()) {
+        body.lines().count()
+    } else {
+        let raw = data.get("result").and_then(|f| f.as_str()).unwrap_or("");
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
+            parsed
+                .get("body")
+                .and_then(|b| b.as_str())
+                .map(|b| b.lines().count())
+                .unwrap_or_else(|| raw.lines().count())
+        } else {
+            raw.lines().count()
+        }
+    };
+
     format!(
         "> **Result (`{}`):** {} line(s) read.\n\n",
-        func_name,
-        content.lines().count()
+        func_name, line_count
     )
 }
 

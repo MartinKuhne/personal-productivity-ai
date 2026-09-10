@@ -132,6 +132,49 @@ fn test_format_result_get_email_by_id() {
     assert!(msg.contains("3 line(s) read"));
 }
 
+#[test]
+fn test_format_result_get_email_by_id_json_body() {
+    let json_email = serde_json::json!({
+        "id": "e1",
+        "subject": "Status Update",
+        "date": "2026-09-09T12:00:00Z",
+        "from": ["Alice <alice@example.com>"],
+        "to": ["Bob <bob@example.com>"],
+        "preview": "Line 1",
+        "body": "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+    });
+
+    let tool_result = serde_json::json!({
+        "status": "success",
+        "data": {
+            "result": serde_json::to_string_pretty(&json_email).unwrap()
+        }
+    });
+
+    let msg = format_tool_result_message("get_email_by_id", &tool_result.to_string());
+    assert!(msg.contains("get_email_by_id"));
+    assert!(msg.contains("5 line(s) read"));
+    assert!(!msg.contains("13 line(s) read"));
+}
+
+#[test]
+fn test_format_result_get_email_by_id_empty_body() {
+    let json_email = serde_json::json!({
+        "id": "e2",
+        "body": ""
+    });
+
+    let tool_result = serde_json::json!({
+        "status": "success",
+        "data": {
+            "result": serde_json::to_string_pretty(&json_email).unwrap()
+        }
+    });
+
+    let msg = format_tool_result_message("get_email_by_id", &tool_result.to_string());
+    assert!(msg.contains("0 line(s) read"));
+}
+
 // `search_email` paging display: the result header should
 // show the cross-page total, the items on this page, and either
 // the cursor (more pages) or the "Final page." hint (last page).
