@@ -24,6 +24,31 @@ fn single_page_omits_cursor() {
 }
 
 #[test]
+fn count_reports_items_on_this_page_not_total() {
+    // Regression for the LLM claiming it received `total` items:
+    // `count` must equal the page slice length on every page, so the
+    // LLM can compare `count` with `total` to detect remaining pages.
+    let mgr = CursorSessionManager::<i32>::new(3, TEST_HINT, TEST_ERROR);
+    let uuid_gen = FixedUuidGenerator::new(uuid::Uuid::nil());
+    let items = vec![1, 2, 3, 4, 5, 6, 7];
+
+    let p1 = mgr.create_session(items, &uuid_gen);
+    assert_eq!(p1.count, p1.items.len());
+    assert_eq!(p1.count, 3);
+    assert!(p1.count < p1.total);
+
+    let cursor = p1.cursor.unwrap();
+    let p2 = mgr.next_page(&cursor).unwrap();
+    assert_eq!(p2.count, p2.items.len());
+    assert_eq!(p2.count, 3);
+
+    let p3 = mgr.next_page(&cursor).unwrap();
+    assert_eq!(p3.count, p3.items.len());
+    assert_eq!(p3.count, 1);
+    assert_eq!(p3.total, 7);
+}
+
+#[test]
 fn empty_items_omits_cursor() {
     let mgr = CursorSessionManager::<i32>::new(5, TEST_HINT, TEST_ERROR);
     let uuid_gen = FixedUuidGenerator::new(uuid::Uuid::nil());
@@ -283,4 +308,28 @@ fn multithreaded_concurrent_access() {
     for h in handles {
         h.join().unwrap();
     }
+}
+
+#[test]
+fn is_non_blank_treats_missing_empty_and_blank_as_absent() {
+    assert!(!is_non_blank(&None));
+    assert!(!is_non_blank(&Some(String::new())));
+    assert!(!is_non_blank(&Some("   ".to_string())));
+    assert!(is_non_blank(&Some("query".to_string())));
+}
+
+#[test]
+fn require_cursor_xor_params_rejects_cursor_with_fresh_params() {
+    let err = require_cursor_xor_params(&Some("c_00000000".to_string()), true).unwrap_err();
+    assert_eq!(
+        err,
+        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+    );
+}
+
+#[test]
+fn require_cursor_xor_params_allows_cursor_only_fresh_only_and_neither() {
+    assert!(require_cursor_xor_params(&Some("c_00000000".to_string()), false).is_ok());
+    assert!(require_cursor_xor_params(&None, true).is_ok());
+    assert!(require_cursor_xor_params(&None, false).is_ok());
 }

@@ -75,6 +75,19 @@ impl McpToolAdapter {
     pub fn server_name(&self) -> &str {
         &self.server_name
     }
+
+    /// LLM-facing description with the `[<server>]` source prefix.
+    /// The prefix lets the LLM tell tools apart when many MCP servers
+    /// expose tools with the same name. An empty remote description
+    /// becomes `[<server>] No description.`
+    pub fn prefixed_description(&self) -> String {
+        let body = self.description.trim();
+        if body.is_empty() {
+            format!("[{}] No description.", self.server_name)
+        } else {
+            format!("[{}] {}", self.server_name, body)
+        }
+    }
 }
 
 impl Tool for McpToolAdapter {
@@ -83,7 +96,7 @@ impl Tool for McpToolAdapter {
             .get_or_init(|| {
                 Box::new(ToolDescriptor::with_json_schema(
                     self.name.clone(),
-                    self.description.clone(),
+                    self.prefixed_description(),
                     self.parameters.clone(),
                     crate::tools::Safety::Mutating,
                     // The group's enable flag is the single source

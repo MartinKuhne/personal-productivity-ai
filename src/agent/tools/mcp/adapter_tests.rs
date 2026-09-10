@@ -33,7 +33,7 @@ fn test_mcp_tool_adapter_metadata_and_safety() {
 
     assert_eq!(adapter.server_name(), "test_server");
     assert_eq!(adapter.name(), "test_tool");
-    assert_eq!(adapter.description(), "A test tool");
+    assert_eq!(adapter.description(), "[test_server] A test tool");
     assert_eq!(adapter.safety(), Safety::Mutating);
     assert_eq!(adapter.parameters_schema()["type"].as_str(), Some("object"));
 
@@ -50,6 +50,44 @@ fn test_mcp_tool_adapter_metadata_and_safety() {
         .into(),
     );
     assert!(adapter.is_enabled(&config, "prompt"));
+}
+
+#[test]
+fn test_mcp_tool_adapter_description_carries_server_prefix() {
+    let manager = Arc::new(McpClients::new());
+    let adapter = McpToolAdapter::new(
+        "my_server",
+        "my_server/remote_tool",
+        "remote_tool",
+        "Does work.",
+        serde_json::json!({"type": "object", "properties": {}}),
+        manager,
+    );
+
+    assert_eq!(adapter.prefixed_description(), "[my_server] Does work.");
+    assert_eq!(adapter.description(), "[my_server] Does work.");
+    assert_eq!(
+        adapter.descriptor().description.as_ref(),
+        "[my_server] Does work."
+    );
+}
+
+#[test]
+fn test_mcp_tool_adapter_empty_description_gets_prefix_and_fallback() {
+    let manager = Arc::new(McpClients::new());
+    let adapter = McpToolAdapter::new(
+        "my_server",
+        "my_server/remote_tool",
+        "remote_tool",
+        "   ",
+        serde_json::json!({"type": "object", "properties": {}}),
+        manager,
+    );
+
+    assert_eq!(
+        adapter.prefixed_description(),
+        "[my_server] No description."
+    );
 }
 
 #[test]

@@ -52,13 +52,18 @@ pub fn tool_web_fetch_with_locator(
     locator: Option<&dyn crate::tools::browser_locator::BrowserLocator>,
     custom_runner: Option<&dyn crate::tools::browser_runner::BrowserRunner>,
 ) -> Result<crate::tools::dtos::WebFetchResponse, String> {
-    let url = &input.url;
+    // A call takes `cursor` or fresh fetch parameters, never both.
+    // `force_refetch` re-reads from the start, so it also conflicts with
+    // `cursor`. `headers` only changes the output shape and is allowed.
+    let has_fresh_params = crate::tools::cursor::is_non_blank(&input.url) || input.force_refetch;
+    crate::tools::cursor::require_cursor_xor_params(&input.cursor, has_fresh_params)?;
 
     // 1. If cursor is provided, slice next page from line cursor manager
     if let Some(cursor) = &input.cursor {
         let page = cache.web_lines.next_page(cursor)?;
         return Ok(crate::tools::dtos::WebFetchResponse {
             content: page.items.join("\n"),
+            count: page.count,
             total_lines: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -68,18 +73,25 @@ pub fn tool_web_fetch_with_locator(
     }
 
     // 2. Check cache if force_refetch is false
+    let url: String = input
+        .url
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| {
+            "No `url` and no `cursor` were given. Give `url` to start a new fetch, or `cursor` to read the next page.".to_string()
+        })?;
     let (cached_doc, from_cache) = if !input.force_refetch
-        && let Some(doc) = cache.web_documents.get(url)
+        && let Some(doc) = cache.web_documents.get(&url)
     {
         (doc, true)
     } else {
-        cache.web_documents.invalidate(url);
+        cache.web_documents.invalidate(&url);
 
         let mut fetched_doc: Option<CachedWebDocument> = None;
 
         // Try headless browser fetch if runner or locator available
         if let Some(runner) = custom_runner {
-            match fetch_url_via_browser(runner, url) {
+            match fetch_url_via_browser(runner, &url) {
                 Ok(doc) => {
                     fetched_doc = Some(doc);
                 }
@@ -96,7 +108,7 @@ pub fn tool_web_fetch_with_locator(
             let runner =
                 crate::tools::browser_runner::SystemChromeRunner::new(installation.executable_path)
                     .with_capture_headers(input.headers);
-            match fetch_url_via_browser(&runner, url) {
+            match fetch_url_via_browser(&runner, &url) {
                 Ok(doc) => {
                     fetched_doc = Some(doc);
                 }
@@ -114,7 +126,7 @@ pub fn tool_web_fetch_with_locator(
         // Fallback to standard HTTP GET if browser fetch was absent or failed
         let doc = match fetched_doc {
             Some(d) => d,
-            None => fetch_url_via_http(url)?,
+            None => fetch_url_via_http(&url)?,
         };
 
         cache.web_documents.insert(url.clone(), doc.clone());
@@ -127,6 +139,7 @@ pub fn tool_web_fetch_with_locator(
 
     Ok(crate::tools::dtos::WebFetchResponse {
         content: page.items.join("\n"),
+        count: page.count,
         total_lines: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -366,11 +379,15 @@ fn extract_title_from_destination(s: &str) -> Option<&str> {
 /// Reference: <https://docs.searxng.org/dev/search_api.html>
 pub fn tool_web_search(
     url: &str,
-    query: &str,
+    query: Option<&str>,
     cursor: Option<String>,
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::WebSearchResponse, String> {
+    // A call takes `cursor` or a fresh `query`, never both.
+    let has_fresh_params = query.is_some_and(|q| !q.trim().is_empty());
+    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
+
     if let Some(cursor) = cursor {
         let page = cache.web_search_sessions.next_page(&cursor)?;
         let results = if page.items.is_empty() {
@@ -380,12 +397,16 @@ pub fn tool_web_search(
         };
         return Ok(crate::tools::dtos::WebSearchResponse {
             results,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
         });
     }
 
+    let query = query.filter(|q| !q.trim().is_empty()).ok_or_else(|| {
+        "No `query` and no `cursor` were given. Give `query` to start a new search, or `cursor` to read the next page.".to_string()
+    })?;
     let endpoint = format!("{}/search", url);
     match reqwest::blocking::Client::new()
         .get(&endpoint)
@@ -417,6 +438,7 @@ pub fn tool_web_search(
                         if items.is_empty() {
                             Ok(crate::tools::dtos::WebSearchResponse {
                                 results: "No results found.".to_string(),
+                                count: 0,
                                 total: 0,
                                 cursor: None,
                                 hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -425,6 +447,7 @@ pub fn tool_web_search(
                             let page = cache.web_search_sessions.create_session(items, uuid_gen);
                             Ok(crate::tools::dtos::WebSearchResponse {
                                 results: page.items.join("\n\n"),
+                                count: page.count,
                                 total: page.total,
                                 cursor: page.cursor,
                                 hint: page.hint,
@@ -630,7 +653,7 @@ pub fn tool_web_delegate(
                         if let Some(url) = config.searxng_url() {
                             match tool_web_search(
                                 url,
-                                &input.query,
+                                input.query.as_deref(),
                                 input.cursor,
                                 cache,
                                 &crate::utils::uuid::SystemUuidGenerator,

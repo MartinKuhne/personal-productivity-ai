@@ -33,7 +33,7 @@ fn test_tool_web_fetch_mock() {
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -59,7 +59,7 @@ fn test_tool_web_fetch_error() {
         .install_default()
         .ok();
     let input = crate::tools::dtos::WebFetchInput {
-        url: "http://127.0.0.1:1".to_string(),
+        url: Some("http://127.0.0.1:1".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -78,7 +78,7 @@ fn test_tool_web_fetch_pagination() {
         "<html><body><p>line1</p><p>line2</p><p>line3</p><p>line4</p><p>line5</p></body></html>";
     let server_url = spawn_mock_server(html);
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -112,7 +112,7 @@ fn test_tool_web_fetch_cursor_pagination() {
 
     // First call: no cursor, force a fresh fetch.
     let first_input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -131,12 +131,12 @@ fn test_tool_web_fetch_cursor_pagination() {
     );
     let cursor = first.cursor.clone().unwrap();
 
-    // Second call: pass the cursor back. Prior to the fix this returned
+    // Second call: cursor only, no fresh parameters. Prior to the fix this returned
     // `"Cursor expired or unknown; re-run the fetch with no cursor."`
     // because the cursor branch looked up `WebFetch { cursor }` at the
     // cursor key, which actually holds `WebFetchContent`.
     let second_input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: None,
         headers: false,
         force_refetch: false,
         cursor: Some(cursor.clone()),
@@ -189,7 +189,7 @@ fn test_tool_web_fetch_headers() {
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Test</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: true,
         force_refetch: true,
         cursor: None,
@@ -208,7 +208,7 @@ fn test_tool_web_fetch_cache_hit() {
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Cached</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: false,
         cursor: None,
@@ -228,14 +228,14 @@ fn test_tool_web_fetch_force_refetch() {
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Force</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: false,
         cursor: None,
     };
     let _first = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     let force_input = crate::tools::dtos::WebFetchInput {
-        url: server_url.clone(),
+        url: Some(server_url.clone()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -261,7 +261,7 @@ fn test_tool_web_fetch_chrome_happy_path() {
     runner_with_headers.return_headers = headers;
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/spa".to_string(),
+        url: Some("https://example.com/spa".to_string()),
         headers: true,
         force_refetch: true,
         cursor: None,
@@ -294,7 +294,7 @@ fn test_tool_web_fetch_fallback_when_browser_absent() {
     let server_url = spawn_mock_server("<html><body><p>Static Fallback</p></body></html>");
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url,
+        url: Some(server_url),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -326,7 +326,7 @@ fn test_tool_web_fetch_fallback_on_browser_crash_or_error() {
         crate::tools::browser_runner::tests::MockBrowserRunner::new().with_failure(1);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url,
+        url: Some(server_url),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -357,7 +357,7 @@ fn test_tool_web_fetch_fallback_on_timeout() {
         crate::tools::browser_runner::tests::MockBrowserRunner::new().with_timeout();
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url,
+        url: Some(server_url),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -389,7 +389,7 @@ fn test_tool_web_fetch_chrome_cursor_pagination() {
     let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(body);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/long-page".to_string(),
+        url: Some("https://example.com/long-page".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -407,9 +407,9 @@ fn test_tool_web_fetch_chrome_cursor_pagination() {
     assert!(!first.content.is_empty());
     assert!(first.cursor.is_some());
 
-    // Second page
+    // Second page: cursor only, no fresh parameters.
     let second_input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/long-page".to_string(),
+        url: None,
         headers: false,
         force_refetch: false,
         cursor: first.cursor,
@@ -441,7 +441,7 @@ fn test_tool_web_fetch_chrome_cache_hit_bypasses_browser() {
         .with_html("<html><body><p>Cache Target</p></body></html>");
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/cache-target".to_string(),
+        url: Some("https://example.com/cache-target".to_string()),
         headers: false,
         force_refetch: false,
         cursor: None,
@@ -482,7 +482,7 @@ fn test_tool_web_fetch_chrome_force_refetch_invalidates_cache() {
         .with_html("<html><body><p>Force Refetch Target</p></body></html>");
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/refetch-target".to_string(),
+        url: Some("https://example.com/refetch-target".to_string()),
         headers: false,
         force_refetch: false,
         cursor: None,
@@ -498,7 +498,7 @@ fn test_tool_web_fetch_chrome_force_refetch_invalidates_cache() {
     assert!(!first.from_cache);
 
     let force_input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/refetch-target".to_string(),
+        url: Some("https://example.com/refetch-target".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -521,7 +521,7 @@ fn test_tool_web_fetch_browser_markdown_conversion() {
     let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: "https://example.com/browser-md".to_string(),
+        url: Some("https://example.com/browser-md".to_string()),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -557,7 +557,7 @@ fn test_tool_web_fetch_http_markdown_conversion() {
     let server_url = spawn_mock_server(html);
 
     let input = crate::tools::dtos::WebFetchInput {
-        url: server_url,
+        url: Some(server_url),
         headers: false,
         force_refetch: true,
         cursor: None,
@@ -766,7 +766,7 @@ fn test_tool_web_search_mock() {
     let server_url = spawn_mock_server(mock_json.to_string());
     let result = tool_web_search(
         &server_url,
-        "test query",
+        Some("test query"),
         None,
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -792,7 +792,7 @@ fn test_tool_web_search_empty() {
     let server_url = spawn_mock_server(mock_json.to_string());
     let result = tool_web_search(
         &server_url,
-        "test query",
+        Some("test query"),
         None,
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -826,7 +826,7 @@ fn test_tool_web_search_cursor_pagination_32_page_size() {
     // Page 1
     let page1 = tool_web_search(
         &server_url,
-        "q",
+        Some("q"),
         None,
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -840,7 +840,7 @@ fn test_tool_web_search_cursor_pagination_32_page_size() {
     // Page 2
     let page2 = tool_web_search(
         &server_url,
-        "q",
+        None,
         Some(cursor1),
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -854,7 +854,7 @@ fn test_tool_web_search_cursor_pagination_32_page_size() {
     // Page 3 (final)
     let page3 = tool_web_search(
         &server_url,
-        "q",
+        None,
         Some(cursor2),
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -874,7 +874,7 @@ fn test_tool_web_search_invalid_json() {
     let server_url = spawn_mock_server("invalid json");
     let result = tool_web_search(
         &server_url,
-        "test query",
+        Some("test query"),
         None,
         &cache,
         &crate::utils::uuid::SystemUuidGenerator,
@@ -1017,4 +1017,80 @@ fn test_tool_web_delegate_handles_api_error_gracefully() {
     let result = tool_web_delegate(&config, "test", &cache);
     // Should return an error, not panic
     assert!(result.is_err() || result.is_ok());
+}
+
+#[test]
+fn test_tool_web_fetch_rejects_cursor_with_url() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let input = crate::tools::dtos::WebFetchInput {
+        url: Some("https://example.com/page".to_string()),
+        headers: false,
+        force_refetch: false,
+        cursor: Some("c_00000000".to_string()),
+    };
+    let err = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap_err();
+    assert_eq!(
+        err,
+        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+    );
+}
+
+#[test]
+fn test_tool_web_fetch_rejects_cursor_with_force_refetch() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let input = crate::tools::dtos::WebFetchInput {
+        url: None,
+        headers: false,
+        force_refetch: true,
+        cursor: Some("c_00000000".to_string()),
+    };
+    let err = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap_err();
+    assert_eq!(
+        err,
+        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+    );
+}
+
+#[test]
+fn test_tool_web_fetch_rejects_missing_url_and_cursor() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let input = crate::tools::dtos::WebFetchInput {
+        url: None,
+        headers: false,
+        force_refetch: false,
+        cursor: None,
+    };
+    let err = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap_err();
+    assert!(err.contains("Give `url`"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_tool_web_search_rejects_cursor_with_query() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let err = tool_web_search(
+        "http://127.0.0.1:1",
+        Some("fresh query"),
+        Some("c_00000000".to_string()),
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+    );
+}
+
+#[test]
+fn test_tool_web_search_rejects_missing_query_and_cursor() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let err = tool_web_search(
+        "http://127.0.0.1:1",
+        None,
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap_err();
+    assert!(err.contains("Give `query`"), "unexpected error: {err}");
 }
