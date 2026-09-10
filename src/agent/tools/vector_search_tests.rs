@@ -106,3 +106,33 @@ fn execute_vector_search_cursor_session_pagination() {
     let err_res = execute_vector_search(&tool, &ctx, r#"{"cursor":"unknown_cursor"}"#);
     assert!(err_res.is_err());
 }
+
+#[test]
+fn execute_vector_search_rejects_cursor_with_fresh_params() {
+    let mock = Arc::new(MockVectorSearchService::default());
+    let cache = Arc::new(crate::tools::registry::cache::ToolCache::new());
+    let mut ctx = ToolContext::default();
+    ctx.extensions.insert(Arc::new(VectorSearchExt(mock)));
+    ctx.extensions
+        .insert(Arc::new(crate::tools::context::ToolCacheExt(cache)));
+    let tool = VectorSearchTool;
+    let expected = crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR;
+
+    let err = execute_vector_search(&tool, &ctx, r#"{"query":"credit union","cursor":"c_1"}"#)
+        .unwrap_err();
+    assert_eq!(err, expected);
+
+    let err =
+        execute_vector_search(&tool, &ctx, r#"{"max_distance":0.5,"cursor":"c_1"}"#).unwrap_err();
+    assert_eq!(err, expected);
+}
+
+#[test]
+fn execute_vector_search_rejects_missing_query_without_cursor() {
+    let mock = Arc::new(MockVectorSearchService::default());
+    let mut ctx = ToolContext::default();
+    ctx.extensions.insert(Arc::new(VectorSearchExt(mock)));
+    let tool = VectorSearchTool;
+    let err = execute_vector_search(&tool, &ctx, r#"{}"#).unwrap_err();
+    assert_eq!(err, "query must not be empty");
+}

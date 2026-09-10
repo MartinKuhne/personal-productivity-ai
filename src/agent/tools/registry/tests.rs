@@ -276,11 +276,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     assert!(data1["hint"].is_null());
     let cursor1 = data1["cursor"].as_str().unwrap();
 
-    // Page 2
-    let envelope2 = run_list_by_tag_ctx(
-        &ctx,
-        &format!(r#"{{"tag":"meeting","cursor":"{cursor1}"}}"#),
-    );
+    // Page 2 (cursor only: sending `tag` together with a cursor is rejected)
+    let envelope2 = run_list_by_tag_ctx(&ctx, &format!(r#"{{"cursor":"{cursor1}"}}"#));
     assert_eq!(envelope2["status"], "success");
     let data2 = &envelope2["data"];
     assert_eq!(data2["total"], 150);
@@ -290,11 +287,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     assert!(data2["hint"].is_null());
     let cursor2 = data2["cursor"].as_str().unwrap();
 
-    // Page 3 (final)
-    let envelope3 = run_list_by_tag_ctx(
-        &ctx,
-        &format!(r#"{{"tag":"meeting","cursor":"{cursor2}"}}"#),
-    );
+    // Page 3 (final, cursor only)
+    let envelope3 = run_list_by_tag_ctx(&ctx, &format!(r#"{{"cursor":"{cursor2}"}}"#));
     assert_eq!(envelope3["status"], "success");
     let data3 = &envelope3["data"];
     assert_eq!(data3["total"], 150);
@@ -644,11 +638,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     assert_eq!(matches1.lines().count(), 64);
     let cursor1 = data1["cursor"].as_str().unwrap();
 
-    // Page 2
-    let envelope2 = run_grep_ctx(
-        &ctx,
-        &format!(r#"{{"query":"needle","cursor":"{cursor1}"}}"#),
-    );
+    // Page 2 (cursor only: sending `query` together with a cursor is rejected)
+    let envelope2 = run_grep_ctx(&ctx, &format!(r#"{{"cursor":"{cursor1}"}}"#));
     assert_eq!(envelope2["status"], "success");
     let data2 = &envelope2["data"];
     assert_eq!(data2["total"], 150);
@@ -658,11 +649,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     assert_eq!(matches2.lines().count(), 64);
     let cursor2 = data2["cursor"].as_str().unwrap();
 
-    // Page 3 (final)
-    let envelope3 = run_grep_ctx(
-        &ctx,
-        &format!(r#"{{"query":"needle","cursor":"{cursor2}"}}"#),
-    );
+    // Page 3 (final, cursor only)
+    let envelope3 = run_grep_ctx(&ctx, &format!(r#"{{"cursor":"{cursor2}"}}"#));
     assert_eq!(envelope3["status"], "success");
     let data3 = &envelope3["data"];
     assert_eq!(data3["total"], 150);
@@ -794,9 +782,11 @@ fn test_mcp_char_count_bug() {
     // Also, what happens when mcp tool doesn't have mcp_ prefixed name?
     mgr.register_mcp_tool("test_mcp", "test_tool", "desc", serde_json::json!({}));
     let count2 = mgr.tool_char_count("test_mcp/test_tool", &config, "");
-    // Now it uses the prefixed name "devstack/list_projects" (which adds 9 chars)
-    assert_eq!(char_count, Some(125));
-    assert_eq!(count2, Some(112));
+    // Now it uses the prefixed name "devstack/list_projects" (which adds 9 chars).
+    // MCP descriptions carry the `[test_mcp] ` source prefix (11 chars), so both
+    // counts include the prefixed description `[test_mcp] desc`.
+    assert_eq!(char_count, Some(136));
+    assert_eq!(count2, Some(123));
 }
 
 #[test]

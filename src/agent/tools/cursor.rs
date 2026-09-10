@@ -11,14 +11,44 @@ pub const DEFAULT_CURSOR_TTL: Duration = Duration::from_secs(1800);
 /// Default capacity for cursor sessions (256 entries per TOOL-030).
 pub const DEFAULT_CURSOR_CAPACITY: u64 = 256;
 
+/// Report whether an optional text parameter counts as given.
+///
+/// A missing value, an empty string, or a blank string counts as absent.
+/// The LLM sometimes sends `""` for parameters it does not use, so blank
+/// strings must not count as fresh search parameters.
+pub fn is_non_blank(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|s| !s.trim().is_empty())
+}
+
+/// Enforce the either-or rule for cursor-paginated tools: a call takes
+/// `cursor` or fresh search parameters, never both.
+///
+/// When both are present the fresh parameters would be silently ignored
+/// (the cursor branch runs first), so fail with instructions instead.
+pub fn require_cursor_xor_params(
+    cursor: &Option<String>,
+    has_fresh_params: bool,
+) -> Result<(), String> {
+    if cursor.is_some() && has_fresh_params {
+        return Err(
+            crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR.to_string(),
+        );
+    }
+    Ok(())
+}
+
 /// A single page slice returned by cursor pagination.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CursorPage<T> {
     /// Items in this page slice.
     pub items: Vec<T>,
+    /// Number of items in this page slice. Compare with `total`:
+    /// when `count` is less than `total`, more pages remain.
+    pub count: usize,
     /// Next cursor to continue fetching, or `None` if this was the last page.
+    /// A present cursor means more items remain that the caller has not received.
     pub cursor: Option<String>,
-    /// Total items across all pages.
+    /// Total items across all pages. Not the number of items in this page.
     pub total: usize,
     /// Informative terminal hint when pagination is complete.
     pub hint: Option<String>,
@@ -91,6 +121,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if total == 0 {
             return CursorPage {
                 items: Vec::new(),
+                count: 0,
                 cursor: None,
                 total: 0,
                 hint: Some(self.final_page_hint.to_string()),
@@ -100,6 +131,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if total <= self.page_size {
             return CursorPage {
                 items,
+                count: total,
                 cursor: None,
                 total,
                 hint: Some(self.final_page_hint.to_string()),
@@ -117,6 +149,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         self.sessions.sync();
 
         CursorPage {
+            count: page_items.len(),
             items: page_items,
             cursor: Some(cursor_id),
             total,
@@ -150,6 +183,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             self.sessions.invalidate(&cursor_key);
             self.sessions.sync();
             Ok(CursorPage {
+                count: page_items.len(),
                 items: page_items,
                 cursor: None,
                 total,
@@ -165,6 +199,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             self.sessions.insert(cursor_key, updated);
             self.sessions.sync();
             Ok(CursorPage {
+                count: page_items.len(),
                 items: page_items,
                 cursor: Some(cursor.to_string()),
                 total,

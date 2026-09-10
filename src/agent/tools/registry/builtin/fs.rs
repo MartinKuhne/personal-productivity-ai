@@ -5,6 +5,7 @@
 use crate::config::ContentLibraryExt;
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
+use crate::tools::cursor::{is_non_blank, require_cursor_xor_params};
 use crate::tools::dtos;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
@@ -72,6 +73,8 @@ fn execute_search_notes(
     let input: dtos::SearchNotesInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
 
+    require_cursor_xor_params(&input.cursor, is_non_blank(&input.query))?;
+
     if let Some(cursor) = &input.cursor {
         let page = ctx.cache().search_notes_sessions.next_page(cursor)?;
         let matches = if page.items.is_empty() {
@@ -81,6 +84,7 @@ fn execute_search_notes(
         };
         return Ok(serde_json::to_value(dtos::SearchNotesResponse {
             matches,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -91,13 +95,17 @@ fn execute_search_notes(
     let mut all_matches: Vec<String> = Vec::new();
     let mut libs: Vec<_> = ctx.config.content_libraries().iter().collect();
     libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
+    let query = input
+        .query
+        .as_deref()
+        .filter(|q| !q.trim().is_empty())
+        .ok_or_else(|| {
+            "No `query` and no `cursor` were given. Give `query` to start a new search, or `cursor` to read the next page.".to_string()
+        })?;
     for lib in libs {
-        if let Ok(mut matches) = crate::tools::filesystem::tool_search_notes(
-            ctx,
-            &lib.root_path(),
-            &lib.name,
-            &input.query,
-        ) {
+        if let Ok(mut matches) =
+            crate::tools::filesystem::tool_search_notes(ctx, &lib.root_path(), &lib.name, query)
+        {
             all_matches.append(&mut matches);
         }
     }
@@ -105,6 +113,7 @@ fn execute_search_notes(
     if all_matches.is_empty() {
         return Ok(serde_json::to_value(dtos::SearchNotesResponse {
             matches: "No matches found.".to_string(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(strings::FINAL_PAGE_HINT.to_string()),
@@ -118,6 +127,7 @@ fn execute_search_notes(
         .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::SearchNotesResponse {
         matches: page.items.join("\n"),
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -176,10 +186,13 @@ fn execute_list_notes_by_tag(
     let input: dtos::ListNotesByTagInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
 
+    require_cursor_xor_params(&input.cursor, is_non_blank(&input.tag))?;
+
     if let Some(cursor) = &input.cursor {
         let page = ctx.cache().list_notes_by_tag_sessions.next_page(cursor)?;
         return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
             files: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -188,12 +201,19 @@ fn execute_list_notes_by_tag(
     }
 
     let mut all_matches: Vec<String> = Vec::new();
+    let tag = input
+        .tag
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| {
+            "No `tag` and no `cursor` were given. Give `tag` to start a new search, or `cursor` to read the next page.".to_string()
+        })?;
     for lib in ctx.config.content_libraries() {
         match crate::tools::filesystem::tool_list_notes_by_tag(
             ctx,
             &lib.root_path(),
             &lib.name,
-            &input.tag,
+            tag,
         ) {
             Ok(mut files) => all_matches.append(&mut files),
             Err(e) => {
@@ -207,6 +227,7 @@ fn execute_list_notes_by_tag(
     if all_matches.is_empty() {
         return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
             files: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(strings::NO_MATCHING_TAGGED_FILES_HINT.to_string()),
@@ -220,6 +241,7 @@ fn execute_list_notes_by_tag(
         .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
         files: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -272,6 +294,7 @@ fn execute_list_notes(
     };
     let (page_files, hint) = paginate_in_range(&all_matches, offset, limit, total, plural);
     Ok(serde_json::to_value(dtos::ListNotesResponse {
+        count: page_files.len(),
         files: page_files,
         total,
         hint,

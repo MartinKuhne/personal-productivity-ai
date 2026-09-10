@@ -343,7 +343,7 @@ fn test_tool_search_contact_handles_empty_clients_gracefully() {
     let config = crate::config::AgentConfig::default();
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let res = tool_search_contact(&config, "test", None, &cache, &uuid_gen);
+    let res = tool_search_contact(&config, Some("test"), None, &cache, &uuid_gen);
 
     assert!(res.is_ok());
     let response = res.unwrap();
@@ -351,6 +351,34 @@ fn test_tool_search_contact_handles_empty_clients_gracefully() {
     assert_eq!(response.total, 0);
     assert_eq!(response.hint.as_deref(), Some("Final page."));
     assert!(response.cursor.is_none());
+}
+
+#[test]
+fn test_tool_search_contact_rejects_cursor_with_keyword() {
+    let config = crate::config::AgentConfig::default();
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let err = tool_search_contact(
+        &config,
+        Some("alice"),
+        Some("c_00000000".to_string()),
+        &cache,
+        &uuid_gen,
+    )
+    .unwrap_err();
+    assert_eq!(
+        err,
+        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
+    );
+}
+
+#[test]
+fn test_tool_search_contact_rejects_missing_keyword_and_cursor() {
+    let config = crate::config::AgentConfig::default();
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let err = tool_search_contact(&config, None, None, &cache, &uuid_gen).unwrap_err();
+    assert!(err.contains("Give `keyword`"), "unexpected error: {err}");
 }
 
 #[test]
@@ -1402,7 +1430,7 @@ fn test_carddav_tools_mock_server() {
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     // 1. Search contact
-    let search_res = tool_search_contact(&config, "Alice", None, &cache, &uuid_gen).unwrap();
+    let search_res = tool_search_contact(&config, Some("Alice"), None, &cache, &uuid_gen).unwrap();
     assert!(
         search_res
             .results

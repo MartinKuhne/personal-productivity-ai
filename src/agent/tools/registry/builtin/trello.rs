@@ -17,24 +17,33 @@ pub struct TrelloEmptyInput {}
 
 #[derive(Serialize, Deserialize, Clone, schemars::JsonSchema)]
 pub struct TrelloIdInput {
+    #[schemars(description = strings::FIELD_TRELLO_ID_DESCRIPTION)]
     pub id: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, schemars::JsonSchema)]
 pub struct TrelloCreateCardInput {
+    #[schemars(description = strings::FIELD_TRELLO_CREATE_ID_LIST_DESCRIPTION)]
     #[serde(rename = "idList")]
     pub id_list: String,
+    #[schemars(description = strings::FIELD_TRELLO_CREATE_NAME_DESCRIPTION)]
     pub name: String,
+    #[schemars(description = strings::FIELD_TRELLO_CREATE_DESC_DESCRIPTION)]
     pub desc: Option<String>,
+    #[schemars(description = strings::FIELD_TRELLO_CREATE_ID_LABELS_DESCRIPTION)]
     #[serde(rename = "idLabels")]
     pub id_labels: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, schemars::JsonSchema)]
 pub struct TrelloUpdateCardInput {
+    #[schemars(description = strings::FIELD_TRELLO_UPDATE_ID_DESCRIPTION)]
     pub id: String,
+    #[schemars(description = strings::FIELD_TRELLO_UPDATE_NAME_DESCRIPTION)]
     pub name: Option<String>,
+    #[schemars(description = strings::FIELD_TRELLO_UPDATE_DESC_DESCRIPTION)]
     pub desc: Option<String>,
+    #[schemars(description = strings::FIELD_TRELLO_UPDATE_ID_LIST_DESCRIPTION)]
     #[serde(rename = "idList")]
     pub id_list: Option<String>,
 }

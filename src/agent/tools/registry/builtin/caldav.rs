@@ -33,7 +33,7 @@ fn execute_search_calendar(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     crate::lib::dav::cal::tool_search_calendar(
         &ctx.config,
-        &input.keyword,
+        input.keyword.as_deref(),
         input.cursor,
         &ctx.cache(),
         ctx.uuid_gen().as_ref(),
@@ -64,8 +64,8 @@ fn execute_get_calendar(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     crate::lib::dav::cal::tool_get_calendar(
         &ctx.config,
-        &input.start_date,
-        &input.end_date,
+        input.start_date.as_deref(),
+        input.end_date.as_deref(),
         input.cursor,
         &ctx.cache(),
         ctx.uuid_gen().as_ref(),

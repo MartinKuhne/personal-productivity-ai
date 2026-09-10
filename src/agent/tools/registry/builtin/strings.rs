@@ -1,4 +1,4 @@
-//! User-visible description strings for every built-in tool â€” the single source of truth for the LLM-facing tool description and per-field schema description.
+//! User-visible description strings for every built-in tool — the single source of truth for the LLM-facing tool description and per-field schema description.
 //!
 //! Every const lives at the top level of this module. The `Tool::description()` impls in the
 //! sibling `builtin/*.rs` files and the `#[schemars(description = ...)]` attributes on the
@@ -11,49 +11,73 @@
 //! names (e.g. `FIELD_BROWSER_NAVIGATE_INPUT_URL`) already disambiguate cross-family
 //! references, so no submodule is needed and adding a new tool no longer requires
 //! creating a new file.
+//!
+//! Style: descriptions follow ASD-STE100 Simplified Technical English where possible.
+//! Short sentences. One instruction per sentence. Imperative verbs. Consistent terms:
+//! `note` is a Markdown file in the workspace. `virtual path` is a workspace path.
+//! `cursor` is an opaque page token. REQ: TOOL-001..TOOL-010 (tool behaviour).
 
-// --- paging (offset/limit) â€” canonical across list-paginated tools ---
+// --- paging (offset/limit) — canonical across list-paginated tools ---
 
 /// `offset` parameter description. Used on every list-paginated tool's `offset` field.
 pub const FIELD_OFFSET_DESCRIPTION: &str =
-    "Specify the number of items to skip from the start (0-indexed). Default: 0.";
+    "Give the number of items to skip. Use 0 for the first page. Default: 0.";
 
-/// `limit` parameter description. The default value is substituted per tool via the
-/// per-family domain sentence.
-pub const FIELD_LIMIT_DESCRIPTION: &str = "Specify the number of items to return. Default: {N}.";
+/// `limit` parameter description. Per-tool default limits are stated in each tool description.
+pub const FIELD_LIMIT_DESCRIPTION: &str = "Give the maximum number of items to return. If you omit this value, the tool uses its default limit.";
 
 /// `total` response field description. Used on every list-paginated tool's `total` field.
-pub const FIELD_TOTAL_DESCRIPTION: &str = "The total number of items across all pages.";
+pub const FIELD_TOTAL_DESCRIPTION: &str =
+    "The count on ALL pages. Not the count on this page. You received only `count` items.";
+
+/// `count` response field description. Used on every paginated tool's `count` field.
+pub const FIELD_COUNT_DESCRIPTION: &str = "The number of items on THIS page. Compare it with `total`. When `count` is less than `total`, more pages remain.";
 
 /// `hint` response field description. Used on every list-paginated tool's `hint` field.
-pub const FIELD_HINT_DESCRIPTION: &str =
-    "Displays a message when the offset exceeds total results or when no matches exist.";
+pub const FIELD_HINT_DESCRIPTION: &str = "The value is `Final page` on the last page. No more pages remain. Do not call the tool again with a cursor.";
 
 /// `results` response field description for `search_email`: a JSON array of the
 /// matching emails on this page, one `{ client, preview }` object per email.
-pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "An array of matching emails on this page. Each item has `client` (the account the email came from) and `preview` (partial email content; use `get_email_by_id` with the email `id` to read the full content).";
+pub const FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION: &str = "Only the emails on THIS page. These are NOT all results. Compare the item count with `total`. Each item has `client` and `preview`. Use the email `id` with `get_email_by_id` to read the full email.";
 
 /// `preview` response field description for `SearchEmailItem`: partial email preview.
-pub const FIELD_SEARCH_EMAIL_ITEM_PREVIEW_DESC: &str = "Partial email content preview. Use `get_email_by_id` with the email `id` to read the full content.";
+pub const FIELD_SEARCH_EMAIL_ITEM_PREVIEW_DESC: &str =
+    "Partial email content. Use `get_email_by_id` with the email `id` to read the full email.";
 
 /// `errors` response field description for `search_email`: per-account failures.
-pub const FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION: &str = "Per-account failure notes while querying the email servers. Empty when every account succeeded.";
+pub const FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION: &str =
+    "Failure notes for each account. Empty when all accounts work.";
 
 // --- cursor — canonical for cursor-paginated tools ---
 
 /// Standard cursor-based pagination description paragraph (TOOL-028).
 #[allow(dead_code)]
-pub const CURSOR_PAGINATION_CANONICAL_DESCRIPTION: &str = "This tool uses cursor-based pagination. The first call returns the initial results and an opaque `cursor` token. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const CURSOR_PAGINATION_CANONICAL_DESCRIPTION: &str = "This tool uses cursor pages. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. The last page has a `hint` field and no `cursor`.";
 
-/// `cursor` field description. Used on both the input and output `cursor` fields of
+/// `cursor` field description. Used on the input `cursor` fields of
 /// cursor-paginated tools because the LLM passes back whatever the tool returned.
-pub const FIELD_CURSOR_DESCRIPTION: &str = "Pass this pagination token back unchanged to get the next page. The tool generates this token on the first call.";
+pub const FIELD_CURSOR_DESCRIPTION: &str = "Omit this field on the first call. To get the next page, give back the `cursor` value unchanged and no other parameters. Never give `cursor` together with search parameters.";
+
+/// `cursor` output field description. Used on the output `cursor` fields of
+/// cursor-paginated tools. A present cursor means more items remain.
+pub const FIELD_CURSOR_OUTPUT_DESCRIPTION: &str = "Token for the next page. Absent on the last page. If present, more items remain that you have NOT received.";
+
+/// Error returned when a cursor-paginated tool call gives both `cursor`
+/// and fresh search parameters. The call must do only one thing, so the
+/// message instructs the LLM how to call again.
+pub const CURSOR_WITH_FRESH_PARAMS_ERROR: &str = "Both `cursor` and new search parameters were given. Give only one. To read the next page, send only `cursor`. To start a new search, omit `cursor`.";
+
+/// Canonical page-vs-total block for cursor tools. Each cursor tool description
+/// ends with these sentences so the LLM does not mistake `total` for the
+/// received item count.
+#[allow(dead_code)]
+pub const CURSOR_PAGE_VS_TOTAL_BLOCK: &str = "This tool returns one page. The results field has only the items on THIS page. The `count` field is the number of items on THIS page. The `total` field is the count on ALL pages. You have NOT received all items. Example: `total` 252 with `count` 32 means you received 32 items, and 220 remain. To get the next page, give back the `cursor` value unchanged and no other parameters. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 /// Description for `search_email` (TOOL-026a).
-pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. Returns up to 32 matching emails per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date, sender, recipient, or status. Give one or more filters. This tool returns one page with a maximum of 32 emails. The results field has only the emails on THIS page. The `count` field is the number of emails on THIS page. The `total` field is the count on ALL pages. You have NOT received all emails. Example: `total` 252 with `count` 32 means you received 32 emails, and 220 remain. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
 /// Description for `web_fetch` cursor-based pagination (TOOL-026b).
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to re-fetch the page from it's source and read it from the beginning.";
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Get a URL and change its content to Markdown. This tool returns one page with a maximum of 64 lines. The content field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total_lines` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. To read from the start again, use `force_refetch`.";
 
 /// Hint string emitted on the final page of a cursor pagination (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";
@@ -63,79 +87,133 @@ pub const NO_MATCHING_TAGGED_FILES_HINT: &str = "No matching tagged files found.
 
 // --- filesystem (fs) ---
 
+/// Virtual workspace path of a note. Shared by note tools that take a `path`.
+pub const FIELD_NOTE_PATH_DESCRIPTION: &str = "The virtual path of the note. Example: `notes/plan.md`. Use `/` or `.` for the library root where permitted.";
+
+/// Content of a note file. Shared by note tools that take full file text.
+pub const FIELD_NOTE_CONTENT_DESCRIPTION: &str = "The full text of the note in Markdown format.";
+
 // --- patch_note ---
 
-pub const PATCH_NOTE_DESCRIPTION: &str = "Patch a markdown-formatted note by replacing exact occurrences of target text with replacement text.";
+pub const PATCH_NOTE_DESCRIPTION: &str = "Change a note. Replace exact text with new text. The tool changes all exact matches. Use `read_note` first to see the exact text. This change is permanent.";
+
+pub const FIELD_PATCH_NOTE_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_PATCH_NOTE_INPUT_OLD_STRING: &str =
+    "The exact text to replace. Copy it from `read_note`. The text must match exactly.";
+
+pub const FIELD_PATCH_NOTE_INPUT_NEW_STRING: &str = "The new text. It replaces the old text.";
 
 // --- search_notes ---
 
-pub const SEARCH_NOTES_DESCRIPTION: &str = "Search markdown-formatted notes for text. Returns up to 64 matching lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const SEARCH_NOTES_DESCRIPTION: &str = "Search notes for exact text. Use this tool for exact words, not for ideas. For ideas and concepts, use `vector_search`. This tool returns one page with a maximum of 64 matching lines. The matches field has only the lines on THIS page. The `count` field is the number of lines on THIS page. The `total` field is the count on ALL pages. You have NOT received all lines. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
-pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Specify the search term.";
+pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Give the text to find. Use exact words.";
 
-pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Contains matching lines for the requested page slice. Returns `\"No matches found.\"` when no matches exist.";
+pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Only the matching lines on THIS page. These are NOT all matches. Compare the line count with `total`. Contains `\"No matches found.\"` when there are no matches.";
 
 pub const FIELD_SEARCH_NOTES_RESPONSE_TOTAL: &str =
-    "Total number of matching lines found across all libraries.";
+    "The count on ALL pages. Not the count on this page. You received only `count` lines.";
 
 // --- read_tags ---
 
-pub const READ_TAGS_DESCRIPTION: &str =
-    "Get all unique tags from front-matter headers in workspace Markdown files.";
+pub const READ_TAGS_DESCRIPTION: &str = "Get all tags from note headers. Use the result with `list_notes_by_tag` to list notes for a tag. No input is necessary.";
 
 // --- list_notes_by_tag ---
 
-pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "Return a cursor-paginated list of markdown-formatted notes that contain a tag in their front-matter. Returns up to 64 file names per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "List notes that contain a tag in the header. Give the tag name. This tool returns one page with a maximum of 64 file names. The files field has only the names on THIS page. The `count` field is the number of names on THIS page. The `total` field is the count on ALL pages. You have NOT received all names. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To see all tags first, use `read_tags`.";
 
-pub const FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES: &str =
-    "JSON array of virtual file paths for the requested page slice.";
+pub const FIELD_LIST_NOTES_BY_TAG_INPUT_TAG: &str =
+    "The tag name to find. Omit the `#` prefix. Example: `project`.";
+
+pub const FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES: &str = "Only the virtual paths on THIS page. These are NOT all paths. Compare the item count with `total`.";
 
 // --- list_notes ---
 
-pub const LIST_NOTES_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes in a directory. Use path `/` or `.` to list content libraries. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_DESCRIPTION: &str = "List notes in a folder. Use path `/` or `.` to list content libraries. Use `offset` and `limit` to get pages. Default: `offset=0`, `limit=100`. This tool returns one page. The files field has only the names on THIS page. The `count` field is the number of names on THIS page. The `total` field is the count on ALL pages. You have NOT received all names. To find notes by content, use `search_notes`. To find notes by tag, use `list_notes_by_tag`.";
 
-pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str =
-    "JSON array of virtual file paths for the requested page slice.";
+pub const FIELD_LIST_NOTES_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str = "Only the virtual paths on THIS page. These are NOT all paths. Compare the item count with `total`.";
 
 // --- read_note ---
 
-pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Note: User context files (`User.md` / `System/User.md`) are already provided directly in system context and do not need to be read with this tool. Use `read_yaml_header` if you only need a document summary.";
+pub const READ_NOTE_DESCRIPTION: &str = "Read a full note. Give the virtual path. Do not use this tool for `User.md` files. The system already gives you these files. To see a summary only, use `read_yaml_header`. To read part of a file, use `window_note`.";
+
+pub const FIELD_READ_NOTE_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_READ_NOTE_RESPONSE_CONTENT: &str = "The full text of the note.";
 
 // --- window_note ---
 
-pub const WINDOW_NOTE_DESCRIPTION: &str = "Read a contiguous slice of lines from a markdown-formatted note. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the note returns an empty `content`. A `limit` that would overflow the note's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Note: User context files (`User.md` / `System/User.md`) are already provided directly in system context and do not need to be read with this tool. Pairs with `read_note` when you need the whole note.";
+pub const WINDOW_NOTE_DESCRIPTION: &str = "Read lines from a note. Give the path, the first line (`offset`), and the line count (`limit`). The first line is line 0. Default: `offset=0`, `limit=100`. If `offset` is past the end, the tool returns empty content. If `limit` is too large, the tool returns the remaining lines. Do not use this tool for `User.md` files. Pairs with `read_note`.";
+
+pub const FIELD_WINDOW_NOTE_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_WINDOW_NOTE_INPUT_OFFSET: &str =
+    "The first line to read. Use 0 for the first line.";
+
+pub const FIELD_WINDOW_NOTE_INPUT_LIMIT: &str =
+    "The maximum number of lines to read. Default: 100.";
+
+pub const FIELD_WINDOW_NOTE_RESPONSE_CONTENT: &str = "The requested lines of the note.";
 
 // --- create_note ---
 
-pub const CREATE_NOTE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
+pub const CREATE_NOTE_DESCRIPTION: &str = "Make a new note file with the given content. Give the path and the content. The tool fails if the file already exists. This tool only makes new files. It does not change files.";
+
+pub const FIELD_CREATE_NOTE_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_CREATE_NOTE_INPUT_CONTENT: &str = FIELD_NOTE_CONTENT_DESCRIPTION;
 
 // --- insert_into_note ---
 
-pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Insert lines into a markdown-formatted note at a specified 0-indexed offset. `offset=0` inserts at the top of the note; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
+pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Add lines to a note at a line number. Use `offset=0` to add lines at the top. Use `offset=lines.len()` to add lines at the end. The tool fails if `offset` is larger than the line count. This change is permanent.";
+
+pub const FIELD_INSERT_INTO_NOTE_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_INSERT_INTO_NOTE_INPUT_OFFSET: &str =
+    "The line number for the insert. Use 0 for the top. Use the line count for the end.";
+
+pub const FIELD_INSERT_INTO_NOTE_INPUT_LINES: &str = "The lines to add. Give one string per line.";
 
 // --- move_note ---
 
-pub const MOVE_NOTE_DESCRIPTION: &str = "Move or rename a markdown-formatted note from a source virtual path to a target virtual path. Fails if the target file already exists.";
+pub const MOVE_NOTE_DESCRIPTION: &str = "Move or rename a note. Give the source path and the target path. The tool fails if the target file already exists. This change is permanent.";
 
-pub const FIELD_MOVE_NOTE_INPUT_SOURCE: &str = "Virtual file path of the source note to move.";
+pub const FIELD_MOVE_NOTE_INPUT_SOURCE: &str = "Virtual path of the source note to move.";
 
-pub const FIELD_MOVE_NOTE_INPUT_TARGET: &str =
-    "Virtual file path of the destination where the note should be moved.";
+pub const FIELD_MOVE_NOTE_INPUT_TARGET: &str = "Virtual path of the target location for the note.";
 
-pub const FIELD_MOVE_NOTE_RESPONSE_RESULT: &str = "Description of the operation result.";
+/// Result text of a move operation.
+pub const FIELD_MOVE_NOTE_RESPONSE_RESULT: &str = "Result data for the operation.";
 
 // --- web ---
 
 // --- web_delegate ---
 
-pub const WEB_DELEGATE_DESCRIPTION: &str = "Delegate a specific, unambiguous fact lookup to a sub-agent that searches and fetches the web, then returns a concise answer. Use when the question has a single factual answer — a word, sentence, or short list. Examples: \"What is the full name of the current president of the United States?\" or \"List every compact SUV make and model sold in California in 2026.\" Preferring web_delegate for fact lookups reduces your context usage. Do NOT use web_delegate for open-ended research, ambiguous questions, multi-page crawling, or as a retry after a failed web_search.";
+pub const WEB_DELEGATE_DESCRIPTION: &str = "Ask a sub-agent to find one fact on the web. Use this tool when the answer is one word, one sentence, or one short list. Examples: \"What is the full name of the current president of the United States?\" or \"List every compact SUV make and model sold in California in 2026.\" This tool uses less context. Do not use this tool for open research. Do not use it for unclear questions. Do not use it to crawl many pages. Do not use it to retry a failed `web_search`.";
+
+pub const FIELD_WEB_DELEGATE_INPUT_INSTRUCTION: &str =
+    "One clear question for the sub-agent. Include all facts that the sub-agent needs.";
 
 // --- web_fetch ---
 
 pub const WEB_FETCH_DESCRIPTION: &str = WEB_FETCH_CURSOR_DESCRIPTION;
 
+pub const FIELD_WEB_FETCH_INPUT_URL: &str =
+    "The full URL to read. Example: `https://example.com/page`.";
+
+pub const FIELD_WEB_FETCH_INPUT_HEADERS: &str =
+    "Set to `true` to include the HTTP response headers. Default: `false`.";
+
+pub const FIELD_WEB_FETCH_INPUT_FORCE_REFETCH: &str =
+    "Set to `true` to read from the source again and start at the first page. Default: `false`.";
+
+pub const FIELD_WEB_FETCH_RESPONSE_CONTENT: &str = "Only the Markdown lines on THIS page. These are NOT all lines. Compare the line count with `total_lines`.";
+
 pub const FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES: &str =
-    "Total number of Markdown lines in the fetched body.";
+    "The line count on ALL pages. Not the count on this page. You received only `count` lines.";
 
 pub const FIELD_WEB_FETCH_RESPONSE_FROM_CACHE: &str =
     "Set to `true` when the response comes from cache.";
@@ -187,29 +265,38 @@ pub const CHROME_FLAG_VIRTUAL_TIME_BUDGET_PREFIX: &str = "--virtual-time-budget=
 
 // --- web_search ---
 
-pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web. Give a search phrase. This tool returns one page with a maximum of 32 results. The results field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To read a result page, use `web_fetch`. For one fact with low context use, use `web_delegate`.";
 
-pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Specify the search term.";
+pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Give the search phrase.";
+
+pub const FIELD_WEB_SEARCH_RESPONSE_RESULTS: &str = "Only the search results on THIS page in text format. These are NOT all results. Compare the result count with `total`.";
 
 // --- jmap (email) ---
 
 pub const SEARCH_EMAIL_DESCRIPTION: &str = SEARCH_EMAIL_CANONICAL_DESCRIPTION;
 
-pub const GET_EMAIL_BY_ID_DESCRIPTION: &str = "Get an email by its unique ID.";
+pub const GET_EMAIL_BY_ID_DESCRIPTION: &str = "Read one full email. Give the email ID. Use `search_email` first to find the ID. Returns the subject, body, and headers.";
 
-pub const SEND_EMAIL_DESCRIPTION: &str = "Send an email message.";
+pub const SEND_EMAIL_DESCRIPTION: &str = "Send a real email. Give the recipient, subject, and body. This action is permanent. It sends the email immediately. Confirm the recipient and the content before you call this tool.";
 
-pub const FIELD_SEARCH_EMAIL_INPUT_KEYWORD: &str =
-    "Search email subjects, bodies, and headers using text keywords.";
+pub const FIELD_GET_EMAIL_BY_ID_INPUT_ID: &str = "The email ID from a `search_email` result.";
+
+pub const FIELD_SEND_EMAIL_INPUT_TO: &str = "The recipient email address.";
+
+pub const FIELD_SEND_EMAIL_INPUT_SUBJECT: &str = "The email subject line.";
+
+pub const FIELD_SEND_EMAIL_INPUT_BODY: &str = "The email body text.";
+
+pub const FIELD_SEARCH_EMAIL_INPUT_KEYWORD: &str = "Search email subjects, bodies, and headers using text keywords. Matching is case-insensitive. Bare words must all be present but may appear in any order, so `new balance` matches any email containing both words. To match an exact word sequence, wrap it in double quotes, like `\"new balance\"`.";
 
 pub const FIELD_SEARCH_EMAIL_INPUT_FOLDER: &str =
-    "Specify an optional mailbox folder name (such as Inbox or Sent).";
+    "Optional mailbox folder name (such as Inbox or Sent).";
 
 pub const FIELD_SEARCH_EMAIL_INPUT_START_DATE: &str =
-    "Specify an inclusive start date for received emails (ISO YYYY-MM-DD or RFC 3339 timestamp).";
+    "Inclusive start date for received emails (ISO YYYY-MM-DD or RFC 3339 timestamp).";
 
 pub const FIELD_SEARCH_EMAIL_INPUT_END_DATE: &str =
-    "Specify an inclusive end date for received emails (ISO YYYY-MM-DD or RFC 3339 timestamp).";
+    "Inclusive end date for received emails (ISO YYYY-MM-DD or RFC 3339 timestamp).";
 
 pub const FIELD_SEARCH_EMAIL_INPUT_FROM: &str = "Filter emails by sender address substring.";
 
@@ -223,18 +310,21 @@ pub const FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED: &str =
 
 // --- caldav (calendar) ---
 
-pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar items by keyword. Returns up to 32 structured event items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar events by keyword. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To search by date, use `get_calendar`.";
 
-pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range. Returns up to 32 structured event items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar events in a date range. Give a start date and an end date. Use ISO format `YYYY-MM-DD`. This tool returns one page with a maximum of 32 events. The results field has only the events on THIS page. The `count` field is the number of events on THIS page. The `total` field is the count on ALL pages. You have NOT received all events. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
 
-pub const GET_CALENDAR_ITEM_DESCRIPTION: &str =
-    "Get a calendar item by its full href path (or id). Returns structured event details.";
+pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get one calendar event. Give the `href` or `id` from a search result. Returns the full event data.";
 
-pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event to the configured CalDAV calendar. All event fields are optional — only include fields you know. An optional `client` specifies the target account (defaults to primary). The tool generates a UID automatically.";
+pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event. Only give fields that you know. All fields are optional. Give `client` to select an account. If you omit `client`, the tool uses the primary account. The tool makes a UID.";
 
-pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar event identified by `href` (or `id`). An optional `client` specifies the target account. Only the fields you provide are changed; all other event properties are preserved.";
+pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Change a calendar event. Give the `href` or `id`. Only the given fields change. All other fields stay the same. Give `client` to select an account. This change is permanent.";
 
-pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item identified by `href` (or `id`). An optional `client` specifies the target account.";
+pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar event. Give the `href` or `id`. Give `client` to select an account. This action is permanent. It cannot be undone.";
+
+/// `results` response field description for `search_calendar` and `get_calendar`.
+pub const FIELD_CALENDAR_RESULTS_DESCRIPTION: &str =
+    "Only the events on THIS page. These are NOT all events. Compare the item count with `total`.";
 
 pub const FIELD_CALENDAR_CLIENT_DESC: &str =
     "Optional CalDAV account name to target. If omitted, uses the default account.";
@@ -254,6 +344,15 @@ pub const FIELD_CALENDAR_END_DESC: &str =
 pub const FIELD_CALENDAR_DESCRIPTION_DESC: &str = "Free-text event description or notes.";
 
 pub const FIELD_CALENDAR_LOCATION_DESC: &str = "Event location (e.g. room name, address).";
+
+pub const FIELD_SEARCH_CALENDAR_INPUT_KEYWORD: &str =
+    "The keyword to find in event titles and notes.";
+
+pub const FIELD_GET_CALENDAR_INPUT_START_DATE: &str =
+    "The start of the date range. Use ISO format `YYYY-MM-DD`.";
+
+pub const FIELD_GET_CALENDAR_INPUT_END_DATE: &str =
+    "The end of the date range. Use ISO format `YYYY-MM-DD`.";
 
 // --- carddav (contacts) ---
 
@@ -296,127 +395,183 @@ pub const FIELD_ADDRESS_PO_BOX_DESC: &str = "P.O. box number.";
 
 pub const FIELD_ADDRESS_EXT_DESC: &str = "Extended address (e.g. apartment or suite).";
 
-pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Returns up to 32 structured contact items per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
+pub const FIELD_SEARCH_CONTACT_INPUT_KEYWORD: &str =
+    "The keyword to find in names and contact fields.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. An optional `client` specifies the target account. The created resource is returned with its href and path.";
+/// `results` response field description for `search_contact`.
+pub const FIELD_CONTACT_RESULTS_DESCRIPTION: &str = "Only the contacts on THIS page. These are NOT all contacts. Compare the item count with `total`.";
+
+pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Give one keyword. This tool returns one page with a maximum of 32 contacts. The results field has only the contacts on THIS page. The `count` field is the number of contacts on THIS page. The `total` field is the count on ALL pages. You have NOT received all contacts. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages. To read one contact, use `get_contact`.";
+
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact. Only give fields that you know. All fields are optional. Give `client` to select an account. If you omit `client`, the tool uses the primary account. The tool returns the new `href`.";
 
 pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its href (or id). Returns structured fields: `fn_name`, `email`, `tel`, `org`, `bday`, `addresses`, and raw `vcard`.";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `href` (or `id`). An optional `client` specifies the target account. Only the fields you provide are touched; every other vCard property on the contact is preserved verbatim. The contact's vCard `UID` is preserved across the update so the addressbook href stays stable.";
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Change a contact at the given `href` (or `id`). Give `client` to select an account. Only the given fields change. All other vCard data stays the same. The vCard `UID` stays the same. Thus the addressbook href stays stable. This change is permanent.";
 
-pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `href` (or `id`). An optional `client` specifies the target account. A 404 (already absent) is treated as a successful no-op so the call is idempotent.";
+pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `href` (or `id`). Give `client` to select an account. A 404 (already absent) is a successful no-op. Thus the call is idempotent. A successful delete is permanent.";
 
 // --- csv (database) ---
 
-pub const CREATE_CSV_DESCRIPTION: &str = "Create a CSV database. Specify the column headers.";
+pub const CREATE_CSV_DESCRIPTION: &str = "Make a new CSV database. Give a unique name and the column headers in order. Example headers: `[\"name\", \"age\"]`. Use `add_rows` next to add data.";
 
-pub const LIST_CSV_DESCRIPTION: &str = "List all CSV databases.";
+pub const LIST_CSV_DESCRIPTION: &str =
+    "List all CSV databases. Use this tool to see names before you query. No input is necessary.";
 
-pub const ADD_ROWS_DESCRIPTION: &str = "Add rows to a CSV database.";
+pub const ADD_ROWS_DESCRIPTION: &str = "Add rows to a CSV database. Give the database name and the rows. Give each row as an object. Use header names as keys. Missing keys become empty text. This change is permanent.";
 
-pub const DELETE_ROWS_DESCRIPTION: &str = "Delete rows from a CSV database. Specify an expression.";
+pub const DELETE_ROWS_DESCRIPTION: &str = "Delete rows from a CSV database. Give the database name and a filter expression. The tool deletes each row where the expression is true. Example: `age > 30`. This change is permanent. It cannot be undone.";
 
-pub const QUERY_DESCRIPTION: &str =
-    "Query a CSV database. Specify an expression or an aggregate function.";
+pub const QUERY_DESCRIPTION: &str = "Read rows from a CSV database. Give the database name. Optionally give a filter expression to select rows. Optionally give `aggregate_col` and `aggregate_func` (`sum`, `average`, `count`) to calculate a value. Example filter: `city == \"Berlin\"`. To change data, use `add_rows` or `delete_rows`.";
 
-pub const FIELD_CREATE_CSV_INPUT_DB_NAME: &str = "Specify a unique name for the new CSV database.";
+pub const FIELD_CREATE_CSV_INPUT_DB_NAME: &str = "A unique name for the new CSV database.";
 
 pub const FIELD_CREATE_CSV_INPUT_HEADERS: &str =
-    "Specify the column headers for the new CSV database. Use sequential order.";
+    "The column headers in order. Example: `[\"name\", \"age\"]`.";
 
-pub const FIELD_ADD_ROWS_INPUT_DB_NAME: &str = "Specify the name of the target CSV database.";
+pub const FIELD_ADD_ROWS_INPUT_DB_NAME: &str = "The name of the target CSV database.";
 
-pub const FIELD_ADD_ROWS_INPUT_ROWS: &str = "Specify the rows as JSON objects. Map the header names to the string values. The system saves the missing keys as empty strings.";
+pub const FIELD_ADD_ROWS_INPUT_ROWS: &str = "The rows as objects. Use header names as keys with text values. Missing keys become empty text.";
 
-pub const FIELD_DELETE_ROWS_INPUT_DB_NAME: &str = "Specify the name of the target CSV database.";
+pub const FIELD_DELETE_ROWS_INPUT_DB_NAME: &str = "The name of the target CSV database.";
 
-pub const FIELD_DELETE_ROWS_INPUT_PREDICATE: &str = "Specify an expression to evaluate each row. The tool deletes the rows where the expression returns true.";
+pub const FIELD_DELETE_ROWS_INPUT_PREDICATE: &str = "A filter expression for each row. The tool deletes rows where the expression is true. Example: `age > 30`.";
 
-pub const FIELD_QUERY_REQUEST_DB_NAME: &str = "Specify the name of the target CSV database.";
+pub const FIELD_QUERY_REQUEST_DB_NAME: &str = "The name of the target CSV database.";
 
-pub const FIELD_QUERY_REQUEST_PREDICATE: &str = "Specify an expression to filter the rows. If you do not specify the expression, the tool evaluates all rows.";
+pub const FIELD_QUERY_REQUEST_PREDICATE: &str = "A filter expression to select rows. If you omit it, the tool reads all rows. Example: `city == \"Berlin\"`.";
 
 pub const FIELD_QUERY_REQUEST_AGGREGATE_COL: &str =
-    "Specify the column to aggregate. Specify this value when you set `aggregate_func`.";
+    "The column to calculate. Give this value when you set `aggregate_func`.";
 
 pub const FIELD_QUERY_REQUEST_AGGREGATE_FUNC: &str =
-    "Specify the aggregate function. Use `sum`, `average`, or `count`.";
+    "The calculate function. Use `sum`, `average`, or `count`.";
 
 // --- yaml (front-matter) ---
 
 // --- read_yaml_header ---
 
-pub const READ_YAML_HEADER_DESCRIPTION: &str = "Read the YAML header from a Markdown file. Use this tool to inspect a document summary before reading the full file.";
+pub const READ_YAML_HEADER_DESCRIPTION: &str = "Read the header of a Markdown file. The header has the title, summary, and tags. Use this tool to see a summary before you read the full file. It uses less context than `read_note`.";
+
+pub const FIELD_READ_YAML_HEADER_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
 
 // --- write_yaml_header ---
 
-pub const WRITE_YAML_HEADER_DESCRIPTION: &str =
-    "Write or update YAML header data in a Markdown file.";
+pub const WRITE_YAML_HEADER_DESCRIPTION: &str = "Write or change the header of a Markdown file. Give the path. Give only the fields to change: `title`, `summary`, `tags`, or `header-date`. Other header fields stay the same. This change is permanent.";
+
+pub const FIELD_WRITE_YAML_HEADER_INPUT_PATH: &str = FIELD_NOTE_PATH_DESCRIPTION;
+
+pub const FIELD_WRITE_YAML_HEADER_INPUT_TITLE: &str = "The document title.";
+
+pub const FIELD_WRITE_YAML_HEADER_INPUT_SUMMARY: &str = "A short summary of the document.";
+
+pub const FIELD_WRITE_YAML_HEADER_INPUT_TAGS: &str = "The tag list for the document.";
+
+pub const FIELD_WRITE_YAML_HEADER_INPUT_HEADER_DATE: &str =
+    "The header date as text. Use ISO format `YYYY-MM-DD` where possible.";
 
 // --- weather ---
 
-pub const GET_WEATHER_DESCRIPTION: &str = "Get current weather conditions and forecasts for a location (~7 days). You can optionally filter forecasts by date (`YYYY-MM-DD`).";
+pub const GET_WEATHER_DESCRIPTION: &str = "Get weather for a place. Give a city name or coordinates. Returns current conditions and a forecast for 7 days. Optionally give a date (`YYYY-MM-DD`) to filter the forecast.";
+
+pub const FIELD_WEATHER_INPUT_LOCATION: &str =
+    "The place name or coordinates. Example: `Berlin` or `52.52,13.41`.";
+
+pub const FIELD_WEATHER_INPUT_DATE_RANGE: &str = "An optional date (`YYYY-MM-DD`) to filter the forecast. If you omit it, the tool returns all 7 days.";
 
 // --- trello ---
 
-pub const GET_BOARDS_DESCRIPTION: &str = "Fetch all Trello boards for the authenticated user.";
-pub const GET_BOARD_DESCRIPTION: &str = "Fetch details of a Trello board by its ID.";
-pub const GET_LISTS_DESCRIPTION: &str = "Fetch all lists in a Trello board by its ID.";
-pub const GET_CARDS_DESCRIPTION: &str = "Fetch all cards in a Trello list by its ID.";
-pub const CREATE_CARD_DESCRIPTION: &str = "Create a new card in a specific Trello list. Make sure the card specifies what needs to be accomplished, when, how, and by whom. Be sure to set an estimated priority and include any relevant context or links (like email or website references) in the description.";
-pub const UPDATE_CARD_DESCRIPTION: &str =
-    "Update an existing Trello card (e.g. name, description, move to list).";
-pub const DELETE_CARD_DESCRIPTION: &str = "Delete a Trello card by its ID.";
+pub const GET_BOARDS_DESCRIPTION: &str = "List all Trello boards for the user. Use this tool first to find a board ID. No input is necessary.";
+pub const GET_BOARD_DESCRIPTION: &str =
+    "Read one Trello board. Give the board ID from `trello_get_boards`. Returns the board data.";
+pub const GET_LISTS_DESCRIPTION: &str = "List all lists on a Trello board. Give the board ID. Use the result to find a list ID for `trello_get_cards` or `trello_create_card`.";
+pub const GET_CARDS_DESCRIPTION: &str =
+    "List all cards in a Trello list. Give the list ID from `trello_get_lists`.";
+pub const CREATE_CARD_DESCRIPTION: &str = "Make a new card in a Trello list. Give the list ID (`idList`) and a name. Optionally give a description in Markdown with context and links. This change is permanent.";
+pub const UPDATE_CARD_DESCRIPTION: &str = "Change a Trello card. Give the card ID. Give only the fields to change: `name`, `desc`, or `idList` to move the card. This change is permanent.";
+pub const DELETE_CARD_DESCRIPTION: &str =
+    "Delete a Trello card. Give the card ID. This action is permanent. It cannot be undone.";
+
+pub const FIELD_TRELLO_ID_DESCRIPTION: &str = "The Trello ID of the board, list, or card.";
+
+pub const FIELD_TRELLO_CREATE_ID_LIST_DESCRIPTION: &str =
+    "The list ID that holds the new card. Get it from `trello_get_lists`.";
+
+pub const FIELD_TRELLO_CREATE_NAME_DESCRIPTION: &str = "The card name.";
+
+pub const FIELD_TRELLO_CREATE_DESC_DESCRIPTION: &str =
+    "The card description in Markdown. Include context and links.";
+
+pub const FIELD_TRELLO_CREATE_ID_LABELS_DESCRIPTION: &str = "Optional label IDs for the card.";
+
+pub const FIELD_TRELLO_UPDATE_ID_DESCRIPTION: &str = "The card ID to change.";
+
+pub const FIELD_TRELLO_UPDATE_NAME_DESCRIPTION: &str = "The new card name.";
+
+pub const FIELD_TRELLO_UPDATE_DESC_DESCRIPTION: &str = "The new card description.";
+
+pub const FIELD_TRELLO_UPDATE_ID_LIST_DESCRIPTION: &str =
+    "The new list ID. Use it to move the card.";
+
+// --- vector search ---
+
+/// Description for `vector_search`. Only used with the `vector-search` feature.
+#[allow(dead_code)]
+pub const VECTOR_SEARCH_DESCRIPTION: &str = "Search notes by meaning and concepts. Give a phrase, question, or summary. Example: `checking account statements from credit union`. For exact words, use `search_notes`. This tool returns one page with a maximum of 32 results. The items field has only the results on THIS page. The `count` field is the number of results on THIS page. The `total` field is the count on ALL pages. You have NOT received all results. Omit `cursor` on the first call. Give the `cursor` back unchanged to get the next page. Give either `cursor` or new search parameters, never both. When the response has no `cursor`, you have all pages.";
+
+#[allow(dead_code)]
+pub const FIELD_VECTOR_SEARCH_INPUT_QUERY: &str = "A phrase, question, or summary. Do not use single keywords. For exact text, use `search_notes`.";
+
+#[allow(dead_code)]
+pub const FIELD_VECTOR_SEARCH_INPUT_MAX_DISTANCE: &str = "A value from 0.0 to 2.0. Default: 0.6. Use 0.3 to 0.5 for strict matches. Use 0.8 to 1.0 for broad matches.";
 
 // --- browser (headless automation, BRWS-001..008) ---
 
 // --- browser_navigate ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_NAVIGATE_DESCRIPTION: &str = "Navigate the headless browser to a URL. The system preserves page state across calls for multi-step flows. The response returns the final URL and page title.";
+pub const BROWSER_NAVIGATE_DESCRIPTION: &str = "Open a URL in the headless browser. Give a full URL. The page stays active for the next calls. The tool returns the final URL and the page title. Use `browser_get_page_state` next to see the page.";
 
 // --- browser_get_page_state ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_GET_PAGE_STATE_DESCRIPTION: &str = "Get interactable elements (a, button, input, select, textarea), current URL, and page title. Each element includes a stable agent_id for action tools.";
+pub const BROWSER_GET_PAGE_STATE_DESCRIPTION: &str = "Read the current page. Returns the URL, title, and all controls (links, buttons, inputs). Each control has a stable `agent_id`. Use the `agent_id` in the next action tools. Call this tool after each navigation or click.";
 
 // --- browser_click ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_CLICK_DESCRIPTION: &str = "Click an element on the page using a CSS selector. Subsequent page state calls reflect the updated DOM.";
+pub const BROWSER_CLICK_DESCRIPTION: &str = "Click a control on the page. First call `browser_get_page_state` to get the `agent_id`. Give the CSS selector for the control. The page changes after the click. Call `browser_get_page_state` again to see the new page.";
 
 // --- browser_fill_input ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_FILL_INPUT_DESCRIPTION: &str = "Fill an input or textarea element with text. This action replaces any existing value. Press Enter using browser_press_key to submit forms.";
+pub const BROWSER_FILL_INPUT_DESCRIPTION: &str = "Type text in an input field or text area. First call `browser_get_page_state` to get the `agent_id`. This action replaces all text in the field. To submit a form, press `Enter` with `browser_press_key`.";
 
 // --- browser_select_dropdown ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_SELECT_DROPDOWN_DESCRIPTION: &str =
-    "Select an option in a dropdown element using its value attribute.";
+pub const BROWSER_SELECT_DROPDOWN_DESCRIPTION: &str = "Select a value in a drop-down list. First call `browser_get_page_state` to get the `agent_id`. Give the CSS selector for the list and the `value` of the option.";
 
 // --- browser_press_key ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_PRESS_KEY_DESCRIPTION: &str =
-    "Press a keyboard key on the page (such as Enter, Tab, Escape, or ArrowDown).";
+pub const BROWSER_PRESS_KEY_DESCRIPTION: &str = "Press a key on the page. Use `Enter` to submit a form. Use `Escape` to close a dialog. You can also use `Tab` or `ArrowDown`. First read the page with `browser_get_page_state`.";
 
 // --- browser_evaluate_js ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_EVALUATE_JS_DESCRIPTION: &str = "Evaluate a JavaScript expression in the page context. The tool serializes the return value to JSON.";
+pub const BROWSER_EVALUATE_JS_DESCRIPTION: &str = "Run a JavaScript expression on the page. Give one expression. The tool returns the result as JSON. Keep the script short and safe.";
 
 // --- browser_screenshot ---
 
 #[cfg(feature = "browser")]
-pub const BROWSER_SCREENSHOT_DESCRIPTION: &str = "Save a PNG screenshot of the page to the configured directory. The tool restricts filenames to valid alphanumeric characters (up to 128 characters).";
+pub const BROWSER_SCREENSHOT_DESCRIPTION: &str = "Save a picture of the page as a PNG file. Give a file name. Use only letters, digits, `.`, `_`, `-`, maximum 128 characters. No folders. No leading dots.";
 
 // --- Field descriptions ---
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_INPUT_URL: &str =
-    "Specify the absolute URL to navigate to (such as `https://example.com/login`).";
+    "The full URL to open (such as `https://example.com/login`).";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_RESPONSE_URL: &str =
@@ -424,53 +579,53 @@ pub const FIELD_BROWSER_NAVIGATE_RESPONSE_URL: &str =
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE: &str =
-    "The page `<title>` after navigation. Returns an empty string if the page has no title.";
+    "The page `<title>` after navigation. Empty when the page has no title.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL: &str = "The current page URL.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE: &str =
-    "The current page `<title>`. Returns an empty string if the page has no title.";
+    "The current page `<title>`. Empty when the page has no title.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS: &str = "JSON array of interactable elements. Each entry contains `agent_id`, `tag`, `text`, `placeholder`, `name`, and `type`. Use `agent_id` to target specific elements.";
+pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS: &str = "Controls on the page. Each entry has `agent_id`, `tag`, `text`, `placeholder`, `name`, and `type`. Use `agent_id` to select a control.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL: &str =
-    "Total number of interactable elements on the page.";
+    "Total number of controls on the page.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_CLICK_INPUT_SELECTOR: &str = "Specify the CSS selector for the element to click. Use `agent_id` to build a `:nth-of-type(...)` selector if needed.";
+pub const FIELD_BROWSER_CLICK_INPUT_SELECTOR: &str = "The CSS selector for the control. Get the `agent_id` from `browser_get_page_state` first, then build the selector.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR: &str =
-    "Specify the CSS selector for the input or textarea to fill.";
+pub const FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR: &str = "The CSS selector for the input or text area. Get the `agent_id` from `browser_get_page_state` first.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_FILL_INPUT_INPUT_TEXT: &str =
-    "Provide the text to insert. Replaces any existing text.";
+    "The text to type. It replaces all text in the field.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR: &str =
-    "Specify the CSS selector for the `<select>` element.";
+pub const FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR: &str = "The CSS selector for the `<select>` list. Get the `agent_id` from `browser_get_page_state` first.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE: &str =
-    "Specify the `value` attribute of the `<option>` to select.";
+    "The `value` of the `<option>` to select.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_PRESS_KEY_INPUT_KEY: &str =
-    "Specify the key to press (such as `Enter`, `Tab`, `Escape`, or `ArrowDown`).";
+    "The key to press (such as `Enter`, `Tab`, `Escape`, or `ArrowDown`).";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT: &str = "Provide a JavaScript expression to evaluate in the page context. The tool serializes the return value to JSON.";
+pub const FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT: &str =
+    "One JavaScript expression to run on the page. The tool returns the result as JSON.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME: &str = "Specify the filename for the PNG. Must match `[A-Za-z0-9._-]{1,128}` without path separators or leading dots.";
+pub const FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME: &str =
+    "The file name for the PNG. Use `[A-Za-z0-9._-]{1,128}`. No folders. No leading dots.";
 
 #[cfg(feature = "browser")]
-pub const FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE: &str = "Set to `true` to capture the entire scrollable page, or `false` to capture only the current viewport. Default: `false`.";
+pub const FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE: &str = "Set to `true` to capture the full page, or `false` to capture only the screen. Default: `false`.";
 
 #[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH: &str =

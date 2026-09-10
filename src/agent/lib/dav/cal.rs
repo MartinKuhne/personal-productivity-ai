@@ -311,15 +311,20 @@ where
 
 pub fn tool_search_calendar(
     config: &crate::config::AgentConfig,
-    keyword: &str,
+    keyword: Option<&str>,
     cursor: Option<String>,
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<SearchCalendarResponse, String> {
+    // A call takes `cursor` or a fresh `keyword`, never both.
+    let has_fresh_params = keyword.is_some_and(|k| !k.trim().is_empty());
+    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
+
     if let Some(cursor) = cursor {
         let page = cache.calendar_search_sessions.next_page(&cursor)?;
         return Ok(SearchCalendarResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -327,11 +332,15 @@ pub fn tool_search_calendar(
         });
     }
 
+    let keyword = keyword.filter(|k| !k.trim().is_empty()).ok_or_else(|| {
+        "No `keyword` and no `cursor` were given. Give `keyword` to start a new search, or `cursor` to read the next page.".to_string()
+    })?;
     let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
 
     if results.is_empty() {
         return Ok(SearchCalendarResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -344,6 +353,7 @@ pub fn tool_search_calendar(
         .create_session(results, uuid_gen);
     Ok(SearchCalendarResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
@@ -353,16 +363,22 @@ pub fn tool_search_calendar(
 
 pub fn tool_get_calendar(
     config: &crate::config::AgentConfig,
-    start: &str,
-    end: &str,
+    start: Option<&str>,
+    end: Option<&str>,
     cursor: Option<String>,
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<GetCalendarResponse, String> {
+    // A call takes `cursor` or a fresh date range, never both.
+    let has_fresh_params =
+        start.is_some_and(|s| !s.trim().is_empty()) || end.is_some_and(|e| !e.trim().is_empty());
+    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
+
     if let Some(cursor) = cursor {
         let page = cache.calendar_get_sessions.next_page(&cursor)?;
         return Ok(GetCalendarResponse {
             results: page.items,
+            count: page.count,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
@@ -370,11 +386,19 @@ pub fn tool_get_calendar(
         });
     }
 
+    let (start, end) = match (
+        start.filter(|s| !s.trim().is_empty()),
+        end.filter(|e| !e.trim().is_empty()),
+    ) {
+        (Some(start), Some(end)) => (start, end),
+        _ => return Err("No date range and no `cursor` were given. Give `start_date` and `end_date` to start a new search, or `cursor` to read the next page.".to_string()),
+    };
     let (results, errors) = for_each_client_vec(config, |_, c| c.get_calendar(start, end));
 
     if results.is_empty() {
         return Ok(GetCalendarResponse {
             results: Vec::new(),
+            count: 0,
             total: 0,
             cursor: None,
             hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
@@ -387,6 +411,7 @@ pub fn tool_get_calendar(
         .create_session(results, uuid_gen);
     Ok(GetCalendarResponse {
         results: page.items,
+        count: page.count,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
