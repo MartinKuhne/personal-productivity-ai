@@ -667,6 +667,61 @@ fn test_tool_get_email_by_id_returns_body_content() {
 }
 
 #[test]
+fn test_tool_get_email_by_id_returns_yaml_frontmatter_and_markdown_body() {
+    let _cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/get\", {\
+                    \"list\": [{\
+                        \"id\": \"e1\",\
+                        \"subject\": \"Order #42\",\
+                        \"receivedAt\": \"2026-07-19T10:00:00Z\",\
+                        \"from\": [{\"name\": \"Store\", \"email\": \"orders@store.com\"}],\
+                        \"to\": [{\"name\": \"Alice\", \"email\": \"alice@example.com\"}],\
+                        \"htmlBody\": [{\"partId\": \"p1\"}],\
+                        \"bodyValues\": {\"p1\": {\"value\": \"Thank you for your order!\\nYour item has shipped.\", \"isTruncated\": false}}\
+                    }]\
+                }, \"0\"]\
+            ]\
+        }";
+    let url = spawn_mock_server(body);
+    let mut config = AgentConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let res = tool_get_email_by_id(&config, "e1").expect("tool call should succeed");
+
+    assert!(
+        res.result.starts_with("---\n"),
+        "result must start with YAML front matter delimiter, got: {}",
+        res.result
+    );
+    assert!(res.result.contains("id: e1"));
+    assert!(res.result.contains("Order #42"));
+    assert!(res.result.contains("orders@store.com"));
+    assert!(res.result.contains("alice@example.com"));
+    assert!(
+        res.result
+            .contains("---\n\nThank you for your order!\nYour item has shipped."),
+        "result must contain markdown body separated by closing YAML delimiter and blank line; got: {}",
+        res.result
+    );
+    assert!(
+        !res.result.contains("preview:"),
+        "preview field must be omitted to save tokens"
+    );
+}
+
+#[test]
 fn test_tool_search_email_with_status_filters_success() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()

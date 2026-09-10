@@ -175,6 +175,36 @@ fn test_format_result_get_email_by_id_empty_body() {
     assert!(msg.contains("0 line(s) read"));
 }
 
+#[test]
+fn test_format_result_get_email_by_id_yaml_frontmatter() {
+    let markdown = "---\nid: e1\nsubject: Status Update\ndate: '2026-09-09T12:00:00Z'\nfrom:\n  - Alice <alice@example.com>\nto:\n  - Bob <bob@example.com>\n---\n\nLine 1\nLine 2\nLine 3\nLine 4\nLine 5";
+    let tool_result = serde_json::json!({
+        "status": "success",
+        "data": {
+            "result": markdown
+        }
+    });
+
+    let msg = format_tool_result_message("get_email_by_id", &tool_result.to_string());
+    assert!(msg.contains("get_email_by_id"));
+    assert!(msg.contains("5 line(s) read"));
+    assert!(!msg.contains("12 line(s) read"));
+}
+
+#[test]
+fn test_format_result_get_email_by_id_yaml_frontmatter_empty_body() {
+    let markdown = "---\nid: e2\nsubject: Empty\n---\n";
+    let tool_result = serde_json::json!({
+        "status": "success",
+        "data": {
+            "result": markdown
+        }
+    });
+
+    let msg = format_tool_result_message("get_email_by_id", &tool_result.to_string());
+    assert!(msg.contains("0 line(s) read"));
+}
+
 // `search_email` paging display: the result header should
 // show the cross-page total, the items on this page, and either
 // the cursor (more pages) or the "Final page." hint (last page).

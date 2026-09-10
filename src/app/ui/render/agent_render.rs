@@ -260,7 +260,20 @@ fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> Strin
         body.lines().count()
     } else {
         let raw = data.get("result").and_then(|f| f.as_str()).unwrap_or("");
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(fm) = crate::markdown::parse_front_matter(raw) {
+            let body = fm
+                .body
+                .strip_prefix("\r\n\r\n")
+                .or_else(|| fm.body.strip_prefix("\n\n"))
+                .or_else(|| fm.body.strip_prefix("\r\n"))
+                .or_else(|| fm.body.strip_prefix("\n"))
+                .unwrap_or(&fm.body);
+            if body.trim().is_empty() {
+                0
+            } else {
+                body.lines().count()
+            }
+        } else if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) {
             parsed
                 .get("body")
                 .and_then(|b| b.as_str())

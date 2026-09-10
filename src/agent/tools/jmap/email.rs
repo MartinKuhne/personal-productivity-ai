@@ -29,8 +29,8 @@ use crate::tools::registry::cache::SearchEmailItem;
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
 ///
 /// The RFC default of `0` makes servers return **no** body values at all, so
-/// `email.body_value(part_id)` is `None` and `simplify_email` produces an
-/// empty `body` field — which is what the LLM has been seeing. Setting a
+/// `email.body_value(part_id)` is `None` and `format_email_as_markdown` produces an
+/// empty body — which is what the LLM has been seeing. Setting a
 /// non-zero cap is mandatory; we pick 10 MiB as a generous upper bound for a
 /// single MIME part while still bounded enough to avoid pathological emails
 /// inflating the agent's tool response.
@@ -141,46 +141,49 @@ fn lookup_mailbox_id(session: &JmapSession, folder_name: &str) -> Result<String,
     Err(format!("Mailbox not found with name: {}", folder_name))
 }
 
-/// Simplify a single `Email<Get>` into a flat JSON object.
-fn simplify_email(
+#[derive(serde::Serialize)]
+struct EmailFrontMatter {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cc: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bcc: Option<Vec<String>>,
+}
+
+/// Format a single `Email<Get>` into Markdown with YAML front matter.
+fn format_email_as_markdown(
     email: &mut jmap_client::email::Email<jmap_client::Get>,
     max_lines: Option<usize>,
-) -> serde_json::Value {
-    let mut simplified = serde_json::Map::new();
+) -> String {
+    let id = email.take_id();
+    let subject = email.subject().map(|s| s.to_string());
+    let date = email.received_at().map(|ts| {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| ts.to_string())
+    });
+    let from = extract_address_strings(email.from());
+    let to = extract_address_strings(email.to());
+    let cc = extract_address_strings(email.cc());
+    let bcc = extract_address_strings(email.bcc());
 
-    simplified.insert("id".to_string(), serde_json::Value::String(email.take_id()));
-
-    simplified.insert(
-        "subject".to_string(),
-        email
-            .subject()
-            .map(|s| serde_json::Value::String(s.to_string()))
-            .unwrap_or(serde_json::Value::Null),
-    );
-
-    if let Some(ts) = email.received_at() {
-        simplified.insert(
-            "date".to_string(),
-            serde_json::Value::String(
-                chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| ts.to_string()),
-            ),
-        );
-    }
-
-    if let Some(val) = serialize_address_list(email.from()) {
-        simplified.insert("from".to_string(), val);
-    }
-    if let Some(val) = serialize_address_list(email.to()) {
-        simplified.insert("to".to_string(), val);
-    }
-    if let Some(val) = serialize_address_list(email.cc()) {
-        simplified.insert("cc".to_string(), val);
-    }
-    if let Some(val) = serialize_address_list(email.bcc()) {
-        simplified.insert("bcc".to_string(), val);
-    }
+    let fm = EmailFrontMatter {
+        id,
+        subject,
+        date,
+        from,
+        to,
+        cc,
+        bcc,
+    };
 
     // Extract body: prefer htmlBody, fall back to textBody
     let mut body_str = String::new();
@@ -230,18 +233,22 @@ fn simplify_email(
     }
 
     if is_truncated {
-        body_str.push_str("\n... (truncated - use the get_email_by_id tool with the email id to read the full content)");
+        body_str.push_str("\n... (truncated)");
     }
 
-    if let Some(p) = email.preview() {
-        simplified.insert(
-            "preview".to_string(),
-            serde_json::Value::String(p.to_string()),
-        );
+    let yaml_str = serde_norway::to_string(&fm).unwrap_or_default();
+    let yaml_inner = yaml_str.trim_start_matches("---\n");
+    let mut yaml_final = yaml_inner.to_string();
+    if !yaml_final.ends_with('\n') {
+        yaml_final.push('\n');
     }
 
-    simplified.insert("body".to_string(), serde_json::Value::String(body_str));
-    serde_json::Value::Object(simplified)
+    let trimmed_body = body_str.trim_start_matches('\n').trim_start_matches('\r');
+    if trimmed_body.is_empty() {
+        format!("---\n{}---\n", yaml_final)
+    } else {
+        format!("---\n{}---\n\n{}", yaml_final, trimmed_body)
+    }
 }
 
 /// Extract a fallback plain-text snippet (up to 256 chars) if `preview` was not
@@ -324,25 +331,33 @@ pub(crate) fn simplify_email_for_search(
     serde_json::Value::Object(simplified)
 }
 
-fn serialize_address_list(
+fn extract_address_strings(
     addrs: Option<&[jmap_client::email::EmailAddress<jmap_client::Get>]>,
-) -> Option<serde_json::Value> {
+) -> Option<Vec<String>> {
     let list = addrs?;
     if list.is_empty() {
         return None;
     }
-    let json: Vec<serde_json::Value> = list
+    let strings: Vec<String> = list
         .iter()
         .map(|addr| {
             let email = addr.email();
-            let val = match addr.name() {
+            match addr.name() {
                 Some(name) if !name.trim().is_empty() => format!("{} <{}>", name, email),
                 _ => email.to_string(),
-            };
-            serde_json::Value::String(val)
+            }
         })
         .collect();
-    Some(serde_json::Value::Array(json))
+    Some(strings)
+}
+
+fn serialize_address_list(
+    addrs: Option<&[jmap_client::email::EmailAddress<jmap_client::Get>]>,
+) -> Option<serde_json::Value> {
+    let strings = extract_address_strings(addrs)?;
+    Some(serde_json::Value::Array(
+        strings.into_iter().map(serde_json::Value::String).collect(),
+    ))
 }
 
 /// Optional filters an LLM can pass to `tool_search_email`.
@@ -647,10 +662,8 @@ pub fn tool_get_email_by_id(
 
         match email_get_full(&session, id) {
             Ok(Some(mut email)) => {
-                let email_json = simplify_email(&mut email, None);
-                return Ok(crate::tools::dtos::GetEmailByIdResponse {
-                    result: serde_json::to_string_pretty(&email_json).unwrap_or_default(),
-                });
+                let markdown = format_email_as_markdown(&mut email, None);
+                return Ok(crate::tools::dtos::GetEmailByIdResponse { result: markdown });
             }
             Ok(None) => {
                 tracing::warn!(client = %name, email_id = %id, "Email not found in response");
