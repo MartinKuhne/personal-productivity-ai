@@ -52,12 +52,6 @@ pub fn tool_web_fetch_with_locator(
     locator: Option<&dyn crate::tools::browser_locator::BrowserLocator>,
     custom_runner: Option<&dyn crate::tools::browser_runner::BrowserRunner>,
 ) -> Result<crate::tools::dtos::WebFetchResponse, String> {
-    // A call takes `cursor` or fresh fetch parameters, never both.
-    // `force_refetch` re-reads from the start, so it also conflicts with
-    // `cursor`. `headers` only changes the output shape and is allowed.
-    let has_fresh_params = crate::tools::cursor::is_non_blank(&input.url) || input.force_refetch;
-    crate::tools::cursor::require_cursor_xor_params(&input.cursor, has_fresh_params)?;
-
     // 1. If cursor is provided, slice next page from line cursor manager
     if let Some(cursor) = &input.cursor {
         let page = cache.web_lines.next_page(cursor)?;
@@ -384,10 +378,6 @@ pub fn tool_web_search(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::WebSearchResponse, String> {
-    // A call takes `cursor` or a fresh `query`, never both.
-    let has_fresh_params = query.is_some_and(|q| !q.trim().is_empty());
-    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
-
     if let Some(cursor) = cursor {
         let page = cache.web_search_sessions.next_page(&cursor)?;
         let results = if page.items.is_empty() {

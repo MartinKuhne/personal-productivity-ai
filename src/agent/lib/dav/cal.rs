@@ -316,10 +316,6 @@ pub fn tool_search_calendar(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<SearchCalendarResponse, String> {
-    // A call takes `cursor` or a fresh `keyword`, never both.
-    let has_fresh_params = keyword.is_some_and(|k| !k.trim().is_empty());
-    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
-
     if let Some(cursor) = cursor {
         let page = cache.calendar_search_sessions.next_page(&cursor)?;
         return Ok(SearchCalendarResponse {
@@ -369,11 +365,6 @@ pub fn tool_get_calendar(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<GetCalendarResponse, String> {
-    // A call takes `cursor` or a fresh date range, never both.
-    let has_fresh_params =
-        start.is_some_and(|s| !s.trim().is_empty()) || end.is_some_and(|e| !e.trim().is_empty());
-    crate::tools::cursor::require_cursor_xor_params(&cursor, has_fresh_params)?;
-
     if let Some(cursor) = cursor {
         let page = cache.calendar_get_sessions.next_page(&cursor)?;
         return Ok(GetCalendarResponse {

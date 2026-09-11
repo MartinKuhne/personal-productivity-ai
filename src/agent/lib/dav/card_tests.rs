@@ -354,22 +354,41 @@ fn test_tool_search_contact_handles_empty_clients_gracefully() {
 }
 
 #[test]
-fn test_tool_search_contact_rejects_cursor_with_keyword() {
+fn test_tool_search_contact_uses_cursor_and_ignores_keyword() {
     let config = crate::config::AgentConfig::default();
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let err = tool_search_contact(
+
+    let items: Vec<CardDavContactDetails> = (0..35)
+        .map(|i| CardDavContactDetails {
+            client: "c1".to_string(),
+            id: format!("id_{i}"),
+            href: format!("/h/{i}.vcf"),
+            fn_name: Some(format!("Contact {i}")),
+            email: None,
+            tel: None,
+            org: None,
+            bday: None,
+            addresses: Vec::new(),
+            vcard: String::new(),
+        })
+        .collect();
+
+    let page = cache
+        .contact_search_sessions
+        .create_session(items, &uuid_gen);
+    let cursor = page.cursor.expect("session should have cursor");
+
+    let res = tool_search_contact(
         &config,
-        Some("alice"),
-        Some("c_00000000".to_string()),
+        Some("ignored_keyword"),
+        Some(cursor),
         &cache,
         &uuid_gen,
     )
-    .unwrap_err();
-    assert_eq!(
-        err,
-        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-    );
+    .expect("tool_search_contact should succeed with cursor and ignore keyword");
+    assert_eq!(res.count, 3);
+    assert_eq!(res.total, 35);
 }
 
 #[test]

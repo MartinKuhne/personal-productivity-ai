@@ -317,19 +317,3 @@ fn is_non_blank_treats_missing_empty_and_blank_as_absent() {
     assert!(!is_non_blank(&Some("   ".to_string())));
     assert!(is_non_blank(&Some("query".to_string())));
 }
-
-#[test]
-fn require_cursor_xor_params_rejects_cursor_with_fresh_params() {
-    let err = require_cursor_xor_params(&Some("c_00000000".to_string()), true).unwrap_err();
-    assert_eq!(
-        err,
-        crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-    );
-}
-
-#[test]
-fn require_cursor_xor_params_allows_cursor_only_fresh_only_and_neither() {
-    assert!(require_cursor_xor_params(&Some("c_00000000".to_string()), false).is_ok());
-    assert!(require_cursor_xor_params(&None, true).is_ok());
-    assert!(require_cursor_xor_params(&None, false).is_ok());
-}

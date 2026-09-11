@@ -85,10 +85,6 @@ fn execute_vector_search(
     let input: VectorSearchInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {e}"))?;
 
-    // A call takes `cursor` or fresh search parameters, never both.
-    let has_fresh_params = !input.query.trim().is_empty() || input.max_distance.is_some();
-    crate::tools::cursor::require_cursor_xor_params(&input.cursor, has_fresh_params)?;
-
     if let Some(cursor) = &input.cursor {
         let page = ctx.cache().vector_sessions.next_page(cursor)?;
         return serde_json::to_value(page).map_err(|e| e.to_string());

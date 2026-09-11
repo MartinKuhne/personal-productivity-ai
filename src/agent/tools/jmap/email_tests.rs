@@ -483,10 +483,16 @@ fn test_tool_search_email_no_clients() {
 }
 
 #[test]
-fn test_tool_search_email_rejects_cursor_with_filters() {
+fn test_tool_search_email_uses_cursor_and_ignores_filters() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    let config = AgentConfig::default();
     let uuid = crate::utils::uuid::SystemUuidGenerator;
+    let items: Vec<crate::tools::registry::cache::SearchEmailItem> = (0..35)
+        .map(|i| crate::tools::registry::cache::SearchEmailItem {
+            client: "test".to_string(),
+            preview: serde_json::json!({ "id": format!("e{i}") }),
+        })
+        .collect();
+    let config = AgentConfig::default();
     for filters in [
         SearchEmailFilters {
             keyword: Some("test"),
@@ -501,18 +507,12 @@ fn test_tool_search_email_rejects_cursor_with_filters() {
             ..Default::default()
         },
     ] {
-        let err = tool_search_email(
-            &config,
-            filters,
-            Some("c_00000000".to_string()),
-            &cache,
-            &uuid,
-        )
-        .unwrap_err();
-        assert_eq!(
-            err,
-            crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR
-        );
+        let first_page = cache.email_sessions.create_session(items.clone(), &uuid);
+        let cursor = first_page.cursor.expect("session should have cursor");
+        let res = tool_search_email(&config, filters, Some(cursor), &cache, &uuid)
+            .expect("tool_search_email with cursor should succeed and ignore filters");
+        assert_eq!(res.count, 3);
+        assert_eq!(res.total, 35);
     }
 }
 
@@ -663,6 +663,61 @@ fn test_tool_get_email_by_id_returns_body_content() {
         res.result.contains("Hello, world!"),
         "tool_get_email_by_id should surface body content; got: {}",
         res.result
+    );
+}
+
+#[test]
+fn test_tool_get_email_by_id_returns_yaml_frontmatter_and_markdown_body() {
+    let _cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/get\", {\
+                    \"list\": [{\
+                        \"id\": \"e1\",\
+                        \"subject\": \"Order #42\",\
+                        \"receivedAt\": \"2026-07-19T10:00:00Z\",\
+                        \"from\": [{\"name\": \"Store\", \"email\": \"orders@store.com\"}],\
+                        \"to\": [{\"name\": \"Alice\", \"email\": \"alice@example.com\"}],\
+                        \"htmlBody\": [{\"partId\": \"p1\"}],\
+                        \"bodyValues\": {\"p1\": {\"value\": \"Thank you for your order!\\nYour item has shipped.\", \"isTruncated\": false}}\
+                    }]\
+                }, \"0\"]\
+            ]\
+        }";
+    let url = spawn_mock_server(body);
+    let mut config = AgentConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let res = tool_get_email_by_id(&config, "e1").expect("tool call should succeed");
+
+    assert!(
+        res.result.starts_with("---\n"),
+        "result must start with YAML front matter delimiter, got: {}",
+        res.result
+    );
+    assert!(res.result.contains("id: e1"));
+    assert!(res.result.contains("Order #42"));
+    assert!(res.result.contains("orders@store.com"));
+    assert!(res.result.contains("alice@example.com"));
+    assert!(
+        res.result
+            .contains("---\n\nThank you for your order!\nYour item has shipped."),
+        "result must contain markdown body separated by closing YAML delimiter and blank line; got: {}",
+        res.result
+    );
+    assert!(
+        !res.result.contains("preview:"),
+        "preview field must be omitted to save tokens"
     );
 }
 

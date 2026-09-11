@@ -437,7 +437,7 @@ All tool responses follow the same envelope:
   ```
 * **Response (`data`):**
   ```json
-  { "result": "{\"id\":\"abc123\",\"subject\":\"Invoice\",\"from\":...,\"body\":\"...\"}" }
+  { "result": "---\nid: abc123\nsubject: Invoice\nfrom:\n  - Billing <billing@example.com>\n---\n\n## Invoice Details\n..." }
   ```
 
 ##### `send_email`

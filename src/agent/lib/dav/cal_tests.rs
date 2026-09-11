@@ -369,32 +369,55 @@ fn test_caldav_tools_empty_config() {
 }
 
 #[test]
-fn test_calendar_tools_reject_cursor_with_fresh_params() {
+fn test_calendar_tools_use_cursor_and_ignore_fresh_params() {
     let config = AgentConfig::default();
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let expected = crate::tools::registry::builtin::strings::CURSOR_WITH_FRESH_PARAMS_ERROR;
 
-    let err = tool_search_calendar(
+    let items: Vec<CalDavEventDetails> = (0..35)
+        .map(|i| CalDavEventDetails {
+            client: "c1".to_string(),
+            id: format!("event_{i}"),
+            href: format!("/events/{i}.ics"),
+            summary: Some(format!("Event {i}")),
+            start: None,
+            end: None,
+            description: None,
+            location: None,
+            organizer: None,
+        })
+        .collect();
+
+    let search_page = cache
+        .calendar_search_sessions
+        .create_session(items.clone(), &uuid_gen);
+    let search_cursor = search_page.cursor.expect("session should have cursor");
+
+    let search_res = tool_search_calendar(
         &config,
         Some("meeting"),
-        Some("c_00000000".to_string()),
+        Some(search_cursor),
         &cache,
         &uuid_gen,
     )
-    .unwrap_err();
-    assert_eq!(err, expected);
+    .expect("tool_search_calendar should succeed with cursor and ignore keyword");
+    assert_eq!(search_res.count, 3);
+    assert_eq!(search_res.total, 35);
 
-    let err = tool_get_calendar(
+    let get_page = cache.calendar_get_sessions.create_session(items, &uuid_gen);
+    let get_cursor = get_page.cursor.expect("session should have cursor");
+
+    let get_res = tool_get_calendar(
         &config,
         Some("2024-01-01"),
         Some("2024-01-02"),
-        Some("c_00000000".to_string()),
+        Some(get_cursor),
         &cache,
         &uuid_gen,
     )
-    .unwrap_err();
-    assert_eq!(err, expected);
+    .expect("tool_get_calendar should succeed with cursor and ignore date range");
+    assert_eq!(get_res.count, 3);
+    assert_eq!(get_res.total, 35);
 }
 
 #[test]

@@ -5,7 +5,6 @@
 use crate::config::ContentLibraryExt;
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
-use crate::tools::cursor::{is_non_blank, require_cursor_xor_params};
 use crate::tools::dtos;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
@@ -72,8 +71,6 @@ fn execute_search_notes(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchNotesInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-
-    require_cursor_xor_params(&input.cursor, is_non_blank(&input.query))?;
 
     if let Some(cursor) = &input.cursor {
         let page = ctx.cache().search_notes_sessions.next_page(cursor)?;
@@ -185,8 +182,6 @@ fn execute_list_notes_by_tag(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::ListNotesByTagInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-
-    require_cursor_xor_params(&input.cursor, is_non_blank(&input.tag))?;
 
     if let Some(cursor) = &input.cursor {
         let page = ctx.cache().list_notes_by_tag_sessions.next_page(cursor)?;
