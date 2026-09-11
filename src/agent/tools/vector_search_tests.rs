@@ -132,7 +132,9 @@ fn execute_vector_search_uses_cursor_and_ignores_fresh_params() {
         r#"{"max_distance":0.5}"#,
         r#"{"query":"credit union","max_distance":0.5}"#,
     ] {
-        let page = cache.vector_sessions.create_session(hits.clone(), &uuid_gen);
+        let page = cache
+            .vector_sessions
+            .create_session(hits.clone(), &uuid_gen);
         let cursor = page.cursor.expect("session should have cursor");
         let mut obj: serde_json::Value = serde_json::from_str(payload).unwrap();
         obj["cursor"] = serde_json::Value::String(cursor);
