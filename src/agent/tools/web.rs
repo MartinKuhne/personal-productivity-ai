@@ -163,8 +163,10 @@ fn fetch_url_via_browser(
     let res = convert(&rendered.html_body, None)
         .map_err(|e| format!("Failed to convert rendered HTML to Markdown: {}", e))?;
 
+    let content = replace_inline_image_data_uris(&res.content.unwrap_or_default());
+
     Ok(CachedWebDocument {
-        content: res.content.unwrap_or_default(),
+        content,
         response_headers: rendered.headers,
     })
 }
@@ -193,7 +195,8 @@ fn fetch_url_via_http(url: &str) -> Result<CachedWebDocument, String> {
             match response.text() {
                 Ok(body) => match convert(&body, None) {
                     Ok(res) => {
-                        let md_content = res.content.unwrap_or_default();
+                        let raw_md = res.content.unwrap_or_default();
+                        let md_content = replace_inline_image_data_uris(&raw_md);
                         Ok(CachedWebDocument {
                             content: md_content,
                             response_headers,
@@ -230,6 +233,145 @@ fn fetch_url_via_http(url: &str) -> Result<CachedWebDocument, String> {
             Err(format!("Failed to fetch URL: {}", e))
         }
     }
+}
+
+/// Fallback label when an inline data URI image has no alt text or title.
+pub const IMAGE_PLACEHOLDER_EMPTY: &str = "[Image]";
+
+/// Prefix for image placeholder with alt text or title.
+pub const IMAGE_PLACEHOLDER_PREFIX: &str = "[Image: ";
+
+/// Suffix for image placeholder with alt text or title.
+pub const IMAGE_PLACEHOLDER_SUFFIX: &str = "]";
+
+/// Replaces Markdown inline image data URIs (e.g. `![alt](data:image/...)`) with
+/// a concise placeholder tag `[Image: <alt>]` (or `[Image]` if no alt text or title exists).
+///
+/// Complies with TOOL-048. Standard web images (`https://...` or relative URLs) and normal hyperlinks are preserved unchanged.
+pub fn replace_inline_image_data_uris(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut byte_idx = 0;
+
+    while byte_idx < content.len() {
+        let rest = &content[byte_idx..];
+        if rest.starts_with("![")
+            && let Some((consumed_bytes, placeholder)) = parse_and_format_data_uri_image(rest)
+        {
+            result.push_str(&placeholder);
+            byte_idx += consumed_bytes;
+            continue;
+        }
+
+        let ch = rest.chars().next().expect("rest is non-empty");
+        result.push(ch);
+        byte_idx += ch.len_utf8();
+    }
+
+    result
+}
+
+fn parse_and_format_data_uri_image(s: &str) -> Option<(usize, String)> {
+    if !s.starts_with("![") {
+        return None;
+    }
+
+    // 1. Scan for matching `]` (alt text) starting after `![` (byte offset 2)
+    let mut alt_depth = 1;
+    let mut alt_end = None;
+    let mut chars = s[2..].char_indices();
+    let mut escaped = false;
+
+    for (rel_idx, ch) in chars.by_ref() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '[' {
+            alt_depth += 1;
+        } else if ch == ']' {
+            alt_depth -= 1;
+            if alt_depth == 0 {
+                alt_end = Some(2 + rel_idx);
+                break;
+            }
+        }
+    }
+
+    let alt_end_idx = alt_end?;
+    let alt_text = &s[2..alt_end_idx];
+
+    // 2. Character immediately following `]` must be `(`
+    let after_bracket = &s[alt_end_idx + 1..];
+    if !after_bracket.starts_with('(') {
+        return None;
+    }
+
+    // 3. Scan inside `(...)` starting after `(`
+    let inside_paren = &after_bracket[1..];
+    let trimmed_inside = inside_paren.trim_start();
+    let leading_ws_len = inside_paren.len() - trimmed_inside.len();
+
+    // Check if destination starts with `data:` or `<data:`
+    let is_data_uri = trimmed_inside.starts_with("data:") || trimmed_inside.starts_with("<data:");
+    if !is_data_uri {
+        return None;
+    }
+
+    // Find the closing `)` of the image
+    let paren_chars = trimmed_inside.char_indices();
+    let mut close_paren_rel = None;
+    let mut in_title_quote = false;
+    let mut escaped_paren = false;
+
+    for (rel_i, ch) in paren_chars {
+        if escaped_paren {
+            escaped_paren = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped_paren = true;
+            continue;
+        }
+        if ch == '"' {
+            in_title_quote = !in_title_quote;
+            continue;
+        }
+        if !in_title_quote && ch == ')' {
+            close_paren_rel = Some(rel_i);
+            break;
+        }
+    }
+
+    let close_paren_idx = close_paren_rel?;
+    let total_consumed = (alt_end_idx + 1) + 1 + leading_ws_len + close_paren_idx + 1;
+
+    let inside_content = &trimmed_inside[..close_paren_idx];
+    let title = extract_title_from_destination(inside_content);
+
+    let trimmed_alt = alt_text.trim();
+    let placeholder = if !trimmed_alt.is_empty() {
+        format!("{IMAGE_PLACEHOLDER_PREFIX}{trimmed_alt}{IMAGE_PLACEHOLDER_SUFFIX}")
+    } else if let Some(t) = title.filter(|t| !t.trim().is_empty()) {
+        format!(
+            "{IMAGE_PLACEHOLDER_PREFIX}{}{IMAGE_PLACEHOLDER_SUFFIX}",
+            t.trim()
+        )
+    } else {
+        IMAGE_PLACEHOLDER_EMPTY.to_string()
+    };
+
+    Some((total_consumed, placeholder))
+}
+
+fn extract_title_from_destination(s: &str) -> Option<&str> {
+    let quote_end = s.rfind('"')?;
+    let before_quote = &s[..quote_end];
+    let first_quote = before_quote.rfind('"')?;
+    Some(&s[first_quote + 1..quote_end])
 }
 
 /// Searches the web for query results via a configured SearXNG instance.

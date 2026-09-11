@@ -585,6 +585,170 @@ fn test_tool_web_fetch_http_markdown_conversion() {
 }
 
 #[test]
+fn test_tool_web_fetch_replaces_inline_data_uri_with_alt_text() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let html = r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="Sample Logo"> After</p></body></html>"#;
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: Some("https://example.com/data-uri-test".to_string()),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert!(!result.content.contains("data:image/png;base64"));
+    assert!(result.content.contains("[Image: Sample Logo]"));
+}
+
+#[test]
+fn test_tool_web_fetch_replaces_inline_data_uri_without_alt_text() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let html = r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="> After</p></body></html>"#;
+    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: Some("https://example.com/data-uri-no-alt".to_string()),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_runner(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        Some(&runner),
+    )
+    .unwrap();
+
+    assert!(!result.content.contains("data:image/png;base64"));
+    assert!(result.content.contains("[Image]"));
+}
+
+#[test]
+fn test_tool_web_fetch_replaces_inline_data_uri_http_fallback() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let html = r#"<html><body><p>Text <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="Http Icon"> End</p></body></html>"#;
+    let server_url = spawn_mock_server(html);
+
+    let input = crate::tools::dtos::WebFetchInput {
+        url: Some(server_url),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+
+    let result = tool_web_fetch_with_locator(
+        &input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(!result.content.contains("data:image/png;base64"));
+    assert!(result.content.contains("[Image: Http Icon]"));
+}
+
+#[test]
+fn test_replace_inline_image_data_uris_pure_unit_tests() {
+    use crate::tools::web::replace_inline_image_data_uris;
+
+    // 1. Basic with alt text
+    assert_eq!(
+        replace_inline_image_data_uris("![Logo](data:image/png;base64,AAAA)"),
+        "[Image: Logo]"
+    );
+
+    // 2. Empty alt text
+    assert_eq!(
+        replace_inline_image_data_uris("![](data:image/png;base64,AAAA)"),
+        "[Image]"
+    );
+
+    // 3. Whitespace-only alt text
+    assert_eq!(
+        replace_inline_image_data_uris("![   ](data:image/png;base64,AAAA)"),
+        "[Image]"
+    );
+
+    // 4. Title fallback when alt text is empty
+    assert_eq!(
+        replace_inline_image_data_uris(r#"![](data:image/png;base64,AAAA "Company Diagram")"#),
+        "[Image: Company Diagram]"
+    );
+
+    // 5. Alt text prioritized over title
+    assert_eq!(
+        replace_inline_image_data_uris(r#"![Chart](data:image/png;base64,AAAA "Company Diagram")"#),
+        "[Image: Chart]"
+    );
+
+    // 6. Angle bracket wrapped URI
+    assert_eq!(
+        replace_inline_image_data_uris("![SVG](<data:image/svg+xml;utf8,<svg></svg>> )"),
+        "[Image: SVG]"
+    );
+
+    // 7. Regular web image preserved
+    assert_eq!(
+        replace_inline_image_data_uris("![Photo](https://example.com/pic.png)"),
+        "![Photo](https://example.com/pic.png)"
+    );
+
+    // 8. Relative image preserved
+    assert_eq!(
+        replace_inline_image_data_uris("![Logo](/assets/logo.png)"),
+        "![Logo](/assets/logo.png)"
+    );
+
+    // 9. Regular hyperlink with data URI preserved
+    assert_eq!(
+        replace_inline_image_data_uris("[Download](data:application/pdf;base64,AAAA)"),
+        "[Download](data:application/pdf;base64,AAAA)"
+    );
+
+    // 10. Image nested inside a link
+    assert_eq!(
+        replace_inline_image_data_uris(
+            "[![Thumb](data:image/png;base64,AAAA)](https://example.com)"
+        ),
+        "[[Image: Thumb]](https://example.com)"
+    );
+
+    // 11. Multiple images mixed with text
+    let mixed = "Intro ![A](data:image/png;base64,111) middle ![Remote](https://example.com/b.jpg) end ![](data:image/jpeg;base64,222).";
+    let expected = "Intro [Image: A] middle ![Remote](https://example.com/b.jpg) end [Image].";
+    assert_eq!(replace_inline_image_data_uris(mixed), expected);
+
+    // 12. Edge cases: empty, plain text, malformed unclosed constructs
+    assert_eq!(replace_inline_image_data_uris(""), "");
+    assert_eq!(replace_inline_image_data_uris("Hello World"), "Hello World");
+    assert_eq!(
+        replace_inline_image_data_uris("![unclosed alt"),
+        "![unclosed alt"
+    );
+    assert_eq!(replace_inline_image_data_uris("![alt]"), "![alt]");
+    assert_eq!(
+        replace_inline_image_data_uris("![alt](unclosed url"),
+        "![alt](unclosed url"
+    );
+}
+
+#[test]
 fn test_tool_web_search_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()

@@ -83,6 +83,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [TOOL-008] The system SHALL cache fetched Markdown content for 30 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) SHALL return the cached content without making a network request.
 * [TOOL-009] The `web_fetch` tool SHALL accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system SHALL invalidate the shared cache entry for the URL and SHALL fetch fresh content, replacing the cached entry.
 * [TOOL-010] The `web_fetch` tool description SHALL state that the LLM can save context by fetching a URL once and then using the cursor token to paginate through the Markdown body, rather than re-fetching the same URL.
+* [TOOL-048] When the `web_fetch` tool converts HTML containing inline image data URIs (e.g. `data:`), the system SHALL replace the data URI payload with a descriptive placeholder (`[Image: <alt>]` or `[Image: <title>]`), falling back to `[Image]` when no alt text or title is available, while preserving external image URLs and hyperlinks.
 
 ### Grep Tool
 
