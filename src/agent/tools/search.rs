@@ -71,7 +71,12 @@ fn search_slice_with(matcher: &RegexMatcher, haystack: &[u8]) -> Vec<(u64, Strin
     let mut searcher = SearcherBuilder::new().line_number(true).build();
     let mut matches = Vec::new();
     let sink = UTF8(|line_number: u64, line: &str| -> std::io::Result<bool> {
-        matches.push((line_number, line.to_string()));
+        // The sink hands us the line with its terminator (`\n` / `\r\n`)
+        // intact. Strip only the terminator so one match stays one line
+        // when the caller joins matches with `\n` (otherwise 64 matches
+        // render as 127 lines and break cursor pagination).
+        let text = line.trim_end_matches(['\r', '\n']);
+        matches.push((line_number, text.to_string()));
         Ok(true)
     });
     let _: std::io::Result<()> = searcher.search_slice(matcher, haystack, sink);
