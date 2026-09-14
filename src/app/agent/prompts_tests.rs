@@ -455,25 +455,32 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
         .as_array()
         .expect("messages array must be present in OpenAI payload");
 
-    // Verify that the User.md content was delivered in a system message block without additional context or guardrails (VFS-130)
-    let system_msg_with_user_md = messages
-        .iter()
-        .find(|m| {
-            m["role"] == "system"
-                && m["content"]
-                    .as_str()
-                    .map(|c| c.contains(user_md_content))
-                    .unwrap_or(false)
-        })
-        .expect("Must find system message containing User.md content");
-
-    let content = system_msg_with_user_md["content"].as_str().unwrap();
+    // Verify that the User.md content was delivered as a verbatim block inside
+    // the single system message, without additional context or guardrails (VFS-130).
+    // Strict chat templates accept at most one system message, so all blocks
+    // are joined into `messages[0]` rather than sent as one message per block.
+    let systems: Vec<_> = messages.iter().filter(|m| m["role"] == "system").collect();
     assert_eq!(
-        content, user_md_content,
-        "System library User.md must be provided verbatim without additional context or guardrails (VFS-130)"
+        systems.len(),
+        1,
+        "payload must contain exactly one system message"
+    );
+    assert_eq!(
+        messages[0]["role"], "system",
+        "system message must be at index 0"
+    );
+    let content = messages[0]["content"].as_str().unwrap();
+    let blocks: Vec<&str> = content.split("\n\n").collect();
+    assert!(
+        blocks.contains(&user_md_content),
+        "single system message must contain the System library User.md as a verbatim block; got: {content}"
     );
     assert!(!content.contains("User Context (from System):"));
-    assert!(!content.contains("<<<EXTERNAL_DATA>>>"));
+    let user_md_block = blocks
+        .iter()
+        .find(|b| **b == user_md_content)
+        .expect("User.md block must be present");
+    assert!(!user_md_block.contains("<<<EXTERNAL_DATA>>>"));
 }
 
 /// End-to-end test: when a Note skill is invoked, the active note's path
