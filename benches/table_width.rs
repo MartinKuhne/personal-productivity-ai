@@ -48,7 +48,7 @@
 //!   in <10 ms per call.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use fastmd::markdown::table_width::{Breakpoint, DeficitStrategy, ftwa};
+use fastmd::markdown::{Breakpoint, DeficitStrategy, ftwa};
 use std::hint::black_box;
 
 /// The two strategies the bench cares about. The default

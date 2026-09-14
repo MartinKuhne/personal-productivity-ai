@@ -1,7 +1,7 @@
 //! Background subsystem — indexer, manager, models, PDF converter, and vision processor.
 //!
 //! The `notify`-based filesystem watcher lives in
-//! [`crate::workspace::watcher::file_watcher`]. All cross-thread messaging
+//! `crate::workspace::watcher::file_watcher`. All cross-thread messaging
 //! primitives (buses, event payloads, routing) live in [`crate::bus`].
 //!
 //! ## `image-library` feature
@@ -15,21 +15,20 @@
 
 #[cfg(feature = "vector-search")]
 pub mod embeddings;
-pub mod indexer;
+pub(crate) mod indexer;
 pub mod logs;
-pub mod models;
-pub mod pdf_converter;
-pub mod task;
+pub(crate) mod models;
+pub(crate) mod pdf_converter;
+pub(crate) mod task;
 #[cfg(feature = "vector-search")]
-pub mod vector_search;
+pub(crate) mod vector_search;
 #[cfg(feature = "image-library")]
-pub mod vision_processor;
+pub(crate) mod vision_processor;
 
 pub use indexer::Indexer;
-pub use logs::{BackgroundLogs, MAX_LOG_ENTRIES, SharedBackgroundLogs};
 #[cfg(feature = "image-library")]
 pub use models::ImageJob;
-pub use models::{BackgroundLogEntry, LogCategory};
+pub(crate) use models::{BackgroundLogEntry, LogCategory};
 pub use pdf_converter::{PdfConversionJob, PdfConverterWorker};
 pub use task::Task;
 #[cfg(feature = "vector-search")]

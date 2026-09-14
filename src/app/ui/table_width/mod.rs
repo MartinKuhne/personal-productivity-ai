@@ -14,12 +14,15 @@
 //! existing call sites (`crate::ui::table_width::ftwa_cached`) keep resolving
 //! unchanged.
 
-pub use crate::markdown::table_layout::{
-    LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer,
+pub(crate) use crate::markdown::table_layout::{TableLayout, TableLayoutBuilder, TextMeasurer};
+pub(crate) use crate::markdown::table_width::{
+    Breakpoint, CellTokens, DeficitStrategy, compute_column_breakpoints,
 };
-pub use crate::markdown::table_width::{
-    Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
-};
+// `ColumnWidths` and `ftwa` are reached through `crate::ui::table_width::X`
+// only from the e2e tests; re-export them under `#[cfg(test)]` so the
+// library build has no unused pass-through.
+#[cfg(test)]
+pub(crate) use crate::markdown::table_width::{ColumnWidths, ftwa};
 use crate::ui::render::InlineElem;
 use eframe::egui;
 

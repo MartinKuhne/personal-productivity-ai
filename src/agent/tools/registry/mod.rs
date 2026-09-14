@@ -13,9 +13,9 @@
 //! and tests don't notice the refactor.
 
 pub mod builtin;
-pub mod errors;
-pub mod groups;
-pub mod pagination;
+pub(crate) mod errors;
+pub(crate) mod groups;
+pub(crate) mod pagination;
 
 #[cfg(test)]
 mod group_tests;
@@ -24,13 +24,7 @@ mod pagination_tests;
 #[cfg(test)]
 mod tests;
 
-pub use crate::tools::cache;
-pub use crate::tools::cache::{
-    CACHE_TTL, CURSOR_EXPIRED_ERROR, CachedWebDocument, FINAL_PAGE_HINT, MAX_CACHE_ENTRIES,
-    SearchEmailItem, ToolCache,
-};
-pub use crate::tools::cursor;
-pub use crate::tools::cursor::{CursorPage, CursorSessionManager, PagedDataset};
+pub(crate) use crate::tools::cache;
 pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;

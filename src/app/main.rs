@@ -2,10 +2,10 @@
 //! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
-use fastmd::bus::events::config::ConfigArrived;
+use fastmd::bus::events::ConfigArrived;
 #[cfg(feature = "discord")]
 use fastmd::integrations::discord::run_discord_bot;
-use fastmd::ui::FastMdApp;
+use fastmd::ui::app::FastMdApp;
 
 use mimalloc::MiMalloc;
 

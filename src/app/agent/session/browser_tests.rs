@@ -73,7 +73,7 @@ fn test_browser_navigate_tool_round_trip() {
     config.tool_groups.browser = true;
     let agent_config = config.to_agent_config();
     let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
-    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+    let cache = Arc::new(crate::agent::tools::ToolCache::new());
     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(agent_config),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
@@ -105,7 +105,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
     config.tool_groups.browser = true;
     let agent_config = config.to_agent_config();
     let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
-    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+    let cache = Arc::new(crate::agent::tools::ToolCache::new());
     let _ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(agent_config),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),

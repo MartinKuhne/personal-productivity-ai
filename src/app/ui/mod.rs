@@ -7,36 +7,38 @@ pub mod app;
 pub mod attributions;
 pub mod background_logs;
 pub mod batch_dialog;
-pub mod dialogs;
+pub(crate) mod dialogs;
 pub mod editor_egui;
 pub mod fonts;
-pub mod link_resolver;
+pub(crate) mod link_resolver;
 pub mod logo;
 pub mod modals;
 pub mod os_shell;
-pub mod panel_layout;
+pub(crate) mod panel_layout;
 pub mod panels;
-pub mod persisted;
-pub mod render;
-pub mod selection;
+pub(crate) mod persisted;
+pub(crate) mod render;
+pub(crate) mod selection;
 pub mod strings;
-pub mod tab_item;
+pub(crate) mod tab_item;
 pub mod table_width;
-pub mod tabs;
+pub(crate) mod tabs;
 pub mod test_helpers;
-pub mod text_buffer;
+pub(crate) mod text_buffer;
 pub mod tools_dialog;
-pub mod tree;
+pub(crate) mod tree;
 pub mod tree_search;
 
-pub use crate::markdown::ToCEntry;
-pub use app::{FastMdApp, TreeNode};
+// `ToCEntry` is reached through `crate::ui::ToCEntry` only from tests;
+// its single canonical public path is `crate::markdown::ToCEntry`.
+#[cfg(test)]
+pub(crate) use crate::markdown::ToCEntry;
+pub(crate) use app::{FastMdApp, TreeNode};
 pub use dialogs::{Dialogs, OAuthFlowStatus};
 pub use link_resolver::{LinkAction, resolve_link};
-pub use os_shell::{open_in_system_editor, open_url, show_in_file_explorer};
+pub(crate) use os_shell::{open_in_system_editor, show_in_file_explorer};
 pub use panel_layout::PanelLayout;
 pub use persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
-pub use render::{build_toc, render_markdown};
 pub use selection::FileSelection;
 pub use tab_item::TabItem;
 pub use tabs::Tabs;
@@ -45,4 +47,4 @@ pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,
     render_flat_row,
 };
-pub use tree_search::{SearchResultEntry, TreeSearch};
+pub(crate) use tree_search::TreeSearch;

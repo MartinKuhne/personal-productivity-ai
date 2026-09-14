@@ -1,8 +1,8 @@
 //! Export and print subsystem — HTML printing and Typst-powered PDF generation.
 
-pub mod print;
+pub(crate) mod print;
 
-pub mod pdf;
+pub(crate) mod pdf;
 
 pub use print::{PrintJob, cleanup_temp_files, execute_print_blocking};
 
