@@ -804,3 +804,53 @@ fn test_observer_receives_lifecycle_events() {
         "Observer must receive SessionFinished"
     );
 }
+
+/// Strict chat templates (llama.cpp / Ollama / vLLM) reject more than one
+/// `system` message: multiple pre-built blocks must be joined into a
+/// single `system` message at index 0.
+#[test]
+fn test_run_agent_joins_system_blocks_into_single_message() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (mut ctx, recorded) = make_ctx(make_agent_config(port));
+    ctx.system_prompts = vec!["static block".to_string(), "dynamic block".to_string()];
+    run_agent(ctx);
+
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
+    let history = events
+        .iter()
+        .find_map(|e| match e {
+            AgentObserverEvent::SessionFinished(history) => Some(history.clone()),
+            _ => None,
+        })
+        .expect("agent must emit SessionFinished with history");
+
+    let systems: Vec<_> = history
+        .iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+        .collect();
+    assert_eq!(
+        systems.len(),
+        1,
+        "history must contain exactly one system message"
+    );
+    assert_eq!(
+        history[0].get("role").and_then(|r| r.as_str()),
+        Some("system"),
+        "system message must be at index 0"
+    );
+    assert_eq!(
+        history[0].get("content").and_then(|c| c.as_str()),
+        Some("static block\n\ndynamic block"),
+        "blocks must be joined with a blank line"
+    );
+    assert_eq!(
+        history[1].get("role").and_then(|r| r.as_str()),
+        Some("user"),
+        "user prompt must follow the system message"
+    );
+}

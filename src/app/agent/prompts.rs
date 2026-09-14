@@ -7,10 +7,13 @@
 //! — those fields stay on the global config for users to edit, and the
 //! prompt assembler reads them at submit time.
 //!
-//! The output is a `Vec<String>` of system messages, one per
-//! "block" (static, dynamic, USER.md). Each block is delivered to
-//! the LLM as a separate `role=system` message — this is the
-//! standard OpenAI/Anthropic pattern and lets the model distinguish
+//! The output is a `Vec<String>` of system-prompt blocks, one per
+//! "block" (static, dynamic, USER.md). The blocks are joined into a
+//! single `role=system` message at send time — strict chat templates
+//! (llama.cpp / Ollama / vLLM) accept at most one system message and
+//! only at index 0. Joining (rather than one message per block) keeps
+//! the standard OpenAI/Anthropic pattern while staying compatible
+//! with those templates, and lets the model distinguish
 //! instructions from user content (R1 Spotlighting).
 //!
 //! Unit tests live in the sibling `prompts_tests.rs` sidecar.
@@ -52,8 +55,9 @@ pub fn find_user_md_file(dir: &Path) -> Option<PathBuf> {
 /// batch executor; both have the active file/dir/selected files
 /// from the UI state and the global config from the orchestrator.
 ///
-/// Returns a `Vec<String>` where each entry is delivered to the
-/// LLM as a separate `role=system` message. The order is:
+/// Returns a `Vec<String>` of blocks that the caller joins into a
+/// single `role=system` message (with a send-time merge as safety net
+/// for pre-existing multi-system histories). The order is:
 /// 1. Static prompt (security header + role + critical rules).
 /// 2. Dynamic prompt (date, user info, extension, active context).
 /// 3. One block per `USER.md` / `User.md` found in the content libraries and system library (VFS-130).
