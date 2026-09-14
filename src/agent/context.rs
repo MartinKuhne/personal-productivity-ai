@@ -26,8 +26,9 @@ pub struct AgentContext {
     pub selected_files: HashSet<PathBuf>,
     pub prompt: String,
     /// Pre-assembled system-prompt message blocks, built by the caller.
-    /// The agent run loop forwards these as `role=system` messages
-    /// before the user turn; it does not construct them itself.
+    /// The agent run loop joins these into a single `role=system` message
+    /// at the start of a fresh turn (strict chat templates accept at most
+    /// one system message, only at index 0).
     pub system_prompts: Vec<String>,
     pub cancel_flag: Arc<AtomicBool>,
     pub history: Option<Vec<Value>>,

@@ -125,21 +125,23 @@ fn execute_vector_search_uses_cursor_and_ignores_fresh_params() {
             content: format!("chunk {i}"),
         })
         .collect();
-    let page = cache.vector_sessions.create_session(hits, &uuid_gen);
-    let cursor = page.cursor.expect("session should have cursor");
     let tool = VectorSearchTool;
 
     for payload in [
-        format!(r#"{{"query":"credit union","cursor":"{cursor}"}}"#),
-        format!(r#"{{"max_distance":0.5,"cursor":"{cursor}"}}"#),
-        format!(r#"{{"query":"credit union","max_distance":0.5,"cursor":"{cursor}"}}"#),
+        r#"{"query":"credit union"}"#,
+        r#"{"max_distance":0.5}"#,
+        r#"{"query":"credit union","max_distance":0.5}"#,
     ] {
-        let res = execute_vector_search(&tool, &ctx, &payload)
+        let page = cache
+            .vector_sessions
+            .create_session(hits.clone(), &uuid_gen);
+        let cursor = page.cursor.expect("session should have cursor");
+        let mut obj: serde_json::Value = serde_json::from_str(payload).unwrap();
+        obj["cursor"] = serde_json::Value::String(cursor);
+        let res = execute_vector_search(&tool, &ctx, &obj.to_string())
             .expect("execute_vector_search should succeed with cursor and ignore fresh params");
-        let parsed: crate::tools::registry::cursor::CursorPage<VectorSearchHit> =
-            serde_json::from_value(res).unwrap();
-        assert_eq!(parsed.count, 3);
-        assert_eq!(parsed.total, 35);
+        assert_eq!(res["count"], 3);
+        assert_eq!(res["total"], 35);
     }
 }
 

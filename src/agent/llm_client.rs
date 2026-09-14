@@ -63,6 +63,40 @@ pub struct LLMClient {
     max_tokens: u32,
 }
 
+/// Merge leading consecutive `role=system` messages into a single message.
+///
+/// Strict chat templates (llama.cpp / Ollama / vLLM) reject requests with
+/// more than one `system` message or a `system` message past index 0 with
+/// `chat template rejected the request: System message must be at the
+/// beginning`. This is a send-time safety net for histories assembled
+/// before the single-system fix (or by other submitters): the leading run
+/// of `system` blocks is joined with a blank line, later messages are left
+/// untouched.
+pub(crate) fn merge_leading_system_messages(
+    messages: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let leading = messages
+        .iter()
+        .take_while(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+        .count();
+    if leading <= 1 {
+        return messages.to_vec();
+    }
+    let mut merged = String::new();
+    for m in &messages[..leading] {
+        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
+            if !merged.is_empty() {
+                merged.push_str("\n\n");
+            }
+            merged.push_str(content);
+        }
+    }
+    let mut out = Vec::with_capacity(messages.len() - leading + 1);
+    out.push(serde_json::json!({"role": "system", "content": merged}));
+    out.extend_from_slice(&messages[leading..]);
+    out
+}
+
 impl LLMClient {
     pub fn from_agent_config(config: &AgentConfig, model_name: Option<&str>) -> Option<Self> {
         let model_cfg = if let Some(name) = model_name {
@@ -122,7 +156,7 @@ impl LLMClient {
 
         let body = serde_json::json!({
             "model": self.model_name,
-            "messages": messages,
+            "messages": merge_leading_system_messages(messages),
             "tools": tools_value,
             "tool_choice": "auto",
             "max_tokens": self.max_tokens
@@ -433,6 +467,61 @@ mod tests {
         let err = map_openai_error(api_err(400, "bad request"));
         assert!(matches!(err, AgentError::HttpError { status: 400, .. }));
         assert!(!err.is_retryable());
+    }
+
+    // ---- merge_leading_system_messages ----
+
+    fn sys(content: &str) -> serde_json::Value {
+        serde_json::json!({"role": "system", "content": content})
+    }
+
+    #[test]
+    fn test_merge_single_system_untouched() {
+        let msgs = vec![
+            sys("a"),
+            serde_json::json!({"role": "user", "content": "hi"}),
+        ];
+        let out = merge_leading_system_messages(&msgs);
+        assert_eq!(out, msgs);
+    }
+
+    #[test]
+    fn test_merge_multiple_leading_systems_joined() {
+        let msgs = vec![
+            sys("static"),
+            sys("dynamic"),
+            sys("user-md"),
+            serde_json::json!({"role": "user", "content": "hi"}),
+        ];
+        let out = merge_leading_system_messages(&msgs);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["role"], "system");
+        assert_eq!(out[0]["content"], "static\n\ndynamic\n\nuser-md");
+        assert_eq!(out[1]["role"], "user");
+    }
+
+    #[test]
+    fn test_merge_no_system_untouched() {
+        let msgs = vec![serde_json::json!({"role": "user", "content": "hi"})];
+        let out = merge_leading_system_messages(&msgs);
+        assert_eq!(out, msgs);
+    }
+
+    #[test]
+    fn test_merge_empty_untouched() {
+        let out = merge_leading_system_messages(&[]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn test_merge_non_leading_system_left_alone() {
+        let msgs = vec![
+            sys("first"),
+            serde_json::json!({"role": "user", "content": "hi"}),
+            sys("stray"),
+        ];
+        let out = merge_leading_system_messages(&msgs);
+        assert_eq!(out, msgs, "only the leading run is merged");
     }
 
     #[test]

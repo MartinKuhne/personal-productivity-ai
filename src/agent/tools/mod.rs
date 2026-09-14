@@ -34,6 +34,7 @@ pub mod provider;
 #[cfg(test)]
 mod provider_tests;
 pub mod registry;
+pub mod search;
 pub mod specs;
 #[cfg(feature = "vector-search")]
 pub mod vector_search;

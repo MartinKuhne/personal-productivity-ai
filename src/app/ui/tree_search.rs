@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use rayon::prelude::*;
+use fastmd_agent::tools::search as note_search;
 
 use crate::config::ContentLibrary;
 
@@ -149,26 +149,7 @@ pub fn compute_relative_path(path: &Path, content_libraries: &[ContentLibrary]) 
 
 /// Truncates or windows a matching line into a readable preview snippet.
 pub fn extract_snippet(line: &str, term_lower: &str) -> String {
-    let trimmed = line.trim();
-    if trimmed.chars().count() <= 100 {
-        return trimmed.to_string();
-    }
-    let lower = trimmed.to_lowercase();
-    if let Some(byte_pos) = lower.find(term_lower) {
-        let char_idx = trimmed[..byte_pos].chars().count();
-        let start = char_idx.saturating_sub(30);
-        let snippet_chars: String = trimmed.chars().skip(start).take(90).collect();
-        let prefix = if start > 0 { "…" } else { "" };
-        let suffix = if trimmed.chars().count() > start + 90 {
-            "…"
-        } else {
-            ""
-        };
-        format!("{prefix}{snippet_chars}{suffix}")
-    } else {
-        let snippet_chars: String = trimmed.chars().take(90).collect();
-        format!("{snippet_chars}…")
-    }
+    note_search::extract_snippet(line, term_lower)
 }
 
 /// Returns `true` if `path` begins with `root`, matching case-insensitively on Windows.
@@ -220,103 +201,7 @@ pub fn is_in_content_library(path: &Path, content_libraries: &[ContentLibrary]) 
 
 /// Returns `true` if `path` has a markdown extension (`.md` or `.markdown`), case-insensitively.
 pub fn is_markdown_file(path: &Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|ext| ext.to_str())
-            .map(str::to_ascii_lowercase)
-            .as_deref(),
-        Some("md" | "markdown")
-    )
-}
-
-/// Returns `true` if `haystack` contains `term_lower` case-insensitively.
-fn contains_ignore_case(haystack: &str, term_lower: &str) -> bool {
-    if term_lower.is_empty() {
-        return true;
-    }
-    if term_lower.is_ascii() {
-        let term_bytes = term_lower.as_bytes();
-        haystack
-            .as_bytes()
-            .windows(term_bytes.len())
-            .any(|window| window.eq_ignore_ascii_case(term_bytes))
-    } else {
-        haystack.to_lowercase().contains(term_lower)
-    }
-}
-
-/// Counts non-overlapping case-insensitive occurrences of `term_lower` in `haystack`.
-fn count_matches_ignore_case(haystack: &str, term_lower: &str) -> usize {
-    if term_lower.is_empty() {
-        return 0;
-    }
-    if term_lower.is_ascii() {
-        let term_bytes = term_lower.as_bytes();
-        let term_len = term_bytes.len();
-        let haystack_bytes = haystack.as_bytes();
-        let mut count = 0;
-        let mut i = 0;
-        while i + term_len <= haystack_bytes.len() {
-            if haystack_bytes[i..i + term_len].eq_ignore_ascii_case(term_bytes) {
-                count += 1;
-                i += term_len;
-            } else {
-                i += 1;
-            }
-        }
-        count
-    } else {
-        haystack.to_lowercase().matches(term_lower).count()
-    }
-}
-
-/// Scans a single markdown file for occurrences of `term_lower`.
-/// Returns `Some(SearchResultEntry)` if at least one match is found.
-fn extract_file_result(
-    path: &Path,
-    term_lower: &str,
-    content_libraries: &[ContentLibrary],
-) -> Option<SearchResultEntry> {
-    if !is_markdown_file(path) {
-        return None;
-    }
-    let content = std::fs::read_to_string(path).ok()?;
-    if !contains_ignore_case(&content, term_lower) {
-        return None;
-    }
-
-    let mut match_count = 0usize;
-    let mut first_line_num = 0usize;
-    let mut first_snippet = String::new();
-
-    for (idx, line) in content.lines().enumerate() {
-        let count_on_line = count_matches_ignore_case(line, term_lower);
-        if count_on_line > 0 {
-            if match_count == 0 {
-                first_line_num = idx + 1;
-                first_snippet = extract_snippet(line, term_lower);
-            }
-            match_count += count_on_line;
-        }
-    }
-
-    if match_count > 0 {
-        let file_name = path
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let relative_path = compute_relative_path(path, content_libraries);
-        Some(SearchResultEntry {
-            path: path.to_path_buf(),
-            file_name,
-            relative_path,
-            snippet: first_snippet,
-            line_number: first_line_num,
-            match_count,
-        })
-    } else {
-        None
-    }
+    note_search::is_markdown_file(path)
 }
 
 /// Returns structured search results across `all_files` for `term_lower`.
@@ -353,9 +238,42 @@ pub fn find_search_results_scoped(
         })
         .collect();
 
+    // Fan out over the reused file list with the shared ripgrep-core engine.
+    let matched = note_search::search_files_parallel(&candidate_files, term_lower, false, |p| {
+        std::fs::read_to_string(p)
+    });
+    let matched_by_path: std::collections::HashMap<&Path, &note_search::FileLineMatches> =
+        matched.iter().map(|m| (m.path.as_path(), m)).collect();
+
     let mut results: Vec<SearchResultEntry> = candidate_files
-        .par_iter()
-        .filter_map(|path| extract_file_result(path, term_lower, content_libraries))
+        .iter()
+        .filter_map(|path| {
+            let file_match = matched_by_path.get(path.as_path())?;
+            let match_count: usize = file_match
+                .lines
+                .iter()
+                .map(|(_, text)| note_search::count_occurrences(text, term_lower))
+                .sum();
+            if match_count == 0 {
+                return None;
+            }
+            let (first_line_num, first_text) = file_match
+                .lines
+                .first()
+                .expect("shared engine only returns non-empty line lists");
+            let file_name = path
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Some(SearchResultEntry {
+                path: (*path).clone(),
+                file_name,
+                relative_path: compute_relative_path(path, content_libraries),
+                snippet: note_search::extract_snippet(first_text, term_lower),
+                line_number: *first_line_num as usize,
+                match_count,
+            })
+        })
         .collect();
 
     // Sort alphabetically by file name, then relative path
@@ -400,19 +318,12 @@ pub fn filter_files_by_content(all_files: &[PathBuf], term_lower: &str) -> HashS
         })
         .collect();
 
-    candidate_files
-        .par_iter()
-        .filter(|path| file_contains_term(path, term_lower))
-        .map(|p| (*p).clone())
-        .collect()
-}
-
-/// Returns `true` when the file at `path` is readable UTF-8 text whose
-/// content contains `term_lower` case-insensitively.
-fn file_contains_term(path: &Path, term_lower: &str) -> bool {
-    std::fs::read_to_string(path)
-        .map(|content| contains_ignore_case(&content, term_lower))
-        .unwrap_or(false)
+    note_search::search_files_parallel(&candidate_files, term_lower, false, |p| {
+        std::fs::read_to_string(p)
+    })
+    .into_iter()
+    .map(|m| m.path)
+    .collect()
 }
 
 #[cfg(test)]

@@ -99,8 +99,8 @@ pub struct AgentPrompt {
     pub text: String,
     /// Pre-assembled system-prompt message blocks. Built by the
     /// caller. The agent run
-    /// loop forwards the
-    /// blocks as `role=system` messages ahead of the user turn.
+    /// loop joins the
+    /// blocks into a single `role=system` message ahead of the user turn.
     pub system_prompts: Vec<String>,
     /// UI selection context passed through to tools.
     pub active_file: Option<PathBuf>,

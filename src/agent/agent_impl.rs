@@ -249,10 +249,16 @@ fn build_messages(
         existing.push(serde_json::json!({"role": "user", "content": prompt}));
         existing
     } else {
-        let mut messages: Vec<serde_json::Value> = system_prompts
-            .into_iter()
-            .map(|sp| serde_json::json!({"role": "system", "content": sp}))
-            .collect();
+        let mut messages: Vec<serde_json::Value> = Vec::new();
+        // Strict chat templates (llama.cpp / Ollama / vLLM) accept at most
+        // one `system` message and only at index 0, so the pre-built blocks
+        // are joined into a single message instead of one message per block.
+        if !system_prompts.is_empty() {
+            messages.push(serde_json::json!({
+                "role": "system",
+                "content": system_prompts.join("\n\n")
+            }));
+        }
         messages.push(serde_json::json!({"role": "user", "content": prompt}));
         messages
     }
