@@ -98,6 +98,21 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/rust-lang/glob",
     },
     Attribution {
+        name: "grep-matcher",
+        authors: "Andrew Gallant",
+        github_url: "https://github.com/BurntSushi/ripgrep",
+    },
+    Attribution {
+        name: "grep-regex",
+        authors: "Andrew Gallant",
+        github_url: "https://github.com/BurntSushi/ripgrep",
+    },
+    Attribution {
+        name: "grep-searcher",
+        authors: "Andrew Gallant",
+        github_url: "https://github.com/BurntSushi/ripgrep",
+    },
+    Attribution {
         name: "html-escape",
         authors: "Magic Len",
         github_url: "https://github.com/magiclen/html-escape",
@@ -161,6 +176,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         name: "rayon",
         authors: "Niko Matsakis, Josh Stone",
         github_url: "https://github.com/rayon-rs/rayon",
+    },
+    Attribution {
+        name: "regex",
+        authors: "The Rust Project Developers",
+        github_url: "https://github.com/rust-lang/regex",
     },
     Attribution {
         name: "reqwest",

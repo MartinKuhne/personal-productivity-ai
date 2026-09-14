@@ -197,7 +197,7 @@ fn license_is_scrollable_with_capped_height() {
 }
 
 #[test]
-fn attributions_all_52_rendered_and_scrollable() {
+fn attributions_all_56_rendered_and_scrollable() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     let output = render_dialog_once(&mut app);
     assert_text_contains(
@@ -214,8 +214,8 @@ fn attributions_all_52_rendered_and_scrollable() {
         );
     }
     // Full catalog completeness is verified by attributions_tests; here we just ensure
-    // the catalog length is 52.
-    assert_eq!(crate::ui::attributions::DIRECT_DEPENDENCIES.len(), 52);
+    // the catalog length is 56.
+    assert_eq!(crate::ui::attributions::DIRECT_DEPENDENCIES.len(), 56);
 }
 
 #[test]

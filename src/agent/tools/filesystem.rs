@@ -18,31 +18,41 @@ pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 /// with `tool_list_notes_by_tag` and `tool_read_tags`. The caller (the tool
 /// registry) is responsible for applying the result cap across libraries, so
 /// this function returns all matches unfiltered.
+///
+/// The scan fans out in parallel over a single collected file list via the
+/// shared [`super::search`] engine (ripgrep core); line numbers are 1-based
+/// file line numbers past any YAML front-matter, which is excluded.
 pub fn tool_search_notes(
     ctx: &crate::tools::context::ToolContext,
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
 ) -> Result<Vec<String>, String> {
-    let mut results = Vec::new();
-    let query_lower = query.to_lowercase();
-    for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
-        if entry.path().is_file()
-            && let Some(ext) = entry.path().extension()
-            && (ext == "md" || ext == "markdown")
-            && let Some(rel_path) = entry.path().strip_prefix(root_path).ok()
-            && let Ok(content) = ctx.vfs().read_to_string(entry.path().as_ref())
-        {
-            let (_, body) = split_file_content(&content);
-            let virtual_path = Path::new(virtual_prefix).join(rel_path);
-            for (idx, line) in body.lines().enumerate() {
-                if line.to_lowercase().contains(&query_lower) {
-                    results.push(format!("{}:{} - {}", virtual_path.display(), idx + 1, line));
-                }
-            }
+    let files = super::search::collect_markdown_files(root_path);
+    let vfs = ctx.vfs();
+    let matches =
+        super::search::search_files_parallel(&files, query, true, |path| vfs.read_to_string(path));
+    // Sort structurally (not lexicographically) so `note:10` follows
+    // `note:9` and paging at the call site stays deterministic.
+    let mut ordered: Vec<(String, u64, String)> = Vec::new();
+    for file_match in &matches {
+        let rel_path = file_match
+            .path
+            .strip_prefix(root_path)
+            .unwrap_or(&file_match.path);
+        let display = Path::new(virtual_prefix)
+            .join(rel_path)
+            .display()
+            .to_string();
+        for (line_number, text) in &file_match.lines {
+            ordered.push((display.clone(), *line_number, text.clone()));
         }
     }
-    Ok(results)
+    ordered.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    Ok(ordered
+        .into_iter()
+        .map(|(path, line_number, text)| format!("{path}:{line_number} - {text}"))
+        .collect())
 }
 
 pub fn tool_read_tags(
