@@ -3,7 +3,8 @@
 //! coverage (close-test-gaps P2).
 
 use super::*;
-use crate::background::{BackgroundLogs, LogCategory};
+use crate::background::LogCategory;
+use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;

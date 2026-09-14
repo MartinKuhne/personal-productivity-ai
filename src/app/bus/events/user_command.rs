@@ -22,7 +22,7 @@
 use std::path::PathBuf;
 
 use crate::agent::batch::types::BatchConfig;
-use crate::agent::tools::registry::groups::ToolGroupId;
+use crate::agent::tools::registry::ToolGroupId;
 use crate::bus::core::Bus;
 use crate::markdown::table_width::DeficitStrategy;
 

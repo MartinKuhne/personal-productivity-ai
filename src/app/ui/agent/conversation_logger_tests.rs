@@ -351,7 +351,7 @@ fn test_e2e_openai_wiremock_chat_log_generation_multi_turn() {
         .build();
 
     // Turn 1
-    let ctx1 = fastmd_agent::context::AgentContextBuilder::new(
+    let ctx1 = fastmd_agent::AgentContextBuilder::new(
         agent_config.clone(),
         session_id,
         "Turn 1 user prompt".to_string(),
@@ -402,7 +402,7 @@ fn test_e2e_openai_wiremock_chat_log_generation_multi_turn() {
     );
 
     // Turn 2
-    let ctx2 = fastmd_agent::context::AgentContextBuilder::new(
+    let ctx2 = fastmd_agent::AgentContextBuilder::new(
         agent_config,
         session_id,
         "Turn 2 user prompt".to_string(),
@@ -550,7 +550,7 @@ fn test_e2e_openai_wiremock_chat_log_with_mutating_tool() {
         .with_content_libraries(content_libraries)
         .build();
 
-    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+    let ctx = fastmd_agent::AgentContextBuilder::new(
         agent_config,
         session_id,
         "Create a todo note for me".to_string(),

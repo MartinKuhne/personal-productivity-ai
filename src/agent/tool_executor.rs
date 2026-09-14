@@ -8,7 +8,7 @@ use crate::AgentToolContext;
 use crate::config::AgentConfig;
 use crate::events::ToolSideEffect;
 use crate::tools::Safety;
-use crate::tools::execute_tool;
+use crate::tools::registry::execute_tool;
 use std::path::Path;
 use std::sync::Arc;
 

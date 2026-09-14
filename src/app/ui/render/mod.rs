@@ -25,15 +25,18 @@ pub mod inline;
 mod table;
 pub mod yaml_table;
 
-// Markdown re-exports — preserved verbatim from the old `render.rs`
-// `pub use` block so the public surface is identical to before the
-// module split. `apply_task_toggle` and `build_toc` are used by
-// `ui/panels/center.rs`; the rest are used by the renderer itself
-// and the e2e tests in this module.
-pub use crate::markdown::{
-    InlineElem, RenderEvent, TextStyle, apply_task_toggle, build_toc, heading_plain_text,
-    parse_markdown_to_events, parse_yaml_to_pairs,
+// Markdown pass-through — `pub(crate) use` (not `pub use`) so these
+// items keep their single canonical public path at `crate::markdown::X`
+// while the renderer and its e2e tests can still reach them through
+// `crate::ui::render::X`. `TextStyle` and `parse_yaml_to_pairs` are
+// only referenced from test code, so they are re-exported under
+// `#[cfg(test)]` to avoid an unused-import in the library build.
+pub(crate) use crate::markdown::{
+    InlineElem, RenderEvent, apply_task_toggle, build_toc, heading_plain_text,
+    parse_markdown_to_events,
 };
+#[cfg(test)]
+pub(crate) use crate::markdown::{TextStyle, parse_yaml_to_pairs};
 
 // `pub(crate) use` (not plain `use`) so the e2e_tests submodule (a sibling
 // of `code`/`heading`/`inline`/`table` under `render`) can reach these

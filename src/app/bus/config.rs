@@ -1,7 +1,7 @@
 //! Configuration-arrival bus constructor and subscriber timeout.
 //!
 //! The [`ConfigArrived`] event payload lives in
-//! [`crate::bus::events::config`]; this module owns only the
+//! `crate::bus::events::config`; this module owns only the
 //! constructor and the timeout constant that polling subscribers use
 //! when they can't block the UI thread.
 

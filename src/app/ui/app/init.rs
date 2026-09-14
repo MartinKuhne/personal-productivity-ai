@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::background::{BackgroundLogs, Task};
+use crate::background::Task;
+use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;

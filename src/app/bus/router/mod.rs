@@ -5,8 +5,8 @@
 //! infrastructure they sit on: per-format fan-out (`bus_router`) and
 //! generic channel-driven workers (`worker`).
 
-pub mod bus_router;
-pub mod worker;
+pub(crate) mod bus_router;
+pub(crate) mod worker;
 
 pub use bus_router::BusRouter;
 pub use worker::{ChannelWorker, spawn_path_worker};

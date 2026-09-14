@@ -20,7 +20,7 @@
 //! See the architecture review (`doc/planning/application-architecture-review.md`,
 //! P1-6) for the background-event migration that split the legacy
 //! `BackgroundMessage` god-enum into per-domain sub-enums
-//! (`AgentEvent`, `FsEvent`, `ProcessEvent`) under [`events::typed`].
+//! (`AgentEvent`, `FsEvent`, `ProcessEvent`) under `events::typed`.
 
 pub mod config;
 pub mod core;

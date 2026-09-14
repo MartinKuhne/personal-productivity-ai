@@ -131,7 +131,7 @@ impl Default for UndoStack {
 }
 
 impl UndoStack {
-    /// Create an empty undo stack with [`DEFAULT_UNDO_CAPACITY`].
+    /// Create an empty undo stack with `DEFAULT_UNDO_CAPACITY`.
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_UNDO_CAPACITY)
     }

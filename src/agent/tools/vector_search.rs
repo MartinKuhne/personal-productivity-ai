@@ -102,8 +102,8 @@ fn execute_vector_search(
         .search(input.query.trim(), 128, input.max_distance)?;
 
     if hits.is_empty() {
-        let page: crate::tools::registry::cursor::CursorPage<VectorSearchHit> =
-            crate::tools::registry::cursor::CursorPage {
+        let page: crate::tools::cursor::CursorPage<VectorSearchHit> =
+            crate::tools::cursor::CursorPage {
                 items: Vec::new(),
                 count: 0,
                 total: 0,

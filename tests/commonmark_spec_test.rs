@@ -29,7 +29,7 @@
 use std::sync::OnceLock;
 
 use fastmd_pdf::compile_markdown_to_pdf;
-use fastmd_pdf::translator::render_markdown_to_typst;
+use fastmd_pdf::render_markdown_to_typst;
 
 /// Source of the vendored spec. `include_str!` resolves at compile
 /// time, so the test binary carries the spec as a static — the file

@@ -13,14 +13,14 @@ pub mod blocking;
 pub mod browser;
 pub mod browser_locator;
 pub mod browser_runner;
-pub mod cache;
+pub(crate) mod cache;
 pub mod context;
 pub mod csv_db;
 pub mod cursor;
 pub mod descriptor;
 #[cfg(test)]
 mod descriptor_tests;
-pub mod dispatcher;
+pub(crate) mod dispatcher;
 #[cfg(test)]
 mod dispatcher_tests;
 pub mod dtos;
@@ -30,7 +30,7 @@ pub mod jmap;
 pub mod mcp;
 pub mod observer;
 pub mod policy;
-pub mod provider;
+pub(crate) mod provider;
 #[cfg(test)]
 mod provider_tests;
 pub mod registry;
@@ -136,9 +136,5 @@ pub use cache::{
     CACHE_TTL, CURSOR_EXPIRED_ERROR, CachedWebDocument, FINAL_PAGE_HINT, MAX_CACHE_ENTRIES,
     SearchEmailItem, ToolCache, cache,
 };
-pub use context::ToolContext as ToolContextType;
-pub use cursor::{CursorPage, CursorSessionManager, PagedDataset};
-pub use descriptor::ToolDescriptor as ToolDescriptorType;
 pub use dispatcher::{ToolDispatcher, ToolError, ToolOutcome, ToolServices};
 pub use provider::{RegisteredTool, ToolProvider};
-pub use registry::execute_tool;
