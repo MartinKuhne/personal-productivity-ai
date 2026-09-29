@@ -347,7 +347,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                 multi: false,
                                             },
                                         );
-                                        app.orchestrator.tabs.scroll_to_search = Some(active_query.clone());
+                                        app.orchestrator.tabs.scroll_to_search =
+                                            Some(crate::ui::tabs::SearchJump::new(
+                                                active_query.clone(),
+                                                0,
+                                            ));
                                     }
                                 });
                                 ui.add_space(2.0);

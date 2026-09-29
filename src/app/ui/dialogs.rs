@@ -56,6 +56,12 @@ pub struct Dialogs {
     // About dialog
     pub about_dialog_open: bool,
 
+    // Find dialog (Ctrl+F)
+    pub find_dialog_open: bool,
+    pub find_query: String,
+    pub find_match_index: usize,
+    pub find_focus_requested: bool,
+
     // OAuth in-flight state (MCP-021)
     /// Per-server OAuth flow status. Present (InProgress) while the
     /// background thread running `McpClients::authenticate` is
@@ -90,6 +96,11 @@ impl Dialogs {
 
             tools_dialog_open: false,
             about_dialog_open: false,
+
+            find_dialog_open: false,
+            find_query: String::new(),
+            find_match_index: 0,
+            find_focus_requested: false,
 
             oauth_status: HashMap::new(),
         }
@@ -142,6 +153,10 @@ mod tests {
         assert!(dm.file_to_rename.is_none());
         assert!(!dm.batch_dialog_open);
         assert!(!dm.about_dialog_open);
+        assert!(!dm.find_dialog_open);
+        assert!(dm.find_query.is_empty());
+        assert_eq!(dm.find_match_index, 0);
+        assert!(!dm.find_focus_requested);
     }
 
     #[test]

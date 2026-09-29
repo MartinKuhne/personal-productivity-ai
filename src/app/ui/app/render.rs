@@ -96,6 +96,10 @@ impl FastMdApp {
             crate::ui::about_dialog::show_about_dialog(ctx, self);
         }
 
+        if self.orchestrator.dialogs.find_dialog_open {
+            crate::ui::find_dialog::show_find_dialog(ctx, self);
+        }
+
         if self.orchestrator.dialogs.batch_dialog_open {
             let mut dialog_config = self.orchestrator.dialogs.batch_dialog_config.clone();
 

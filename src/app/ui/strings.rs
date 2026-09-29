@@ -542,6 +542,28 @@ pub const SAVE_BUTTON: &str = "Save";
 pub const PDF_BACKED_ERROR: &str = "Cannot modify this file. The system generates the file from a PDF. \
      Use write_yaml_header to modify front-matter.";
 
+// Find in Document Dialog
+/// Title of the in-document find dialog window.
+pub const FIND_DIALOG_TITLE: &str = "Find in Document";
+
+/// Placeholder hint text for the search input field.
+pub const FIND_INPUT_HINT: &str = "Search...";
+
+/// Button label for jumping to the next search occurrence.
+pub const FIND_NEXT_BUTTON: &str = "Next";
+
+/// Button label for jumping to the previous search occurrence.
+pub const FIND_PREV_BUTTON: &str = "Prev";
+
+/// Status label when no matches are found in the document.
+pub const FIND_NO_MATCHES: &str = "No matches";
+
+/// Status label when no document is currently open.
+pub const FIND_NO_DOCUMENT: &str = "No document open";
+
+/// Format string for displaying current match index and total matches.
+pub const FIND_MATCH_STATUS_FORMAT: &str = "{} of {}";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,5 +681,16 @@ mod tests {
             !AGENT_SESSION_HEADER.contains('🤖'),
             "AGENT_SESSION_HEADER should not use raw robot emoji"
         );
+    }
+
+    #[test]
+    fn test_find_dialog_strings() {
+        assert_eq!(FIND_DIALOG_TITLE, "Find in Document");
+        assert_eq!(FIND_INPUT_HINT, "Search...");
+        assert_eq!(FIND_NEXT_BUTTON, "Next");
+        assert_eq!(FIND_PREV_BUTTON, "Prev");
+        assert_eq!(FIND_NO_MATCHES, "No matches");
+        assert_eq!(FIND_NO_DOCUMENT, "No document open");
+        assert_eq!(FIND_MATCH_STATUS_FORMAT, "{} of {}");
     }
 }

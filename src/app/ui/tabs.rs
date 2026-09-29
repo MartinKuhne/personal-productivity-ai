@@ -15,6 +15,46 @@ struct TabStripCache {
     titles: Vec<String>,
 }
 
+/// Target jump query and 0-based match index within the document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchJump {
+    /// Case-insensitive search query.
+    pub query: String,
+    /// 0-based index of the target match in the document.
+    pub match_index: usize,
+}
+
+impl SearchJump {
+    /// Purpose: Constructs a new `SearchJump` target.
+    /// Inputs: `query` - search term, `match_index` - target match ordinal
+    /// Outputs: `SearchJump` instance
+    /// Purity: Pure
+    pub fn new(query: impl Into<String>, match_index: usize) -> Self {
+        Self {
+            query: query.into(),
+            match_index,
+        }
+    }
+}
+
+impl From<String> for SearchJump {
+    fn from(query: String) -> Self {
+        Self {
+            query,
+            match_index: 0,
+        }
+    }
+}
+
+impl From<&str> for SearchJump {
+    fn from(query: &str) -> Self {
+        Self {
+            query: query.to_string(),
+            match_index: 0,
+        }
+    }
+}
+
 pub struct Tabs {
     pub loaded_path: Option<PathBuf>,
     pub current_yaml: Option<serde_norway::Value>,
@@ -27,10 +67,10 @@ pub struct Tabs {
     /// `egui::Id` at render time. Stored as a string so the
     /// manager is egui-independent.
     pub scroll_to_header_id: Option<String>,
-    /// Pending search jump target query. The center panel scrolls
-    /// to the first occurrence of this query within the document,
+    /// Pending search jump target query and match index. The center panel scrolls
+    /// to the requested occurrence of this query within the document,
     /// then clears it.
-    pub scroll_to_search: Option<String>,
+    pub scroll_to_search: Option<SearchJump>,
     /// Pending task checkbox toggles queued by `render_markdown`.
     /// Drained and applied to `current_markdown` after each frame.
     pub pending_task_toggles: Vec<(usize, bool)>,

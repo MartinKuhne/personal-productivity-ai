@@ -60,6 +60,15 @@ impl FastMdApp {
             );
         }
 
+        if ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)
+                || i.consume_key(egui::Modifiers::CTRL, egui::Key::F)
+        }) {
+            self.orchestrator
+                .user_command_bus
+                .publish(crate::bus::events::user_command::UserCommand::OpenFindDialog);
+        }
+
         self.orchestrator.handle_file_selection();
         self.show_editor_overlay(ui);
         self.show_modals(ui);
