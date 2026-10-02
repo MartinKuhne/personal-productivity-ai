@@ -98,9 +98,19 @@ pub(crate) fn merge_leading_system_messages(
 }
 
 impl LLMClient {
+    /// Construct an `LLMClient` from an [`AgentConfig`].
+    ///
+    /// If `model_name` is explicitly provided, uses that model. Otherwise, checks
+    /// `config.selected_chat_model()`, falling back to the lowest-cost model configured
+    /// for the "chat" use case, and finally the first available model.
     pub fn from_agent_config(config: &AgentConfig, model_name: Option<&str>) -> Option<Self> {
         let model_cfg = if let Some(name) = model_name {
             config.models().get(name)?.clone()
+        } else if let Some(cfg) = config
+            .selected_chat_model()
+            .and_then(|name| config.models().get(name))
+        {
+            cfg.clone()
         } else if let Some((_key, cfg)) = config
             .models()
             .iter()
@@ -407,6 +417,99 @@ mod tests {
     #[test]
     fn test_from_agent_config_chooses_cheapest_chat_model() {
         let config = AgentConfigBuilder::new()
+            .with_models(std::collections::HashMap::from([
+                (
+                    "cheap".to_string(),
+                    crate::config::LlmConfig {
+                        model: "cheap-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(1),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+                (
+                    "expensive".to_string(),
+                    crate::config::LlmConfig {
+                        model: "expensive-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(9),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+            ]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, None).unwrap();
+        assert_eq!(client.model_name(), "cheap-model");
+    }
+
+    #[test]
+    fn test_from_agent_config_prefers_selected_chat_model_over_cheapest() {
+        let config = AgentConfigBuilder::new()
+            .with_selected_chat_model(Some("expensive".to_string()))
+            .with_models(std::collections::HashMap::from([
+                (
+                    "cheap".to_string(),
+                    crate::config::LlmConfig {
+                        model: "cheap-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(1),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+                (
+                    "expensive".to_string(),
+                    crate::config::LlmConfig {
+                        model: "expensive-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(9),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+            ]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, None).unwrap();
+        assert_eq!(client.model_name(), "expensive-model");
+    }
+
+    #[test]
+    fn test_from_agent_config_explicit_model_name_overrides_selected_chat_model() {
+        let config = AgentConfigBuilder::new()
+            .with_selected_chat_model(Some("expensive".to_string()))
+            .with_models(std::collections::HashMap::from([
+                (
+                    "cheap".to_string(),
+                    crate::config::LlmConfig {
+                        model: "cheap-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(1),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+                (
+                    "expensive".to_string(),
+                    crate::config::LlmConfig {
+                        model: "expensive-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(9),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+            ]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, Some("cheap")).unwrap();
+        assert_eq!(client.model_name(), "cheap-model");
+    }
+
+    #[test]
+    fn test_from_agent_config_invalid_selected_chat_model_falls_back_to_cheapest() {
+        let config = AgentConfigBuilder::new()
+            .with_selected_chat_model(Some("nonexistent".to_string()))
             .with_models(std::collections::HashMap::from([
                 (
                     "cheap".to_string(),

@@ -518,6 +518,12 @@ fn test_apply_chat_model_selection() {
             .model,
         "model-b"
     );
+    assert_eq!(
+        fastmd_agent::llm_client::LLMClient::from_agent_config(&app.agent().agent_config(), None)
+            .unwrap()
+            .model_name(),
+        "model-b"
+    );
 
     // Idempotent re-selection of same model
     app.orchestrator
@@ -539,6 +545,12 @@ fn test_apply_chat_model_selection() {
             .select_chat_model()
             .unwrap()
             .model,
+        "model-a"
+    );
+    assert_eq!(
+        fastmd_agent::llm_client::LLMClient::from_agent_config(&app.agent().agent_config(), None)
+            .unwrap()
+            .model_name(),
         "model-a"
     );
 }
