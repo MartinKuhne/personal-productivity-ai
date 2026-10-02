@@ -4,18 +4,18 @@
 
 #![allow(special_module_name)]
 
-pub mod agent_impl;
+pub(crate) mod agent_impl;
 pub mod config;
-pub mod context;
+pub(crate) mod context;
 pub mod datamark;
 pub mod error;
 pub mod events;
 #[allow(special_module_name)]
 pub mod lib;
 pub mod llm_client;
-pub mod session;
-pub mod tool_context;
-pub mod tool_executor;
+pub(crate) mod session;
+pub(crate) mod tool_context;
+pub(crate) mod tool_executor;
 pub mod tools;
 pub mod utils;
 pub mod vfs;
@@ -38,7 +38,7 @@ mod tool_context_tests;
 mod datamark_proptests;
 
 pub use agent_impl::*;
-pub use context::AgentContext;
-pub use session::AgentSession;
+pub use context::{AgentContext, AgentContextBuilder};
+pub use session::{AgentSession, AgentSessionBuilder};
 pub use tool_context::AgentToolContext;
 pub use tool_executor::{ToolCallRecord, ToolExecutor, ToolExecutorBuilder};

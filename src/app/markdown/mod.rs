@@ -13,12 +13,12 @@
 //! - `parser` — `pulldown-cmark`-backed parsing and HTML rendering.
 //! - `table_width` — pure Fair Table Width Algorithm (no egui, no Markdown types).
 
-pub mod document;
-pub mod link_scanner;
-pub mod model;
-pub mod parser;
-pub mod table_layout;
-pub mod table_width;
+pub(crate) mod document;
+pub(crate) mod link_scanner;
+pub(crate) mod model;
+pub(crate) mod parser;
+pub(crate) mod table_layout;
+pub(crate) mod table_width;
 
 pub use document::{Document, DocumentContent, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use link_scanner::scan_text_for_links;

@@ -1,7 +1,6 @@
 //! Centralised modal-dialog state — open/closed flags and temporary inputs for every dialog in the application.
 
-use crate::agent::batch::BatchHandle;
-use crate::agent::batch::types::BatchDialogConfig;
+use crate::agent::batch::types::{BatchDialogConfig, BatchHandle};
 use std::collections::HashMap;
 use std::path::PathBuf;
 

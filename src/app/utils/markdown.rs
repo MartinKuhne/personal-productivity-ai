@@ -1,9 +1,13 @@
-#[deprecated(note = "import directly from crate::markdown")]
-pub use crate::markdown::{FrontMatter, parse_front_matter};
+//! Retained front-matter parsing tests.
+//!
+//! The former `crate::utils::markdown` re-export shim was removed so that
+//! `parse_front_matter` keeps a single public path at
+//! `crate::markdown::parse_front_matter`. These tests are kept against the
+//! canonical path.
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::markdown::parse_front_matter;
 
     #[test]
     fn test_parse_front_matter_basic() {

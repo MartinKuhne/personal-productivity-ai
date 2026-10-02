@@ -422,14 +422,11 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
 
     let session_id = uuid::Uuid::new_v4();
     let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
-    let ctx = fastmd_agent::context::AgentContextBuilder::new(
-        agent_config,
-        session_id,
-        "Hello agent".to_string(),
-    )
-    .with_system_prompts(system_prompts)
-    .with_observer(observer.clone())
-    .build();
+    let ctx =
+        fastmd_agent::AgentContextBuilder::new(agent_config, session_id, "Hello agent".to_string())
+            .with_system_prompts(system_prompts)
+            .with_observer(observer.clone())
+            .build();
 
     let handle = std::thread::spawn(move || {
         fastmd_agent::run_agent(ctx);
@@ -588,7 +585,7 @@ fn test_e2e_openai_wiremock_note_skill_context_sent_as_system_context() {
 
     let session_id = uuid::Uuid::new_v4();
     let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
-    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+    let ctx = fastmd_agent::AgentContextBuilder::new(
         agent_config,
         session_id,
         "Proofread this note.".to_string(),
@@ -745,7 +742,7 @@ fn test_e2e_openai_wiremock_folder_skill_context_sent_as_system_context() {
 
     let session_id = uuid::Uuid::new_v4();
     let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
-    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+    let ctx = fastmd_agent::AgentContextBuilder::new(
         agent_config,
         session_id,
         "Summarise all notes in this folder.".to_string(),
@@ -903,14 +900,10 @@ fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
 
     let session_id = uuid::Uuid::new_v4();
     let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
-    let ctx = fastmd_agent::context::AgentContextBuilder::new(
-        agent_config,
-        session_id,
-        user_prompt.clone(),
-    )
-    .with_system_prompts(system_prompts)
-    .with_observer(observer.clone())
-    .build();
+    let ctx = fastmd_agent::AgentContextBuilder::new(agent_config, session_id, user_prompt.clone())
+        .with_system_prompts(system_prompts)
+        .with_observer(observer.clone())
+        .build();
 
     let handle = std::thread::spawn(move || {
         fastmd_agent::run_agent(ctx);

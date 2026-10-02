@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 
 /// Job description for the "Save as PDF" background action.
 ///
-/// Mirrors [`crate::export::print::PrintJob`] but produces a file rather
+/// Mirrors [`crate::export::PrintJob`] but produces a file rather
 /// than opening a browser tab. The `output_path` is filled in by
 /// [`execute_save_as_pdf_blocking`]; callers pass `None` and accept
 /// the default of "next to the source markdown with `.pdf`
@@ -86,7 +86,7 @@ use fastmd_pdf::compile_markdown_to_pdf;
 /// Compile the markdown content to a PDF file at
 /// `job.resolved_output_path()`. Suitable to be called from a
 /// `std::thread::spawn` background worker (matches the
-/// `execute_print_blocking` pattern in [`crate::export::print`]).
+/// `execute_print_blocking` pattern in `crate::export::print`).
 ///
 /// The `tx` channel is used to push log entries into the Background
 /// Process Log so the user can see "Exported `notes.md` →
@@ -207,7 +207,7 @@ pub fn open_pdf_in_viewer(path: &Path) -> Result<(), String> {
 /// UI-layer composition: compile + save, then open the result
 /// in the user's default PDF viewer. Suitable to be called from
 /// a `std::thread::spawn` background worker (matches the
-/// `execute_print_blocking` pattern in [`crate::export::print`]).
+/// `execute_print_blocking` pattern in `crate::export::print`).
 ///
 /// On the test path, call [`compile_and_save_pdf`] directly
 /// instead — that function does not pop a viewer, so the

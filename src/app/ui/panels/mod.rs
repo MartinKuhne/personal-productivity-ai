@@ -1,10 +1,10 @@
 //! Five-panel layout — top, bottom, left, right, and center panel submodules and their entry-point functions.
 
-pub mod bottom;
-pub mod center;
-pub mod left;
-pub mod right;
-pub mod top;
+pub(crate) mod bottom;
+pub(crate) mod center;
+pub(crate) mod left;
+pub(crate) mod right;
+pub(crate) mod top;
 
 pub use bottom::show_bottom_panel;
 pub use center::show_center_panel;

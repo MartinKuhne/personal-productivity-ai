@@ -59,7 +59,7 @@ impl std::fmt::Display for LogCategory {
 /// Carried inside [`crate::bus::events::ProcessEvent::LogEntry`]
 /// and produced by every background worker via the
 /// `BackgroundEvent::From<BackgroundLogEntry>` impl in
-/// [`crate::bus::events::typed`].
+/// `crate::bus::events::typed`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BackgroundLogEntry {
     pub timestamp: DateTime<Local>,

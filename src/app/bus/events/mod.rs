@@ -3,10 +3,10 @@
 //!
 //! | Module | Payload(s) | Channel |
 //! | --- | --- | --- |
-//! | [`mod@file`] | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
-//! | [`messages`] | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with [`typed`] |
-//! | [`typed`] | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`), `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` |
-//! | [`config`] | `ConfigArrived` | `Bus<ConfigArrived>` |
+//! | `file` | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
+//! | `messages` | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with `typed` |
+//! | `typed` | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`), `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` |
+//! | `config` | `ConfigArrived` | `Bus<ConfigArrived>` |
 //!
 //! The `AgentEvent` variant was removed from `BackgroundEvent` in feature 003
 //! (agent-ui-seam-refactor). Agent events now flow on `Bus<AgentEvent>` from
@@ -15,13 +15,13 @@
 //!
 //! See [`crate::bus::core`] for the transport primitive.
 
-pub mod agent;
-pub mod config;
-pub mod debug;
-pub mod file;
-pub mod messages;
-pub mod typed;
-pub mod user_command;
+pub(crate) mod agent;
+pub(crate) mod config;
+pub(crate) mod debug;
+pub(crate) mod file;
+pub(crate) mod messages;
+pub(crate) mod typed;
+pub(crate) mod user_command;
 
 pub use agent::{AgentEvent, BusAgentEventObserver, CompositeAgentEventObserver};
 pub use config::ConfigArrived;

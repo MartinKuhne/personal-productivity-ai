@@ -2,16 +2,16 @@
 //!
 //! Independent crate extracted from `src/app/export/pdf`. The pipeline is:
 //!
-//! 1. [`translator::render_markdown_to_typst`] — pure markdown to Typst markup
-//! 2. [`engine::generate`] — Typst markup to PDF bytes via the official `typst` CLI
+//! 1. [`render_markdown_to_typst`] — pure markdown to Typst markup
+//! 2. [`generate`] — Typst markup to PDF bytes via the official `typst` CLI
 //! 3. [`compile_markdown_to_pdf`] — composition of the two for ergonomic use
 //!
 //! Unit tests live in sibling sidecars (`translator_tests.rs`,
 //! `translator_proptests.rs`, `save_tests.rs`).
 //! See `AGENTS.md RUST-056 / RUST-057`.
 
-pub mod engine;
-pub mod translator;
+pub(crate) mod engine;
+pub(crate) mod translator;
 
 pub use engine::{find_typst_binary, generate, generate_to_file, is_typst_available};
 pub use translator::render_markdown_to_typst;
