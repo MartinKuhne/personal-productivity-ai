@@ -109,6 +109,11 @@ pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
             }
         }
     }
+    skills.sort_by(|a, b| {
+        a.display_name
+            .cmp(&b.display_name)
+            .then_with(|| a.path.cmp(&b.path))
+    });
     skills
 }
 
@@ -272,7 +277,12 @@ mod tests {
 
         let skills = discover_batch_skills(&libs);
         assert_eq!(skills.len(), 2);
+        assert_eq!(
+            skills[0].display_name,
+            "System / Skills/Batch/ExtractEntities"
+        );
         assert_eq!(skills[0].content, "Extract entities from this file.");
+        assert_eq!(skills[1].display_name, "System / Skills/Batch/SummarizeAll");
         assert_eq!(skills[1].content, "Summarize this file.");
 
         let config = AppConfig {
@@ -284,5 +294,34 @@ mod tests {
 
         let resolved = resolve_prompts(&BTreeSet::new(), &libs);
         assert_eq!(resolved.len(), 2);
+    }
+
+    #[test]
+    fn test_discover_batch_skills_deterministic_sorting() {
+        let dir = tempfile::tempdir().unwrap();
+        let sys_dir = dir.path().join("system");
+        let batch_dir = sys_dir.join("Skills").join("Batch");
+        fs::create_dir_all(&batch_dir).unwrap();
+
+        fs::write(batch_dir.join("Z_Skill.md"), "Z content").unwrap();
+        fs::write(batch_dir.join("A_Skill.md"), "A content").unwrap();
+        fs::write(batch_dir.join("M_Skill.md"), "M content").unwrap();
+
+        let libs = vec![ContentLibrary {
+            root_folder: sys_dir.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+
+        let skills = discover_batch_skills(&libs);
+        assert_eq!(skills.len(), 3);
+        assert_eq!(skills[0].display_name, "System / Skills/Batch/A_Skill");
+        assert_eq!(skills[0].content, "A content");
+        assert_eq!(skills[1].display_name, "System / Skills/Batch/M_Skill");
+        assert_eq!(skills[1].content, "M content");
+        assert_eq!(skills[2].display_name, "System / Skills/Batch/Z_Skill");
+        assert_eq!(skills[2].content, "Z content");
     }
 }
