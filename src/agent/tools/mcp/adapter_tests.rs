@@ -10,6 +10,7 @@ use crate::config::AgentConfig;
 
 use super::*;
 use crate::config::{McpServerConfig, McpServerEntry};
+use crate::lib::mcp::McpClients;
 use crate::tools::{Safety, Tool};
 use std::collections::HashMap;
 use std::sync::Arc;

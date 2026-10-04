@@ -34,10 +34,10 @@
 //! `doc/planning/desktop-module-boundaries-review.md` for the
 //! rationale.
 
-pub mod browser_session;
+pub(crate) mod browser_session;
 pub mod bus_observer;
-pub mod config_subscriber;
-pub mod pdf_backing_tracker;
+pub(crate) mod config_subscriber;
+pub(crate) mod pdf_backing_tracker;
 
 pub use browser_session::{BrowserSession, PageHandle, SessionError};
 pub use config_subscriber::spawn_config_subscription;

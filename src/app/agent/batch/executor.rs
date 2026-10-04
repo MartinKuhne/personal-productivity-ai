@@ -234,7 +234,7 @@ pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Optio
         &selected_files,
     );
 
-    let ctx = crate::agent::context::AgentContextBuilder::new(
+    let ctx = crate::agent::AgentContextBuilder::new(
         config.to_agent_config(),
         uuid::Uuid::new_v4(),
         prompt,

@@ -16,7 +16,7 @@
 //! stay always compiled — the log filter chip for `Image Vision`
 //! still renders in the UI even when no worker is emitting into it.
 
-pub use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
+pub(crate) use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
 
 #[cfg(test)]
 mod tests {

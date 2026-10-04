@@ -3,7 +3,8 @@
 
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
-use crate::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
+use crate::background::logs::SharedBackgroundLogs;
+use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;

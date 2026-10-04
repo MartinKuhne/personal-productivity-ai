@@ -1,7 +1,7 @@
 //! egui adapter for the inline text editor — palette + `show_text_editor`.
 //!
 //! Everything in this module imports `eframe::egui`; the data model it
-//! adapts lives in [`crate::ui::text_buffer`] and is egui-free.
+//! adapts lives in `crate::ui::text_buffer` and is egui-free.
 //!
 //! The two responsibilities of this file are:
 //!

@@ -17,21 +17,5 @@ mod adapter;
 
 pub use adapter::McpToolAdapter;
 
-// Re-export the protocol-level types so existing callers can keep
-// using `crate::tools::mcp::{McpClients,
-// McpToolDescriptor, ...}`. The protocol implementation itself lives
-// in `crate::lib::mcp`.
-pub use crate::lib::mcp::{
-    AuthorizationServerMetadata, ClientRegistrationRequest, ClientRegistrationResponse, McpError,
-    McpToolDescriptor, OAuthClient, OAuthError, OAuthFlowInputs, OAuthFlowOutput,
-    PreRegisteredClient, ProtectedResourceMetadata, StoredToken, TokenResponse, TokenStore,
-    WwwAuthenticateChallenge, parse_bearer_challenge, parse_redirect_uri, run_oauth_flow,
-};
-pub use crate::lib::mcp::{
-    CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, DynamicToolSource, MAX_REQUEST_TIMEOUT,
-    PROTOCOL_VERSION, is_valid_session_id,
-};
-pub use crate::lib::mcp::{McpClientSession, McpClients};
-
 #[cfg(test)]
 mod adapter_tests;
