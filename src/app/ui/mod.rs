@@ -29,6 +29,7 @@ pub mod theme;
 pub mod tools_dialog;
 pub(crate) mod tree;
 pub mod tree_search;
+pub mod widgets;
 
 // `ToCEntry` is reached through `crate::ui::ToCEntry` only from tests;
 // its single canonical public path is `crate::markdown::ToCEntry`.
