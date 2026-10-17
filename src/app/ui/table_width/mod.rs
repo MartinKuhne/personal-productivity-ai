@@ -160,10 +160,7 @@ pub fn measure(
     let color = egui::Color32::WHITE;
 
     // Measure space width for breakpoint computation (use body font).
-    let space_width = {
-        let g = ui.fonts_mut(|f| f.layout_no_wrap(" ".to_string(), body_font.clone(), color));
-        g.size().x
-    };
+    let space_width = crate::ui::measure::text_width(ui.ctx(), " ", body_font.clone(), color);
 
     let mut max_w = vec![0.0_f32; n];
     let mut min_w = vec![0.0_f32; n];
@@ -266,10 +263,7 @@ impl<'a> EguiTextMeasurer<'a> {
             .unwrap_or_else(|| egui::FontId::proportional(14.0));
         let mono_font = egui::FontId::new(body_font.size, egui::FontFamily::Monospace);
         let color = egui::Color32::WHITE;
-        let space_width = {
-            let g = ui.fonts_mut(|f| f.layout_no_wrap(" ".to_string(), body_font.clone(), color));
-            g.size().x
-        };
+        let space_width = crate::ui::measure::text_width(ui.ctx(), " ", body_font.clone(), color);
         let line_height = ui.text_style_height(&egui::TextStyle::Body);
 
         Self {
@@ -434,8 +428,7 @@ fn measure_cell(
 
     let measure_token = |tok: &str, font: &egui::FontId, min_w: &mut f32, widths: &mut Vec<f32>| {
         if !tok.is_empty() {
-            let g = ui.fonts_mut(|f| f.layout_no_wrap(tok.to_string(), font.clone(), color));
-            let w = g.size().x;
+            let w = crate::ui::measure::text_width(ui.ctx(), tok, font.clone(), color);
             if w > *min_w {
                 *min_w = w;
             }
@@ -450,7 +443,7 @@ fn measure_cell(
                 (t.clone(), f)
             }
             InlineElem::Link(_, display) => (display.clone(), body_font),
-            InlineElem::Image(url) => (format!("[Image: {}]", url), body_font),
+            InlineElem::Image(url) => (crate::markdown::image_placeholder(url), body_font),
             InlineElem::Html(h) => (h.clone(), body_font),
             InlineElem::SoftBreak => (" ".to_string(), body_font),
         };
@@ -459,8 +452,7 @@ fn measure_cell(
             continue;
         }
 
-        let g = ui.fonts_mut(|f| f.layout_no_wrap(displayed.clone(), font.clone(), color));
-        max_w += g.size().x;
+        max_w += crate::ui::measure::text_width(ui.ctx(), &displayed, font.clone(), color);
 
         let parts: Vec<&str> = displayed.split_whitespace().collect();
         if parts.is_empty() {

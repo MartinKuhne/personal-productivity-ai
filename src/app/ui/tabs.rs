@@ -3,16 +3,27 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::markdown::model::ToCEntry;
 
 /// Cached tab strip data to avoid rebuilding the tab bar every frame.
+///
+/// `paths` and `titles` are held behind [`Arc`] so the centre panel can take a
+/// per-frame [`Arc::clone`] (a pointer bump) instead of cloning both vectors
+/// (see `cached_tree_rows` for the established pattern). The cache is keyed by
+/// a hash of the tab paths, so it self-invalidates even when `tabs` is mutated
+/// directly (bypassing [`Tabs::invalidate_tab_strip_cache`]).
 #[derive(Clone, Debug, Default)]
 struct TabStripCache {
     /// Hash of the tabs vector to detect changes.
     tabs_hash: u64,
+    /// Whether the cache holds a built snapshot.
+    valid: bool,
+    /// Cached tab paths (the source `tabs` vector).
+    paths: Arc<Vec<PathBuf>>,
     /// Cached tab titles (file names).
-    titles: Vec<String>,
+    titles: Arc<Vec<String>>,
 }
 
 pub struct Tabs {
@@ -37,8 +48,12 @@ pub struct Tabs {
     /// Cached tab strip to avoid per-frame rebuild.
     tab_strip_cache: TabStripCache,
     /// Pre-computed heading IDs with duplicate disambiguation.
-    /// Keyed by a hash of the markdown content.
-    heading_ids_cache: Option<(u64, Vec<String>)>,
+    /// Keyed by a hash of the markdown content. Held behind [`Arc`] so the
+    /// centre panel can take a per-frame [`Arc::clone`] instead of copying.
+    heading_ids_cache: Option<(u64, Arc<Vec<String>>)>,
+    /// Cached [`toc`](Self::toc) snapshot behind [`Arc`], keyed by a hash of the
+    /// ToC entries, so the right panel can take a per-frame [`Arc::clone`].
+    toc_cache: Option<(u64, Arc<Vec<ToCEntry>>)>,
 }
 
 impl Tabs {
@@ -55,6 +70,7 @@ impl Tabs {
             pending_task_toggles: Vec::new(),
             tab_strip_cache: TabStripCache::default(),
             heading_ids_cache: None,
+            toc_cache: None,
         }
     }
 
@@ -74,8 +90,46 @@ impl Tabs {
 
     /// Invalidate the tab strip cache so it rebuilds on next frame.
     fn invalidate_tab_strip_cache(&mut self) {
-        self.tab_strip_cache.tabs_hash = 0;
-        self.tab_strip_cache.titles.clear();
+        self.tab_strip_cache.valid = false;
+    }
+
+    /// Hash of the current tab paths (cheap change detector).
+    fn tabs_hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.tabs.len().hash(&mut hasher);
+        for tab in &self.tabs {
+            tab.hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    /// Returns the cached `(paths, titles)` tab-strip snapshot, rebuilding it
+    /// only when the tab set changed.
+    ///
+    /// The returned [`Arc`]s are cheap to clone, so the centre panel takes them
+    /// once per frame instead of cloning both vectors (RUST-023).
+    pub fn tab_strip(&mut self) -> (Arc<Vec<PathBuf>>, Arc<Vec<String>>) {
+        let tabs_hash = self.tabs_hash();
+        if !self.tab_strip_cache.valid || self.tab_strip_cache.tabs_hash != tabs_hash {
+            let titles: Vec<String> = self
+                .tabs
+                .iter()
+                .map(|p| {
+                    p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            self.tab_strip_cache.tabs_hash = tabs_hash;
+            self.tab_strip_cache.paths = Arc::new(self.tabs.clone());
+            self.tab_strip_cache.titles = Arc::new(titles);
+            self.tab_strip_cache.valid = true;
+        }
+        (
+            Arc::clone(&self.tab_strip_cache.paths),
+            Arc::clone(&self.tab_strip_cache.titles),
+        )
     }
 
     /// Invalidate the heading IDs cache so it rebuilds on next frame.
@@ -85,36 +139,17 @@ impl Tabs {
 
     /// Get or build the cached tab titles.
     pub fn tab_titles(&mut self) -> &[String] {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.tabs.len().hash(&mut hasher);
-        for tab in &self.tabs {
-            tab.hash(&mut hasher);
-        }
-        let tabs_hash = hasher.finish();
-
-        if self.tab_strip_cache.tabs_hash == tabs_hash && !self.tab_strip_cache.titles.is_empty() {
-            return &self.tab_strip_cache.titles;
-        }
-
-        let titles: Vec<String> = self
-            .tabs
-            .iter()
-            .map(|p| {
-                p.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-
-        self.tab_strip_cache.tabs_hash = tabs_hash;
-        self.tab_strip_cache.titles = titles;
-        &self.tab_strip_cache.titles
+        let _ = self.tab_strip();
+        self.tab_strip_cache.titles.as_slice()
     }
 
-    /// Get or compute heading IDs for the current markdown content.
+    /// Get or compute heading IDs for the current markdown content, as a
+    /// cheap-to-clone [`Arc`] handle.
+    ///
     /// Returns a vector of stable heading IDs (with duplicate disambiguation).
-    pub fn heading_ids(&mut self) -> &[String] {
+    /// The centre panel uses this handle to pass the ids to the renderer
+    /// without copying the vector every frame.
+    pub fn heading_ids_arc(&mut self) -> Arc<Vec<String>> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.current_markdown.hash(&mut hasher);
         let content_hash = hasher.finish();
@@ -148,11 +183,40 @@ impl Tabs {
                 }
             }
 
-            self.heading_ids_cache = Some((content_hash, heading_ids));
+            self.heading_ids_cache = Some((content_hash, Arc::new(heading_ids)));
         }
 
-        // Return reference to cached data (cache is guaranteed valid now)
-        self.heading_ids_cache.as_ref().unwrap().1.as_slice()
+        Arc::clone(&self.heading_ids_cache.as_ref().unwrap().1)
+    }
+
+    /// Get or compute heading IDs for the current markdown content.
+    /// Returns a slice of stable heading IDs (with duplicate disambiguation).
+    pub fn heading_ids(&mut self) -> &[String] {
+        let _ = self.heading_ids_arc();
+        self.heading_ids_cache
+            .as_ref()
+            .map(|(_, ids)| ids.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get or compute the ToC snapshot as a cheap-to-clone [`Arc`] handle.
+    ///
+    /// Keyed by a hash of the entries so a change to `toc` (including direct
+    /// field writes) is picked up without an explicit invalidation hook.
+    pub fn toc_arc(&mut self) -> Arc<Vec<ToCEntry>> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.toc.len().hash(&mut hasher);
+        for entry in &self.toc {
+            entry.id.hash(&mut hasher);
+            entry.title.hash(&mut hasher);
+            entry.level.hash(&mut hasher);
+        }
+        let toc_hash = hasher.finish();
+
+        if self.toc_cache.as_ref().map(|(h, _)| *h) != Some(toc_hash) {
+            self.toc_cache = Some((toc_hash, Arc::new(self.toc.clone())));
+        }
+        Arc::clone(&self.toc_cache.as_ref().unwrap().1)
     }
 
     pub fn has_tabs(&self) -> bool {
@@ -300,5 +364,65 @@ mod tests {
         // clear_content resets the markdown and invalidates the cache.
         manager.clear_content();
         assert!(manager.heading_ids().is_empty());
+    }
+
+    #[test]
+    fn test_tab_strip_reuses_arc_until_tabs_change() {
+        let mut manager = Tabs::new();
+        manager.open_tab(PathBuf::from("a.md"));
+        manager.open_tab(PathBuf::from("dir/b.md"));
+
+        let (paths, titles) = manager.tab_strip();
+        assert_eq!(paths.as_slice(), &manager.tabs);
+        assert_eq!(titles.as_slice(), ["a.md".to_string(), "b.md".to_string()]);
+
+        // A second call returns the *same* Arc allocations (pointer bump).
+        let (paths2, titles2) = manager.tab_strip();
+        assert!(Arc::ptr_eq(&paths, &paths2));
+        assert!(Arc::ptr_eq(&titles, &titles2));
+
+        // Mutating `tabs` directly (bypassing invalidation) rebuilds.
+        manager.tabs.push(PathBuf::from("c.md"));
+        let (paths3, _) = manager.tab_strip();
+        assert!(!Arc::ptr_eq(&paths, &paths3));
+        assert_eq!(paths3.len(), 3);
+    }
+
+    #[test]
+    fn test_heading_ids_arc_reuses_arc_until_content_changes() {
+        let mut manager = Tabs::new();
+        manager.current_markdown = "# Intro".to_string();
+        let first = manager.heading_ids_arc();
+        assert_eq!(first.as_slice(), ["Intro".to_string()]);
+
+        let second = manager.heading_ids_arc();
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged content must reuse the Arc allocation"
+        );
+
+        manager.current_markdown = "# Intro\n\n# Two".to_string();
+        let third = manager.heading_ids_arc();
+        assert!(!Arc::ptr_eq(&first, &third));
+        assert_eq!(third.len(), 2);
+    }
+
+    #[test]
+    fn test_toc_arc_reuses_arc_until_toc_changes() {
+        let mut manager = Tabs::new();
+        manager.toc = vec![ToCEntry::new("Intro", 1, "Intro")];
+        let first = manager.toc_arc();
+        assert_eq!(first.len(), 1);
+
+        let second = manager.toc_arc();
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "unchanged ToC must reuse the Arc allocation"
+        );
+
+        manager.toc.push(ToCEntry::new("Body", 1, "Body"));
+        let third = manager.toc_arc();
+        assert!(!Arc::ptr_eq(&first, &third));
+        assert_eq!(third.len(), 2);
     }
 }

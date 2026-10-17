@@ -13,7 +13,7 @@
 
 use crate::bus::events::file::FileEventProducer;
 use crate::ui::text_buffer::TextBuffer;
-use crate::ui::widgets::{modal_window, right_aligned_row};
+use crate::ui::widgets::{DialogAction, confirm_cancel_buttons, modal_window, right_aligned_row};
 use eframe::egui::{self, Key};
 
 /// Inverted colour palette for the inline text editor (UI-046).
@@ -171,13 +171,14 @@ pub fn show_text_editor_with_colors(
             ui.separator();
 
             ui.horizontal(|ui| {
-                if ui.button(crate::ui::strings::SAVE_BUTTON).clicked()
-                    && buf.save(producer).is_ok()
-                {
-                    did_save = true;
-                }
-                if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                    buf.close();
+                match confirm_cancel_buttons(ui, crate::ui::strings::SAVE_BUTTON, true) {
+                    DialogAction::Confirm => {
+                        if buf.save(producer).is_ok() {
+                            did_save = true;
+                        }
+                    }
+                    DialogAction::Cancel => buf.close(),
+                    DialogAction::None => {}
                 }
 
                 right_aligned_row(ui, |ui| {

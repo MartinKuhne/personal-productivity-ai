@@ -157,6 +157,42 @@ where
     changed
 }
 
+/// The outcome of a [`confirm_cancel_buttons`] interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogAction {
+    /// Neither button was clicked.
+    None,
+    /// The confirm button (OK / Save / Process / …) was clicked.
+    Confirm,
+    /// The cancel button was clicked.
+    Cancel,
+}
+
+/// Emits a confirm + cancel button pair into the current layout and reports
+/// which was clicked (RUST-023).
+///
+/// The caller owns the layout, so the same pair renders plainly (the
+/// name-entry modals) or inside a [`right_aligned_row`] (the batch and editor
+/// toolbars). `confirm_label` varies per dialog ("OK", "Save", "Process");
+/// the cancel label is always [`crate::ui::strings::CANCEL_BUTTON`].
+pub fn confirm_cancel_buttons(
+    ui: &mut egui::Ui,
+    confirm_label: &str,
+    confirm_enabled: bool,
+) -> DialogAction {
+    let mut action = DialogAction::None;
+    if ui
+        .add_enabled(confirm_enabled, egui::Button::new(confirm_label))
+        .clicked()
+    {
+        action = DialogAction::Confirm;
+    }
+    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
+        action = DialogAction::Cancel;
+    }
+    action
+}
+
 /// The standard application modal window.
 ///
 /// Closable through the title-bar `X` (which clears `open`) and

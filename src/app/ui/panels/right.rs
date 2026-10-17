@@ -75,6 +75,40 @@ pub fn apply_toc_row_click(entry_id: &str) -> crate::bus::events::user_command::
     crate::bus::events::user_command::UserCommand::ScrollToHeader(entry_id.to_string())
 }
 
+/// Resolves a markdown link anchor (e.g. `#Getting-Started`) to the concrete
+/// heading id used by the renderer.
+///
+/// Applies the same fuzzy matching in both directions — case-insensitive, and
+/// treating `-` and space as interchangeable — first against the ToC entries
+/// (by id or title) and then against the rendered heading ids. Falls back to
+/// `anchor` verbatim when nothing matches, so the scroll request still names a
+/// heading id.
+///
+/// Extracted from `FastMdApp::handle_open_link` so the matching rule is a pure,
+/// testable function (RUST-023).
+pub fn resolve_anchor(
+    toc: &[crate::markdown::ToCEntry],
+    heading_ids: &[String],
+    anchor: &str,
+) -> String {
+    let anchor_lower = anchor.to_lowercase();
+    let hyphenated = anchor_lower.replace(' ', "-");
+    let spaced = anchor_lower.replace('-', " ");
+
+    let matches = |candidate: &str| {
+        let candidate_lower = candidate.to_lowercase();
+        candidate.eq_ignore_ascii_case(anchor)
+            || candidate_lower.replace(' ', "-") == hyphenated
+            || spaced == candidate_lower
+    };
+
+    toc.iter()
+        .find(|entry| matches(&entry.id) || matches(&entry.title))
+        .map(|entry| entry.id.clone())
+        .or_else(|| heading_ids.iter().find(|id| matches(id)).cloned())
+        .unwrap_or_else(|| anchor.to_owned())
+}
+
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     show_right_panel_capture(app, parent_ui, no_op_sink);
 }
@@ -121,12 +155,13 @@ pub fn show_right_panel_capture(
         app.selection().selected_file().is_some(),
     );
 
-    let max_w = ctx.viewport_rect().width() * 0.3;
+    let max_w =
+        ctx.viewport_rect().width() * crate::ui::panel_layout::RIGHT_PANEL_MAX_WIDTH_FRACTION;
     let default_w = app
         .layout()
         .right_panel_width
-        .unwrap_or(200.0)
-        .max(150.0)
+        .unwrap_or(crate::ui::panel_layout::RIGHT_PANEL_DEFAULT_WIDTH)
+        .max(crate::ui::panel_layout::RIGHT_PANEL_MIN_WIDTH)
         .min(max_w);
 
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
@@ -134,7 +169,7 @@ pub fn show_right_panel_capture(
     // `width_range` is now `size_range`.
     let panel_response = Panel::right("toc_panel")
         .default_size(default_w)
-        .size_range(150.0..=max_w)
+        .size_range(crate::ui::panel_layout::RIGHT_PANEL_MIN_WIDTH..=max_w)
         .resizable(true)
         .show(parent_ui, |ui| {
             if !toc_visible {
@@ -144,6 +179,7 @@ pub fn show_right_panel_capture(
             panel_heading(ui, crate::ui::strings::TABLE_OF_CONTENTS_HEADER, 14.0);
             ui.add_space(4.0);
 
+            let toc_snapshot = app.orchestrator.tabs.toc_arc();
             egui::ScrollArea::vertical()
                 .id_salt("right_toc_scroll")
                 // Pin the scroll area's inner WIDTH to the panel's width
@@ -164,43 +200,37 @@ pub fn show_right_panel_capture(
                 // narrow, resizable panel) instead of drifting the
                 // origin and clipping on the left.
                 .auto_shrink([false, true])
-                .show_rows(
-                    ui,
-                    18.0,
-                    app.orchestrator.tabs.toc.len(),
-                    |ui, row_range| {
-                        let toc_snapshot = app.orchestrator.tabs.toc.clone();
-                        for i in row_range {
-                            if let Some(entry) = toc_snapshot.get(i) {
-                                ui.push_id((i, &entry.id, "toc_item"), |ui| {
-                                    let font_size = calculate_font_size(entry.level as usize);
-                                    let indent = calculate_indent(entry.level as usize);
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(indent);
-                                        // Cap the label's layout width to the remaining
-                                        // available space. Without this, a non-wrapping
-                                        // label's allocation grows the placer's min_rect
-                                        // past the panel right edge even when truncate()
-                                        // clips the visual rendering — left-side text then
-                                        // disappears behind the panel's clip_rect.
-                                        let max_label_w = (ui.available_width()).max(0.0);
-                                        ui.set_max_width(max_label_w);
-                                        let label = egui::Label::new(
-                                            RichText::new(&entry.title).size(font_size),
-                                        )
-                                        .truncate();
-                                        if ui.add(label).clicked() {
-                                            app.orchestrator
-                                                .user_command_bus
-                                                .publish(apply_toc_row_click(&entry.id));
-                                            on_click("toc_row");
-                                        }
-                                    });
+                .show_rows(ui, 18.0, toc_snapshot.len(), |ui, row_range| {
+                    for i in row_range {
+                        if let Some(entry) = toc_snapshot.get(i) {
+                            ui.push_id((i, &entry.id, "toc_item"), |ui| {
+                                let font_size = calculate_font_size(entry.level as usize);
+                                let indent = calculate_indent(entry.level as usize);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(indent);
+                                    // Cap the label's layout width to the remaining
+                                    // available space. Without this, a non-wrapping
+                                    // label's allocation grows the placer's min_rect
+                                    // past the panel right edge even when truncate()
+                                    // clips the visual rendering — left-side text then
+                                    // disappears behind the panel's clip_rect.
+                                    let max_label_w = (ui.available_width()).max(0.0);
+                                    ui.set_max_width(max_label_w);
+                                    let label = egui::Label::new(
+                                        RichText::new(&entry.title).size(font_size),
+                                    )
+                                    .truncate();
+                                    if ui.add(label).clicked() {
+                                        app.orchestrator
+                                            .user_command_bus
+                                            .publish(apply_toc_row_click(&entry.id));
+                                        on_click("toc_row");
+                                    }
                                 });
-                            }
+                            });
                         }
-                    },
-                );
+                    }
+                });
         });
 
     // Capture the panel's actual width after user interaction

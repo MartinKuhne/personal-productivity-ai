@@ -65,6 +65,10 @@ pub struct Palette {
     pub warning: egui::Color32,
     /// Error text and error-marked rows (red RGB(244, 15, 2)).
     pub error: egui::Color32,
+    /// Timestamp column of the background-logs viewer (dim gray).
+    pub log_timestamp: egui::Color32,
+    /// Category tag of the background-logs viewer (light blue).
+    pub log_category: egui::Color32,
 }
 
 impl Palette {
@@ -90,6 +94,8 @@ impl Palette {
             success: egui::Color32::from_rgb(100, 255, 100),
             warning: egui::Color32::from_rgb(220, 130, 0),
             error: egui::Color32::from_rgb(244, 15, 2),
+            log_timestamp: egui::Color32::DARK_GRAY,
+            log_category: egui::Color32::LIGHT_BLUE,
         }
     }
 

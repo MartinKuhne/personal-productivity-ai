@@ -22,7 +22,10 @@ pub(crate) mod table_width;
 
 pub use document::{Document, DocumentContent, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use link_scanner::scan_text_for_links;
-pub use model::{InlineElem, RenderEvent, TextStyle, ToCEntry, build_toc, heading_plain_text};
+pub use model::{
+    IMAGE_PLACEHOLDER_PREFIX, InlineElem, RenderEvent, TextStyle, ToCEntry, WIKILINK_SCHEME,
+    build_toc, heading_plain_text, image_placeholder,
+};
 pub use parser::{parse_markdown_to_events, parse_yaml_to_pairs, render_markdown_to_html};
 pub use table_layout::{LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer};
 pub use table_width::{

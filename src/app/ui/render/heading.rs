@@ -11,6 +11,7 @@
 //!
 //! Unit tests live in the sibling `heading_tests.rs` sidecar.
 
+use super::style::{link_hover_tip, styled_text};
 use crate::markdown::{InlineElem, heading_plain_text};
 use crate::ui::theme::PaletteExt;
 use crate::ui::widgets::muted_text;
@@ -53,34 +54,14 @@ pub(crate) fn render_heading(
         for elem in elems {
             match elem {
                 InlineElem::Text(t, style) => {
-                    let mut rt = RichText::new(t).size(size);
-                    // Respect the heading's TextStyle.bold instead of
-                    // unconditionally applying .strong().
-                    if style.bold {
-                        rt = rt.strong();
-                    }
-                    if style.italic {
-                        rt = rt.italics();
-                    }
-                    if style.code {
-                        rt = rt.monospace().background_color(ui.palette().border);
-                    }
-                    if style.strikethrough {
-                        rt = rt.strikethrough();
-                    }
-                    ui.label(rt);
+                    ui.label(styled_text(t, style, Some(size), ui.palette()));
                 }
                 InlineElem::Link(url, text) => {
-                    let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
-                        format!("Note: {target}")
-                    } else {
-                        url.clone()
-                    };
                     ui.hyperlink_to(egui::RichText::new(text).size(size), url)
-                        .on_hover_text(hover_tip);
+                        .on_hover_text(link_hover_tip(url));
                 }
                 InlineElem::Image(url) => {
-                    ui.label(RichText::new(format!("[Image: {}]", url)).size(size));
+                    ui.label(RichText::new(crate::markdown::image_placeholder(url)).size(size));
                 }
                 InlineElem::Html(h) => {
                     ui.label(muted_text(h).size(size));

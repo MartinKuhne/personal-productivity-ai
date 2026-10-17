@@ -56,6 +56,21 @@ pub enum RenderEvent {
     Separator,
 }
 
+/// Scheme prefix marking an in-app wikilink target inside an
+/// [`InlineElem::Link`] URL (`wikilink:<target>` or
+/// `wikilink:<target>#<anchor>`).
+pub const WIKILINK_SCHEME: &str = "wikilink:";
+
+/// Prefix of the placeholder text produced by [`image_placeholder`].
+pub const IMAGE_PLACEHOLDER_PREFIX: &str = "[Image: ";
+
+/// The placeholder text rendered in place of an [`InlineElem::Image`] whose
+/// bitmap is not painted: `"[Image: <url>]"` (RUST-021 — the single source
+/// shared by the plain-text derivation, the parser and every UI renderer).
+pub fn image_placeholder(url: &str) -> String {
+    format!("{IMAGE_PLACEHOLDER_PREFIX}{url}]")
+}
+
 /// Concatenate the plain-text content of inline elements. Used to derive
 /// the scroll-id key and the ToC title from a heading's styled elements.
 pub fn heading_plain_text(elems: &[InlineElem]) -> String {
@@ -64,9 +79,7 @@ pub fn heading_plain_text(elems: &[InlineElem]) -> String {
         match e {
             InlineElem::Text(t, _) => out.push_str(t),
             InlineElem::Link(_, t) => out.push_str(t),
-            InlineElem::Image(url) => {
-                out.push_str(&format!("[Image: {}]", url));
-            }
+            InlineElem::Image(url) => out.push_str(&image_placeholder(url)),
             InlineElem::Html(h) => out.push_str(h),
             InlineElem::SoftBreak => out.push(' '),
         }

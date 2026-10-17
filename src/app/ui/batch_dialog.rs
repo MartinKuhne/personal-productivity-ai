@@ -10,7 +10,10 @@ use crate::agent::batch::types::{
 };
 use crate::ui::FastMdApp;
 use crate::ui::strings;
-use crate::ui::widgets::{modal_window, right_aligned_row, selectable_combo};
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{
+    DialogAction, confirm_cancel_buttons, modal_window, right_aligned_row, selectable_combo,
+};
 use eframe::egui;
 
 /// Shows the batch prompt processing dialog.
@@ -87,7 +90,10 @@ fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDi
     if config.mode == BatchMode::File {
         ui.horizontal(|ui| {
             ui.label(strings::BATCH_DIALOG_PATTERN_LABEL);
-            ui.add(egui::TextEdit::singleline(&mut config.pattern).hint_text("*.md"));
+            ui.add(
+                egui::TextEdit::singleline(&mut config.pattern)
+                    .hint_text(strings::BATCH_DIALOG_PATTERN_HINT),
+            );
         });
     }
 
@@ -143,37 +149,34 @@ fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDi
     // Process and Cancel buttons
     ui.horizontal(|ui| {
         right_aligned_row(ui, |ui| {
-            let process_enabled = is_config_valid(config);
-
-            if ui
-                .add_enabled(
-                    process_enabled,
-                    egui::Button::new(strings::BATCH_PROCESS_BUTTON),
-                )
-                .clicked()
-                && let (Some(dir_idx), Some(prompt_idx)) =
-                    (config.selected_dir_idx, config.selected_prompt_idx)
-                && let (Some(directory), Some(prompt)) = (
-                    config.available_dirs.get(dir_idx),
-                    config.available_prompts.get(prompt_idx),
-                )
+            match confirm_cancel_buttons(ui, strings::BATCH_PROCESS_BUTTON, is_config_valid(config))
             {
-                let batch_config = BatchConfig {
-                    directory: directory.clone(),
-                    pattern: config.pattern.clone(),
-                    prompt_path: prompt.path.clone(),
-                    mode: config.mode,
-                    concurrency: config.concurrency,
-                };
-                app.orchestrator.user_command_bus.publish(
-                    crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
-                );
-            }
-
-            if ui.button(strings::CANCEL_BUTTON).clicked() {
-                app.orchestrator
-                    .user_command_bus
-                    .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                DialogAction::Confirm => {
+                    if let (Some(dir_idx), Some(prompt_idx)) =
+                        (config.selected_dir_idx, config.selected_prompt_idx)
+                        && let (Some(directory), Some(prompt)) = (
+                            config.available_dirs.get(dir_idx),
+                            config.available_prompts.get(prompt_idx),
+                        )
+                    {
+                        let batch_config = BatchConfig {
+                            directory: directory.clone(),
+                            pattern: config.pattern.clone(),
+                            prompt_path: prompt.path.clone(),
+                            mode: config.mode,
+                            concurrency: config.concurrency,
+                        };
+                        app.orchestrator.user_command_bus.publish(
+                            crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
+                        );
+                    }
+                }
+                DialogAction::Cancel => {
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                }
+                DialogAction::None => {}
             }
         });
     });
@@ -196,7 +199,7 @@ fn show_running_view(ui: &mut egui::Ui, app: &mut FastMdApp) {
         if let Some(cancel_flag) = &app.dialogs().batch_cancel_flag
             && cancel_flag.load(std::sync::atomic::Ordering::SeqCst)
         {
-            ui.colored_label(egui::Color32::YELLOW, strings::BATCH_CANCELLED_TEXT);
+            ui.colored_label(ui.palette().warning, strings::BATCH_CANCELLED_TEXT);
         }
     } else {
         ui.label(strings::BATCH_PROCESSING_TEXT);

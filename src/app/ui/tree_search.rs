@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fastmd_agent::tools::search as note_search;
 
@@ -36,7 +37,9 @@ pub struct SearchResultEntry {
 pub struct TreeSearch {
     query: String,
     active_filter: Option<String>,
-    results: Vec<SearchResultEntry>,
+    /// Search results behind an [`Arc`] so the left panel can take a per-frame
+    /// [`Arc::clone`] (a pointer bump) rather than copying the vector.
+    results: Arc<Vec<SearchResultEntry>>,
     matching_files: HashSet<PathBuf>,
 }
 
@@ -52,7 +55,7 @@ impl TreeSearch {
         Self {
             query: String::new(),
             active_filter: None,
-            results: Vec::new(),
+            results: Arc::new(Vec::new()),
             matching_files: HashSet::new(),
         }
     }
@@ -84,7 +87,15 @@ impl TreeSearch {
 
     /// The structured search results, one entry per matching file.
     pub fn results(&self) -> &[SearchResultEntry] {
-        &self.results
+        self.results.as_slice()
+    }
+
+    /// The search results as a cheap-to-clone [`Arc`] handle.
+    ///
+    /// The left panel takes this once per frame instead of cloning the vector
+    /// while searching (the `cached_tree_rows` pattern).
+    pub fn results_arc(&self) -> Arc<Vec<SearchResultEntry>> {
+        Arc::clone(&self.results)
     }
 
     /// Files whose content matched the active filter.
@@ -107,8 +118,12 @@ impl TreeSearch {
         }
         self.active_filter = Some(trimmed.to_string());
         let term_lower = trimmed.to_lowercase();
-        self.results =
-            find_search_results_scoped(all_files, &term_lower, content_libraries, allowed_dirs);
+        self.results = Arc::new(find_search_results_scoped(
+            all_files,
+            &term_lower,
+            content_libraries,
+            allowed_dirs,
+        ));
         self.matching_files = self.results.iter().map(|r| r.path.clone()).collect();
     }
 
@@ -125,7 +140,7 @@ impl TreeSearch {
     pub fn clear(&mut self) {
         self.query.clear();
         self.active_filter = None;
-        self.results.clear();
+        Arc::make_mut(&mut self.results).clear();
         self.matching_files.clear();
     }
 }

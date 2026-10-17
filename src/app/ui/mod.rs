@@ -12,6 +12,7 @@ pub mod editor_egui;
 pub mod fonts;
 pub(crate) mod link_resolver;
 pub mod logo;
+pub(crate) mod measure;
 pub mod modals;
 pub mod os_shell;
 pub(crate) mod panel_layout;

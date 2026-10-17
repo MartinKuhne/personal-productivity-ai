@@ -2,6 +2,7 @@
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
+use crate::ui::theme::PaletteExt;
 use crate::ui::widgets::{modal_window, search_field, selectable_combo};
 use eframe::egui;
 
@@ -135,15 +136,16 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                         let log = &logs[i];
                         ui.push_id(i, |ui| {
                             ui.horizontal(|ui| {
+                                let palette = ui.palette();
                                 ui.label(
                                     egui::RichText::new(
                                         log.timestamp.format("%H:%M:%S%.3f").to_string(),
                                     )
-                                    .color(egui::Color32::DARK_GRAY),
+                                    .color(palette.log_timestamp),
                                 );
                                 ui.label(
                                     egui::RichText::new(format!("[{}]", log.category))
-                                        .color(egui::Color32::LIGHT_BLUE),
+                                        .color(palette.log_category),
                                 );
                                 ui.label(&log.message);
                             })
