@@ -149,6 +149,85 @@ fn test_menu_check_returns_post_click_value() {
 }
 
 #[test]
+fn test_bordered_panel_uses_fill_and_palette_border() {
+    use crate::ui::theme::Palette;
+
+    let ctx = egui::Context::default();
+    let mut captured = None;
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
+        let fill = egui::Color32::from_rgb(1, 2, 3);
+        let frame = bordered_panel(ui, fill);
+        captured = Some((frame.fill, frame.stroke, frame.inner_margin));
+    });
+    let (fill, stroke, margin) = captured.expect("render closure ran");
+    assert_eq!(fill, egui::Color32::from_rgb(1, 2, 3));
+    assert_eq!(stroke.width, 1.0_f32);
+    assert_eq!(stroke.color, Palette::fastmd_dark().border);
+    assert_eq!(margin, egui::Margin::same(8));
+}
+
+#[test]
+fn test_bordered_panel_renders_without_id_change() {
+    let ctx = egui::Context::default();
+    let output = run_ui_test(&ctx, raw_input(), |ui| {
+        bordered_panel(ui, ui.palette().code_surface).show(ui, |ui| {
+            ui.label("body");
+        });
+    });
+    assert_no_id_change_in_shapes(&shapes_of(&output));
+}
+
+#[test]
+fn test_search_field_accepts_typed_text() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(String::new(), |ui, text| {
+        search_field(ui, text);
+    });
+    harness.set_size(egui::vec2(600.0, 200.0));
+    harness.run_steps(2);
+
+    harness.get_by_role(Role::TextInput).click();
+    harness.run_steps(2);
+    harness.get_by_role(Role::TextInput).type_text("note");
+    harness.run_steps(2);
+
+    assert_eq!(harness.state().as_str(), "note");
+}
+
+#[test]
+fn test_no_op_sink_is_an_interaction_sink() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+
+    // `no_op_sink` must satisfy the `InteractionSink` bound used by every
+    // `*_capture` render seam.
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        ui.menu_button("Menu", |ui| {
+            if menu_item(ui, "Open") {
+                no_op_sink("open");
+            }
+            if menu_item(ui, "Close") {
+                captured.push("close");
+            }
+        });
+    });
+    use egui_kittest::kittest::Queryable;
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    harness.get_by_label("Menu").click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+    harness.get_by_label("Close").click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    assert_eq!(harness.state(), &vec!["close"]);
+}
+
+#[test]
 fn test_selectable_options_writes_back_and_marks_changed() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
