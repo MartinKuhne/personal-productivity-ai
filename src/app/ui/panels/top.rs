@@ -5,6 +5,7 @@
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::table_width::DeficitStrategy;
+use crate::ui::theme::{Palette, PaletteExt};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -20,7 +21,7 @@ use std::path::PathBuf;
 pub fn build_indexing_status_text(indexing_finished: bool, file_count: usize) -> RichText {
     if indexing_finished {
         RichText::new(crate::ui::strings::build_indexing_finished_text(file_count))
-            .color(egui::Color32::from_rgb(100, 255, 100))
+            .color(Palette::fastmd_dark().success)
     } else {
         RichText::new(crate::ui::strings::build_indexing_progress_text(file_count)).italics()
     }
@@ -144,7 +145,7 @@ pub fn show_top_panel_capture(
             ui.heading(
                 RichText::new(crate::ui::strings::APP_TITLE)
                     .strong()
-                    .color(egui::Color32::from_rgb(100, 200, 255)),
+                    .color(ui.palette().accent_text),
             );
             ui.separator();
             // Spinner and tag combobox must always allocate, even

@@ -12,6 +12,7 @@
 //! ids, no inline-style composition. It depends only on `egui` and the
 //! `RichText` helper.
 
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 
@@ -32,9 +33,10 @@ pub(crate) fn render_code_block_scroll(
     content: &str,
     scroll_to_me: bool,
 ) {
+    let palette = ui.palette();
     let frame_resp = egui::Frame::NONE
-        .fill(egui::Color32::from_rgb(20, 20, 22))
-        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
+        .fill(palette.code_surface)
+        .stroke(egui::Stroke::new(1.0_f32, palette.border))
         .inner_margin(8.0)
         .corner_radius(4.0)
         .show(ui, |ui| {

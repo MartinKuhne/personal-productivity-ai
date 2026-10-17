@@ -25,6 +25,7 @@ pub mod table_width;
 pub(crate) mod tabs;
 pub mod test_helpers;
 pub(crate) mod text_buffer;
+pub mod theme;
 pub mod tools_dialog;
 pub(crate) mod tree;
 pub mod tree_search;

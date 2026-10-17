@@ -12,6 +12,7 @@
 //! Unit tests live in the sibling `heading_tests.rs` sidecar.
 
 use crate::markdown::{InlineElem, heading_plain_text};
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 
@@ -61,9 +62,7 @@ pub(crate) fn render_heading(
                         rt = rt.italics();
                     }
                     if style.code {
-                        rt = rt
-                            .monospace()
-                            .background_color(egui::Color32::from_gray(40));
+                        rt = rt.monospace().background_color(ui.palette().border);
                     }
                     if style.strikethrough {
                         rt = rt.strikethrough();

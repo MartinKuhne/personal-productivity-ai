@@ -13,6 +13,7 @@
 //! re-rendering the same front matter on subsequent frames is nearly free.
 
 use crate::markdown::parse_yaml_to_pairs;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 use std::hash::{Hash, Hasher};
@@ -54,9 +55,10 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
             (pairs, None)
         };
 
+        let palette = ui.palette();
         egui::Frame::NONE
-            .fill(egui::Color32::from_rgb(24, 24, 27))
-            .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
+            .fill(palette.table_surface)
+            .stroke(egui::Stroke::new(1.0_f32, palette.border))
             .inner_margin(8.0)
             .corner_radius(4.0)
             .show(ui, |ui| {
@@ -108,7 +110,7 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
                                             ui.label(
                                                 RichText::new(k)
                                                     .strong()
-                                                    .color(egui::Color32::from_rgb(150, 200, 255)),
+                                                    .color(ui.palette().accent_text_soft),
                                             );
                                         },
                                     );
@@ -122,8 +124,7 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
                                             ui.set_max_width(value_col_width);
                                             ui.add(
                                                 egui::Label::new(
-                                                    RichText::new(v)
-                                                        .color(egui::Color32::from_gray(220)),
+                                                    RichText::new(v).color(ui.palette().text_value),
                                                 )
                                                 .wrap(),
                                             );

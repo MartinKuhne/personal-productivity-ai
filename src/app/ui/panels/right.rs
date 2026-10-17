@@ -3,6 +3,7 @@
 //! Unit tests live in the sibling `right_tests.rs` sidecar.
 
 use crate::ui::FastMdApp;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -144,7 +145,7 @@ pub fn show_right_panel_capture(
                 RichText::new(crate::ui::strings::TABLE_OF_CONTENTS_HEADER)
                     .size(14.0)
                     .strong()
-                    .color(egui::Color32::from_rgb(100, 200, 255)),
+                    .color(ui.palette().accent_text),
             );
             ui.add_space(4.0);
 

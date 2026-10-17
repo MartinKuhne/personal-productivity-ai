@@ -5,6 +5,7 @@
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
@@ -74,7 +75,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             RichText::new(crate::ui::strings::AGENT_SESSION_HEADER)
                 .size(18.0)
                 .strong()
-                .color(egui::Color32::from_rgb(100, 200, 255)),
+                .color(ui.palette().accent_text),
         );
         ui.separator();
         if ui
@@ -113,7 +114,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     ui.label(
                         egui::RichText::new(&thinking)
                             .italics()
-                            .color(egui::Color32::from_rgb(160, 160, 160)),
+                            .color(ui.palette().text_muted),
                     );
                 });
                 ui.add_space(8.0);
@@ -303,7 +304,7 @@ pub fn render_tabs_and_content_capture(
 
     if let Some(selected_path) = app.selection().selected_file() {
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
-        let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
+        let frame_fill = pdf_backed.then(|| ui.palette().pdf_surface);
         let deficit_strategy = app.orchestrator.config.deficit_strategy();
         render_markdown_content(ui, &mut app.orchestrator.tabs, frame_fill, deficit_strategy);
     }

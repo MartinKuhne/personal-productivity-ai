@@ -18,6 +18,7 @@ use crate::ui::strings::{
     TOOLS_FORGET, TOOLS_KIND_INTERNAL, TOOLS_KIND_MCP_REMOTE, TOOLS_KIND_MCP_STDIO,
     TOOLS_LIST_COLUMN, TOOLS_RESTART,
 };
+use crate::ui::theme::PaletteExt;
 
 use eframe::egui;
 
@@ -250,7 +251,7 @@ fn render_row(
     row.col(|ui| {
         ui.horizontal(|ui| {
             if let Some(err) = &group.last_error {
-                ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
+                ui.label(egui::RichText::new("⚠").color(ui.palette().warning))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
                     app.orchestrator.user_command_bus.publish(

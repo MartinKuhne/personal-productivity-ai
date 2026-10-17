@@ -12,6 +12,7 @@
 //! viewport math.
 
 use crate::markdown::InlineElem;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 
@@ -151,12 +152,10 @@ pub(super) fn render_inline_inner(
                     rt = rt.italics();
                 }
                 if style.code {
-                    rt = rt
-                        .monospace()
-                        .background_color(egui::Color32::from_gray(40));
+                    rt = rt.monospace().background_color(ui.palette().border);
                 }
                 if style.muted {
-                    rt = rt.color(egui::Color32::from_rgb(160, 160, 160));
+                    rt = rt.color(ui.palette().text_muted);
                 }
                 if style.strikethrough {
                     rt = rt.strikethrough();

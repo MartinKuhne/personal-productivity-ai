@@ -26,6 +26,7 @@
 use super::cell::render_table_cell;
 use crate::markdown::InlineElem;
 use crate::ui::table_width::TableRenderConfig;
+use crate::ui::theme::Palette;
 use eframe::egui;
 
 /// Medium-gray border drawn around the outer perimeter of every markdown
@@ -34,7 +35,7 @@ use eframe::egui;
 /// line stays continuous at the table edge regardless of which path ran.
 const TABLE_PERIMETER_STROKE: egui::Stroke = egui::Stroke {
     width: 1.0,
-    color: egui::Color32::from_gray(120),
+    color: Palette::fastmd_dark().border_strong,
 };
 
 /// Render a markdown table using the Fair Table Width Algorithm (FTWA) with

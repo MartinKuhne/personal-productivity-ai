@@ -8,6 +8,7 @@ use super::handlers::{apply_directory_row_click, apply_file_row_click};
 use crate::export::pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
 use crate::export::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use std::collections::HashSet;
 
@@ -420,7 +421,7 @@ pub fn render_flat_row_capture(
                 ui.add_space(clamped_depth as f32 * 18.0);
                 let mut text = egui::RichText::new(label);
                 if ctx.pdf_backing_tracker.is_pdf_backed(&row.path) {
-                    text = text.color(egui::Color32::from_rgb(244, 15, 2));
+                    text = text.color(ui.palette().error);
                 }
 
                 let response = ui.selectable_label(is_selected, text);
@@ -503,7 +504,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let label = format!("  {}", node.name);
         let mut text = egui::RichText::new(label);
         if ctx.pdf_backing_tracker.is_pdf_backed(&node.path) {
-            text = text.color(egui::Color32::from_rgb(244, 15, 2));
+            text = text.color(ui.palette().error);
         }
 
         let response = ui.selectable_label(is_selected, text);

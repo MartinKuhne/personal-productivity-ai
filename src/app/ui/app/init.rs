@@ -36,36 +36,10 @@ impl FastMdApp {
     /// theme's visuals match the FastMD palette so UI-002 (dark color
     /// scheme) holds even if the system preference reports light mode.
     ///
-    /// egui 0.35 split the global style into a Dark and a Light theme,
-    /// picked at runtime by `ThemePreference` (default `System`).
-    /// `set_visuals` writes to the *currently active* theme only, so on
-    /// systems that report a light-mode preference the next frame can
-    /// flip the active theme back to the default light visuals and the
-    /// carefully tuned dark background is lost. Forcing the dark theme
-    /// and applying the visuals to the dark theme explicitly makes the
-    /// dark color scheme the source of truth.
+    /// Delegates to [`crate::ui::theme::install_dark`], which owns the
+    /// palette and the egui theme-pinning rationale.
     pub fn configure_dark_theme(ctx: &egui::Context) {
-        ctx.set_theme(egui::Theme::Dark);
-
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
-        visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
-        visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
-        visuals.window_corner_radius = 8.0.into();
-        visuals.widgets.noninteractive.corner_radius = 4.0.into();
-        visuals.widgets.inactive.corner_radius = 4.0.into();
-        visuals.widgets.hovered.corner_radius = 4.0.into();
-        visuals.widgets.active.corner_radius = 4.0.into();
-
-        let bright_text = egui::Color32::from_gray(210);
-        visuals.widgets.noninteractive.fg_stroke.color = bright_text;
-        visuals.widgets.inactive.fg_stroke.color = bright_text;
-        visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
-        visuals.widgets.hovered.fg_stroke.color = egui::Color32::WHITE;
-
-        // Apply to the dark theme explicitly so the visuals persist
-        // even if the active theme ever flips to Light.
-        ctx.set_visuals_of(egui::Theme::Dark, visuals);
+        crate::ui::theme::install_dark(ctx);
     }
 
     /// Configure fonts for FastMD including typography defaults, Phosphor icon font,

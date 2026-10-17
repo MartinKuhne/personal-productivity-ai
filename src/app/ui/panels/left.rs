@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
+use crate::ui::theme::PaletteExt;
 use crate::ui::tree::{FlatRow, TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
 use eframe::egui;
 use egui::RichText;
@@ -297,7 +298,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                     let bg_color = if is_selected {
                                         ui.visuals().selection.bg_fill
                                     } else {
-                                        egui::Color32::from_rgb(18, 18, 20)
+                                        ui.palette().surface_variant
                                     };
 
                                     let frame_resp = egui::Frame::NONE
@@ -313,7 +314,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                         ui.label(
                                                             RichText::new(format!("({})", entry.match_count))
                                                                 .size(11.0)
-                                                                .color(egui::Color32::from_gray(140)),
+                                                                .color(ui.palette().text_faint),
                                                         );
                                                     }
                                                 });
@@ -321,7 +322,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                     ui.label(
                                                         RichText::new(&entry.relative_path)
                                                             .size(11.0)
-                                                            .color(egui::Color32::from_gray(140)),
+                                                            .color(ui.palette().text_faint),
                                                     );
                                                 }
                                                 if !entry.snippet.is_empty() {
@@ -329,7 +330,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                         RichText::new(&entry.snippet)
                                                             .size(11.0)
                                                             .italics()
-                                                            .color(egui::Color32::from_rgb(160, 190, 220)),
+                                                            .color(ui.palette().accent_text_subtle),
                                                     );
                                                 }
                                             });

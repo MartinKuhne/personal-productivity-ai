@@ -38,6 +38,7 @@
 
 use crate::markdown::InlineElem;
 use crate::ui::table_width::TablePadding;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 use egui::epaint::text::{LayoutJob, TextWrapping};
@@ -116,9 +117,7 @@ pub(super) fn render_table_cell(
                             rt = rt.italics();
                         }
                         if style.code {
-                            rt = rt
-                                .monospace()
-                                .background_color(egui::Color32::from_gray(40));
+                            rt = rt.monospace().background_color(ui.palette().border);
                         }
                         if style.strikethrough {
                             rt = rt.strikethrough();
