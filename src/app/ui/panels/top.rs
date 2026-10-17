@@ -6,6 +6,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::table_width::DeficitStrategy;
 use crate::ui::theme::{Palette, PaletteExt};
+use crate::ui::widgets::{menu_check, menu_item, right_aligned_row, selectable_combo};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -182,59 +183,50 @@ pub fn show_top_panel_capture(
                     app.file_processor().indexing_finished,
                     egui::Separator::default(),
                 );
-                egui::ComboBox::from_id_salt(crate::ui::strings::TAG_FILTER_ID_SALT)
-                    .selected_text(get_tag_filter_text(app.tags().selected_tag.as_ref()))
-                    .show_ui(ui, |ui| {
-                        let mut changed = ui
-                            .selectable_value(
-                                &mut app.tags_mut().selected_tag,
-                                None,
-                                crate::ui::strings::TAG_FILTER_ALL,
-                            )
-                            .changed();
-                        let all_tags: Vec<String> = app.tags().all_tags().iter().cloned().collect();
-                        for tag in all_tags {
-                            changed |= ui
-                                .selectable_value(
-                                    &mut app.tags_mut().selected_tag,
-                                    Some(tag.clone()),
-                                    &tag,
-                                )
-                                .changed();
-                        }
-                        if changed {
-                            let next = compute_next_selected_file(
-                                app.selection().selected_file(),
-                                app.tags().selected_tag.as_ref(),
-                                app.tags().file_tags(),
-                            );
-                            *app.selection_mut().selected_file_mut() = next;
-                            app.selection_mut().tree_dirty = true;
-                        }
-                    });
+                let selected_text =
+                    get_tag_filter_text(app.tags().selected_tag.as_ref()).to_string();
+                let mut options: Vec<(Option<String>, String)> =
+                    vec![(None, crate::ui::strings::TAG_FILTER_ALL.to_string())];
+                for tag in app.tags().all_tags().iter().cloned().collect::<Vec<_>>() {
+                    options.push((Some(tag.clone()), tag));
+                }
+                let changed = selectable_combo(
+                    ui,
+                    crate::ui::strings::TAG_FILTER_ID_SALT,
+                    selected_text,
+                    &mut app.tags_mut().selected_tag,
+                    options,
+                );
+                if changed {
+                    let next = compute_next_selected_file(
+                        app.selection().selected_file(),
+                        app.tags().selected_tag.as_ref(),
+                        app.tags().file_tags(),
+                    );
+                    *app.selection_mut().selected_file_mut() = next;
+                    app.selection_mut().tree_dirty = true;
+                }
             });
 
             // Hamburger menu placed at the far right of the top toolbar.
             // Clicking the hamburger button opens a dropdown containing
             // Batch, Tools, Windows, Chat models, and Table wrap algorithm entries.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            right_aligned_row(ui, |ui| {
                 ui.menu_button(crate::ui::strings::HAMBURGER_MENU_BUTTON, |ui| {
                     ui.set_min_width(180.0);
 
                     // Direct action items ?" open dialogs immediately on click.
-                    if ui.button(crate::ui::strings::MENU_BATCH).clicked() {
+                    if menu_item(ui, crate::ui::strings::MENU_BATCH) {
                         app.orchestrator
                             .user_command_bus
                             .publish(apply_batch_button_click());
                         on_click("batch_button");
-                        ui.close();
                     }
-                    if ui.button(crate::ui::strings::MENU_TOOLS).clicked() {
+                    if menu_item(ui, crate::ui::strings::MENU_TOOLS) {
                         app.orchestrator
                             .user_command_bus
                             .publish(apply_tools_button_click());
                         on_click("tools_button");
-                        ui.close();
                     }
 
                     ui.separator();
@@ -251,35 +243,25 @@ pub fn show_top_panel_capture(
                         // egui's `ui.checkbox` draws the checkmark as vector
                         // strokes, so it renders correctly without relying on a
                         // glyph (e.g. U+2713) that is absent from egui's bundled
-                        // default fonts. On click egui flips `background_checked`
-                        // before returning, so `apply_background_logs_toggle`
-                        // receives the post-click value.
-                        let mut background_checked = show_bg;
-                        if ui
-                            .checkbox(
-                                &mut background_checked,
-                                crate::ui::strings::MENU_BACKGROUND_OPERATIONS,
-                            )
-                            .clicked()
+                        // default fonts. `menu_check` returns the post-click
+                        // value, which `apply_background_logs_toggle` needs.
+                        if let Some(checked) =
+                            menu_check(ui, crate::ui::strings::MENU_BACKGROUND_OPERATIONS, show_bg)
                         {
                             app.orchestrator
                                 .user_command_bus
-                                .publish(apply_background_logs_toggle(background_checked));
+                                .publish(apply_background_logs_toggle(checked));
                             on_click(crate::ui::strings::BACKGROUND_OPERATIONS_EVENT);
-                            ui.close();
                         }
 
                         let show_debug = app.orchestrator.agent_panel_state.show_debug_window;
-                        let mut debug_checked = show_debug;
-                        if ui
-                            .checkbox(&mut debug_checked, crate::ui::strings::MENU_AGENT_DEBUG)
-                            .clicked()
+                        if let Some(checked) =
+                            menu_check(ui, crate::ui::strings::MENU_AGENT_DEBUG, show_debug)
                         {
                             app.orchestrator
                                 .user_command_bus
-                                .publish(apply_agent_debug_toggle(debug_checked));
+                                .publish(apply_agent_debug_toggle(checked));
                             on_click(crate::ui::strings::AGENT_DEBUG_EVENT);
-                            ui.close();
                         }
                     });
 
@@ -306,23 +288,20 @@ pub fn show_top_panel_capture(
                             let mut pending_model: Option<String> = None;
                             for (name, model_cfg) in chat_models {
                                 let is_current = current_model.as_deref() == Some(name.as_str());
-                                // `ui.checkbox` renders the selected indicator
+                                // `menu_check` renders the selected indicator
                                 // as vector strokes rather than a `✓` glyph that
                                 // is absent from egui's bundled default fonts
                                 // (see the Chat models / Windows / Table wrap
                                 // submenus). The local `checked` flip on click
                                 // is invisible because the menu closes
                                 // immediately.
-                                let mut checked = is_current;
                                 let label = crate::ui::strings::format_chat_model_menu_label(
                                     name,
                                     model_cfg.get_cost(),
                                 );
-                                if ui.checkbox(&mut checked, label).clicked() {
-                                    if !is_current {
-                                        pending_model = Some(name.clone());
-                                    }
-                                    ui.close();
+                                let clicked = menu_check(ui, &label, is_current).is_some();
+                                if clicked && !is_current {
+                                    pending_model = Some(name.clone());
                                 }
                             }
 
@@ -355,12 +334,10 @@ pub fn show_top_panel_capture(
                             DeficitStrategy::LagrangePenalty,
                         ] {
                             let is_selected = variant == current_strategy;
-                            let mut checked = is_selected;
-                            if ui.checkbox(&mut checked, strategy_label(variant)).clicked() {
-                                if !is_selected {
-                                    pending = Some(variant);
-                                }
-                                ui.close();
+                            let clicked =
+                                menu_check(ui, strategy_label(variant), is_selected).is_some();
+                            if clicked && !is_selected {
+                                pending = Some(variant);
                             }
                         }
 
@@ -374,12 +351,11 @@ pub fn show_top_panel_capture(
 
                     ui.separator();
 
-                    if ui.button(crate::ui::strings::MENU_ABOUT).clicked() {
+                    if menu_item(ui, crate::ui::strings::MENU_ABOUT) {
                         app.orchestrator
                             .user_command_bus
                             .publish(apply_about_button_click());
                         on_click(crate::ui::strings::ABOUT_EVENT);
-                        ui.close();
                     }
                 });
             });

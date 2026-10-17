@@ -2,6 +2,7 @@
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
+use crate::ui::widgets::{modal_window, selectable_combo};
 use eframe::egui;
 
 /// Determines if a log entry matches the given category and search text.
@@ -61,8 +62,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
         .unwrap()
         .show_background_logs;
 
-    egui::Window::new(crate::ui::strings::BACKGROUND_PROCESSES_WINDOW)
-        .open(&mut open)
+    modal_window(crate::ui::strings::BACKGROUND_PROCESSES_WINDOW, &mut open)
         .resizable(true)
         .collapsible(true)
         .default_size([600.0, 400.0])
@@ -77,43 +77,40 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.text_edit_singleline(&mut mgr.search_text);
 
                 ui.label(crate::ui::strings::CATEGORY_LABEL);
-                egui::ComboBox::from_id_salt("category_filter")
-                    .selected_text(match mgr.filter_category {
-                        Some(c) => c.to_string(),
-                        None => crate::ui::strings::LOG_CATEGORY_ALL.to_string(),
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            None,
-                            crate::ui::strings::LOG_CATEGORY_ALL,
-                        );
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            Some(LogCategory::Indexer),
-                            crate::ui::strings::LOG_CATEGORY_INDEXER,
-                        );
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            Some(LogCategory::Watcher),
-                            crate::ui::strings::LOG_CATEGORY_WATCHER,
-                        );
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            Some(LogCategory::PdfConverter),
-                            crate::ui::strings::LOG_CATEGORY_PDF_CONVERTER,
-                        );
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            Some(LogCategory::ImageVision),
-                            crate::ui::strings::LOG_CATEGORY_IMAGE_VISION,
-                        );
-                        ui.selectable_value(
-                            &mut mgr.filter_category,
-                            Some(LogCategory::LlmTools),
-                            crate::ui::strings::LOG_CATEGORY_LLM_TOOLS,
-                        );
-                    });
+                let selected_text = match mgr.filter_category {
+                    Some(c) => c.to_string(),
+                    None => crate::ui::strings::LOG_CATEGORY_ALL.to_string(),
+                };
+                let options: Vec<(Option<LogCategory>, String)> = vec![
+                    (None, crate::ui::strings::LOG_CATEGORY_ALL.to_string()),
+                    (
+                        Some(LogCategory::Indexer),
+                        crate::ui::strings::LOG_CATEGORY_INDEXER.to_string(),
+                    ),
+                    (
+                        Some(LogCategory::Watcher),
+                        crate::ui::strings::LOG_CATEGORY_WATCHER.to_string(),
+                    ),
+                    (
+                        Some(LogCategory::PdfConverter),
+                        crate::ui::strings::LOG_CATEGORY_PDF_CONVERTER.to_string(),
+                    ),
+                    (
+                        Some(LogCategory::ImageVision),
+                        crate::ui::strings::LOG_CATEGORY_IMAGE_VISION.to_string(),
+                    ),
+                    (
+                        Some(LogCategory::LlmTools),
+                        crate::ui::strings::LOG_CATEGORY_LLM_TOOLS.to_string(),
+                    ),
+                ];
+                selectable_combo(
+                    ui,
+                    "category_filter",
+                    selected_text,
+                    &mut mgr.filter_category,
+                    options,
+                );
 
                 ui.checkbox(
                     &mut mgr.auto_scroll,
