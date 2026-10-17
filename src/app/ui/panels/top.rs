@@ -6,7 +6,9 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::table_width::DeficitStrategy;
 use crate::ui::theme::{Palette, PaletteExt};
-use crate::ui::widgets::{menu_check, menu_item, right_aligned_row, selectable_combo};
+use crate::ui::widgets::{
+    InteractionSink, menu_check, menu_item, no_op_sink, right_aligned_row, selectable_combo,
+};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -119,7 +121,7 @@ pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_top_panel_capture(app, parent_ui, |_| {});
+    show_top_panel_capture(app, parent_ui, no_op_sink);
 }
 
 /// Tier 4 test variant of [`show_top_panel`]. The `on_click` callback
@@ -129,7 +131,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 pub fn show_top_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {

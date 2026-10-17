@@ -32,6 +32,13 @@ pub fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Respon
     ui.button(icon).on_hover_text(tooltip)
 }
 
+/// The "Search" label plus single-line text field shared by the log/debug
+/// viewer toolbars.
+pub fn search_field(ui: &mut egui::Ui, text: &mut String) {
+    ui.label(crate::ui::strings::SEARCH_LABEL);
+    ui.text_edit_singleline(text);
+}
+
 /// A menu or context-menu item.
 ///
 /// Returns `true` when the item was clicked and asks the enclosing menu to
@@ -83,6 +90,20 @@ pub fn panel_heading(ui: &mut egui::Ui, text: &str, size: f32) -> egui::Response
             .strong()
             .color(ui.palette().accent_text),
     )
+}
+
+/// The bordered, rounded content-panel frame shared by code blocks and the
+/// YAML front-matter table.
+///
+/// Callers pass the surface colour (`palette().code_surface` for code blocks,
+/// `palette().table_surface` for the YAML table); the border, padding and
+/// corner radius are the shared values.
+pub fn bordered_panel(ui: &egui::Ui, fill: egui::Color32) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0_f32, ui.palette().border))
+        .inner_margin(8.0)
+        .corner_radius(4.0)
 }
 
 /// Renders `(value, label)` options as selectable rows, writing the picked
@@ -144,6 +165,18 @@ where
 pub fn modal_window<'a>(title: &'a str, open: &'a mut bool) -> egui::Window<'a> {
     egui::Window::new(title).open(open).collapsible(false)
 }
+
+/// Sink for the interaction events emitted by the `*_capture` render seams.
+///
+/// A blanket alias for `FnMut(&'static str)`. Production render paths pass
+/// [`no_op_sink`]; tests pass a closure that records the event names into the
+/// `egui_kittest` harness's persistent state (see `ui::test_helpers::interact`).
+pub trait InteractionSink: FnMut(&'static str) {}
+
+impl<T: FnMut(&'static str)> InteractionSink for T {}
+
+/// The no-op [`InteractionSink`] passed by production render paths.
+pub fn no_op_sink(_event: &'static str) {}
 
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `widgets_tests.rs` sidecar.

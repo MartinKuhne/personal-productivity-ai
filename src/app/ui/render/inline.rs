@@ -13,6 +13,7 @@
 
 use crate::markdown::InlineElem;
 use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::muted_text;
 use eframe::egui;
 use egui::RichText;
 
@@ -186,10 +187,7 @@ pub(super) fn render_inline_inner(
             InlineElem::Html(html) => {
                 // Same egui 0.35 wrap-mode default-off hazard as
                 // `InlineElem::Text`; pin the wrap explicitly.
-                ui.add(
-                    egui::Label::new(RichText::new(html).italics().color(egui::Color32::GRAY))
-                        .wrap(),
-                );
+                ui.add(egui::Label::new(muted_text(html)).wrap());
             }
             InlineElem::SoftBreak => {
                 ui.label(" ");

@@ -3,7 +3,7 @@
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
-use crate::ui::widgets::{modal_window, right_aligned_row, selectable_combo};
+use crate::ui::widgets::{modal_window, right_aligned_row, search_field, selectable_combo};
 use eframe::egui;
 
 pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
@@ -21,8 +21,10 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
             let entries = app.orchestrator.agent.state().debug_entries.clone();
 
             ui.horizontal(|ui| {
-                ui.label(crate::ui::strings::SEARCH_LABEL);
-                ui.text_edit_singleline(&mut app.orchestrator.agent_panel_state.debug_search_text);
+                search_field(
+                    ui,
+                    &mut app.orchestrator.agent_panel_state.debug_search_text,
+                );
 
                 ui.checkbox(
                     &mut app.orchestrator.agent_panel_state.debug_auto_scroll,

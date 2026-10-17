@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `right_tests.rs` sidecar.
 
 use crate::ui::FastMdApp;
-use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{InteractionSink, no_op_sink, panel_heading};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -76,7 +76,7 @@ pub fn apply_toc_row_click(entry_id: &str) -> crate::bus::events::user_command::
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_right_panel_capture(app, parent_ui, |_| {});
+    show_right_panel_capture(app, parent_ui, no_op_sink);
 }
 
 /// Tier 4 test variant of [`show_right_panel`]. The `on_click`
@@ -91,7 +91,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 pub fn show_right_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     // Compute visibility once, outside the panel closure, so the
     // same value is used in every layout pass of this frame.
@@ -141,12 +141,7 @@ pub fn show_right_panel_capture(
                 ui.set_invisible();
             }
             ui.add_space(4.0);
-            ui.heading(
-                RichText::new(crate::ui::strings::TABLE_OF_CONTENTS_HEADER)
-                    .size(14.0)
-                    .strong()
-                    .color(ui.palette().accent_text),
-            );
+            panel_heading(ui, crate::ui::strings::TABLE_OF_CONTENTS_HEADER, 14.0);
             ui.add_space(4.0);
 
             egui::ScrollArea::vertical()
@@ -191,7 +186,7 @@ pub fn show_right_panel_capture(
                                         let max_label_w = (ui.available_width()).max(0.0);
                                         ui.set_max_width(max_label_w);
                                         let label = egui::Label::new(
-                                            egui::RichText::new(&entry.title).size(font_size),
+                                            RichText::new(&entry.title).size(font_size),
                                         )
                                         .truncate();
                                         if ui.add(label).clicked() {

@@ -13,6 +13,7 @@
 
 use crate::bus::events::file::FileEventProducer;
 use crate::ui::text_buffer::TextBuffer;
+use crate::ui::widgets::{modal_window, right_aligned_row};
 use eframe::egui::{self, Key};
 
 /// Inverted colour palette for the inline text editor (UI-046).
@@ -76,9 +77,7 @@ pub fn show_text_editor_with_colors(
         ..egui::Frame::window(&style)
     };
 
-    egui::Window::new("Inline Editor")
-        .open(&mut is_open)
-        .collapsible(false)
+    modal_window(crate::ui::strings::INLINE_EDITOR_WINDOW_TITLE, &mut is_open)
         .resizable(true)
         .frame(editor_frame)
         .default_size(egui::vec2(800.0, 600.0))
@@ -181,7 +180,7 @@ pub fn show_text_editor_with_colors(
                     buf.close();
                 }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                right_aligned_row(ui, |ui| {
                     ui.colored_label(
                         colors.text,
                         format!("Line: {} | Col: {}", cursor_line, cursor_col),

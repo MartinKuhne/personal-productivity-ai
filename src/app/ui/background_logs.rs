@@ -2,7 +2,7 @@
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
-use crate::ui::widgets::{modal_window, selectable_combo};
+use crate::ui::widgets::{modal_window, search_field, selectable_combo};
 use eframe::egui;
 
 /// Determines if a log entry matches the given category and search text.
@@ -73,8 +73,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
             };
 
             ui.horizontal(|ui| {
-                ui.label(crate::ui::strings::SEARCH_LABEL);
-                ui.text_edit_singleline(&mut mgr.search_text);
+                search_field(ui, &mut mgr.search_text);
 
                 ui.label(crate::ui::strings::CATEGORY_LABEL);
                 let selected_text = match mgr.filter_category {

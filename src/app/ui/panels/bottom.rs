@@ -4,6 +4,7 @@
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
+use crate::ui::widgets::{InteractionSink, no_op_sink};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -140,7 +141,7 @@ pub fn clear_command_input_command() -> UserCommand {
 }
 
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_bottom_panel_capture(app, parent_ui, |_| {});
+    show_bottom_panel_capture(app, parent_ui, no_op_sink);
 }
 
 /// Tier 4 test variant of [`show_bottom_panel`]. The `on_click`
@@ -154,7 +155,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 pub fn show_bottom_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui` (using

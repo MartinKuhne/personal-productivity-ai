@@ -20,6 +20,7 @@ use crate::ui::strings::{
 };
 use crate::ui::theme::PaletteExt;
 
+use crate::ui::widgets::modal_window;
 use eframe::egui;
 
 /// Render the tools dialog. Called every frame while
@@ -46,9 +47,9 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
-    eframe::egui::Window::new(title)
+    modal_window(title, &mut open)
+        .collapsible(true)
         .id(eframe::egui::Id::new("tools_dialog"))
-        .open(&mut open)
         .resizable(true)
         .default_size(default_size)
         .min_size(min_size)

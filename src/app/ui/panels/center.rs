@@ -6,6 +6,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
 use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{InteractionSink, menu_item, muted_text, no_op_sink, panel_heading};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
@@ -71,12 +72,7 @@ pub fn apply_tab_close_all_click() -> UserCommand {
 /// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
-        ui.heading(
-            RichText::new(crate::ui::strings::AGENT_SESSION_HEADER)
-                .size(18.0)
-                .strong()
-                .color(ui.palette().accent_text),
-        );
+        panel_heading(ui, crate::ui::strings::AGENT_SESSION_HEADER, 18.0);
         ui.separator();
         if ui
             .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
@@ -156,7 +152,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Preconditions: `app.tabs().tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
-    render_tabs_and_content_capture(ui, app, |_| {});
+    render_tabs_and_content_capture(ui, app, no_op_sink);
 }
 
 /// Tier 4 test variant of `render_tabs_and_content`. The
@@ -171,7 +167,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 pub fn render_tabs_and_content_capture(
     ui: &mut egui::Ui,
     app: &mut FastMdApp,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     ui.horizontal(|ui| {
         let tabs_snapshot: Vec<PathBuf> = app.orchestrator.tabs.tabs.clone();
@@ -198,64 +194,51 @@ pub fn render_tabs_and_content_capture(
                 on_click("tab_middle_click");
             }
             response.inner.context_menu(|ui| {
-                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
+                if menu_item(ui, crate::ui::strings::EDIT_BUTTON) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::OpenInEditor(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
                 ui.separator();
-                if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_TAB_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_click(i));
                     on_click("tab_close_menu");
-                    ui.close();
                 }
-                if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_OTHERS_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_others_click(i));
                     on_click("tab_close_others_menu");
-                    ui.close();
                 }
-                if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_ALL_TABS_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_all_click());
                     on_click("tab_close_all_menu");
-                    ui.close();
                 }
                 ui.separator();
-                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
+                if menu_item(ui, crate::ui::strings::COPY_PATH_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::CopyPath(tab_path.clone()),
                     );
-                    ui.close();
                 }
-                if ui
-                    .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
-                    .clicked()
-                {
+                if menu_item(ui, crate::ui::strings::SHOW_IN_EXPLORER_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::ShowInExplorer(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
-                if ui
-                    .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
-                    .clicked()
-                {
+                if menu_item(ui, crate::ui::strings::OPEN_IN_EDITOR_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::OpenInEditor(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
 
                 // Note skills (VFS-121)
@@ -263,7 +246,7 @@ pub fn render_tabs_and_content_capture(
                 if !note_skills.is_empty() {
                     ui.separator();
                     for skill in note_skills {
-                        if ui.button(&skill.name).clicked() {
+                        if menu_item(ui, skill.name.as_str()) {
                             if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
                                 let content =
                                     crate::markdown::DocumentContent::parse(&raw_content).body;
@@ -281,7 +264,6 @@ pub fn render_tabs_and_content_capture(
                                     "Failed to read skill file content to run as prompt."
                                 );
                             }
-                            ui.close();
                         }
                     }
                 }
@@ -384,12 +366,7 @@ fn show_markdown_scroll_area(
 #[tracing::instrument(skip_all, name = "ui.center.render_empty_state", level = "debug")]
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
-        ui.label(
-            RichText::new(crate::ui::strings::NO_FILE_SELECTED_PROMPT)
-                .size(15.0)
-                .italics()
-                .color(egui::Color32::GRAY),
-        );
+        ui.label(muted_text(crate::ui::strings::NO_FILE_SELECTED_PROMPT).size(15.0));
     });
 }
 

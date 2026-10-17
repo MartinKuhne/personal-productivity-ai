@@ -9,6 +9,7 @@ use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
 use crate::ui::theme::PaletteExt;
 use crate::ui::tree::{FlatRow, TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
+use crate::ui::widgets::{icon_button, muted_text};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -248,9 +249,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         .desired_width((ui.available_width() - 56.0).max(80.0)),
                 );
                 let enter_pressed = text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let search_clicked = ui
-                    .button(crate::ui::strings::ICON_MAGNIFYING_GLASS)
-                    .on_hover_text(crate::ui::strings::SEARCH_TRIGGER_TOOLTIP)
+                let search_clicked =
+                    icon_button(
+                        ui,
+                        crate::ui::strings::ICON_MAGNIFYING_GLASS,
+                        crate::ui::strings::SEARCH_TRIGGER_TOOLTIP,
+                    )
                     .clicked();
 
                 if (search_clicked || enter_pressed) && !app.search().query().trim().is_empty() {
@@ -263,10 +267,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
 
                 if app.search().is_searching()
-                    && ui
-                        .button(crate::ui::strings::ICON_X)
-                        .on_hover_text(crate::ui::strings::SEARCH_CLEAR_TOOLTIP)
-                        .clicked()
+                    && icon_button(
+                        ui,
+                        crate::ui::strings::ICON_X,
+                        crate::ui::strings::SEARCH_CLEAR_TOOLTIP,
+                    )
+                    .clicked()
                 {
                     app.search_mut().clear();
                 }
@@ -279,11 +285,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
                 if results.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(crate::ui::strings::SEARCH_NO_RESULTS)
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                    );
+                    ui.label(muted_text(crate::ui::strings::SEARCH_NO_RESULTS));
                 } else {
                     const SEARCH_ROW_HEIGHT: f32 = 52.0;
                     egui::ScrollArea::vertical()
@@ -413,11 +415,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 // source of id-clash warnings before the fix.
                 if tree_rows.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                    );
+                    ui.label(muted_text(crate::ui::strings::NO_MARKDOWN_FILES));
                 }
             }
         });

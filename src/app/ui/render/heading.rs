@@ -13,6 +13,7 @@
 
 use crate::markdown::{InlineElem, heading_plain_text};
 use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::muted_text;
 use eframe::egui;
 use egui::RichText;
 
@@ -82,12 +83,7 @@ pub(crate) fn render_heading(
                     ui.label(RichText::new(format!("[Image: {}]", url)).size(size));
                 }
                 InlineElem::Html(h) => {
-                    ui.label(
-                        RichText::new(h)
-                            .size(size)
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                    );
+                    ui.label(muted_text(h).size(size));
                 }
                 InlineElem::SoftBreak => {
                     ui.label(RichText::new(" ").size(size));

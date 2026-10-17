@@ -141,6 +141,9 @@ pub const ICON_X: &str = "\u{E4F6}";
 /// Phosphor icon: copy (U+E1CA)
 pub const ICON_COPY: &str = "\u{E1CA}";
 
+/// Hover tooltip for the code-block copy button.
+pub const CODE_COPY_BUTTON_TOOLTIP: &str = "Copy code";
+
 /// Phosphor icon: list / hamburger menu (U+E2F0)
 pub const ICON_LIST: &str = "\u{E2F0}";
 
@@ -232,6 +235,13 @@ pub const TABLE_WIDTH_STRATEGY_HYBRID: &str = "Hybrid (penalty + fill)";
 /// `"batch_button"` / `"tools_button"` event names already used by
 /// the top toolbar so the test harness can capture it the same way.
 pub const TABLE_WIDTH_STRATEGY_EVENT: &str = "table_width_strategy";
+
+/// `on_click` event name fired when a directory row is clicked in the
+/// file tree.
+pub const DIR_ROW_EVENT: &str = "dir_row";
+
+/// `on_click` event name fired when a file row is clicked in the file tree.
+pub const FILE_ROW_EVENT: &str = "file_row";
 
 /// Format string builder for indexing status when finished.
 pub fn build_indexing_finished_text(file_count: usize) -> String {
@@ -533,6 +543,9 @@ pub const DEBUG_JSON_ROWS_LABEL: &str = "JSON rows:";
 pub const DEBUG_COPY_JSON_BUTTON: &str = "Copy JSON";
 
 // Inline Editor Widget
+/// Title-bar text of the inline text editor window.
+pub const INLINE_EDITOR_WINDOW_TITLE: &str = "Inline Editor";
+
 /// Save button label in inline text editor.
 pub const SAVE_BUTTON: &str = "Save";
 
