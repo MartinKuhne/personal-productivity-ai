@@ -13,11 +13,12 @@
 //! [logo] FastMD Viewer | <indexing status> [tag filter]        [☰ menu]
 //! ```
 //!
-//! * **Logo** — the egui panel vector-paints `ui::logo::paint_logo`. iced
-//!   renders raster/SVG art only through the `image`/`svg` cargo features,
-//!   which this crate does NOT enable, so the mark is a Phosphor bolt
-//!   ([`strings::ICON_LIGHTNING`]) standing in for the "Document + Bolt"
-//!   badge. See *Feature-gated widgets* below.
+//! * **Logo** — the egui panel vector-paints `ui::logo::paint_logo`; this
+//!   port renders the shared stand-in built by
+//!   [`crate::ui_iced::logo::logo_mark`] at [`LOGO_MARK_SIZE`], because
+//!   the egui paint primitives do not exist in iced. See *Feature-gated
+//!   widgets* below and the trade-off table in
+//!   [`crate::ui_iced::logo`].
 //! * **Indexing status** — [`indexing_status_text`] plus the `success`
 //!   palette token once indexing has finished.
 //! * **Tag filter** — an [`iced::widget::pick_list()`] over
@@ -50,8 +51,11 @@
 //! * **Logo** — `iced::widget::image` needs the `image` feature and
 //!   `iced::widget::svg` needs `svg`; neither is enabled in `Cargo.toml`
 //!   (DEC-011 added iced with `wgpu`, `tiny-skia`, `fira-sans`,
-//!   `advanced-shaping` only). A `text` mark is used instead. Adding either
-//!   feature is a build-level decision for the orchestrator, not this task.
+//!   `advanced-shaping` and `markdown` only). A `text` mark is used
+//!   instead, single-sourced through [`crate::ui_iced::logo`], which also
+//!   records the raster / SVG / `canvas` cost of each option. Adding any of
+//!   them is a build-level decision for the orchestrator, not this task
+//!   ([TASK-020]).
 //! * **Spinner** — iced 0.14 has **no** spinner widget at all (there is no
 //!   `iced::widget::spin`, and `iced_widget-0.14.2` contains no spinner
 //!   implementation). An indeterminate indicator would need `progress_bar`
@@ -79,6 +83,7 @@ use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
+use crate::ui_iced::logo::logo_mark;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::theme::to_iced_color;
 
@@ -100,8 +105,10 @@ pub use crate::ui::panels::top::{
 /// ([TASK-018]).
 pub const CHAT_USE_CASE: &str = "chat";
 
-/// Logical point size of the logo mark.
-pub const LOGO_MARK_SIZE: f32 = 20.0;
+/// Logical point size of the logo mark — the shared constant owned by
+/// [`crate::ui_iced::logo`], re-exported here so the top-bar public
+/// surface is unchanged ([TASK-020], [RUST-051]).
+pub use crate::ui_iced::logo::LOGO_MARK_SIZE;
 
 /// Logical point size of the app-title heading.
 pub const TITLE_SIZE: f32 = 18.0;
@@ -605,10 +612,7 @@ impl TopBarViewModel {
 pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
-    let logo = text(strings::ICON_LIGHTNING)
-        .font(phosphor_font())
-        .size(LOGO_MARK_SIZE)
-        .color(to_iced_color(palette.accent_text));
+    let logo = logo_mark(LOGO_MARK_SIZE);
 
     let title = text(strings::APP_TITLE)
         .size(TITLE_SIZE)
@@ -640,7 +644,7 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     .into();
 
     Row::with_children(vec![
-        logo.into(),
+        logo,
         title.into(),
         rule::vertical(SEPARATOR_WIDTH).into(),
         status.into(),

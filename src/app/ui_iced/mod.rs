@@ -86,6 +86,10 @@
 //!   report, folded into one `Subscription<Message>` merged with
 //!   `Subscription::batch`, over a pure `bus_event_to_message` mapper
 //!   ([TASK-019], FMD-065..FMD-067).
+//! - [`logo`] — the shared "Document + Bolt" mark: the single place the
+//!   Phosphor-bolt stand-in is constructed, since egui's vector paint
+//!   routine (`ui::logo::paint_logo`) is not portable under DEC-011's
+//!   feature set ([TASK-020]).
 //!
 //! `update` and `tree` follow in Phase 3/4.
 
@@ -98,6 +102,7 @@ pub mod dialogs;
 pub mod editor;
 pub mod fonts;
 pub mod layout;
+pub mod logo;
 pub mod logs;
 pub mod message;
 pub mod overlay;

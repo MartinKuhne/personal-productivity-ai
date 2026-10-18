@@ -21,15 +21,16 @@
 //!
 //! # Banner: a glyph, not the PNG
 //!
-//! `Cargo.toml` enables iced's `wgpu`, `tiny-skia`, `fira-sans` and
-//! `advanced-shaping` features only (DEC-011 — minimal features), so
-//! `iced::widget::image` and `iced::widget::svg` **do not exist** in this
-//! build. The compiled-in `assets/icon-32.png`
+//! `Cargo.toml` enables iced's `wgpu`, `tiny-skia`, `fira-sans`,
+//! `advanced-shaping` and `markdown` features only (DEC-011 — minimal
+//! features), so `iced::widget::image` and `iced::widget::svg` **do not
+//! exist** in this build. The compiled-in `assets/icon-32.png`
 //! ([`crate::utils::app_icon::APP_ICON_PNG`]) therefore cannot be shown;
-//! the banner is the Phosphor bolt ([`strings::ICON_LIGHTNING`]) the top
-//! bar already uses as the "Document + Bolt" stand-in ([TASK-011]).
-//! Enabling the `image` feature is a build-level decision for the
-//! orchestrator, not this task.
+//! the banner is the shared "Document + Bolt" stand-in from
+//! [`crate::ui_iced::logo`] — the same mark the top bar renders
+//! ([TASK-011], [TASK-020]). That module records the raster / SVG /
+//! `canvas` trade-off; enabling any of those features is a build-level
+//! decision for the orchestrator, not this task.
 //!
 //! # Message channel
 //!
@@ -76,8 +77,8 @@ use iced::{Alignment, Element, Length};
 use crate::ui::attributions::DIRECT_DEPENDENCIES;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
+use crate::ui_iced::logo;
 use crate::ui_iced::message::{AboutMessage, Message};
-use crate::ui_iced::panels::top::phosphor_font;
 use crate::ui_iced::theme::to_iced_color;
 
 #[cfg(test)]
@@ -301,22 +302,17 @@ pub fn about_card(view_model: &AboutViewModel) -> Element<'_, Message> {
 
 /// The glyph the About banner renders.
 ///
-/// The Phosphor bolt stand-in: iced's `image`/`svg` widgets are not
-/// compiled in (DEC-011), so the PNG in
-/// [`crate::utils::app_icon::APP_ICON_PNG`] has no widget to live in.
+/// Delegated to [`crate::ui_iced::logo::logo_glyph`] — the About card does
+/// not own its own mark ([TASK-020], [RUST-051]).
 #[must_use]
 pub fn banner_glyph() -> &'static str {
-    strings::ICON_LIGHTNING
+    logo::logo_glyph()
 }
 
 /// The rendered banner mark (top panel of the card).
 #[must_use]
 pub fn banner_mark() -> Element<'static, Message> {
-    text(banner_glyph())
-        .font(phosphor_font())
-        .size(ABOUT_BANNER_SIZE)
-        .color(to_iced_color(Palette::fastmd_dark().accent_text))
-        .into()
+    logo::logo_mark(ABOUT_BANNER_SIZE)
 }
 
 /// The Close button shared by the About and attributions cards.

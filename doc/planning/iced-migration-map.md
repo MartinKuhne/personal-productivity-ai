@@ -3170,3 +3170,115 @@ task's import additions) — **none in the new files**.
    itself; `Arc::ptr_eq` will not do it.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+### TASK-020 logo/misc verification log (logo port decision + egui-free module audit - 2026-10-18)
+
+**Scope delivered: an audit plus one small consolidation.** Most of
+TASK-020 turned out to need *no* porting — three of the four modules in
+scope are already reusable by the iced layer exactly where they sit. The
+only real work was removing the duplicated logo stand-in: new
+`src/app/ui_iced/logo.rs` + `logo_tests.rs` (6 tests), with
+`ui_iced/panels/top.rs` and `ui_iced/about.rs` refactored to route
+through it, and `ui_iced/mod.rs` updated. Nothing was moved on disk, and
+no cargo feature was added or removed.
+
+**Per-module egui-dependency audit.**
+
+| Module | egui / eframe dependency | Verdict | What the iced layer does |
+| --- | --- | --- | --- |
+| `ui/measure.rs` | `use eframe::egui;` — the *entire* API is egui-typed: `text_width(&egui::Context, &str, egui::FontId, egui::Color32) -> f32`, wrapping the 0.35 `fonts_mut` + `layout_no_wrap` quirk | **egui-bound by construction.** There is no pure part to extract — the context *is* the function | Not imported. iced cannot hand a `Context` to a pure view, so measurement is injected instead (`ui_iced/table_width.rs::IcedTextMeasurer`, [TASK-015]). No gap, no duplication |
+| `ui/os_shell.rs` | `use eframe::egui;` — used by **one** of its four functions: `dispatch_platform_commands(&[egui::OutputCommand], F)` | **Mixed.** `open_in_system_editor`, `show_in_file_explorer` and `open_url` are egui-free `opener` wrappers; only the platform-output drainer is egui-typed | Importable as-is from `crate::ui::os_shell::{open_in_system_editor, show_in_file_explorer, open_url}` (`pub mod` + `pub(crate)` re-exports at `ui/mod.rs:17,42`) — **not moved, not copied**. `dispatch_platform_commands` is the egui `OutputCommand::OpenUrl` bridge and dies with the egui layer; the iced link path calls `open_url` directly instead |
+| `ui/link_resolver.rs` | **zero** references to `egui`/`eframe` (grep-verified) | **egui-free by construction** — pure `&str` + `Option<&Path>` + slices → `LinkAction` | Importable as-is: `pub(crate) mod` at `ui/mod.rs:13` with `pub use link_resolver::{LinkAction, resolve_link}` at `:41`. This is the [TASK-015] Render-channel contract the reducer calls (`ui_iced/message.rs:594`), so the iced side already depends on it through that contract. **Not moved, not duplicated** |
+| `ui/logo.rs` | `use eframe::egui;` — `paint_logo` draws the badge with `Painter::rect_filled`, `Shape::convex_polygon` and `line_segment`; `load_app_icon` returns `egui::IconData` | **The mark is vector paint, not a raster asset.** Not portable without a feature or a re-implementation | `load_app_icon` stays egui-only. The iced window icon already bypasses it via `crate::utils::app_icon::decode_app_icon_rgba` ([TASK-006]) |
+
+**Logo decision: option (a) — keep the Phosphor-bolt stand-in, but stop
+duplicating it.** `paint_logo` is ~140 lines of egui painter calls with
+no iced equivalent under DEC-011's enabled features, so the stand-in
+[TASK-011] introduced stays. What changed is *ownership*:
+`ui_iced/logo.rs` now owns the mark (`logo_glyph`, `logo_color`,
+`logo_font`, `logo_mark(size)`), and both consumers call it —
+
+* `panels/top.rs` — `let logo = logo_mark(LOGO_MARK_SIZE);` (was an
+  inline four-line `text(..).font(..).size(..).color(..)` build),
+* `about.rs` — `banner_glyph()` delegates to `logo::logo_glyph()` and
+  `banner_mark()` to `logo::logo_mark(ABOUT_BANNER_SIZE)` (was its own
+  four-line build plus a `panels::top::phosphor_font` import).
+
+`LOGO_MARK_SIZE` moved to `logo.rs` and is **re-exported** from
+`panels::top`, so that module's public surface is unchanged. After the
+refactor the literal `strings::ICON_LIGHTNING` appears in iced production
+code exactly once — `ui_iced/logo.rs:65` ([RUST-051]).
+
+**Feature trade-off (verified, not assumed).** Read from
+`iced_widget-0.14.2`, `iced_renderer-0.14.0`, `iced_graphics-0.14.0`,
+`iced_wgpu-0.14.0`, `iced_tiny_skia-0.14.1` feature tables and this
+workspace's `Cargo.lock`:
+
+| Option | Feature chain | Unlocks | Marginal cost |
+| --- | --- | --- | --- |
+| Raster badge | `iced/image` → `iced_renderer/image` → `iced_graphics/image` = `dep:image` + `kamadak-exif` | `iced::widget::image` over `crate::utils::app_icon::APP_ICON_PNG` (the real 32px mark, already embedded) | `image` 0.25 is **already** in the lock tree (fastmd's `utils::app_icon`); the only new crate is `kamadak-exif` (absent today). **Cheapest path to real artwork** |
+| Vector SVG | `iced/svg` → `iced_wgpu/svg` = `resvg/text`, `iced_tiny_skia/svg` = `resvg` | `iced::widget::svg` over `assets/icon.svg` (present, 1.5 kB) | `resvg` + `usvg` + its text stack — **absent** from the lock. **Heaviest option** |
+| Re-painted vectors | `iced/canvas` → `iced_renderer/geometry` = `iced_graphics/geometry` (`lyon_path`) + `iced_wgpu?/geometry` (`lyon`) | `iced::widget::canvas` — a `Program` reproducing `paint_logo`'s polygons at any size | `lyon` / `lyon_path` — **absent** from the lock, plus a hand port of the ~140-line paint routine. **Best visual parity** (crisp at every zoom, no raster asset) |
+
+None of the three is enabled and **no cargo feature was touched** —
+enabling one is a build-level decision for the orchestrator.
+
+**Imported directly vs ported.**
+
+*Directly, unchanged, in place:* `crate::ui::link_resolver::{resolve_link,
+normalize_path, LinkAction}`; `crate::ui::os_shell::{open_in_system_editor,
+show_in_file_explorer, open_url}`; `crate::utils::app_icon::{APP_ICON_PNG,
+decode_app_icon_rgba}` ([TASK-006]).
+*Ported / new:* `ui_iced/logo.rs` — the shared stand-in renderer.
+*Not ported, with reasons:* `paint_logo` (vector art, needs a feature);
+`load_app_icon` (egui `IconData` wrapper — iced has its own icon path);
+`dispatch_platform_commands` (egui platform-output bridge, meaningless
+without egui); `measure::text_width` (egui `Context` measurement — iced
+injects its measurer instead).
+
+**Tests.** 6 new in `logo_tests.rs`: glyph identity against
+`strings::ICON_LIGHTNING`; colour resolves to the `accent_text` token
+through `to_iced_color` ([GUD-003]); font handle is the registered
+`phosphor` family ([TASK-007]); `LOGO_MARK_SIZE == 20.0` (parity with
+the `egui::vec2(20.0, 20.0)` allocation at `ui/panels/top.rs:142`);
+element-construction smoke at both caller sizes (top bar and About
+banner); and `about::banner_glyph()` delegates to `logo::logo_glyph()` —
+the routing check. The pre-existing
+`about_tests::banner_glyph_is_the_shared_phosphor_bolt` and
+`top_tests::top_bar_builds_for_both_indexing_states` still pass and now
+cover the routed paths. No tests were written for modules this task did
+not change; the `measure` / `os_shell` / `link_resolver` sidecars were
+left running untouched.
+
+**Gate results (this pass).** `cargo check -q` PASS (workspace, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS; `cargo fmt`
+run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
+--status-level fail --show-progress none` PASS (**2114 run / 2114 passed
+/ 1 skipped**), of which **6** are this task's new tests;
+`cargo doc --no-deps --quiet -p fastmd` PASS (no warnings).
+
+**Needs the orchestrator's eyes.**
+
+1. **Feature decision (the only open question in this task).** Cheapest
+   real artwork = `image` (one new crate, `kamadak-exif`, and the PNG is
+   already embedded); best fidelity = `canvas` (lyon + a hand port);
+   `svg` is the heaviest and buys the least over `canvas`. If any is
+   approved, `logo_mark` is the single call site to change — no panel
+   edits.
+2. **`LOGO_MARK_SIZE` is a 20pt *glyph*, not the 20×20pt *box* egui
+   allocates**, so the drawn mark is slightly smaller than the egui
+   badge. If exact visual parity matters, the fix is the `image`/`canvas`
+   route, not inflating the point size.
+3. **`ui/measure.rs` stays egui-only forever.** When Phase 5 deletes the
+   egui layer it takes the tree-width and table-width egui measurers with
+   it; the iced path already has its injected measurer ([TASK-015]), so
+   there is no gap to close now.
+4. **`dispatch_platform_commands` has no iced counterpart by design.**
+   iced link activation calls `os_shell::open_url` from the reducer
+   ([TASK-022/023]) rather than draining a platform-output list.
+5. **`link_resolver` is `pub(crate)`** (re-exported at
+   `crate::ui::{resolve_link, LinkAction}`). If a future iced-side
+   integration wants it from outside the crate, that visibility — not the
+   module — is what must change.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.
