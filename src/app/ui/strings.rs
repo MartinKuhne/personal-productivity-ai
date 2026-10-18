@@ -168,6 +168,37 @@ pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
 /// ID salt for the hamburger menu in egui.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
 
+/// Glyph drawn in the check slot of an active top-bar hamburger menu row
+/// (UI-065, UI-066). U+2713 CHECK MARK.
+const MENU_CHECK_GLYPH: char = '\u{2713}';
+
+/// Glyph drawn between a submenu name and its item label in the iced
+/// top-bar hamburger menu, standing in for the nested-popup arrow.
+const MENU_SUBMENU_ARROW: char = '\u{203A}';
+
+/// Formats one row of the top-bar hamburger menu for the iced port
+/// ([TASK-011]).
+///
+/// iced 0.14's built-in dropdowns are single-level and render every row as
+/// plain text, so the submenu a row belongs to is carried inside the row
+/// label rather than in a nested popup. The layout is
+/// `"<check slot> <submenu> › <label>"`, with the submenu segment omitted
+/// for top-level rows. The check slot is always present (blank when
+/// unchecked) so checked and unchecked rows stay column-aligned.
+pub fn format_menu_row_label(submenu: Option<&str>, label: &str, checked: bool) -> String {
+    let mut out = String::with_capacity(label.len() + 16);
+    out.push(if checked { MENU_CHECK_GLYPH } else { ' ' });
+    out.push(' ');
+    if let Some(submenu) = submenu {
+        out.push_str(submenu);
+        out.push(' ');
+        out.push(MENU_SUBMENU_ARROW);
+        out.push(' ');
+    }
+    out.push_str(label);
+    out
+}
+
 /// Submenu label for the Table Wrap Algorithm submenu in the top hamburger menu.
 pub const MENU_TABLE_WRAP_ALGORITHM: &str = "Table wrap algorithm";
 

@@ -531,3 +531,186 @@ run `cargo fmt` - or `git checkout --` those three files - before
 committing.
 - Pane-grid drag feel: leeway grab, clamped-ratio replay, and the
   right-pane gate visually (pilot gate inputs are `false` stubs).
+
+### TASK-011 verification log (top panel ported to iced - 2026-10-17)
+
+**Deliverables:** `src/app/ui_iced/panels/mod.rs`,
+`src/app/ui_iced/panels/top.rs` + `top_tests.rs` sidecar (36 tests),
+`src/app/ui_iced/mod.rs` (`pub mod panels;` + module-doc bullet), and one
+additive formatting helper in `src/app/ui/strings.rs`
+(`format_menu_row_label`, plus its two private glyph consts). No pilot or
+update-loop wiring (that is TASK-022/023).
+
+**Port shape - pure view, no `FastMdApp` inside the widget tree.**
+
+`top_bar(&TopBarViewModel) -> Element<'_, Message>` renders the bar; every
+user action becomes `Message::Command(UserCommand)`. The panel never
+publishes to `user_command_bus` - the TASK-022/023 reducer does, which is
+what keeps intent replayable (FMD-068). Because iced keeps widget state in
+the widget `Tree` (verified: `PickList::new(options, selected, on_select)`
+takes NO state argument - `iced_widget-0.14.2/src/pick_list.rs:191-215`,
+state created via `Widget::state()` at `pick_list.rs:762-780`), the view
+needs no `&mut` state parameter and stays a pure function.
+
+`TopBarViewModel` (built by `TopBarViewModel::from_app(&FastMdApp)`,
+reading exactly the accessors the egui panel used):
+
+| Field | Source (egui panel parity) |
+| --- | --- |
+| `indexing_finished: bool` | `file_processor().indexing_finished` |
+| `file_count: usize` | `file_processor().all_files.len()` |
+| `tag_options: Vec<TagFilterOption>` | `tags().all_tags()`, `All` entry first |
+| `selected_tag: Option<String>` | `tags().selected_tag` |
+| `chat_models: Vec<ChatModelEntry{name,cost}>` | `config().models` filtered on `has_use_case("chat")`, falling back to ALL models when none declare it, name-sorted (egui rule preserved verbatim) |
+| `current_chat_model: Option<String>` | `config().current_chat_model_key()` |
+| `current_strategy: DeficitStrategy` | `config().deficit_strategy()` |
+| `show_background_logs: bool` | `orchestrator.background_manager.lock().unwrap().show_background_logs` |
+| `show_agent_debug: bool` | `orchestrator.agent_panel_state.show_debug_window` |
+
+`TagFilterOption { label, tag: Option<String> }` carries the command in
+`tag`, not the label, so a tag literally spelled `"All"` can never collapse
+into the "show everything" entry (pinned by a test).
+
+**Pure helpers - reused, not duplicated ([RUST-051]).**
+`compute_next_selected_file`, `get_tag_filter_text`, `strategy_label` and
+all six `apply_*` command constructors are `pub use`-re-exported from
+`crate::ui::panels::top` (they are framework-free; `layout.rs:64` sets
+the same precedent for `should_show_panel`). Only
+`build_indexing_status_text` needed re-typing: `egui::RichText` is replaced
+by three pure functions - `indexing_status_text` (String),
+`indexing_status_color` (palette token) and `indexing_status_font`
+(italic-while-indexing) - so no egui type crosses into the iced layer.
+
+**Nested submenus (UI-062/UI-064/UI-066) - flattened, with the hierarchy
+kept in the model.**
+
+Investigated `overlay::menu::Menu` / `State` before choosing
+(`iced_widget-0.14.2/src/overlay/menu.rs`):
+
+* `Menu::new(state, options, hovered_option, on_selected,
+  on_option_hovered, class)` - `menu.rs:57-79`; `State` is a bare `Tree`
+  wrapper (`menu.rs:144-156`) with no open/close query.
+* Options render as **one plain `ToString::to_string` row each**
+  (`menu.rs:557-576`). There are **no separators, no disabled rows, no
+  rich content and no child menus** - `Menu` is single-level only.
+* `Menu` never closes itself; the consumer must (only `PickList` wires
+  open/close/click-away internally - `pick_list.rs:450-478`).
+* DEC-005 rules out `iced_aw` (and `iced_aw` is not in `Cargo.lock`).
+
+Resolution: **two-level model, one-level widget.**
+
+1. `build_menu_entries(&vm) -> Vec<MenuEntry>` is the authoritative,
+   fully-ordered UI-061..066 structure: `MenuEntry { label, section,
+   kind, checked }` with `MenuSection::{Direct, Windows, ChatModels,
+   TableWrap}` and `MenuEntryKind::{Action(UserCommand), SectionHeader,
+   Placeholder}`.
+2. `hamburger_items(&vm) -> Vec<HamburgerItem>` projects only the
+   **selectable** rows (`HamburgerItem { label, command }`) and feeds one
+   `pick_list`.
+
+Why the non-selectable rows are filtered rather than rendered: a iced
+dropdown must answer a click on *any* row with a `Message`, and the panel
+is only allowed to emit real user intent - `Message` (TASK-021) has no
+no-op variant and adding one is out of this task's scope. So section
+headers and UI-064's `NO_CHAT_MODELS_CONFIGURED` placeholder live in the
+model and are dropped by `HamburgerItem::from_entry` instead of firing a
+meaningless command. **Consequence: the placeholder is currently modelled
+but not visible in the rendered menu** - flagged below for the
+orchestrator.
+
+Submenu membership is carried inside the row label via
+`strings::format_menu_row_label(submenu, label, checked)`:
+`"<check slot> <submenu> › <label>"` (`›` = U+203A), with the submenu
+segment omitted for top-level rows and the check slot always present so
+checked/unchecked rows stay column-aligned. UI-064's
+`<name> (Cost: <cost>)` format survives verbatim as the item segment.
+
+**Menu item -> `UserCommand` mapping** (all rows, in menu order):
+
+| Menu row | `UserCommand` | checked when |
+| --- | --- | --- |
+| `MENU_BATCH` | `OpenBatchDialog` | - |
+| `MENU_TOOLS` | `OpenToolsDialog` | - |
+| *Windows* (header) | none (not selectable) | - |
+| `MENU_BACKGROUND_OPERATIONS` | `ToggleBackgroundLogs(!show_background_logs)` | window shown |
+| `MENU_AGENT_DEBUG` | `ToggleAgentDebugWindow(!show_agent_debug)` | window shown |
+| *Chat models* (header) | none (not selectable) | - |
+| `NO_CHAT_MODELS_CONFIGURED` | none (placeholder, not selectable) | - |
+| `<name> (Cost: <cost>)` | `SelectChatModel(name)` | `current_chat_model == name` |
+| *Table wrap algorithm* (header) | none (not selectable) | - |
+| each of 5 `strategy_label(v)` | `ChangeTableWidthStrategy(v)` | `v == current_strategy` |
+| `MENU_ABOUT` | `OpenAboutDialog` | - |
+
+Toggle rows carry the value they *switch to* (egui's `menu_check` returned
+the post-click value), so the reducer receives an absolute target and stays
+idempotent-friendly. Strategy order is pinned by `strategy_menu_order()` -
+production default `HybridMinPenaltyWaterFill` first, then the two FTWA
+strategies, then the three survey algorithms, matching the egui panel.
+
+**Feature-gated widgets stubbed, and why.**
+
+* **Logo** - `iced::widget::image` requires the `image` cargo feature and
+  `iced::widget::svg` requires `svg`; **neither is enabled**
+  (`Cargo.toml:55` adds iced with `wgpu`, `tiny-skia`, `fira-sans`,
+  `advanced-shaping` only), and DEC-011 says no feature flags. The
+  egui panel vector-paints `ui::logo::paint_logo`; the port renders the
+  existing Phosphor bolt `strings::ICON_LIGHTNING` in
+  `phosphor_font()` (`PHOSPHOR_FONT_NAME`, registered by TASK-007) as
+  the "Document + Bolt" stand-in. No cargo feature was added.
+* **Spinner** - iced 0.14 has **no spinner widget at all**: there is no
+  `iced::widget::spin`, and a search of `iced_widget-0.14.2/src` finds no
+  spinner implementation. An indeterminate indicator would need
+  `progress_bar` driven by a timer subscription, i.e. runtime wiring
+  outside a view-only task. The panel renders the status **text only**;
+  "still indexing" stays legible through the italic font
+  (`indexing_status_font`) and the `(...found N files...)` ellipsis.
+* **Icon font inside `pick_list`** - `pick_list` passes ONE font to both
+  the button and its menu (`pick_list.rs:704, 725`), so the Phosphor
+  hamburger glyph cannot be applied to the button without also applying it
+  to every menu row. The hamburger therefore uses the **default UI font**
+  and relies on cosmic-text per-glyph fallback to resolve
+  `HAMBURGER_MENU_BUTTON` (U+E2F0) from the registered Phosphor font.
+  Same fallback assumption applies to the U+2713 check glyph.
+
+**Gate results (this pass):** `cargo check -q` PASS (exit 0, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS workspace-wide (exit 0 - the
+three files TASK-021 flagged as dirty are clean in this working tree);
+`cargo nextest run --status-level fail --show-progress none` PASS
+(**1315 run / 1315 passed / 1 skipped**, +36 over TASK-021's 1279);
+`cargo doc --no-deps --quiet` PASS (exit 0, no warnings).
+
+**Needs the orchestrator's eyes:**
+
+1. **`strings.rs` was extended** (not in the task's deliverable list).
+   [GUD-002] forbids literals in panels, so the row format had to live in
+   `strings.rs`: `pub fn format_menu_row_label(...)` plus private consts
+   `MENU_CHECK_GLYPH` (U+2713) and `MENU_SUBMENU_ARROW` (U+203A).
+   Additive only; no existing string changed.
+2. **UI-064's empty-models placeholder is modelled but not rendered.**
+   As explained above, `pick_list` cannot show a non-selectable row. If
+   the placeholder must be *visible*, the options are (a) render it as a
+   selectable row that fires a command we do not have, (b) render it
+   outside the menu, or (c) replace the `pick_list` with the custom
+   overlay work scheduled for TASK-017. Recommend deciding at TASK-017.
+3. **UI-062/UI-064/UI-066 nesting is flattened into label prefixes.**
+   True nested popups are not available from iced 0.14 built-ins under
+   DEC-005. If the reviewer wants real submenus, that is a DEC-005
+   revisit (custom overlay in TASK-017), not a TASK-011 fix.
+4. **Glyph rendering is unverified at runtime.** Both U+E2F0 (hamburger)
+   and U+2713 (check) depend on cosmic-text falling back to the
+   Phosphor / system symbol font registered by TASK-007. [UNVERIFIED]
+   headlessly - needs one visual pass in the pilot once TASK-022 mounts
+   the panel. If either tofus, the consts in `strings.rs` make the swap a
+   one-line change.
+5. **`apply_*` / pure helpers are re-exported, not re-implemented.** If
+   the plan expects the egui panel to be deleted in Phase 5, these
+   `pub use` paths must be re-pointed at the time of that deletion; the
+   iced panel currently depends on `crate::ui::panels::top` remaining
+   present.
+6. **Tag-filter gating dropped deliberately.** The egui panel hides the
+   combobox while indexing purely to keep egui widget ids stable across
+   the `indexing_finished` flip (`ui/panels/top.rs:154-211`). iced has
+   no such constraint, so the tag `pick_list` is always allocated and
+   visible. No behaviour requirement is affected.
+

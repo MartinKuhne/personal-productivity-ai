@@ -16,13 +16,16 @@
 //!   `crate::ui::PanelLayout`-bound resize reductions ([TASK-010], UI-001),
 //! - [`message`] — the top-level `Message` enum, one variant per logical
 //!   interaction channel, with `UserCommand` as the user-intent channel
-//!   ([TASK-021], [FMD-068]).
+//!   ([TASK-021], [FMD-068]),
+//! - [`panels`] — the pane view functions; each takes an immutable
+//!   view-model snapshot and emits `Message::Command` instead of publishing
+//!   to the command bus itself ([TASK-011]..[TASK-016]).
 //!
-//! `update`, `view`, `panels`, `tree`, `render` and `agent` follow in
-//! Phase 3/4.
+//! `update`, `tree`, `render` and `agent` follow in Phase 3/4.
 
 pub mod fonts;
 pub mod layout;
 pub mod message;
+pub mod panels;
 pub mod persisted;
 pub mod theme;
