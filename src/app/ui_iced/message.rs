@@ -397,6 +397,25 @@ pub enum EditorMessage {
 /// (`ToggleDebugWindow`/`ClearDebugEntries`/`SetDebugJsonRows`/
 /// `SetDebugSearchText`/`SetDebugAutoScroll`), so nothing is duplicated
 /// here.
+///
+/// [TASK-018] adds the two pieces of view-local state egui kept in widget
+/// memory for the agent session view, plus the transcript's viewport report:
+///
+/// * [`Self::ThinkingToggled`] replaces the `egui::collapsing` disclosure
+///   of the "Thinking Process" block (`src/app/ui/panels/center.rs:143`),
+///   which iced has no built-in equivalent for — the disclosure is
+///   view-local, not application state, so it is deliberately **not** a
+///   [`UserCommand`].
+/// * [`Self::ScrollReported`] is the transcript-list counterpart of
+///   [`LogsMessage::ScrollReported`]: egui applied `stick_to_bottom(true)`
+///   inside its own `ScrollArea`
+///   (`src/app/ui/panels/center.rs:140`), whereas iced exposes the geometry
+///   only through `Scrollable::on_scroll`
+///   (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the viewport has
+///   to reach `update` as a message before the reused
+///   [`crate::ui_iced::logs::should_follow`] rule can decide anything. A
+///   runtime report, not user intent — the same class of payload
+///   [`LayoutMessage::CursorMoved`] carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentMessage {
     /// The command-input field text changed while the user types.
@@ -410,6 +429,29 @@ pub enum AgentMessage {
         /// The submitted text, exactly as typed (trimming happens in the
         /// parser, not the widget callback).
         text: String,
+    },
+    /// The "Thinking Process" disclosure was expanded or collapsed
+    /// ([TASK-018], UI-048). View-local disclosure state, replacing egui's
+    /// `collapsing` widget memory.
+    ThinkingToggled {
+        /// The new expanded state of the thinking block.
+        expanded: bool,
+    },
+    /// The transcript list's viewport geometry changed ([TASK-018]).
+    ///
+    /// The reducer stores this and feeds it to
+    /// [`crate::ui_iced::logs::should_follow`] together with the
+    /// follow-the-stream preference; when the intent is `true` it dispatches
+    /// `operation::scrollable::scroll_to` against
+    /// [`crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID`]
+    /// (`iced_runtime-0.14.0/src/widget/operation.rs:31-39`).
+    ScrollReported {
+        /// How far the content is scrolled down, in logical points.
+        offset_y: f32,
+        /// Height of the visible viewport, in logical points.
+        viewport_height: f32,
+        /// Total height of the scrolled content, in logical points.
+        content_height: f32,
     },
 }
 

@@ -69,10 +69,17 @@
 //!   expanded-id set, the [TASK-016] auto-scroll intent rule reused for
 //!   its stick-to-bottom, and search / auto-scroll / json-rows / Clear
 //!   riding the command channel ([TASK-017b4], UI-048).
+//! - [`agent`] — the agent panel: the streaming conversation view over the
+//!   reused `AgentTranscript` (user turns themed, assistant turns through
+//!   iced's **built-in** `iced::widget::markdown`), the UI-048
+//!   thinking-delimiter gate and disclosure, the prompt row with send /
+//!   queue / cancel and the chat-model `pick_list`, and the reused
+//!   follow-the-stream report ([TASK-018], UI-048).
 //!
-//! `update`, `tree` and `agent` follow in Phase 3/4.
+//! `update` and `tree` follow in Phase 3/4.
 
 pub mod about;
+pub mod agent;
 pub mod agent_debug;
 pub mod attributions;
 pub mod batch_dialog;

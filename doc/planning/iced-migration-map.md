@@ -2780,3 +2780,131 @@ lints in other tasks' files (`markdown/link_scanner_tests.rs`,
    file this chunk could not touch.
 5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+---
+
+## TASK-018 agent-panel verification log
+
+Ported the egui agent conversation panel to a pure iced 0.14 view in
+`src/app/ui_iced/agent/` (`mod.rs`, `panel_state.rs`, `transcript.rs`,
+`prompt_input.rs` + four `_tests.rs` sidecars). Pure view + pure state,
+no bus / I/O at render time; **not** wired into the pilot binary or the
+update loop (that is [TASK-022]/[TASK-023]).
+
+**Render source: the flat `content` buffer, not `blocks`.** The egui
+transcript renders `AgentTranscript::blocks`, but the bus path that
+rewrites state in place — `ApplyTaskToggles` (re-renders task checkboxes)
+and the bus-lag `truncate_to_last_complete_paragraph` — mutate
+`AgentTranscript::content`, not `blocks`. Rendering `blocks` would make
+those rewrites invisible on the next frame. The iced view therefore
+re-parses `content` into turns every render via
+`agent::panel_state::turns_from_content`, so both survive a re-render.
+`blocks` is left as the egui-only incremental-build structure.
+
+**Turn recovery.** `content` carries no per-turn role, so a user turn is
+recognised by the injected `**User:** ` marker
+(`strings::AGENT_USER_TURN_MARKER`, the same literal the orchestrator
+prepends at `orchestrator.rs:268`, now sourced from the const rather than
+duplicated). A user turn runs from that marker to the first blank line;
+everything else is one assistant turn. `split_user_turn` returns the
+prompt with the marker stripped. **Documented limitation:** a blank line
+*inside* a pasted prompt splits that turn early — the egui incremental
+builder never hit this because it recorded role at append time. Accepted
+for the pure re-parse model.
+
+**View-model shape.** `AgentPanelViewModel { turns, running, busy_thinking,
+show_thinking, current_model, queued_count }`. `TranscriptTurn::Assistant`
+carries **pre-parsed `Vec<markdown::Item>`** because
+`iced_widget::markdown::view` borrows the items for the returned
+`Element`'s whole lifetime (`markdown.rs:1197`), so the items must be
+owned by something that outlives the element — here the view model. That
+borrow requirement forced dropping `PartialEq` from `TranscriptTurn` and
+`AgentPanelViewModel` (they are `Clone + Debug` only). `User` turns keep
+the raw prompt string.
+
+**Thinking-delimiter gate** (mirrors `panel_state.rs:214-233`):
+`thinking_section_visible(busy_thinking, show_thinking, content)` hides
+the section while streaming until the user opens it, and keeps it visible
+after the stream ends only if it was opened. `thinking_content` is the
+buffer after `**Assistant thinking:**` (`AGENT_THINKING_LABEL`). The
+header text is `AGENT_THINKING_LABEL_RUNNING` while streaming,
+`AGENT_THINKING_LABEL` otherwise, with the expand/collapse hint appended.
+
+**`conversation_logger` disposition.** Kept **out** of the view. It is a
+persistence / background observer (writes the transcript to disk), not a
+render concern; [FMD-065] forbids the view being synchronously driven by
+it. The iced view reads only the snapshot it is handed. Noted in
+`agent/mod.rs` docs.
+
+**Message-channel choices** (all on `Message::Agent`, `message.rs`):
+`ThinkingToggled { expanded }` and
+`ScrollReported { offset_y, viewport_height, content_height }` were
+**added** to `AgentMessage`. Send and Queue both emit the existing
+`AgentMessage::Submit { prompt }`; the reducer's reused
+`bottom::submit_commands` (`bottom.rs:115-124`) picks `RunAgent` when idle
+vs `QueueAgentPrompt` when running — the panel never decides that itself.
+Close emits `ClearAgentSession` (via `clear_session_message`, which also
+runs `clear_command_input_command`, `bottom.rs:126-133`). Markdown links
+emit `RenderMessage::LinkActivated { source_file: None }` because iced's
+`Viewer::link` hands back a bare `Uri(String)` with no source file
+(`markdown.rs:1576`); the reducer resolves the source the same way the
+egui link path does downstream. Scroll follows reuse `logs::should_follow`
+/ `ScrollSnapshot` unchanged.
+
+**Verified iced markdown API** (`iced_widget-0.14.2/src/markdown.rs`):
+`parse` :426 · `view` :1197 · `view_with` :1213 · `Item` :192-235 ·
+`Content` :76-182 · `Settings::with_text_size` :1067 · `Style`
+:1102-1117 · `Viewer::image` :1576 · `Catalog for Theme` impl :1706-1722
+(our theme satisfies it via `RendererTheme: Catalog`). `markdown_style`
+maps `Palette` tokens onto the eight `Style` fields; `markdown_settings`
+pins text size to `BODY_TEXT_SIZE`.
+
+**Cargo feature correction.** The task brief said no extra iced features
+were needed. That is wrong: `markdown` is a gated feature
+(`iced-0.14.0/Cargo.toml:93` `markdown = ["iced_widget/markdown"]`;
+`iced_widget-0.14.2/Cargo.toml:51` `markdown = ["dep:pulldown-cmark"]`).
+Added `markdown` to the iced feature list in `Cargo.toml`.
+
+**Not ported, with reasons.**
+
+1. **Cancel button.** The egui agent panel has no cancel control (cancel
+   lives on the command-input band). `cancel_enabled` is provided as a
+   pure helper for [TASK-023] but is not rendered here.
+2. **Images are placeholders.** `Viewer::image` returns a placeholder
+   text, matching the other `ui_iced` renderers — there is no iced asset
+   protocol yet.
+3. **No incremental block building.** The egui `AgentTranscriptBuilder`
+   appends blocks incrementally; the pure view re-parses `content` per
+   render. Cheaper to reason about, and correct under in-place rewrites.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (clean);
+`cargo clippy --quiet -- -D warnings` (canonical lib+bins) PASS;
+`cargo fmt` run, `cargo fmt --check` PASS;
+`cargo nextest run -p fastmd --status-level fail --show-progress none`
+PASS (**2058 run / 2058 passed / 1 skipped**), of which **67** are this
+task's new agent tests plus the `strings`/`message` additions;
+`cargo doc --no-deps --quiet` PASS (no warnings). `cargo clippy
+--all-targets` still reports the same **12 pre-existing** test-only lints
+in other tasks' files (`markdown/link_scanner_tests.rs`,
+`ui/batch_dialog_tests.rs`, `ui_iced/panels/left_tests.rs`,
+`ui_iced/render/code_tests.rs`, `config/config_tests.rs`,
+`ui_iced/message_tests.rs:384`) — **none in the new agent files**.
+
+**Needs the orchestrator's eyes.**
+
+1. **Reducer obligations for [TASK-022/023]** that the pure layer cannot
+   enforce: apply `ThinkingToggled` → `AgentPanelState::show_thinking`;
+   store the last `ScrollReported` and dispatch
+   `operation::scrollable::scroll_to(AGENT_TRANSCRIPT_SCROLLABLE_ID, …)`
+   when `logs::should_follow` returns true; route `AgentMessage::Submit`
+   through `submit_commands`; map `ClearAgentSession` onto the agent-state
+   reset plus `clear_command_input_command`.
+2. **`orchestrator.rs:268` now uses `strings::AGENT_USER_TURN_MARKER`**
+   instead of the inline literal — behaviour-identical, single source of
+   truth, but it is a change outside `ui_iced/`.
+3. **`markdown` feature added to `Cargo.toml`** (grows the binary
+   slightly via `pulldown-cmark`) — confirm acceptable.
+4. **Blank-line-in-prompt split limitation** (see Turn recovery) — a
+   pasted multi-paragraph prompt becomes multiple user turns.
+5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

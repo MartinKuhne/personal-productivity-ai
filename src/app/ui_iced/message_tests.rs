@@ -108,6 +108,36 @@ fn test_every_channel_message_clones_to_an_equal_value() {
 }
 
 #[test]
+fn test_agent_channel_thinking_and_scroll_variants() {
+    // TASK-018 added the thinking-disclosure and transcript-scroll-report
+    // variants to the Agent channel.
+    let toggled = Message::Agent(AgentMessage::ThinkingToggled { expanded: true });
+    assert!(matches!(
+        toggled,
+        Message::Agent(AgentMessage::ThinkingToggled { expanded: true })
+    ));
+    assert_eq!(toggled, toggled.clone());
+
+    let scrolled = Message::Agent(AgentMessage::ScrollReported {
+        offset_y: 10.0,
+        viewport_height: 20.0,
+        content_height: 30.0,
+    });
+    match scrolled {
+        Message::Agent(AgentMessage::ScrollReported {
+            offset_y,
+            viewport_height,
+            content_height,
+        }) => {
+            assert_eq!(offset_y, 10.0);
+            assert_eq!(viewport_height, 20.0);
+            assert_eq!(content_height, 30.0);
+        }
+        other => panic!("expected ScrollReported, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_message_is_clone_but_channels_that_can_be_are_copy() {
     assert_clone::<Message>();
     assert_clone::<WindowMessage>();

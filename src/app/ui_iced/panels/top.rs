@@ -95,8 +95,10 @@ pub use crate::ui::panels::top::{
 
 /// `LlmConfig::has_use_case` key selecting the chat-capable models
 /// (UI-064). Not user-facing text, but named so the literal appears once
-/// ([RUST-021]).
-const CHAT_USE_CASE: &str = "chat";
+/// ([RUST-021]). Made `pub` so the agent panel's model selector
+/// ([`crate::ui_iced::agent`]) filters on the exact same key
+/// ([TASK-018]).
+pub const CHAT_USE_CASE: &str = "chat";
 
 /// Logical point size of the logo mark.
 pub const LOGO_MARK_SIZE: f32 = 20.0;
@@ -237,6 +239,16 @@ impl ChatModelEntry {
     /// The intent this model publishes when picked (UI-065).
     pub fn command(&self) -> UserCommand {
         UserCommand::SelectChatModel(self.name.clone())
+    }
+}
+
+/// `ChatModelEntry` renders as its [`Self::label`]. Added so the entry can
+/// drive an `iced::widget::pick_list` in the agent prompt row
+/// ([`crate::ui_iced::agent::prompt_input`]), which requires
+/// `T: ToString` (`iced_widget-0.14.2/src/helpers.rs:1662`).
+impl std::fmt::Display for ChatModelEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label())
     }
 }
 

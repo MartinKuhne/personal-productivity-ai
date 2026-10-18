@@ -410,6 +410,35 @@ pub const AGENT_THINKING_LABEL: &str = "Agent is thinking...";
 /// Label for tool call parameter payload string in agent view.
 pub const AGENT_TOOL_CALL_PARAM: &str = "Tool call parameter string";
 
+/// Markdown prefix the orchestrator injects ahead of a user prompt when it
+/// appends the prompt to a continuing agent transcript
+/// (`src/app/orchestrator.rs:268`). The iced agent panel parses this marker
+/// back out to render the user turn as themed text rather than assistant
+/// markdown ([TASK-018], UI-048 turn model).
+pub const AGENT_USER_TURN_MARKER: &str = "**User:** ";
+
+/// Send-button label in the agent prompt row ([TASK-018]).
+pub const AGENT_SEND_BUTTON: &str = "Send";
+
+/// Queue-button label shown while the agent is running, behind which the
+/// prompt is parked until the current turn finishes ([TASK-018]).
+pub const AGENT_QUEUE_BUTTON: &str = "Queue";
+
+/// Label prefix for the chat-model selector in the agent prompt row
+/// ([TASK-018], UI-064/065 selection).
+pub const AGENT_MODEL_LABEL: &str = "Model:";
+
+/// Prefix for the queued-prompt count badge in the agent prompt row
+/// ([TASK-018]). Pair with [`format_queued_prompts_label`].
+pub const AGENT_QUEUED_PREFIX: &str = "Queued: ";
+
+/// Formats the queued-prompt count badge label
+/// (`Queued: 3`) from the number of parked prompts ([TASK-018]).
+#[must_use]
+pub fn format_queued_prompts_label(count: usize) -> String {
+    format!("{AGENT_QUEUED_PREFIX}{count}")
+}
+
 /// Button text for copying rendered agent markdown.
 pub const COPY_MARKDOWN_BUTTON: &str = "Copy markdown";
 
@@ -910,6 +939,17 @@ mod tests {
             format_chat_model_menu_label("gpt-4o", 15),
             "gpt-4o (Cost: 15)"
         );
+    }
+
+    #[test]
+    fn test_agent_panel_prompt_strings() {
+        assert_eq!(AGENT_USER_TURN_MARKER, "**User:** ");
+        assert_eq!(AGENT_SEND_BUTTON, "Send");
+        assert_eq!(AGENT_QUEUE_BUTTON, "Queue");
+        assert_eq!(AGENT_MODEL_LABEL, "Model:");
+        assert_eq!(AGENT_QUEUED_PREFIX, "Queued: ");
+        assert_eq!(format_queued_prompts_label(0), "Queued: 0");
+        assert_eq!(format_queued_prompts_label(3), "Queued: 3");
     }
 
     #[test]

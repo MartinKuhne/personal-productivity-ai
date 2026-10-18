@@ -52,7 +52,17 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 egui_extras = { version = "0.36", default-features = false }
 # UI framework migration (TASK-003, `doc/planning/iced.md`): iced ships as a
 # REGULAR (non-optional) dependency per DEC-011 — no feature flag exists.
-iced = { version = "0.14.0", features = ["wgpu", "tiny-skia", "fira-sans", "advanced-shaping"] }
+# The `markdown` feature gates iced's built-in Markdown widget
+# (`iced-0.14.0/Cargo.toml:93` `markdown = ["iced_widget/markdown"]`,
+# `iced_widget-0.14.2/Cargo.toml:51` `markdown = ["dep:pulldown-cmark"]`).
+# The agent transcript renders assistant output through it ([TASK-018]).
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tiny-skia",
+    "fira-sans",
+    "advanced-shaping",
+    "markdown",
+] }
 notify = "8"
 playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

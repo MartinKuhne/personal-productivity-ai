@@ -265,7 +265,11 @@ impl AppOrchestrator {
             self.agent_transcript.reset();
         } else {
             // Visually separate the new prompt in the transcript for continuation
-            let user_prompt = format!("\n\n**User:** {}\n\n", prompt);
+            let user_prompt = format!(
+                "\n\n{}{}\n\n",
+                crate::ui::strings::AGENT_USER_TURN_MARKER,
+                prompt
+            );
             self.agent_transcript.content.push_str(&user_prompt);
             self.agent_transcript
                 .blocks
