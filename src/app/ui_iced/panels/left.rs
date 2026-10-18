@@ -20,19 +20,28 @@
 //!
 //! # Reused, not reimplemented ([RUST-051])
 //!
-//! The tree's *logic* stays in the egui-side subsystem and is called, not
-//! copied:
-//!
-//! * `crate::ui::panels::left::build_workspace_tree` (crate-internal)
-//!   builds the `TreeNode` hierarchy from the content libraries and the tag
-//!   filter.
-//! * [`flatten_tree`] turns it into the visible [`FlatRow`] list, which is
-//!   where **UI-017** (directories before files, then name-ascending) and
-//!   **UI-018** (a tag filter prunes directories with no matching files)
-//!   actually live. Rendering the reused rows *in order* is what preserves
-//!   both requirements — this module adds no sorting of its own.
+//! * [`flatten_tree`] turns the `TreeNode` hierarchy into the visible
+//!   [`FlatRow`] list, which is where **UI-017** (directories before files,
+//!   then name-ascending) and **UI-018** (a tag filter prunes directories
+//!   with no matching files) actually live. Rendering the reused rows *in
+//!   order* is what preserves both requirements — this module adds no
+//!   sorting of its own. `crate::ui::tree` is a file the migration KEEPS, so
+//!   that import stays.
 //! * [`crate::ui_iced::layout::clamped_width`] is the single UI-016
 //!   clamping rule shared with the pane-grid resize reduction.
+//!
+//! # Relocated helpers ([TASK-029])
+//!
+//! [`build_workspace_tree`] — the `TreeNode` builder the egui panel owned —
+//! used to be called across the boundary at
+//! `crate::ui::panels::left::build_workspace_tree`, a file [TASK-029b]
+//! deletes. It is copied into this module together with its three private
+//! helpers (`prune_empty_dirs`, `library_for_path`,
+//! `insert_path_into_tree`). All four are **egui-free**: they touch only
+//! [`TreeNode`], [`ContentLibrary`] and `Path`, never `egui`/`eframe`. The
+//! `TreeNode` type itself lives in `crate::ui::app`, a KEPT file, so it is
+//! imported rather than duplicated. The egui panel keeps its own copy until
+//! Phase 5.
 //!
 //! Only what egui bound to `egui::Ui`/`egui::Context` is re-typed here:
 //! the width measurement, the row labels, the click→command mapping and the
@@ -91,6 +100,7 @@ use iced::{Alignment, Background, Element, Font, Length, Padding};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, SkillFile};
+use crate::ui::TreeNode;
 use crate::ui::app::FastMdApp;
 use crate::ui::panel_layout::{
     LEFT_PANEL_DEFAULT_WIDTH, LEFT_PANEL_MAX_WIDTH_FRACTION, LEFT_PANEL_MIN_WIDTH,
@@ -542,12 +552,154 @@ pub fn tree_rows(app: &FastMdApp) -> Arc<Vec<FlatRow>> {
         return Arc::clone(cached);
     }
 
-    let root = crate::ui::panels::left::build_workspace_tree(app);
+    let root = build_workspace_tree(app);
     let mut rows = Vec::new();
     if !root.children.is_empty() {
         flatten_tree(&root, 0, app.selection().expanded_dirs(), &mut rows);
     }
     Arc::new(rows)
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-tree construction — relocated from the egui left panel
+// ([TASK-029], `src/app/ui/panels/left.rs:18-133`).
+//
+// All four functions are egui-free: their signatures and bodies mention only
+// `TreeNode` (owned by the KEPT `crate::ui::app`), `ContentLibrary`,
+// `Path`/`PathBuf` and `String`. The egui panel keeps its own copy until
+// [TASK-029b] removes it.
+// ---------------------------------------------------------------------------
+
+/// Recursively removes directory nodes that do not contain any child files or subdirectories.
+///
+/// Relocated from the egui left panel for the zero-egui migration
+/// ([TASK-029]); the UI-018 prune rule is unchanged.
+fn prune_empty_dirs(node: &mut TreeNode) {
+    node.children.retain(|_, child| {
+        if child.is_dir {
+            prune_empty_dirs(child);
+            !child.children.is_empty()
+        } else {
+            true
+        }
+    });
+}
+
+/// Finds the content library whose root is a prefix of `path`, returning the
+/// library and the library-relative remainder of the path.
+///
+/// Relocated from the egui left panel for the zero-egui migration
+/// ([TASK-029]).
+fn library_for_path<'a>(
+    libraries: &'a [ContentLibrary],
+    path: &'a std::path::Path,
+) -> Option<(&'a ContentLibrary, &'a std::path::Path)> {
+    libraries.iter().find_map(|lib| {
+        let root = std::path::Path::new(&lib.root_folder);
+        path.strip_prefix(root).ok().map(|rel| (lib, rel))
+    })
+}
+
+/// Inserts `path` under the content library that contains it, creating the
+/// intermediate directory nodes on the way down.
+///
+/// The two passes over the workspace (discovered files, discovered
+/// directories) previously duplicated this library-match + component-walk; the
+/// only difference is whether the *final* component is a file or a directory,
+/// selected by `leaf_is_dir`. Paths outside every library root are ignored.
+///
+/// Relocated from the egui left panel for the zero-egui migration
+/// ([TASK-029]).
+fn insert_path_into_tree(
+    root_node: &mut TreeNode,
+    libraries: &[ContentLibrary],
+    path: &std::path::Path,
+    leaf_is_dir: bool,
+) {
+    let Some((lib, rel_path)) = library_for_path(libraries, path) else {
+        return;
+    };
+    let Some(current_node_ref) = root_node.children.get_mut(&lib.name) else {
+        return;
+    };
+    let mut current_node = current_node_ref;
+    let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+
+    let components: Vec<_> = rel_path.components().collect();
+    for (i, comp) in components.iter().enumerate() {
+        let name = comp.as_os_str().to_string_lossy().into_owned();
+        current_path = current_path.join(&name);
+        let is_dir = if i == components.len() - 1 {
+            leaf_is_dir
+        } else {
+            true
+        };
+
+        current_node
+            .children
+            .entry(name.clone())
+            .or_insert_with(|| TreeNode::new(name.clone(), current_path.clone(), is_dir));
+        match current_node.children.get_mut(&name) {
+            Some(n) => current_node = n,
+            None => break,
+        }
+    }
+}
+
+/// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
+///
+/// Relocated from the egui left panel for the zero-egui migration
+/// ([TASK-029]); UI-017's ordering and UI-018's tag-prune behaviour are
+/// unchanged. The tracing span is renamed to the `ui_iced.*` namespace so the
+/// iced and egui builds do not report under one span name while both exist.
+#[tracing::instrument(skip_all, name = "ui_iced.left.build_workspace_tree", level = "debug")]
+#[must_use]
+pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
+    let filtered_files: Vec<&std::path::PathBuf> = app
+        .file_processor()
+        .all_files
+        .iter()
+        .filter(|p| {
+            if let Some(active_tag) = &app.tags().selected_tag {
+                if let Some(tags) = app.tags().file_tags().get(*p) {
+                    tags.contains(active_tag)
+                } else {
+                    false
+                }
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    let mut root_node = TreeNode::new(
+        strings::DEFAULT_WORKSPACE_NAME.to_string(),
+        std::path::PathBuf::new(),
+        true,
+    );
+
+    for lib in app.content_libraries() {
+        let lib_node_name = lib.name.clone();
+        let lib_root_path = std::path::PathBuf::from(&lib.root_folder);
+        root_node
+            .children
+            .entry(lib_node_name.clone())
+            .or_insert_with(|| TreeNode::new(lib_node_name.clone(), lib_root_path, true));
+    }
+
+    for path in filtered_files {
+        insert_path_into_tree(&mut root_node, app.content_libraries(), path, false);
+    }
+
+    if app.tags().selected_tag.is_none() {
+        for dir in app.file_processor().all_dirs.iter() {
+            insert_path_into_tree(&mut root_node, app.content_libraries(), dir, true);
+        }
+    } else {
+        prune_empty_dirs(&mut root_node);
+    }
+
+    root_node
 }
 
 /// Everything the left panel needs to render, snapshotted off `FastMdApp`.

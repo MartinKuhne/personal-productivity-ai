@@ -13,9 +13,10 @@
 //!   `Internal::from_configuration` (`iced_widget-0.14.2/src/pane_grid/
 //!   state.rs:365-408`) are derived from the built [`pane_grid::State`]
 //!   rather than hardcoded, and the shape contract is pinned by tests;
-//! - the right pane is gated by [`should_show_panel`] — the pure function
-//!   reused verbatim from `crate::ui::panels::right:11-17` ([RUST-051]:
-//!   single source of truth; no verbatim duplication);
+//! - the right pane is gated by [`should_show_panel`] — the pure ToC rule,
+//!   owned by [`crate::ui_iced::panels::right`] and re-exported here so the
+//!   [TASK-010] public path stays stable ([RUST-051]: one iced-side home for
+//!   the gate);
 //! - pane-grid resize drag events ([`pane_grid::ResizeEvent`] fields
 //!   `split`/`ratio` — `iced_widget-0.14.2/src/pane_grid.rs:1226-1237`, fed
 //!   through `PaneGrid::on_resize(leeway, f)` — `pane_grid.rs:267-275`)
@@ -58,10 +59,13 @@ pub const STUB_TEXT: &str = "stub";
 /// [`should_show_panel`] passes; see [`STUB_TEXT`].
 pub const TOC_STUB_TEXT: &str = "toc";
 
-/// Pure visibility gate for the right (TOC) pane, reused verbatim from the
-/// egui panel ([RUST-051]: single source of truth at
-/// `src/app/ui/panels/right.rs:11-17`).
-pub use crate::ui::panels::right::should_show_panel;
+/// Pure visibility gate for the right (TOC) pane.
+///
+/// Relocated into the iced tree at [`crate::ui_iced::panels::right`] for the
+/// zero-egui migration ([TASK-029]) and re-exported here, so the
+/// [`layout`](crate::ui_iced::layout) public path [TASK-010] established is
+/// unchanged and [`view`](crate::ui_iced::view) needs no edit.
+pub use crate::ui_iced::panels::right::should_show_panel;
 
 /// Contents of each middle-band pane ([TASK-010]) — [RUST-011]: pub item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -274,8 +278,8 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
 /// pane-grid view callback runs once per pane per frame and `Element` is not
 /// `Clone`. The right (TOC) body is only mounted when
 /// [`should_show_panel`] passes; the gate is evaluated here so the rule
-/// stays in the one place it is defined
-/// (`crate::ui::panels::right::should_show_panel`, [RUST-051]).
+/// stays in the one place the iced layer defines it
+/// ([`crate::ui_iced::panels::right::should_show_panel`], [TASK-029]).
 ///
 /// `on_resize` maps a [`pane_grid::ResizeEvent`] into the caller's message
 /// type (`on_resize` contract verified at

@@ -57,14 +57,95 @@
 //! FTWA regime transition (surplus / deficit / fallback) still fires on
 //! the same *relative* column shapes the renderer-backed path produces.
 //!
+//! # Relocated helper ([TASK-029])
+//!
+//! [`TablePadding`] used to be `use`d from `crate::ui::table_width`, a file
+//! [TASK-029b] deletes. It is copied into this module verbatim and is
+//! **egui-free** (four `f32` fields, four pure methods). The egui module's
+//! `TableRenderConfig` is likewise egui-free but has no `ui_iced` consumer,
+//! so it is not copied.
+//!
 //! Unit tests live in the sibling `table_width_tests.rs` sidecar.
 
 use crate::markdown::model::InlineElem;
 use crate::markdown::table_layout::{TableLayout, TableLayoutBuilder, TextMeasurer};
 use crate::markdown::table_width::DeficitStrategy;
-use crate::ui::table_width::TablePadding;
 use iced::Length;
 use iced::font::{Family, Font};
+
+/// Per-cell padding in logical pixels applied around cell content.
+///
+/// Padding is resolved per cell by taking the most-specific non-`None` layer
+/// (per-cell override > per-column override > global default), then sanitised
+/// (negative components clamped to `0.0`, satisfying `TBL-050`). Resolved
+/// horizontal padding is factored into column width accounting (`TBL-033`):
+/// every returned `max_content`/`min_content` is increased by
+/// `padding.horizontal()`. Vertical padding is applied as inner frame margin
+/// in the cell renderer and increases the rendered row height.
+///
+/// See [contracts/table-renderer.md](../../../specs/002-table-layout-renderer/contracts/table-renderer.md) Part C.
+///
+/// # Relocated ([TASK-029])
+///
+/// Copied verbatim from `src/app/ui/table_width/mod.rs:29-86`, which used to
+/// be `use`d across the boundary and is deleted by [TASK-029b]. The type is
+/// **egui-free by construction** — four `f32` fields and four pure methods,
+/// no `egui`/`eframe` type anywhere — so the copy is exact.
+///
+/// The egui module's `TableRenderConfig` is **also** egui-free but is not
+/// copied: no `ui_iced` code reads it (the iced render path carries
+/// [`RenderContext::table_padding`](crate::ui_iced::render::RenderContext)
+/// instead). The egui module keeps both until Phase 5.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TablePadding {
+    /// Top padding in logical pixels.
+    pub top: f32,
+    /// Bottom padding in logical pixels.
+    pub bottom: f32,
+    /// Left padding in logical pixels.
+    pub left: f32,
+    /// Right padding in logical pixels.
+    pub right: f32,
+}
+
+impl TablePadding {
+    /// Zero padding on every side — the no-arg default.
+    pub const ZERO: Self = Self {
+        top: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+        right: 0.0,
+    };
+
+    /// Clamp each negative component to `0.0` (`TBL-050` malformed-input branch).
+    #[must_use]
+    pub fn sanitised(self) -> Self {
+        Self {
+            top: self.top.max(0.0),
+            bottom: self.bottom.max(0.0),
+            left: self.left.max(0.0),
+            right: self.right.max(0.0),
+        }
+    }
+
+    /// Horizontal padding (`left + right`) added to width accounting.
+    #[must_use]
+    pub fn horizontal(self) -> f32 {
+        self.left + self.right
+    }
+
+    /// Vertical padding (`top + bottom`) added to row height accounting.
+    #[must_use]
+    pub fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
+}
+
+impl Default for TablePadding {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
 
 /// Horizontal padding the iced `Table` paints on each side of every cell.
 ///

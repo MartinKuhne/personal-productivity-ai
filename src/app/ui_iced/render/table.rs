@@ -42,11 +42,10 @@ use super::inline::{BODY_SIZE, SpanModel, spans_from_inline};
 use crate::markdown::model::InlineElem;
 use crate::markdown::table_layout::TableLayout;
 use crate::markdown::table_width::DeficitStrategy;
-use crate::ui::table_width::TablePadding;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::table_width::{
-    CELL_PADDING_X, CELL_PADDING_Y, IcedTextMeasurer, column_length, column_widths,
+    CELL_PADDING_X, CELL_PADDING_Y, IcedTextMeasurer, TablePadding, column_length, column_widths,
     solve_table_layout,
 };
 use crate::ui_iced::theme::to_iced_color;

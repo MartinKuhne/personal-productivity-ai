@@ -95,6 +95,21 @@
 //!   its marker exist so the view is ready for it; [TASK-022] populates it
 //!   when dirty tracking lands. Flagged as spec drift per [RUST-041].
 //!
+//! # Relocated helpers ([TASK-029])
+//!
+//! The band's four framework-free `UserCommand` constructors
+//! ([`clear_agent_session_command`], [`apply_tab_close_click`],
+//! [`apply_tab_close_others_click`], [`apply_tab_close_all_click`]) used to
+//! be `pub use`d from `src/app/ui/panels/center.rs`, a file [TASK-029b]
+//! deletes. They are copied into this module verbatim; every one is a pure
+//! `usize`/`() → UserCommand` constructor with **no `egui` type** in its
+//! signature or body. The egui panel keeps its own copy until Phase 5.
+//!
+//! `apply_task_toggles_command` (the egui panel's fifth pure constructor) is
+//! **not** copied: no `ui_iced` code reaches it — the iced render path does
+//! not yet emit task-checkbox intents (see the `message` module's UI-048
+//! note).
+//!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
 #[cfg(test)]
@@ -118,14 +133,66 @@ use crate::ui_iced::theme::to_iced_color;
 use super::left::{NOTE_SKILLS_SUBDIR, skill_dir};
 use super::top::phosphor_font;
 
-/// The egui center panel's framework-free `UserCommand` constructors are
-/// re-exported rather than duplicated ([RUST-051]): they are pure
-/// constructors with no egui type in their signature, so the iced view and
-/// the [TASK-022] reducer call exactly the same code.
-pub use crate::ui::panels::center::{
-    apply_tab_close_all_click, apply_tab_close_click, apply_tab_close_others_click,
-    clear_agent_session_command,
-};
+// The egui center panel's framework-free `UserCommand` constructors,
+// **relocated into this module** for the zero-egui migration ([TASK-029])
+// from `src/app/ui/panels/center.rs:14-64`.
+//
+// They were previously `pub use`d from a file [TASK-029b] deletes. Each is
+// copied verbatim and is egui-free — a pure `usize`/`()`→[`UserCommand`]
+// constructor with no `egui` type in its signature or body — so the iced
+// view and the [TASK-022] reducer call exactly the same code. The egui
+// panel keeps its own copy until Phase 5.
+
+/// Purpose: Creates a `UserCommand` to clear all agent-related session state.
+/// Inputs: None
+/// Outputs: `UserCommand::ClearAgentSession`
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns command that, when executed, hides agent results, clears history and text buffers, and cancels any running agent.
+///
+/// Relocated from the egui center panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn clear_agent_session_command() -> UserCommand {
+    UserCommand::ClearAgentSession
+}
+
+/// Purpose: Applies the side effect of clicking the tab close `×`
+/// button in the center panel.
+/// Inputs: i (the index of the tab to close, as it appeared in the tab
+/// strip on the frame the button was clicked)
+/// Outputs: the `UserCommand::CloseTab` intent for that index.
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None — `i` is bounds-checked inside the executor; an
+/// out-of-range index is a silent no-op.
+/// Postconditions: Returns the command that, when executed, removes the tab
+/// at that index; if the closed tab was the selected file the selection
+/// falls back to the new last tab (or `None` if no tabs remain).
+///
+/// Relocated from the egui center panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_tab_close_click(i: usize) -> UserCommand {
+    UserCommand::CloseTab(i)
+}
+
+/// The intent for "Close Other Tabs" on the tab at index `i`.
+///
+/// Relocated from the egui center panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_tab_close_others_click(i: usize) -> UserCommand {
+    UserCommand::CloseOtherTabs(i)
+}
+
+/// The intent for "Close All Tabs".
+///
+/// Relocated from the egui center panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_tab_close_all_click() -> UserCommand {
+    UserCommand::CloseAllTabs
+}
 
 /// Logical point size of a tab label.
 ///

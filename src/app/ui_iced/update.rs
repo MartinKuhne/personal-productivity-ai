@@ -65,7 +65,6 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::markdown::document::DocumentContent;
-use crate::ui::os_shell;
 use crate::ui::tree_search::find_search_results_scoped;
 use crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID;
 use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
@@ -80,6 +79,7 @@ use crate::ui_iced::message::{
     RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage,
     WindowMessage,
 };
+use crate::ui_iced::os_shell;
 use crate::ui_iced::panels::bottom::submit_commands;
 use crate::ui_iced::panels::left::ROW_TEXT_SIZE;
 use crate::ui_iced::persisted;
@@ -950,7 +950,7 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
         }
         crate::ui::LinkAction::ScrollToAnchor { anchor } => {
             let heading_ids = state.app.orchestrator.tabs.heading_ids().to_vec();
-            let matched = crate::ui::panels::right::resolve_anchor(
+            let matched = crate::ui_iced::panels::right::resolve_anchor(
                 &state.app.orchestrator.tabs.toc,
                 &heading_ids,
                 &anchor,

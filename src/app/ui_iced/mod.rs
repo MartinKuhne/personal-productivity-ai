@@ -104,6 +104,29 @@
 //!   stacks the context menu, editor, dialogs, log viewer, debug window,
 //!   tools, About, attributions and batch windows in the egui draw order
 //!   ([TASK-023]).
+//! - [`os_shell`] — the egui-free platform wrappers the reducer calls:
+//!   open-in-system-editor, reveal-in-file-explorer and open-URL, copied out
+//!   of the egui tree so `ui_iced` owns them outright ([TASK-029]).
+//! - `test_helpers` — `#[cfg(test)]` egui-free fixtures that build a
+//!   `FastMdApp` or a whole [`app::AppState`] over in-memory storage for
+//!   the iced sidecar tests ([TASK-029], [RUST-006]).
+//!
+//! # Self-containment ([TASK-029])
+//!
+//! `ui_iced` no longer `pub use`s any helper out of an egui file that
+//! [TASK-029b] deletes. Every framework-free helper the iced panes need is
+//! **owned** by the iced module that consumes it — see the `//!` note in
+//! [`layout`], [`panels::left`], [`panels::center`], [`panels::top`],
+//! [`panels::bottom`], [`panels::right`], [`table_width`], [`overlay`] and
+//! [`os_shell`]. The egui originals keep their own copies until Phase 5;
+//! the transient duplication is deliberate.
+//!
+//! Imports that DO remain point at files the migration **keeps** (they are
+//! RELOCATE / RESIDUE / RE-TYPE, not DELETE): `crate::ui::strings`,
+//! `crate::ui::theme`, [`crate::ui::app`] (`FastMdApp`),
+//! `crate::ui::tree_search`, `crate::ui::panel_layout`, `crate::ui::agent`,
+//! `crate::ui::tree`, `crate::ui::attributions`,
+//! [`crate::ui::PersistedUiState`] and [`crate::ui::CURRENT_SCHEMA_VERSION`].
 //!
 //! The view borrows every panel view-model out of
 //! [`AppState::models`](app::AppState::models); those snapshots are rebuilt
@@ -126,6 +149,7 @@ pub mod layout;
 pub mod logo;
 pub mod logs;
 pub mod message;
+pub mod os_shell;
 pub mod overlay;
 pub mod panels;
 pub mod persisted;
@@ -133,6 +157,8 @@ pub mod render;
 pub mod search;
 pub mod subscription;
 pub mod table_width;
+#[cfg(test)]
+pub mod test_helpers;
 pub mod theme;
 pub mod tools_dialog;
 pub mod update;

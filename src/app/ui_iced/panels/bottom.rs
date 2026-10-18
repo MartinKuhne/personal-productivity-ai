@@ -26,12 +26,16 @@
 //!
 //! # Reused, not reimplemented ([RUST-051])
 //!
-//! Every framework-free helper the egui band owned stays where it is and is
-//! re-exported rather than copied: [`compute_prompt_prefix`],
-//! [`compute_file_context`], [`format_models_list`] and
-//! [`parse_command_intent`] have no egui types in their signatures, so both
-//! UIs — and the reducer — run the same code. Only what egui bound to
-//! `egui::Ui`/`egui::Context` is re-typed here.
+//! The band's framework-free helpers were **relocated into this module** for
+//! the zero-egui migration ([TASK-029]): [`compute_prompt_prefix`],
+//! [`compute_file_context`], [`format_models_list`],
+//! [`parse_command_intent`] and [`clear_command_input_command`] used to be
+//! `pub use`d from `src/app/ui/panels/bottom.rs`, a file [TASK-029b]
+//! deletes. They are copied here verbatim — every one is egui-free (pure
+//! `Path`/`String`/`UserCommand` signatures, no `egui` type anywhere in the
+//! body), so the iced view, the [TASK-022] reducer and the iced sidecar
+//! tests all run the same rules the egui band ran. The egui panel keeps its
+//! own copy until Phase 5; the transient duplication dies with it.
 //!
 //! The one piece of *behaviour* that egui kept inline inside the widget
 //! closure — "running → queue the prompt, idle → parse the intent, then clear
@@ -83,12 +87,136 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{AgentMessage, Message};
 use crate::ui_iced::theme::to_iced_color;
 
-/// The egui band's framework-free helpers, reused rather than duplicated
-/// ([RUST-051]) — `src/app/ui/panels/bottom.rs:44-134`.
-pub use crate::ui::panels::bottom::{
-    clear_command_input_command, compute_file_context, compute_prompt_prefix, format_models_list,
-    parse_command_intent,
-};
+// The egui band's framework-free helpers, **relocated into this module**
+// for the zero-egui migration ([TASK-029]) from
+// `src/app/ui/panels/bottom.rs:44-142`.
+//
+// Each is copied verbatim and is egui-free: no `egui`/`eframe` type appears
+// in any signature or body. See the individual items below.
+//
+// The egui panel keeps its own copy until [TASK-029b] removes it; the
+// transient duplication is intentional.
+
+/// Parses the user prompt to determine the intended command.
+/// Computes the prompt prefix based on the selected directory and available content libraries.
+///
+/// Relocated from the egui bottom band for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn compute_prompt_prefix(
+    selected_dir: Option<&std::path::Path>,
+    content_libraries: &[crate::config::ContentLibrary],
+) -> String {
+    if let Some(dir) = selected_dir {
+        let rel_str = crate::config::library_display_label(content_libraries, dir)
+            .unwrap_or_else(|| dir.to_string_lossy().to_string());
+        if rel_str.is_empty() {
+            ">".to_string()
+        } else {
+            format!("{} >", rel_str)
+        }
+    } else {
+        ">".to_string()
+    }
+}
+
+/// Computes the file name context display from the active file.
+/// Returns `None` when there is no active file context.
+///
+/// Relocated from the egui bottom band for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn compute_file_context(
+    active_file: Option<&std::path::Path>,
+    prompt_prefix: &str,
+) -> Option<(String, f32)> {
+    let file_name = active_file?.file_name()?.to_string_lossy().to_string();
+    if file_name.is_empty() {
+        return None;
+    }
+
+    let dir_display = prompt_prefix.trim_end_matches(" >").trim_end_matches('>');
+    let dir_len = dir_display.chars().count();
+    let file_len = file_name.chars().count();
+
+    let base_size = 12.0;
+    let min_size = 8.0;
+
+    let font_size = if file_len > dir_len && dir_len > 0 {
+        let ratio = dir_len as f32 / file_len as f32;
+        (base_size * ratio).max(min_size)
+    } else {
+        base_size
+    };
+
+    Some((file_name, font_size))
+}
+
+/// Renders the chat-model catalogue the `/models` command reports.
+///
+/// Relocated from the egui bottom band for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn format_models_list(
+    models: &std::collections::HashMap<String, crate::config::LlmConfig>,
+) -> String {
+    let mut output = crate::ui::strings::MODELS_LIST_HEADER.to_string();
+    let mut sorted_names: Vec<&String> = models.keys().collect();
+    sorted_names.sort();
+
+    for name in sorted_names {
+        let model_cfg = &models[name];
+        let use_cases = model_cfg.use_case.join(", ");
+        output.push_str(&format!(
+            "- {} [cost: {}, use_case: {}]\n",
+            name,
+            model_cfg.get_cost(),
+            use_cases
+        ));
+    }
+    if models.is_empty() {
+        output.push_str(crate::ui::strings::MODELS_LIST_NO_ADDITIONAL);
+    }
+    output
+}
+
+/// Purpose: Parses the user prompt and returns the appropriate
+/// `UserCommand` to dispatch. Does NOT mutate state.
+/// Inputs: `prompt` - the user's input text (already trimmed)
+/// Outputs: `Option<UserCommand>` - the command to publish, or `None` if empty
+/// Purity: Pure (no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns the command corresponding to the parsed intent.
+///
+/// Relocated from the egui bottom band for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn parse_command_intent(prompt: &str) -> Option<UserCommand> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if trimmed.starts_with("/models") {
+        Some(UserCommand::ShowModels)
+    } else if trimmed.starts_with("/model ") {
+        Some(UserCommand::ShowDeprecatedModelMessage)
+    } else {
+        Some(UserCommand::RunAgent(trimmed.to_string()))
+    }
+}
+
+/// Purpose: Returns a command to clear the command input.
+/// Inputs: None
+/// Outputs: `UserCommand::ClearCommandInput`
+/// Purity: Pure (returns command, no state mutation).
+///
+/// Relocated from the egui bottom band for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn clear_command_input_command() -> UserCommand {
+    UserCommand::ClearCommandInput
+}
 
 /// Logical point size of the prompt prefix and the command input.
 pub const PROMPT_TEXT_SIZE: f32 = 14.0;

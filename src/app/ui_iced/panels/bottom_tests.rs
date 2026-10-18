@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::LlmConfig;
 use crate::ui::strings;
-use crate::ui::test_helpers::app::test_app;
+use crate::ui_iced::test_helpers::test_app;
 
 use super::{
     BottomPanelViewModel, compute_file_context, compute_prompt_prefix, format_models_list,

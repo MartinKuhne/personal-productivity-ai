@@ -133,7 +133,6 @@ use iced::widget::{Column, MouseArea, Row, button, container, mouse_area, space,
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Size};
 
 use crate::ui::strings;
-use crate::ui::widgets::DialogAction;
 use crate::ui_iced::theme::{scrim_color, to_iced_color};
 
 /// Width of a rendered context-menu card ([TASK-017a]).
@@ -359,6 +358,31 @@ pub fn clamp_anchor(anchor: Point, size: Size, viewport: Size) -> Point {
     let max_y = (viewport.height - size.height).max(0.0);
 
     Point::new(anchor.x.clamp(0.0, max_x), anchor.y.clamp(0.0, max_y))
+}
+
+/// The outcome of a confirm / cancel button pair.
+///
+/// # Relocated ([TASK-029])
+///
+/// Copied verbatim from `crate::ui::widgets::DialogAction`
+/// (`src/app/ui/widgets.rs:160-169`), which [`ConfirmCancel`] used to map
+/// onto across the boundary. That egui file is deleted by [TASK-029b], so the
+/// iced layer owns its own copy. The enum is **egui-free by construction** —
+/// three unit variants, no `egui`/`eframe` type anywhere.
+///
+/// It is kept as a distinct type rather than folded into [`ConfirmCancel`]
+/// because it is the *egui-parity* vocabulary: `to_dialog_action` exists so
+/// a caller comparing against the egui outcome still compiles, and
+/// `ConfirmCancel` has no `None` member (an iced button either emits a
+/// message or does not exist).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogAction {
+    /// Neither button was clicked.
+    None,
+    /// The confirm button (OK / Save / Process / …) was clicked.
+    Confirm,
+    /// The cancel button was clicked.
+    Cancel,
 }
 
 /// The outcome of the shared confirm/cancel button pair ([TASK-017a]).

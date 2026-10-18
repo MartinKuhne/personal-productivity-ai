@@ -16,8 +16,8 @@
 
 use super::*;
 use crate::config::ContentLibrary;
-use crate::ui::test_helpers::app::test_app;
 use crate::ui_iced::overlay::menu_labels;
+use crate::ui_iced::test_helpers::test_app;
 use tempfile::TempDir;
 
 // --- fixtures -----------------------------------------------------------

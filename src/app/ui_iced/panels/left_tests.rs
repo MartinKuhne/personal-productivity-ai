@@ -12,8 +12,8 @@
 //! lookup never touches the real user profile.
 
 use super::*;
-use crate::ui::test_helpers::app::test_app;
 use crate::ui_iced::overlay::menu_labels;
+use crate::ui_iced::test_helpers::test_app;
 use tempfile::TempDir;
 
 // --- fixtures -----------------------------------------------------------

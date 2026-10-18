@@ -115,8 +115,9 @@ fn test_middle_band_configuration_is_two_level_vertical() {
 
 #[test]
 fn test_should_show_panel_gates_via_layout_module() {
-    // Re-exported verbatim from `crate::ui::panels::right:11-17`
-    // ([RUST-051]); assert the gate contract at the new import path.
+    // Re-exported from the iced ToC module (`ui_iced/panels/right.rs`) for
+    // the zero-egui migration ([TASK-029]); assert the gate contract at the
+    // [TASK-010] import path.
     assert!(should_show_panel(true, true));
     assert!(!should_show_panel(true, false));
     assert!(!should_show_panel(false, true));

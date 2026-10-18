@@ -4001,3 +4001,148 @@ be confirmed by running `cargo run` (== `cargo run --bin fastmd`):
    preamble (panic hook + logging + rustls). Both build; the duplication dies
    with the pilot in [TASK-029].
 5. **No branch created, nothing committed** — left for the orchestrator.
+
+
+### TASK-029a self-containment verification log (ui_iced owns its pure helpers - 2026-10-18)
+
+**Scope delivered: `ui_iced` no longer depends on any egui file [TASK-029b]
+deletes.** Every framework-free helper the iced layer `pub use`d or called
+across the boundary out of `src/app/ui/` has been **copied into the iced
+module that uses it**. No file under `src/app/ui/` was modified — the egui
+tree keeps its own copies and still builds, so the duplication is transient
+and dies with the egui layer.
+
+**Copy map (helper → new iced home).**
+
+| # | Old location (DELETE in 029b) | Helper(s) | New iced home | egui-free? |
+| --- | --- | --- | --- | --- |
+| 1 | `ui/panels/right.rs:11-17` | `should_show_panel` | **new** `ui_iced/panels/right.rs`; re-exported from `ui_iced/layout.rs` so the [TASK-010] public path `layout::should_show_panel` is unchanged | Yes — `(bool, bool) -> bool` |
+| 1 | `ui/panels/right.rs:78-110` | `resolve_anchor` | **new** `ui_iced/panels/right.rs`; `update.rs` now calls `ui_iced::panels::right::resolve_anchor` | Yes — `&[ToCEntry] + &[String] + &str -> String` |
+| 2 | `ui/panels/left.rs:18-133` | `build_workspace_tree` + private `prune_empty_dirs`, `library_for_path`, `insert_path_into_tree` | `ui_iced/panels/left.rs` (called by `tree_rows`) | Yes — `TreeNode` / `ContentLibrary` / `Path` only. `TreeNode` itself lives in `ui/app/mod.rs` (KEPT) and is imported, not copied |
+| 3 | `ui/panels/bottom.rs:44-142` | `compute_prompt_prefix`, `compute_file_context`, `format_models_list`, `parse_command_intent`, `clear_command_input_command` | `ui_iced/panels/bottom.rs` | Yes — `Path` / `String` / `HashMap<String, LlmConfig>` / `UserCommand` only |
+| 4 | `ui/panels/center.rs:14-64` | `clear_agent_session_command`, `apply_tab_close_click`, `apply_tab_close_others_click`, `apply_tab_close_all_click` | `ui_iced/panels/center.rs` | Yes — pure `usize`/`() -> UserCommand` constructors |
+| 5 | `ui/panels/top.rs:33-121` | `get_tag_filter_text`, `compute_next_selected_file`, `apply_batch_button_click`, `apply_tools_button_click`, `apply_about_button_click`, `apply_background_logs_toggle`, `apply_agent_debug_toggle`, `apply_chat_model_selection`, `apply_table_width_strategy_change`, `strategy_label` | `ui_iced/panels/top.rs` | Yes — pure `UserCommand` constructors and pure path/tag/label solvers |
+| 6 | `ui/table_width/mod.rs:29-86` | `TablePadding` (+ `ZERO`, `sanitised`, `horizontal`, `vertical`, `Default`) | `ui_iced/table_width.rs`; `render/mod.rs` and `render/table.rs` re-pointed at it | Yes — four `f32` fields, four pure methods |
+| 7 | `ui/widgets.rs:160-169` | `DialogAction` | `ui_iced/overlay.rs` (beside `ConfirmCancel`, whose `to_dialog_action` still maps onto it) | Yes — three unit variants |
+| 8 | `ui/os_shell.rs:9-31` | `open_in_system_editor`, `show_in_file_explorer`, `open_url` | **new** `ui_iced/os_shell.rs`; `update.rs` now imports `ui_iced::os_shell` | Yes — `opener` wrappers over `&Path` / `&str` |
+| 9 | `ui/test_helpers/app.rs:14-51` | `test_app`, `test_app_with_config` (+ `test_app_with_api_url` for parity) | **new** `ui_iced/test_helpers.rs` (`#[cfg(test)]`); the four panel sidecars re-pointed at it | Yes — route through `FastMdApp::empty_state`, which needs no `CreationContext` and applies no egui visuals |
+
+**Placement decision the brief asked for (item 1).** `should_show_panel` and
+`resolve_anchor` went into a **new `ui_iced/panels/right.rs`** rather than
+`layout.rs`. Rationale: `resolve_anchor` is a ToC/heading-resolution rule,
+not pane-grid geometry ([RUST-051]: place by concern); `panels/mod.rs`
+already anticipated a `right` submodule; and `layout.rs` re-exports
+`should_show_panel`, so `view.rs` and `layout_tests.rs` needed **zero**
+call-site changes. The cost is one `layout → panels::right` module edge,
+which is legal and unremarkable inside one crate.
+
+**Symbols deliberately NOT copied.**
+
+| Symbol | Why not |
+| --- | --- |
+| `ui/panels/bottom.rs::is_enter_pressed` | Takes `&egui::InputState` — egui-bound. Also already irrelevant: iced's `text_input` publishes `on_submit` from its own key handling, so there is no second IME delivery path to reconcile (the [TASK-016] gap note). |
+| `ui/panels/top.rs::build_indexing_status_text` | Returns `egui::RichText`. Cannot be relocated egui-free. The iced panel already owns its own `indexing_status_text` re-typing. |
+| `ui/panels/center.rs::apply_task_toggles_command` | egui-free, but **no `ui_iced` code reaches it** — the iced render path does not yet emit task-checkbox intents. Copying it would add unused public API. |
+| `ui/table_width/mod.rs::TableRenderConfig` | egui-free, but **no `ui_iced` consumer**: the iced render path carries `RenderContext::table_padding` instead. Not copied. |
+| `ui/table_width/mod.rs::resolve_padding`, `measure`, `measure_cached`, `table_layout_cached`, `EguiTextMeasurer`, `TableMeasureCache`, `TableDecisionCache` | egui-bound (`&egui::Ui` / `&egui::Context`), or already replaced iced-side by `IcedTextMeasurer` ([TASK-015]). |
+| `ui/os_shell.rs::dispatch_platform_commands` | Takes `&[egui::OutputCommand]` — the egui platform-output bridge, meaningless without egui. The iced link path calls `os_shell::open_url` from the reducer instead ([TASK-020] note). |
+| `ui/panels/right.rs::calculate_indent`, `calculate_font_size`, `apply_toc_row_click` | egui-free but **no `ui_iced` consumer** — `view::toc_body` uses its own `TOC_LEVEL_INDENT_PIXELS` rule and emits `ScrollToHeader` directly. |
+| `ui/test_helpers/app.rs::noop_producer` | No `ui_iced` consumer. |
+
+**Remaining `crate::ui::` imports — and why each is safe.**
+
+*Explicitly KEPT by the brief (RELOCATE / RESIDUE / RE-TYPE, not DELETE):*
+
+| Import | Used by | Why safe |
+| --- | --- | --- |
+| `crate::ui::strings` | ~every iced module | The single UI-text home (AGENTS §4). Survives the migration. |
+| `crate::ui::theme` (`Palette`) | ~every iced module | The single colour-token home (AGENTS §4a); `ui_iced/theme.rs` maps it into iced. |
+| `crate::ui::app::FastMdApp` (+ `TreeNode`) | panels, agent, logs, test_helpers | The domain state object itself. |
+| `crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer}` | `app.rs`, `persisted.rs` | Domain/manager types re-exported from `ui/mod.rs`; `panel_layout` and `persisted` are KEPT. |
+| `crate::ui::panel_layout::{LEFT/RIGHT_PANEL_*}` | `layout.rs`, `panels/left.rs`, `view.rs` | The UI-016 width constants. |
+| `crate::ui::tree::{FlatRow, flatten_tree}`, `tree::flatten::FlatRow` | `panels/left.rs`, `update_tests.rs` | The UI-017/UI-018 ordering engine. |
+| `crate::ui::tree_search::*` | `search.rs`, `message.rs`, `update.rs` | The UI-050 search engine. |
+| `crate::ui::agent::*` (`AgentPanelState`, `AgentTranscript`, `TranscriptBlock`, `ConversationLoggerObserver`) | `app.rs`, `agent/*` | The reused agent session state. |
+| `crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES}` | `about.rs`, `attributions.rs` | The curated credits catalog. |
+| `crate::ui::PersistedUiState`, `crate::ui::CURRENT_SCHEMA_VERSION` | `persisted.rs`, `app.rs`, tests | The DEC-006 snapshot schema. |
+
+*NOT named in the brief's KEPT list and NOT a copy target — flagged for the
+orchestrator to classify before 029b runs:*
+
+| Import | Used by | Note |
+| --- | --- | --- |
+| `crate::ui::{resolve_link, LinkAction}` (`ui/link_resolver.rs`) | `update.rs` | The map's TASK-020 audit already ruled this **KEPT**: "zero references to `egui`/`eframe` (grep-ified)… **Not moved, not duplicated**". Safe. |
+| `crate::ui::fonts::{PHOSPHOR_REGULAR_FONT, load_fallback_font}` | `ui_iced/fonts.rs` (+ its sidecar) | Embedded font **bytes**, not egui types — `ui_iced/fonts.rs` deliberately reuses the same embedded assets rather than re-embedding them. If `ui/fonts.rs` is DELETE-marked, these two loaders must be relocated first. |
+| `crate::ui::about_dialog::{APP_VERSION, license_display_text, apply_first_run_auto_show}` | `about.rs`, `app.rs` (+ sidecars) | Version string, license text and the first-run gate. All egui-free, but not in the copy inventory. If `ui/about_dialog.rs` is DELETE-marked these three need a home (natural fit: `ui_iced/about.rs`). |
+| `crate::ui::background_logs::{filter_logs, is_log_visible}` (`pub use`d from `ui_iced/logs.rs`) | `logs.rs` | The UI-047 filter predicates, egui-free. Same situation — relocate before deleting `ui/background_logs.rs`. |
+
+**Nothing in `ui_iced` now imports `ui/panels/*`, `ui/widgets.rs`,
+`ui/os_shell.rs`, `ui/table_width/*` or `ui/test_helpers*`.** Verified by
+grepping every `.rs` under `src/app/ui_iced/` for
+`crate::ui::(panels|widgets|os_shell|table_width|test_helpers)`: the only
+remaining hits are inside `//!`/`///` provenance comments, not code.
+
+**Tests added (19, all new; [RUST-003]).**
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `ui_iced/panels/right_tests.rs` | 9 | `should_show_panel` truth table; `resolve_anchor` exact / case-insensitive / hyphen⇄space (both directions) / title-vs-id / heading-id fallback / ToC-over-headings precedence / verbatim fallback / empty-input |
+| `ui_iced/os_shell_tests.rs` | 4 | Each wrapper's signature pinned to `fn(&Path)` / `fn(&str)` — a compile-time egui-free guarantee; editor vs explorer wrappers proven distinct (`open` ≠ `reveal`). No OS process is launched ([RUST-006]), matching the egui sidecar's own precedent. |
+| `ui_iced/test_helpers_tests.rs` | 6 | The egui-free fixture smoke tests: empty workspace, config forwarding, chat-model registration, a full `AppState` build (pane grid + viewport + no premature OS scale), persisted-geometry seeding with the DEC-008 composed scale, and `rebuild_view_models()` running egui-free. |
+
+Existing coverage was **preserved, not duplicated**: `layout_tests.rs`'s
+gate test still runs (now against the iced-owned copy), and the four panel
+sidecars (`bottom`/`center`/`top`/`left`) exercise the relocated helpers and
+the new `ui_iced::test_helpers` fixtures unchanged.
+
+**Gate results.** `cargo check -q` (workspace) PASS (no output);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS (exit 0);
+`cargo nextest run -p fastmd --status-level fail --show-progress none` PASS
+(**2249 run / 2249 passed / 1 skipped** — was 2230 before this chunk; the
++19 are exactly the three new sidecars above); `cargo doc --no-deps --quiet
+-p fastmd` PASS (no warnings).
+
+**Files changed.** 17 modified + 6 new, all under `src/app/ui_iced/`:
+
+*New:* `panels/right.rs`, `panels/right_tests.rs`, `os_shell.rs`,
+`os_shell_tests.rs`, `test_helpers.rs`, `test_helpers_tests.rs`.
+*Modified:* `mod.rs`, `layout.rs`, `layout_tests.rs`, `update.rs`,
+`overlay.rs`, `table_width.rs`, `panels/mod.rs`, `panels/left.rs`,
+`panels/left_tests.rs`, `panels/center.rs`, `panels/center_tests.rs`,
+`panels/top.rs`, `panels/top_tests.rs`, `panels/bottom.rs`,
+`panels/bottom_tests.rs`, `render/mod.rs`, `render/table.rs`.
+**Zero files under `src/app/ui/` touched.**
+
+**Needs the orchestrator's eyes.**
+
+1. **The four unlisted `crate::ui::` modules above** (`fonts`,
+   `about_dialog`, `background_logs`, plus `link_resolver` which the map
+   already keeps) are the only thing standing between `ui_iced` and full
+   independence from the egui tree. They are all egui-free, so 029b either
+   RELOCATEs them or they stay as KEPT residue — but that decision is the
+   orchestrator's, not this chunk's.
+2. **`TableRenderConfig` / `apply_task_toggles_command` /
+   `calculate_indent` / `calculate_font_size` / `apply_toc_row_click` /
+   `noop_producer` were NOT copied** because no `ui_iced` code reaches them.
+   If a later task wants them iced-side, they are egui-free and trivially
+   copyable — but adding them now would be unused public API.
+3. **`ui_iced/test_helpers.rs` is `#[cfg(test)]`-gated**, unlike the egui
+   `ui::test_helpers` which compiles into the production lib. Deliberate:
+   test fixtures should not ship. Consequence — the stated
+   `cargo clippy -p fastmd --bins --lib` gate does **not** lint it; it is
+   compiled and run by `cargo nextest`.
+4. **`cargo clippy -p fastmd --all-targets` is NOT clean**, and was not
+   clean before this chunk either: 12 pre-existing lints in
+   `config/config_tests.rs`, `markdown/link_scanner_tests.rs`,
+   `ui/batch_dialog_tests.rs`, `ui_iced/message_tests.rs`,
+   `ui_iced/panels/left_tests.rs` and `ui_iced/render/code_tests.rs`
+   (`field_reassign_with_default`, `let_unit_value`, `redundant_closure`,
+   `assertions_on_constants`, `cloned_ref_to_slice_refs`, `useless_vec`).
+   None are in code this task wrote; the brief's stated gate
+   (`--bins --lib`) passes. Flagging so the gate discrepancy is visible.
+5. **The `ui_iced.left.build_workspace_tree` tracing span was renamed**
+   (was `ui.left.build_workspace_tree`). Both copies now emit under
+   distinct span names while they coexist; log dashboards keyed on the old
+   name will see the egui span until Phase 5 and the iced span after.
+6. **No branch created, nothing committed** — left for the orchestrator.

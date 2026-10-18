@@ -64,6 +64,23 @@
 //!   progress" state stays legible through the italic wording and the
 //!   [`strings::build_indexing_progress_text`] ellipsis.
 //!
+//! # Relocated helpers ([TASK-029])
+//!
+//! The bar's ten framework-free helpers ([`get_tag_filter_text`],
+//! [`compute_next_selected_file`], [`apply_batch_button_click`],
+//! [`apply_tools_button_click`], [`apply_about_button_click`],
+//! [`apply_background_logs_toggle`], [`apply_agent_debug_toggle`],
+//! [`apply_chat_model_selection`], [`apply_table_width_strategy_change`],
+//! [`strategy_label`]) used to be `pub use`d from
+//! `src/app/ui/panels/top.rs`, a file [TASK-029b] deletes. They are copied
+//! into this module verbatim; every one is a pure `UserCommand` constructor
+//! or a pure path/tag/label solver with **no `egui` type** in its signature
+//! or body.
+//!
+//! `build_indexing_status_text` is **not** copied — it returns an
+//! `egui::RichText` and cannot be relocated egui-free. This module's own
+//! [`indexing_status_text`] is the iced re-typing of it.
+//!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
 #[cfg(test)]
@@ -87,16 +104,146 @@ use crate::ui_iced::logo::logo_mark;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::theme::to_iced_color;
 
-/// The framework-free helpers the egui panel already owns are re-exported
-/// rather than duplicated ([RUST-051]: one source of truth). They are
-/// pure `UserCommand` constructors and pure path/tag/label solvers with no
-/// egui types in their signatures, so the iced panel and the [TASK-022]
-/// reducer both call the same code.
-pub use crate::ui::panels::top::{
-    apply_about_button_click, apply_agent_debug_toggle, apply_background_logs_toggle,
-    apply_batch_button_click, apply_chat_model_selection, apply_table_width_strategy_change,
-    apply_tools_button_click, compute_next_selected_file, get_tag_filter_text, strategy_label,
-};
+// The framework-free helpers the egui panel owned, **relocated into this
+// module** for the zero-egui migration ([TASK-029]) from
+// `src/app/ui/panels/top.rs:33-121`.
+//
+// They were previously `pub use`d from a file [TASK-029b] deletes. Each is
+// copied verbatim and is egui-free — pure `UserCommand` constructors and
+// pure path/tag/label solvers with no `egui` type in any signature or body
+// — so the iced panel and the [TASK-022] reducer call the same code. The
+// egui panel keeps its own copy until Phase 5.
+//
+// `build_indexing_status_text` is deliberately **not** copied: it returns an
+// `egui::RichText`, so it cannot be relocated egui-free. The iced panel
+// owns its own [`indexing_status_text`](crate::ui_iced::panels::top::indexing_status_text)
+// re-typing instead.
+
+/// Purpose: Determines the display text for the tag filter combobox.
+/// Inputs: selected_tag (optional string reference)
+/// Outputs: String slice representing the text to show.
+/// Purity: Pure function.
+/// Preconditions: None.
+/// Postconditions: Returns the tag name if one is selected, otherwise "Filter by Tag: All".
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
+    selected_tag
+        .map(|s| s.as_str())
+        .unwrap_or(strings::TAG_FILTER_DEFAULT)
+}
+
+/// Purpose: Determines the next selected file after the active tag filter changes.
+/// Inputs: selected_file (current selected file path), selected_tag (currently active tag filter), file_tags (mapping of files to their tags)
+/// Outputs: `Option<PathBuf>` representing the new selected file.
+/// Purity: Pure function.
+/// Preconditions: None.
+/// Postconditions: Returns `None` if an active tag is selected and it is not associated with the selected file. Otherwise returns the original selected file.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn compute_next_selected_file(
+    selected_file: Option<&PathBuf>,
+    selected_tag: Option<&String>,
+    file_tags: &BTreeMap<PathBuf, Vec<String>>,
+) -> Option<PathBuf> {
+    let selected = selected_file?;
+    if let Some(active_tag) = selected_tag {
+        {
+            let tags = file_tags.get(selected)?;
+            if !tags.contains(active_tag) {
+                return None;
+            }
+        }
+    }
+    Some(selected.clone())
+}
+
+/// Returns the command for clicking the batch-processing button.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_batch_button_click() -> UserCommand {
+    UserCommand::OpenBatchDialog
+}
+
+/// Returns the command for clicking the "Tools..." button.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_tools_button_click() -> UserCommand {
+    UserCommand::OpenToolsDialog
+}
+
+/// Returns the command for clicking the "About FastMD..." button.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_about_button_click() -> UserCommand {
+    UserCommand::OpenAboutDialog
+}
+
+/// Returns the command for toggling the background logs window.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
+    UserCommand::ToggleBackgroundLogs(show)
+}
+
+/// Returns the command for toggling the agent debug window.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_agent_debug_toggle(show: bool) -> UserCommand {
+    UserCommand::ToggleAgentDebugWindow(show)
+}
+
+/// Returns the command for picking a new chat model.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_chat_model_selection(model_name: String) -> UserCommand {
+    UserCommand::SelectChatModel(model_name)
+}
+
+/// Returns the command for changing the table-width deficit strategy.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn apply_table_width_strategy_change(strategy: DeficitStrategy) -> UserCommand {
+    UserCommand::ChangeTableWidthStrategy(strategy)
+}
+
+/// Human-readable label for a [`DeficitStrategy`] variant, used as the
+/// `selected_text` of the top-bar table-width-strategy combobox and as
+/// the row label inside the dropdown. The match is intentionally
+/// exhaustive over every variant of `DeficitStrategy` so adding a new
+/// strategy in the future is a compile error here until the label is
+/// supplied.
+///
+/// Relocated from the egui top panel for the zero-egui migration
+/// ([TASK-029]).
+#[must_use]
+pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
+    match strategy {
+        DeficitStrategy::ProportionalToSlack => strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL,
+        DeficitStrategy::BreakpointWaterFill => strings::TABLE_WIDTH_STRATEGY_WATERFILL,
+        DeficitStrategy::WaterFillRatio => strings::TABLE_WIDTH_STRATEGY_RATIO,
+        DeficitStrategy::LagrangePenalty => strings::TABLE_WIDTH_STRATEGY_LAGRANGE,
+        DeficitStrategy::HybridMinPenaltyWaterFill => strings::TABLE_WIDTH_STRATEGY_HYBRID,
+    }
+}
 
 /// `LlmConfig::has_use_case` key selecting the chat-capable models
 /// (UI-064). Not user-facing text, but named so the literal appears once

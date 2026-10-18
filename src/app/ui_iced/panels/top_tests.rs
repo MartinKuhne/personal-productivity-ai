@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::config::{AppConfig, LlmConfig};
-use crate::ui::test_helpers::app::{test_app, test_app_with_config};
+use crate::ui_iced::test_helpers::{test_app, test_app_with_config};
 use std::collections::HashMap;
 
 /// Chat models fixture mirroring `ui/panels/top_tests.rs`: two
