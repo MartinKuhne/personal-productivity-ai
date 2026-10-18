@@ -3856,3 +3856,148 @@ orchestrator machinery:
    multi-select confirm dialog is a product decision, not a migration item.
 5. **`main.rs` is NOT flipped (TASK-024).** No branches created, nothing
    committed.
+
+---
+
+## TASK-024 entry-flip verification log (default entry point -> iced - 2026-10-18)
+
+**What `main.rs` now calls.** `fn main() -> iced::Result` ends in
+`fastmd::ui_iced::app::launch(inputs)` — the same entry `bin/fastmd_iced.rs`
+uses ([TASK-022]). `eframe::run_native` is gone, and with it the
+`use eframe::egui`, `crate::ui::app::FastMdApp` and
+`crate::bus::events::ConfigArrived` imports (the only remaining mentions of
+`egui`/`eframe`/`ConfigArrived` in `main.rs` are prose in the `//!` header).
+Plain `cargo run` / `cargo run --bin fastmd` yields the iced UI — no feature
+flag (DEC-011).
+
+**Entry chain (top to bottom).**
+
+```
+main() -> iced::Result
+ ├─ #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+ ├─ #[global_allocator] MiMalloc
+ ├─ std::panic::set_hook(...)                       (verbatim, inline)
+ ├─ logs::init_logging(logs::get_log_dir())         (guard held for the whole run)
+ ├─ rustls::crypto::ring::default_provider().install_default()
+ ├─ config     = fastmd::config::load_config()
+ ├─ config_bus = fastmd::bus::config::config_bus()
+ ├─ #[cfg(feature = "discord")] tokio::spawn(run_discord_bot(..))
+ └─ app::launch(LaunchInputs {
+      config,
+      config_bus,
+      config_storage:   Arc<FileConfigStorage::new(config::get_config_path())>
+                        as Arc<dyn ConfigStorageHandler>,
+      ui_state_storage: ui_state_storage_for(resolve_ui_state_source(
+                            env FASTMD_ICED_UI_STATE_PATH )),
+      args:             std::env::args().collect(),
+    })
+```
+
+**Startup steps PRESERVED in `main.rs`** (iced `boot`/`launch` do NOT do these):
+the `windows_subsystem` attribute; the `MiMalloc` global allocator; the panic
+hook (structured `tracing::error!` with location + `Backtrace::force_capture`,
+[NFR-004]/[NFR-005]); non-blocking background logging init with the guard
+held for the session ([NFR-002]); the `rustls` ring crypto-provider install;
+the `discord`-feature bot spawn; and `load_config()` + `config_bus()` handle
+creation.
+
+**Startup steps MOVED (confirmed already in `boot`/`launch`, NOT duplicated in
+`main.rs`):** CLI workspace-argument injection and the system-library-only ->
+cwd fallback (`apply_cli_workspace`, `ui_iced/app.rs:805-835`); the DEC-009
+`ConfigArrived` publish (`publish_config_task`, `ui_iced/app.rs:852-864`);
+font registration ([TASK-007]) and the DEC-008 scale-baseline tasks; the
+[TASK-019] subscription bridge; window title `strings::WINDOW_TITLE`
+("FastMD AI", DEC-010), icon, persisted geometry and
+`exit_on_close_request: false` (`window_settings`, DEC-006); and the exit
+cleanup (`export::print::cleanup_temp_files`, `logs::unregister_ui_logs`)
+that runs after `.run()` inside `launch`.
+
+**ConfigArrived workaround REMOVED.** The old `main.rs:140-162`
+"build `FastMdApp` inside the `eframe` creation callback, *then* publish"
+block is deleted. The ordering guarantee it enforced now comes from `boot`:
+the state — background `Task` thread, MCP config subscriber, eager
+`BusReceivers` — is fully constructed before `launch` hands the
+`Task::perform` to the iced runtime, so every subscriber exists when the
+publish runs. Verified by reading `boot` / `boot_with_persisted` /
+`publish_config_task` in `src/app/ui_iced/app.rs:805-864`.
+
+**New production wiring: the persisted UI-state storage.** The pilot kept
+snapshots in-process; the shipping entry needs real persistence for DEC-006
+geometry restore. `main.rs` resolves it through two small pieces:
+
+| Piece | Contract |
+| --- | --- |
+| `resolve_ui_state_source(Option<String>) -> UiStateSource` | pure decision: a non-empty `FASTMD_ICED_UI_STATE_PATH` wins (`Override(PathBuf)`); empty or absent -> `PlatformDefault` |
+| `ui_state_storage_for(UiStateSource) -> Arc<dyn UiStateStorage>` | thin mapper: `FileUiStateStorage::new(path)` vs `FileUiStateStorage::platform_default()` (`%APPDATA%\fastmd\ui_state.json`, `~/.fastmd/ui_state.json`) |
+
+The decision is kept apart from construction so the persistence-location
+policy is unit-testable without tripping the platform-default guard in
+`FileUiStateStorage::platform_default` ([RUST-006]); the platform-default
+path is resolved only in production `main()` ([RUST-024]).
+
+**Files changed.** `src/app/main.rs` (entry rewritten, `//!` header now
+describes the iced launch) and `src/app/main_tests.rs` (new sidecar).
+`bin/fastmd_iced.rs` is left in place (removed in [TASK-029]); the egui
+`ui/` tree is untouched and still compiles; `Cargo.toml` is untouched
+(`eframe`/`egui` stay until [TASK-029]); no `SPEC.md` changes ([RUST-043]).
+
+**Tests added** (`src/app/main_tests.rs`, reported as
+`fastmd::bin/fastmd tests::*`): `non_empty_override_selects_the_explicit_file`,
+`empty_override_is_not_an_override`, `missing_override_selects_platform_default`,
+`override_source_builds_a_file_storage_at_that_path` (`tempfile::TempDir`
+round-trip, [RUST-006]) and `entry_target_is_the_iced_launch_path`
+(compile-time fn-pointer pin `fn(LaunchInputs) -> iced::Result = app::launch`).
+No GUI-launch test was invented — `main()`/`launch()` call `.run()` and are
+not headlessly testable.
+
+**Gate results.** `cargo check -q` (workspace) PASS (no output);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS (exit 0);
+`cargo nextest run -p fastmd --status-level fail --show-progress none` PASS
+(**2230 run / 2230 passed / 1 skipped** — was 2133 at [TASK-022]; +5 are
+this task's `bin/fastmd` sidecar tests, the remainder [TASK-023]'s);
+`cargo build --bin fastmd` PASS (exit 0 — the default binary links the iced
+runtime); `cargo doc --no-deps --quiet -p fastmd` PASS; and
+`cargo check -p fastmd --features discord --bins` PASS (the cfg-gated Discord
+block still compiles after the flip).
+
+**[UNVERIFIED] runtime checklist — needs a human `cargo run`.** The GUI cannot
+be exercised headlessly, so all of the following are **[UNVERIFIED]** and must
+be confirmed by running `cargo run` (== `cargo run --bin fastmd`):
+
+1. [UNVERIFIED] An iced window opens titled **"FastMD AI"** (DEC-010), and a
+   release build shows no console window.
+2. [UNVERIFIED] The FastMD app icon shows (title bar / taskbar).
+3. [UNVERIFIED] Persisted window geometry restores: resize/move, close,
+   relaunch -> same size and position (`%APPDATA%\fastmd\ui_state.json`
+   written on close, read at launch).
+4. [UNVERIFIED] The three-band layout renders with the top / left / center /
+   bottom panels, and pane resizing works.
+5. [UNVERIFIED] Close actually exits (DEC-006 `exit_on_close_request: false`
+   + save-then-close) and the process terminates instead of hanging.
+6. [UNVERIFIED] Background workers start scanning after the boot publish —
+   look for `ui_iced.boot.config_published` in the log.
+7. [UNVERIFIED] The CLI workspace argument still works:
+   `cargo run -- <dir>` adds `<dir>` as a "Workspace" library.
+8. [UNVERIFIED] `FASTMD_ICED_UI_STATE_PATH=<scratch file>` redirects the
+   snapshot away from `%APPDATA%`.
+
+**Needs the orchestrator's eyes.**
+
+1. **Pre-existing `discord` defect preserved, NOT fixed.** The cfg-gated block
+   calls `tokio::spawn` from `main` with no tokio runtime entered
+   (`run_discord_bot` is an `async fn`; nothing here builds a `Runtime`).
+   [INFERENCE] With `--features discord` and a bot token set this panics with
+   "there is no reactor running". Identical in the old egui `main.rs`, so the
+   flip introduces no regression — wrapping it in a runtime (as
+   `bus/router/worker.rs:25` does) is a separate fix.
+2. **`FASTMD_ICED_UI_STATE_PATH` now steers the shipping binary too.** Kept
+   as an escape hatch so a manual run can dodge `%APPDATA%`; if production
+   should ignore it, delete the `Override` branch of `resolve_ui_state_source`.
+3. **`_log_guard`'s lifetime is load-bearing** — `launch()` blocks, so the
+   guard lives for the whole session. A future refactor that moves `launch()`
+   off the main thread must move the guard with it.
+4. **`bin/fastmd_iced` still exists** and now duplicates `main.rs`'s boot
+   preamble (panic hook + logging + rustls). Both build; the duplication dies
+   with the pilot in [TASK-029].
+5. **No branch created, nothing committed** — left for the orchestrator.

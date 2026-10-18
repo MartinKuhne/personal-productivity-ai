@@ -1,18 +1,87 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
+//! FastMd desktop application entry point — initialises tracing, panic hooks and
+//! the crypto provider, then launches the **iced** UI ([TASK-024], DEC-011).
+//!
+//! The egui `eframe::run_native` path is retired here: `cargo run` (the
+//! `fastmd` bin) now boots through [`fastmd::ui_iced::app::launch`] — the very
+//! same launch chain `cargo run --bin fastmd_iced` exercises ([TASK-022]). No
+//! feature flag gates the switch (DEC-011: iced is a regular dependency); the
+//! egui `ui/` tree still compiles and is removed later ([TASK-029]).
+//!
+//! Startup ownership after the flip:
+//!
+//! | Step | Lives in |
+//! | --- | --- |
+//! | Panic hook (structured `ERROR` + backtrace, [NFR-004]/[NFR-005]) | this file |
+//! | Non-blocking background logging ([NFR-002]) | this file |
+//! | `rustls` ring crypto-provider install | this file |
+//! | Optional Discord bot (`discord` feature) | this file |
+//! | Config load + storage-handler injection ([RUST-024]) | this file |
+//! | CLI workspace-argument injection | [`fastmd::ui_iced::app::boot`] ([TASK-022]) |
+//! | DEC-009 `ConfigArrived` publish | [`fastmd::ui_iced::app::boot`] ([TASK-022]) |
+//! | Title / icon / persisted geometry, theme, scale chain, bus bridge | [`fastmd::ui_iced::app::launch`] |
+//!
+//! The retired `main.rs:147-160` "build the app first, *then* publish"
+//! workaround is gone: `boot` constructs every subscriber before it returns the
+//! `Task::perform` that publishes `ConfigArrived`, so the same ordering
+//! guarantee holds without the `eframe` creation-callback trick.
+//!
+//! Unit tests live in the sibling `main_tests.rs` sidecar.
 
-use eframe::egui;
-use fastmd::bus::events::ConfigArrived;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use fastmd::config::{ConfigStorageHandler, FileConfigStorage};
 #[cfg(feature = "discord")]
 use fastmd::integrations::discord::run_discord_bot;
-use fastmd::ui::app::FastMdApp;
+use fastmd::ui_iced::app::{self, LaunchInputs};
+use fastmd::ui_iced::persisted::{FileUiStateStorage, UiStateStorage};
 
 use mimalloc::MiMalloc;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-fn main() -> eframe::Result<()> {
+/// Where the shipping binary keeps the persisted iced UI-state snapshot
+/// ([TASK-024], DEC-006).
+///
+/// The *decision* is kept apart from the storage construction so the
+/// persistence-location policy is unit-testable without touching the
+/// filesystem or tripping the platform-default guard in
+/// [`FileUiStateStorage::platform_default`] ([RUST-006]).
+#[derive(Debug, PartialEq, Eq)]
+enum UiStateSource {
+    /// `FASTMD_ICED_UI_STATE_PATH` names an explicit scratch file.
+    Override(PathBuf),
+    /// No override — the platform-default `%APPDATA%\fastmd\ui_state.json`
+    /// (or `~/.fastmd/ui_state.json`).
+    PlatformDefault,
+}
+
+/// Decide where the UI-state snapshot lives from the raw environment override.
+///
+/// A missing or empty value means "no override", matching
+/// [`app::ui_state_storage_from_env`]'s rule so the pilot binary and the
+/// shipping binary agree on what counts as an override.
+fn resolve_ui_state_source(env_override: Option<String>) -> UiStateSource {
+    match env_override.filter(|path| !path.is_empty()) {
+        Some(path) => UiStateSource::Override(PathBuf::from(path)),
+        None => UiStateSource::PlatformDefault,
+    }
+}
+
+/// Build the injected [`UiStateStorage`] for a resolved [`UiStateSource`].
+///
+/// The platform-default branch resolves the user location only here, at
+/// production launch — never inside a test ([RUST-024], [RUST-006]).
+fn ui_state_storage_for(source: UiStateSource) -> Arc<dyn UiStateStorage> {
+    match source {
+        UiStateSource::Override(path) => Arc::new(FileUiStateStorage::new(path)),
+        UiStateSource::PlatformDefault => Arc::new(FileUiStateStorage::platform_default()),
+    }
+}
+
+fn main() -> iced::Result {
     std::panic::set_hook(Box::new(|panic_info| {
         let location = panic_info.location().map(|l| l.to_string());
         let payload = panic_info.payload();
@@ -35,6 +104,8 @@ fn main() -> eframe::Result<()> {
     // Writes to `%APPDATA%\fastmd\logs\background-process.log` (or `FASTMD_LOG_DIR`)
     // asynchronously via a dedicated worker thread, while outputting to stdout/stderr
     // with `FmtSpan::CLOSE` profiling and bridging to the in-memory UI panel.
+    // The guard MUST stay alive for the whole run — `launch()` blocks until the
+    // iced runtime exits, so dropping it here would shut logging down mid-session.
     let log_dir = fastmd::background::logs::get_log_dir();
     let _log_guard = fastmd::background::logs::init_logging(log_dir).ok();
 
@@ -43,82 +114,13 @@ fn main() -> eframe::Result<()> {
         .install_default()
         .ok();
 
-    let icon = fastmd::ui::logo::load_app_icon();
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_app_id("fastmd")
-        .with_inner_size([1000.0, 700.0])
-        .with_title("FastMD Viewer");
-    if let Some(icon) = icon {
-        viewport = viewport.with_icon(icon);
-    }
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
-    };
-
-    let mut config = fastmd::config::load_config();
-
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        let path = std::path::PathBuf::from(&args[1]);
-        if path.exists() && path.is_dir() {
-            let mut path_str = path
-                .canonicalize()
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-            if path_str.starts_with(r"\\?\") {
-                path_str = path_str[4..].to_string();
-            }
-            let found = config
-                .content_libraries
-                .iter()
-                .any(|lib| lib.root_folder == path_str);
-            if !found {
-                config
-                    .content_libraries
-                    .push(fastmd::config::ContentLibrary {
-                        root_folder: path_str,
-                        name: "Workspace".to_string(),
-                        kind: "text".to_string(),
-                        readonly: false,
-                        priority: 0,
-                    });
-            }
-        }
-    }
-
-    if config.content_libraries.len() <= 1
-        && config
-            .content_libraries
-            .iter()
-            .all(|lib| lib.name == config.system_library_display_name())
-    {
-        let mut current_dir =
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Ok(canon) = std::fs::canonicalize(&current_dir) {
-            current_dir = canon;
-        }
-        let mut path_str = current_dir.to_string_lossy().to_string();
-        if path_str.starts_with(r"\\?\") {
-            path_str = path_str[4..].to_string();
-        }
-        config
-            .content_libraries
-            .push(fastmd::config::ContentLibrary {
-                root_folder: path_str,
-                name: "Workspace".to_string(),
-                kind: "text".to_string(),
-                readonly: false,
-                priority: 0,
-            });
-    }
+    let config = fastmd::config::load_config();
 
     // The configuration-arrival bus is the fan-out channel that
-    // each subsystem (background workers, agent, UI) subscribes to
-    // and uses to perform its own initialization work. We create it
-    // here, hand it to the app, and publish the loaded config so
-    // every subscriber observes the same first-arrival event.
+    // each subsystem (background workers, agent, UI) subscribes to.
+    // The UI no longer waits on it — it is direct-injected by `boot`
+    // (DEC-009) — but the background workers still need the handle so
+    // `boot` can publish the first arrival after they are constructed.
     let config_bus = fastmd::bus::config::config_bus();
 
     // Start Discord bot if configured. The bot integration
@@ -137,27 +139,24 @@ fn main() -> eframe::Result<()> {
         });
     }
 
-    eframe::run_native(
-        "fastmd",
-        options,
-        // egui 0.28+ wraps the `Box<dyn App>` returned by the
-        // creation callback in a `Result`, so the app can fail
-        // during setup instead of panicking. We don't currently
-        // have any fallible setup work to do, so we always return
-        // `Ok`.
-        Box::new(move |cc| {
-            // Build the app first so its internal subscribers
-            // (`Task::new`, `AgentSession::new`, and the UI
-            // reader in `FastMdApp::new`) register *before* we
-            // publish. `tokio::sync::broadcast` only delivers an
-            // event to subscribers that exist at publish time —
-            // publishing before construction would silently drop
-            // the event on the floor and the background workers
-            // would fall back to the default (empty) config and
-            // never start scanning.
-            let app = FastMdApp::new(cc, config_bus.clone());
-            config_bus.publish(ConfigArrived::new(config.clone()));
-            Ok(Box::new(app))
-        }),
-    )
+    // CLI workspace injection (`main.rs:59-115`) and the DEC-009
+    // `ConfigArrived` publish are applied inside `boot`; this entry only
+    // hands over the loaded config plus the injected storage handlers
+    // ([RUST-024]) and the raw process arguments.
+    let inputs = LaunchInputs {
+        config,
+        config_bus,
+        config_storage: Arc::new(FileConfigStorage::new(fastmd::config::get_config_path()))
+            as Arc<dyn ConfigStorageHandler>,
+        ui_state_storage: ui_state_storage_for(resolve_ui_state_source(
+            std::env::var(app::UI_STATE_PATH_ENV).ok(),
+        )),
+        args: std::env::args().collect(),
+    };
+
+    app::launch(inputs)
 }
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
