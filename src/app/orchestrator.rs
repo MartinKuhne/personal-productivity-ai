@@ -111,86 +111,92 @@ impl AppOrchestrator {
 
     #[tracing::instrument(skip_all, name = "orchestrator.process_file_events", level = "debug")]
     pub fn process_file_events(&mut self) -> bool {
-        use crate::bus::events::file::FileEventKind;
-
         let mut changed = false;
-        let mut needs_rebuild = false;
-        let mut tree_dirty = false;
 
         // Let DirectoryTracker consume directory events from its own subscriber.
         if self.directory_tracker.process_events() {
             changed = true;
-            tree_dirty = true;
-        }
-
-        if let Some(reader) = &self.file_event_reader {
-            let mut removed_paths: Vec<PathBuf> = Vec::new();
-            while let Ok(event) = reader.try_recv() {
-                changed = true;
-                match event.kind {
-                    FileEventKind::Discovered => {
-                        self.pdf_backing_tracker.process_discovered(&event.paths);
-                        for p in &event.paths {
-                            if Self::is_workspace_file(p) {
-                                self.file_processor.add_file(p.clone());
-                                if let Some(parent) = p.parent() {
-                                    let parent = parent.to_path_buf();
-                                    self.file_processor.add_dir(parent);
-                                }
-                            }
-                        }
-                        tree_dirty = true;
-                    }
-                    FileEventKind::Updated => {
-                        for p in &event.paths {
-                            if self.tabs.loaded_path.as_ref() == Some(p)
-                                && !self.text_buffer.is_open
-                            {
-                                self.tabs.loaded_path = None;
-                            }
-                        }
-                    }
-                    FileEventKind::Removed => {
-                        self.pdf_backing_tracker.process_removed(&event.paths);
-                        for p in &event.paths {
-                            self.file_processor.remove_file(p);
-                            if self.tabs.loaded_path.as_ref() == Some(p) {
-                                self.tabs.loaded_path = None;
-                            }
-                            self.tags.remove_file(p);
-                        }
-                        removed_paths.extend(event.paths);
-                        needs_rebuild = true;
-                        tree_dirty = true;
-                    }
-                    FileEventKind::DirDiscovered => {
-                        for p in &event.paths {
-                            self.file_processor.add_dir(p.clone());
-                        }
-                        tree_dirty = true;
-                    }
-                    FileEventKind::DirRemoved => {
-                        for p in &event.paths {
-                            self.file_processor.remove_dir(p);
-                        }
-                        tree_dirty = true;
-                    }
-                }
-            }
-            if !removed_paths.is_empty() {
-                self.close_tabs_for_removed_files(&removed_paths);
-            }
-        }
-
-        if needs_rebuild {
-            self.tags.rebuild();
-        }
-
-        if tree_dirty {
             self.selection.tree_dirty = true;
         }
 
+        // Collect the backlog before applying it (the same shape
+        // `drain_user_command_bus` uses) so the reader borrow ends before the
+        // events touch `self`.
+        let mut events: Vec<crate::bus::events::file::FileEvent> = Vec::new();
+        if let Some(reader) = self.file_event_reader.as_mut() {
+            while let Ok(event) = reader.try_recv() {
+                events.push(event);
+            }
+        }
+        for event in events {
+            self.apply_file_event(event);
+            changed = true;
+        }
+
         changed
+    }
+
+    /// Applies ONE file event to the workspace projections: the file/directory
+    /// index, the PDF-backing tracker, the tag manager, the open tabs and the
+    /// tree-dirty flag.
+    ///
+    /// Extracted verbatim out of [`Self::process_file_events`]'s drain loop so
+    /// the iced reducer can apply the event carried by
+    /// [`InboundMessage::FileChanged`](crate::ui_iced::message::InboundMessage::FileChanged)
+    /// itself. In the iced build the [TASK-019] subscription bridge is the
+    /// single inbound path ([FMD-065]), so the orchestrator's own
+    /// `file_event_reader` is left inert and this is the only applier — no
+    /// event is applied twice.
+    pub fn apply_file_event(&mut self, event: crate::bus::events::file::FileEvent) {
+        use crate::bus::events::file::FileEventKind;
+
+        match event.kind {
+            FileEventKind::Discovered => {
+                self.pdf_backing_tracker.process_discovered(&event.paths);
+                for p in &event.paths {
+                    if Self::is_workspace_file(p) {
+                        self.file_processor.add_file(p.clone());
+                        if let Some(parent) = p.parent() {
+                            let parent = parent.to_path_buf();
+                            self.file_processor.add_dir(parent);
+                        }
+                    }
+                }
+                self.selection.tree_dirty = true;
+            }
+            FileEventKind::Updated => {
+                for p in &event.paths {
+                    if self.tabs.loaded_path.as_ref() == Some(p) && !self.text_buffer.is_open {
+                        self.tabs.loaded_path = None;
+                    }
+                }
+            }
+            FileEventKind::Removed => {
+                self.pdf_backing_tracker.process_removed(&event.paths);
+                for p in &event.paths {
+                    self.file_processor.remove_file(p);
+                    if self.tabs.loaded_path.as_ref() == Some(p) {
+                        self.tabs.loaded_path = None;
+                    }
+                    self.tags.remove_file(p);
+                }
+                self.close_tabs_for_removed_files(&event.paths);
+                self.tags.rebuild();
+                self.selection.tree_dirty = true;
+            }
+            FileEventKind::DirDiscovered => {
+                for p in &event.paths {
+                    self.file_processor.add_dir(p.clone());
+                }
+                self.selection.tree_dirty = true;
+            }
+            FileEventKind::DirRemoved => {
+                for p in &event.paths {
+                    self.file_processor.remove_dir(p);
+                }
+                self.selection.tree_dirty = true;
+            }
+        }
     }
 
     pub fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {

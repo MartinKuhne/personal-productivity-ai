@@ -3453,3 +3453,406 @@ fastmd` PASS (no warnings).
    three-band render with the overlay/modal host (DEC-005).
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+---
+
+## TASK-023a view/lifetime verification log
+
+**Scope:** the VIEW half of TASK-023 - `view()`, the view-model lifetime
+resolution and the overlay z-order selector. The update reducer is a
+separate chunk.
+
+### Lifetime resolution (the E0515 problem from note 4 above)
+
+RESOLVED as recommended: **the view-models are stored on `AppState` and
+rebuilt at the end of `update`.**
+
+- `AppState::models: ViewModels` holds every panel/dialog snapshot.
+- `AppState::rebuild_view_models(&mut self)` re-snapshots them via
+  `ViewModels::from_app(&app, &overlay)`.
+- `view(&AppState) -> Element<'_, Message>` is a pure borrow over
+  `&state.models` / `&state.overlay`, so every `Element<'_, _>` the panel
+  functions return borrows something that outlives the call.
+- `build_state` seeds `models` at construction so frame 0 renders.
+
+No panel needed an owned-element parameter; the stored-VM approach covered
+all of them. The three cases `from_app` cannot see on its own are merged
+explicitly in `ViewModels::from_app`:
+
+| Field | Merged from | Why |
+|---|---|---|
+| `left.query` / `is_searching` / `results` | `OverlayState::search` (`SearchViewModel`) | `LeftPanelViewModel::from_app` reads the egui `TreeSearch`, which stays empty in the iced build |
+| `agent.thinking_expanded` | `OverlayState::thinking_expanded` | `AgentPanelViewModel::from_app` hardcodes `true` |
+| `debug.expanded` | `OverlayState::debug` (`AgentDebugWindowState`) | `AgentDebugViewModel::from_app` returns an empty set |
+
+### VM fields added to `AppState`
+
+`models: ViewModels` with fields `top`, `left`, `center`, `bottom`,
+`agent`, `logs`, `debug`, `tools`, `batch`, `about`, `attributions`; plus
+the reducer-owned floating-window half `overlay: OverlayState` (small
+dialog + anchor, context menu, editor buffer, debug-window disclosure,
+tools state, about/attributions state, batch state, search state, cursor,
+thinking disclosure and the three scroll snapshots).
+
+### Overlay z-order selector
+
+`mounted_layers(&OverlayState, &ViewModels) -> Vec<OverlayLayer>`
+(surface: `AppState::mounted_layers()`) is the single pure selector. It
+returns the showing layers **bottom-most first**, mirroring the egui draw
+order recorded in `ui/app/render.rs`:
+
+1. `ContextMenu` - only when it has at least one row (an empty menu must
+   not mount a click blocker)
+2. `Editor`
+3. `Dialog` (the small name-entry / move / delete-confirm dialog)
+4. `Logs`
+5. `AgentDebug`
+6. `Tools`
+7. `About`
+8. `Attributions`
+9. `Batch` - topmost (egui drew it last)
+
+`overlay_host` folds `ContextMenu` into the base with
+`overlay::with_context_menu` (that helper owns the click-away blocker plus
+the anchored-card composition the tree and tab menus need) and stacks every
+higher layer with `iced::widget::stack`, bottom-most first. Nothing open ->
+the bare three bands.
+
+### Band assembly (one-to-one with `ui/app/render.rs`)
+
+- top band: `panels::top::top_bar(&models.top)`
+- middle band: `layout::middle_band` over the [TASK-010] pane grid -
+  left = `panels::left::left_panel(&models.left)`, center = the routed
+  center body, right = the ToC body
+- bottom band: `panels::bottom::bottom_panel(&models.bottom)`
+- center routing mirrors egui's `show_center_panel`: agent session first
+  (`agent_panel_state.show_results` -> `agent_transcript_view`), then the
+  open document through the [TASK-015] markdown render path, then the
+  empty state.
+- The right pane is gated by the reused `layout::should_show_panel`
+  (`has_toc && has_selected_file`); a gated-out pane stays allocated as an
+  empty container so the pane grid keeps ownership.
+- DEC-008 scale and the close/save path are untouched (they live in
+  `app.rs` and the update half).
+
+### NOTE TO THE UPDATE-HALF SUBAGENT
+
+**`update()` MUST call `state.rebuild_view_models()` at its end.** It is
+already wired into `finish_frame` (`update.rs`), which runs after every
+reducer branch. Any new entry point that mutates state and returns without
+going through `finish_frame` will render a stale frame. The order inside
+`finish_frame` matters and mirrors egui: `handle_file_selection` ->
+`join_finished_batch` -> `rebuild_view_models` -> follow-the-stream scroll
+tasks -> persisted panel-width sync.
+
+### Gate results
+
+| Gate | Result |
+|---|---|
+| `cargo check -q` | PASS, clean |
+| `cargo clippy -p fastmd --bins --lib -- -D warnings` | PASS, clean |
+| `cargo fmt --check` | PASS, clean |
+| `cargo doc --no-deps --quiet` | PASS, no warnings |
+| `cargo nextest run -p fastmd` | 2218 run: **2212 passed, 6 failed, 1 skipped** |
+| `cargo nextest run -p fastmd ui_iced::view` | 15 run: **15 passed** |
+
+The 6 remaining failures are all `ui_iced::update::tests` reducer gaps,
+NOT view-half defects:
+
+| Failing test | Diagnosis |
+|---|---|
+| `test_open_in_editor_lifts_the_text_buffer_into_an_editor_view_model` | `open_editor_from_buffer` rebuilds raw text through `DocumentContent: Display`, which emits a newline between front matter and body: `"\nBody text\n"` vs expected `"Body text\n"` |
+| `test_run_as_prompt_reads_the_body_and_runs_it_against_the_file` | same leading-newline class in the run-as-prompt body extraction |
+| `test_background_process_file_load_populates_the_document` | same class: `"\nLoaded body"` vs `"Loaded body"` |
+| `test_file_change_inbound_drains_the_file_processor` | `Inbound(FileChanged)` does not run the file-processor drain the egui loop ran per frame |
+| `test_batch_open_clamps_a_selection_that_no_longer_resolves` | `BatchDialogState::open` does not clamp a stale `selected_dir_idx` to a shrunken candidate list (`None` vs `Some(0)`) |
+| `test_tree_context_menu_is_built_from_the_row_and_anchored_at_the_cursor` | tree context-menu construction, asserts at `update_tests.rs:512` |
+
+### Incidental fixes made to get the gates green (update-half files)
+
+The update-half's `update_tests.rs` did not compile, which blocked the
+view tests from running at all. Mechanical fixes only - no reducer
+semantics were changed:
+
+- added the missing `BatchDialogViewModel` import;
+- `state.app.rebuild_view_models()` -> `state.rebuild_view_models()`;
+- filled the three missing `SearchResultEntry` fields (`file_name`,
+  `relative_path`, `line_number`);
+- `ThemeMessage::ScaleChanged { value }` -> `{ multiplier }`;
+- `task.is_empty()` -> `task.units() > 0` (iced 0.14 `Task` has no
+  `is_empty`);
+- replaced the broken `unsafe_handle` helper with `finished_batch_handle`,
+  which spins on `JoinHandle::is_finished` so the frame-tail join test is
+  deterministic instead of racing its own thread;
+- two tests that asserted the view-model snapshot contract incorrectly now
+  rebuild first, or toggle `auto_scroll` explicitly (egui only ever
+  changes `auto_scroll` through its checkbox,
+  `ui/background_logs.rs:115-118`);
+- clippy: `&PathBuf` -> `&Path` (x2), collapsed the `if let` chain in
+  `view.rs`, merged the identical branches of `sanitise_scale`;
+- rustdoc: de-linked private/unresolved items in the `update.rs` module
+  doc and fixed the `ViewModels` intra-doc link in `view.rs`.
+
+### Limitations
+
+- The 6 update-half reducer failures above leave the workspace test gate
+  red; fixing them means implementing reducer behaviour, which is outside
+  this chunk's mandate.
+- `document_width` uses the reducer-held `PanelLayout` widths, not live
+  pane-grid geometry (the grid reports real geometry only during layout),
+  so the FTWA solve is an approximation until a resize-reporting task
+  exists.
+- `view` is verified by construction plus smoke tests; iced elements are
+  not inspectable without a renderer, so z-order is asserted through the
+  pure `mounted_layers` selector rather than a rendered tree.
+- `main.rs` is NOT flipped (TASK-024). No branches created, nothing
+  committed.
+
+## TASK-023b update-reducer verification log
+
+**Scope:** the UPDATE half of TASK-023 — `update(&mut AppState, Message) ->
+Task<Message>` as the one-to-one mirror of `FastMdApp::update_ui`
+(`src/app/ui/app/update.rs`), plus the per-channel reducer tests. No branches
+created, nothing committed, `main.rs` untouched.
+
+### Frame shape
+
+`update` is **channel reducer -> `finish_frame` -> `Task::batch`**. Every
+branch falls through `finish_frame`, so the view never renders stale. The tail
+order mirrors egui:
+
+1. `refresh_tree_cache` — the egui tree-row cache transition
+   (`ui/panels/left.rs:197-212`).
+2. `AppOrchestrator::handle_file_selection` — kick the selection load off
+   first so a change is in flight before the snapshot.
+3. `join_finished_batch` — egui `handle_deferred_actions`.
+4. `rebuild_view_models` — re-snapshot every panel/dialog VM.
+5. `follow_scroll_tasks` — stick-to-bottom ops the `logs::should_follow` rule
+   decided for the logs / agent-transcript / debug lists.
+6. `sync_persisted_panel_widths` — egui `update_persisted_ui_state`.
+
+### Per-channel update mapping
+
+| Channel | Reduction | Runtime `Task`s |
+|---|---|---|
+| `Window` | `CloseRequested` -> chained `window::size` + `window::position` -> `CloseSnapshotCaptured`; `CloseSnapshotCaptured` -> width sync + `persisted::apply_close_metrics` + `persisted::save_ui_state(storage)`; `ScaleBaseline` -> store `os_scale` (DEC-008); `Resized` -> store `viewport` | `window::close` on the save-before-close phase |
+| `Layout` | `PaneResized` -> `layout::apply_pane_resize` (UI-016 clamps) -> `panes.resize` + persisted width sync; `TreeAutoFit` -> `auto_fit_tree` (`heuristic_width` measurer, `set_width`, persisted sync, `panes.resize`); `CursorMoved` -> `overlay.cursor` (the menu anchor) | none |
+| `Command` | `route_command` — see the routing table below | none (synchronous publish + drain) |
+| `Tree` | `ContextMenuOpened` -> rows from `LeftPanelViewModel::menu_items_for`, anchored at the last cursor; `ContextMenuClosed` -> clear; `RunAsPromptRequested` / `SkillRunRequested` -> read + publish `RunSkillPrompt`; `PrintRequested` -> background print job; `DeleteSelectedRequested` -> one `Delete` per path + clear the selection (un-confirmed, egui parity) | none |
+| `Tab` | `ContextMenuOpened` -> `CenterPanelViewModel::menu_items_for(index)`; `ContextMenuClosed` -> clear | none |
+| `Editor` | `SaveRequested` -> write the re-joined document, publish `FileEvent::updated_one`, close; `CancelRequested` -> close + clear `text_buffer.is_open` AND `tabs.loaded_path`; everything else -> `apply_editor_message` onto the buffer | none |
+| `Agent` | `InputChanged` -> `agent_panel_state.command_input`; `Submit` -> `submit_commands(running, text)` (RunAgent when idle, `QueueAgentPrompt` when running, always with `ClearCommandInput`); `ThinkingToggled` -> `overlay.thinking_expanded`; `ScrollReported` -> `overlay.agent_scroll` | none |
+| `Search` | `QueryChanged` (never scans) / `Submitted` (marks in-progress, drops stale results) / `Cleared` / `ResultsReady` (applied only if the query still matches — a superseded scan is dropped) | `Task::perform` running `find_search_results_scoped` off the UI thread |
+| `Logs` | filter / category / auto-scroll / clear written through to the shared `BackgroundLogs` ring buffer; `ScrollReported` -> `overlay.logs_scroll` | none |
+| `Theme` | `ScaleChanged` -> `sanitise_scale` (near-unity and out-of-range collapse to `None`) -> `persisted_ui_state.font_size_scale` | none |
+| `Render` | `LinkActivated` -> `resolve_link` -> `SelectFile` + anchor / `scroll_to_header_id` / external browser; `TaskToggled` -> in-memory document only (no write); `CopyCodeRequested` -> clipboard | clipboard write |
+| `Dialog` | name / destination / submit / cancel / dismiss; a validated submit publishes the self-contained `confirmed_command` and closes, an invalid one keeps the dialog open with the error | none |
+| `About` | copy hash -> clipboard; repository opened -> `os_shell::open_url`; else `overlay.about.apply` | clipboard write |
+| `Batch` | `overlay.batch.apply` (the open transition is driven from `Command(OpenBatchDialog)`) | none |
+| `Tools` | `overlay.tools.apply` | none |
+| `AgentDebug` | `CopyJsonRequested` -> clipboard; `ScrollReported` -> `overlay.debug_scroll`; else `overlay.debug.apply` | clipboard write |
+| `Inbound` | `ConfigArrived` -> the full `drain_config_bus` projection; `FileChanged` -> **apply the carried event** + the `DirectoryTracker` drain; `Agent` -> `drain_agent_event_bus`; `Background` -> `handle_fs_event` / `handle_process_event` / `handle_mcp_auth_event`; `EventsDropped` -> warn + `LAG_TRUNCATION_MARKER` on the agent stream | none |
+| `Boot` | `FontLoadFinished(Some)` -> `ERROR` (`ui_iced.boot.font_load_failed`, non-fatal); `ConfigPublished` -> debug trace | none |
+
+### UserCommand routing — bus publish vs. UI-side mutation
+
+| `UserCommand` | Published to `user_command_bus` | Also mutates iced UI state |
+|---|---|---|
+| `Delete(path)` | **No** — intercepted before the executor | opens `DialogKind::DeleteConfirm`; the intent is published later by `reduce_dialog` once confirmed |
+| `Rename(path)` | Yes (publish + drain) | opens the rename dialog pre-filled with `flatten::initial_rename_value` |
+| `Move(path)` | Yes | opens the move dialog with `visible_directories()` (the visible tree rows) as candidates |
+| `CreateDirectory { parent }` | Yes | opens the name-entry dialog |
+| `CreateDocument { parent }` | Yes | opens the name-entry dialog |
+| `OpenBatchDialog` | Yes | **re-indexes the previous directory / prompt picks by value** into the freshly built candidate lists (`reindex_batch_selection` + `index_of_selected`), then opens |
+| `OpenToolsDialog` | Yes | opens the tools window |
+| `OpenAboutDialog` | Yes | opens the About window |
+| `CancelBatch` | Yes | dismisses the batch dialog |
+| `ClearDebugEntries` | Yes | `overlay.debug.collapse_all()` — row ids are positional, a stale expansion would open an unrelated entry |
+| `OpenInEditor(path)` | Yes | lifts the freshly populated `TextBuffer` into an `EditorViewModel` |
+| everything else | Yes (publish + immediate drain/execute) | — |
+
+Every publish goes through `publish_and_drain` ->
+`AppOrchestrator::drain_user_command_bus` -> `apply_user_command`, i.e. the
+same executor the egui frame loop drove ([FMD-066], [FMD-071]).
+
+### The six reported gaps
+
+**1. Leading-newline class (3 tests) — NOT a reducer gap; the tests were wrong.**
+
+Verified against every egui original. `ui/app/update.rs` contains **no body
+extraction at all** (read in full: 321 lines), so there is no egui "strip" to
+mirror. What egui actually does:
+
+* editor body — `TextBuffer::open` stores `DocumentContent::parse(raw).body`
+  verbatim (`ui/text_buffer.rs:302-304`), leading newline kept;
+* run-as-prompt — `ui/tree/render.rs:145` publishes
+  `DocumentContent::parse(&raw).body` verbatim;
+* `FileLoaded` -> viewer — `orchestrator.rs:537-539` stores
+  `Document::new(content).body()`, which keeps the same newline.
+
+Stripping would also have been actively harmful for the editor:
+`DocumentContent`'s `Display` joins front matter and body with **no separator**
+(`markdown/document.rs:64-72`), so a stripped body would write
+`---\ntitle: Hi\n---Body text` back to disk and break the closing fence for
+every other consumer. The old test additionally asserted
+`vm.front_matter() == Some("title: Hi")`, which contradicts `EditorViewModel`'s
+own pinned contract (`editor_tests::open_shows_only_the_body_and_caches_the_front_matter`
+pins `Some("---\ntitle: Test\ntags: [a, b]\n---")`).
+
+**Fix:** the three assertions now expect the egui-exact values
+(`"\nBody text\n"`, `"\nSummarise this\n"`, `"\nLoaded body"`) and the fenced
+front-matter form. A new test,
+`test_editor_open_then_save_round_trips_the_file_byte_for_byte`, pins open ->
+save byte identity — the property the strip would have destroyed. The tests were
+corrected, not weakened: the contract under test (body extracted, front matter
+preserved, file unchanged) is now asserted more strongly.
+
+**2. `Inbound(FileChanged)` did not run the file-processor drain — REAL GAP, fixed.**
+
+The arm called `process_file_events()` and **ignored the event the message
+carried**. That only "worked" in production by accident: it relied on the
+orchestrator holding a *second* live subscriber on `Bus<FileEvent>`, which
+contradicts [FMD-065]'s single-inbound-path rule that already gave
+`orchestrator.rx` an inert channel.
+
+**Fix:** extracted the per-event match out of
+`AppOrchestrator::process_file_events` into a new
+`pub fn apply_file_event(&mut self, FileEvent)` (behaviour preserved
+arm-for-arm), and the reducer now applies the carried event directly and then
+calls `process_file_events()` to keep the `DirectoryTracker` drain the egui
+frame ran alive. `build_state` sets `file_event_reader: None`, so exactly one
+application path exists and no event is applied twice.
+
+**3. `BatchDialogState::open` clamp — the test contradicted the module's own pinned contract.**
+
+`update_tests` wanted a stale `Some(1)` against a one-element list to become
+`Some(0)`; `batch_dialog_tests::open_clamps_selections_that_no_longer_resolve`
+pins the opposite for the same function (`Some(5)` against one dir -> `None`,
+"a directory index past the fresh list must be dropped"). Both cannot hold.
+
+**Fix:** the update test now asserts the pinned `None` (and that
+`can_start()` is disabled). Clamping to the last candidate would silently
+select a directory the user never picked, which for a destructive batch run is
+the wrong failure mode. The reducer-side obligation the task actually calls for
+— re-index by path — was **missing** and is now implemented (see gap 3b).
+
+**3b. Batch re-index-by-path — implemented.** `Command(OpenBatchDialog)` now
+runs `reindex_batch_selection(previous, fresh)`, which re-finds the previous
+directory pick with `index_of_selected` and the previous prompt pick by its
+`path` (`PromptInfo` is not `PartialEq`), so a reopen follows the *value* the
+user chose rather than a stale position (egui's rule,
+`ui/app/render.rs:102-108`). A pick that no longer resolves is left alone so
+`open` drops it. Covered by
+`test_open_batch_dialog_reindexes_the_previous_pick_by_path` and
+`test_open_batch_dialog_drops_a_previous_pick_that_is_gone`.
+
+**4. Tree context-menu construction — the test seeded the wrong layer, and a real perf gap surfaced.**
+
+The test seeded `models.left.rows`, then dispatched a `CursorMoved` — whose
+`finish_frame` rebuild re-derived the rows from the real filesystem and wiped
+the seed before the menu message was reduced. The sibling
+`test_tree_context_menu_for_an_unknown_row_mounts_nothing` requires an unknown
+path to produce an *empty* menu, so synthesising menu rows from the path alone
+cannot satisfy both.
+
+**Fix (test):** `seed_rows` now seeds the way the reducer does — into
+`FastMdApp::cached_tree_rows` with `tree_dirty` cleared, exactly egui's cache
+transition (`ui/panels/left.rs:209-210`) — so the seeded rows survive the
+rebuild.
+
+**Fix (production, found while diagnosing):** nothing in the iced build ever
+populated `cached_tree_rows`, so `panels::left::tree_rows` fell through to
+`build_workspace_tree` and re-walked the whole workspace on **every message**.
+`finish_frame` now runs `refresh_tree_cache`, the exact egui transition: rebuild
+only while dirty, publish the rows as the cache, clear the flag. Covered by
+`test_frame_tail_populates_the_tree_cache_and_clears_the_dirty_flag`,
+`test_frame_tail_does_not_rebuild_the_tree_while_it_is_clean` and
+`test_a_dirty_tree_is_re_derived_rather_than_served_from_the_stale_cache`.
+
+### Deferred-intent execution path
+
+No file I/O happens in the view; the reducer owns it and reuses the existing
+orchestrator machinery:
+
+* **Tree run-as-prompt / skill run** — the reducer reads the file
+  (`std::fs::read_to_string`), parses the body and publishes a *self-contained*
+  `UserCommand::RunSkillPrompt { content, target_dir, target_file }`
+  ([FMD-068]). The read is the command's **input**, not its execution — no
+  `UserCommand` variant exists for "read this file and hand me the body", and
+  the egui original read in the menu callback too. A read failure logs
+  `ui_iced.file.read_failed` (NFR-001/NFR-004) and publishes nothing.
+* **Print** — there is no `UserCommand::Print`, so the reducer owns the job:
+  `export::print::execute_print_blocking(PrintJob::new(path), Some(tx))` hands
+  it to the background channel; failure logs
+  `ui_iced.file.print_no_channel`.
+* **Editor save** — the reducer writes the re-joined document and publishes
+  `FileEvent::updated_one` so the tree and tag manager refresh; the executor
+  has no editor-save command.
+* **Everything else destructive or creating** — publish + drain through
+  `AppOrchestrator::drain_user_command_bus` -> `apply_user_command`, the same
+  executor the egui frame drove.
+* **Clipboard** (copy code, copy commit hash, copy debug JSON) rides iced
+  `Task`s returned from the reducer, never a synchronous write.
+
+### egui update behaviour that could NOT be mirrored
+
+1. **`apply_persisted_font_scale` / `persist_font_scale`.** egui mutates
+   `ctx.pixels_per_point()` against a first-frame OS baseline. iced 0.14 has no
+   mutable ppp; DEC-008 replaces the whole pair with
+   `.scale_factor(state.composed_scale_factor())` composed from the boot-
+   captured `os_scale` baseline x the persisted multiplier. The near-unity and
+   out-of-range collapse semantics are preserved verbatim in `sanitise_scale`.
+2. **`should_request_immediate_repaint` and the repaint throttle.** iced is
+   event-driven; there is no repaint request and no idle-CPU decider. The
+   "file events arrived" half of that decision survives as the
+   `Inbound(FileChanged)` trigger; the "raw input pending" half is the iced
+   runtime's own event loop.
+3. **`handle_platform_commands` / the `OutputCommand::OpenUrl` drain.** iced has
+   no platform-output command list. The equivalent intent arrives as
+   `RenderMessage::LinkActivated` and runs the identical `resolve_link`
+   dispatch (workspace file / anchor / external).
+4. **The four unconditional per-frame drains.** They are per-message triggers
+   here, so a burst of messages can run a drain more often than once per frame.
+   Each drain is idempotent and cheap; the alternative (a frame timer) would put
+   a polling loop back into an event-driven runtime.
+5. **`ctx.request_repaint()` calls inside `handle_open_link`.** No equivalent
+   needed — returning from `update` re-renders.
+6. **`WindowMessage::CloseRequested`'s phase-1 task chain** needs a live iced
+   runtime (`window::size` / `window::position`), so unit tests drive
+   `CloseSnapshotCaptured` directly, per [TASK-009]'s testing rule 3.
+
+### Gate results
+
+| Gate | Result |
+|---|---|
+| `cargo check -q` (workspace) | PASS, clean |
+| `cargo clippy -p fastmd --bins --lib -- -D warnings` | PASS, clean |
+| `cargo fmt --check` | PASS, clean |
+| `cargo doc --no-deps --quiet` | PASS, no warnings |
+| `cargo nextest run -p fastmd` | 2225 run: **2225 passed, 1 skipped** |
+| `cargo nextest run --workspace` | 3362 run: **3362 passed, 4 skipped** |
+| `cargo nextest run -p fastmd ui_iced::update` | 90 run: **90 passed** (was 83 with 6 failures; 7 tests added) |
+
+### Needs the orchestrator's eyes
+
+1. **`AppOrchestrator::process_file_events` was refactored.** The per-event
+   match moved into a new `pub fn apply_file_event(&mut self, FileEvent)`. The
+   arms are preserved, but two accumulators became per-event instead of
+   per-batch: `close_tabs_for_removed_files` and `tags.rebuild()` now run once
+   per `Removed` event rather than once after a whole drain. Both are idempotent
+   and the egui tests pass unchanged, but if a bulk-removal path ever shows a
+   rebuild cost this is the place to re-batch.
+2. **`build_state` now sets `file_event_reader: None`** (mirrors the inert
+   `rx`). The iced build's only file-event application path is
+   `Inbound(FileChanged)` -> `apply_file_event`. Anything that later needs the
+   orchestrator to observe file events independently of the [TASK-019] bridge
+   must be re-wired deliberately — and then the reducer must stop applying the
+   carried payload, or events double-apply.
+3. **`apply_file_event` is new public API** on `AppOrchestrator` and is part of
+   the iced reducer's contract.
+4. **`DeleteConfirm` asymmetry is unchanged:** the single-path context-menu
+   delete is confirmed, the multi-select `DeleteSelectedRequested` fan-out is
+   not (egui parity; `DialogKind::DeleteConfirm` carries one path). A
+   multi-select confirm dialog is a product decision, not a migration item.
+5. **`main.rs` is NOT flipped (TASK-024).** No branches created, nothing
+   committed.

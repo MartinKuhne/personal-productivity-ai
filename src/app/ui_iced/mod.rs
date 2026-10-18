@@ -98,9 +98,18 @@
 //!   [TASK-010] pane reduction, the `Message::Command` publish-and-execute
 //!   half and the boot-report reductions ([TASK-022] minimal; [TASK-023]
 //!   completes the one-to-one mirror).
-//! - [`view`] — the top-level view: the three-band layout with the real
-//!   top toolbar, the middle pane grid and the bottom band stub
-//!   ([TASK-022] minimal; [TASK-023] completes the render path).
+//! - [`view`] - the top-level view: the three-band layout with the real top
+//!   toolbar, the middle pane grid (left tree / center document-or-agent /
+//!   gated ToC) and the bottom command band, under the overlay host that
+//!   stacks the context menu, editor, dialogs, log viewer, debug window,
+//!   tools, About, attributions and batch windows in the egui draw order
+//!   ([TASK-023]).
+//!
+//! The view borrows every panel view-model out of
+//! [`AppState::models`](app::AppState::models); those snapshots are rebuilt
+//! by [`AppState::rebuild_view_models`](app::AppState::rebuild_view_models)
+//! at the end of every [`update`] call. Any new `update` entry point MUST
+//! call it, or the view renders a stale frame.
 //!
 //! `tree` follows in Phase 4.
 

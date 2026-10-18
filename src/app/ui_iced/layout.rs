@@ -266,28 +266,32 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
     }
 }
 
-/// Builds the middle band area ([TASK-010]): a [`pane_grid::PaneGrid`] over the pilot's
-/// pane state whose right pane is gated by [`should_show_panel`] and whose
-/// center pane is supplied by the caller (the pilot renders the iced-logo
-/// section there; TASK-022 will pass the document viewer).
+/// Builds the middle band area ([TASK-010], [TASK-023]): a
+/// [`pane_grid::PaneGrid`] over the pilot's pane state whose three pane
+/// bodies are supplied by the caller.
 ///
-/// The `center` argument is a builder closure so the pane-grid view callback
-/// can produce fresh elements per call. `on_resize` maps a
-/// [`pane_grid::ResizeEvent`] into the caller's message type (`on_resize`
-/// contract verified at `iced_widget-0.14.2/src/pane_grid.rs:267-275`).
+/// Each body is a builder closure rather than a single `Element` because the
+/// pane-grid view callback runs once per pane per frame and `Element` is not
+/// `Clone`. The right (TOC) body is only mounted when
+/// [`should_show_panel`] passes; the gate is evaluated here so the rule
+/// stays in the one place it is defined
+/// (`crate::ui::panels::right::should_show_panel`, [RUST-051]).
+///
+/// `on_resize` maps a [`pane_grid::ResizeEvent`] into the caller's message
+/// type (`on_resize` contract verified at
+/// `iced_widget-0.14.2/src/pane_grid.rs:267-275`).
 pub fn middle_band<'a, Message: 'a>(
     panes: &'a pane_grid::State<PaneKind>,
+    left: impl Fn() -> iced::Element<'a, Message> + 'a,
     center: impl Fn() -> iced::Element<'a, Message> + 'a,
+    right: impl Fn() -> iced::Element<'a, Message> + 'a,
     has_toc: bool,
     has_selected_file: bool,
     on_resize: impl Fn(pane_grid::ResizeEvent) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
+    let toc_visible = should_show_panel(has_toc, has_selected_file);
     pane_grid::PaneGrid::new(panes, move |_pane, kind, _is_maximized| {
-        pane_grid::Content::new(pane_body(
-            kind,
-            center(),
-            should_show_panel(has_toc, has_selected_file),
-        ))
+        pane_grid::Content::new(pane_body(kind, left(), center(), right(), toc_visible))
     })
     .on_resize(RESIZE_LEEWAY_PIXELS, on_resize)
     .into()
@@ -298,23 +302,19 @@ pub fn middle_band<'a, Message: 'a>(
 /// the pane grid either way).
 fn pane_body<'a, Message: 'a>(
     kind: &PaneKind,
+    left: iced::Element<'a, Message>,
     center: iced::Element<'a, Message>,
+    right: iced::Element<'a, Message>,
     toc_visible: bool,
 ) -> iced::Element<'a, Message> {
-    use iced::widget::{container, space, text};
+    use iced::widget::{container, space};
 
     match kind {
-        PaneKind::Left => stub_pane(STUB_TEXT),
-        PaneKind::Center => container(center)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
+        PaneKind::Left => fill_pane(left),
+        PaneKind::Center => fill_pane(center),
         PaneKind::Right => {
             if toc_visible {
-                container(text(TOC_STUB_TEXT))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
+                fill_pane(right)
             } else {
                 container(space::vertical())
                     .width(Length::Fill)
@@ -325,11 +325,9 @@ fn pane_body<'a, Message: 'a>(
     }
 }
 
-/// Renders the left-banding stub body for one pane ([TASK-010]).
-fn stub_pane<'a, Message: 'a>(label: &'static str) -> iced::Element<'a, Message> {
-    use iced::widget::{container, text};
-
-    container(text(label))
+/// Wraps a pane body so it owns the whole pane area.
+fn fill_pane<'a, Message: 'a>(body: iced::Element<'a, Message>) -> iced::Element<'a, Message> {
+    iced::widget::container(body)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

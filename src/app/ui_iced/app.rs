@@ -77,11 +77,26 @@ use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::app::FastMdApp;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
+use crate::ui_iced::about::{AboutViewModel, AboutWindowState};
+use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
+use crate::ui_iced::agent_debug::{AgentDebugViewModel, AgentDebugWindowState};
+use crate::ui_iced::attributions::AttributionsViewModel;
+use crate::ui_iced::batch_dialog::{BatchDialogState, BatchDialogViewModel, BatchRunStatus};
+use crate::ui_iced::dialogs::DialogState;
+use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::fonts;
 use crate::ui_iced::layout;
+use crate::ui_iced::logs::{BackgroundLogsViewModel, ScrollSnapshot};
 use crate::ui_iced::message::{BootMessage, Message, WindowMessage};
+use crate::ui_iced::overlay::MenuItem;
+use crate::ui_iced::panels::bottom::BottomPanelViewModel;
+use crate::ui_iced::panels::center::CenterPanelViewModel;
+use crate::ui_iced::panels::left::LeftPanelViewModel;
+use crate::ui_iced::panels::top::TopBarViewModel;
 use crate::ui_iced::persisted::{self, UiStateStorage};
+use crate::ui_iced::search::SearchViewModel;
 use crate::ui_iced::subscription::{self, BusReceivers};
+use crate::ui_iced::tools_dialog::{ToolsDialogState, ToolsDialogViewModel};
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
 use crate::workspace::Tags;
@@ -109,12 +124,12 @@ const WORKSPACE_LIBRARY_KIND: &str = "text";
 /// wiring so cross-run restore experiments can point it inside a scratch dir.
 pub const UI_STATE_PATH_ENV: &str = "FASTMD_ICED_UI_STATE_PATH";
 
-/// The iced application state ([TASK-022]).
+/// The iced application state ([TASK-022], [TASK-023]).
 ///
 /// A thin wrapper: the egui-free [`FastMdApp`] domain state plus the
-/// iced-specific runtime bits. [TASK-023] grows the view-local half
-/// (cursor anchor, overlay slot, dialog / about / debug window state,
-/// scroll reports) onto this struct; the boot-owned half below is final.
+/// iced-specific runtime bits. [TASK-023] adds the view-model half
+/// ([`ViewModels`]) and the floating-window half ([`OverlayState`]); the
+/// boot-owned half below is final.
 pub struct AppState {
     /// The egui-free FastMD domain state (orchestrator + panels + persisted
     /// snapshot). All domain accessors route through here.
@@ -137,6 +152,11 @@ pub struct AppState {
     pub panes: pane_grid::State<layout::PaneKind>,
     /// The middle-band pane/split ids discovered at construction.
     pub band: layout::MiddleBandPanes,
+    /// Every panel and dialog view-model the view renders, rebuilt at the end
+    /// of each `update` by [`AppState::rebuild_view_models`] ([TASK-023]).
+    pub models: ViewModels,
+    /// Reducer-owned floating-window state ([TASK-023]).
+    pub overlay: OverlayState,
 }
 
 impl AppState {
@@ -147,6 +167,285 @@ impl AppState {
             self.os_scale.unwrap_or(1.0),
             self.app.persisted_ui_state.font_size_scale,
         )
+    }
+
+    /// Re-snapshots every view-model from the domain state and the
+    /// reducer-held overlay state ([TASK-023]).
+    ///
+    /// This is the resolution of the view-model lifetime problem: every
+    /// panel function returns an `Element<'_, Message>` that **borrows** its
+    /// view-model, so a view-model built inside `view` cannot outlive the
+    /// call (E0515). Building them at the end of `update` instead — where
+    /// the domain state has just finished mutating — lets `view` stay a pure
+    /// borrow over `&AppState`.
+    pub fn rebuild_view_models(&mut self) {
+        self.models = ViewModels::from_app(&self.app, &self.overlay);
+    }
+
+    /// Which floating windows are showing, bottom-most layer first
+    /// ([TASK-023]). Delegates to [`mounted_layers`].
+    #[must_use]
+    pub fn mounted_layers(&self) -> Vec<OverlayLayer> {
+        mounted_layers(&self.overlay, &self.models)
+    }
+}
+
+/// A floating context menu: where it was opened and the rows it shows
+/// ([TASK-023], DEC-005).
+///
+/// The reducer builds the rows from the panel view-model that owns the
+/// target (`LeftPanelViewModel::menu_items_for` /
+/// `CenterPanelViewModel::menu_items_for`) so the view stays a pure
+/// projection and never reads the domain model to decide menu contents.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContextMenu {
+    /// Top-left anchor in window coordinates, taken from the
+    /// [`LayoutMessage::CursorMoved`](crate::ui_iced::message::LayoutMessage::CursorMoved)
+    /// that preceded the open request.
+    pub anchor: iced::Point,
+    /// The rows to render, in display order.
+    pub items: Vec<MenuItem<Message>>,
+}
+
+/// Reducer-owned floating-window state ([TASK-023]).
+///
+/// egui kept each of these as a `bool` on [`crate::ui::Dialogs`] plus
+/// widget memory for the contents. iced has to hold the contents
+/// explicitly, and because the egui build could genuinely show several at
+/// once (a context menu over an open About window), the single-blocking
+/// overlay [`crate::ui_iced::overlay::OverlaySlot`] does not describe the
+/// real model. One slot per window does; [`mounted_layers`] turns them back
+/// into a z-ordered stack.
+#[derive(Debug)]
+pub struct OverlayState {
+    /// The small name-entry / move / delete-confirmation dialog.
+    pub dialog: DialogState,
+    /// Where the small dialog was anchored (`None` = centred).
+    pub dialog_anchor: Option<iced::Point>,
+    /// The floating tree / tab context menu.
+    pub context_menu: Option<ContextMenu>,
+    /// The inline editor buffer (owns the live `text_editor::Content`, so
+    /// the overlay as a whole is not `Clone`).
+    pub editor: Option<EditorViewModel>,
+    /// The agent debug window's disclosure state.
+    pub debug: AgentDebugWindowState,
+    /// The tools dialog window.
+    pub tools: ToolsDialogState,
+    /// The About / attributions window.
+    pub about: AboutWindowState,
+    /// The batch prompt dialog and its composed selection.
+    pub batch: BatchDialogState,
+    /// The workspace content-search state (the left panel's search box).
+    pub search: SearchViewModel,
+    /// Last reported pointer position, the anchor source for context menus.
+    pub cursor: Option<iced::Point>,
+    /// The agent transcript's "Thinking Process" disclosure (replaces
+    /// egui's `collapsing` widget memory).
+    pub thinking_expanded: bool,
+    /// Last reported background-logs viewport.
+    pub logs_scroll: Option<ScrollSnapshot>,
+    /// Last reported agent-transcript viewport.
+    pub agent_scroll: Option<ScrollSnapshot>,
+    /// Last reported debug-entry viewport.
+    pub debug_scroll: Option<ScrollSnapshot>,
+}
+
+impl Default for OverlayState {
+    /// A closed-everything overlay with the egui-matching defaults: the
+    /// thinking block starts expanded (egui's `collapsing` opened that way)
+    /// and no scroll viewport has been reported yet.
+    fn default() -> Self {
+        Self {
+            dialog: DialogState::new(),
+            dialog_anchor: None,
+            context_menu: None,
+            editor: None,
+            debug: AgentDebugWindowState::new(),
+            tools: ToolsDialogState::new(),
+            about: AboutWindowState::new(),
+            batch: BatchDialogState::new(),
+            search: SearchViewModel::new(),
+            cursor: None,
+            thinking_expanded: true,
+            logs_scroll: None,
+            agent_scroll: None,
+            debug_scroll: None,
+        }
+    }
+}
+
+/// One floating-window layer of the overlay host, bottom-most first
+/// ([TASK-023]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverlayLayer {
+    /// The floating tree / tab context menu.
+    ContextMenu,
+    /// The inline editor modal.
+    Editor,
+    /// A small name-entry / move / delete-confirmation dialog.
+    Dialog,
+    /// The background-process log viewer.
+    Logs,
+    /// The agent debug window.
+    AgentDebug,
+    /// The tools dialog.
+    Tools,
+    /// The About window.
+    About,
+    /// The third-party attributions window.
+    Attributions,
+    /// The batch prompt-processing dialog (topmost — egui drew it last).
+    Batch,
+}
+
+/// The z-ordered set of showing layers ([TASK-023]).
+///
+/// Mirrors the egui draw order of `ui/app/render.rs`: the context menu sat
+/// above the panels, the editor above that, then the small dialogs, the log
+/// viewer, the debug window, the tools dialog, the identity windows and the
+/// batch dialog last.
+///
+/// [RUST-020]: pure.
+#[must_use]
+pub fn mounted_layers(overlay: &OverlayState, models: &ViewModels) -> Vec<OverlayLayer> {
+    let mut layers = Vec::new();
+    if overlay
+        .context_menu
+        .as_ref()
+        .is_some_and(|menu| !menu.items.is_empty())
+    {
+        layers.push(OverlayLayer::ContextMenu);
+    }
+    if overlay.editor.is_some() {
+        layers.push(OverlayLayer::Editor);
+    }
+    if overlay.dialog.is_open() {
+        layers.push(OverlayLayer::Dialog);
+    }
+    if models.logs.visible {
+        layers.push(OverlayLayer::Logs);
+    }
+    if models.debug.visible {
+        layers.push(OverlayLayer::AgentDebug);
+    }
+    if overlay.tools.is_open() {
+        layers.push(OverlayLayer::Tools);
+    }
+    if overlay.about.is_about() {
+        layers.push(OverlayLayer::About);
+    }
+    if overlay.about.is_attributions() {
+        layers.push(OverlayLayer::Attributions);
+    }
+    if overlay.batch.is_open() {
+        layers.push(OverlayLayer::Batch);
+    }
+    layers
+}
+
+/// Every panel and dialog view-model the iced view renders ([TASK-023]).
+///
+/// The view holds no state of its own: each field is a snapshot the reducer
+/// rebuilt after the last mutation, which is what lets
+/// [`crate::ui_iced::view::view`] borrow them (see
+/// [`AppState::rebuild_view_models`] for why they cannot be built there).
+#[derive(Debug)]
+pub struct ViewModels {
+    /// Top toolbar.
+    pub top: TopBarViewModel,
+    /// Left file-tree / search panel.
+    pub left: LeftPanelViewModel,
+    /// Center tab strip and document viewer.
+    pub center: CenterPanelViewModel,
+    /// Bottom command-input band.
+    pub bottom: BottomPanelViewModel,
+    /// Agent session panel.
+    pub agent: AgentPanelViewModel,
+    /// Background-process log viewer.
+    pub logs: BackgroundLogsViewModel,
+    /// Agent debug window.
+    pub debug: AgentDebugViewModel,
+    /// Tools dialog card.
+    pub tools: ToolsDialogViewModel,
+    /// Batch prompt dialog card.
+    pub batch: BatchDialogViewModel,
+    /// About card.
+    pub about: AboutViewModel,
+    /// Third-party attributions card.
+    pub attributions: AttributionsViewModel,
+}
+
+impl ViewModels {
+    /// Snapshots every view-model off `app`, merging in the reducer-held
+    /// state that `from_app` cannot see ([TASK-023]).
+    ///
+    /// Three merges are required because the egui originals read state the
+    /// iced reducer owns instead:
+    ///
+    /// * the left panel's search fields come from [`SearchViewModel`], not
+    ///   the egui `TreeSearch` that `LeftPanelViewModel::from_app` reads
+    ///   (and which stays empty in the iced build);
+    /// * the agent panel's disclosure comes from
+    ///   [`OverlayState::thinking_expanded`], because
+    ///   `AgentPanelViewModel::from_app` hardcodes `true`;
+    /// * the debug window's expanded rows come from [`AgentDebugWindowState`],
+    ///   because `AgentDebugViewModel::from_app` returns an empty set.
+    ///
+    /// Side effects: the per-snapshot filesystem reads the egui panels
+    /// already paid every frame (skill listings, the Typst PATH probe, the
+    /// tree flatten). Rebuilding once per message is strictly cheaper than
+    /// egui's once-per-frame cost.
+    #[must_use]
+    pub fn from_app(app: &FastMdApp, overlay: &OverlayState) -> Self {
+        let mut left = LeftPanelViewModel::from_app(app);
+        left.query = overlay.search.query().to_string();
+        left.is_searching = overlay.search.is_filtering();
+        left.results = overlay.search.results_arc();
+
+        let agent =
+            AgentPanelViewModel::from_app(app).with_thinking_expanded(overlay.thinking_expanded);
+
+        let mut debug = AgentDebugViewModel::from_app(app);
+        debug.expanded = overlay.debug.expanded_ids().clone();
+
+        let batch =
+            BatchDialogViewModel::from_config(&app.orchestrator.dialogs.batch_dialog_config)
+                .with_status(batch_run_status(&app.orchestrator.dialogs));
+
+        Self {
+            top: TopBarViewModel::from_app(app),
+            left,
+            center: CenterPanelViewModel::from_app(app),
+            bottom: BottomPanelViewModel::from_app(app),
+            agent,
+            logs: BackgroundLogsViewModel::from_app(app),
+            debug,
+            tools: ToolsDialogViewModel::from_app(app),
+            batch,
+            about: AboutViewModel::from_build(),
+            attributions: AttributionsViewModel::from_catalog(),
+        }
+    }
+}
+
+/// Projects the egui [`crate::ui::Dialogs`] batch-run fields onto the iced
+/// [`BatchRunStatus`] the card renders ([TASK-023]).
+///
+/// [RUST-020]: pure — reads the handle's liveness, mutates nothing.
+#[must_use]
+fn batch_run_status(dialogs: &crate::ui::Dialogs) -> BatchRunStatus {
+    use std::sync::atomic::Ordering;
+
+    BatchRunStatus {
+        has_handle: dialogs.batch_handle.is_some(),
+        finished: dialogs
+            .batch_handle
+            .as_ref()
+            .is_some_and(|handle| handle.thread.is_finished()),
+        cancel_requested: dialogs
+            .batch_cancel_flag
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed)),
     }
 }
 
@@ -162,6 +461,8 @@ impl core::fmt::Debug for AppState {
             .field("viewport", &self.viewport)
             .field("panes", &self.panes)
             .field("band", &self.band)
+            .field("models", &self.models)
+            .field("overlay", &self.overlay)
             .finish()
     }
 }
@@ -334,7 +635,6 @@ pub fn build_state(
             content_libraries: config.content_libraries.clone(),
             rx: inert_rx,
             tx: background_task.tx,
-            file_event_reader: Some(event_bus.subscribe()),
             file_event_bus: event_bus,
             file_processor,
             pdf_backing_tracker,
@@ -353,6 +653,13 @@ pub fn build_state(
             // The iced UI reads config arrivals through the subscription
             // bridge, not the orchestrator's sync reader.
             config_reader: None,
+            // [FMD-065] single inbound path: the [TASK-019] bridge owns
+            // `Bus<FileEvent>` delivery and the reducer applies each
+            // `Inbound(FileChanged)` payload through
+            // `AppOrchestrator::apply_file_event`. A live reader here would
+            // apply every event a second time, so it is inert — the same
+            // treatment `rx` above gets.
+            file_event_reader: None,
             pending_file_load: None,
             finished_watcher_slot,
             tool_context,
@@ -372,6 +679,12 @@ pub fn build_state(
         .unwrap_or(Size::new(WINDOW_WIDTH_POINTS, WINDOW_HEIGHT_POINTS));
     let (panes, band) = layout::middle_band_state();
 
+    // The view-model half is seeded here so `view` is renderable from the
+    // very first frame; every later frame re-snapshots it at the end of
+    // `update` ([TASK-023]).
+    let overlay = OverlayState::default();
+    let models = ViewModels::from_app(&app, &overlay);
+
     AppState {
         app,
         receivers,
@@ -380,6 +693,8 @@ pub fn build_state(
         viewport,
         panes,
         band,
+        models,
+        overlay,
     }
 }
 

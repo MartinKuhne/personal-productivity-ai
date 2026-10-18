@@ -533,12 +533,34 @@ impl CenterPanelViewModel {
 /// The tab strip is always allocated; the viewer area below it is always
 /// allocated too, showing the empty-state prompt when no document is active.
 pub fn center_panel(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
-    let body: Element<'_, Message> = if view_model.show_agent_session {
+    center_panel_rendered(view_model, None)
+}
+
+/// The center panel with a pre-rendered document body in the viewer area
+/// ([TASK-023]).
+///
+/// Same chrome as [`center_panel`]; the rendered element replaces the
+/// placeholder title inside the always-allocated scrollable. The body is
+/// passed in rather than held on the view-model because
+/// [`crate::ui_iced::render::render_document`] produces an
+/// `Element<'static, Message>`, and `Element` is neither `Clone` nor
+/// `Debug` — a snapshot struct could not own one.
+///
+/// `None` keeps the [TASK-013] placeholder behaviour, which is what the
+/// empty state (no open tab) renders.
+pub fn center_panel_rendered<'a>(
+    view_model: &'a CenterPanelViewModel,
+    document: Option<iced::Element<'static, Message>>,
+) -> Element<'a, Message> {
+    let body: Element<'a, Message> = if view_model.show_agent_session {
         agent_session_area(view_model)
     } else {
-        Column::with_children(vec![tab_strip(view_model), viewer_area(view_model)])
-            .height(Length::Fill)
-            .into()
+        Column::with_children(vec![
+            tab_strip(view_model),
+            viewer_area(view_model, document),
+        ])
+        .height(Length::Fill)
+        .into()
     };
 
     container(body)
@@ -624,13 +646,17 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
 /// The `pdf_surface` frame mirrors egui's sepia tint for PDF-backed files
 /// (`panels/center.rs:320-323`); the empty state is the same
 /// [`strings::NO_FILE_SELECTED_PROMPT`] the egui panel used.
-fn viewer_area(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
+fn viewer_area<'a>(
+    view_model: &'a CenterPanelViewModel,
+    document: Option<iced::Element<'static, Message>>,
+) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
     let pdf_backed = view_model.active_pdf_backed;
 
-    let body: Element<'_, Message> = match view_model.active_tab_entry() {
-        Some(tab) => document_preview(tab),
-        None => text(strings::NO_FILE_SELECTED_PROMPT)
+    let body: Element<'a, Message> = match (view_model.active_tab_entry(), document) {
+        (Some(_), Some(rendered)) => rendered,
+        (Some(tab), None) => document_preview(tab),
+        (None, _) => text(strings::NO_FILE_SELECTED_PROMPT)
             .size(EMPTY_STATE_SIZE)
             .color(to_iced_color(palette.text_muted))
             .into(),
@@ -649,14 +675,12 @@ fn viewer_area(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
     .into()
 }
 
-/// The active document's render block.
+/// The active document's render block — the [TASK-013] placeholder.
 ///
-/// **This is the [TASK-015] extension point.** egui rendered the YAML
-/// front-matter table, then the search-aware markdown with the FTWA table
-/// strategy and the task-checkbox toggles
-/// (`panels/center.rs:362-385`). None of that is ported here; the block
-/// carries the document title so the pane is never blank, and the `Column`
-/// is the shape the renderer appends to.
+/// The real [TASK-015] render (YAML front-matter table, search-aware
+/// markdown, FTWA table strategy, task-checkbox toggles) is supplied to
+/// [`center_panel_rendered`] by the root view; this is what shows when no
+/// rendered body was handed in, so the pane is never blank.
 fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
