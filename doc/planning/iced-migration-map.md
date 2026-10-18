@@ -123,3 +123,84 @@ The **Tier** column is the REQ-010 four-tier test citation (1=unit sidecar, 2=`S
 - `UI-042`'s "minimum 100 history entries" fixes the DEC-007 history-stack depth constant at ≥ 100.
 - Rows marked `—` in **Tier** receive their four-tier citations when `TASK-028` completes REQ-010;
   every row MUST cite ≥ 1 tier artifact at that point or spawn new gaps for `TASK-029`-adjacent work.
+
+## Phase 2 success criteria (TASK-005)
+
+Verified 2026-10-17 against the local crate sources in the cargo registry checkout
+`C:\Users\mkuhn\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\` (`iced-0.14.0` plus its
+resolved `iced_widget-0.14.2` dependency). All citations are `file:line` within that checkout.
+
+### Verified `iced::application(boot, update, view).run()` signature
+
+- Constructor: `pub fn application<State, Message, Theme, Renderer>(boot: impl BootFn<State,
+  Message>, update: impl UpdateFn<State, Message>, view: impl for<'a> ViewFn<'a, State, Message,
+  Theme, Renderer>) -> Application<impl Program<State = State, Message = Message, Theme = Theme>>`
+  — `iced-0.14.0/src/application.rs:79-89` (bounds: `State: 'static`, `Message: Send + 'static`,
+  `Theme: theme::Base`, `Renderer: program::Renderer`).
+- **BootFn**: `trait BootFn<State, Message> { fn boot(&self) -> (State, Task<Message>); }` —
+  `application.rs:535-538`; blanket-impl'd for `T: Fn() -> C where C: IntoBoot<State, Message>` —
+  `application.rs:540-548`. **IntoBoot** is implemented for the bare `State` (wrapped with
+  `Task::none()`) and for `(State, Task<Message>)` — `application.rs:551-566`, confirming DEC-009
+  (boot may return an initial Task). `Program::boot` returns the tuple at `application.rs:124-126`.
+- **UpdateFn**: `trait UpdateFn<State, Message> { fn update(&self, state: &mut State, message:
+  Message) -> Task<Message>; }` — `application.rs:598-601`; blanket-impl'd for `T: Fn(&mut State,
+  Message) -> C where C: Into<Task<Message>>` — `application.rs:609-617` (the unit type converts
+  into `Task::none()`, so a no-op passthrough handler needs only a unit-returning closure).
+- **ViewFn**: `trait ViewFn<'a, State, Message, Theme, Renderer> { fn view(&self, state: &'a
+  State) -> Element<'a, Message, Theme, Renderer>; }` — `application.rs:623-626`; blanket-impl'd
+  (HRTB) for `T: Fn(&'a State) -> W where W: Into<Element<'a, ...>>` — `application.rs:628-638`.
+- Final call shape: `pub fn run(self) -> Result where Self: 'static, P::Message:
+  message::MaybeDebug + message::MaybeClone` — `application.rs:185-190`; `shell::run(program)?` at
+  `application.rs:214`. `iced::Result = Result<(), Error>` — `iced-0.14.0/src/lib.rs:679`.
+- Builder methods of `Application<P>` (window/window_size/position/centered/title/theme/
+  subscription/scale_factor/presets/..., per DEP-007) — `application.rs:184-457`.
+
+### Logo widget existence check (TASK-004 verification duty)
+
+`iced::widget::iced(text_size)` **exists** in 0.14 — no discrepancy, no stub fallback needed:
+"Creates an [`Element`] that displays the iced logo with the given `text_size`." —
+`iced_widget-0.14.2/src/helpers.rs:1848-1894` (takes `impl Into<core::Pixels>`). Re-exported
+through `iced_widget-0.14.2/src/lib.rs:48` (`pub use helpers::*;`) and the `iced::widget`
+ façade `iced-0.14.0/src/lib.rs:634-637`. Feature gates required by the where-clauses
+(`Renderer: core::Renderer + core::text::Renderer<Font = core::Font>`,
+`Theme: text::Catalog + container::Catalog`) are satisfied by the default `iced::Theme` /
+`iced::Renderer` built from the `wgpu`/`tiny-skia`/`fira-sans` features (`Cargo.toml` TASK-003).
+
+### Dependency/feature verification (TASK-003)
+
+All four requested features exist in `iced-0.14.0/Cargo.toml`: `wgpu` (:116), `tiny-skia` (:107),
+`fira-sans` (:74), `advanced-shaping` (:53). The dependency is declared REGULAR (non-optional,
+DEC-011) in the root `Cargo.toml`; no Cargo feature may gate it.
+
+### Lockfile resolution note (found & fixed during the TASK-003 gate, 2026-10-17)
+
+Adding iced exposed a **`windows` crate version split inside the iced/wgpu dependency tail**, not
+an iced-version mismatch (all iced crates resolve at 0.14.x: `iced`/`iced_core`/`iced_futures`/
+`iced_graphics`/`iced_program`/`iced_renderer`/`iced_runtime`/`iced_wgpu` = **0.14.0**,
+`iced_tiny_skia`/`iced_winit` = **0.14.1**, `iced_widget` = **0.14.2**):
+
+- `iced → iced_wgpu 0.14 → cryoglyph 0.1 → wgpu 27.0.1 → wgpu-hal 27.0.4` requires `windows 0.58`
+  (`wgpu-hal-27.0.4/Cargo.toml`, `[target."cfg(windows)".dependencies.windows] version = "0.58"`).
+- `wgpu-hal 27.0.4 → gpu-allocator 0.27.0`, which declares a *wide* range
+  `windows = ">=0.53,<=0.58"` (`gpu-allocator-0.27.0/Cargo.toml:135`), so it can unify with 0.58.
+- The pre-existing `trash = 5.2.6` dependency pinned a `windows 0.56.0` vertex into the
+  lockfile's target-union (trash's own `windows` dep is `cfg(windows)`-gated while our
+  edge is `cfg(not(windows))` — a combination that never compiles on any real target), and the
+  stale lock resolved gpu-allocator **down** to that 0.56 copy → type-mismatch compile errors in
+  `wgpu-hal/src/dx12/suballocation.rs` (E0308/E0277, two incompatible `windows-core` majors).
+- **Fix (lock-only, no manifest/API change):** `cargo update -p trash` → `trash 5.2.9`
+  (patch bump; `trash = "5.2.6"` in `Cargo.toml` means `^5.2.6` and already allowed it). 5.2.9
+  requires `windows ^0.62`, which deletes the `windows|windows-core 0.56.0` vertices from the
+  graph, after which gpu-allocator 0.27.0 unifies on `windows 0.58.0` — exactly what wgpu-hal 27
+  needs. Workspace `windows 0.62` edge and the egui/eframe stack (wgpu 30 / gpu-allocator 0.28)
+  are unaffected.
+
+
+### Success criteria (window run — executed later by the user/orchestrator, not in the implementation session)
+
+1. `cargo run --bin fastmd_iced` launches a native OS window (wgpu path initializes without panic).
+2. The window shows the built-in `iced::widget::iced(48.0)` logo widget and the label
+   text `fastmd iced pilot`, vertically centered (`fork: src/app/bin/fastmd_iced.rs`).
+3. Closing the window exits the process with exit code 0 (`iced::application(...).run()` returns
+   `Ok(())`; the no-op passthrough `update` and empty-state `boot` produce no error path).
+

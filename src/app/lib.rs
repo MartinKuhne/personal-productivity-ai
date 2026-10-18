@@ -9,6 +9,7 @@ pub mod integrations;
 pub mod markdown;
 pub(crate) mod orchestrator;
 pub mod ui;
+pub mod ui_iced;
 pub mod utils;
 pub mod workspace;
 

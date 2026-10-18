@@ -50,6 +50,9 @@ base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "persistence"] }
 egui_extras = { version = "0.36", default-features = false }
+# UI framework migration (TASK-003, `doc/planning/iced.md`): iced ships as a
+# REGULAR (non-optional) dependency per DEC-011 — no feature flag exists.
+iced = { version = "0.14.0", features = ["wgpu", "tiny-skia", "fira-sans", "advanced-shaping"] }
 notify = "8"
 playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -124,6 +127,12 @@ path = "src/app/main.rs"
 [[bin]]
 name = "deploy"
 path = "src/app/bin/deploy.rs"
+
+# Iced pilot binary (TASK-004, `doc/planning/iced.md`): smoke-tests the iced
+# runtime bootstrap in parallel with the egui `fastmd` binary (DEC-011).
+[[bin]]
+name = "fastmd_iced"
+path = "src/app/bin/fastmd_iced.rs"
 
 [[bench]]
 name = "table_width"
