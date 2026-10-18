@@ -76,7 +76,7 @@
 //!
 //! | Pilot variant | This enum |
 //! | --- | --- |
-//! | `FontLoadFinished(Option<String>)` | *not a window concern — stays in the pilot until [TASK-022] gives the font bootstrap its own channel* |
+//! | `FontLoadFinished(Option<String>)` | `Message::Boot(BootMessage::FontLoadFinished(..))` — [TASK-022] gave the font bootstrap its own boot-infrastructure channel |
 //! | `CloseRequested(Id)` | `Message::Window(WindowMessage::CloseRequested(id))` |
 //! | `CloseSnapshotCaptured { id, size, position }` | `Message::Window(WindowMessage::CloseSnapshotCaptured(WindowSnapshot { .. }))` |
 //! | `ScaleBaseline(f32)` | `Message::Window(WindowMessage::ScaleBaseline(scale))` |
@@ -156,6 +156,35 @@ pub enum Message {
     /// Inbound *background → UI* notification channel ([TASK-019],
     /// FMD-065..FMD-067) — the only channel no widget can produce.
     Inbound(InboundMessage),
+    /// Boot-infrastructure reports ([TASK-022]) — the terminal outcomes of
+    /// the one-shot tasks the `boot` closure returns (font registration,
+    /// the DEC-009 `ConfigArrived` publish). Not a panel channel and not
+    /// user intent: the producer is the boot task chain itself.
+    Boot(BootMessage),
+}
+
+/// Boot-infrastructure channel ([TASK-022]).
+///
+/// The `boot` closure returns a batched [`iced::Task`] whose members must
+/// report back through the top-level `Message` type. These two variants are
+/// those reports. They are deliberately **not** folded into [`WindowMessage`]
+/// (font loading and the config handoff are not window concerns) nor into
+/// [`InboundMessage`] (they are produced by the boot task chain, not by a
+/// background bus).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootMessage {
+    /// One font collection settled registering ([TASK-007]). `Some` holds
+    /// the failure description (logged as an [NFR-001] `ERROR`, non-fatal
+    /// per [FMD-064]); `None` means the collection loaded cleanly. This is
+    /// the home the pilot's `FontLoadFinished` was promised in the
+    /// module-header fold table.
+    FontLoadFinished(Option<String>),
+    /// The DEC-009 startup `ConfigArrived` publish returned. The publish
+    /// runs in a `Task::perform` so background workers observe the arrival
+    /// event *after* every subscriber was constructed in `boot`; this
+    /// variant is its terminal report (the UI itself was direct-injected
+    /// and does not depend on it).
+    ConfigPublished,
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a

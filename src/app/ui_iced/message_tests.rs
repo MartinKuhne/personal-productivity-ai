@@ -6,10 +6,10 @@
 //! configuration file or database is touched.
 
 use super::{
-    AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BusSource, DialogMessage,
-    EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message, RenderMessage,
-    SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage,
-    WindowSnapshot,
+    AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
+    DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message,
+    RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage,
+    WindowMessage, WindowSnapshot,
 };
 use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
@@ -735,6 +735,23 @@ fn test_search_channel_results_ready_carries_query_and_snapshot() {
         }
         other => panic!("expected Search::ResultsReady, got {other:?}"),
     }
+}
+
+#[test]
+fn test_boot_channel_variants_are_distinct_and_clone_preserving() {
+    // [TASK-022]: the boot-infrastructure channel carries the font-load
+    // report and the DEC-009 publish confirmation; the two variants must
+    // stay separable and clone exactly.
+    let font_failed = Message::Boot(BootMessage::FontLoadFinished(Some("boom".to_string())));
+    let font_ok = Message::Boot(BootMessage::FontLoadFinished(None));
+    let published = Message::Boot(BootMessage::ConfigPublished);
+
+    assert_eq!(font_failed.clone(), font_failed);
+    assert_eq!(font_ok.clone(), font_ok);
+    assert_eq!(published.clone(), published);
+    assert_ne!(font_failed, font_ok, "failure vs success must be separable");
+    assert_ne!(font_ok, published, "font report vs config publish report");
+    assert!(!matches!(published, Message::Command(_)));
 }
 
 #[test]

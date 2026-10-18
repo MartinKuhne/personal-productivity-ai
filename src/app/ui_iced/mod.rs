@@ -90,12 +90,24 @@
 //!   Phosphor-bolt stand-in is constructed, since egui's vector paint
 //!   routine (`ui::logo::paint_logo`) is not portable under DEC-011's
 //!   feature set ([TASK-020]).
+//! - [`app`] — the iced application root: the egui-free [`app::AppState`]
+//!   (a thin wrapper over the domain `FastMdApp`), the parallel egui-free
+//!   constructor, the DEC-008/DEC-009 `boot` task chain and the verified
+//!   `launch()` builder chain ([TASK-022], DEC-006/008/009/010).
+//! - [`update`] — the top-level reducer: the DEC-006 close/save flow, the
+//!   [TASK-010] pane reduction, the `Message::Command` publish-and-execute
+//!   half and the boot-report reductions ([TASK-022] minimal; [TASK-023]
+//!   completes the one-to-one mirror).
+//! - [`view`] — the top-level view: the three-band layout with the real
+//!   top toolbar, the middle pane grid and the bottom band stub
+//!   ([TASK-022] minimal; [TASK-023] completes the render path).
 //!
-//! `update` and `tree` follow in Phase 3/4.
+//! `tree` follows in Phase 4.
 
 pub mod about;
 pub mod agent;
 pub mod agent_debug;
+pub mod app;
 pub mod attributions;
 pub mod batch_dialog;
 pub mod dialogs;
@@ -114,3 +126,5 @@ pub mod subscription;
 pub mod table_width;
 pub mod theme;
 pub mod tools_dialog;
+pub mod update;
+pub mod view;

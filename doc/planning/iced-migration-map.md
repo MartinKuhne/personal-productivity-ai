@@ -3282,3 +3282,174 @@ run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
    module — is what must change.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+
+### TASK-022 launch/state-decoupling verification log (launch() entry + egui-free state + DEC-009 config arrival - 2026-10-18)
+
+**Scope delivered: the iced application root.** New files:
+`src/app/ui_iced/app.rs` + `app_tests.rs` (19 tests),
+`src/app/ui_iced/update.rs` + `update_tests.rs` (8 tests),
+`src/app/ui_iced/view.rs` + `view_tests.rs` (5 tests); a `Boot` channel
+(`BootMessage`) added to `message.rs` (+1 `message_tests.rs` test);
+`ui_iced/mod.rs` updated with the three modules + doc bullets; a
+`pub(crate) FastMdApp::from_parts` constructor added to
+`src/app/ui/app/init.rs`; and `src/app/bin/fastmd_iced.rs` refactored to a
+thin shim over `app::launch()` (its old `fastmd_iced_tests.rs` sidecar was
+deleted — the still-relevant reductions were re-hosted in `update_tests.rs`
+against the real `AppState`). `main.rs` was NOT flipped (that is
+[TASK-024]).
+
+**Verified iced 0.14 builder chain** (read from the local registry source
+`iced-0.14.0/src/application.rs`, not docs):
+
+| Builder element | Verified line |
+| --- | --- |
+| `iced::application(boot, update, view)` | helper (`application.rs`) |
+| `.font(bytes)` | `:245` |
+| `.window(window::Settings)` | `:253` |
+| `.exit_on_close_request(bool)` | `:269` |
+| `.window_size(Size)` | `:280` |
+| `.position(window::Position)` | `:324` |
+| `.title(...)` (`TitleFn`, `&'static str` impl `:579`) | `:346` |
+| `.subscription(...)` | `:363` |
+| `.theme(...)` (`ThemeFn`) | `:378` |
+| `.scale_factor(impl Fn(&State) -> f32)` | `:410` |
+| `.presets(...)` | `:448` |
+| `.run() -> Result` | `:186` |
+| `BootFn` / `IntoBoot for (State, Task<Message>)` | `:535-566` |
+| `UpdateFn` (`Fn(&mut State, Message) -> C: Into<Task>`) | `:609-617` |
+| `ViewFn` (`Fn(&'a State) -> Widget: Into<Element>`) | `:628-638` |
+
+`launch()` wires `boot` + `update` + `view` through
+`.title(strings::WINDOW_TITLE)` ("FastMD AI", DEC-010) →
+`.window(window_settings)` (persisted size/position + icon +
+`exit_on_close_request: false`, DEC-006) → `.theme(fastmd_dark_theme)`
+([TASK-008]) → `.scale_factor(composed_scale_factor)` (DEC-008) →
+`.subscription(subscription(&receivers))` ([TASK-019]) → `.run()`. Fonts
+register through the [TASK-007] boot task (returned by `boot`), matching
+the pilot's proven pattern rather than `.font(bytes)`.
+
+**AppState shape — a thin iced wrapper, NOT `FastMdApp` itself.**
+`AppState { app: FastMdApp, receivers: BusReceivers, storage:
+Arc<dyn UiStateStorage>, os_scale: Option<f32>, viewport: Size, panes:
+pane_grid::State<PaneKind>, band: MiddleBandPanes }`. The domain half is
+the egui-free `FastMdApp` (its struct fields were confirmed egui-free —
+the egui coupling lives only in the `impl eframe::App` block at
+`ui/app/mod.rs:244-274` and the `cc.egui_ctx`/`cc.storage` use in
+`init.rs::new`); the wrapper carries the iced-runtime bits the domain
+struct never had. It is constructible with zero `egui`/`eframe` references
+([DEC-011]). [TASK-023] grows the view-local half (cursor anchor, overlay
+slot, dialog/about/debug window state, scroll reports) onto this struct.
+
+**Egui-free construction approach: PARALLEL constructor, not a shared
+`init.rs` core.** `build_state` (in `ui_iced/app.rs`) mirrors the plain
+(non-egui) wiring of `init.rs::new` — background `Task`, MCP
+config-subscriber, agent session + observer fan-out, directory tracker,
+persisted-UI-state projection, first-run auto-show — but resolves the
+snapshot through the injected `UiStateStorage` instead of `eframe::Storage`
+and direct-injects the loaded `AppConfig`. The reason a single shared core
+was rejected: the background-event channel `rx:
+std::sync::mpsc::Receiver<BackgroundEvent>` is **single-owner**. The egui
+path moves it into `AppOrchestrator.rx` and drains it per frame; the iced
+path must move it into the [TASK-019] `BusReceivers` bridge so background
+notifications arrive as `Message::Inbound`. Sharing one core would force a
+fate-flag or an inert dummy channel into the shipping egui build. The
+parallel constructor keeps `init.rs::new` byte-identical (zero regression
+risk on the egui app that lives until [TASK-024]) at the cost of a
+temporary duplication that dies with the egui layer in [TASK-029]. The
+only change to `init.rs` is the additive `pub(crate) FastMdApp::from_parts`
+(parts-in, struct-out) so the iced tree can build `FastMdApp` without
+touching its three private egui first-frame font-tracking fields. In the
+iced build the orchestrator's `rx` is given an inert, never-fed channel
+(`try_recv` returns immediately — no blocking); the real events flow
+through the bridge ([FMD-065] single inbound path).
+
+**DEC-009 config-arrival wiring.** `boot` (a) constructs the state with
+every subscriber already live — the background `Task` thread, the MCP
+subscriber and the eager `BusReceivers` — and direct-injects the loaded
+config into the orchestrator (`config` field, `content_libraries`,
+`inline_editor_enabled`, batch-dialog dirs) and the agent
+(`agent.set_agent_config(config.to_agent_config())`); (b) returns a
+`Task::perform` that publishes `ConfigArrived` on the existing
+`Bus<ConfigArrived>` for the background workers, mapped onto
+`BootMessage::ConfigPublished`. Because the publish runs in a task, every
+subscriber exists before the event is sent — the exact ordering guarantee
+the retired `main.rs:147-160` workaround enforced, now expressed the iced
+way. The UI itself never depends on the broadcast (it was direct-injected);
+the subscription bridge still delivers the same publish to `update` as an
+idempotent `Inbound(ConfigArrived)` for [TASK-023]'s projection.
+
+**What moved from `main.rs`.** The CLI-argument workspace injection
+(`main.rs:61-115`) moved into `boot` UNCHANGED, extracted as the pure
+`apply_cli_workspace(&mut AppConfig, &[String])` so both branches
+(explicit-dir and system-library-only→cwd) are unit-testable without a
+process. The `Box::new`-then-publish workaround (`main.rs:147-160`) is
+RETIRED — not replicated. `main.rs` itself is untouched (TASK-024 flips
+it).
+
+**Message-channel note.** A new top-level `Boot(BootMessage)` channel was
+added (`FontLoadFinished(Option<String>)`, `ConfigPublished`). This is the
+home the `message.rs` pilot-fold table promised for the font bootstrap
+("until [TASK-022] gives the font bootstrap its own channel"), and the
+terminal report the DEC-009 `Task::perform` needs (every iced task must map
+to a `Message`; no existing variant fit a fire-and-forget publish). It is
+deliberately separate from `Window` (not a window concern) and `Inbound`
+(produced by the boot task chain, not a background bus). Channel count
+15 → 16.
+
+**Pilot binary.** `bin/fastmd_iced.rs` is now a ~70-line shim: panic hook +
+non-blocking logging + rustls provider (mirroring `main.rs:16-44`), then
+`app::launch(LaunchInputs { config: load_config(), config_bus,
+config_storage: FileConfigStorage(get_config_path()), ui_state_storage:
+ui_state_storage_from_env(FASTMD_ICED_UI_STATE_PATH), args })`. So
+`cargo run --bin fastmd_iced` exercises the REAL launch chain. The UI-state
+storage keeps the [TASK-009] pilot safety rule: env-override → file, else
+in-process; the platform-default UI-state location is NOT resolved by the
+pilot ([RUST-024]/[RUST-006]).
+
+**Gate results (this pass).** `cargo check -q` PASS (workspace, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS; `cargo fmt`
+run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd --status-level
+fail --show-progress none` PASS (**2133 run / 2133 passed / 1 skipped**),
+of which **33** are this task's new tests (19 `app` + 8 `update` + 5
+`view` + 1 `message` Boot-channel) and the 13 pilot sidecar tests were
+re-hosted/retired with the binary gut; `cargo doc --no-deps --quiet -p
+fastmd` PASS (no warnings).
+
+**Needs the orchestrator's eyes.**
+
+1. **`Boot` message channel added** (message.rs 15→16). If the channel
+   design wants the font report elsewhere, `BootMessage` is the single
+   place to change.
+2. **`FastMdApp::from_parts` added to `init.rs`** — additive, egui-free,
+   keeps the three font-tracking fields private; it is the iced construction
+   seam. Flagged because it is a change outside `ui_iced/`.
+3. **Inert `rx` in the iced orchestrator.** The real background channel
+   goes to the bridge; the orchestrator's `rx` is a never-fed channel whose
+   `try_recv` returns immediately. [TASK-023] must NOT rely on
+   `orchestrator.rx` for background events in the iced build — use
+   `Message::Inbound(Background)`.
+4. **View uses band STUBS, not the real panels.** The real
+   `panels::top::top_bar` returns an `Element<'_>` that borrows its
+   `TopBarViewModel` (the tag `pick_list` holds `Option<&TagFilterOption>`
+   from `selected_tag_option`), so it cannot escape `view` while the VM is
+   a stack local (E0515). [TASK-023] must resolve the view-model lifetime
+   (hold the VM in `AppState` and rebuild in `update`, or make panels
+   return owned elements) before mounting the real top bar / left / center /
+   bottom panels.
+5. **What [TASK-023] must complete in `update`/`view`:** the full
+   one-to-one mirror — `Inbound(ConfigArrived)` → the
+   `drain_config_bus` projection; `Inbound(FileChanged)` →
+   `process_file_events`; `Inbound(Agent)` → the transcript/agent-state
+   drain incl. `LAG_TRUNCATION_MARKER` on lag; `Inbound(Background)` →
+   `handle_fs/process/mcp_auth_event`; `Inbound(EventsDropped)` → surface
+   per source; `Tree`/`Tab` deferred-intent reads + overlay open using the
+   stored `CursorMoved` point; `Editor` DEC-007 undo/redo + save; `Agent`
+   `Submit`→`submit_commands`, `ThinkingToggled`, `ScrollReported`→
+   `should_follow`+`scroll_to`; `Search` `Submitted`→engine Task +
+   `ResultsReady`→`apply_results`; `Logs`/`AgentDebug` scroll + filters;
+   `Dialog`/`About`/`Batch`/`Tools` window-state transitions;
+   `LayoutMessage::TreeAutoFit`/`CursorMoved` storage; and the real
+   three-band render with the overlay/modal host (DEC-005).
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

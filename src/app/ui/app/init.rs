@@ -261,6 +261,37 @@ impl FastMdApp {
         }
     }
 
+    /// Build a `FastMdApp` from already-constructed parts, with the
+    /// egui first-frame font-tracking fields at their defaults.
+    ///
+    /// This is the egui-free construction entry point used by the iced boot
+    /// path ([`crate::ui_iced::app::build_state`], [TASK-022]): the iced
+    /// side assembles the [`crate::orchestrator::AppOrchestrator`], the
+    /// [`PanelLayout`] and the persisted snapshot itself and never runs the
+    /// egui first-frame font-scale application, so the three private
+    /// font-tracking fields (`persisted_font_applied`, `os_baseline_ppp`,
+    /// `applied_font_scale`) are simply initialised. Keeping this here —
+    /// beside the other constructors — lets the private fields stay private
+    /// while giving the iced tree a non-egui way to build the struct.
+    ///
+    /// [RUST-020]: pure construction; no side effects.
+    pub(crate) fn from_parts(
+        orchestrator: crate::orchestrator::AppOrchestrator,
+        layout: PanelLayout,
+        persisted_ui_state: PersistedUiState,
+    ) -> Self {
+        Self {
+            orchestrator,
+            layout,
+            cached_tree_rows: None,
+            persisted_ui_state,
+            persisted_font_applied: false,
+            os_baseline_ppp: None,
+            applied_font_scale: 1.0,
+            search: crate::ui::TreeSearch::new(),
+        }
+    }
+
     /// Purpose: Build a `FastMdApp` with all UI state cleared and no background channels.
     /// Inputs: None.
     /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
