@@ -30,6 +30,13 @@
 - Reference strings through `crate::ui::strings::<CONST_NAME>`.
 - Add a `///` doc comment to every `pub const` or helper in [strings.rs](strings.rs).
 
+## 4a. Colour Palette Rules
+- All numeric colours (`Color32::from_rgb`, `from_gray`, `from_rgba_*`, `from_white_alpha`) MUST live in [theme.rs](ui/theme.rs) as [`Palette`](ui/theme.rs) tokens or [`EditorColors`](ui/theme.rs).
+- Do not hardcode numeric colours in panel, modal, tree, renderer, or editor modules. Resolve them via `ui.palette().<token>` (import `crate::ui::theme::PaletteExt`) or `Palette::fastmd_dark()` when no `Ui` is available.
+- Add a `///` doc comment to every `Palette` field describing the role it serves.
+- Named egui constants (`Color32::GRAY`, `Color32::WHITE`, `Color32::TRANSPARENT`) remain acceptable for non-brand, self-describing uses.
+- The one exception is self-contained brand artwork in [logo.rs](ui/logo.rs), whose tints are local to the mark and not part of the UI palette.
+
 ## 5. `egui::Id` Stability Rules
 - Keep widget IDs stable across layout passes.
 - Do not reuse the same key for sibling widgets. Salt each key with a label tuple when a loop renders multiple widgets for one item.

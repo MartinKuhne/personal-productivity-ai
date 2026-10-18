@@ -3,6 +3,7 @@
 //! Provides the taskbar/window icon (`IconData`) and the in-app header paint routine.
 //! Colors are shared with `assets/icon.svg` and the dark theme (`9,9,11` bg, `99,102,241` indigo).
 
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 
 /// Try to load the 32px PNG icon for `ViewportBuilder::with_icon`.
@@ -32,10 +33,12 @@ pub fn paint_logo(ui: &mut egui::Ui, rect: egui::Rect) {
     }
     let painter = ui.painter_at(rect);
 
-    // Theme-aligned palette
-    let indigo = egui::Color32::from_rgb(99, 102, 241);
-    let cyan = egui::Color32::from_rgb(100, 200, 255);
+    // Theme-aligned brand colours, single-sourced from `ui::theme`.
+    let palette = ui.palette();
+    let indigo = palette.accent;
+    let cyan = palette.accent_text;
     let white = egui::Color32::WHITE;
+    // Logo-artwork tints: local to the mark, not part of the UI palette.
     let fold = egui::Color32::from_rgb(199, 210, 254);
     let fold_stroke = egui::Color32::from_rgb(165, 180, 252);
     let dark_stroke = egui::Color32::from_rgb(67, 56, 202);

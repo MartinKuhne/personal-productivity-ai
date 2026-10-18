@@ -4,6 +4,7 @@
 
 use crate::config::ContentLibrary;
 use crate::ui::dialogs::Dialogs;
+use crate::ui::widgets::{DialogAction, confirm_cancel_buttons};
 use crate::workspace::watcher::FileEventProcessor;
 use eframe::egui;
 use std::collections::BTreeSet;
@@ -52,15 +53,28 @@ fn show_name_entry_window(
             let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
             ui.horizontal(|ui| {
-                if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
-                    action = Some(true);
-                }
-                if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                    action = Some(false);
+                match confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true) {
+                    DialogAction::Confirm => action = Some(true),
+                    DialogAction::Cancel => action = Some(false),
+                    DialogAction::None => {
+                        if submit {
+                            action = Some(true);
+                        }
+                    }
                 }
             });
         });
     action
+}
+
+/// Closes a name-entry dialog: runs `reset` (to clear the dialog's own fields)
+/// and drops the window's cached anchor so the next open captures a fresh
+/// pointer position.
+fn close_name_entry_window(ctx: &egui::Context, window_title: &str, reset: impl FnOnce()) {
+    reset();
+    ctx.data_mut(|data| {
+        data.remove_temp::<egui::Pos2>(egui::Id::new(window_title));
+    });
 }
 
 pub fn show_move_modal_dialog(
@@ -113,26 +127,26 @@ pub fn show_move_modal_dialog(
 
                 let submit =
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                let mut confirm_clicked = false;
                 ui.horizontal(|ui| {
-                    if ui.button(crate::ui::strings::OK_BUTTON).clicked()
-                        || (submit && dm.selected_move_folder.is_some())
-                    {
-                        if let (Some(file), Some(folder)) =
-                            (&dm.file_to_move, &dm.selected_move_folder)
-                        {
-                            user_command_bus.publish(
-                                crate::bus::events::user_command::UserCommand::ConfirmMove {
-                                    file: file.clone(),
-                                    destination: folder.clone(),
-                                },
-                            );
-                        }
-                        close_modal = true;
-                    }
-                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                        close_modal = true;
+                    match confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true) {
+                        DialogAction::Confirm => confirm_clicked = true,
+                        DialogAction::Cancel => close_modal = true,
+                        DialogAction::None => {}
                     }
                 });
+                if confirm_clicked || (submit && dm.selected_move_folder.is_some()) {
+                    if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
+                    {
+                        user_command_bus.publish(
+                            crate::bus::events::user_command::UserCommand::ConfirmMove {
+                                file: file.clone(),
+                                destination: folder.clone(),
+                            },
+                        );
+                    }
+                    close_modal = true;
+                }
             });
 
         if close_modal {
@@ -157,38 +171,23 @@ pub fn show_create_dir_dialog(
         crate::ui::strings::ENTER_DIRECTORY_NAME,
         &mut dm.create_dir_name,
     );
-    match action {
-        Some(true) => {
-            if let Some(parent) = &dm.create_dir_parent
-                && !dm.create_dir_name.trim().is_empty()
-            {
-                user_command_bus.publish(
-                    crate::bus::events::user_command::UserCommand::ConfirmCreateDirectory {
-                        parent: parent.clone(),
-                        name: dm.create_dir_name.trim().to_string(),
-                    },
-                );
-            }
+    if action == Some(true)
+        && let Some(parent) = &dm.create_dir_parent
+        && !dm.create_dir_name.trim().is_empty()
+    {
+        user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::ConfirmCreateDirectory {
+                parent: parent.clone(),
+                name: dm.create_dir_name.trim().to_string(),
+            },
+        );
+    }
+    if action.is_some() {
+        close_name_entry_window(ctx, crate::ui::strings::CREATE_DIRECTORY_WINDOW, || {
             dm.create_dir_dialog_open = false;
             dm.create_dir_parent = None;
             dm.create_dir_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(
-                    crate::ui::strings::CREATE_DIRECTORY_WINDOW,
-                ));
-            });
-        }
-        Some(false) => {
-            dm.create_dir_dialog_open = false;
-            dm.create_dir_parent = None;
-            dm.create_dir_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(
-                    crate::ui::strings::CREATE_DIRECTORY_WINDOW,
-                ));
-            });
-        }
-        None => {}
+        });
     }
 }
 
@@ -214,38 +213,23 @@ pub fn show_create_document_dialog(
         crate::ui::strings::ENTER_DOCUMENT_NAME,
         &mut dm.create_document_name,
     );
-    match action {
-        Some(true) => {
-            if let Some(parent) = &dm.create_document_parent
-                && !dm.create_document_name.trim().is_empty()
-            {
-                user_command_bus.publish(
-                    crate::bus::events::user_command::UserCommand::ConfirmCreateDocument {
-                        parent: parent.clone(),
-                        name: dm.create_document_name.trim().to_string(),
-                    },
-                );
-            }
+    if action == Some(true)
+        && let Some(parent) = &dm.create_document_parent
+        && !dm.create_document_name.trim().is_empty()
+    {
+        user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::ConfirmCreateDocument {
+                parent: parent.clone(),
+                name: dm.create_document_name.trim().to_string(),
+            },
+        );
+    }
+    if action.is_some() {
+        close_name_entry_window(ctx, crate::ui::strings::CREATE_DOCUMENT_WINDOW, || {
             dm.create_document_dialog_open = false;
             dm.create_document_parent = None;
             dm.create_document_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(
-                    crate::ui::strings::CREATE_DOCUMENT_WINDOW,
-                ));
-            });
-        }
-        Some(false) => {
-            dm.create_document_dialog_open = false;
-            dm.create_document_parent = None;
-            dm.create_document_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(
-                    crate::ui::strings::CREATE_DOCUMENT_WINDOW,
-                ));
-            });
-        }
-        None => {}
+        });
     }
 }
 
@@ -317,34 +301,23 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
         crate::ui::strings::ENTER_NEW_NAME,
         &mut dm.rename_new_name,
     );
-    match action {
-        Some(true) => {
-            if let Some(file) = &dm.file_to_rename
-                && !dm.rename_new_name.trim().is_empty()
-            {
-                user_command_bus.publish(
-                    crate::bus::events::user_command::UserCommand::ConfirmRename {
-                        path: file.clone(),
-                        new_name: dm.rename_new_name.trim().to_string(),
-                    },
-                );
-            }
+    if action == Some(true)
+        && let Some(file) = &dm.file_to_rename
+        && !dm.rename_new_name.trim().is_empty()
+    {
+        user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::ConfirmRename {
+                path: file.clone(),
+                new_name: dm.rename_new_name.trim().to_string(),
+            },
+        );
+    }
+    if action.is_some() {
+        close_name_entry_window(ctx, crate::ui::strings::RENAME_WINDOW, || {
             dm.rename_dialog_open = false;
             dm.file_to_rename = None;
             dm.rename_new_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(crate::ui::strings::RENAME_WINDOW));
-            });
-        }
-        Some(false) => {
-            dm.rename_dialog_open = false;
-            dm.file_to_rename = None;
-            dm.rename_new_name.clear();
-            ctx.data_mut(|data| {
-                data.remove_temp::<egui::Pos2>(egui::Id::new(crate::ui::strings::RENAME_WINDOW));
-            });
-        }
-        None => {}
+        });
     }
 }
 

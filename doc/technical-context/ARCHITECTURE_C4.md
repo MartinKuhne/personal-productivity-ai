@@ -42,7 +42,13 @@ When the `vector-search` feature is enabled, `app/background/vector_search.rs` o
 
 `ui/` renders the desktop app. `FastMdApp` (`app.rs`, 1346 lines) is the root
 `eframe::App` and owns all cross-cutting state. A 5-pane layout is enforced by
-`PanelLayout` driving per-pane render functions in `ui/panels/*`.
+`PanelLayout` driving per-pane render functions in `ui/panels/*`. All colours
+flow from `ui/theme.rs`, the single source of truth for the dark palette
+(`Palette`) and the inverted inline-editor palette (`EditorColors`); call sites
+read tokens via `PaletteExt::palette`. Repeated egui idioms (context-menu items,
+selectable combos, modal windows, content frames, muted placeholders) live in
+`ui/widgets.rs`, which panels, modals, the tree and the renderers call instead
+of hand-rolling the widget tree.
 
 ```mermaid
 C4Component
@@ -58,6 +64,8 @@ C4Component
   Component(modals, "modals", "Modal rendering (private)")
   Component(bglogs, "background_logs", "Background Processes tab")
   Component(osshell, "os_shell", "OS integration: open in editor, show in explorer, print")
+  Component(theme, "theme", "Palette + Visuals construction; PaletteExt::palette (UI-002/UI-046)")
+  Component(widgets, "widgets", "Shared egui widget helpers: menus, selectable combos, modal windows, content frames, placeholders")
   Component(tblw_pure, "table_width (pure core)", "Fair Table Width Algorithm: pure f32 column-width solver")
   Component(tblw_adapter, "table_width (egui adapter)", "egui bridging: measure_cached, ftwa_cached, re-exports pure core")
 
@@ -69,6 +77,13 @@ C4Component
   Rel(app, dialog, "modal actions")
   Rel(app, bglogs, "shows background logs")
   Rel(app, osshell, "OS integration")
+  Rel(app, theme, "install_dark()")
+  Rel(render, theme, "palette tokens")
+  Rel(panels, theme, "palette tokens")
+  Rel(tree, theme, "palette tokens")
+  Rel(panels, widgets, "shared widget helpers")
+  Rel(render, widgets, "shared widget helpers")
+  Rel(tree, widgets, "shared widget helpers")
   Rel(render, tblw_adapter, "measure_cached, ftwa_cached")
   Rel(tblw_adapter, tblw_pure, "re-exports ftwa, Breakpoint, ColumnWidths, DeficitStrategy, CellTokens, compute_column_breakpoints")
 ```

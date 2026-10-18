@@ -35,33 +35,6 @@ fn test_show_text_editor_with_colors_is_a_noop_when_buffer_closed() {
     });
 }
 
-// --- UI-046: inverted (black text on white) colour scheme ---
-
-/// UI-046 in one assertion set: the inverted palette has
-/// black text on a white background with a black border, the
-/// default palette equals the inverted one (so callers don't
-/// have to opt in), and the per-channel RGB contrast between
-/// text and background is maximal.
-#[test]
-fn test_editor_colors_inverted_satisfies_ui046() {
-    let colors = EditorColors::inverted();
-
-    // Inverted palette: white surface, black foreground, black border.
-    assert_eq!(colors.background, egui::Color32::WHITE);
-    assert_eq!(colors.text, egui::Color32::BLACK);
-    assert_eq!(colors.border, egui::Color32::BLACK);
-
-    // Default palette is the inverted one — callers don't need to opt in.
-    assert_eq!(EditorColors::default(), EditorColors::inverted());
-
-    // Per-channel contrast is maximal: 255 = 0 + 255.
-    let bg = colors.background;
-    let fg = colors.text;
-    assert_eq!(bg.r() + fg.r(), 255);
-    assert_eq!(bg.g() + fg.g(), 255);
-    assert_eq!(bg.b() + fg.b(), 255);
-}
-
 #[test]
 fn test_show_text_editor_renders_when_open() {
     let mut buf = TextBuffer::new();

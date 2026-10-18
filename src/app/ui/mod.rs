@@ -12,6 +12,7 @@ pub mod editor_egui;
 pub mod fonts;
 pub(crate) mod link_resolver;
 pub mod logo;
+pub(crate) mod measure;
 pub mod modals;
 pub mod os_shell;
 pub(crate) mod panel_layout;
@@ -25,9 +26,11 @@ pub mod table_width;
 pub(crate) mod tabs;
 pub mod test_helpers;
 pub(crate) mod text_buffer;
+pub mod theme;
 pub mod tools_dialog;
 pub(crate) mod tree;
 pub mod tree_search;
+pub mod widgets;
 
 // `ToCEntry` is reached through `crate::ui::ToCEntry` only from tests;
 // its single canonical public path is `crate::markdown::ToCEntry`.

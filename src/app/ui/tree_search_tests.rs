@@ -279,3 +279,27 @@ fn test_tree_node_collect_dirs() {
     assert!(dirs.contains(&dir_a));
     assert!(dirs.contains(&dir_b));
 }
+
+#[test]
+fn test_results_arc_reuses_allocation_and_clears() {
+    let dir = temp_dir("results_arc");
+    let file = dir.join("notes.md");
+    write_file(&file, "keyword here");
+
+    let mut search = TreeSearch::new();
+    *search.query_mut() = "keyword".to_string();
+    search.apply(std::slice::from_ref(&file), &[]);
+
+    let first = search.results_arc();
+    assert_eq!(first.len(), 1);
+
+    // Same content: the Arc allocation is reused (pointer bump).
+    let second = search.results_arc();
+    assert!(Arc::ptr_eq(&first, &second));
+
+    // Clearing swaps in a new (empty) allocation.
+    search.clear();
+    let third = search.results_arc();
+    assert!(!Arc::ptr_eq(&first, &third));
+    assert!(third.is_empty());
+}

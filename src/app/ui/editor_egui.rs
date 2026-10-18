@@ -5,53 +5,22 @@
 //!
 //! The two responsibilities of this file are:
 //!
-//! 1. Hold the inverted (black text on white) colour palette required
-//!    by UI-046 in [`EditorColors`].
+//! 1. Re-export the inverted (black text on white) colour palette
+//!    required by UI-046 from [`crate::ui::theme`].
 //! 2. Render the buffer with [`show_text_editor`], reading the
 //!    [`TextBuffer::content`] and writing the resulting cursor
 //!    position back via [`TextBuffer::set_cursor`] before returning.
 
 use crate::bus::events::file::FileEventProducer;
 use crate::ui::text_buffer::TextBuffer;
+use crate::ui::widgets::{DialogAction, confirm_cancel_buttons, modal_window, right_aligned_row};
 use eframe::egui::{self, Key};
 
-/// Inverted color scheme for the inline text editor (UI-046).
+/// Inverted colour palette for the inline text editor (UI-046).
 ///
-/// The editor must look distinctly different from the rest of the
-/// dark-themed application: black text on a white background, with a
-/// black border to make the inverted surface visually obvious.
-/// Centralising the palette here makes the requirement testable and
-/// keeps the `show` function free of magic constants.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EditorColors {
-    /// Window / frame fill colour (the editor's surface).
-    pub background: egui::Color32,
-    /// Text colour used inside the editing area and the status bar.
-    pub text: egui::Color32,
-    /// Border stroke colour around the window.
-    pub border: egui::Color32,
-    /// Colour used to surface validation / save errors.
-    pub error: egui::Color32,
-}
-
-impl Default for EditorColors {
-    fn default() -> Self {
-        Self::inverted()
-    }
-}
-
-impl EditorColors {
-    /// Returns the inverted (black text on white) palette required by
-    /// UI-046.
-    pub const fn inverted() -> Self {
-        Self {
-            background: egui::Color32::WHITE,
-            text: egui::Color32::BLACK,
-            border: egui::Color32::BLACK,
-            error: egui::Color32::RED,
-        }
-    }
-}
+/// Defined in [`crate::ui::theme`] alongside the dark [`crate::ui::theme::Palette`];
+/// re-exported here so the editor adapter keeps a stable path.
+pub use crate::ui::theme::EditorColors;
 
 /// Render the inline text editor.
 ///
@@ -108,9 +77,7 @@ pub fn show_text_editor_with_colors(
         ..egui::Frame::window(&style)
     };
 
-    egui::Window::new("Inline Editor")
-        .open(&mut is_open)
-        .collapsible(false)
+    modal_window(crate::ui::strings::INLINE_EDITOR_WINDOW_TITLE, &mut is_open)
         .resizable(true)
         .frame(editor_frame)
         .default_size(egui::vec2(800.0, 600.0))
@@ -204,16 +171,17 @@ pub fn show_text_editor_with_colors(
             ui.separator();
 
             ui.horizontal(|ui| {
-                if ui.button(crate::ui::strings::SAVE_BUTTON).clicked()
-                    && buf.save(producer).is_ok()
-                {
-                    did_save = true;
-                }
-                if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                    buf.close();
+                match confirm_cancel_buttons(ui, crate::ui::strings::SAVE_BUTTON, true) {
+                    DialogAction::Confirm => {
+                        if buf.save(producer).is_ok() {
+                            did_save = true;
+                        }
+                    }
+                    DialogAction::Cancel => buf.close(),
+                    DialogAction::None => {}
                 }
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                right_aligned_row(ui, |ui| {
                     ui.colored_label(
                         colors.text,
                         format!("Line: {} | Col: {}", cursor_line, cursor_col),

@@ -7,7 +7,9 @@ use std::sync::Arc;
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
+use crate::ui::theme::PaletteExt;
 use crate::ui::tree::{FlatRow, TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
+use crate::ui::widgets::{icon_button, muted_text};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -23,6 +25,61 @@ fn prune_empty_dirs(node: &mut TreeNode) {
             true
         }
     });
+}
+
+/// Finds the content library whose root is a prefix of `path`, returning the
+/// library and the library-relative remainder of the path.
+fn library_for_path<'a>(
+    libraries: &'a [crate::config::ContentLibrary],
+    path: &'a std::path::Path,
+) -> Option<(&'a crate::config::ContentLibrary, &'a std::path::Path)> {
+    libraries.iter().find_map(|lib| {
+        let root = std::path::Path::new(&lib.root_folder);
+        path.strip_prefix(root).ok().map(|rel| (lib, rel))
+    })
+}
+
+/// Inserts `path` under the content library that contains it, creating the
+/// intermediate directory nodes on the way down.
+///
+/// The two passes over the workspace (discovered files, discovered
+/// directories) previously duplicated this library-match + component-walk; the
+/// only difference is whether the *final* component is a file or a directory,
+/// selected by `leaf_is_dir`. Paths outside every library root are ignored.
+fn insert_path_into_tree(
+    root_node: &mut TreeNode,
+    libraries: &[crate::config::ContentLibrary],
+    path: &std::path::Path,
+    leaf_is_dir: bool,
+) {
+    let Some((lib, rel_path)) = library_for_path(libraries, path) else {
+        return;
+    };
+    let Some(current_node_ref) = root_node.children.get_mut(&lib.name) else {
+        return;
+    };
+    let mut current_node = current_node_ref;
+    let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+
+    let components: Vec<_> = rel_path.components().collect();
+    for (i, comp) in components.iter().enumerate() {
+        let name = comp.as_os_str().to_string_lossy().into_owned();
+        current_path = current_path.join(&name);
+        let is_dir = if i == components.len() - 1 {
+            leaf_is_dir
+        } else {
+            true
+        };
+
+        current_node
+            .children
+            .entry(name.clone())
+            .or_insert_with(|| TreeNode::new(name.clone(), current_path.clone(), is_dir));
+        match current_node.children.get_mut(&name) {
+            Some(n) => current_node = n,
+            None => break,
+        }
+    }
 }
 
 /// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
@@ -61,85 +118,12 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     }
 
     for path in filtered_files {
-        let mut target_lib = None;
-        let mut rel_path_res = None;
-
-        for lib in app.content_libraries() {
-            let lib_root = std::path::Path::new(&lib.root_folder);
-            if let Ok(rel_path) = path.strip_prefix(lib_root) {
-                target_lib = Some(lib);
-                rel_path_res = Some(rel_path);
-                break;
-            }
-        }
-
-        if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
-            let lib_node_name = lib.name.clone();
-            let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
-                continue;
-            };
-            let mut current_node = current_node_ref;
-            let mut current_path = std::path::PathBuf::from(&lib.root_folder);
-
-            let components: Vec<_> = rel_path.components().collect();
-            for (i, comp) in components.iter().enumerate() {
-                let name = comp.as_os_str().to_string_lossy().into_owned();
-                current_path = current_path.join(&name);
-                let is_last = i == components.len() - 1;
-                let is_dir = !is_last;
-
-                if !current_node.children.contains_key(&name) {
-                    current_node.children.insert(
-                        name.clone(),
-                        TreeNode::new(name.clone(), current_path.clone(), is_dir),
-                    );
-                }
-                match current_node.children.get_mut(&name) {
-                    Some(n) => current_node = n,
-                    None => break,
-                }
-            }
-        }
+        insert_path_into_tree(&mut root_node, app.content_libraries(), path, false);
     }
 
     if app.tags().selected_tag.is_none() {
         for dir in app.file_processor().all_dirs.iter() {
-            let mut target_lib = None;
-            let mut rel_path_res = None;
-
-            for lib in app.content_libraries() {
-                let lib_root = std::path::Path::new(&lib.root_folder);
-                if let Ok(rel_path) = dir.strip_prefix(lib_root) {
-                    target_lib = Some(lib);
-                    rel_path_res = Some(rel_path);
-                    break;
-                }
-            }
-
-            if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
-                let lib_node_name = lib.name.clone();
-                let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
-                    continue;
-                };
-                let mut current_node = current_node_ref;
-                let mut current_path = std::path::PathBuf::from(&lib.root_folder);
-
-                let components: Vec<_> = rel_path.components().collect();
-                for comp in &components {
-                    let name = comp.as_os_str().to_string_lossy().into_owned();
-                    current_path = current_path.join(&name);
-                    if !current_node.children.contains_key(&name) {
-                        current_node.children.insert(
-                            name.clone(),
-                            TreeNode::new(name.clone(), current_path.clone(), true),
-                        );
-                    }
-                    match current_node.children.get_mut(&name) {
-                        Some(n) => current_node = n,
-                        None => break,
-                    }
-                }
-            }
+            insert_path_into_tree(&mut root_node, app.content_libraries(), dir, true);
         }
     } else {
         prune_empty_dirs(&mut root_node);
@@ -174,12 +158,14 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 };
                 let text = format!("{} {}", icon, node.name);
                 // egui 0.35: `FontsView::layout_no_wrap` requires
-                // `&mut self`, so we need `fonts_mut` rather than `fonts`.
-                let text_w = ctx.fonts_mut(|f| {
-                    f.layout_no_wrap(text, egui::FontId::proportional(14.0), egui::Color32::WHITE)
-                        .size()
-                        .x
-                });
+                // `&mut self`, so measurement goes through
+                // `ui::measure::text_width` (which owns the `fonts_mut` seam).
+                let text_w = crate::ui::measure::text_width(
+                    ctx,
+                    &text,
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                );
                 let indent = (depth - 1) as f32 * 18.0;
                 let my_w = indent + text_w + 40.0;
                 if my_w > max_w {
@@ -193,17 +179,19 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         // `viewport_rect` (the full area available to egui, equivalent
         // to the old `available_rect` for this purpose) to size the
         // left panel.
-        let max_allowed = ctx.viewport_rect().width() * 0.2;
+        let max_allowed =
+            ctx.viewport_rect().width() * crate::ui::panel_layout::LEFT_PANEL_MAX_WIDTH_FRACTION;
         app.layout_mut().left_panel_width = Some(calculated.min(max_allowed));
         app.layout_mut().left_panel_dirty = false;
     }
 
-    let max_w = ctx.viewport_rect().width() * 0.2;
+    let max_w =
+        ctx.viewport_rect().width() * crate::ui::panel_layout::LEFT_PANEL_MAX_WIDTH_FRACTION;
     let default_w = app
         .layout()
         .left_panel_width
-        .unwrap_or(280.0)
-        .max(180.0)
+        .unwrap_or(crate::ui::panel_layout::LEFT_PANEL_DEFAULT_WIDTH)
+        .max(crate::ui::panel_layout::LEFT_PANEL_MIN_WIDTH)
         .min(max_w);
 
     // Rebuild tree rows only when dirty or not yet cached
@@ -247,9 +235,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         .desired_width((ui.available_width() - 56.0).max(80.0)),
                 );
                 let enter_pressed = text_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let search_clicked = ui
-                    .button(crate::ui::strings::ICON_MAGNIFYING_GLASS)
-                    .on_hover_text(crate::ui::strings::SEARCH_TRIGGER_TOOLTIP)
+                let search_clicked =
+                    icon_button(
+                        ui,
+                        crate::ui::strings::ICON_MAGNIFYING_GLASS,
+                        crate::ui::strings::SEARCH_TRIGGER_TOOLTIP,
+                    )
                     .clicked();
 
                 if (search_clicked || enter_pressed) && !app.search().query().trim().is_empty() {
@@ -262,10 +253,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
 
                 if app.search().is_searching()
-                    && ui
-                        .button(crate::ui::strings::ICON_X)
-                        .on_hover_text(crate::ui::strings::SEARCH_CLEAR_TOOLTIP)
-                        .clicked()
+                    && icon_button(
+                        ui,
+                        crate::ui::strings::ICON_X,
+                        crate::ui::strings::SEARCH_CLEAR_TOOLTIP,
+                    )
+                    .clicked()
                 {
                     app.search_mut().clear();
                 }
@@ -273,16 +266,12 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             ui.add_space(6.0);
 
             if app.search().is_searching() {
-                let results = app.search().results().to_vec();
+                let results = app.search().results_arc();
                 let active_query = app.search().active_filter().unwrap_or("").to_string();
 
                 if results.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(crate::ui::strings::SEARCH_NO_RESULTS)
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                    );
+                    ui.label(muted_text(crate::ui::strings::SEARCH_NO_RESULTS));
                 } else {
                     const SEARCH_ROW_HEIGHT: f32 = 52.0;
                     egui::ScrollArea::vertical()
@@ -297,7 +286,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                     let bg_color = if is_selected {
                                         ui.visuals().selection.bg_fill
                                     } else {
-                                        egui::Color32::from_rgb(18, 18, 20)
+                                        ui.palette().surface_variant
                                     };
 
                                     let frame_resp = egui::Frame::NONE
@@ -313,7 +302,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                         ui.label(
                                                             RichText::new(format!("({})", entry.match_count))
                                                                 .size(11.0)
-                                                                .color(egui::Color32::from_gray(140)),
+                                                                .color(ui.palette().text_faint),
                                                         );
                                                     }
                                                 });
@@ -321,7 +310,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                     ui.label(
                                                         RichText::new(&entry.relative_path)
                                                             .size(11.0)
-                                                            .color(egui::Color32::from_gray(140)),
+                                                            .color(ui.palette().text_faint),
                                                     );
                                                 }
                                                 if !entry.snippet.is_empty() {
@@ -329,7 +318,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                                         RichText::new(&entry.snippet)
                                                             .size(11.0)
                                                             .italics()
-                                                            .color(egui::Color32::from_rgb(160, 190, 220)),
+                                                            .color(ui.palette().accent_text_subtle),
                                                     );
                                                 }
                                             });
@@ -412,11 +401,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 // source of id-clash warnings before the fix.
                 if tree_rows.is_empty() {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
-                            .italics()
-                            .color(egui::Color32::GRAY),
-                    );
+                    ui.label(muted_text(crate::ui::strings::NO_MARKDOWN_FILES));
                 }
             }
         });

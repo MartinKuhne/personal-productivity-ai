@@ -3,6 +3,7 @@
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
+use crate::ui::widgets::{modal_window, right_aligned_row, search_field, selectable_combo};
 use eframe::egui;
 
 pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
@@ -12,8 +13,7 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
     let mut open = app.orchestrator.agent_panel_state.show_debug_window;
 
-    egui::Window::new(crate::ui::strings::AGENT_DEBUG_WINDOW)
-        .open(&mut open)
+    modal_window(crate::ui::strings::AGENT_DEBUG_WINDOW, &mut open)
         .resizable(true)
         .collapsible(true)
         .default_size([600.0, 1600.0])
@@ -21,8 +21,10 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
             let entries = app.orchestrator.agent.state().debug_entries.clone();
 
             ui.horizontal(|ui| {
-                ui.label(crate::ui::strings::SEARCH_LABEL);
-                ui.text_edit_singleline(&mut app.orchestrator.agent_panel_state.debug_search_text);
+                search_field(
+                    ui,
+                    &mut app.orchestrator.agent_panel_state.debug_search_text,
+                );
 
                 ui.checkbox(
                     &mut app.orchestrator.agent_panel_state.debug_auto_scroll,
@@ -30,23 +32,19 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 );
 
                 ui.label(crate::ui::strings::DEBUG_JSON_ROWS_LABEL);
-                egui::ComboBox::from_id_salt("debug_json_rows")
-                    .selected_text(format!(
-                        "{}",
-                        app.orchestrator.agent_panel_state.debug_json_rows
-                    ))
-                    .show_ui(ui, |ui| {
-                        for rows in [8, 16, 24, 32, 64] {
-                            if ui
-                                .selectable_value(
-                                    &mut app.orchestrator.agent_panel_state.debug_json_rows,
-                                    rows,
-                                    format!("{}", rows),
-                                )
-                                .clicked()
-                            {}
-                        }
-                    });
+                let selected_text =
+                    format!("{}", app.orchestrator.agent_panel_state.debug_json_rows);
+                let options: Vec<(usize, String)> = [8usize, 16, 24, 32, 64]
+                    .iter()
+                    .map(|rows| (*rows, rows.to_string()))
+                    .collect();
+                selectable_combo(
+                    ui,
+                    "debug_json_rows",
+                    selected_text,
+                    &mut app.orchestrator.agent_panel_state.debug_json_rows,
+                    options,
+                );
 
                 if ui.button(crate::ui::strings::CLEAR_BUTTON).clicked() {
                     app.orchestrator
@@ -175,7 +173,7 @@ fn render_entry_row(ui: &mut egui::Ui, entry: &AgentDebugEntry, id_salt: usize, 
         .show(ui, |ui| {
             if let Some(ref content) = entry.content {
                 ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    right_aligned_row(ui, |ui| {
                         if ui
                             .button(crate::ui::strings::DEBUG_COPY_JSON_BUTTON)
                             .clicked()

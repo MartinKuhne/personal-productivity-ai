@@ -4,6 +4,8 @@
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{InteractionSink, no_op_sink};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -140,7 +142,7 @@ pub fn clear_command_input_command() -> UserCommand {
 }
 
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_bottom_panel_capture(app, parent_ui, |_| {});
+    show_bottom_panel_capture(app, parent_ui, no_op_sink);
 }
 
 /// Tier 4 test variant of [`show_bottom_panel`]. The `on_click`
@@ -154,7 +156,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 pub fn show_bottom_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui` (using
@@ -194,7 +196,7 @@ pub fn show_bottom_panel_capture(
                         egui::pos2(full_row.max.x - 100.0, full_row.min.y), // approximate width
                         full_row.max,
                     ),
-                    egui::Button::new(RichText::new(button_text).color(egui::Color32::RED)),
+                    egui::Button::new(RichText::new(button_text).color(ui.palette().error)),
                 );
                 stop_clicked = button_response.clicked();
                 stop_button_width = button_response.rect.width();

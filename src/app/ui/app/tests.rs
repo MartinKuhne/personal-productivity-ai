@@ -55,14 +55,15 @@ fn test_indexing_in_progress_without_events_does_not_request_repaint() {
     );
 }
 
-/// UI-002 (dark color scheme): `configure_dark_theme` must pin the
-/// active theme to Dark and apply the FastMD brand palette
-/// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
-/// Regression guard: the egui 0.27 â†’ 0.35 upgrade silently fell
-/// back to the active theme's default visuals on systems reporting
-/// light mode, losing the black background.
+/// UI-002 (dark color scheme): `FastMdApp::configure_dark_theme` must pin the
+/// active theme to Dark and apply the FastMD brand palette (RGB(9, 9, 11)
+/// surfaces, indigo selection) to the dark theme. Regression guard: the egui
+/// 0.27 → 0.36 upgrade silently fell back to the active theme's default
+/// visuals on systems reporting light mode, losing the black background.
 #[test]
 fn test_configure_dark_theme_pins_dark_with_brand_palette() {
+    use crate::ui::theme::{Palette, PaletteExt};
+
     let ctx = egui::Context::default();
 
     // First, flip the active theme to Light to simulate a host
@@ -83,22 +84,22 @@ fn test_configure_dark_theme_pins_dark_with_brand_palette() {
     // The dark theme's visuals are the FastMD brand palette,
     // not the default `Visuals::dark()` (which is RGB(27, 27, 27)
     // for both window_fill and panel_fill).
+    let palette = Palette::fastmd_dark();
     let dark_visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
-    let expected_panel = egui::Color32::from_rgb(9, 9, 11);
-    let expected_window = egui::Color32::from_rgb(9, 9, 11);
     assert_eq!(
-        dark_visuals.panel_fill, expected_panel,
+        dark_visuals.panel_fill, palette.surface,
         "dark theme's panel_fill must be the FastMD brand RGB(9, 9, 11)"
     );
     assert_eq!(
-        dark_visuals.window_fill, expected_window,
+        dark_visuals.window_fill, palette.surface,
         "dark theme's window_fill must be the FastMD brand RGB(9, 9, 11)"
     );
     assert_eq!(
-        dark_visuals.selection.bg_fill,
-        egui::Color32::from_rgb(99, 102, 241),
+        dark_visuals.selection.bg_fill, palette.accent,
         "selection.bg_fill must be the FastMD indigo RGB(99, 102, 241)"
     );
+    // The palette is published on the context for `PaletteExt` consumers.
+    assert_eq!(ctx.palette(), palette);
 }
 
 #[test]

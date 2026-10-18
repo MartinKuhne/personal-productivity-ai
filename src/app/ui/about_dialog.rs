@@ -10,6 +10,7 @@
 use crate::ui::FastMdApp;
 use crate::ui::attributions::DIRECT_DEPENDENCIES;
 use crate::ui::strings;
+use crate::ui::widgets::modal_window;
 use eframe::egui;
 
 /// Full MIT license text bundled at compile time.
@@ -127,9 +128,9 @@ pub(crate) fn apply_first_run_auto_show(
 pub fn show_about_dialog(ctx: &egui::Context, app: &mut FastMdApp) {
     let mut open = app.dialogs().about_dialog_open;
 
-    egui::Window::new(strings::ABOUT_DIALOG_TITLE)
+    modal_window(strings::ABOUT_DIALOG_TITLE, &mut open)
+        .collapsible(true)
         .id(egui::Id::new("about_dialog"))
-        .open(&mut open)
         .resizable(true)
         .default_size([620.0, 780.0])
         .min_size([480.0, 400.0])

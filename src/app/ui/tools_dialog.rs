@@ -18,7 +18,9 @@ use crate::ui::strings::{
     TOOLS_FORGET, TOOLS_KIND_INTERNAL, TOOLS_KIND_MCP_REMOTE, TOOLS_KIND_MCP_STDIO,
     TOOLS_LIST_COLUMN, TOOLS_RESTART,
 };
+use crate::ui::theme::PaletteExt;
 
+use crate::ui::widgets::modal_window;
 use eframe::egui;
 
 /// Render the tools dialog. Called every frame while
@@ -45,9 +47,9 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
-    eframe::egui::Window::new(title)
+    modal_window(title, &mut open)
+        .collapsible(true)
         .id(eframe::egui::Id::new("tools_dialog"))
-        .open(&mut open)
         .resizable(true)
         .default_size(default_size)
         .min_size(min_size)
@@ -250,7 +252,7 @@ fn render_row(
     row.col(|ui| {
         ui.horizontal(|ui| {
             if let Some(err) = &group.last_error {
-                ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
+                ui.label(egui::RichText::new("⚠").color(ui.palette().warning))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
                     app.orchestrator.user_command_bus.publish(

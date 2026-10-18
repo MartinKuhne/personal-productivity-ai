@@ -36,8 +36,10 @@
 //! `Html`) fall back to the per-element rendering — they cannot be
 //! represented as `TextFormat` runs in a `LayoutJob`.
 
+use super::super::style::{RunColors, link_hover_tip, styled_text, text_format};
 use crate::markdown::InlineElem;
 use crate::ui::table_width::TablePadding;
+use crate::ui::theme::PaletteExt;
 use eframe::egui;
 use egui::RichText;
 use egui::epaint::text::{LayoutJob, TextWrapping};
@@ -108,33 +110,15 @@ pub(super) fn render_table_cell(
             for elem in cell {
                 match elem {
                     InlineElem::Text(t, style) => {
-                        let mut rt = RichText::new(t);
-                        if style.bold {
-                            rt = rt.strong();
-                        }
-                        if style.italic {
-                            rt = rt.italics();
-                        }
-                        if style.code {
-                            rt = rt
-                                .monospace()
-                                .background_color(egui::Color32::from_gray(40));
-                        }
-                        if style.strikethrough {
-                            rt = rt.strikethrough();
-                        }
+                        let rt = styled_text(t, style, None, ui.palette());
                         ui.add(egui::Label::new(rt).wrap());
                     }
                     InlineElem::Link(url, text) => {
-                        let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
-                            format!("Note: {target}")
-                        } else {
-                            url.clone()
-                        };
-                        ui.hyperlink_to(text, url).on_hover_text(hover_tip);
+                        ui.hyperlink_to(text, url)
+                            .on_hover_text(link_hover_tip(url));
                     }
                     InlineElem::Image(url) => {
-                        ui.label(format!("[Image: {}]", url));
+                        ui.label(crate::markdown::image_placeholder(url));
                     }
                     InlineElem::Html(html) => {
                         ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
@@ -214,14 +198,7 @@ fn build_text_layout_job(cell: &[InlineElem], ui: &egui::Ui, inner_w: f32) -> La
         .get(&egui::TextStyle::Monospace)
         .cloned()
         .unwrap_or_else(|| egui::FontId::monospace(13.0));
-    let visuals = ui.visuals();
-    let base_color = visuals.text_color();
-    let strong_color = visuals.strong_text_color();
-    let strikethrough_stroke = egui::Stroke {
-        width: 1.0,
-        color: base_color,
-    };
-    let code_bg = visuals.code_bg_color;
+    let colors = RunColors::from_ui(ui);
 
     let mut job = LayoutJob {
         wrap: TextWrapping {
@@ -237,35 +214,12 @@ fn build_text_layout_job(cell: &[InlineElem], ui: &egui::Ui, inner_w: f32) -> La
     for elem in cell {
         match elem {
             InlineElem::Text(t, style) => {
-                let font = if style.code {
-                    mono_font.clone()
-                } else {
-                    body_font.clone()
-                };
-                let color = if style.bold { strong_color } else { base_color };
-                let background = if style.code {
-                    code_bg
-                } else {
-                    egui::Color32::TRANSPARENT
-                };
-                let format = egui::epaint::text::TextFormat {
-                    font_id: font,
-                    color,
-                    background,
-                    italics: style.italic,
-                    strikethrough: if style.strikethrough {
-                        strikethrough_stroke
-                    } else {
-                        egui::Stroke::NONE
-                    },
-                    ..Default::default()
-                };
-                job.append(t, 0.0, format);
+                job.append(t, 0.0, text_format(style, &body_font, &mono_font, colors));
             }
             InlineElem::SoftBreak => {
                 let format = egui::epaint::text::TextFormat {
                     font_id: body_font.clone(),
-                    color: base_color,
+                    color: colors.text,
                     ..Default::default()
                 };
                 job.append(" ", 0.0, format);

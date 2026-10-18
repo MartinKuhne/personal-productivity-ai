@@ -10,6 +10,10 @@ use crate::agent::batch::types::{
 };
 use crate::ui::FastMdApp;
 use crate::ui::strings;
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{
+    DialogAction, confirm_cancel_buttons, modal_window, right_aligned_row, selectable_combo,
+};
 use eframe::egui;
 
 /// Shows the batch prompt processing dialog.
@@ -32,10 +36,8 @@ pub fn show_batch_modal(app: &mut FastMdApp, ctx: &egui::Context, config: &mut B
         }
     }
 
-    egui::Window::new(strings::BATCH_DIALOG_WINDOW)
-        .open(&mut dialog_open)
+    modal_window(strings::BATCH_DIALOG_WINDOW, &mut dialog_open)
         .resizable(false)
-        .collapsible(false)
         .show(ctx, |ui| {
             ui.set_min_width(500.0);
             ui.spacing_mut().item_spacing.y = 10.0;
@@ -64,59 +66,58 @@ fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDi
     // Directory selector
     ui.horizontal(|ui| {
         ui.label(strings::BATCH_DIALOG_DIRECTORY_LABEL);
-        egui::ComboBox::from_id_salt("batch_dir_combo")
-            .selected_text(
-                config
-                    .selected_dir_idx
-                    .and_then(|i| config.available_dirs.get(i))
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| strings::BATCH_DIALOG_SELECT_DIRECTORY.to_string()),
-            )
-            .show_ui(ui, |ui| {
-                for (idx, dir) in config.available_dirs.iter().enumerate() {
-                    let label = dir.display().to_string();
-                    if ui
-                        .selectable_label(config.selected_dir_idx == Some(idx), label)
-                        .clicked()
-                    {
-                        config.selected_dir_idx = Some(idx);
-                    }
-                }
-            });
+        let selected_text = config
+            .selected_dir_idx
+            .and_then(|i| config.available_dirs.get(i))
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| strings::BATCH_DIALOG_SELECT_DIRECTORY.to_string());
+        let options: Vec<(Option<usize>, String)> = config
+            .available_dirs
+            .iter()
+            .enumerate()
+            .map(|(idx, dir)| (Some(idx), dir.display().to_string()))
+            .collect();
+        selectable_combo(
+            ui,
+            "batch_dir_combo",
+            selected_text,
+            &mut config.selected_dir_idx,
+            options,
+        );
     });
 
     // Wildcard pattern (hidden in Directory mode)
     if config.mode == BatchMode::File {
         ui.horizontal(|ui| {
             ui.label(strings::BATCH_DIALOG_PATTERN_LABEL);
-            ui.add(egui::TextEdit::singleline(&mut config.pattern).hint_text("*.md"));
+            ui.add(
+                egui::TextEdit::singleline(&mut config.pattern)
+                    .hint_text(strings::BATCH_DIALOG_PATTERN_HINT),
+            );
         });
     }
 
     // Prompt selector
     ui.horizontal(|ui| {
         ui.label(strings::BATCH_DIALOG_PROMPT_LABEL);
-        egui::ComboBox::from_id_salt("batch_prompt_combo")
-            .selected_text(
-                config
-                    .selected_prompt_idx
-                    .and_then(|i| config.available_prompts.get(i))
-                    .map(|p| p.display_name.clone())
-                    .unwrap_or_else(|| strings::BATCH_DIALOG_SELECT_PROMPT.to_string()),
-            )
-            .show_ui(ui, |ui| {
-                for (idx, prompt) in config.available_prompts.iter().enumerate() {
-                    if ui
-                        .selectable_label(
-                            config.selected_prompt_idx == Some(idx),
-                            &prompt.display_name,
-                        )
-                        .clicked()
-                    {
-                        config.selected_prompt_idx = Some(idx);
-                    }
-                }
-            });
+        let selected_text = config
+            .selected_prompt_idx
+            .and_then(|i| config.available_prompts.get(i))
+            .map(|p| p.display_name.clone())
+            .unwrap_or_else(|| strings::BATCH_DIALOG_SELECT_PROMPT.to_string());
+        let options: Vec<(Option<usize>, String)> = config
+            .available_prompts
+            .iter()
+            .enumerate()
+            .map(|(idx, prompt)| (Some(idx), prompt.display_name.clone()))
+            .collect();
+        selectable_combo(
+            ui,
+            "batch_prompt_combo",
+            selected_text,
+            &mut config.selected_prompt_idx,
+            options,
+        );
     });
 
     // Batch mode selector
@@ -133,56 +134,49 @@ fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDi
     // Concurrency selector
     ui.horizontal(|ui| {
         ui.label(strings::BATCH_DIALOG_CONCURRENCY_LABEL);
-        egui::ComboBox::from_id_salt("batch_concurrency_combo")
-            .selected_text(config.concurrency.to_string())
-            .show_ui(ui, |ui| {
-                for n in 1..=8 {
-                    if ui
-                        .selectable_label(config.concurrency == n, n.to_string())
-                        .clicked()
-                    {
-                        config.concurrency = n;
-                    }
-                }
-            });
+        let options: Vec<(u8, String)> = (1u8..=8).map(|n| (n, n.to_string())).collect();
+        selectable_combo(
+            ui,
+            "batch_concurrency_combo",
+            config.concurrency.to_string(),
+            &mut config.concurrency,
+            options,
+        );
     });
 
     ui.separator();
 
     // Process and Cancel buttons
     ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let process_enabled = is_config_valid(config);
-
-            if ui
-                .add_enabled(
-                    process_enabled,
-                    egui::Button::new(strings::BATCH_PROCESS_BUTTON),
-                )
-                .clicked()
-                && let (Some(dir_idx), Some(prompt_idx)) =
-                    (config.selected_dir_idx, config.selected_prompt_idx)
-                && let (Some(directory), Some(prompt)) = (
-                    config.available_dirs.get(dir_idx),
-                    config.available_prompts.get(prompt_idx),
-                )
+        right_aligned_row(ui, |ui| {
+            match confirm_cancel_buttons(ui, strings::BATCH_PROCESS_BUTTON, is_config_valid(config))
             {
-                let batch_config = BatchConfig {
-                    directory: directory.clone(),
-                    pattern: config.pattern.clone(),
-                    prompt_path: prompt.path.clone(),
-                    mode: config.mode,
-                    concurrency: config.concurrency,
-                };
-                app.orchestrator.user_command_bus.publish(
-                    crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
-                );
-            }
-
-            if ui.button(strings::CANCEL_BUTTON).clicked() {
-                app.orchestrator
-                    .user_command_bus
-                    .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                DialogAction::Confirm => {
+                    if let (Some(dir_idx), Some(prompt_idx)) =
+                        (config.selected_dir_idx, config.selected_prompt_idx)
+                        && let (Some(directory), Some(prompt)) = (
+                            config.available_dirs.get(dir_idx),
+                            config.available_prompts.get(prompt_idx),
+                        )
+                    {
+                        let batch_config = BatchConfig {
+                            directory: directory.clone(),
+                            pattern: config.pattern.clone(),
+                            prompt_path: prompt.path.clone(),
+                            mode: config.mode,
+                            concurrency: config.concurrency,
+                        };
+                        app.orchestrator.user_command_bus.publish(
+                            crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
+                        );
+                    }
+                }
+                DialogAction::Cancel => {
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                }
+                DialogAction::None => {}
             }
         });
     });
@@ -205,7 +199,7 @@ fn show_running_view(ui: &mut egui::Ui, app: &mut FastMdApp) {
         if let Some(cancel_flag) = &app.dialogs().batch_cancel_flag
             && cancel_flag.load(std::sync::atomic::Ordering::SeqCst)
         {
-            ui.colored_label(egui::Color32::YELLOW, strings::BATCH_CANCELLED_TEXT);
+            ui.colored_label(ui.palette().warning, strings::BATCH_CANCELLED_TEXT);
         }
     } else {
         ui.label(strings::BATCH_PROCESSING_TEXT);
@@ -216,7 +210,7 @@ fn show_running_view(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        right_aligned_row(ui, |ui| {
             if is_finished {
                 if ui.button(strings::BATCH_CLOSE_BUTTON).clicked() {
                     app.orchestrator

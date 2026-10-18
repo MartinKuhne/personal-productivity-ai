@@ -11,7 +11,10 @@
 //! `egui::RichText`. No table layout, no heading id bookkeeping, no
 //! viewport math.
 
+use super::style::{link_hover_tip, styled_text};
 use crate::markdown::InlineElem;
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::muted_text;
 use eframe::egui;
 use egui::RichText;
 
@@ -143,24 +146,7 @@ pub(super) fn render_inline_inner(
     for elem in item.elems {
         match elem {
             InlineElem::Text(t, style) => {
-                let mut rt = RichText::new(t);
-                if style.bold {
-                    rt = rt.strong();
-                }
-                if style.italic {
-                    rt = rt.italics();
-                }
-                if style.code {
-                    rt = rt
-                        .monospace()
-                        .background_color(egui::Color32::from_gray(40));
-                }
-                if style.muted {
-                    rt = rt.color(egui::Color32::from_rgb(160, 160, 160));
-                }
-                if style.strikethrough {
-                    rt = rt.strikethrough();
-                }
+                let rt = styled_text(t, style, None, ui.palette());
                 // P1: egui 0.35 `Label::new` defaults `wrap_mode` to
                 // `None`; wrap is only inherited if the parent layout
                 // is vertical or horizontal+main_wrap AND the available
@@ -172,25 +158,18 @@ pub(super) fn render_inline_inner(
                 ui.add(egui::Label::new(rt).wrap());
             }
             InlineElem::Link(url, text) => {
-                let hover_tip = if let Some(target) = url.strip_prefix("wikilink:") {
-                    format!("Note: {target}")
-                } else {
-                    url.clone()
-                };
-                ui.hyperlink_to(text, url).on_hover_text(hover_tip);
+                ui.hyperlink_to(text, url)
+                    .on_hover_text(link_hover_tip(url));
             }
             InlineElem::Image(url) => {
                 // Same egui 0.35 wrap-mode default-off hazard as
                 // `InlineElem::Text`; pin the wrap explicitly.
-                ui.add(egui::Label::new(format!("[Image: {}]", url)).wrap());
+                ui.add(egui::Label::new(crate::markdown::image_placeholder(url)).wrap());
             }
             InlineElem::Html(html) => {
                 // Same egui 0.35 wrap-mode default-off hazard as
                 // `InlineElem::Text`; pin the wrap explicitly.
-                ui.add(
-                    egui::Label::new(RichText::new(html).italics().color(egui::Color32::GRAY))
-                        .wrap(),
-                );
+                ui.add(egui::Label::new(muted_text(html)).wrap());
             }
             InlineElem::SoftBreak => {
                 ui.label(" ");

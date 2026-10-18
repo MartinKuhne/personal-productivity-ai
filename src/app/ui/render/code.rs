@@ -12,6 +12,8 @@
 //! ids, no inline-style composition. It depends only on `egui` and the
 //! `RichText` helper.
 
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{bordered_panel, icon_button};
 use eframe::egui;
 use egui::RichText;
 
@@ -32,38 +34,36 @@ pub(crate) fn render_code_block_scroll(
     content: &str,
     scroll_to_me: bool,
 ) {
-    let frame_resp = egui::Frame::NONE
-        .fill(egui::Color32::from_rgb(20, 20, 22))
-        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
-        .inner_margin(8.0)
-        .corner_radius(4.0)
-        .show(ui, |ui| {
-            if let Some(lang) = language
-                && !lang.is_empty()
+    let palette = ui.palette();
+    let frame_resp = bordered_panel(ui, palette.code_surface).show(ui, |ui| {
+        if let Some(lang) = language
+            && !lang.is_empty()
+        {
+            ui.label(RichText::new(lang).weak().small());
+        }
+        // Constrain the wrapping label's width so the copy button
+        // always has room, while computing content height dynamically.
+        ui.horizontal_top(|ui| {
+            let button_width = 30.0;
+            let label_width = (ui.available_width() - button_width).max(0.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(label_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
+                },
+            );
+            if icon_button(
+                ui,
+                crate::ui::strings::ICON_COPY,
+                crate::ui::strings::CODE_COPY_BUTTON_TOOLTIP,
+            )
+            .clicked()
             {
-                ui.label(RichText::new(lang).weak().small());
+                copy_code_to_output(ui, content);
             }
-            // Constrain the wrapping label's width so the copy button
-            // always has room, while computing content height dynamically.
-            ui.horizontal_top(|ui| {
-                let button_width = 30.0;
-                let label_width = (ui.available_width() - button_width).max(0.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(label_width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
-                    },
-                );
-                if ui
-                    .button(crate::ui::strings::ICON_COPY)
-                    .on_hover_text("Copy code")
-                    .clicked()
-                {
-                    copy_code_to_output(ui, content);
-                }
-            });
         });
+    });
     if scroll_to_me {
         frame_resp.response.scroll_to_me(Some(egui::Align::Center));
     }

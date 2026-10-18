@@ -4,11 +4,12 @@
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
-use crate::ui::render::{render_markdown, render_yaml_table};
+use crate::ui::render::render_yaml_table;
+use crate::ui::theme::PaletteExt;
+use crate::ui::widgets::{InteractionSink, menu_item, muted_text, no_op_sink, panel_heading};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
-use std::path::PathBuf;
 
 /// Purpose: Creates a `UserCommand` to clear all agent-related session state.
 /// Inputs: None
@@ -62,6 +63,42 @@ pub fn apply_tab_close_all_click() -> UserCommand {
     UserCommand::CloseAllTabs
 }
 
+/// Renders markdown through the search-aware renderer, collecting any
+/// task-checkbox toggles the user triggered this frame.
+///
+/// Both the agent-response pane and the file-preview pane share this
+/// "render then collect toggles" shape; the callers differ only in how they
+/// apply the returned toggles (publish a `UserCommand` vs. mutate the source)
+/// (RUST-023).
+fn render_markdown_collecting_toggles(
+    ui: &mut egui::Ui,
+    markdown: &str,
+    scroll_to_id: &mut Option<String>,
+    scroll_to_search: &mut Option<String>,
+    strategy: crate::ui::table_width::DeficitStrategy,
+    heading_ids: Option<&[String]>,
+) -> Vec<(usize, bool)> {
+    let mut toggles = Vec::new();
+    crate::ui::render::render_markdown_with_search(
+        ui,
+        markdown,
+        scroll_to_id,
+        scroll_to_search,
+        &mut toggles,
+        strategy,
+        heading_ids,
+    );
+    toggles
+}
+
+/// Applies every collected task-checkbox toggle to `markdown`, in order
+/// (P0-2).
+fn apply_task_toggles_to_markdown(markdown: &mut String, toggles: Vec<(usize, bool)>) {
+    for (idx, checked) in toggles {
+        crate::ui::render::apply_task_toggle(markdown, idx, checked);
+    }
+}
+
 /// Purpose: Renders the agent session view in the center panel.
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
@@ -70,12 +107,7 @@ pub fn apply_tab_close_all_click() -> UserCommand {
 /// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
-        ui.heading(
-            RichText::new(crate::ui::strings::AGENT_SESSION_HEADER)
-                .size(18.0)
-                .strong()
-                .color(egui::Color32::from_rgb(100, 200, 255)),
-        );
+        panel_heading(ui, crate::ui::strings::AGENT_SESSION_HEADER, 18.0);
         ui.separator();
         if ui
             .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
@@ -107,29 +139,27 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .id_salt("agent_thinking_scroll")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            let thinking = app.orchestrator.agent_transcript.thinking.clone();
-            if !thinking.is_empty() {
+            if !app.orchestrator.agent_transcript.thinking.is_empty() {
                 ui.collapsing(crate::ui::strings::AGENT_THINKING_PROCESS, |ui| {
                     ui.label(
-                        egui::RichText::new(&thinking)
+                        egui::RichText::new(&app.orchestrator.agent_transcript.thinking)
                             .italics()
-                            .color(egui::Color32::from_rgb(160, 160, 160)),
+                            .color(ui.palette().text_muted),
                     );
                 });
                 ui.add_space(8.0);
             }
 
-            let content = app.orchestrator.agent_transcript.content.clone();
-            if !content.is_empty() {
+            if !app.orchestrator.agent_transcript.content.is_empty() {
                 ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
                 let strategy = app.orchestrator.config.deficit_strategy();
-                let mut toggles = Vec::new();
-                render_markdown(
+                let mut scroll_to_search = None;
+                let toggles = render_markdown_collecting_toggles(
                     ui,
-                    &content,
+                    &app.orchestrator.agent_transcript.content,
                     &mut app.orchestrator.agent_panel_state.scroll_to_id,
-                    &mut toggles,
+                    &mut scroll_to_search,
                     strategy,
                     None,
                 );
@@ -155,7 +185,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Preconditions: `app.tabs().tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
-    render_tabs_and_content_capture(ui, app, |_| {});
+    render_tabs_and_content_capture(ui, app, no_op_sink);
 }
 
 /// Tier 4 test variant of `render_tabs_and_content`. The
@@ -170,11 +200,10 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 pub fn render_tabs_and_content_capture(
     ui: &mut egui::Ui,
     app: &mut FastMdApp,
-    mut on_click: impl FnMut(&'static str),
+    mut on_click: impl InteractionSink,
 ) {
     ui.horizontal(|ui| {
-        let tabs_snapshot: Vec<PathBuf> = app.orchestrator.tabs.tabs.clone();
-        let tab_titles = app.orchestrator.tabs.tab_titles().to_vec();
+        let (tabs_snapshot, tab_titles) = app.orchestrator.tabs.tab_strip();
 
         for (i, (tab_path, title)) in tabs_snapshot.iter().zip(tab_titles.iter()).enumerate() {
             let is_selected = app.orchestrator.selection.selected_file() == Some(tab_path);
@@ -197,64 +226,51 @@ pub fn render_tabs_and_content_capture(
                 on_click("tab_middle_click");
             }
             response.inner.context_menu(|ui| {
-                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
+                if menu_item(ui, crate::ui::strings::EDIT_BUTTON) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::OpenInEditor(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
                 ui.separator();
-                if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_TAB_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_click(i));
                     on_click("tab_close_menu");
-                    ui.close();
                 }
-                if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_OTHERS_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_others_click(i));
                     on_click("tab_close_others_menu");
-                    ui.close();
                 }
-                if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
+                if menu_item(ui, crate::ui::strings::CLOSE_ALL_TABS_MENU) {
                     app.orchestrator
                         .user_command_bus
                         .publish(apply_tab_close_all_click());
                     on_click("tab_close_all_menu");
-                    ui.close();
                 }
                 ui.separator();
-                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
+                if menu_item(ui, crate::ui::strings::COPY_PATH_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::CopyPath(tab_path.clone()),
                     );
-                    ui.close();
                 }
-                if ui
-                    .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
-                    .clicked()
-                {
+                if menu_item(ui, crate::ui::strings::SHOW_IN_EXPLORER_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::ShowInExplorer(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
-                if ui
-                    .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
-                    .clicked()
-                {
+                if menu_item(ui, crate::ui::strings::OPEN_IN_EDITOR_ACTION) {
                     app.orchestrator.user_command_bus.publish(
                         crate::bus::events::user_command::UserCommand::OpenInEditor(
                             tab_path.clone(),
                         ),
                     );
-                    ui.close();
                 }
 
                 // Note skills (VFS-121)
@@ -262,7 +278,7 @@ pub fn render_tabs_and_content_capture(
                 if !note_skills.is_empty() {
                     ui.separator();
                     for skill in note_skills {
-                        if ui.button(&skill.name).clicked() {
+                        if menu_item(ui, skill.name.as_str()) {
                             if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
                                 let content =
                                     crate::markdown::DocumentContent::parse(&raw_content).body;
@@ -280,7 +296,6 @@ pub fn render_tabs_and_content_capture(
                                     "Failed to read skill file content to run as prompt."
                                 );
                             }
-                            ui.close();
                         }
                     }
                 }
@@ -303,7 +318,7 @@ pub fn render_tabs_and_content_capture(
 
     if let Some(selected_path) = app.selection().selected_file() {
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
-        let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
+        let frame_fill = pdf_backed.then(|| ui.palette().pdf_surface);
         let deficit_strategy = app.orchestrator.config.deficit_strategy();
         render_markdown_content(ui, &mut app.orchestrator.tabs, frame_fill, deficit_strategy);
     }
@@ -355,22 +370,17 @@ fn show_markdown_scroll_area(
             if let Some(yaml) = &tabs.current_yaml {
                 render_yaml_table(ui, yaml);
             }
-            let heading_ids = tabs.heading_ids().to_vec();
-            crate::ui::render::render_markdown_with_search(
+            let heading_ids = tabs.heading_ids_arc();
+            let toggles = render_markdown_collecting_toggles(
                 ui,
                 &tabs.current_markdown,
                 &mut tabs.scroll_to_header_id,
                 &mut tabs.scroll_to_search,
-                &mut tabs.pending_task_toggles,
                 deficit_strategy,
-                Some(&heading_ids),
+                Some(heading_ids.as_slice()),
             );
             // P0-2: Apply task checkbox toggles to the markdown source.
-            if !tabs.pending_task_toggles.is_empty() {
-                for (idx, checked) in tabs.pending_task_toggles.drain(..) {
-                    crate::ui::render::apply_task_toggle(&mut tabs.current_markdown, idx, checked);
-                }
-            }
+            apply_task_toggles_to_markdown(&mut tabs.current_markdown, toggles);
         });
 }
 
@@ -383,12 +393,7 @@ fn show_markdown_scroll_area(
 #[tracing::instrument(skip_all, name = "ui.center.render_empty_state", level = "debug")]
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
-        ui.label(
-            RichText::new(crate::ui::strings::NO_FILE_SELECTED_PROMPT)
-                .size(15.0)
-                .italics()
-                .color(egui::Color32::GRAY),
-        );
+        ui.label(muted_text(crate::ui::strings::NO_FILE_SELECTED_PROMPT).size(15.0));
     });
 }
 
