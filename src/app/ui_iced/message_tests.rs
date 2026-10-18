@@ -6,8 +6,8 @@
 //! configuration file or database is touched.
 
 use super::{
-    AgentMessage, EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage, SearchMessage,
-    TabMessage, ThemeMessage, TreeMessage, WindowMessage, WindowSnapshot,
+    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage,
+    SearchMessage, TabMessage, ThemeMessage, TreeMessage, WindowMessage, WindowSnapshot,
 };
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
@@ -58,6 +58,9 @@ fn one_message_per_channel() -> Vec<Message> {
             url: "https://example.com".into(),
             source_file: Some(sample_path()),
         }),
+        Message::Dialog(DialogMessage::NameChanged {
+            text: "my note".into(),
+        }),
     ]
 }
 
@@ -66,9 +69,10 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     let messages = one_message_per_channel();
     assert_eq!(
         messages.len(),
-        11,
+        12,
         "TASK-021 fixes the channel set at window, layout, command, tree, tab, \
-         editor, agent, search, logs, theme; TASK-015 adds render"
+         editor, agent, search, logs, theme; TASK-015 adds render; TASK-017b1 \
+         adds dialog"
     );
 
     assert!(matches!(messages[0], Message::Window(_)));
@@ -82,6 +86,7 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     assert!(matches!(messages[8], Message::Logs(_)));
     assert!(matches!(messages[9], Message::Theme(_)));
     assert!(matches!(messages[10], Message::Render(_)));
+    assert!(matches!(messages[11], Message::Dialog(_)));
 }
 
 #[test]
@@ -402,10 +407,55 @@ fn test_debug_messages_are_debuggable() {
     let rendered = format!("{:?}", one_message_per_channel());
     for channel in [
         "Window", "Layout", "Command", "Tree", "Tab", "Editor", "Agent", "Search", "Logs", "Theme",
+        "Render", "Dialog",
     ] {
         assert!(
             rendered.contains(channel),
             "Debug output must name the {channel} channel for [FMD-071] tracing"
+        );
+    }
+}
+
+#[test]
+fn test_dialog_channel_covers_every_small_dialog_interaction() {
+    // [TASK-017b1]: the name-entry / move / delete dialogs' view-local
+    // transitions. Each is a distinct message so the reducer can route it.
+    let name_changed = Message::Dialog(DialogMessage::NameChanged {
+        text: "draft".into(),
+    });
+    let submitted = Message::Dialog(DialogMessage::Submitted);
+    let cancelled = Message::Dialog(DialogMessage::Cancelled);
+    let dismissed = Message::Dialog(DialogMessage::Dismissed);
+    let destination = Message::Dialog(DialogMessage::DestinationSelected {
+        path: sample_path(),
+    });
+
+    let all = [
+        name_changed.clone(),
+        submitted.clone(),
+        cancelled.clone(),
+        dismissed.clone(),
+        destination.clone(),
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for (j, b) in all.iter().enumerate() {
+            if i == j {
+                assert_eq!(a, b);
+            } else {
+                assert_ne!(a, b, "dialog interactions {i} and {j} must stay separable");
+            }
+        }
+    }
+
+    // Cancel and Dismiss are distinct: an explicit cancel differs from a
+    // click-away, the same distinction OverlaySlot::close reports.
+    assert_ne!(cancelled, dismissed);
+
+    // None of these is a ready-to-publish command: validation runs first.
+    for message in all {
+        assert!(
+            !matches!(message, Message::Command(_)),
+            "a dialog interaction must not masquerade as a published command"
         );
     }
 }

@@ -482,6 +482,21 @@ fn modal_fills_its_parent() {
 }
 
 #[test]
+fn modal_at_fills_its_parent_like_modal() {
+    // [TASK-017b1]: the anchored sibling of `modal` keeps the same
+    // full-area scrim contract; only the card placement differs.
+    let card: Element<'_, TestMessage> = text("anchored dialog").into();
+
+    let anchored = modal_at(card, Point::new(40.0, 60.0), TestMessage::Close);
+
+    assert_eq!(
+        anchored.as_widget().size(),
+        Size::new(Length::Fill, Length::Fill),
+        "the anchored modal still needs the whole area to swallow clicks"
+    );
+}
+
+#[test]
 fn context_menu_trigger_inherits_the_wrapped_content_size() {
     let row: Element<'_, TestMessage> = text("row").into();
     let row_size = row.as_widget().size();

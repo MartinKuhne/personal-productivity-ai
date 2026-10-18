@@ -42,7 +42,10 @@
 //! # Grounding status
 //!
 //! - **Grounded in shipped behaviour:** `Window`, `Layout`, `Command`,
-//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`, `Render`.
+//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`, `Render`,
+//!   `Dialog` ([TASK-017b1] — the small name-entry / move /
+//!   delete-confirmation dialogs; the delete *confirmation* itself is new,
+//!   see the `DialogMessage` docs and the migration-map drift note).
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
@@ -118,6 +121,9 @@ pub enum Message {
     Theme(ThemeMessage),
     /// Markdown render-path channel ([TASK-015]).
     Render(RenderMessage),
+    /// Small individual dialogs — create-directory / create-document /
+    /// rename / move / delete-confirmation ([TASK-017b1], UI-011/UI-015).
+    Dialog(DialogMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -531,5 +537,52 @@ pub enum RenderMessage {
     CopyCodeRequested {
         /// The exact code-block content to place on the clipboard.
         content: String,
+    },
+}
+
+/// Small-dialog channel ([TASK-017b1], UI-011/UI-015).
+///
+/// Grounded in the egui name-entry / move / delete dialogs
+/// (`src/app/ui/modals.rs:26-68`, `:80-158`, `:160-322`) and the
+/// `Dialogs` state model (`src/app/ui/dialogs.rs:25-63`). egui kept the
+/// open flag, the typed name and the selected destination in the
+/// `Dialogs` struct plus single-line widget memory; under iced that state
+/// is explicit in [`crate::ui_iced::dialogs::DialogState`] and this
+/// channel is the only way the rendered card mutates it.
+///
+/// The confirm outcome is deliberately **not** a [`UserCommand`] here:
+/// the egui build validates the trimmed name only in the command
+/// executor (`src/app/command_executor.rs:308-371` via
+/// `utils::path::is_safe_basename`), so the view must not pre-decide
+/// validity. The [TASK-022]/[TASK-023] reducer runs
+/// [`crate::ui_iced::dialogs::DialogState::submit`], and only a valid
+/// [`crate::ui_iced::dialogs::SubmitOutcome::Completed`] becomes the
+/// matching `Confirm*` command — the intent stays self-contained and
+/// replayable ([FMD-068]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DialogMessage {
+    /// The pending name text changed while the user types.
+    NameChanged {
+        /// The field's new contents.
+        text: String,
+    },
+    /// The confirm button or `Enter` was pressed; the reducer validates
+    /// via `DialogState::submit` and either publishes the `Confirm*`
+    /// command or sets the dialog's error line.
+    Submitted,
+    /// The Cancel button was pressed.
+    Cancelled,
+    /// The scrim was clicked (or Escape pressed) — the dialog is
+    /// dismissed without confirming. Kept distinct from
+    /// [`Self::Cancelled`] so the reducer can tell an explicit cancel
+    /// from a click-away, the same distinction
+    /// [`crate::ui_iced::overlay::OverlaySlot::close`] reports for
+    /// Escape consumption.
+    Dismissed,
+    /// A destination folder row was picked in the move dialog (the
+    /// `selectable_label` equivalent of `ui/modals.rs:116-124`).
+    DestinationSelected {
+        /// The folder the user picked as the move target.
+        path: PathBuf,
     },
 }

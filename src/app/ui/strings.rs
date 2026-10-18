@@ -448,6 +448,38 @@ pub const RENAME_WINDOW: &str = "Rename";
 /// Label prompt in rename dialog.
 pub const ENTER_NEW_NAME: &str = "Enter new name:";
 
+/// Window title for the delete-confirmation dialog ([TASK-017b1]).
+///
+/// The egui build has no delete confirmation — the tree's Delete row
+/// publishes `UserCommand::Delete` directly — so this title is new for the
+/// iced port (drift note in `doc/planning/iced-migration-map.md`).
+pub const DELETE_CONFIRM_WINDOW: &str = "Delete";
+
+/// Delete-confirmation prompt naming the target ([TASK-017b1]).
+///
+/// Formatting helper rather than a bare constant because the target name is
+/// interpolated into the sentence.
+#[must_use]
+pub fn format_delete_confirm_prompt(name: &str) -> String {
+    format!("Delete \"{name}\"?")
+}
+
+/// Error shown when a name-entry dialog is submitted with no name
+/// ([TASK-017b1]).
+pub const DIALOG_NAME_EMPTY_ERROR: &str = "Name must not be empty.";
+
+/// Error shown when a name-entry dialog holds a name that is not a safe
+/// single path segment (separators or `..`) ([TASK-017b1]).
+pub const DIALOG_NAME_UNSAFE_ERROR: &str = "Name contains invalid characters.";
+
+/// Error shown when the move dialog is confirmed with no destination
+/// selected ([TASK-017b1]).
+pub const DIALOG_MOVE_NO_DESTINATION_ERROR: &str = "Select a destination folder.";
+
+/// Error returned when a submit arrives while no dialog is open
+/// ([TASK-017b1]). Defensive: the view never renders a card when closed.
+pub const DIALOG_NOT_OPEN_ERROR: &str = "No dialog is open.";
+
 // Batch Dialog
 /// Window title for the batch prompt processing dialog.
 pub const BATCH_DIALOG_WINDOW: &str = "Batch Prompt Processing";

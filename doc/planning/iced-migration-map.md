@@ -1971,3 +1971,159 @@ new sidecar tests (45 `ui_iced::logs` + 22 `ui_iced::panels::bottom`);
    this task.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped from
    existing requirements only.
+
+
+### TASK-017b1 dialog verification log (small individual dialogs — first half — 2026-10-18)
+
+**Scope delivered: the individual name-entry / move / delete-confirmation
+dialogs only.** The big windows (about / batch / tools / agent-debug /
+attributions) remain a later chunk. New files: `src/app/ui_iced/dialogs.rs`
++ `dialogs_tests.rs` sidecar (51 tests), `pub mod dialogs;` + module-doc
+bullet in `src/app/ui_iced/mod.rs`, a new `Dialog` message channel in
+`src/app/ui_iced/message.rs` (+1 `message_tests.rs` test), one new
+primitive `modal_at` in `src/app/ui_iced/overlay.rs` (+1 `overlay_tests.rs`
+test), and six new string constants / one formatting helper in
+`src/app/ui/strings.rs`.
+
+**`DialogKind` / `DialogState` shape.** The per-dialog `bool` fields of
+`ui::dialogs::Dialogs` (`ui/dialogs.rs:25-63`) collapse into one
+`Option<DialogKind>` carrying the reducer's execution targets
+([FMD-068]):
+
+```rust
+pub enum DialogKind {
+    CreateDirectory { parent: PathBuf },   // UI-011  (egui create_dir_parent)
+    CreateDocument  { parent: PathBuf },   // UI-015  (egui create_document_parent)
+    Rename          { path:   PathBuf },   // UI-012  (egui file_to_rename)
+    Move            { path:   PathBuf },   // UI-013  (egui file_to_move)
+    DeleteConfirm   { path:   PathBuf },   // NEW — see drift note below
+}
+pub struct DialogState {
+    open: Option<DialogKind>,
+    pending_name: String,            // name-entry field (egui *_name fields)
+    error: Option<String>,           // NEW visible error line (egui had none)
+    destinations: Vec<PathBuf>,      // move picker list, reducer-supplied
+    selected_destination: Option<PathBuf>,  // egui selected_move_folder
+}
+// transitions: open / open_move / close->bool / cancel / set_name /
+//              set_error / clear_error / select_destination / can_confirm /
+//              submit -> SubmitOutcome
+pub enum SubmitOutcome {
+    Completed { kind: DialogKind, name: String, destination: Option<PathBuf> },
+    Invalid   { message: String },
+}
+```
+
+`open()` **replaces** whatever was open — one dialog at a time. egui kept
+independent `bool` flags and did *not* enforce mutual exclusion
+(`ui/dialogs.rs`); the iced port consolidates because the overlay contract
+(`OverlaySlot`) allows exactly one blocking modal, matching
+`OverlaySlot::open_modal`. `submit()` returns the self-contained payload
+so the reducer can publish the `Confirm*` command without re-reading
+state the close has already cleared.
+
+**Validation rules — found in TWO egui layers, merged into one pure
+`validate_name`.** Verified against the egui build:
+
+| Layer | Location | Rule |
+| --- | --- | --- |
+| Dialog (silent) | `ui/modals.rs:176/218/306` | `!name.trim().is_empty()` — empty/whitespace-only just closes without publishing |
+| Dialog (move) | `ui/modals.rs:138-148` | `selected_move_folder.is_some()` gates the publish |
+| Executor (silent) | `command_executor.rs:309/338/365` → `utils::path::is_safe_basename` (`utils/path.rs:13-27`) | non-empty, no `/`, no `\`, no `..` component; bad name logs a warn and **skips** the operation |
+
+`validate_name(kind, name)` merges the dialog's non-blank check with the
+executor's `is_safe_basename` rule and surfaces the failure as a visible
+error line (`DIALOG_NAME_EMPTY_ERROR` / `DIALOG_NAME_UNSAFE_ERROR`) — an
+**improvement over egui's silent close**. Non-name kinds (Move,
+DeleteConfirm) return `Ok` from `validate_name`; their gating lives in
+`can_confirm` (move needs a picked destination, delete is always
+confirmable). The trimmed name is what `submit` returns, matching egui's
+`name.trim().to_string()` publish.
+
+**Anchor model.** The egui name-entry window captures the pointer once per
+open session and pins with `fixed_pos`, falling back to the viewport
+centre (`ui/modals.rs:26-45`). The iced port keeps the shape: the reducer
+captures the tracked `LayoutMessage::CursorMoved` point at open time and
+passes it to `dialog_card(state, anchor: Option<Point>, viewport)`, which
+resolves the top-left with `resolve_dialog_anchor` — the cursor point
+clamped by `overlay::clamp_anchor`, or the viewport centre when `anchor`
+is `None` (truly centred, not egui's top-left-at-centre quirk). The
+card's size is deterministic (`dialog_size`) because every row is a
+fixed-height widget and the error row is always allocated, so the clamp
+cannot drift from the real layout — the same argument `menu_size` makes.
+The card mounts via the new `overlay::modal_at` (same scrim + card chrome
+as `modal`, explicit top-left placement instead of centring).
+
+**Connection to the tree deferred-intents.** The left panel's context-menu
+rows already emit the opening intents as `UserCommand`s
+(`panels/left.rs:331-350` directory / `:416-427` file: `Rename`, `Move`,
+`CreateDirectory { parent }`, `CreateDocument { parent }`, `Delete`).
+The [TASK-022/023] reducer maps each to `DialogState::open(kind)` (or
+`open_move` with the destination snapshot for Move). The dialog card then
+emits `Message::Dialog(...)` for every interaction; the reducer runs
+`submit()` and publishes the matching `UserCommand::Confirm*`
+(`ConfirmCreateDirectory` / `ConfirmCreateDocument` / `ConfirmRename` /
+`ConfirmMove`) or `UserCommand::Delete` only on
+`SubmitOutcome::Completed`. The view never touches the bus ([FMD-065]).
+
+**Message channel.** New `Message::Dialog(DialogMessage)` with
+`NameChanged { text }` / `Submitted` / `Cancelled` / `Dismissed` /
+`DestinationSelected { path }`. `Cancelled` (explicit) is kept distinct
+from `Dismissed` (scrim/Escape) so the reducer can tell them apart, the
+same distinction `OverlaySlot::close` reports. None of these is a
+ready-to-publish `UserCommand` — validation runs first.
+
+**Not ported / new behaviour, with reasons.**
+
+1. **The delete confirmation is NEW.** The egui build has **no** delete
+   confirmation — the tree's Delete row publishes `UserCommand::Delete`
+   directly (`ui/tree/render.rs:63/112/270`); `modals.rs`'s module
+   docstring names a "delete confirmation" that does not exist in the
+   code. `DialogKind::DeleteConfirm` is added because the migration brief
+   requires a confirm step; whether the reducer routes `Delete` through it
+   is a [TASK-022/023] decision ([RUST-041] drift note).
+2. **The move dialog is a destination picker, not a name-entry field** —
+   egui parity (`ui/modals.rs:95-126`): a scrollable list of
+   library-root + all-dir + file-parent folders with a `selectable_label`
+   per row. The candidate list is data the pure view cannot build (it came
+   from `ContentLibrary` + `FileEventProcessor` at render time), so the
+   reducer snapshots it and hands it in via `open_move`. The egui
+   `library_display_label` nicety is **not** reproduced — rows show the
+   raw `to_string_lossy` path; adding library labels is a reducer-side
+   concern flagged for the orchestrator.
+3. **The visible error line is new** (egui failed silently). The error row
+   is always allocated so the card's widget shape is stable across the
+   error/no-error transition (egui conditional-rendering rule).
+4. **`text_input` is single-line** (egui `text_edit_singleline` parity);
+   no `.height()` is applied — `DIALOG_INPUT_HEIGHT` is reserved geometry
+   for the size formula only.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (workspace, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS; `cargo fmt`
+run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd --status-level
+fail --show-progress none` PASS (**1780 run / 1780 passed / 1 skipped**),
+of which **53** are this task's new tests (51 `ui_iced::dialogs` + 1
+`ui_iced::message` + 1 `ui_iced::overlay`); `cargo doc --no-deps --quiet
+-p fastmd` PASS (no warnings).
+
+**Needs the orchestrator's eyes.**
+
+1. **`overlay.rs` grew a primitive (`modal_at`).** The brief said reuse
+   `modal`; `modal` centres and cannot place a card at a clamped cursor
+   point without duplicating the scrim + card chrome. `modal_at` is the
+   anchored sibling (same `card_style`/`scrim_blocker`), so the dialog
+   stays DRY. If the orchestrator prefers `overlay.rs` frozen, the
+   alternative is duplicating the card chrome in `dialogs.rs` — worse.
+2. **One-at-a-time is stricter than egui.** egui's independent flags could
+   theoretically hold two dialogs open; the port forbids it (overlay
+   contract). Confirm this is the intended consolidation.
+3. **Delete-confirm routing is a reducer decision.** The dialog exists but
+   nothing forces `UserCommand::Delete` through it. If the product wants
+   the confirm step, [TASK-022/023] must intercept `Delete`; if not, the
+   `DeleteConfirm` kind stays unused. Flagged so the gap is a decision,
+   not an oversight.
+4. **Move destination labels.** Raw path strings vs egui's
+   `library_display_label` — a product-parity gap needing reducer-side
+   label data if the friendlier labels are wanted.
+5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

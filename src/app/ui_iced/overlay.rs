@@ -59,7 +59,9 @@
 //! * Exact viewport clamping — the menu's size is **deterministic**
 //!   ([`menu_size`]) because rows are uniform-height buttons, so
 //!   [`clamp_anchor`] cannot drift out of sync with the real layout.
-//! * Centred, blocking modals with a dimmed scrim ([`modal`]).
+//! * Centred, blocking modals with a dimmed scrim ([`modal`]), and the
+//!   same modal placed at an explicit clamped top-left position
+//!   ([`modal_at`], [TASK-017b1] — the cursor-anchored small dialogs).
 //!
 //! ## What is NOT achievable with built-ins (and the workaround)
 //!
@@ -601,6 +603,48 @@ where
             .height(Length::Fill)
             .align_x(iced::alignment::Horizontal::Center)
             .align_y(iced::alignment::Vertical::Center)
+            .into(),
+    ])
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// A blocking modal anchored at an explicit top-left `position` instead of
+/// centred ([TASK-017b1]).
+///
+/// Same scrim + card chrome as [`modal`]; only the placement differs. The
+/// card's top-left corner sits at `position`, which the caller resolves
+/// with [`clamp_anchor`] (or a centre fallback) before mounting — the
+/// shape the cursor-anchored small dialogs need, mirroring the egui
+/// name-entry window's `fixed_pos` behaviour
+/// (`src/app/ui/modals.rs:40-45`). Like [`modal`], any click outside the
+/// card lands on the scrim and emits `on_dismiss`.
+#[must_use]
+pub fn modal_at<'a, Message>(
+    content: Element<'a, Message>,
+    position: Point,
+    on_dismiss: Message,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let card: Element<'a, Message> = container(content)
+        .padding(MODAL_PADDING)
+        .style(card_style)
+        .into();
+
+    stack(vec![
+        scrim_blocker(on_dismiss).into(),
+        container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: position.y,
+                right: 0.0,
+                bottom: 0.0,
+                left: position.x,
+            })
             .into(),
     ])
     .width(Length::Fill)

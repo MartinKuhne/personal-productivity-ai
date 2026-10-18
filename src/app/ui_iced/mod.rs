@@ -38,9 +38,15 @@
 //!   over a read-only snapshot of the same `background::logs` ring buffer,
 //!   the reused filter predicate, the category pick list and the pure
 //!   auto-scroll intent rule ([TASK-016]).
+//! - [`dialogs`] — the small individual dialogs: the shared name-entry
+//!   dialog (create-directory UI-011 / create-document UI-015), rename,
+//!   move and the delete confirmation, as a pure
+//!   [`crate::ui_iced::dialogs::DialogState`] model with merged name
+//!   validation and cursor-anchored, clamped modal cards ([TASK-017b1]).
 //!
 //! `update`, `tree` and `agent` follow in Phase 3/4.
 
+pub mod dialogs;
 pub mod editor;
 pub mod fonts;
 pub mod layout;
