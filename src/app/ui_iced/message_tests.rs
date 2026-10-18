@@ -6,10 +6,11 @@
 //! configuration file or database is touched.
 
 use super::{
-    AboutMessage, AgentMessage, DialogMessage, EditorMessage, LayoutMessage, LogsMessage, Message,
-    RenderMessage, SearchMessage, TabMessage, ThemeMessage, TreeMessage, WindowMessage,
-    WindowSnapshot,
+    AboutMessage, AgentMessage, BatchDialogMessage, DialogMessage, EditorMessage, LayoutMessage,
+    LogsMessage, Message, RenderMessage, SearchMessage, TabMessage, ThemeMessage,
+    ToolsDialogMessage, TreeMessage, WindowMessage, WindowSnapshot,
 };
+use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui_iced::layout::middle_band_state;
@@ -514,4 +515,100 @@ fn test_about_channel_is_not_the_small_dialog_channel() {
         Message::About(AboutMessage::CloseRequested),
         Message::Dialog(DialogMessage::Cancelled)
     );
+}
+
+#[test]
+fn test_batch_channel_covers_every_selection_transition() {
+    // [TASK-017b3]: the batch dialog's composed selection. Each variant
+    // stays separable so the reducer can route it to one field.
+    let all = [
+        Message::Batch(BatchDialogMessage::DirectorySelected(Some(1))),
+        Message::Batch(BatchDialogMessage::DirectorySelected(None)),
+        Message::Batch(BatchDialogMessage::PromptSelected(Some(2))),
+        Message::Batch(BatchDialogMessage::PromptSelected(None)),
+        Message::Batch(BatchDialogMessage::PatternChanged {
+            text: "*.md".into(),
+        }),
+        Message::Batch(BatchDialogMessage::ModeChanged(BatchMode::File)),
+        Message::Batch(BatchDialogMessage::ModeChanged(BatchMode::Directory)),
+        Message::Batch(BatchDialogMessage::ConcurrencyChanged(4)),
+    ];
+
+    for (i, a) in all.iter().enumerate() {
+        for (j, b) in all.iter().enumerate() {
+            if i == j {
+                assert_eq!(a, b);
+            } else {
+                assert_ne!(a, b, "batch selection {i} and {j} must stay separable");
+            }
+        }
+    }
+
+    for message in all {
+        assert!(
+            !matches!(message, Message::Command(_)),
+            "a batch selection transition must not masquerade as a published command"
+        );
+    }
+}
+
+#[test]
+fn test_batch_open_start_and_cancel_stay_on_the_command_channel() {
+    // [TASK-017b3] channel choice: only the *selection* needed a new
+    // channel. Open / Start / Cancel already ride `Message::Command` as
+    // exactly what the egui dialog published, so no `BatchDialogMessage`
+    // variant duplicates them.
+    let commands = [
+        Message::Command(UserCommand::OpenBatchDialog),
+        Message::Command(UserCommand::CancelBatch),
+    ];
+    for command in commands {
+        assert!(matches!(command, Message::Command(_)));
+    }
+
+    // No Batch-channel value equals a command-channel value.
+    assert_ne!(
+        Message::Batch(BatchDialogMessage::ConcurrencyChanged(4)),
+        Message::Command(UserCommand::CancelBatch)
+    );
+}
+
+#[test]
+fn test_tools_channel_carries_only_the_dismiss() {
+    // [TASK-017b3]: every tool-group action is already a `UserCommand`,
+    // so the Tools channel holds exactly one variant.
+    assert_eq!(
+        Message::Tools(ToolsDialogMessage::CloseRequested),
+        Message::Tools(ToolsDialogMessage::CloseRequested)
+    );
+    assert_ne!(
+        Message::Tools(ToolsDialogMessage::CloseRequested),
+        Message::Command(UserCommand::OpenToolsDialog)
+    );
+    assert_ne!(
+        Message::Tools(ToolsDialogMessage::CloseRequested),
+        Message::Dialog(DialogMessage::Dismissed)
+    );
+}
+
+#[test]
+fn test_tool_group_actions_ride_the_command_channel_not_the_tools_channel() {
+    let actions = [
+        Message::Command(UserCommand::SetToolGroupEnabled {
+            id: crate::agent::tools::registry::ToolGroupId::Mcp("srv".into()),
+            enabled: true,
+        }),
+        Message::Command(UserCommand::ClearToolGroupError(
+            crate::agent::tools::registry::ToolGroupId::Mcp("srv".into()),
+        )),
+        Message::Command(UserCommand::StartMcpAuth("srv".into())),
+        Message::Command(UserCommand::ForgetMcpAuth("srv".into())),
+    ];
+    for action in actions {
+        assert!(
+            matches!(action, Message::Command(_)),
+            "a tool-group action must ride the command channel"
+        );
+        assert_ne!(action, Message::Tools(ToolsDialogMessage::CloseRequested));
+    }
 }

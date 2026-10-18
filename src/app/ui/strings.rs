@@ -134,6 +134,28 @@ pub const TOOLS_RESTART: &str = "Restart";
 /// tell the manager to forget that the server once required auth).
 pub const TOOLS_FORGET: &str = "Forget";
 
+/// Caption for the tool-group name column header.
+pub const TOOLS_GROUP_COLUMN: &str = "Group";
+
+/// Caption for the tool-group kind column header.
+pub const TOOLS_KIND_COLUMN: &str = "Kind";
+
+/// Caption for the per-group actions column header.
+pub const TOOLS_ACTIONS_COLUMN: &str = "Actions";
+
+/// Marker glyph rendered on a tool-group row that carries a recorded error.
+pub const TOOLS_ERROR_ICON: &str = "⚠";
+
+/// Empty-state line shown when no tool group is registered at all.
+pub const TOOLS_EMPTY_STATE: &str = "No tool groups registered.";
+
+/// Formats one recorded tool-group error for display as `Kind: message`,
+/// the shape both the egui hover tooltip and the iced inline line use.
+#[must_use]
+pub fn format_tool_group_error(kind: &str, message: &str) -> String {
+    format!("{kind}: {message}")
+}
+
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 
@@ -779,6 +801,25 @@ mod tests {
             BATCH_RUNNING_CANCEL_HINT,
             "Click Cancel to stop processing. In-flight jobs will finish."
         );
+    }
+
+    #[test]
+    fn test_tools_dialog_column_and_marker_strings() {
+        assert_eq!(TOOLS_GROUP_COLUMN, "Group");
+        assert_eq!(TOOLS_KIND_COLUMN, "Kind");
+        assert_eq!(TOOLS_ACTIONS_COLUMN, "Actions");
+        assert_eq!(TOOLS_ERROR_ICON, "⚠");
+        assert_eq!(TOOLS_EMPTY_STATE, "No tool groups registered.");
+    }
+
+    #[test]
+    fn test_format_tool_group_error_joins_kind_and_message() {
+        assert_eq!(
+            format_tool_group_error("Execution", "Permission denied"),
+            "Execution: Permission denied"
+        );
+        // Empty message still yields the `Kind: ` shape, never an empty line.
+        assert_eq!(format_tool_group_error("Discovery", ""), "Discovery: ");
     }
 
     #[test]

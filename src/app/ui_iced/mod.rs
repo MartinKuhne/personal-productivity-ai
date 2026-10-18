@@ -52,11 +52,23 @@
 //!   `crate::ui::attributions::DIRECT_DEPENDENCIES` catalog: a scrollable
 //!   Crate / Authors / Repository table whose rows emit deferred
 //!   open-in-browser intent ([TASK-017b2]).
+//! - [`batch_dialog`] — the Batch prompt-processing dialog: directory /
+//!   pattern / prompt / mode / concurrency composition over the reused
+//!   `BatchConfig` + `validate_batch_params`, the running/completed
+//!   views, and the reducer-held
+//!   [`crate::ui_iced::batch_dialog::BatchDialogState`] ([TASK-017b3],
+//!   BATCH-001..BATCH-014).
+//! - [`tools_dialog`] — the Tools dialog: the six-column tool-group table
+//!   that replaces the codebase's only `egui_extras::TableBuilder` with
+//!   `iced::widget::table`, over the reused tool-group registry, with
+//!   per-row enable / restart / OAuth actions riding the command channel
+//!   ([TASK-017b3], UI-051..UI-060).
 //!
 //! `update`, `tree` and `agent` follow in Phase 3/4.
 
 pub mod about;
 pub mod attributions;
+pub mod batch_dialog;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
@@ -69,3 +81,4 @@ pub mod persisted;
 pub mod render;
 pub mod table_width;
 pub mod theme;
+pub mod tools_dialog;

@@ -2355,3 +2355,239 @@ warnings). `cargo clippy -p fastmd --all-targets` still reports the same
    `AGENT_SESSION_CLOSE_BUTTON`); consolidating them is a separate chore.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+
+### TASK-017b3 batch/tools dialog verification log (Batch dialog + Tools dialog — 2026-10-18)
+
+**Scope delivered: the Batch prompt-processing dialog and the Tools
+(tool-group) dialog only.** `agent_debug_window` remains a later chunk.
+New files: `src/app/ui_iced/batch_dialog.rs` + `batch_dialog_tests.rs`
+sidecar (50 tests), `src/app/ui_iced/tools_dialog.rs` +
+`tools_dialog_tests.rs` sidecar (44 tests), two `pub mod` lines plus
+module-doc bullets in `src/app/ui_iced/mod.rs`, two new message channels
+in `src/app/ui_iced/message.rs` (+4 `message_tests.rs` tests) and six
+new string constants plus one formatting helper in
+`src/app/ui/strings.rs`. No egui file was touched.
+
+**The brief's description of the Batch dialog did not match the code.**
+It asked for "file selection for batch processing" and "merge-prompt
+candidates". Verified against `src/app/ui/batch_dialog.rs`: the dialog
+has **no file list and no merge-prompt handling**. It composes a
+*directory* + a *glob pattern* + a *prompt* + a *mode* + a *concurrency*
+and hands discovery to the batch subsystem
+(`agent/batch/file_matcher.rs`). Merge prompts live on a different
+surface entirely — the tree's multi-select context menu builds them
+(`ui/tree/handlers.rs:71 build_merge_prompt`) and publishes
+`UserCommand::MergePrompt` (`command_executor.rs:302`). The port
+implements what exists; the scrollable, selectable rows the brief wanted
+were given to the **prompt candidates** instead (see the deviation note
+below). [RUST-041] brief-drift note, flagged rather than invented.
+
+**Batch data sources — reused unchanged ([RUST-051]).**
+
+| Field | Source |
+| --- | --- |
+| `BatchConfig`, `BatchMode`, `PromptInfo` | `crate::agent::batch::types`, re-exported (`pub use`) from `ui_iced/batch_dialog.rs`. `BatchConfig` is the exact `UserCommand::StartBatch` payload (`bus/events/user_command.rs:134`) — not re-declared, not wrapped |
+| Validity gate | `validate_batch_params` (`agent/batch/types.rs:48-65`) — the *same* function the egui dialog calls (`ui/batch_dialog.rs:239`), so both builds gate Process identically |
+| `BatchDialogConfig` | the egui dialog's own state type; `BatchDialogViewModel::from_config` copies it across so the reducer needs no field translation |
+| Directory candidates | `DirectoryTracker::dirs_sorted()` / content-library roots — the egui refresh source (`ui/app/render.rs:105`), snapshotted by the reducer |
+| Prompt candidates | `resolve_prompts(app.tags().prompt_paths(), &app.config().content_libraries)` — the egui dialog's own snapshot call (`ui/batch_dialog.rs:26-27`), moved out of render |
+| Run status | `Dialogs::batch_handle`, `BatchHandle::thread.is_finished()`, `Dialogs::batch_cancel_flag` → [`BatchRunStatus { has_handle, finished, cancel_requested }`], because `BatchHandle` owns a `JoinHandle` and is neither `Clone` nor `Debug` |
+
+**Tools data source — the tool-group registry, reused unchanged.**
+
+| Field | Source |
+| --- | --- |
+| Rows | `ToolRegistry::groups(&AgentConfig)` (`src/agent/tools/registry/mod.rs:268-341`) — the same snapshot the egui dialog read (`ui/tools_dialog.rs:41-46`); internal families first, MCP servers sorted by name |
+| Types | `ToolGroupState` / `ToolGroupId` / `ToolGroupKind` / `ToolGroupError` / `ToolErrorKind` / `InternalToolGroup` (`agent/tools/registry/groups.rs:9-90`), re-exported (`pub use`), never re-declared |
+| Prompt char count | `ToolGroupState::prompt_char_count(&dyn Fn(&str) -> Option<usize>)` (`groups.rs:99-104`) — the subsystem's own summing helper, fed `ToolRegistry::tool_char_count` (`registry/mod.rs:255-263`) with the empty prompt context the egui row used (`ui/tools_dialog.rs:194`, exposed as `PROMPT_CONTEXT`) |
+| OAuth eligibility | `McpClients::needs_authentication` (`agent/lib/mcp/mod.rs:320-327`) — the canonical rule. The egui dialog carried a **private duplicate** of the identical function (`ui/tools_dialog.rs:296-303`); the port calls the shared one rather than adding a third copy |
+| OAuth in flight | `Dialogs::is_oauth_in_progress(server)` (`ui/dialogs.rs:112-117`) → `McpAuthFacts { eligible, in_progress }` |
+
+`ToolsDialogViewModel::from_app(&FastMdApp)` performs the exact reads
+the egui dialog did at render time, once, at snapshot time, so the card
+stays I/O-free ([FMD-065]).
+
+**`egui_extras::TableBuilder` → `iced::widget::table` (the migration
+map's A5 mapping).** The Tools dialog was the codebase's only real
+`egui_extras` consumer. The six columns map one-for-one:
+
+| # | egui (`ui/tools_dialog.rs:143-148`) | iced cell | Width |
+| --- | --- | --- | --- |
+| 1 | `Column::auto().at_least(28.0)` — enable checkbox | `checkbox(enabled).on_toggle(..)` → `SetToolGroupEnabled` (`checkbox.rs:119`, `:155`) | `Shrink` |
+| 2 | `Column::remainder().at_least(140.0).clip(true)` — group | strong `text` + always-allocated error line | `Fill` |
+| 3 | `Column::auto().at_least(72.0)` — kind | `text(kind_label(kind))` | `Shrink` |
+| 4 | `Column::remainder().at_least(120.0)` — tools | comma-joined `tool_names` | `Fill` |
+| 5 | `Column::auto().at_least(80.0)` — prompt char count | `text(prompt_char_count)` | `Shrink` |
+| 6 | `Column::remainder().at_least(140.0)` — actions | `Row` of `ToolAction` buttons via `on_press_maybe` | `Fill` |
+
+Verified API (`iced_widget-0.14.2/src/table.rs`): `table(columns, rows)`
+`:18-28`, `column(header, view)` `:34-49`, `Column::width` `:650-653`,
+and the all-`Shrink` → first-column-`Fill` promotion rule `:129-133` —
+three explicit `Fill`s keep the wide columns wide and the short ones
+tight, the same lesson `logs::log_table` and `attributions` learned.
+
+**Message-channel choices.**
+
+```rust
+// New: only the batch dialog's *composed selection* needed a channel.
+pub enum BatchDialogMessage {
+    DirectorySelected(Option<usize>),
+    PromptSelected(Option<usize>),
+    PatternChanged { text: String },
+    ModeChanged(BatchMode),
+    ConcurrencyChanged(u8),
+}
+// New: the tools dialog needed exactly ONE variant.
+pub enum ToolsDialogMessage { CloseRequested }
+```
+
+* **Batch open / start / cancel stay on `Message::Command`.**
+  `UserCommand::OpenBatchDialog`, `UserCommand::StartBatch(config)` and
+  `UserCommand::CancelBatch` are exactly what the egui dialog published
+  (`ui/batch_dialog.rs:169-178`, `:216-225`, `:54-61`), and the
+  composed `BatchConfig` travels inside the command, so the intent is
+  self-contained and replayable ([FMD-068]). No validation round-trip
+  was added: the Process button is gated by
+  `BatchDialogViewModel::can_start()` at render time, mirroring egui's
+  `is_config_valid` gate.
+* **Tools: every action already rides `Message::Command`.**
+  `SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` /
+  `ForgetMcpAuth` (`user_command.rs:80-88`) each carry their own
+  `ToolGroupId` or server name — the egui dialog published precisely
+  those (`ui/tools_dialog.rs:197-293`). The egui dialog also keeps **no
+  view-local state at all** (no search box, no selection, no expansion),
+  so nothing else needed a channel.
+* **The one exception is dismissal.** egui closed both dialogs through
+  the `egui::Window` title-bar `X` (`ui/tools_dialog.rs:61-63`), a
+  window-frame widget an in-window iced modal does not have. The tools
+  scrim/Escape therefore emits `ToolsDialogMessage::CloseRequested`.
+  The batch dialog needs no such variant because its close path *is*
+  `UserCommand::CancelBatch` in the egui build.
+
+**Window state — pure, one dialog at a time.**
+
+```rust
+// ui_iced/batch_dialog.rs
+pub struct BatchDialogState { open: bool, model: BatchDialogViewModel }
+// .new() .with_model(vm) .is_open() .model()
+// .open(vm) -> bool          — clamps stale selections, reports the open-flag change
+// .close() -> bool           — "was anything consumed" (OverlaySlot::close contract)
+// .toggle() -> bool
+// .current_view() -> BatchDialogView { Config | Progress }
+// .can_start() / .batch_config()
+// .apply(BatchDialogMessage) -> bool   — did the model actually change
+
+// ui_iced/tools_dialog.rs
+pub struct ToolsDialogState { open: bool }
+// .new() .is_open() .open() -> bool .close() -> bool .toggle() -> bool
+// .apply(ToolsDialogMessage) -> bool
+```
+
+Both mirror `AboutWindowState` / `DialogState`: opening replaces,
+`close()` reports consumption so an Escape handler can tell a consumed
+key from a no-op, and a reducer wanting the single-blocking-overlay
+invariant can mirror either into `OverlaySlot<K>`.
+
+**Error highlighting — two tokens, deliberately.** The `⚠` marker
+(`strings::TOOLS_ERROR_ICON`) uses `Palette::warning` — exact egui
+parity (`ui/tools_dialog.rs:255`). The error **text** uses
+`Palette::error`, not `warning`: egui never showed the text at all, it
+hid `"{kind:?}: {message}"` in a hover tooltip (`:215`, `:256`). iced
+0.14 has no built-in tooltip and DEC-005 rules out `iced_aw`, so the
+message must be visible inline, and inline next to a warning marker a
+failure reads correctly in the stronger token. Both come from the shared
+palette; no numeric literal was introduced ([GUD-003]). Pinned by
+`the_error_marker_uses_the_warning_token_and_the_text_the_error_token`.
+
+**Not ported, with reasons.**
+
+1. **Batch: a selected-file list.** Does not exist in the egui dialog —
+   it selects a directory + glob and lets `file_matcher` discover the
+   files. See the brief-drift note above.
+2. **Batch: merge-prompt candidates.** Belong to the tree's
+   `UserCommand::MergePrompt`, never to the batch dialog.
+3. **Batch: select-all / select-none.** egui has neither (single-choice
+   combos throughout), so no transition was invented. The two
+   selection-state rules egui *does* run are ported as pure functions:
+   `clamp_selection` (the stale-index drop at `ui/batch_dialog.rs:28-36`)
+   and `index_of_selected` (the path-stable re-index at
+   `ui/app/render.rs:102-108`).
+4. **Batch: the spinner.** `egui::Spinner` has no iced 0.14 built-in and
+   DEC-005 rules out `iced_aw`; the progress view carries
+   `BATCH_PROCESSING_TEXT` plus the cancel hint instead.
+5. **Batch: the prompt combo became a scrollable selectable row list.**
+   Deliberate deviation. egui used `selectable_combo`
+   (`ui/batch_dialog.rs:108-121`); a prompt catalog can outgrow a
+   dropdown, and iced's `pick_list` has no search or per-row affordance.
+   The rows use the same shape the move dialog's destination picker
+   established (`ui_iced/dialogs.rs:644-661`). The directory and
+   concurrency pickers *are* `pick_list`, egui parity.
+6. **Batch: the pattern field is always allocated, inert in Directory
+   mode.** egui hid the whole row (`:90`); AGENTS §6 wants the shape
+   kept, so `on_input_maybe(None)` (`text_input.rs:184-191`) makes the
+   field stop reporting edits instead of removing it.
+7. **Tools: `striped`, `resizable` and the per-column `at_least`
+   minimums.** iced 0.14's `table` has no row striping and no
+   user-resizable columns — `table::Style` exposes only
+   `separator_x`/`separator_y` (`table.rs:676-681`) — and `Column`
+   takes one `Length` with no minimum. Proportions are expressed as
+   `Fill`/`Shrink` ratios rather than pixel floors.
+8. **Tools: the group-name hover tooltip.** Same no-tooltip constraint;
+   the error line moved inline under the name (always allocated, empty
+   when clean, so the cell shape never changes).
+9. **Tools: the `✓ parallel` chip.** Already removed from the egui
+   build by user request (`ui/tools_dialog_tests.rs:79-89`);
+   `parallel_safe` is still carried in `ToolGroupState` and still not
+   rendered.
+10. **Both: the `egui::Window` chrome** (resizable/collapsible frames,
+    title-bar `X`, `default_size`/`min_size`/`max_height` window
+    negotiation). The cards are content only; the overlay host
+    ([TASK-023]) mounts them through `ui_iced::overlay::modal`. The
+    egui height rule is ported as a pure function
+    (`tools_dialog::compute_dialog_size`, same constants and clamps as
+    `ui/tools_dialog.rs:76-115`) so the reducer can size the mount.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (workspace,
+clean); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS;
+`cargo fmt` run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
+--status-level fail --show-progress none` PASS (**1925 run / 1925
+passed / 1 skipped**), of which **100** are this task's new tests (50
+`ui_iced::batch_dialog` + 44 `ui_iced::tools_dialog` + 4
+`ui_iced::message` + 2 `ui::strings`); `cargo doc --no-deps --quiet -p
+fastmd` PASS (no warnings). `cargo clippy -p fastmd --all-targets` still
+reports the same **12 pre-existing** test-only lints in other tasks'
+files (`markdown/link_scanner_tests.rs`, `ui/batch_dialog_tests.rs`,
+`ui_iced/panels/left_tests.rs`, `ui_iced/render/code_tests.rs`,
+`config/config_tests.rs`, `ui_iced/message_tests.rs:351`) — none in the
+new files.
+
+**Needs the orchestrator's eyes.**
+
+1. **The brief's Batch-dialog description is wrong** (no file list, no
+   merge prompts — see the header). The port implements the real
+   dialog. If a per-file batch selection is actually wanted, that is a
+   new feature needing a new `BatchConfig` shape and a
+   `UserCommand::StartBatch` payload change, not a migration.
+2. **Product-parity change: the prompt picker is now a scrollable row
+   list, not a combo.** One more visible difference between the builds;
+   confirm it is wanted.
+3. **`BatchDialogState::open(model)` clamps stale selections.** The
+   egui build clamped only the *prompt* index inside the dialog
+   (`ui/batch_dialog.rs:28-36`) and re-indexed the *directory* by path
+   in the render loop (`ui/app/render.rs:102-108`). The port clamps
+   both by index at open time and exposes `index_of_selected` for the
+   reducer to do the path-stable re-index. If the reducer does not call
+   it, a reordered directory list silently drops the selection instead
+   of following the path. Flagged so [TASK-022/023] picks it up.
+4. **`ToolsDialogMessage` exists only for dismissal.** If a
+   `UserCommand::CloseToolsDialog` were added to the bus, this channel
+   would become empty and could be dropped. It was not added here because
+   the command enum is a shared contract and nothing else needs it.
+5. **The egui `needs_authentication` duplicate is still there.**
+   `ui/tools_dialog.rs:296-303` remains a private copy of
+   `McpClients::needs_authentication`. The iced port uses the shared
+   one; deleting the egui copy is a one-line change in a file this chunk
+   was barred from touching.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is
+   mapped from existing requirements only.

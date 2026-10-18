@@ -48,7 +48,10 @@
 //!   see the `DialogMessage` docs and the migration-map drift note) and
 //!   `About` ([TASK-017b2] — the About window plus the third-party
 //!   attributions window; the credits list itself is unchanged, only its
-//!   placement moved out of the About dialog).
+//!   placement moved out of the About dialog), `Batch` ([TASK-017b3] — the
+//!   batch dialog's composed selection only; open / start / cancel stay on
+//!   the command channel) and `Tools` ([TASK-017b3] — the tools dialog's
+//!   dismiss; every tool-group action stays on the command channel).
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
@@ -130,6 +133,11 @@ pub enum Message {
     /// The About window and the third-party attributions window
     /// ([TASK-017b2]).
     About(AboutMessage),
+    /// The batch prompt-processing dialog's own selection state
+    /// ([TASK-017b3], BATCH-001..BATCH-014).
+    Batch(BatchDialogMessage),
+    /// The tools dialog's window visibility ([TASK-017b3], UI-051..UI-060).
+    Tools(ToolsDialogMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -641,5 +649,68 @@ pub enum AboutMessage {
     /// window is showing. Kept as one variant because the two windows are
     /// mutually exclusive, so the reducer needs exactly one "hide it"
     /// transition ([`crate::ui_iced::about::AboutWindowState::close`]).
+    CloseRequested,
+}
+
+/// Batch prompt-processing dialog channel ([TASK-017b3], BATCH-001..BATCH-014).
+///
+/// Grounded in the egui dialog (`src/app/ui/batch_dialog.rs:65-183`) and the
+/// `BatchDialogConfig` state it mutates
+/// (`src/app/agent/batch/types.rs:224-253`). This channel carries **only the
+/// selection state egui kept in that config** — the directory, prompt,
+/// wildcard pattern, mode and concurrency the user is composing.
+///
+/// Everything else the batch dialog does already rides [`Message::Command`]
+/// and is deliberately **not** duplicated here:
+///
+/// * open — `UserCommand::OpenBatchDialog` (`user_command.rs:64`);
+/// * start — `UserCommand::StartBatch(BatchConfig)` (`:134`), which the
+///   Process button emits directly because the composed config *is* the
+///   self-contained intent ([FMD-068]);
+/// * cancel / close — `UserCommand::CancelBatch` (`:136`), which is what
+///   the egui dialog published on both its Cancel button and on window
+///   close (`ui/batch_dialog.rs:54-61`, `:174-178`).
+///
+/// So unlike [`DialogMessage`], no validation round-trip lives here: the
+/// Process button is gated by
+/// [`crate::ui_iced::batch_dialog::BatchDialogViewModel::can_start`] at
+/// render time, mirroring egui's `is_config_valid` gate
+/// (`ui/batch_dialog.rs:152`, `:232-240`), and an invalid composition
+/// simply never emits `StartBatch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchDialogMessage {
+    /// The directory pick-list selection changed (`None` clears it).
+    DirectorySelected(Option<usize>),
+    /// A prompt-candidate row was picked (`None` clears the selection).
+    PromptSelected(Option<usize>),
+    /// The wildcard pattern field text changed (File mode only).
+    PatternChanged {
+        /// The field's new contents.
+        text: String,
+    },
+    /// The File / Directory mode radio changed.
+    ModeChanged(crate::agent::batch::types::BatchMode),
+    /// The concurrency pick-list selection changed (1..=8).
+    ConcurrencyChanged(u8),
+}
+
+/// Tools dialog window channel ([TASK-017b3], UI-051..UI-060).
+///
+/// Deliberately a **single-variant** channel. Every action the tools dialog
+/// performs is already a self-contained [`UserCommand`] —
+/// `SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` /
+/// `ForgetMcpAuth` (`user_command.rs:80-88`) — and the iced card emits
+/// those through [`Message::Command`] exactly as the egui dialog published
+/// them (`ui/tools_dialog.rs:197-293`). The egui dialog also keeps **no
+/// view-local state at all**: no search box, no selection, no expansion.
+///
+/// The one thing with no [`UserCommand`] equivalent is *closing* it. The
+/// egui dialog closed via its title-bar `X` (`ui/tools_dialog.rs:61-63`),
+/// a window-frame widget that does not exist for an in-window iced modal,
+/// so the scrim click / Escape needs its own dismiss message. Opening is
+/// still `UserCommand::OpenToolsDialog` (`:66`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolsDialogMessage {
+    /// The scrim was clicked or Escape pressed — hide the tools dialog.
     CloseRequested,
 }
