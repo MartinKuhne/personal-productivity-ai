@@ -63,10 +63,17 @@
 //!   `iced::widget::table`, over the reused tool-group registry, with
 //!   per-row enable / restart / OAuth actions riding the command channel
 //!   ([TASK-017b3], UI-051..UI-060).
+//! - [`agent_debug`] — the agent debug window: the streaming LLM-traffic
+//!   list over the reused `AgentSession` debug-entry buffer, with the
+//!   codebase's only `CollapsingHeader` replaced by an explicit
+//!   expanded-id set, the [TASK-016] auto-scroll intent rule reused for
+//!   its stick-to-bottom, and search / auto-scroll / json-rows / Clear
+//!   riding the command channel ([TASK-017b4], UI-048).
 //!
 //! `update`, `tree` and `agent` follow in Phase 3/4.
 
 pub mod about;
+pub mod agent_debug;
 pub mod attributions;
 pub mod batch_dialog;
 pub mod dialogs;

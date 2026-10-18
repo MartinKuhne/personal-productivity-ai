@@ -6,9 +6,9 @@
 //! configuration file or database is touched.
 
 use super::{
-    AboutMessage, AgentMessage, BatchDialogMessage, DialogMessage, EditorMessage, LayoutMessage,
-    LogsMessage, Message, RenderMessage, SearchMessage, TabMessage, ThemeMessage,
-    ToolsDialogMessage, TreeMessage, WindowMessage, WindowSnapshot,
+    AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, DialogMessage,
+    EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage, SearchMessage, TabMessage,
+    ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage, WindowSnapshot,
 };
 use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
@@ -64,6 +64,7 @@ fn one_message_per_channel() -> Vec<Message> {
             text: "my note".into(),
         }),
         Message::About(AboutMessage::AttributionsRequested),
+        Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 3 }),
     ]
 }
 
@@ -72,10 +73,11 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     let messages = one_message_per_channel();
     assert_eq!(
         messages.len(),
-        13,
+        14,
         "TASK-021 fixes the channel set at window, layout, command, tree, tab, \
          editor, agent, search, logs, theme; TASK-015 adds render; TASK-017b1 \
-         adds dialog; TASK-017b2 adds about"
+         adds dialog; TASK-017b2 adds about; TASK-017b4 adds agent_debug \
+         (batch and tools, added by TASK-017b3, are not represented here)"
     );
 
     assert!(matches!(messages[0], Message::Window(_)));
@@ -91,6 +93,7 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     assert!(matches!(messages[10], Message::Render(_)));
     assert!(matches!(messages[11], Message::Dialog(_)));
     assert!(matches!(messages[12], Message::About(_)));
+    assert!(matches!(messages[13], Message::AgentDebug(_)));
 }
 
 #[test]
@@ -610,5 +613,59 @@ fn test_tool_group_actions_ride_the_command_channel_not_the_tools_channel() {
             "a tool-group action must ride the command channel"
         );
         assert_ne!(action, Message::Tools(ToolsDialogMessage::CloseRequested));
+    }
+}
+
+#[test]
+fn test_agent_debug_channel_carries_only_what_the_command_channel_cannot() {
+    // [TASK-017b4]: search text, auto-scroll, the JSON row count, Clear
+    // and close are already `UserCommand`s, so the AgentDebug channel
+    // holds only disclosure plus the two deferred/runtime payloads iced
+    // will not let a view handle itself.
+    let channel = [
+        Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 1 }),
+        Message::AgentDebug(AgentDebugMessage::CopyJsonRequested {
+            content: "{\"a\": 1}".to_string(),
+        }),
+        Message::AgentDebug(AgentDebugMessage::ScrollReported {
+            offset_y: 1.0,
+            viewport_height: 2.0,
+            content_height: 3.0,
+        }),
+    ];
+
+    for message in channel {
+        assert!(
+            matches!(message, Message::AgentDebug(_)),
+            "a debug-window transition must arrive on its own channel"
+        );
+        assert!(
+            !matches!(message, Message::Command(_)),
+            "a debug-window transition must not masquerade as a published command"
+        );
+    }
+}
+
+#[test]
+fn test_agent_debug_settings_stay_on_the_command_channel() {
+    // No AgentDebug-channel variant duplicates these: the egui window
+    // published/mutated exactly these, and the iced card keeps doing so.
+    let commands = [
+        Message::Command(UserCommand::SetDebugSearchText("turn".into())),
+        Message::Command(UserCommand::SetDebugAutoScroll(true)),
+        Message::Command(UserCommand::SetDebugJsonRows(24)),
+        Message::Command(UserCommand::ClearDebugEntries),
+        Message::Command(UserCommand::ToggleDebugWindow(false)),
+    ];
+
+    for command in commands {
+        assert!(
+            matches!(command, Message::Command(_)),
+            "a debug-window setting must ride the command channel"
+        );
+        assert_ne!(
+            command,
+            Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 0 })
+        );
     }
 }

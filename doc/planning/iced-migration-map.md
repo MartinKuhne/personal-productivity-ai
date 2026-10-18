@@ -2591,3 +2591,192 @@ new files.
    was barred from touching.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is
    mapped from existing requirements only.
+
+### TASK-017b4 agent-debug verification log (Agent debug window — 2026-10-18)
+
+**Scope delivered: the agent debug window only.** New files:
+`src/app/ui_iced/agent_debug.rs` + `agent_debug_tests.rs` sidecar
+(62 tests), one `pub mod` line plus a module-doc bullet in
+`src/app/ui_iced/mod.rs`, a new `AgentDebug` message channel in
+`src/app/ui_iced/message.rs` (+2 `message_tests.rs` tests, channel
+count 13 → 14) and one new string constant
+(`DEBUG_OMITTED_TOOLS_PLACEHOLDER`) in `src/app/ui/strings.rs`. The
+egui `ui/agent_debug_window.rs` was not touched.
+
+**Debug-entry data source — reused unchanged ([RUST-051]).**
+
+| Field | Source |
+| --- | --- |
+| Entries | `AgentSession::state().debug_entries` (`src/agent/session.rs:33`, appended by `push_debug_entry` at `:215`) — the exact read the egui window performed (`ui/agent_debug_window.rs:21`) |
+| Types | `AgentDebugEntry` / `DebugEntryKind` / `DebugEntryRow` (`src/agent/events.rs:23-62`), reached through the existing bus re-export `crate::bus::events::debug` (`src/app/bus/events/debug.rs:3`); re-exported, never re-declared |
+| Search / auto-scroll / json-rows / open flag | `AgentPanelState` (`src/app/ui/agent/panel_state.rs:13-31`) — the UI-owned panel state the egui window mutated in place, read through the same four fields |
+| External-data markers | `crate::agent::datamark::{EXTERNAL_DATA_START, EXTERNAL_DATA_END}` (`src/agent/datamark.rs:27`, `:32`) — the envelope the agent itself writes, not re-typed literals ([RUST-021]) |
+
+**Live streaming needed no new plumbing.** The agent appends to that same
+`Vec` while a turn runs; the [TASK-022] subscription bridge turns each
+inbound `AgentEvent::DebugEntry` into a redraw and the next snapshot
+picks the new rows up. The view never pulls from a live stream at render
+time ([FMD-065]) and never writes to the buffer ([FMD-069]).
+
+**`CollapsingHeader` → an explicit expanded-id set.**
+`ui/agent_debug_window.rs:170` was the only `CollapsingHeader` in the
+codebase (row A9 of this map, `:30`) and iced 0.14 has no equivalent.
+The mapping's second offered shape — a disclose-arrow `Row` — is what
+shipped:
+
+```rust
+mouse_area(container(Row[chevron, "HH:MM:SS.fff  [Kind]  summary"]))
+    .on_press(Message::AgentDebug(AgentDebugMessage::EntryToggled { id }))
+```
+
+The state egui kept inside the header widget's memory is a
+`HashSet<usize>` held by `AgentDebugWindowState`, copied into the
+view-model through `with_expanded`. A row id is the entry's index in the
+**raw** debug-entry list — egui's `orig_idx` (`:106`), the very value
+its `push_id(orig_idx)` / `id_salt(("entry_header", id_salt))` used —
+so row identity is identical across both builds, and egui's
+`.default_open(false)` maps to the empty set
+`AgentDebugWindowState::new()` starts from. The chevron is
+`chevron_glyph(expanded)` → `ICON_CARET_DOWN` / `ICON_CARET_RIGHT` in
+the Phosphor font the top bar already loads. Session-boundary rows stay
+**non-clickable**: egui's divider had no disclosure either.
+
+Two reducer obligations follow from positional ids ([RUST-041] drift
+note): `UserCommand::ClearDebugEntries` must be followed by
+`AgentDebugWindowState::collapse_all()` (a stale id would silently
+re-expand an unrelated new entry), and `close()` deliberately **keeps**
+the set — hiding the window in egui left header states untouched, so
+reopening shows what the user had open.
+
+**Auto-scroll — the [TASK-016] intent model, reused not copied.**
+`AgentDebugViewModel::follow_intent` delegates straight to
+`crate::ui_iced::logs::should_follow`; the report type is the reused
+`logs::ScrollSnapshot`, captured by the reused `logs::scroll_snapshot`.
+`follow_intent_is_the_logs_rule_itself` asserts agreement with
+`logs::should_follow` across five offsets, so the two stick-to-bottom
+windows cannot drift. The list carries a stable `DEBUG_SCROLLABLE_ID` so
+the reducer can aim `operation::scrollable::scroll_to` at it — a widget
+without an explicit id cannot be scrolled programmatically at all.
+
+**`json_rows` semantics — a viewport size, not a truncation.** egui
+computed `max_h = text_style_height(Monospace) × json_rows` and capped
+a `ScrollArea` with it (`:204-207`), so an expanded body shows
+`min(lines, json_rows)` lines and scrolls to reach the rest. Ported as
+`visible_json_lines` (the count) and `json_body_height` (the cap).
+Because iced's default `LineHeight` is `Relative(1.3)`
+(`iced_core-0.14.0/src/text.rs:215-218`), `JSON_LINE_HEIGHT =
+JSON_TEXT_SIZE × 1.3` is the iced equivalent of egui's
+`text_style_height(Monospace)`. The body is drawn `Wrapping::None`
+(iced's default is `Word`) to reproduce egui's
+`desired_width(f32::INFINITY)` horizontal scroll. The catalogue is
+egui's `[8, 16, 24, 32, 64]` (default `8` from
+`AgentPanelState::default`); `json_row_options(current)` additionally
+keeps an off-catalogue value visible, because `pick_list` can only
+display a value it can find among its options while
+`UserCommand::SetDebugJsonRows` accepts any `usize`. Boundary coverage:
+`json_rows == 0` ⇒ 0 visible lines and `0.0` height (egui's collapsed
+area), `1`, and `usize::MAX`.
+
+**Message-channel choices.**
+
+```rust
+// New: only disclosure + the two things iced will not let a view do.
+pub enum AgentDebugMessage {
+    EntryToggled { id: usize },
+    CopyJsonRequested { content: String },
+    ScrollReported { offset_y: f32, viewport_height: f32, content_height: f32 },
+}
+```
+
+* **Settings and close stay on `Message::Command`.**
+  `SetDebugSearchText` / `SetDebugAutoScroll` / `SetDebugJsonRows` /
+  `ClearDebugEntries` / `ToggleDebugWindow(false)`
+  (`bus/events/user_command.rs:152-160`) are exactly what the egui
+  window published or mutated to the same effect
+  (`ui/agent_debug_window.rs:41-53`, `:149-153`). Nothing duplicated.
+* **`EntryToggled` is view-local disclosure, not application state**, so
+  it is deliberately *not* a `UserCommand` — there is no command to
+  reuse and inventing one would put widget state on a shared contract.
+* **`CopyJsonRequested` is deferred intent**: egui copied with
+  `Ui::copy_text` inside the click handler (`:177-184`) while iced
+  exposes the clipboard to `update` only
+  (`iced_core-0.14.0/src/clipboard.rs`), so the exact payload rides the
+  message — the same shape `RenderMessage::CopyCodeRequested` and
+  `AboutMessage::CopyCommitHashRequested` use.
+* **`ScrollReported` is a runtime report**, the same class of payload
+  `LogsMessage::ScrollReported` and `LayoutMessage::CursorMoved` carry.
+* **No `CloseRequested` variant.** The egui window's own close path *is*
+  `UserCommand::ToggleDebugWindow(false)`, so `dismiss_command()` reuses
+  it instead of adding a fourth variant.
+
+**Display pipeline — ported in the egui order.** `display_json` =
+replace a duplicated `tools` array → `unescape_json_strings` →
+`serde_json::to_string_pretty`. `duplicate_tool_indices` keeps the
+**first** `tools`-bearing entry of each session whole and elides later
+ones (the agent re-sends the same catalog every turn), with a
+`SessionBoundary` resetting the flag. It runs on the **filtered** list,
+so searching the first tools entry away promotes the second — pinned by
+`the_dedup_runs_on_the_filtered_list_not_the_raw_buffer`. The
+un-escaper turns string-encoded request/response bodies into real
+structure and rewrites `<<<EXTERNAL_DATA>>> … <<<END_EXTERNAL_DATA>>>`
+envelopes into `{"EXTERNAL_DATA": {provenance, data}}`; unparseable
+bracketed strings and headerless envelopes are left exactly as they
+arrived.
+
+**Not ported, with reasons.**
+
+1. **The `egui::Window` chrome** (resizable/collapsible frame,
+   `default_size([600.0, 1600.0])`, title-bar `X`). The card is content
+   only; `CARD_WIDTH = 600.0` keeps the egui width and the list is
+   `Length::Fill`, so the overlay host ([TASK-023]) controls the height
+   the way egui's monitor clamp did.
+2. **The read-only `TextEdit` became a plain `text` label.** iced 0.14
+   has no read-only text area, and a label is exactly what egui's
+   `interactive(false)` multiline `TextEdit` rendered.
+3. **No search placeholder.** egui's `search_field` is a `Search:` label
+   plus a bare single-line edit (`ui/widgets.rs:37-40`); there was no
+   hint text to carry over.
+4. **No collapse-all control** — egui has none. `collapse_all()` exists
+   on the state purely for the reducer's clear-entries path, not as a
+   widget.
+5. **The filter / dedup / un-escape helpers are re-implemented, not
+   `pub use`d.** They are private to `ui/agent_debug_window.rs`, and
+   [RUST-051] reuse would have required editing that file, which this
+   chunk was barred from doing. The duplication disappears when Phase 5
+   deletes the egui layer.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (workspace,
+clean); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS;
+`cargo fmt` run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
+--status-level fail --show-progress none` PASS (**1989 run / 1989
+passed / 1 skipped**), of which **64** are this task's new tests (62
+`ui_iced::agent_debug` + 2 `ui_iced::message`); `cargo doc --no-deps
+--quiet -p fastmd` PASS (no warnings). `cargo clippy -p fastmd
+--all-targets` still reports the same **12 pre-existing** test-only
+lints in other tasks' files (`markdown/link_scanner_tests.rs`,
+`ui/batch_dialog_tests.rs`, `ui_iced/panels/left_tests.rs`,
+`ui_iced/render/code_tests.rs`, `config/config_tests.rs`,
+`ui_iced/message_tests.rs`) — none in the new files.
+
+**Needs the orchestrator's eyes.**
+
+1. **Three reducer obligations for [TASK-022/023]:** apply
+   `collapse_all()` whenever the debug buffer is cleared; store the last
+   `ScrollReported` and dispatch
+   `operation::scrollable::scroll_to(DEBUG_SCROLLABLE_ID, …)` when
+   `follow_intent` returns true; map `ToggleDebugWindow` /
+   `ToggleAgentDebugWindowShortcut` onto `AgentDebugWindowState::toggle`.
+   None of them can be enforced from the pure layer.
+2. **Search now round-trips through the command channel** (egui mutated
+   `AgentPanelState::debug_search_text` in place). If per-keystroke
+   latency is visible, the fix is applying `SetDebugSearchText`
+   synchronously inside `update`, not adding a second channel.
+3. **`message_tests::one_message_per_channel` still omits `Batch` and
+   `Tools`** — TASK-017b3 never added its two channels to that list. It
+   now counts 14 with `AgentDebug`. Flagged rather than silently
+   rebased; worth a follow-up to make the list exhaustive.
+4. **The egui filter/dedup/un-escape duplication** (deviation 5) stays
+   until the egui window is deleted. Consolidating now means editing a
+   file this chunk could not touch.
+5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

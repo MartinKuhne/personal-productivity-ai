@@ -691,6 +691,11 @@ pub const DEBUG_JSON_ROWS_LABEL: &str = "JSON rows:";
 /// Label for the copy-JSON button in a debug entry's expanded body.
 pub const DEBUG_COPY_JSON_BUTTON: &str = "Copy JSON";
 
+/// Placeholder that replaces a `tools` array an earlier entry in the same
+/// session already showed, so the same catalog is not repeated on every
+/// turn of the agent debug window.
+pub const DEBUG_OMITTED_TOOLS_PLACEHOLDER: &str = "[omitted - see earlier turn]";
+
 // Inline Editor Widget
 /// Title-bar text of the inline text editor window.
 pub const INLINE_EDITOR_WINDOW_TITLE: &str = "Inline Editor";
@@ -836,6 +841,12 @@ mod tests {
         assert_eq!(DEBUG_KIND_OUTGOING, "Outgoing");
         assert_eq!(DEBUG_KIND_INCOMING, "Incoming");
         assert_eq!(DEBUG_KIND_TOOL_RESULTS, "ToolResults");
+        assert_eq!(DEBUG_JSON_ROWS_LABEL, "JSON rows:");
+        assert_eq!(DEBUG_COPY_JSON_BUTTON, "Copy JSON");
+        assert_eq!(
+            DEBUG_OMITTED_TOOLS_PLACEHOLDER,
+            "[omitted - see earlier turn]"
+        );
     }
 
     #[test]

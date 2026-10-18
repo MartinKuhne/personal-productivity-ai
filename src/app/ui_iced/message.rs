@@ -50,8 +50,11 @@
 //!   attributions window; the credits list itself is unchanged, only its
 //!   placement moved out of the About dialog), `Batch` ([TASK-017b3] — the
 //!   batch dialog's composed selection only; open / start / cancel stay on
-//!   the command channel) and `Tools` ([TASK-017b3] — the tools dialog's
-//!   dismiss; every tool-group action stays on the command channel).
+//!   the command channel), `Tools` ([TASK-017b3] — the tools dialog's
+//!   dismiss; every tool-group action stays on the command channel) and
+//!   `AgentDebug` ([TASK-017b4] — the agent debug window's disclosure
+//!   state plus its two deferred intents; search, auto-scroll, the JSON
+//!   row count, Clear and close all stay on the command channel).
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
@@ -138,6 +141,9 @@ pub enum Message {
     Batch(BatchDialogMessage),
     /// The tools dialog's window visibility ([TASK-017b3], UI-051..UI-060).
     Tools(ToolsDialogMessage),
+    /// The agent debug window's own disclosure state ([TASK-017b4],
+    /// UI-048 / REQ-008).
+    AgentDebug(AgentDebugMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -713,4 +719,78 @@ pub enum BatchDialogMessage {
 pub enum ToolsDialogMessage {
     /// The scrim was clicked or Escape pressed — hide the tools dialog.
     CloseRequested,
+}
+
+/// Agent debug window channel ([TASK-017b4], UI-048 / REQ-008).
+///
+/// Grounded in the egui debug window (`src/app/ui/agent_debug_window.rs`)
+/// and the debug-entry stream it renders
+/// (`AgentSession::state().debug_entries`, `src/agent/session.rs:33`).
+///
+/// This channel carries **only what the command channel cannot express**.
+/// Everything else the window does already rides [`Message::Command`]:
+///
+/// * search text — `UserCommand::SetDebugSearchText` (`user_command.rs:158`);
+/// * auto-scroll — `UserCommand::SetDebugAutoScroll` (`:160`);
+/// * the JSON row count — `UserCommand::SetDebugJsonRows` (`:156`);
+/// * Clear — `UserCommand::ClearDebugEntries` (`:154`);
+/// * close — `UserCommand::ToggleDebugWindow(false)` (`:152`), which is
+///   literally what the egui window published when its title-bar `X` was
+///   used (`ui/agent_debug_window.rs:149-153`), so no
+///   `CloseRequested` variant is invented here.
+///
+/// What is left is the disclosure state egui kept inside its
+/// `CollapsingHeader` widget memory — the only one in the codebase
+/// (`ui/agent_debug_window.rs:170`) — plus the two things iced will not
+/// let a view do: copy to the clipboard and report its own viewport
+/// geometry.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentDebugMessage {
+    /// The clickable header of entry `id` was pressed, replacing
+    /// `egui::CollapsingHeader`'s built-in toggle. `id` is the entry's
+    /// index in the raw debug-entry list — egui's `orig_idx`
+    /// (`ui/agent_debug_window.rs:106`) — and the reducer flips it in
+    /// [`crate::ui_iced::agent_debug::AgentDebugWindowState`].
+    ///
+    /// View-local disclosure, not application state, so it is
+    /// deliberately **not** a [`UserCommand`].
+    EntryToggled {
+        /// The row whose expansion flipped.
+        id: usize,
+    },
+    /// The "Copy JSON" button in an expanded entry body was pressed;
+    /// `content` is the exact pretty-printed JSON to place on the
+    /// clipboard.
+    ///
+    /// Deferred intent in the same sense as
+    /// [`RenderMessage::CopyCodeRequested`] and
+    /// [`AboutMessage::CopyCommitHashRequested`]: egui copied inside the
+    /// click handler with `Ui::copy_text`
+    /// (`src/app/ui/agent_debug_window.rs:177-184`), while iced exposes
+    /// the clipboard to `update` only
+    /// (`iced_core-0.14.0/src/clipboard.rs`), so the payload travels
+    /// with the message and the reducer writes it.
+    CopyJsonRequested {
+        /// The JSON text to copy.
+        content: String,
+    },
+    /// The entry list's viewport geometry changed.
+    ///
+    /// The auto-scroll counterpart of [`LogsMessage::ScrollReported`]:
+    /// egui applied `stick_to_bottom` inside its own `ScrollArea` state
+    /// (`ui/agent_debug_window.rs:103`), whereas iced exposes the
+    /// geometry only through `Scrollable::on_scroll`
+    /// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the
+    /// viewport has to reach `update` as a message before the reused
+    /// [`crate::ui_iced::logs::should_follow`] rule can decide
+    /// anything. A runtime report, not user intent — the same class of
+    /// payload [`LayoutMessage::CursorMoved`] carries.
+    ScrollReported {
+        /// How far the content is scrolled down, in logical points.
+        offset_y: f32,
+        /// Height of the visible viewport, in logical points.
+        viewport_height: f32,
+        /// Total height of the scrolled content, in logical points.
+        content_height: f32,
+    },
 }
