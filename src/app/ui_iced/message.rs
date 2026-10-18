@@ -45,7 +45,10 @@
 //!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`, `Render`,
 //!   `Dialog` ([TASK-017b1] — the small name-entry / move /
 //!   delete-confirmation dialogs; the delete *confirmation* itself is new,
-//!   see the `DialogMessage` docs and the migration-map drift note).
+//!   see the `DialogMessage` docs and the migration-map drift note) and
+//!   `About` ([TASK-017b2] — the About window plus the third-party
+//!   attributions window; the credits list itself is unchanged, only its
+//!   placement moved out of the About dialog).
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
@@ -124,6 +127,9 @@ pub enum Message {
     /// Small individual dialogs — create-directory / create-document /
     /// rename / move / delete-confirmation ([TASK-017b1], UI-011/UI-015).
     Dialog(DialogMessage),
+    /// The About window and the third-party attributions window
+    /// ([TASK-017b2]).
+    About(AboutMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -585,4 +591,55 @@ pub enum DialogMessage {
         /// The folder the user picked as the move target.
         path: PathBuf,
     },
+}
+
+/// About / attributions window channel ([TASK-017b2]).
+///
+/// Grounded in the egui About dialog (`src/app/ui/about_dialog.rs`) and
+/// the attribution catalog it renders (`src/app/ui/attributions.rs`).
+/// This is a **separate channel from [`DialogMessage`]**, on purpose:
+/// `DialogMessage`'s vocabulary is name-entry shaped (`NameChanged`,
+/// `Submitted`, `DestinationSelected`) and drives
+/// [`crate::ui_iced::dialogs::DialogState`]'s validation, none of which
+/// an About or credits window has. Merging them would put two unrelated
+/// state models behind one message type; the reducer would have to
+/// discriminate on payload kind anyway.
+///
+/// Opening the About window is **not** here — that is user intent and
+/// already rides [`Message::Command`] as `UserCommand::OpenAboutDialog`
+/// (`src/app/bus/events/user_command.rs:68`), which the hamburger emits
+/// (`ui_iced/panels/top.rs:439`). The reducer maps that command onto
+/// [`crate::ui_iced::about::AboutWindowState::open_about`]. What lives
+/// here is only what the rendered cards can do to *their own* visibility
+/// and the two side effects egui performed inside its click handler that
+/// iced only allows in `update`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AboutMessage {
+    /// The "View third-party attributions…" button was pressed in the
+    /// About card — show
+    /// [`crate::ui_iced::attributions::attributions_view`].
+    AttributionsRequested,
+    /// The commit-hash cell was clicked. egui copied the full hash with
+    /// `ctx.copy_text` inside the click handler
+    /// (`src/app/ui/about_dialog.rs:68-77`); iced exposes the clipboard
+    /// only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so the
+    /// reducer performs the write. The cell never emits this on an
+    /// `"unknown"` build (spec FR-007) — see
+    /// [`crate::ui_iced::about::commit_copy_press`].
+    CopyCommitHashRequested,
+    /// A repository link in the attributions list was clicked; `url` is
+    /// the catalog's repository URL verbatim. Deferred intent in the same
+    /// sense as [`RenderMessage::LinkActivated`]: egui pushed
+    /// `egui::OutputCommand::OpenUrl` from inside the click, while a
+    /// pure view may not open a browser, so the URL travels with the
+    /// message and the reducer opens it.
+    RepositoryOpened {
+        /// The repository URL to open.
+        url: String,
+    },
+    /// The Close button, a scrim click or Escape — hide whichever identity
+    /// window is showing. Kept as one variant because the two windows are
+    /// mutually exclusive, so the reducer needs exactly one "hide it"
+    /// transition ([`crate::ui_iced::about::AboutWindowState::close`]).
+    CloseRequested,
 }

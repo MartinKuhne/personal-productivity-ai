@@ -6,8 +6,9 @@
 //! configuration file or database is touched.
 
 use super::{
-    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage,
-    SearchMessage, TabMessage, ThemeMessage, TreeMessage, WindowMessage, WindowSnapshot,
+    AboutMessage, AgentMessage, DialogMessage, EditorMessage, LayoutMessage, LogsMessage, Message,
+    RenderMessage, SearchMessage, TabMessage, ThemeMessage, TreeMessage, WindowMessage,
+    WindowSnapshot,
 };
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
@@ -61,6 +62,7 @@ fn one_message_per_channel() -> Vec<Message> {
         Message::Dialog(DialogMessage::NameChanged {
             text: "my note".into(),
         }),
+        Message::About(AboutMessage::AttributionsRequested),
     ]
 }
 
@@ -69,10 +71,10 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     let messages = one_message_per_channel();
     assert_eq!(
         messages.len(),
-        12,
+        13,
         "TASK-021 fixes the channel set at window, layout, command, tree, tab, \
          editor, agent, search, logs, theme; TASK-015 adds render; TASK-017b1 \
-         adds dialog"
+         adds dialog; TASK-017b2 adds about"
     );
 
     assert!(matches!(messages[0], Message::Window(_)));
@@ -87,6 +89,7 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     assert!(matches!(messages[9], Message::Theme(_)));
     assert!(matches!(messages[10], Message::Render(_)));
     assert!(matches!(messages[11], Message::Dialog(_)));
+    assert!(matches!(messages[12], Message::About(_)));
 }
 
 #[test]
@@ -407,7 +410,7 @@ fn test_debug_messages_are_debuggable() {
     let rendered = format!("{:?}", one_message_per_channel());
     for channel in [
         "Window", "Layout", "Command", "Tree", "Tab", "Editor", "Agent", "Search", "Logs", "Theme",
-        "Render", "Dialog",
+        "Render", "Dialog", "About",
     ] {
         assert!(
             rendered.contains(channel),
@@ -458,4 +461,57 @@ fn test_dialog_channel_covers_every_small_dialog_interaction() {
             "a dialog interaction must not masquerade as a published command"
         );
     }
+}
+
+#[test]
+fn test_about_channel_covers_every_identity_window_interaction() {
+    // [TASK-017b2]: the About + attributions windows' view-local
+    // transitions and deferred intents. Each stays separable so the
+    // reducer can route it.
+    let attributions = Message::About(AboutMessage::AttributionsRequested);
+    let copy_hash = Message::About(AboutMessage::CopyCommitHashRequested);
+    let repo = Message::About(AboutMessage::RepositoryOpened {
+        url: "https://github.com/dtolnay/anyhow".into(),
+    });
+    let close = Message::About(AboutMessage::CloseRequested);
+
+    let all = [
+        attributions.clone(),
+        copy_hash.clone(),
+        repo.clone(),
+        close.clone(),
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for (j, b) in all.iter().enumerate() {
+            if i == j {
+                assert_eq!(a, b);
+            } else {
+                assert_ne!(a, b, "about interactions {i} and {j} must stay separable");
+            }
+        }
+    }
+
+    // The About channel is not the command channel: opening the dialog is
+    // `UserCommand::OpenAboutDialog`, everything else here is view-local.
+    for message in all {
+        assert!(
+            !matches!(message, Message::Command(_)),
+            "an about-window interaction must not masquerade as a published command"
+        );
+    }
+}
+
+#[test]
+fn test_about_channel_is_not_the_small_dialog_channel() {
+    // [TASK-017b2] channel choice: About/attributions deliberately do NOT
+    // ride `Message::Dialog`. A close on one channel must never be
+    // mistakable for a dismiss on the other.
+    assert_ne!(
+        Message::About(AboutMessage::CloseRequested),
+        Message::Dialog(DialogMessage::Dismissed)
+    );
+    assert_ne!(
+        Message::About(AboutMessage::CloseRequested),
+        Message::Dialog(DialogMessage::Cancelled)
+    );
 }

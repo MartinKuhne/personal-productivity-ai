@@ -2127,3 +2127,231 @@ of which **53** are this task's new tests (51 `ui_iced::dialogs` + 1
    label data if the friendlier labels are wanted.
 5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+
+### TASK-017b2 about/attributions verification log (About window + credits window — 2026-10-18)
+
+**Scope delivered: the About window and the third-party attributions
+window only.** `batch_dialog` / `tools_dialog` / `agent_debug_window`
+remain a later chunk. New files: `src/app/ui_iced/about.rs` +
+`about_tests.rs` sidecar (24 tests), `src/app/ui_iced/attributions.rs` +
+`attributions_tests.rs` sidecar (16 tests), two `pub mod` lines plus
+module-doc bullets in `src/app/ui_iced/mod.rs`, a new `About` message
+channel in `src/app/ui_iced/message.rs` (+2 `message_tests.rs` tests) and
+five new string constants plus one formatting helper in
+`src/app/ui/strings.rs`.
+
+**Two modules, not one.** The brief allowed either. Two were chosen because
+the egui originals are two files with two different jobs — a dialog
+(`ui/about_dialog.rs`) and a data catalog (`ui/attributions.rs`) — and
+the iced port keeps that boundary: `about.rs` owns identity, build
+metadata, the license and the window-state model; `attributions.rs` owns
+the credits table. Each stays well under the [RUST-053] size limit and
+neither needs the other's internals (only `close_button` / spacing
+constants are shared).
+
+**Attribution / license data source — reused verbatim, unchanged.**
+`crate::ui::attributions::DIRECT_DEPENDENCIES` (`src/app/ui/attributions.rs:24`),
+the hand-curated `pub const &[Attribution]` of 57 direct third-party
+crates across all four workspace members, alphabetically sorted and
+duplicate-free. It is **not** `cargo-about` output, **not** a generated
+file and there is **no** runtime shell-out in either build — the data is
+compiled in, so the iced view reads it with zero I/O
+(`AttributionsViewModel::from_catalog()` snapshots it with `to_vec()`).
+
+Two honest findings about that catalog:
+
+1. **`Attribution` has no license and no version field** — only
+   `name`, `authors`, `github_url`. The brief asked for "crate name +
+   license + (version/homepage if present)"; the "if present" is *not*
+   present. The credits window therefore shows **Crate / Authors /
+   Repository**, exactly the three columns the egui header already names
+   (`strings::ABOUT_COL_CRATE` / `_AUTHORS` / `_REPO`,
+   `src/app/ui/about_dialog.rs:202-206`). The only license text in the
+   whole app is FastMD's own MIT license, embedded via
+   `include_str!("../../../LICENSE")` and re-flowed by the **reused**
+   `license_display_text()` helper in `src/app/ui/about_dialog.rs:58-64`
+   (hard wraps collapsed into flowing paragraphs, blank-line paragraph
+   breaks preserved). Adding real per-crate license data is a new
+   compile-time pipeline (e.g. a generated `cargo-about` file) — a
+   data-source decision for the orchestrator, not something this port
+   invents.
+2. **The catalog is curated, not derived.** `egui_extras` is listed at
+   `src/app/ui/attributions.rs:76` purely to credit its authors even
+   though it is not a real consumer. That curation is preserved exactly;
+   `attributions_tests.rs` asserts snapshot-equality with the catalog
+   rather than re-deriving it.
+
+**Version source.** `crate::ui::about_dialog::APP_VERSION`
+(`env!("CARGO_PKG_VERSION")`, currently `0.2.0`) — reused, not
+re-declared. **Build metadata** (branch / full hash / short hash / build
+date) is read with `env!` in the new module from the same root `build.rs`
+`cargo:rustc-env` vars the egui dialog reads; the egui copies of those
+consts are module-private, so re-reading the shared env vars is the
+non-invasive reuse (no edit to the egui file).
+
+**View-model shapes.**
+
+```rust
+// ui_iced/about.rs — identity + build metadata + license
+pub struct AboutViewModel {
+    pub app_name: &'static str,          // strings::ABOUT_APP_NAME
+    pub version: &'static str,          // CARGO_PKG_VERSION
+    pub description: &'static str,      // strings::ABOUT_DESCRIPTION (manifest desc)
+    pub copyright: &'static str,        // strings::ABOUT_COPYRIGHT
+    pub branch: &'static str,           // env!("BUILD_BRANCH")
+    pub commit_hash: &'static str,      // env!("BUILD_COMMIT_HASH")
+    pub commit_short_hash: &'static str,// env!("BUILD_COMMIT_SHORT_HASH")
+    pub build_date: &'static str,       // env!("BUILD_DATE")
+    pub license_text: String,           // reflowed MIT body
+    pub attribution_count: usize,       // DIRECT_DEPENDENCIES.len()
+}
+// AboutViewModel::from_build() -> Self          — production snapshot
+// .is_build_metadata_unknown() -> bool          — "unknown" sentinel (FR-007)
+// .version_line() / .commit_tooltip() / .attributions_summary() -> String
+// .view() -> Element<Message>                   — == about_card(&vm)
+
+pub fn about_card(&AboutViewModel) -> Element<Message>   // banner, title,
+    // version, description, Branch/Commit/Built row, license scroll
+    // (200px cap, egui parity), attributions teaser + button, Close
+
+// ui_iced/attributions.rs — the credits list
+pub struct AttributionsViewModel { entries: Vec<Attribution> }
+// .from_catalog() / .with_entries(Vec<Attribution>)
+// .entries() -> &[Attribution]  .count()  .is_empty()  .summary() -> String
+pub fn attributions_view(&AttributionsViewModel) -> Element<Message>  // title,
+    // count line, scrollable 3-column table (340px cap, egui parity), Close
+pub fn attribution_table(&[Attribution]) -> Element<Message>          // iced table
+```
+
+**Banner rendering decision — glyph, not the PNG.** Verified against
+`iced-0.14.0/Cargo.toml`: the `image` feature exists (:83, pulls
+`iced_widget/image`) and `svg` exists (:99, `iced_widget/svg`), but
+**neither is enabled** — `Cargo.toml:55` lists only `wgpu`, `tiny-skia`,
+`fira-sans`, `advanced-shaping` (the DEC-011 minimal-feature decision,
+`doc/planning/iced-migration-map.md:169-173`). So `iced::widget::image`
+and `iced::widget::svg` **do not exist in this build** and the
+compiled-in `assets/icon-32.png`
+(`crate::utils::app_icon::APP_ICON_PNG`) has no widget to live in. The
+banner is the Phosphor bolt (`strings::ICON_LIGHTNING`) drawn with
+`panels::top::phosphor_font()` — the identical stand-in [TASK-011] uses
+for the top-bar "Document + Bolt" mark (`ui_iced/panels/top.rs:596`).
+`banner_glyph()` is a tested constant accessor so swapping in a real image
+later is a one-function change once the `image` feature decision is made.
+
+**Message-channel choice — a new `Message::About` channel, deliberately
+NOT the `Dialog` channel.**
+
+```rust
+pub enum AboutMessage {
+    AttributionsRequested,        // About card's credits button
+    CopyCommitHashRequested,     // commit cell click -> reducer writes clipboard
+    RepositoryOpened { url: String }, // credits row -> reducer opens URL
+    CloseRequested,              // Close button / scrim / Escape
+}
+```
+
+`DialogMessage`'s vocabulary is name-entry shaped (`NameChanged`,
+`Submitted`, `DestinationSelected`) and drives `DialogState`'s
+validation; none of it applies to an About or credits window, and merging
+them would put two unrelated state models behind one message type that
+the reducer would have to discriminate on anyway. Opening the About
+window is **not** in this channel: that is user intent and already rides
+`Message::Command` as `UserCommand::OpenAboutDialog`
+(`src/app/bus/events/user_command.rs:68`), which the iced hamburger
+already emits (`ui_iced/panels/top.rs:439`). Only what the rendered
+cards do to their own visibility, plus the two side effects egui
+performed inside its click handler (clipboard, browser), live here — the
+same deferred-intent shape [TASK-015] established for
+`RenderMessage::LinkActivated`.
+
+**Window state — pure, one window at a time.**
+
+```rust
+pub enum AboutWindow { About, Attributions }        // .title() -> &'static str
+pub struct AboutWindowState { open: Option<AboutWindow> }
+// .new() .is_open() .is_about() .is_attributions() .window()
+// .open(AboutWindow) / .open_about() / .open_attributions() -> bool
+// .close() -> bool                                 // "was anything consumed"
+// .apply(AboutMessage) -> bool                     // did the VISIBLE WINDOW change
+```
+
+`open()` **replaces** whatever was showing — the same one-at-a-time rule
+`DialogState` and `OverlaySlot::open_modal` apply, so a reducer that
+wants the single-blocking-overlay invariant can mirror this state into
+`OverlaySlot<AboutWindow>`. `apply()` returns whether the *visible
+window* changed; `CopyCommitHashRequested` and `RepositoryOpened` return
+`false` while still requiring the reducer's action, which is documented
+on the method.
+
+**Deviations from the egui dialog (deliberate, [RUST-041] notes).**
+
+1. **Attributions moved out of the About dialog.** egui renders the whole
+   57-row catalog inline (`src/app/ui/about_dialog.rs:200-220`); the
+   brief asked for a dedicated credits window, so the About card keeps
+   only the count line plus a `View third-party attributions...` button.
+   This is a visible product-parity change, not a like-for-like port.
+2. **A version row is new** — the egui dialog never displayed
+   `CARGO_PKG_VERSION` even though it owns the constant.
+3. **Copy-to-clipboard is deferred intent.** egui called `ctx.copy_text`
+   inside the click handler (`src/app/ui/about_dialog.rs:68-77`); iced
+   exposes the clipboard only to `update`
+   (`iced_core-0.14.0/src/clipboard.rs`), so the commit cell emits
+   `CopyCommitHashRequested` and the reducer writes it. `MouseArea` has
+   no `on_press_maybe` (`iced_widget-0.14.2/src/mouse_area.rs:38`), so
+   `commit_copy_press(unknown) -> Option<Message>` resolves the handler
+   outside the widget and the caller attaches it only when `Some` — the
+   widget count never changes (AGENTS §6).
+4. **No hover tooltip.** iced 0.14 has no built-in tooltip widget and
+   DEC-005 rules out `iced_aw`, so the full-hash reveal cannot follow the
+   egui shape. `AboutViewModel::commit_tooltip()` still produces the same
+   text for the reducer to surface another way.
+5. **`iced::widget::table` instead of `ui.horizontal` rows.** egui laid
+   the rows out as plain horizontal triples; the port uses the real table
+   widget so the three columns the egui header already names actually
+   align, per the migration map's `egui::Table` → `iced::widget::table`
+   mapping (A5). Column widths follow the rule `logs::log_table` learned:
+   the long URL column carries `Length::Fill` explicitly because iced
+   promotes the first all-`Shrink` column to `Fill`
+   (`iced_widget-0.14.2/src/table.rs:129-133`).
+6. **Empty states never change the widget tree.** An empty catalog renders
+   the same table (header only) with the empty-state text folded into the
+   summary line; an unknown build renders the same commit cell with no
+   press handler.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (workspace,
+clean); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS;
+`cargo fmt` run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
+--status-level fail --show-progress none` PASS (**1825 run / 1825 passed
+/ 1 skipped**), of which **45** are this task's new tests (24
+`ui_iced::about` + 16 `ui_iced::attributions` + 2 `ui_iced::message` +
+3 `ui::strings`); `cargo doc --no-deps --quiet -p fastmd` PASS (no
+warnings). `cargo clippy -p fastmd --all-targets` still reports the same
+**12 pre-existing** test-only lints in other tasks' files
+(`config_tests.rs`, `panels/left_tests.rs`, `render/code_tests.rs`,
+`ui/batch_dialog_tests.rs`, `message_tests.rs:350`,
+`markdown/link_scanner_tests.rs`) — none in the new files.
+
+**Needs the orchestrator's eyes.**
+
+1. **Per-crate license data does not exist.** The reused catalog carries
+   authors and a repo URL only. If the product wants a real License column
+   per crate, that needs a new compile-time data source (a `cargo-about`
+   generated file committed to the repo) — flagged, not invented here.
+2. **`image` / `svg` feature decision.** A real About banner (the
+   `assets/icon-32.png` mark) requires enabling iced's `image` feature,
+   which DEC-011 currently keeps off. `banner_glyph()` / `banner_mark()`
+   are the single seam to change.
+3. **First-run auto-show was NOT ported.** `should_auto_show_about` /
+   `apply_first_run_auto_show` (`src/app/ui/about_dialog.rs:100-123`,
+   spec FR-016) live in the egui + persistence layer and are untouched;
+   [TASK-022] must reuse them and map the decision onto
+   `AboutWindowState::open_about()`. Nothing in this chunk calls them.
+4. **Product-parity change: the catalog is no longer inline in About.**
+   Users must click one more button to see credits. Confirm this is the
+   intended shape.
+5. **`strings::CLOSE_BUTTON` is a new generic const.** Existing modules
+   keep their own `"Close"` constants (`BATCH_CLOSE_BUTTON`,
+   `AGENT_SESSION_CLOSE_BUTTON`); consolidating them is a separate chore.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

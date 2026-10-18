@@ -43,9 +43,20 @@
 //!   move and the delete confirmation, as a pure
 //!   [`crate::ui_iced::dialogs::DialogState`] model with merged name
 //!   validation and cursor-anchored, clamped modal cards ([TASK-017b1]).
+//! - [`about`] — the About window: application identity, `build.rs`
+//!   metadata, the MIT license body and the entry point into the credits
+//!   list, as a pure [`crate::ui_iced::about::AboutViewModel`] snapshot
+//!   with the reducer-held
+//!   [`crate::ui_iced::about::AboutWindowState`] ([TASK-017b2]).
+//! - [`attributions`] — the third-party credits window over the reused
+//!   `crate::ui::attributions::DIRECT_DEPENDENCIES` catalog: a scrollable
+//!   Crate / Authors / Repository table whose rows emit deferred
+//!   open-in-browser intent ([TASK-017b2]).
 //!
 //! `update`, `tree` and `agent` follow in Phase 3/4.
 
+pub mod about;
+pub mod attributions;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;

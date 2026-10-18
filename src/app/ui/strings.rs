@@ -80,6 +80,32 @@ pub const ABOUT_COL_REPO: &str = "Repository";
 /// `on_click` event name fired when the user clicks About FastMD from the hamburger menu.
 pub const ABOUT_EVENT: &str = "about_button";
 
+/// Label for the version row in the About window ([TASK-017b2]).
+pub const ABOUT_VERSION_LABEL: &str = "Version:";
+
+/// One-line product description shown in the About window ([TASK-017b2]).
+/// Read from the `fastmd` package manifest description so the two can
+/// never drift.
+pub const ABOUT_DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
+
+/// Button in the About window that opens the third-party attributions
+/// window ([TASK-017b2]).
+pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON: &str = "View third-party attributions...";
+
+/// Empty-state line for the attributions list ([TASK-017b2]).
+pub const ABOUT_ATTRIBUTIONS_EMPTY: &str = "No third-party dependencies recorded.";
+
+/// Formats the third-party dependency counter shown under the About
+/// window's attributions teaser and the credits window title
+/// ([TASK-017b2]).
+pub fn format_attribution_count(count: usize) -> String {
+    if count == 1 {
+        format!("{count} direct third-party dependency")
+    } else {
+        format!("{count} direct third-party dependencies")
+    }
+}
+
 /// Kind label for an internal (built-in) tool group row.
 pub const TOOLS_KIND_INTERNAL: &str = "Internal";
 
@@ -430,6 +456,10 @@ pub const SELECT_DESTINATION_FOLDER: &str = "Select destination folder:";
 /// Generic OK button label.
 pub const OK_BUTTON: &str = "Ok";
 
+/// Generic Close button label ([TASK-017b2] — the About and attributions
+/// window footers).
+pub const CLOSE_BUTTON: &str = "Close";
+
 /// Window title for create directory dialog.
 pub const CREATE_DIRECTORY_WINDOW: &str = "Create Directory";
 
@@ -765,6 +795,48 @@ mod tests {
         assert_eq!(DEBUG_KIND_OUTGOING, "Outgoing");
         assert_eq!(DEBUG_KIND_INCOMING, "Incoming");
         assert_eq!(DEBUG_KIND_TOOL_RESULTS, "ToolResults");
+    }
+
+    #[test]
+    fn test_about_window_strings() {
+        assert_eq!(ABOUT_VERSION_LABEL, "Version:");
+        assert_eq!(
+            ABOUT_VIEW_ATTRIBUTIONS_BUTTON,
+            "View third-party attributions..."
+        );
+        assert_eq!(
+            ABOUT_ATTRIBUTIONS_EMPTY,
+            "No third-party dependencies recorded."
+        );
+        assert_eq!(CLOSE_BUTTON, "Close");
+    }
+
+    #[test]
+    fn test_about_description_comes_from_the_manifest() {
+        assert!(
+            !ABOUT_DESCRIPTION.trim().is_empty(),
+            "the manifest description must not be empty"
+        );
+        assert!(
+            ABOUT_DESCRIPTION.to_lowercase().contains("markdown"),
+            "ABOUT_DESCRIPTION is `CARGO_PKG_DESCRIPTION`; got {ABOUT_DESCRIPTION:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_attribution_count() {
+        assert_eq!(
+            format_attribution_count(0),
+            "0 direct third-party dependencies"
+        );
+        assert_eq!(
+            format_attribution_count(1),
+            "1 direct third-party dependency"
+        );
+        assert_eq!(
+            format_attribution_count(57),
+            "57 direct third-party dependencies"
+        );
     }
 
     #[test]
