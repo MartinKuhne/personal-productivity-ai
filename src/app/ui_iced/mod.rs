@@ -75,6 +75,17 @@
 //!   thinking-delimiter gate and disclosure, the prompt row with send /
 //!   queue / cancel and the chat-model `pick_list`, and the reused
 //!   follow-the-stream report ([TASK-018], UI-048).
+//! - [`search`] — the content-search view model: query / committed filter /
+//!   result snapshot / in-progress flag as pure transitions, with the
+//!   filesystem scan left to the reused `ui::tree_search` engine and the
+//!   egui result-card predicates extracted as pure functions ([TASK-019],
+//!   UI-050).
+//! - [`subscription`] — the bus → iced bridge: every inbound
+//!   background→UI notification (`ConfigArrived`, `FileEvent`,
+//!   `AgentEvent`, `BackgroundEvent`) plus the `Lagged(n)` dropped-event
+//!   report, folded into one `Subscription<Message>` merged with
+//!   `Subscription::batch`, over a pure `bus_event_to_message` mapper
+//!   ([TASK-019], FMD-065..FMD-067).
 //!
 //! `update` and `tree` follow in Phase 3/4.
 
@@ -93,6 +104,8 @@ pub mod overlay;
 pub mod panels;
 pub mod persisted;
 pub mod render;
+pub mod search;
+pub mod subscription;
 pub mod table_width;
 pub mod theme;
 pub mod tools_dialog;

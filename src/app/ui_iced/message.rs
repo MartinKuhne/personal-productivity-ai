@@ -58,12 +58,15 @@
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
-//! - **Not modelled here (open item for [TASK-019]):** inbound *background →
-//!   UI* notifications (`ConfigArrived`, `FileEvent`, `AgentEvent`,
-//!   `BackgroundEvent`). Those arrive over the subscription bridge rather
-//!   than from a widget; when that bridge is built it will either extend the
-//!   `Logs`/`Agent`/`Tree` channels or add a dedicated inbound channel.
-//!   Nothing is invented for it now.
+//! - **Added by [TASK-019]:** `Inbound` — the *background → UI*
+//!   notification channel (`ConfigArrived`, `FileEvent`, `AgentEvent`,
+//!   `BackgroundEvent`, plus the bus lag report). It is a **dedicated
+//!   channel** rather than new variants on `Logs`/`Agent`/`Tree`, for two
+//!   reasons documented on [`InboundMessage`]: those panel channels are
+//!   widget-only by rule 2 above, and the bus payload enums
+//!   (`AgentEvent`, `BackgroundEvent`, `BackgroundLogEntry`, `AppConfig`)
+//!   do not implement `PartialEq`, so they cannot ride a channel that
+//!   derives it.
 //!
 //! # How the pilot's messages fold in
 //!
@@ -86,10 +89,16 @@
 #[path = "message_tests.rs"]
 mod tests;
 
+use crate::bus::events::AgentEvent;
+use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::LogCategory;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
+use crate::config::AppConfig;
+use crate::ui::tree_search::SearchResultEntry;
 use iced::widget::pane_grid;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The single top-level message of the iced Elm loop ([TASK-021]).
 ///
@@ -144,6 +153,9 @@ pub enum Message {
     /// The agent debug window's own disclosure state ([TASK-017b4],
     /// UI-048 / REQ-008).
     AgentDebug(AgentDebugMessage),
+    /// Inbound *background → UI* notification channel ([TASK-019],
+    /// FMD-065..FMD-067) — the only channel no widget can produce.
+    Inbound(InboundMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -477,6 +489,25 @@ pub enum SearchMessage {
     /// The search was cleared (`✕` button) — the tree view returns
     /// (`TreeSearch::clear`).
     Cleared,
+    /// The content scan the reducer dispatched has finished ([TASK-019]).
+    ///
+    /// **New for the iced port.** egui ran the scan synchronously inside
+    /// the left panel's paint pass (`src/app/ui/panels/left.rs:246-252`),
+    /// so no completion message existed — and a large workspace froze the UI
+    /// while it ran, against [FMD-060]/[FMD-061]. Here the reducer runs the
+    /// *same* reused engine (`crate::ui::tree_search::find_search_results_scoped`)
+    /// in a iced `Task` and reports the outcome through this variant, which
+    /// [`crate::ui_iced::search::SearchViewModel::apply_results`] then
+    /// snapshots — dropping it if a newer committed filter has superseded
+    /// the scan ([FMD-062]).
+    ResultsReady {
+        /// The term the scan actually ran for, echoed back so the reducer can
+        /// detect a superseded (stale) result set.
+        query: String,
+        /// One entry per matching file, exactly as the reused engine returned
+        /// it. Shared so the panel can take a pointer bump per render.
+        results: Arc<Vec<SearchResultEntry>>,
+    },
 }
 
 /// Background-logs panel channel ([TASK-021], [TASK-016], UI-047).
@@ -835,4 +866,120 @@ pub enum AgentDebugMessage {
         /// Total height of the scrolled content, in logical points.
         content_height: f32,
     },
+}
+
+/// Which inbound bus a notification arrived from ([TASK-019]).
+///
+/// Names the four producer channels the bridge in
+/// [`crate::ui_iced::subscription`] reads. The source travels with the
+/// lag report so a warning says *which* bus dropped events, the way the
+/// egui drain loops named them in their `tracing::warn!` calls
+/// (`src/app/orchestrator.rs:97-101`, `:436-440`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BusSource {
+    /// `Bus<ConfigArrived>` — the one-shot configuration handoff (DEC-009).
+    Config,
+    /// `Bus<FileEvent>` — filesystem mutations from the watcher, the
+    /// initial scan, tools and the agent.
+    File,
+    /// `Bus<AgentEvent>` — the agent's streaming turn events.
+    Agent,
+    /// The `std::sync::mpsc` background-event channel carrying
+    /// [`BackgroundEvent`] (`Fs` / `Process` / `McpAuth`).
+    Background,
+}
+
+/// Inbound *background → UI* notification channel ([TASK-019],
+/// FMD-065..FMD-067).
+///
+/// Every other channel of [`Message`] is produced by a widget. This one is
+/// produced only by the subscription bridge
+/// ([`crate::ui_iced::subscription::bus_event_to_message`]), which is the
+/// single place the iced layer touches a live receiver ([FMD-065]: the
+/// notification runs one way — background → UI — and the UI never
+/// publishes back through it; outbound intent rides [`Message::Command`]).
+///
+/// # Why a dedicated channel rather than new `Agent`/`Logs`/`Tree` variants
+///
+/// The [TASK-021] channel rule keeps panel channels for *view-local state*
+/// only; a bus notification is neither view-local nor widget-produced.
+/// Beyond that rule, the payloads simply could not ride them: `AgentEvent`
+/// (`src/app/bus/events/agent.rs:20`), `BackgroundEvent`
+/// (`src/app/bus/events/typed.rs:118`), `BackgroundLogEntry`
+/// (`src/app/bus/events/messages.rs:63`) and `AppConfig`
+/// (`src/app/config/config.rs:81`) derive `Clone` but **not** `PartialEq`,
+/// while every panel channel derives it. Adding them would have meant
+/// editing the bus — which this task is barred from doing — so the payloads
+/// are carried here behind an [`Arc`] and compared by delivery identity.
+///
+/// # Equality
+///
+/// `PartialEq` is hand-written (see the impl) because the opaque payloads
+/// cannot be compared by value:
+///
+/// * [`FileEvent`] and the lag report compare by **value** — both support
+///   `PartialEq` natively.
+/// * `AppConfig`, `AgentEvent` and `BackgroundEvent` compare by
+///   **delivery identity** (`Arc::ptr_eq`): two messages are equal iff they
+///   carry the same shared notification instance. Cloning a [`Message`]
+///   preserves that identity, which is what the [TASK-021]
+///   "clone must preserve the channel and its payload exactly" rule needs;
+///   two independently delivered events are *two deliveries* and never
+///   compare equal, which is the correct answer for a dedup check on
+///   notifications.
+#[derive(Debug, Clone)]
+pub enum InboundMessage {
+    /// DEC-009: the application configuration has been loaded and
+    /// published on `Bus<ConfigArrived>`. The reducer projects it onto the
+    /// agent config, content libraries, batch-directory list and inline
+    /// editor flag exactly as `AppOrchestrator::drain_config_bus` does
+    /// (`src/app/orchestrator.rs:287-331`).
+    ConfigArrived(Arc<AppConfig>),
+    /// A filesystem mutation arrived on `Bus<FileEvent>`.
+    FileChanged(FileEvent),
+    /// An agent lifecycle or streaming event arrived on
+    /// `Bus<AgentEvent>`.
+    Agent(Arc<AgentEvent>),
+    /// A typed background event arrived on the `BackgroundEvent` channel —
+    /// indexer/watcher `Fs` progress, a worker `Process` log entry or file
+    /// load, or an `McpAuth` completion.
+    Background(Arc<BackgroundEvent>),
+    /// A subscriber fell behind a bus and `count` events were discarded
+    /// ([FMD-067], [FMD-072]).
+    ///
+    /// Ported from the egui drain loops' `BroadcastRecvError::Lagged(n)`
+    /// arms (`src/app/orchestrator.rs:96-103`, `:435-449`), which read
+    /// the same count off the same tokio broadcast channel. The reducer
+    /// should surface the loss to the user and re-synchronise on the next
+    /// valid event, as [FMD-067] requires.
+    EventsDropped {
+        /// The bus that discarded events.
+        source: BusSource,
+        /// How many events were discarded.
+        count: u64,
+    },
+}
+
+/// Field-wise equality for [`InboundMessage`] — see the type-level docs for
+/// why this cannot be derived.
+impl PartialEq for InboundMessage {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::ConfigArrived(a), Self::ConfigArrived(b)) => Arc::ptr_eq(a, b),
+            (Self::FileChanged(a), Self::FileChanged(b)) => a == b,
+            (Self::Agent(a), Self::Agent(b)) => Arc::ptr_eq(a, b),
+            (Self::Background(a), Self::Background(b)) => Arc::ptr_eq(a, b),
+            (
+                Self::EventsDropped {
+                    source: source_a,
+                    count: count_a,
+                },
+                Self::EventsDropped {
+                    source: source_b,
+                    count: count_b,
+                },
+            ) => source_a == source_b && count_a == count_b,
+            _ => false,
+        }
+    }
 }

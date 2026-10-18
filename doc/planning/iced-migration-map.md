@@ -2908,3 +2908,265 @@ in other tasks' files (`markdown/link_scanner_tests.rs`,
    pasted multi-paragraph prompt becomes multiple user turns.
 5. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
    from existing requirements only.
+
+### TASK-019 search+bridge verification log (content search + bus→subscription bridge — 2026-10-18)
+
+**Scope delivered: the content-search view model and the bus → iced
+subscription bridge.** New files: `src/app/ui_iced/search.rs` +
+`search_tests.rs` (21 tests), `src/app/ui_iced/subscription.rs` +
+`subscription_tests.rs` (25 tests), two `pub mod` lines plus two
+module-doc bullets in `src/app/ui_iced/mod.rs`, and a message-layer
+extension in `src/app/ui_iced/message.rs` (+4 `message_tests.rs` tests,
+channel count 14 → 15). No egui file, no bus file and no background file
+was touched.
+
+**Verified iced 0.14 runtime primitives (read from the vendored sources,
+not from docs).**
+
+| Primitive | Verified signature | Source |
+| --- | --- | --- |
+| `Subscription::run` | `pub fn run<S>(builder: fn() -> S) -> Self where S: Stream<Item = T> + MaybeSend + 'static, T: 'static` | `iced_futures-0.14.0/src/subscription.rs:182-191` |
+| `Subscription::run_with` | `pub fn run_with<D, S>(data: D, builder: fn(&D) -> S) -> Self where D: Hash + 'static, S: Stream<Item = T> + MaybeSend + 'static, T: 'static` | `iced_futures-0.14.0/src/subscription.rs:198-208` |
+| `Subscription::batch` | `pub fn batch(subscriptions: impl IntoIterator<Item = Subscription<T>>) -> Self` | `iced_futures-0.14.0/src/subscription.rs:212-221` |
+| `Subscription::none` | `pub fn none() -> Self` | `iced_futures-0.14.0/src/subscription.rs:106-110` |
+| `Task::run` | `pub fn run<A>(stream: impl Stream<Item = A> + MaybeSend + 'static, f: impl Fn(A) -> T + MaybeSend + 'static) -> Self where T: 'static` | `iced_runtime-0.14.0/src/task.rs:61-69` |
+| `Task::perform` | `pub fn perform<A>(future: impl Future<Output = A> + MaybeSend + 'static, f: impl FnOnce(A) -> T + MaybeSend + 'static) -> Self` | `iced_runtime-0.14.0/src/task.rs:48-57` |
+| `iced::futures` re-export | `pub use iced_futures::futures;` (and `pub use iced_futures::stream;` on the next line) | `iced-0.14.0/src/lib.rs:484-485` |
+
+Three findings that shaped the design and are worth carrying into
+[TASK-022]/[TASK-023]:
+
+1. **`Subscription::run` cannot carry a live receiver.** Its builder is a
+   bare `fn() -> S` **pointer**, not a closure, so it cannot close over
+   anything. `Subscription::run_with(data, builder)` is the only 0.14
+   form that can, and its `D: Hash` bound is the subscription's identity:
+   the runtime builds the stream once per distinct hash rather than
+   respawning it per `subscription()` call. `SharedReceiver` therefore
+   hashes its `Arc` address, so clones of one handle keep the identity
+   stable across frames while two independent subscriptions never
+   collapse into one.
+2. **An `impl Stream` return type cannot be coerced to that fn pointer** —
+   the opaque type is "more general than" the single `S` the call site
+   infers (E0308). Every lane builder returns a concrete
+   `futures::stream::BoxStream<'static, Message>` instead.
+3. **This build's iced executor is `futures::executor::ThreadPool`, not
+   tokio.** iced's `tokio` feature is off (`iced-0.14.0/Cargo.toml:64-73`
+   default = wgpu/tiny-skia/crisp/web-colors/thread-pool/linux-theme-detection/x11/wayland;
+   `tokio = ["iced_futures/tokio"]` at `:108`), and
+   `backend::default` resolves to `backend::native::thread_pool` when
+   neither `tokio` nor `smol` is on
+   (`iced_futures-0.14.0/src/backend/default.rs:18-22`,
+   `backend/native/thread_pool.rs:4`). The `tokio::sync::*` primitives
+   used here (broadcast, mutex, unbounded mpsc) are reactor-free and poll
+   correctly on that executor, but `tokio::task::*` would panic — which
+   is why the blocking `std::sync::mpsc` background channel is bridged by
+   one dedicated forwarding thread rather than `spawn_blocking`.
+
+**No new crates.** `futures` is reachable through iced itself
+(`iced::futures`, `iced-0.14.0/src/lib.rs:484`), so the streams are
+built with `futures::stream::unfold` + `StreamExt::filter_map`/`boxed`.
+`async-stream` and `tokio-stream` were **not** added — `tokio-stream` is
+in `Cargo.lock` only behind the optional `vector-search` feature
+(`async-openai`'s dependency, `Cargo.lock:386`, `:6590`), so taking it
+as a direct dependency would have compiled it into the default binary for
+no reason. `Cargo.toml` is unchanged.
+
+**Search engine — reused unchanged ([RUST-051]).**
+
+| Piece | Source |
+| --- | --- |
+| Result row type | `SearchResultEntry` (`src/app/ui/tree_search.rs:15-28`), re-exported (`pub use`) from `ui_iced/search.rs` — never re-declared |
+| Scoped engine | `find_search_results_scoped` (`src/app/ui/tree_search.rs:227-301`) — the exact call the egui left panel made (`src/app/ui/panels/left.rs:252`), re-exported, not wrapped |
+| Unscoped engine | `find_search_results` (`src/app/ui/tree_search.rs:308-314`) |
+| Underlying matcher | `fastmd_agent::tools::search::search_files_parallel` / `count_occurrences` / `extract_snippet` — reached through the existing engine, untouched |
+| Match-count label | `strings::format_match_count` (`src/app/ui/strings.rs:189-191`) |
+| Header / empty state | `strings::SEARCH_RESULTS_HEADER` (`:181`), `strings::SEARCH_NO_RESULTS` (`:178`) |
+
+`SearchViewModel` is the egui `TreeSearch` state model
+(`src/app/ui/tree_search.rs:37-146`) minus the scan-on-commit: query text
+stays separate from the committed filter, and results arrive from the
+outside via `apply_results` rather than being produced in place. The
+three presentation predicates the egui result card decided inline
+(`src/app/ui/panels/left.rs:299-323`) are ported as pure functions —
+`shows_match_count` (`match_count > 1`), `shows_relative_path` (non-empty
+and not equal to the file name) and `shows_snippet` — so the already-iced
+`ui_iced/panels/left.rs` card and any future surface share one rule. No
+new user-facing string was needed ([GUD-002] satisfied with existing
+constants; the in-progress flag is internal state and deliberately has no
+label, because the egui build never showed one).
+
+**Why the scan is no longer synchronous.** egui ran it inside the left
+panel's paint pass (`ui/panels/left.rs:246-252`), so a large workspace
+froze the UI — against [FMD-060]/[FMD-061]. The port keeps the same
+engine but moves the call off the UI thread: `submit()` commits the
+trimmed term, drops the stale list and raises the in-progress flag, the
+reducer runs the engine in a `Task`, and `apply_results` snapshots the
+outcome. `apply_results` is **staleness-guarded**: a result whose echoed
+query is not the currently committed filter is dropped without touching
+any state, including the in-progress flag the newer scan still owns
+([FMD-062]). This is why `SearchMessage::ResultsReady { query, results }`
+was added — see "Needs the orchestrator's eyes".
+
+**Full bus-event → `Message` mapping.**
+
+| Bus / channel | Producer | Event | `Message` |
+| --- | --- | --- | --- |
+| `Bus<ConfigArrived>` | `bus/config.rs`, one-shot at startup | `ConfigArrived { config }` | `Inbound(InboundMessage::ConfigArrived(Arc<AppConfig>))` |
+| `Bus<FileEvent>` | watcher, initial scan, UI handlers, tools, agent | `FileEvent { kind: Discovered, paths }` | `Inbound(InboundMessage::FileChanged(event))` |
+| ″ | ″ | `kind: Updated` | ″ |
+| ″ | ″ | `kind: Removed` | ″ |
+| ″ | ″ | `kind: DirDiscovered` | ″ |
+| ″ | ″ | `kind: DirRemoved` | ″ |
+| `Bus<AgentEvent>` | `BusAgentEventObserver` (`bus/events/agent.rs:100`) | `SessionStarted` | `Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
+| ″ | ″ | `SessionFinished` | ″ |
+| ″ | ″ | `Status` | ″ |
+| ″ | ″ | `Thinking` | ″ |
+| ″ | ″ | `ContentDelta` | ″ |
+| ″ | ″ | `ToolCallStarted` | ″ |
+| ″ | ″ | `ToolResult` | ″ |
+| ″ | ″ | `ToolSideEffect` | ″ |
+| ″ | ″ | `DebugEntry` | ″ |
+| ″ | ″ | `TokenUsage` | ″ |
+| ″ | ″ | `Failed` | ″ |
+| `std::sync::mpsc<BackgroundEvent>` | `BackgroundEventSender` (`bus/events/typed.rs:28`) | `Fs(FileParsed)` | `Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
+| ″ | ″ | `Fs(DirParsed)` | ″ |
+| ″ | ″ | `Fs(FileModified)` | ″ |
+| ″ | ″ | `Fs(FileDeleted)` | ″ |
+| ″ | ″ | `Fs(Finished)` | ″ |
+| ″ | ″ | `Fs(FinishedWithoutWatcher)` | ″ |
+| ″ | ″ | `Process(LogEntry)` | ″ |
+| ″ | ″ | `Process(FileLoaded)` | ″ |
+| ″ | ″ | `McpAuth(Completed)` | ″ |
+| any bus, `Lagged(n)` | tokio broadcast channel | dropped-event report | `Inbound(InboundMessage::EventsDropped { source, count })` |
+
+29 event shapes enumerated and covered by tests; every one maps to
+`Some`. `bus_event_to_message` returns `Option<Message>` and no current
+event produces `None` — every payload on these four buses is
+UI-observable, which is what the egui drain loops demonstrated. The
+`Option` is the deliberate seam where a future filter (throttle a chatty
+producer, suppress another session's events) can drop a class of events
+without touching the stream plumbing; the streams drop `None`s through
+`filter_map`.
+
+**Why one dedicated `Inbound` channel instead of new `Agent`/`Logs`/`Tree`
+variants** (the [TASK-021] module doc left this open both ways). Two
+independent reasons:
+
+1. **Channel rule.** [TASK-021] rule 2 keeps panel channels for
+   *view-local state* produced by a widget. A bus notification is neither.
+2. **Type-level blocker.** `AgentEvent` (`bus/events/agent.rs:20`),
+   `BackgroundEvent` (`bus/events/typed.rs:118`), `BackgroundLogEntry`
+   (`bus/events/messages.rs:63`) and `AppConfig`
+   (`src/app/config/config.rs:81`) derive `Clone` but **not**
+   `PartialEq`, while every panel channel derives it. Riding them would
+   have meant editing the bus, which this task is barred from doing.
+   `InboundMessage` therefore carries the opaque payloads behind an
+   `Arc` with a hand-written `PartialEq`: **delivery identity**
+   (`Arc::ptr_eq`) for `AppConfig`/`AgentEvent`/`BackgroundEvent`, and
+   real **value** equality for `FileEvent` and the lag report, which
+   support `PartialEq` natively. Cloning a `Message` preserves the shared
+   instance (so the [TASK-021] "clone must preserve the payload exactly"
+   rule holds), while two independently delivered events are two
+   deliveries and never compare equal — the correct answer for a dedup
+   check on notifications.
+
+**FMD-065..FMD-067 handling.**
+
+* **[FMD-065] single direction.** The bridge only ever *reads*. It holds
+  no `Bus::publish` path, no `BackgroundEventSender` and no
+  `UserCommand` producer; the UI's outbound half is `Message::Command`
+  and the [TASK-022] reducer. The four handles are receive-only wrappers
+  around `Bus::subscribe_async` (`bus/core.rs:77-79`) and the std mpsc
+  receiver.
+* **[FMD-066] order per publisher.** Each lane is one FIFO consumer of
+  one publisher, and tokio broadcast preserves per-sender order; the
+  `test_stream_delivers_events_in_publish_order` test pins four publishes
+  arriving in order. No merging that could reorder across buses — the four
+  lanes stay separate inside `Subscription::batch`.
+* **[FMD-067] loss notification + re-sync.** Ported from the egui drain
+  loops, which read `BusReader::try_recv_exposing_lag() →
+  BroadcastRecvError::Lagged(n)` (`bus/core.rs:149-151`) and handled it
+  at `orchestrator.rs:96-103` (user commands) and `:435-449` (agent
+  events). The async equivalent is `Receiver::recv() →
+  Err(RecvError::Lagged(n))` — the same count off the same channel. On
+  lag the bridge (a) emits `tracing::warn!` with
+  `dropped_events = n` and the bus name, and (b) forwards
+  `InboundMessage::EventsDropped { source, count }` so the reducer can
+  surface the loss and re-synchronise on the next valid event, then
+  **keeps streaming** — a lag is not a disconnect. Only `Closed` ends a
+  stream. The bridge applies this to **all four** buses; the egui build
+  only did it for the agent and user-command buses, silently mapping
+  `Lagged` to `Empty` on the config bus (`orchestrator.rs:292-302`) and
+  not exposing lag on the file bus at all (`:128`).
+* **[FMD-072] count, not silence.** Both the warning and the message
+  carry the count; no `Lagged` arm discards it.
+
+**Subscription shape.** `subscription(&BusReceivers) ->
+iced::Subscription<Message>` = `Subscription::batch([...])` of four
+`Subscription::run_with(handle, lane_builder)` recipes, ready to pass
+straight to `.subscription(...)` in [TASK-022]. `BusReceivers::new(...)`
+subscribes **eagerly**, before the producers run — `Bus::publish`
+delivers to nobody with no subscribers (`bus/core.rs:87-91`) and
+`ConfigArrived` is published exactly once at startup, so a lazily
+subscribed handle would lose DEC-009 entirely. Cloning the struct is four
+`Arc` bumps and preserves every identity.
+
+**Gate results (this pass).** `cargo check --quiet` PASS (workspace,
+clean); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS;
+`cargo fmt` run, `cargo fmt --check` PASS; `cargo nextest run -p fastmd
+--status-level fail --show-progress none` PASS (**2108 run / 2108
+passed / 1 skipped**), of which **50** are this task's new tests (21
+`ui_iced::search` + 25 `ui_iced::subscription` + 4 `ui_iced::message`);
+`cargo doc --no-deps --quiet` PASS (no warnings). `cargo clippy
+--all-targets` still reports the same **12 pre-existing** test-only lints
+in other tasks' files (`markdown/link_scanner_tests.rs`,
+`ui/batch_dialog_tests.rs`, `ui_iced/panels/left_tests.rs`,
+`ui_iced/render/code_tests.rs`, `config/config_tests.rs`,
+`ui_iced/message_tests.rs:393` — the last shifted from `:384` by this
+task's import additions) — **none in the new files**.
+
+**Needs the orchestrator's eyes.**
+
+1. **`SearchMessage::ResultsReady` is new-for-iced, not an egui port.**
+   egui had no completion message because it scanned synchronously. It
+   was added because the async port cannot report a background scan's
+   outcome any other way, and it is what makes the staleness guard
+   possible (the query rides back with the results). If [TASK-022] would
+   rather keep the search fully synchronous for parity, this variant is
+   unused and can be dropped — but that reintroduces the UI freeze.
+2. **The brief's "map into the Agent/Logs/Tree channels" is not
+   achievable** as written — see the `PartialEq` blocker above. The
+   dedicated `Inbound` channel is the option [TASK-021]'s module doc
+   explicitly left open; that paragraph has been updated to record the
+   decision rather than leave it as an open question.
+3. **Reducer obligations for [TASK-022]/[TASK-023]** that the pure
+   layer cannot enforce:
+   * `InboundMessage::ConfigArrived` → the full
+     `AppOrchestrator::drain_config_bus` projection
+     (`orchestrator.rs:309-330`): `to_agent_config()`,
+     `content_libraries`, `inline_editor_enabled`,
+     `dialogs.batch_dialog_config.available_dirs`, `tree_dirty`.
+   * `InboundMessage::FileChanged` → the `process_file_events` fan-out
+     (`orchestrator.rs:113-194`).
+   * `InboundMessage::Agent` → the `drain_agent_event_bus` transcript
+     and agent-state updates (`orchestrator.rs:365-458`), including the
+     `LAG_TRUNCATION_MARKER` append on `EventsDropped { source: Agent }`.
+   * `InboundMessage::Background` → `handle_fs_event` /
+     `handle_process_event` / `handle_mcp_auth_event`
+     (`orchestrator.rs:460-611`).
+   * `InboundMessage::EventsDropped` → surface the loss per source; for
+     `Agent` also set the lag flag and clear it on the next
+     `SessionStarted`/`Status`, as `orchestrator.rs:377-385` does.
+   * `SearchMessage::ResultsReady` → `SearchViewModel::apply_results`,
+     and dispatch the engine call in a `Task` on `Submitted`.
+4. **One OS thread per app run** for the `std::sync::mpsc` → async
+   bridge, unavoidable given the non-tokio iced executor and the
+   blocking `BackgroundEventSender` contract. It exits when the producer
+   drops its sender. Flagged because it is a visible resource the egui
+   build did not have.
+5. **`InboundMessage` equality is deliberately coarse** (delivery
+   identity for three of the five variants). Anything that wants to dedup
+   inbound notifications by *content* must compare the payload fields
+   itself; `Arc::ptr_eq` will not do it.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped
+   from existing requirements only.

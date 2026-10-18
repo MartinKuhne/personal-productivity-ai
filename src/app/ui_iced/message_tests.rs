@@ -6,16 +6,19 @@
 //! configuration file or database is touched.
 
 use super::{
-    AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, DialogMessage,
-    EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage, SearchMessage, TabMessage,
-    ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage, WindowSnapshot,
+    AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BusSource, DialogMessage,
+    EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message, RenderMessage,
+    SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage,
+    WindowSnapshot,
 };
 use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
+use crate::ui::tree_search::SearchResultEntry;
 use crate::ui_iced::layout::middle_band_state;
 use iced::widget::text_editor::{Action, Edit};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Synthetic path used by the payload fixtures — never opened ([RUST-006]).
 fn sample_path() -> PathBuf {
@@ -65,6 +68,10 @@ fn one_message_per_channel() -> Vec<Message> {
         }),
         Message::About(AboutMessage::AttributionsRequested),
         Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 3 }),
+        Message::Inbound(InboundMessage::EventsDropped {
+            source: BusSource::Agent,
+            count: 3,
+        }),
     ]
 }
 
@@ -73,10 +80,11 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     let messages = one_message_per_channel();
     assert_eq!(
         messages.len(),
-        14,
+        15,
         "TASK-021 fixes the channel set at window, layout, command, tree, tab, \
          editor, agent, search, logs, theme; TASK-015 adds render; TASK-017b1 \
-         adds dialog; TASK-017b2 adds about; TASK-017b4 adds agent_debug \
+         adds dialog; TASK-017b2 adds about; TASK-017b4 adds agent_debug; \
+         TASK-019 adds inbound (background→UI notifications) \
          (batch and tools, added by TASK-017b3, are not represented here)"
     );
 
@@ -94,6 +102,7 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     assert!(matches!(messages[11], Message::Dialog(_)));
     assert!(matches!(messages[12], Message::About(_)));
     assert!(matches!(messages[13], Message::AgentDebug(_)));
+    assert!(matches!(messages[14], Message::Inbound(_)));
 }
 
 #[test]
@@ -698,4 +707,82 @@ fn test_agent_debug_settings_stay_on_the_command_channel() {
             Message::AgentDebug(AgentDebugMessage::EntryToggled { id: 0 })
         );
     }
+}
+
+#[test]
+fn test_search_channel_results_ready_carries_query_and_snapshot() {
+    // TASK-019 added the async completion variant: the reducer runs the
+    // reused `ui::tree_search` engine in a Task and reports back here.
+    let results = Arc::new(vec![SearchResultEntry {
+        path: sample_path(),
+        file_name: "notes.md".into(),
+        relative_path: "Docs: notes.md".into(),
+        snippet: "…matched text…".into(),
+        line_number: 4,
+        match_count: 2,
+    }]);
+    let message = Message::Search(SearchMessage::ResultsReady {
+        query: "match".into(),
+        results: Arc::clone(&results),
+    });
+
+    assert_eq!(message.clone(), message, "clone preserves the snapshot");
+    match message {
+        Message::Search(SearchMessage::ResultsReady { query, results }) => {
+            assert_eq!(query, "match");
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].match_count, 2);
+        }
+        other => panic!("expected Search::ResultsReady, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_search_results_ready_is_distinct_from_submitted() {
+    assert_ne!(
+        Message::Search(SearchMessage::ResultsReady {
+            query: "same".into(),
+            results: Arc::new(Vec::new()),
+        }),
+        Message::Search(SearchMessage::Submitted {
+            query: "same".into(),
+        })
+    );
+}
+
+#[test]
+fn test_inbound_channel_is_not_a_widget_channel() {
+    // Every inbound variant is distinct from every panel channel that could
+    // superficially look similar — background notifications never ride the
+    // Agent/Logs/Tree channels ([TASK-019]).
+    let inbound_logs = Message::Inbound(InboundMessage::EventsDropped {
+        source: BusSource::Background,
+        count: 1,
+    });
+    assert_ne!(
+        inbound_logs,
+        Message::Logs(LogsMessage::Cleared),
+        "a dropped-event report is not a user clearing the log list"
+    );
+    assert_ne!(
+        Message::Inbound(InboundMessage::EventsDropped {
+            source: BusSource::Agent,
+            count: 1,
+        }),
+        Message::Agent(AgentMessage::InputChanged {
+            text: String::new()
+        }),
+        "an agent notification is not agent input"
+    );
+}
+
+#[test]
+fn test_bus_source_is_copy_comparable_and_hashable() {
+    assert_copy::<BusSource>();
+    let a = BusSource::Config;
+    let b = a;
+    assert_eq!(a, b);
+    assert_ne!(BusSource::Config, BusSource::File);
+    assert_ne!(BusSource::File, BusSource::Agent);
+    assert_ne!(BusSource::Agent, BusSource::Background);
 }
