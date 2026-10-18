@@ -419,5 +419,115 @@ fixed" below.
 - Scale-baseline delivery through the `latest()` → `scale_factor` chain
   on a real display (esp. >100% DPI), and the composed factor applying
   to the window.
+
+### TASK-021 verification log (top-level iced `Message` enum - 2026-10-17)
+
+**Deliverables:** `src/app/ui_iced/message.rs` + `message_tests.rs` sidecar
+(12 tests), `src/app/ui_iced/mod.rs` (`pub mod message;` + module-doc
+bullet). No pilot rewiring (that is TASK-022/023).
+
+**Final `Message` shape** - one variant per logical channel, each channel a
+small sub-enum so the top level stays flat (PAT-001).
+`Message` itself: `#[derive(Debug, Clone, PartialEq)]` - NOT `Copy`, because
+the `UserCommand` payload carries `String`/`PathBuf`/`Vec`.
+
+| Channel | Payload | Derives | Grounding |
+| --- | --- | --- | --- |
+| `Window` | `WindowMessage`: `CloseRequested(Id)`, `CloseSnapshotCaptured(WindowSnapshot)`, `ScaleBaseline(f32)`, `Resized{id,size}` | `Debug Clone Copy PartialEq` | pilot `bin/fastmd_iced.rs:239-267`; DEC-006/DEC-008 |
+| `Layout` | `LayoutMessage`: `PaneResized(pane_grid::ResizeEvent)`, `TreeAutoFit` | `Debug Clone Copy` + hand-written `PartialEq` | TASK-010; UI-016 / TASK-012 (`left.rs:139-186`) |
+| `Command` | `UserCommand` (existing bus enum, **49** variants) | `Debug Clone` (as `UserCommand` derives) | `bus/events/user_command.rs`; FMD-068 |
+| `Tree` | `TreeMessage`: `ContextMenuOpened{path}`, `ContextMenuClosed` | `Debug Clone PartialEq` | `ui/tree/handlers.rs:51-69`, `ui/tree/render.rs:368-427`; DEC-005 |
+| `Tab` | `TabMessage`: `ContextMenuOpened{index}`, `ContextMenuClosed` | `Debug Clone Copy PartialEq` | `ui/panels/center.rs:208-315` |
+| `Editor` | `EditorMessage`: `Action(text_editor::Action)`, `SaveRequested{path}`, `CancelRequested`, `Undo{path}`, `Redo{path}` | `Debug Clone PartialEq` | `ui/editor_egui.rs:173-190`; DEC-007 (UI-042/043/045) |
+| `Agent` | `AgentMessage`: `InputChanged{text}`, `Submit{text}` | `Debug Clone PartialEq` | `ui/panels/bottom.rs:226-294`; `AgentPanelState::command_input` |
+| `Search` | `SearchMessage`: `QueryChanged{text}`, `Submitted{query}`, `Cleared` | `Debug Clone PartialEq` | `ui/panels/left.rs:230-265`; `tree_search.rs:37-146` (UI-050) |
+| `Logs` | `LogsMessage`: `SearchChanged{text}`, `CategoryFilterChanged(Option<LogCategory>)`, `AutoScrollToggled(bool)`, `Cleared` | `Debug Clone PartialEq` | `ui/background_logs.rs:70-123` (UI-047) |
+| `Theme` | `ThemeMessage`: `ScaleChanged{multiplier}` | `Debug Clone Copy PartialEq` | DEC-008 + `PersistedUiState::font_size_scale` |
+
+**Routing rule (what keeps the channels from overlapping):**
+
+1. **User intent rides `Message::Command(UserCommand)`.** The egui panels
+   already publish a `UserCommand` for every application-level action
+   (select, expand, close tab, run agent, rename, toggle logs window,
+   debug-window controls, ...), so the iced panels keep that vocabulary
+   instead of inventing a parallel per-panel one. `impl From<UserCommand>
+   for Message` wraps it.
+2. **Panel channels carry view-local state transitions only** - the state
+   egui kept implicitly in immediate-mode widget memory (which row's
+   context menu is open, what the search box currently holds, the editor's
+   undo request) plus the runtime reports the window layer hands us.
+
+Consequence: `Tree` and `Tab` are thin *by design* (context-menu overlay
+state only), because selection, expansion and closing are `UserCommand`s.
+
+**Grounded vs minimal:**
+
+- Grounded in shipped egui behaviour: `Window`, `Layout`, `Command`,
+  `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`.
+- Minimal on purpose: `Theme`. UI-002 pins the dark scheme
+  (`ui/theme.rs:190 ctx.set_theme(egui::Theme::Dark)`; mirrored by
+  `ui_iced::theme::fastmd_dark_theme`) and the egui build exposes NO
+  light/dark toggle, so no toggle variant was invented. The only
+  runtime-mutable theme state is the DEC-008 user scale multiplier.
+
+**Not modelled here (open item, flagged for TASK-019):** inbound
+background -> UI notifications (`ConfigArrived`, `FileEvent`,
+`AgentEvent`, `BackgroundEvent`). Those arrive over the subscription
+bridge rather than from a widget, so TASK-019 will either extend
+`Logs`/`Agent`/`Tree` with inbound variants or add a dedicated inbound
+channel. Nothing was guessed for them now.
+
+**Pilot fold-in map** (the pilot's private `Message` in
+`src/app/bin/fastmd_iced.rs`):
+
+| Pilot variant | New home |
+| --- | --- |
+| `CloseRequested(Id)` | `Message::Window(WindowMessage::CloseRequested(id))` |
+| `CloseSnapshotCaptured{id,size,position}` | `Message::Window(WindowMessage::CloseSnapshotCaptured(WindowSnapshot{..}))` |
+| `ScaleBaseline(f32)` | `Message::Window(WindowMessage::ScaleBaseline(s))` |
+| `WindowResized(Size)` | `Message::Window(WindowMessage::Resized{id,size})` - carries the window id `resize_events()` delivers and the single-window pilot dropped (the pilot header already anticipates TASK-022 carrying it) |
+| `PaneResized(ResizeEvent)` | `Message::Layout(LayoutMessage::PaneResized(ev))` |
+| `FontLoadFinished(Option<String>)` | NOT a window concern - left in the pilot. When TASK-022 owns the font bootstrap it needs its own channel (e.g. `Bootstrap`/`Font`). Flagged. |
+
+**Design decisions for orchestrator attention:**
+
+1. `PartialEq` is derived on every channel and on `Message` (the plan asked
+   only for `Debug, Clone[, Copy]`). Rationale: message equality is what a
+   replay/dedup check needs and what the sidecar tests assert; every
+   payload supports it.
+2. `LayoutMessage::PartialEq` is hand-written because
+   `pane_grid::ResizeEvent` derives only `Debug, Clone, Copy`
+   (`iced_widget-0.14.2/src/pane_grid.rs:1226-1237`). The comparison is
+   exact on `ratio` (bit equality of the runtime-produced `f32`); a
+   tolerance would break transitivity.
+3. `EditorMessage::SaveRequested`/`Undo`/`Redo` carry `path` so the target
+   travels with the intent (DEC-007 per-tab history stacks + FMD-068).
+   `CancelRequested` does not - it discards whichever buffer is open.
+4. `EditorMessage::Action` carries `iced::widget::text_editor::Action`
+   (`Debug, Clone, PartialEq`, not `Copy`) as the DEC-007 interception
+   point; `Action::is_edit()` separates content changes from caret moves.
+5. `Layout` is a channel NOT named in the plan's nine. It was added to give
+   the pilot's `PaneResized` and TASK-012's `Message::AutoFitTree` an
+   honest home without calling pane geometry a "window" concern.
+6. `UserCommand` has **49** variants (the task brief said ~36); it derives
+   `Clone, Debug, PartialEq` only, which is why `Message` is `Clone` and
+   not `Copy`.
+
+**Gate results (this pass):** `cargo check -q` PASS (clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0, no
+warnings); `cargo nextest run -p fastmd message` PASS (25 run, incl. the 12
+new `ui_iced::message` tests, 0 failed);
+`cargo nextest run --status-level fail --show-progress none` PASS
+(1279 run / 1279 passed / 1 skipped); `cargo doc --no-deps --quiet` PASS.
+
+`cargo fmt --check`: the TASK-021 files are clean (`rustfmt --check
+--edition 2024` on `message.rs` and `message_tests.rs` -> exit 0). The
+workspace-level check FAILS on three files outside this task's scope
+(`ui_iced/layout.rs`, `ui_iced/persisted.rs`, `ui_iced/persisted_tests.rs`)
+whose working-tree diffs are pure import-ordering / call-wrap reversals
+against HEAD with zero semantic content, and which this task never touched.
+Left untouched deliberately (not this task's work); the orchestrator should
+run `cargo fmt` - or `git checkout --` those three files - before
+committing.
 - Pane-grid drag feel: leeway grab, clamped-ratio replay, and the
   right-pane gate visually (pilot gate inputs are `false` stubs).

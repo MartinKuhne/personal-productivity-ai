@@ -1,0 +1,369 @@
+//! Top-level iced `Message` enum — the single message type driving the
+//! FastMD Elm loop ([TASK-021], `doc/planning/iced.md` PAT-001).
+//!
+//! # Channel design
+//!
+//! [`Message`] has **one variant per logical interaction channel**. Each
+//! channel is its own small sub-enum (`Debug`/`Clone`, plus `Copy` wherever
+//! every payload field is `Copy`), so the top level stays flat and readable
+//! while each panel owns a vocabulary it can grow independently
+//! ([TASK-011]..[TASK-020]).
+//!
+//! Two routing rules keep the channels from overlapping ([FMD-068]):
+//!
+//! 1. **User intent rides [`Message::Command`].** Anything the user asked the
+//!    *application* to do — open a file, close a tab, run the agent, rename
+//!    a path — is already a self-contained [`UserCommand`] carried by the
+//!    existing command bus (`src/app/bus/events/user_command.rs`), and the
+//!    egui panels publish exactly those. The iced panels keep doing that;
+//!    they do NOT re-invent a parallel intent vocabulary per panel.
+//! 2. **Panel channels carry view-local state transitions only** — the state
+//!    egui kept implicitly in immediate-mode memory (which row's context
+//!    menu is open, what the search box currently holds, the editor's
+//!    undo request) and the runtime reports the window layer hands us.
+//!
+//! Consequently some channels are deliberately thin: they exist because a
+//! panel needs explicit state that egui used to hide in widget memory, and
+//! they carry nothing more. Each variant below names the egui behaviour it
+//! replaces, so a reviewer can check the grounding against
+//! `src/app/ui/`.
+//!
+//! # Grounding status
+//!
+//! - **Grounded in shipped behaviour:** `Window`, `Layout`, `Command`,
+//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`.
+//! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
+//!   and no light/dark toggle exists in the egui build, so the only
+//!   runtime-mutable theme state is the DEC-008 user scale multiplier.
+//! - **Not modelled here (open item for [TASK-019]):** inbound *background →
+//!   UI* notifications (`ConfigArrived`, `FileEvent`, `AgentEvent`,
+//!   `BackgroundEvent`). Those arrive over the subscription bridge rather
+//!   than from a widget; when that bridge is built it will either extend the
+//!   `Logs`/`Agent`/`Tree` channels or add a dedicated inbound channel.
+//!   Nothing is invented for it now.
+//!
+//! # How the pilot's messages fold in
+//!
+//! The `fastmd_iced` pilot's private `Message` enum
+//! (`src/app/bin/fastmd_iced.rs:239-267`) maps 1:1 onto the `Window` and
+//! `Layout` channels, which is why those variants keep the pilot's shapes:
+//!
+//! | Pilot variant | This enum |
+//! | --- | --- |
+//! | `FontLoadFinished(Option<String>)` | *not a window concern — stays in the pilot until [TASK-022] gives the font bootstrap its own channel* |
+//! | `CloseRequested(Id)` | `Message::Window(WindowMessage::CloseRequested(id))` |
+//! | `CloseSnapshotCaptured { id, size, position }` | `Message::Window(WindowMessage::CloseSnapshotCaptured(WindowSnapshot { .. }))` |
+//! | `ScaleBaseline(f32)` | `Message::Window(WindowMessage::ScaleBaseline(scale))` |
+//! | `WindowResized(Size)` | `Message::Window(WindowMessage::Resized { id, size })` — the pilot dropped the window id; `resize_events()` delivers it, so [TASK-022] carries it |
+//! | `PaneResized(pane_grid::ResizeEvent)` | `Message::Layout(LayoutMessage::PaneResized(event))` |
+//!
+//! Unit tests live in the sibling `message_tests.rs` sidecar.
+
+#[cfg(test)]
+#[path = "message_tests.rs"]
+mod tests;
+
+use crate::bus::events::messages::LogCategory;
+use crate::bus::events::user_command::UserCommand;
+use iced::widget::pane_grid;
+use std::path::PathBuf;
+
+/// The single top-level message of the iced Elm loop ([TASK-021]).
+///
+/// `Message` is `Clone` but not `Copy`: the [`UserCommand`] payload carries
+/// `String`/`PathBuf`/`Vec` fields ([`UserCommand`] derives `Clone, Debug,
+/// PartialEq` only), which makes the whole enum non-`Copy`. The individual
+/// channel enums are `Copy` wherever their payloads allow — see
+/// [`WindowMessage`], [`LayoutMessage`], [`TabMessage`] and
+/// [`ThemeMessage`].
+///
+/// `PartialEq` is derived on every channel (and on this enum) because every
+/// payload supports it; message equality is what lets a replay/dedup check —
+/// and the [TASK-021] sidecar tests — compare a recorded message against a
+/// freshly produced one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Message {
+    /// Window-lifecycle channel (close requests, close snapshot, scale
+    /// baseline, resizes).
+    Window(WindowMessage),
+    /// Pane-geometry channel (pane-grid drags, tree auto-fit).
+    Layout(LayoutMessage),
+    /// The command channel: user intent forwarded to the orchestrator's
+    /// `UserCommand` executor unchanged.
+    Command(UserCommand),
+    /// File-tree panel channel ([TASK-012]).
+    Tree(TreeMessage),
+    /// Tab-strip / center panel channel ([TASK-013]).
+    Tab(TabMessage),
+    /// Inline editor channel ([TASK-014], DEC-007).
+    Editor(EditorMessage),
+    /// Agent panel / command-input channel ([TASK-018]).
+    Agent(AgentMessage),
+    /// Workspace content-search channel ([TASK-019], UI-050).
+    Search(SearchMessage),
+    /// Background-logs panel channel ([TASK-016], UI-047).
+    Logs(LogsMessage),
+    /// Theme / UI-scale channel ([TASK-008], DEC-008).
+    Theme(ThemeMessage),
+}
+
+/// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
+/// panel can produce intent without naming the wrapper at every call site.
+impl From<UserCommand> for Message {
+    fn from(command: UserCommand) -> Self {
+        Self::Command(command)
+    }
+}
+
+/// Window-lifecycle channel ([TASK-021]; pilot parity per the module
+/// header table).
+///
+/// Every variant is a *runtime report* from the iced window layer — a
+/// subscription or a chained `Task` result — not user intent. The user's
+/// decision to save-and-close is application intent and rides
+/// [`Message::Command`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowMessage {
+    /// The window manager asked to close a window (title-bar close /
+    /// `Alt+F4`). With `exit_on_close_request: false` the runtime waits for
+    /// the app to persist state and call `iced::window::close`
+    /// ([TASK-009], DEC-006).
+    CloseRequested(iced::window::Id),
+    /// The metrics needed by the close-time snapshot have arrived, reported
+    /// through the chained `window::size` → `window::position` tasks
+    /// ([TASK-009] (a), DEC-006 phase 2).
+    CloseSnapshotCaptured(WindowSnapshot),
+    /// The OS-reported baseline scale factor arrived ([TASK-009], DEC-008);
+    /// the composed factor is `baseline × user multiplier`.
+    ScaleBaseline(f32),
+    /// A window changed size ([`iced::window::resize_events`] delivers
+    /// `(Id, Size)`; the id is carried so a multi-window runtime can route
+    /// the event, which the single-window pilot dropped).
+    Resized {
+        /// The window that changed size.
+        id: iced::window::Id,
+        /// Its new logical size in points.
+        size: iced::Size,
+    },
+}
+
+/// The window metrics captured at close time for the DEC-006 standby save
+/// ([TASK-009], [TASK-021]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowSnapshot {
+    /// The window the snapshot belongs to.
+    pub id: iced::window::Id,
+    /// Logical window size reported by the runtime.
+    pub size: iced::Size,
+    /// Window position in points, when the runtime reports one (`None` for
+    /// platforms/states without a known position).
+    pub position: Option<iced::Point>,
+}
+
+/// Pane-geometry channel ([TASK-021]).
+///
+/// The three-band `PaneGrid` geometry lives in [TASK-010]
+/// ([`crate::ui_iced::layout`]); this channel is how its widget events and
+/// its re-fit requests reach `update`.
+#[derive(Debug, Clone, Copy)]
+pub enum LayoutMessage {
+    /// A pane-grid split was dragged ([`pane_grid::ResizeEvent`]:
+    /// `split` + `ratio`), fed through `PaneGrid::on_resize`
+    /// ([TASK-010]). Reduces onto `PanelLayout` widths under the UI-016
+    /// clamps.
+    PaneResized(pane_grid::ResizeEvent),
+    /// The tree panel should re-fit its width to the longest visible row
+    /// (UI-016; the `Message::AutoFitTree` reducer named in [TASK-012]).
+    /// In the egui build this ran inline in `show_left_panel` on the
+    /// indexing-finished / `left_panel_dirty` transition
+    /// (`src/app/ui/panels/left.rs:139-186`); in the Elm loop it is an
+    /// explicit message so the width change is replayable.
+    TreeAutoFit,
+}
+
+/// Field-wise equality for [`LayoutMessage`].
+///
+/// `pane_grid::ResizeEvent` only derives `Debug, Clone, Copy`
+/// (`iced_widget-0.14.2/src/pane_grid.rs:1226-1237`), so the channel
+/// cannot derive `PartialEq`. The comparison is exact on `ratio`: both sides
+/// carry the same runtime-produced `f32`, so bit equality is what a replay
+/// or dedup check wants (and stays transitive, unlike a tolerance).
+impl PartialEq for LayoutMessage {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::PaneResized(a), Self::PaneResized(b)) => {
+                a.split == b.split && a.ratio == b.ratio
+            }
+            (Self::TreeAutoFit, Self::TreeAutoFit) => true,
+            _ => false,
+        }
+    }
+}
+
+/// File-tree panel channel ([TASK-021], [TASK-012]).
+///
+/// Deliberately thin: row selection and directory expansion are *user
+/// intent* and ride [`Message::Command`] as `UserCommand::SelectFile` /
+/// `UserCommand::SelectDirectory` — exactly what the egui tree publishes
+/// (`src/app/ui/tree/handlers.rs:51-69`). What egui kept implicitly in the
+/// `context_menu` widget is explicit state under iced's DEC-005
+/// `overlay::menu` construction, so that is what this channel carries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TreeMessage {
+    /// A right-click opened the row context menu for `path` (DEC-005;
+    /// [TASK-017] renders the overlay).
+    ContextMenuOpened {
+        /// The row whose menu is open.
+        path: PathBuf,
+    },
+    /// The row context menu was dismissed (click-away or menu selection).
+    ContextMenuClosed,
+}
+
+/// Tab-strip / center panel channel ([TASK-021], [TASK-013]).
+///
+/// Same split as [`TreeMessage`]: selecting a tab, closing one
+/// (`×` / middle-click), closing others/all, copying the path and revealing
+/// it in the explorer are all `UserCommand`s already
+/// (`src/app/ui/panels/center.rs:208-315`). The tab strip's own view state
+/// is which tab's context menu is showing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabMessage {
+    /// A right-click opened the context menu of the tab at `index`
+    /// (index as rendered in the strip that frame, matching
+    /// `UserCommand::CloseTab`'s indexing convention).
+    ContextMenuOpened {
+        /// The tab index whose menu is open.
+        index: usize,
+    },
+    /// The tab context menu was dismissed.
+    ContextMenuClosed,
+}
+
+/// Inline editor channel ([TASK-021], [TASK-014], DEC-007).
+///
+/// Grounded in the egui editor (`src/app/ui/editor_egui.rs:173-190`):
+/// Save / Cancel buttons plus the live buffer, and in DEC-007's rule that
+/// every `Action::Edit` is intercepted so the undo history lives at OUR
+/// layer (`iced::widget::text_editor` has no native undo/redo).
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorMessage {
+    /// An [`iced::widget::text_editor::Action`] was performed in the buffer
+    /// — the DEC-007 interception point. `Action::is_edit()` separates
+    /// content-changing actions (push an undo snapshot) from caret/selection
+    /// actions.
+    Action(iced::widget::text_editor::Action),
+    /// The user asked to save the buffer to `path` (UI-043). The path is
+    /// carried so the write target travels with the intent ([FMD-068]).
+    SaveRequested {
+        /// File the buffer belongs to.
+        path: PathBuf,
+    },
+    /// The user cancelled the editor: discard the buffer, close the overlay
+    /// (UI-045).
+    CancelRequested,
+    /// Replay one snapshot back from the per-tab undo stack (UI-042,
+    /// DEC-007). Per-tab stacks make the tab path part of the intent.
+    Undo {
+        /// The tab whose buffer is being undone.
+        path: PathBuf,
+    },
+    /// Replay one snapshot forward on the per-tab redo stack (UI-042,
+    /// DEC-007).
+    Redo {
+        /// The tab whose buffer is being redone.
+        path: PathBuf,
+    },
+}
+
+/// Agent panel / command-input channel ([TASK-021], [TASK-018]).
+///
+/// Grounded in `src/app/ui/panels/bottom.rs:226-294` and
+/// `AgentPanelState::command_input`. Running, cancelling, queueing a prompt
+/// and clearing the input are all `UserCommand`s
+/// (`RunAgent` / `CancelAgent` / `QueueAgentPrompt` / `ClearCommandInput`),
+/// produced by the reducer after parsing the submitted text with the
+/// existing `parse_command_intent` helper. The agent *debug* window's
+/// controls are likewise `UserCommand`s already
+/// (`ToggleDebugWindow`/`ClearDebugEntries`/`SetDebugJsonRows`/
+/// `SetDebugSearchText`/`SetDebugAutoScroll`), so nothing is duplicated
+/// here.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentMessage {
+    /// The command-input field text changed while the user types.
+    InputChanged {
+        /// The field's new contents.
+        text: String,
+    },
+    /// The user submitted the command input (`Enter` without `Shift`).
+    /// The reducer parses the intent into one or more [`UserCommand`]s.
+    Submit {
+        /// The submitted text, exactly as typed (trimming happens in the
+        /// parser, not the widget callback).
+        text: String,
+    },
+}
+
+/// Workspace content-search channel ([TASK-021], [TASK-019], UI-050).
+///
+/// Grounded in `src/app/ui/panels/left.rs:230-265` and
+/// `TreeSearch` (`src/app/ui/tree_search.rs:37-146`): the query text is
+/// kept separate from the committed filter so a partial edit never
+/// re-scans the workspace.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SearchMessage {
+    /// The search-box text changed while typing; does NOT start a scan.
+    QueryChanged {
+        /// The box's new contents.
+        text: String,
+    },
+    /// The query was committed (`Enter` or the magnifier button) and the
+    /// results replace the tree view.
+    Submitted {
+        /// The committed query text.
+        query: String,
+    },
+    /// The search was cleared (`✕` button) — the tree view returns
+    /// (`TreeSearch::clear`).
+    Cleared,
+}
+
+/// Background-logs panel channel ([TASK-021], [TASK-016], UI-047).
+///
+/// Grounded in `src/app/ui/background_logs.rs:70-123`: the filter row is
+/// a text search, a category combo and an auto-scroll checkbox, plus a
+/// Clear button. Window visibility is NOT here — it is
+/// `UserCommand::ToggleBackgroundLogs`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogsMessage {
+    /// The free-text log filter changed.
+    SearchChanged {
+        /// The filter box's new contents.
+        text: String,
+    },
+    /// The category filter changed (`None` = show all categories).
+    CategoryFilterChanged(Option<LogCategory>),
+    /// The auto-scroll (stick-to-bottom) preference changed.
+    AutoScrollToggled(bool),
+    /// The Clear button emptied the visible log list.
+    Cleared,
+}
+
+/// Theme / UI-scale channel ([TASK-021], [TASK-008], DEC-008).
+///
+/// Minimal by design: UI-002 pins the FastMD dark scheme
+/// (`crate::ui::theme::install_dark`, mirrored by
+/// [`crate::ui_iced::theme::fastmd_dark_theme`]) and the egui build has no
+/// light/dark toggle, so no toggle variant is invented. The only
+/// runtime-mutable theme state is the user scale multiplier that DEC-008
+/// composes with the OS baseline.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThemeMessage {
+    /// The user-chosen UI scale multiplier changed (DEC-008); the value
+    /// handed to `.scale_factor(...)` is `os_baseline × multiplier`, and the
+    /// multiplier is what `PersistedUiState::font_size_scale` stores.
+    ScaleChanged {
+        /// The user multiplier, sanitised to the persisted scale range.
+        multiplier: f32,
+    },
+}
