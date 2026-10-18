@@ -117,7 +117,11 @@ const SKILLS_SUBDIR: &str = "Skills";
 const FOLDER_SKILLS_SUBDIR: &str = "Folder";
 
 /// Skill subfolder offered on **file** rows (VFS-121).
-const NOTE_SKILLS_SUBDIR: &str = "Note";
+///
+/// `pub` so the tab context menu ([`center`](super::center)) resolves the
+/// same note-skill folder through [`skill_dir`] instead of repeating the
+/// literal ([RUST-021]).
+pub const NOTE_SKILLS_SUBDIR: &str = "Note";
 
 /// Logical point size of the panel heading (egui parity: `16.0`).
 pub const HEADER_SIZE: f32 = 16.0;

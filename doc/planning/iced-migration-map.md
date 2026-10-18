@@ -1163,3 +1163,189 @@ PASS (exit 0, no warnings).
    `paths()` accessor on the tracker would make it one lock. Left alone as
    out of scope.
 
+### TASK-013 verification log (center panel / tab strip ported to iced - 2026-10-18)
+
+**Deliverables.** New `src/app/ui_iced/panels/center.rs` + `center_tests.rs`
+sidecar (38 tests); `pub mod center;` + module-doc bullet in
+`ui_iced/panels/mod.rs`; `NOTE_SKILLS_SUBDIR` promoted from private to `pub`
+in `ui_iced/panels/left.rs`; one additive glyph const in `ui/strings.rs`
+(`ICON_UNSAVED_DOT`, U+25CF). No pilot or update-loop wiring (that is
+TASK-022/023).
+
+**Port shape - pure view, no `FastMdApp` inside the widget tree.**
+
+`center_panel(&CenterPanelViewModel) -> Element<'_, Message>` renders the
+tab strip plus the viewer area below it (or the agent-session band while
+`show_results` is on). Every user action becomes
+`Message::Command(UserCommand)` or a named panel-channel message; the panel
+never publishes to `user_command_bus`, never reads a file and never mutates
+`FastMdApp` - the TASK-022/023 reducer does (FMD-068).
+
+`CenterPanelViewModel` (built by `from_app(&FastMdApp)`):
+
+| Field | Source (egui parity) |
+| --- | --- |
+| `tabs: Vec<TabEntry{path,title,unsaved,active}>` | `tabs().tabs` (the strip's source vector); `title` via the pure `tab_title()` = `file_name()` with the same `unwrap_or_default` fallback `Tabs::tab_strip` caches (`ui/tabs.rs:117-123`) |
+| `active_tab: Option<usize>` | `active_tab_index(paths, selection().selected_file())` - the single expression of egui's per-tab `selected_file() == Some(tab_path)` test |
+| `show_agent_session: bool` | `orchestrator.agent_panel_state.show_results` (egui `show_center_panel`'s first routing branch) |
+| `agent_status: String` / `agent_running: bool` | `agent().state().status` / `.running` |
+| `thinking: String` | `orchestrator.agent_transcript.thinking` (already delimiter-extracted upstream) |
+| `active_pdf_backed: bool` | `pdf_backing_tracker().is_pdf_backed(selected)` - drives the `pdf_surface` frame egui painted behind PDF-backed documents |
+| `note_skills: Vec<SkillFile>` | `AppConfig::list_skill_files_in(skill_dir(content_libraries(), NOTE_SKILLS_SUBDIR, get_skills_note_dir))` - the **read-only** path (RUST-006), same rule TASK-012 established; this is where "Format Markdown" comes from |
+
+`TabEntry.unsaved` is reported `false` by `from_app` - see flag 2.
+
+**Tab interactions - what each gesture emits (UI-049).**
+
+| Gesture | Emitted message | egui source |
+| --- | --- | --- |
+| left-click tab label | `Command(SelectFile { path, multi: false })` | `ui/panels/center.rs:214-221` |
+| middle-click tab | `Command(CloseTab(index))` | `:222-227` |
+| `x` close button | `Command(CloseTab(index))` | `:304-313` |
+| right-click tab | `Tab(ContextMenuOpened { index })` | `response.context_menu(..)` `:228` |
+| pointer motion over tab | `Layout(CursorMoved { point })` | DEC-005 anchor tracking |
+
+**Tab-select is modelled as a COMMAND, not view state.** egui never kept an
+active-tab index of its own - the active tab *is*
+`selection().selected_file()`, and clicking a label publishes
+`UserCommand::SelectFile { multi: false }`. The iced port keeps exactly
+that: the strip emits the intent and derives the `active` flag from the
+snapshot. There is deliberately **no** `TabMessage::TabSelected` variant
+(message.rs routing rule 1: user intent rides `Message::Command`).
+`TabMessage` therefore stays exactly as TASK-021 defined it -
+`ContextMenuOpened{index}` / `ContextMenuClosed` - the strip's only genuine
+view-local state.
+
+The `x` button sits **inside** the tab's `MouseArea`, which is safe and is
+what preserves egui's semantics: `MouseArea::update` updates its child
+first and returns without running its own handlers once the child has
+captured the event (`iced_widget-0.14.2/src/mouse_area.rs:230-245`), and
+`Button::update` calls `shell.capture_event()` on press (`button.rs:312`).
+Clicking `x` closes the tab without also selecting it; middle-press is not
+a button event, so it still reaches the tab's `on_middle_press`.
+
+**Tab context-menu item -> message mapping** (UI-026..UI-034, egui order,
+`tab_context_menu_items(index, path, note_skills)`):
+
+| Menu row | Emitted message |
+| --- | --- |
+| `EDIT_BUTTON` | `Command(OpenInEditor(path))` |
+| `CLOSE_TAB_MENU` | `Command(CloseTab(index))` |
+| `CLOSE_OTHERS_MENU` | `Command(CloseOtherTabs(index))` |
+| `CLOSE_ALL_TABS_MENU` | `Command(CloseAllTabs)` |
+| `COPY_PATH_ACTION` | `Command(CopyPath(path))` |
+| `SHOW_IN_EXPLORER_ACTION` | `Command(ShowInExplorer(path))` |
+| `OPEN_IN_EDITOR_ACTION` | `Command(OpenInEditor(path))` |
+| each note skill - VFS-121, incl. the seeded **FormatMarkdown** (UI-033) | `Tree(SkillRunRequested { skill, target_dir: None, target_file: Some(path) })` |
+
+**UI-033 "Format Markdown" is not a `UserCommand`.** In the shipped egui
+build it is a seeded VFS-121 *note skill*
+(`Skills/Note/FormatMarkdown.md`) whose click reads the skill file inside
+the menu closure and publishes `UserCommand::RunSkillPrompt { content,
+target_dir: None, target_file }` (`ui/panels/center.rs:276-301`). A pure
+view may not do I/O, so the row emits the **existing**
+`TreeMessage::SkillRunRequested` deferred-intent variant - the same one the
+file-tree's note-skill rows emit. Reusing it rather than adding a
+`TabMessage` twin is what UI-034's "consistent behaviour across both UI
+locations" asks for (GUD-001), and it keeps `TabMessage: Copy` intact (a
+`PathBuf`-carrying tab variant would have cost it). TASK-022 can route both
+variants through one handler. `strings::FORMAT_MARKDOWN_ACTION` exists but
+is **not** used here: the row label is the skill's display name
+(`file_stem`), exactly as egui rendered it.
+
+Menu **separators** are not representable - the overlay card is a uniform
+column of buttons and its `MenuItem` has no separator kind - so egui's
+three separator groups survive as row *order* only.
+
+**UI-048 - the thinking delimiter is NOT a center-panel extraction.** The
+delimiter handling already lives upstream: `AgentTranscript::apply_event` /
+`split_thinking_and_content` (`src/app/ui/agent/transcript.rs`) and the
+agent's response formatter (AGENT-022). What the egui center panel owned
+was only the *gate* - render the "Thinking Process" block when the
+extracted buffer is non-empty - which is ported here as the pure
+`thinking_section_visible(&str) -> bool` plus
+`CenterPanelViewModel::show_thinking()`. The collapsible disclosure (A9's
+`toggler` pattern) and the streaming response markdown are the
+agent-session render path, **TASK-018**; this module renders the band's
+header, status line and thinking text and stops there.
+
+**What the document-viewer area defers to TASK-015.**
+`viewer_area` / `document_preview` render the active tab's **title only**,
+inside the always-allocated `scrollable` + `pdf_surface` frame. Deferred to
+the TASK-015 render path, exactly as egui had them
+(`ui/panels/center.rs:341-385`):
+
+* the YAML front-matter table (`render_yaml_table`),
+* the search-aware markdown renderer (`render_markdown_with_search`),
+* the FTWA `DeficitStrategy` plumbing and `heading_ids_arc()`,
+* task-checkbox toggles collected during render and applied to the
+  markdown source (P0-2),
+* `scroll_to_header_id` / `scroll_to_search` handling.
+
+The `Column` in `document_preview` is the extension point those append to.
+The empty state (`NO_FILE_SELECTED_PROMPT`) **is** ported.
+
+**Reused, not reimplemented (RUST-051).**
+
+| Concern | How the iced panel gets it |
+| --- | --- |
+| `CloseTab` / `CloseOtherTabs` / `CloseAllTabs` / `ClearAgentSession` construction | `pub use crate::ui::panels::center::{apply_tab_close_click, apply_tab_close_others_click, apply_tab_close_all_click, clear_agent_session_command}` - the egui panel's framework-free constructors, same as TASK-011 did for `top` |
+| Note-skill folder resolution | `super::left::{skill_dir, NOTE_SKILLS_SUBDIR}` - one rule, not two (`NOTE_SKILLS_SUBDIR` made `pub` for this) |
+| Context-menu trigger / card / dismissal | `ui_iced::overlay::{context_menu_trigger, with_context_menu, MenuItem}` (TASK-017a) |
+| Cursor anchor | `LayoutMessage::CursorMoved` (TASK-012) |
+| Deferred skill-run intent | `TreeMessage::SkillRunRequested` (TASK-012) |
+| Tab data model | reads `Tabs.tabs` directly; no parallel tab store was introduced |
+
+Only what egui bound to `egui::Ui`/`egui::Context` was re-typed: the
+label/colour lookups, the click -> command mapping (the egui handlers
+publish inside the closure), and the menu item list.
+
+**Gate results (this pass).** `cargo check -q` PASS (exit 0, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS workspace-wide (exit 0);
+`cargo nextest run --status-level fail --show-progress none` PASS
+(**1435 run / 1435 passed / 1 skipped**, +38 over TASK-012's 1397 - all
+38 are the new `ui_iced::panels::center` tests);
+`cargo doc --no-deps --quiet` PASS (exit 0, no warnings from this task's
+files).
+
+**Needs the orchestrator's eyes.**
+
+1. **`ui/strings.rs` was extended again** (additive only): `ICON_UNSAVED_DOT`
+   (U+25CF BLACK CIRCLE). GUD-002 forbids the literal in the panel. It is
+   a Unicode geometric shape rather than a Phosphor glyph, so it resolves
+   through the system symbol font - [UNVERIFIED] at runtime, same caveat as
+   TASK-011's check/hamburger glyphs.
+2. **UI-027 / UI-029 unsaved-change confirmation is NOT implemented - in
+   either build.** There is no per-tab dirty state anywhere in the shipped
+   app: `Tabs` has no dirty flag, `TextBuffer` exposes no modified signal to
+   the strip, and the egui tab menu closes without ever prompting. The view
+   model carries `TabEntry::unsaved` and the view renders the marker slot
+   (fixed-width, content toggled), so the surface is ready, but `from_app`
+   reports `false` because there is nothing honest to read. Flagged as spec
+   drift per RUST-041; SPEC.md was not touched. TASK-022 needs a
+   dirty-tracking source before the confirmation dialogs mean anything.
+3. **`ui_iced::panels::left::NOTE_SKILLS_SUBDIR` was made `pub`** so the
+   tab menu resolves the same `Skills/Note` folder through the existing
+   `skill_dir()` instead of repeating the literal (RUST-021). Purely
+   additive.
+4. **The tab menu's leading `EDIT_BUTTON` row is ported even though SPEC
+   UI-027..UI-033 does not list it.** The shipped egui menu has it
+   (`ui/panels/center.rs:229-235`), so parity wins; noting it because the
+   task brief's seven-item list is the SPEC list, not the shipped list.
+5. **The agent-session band is a partial port by design.** Header, status
+   line, the UI-048 gate and the `ClearAgentSession` close intent are here
+   so `center_panel`'s routing matches egui; the streaming response view,
+   the collapsible disclosure and the response markdown are TASK-018. If
+   the reviewer would rather the center panel not render that band at all
+   until TASK-018, the gate is one `if` in `center_panel`.
+6. **`TAB_TEXT_SIZE` (13.0) and the other layout consts are visual-pass
+   values, not ported ones.** egui's `selectable_label` used the default
+   body size (12.5 px) and no named constant existed to port, so each const
+   documents its own role instead of implying an egui predecessor.
+7. **`tab_title()` duplicates a three-line mapping** from
+   `Tabs::tab_strip`'s cache builder. It cannot call `tab_strip()` because
+   the cache needs `&mut Tabs` while a view model is built from
+   `&FastMdApp`. If the orchestrator wants one source of truth, the clean
+   refactor is a pure `Tabs::title_for(&Path) -> String` that both call -
+   deliberately not done here to keep the change inside the iced layer.

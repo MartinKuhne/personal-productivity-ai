@@ -18,8 +18,12 @@
 //! - [`left`] — the file-tree pane: reused `flatten_tree` rows in
 //!   UI-017/UI-018 order, the UI-050 content-search box, the UI-016
 //!   auto-fit solver and the DEC-005 row context menus ([TASK-012]).
+//! - [`center`] — the document pane: the UI-049 tab strip, the
+//!   UI-026..UI-034 tab context menu, the UI-048 thinking gate and the
+//!   viewer area whose markdown render is [TASK-015] ([TASK-013]).
 //!
-//! `bottom`, `right` and `center` follow in [TASK-013]..[TASK-016].
+//! `bottom` and `right` follow in [TASK-014]..[TASK-016].
 
+pub mod center;
 pub mod left;
 pub mod top;

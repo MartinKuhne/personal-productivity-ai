@@ -172,6 +172,11 @@ pub const ICON_ROBOT: &str = "\u{E762}";
 /// Phosphor icon: lightning (U+E2DE)
 pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 
+/// Unsaved-changes marker rendered in front of a document tab's title
+/// (UI-027). A Unicode geometric shape (U+25CF BLACK CIRCLE) rather than a
+/// Phosphor glyph, so it resolves through the system symbol font.
+pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
+
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
 
