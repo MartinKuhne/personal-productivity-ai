@@ -13,7 +13,9 @@
 //!   `success`/`warning`/`danger`),
 //! - [`fastmd_dark_theme`] — the `iced::Theme::custom` instance handed to the
 //!   `iced::application(...).theme(...)` builder (verified
-//!   `iced-0.14.0/src/application.rs:377-392`).
+//!   `iced-0.14.0/src/application.rs:377-392`),
+//! - [`scrim_color`] — the dimmed `surface` token the blocking modal overlay
+//!   paints with ([TASK-017a], `ui_iced/overlay.rs`).
 //!
 //! No numeric colour literal appears here: every value flows out of
 //! [`crate::ui::theme::Palette::fastmd_dark`] ([GUD-003]).
@@ -65,6 +67,24 @@ pub fn iced_theme_palette(palette: &crate::ui::theme::Palette) -> iced::theme::p
         warning: to_iced_color(palette.warning),
         danger: to_iced_color(palette.error),
     }
+}
+
+/// Alpha the modal scrim dims the `surface` token to ([TASK-017a]).
+///
+/// The egui build has no scrim — `egui::Window`s float over an undimmed
+/// viewport — so this is a new, overlay-specific token. 0.55 keeps the
+/// background legible while reading clearly as "input is blocked".
+pub const SCRIM_ALPHA: f32 = 0.55;
+
+/// The semi-transparent modal scrim colour ([TASK-017a]).
+///
+/// Derived from the [`crate::ui::theme::Palette::surface`] token at
+/// [`SCRIM_ALPHA`] rather than from a new literal, so the value stays
+/// anchored to the FastMD palette ([GUD-003]).
+pub fn scrim_color() -> iced::Color {
+    let mut color = to_iced_color(crate::ui::theme::Palette::fastmd_dark().surface);
+    color.a = SCRIM_ALPHA;
+    color
 }
 
 /// Builds the canned FastMD dark iced theme ([TASK-008]).

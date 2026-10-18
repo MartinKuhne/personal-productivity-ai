@@ -80,6 +80,30 @@ fn test_iced_theme_palette_roles_and_values() {
 }
 
 #[test]
+fn test_scrim_color_dims_surface_token_to_scrim_alpha() {
+    let scrim = scrim_color();
+    let surface = to_iced_color(Palette::fastmd_dark().surface);
+
+    // RGB must be the untouched `surface` token — the scrim only changes α, so
+    // no new colour value enters the palette ([GUD-003]).
+    assert_eq!(scrim.r, surface.r);
+    assert_eq!(scrim.g, surface.g);
+    assert_eq!(scrim.b, surface.b);
+    assert_eq!(scrim.a, SCRIM_ALPHA);
+}
+
+#[test]
+fn test_scrim_alpha_is_translucent_not_opaque() {
+    let scrim = scrim_color();
+
+    assert!(
+        scrim.a > 0.0 && scrim.a < 1.0,
+        "the scrim must be translucent so the background stays legible, got {}",
+        scrim.a
+    );
+}
+
+#[test]
 fn test_fastmd_dark_theme_is_registered_custom_theme() {
     let theme = fastmd_dark_theme();
     assert!(

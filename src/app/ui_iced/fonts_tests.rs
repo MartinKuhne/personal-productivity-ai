@@ -30,7 +30,7 @@ fn test_phosphor_collection_is_embedded_true_type_font() {
 fn test_collections_are_in_registration_order_and_nonempty() {
     let collections = font_collections();
     assert!(
-        collections.len() >= 1,
+        !collections.is_empty(),
         "at least the embedded Phosphor collection must be present"
     );
     assert!(

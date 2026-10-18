@@ -191,9 +191,11 @@ fn test_save_failure_is_returned_not_raised() {
 
 #[test]
 fn test_legacy_v0_state_is_migrated() {
-    let mut legacy = PersistedUiState::default();
-    legacy.schema_version = 0;
-    legacy.font_size_scale = Some(1.5);
+    let legacy = PersistedUiState {
+        schema_version: 0,
+        font_size_scale: Some(1.5),
+        ..PersistedUiState::default()
+    };
 
     let migrated = migrate_legacy_state(legacy);
     assert_eq!(migrated.schema_version, CURRENT_SCHEMA_VERSION);

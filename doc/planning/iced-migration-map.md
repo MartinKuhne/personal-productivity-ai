@@ -714,3 +714,249 @@ three files TASK-021 flagged as dirty are clean in this working tree);
    no such constraint, so the tag `pick_list` is always allocated and
    visible. No behaviour requirement is affected.
 
+### TASK-017a overlay-infrastructure verification log (2026-10-17)
+
+**Scope delivered: the reusable primitives only.** No individual dialogs
+(about / batch / tools / agent-debug / attributions) were ported - those
+stay a later chunk. New files: `src/app/ui_iced/overlay.rs` +
+`overlay_tests.rs` sidecar (40 tests), `pub mod overlay;` + module-doc
+bullet in `src/app/ui_iced/mod.rs`, and two additive colour-token items in
+`src/app/ui_iced/theme.rs` (`SCRIM_ALPHA`, `scrim_color()`) so the scrim
+introduces no new numeric literal ([GUD-003]).
+
+**Verified iced 0.14 APIs (local sources).**
+
+| API | Citation |
+| --- | --- |
+| `mouse_area(w)` helper | `iced_widget-0.14.2/src/helpers.rs:2010-2017` |
+| `MouseArea` struct (all nine event slots) | `mouse_area.rs:14-33` |
+| `MouseArea::on_right_press` | `mouse_area.rs:68-71` - publishes **and captures** at `mouse_area.rs:407-412` |
+| `MouseArea::on_right_release` | `mouse_area.rs:75-78` |
+| `MouseArea::on_move(impl Fn(Point) -> Message)` | `mouse_area.rs:113-116` - the only position-carrying slot; position is **widget-relative** (`cursor.position_in(layout.bounds())`, `mouse_area.rs:358-360`) |
+| `MouseArea::interaction(Interaction)` | `mouse_area.rs:127-131` |
+| `Stack` - layered draw, top-down event routing, early return on capture | `stack.rs:23-30` (contract), `stack.rs:249-275` (`update`; capture check `stack.rs:262-264`) |
+| `Float::translate(impl Fn(Rectangle, Rectangle) -> Vector)` | `float.rs:53-59` - receives content bounds + viewport, returns a **delta**, not an absolute position |
+| `Float` overlay activation condition | `float.rs:79-84` (`is_floating`), `float.rs:226-250` - floats **only** if `scale > 1.0 \|\| translation != Vector::ZERO` |
+| `overlay::menu::Menu::new(state, options, hovered_option, on_selected, on_option_hovered, class)` | `overlay/menu.rs:57-79` |
+| `menu::State` | `overlay/menu.rs:144-162` - a bare `Tree` wrapper, no open/close query |
+| `Menu::overlay(position, viewport, target_height, menu_height)` | `overlay/menu.rs:126-140`; above/below flip `menu.rs:244-270` |
+| `Menu` rows are plain `ToString`, no per-row handler, never self-closing | `overlay/menu.rs:557-576`, `menu.rs:401-487` |
+| Runtime updates overlays **before** the base tree | `iced_runtime-0.14.0/src/user_interface.rs:198-254` |
+| Base tree is **skipped** for any event the overlay `Captured` | `iced_runtime-0.14.0/src/user_interface.rs:310-316` |
+| `container` default alignment is Left/Top; `align_x`/`align_y` | `container.rs:100-101`, `container.rs:188-203` |
+| `Padding { top, right, bottom, left }` public fields | `iced_core-0.14.0/src/padding.rs:36-45` |
+| `Button::on_press_maybe(Option<Message>)` | `button.rs:170-173` |
+| `mouse::Interaction` variants (no `Blocked` in 0.14) | `iced_core-0.14.0/src/mouse/interaction.rs:4-33` |
+
+**Architecture decision: `Stack` in the base tree, not the `overlay` layer.**
+Both primitives mount as extra `Stack` layers over the caller's content
+rather than as `overlay::Element`s.
+
+1. A scrim needs the full area. `Float` positions by *delta from where the
+   content would naturally sit* and only becomes an overlay when that delta
+   is non-zero (`float.rs:226`). A full-viewport scrim sits at its natural
+   origin, so its translation is `Vector::ZERO` and it would silently stop
+   floating. `Stack` has no such condition.
+2. `overlay::menu::Menu` is built *as* the overlay, so it demands
+   caller-held `&mut menu::State` **and** `&mut Option<usize>`
+   (`menu.rs:57-79`). That forces `&mut` into every view function, against
+   the pure-view pattern the panels already establish
+   (`panels/top.rs:544-553`). It also renders each row as one plain
+   `ToString` row with no per-row handler and never closes itself. A
+   `Column` of `button`s gives per-row `Message`s, native hover styling,
+   keyboard focus, and needs no external state.
+3. Event precedence is already correct: `Stack::update` walks children
+   top-down and returns as soon as one captures the event
+   (`stack.rs:262-264`), so the dialog card gets the click and the scrim
+   only sees clicks that miss it.
+
+**Primitive signatures.**
+
+```rust
+// Overlay state model - generic over the caller's modal vocabulary.
+pub enum OverlaySlot<Kind> { Closed, ContextMenu { anchor: Point }, Modal(Kind) }
+impl<Kind> OverlaySlot<Kind> {
+    pub fn closed() -> Self;
+    pub fn is_closed(&self) -> bool;
+    pub fn is_context_menu(&self) -> bool;
+    pub fn is_modal(&self) -> bool;
+    pub fn anchor(&self) -> Option<Point>;
+    pub fn modal_kind(&self) -> Option<&Kind>;
+    pub fn open_context_menu(&mut self, anchor: Point) -> bool; // refused while Modal is up
+    pub fn open_modal(&mut self, kind: Kind);
+    pub fn close(&mut self) -> bool;  // true = something was open (Escape consumed)
+}
+impl<Kind> Default for OverlaySlot<Kind> { /* Closed, hand-written */ }
+
+// Menu item + projections.
+pub struct MenuItem<Message> { pub label: String, pub message: Message }
+impl<Message> MenuItem<Message> {
+    pub fn new(label: impl Into<String>, message: Message) -> Self;
+    pub fn map<Other>(self, f: impl FnOnce(Message) -> Other) -> MenuItem<Other>;
+}
+impl<Message> Display for MenuItem<Message>;          // renders the label
+pub fn menu_labels<Message>(items: &[MenuItem<Message>]) -> Vec<String>;
+pub fn menu_index_of<Message: PartialEq>(items: &[MenuItem<Message>], m: &Message) -> Option<usize>;
+
+// Pure geometry (deterministic, so clamping cannot drift from the layout).
+pub fn menu_size(item_count: usize) -> Size;
+pub fn clamp_anchor(anchor: Point, size: Size, viewport: Size) -> Point;
+
+// Widgets.
+pub fn context_menu_card<'a, M: Clone + 'a>(items: &'a [MenuItem<M>]) -> Element<'a, M>;
+pub fn with_context_menu<'a, M: Clone + 'a>(
+    base: Element<'a, M>, anchor: Point, items: &'a [MenuItem<M>],
+    viewport: Size, on_close: M,
+) -> Element<'a, M>;
+pub fn modal<'a, M: Clone + 'a>(content: Element<'a, M>, on_dismiss: M) -> Element<'a, M>;
+pub fn context_menu_trigger<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
+    on_move: impl Fn(Point) -> M + 'a,
+    on_right_press: M,
+) -> MouseArea<'a, M>;
+pub fn input_blocker<'a, M: 'a>(on_click: M) -> MouseArea<'a, M>;   // transparent
+pub fn scrim_blocker<'a, M: 'a>(on_click: M) -> MouseArea<'a, M>;   // dimmed
+
+// Confirm/cancel, re-typed from `ui/widgets.rs:178-194`.
+pub enum ConfirmCancel { Confirm, Cancel }
+impl ConfirmCancel { pub fn to_dialog_action(self) -> crate::ui::widgets::DialogAction; }
+pub fn confirm_cancel_pair<M>(on: impl Fn(ConfirmCancel) -> M) -> (M, M);
+pub fn confirm_press<M>(confirm_enabled: bool, message: M) -> Option<M>;
+pub fn confirm_cancel_buttons<'a, M: Clone + 'a>(
+    confirm_label: &'a str, confirm_enabled: bool,
+    on: impl Fn(ConfirmCancel) -> M + 'a,
+) -> Row<'a, M>;
+```
+
+Layout consts: `MENU_WIDTH = 200.0`, `MENU_ROW_HEIGHT = 24.0`,
+`MENU_ROW_SPACING = 2.0`, `MENU_PADDING = 4.0`, `MENU_ANCHOR_GAP = 2.0`,
+`MODAL_PADDING = 16.0`, `CARD_BORDER_WIDTH = 1.0`, `CARD_RADIUS = 4.0`,
+`CONFIRM_CANCEL_SPACING = 8.0`.
+
+**What positioning IS achievable with built-ins.**
+
+* Cursor-anchored menus anywhere in the mount element's coordinate space
+  (`with_context_menu`), via `container` padding on a full-area layer
+  (`container.rs:188-203` + `Padding` fields, `padding.rs:36-45`).
+* **Exact** viewport clamping. The menu card's size is deterministic
+  (`menu_size`) because rows are uniform-height buttons, so
+  `clamp_anchor` can run *before* layout and still match the real box.
+  The lower bound wins when the viewport is smaller than the card, so the
+  result is never negative.
+* Blocking modals: full-area dimmed scrim + centred card. Input blocking is
+  real, not cosmetic - `mouse_area` captures the press
+  (`mouse_area.rs:376-379`) and the runtime then skips the base tree for
+  that event (`user_interface.rs:310-316`).
+* Click-outside dismissal without activating what is underneath, for the
+  same reason.
+* Modality: `open_context_menu` is refused while a `Modal` is open, so a
+  menu can never open behind a blocking dialog.
+
+**What is NOT achievable with built-ins (and the workaround).**
+
+1. **The right-press point cannot travel with the message.**
+   `MouseArea::on_right_press` takes a fixed `Message` and no closure
+   (`mouse_area.rs:68-71`), unlike `on_move`. The anchor must therefore be
+   **state the caller holds**: track the cursor with `on_move`, then read
+   it back when the right-press message is handled.
+   `context_menu_trigger` wires exactly that pair.
+2. **`on_move` positions are widget-relative** (`mouse_area.rs:358-360`),
+   not window-absolute. Mount the menu against the same element the trigger
+   wrapped and no conversion is needed; for a window-absolute anchor, wrap
+   the full-window root (its bounds *are* the viewport) or add the wrapped
+   widget's known offset.
+3. **No submenu nesting.** `Menu` is single-level and DEC-005 rules out
+   `iced_aw` (also absent from `Cargo.lock`). Context menus use the same
+   label-prefix flattening the hamburger menu already uses
+   (`panels/top.rs:584-626`).
+4. **No auto-flip above the anchor.** `Menu::overlay` does flip
+   (`menu.rs:244-270`) but this design does not use `Menu`.
+   `clamp_anchor` clamps rather than flips; a caller wanting flip-above
+   compares `menu_size` against the space below the anchor itself.
+5. **`Float` is not usable for full-area scrims** - see the
+   zero-translation condition above. It remains the right tool for a
+   *small* floating card whose delta from its natural position is
+   guaranteed non-zero.
+6. **`mouse::Interaction::Blocked` does not exist in 0.14**
+   (`mouse/interaction.rs:4-33`); `Interaction::Hidden` is used on the
+   blockers instead.
+
+**How the tree / tabs / editor are expected to call it.**
+
+Tree ([TASK-012]) and tabs ([TASK-013]) - the panel builds the item list,
+the app root mounts it:
+
+```rust
+// per row / per tab - capture the anchor and ask for the menu:
+context_menu_trigger(
+    row,
+    Message::CursorMoved,                                  // keeps app cursor state current
+    Message::Tree(TreeMessage::ContextMenuOpened { path }),
+)
+
+// app root view - `viewport` is the window's logical size:
+match &slot {
+    OverlaySlot::ContextMenu { anchor } => with_context_menu(
+        root, *anchor, &tree_menu_items, viewport,
+        Message::Tree(TreeMessage::ContextMenuClosed),
+    ),
+    _ => root,
+}
+```
+
+`TreeMessage::ContextMenuOpened/ContextMenuClosed` and
+`TabMessage::ContextMenuOpened/ContextMenuClosed` already exist
+(`ui_iced/message.rs:211-241`), so no `Message` variants were invented.
+The reducer calls `slot.open_context_menu(tracked_cursor)` on open and
+`slot.close()` on close.
+
+Editor ([TASK-014]) - the blocking save/cancel dialog:
+
+```rust
+// app root view:
+stack(vec![root, modal(dialog_card, Message::Editor(EditorMessage::CancelRequested))])
+
+// dialog card footer - `buffer_is_valid` gates the confirm button:
+confirm_cancel_buttons(strings::SAVE_BUTTON, buffer_is_valid,
+    |outcome| Message::Editor(match outcome {
+        ConfirmCancel::Confirm => EditorMessage::SaveRequested { path: path.clone() },
+        ConfirmCancel::Cancel  => EditorMessage::CancelRequested,
+    }))
+```
+
+Escape: the caller maps its Escape key to the same dismiss `Message` (or
+calls `OverlaySlot::close()` directly and uses the returned `bool` to
+decide whether the key was consumed).
+
+**Open items for the orchestrator.**
+
+1. **A cursor-tracking message is still missing from `Message`.**
+   `context_menu_trigger` needs an `on_move` target that stores the cursor
+   (the `Message::CursorMoved(Point)` used in the snippets above does not
+   exist yet - TASK-021 has no such variant, and adding one is outside this
+   task). Until it lands, the anchor can only come from a widget-relative
+   position the panel already knows. Flagging rather than inventing a
+   variant.
+2. **Menu chrome is hand-styled, not native.** Because the menu is a
+   `button` column rather than `overlay::menu::Menu`, its look comes from
+   `card_style` (`surface_variant` + `border_strong` tokens) plus the
+   default `button` theme, not from iced's menu style. If the visual pass
+   wants the native menu appearance, that means switching to `Menu` and
+   accepting caller-held `menu::State` + `hovered_option` in the view
+   signature.
+3. **`menu_size` is a contract, not a measurement.** It assumes every row
+   renders at exactly `MENU_ROW_HEIGHT`. If a future menu item wraps to two
+   lines, `clamp_anchor` will under-estimate and the card can overflow the
+   bottom edge. Keep labels single-line.
+4. **The scrim token is new.** `SCRIM_ALPHA = 0.55` has no egui
+   predecessor (egui `Window`s do not dim the viewport). It is a deliberate
+   design addition derived from `Palette::surface`, not a ported value -
+   worth a visual confirmation.
+5. **Workspace-wide `cargo clippy --all-targets -D warnings` does NOT pass**
+   and did not pass before this task either: pre-existing lints fire in
+   `ui/batch_dialog_tests.rs`, `ui_iced/fonts_tests.rs`,
+   `ui_iced/persisted_tests.rs`, `markdown/link_scanner_tests.rs`,
+   `config/config_tests.rs` and across `fastmd-agent`'s test targets. The
+   gate specified for this task (`cargo clippy -p fastmd --bins --lib --
+   -D warnings`) is clean.
+
