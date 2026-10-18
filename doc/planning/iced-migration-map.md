@@ -1737,3 +1737,237 @@ warnings after fixing four intra-doc links in the new module headers).
    is what keeps the alternating-row shading identical to egui's.
 6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped from
    existing requirements only.
+
+### TASK-016 verification log (bottom command band + background-process logs - 2026-10-18)
+
+**Scope.** Two egui modules ported to the iced pure-view pattern.
+
+* `src/app/ui/panels/bottom.rs` (306 lines) - the **bottom command band**:
+  prompt prefix, active-file context, the command input and the agent Stop
+  button. Maps to UI-001's "Bottom Pane (command prompt)"; the band's
+  message vocabulary is the existing `AgentMessage` channel
+  (`message.rs:362-388`, grounded in `ui/panels/bottom.rs:226-294`).
+* `src/app/ui/background_logs.rs` (336 lines) - the **Background Processes
+  viewer** (UI-047): search field, category combo, auto-scroll checkbox,
+  Clear button and the log list.
+
+Both are pure: no file I/O, no bus access, no ring-buffer mutation, no
+wiring into the pilot binary or the update loop (TASK-022/023). The
+background subsystem was **not modified** - REQ-460..465 are untouched
+(`git status` shows no change under `src/app/background/`).
+
+**Ring-buffer source (read-only).** The viewer reads the same type the egui
+build read: `BackgroundLogs` (`src/app/background/logs.rs:262`) - a
+`VecDeque<BackgroundLogEntry>` (`logs.rs:263`) bounded by
+`MAX_LOG_ENTRIES = 10_000` (`logs.rs:14`), shared as
+`SharedBackgroundLogs = Arc<Mutex<BackgroundLogs>>` (`logs.rs:339`) and
+reached through `AppOrchestrator::background_manager`
+(`src/app/orchestrator.rs:48`). The entry and category types live in
+`src/app/bus/events/messages.rs` (`BackgroundLogEntry` `:63-68`,
+`LogCategory` `:30-39`, `Display` `:41-54`) after the layering-inversion
+fix, re-exported by `background/models.rs:19`. The view-model calls only
+`get_logs()` (`logs.rs:301-303`); `push_log` (`:293-298`) and `clear_logs`
+(`:306-308`) are never called from the UI layer.
+
+**Files.**
+
+| File | Role |
+| --- | --- |
+| `src/app/ui_iced/logs.rs` | `CategoryFilterOption`/`category_filter_options`, `timestamp_text`/`category_tag`, `category_color`/`timestamp_color`/`message_color`, `ScrollSnapshot`/`scroll_snapshot`/`should_follow`, `BackgroundLogsViewModel` (`from_logs`/`from_app`/`unavailable`), `background_logs_view`, `log_table`, `LOG_SCROLLABLE_ID` (685 lines) |
+| `src/app/ui_iced/logs_tests.rs` | 45 sidecar tests |
+| `src/app/ui_iced/panels/bottom.rs` | `BottomPanelViewModel` (`from_app`), `submit_commands`, `stop_enabled`, `bottom_panel` + re-exports of the egui band's pure helpers (279 lines) |
+| `src/app/ui_iced/panels/bottom_tests.rs` | 22 sidecar tests |
+| `src/app/ui_iced/message.rs` | new `LogsMessage::ScrollReported { offset_y, viewport_height, content_height }` variant |
+| `src/app/ui_iced/panels/mod.rs` | `pub mod bottom;` + module-doc entry |
+| `src/app/ui_iced/mod.rs` | `pub mod logs;` + module-doc entry |
+
+**Reused vs new.** Reused unchanged: `ui::background_logs::{is_log_visible,
+filter_logs}` (re-exported, `ui/background_logs.rs:15-46`),
+`ui::panels::bottom::{compute_prompt_prefix, compute_file_context,
+format_models_list, parse_command_intent, clear_command_input_command}`
+(`:44-142`), the `BackgroundLogs` ring buffer, `LogCategory::Display`,
+`strings::{SEARCH_LABEL, CATEGORY_LABEL, LOG_CATEGORY_ALL, LOG_CATEGORY_INDEXER,
+LOG_CATEGORY_WATCHER, LOG_CATEGORY_PDF_CONVERTER, LOG_CATEGORY_IMAGE_VISION,
+LOG_CATEGORY_LLM_TOOLS, AUTO_SCROLL_CHECKBOX, CLEAR_BUTTON,
+BACKGROUND_MGR_ACCESS_ERROR, COMMAND_INPUT_HINT, STOP_AGENT_BUTTON}` and the
+`Palette` tokens `log_timestamp`, `log_category`, `text`, `text_strong`,
+`text_muted`, `error` - no new colour literal ([GUD-003]). New: the two
+view-models, the auto-scroll rule, the category pick-list model,
+`submit_commands` (extracted from egui's inline submit branch) and one
+message variant.
+
+**View-model shapes.**
+
+```text
+BottomPanelViewModel {
+    command_input: String,                // AgentPanelState::command_input
+    agent_running: bool,                 // agent().state().running
+    prompt_prefix: String,               // compute_prompt_prefix(prompt_dir, libraries)
+    file_context: Option<(String, f32)>, // compute_file_context(active_file, prefix)
+}
+
+BackgroundLogsViewModel {
+    visible: bool,                       // show_background_logs
+    entries: Vec<BackgroundLogEntry>,    // filtered, ring order (old -> new)
+    total_entries: usize,                // pre-filter count (FMD-067: report the loss)
+    search_text: String,
+    category_filter: Option<LogCategory>,
+    category_options: Vec<CategoryFilterOption>,  // owned: the pick-list borrow lives here
+    auto_scroll: bool,
+    access_error: bool,                  // poisoned lock -> BACKGROUND_MGR_ACCESS_ERROR
+}
+```
+
+`BackgroundLogsViewModel` is `Clone + Debug` only: `BackgroundLogEntry` is a
+bus type that derives no `PartialEq` and REQ-460..465 keep it that way, so
+the snapshot cannot derive it either - the sidecar asserts field by field.
+`category_options` is a field rather than a call because `pick_list` needs
+`V: Borrow<T> + 'a` (`pick_list.rs:179-195`): the selected option must be
+borrowed out of something that outlives the element, which is the same
+reason `TopBarViewModel::tag_options` exists ([TASK-011]).
+
+**Verified iced 0.14 APIs (local registry sources).**
+
+| API | Citation |
+| --- | --- |
+| `table(columns, rows)` / `column(header, view)` | `iced_widget-0.14.2/src/table.rs:18-28` / `:34-49` |
+| all-`Shrink` forces the **first** column to `Fill` (why the message column is `Fill` explicitly) | `table.rs:129-133` |
+| `Column::width` | `table.rs:650-653` |
+| `table::Style` carries only `separator_x`/`separator_y` | `table.rs:676-681` |
+| `scrollable` builder `.id` / `.width` / `.height` / `.on_scroll` | `scrollable.rs:144` / `:150` / `:156` / `:164-168` |
+| `scrollable::Viewport::{absolute_offset, bounds, content_bounds}` | `scrollable.rs:1739-1748` / `:1775-1777` / `:1780-1782` |
+| `pick_list` bounds: `T: ToString + PartialEq + Clone`, `L: Borrow<[T]>`, `V: Borrow<T> + 'a` | `pick_list.rs:179-215` |
+| `checkbox(is_checked)` (label/toggle are builders) | `helpers.rs:1281-1289`, `checkbox.rs:145` (`.label`), `:155` (`.on_toggle`) |
+| `text_input(...).on_submit` fires on Enter with **no modifier check** | `text_input.rs:194`, `:1050-1056` |
+| `widget::Id: From<&'static str>` (the stable scroll target) | `iced_core-0.14.0/src/widget/id.rs:26-30` |
+| reducer-side `operation::{snap_to, snap_to_end, scroll_to, scroll_by} -> Task<T>` | `iced_runtime-0.14.0/src/widget/operation.rs:12-47` |
+| `AbsoluteOffset<T>` / `RelativeOffset::{START, END}` | `iced_core-0.14.0/src/widget/operation/scrollable.rs:120-153` |
+
+**Auto-scroll intent model.** egui got the behaviour declaratively from
+`ScrollArea::stick_to_bottom`
+(`egui-0.36.1/src/containers/scroll_area.rs:648-658`), which in the frame
+loop is:
+
+```rust
+if stick_to_end[d] && state.scroll_stuck_to_end[d] && !had_explicit_scroll_adjustment[d] {
+    state.offset[d] = content_size[d] - inner_rect.size()[d];   // :1282-1284
+}
+// "stuck" is recomputed as:
+// offset == available_offset  ||  (stick_to_end && available_offset < 0)   // :1543-1549
+```
+
+iced has no such flag, so the rule is split across the layers:
+
+1. **Report** - the view wires `Scrollable::on_scroll` and emits
+   `Message::Logs(ScrollReported { offset_y, viewport_height, content_height })`
+   (the reason the `Logs` channel grew a variant).
+2. **Decide** - `logs::should_follow(auto_scroll, Option<ScrollSnapshot>)`
+   is `auto_scroll && viewport.is_at_bottom()`, where `is_at_bottom` is
+   `fits() || offset_y >= max_offset() - BOTTOM_STICK_TOLERANCE`. The
+   `fits()` arm is egui's `available_offset < 0` case; the 1 pt tolerance
+   replaces egui's exact `f32` equality because iced clamps and rounds the
+   offset before reporting it. `None` (no report yet) is **false** - the
+   view must not invent geometry it was never given.
+3. **Execute** - reducer work in TASK-022/023:
+   `operation::scroll_to(LOG_SCROLLABLE_ID.into(), AbsoluteOffset { x: 0.0, y: snapshot.max_offset() })`,
+   or `operation::snap_to_end(...)` for the same result without computing
+   the offset (`operation.rs:23-39`). The pure layer marks the intent only;
+   it never scrolls.
+
+Consequences pinned by test: at-bottom + preference on follows; scrolled-up
+never jumps back down; preference off never follows; content shorter than
+the viewport counts as at the bottom; the tolerance absorbs a sub-point
+shortfall and nothing more; `max_offset` never goes negative.
+
+**Not ported, with reasons.**
+
+1. **The IME Enter workaround** (`ui/panels/bottom.rs:13-40`,
+   `is_enter_pressed`). egui needed it because `egui-winit` drops the raw
+   `Key::Enter` when an IME claims the key (`VK_PROCESSKEY`) and only an
+   `Event::Ime(Commit("\n"))` reaches the app. iced 0.14 never surfaces IME
+   commits to the application - `text_input` publishes `on_submit` from its
+   own key handling (`text_input.rs:1050-1056`) - so there is no second
+   delivery path to reconcile and no equivalent helper to write.
+2. **Shift+Enter = newline.** The egui band submitted on Enter *unless*
+   Shift was held (`bottom.rs:238-243`). iced's `text_input` fires
+   `on_submit` on Enter with no modifier check and the message is fixed, so
+   the view cannot branch on Shift. `text_editor` is no better: its
+   `Action::Edit(Edit::Enter)` carries no modifiers either. Flagged for
+   TASK-018/022 - either accept Enter-always-submits or change
+   `strings::COMMAND_INPUT_HINT`, which currently promises Shift+Enter.
+3. **Multiline command field.** egui used `TextEdit::multiline`
+   (`bottom.rs:228-235`); the port uses `text_input`, which is single-line.
+   A multiline band needs `text_editor` plus an owned
+   `text_editor::Content`/`State` in the runtime model (DEC-007,
+   TASK-014) - the message vocabulary (`InputChanged`/`Submit`) is
+   identical either way, so this is a widget swap, not a model change.
+4. **The Tier-4 `on_click("send")` sink** (`bottom.rs:148-159`) is
+   `egui_kittest` plumbing; CON-003 rules it out. The iced equivalent is the
+   `iced_test::simulator` tier (TASK-025/026).
+5. **egui's hand-computed right-alignment** (the 100 pt Stop-button rect and
+   the `available_rect_before_wrap` bookkeeping, `bottom.rs:187-211`) is not
+   ported: iced's `Row` plus a `Fill` container place it, so the magic
+   numbers disappear rather than get translated.
+6. **The egui window chrome** (resizable/collapsible 600x400 modal,
+   `background_logs.rs:66-70`) is out of scope - the port is the body only,
+   mounted by the overlay host (TASK-017) / the app view (TASK-023).
+7. **UI-047's "open automatically when the first background task starts"**
+   is **not implemented in the egui build either** - visibility is a plain
+   `show_background_logs` flag toggled from the top menu
+   (`UserCommand::ToggleBackgroundLogs`, ported in TASK-011). The port
+   carries the flag through the view-model unchanged; the auto-open trigger
+   would be reducer behaviour, and the gap is pre-existing rather than a
+   migration regression ([RUST-041]).
+
+**Gate results (this pass).** `cargo check -q` PASS (exit 0, clean,
+workspace); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS
+(exit 0); `cargo fmt` run, `cargo fmt --check` PASS (exit 0);
+`cargo nextest run -p fastmd --status-level fail --show-progress none` PASS
+(**1727 run / 1727 passed / 1 skipped**), of which **67** are this task's
+new sidecar tests (45 `ui_iced::logs` + 22 `ui_iced::panels::bottom`);
+`cargo doc --no-deps --quiet` PASS (exit 0, no warnings).
+
+**Needs the orchestrator's eyes.**
+
+1. **The task brief's "level colours" do not exist.** `BackgroundLogEntry`
+   has no severity field (`messages.rs:63-68`) and the egui viewer painted
+   every row with the same two tokens (`background_logs.rs:138-151`).
+   `category_color` is therefore an exhaustive-but-uniform map to
+   `palette.log_category`, kept exhaustive so a new `LogCategory` variant is
+   a compile error rather than a silent fall-through. If per-severity colour
+   is actually wanted, the ring-buffer entry needs a level field - a
+   REQ-460..465 change this task was barred from making.
+2. **`Print` and `Batch` have no filter chip.** The egui combo offered only
+   All / Indexer / Watcher / PdfConverter / ImageVision / LlmTools
+   (`background_logs.rs:84-106`) even though `parse_log_category` routes
+   `print` and `batch` targets into two more variants (`logs.rs:51-54`), and
+   `strings.rs` has no `LOG_CATEGORY_PRINT`/`LOG_CATEGORY_BATCH`. The port
+   keeps parity and documents the gap (pinned by
+   `category_filter_option_is_none_for_an_unoffered_category`). Widening it
+   is a product decision needing two new string constants.
+3. **`LogsMessage` grew a variant.** `ScrollReported` is a runtime geometry
+   report, not user intent - the same class `LayoutMessage::CursorMoved`
+   carries. It is required because iced exposes scroll position only through
+   `on_scroll`; without it the auto-scroll rule can never be evaluated. If
+   the orchestrator would rather keep [TASK-021]'s channel frozen, the
+   alternative is a `Layout`-channel variant, which is a worse fit.
+4. **Poisoned-lock handling is stricter than egui.** The egui viewer called
+   `.lock().unwrap()` and would take the UI down
+   (`background_logs.rs:49-64`, `:157-161`); `from_app` degrades to
+   `unavailable()` instead ([FMD-064]). `unavailable()` reports
+   `visible: false` deliberately - an unreadable buffer must not force a
+   closed window open - so the reducer decides whether to surface the error
+   banner. Flagged in case the reviewer prefers fail-open.
+5. **`--all-targets` clippy is not clean, and was not before this task.** The
+   gate command in the brief (`--bins --lib`) is green. `cargo clippy -p
+   fastmd --all-targets -- -D warnings` reports **12 pre-existing** test-only
+   lints in other tasks' files (`markdown/link_scanner_tests.rs`,
+   `ui/batch_dialog_tests.rs`, `config/config_tests.rs`,
+   `ui_iced/panels/left_tests.rs`, `ui_iced/render/code_tests.rs`,
+   `ui_iced/message_tests.rs`: `field_reassign_with_default`,
+   `let_unit_value`, `assertions_on_constants`, `redundant_closure`,
+   `cloned_ref_to_slice_refs`, `useless_vec`). My own files are clean under
+   the same lint set. Worth a separate chore sweep rather than folding into
+   this task.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped from
+   existing requirements only.

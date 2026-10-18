@@ -417,6 +417,17 @@ pub enum SearchMessage {
 /// a text search, a category combo and an auto-scroll checkbox, plus a
 /// Clear button. Window visibility is NOT here — it is
 /// `UserCommand::ToggleBackgroundLogs`.
+///
+/// `ScrollReported` was added by [TASK-016] (the channel brief allowed
+/// extending it honestly). egui kept the scroll position inside
+/// `ScrollArea`'s own state and applied `stick_to_bottom` there
+/// (`egui-0.36.1/src/containers/scroll_area.rs:1282-1284`); iced exposes
+/// the geometry only through `Scrollable::on_scroll`
+/// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the viewport has
+/// to reach `update` as a message before the pure
+/// [`crate::ui_iced::logs::should_follow`] rule can decide anything. It is
+/// a runtime report about pane geometry, not user intent — the same class of
+/// payload [`LayoutMessage::CursorMoved`] carries for overlay anchoring.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogsMessage {
     /// The free-text log filter changed.
@@ -430,6 +441,22 @@ pub enum LogsMessage {
     AutoScrollToggled(bool),
     /// The Clear button emptied the visible log list.
     Cleared,
+    /// The log list's viewport geometry changed ([TASK-016]).
+    ///
+    /// The reducer stores this and feeds it to
+    /// [`crate::ui_iced::logs::should_follow`] together with the
+    /// auto-scroll preference; when the intent is `true` it dispatches
+    /// `operation::scrollable::scroll_to` against
+    /// [`crate::ui_iced::logs::LOG_SCROLLABLE_ID`]
+    /// (`iced_runtime-0.14.0/src/widget/operation.rs:31-39`).
+    ScrollReported {
+        /// How far the content is scrolled down, in logical points.
+        offset_y: f32,
+        /// Height of the visible viewport, in logical points.
+        viewport_height: f32,
+        /// Total height of the scrolled content, in logical points.
+        content_height: f32,
+    },
 }
 
 /// Theme / UI-scale channel ([TASK-021], [TASK-008], DEC-008).

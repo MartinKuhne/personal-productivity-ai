@@ -34,12 +34,17 @@
 //! - [`table_width`] — the iced adapter for the reused pure Fair Table
 //!   Width Algorithm: available width → solver inputs → pinned iced
 //!   column widths ([TASK-015]).
+//! - [`logs`] — the Background Processes viewer (UI-047): the log table
+//!   over a read-only snapshot of the same `background::logs` ring buffer,
+//!   the reused filter predicate, the category pick list and the pure
+//!   auto-scroll intent rule ([TASK-016]).
 //!
 //! `update`, `tree` and `agent` follow in Phase 3/4.
 
 pub mod editor;
 pub mod fonts;
 pub mod layout;
+pub mod logs;
 pub mod message;
 pub mod overlay;
 pub mod panels;

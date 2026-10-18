@@ -21,9 +21,17 @@
 //! - [`center`] — the document pane: the UI-049 tab strip, the
 //!   UI-026..UI-034 tab context menu, the UI-048 thinking gate and the
 //!   viewer area whose markdown render is [TASK-015] ([TASK-013]).
+//! - [`bottom`] — the command band: the prompt prefix and active-file
+//!   context, the command input and the agent Stop button, with the
+//!   queue-vs-submit intent solver extracted to [`bottom::submit_commands`]
+//!   ([TASK-016], UI-001).
 //!
-//! `bottom` and `right` follow in [TASK-014]..[TASK-016].
+//! `right` follows in [TASK-014]. The Background Processes viewer
+//! ([TASK-016], UI-047) is not a pane — the egui build shows it as a
+//! floating window — so it lives in [`crate::ui_iced::logs`] and is mounted
+//! by the overlay/window host in [TASK-017]/[TASK-023].
 
+pub mod bottom;
 pub mod center;
 pub mod left;
 pub mod top;
