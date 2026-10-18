@@ -1349,3 +1349,181 @@ files).
    `&FastMdApp`. If the orchestrator wants one source of truth, the clean
    refactor is a pure `Tabs::title_for(&Path) -> String` that both call -
    deliberately not done here to keep the change inside the iced layer.
+
+### TASK-014 verification log (inline editor ported to iced `text_editor` - 2026-10-18)
+
+**Scope.** DEC-007: iced 0.14 `text_editor` has no native undo/redo, so the
+editing model egui kept in `ui/text_buffer.rs` + `ui/editor_egui.rs` was
+re-hosted as a pure state module plus a pure view.
+
+**Files.**
+
+| File | Role |
+| --- | --- |
+| `src/app/ui_iced/editor.rs` | `EditorHistory`, `EditorViewModel`, `classify_action`, `apply_editor_message`, `editor_card`, `editor_modal` |
+| `src/app/ui_iced/editor_tests.rs` | 49 sidecar tests |
+| `src/app/markdown/validation.rs` | `validate_markdown`, `MarkdownParseError`, `MarkdownErrorKind` (UI-043) |
+| `src/app/markdown/validation_tests.rs` | 27 sidecar tests |
+| `src/app/markdown/parser.rs` | new `gfm_options()`; `parse_markdown_to_events` now calls it |
+| `src/app/ui/strings.rs` | `build_editor_status_text`, `build_editor_validation_error`, `EDITOR_ERR_UNTERMINATED_FENCE`, `EDITOR_INPUT_PLACEHOLDER` |
+
+Nothing is wired into the running app loop - that is TASK-022/023.
+
+**`EditorHistory` design + cap (UI-042).** A `Vec<String>` of snapshots plus
+a `cursor: usize` indexing the snapshot that *is* the buffer's current state,
+so undo/redo are index moves rather than a second stack. `MIN_UNDO_STEPS =
+100` is UI-042's floor; `UNDO_CAPACITY = MIN_UNDO_STEPS + 1 = 101` is the
+stored-snapshot ceiling. The `+1` is load-bearing: `N` snapshots only yield
+`N - 1` undo steps, so a cap of exactly 100 would ship 99 and miss the
+requirement. Both are pinned at compile time (`const _: () = assert!(...)`)
+and at runtime (push 150 -> `len() == 101`, exactly 100 undo steps
+available, the 101st returns `None`, oldest retained is `s49`). Overflow
+evicts the **oldest** snapshot. Pushing a snapshot equal to the current one
+is **coalesced** - no entry added, and the redo tail survives - which is the
+same rule egui's `UndoStack` used so a stream of no-op edits cannot burn the
+budget. `with_capacity(0)` is raised to 1.
+
+**Action interception (DEC-007).** iced 0.14 does not mutate the widget's
+own buffer: `TextEditor::on_action` *reports* an `Action`
+(`iced_widget-0.14.2/src/text_editor.rs:212-222`) and the application
+applies it with `Content::perform` (`text_editor.rs:411-416`; the crate's
+own example at `text_editor.rs:28-30`). That callback is the interception
+point. `classify_action` delegates to `Action::is_edit()`, verified verbatim
+at `iced_core-0.14.0/src/text/editor.rs:94-99`:
+
+```rust
+pub fn is_edit(&self) -> bool {
+    matches!(self, Self::Edit(_))
+}
+```
+
+`Action::Edit(..)` is the only content-changing variant. Its seven `Edit`
+payloads (`Insert`, `Paste`, `Enter`, `Indent`, `Unindent`, `Backspace`,
+`Delete` - `iced_core-0.14.0/src/text/editor.rs:101-118`) all push;
+`Move`, `Select`, `SelectWord`, `SelectLine`, `SelectAll`, `Click`, `Drag`
+and `Scroll` are `CaretOnly` and never touch history. Two tests cover this:
+one enumerates all 28 `Action` values and asserts the exact partition
+(7 content / 21 caret), one asserts `classify_action(a) == a.is_edit()` for
+every value so the rule cannot drift from iced's own predicate.
+
+**What iced `text_editor` provides natively (verified, not built here).**
+
+| Req | Native support | Source |
+| --- | --- | --- |
+| UI-039 drag select | `Action::Drag(Point)` | `iced_core-0.14.0/src/text/editor.rs:85-86` |
+| UI-039 double-click word | `Action::SelectWord` | `text/editor.rs:75-76` |
+| UI-039 triple-click line | `Action::SelectLine` | `text/editor.rs:77-78` |
+| UI-039 Shift+arrows | `Action::Select(Motion)` | `text/editor.rs:73-74` |
+| UI-040 Copy/Cut/Paste | widget owns the OS clipboard binding; paste arrives as `Action::Edit(Edit::Paste(Arc<String>))`, cut as a delete edit over the selection | `text/editor.rs:101-118` |
+| UI-041 char / word / line / Home / End / Ctrl-Home / Ctrl-End | `Motion::{Left, Right, Up, Down, WordLeft, WordRight, Home, End, PageUp, PageDown, DocumentStart, DocumentEnd}`, with `Motion::widen()` mapping Ctrl+Left -> WordLeft and Ctrl+Home -> DocumentStart | `text/editor.rs:119-159` |
+| UI-038 monospace | `iced::Font::MONOSPACE` | `iced_core-0.14.0/src/font.rs:27` |
+| UI-038 line/column | `Content::cursor() -> Cursor { position: Position { line, column } }`, 0-based; `display_line_column` makes it 1-based | `text/editor.rs:189-216`, `iced_graphics-0.14.0/src/text/editor.rs:277-303` |
+
+Built here because iced has no equivalent: the undo/redo stack, the
+front-matter-preserving save model, and pre-save GFM validation.
+
+**Validation - written, not reused (there was nothing to reuse).** The egui
+build **never validated before saving**: `TextBuffer::save`
+(`ui/text_buffer.rs:329-355`) joins and writes with no parse step, so
+UI-043 was unimplemented drift. A search of `crate::markdown` found no
+validation helper. Per the subsystem's rule that `markdown/` is the single
+`pulldown-cmark` import point, `validate_markdown` was added to
+`crate::markdown` (new `validation.rs`) rather than to the view, and is
+re-exported from `markdown/mod.rs`.
+
+`pulldown_cmark::Parser` is **total** - `new_ext` returns an iterator,
+never a `Result`, and malformed constructs degrade to literal text. Verified
+against the 0.13.4 event stream: a dangling `[^missing]` emits literal
+`Text("[")`/`Text("^missing")`/`Text("]")` with **no** `FootnoteReference`;
+a short table row is **padded** with an empty `TableCell`; a long row has
+its extra cell **dropped**; an unterminated fence is auto-closed at EOF. So
+UI-043's "if parsing fails" cannot be read literally. `validate_markdown`
+still drives the parser with the renderer's exact option set (that is the
+step the requirement names) and then reports the structural defects the
+parser tolerates silently that are real authoring errors with a determinate
+location. One check ships: `MarkdownErrorKind::UnterminatedCodeFence`,
+located at the **opening** fence (byte offset + 1-based line/column),
+because that is the one tolerated defect that visibly destroys the rest of a
+document. Dangling footnotes and table column mismatches are pinned as
+*not-yet-detectable* by two tests so a future parser change surfaces.
+
+`gfm_options()` was extracted from `parse_markdown_to_events` so UI-043's
+"the same GFM parser used for rendering" is structural, not aspirational -
+one definition, asserted to be exactly
+`TABLES | FOOTNOTES | STRIKETHROUGH | TASKLISTS` and to leave
+`WIKILINKS`/`SMART_PUNCTUATION`/`MATH`/`GFM`/`HEADING_ATTRIBUTES` off.
+Validation runs on every content-changing action (not only at save) because
+the Save button's disabled state has to be visible while the user types.
+
+**Front matter (UI-037 / UI-044).** Reused, not reimplemented:
+`EditorViewModel::open` splits with the existing `DocumentContent::parse`
+so only the body reaches the text area and the YAML is cached verbatim;
+`EditorViewModel::document()` re-joins through `DocumentContent`'s
+`Display` impl. A test asserts the rejoined text re-parses to the identical
+front-matter string. The actual `fs::write` stays in the reducer - the view
+only emits `SaveRequested { path }`.
+
+**Reducer contract for TASK-022/023.** `apply_editor_message(&mut vm,
+&EditorMessage) -> bool` is the pure entry point (no I/O, no bus, no
+overlay mutation; returns whether the buffer changed). `Action` is applied
+through `apply_action`; `Undo`/`Redo` replay one snapshot **only when the
+message's `path` matches the buffer's file** - a message aimed at another
+tab is ignored rather than corrupting this buffer; `SaveRequested` /
+`CancelRequested` never mutate the buffer. `EditorViewModel::open` seeds the
+opened body into the history as the baseline, which is what makes the *first*
+keystroke undoable.
+
+**Gate results (this pass).** `cargo check -q` PASS (exit 0, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS workspace-wide (exit 0);
+`cargo nextest run -p fastmd` PASS (**1512 run / 1512 passed / 1 skipped**,
++77 over TASK-013's 1435 - 49 `ui_iced::editor` + 27
+`markdown::validation` + 1 `ui::strings` builder test);
+`cargo doc --no-deps --quiet -p fastmd` PASS
+(exit 0, no warnings from this task's files).
+
+**Needs the orchestrator's eyes.**
+
+1. **UI-043 was never implemented in the egui build** (see above), so this
+   task *adds* behaviour rather than porting it. SPEC.md was not touched.
+   The requirement's literal wording ("if parsing fails") is unsatisfiable
+   with a total parser; the shipped realisation is documented in
+   `markdown/validation.rs`'s module header. If the reviewer wants a
+   stricter gate, the honest options are a different parser (comrak has a
+   fallible API) or an explicit lint list - both out of scope here.
+2. **Undo/redo resets the caret to the document start.** Per this task's
+   contract `EditorHistory` snapshots the *text* only; egui's `UndoStack`
+   stored `Cursor` + `Selection` per entry and restored them. Extending the
+   snapshot to `(String, iced::widget::text_editor::Cursor)` would restore
+   the caret - small change, but it changes the public `undo() -> Option<&str>`
+   shape, so it was left as a follow-up rather than silently widening the API.
+3. **The status-bar column is iced's glyph index, not a Unicode character
+   count.** `Content::cursor()` maps cosmic-text's `cursor.index`
+   (`iced_graphics-0.14.0/src/text/editor.rs:280-287`), which under
+   advanced shaping can differ from the character count for composed
+   scripts. ASCII columns are exact (asserted). The egui build computed a
+   true character column, so this is a small fidelity regression for
+   non-ASCII caret positions.
+4. **`markdown/parser.rs` was modified** (not just read): `gfm_options()`
+   extracted and `parse_markdown_to_events` switched to it. Behaviour-
+   preserving, covered by the existing parser suite. `document.rs`'s
+   `apply_task_toggle` still repeats the same four `insert` calls - a
+   follow-up could fold it onto `gfm_options()` too; left alone to keep this
+   task's blast radius small.
+5. **`EditorViewModel` owns the iced `text_editor::Content`** rather than a
+   `String`, because `Content` *is* the buffer and a parallel `String` would
+   be a second source of truth. Consequence: undo/redo rebuild `Content`
+   (`Content` has no in-place setter), which is also why the caret resets.
+   The VM is therefore not iced-free, though it is side-effect-free.
+6. **The dialog is a fixed 800x600** (`EDITOR_DIALOG_WIDTH`/`_HEIGHT`),
+   matching egui's `default_size`. egui's window was resizable; iced has no
+   resizable modal in the TASK-017a primitive, so resizing is not ported.
+   If a resizable editor is wanted it needs overlay work, not editor work.
+7. **`ui/strings.rs` extended (additive only)**: four items. The egui
+   editor hardcoded `"Line: {} | Col: {}"` in the render code, which the
+   new `build_editor_status_text` replaces for this layer.
+8. **No keyboard bindings for Save/Cancel or Ctrl+Z/Ctrl+Y are wired.**
+   `EditorMessage::Undo`/`Redo` exist and the reducer honours them, but
+   nothing produces them from a key press yet - iced routes editor key
+   events into `Action`s and the app-level shortcut map is TASK-022's. The
+   buttons are the only Save/Cancel path in this commit.

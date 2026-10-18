@@ -620,6 +620,29 @@ pub const SAVE_BUTTON: &str = "Save";
 pub const PDF_BACKED_ERROR: &str = "Cannot modify this file. The system generates the file from a PDF. \
      Use write_yaml_header to modify front-matter.";
 
+/// Status-bar text in the inline editor showing the cursor position
+/// (UI-038), e.g. `Line: 3 | Col: 12`.
+pub fn build_editor_status_text(line: usize, column: usize) -> String {
+    format!("Line: {line} | Col: {column}")
+}
+
+/// Validation-error text shown in the inline editor when the Markdown body
+/// cannot be saved (UI-043), e.g.
+/// `Markdown validation failed: unterminated code fence (line 3, column 1)`.
+pub fn build_editor_validation_error(reason: &str, line: usize, column: usize) -> String {
+    format!("Markdown validation failed: {reason} (line {line}, column {column})")
+}
+
+/// Validation reason for a fenced code block that is opened and never closed
+/// (UI-043, [`MarkdownErrorKind::UnterminatedCodeFence`]).
+///
+/// [`MarkdownErrorKind::UnterminatedCodeFence`]: crate::markdown::MarkdownErrorKind::UnterminatedCodeFence
+pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
+
+/// Placeholder shown in the inline editor's text area while the body is empty
+/// (UI-038).
+pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +661,16 @@ mod tests {
         assert_eq!(
             build_indexing_progress_text(12),
             "Indexing workspace (found 12 files)..."
+        );
+    }
+
+    #[test]
+    fn test_editor_status_and_validation_text_builders() {
+        assert_eq!(build_editor_status_text(1, 1), "Line: 1 | Col: 1");
+        assert_eq!(build_editor_status_text(42, 7), "Line: 42 | Col: 7");
+        assert_eq!(
+            build_editor_validation_error(EDITOR_ERR_UNTERMINATED_FENCE, 3, 1),
+            "Markdown validation failed: unterminated code fence (line 3, column 1)"
         );
     }
 

@@ -187,10 +187,16 @@ fn push_scanned_text(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyle
     }
 }
 
-/// Parses markdown text into a sequence of render events.
-#[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
-pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
-    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+/// The GFM option set FastMD parses with — MD-001's feature list, and the
+/// exact set [UI-043] names for the editor's pre-save validation.
+///
+/// Single source of truth so the renderer and [`super::validation::validate_markdown`]
+/// cannot drift apart: UI-043 requires the editor to validate "with the same
+/// GFM parser used for rendering", which structurally means the same option set.
+///
+/// [UI-043]: `src/app/ui/SPEC.md`
+pub fn gfm_options() -> pulldown_cmark::Options {
+    use pulldown_cmark::Options;
 
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
@@ -204,7 +210,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     // explanation and the regression test for the fix.
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options
+}
 
+/// Parses markdown text into a sequence of render events.
+#[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
+pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
+    use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+
+    let options = gfm_options();
     let parser = Parser::new_ext(markdown_text, options);
     let mut events = Vec::new();
 

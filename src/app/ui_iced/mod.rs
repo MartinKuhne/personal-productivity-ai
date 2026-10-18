@@ -24,9 +24,13 @@
 //!   the overlay slot model, cursor anchoring with viewport clamping, the
 //!   scrim that swallows input, and the confirm/cancel button pair
 //!   ([TASK-017a], DEC-005).
+//! - [`editor`] — the inline Markdown editor modal with the DEC-007
+//!   undo/redo history stack, pre-save GFM validation and the
+//!   front-matter-preserving save model ([TASK-014], UI-037..UI-045).
 //!
 //! `update`, `tree`, `render` and `agent` follow in Phase 3/4.
 
+pub mod editor;
 pub mod fonts;
 pub mod layout;
 pub mod message;
