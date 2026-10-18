@@ -121,3 +121,90 @@ fn test_multi_select_delete_publishes_per_file() {
     assert!(received.contains(&UserCommand::Delete(PathBuf::from("/tmp/a.md"))));
     assert!(received.contains(&UserCommand::Delete(PathBuf::from("/tmp/b.md"))));
 }
+
+#[test]
+fn test_publish_skill_reads_file_and_publishes_command() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let skill_path = dir.path().join("skill.md");
+    std::fs::write(&skill_path, "---\ntitle: Skill\n---\nSkill body text").expect("write skill");
+
+    let mut ctx = make_ctx();
+    let reader = ctx.user_command_bus.subscribe();
+    let target = PathBuf::from("/tmp/note.md");
+
+    super::publish_skill(
+        &mut ctx,
+        &skill_path,
+        "test.skill.read",
+        None,
+        Some(target.clone()),
+    );
+
+    match reader.try_recv_exposing_lag().unwrap() {
+        UserCommand::RunSkillPrompt {
+            content,
+            target_dir,
+            target_file,
+        } => {
+            assert_eq!(content.trim(), "Skill body text");
+            assert_eq!(target_dir, None);
+            assert_eq!(target_file, Some(target));
+        }
+        other => panic!("expected RunSkillPrompt, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_publish_skill_read_failure_publishes_nothing() {
+    let mut ctx = make_ctx();
+    let reader = ctx.user_command_bus.subscribe();
+
+    super::publish_skill(
+        &mut ctx,
+        std::path::Path::new("/nonexistent/definitely-missing-skill.md"),
+        "test.skill.missing",
+        None,
+        None,
+    );
+
+    assert!(
+        reader.try_recv_exposing_lag().is_err(),
+        "a read failure must not publish a RunSkillPrompt"
+    );
+}
+
+#[test]
+fn test_dir_row_label_encodes_expansion_state() {
+    let collapsed = super::dir_row_label(false, "docs");
+    let expanded = super::dir_row_label(true, "docs");
+
+    assert_eq!(
+        collapsed,
+        eframe::egui::RichText::new(format!("{} docs", crate::ui::strings::ICON_CARET_RIGHT))
+    );
+    assert_eq!(
+        expanded,
+        eframe::egui::RichText::new(format!("{} docs", crate::ui::strings::ICON_CARET_DOWN))
+    );
+}
+
+#[test]
+fn test_file_row_label_indents_and_tints_pdf_backed() {
+    use crate::ui::test_helpers::run_ui_test;
+
+    let ctx = eframe::egui::Context::default();
+    let mut plain = None;
+    let mut backed = None;
+    let _ = run_ui_test(&ctx, eframe::egui::RawInput::default(), |ui| {
+        plain = Some(super::file_row_label(ui, "note.md", false));
+        backed = Some(super::file_row_label(ui, "note.md", true));
+    });
+
+    let plain = plain.expect("plain label");
+    let backed = backed.expect("backed label");
+    assert_eq!(plain, eframe::egui::RichText::new("  note.md"));
+    assert_ne!(
+        plain, backed,
+        "a PDF-backed row must be tinted with the palette's error colour"
+    );
+}

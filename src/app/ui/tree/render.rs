@@ -83,22 +83,13 @@ fn show_dir_context_menu(
         ui.separator();
         for skill in folder_skills {
             if menu_item(ui, skill.name.as_str()) {
-                if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
-                    let content = crate::markdown::DocumentContent::parse(&raw_content).body;
-                    ctx.user_command_bus.publish(
-                        crate::bus::events::user_command::UserCommand::RunSkillPrompt {
-                            content,
-                            target_dir: Some(path.to_path_buf()),
-                            target_file: Some(path.to_path_buf()),
-                        },
-                    );
-                } else {
-                    tracing::error!(
-                        name = "ui.dir.skill_prompt_failed",
-                        path = %skill.path.display(),
-                        "Failed to read folder skill file content to run as prompt."
-                    );
-                }
+                publish_skill(
+                    ctx,
+                    &skill.path,
+                    "ui.dir.skill_prompt_failed",
+                    Some(path.to_path_buf()),
+                    Some(path.to_path_buf()),
+                );
             }
         }
     }
@@ -213,8 +204,11 @@ fn show_file_context_menu(
             .and_then(|s| s.to_str())
             .map(|s| format!("{s}.pdf"));
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Save as PDF")
-            .add_filter("PDF document", &["pdf"]);
+            .set_title(crate::ui::strings::SAVE_AS_PDF_DIALOG_TITLE)
+            .add_filter(
+                crate::ui::strings::SAVE_AS_PDF_FILTER_LABEL,
+                &[crate::ui::strings::SAVE_AS_PDF_FILTER_EXTENSION],
+            );
         if let Some(dir) = default_dir.as_ref() {
             dialog = dialog.set_directory(dir);
         }
@@ -296,25 +290,71 @@ fn show_file_context_menu(
         ui.separator();
         for skill in note_skills {
             if menu_item(ui, skill.name.as_str()) {
-                if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
-                    let content = crate::markdown::DocumentContent::parse(&raw_content).body;
-                    ctx.user_command_bus.publish(
-                        crate::bus::events::user_command::UserCommand::RunSkillPrompt {
-                            content,
-                            target_dir: None,
-                            target_file: Some(path.to_path_buf()),
-                        },
-                    );
-                } else {
-                    tracing::error!(
-                        name = "ui.file.skill_prompt_failed",
-                        path = %skill.path.display(),
-                        "Failed to read skill file content to run as prompt."
-                    );
-                }
+                publish_skill(
+                    ctx,
+                    &skill.path,
+                    "ui.file.skill_prompt_failed",
+                    None,
+                    Some(path.to_path_buf()),
+                );
             }
         }
     }
+}
+
+/// Reads a skill file, parses its body, and publishes a `RunSkillPrompt`
+/// command targeting `target_dir`/`target_file`.
+///
+/// The folder-skill menu and the note-skill menu were duplicating this
+/// read → parse → publish dance; the only differences are the target and the
+/// error-log name. A read failure is logged as an `ERROR` (NFR-001).
+fn publish_skill(
+    ctx: &mut TreeNodeContext,
+    skill_path: &std::path::Path,
+    error_name: &'static str,
+    target_dir: Option<std::path::PathBuf>,
+    target_file: Option<std::path::PathBuf>,
+) {
+    match std::fs::read_to_string(skill_path) {
+        Ok(raw_content) => {
+            let content = crate::markdown::DocumentContent::parse(&raw_content).body;
+            ctx.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::RunSkillPrompt {
+                    content,
+                    target_dir,
+                    target_file,
+                },
+            );
+        }
+        Err(_) => {
+            tracing::error!(
+                name = error_name,
+                path = %skill_path.display(),
+                "Failed to read skill file content to run as prompt."
+            );
+        }
+    }
+}
+
+/// Builds the selectable-label content for a directory row: the expansion
+/// caret followed by the directory name.
+fn dir_row_label(is_expanded: bool, name: &str) -> egui::RichText {
+    let icon = if is_expanded {
+        crate::ui::strings::ICON_CARET_DOWN
+    } else {
+        crate::ui::strings::ICON_CARET_RIGHT
+    };
+    egui::RichText::new(format!("{icon} {name}"))
+}
+
+/// Builds the selectable-label content for a file row: an indented file name,
+/// tinted with the palette's `error` token when the file is PDF-backed.
+fn file_row_label(ui: &egui::Ui, name: &str, is_pdf_backed: bool) -> egui::RichText {
+    let mut text = egui::RichText::new(format!("  {name}"));
+    if is_pdf_backed {
+        text = text.color(ui.palette().error);
+    }
+    text
 }
 
 /// Wires the shared click, double-click and context-menu behaviour for a tree
@@ -411,20 +451,16 @@ pub fn render_flat_row_capture(
         ui.horizontal(|ui| {
             ui.add_space(clamped_depth as f32 * 18.0);
             let response = if row.is_dir {
-                let icon = if row.is_expanded {
-                    crate::ui::strings::ICON_CARET_DOWN
-                } else {
-                    crate::ui::strings::ICON_CARET_RIGHT
-                };
-                ui.selectable_label(false, format!("{} {}", icon, row.name))
+                ui.selectable_label(false, dir_row_label(row.is_expanded, &row.name))
             } else {
                 let is_selected = ctx.selected_files().contains(&row.path)
                     || ctx.selected_file().as_ref() == Some(&row.path);
-                let mut text = egui::RichText::new(format!("  {}", row.name));
-                if ctx.pdf_backing_tracker.is_pdf_backed(&row.path) {
-                    text = text.color(ui.palette().error);
-                }
-                ui.selectable_label(is_selected, text)
+                let label = file_row_label(
+                    ui,
+                    &row.name,
+                    ctx.pdf_backing_tracker.is_pdf_backed(&row.path),
+                );
+                ui.selectable_label(is_selected, label)
             };
             wire_row_response(
                 &response,
@@ -442,12 +478,7 @@ pub fn render_flat_row_capture(
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext) {
     if node.is_dir {
         let is_expanded = ctx.expanded_dirs().contains(&node.path);
-        let icon = if is_expanded {
-            crate::ui::strings::ICON_CARET_DOWN
-        } else {
-            crate::ui::strings::ICON_CARET_RIGHT
-        };
-        let response = ui.selectable_label(false, format!("{} {}", icon, node.name));
+        let response = ui.selectable_label(false, dir_row_label(is_expanded, &node.name));
         wire_row_response(
             &response,
             &node.path,
@@ -470,11 +501,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
     } else {
         let is_selected = ctx.selected_files().contains(&node.path)
             || ctx.selected_file().as_ref() == Some(&node.path);
-        let mut text = egui::RichText::new(format!("  {}", node.name));
-        if ctx.pdf_backing_tracker.is_pdf_backed(&node.path) {
-            text = text.color(ui.palette().error);
-        }
-        let response = ui.selectable_label(is_selected, text);
+        let label = file_row_label(
+            ui,
+            &node.name,
+            ctx.pdf_backing_tracker.is_pdf_backed(&node.path),
+        );
+        let response = ui.selectable_label(is_selected, label);
         wire_row_response(
             &response,
             &node.path,

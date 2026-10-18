@@ -149,33 +149,12 @@ impl FastMdApp {
                 }
             }
             crate::ui::LinkAction::ScrollToAnchor { anchor } => {
-                let matched = self
-                    .orchestrator
-                    .tabs
-                    .toc
-                    .iter()
-                    .find(|entry| {
-                        entry.id.eq_ignore_ascii_case(&anchor)
-                            || entry.title.eq_ignore_ascii_case(&anchor)
-                            || entry.id.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
-                            || entry.title.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
-                            || anchor.to_lowercase().replace('-', " ") == entry.id.to_lowercase()
-                            || anchor.to_lowercase().replace('-', " ") == entry.title.to_lowercase()
-                    })
-                    .map(|entry| entry.id.clone())
-                    .or_else(|| {
-                        self.orchestrator
-                            .tabs
-                            .heading_ids()
-                            .iter()
-                            .find(|id| {
-                                id.eq_ignore_ascii_case(&anchor)
-                                    || id.to_lowercase().replace(' ', "-") == anchor.to_lowercase()
-                                    || anchor.to_lowercase().replace('-', " ") == id.to_lowercase()
-                            })
-                            .cloned()
-                    })
-                    .unwrap_or(anchor);
+                let heading_ids = self.orchestrator.tabs.heading_ids().to_vec();
+                let matched = crate::ui::panels::right::resolve_anchor(
+                    &self.orchestrator.tabs.toc,
+                    &heading_ids,
+                    &anchor,
+                );
                 self.orchestrator.tabs.scroll_to_header_id = Some(matched);
                 ctx.request_repaint();
             }

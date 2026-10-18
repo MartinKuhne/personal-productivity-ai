@@ -409,6 +409,10 @@ pub const BATCH_DIALOG_SELECT_DIRECTORY: &str = "Select directory...";
 /// Label for the file pattern input in the batch dialog.
 pub const BATCH_DIALOG_PATTERN_LABEL: &str = "Pattern:";
 
+/// Placeholder hint for the batch-dialog file pattern input, showing the
+/// default markdown glob.
+pub const BATCH_DIALOG_PATTERN_HINT: &str = "*.md";
+
 /// Label for the prompt selector in the batch dialog.
 pub const BATCH_DIALOG_PROMPT_LABEL: &str = "Prompt:";
 
@@ -485,6 +489,15 @@ pub const PRINT_ACTION: &str = "Print";
 /// file context menu; dynamically displayed only when `typst` is found
 /// in the system PATH.
 pub const SAVE_AS_PDF_ACTION: &str = "Save as PDF...";
+
+/// Title of the native "Save as" file dialog used by the Save-as-PDF action.
+pub const SAVE_AS_PDF_DIALOG_TITLE: &str = "Save as PDF";
+
+/// File-type filter description shown in the "Save as PDF" dialog.
+pub const SAVE_AS_PDF_FILTER_LABEL: &str = "PDF document";
+
+/// File extension accepted by the "Save as PDF" dialog filter.
+pub const SAVE_AS_PDF_FILTER_EXTENSION: &str = "pdf";
 
 // Background Logs Window
 /// Window title for background logs monitor.
@@ -588,6 +601,7 @@ mod tests {
         assert_eq!(BATCH_DIALOG_DIRECTORY_LABEL, "Directory:");
         assert_eq!(BATCH_DIALOG_SELECT_DIRECTORY, "Select directory...");
         assert_eq!(BATCH_DIALOG_PATTERN_LABEL, "Pattern:");
+        assert_eq!(BATCH_DIALOG_PATTERN_HINT, "*.md");
         assert_eq!(BATCH_DIALOG_PROMPT_LABEL, "Prompt:");
         assert_eq!(BATCH_DIALOG_SELECT_PROMPT, "Select prompt...");
         assert_eq!(BATCH_DIALOG_MODE_LABEL, "Mode:");
@@ -604,6 +618,14 @@ mod tests {
             BATCH_RUNNING_CANCEL_HINT,
             "Click Cancel to stop processing. In-flight jobs will finish."
         );
+    }
+
+    #[test]
+    fn test_save_as_pdf_dialog_strings() {
+        assert_eq!(SAVE_AS_PDF_ACTION, "Save as PDF...");
+        assert_eq!(SAVE_AS_PDF_DIALOG_TITLE, "Save as PDF");
+        assert_eq!(SAVE_AS_PDF_FILTER_LABEL, "PDF document");
+        assert_eq!(SAVE_AS_PDF_FILTER_EXTENSION, "pdf");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
+use crate::ui::theme::PaletteExt;
 use crate::ui::widgets::{InteractionSink, no_op_sink};
 use eframe::egui;
 use egui::RichText;
@@ -195,7 +196,7 @@ pub fn show_bottom_panel_capture(
                         egui::pos2(full_row.max.x - 100.0, full_row.min.y), // approximate width
                         full_row.max,
                     ),
-                    egui::Button::new(RichText::new(button_text).color(egui::Color32::RED)),
+                    egui::Button::new(RichText::new(button_text).color(ui.palette().error)),
                 );
                 stop_clicked = button_response.clicked();
                 stop_button_width = button_response.rect.width();

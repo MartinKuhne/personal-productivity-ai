@@ -4,6 +4,7 @@
 
 use crate::config::ContentLibrary;
 use crate::ui::dialogs::Dialogs;
+use crate::ui::widgets::{DialogAction, confirm_cancel_buttons};
 use crate::workspace::watcher::FileEventProcessor;
 use eframe::egui;
 use std::collections::BTreeSet;
@@ -52,11 +53,14 @@ fn show_name_entry_window(
             let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
             ui.horizontal(|ui| {
-                if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
-                    action = Some(true);
-                }
-                if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                    action = Some(false);
+                match confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true) {
+                    DialogAction::Confirm => action = Some(true),
+                    DialogAction::Cancel => action = Some(false),
+                    DialogAction::None => {
+                        if submit {
+                            action = Some(true);
+                        }
+                    }
                 }
             });
         });
@@ -123,26 +127,26 @@ pub fn show_move_modal_dialog(
 
                 let submit =
                     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                let mut confirm_clicked = false;
                 ui.horizontal(|ui| {
-                    if ui.button(crate::ui::strings::OK_BUTTON).clicked()
-                        || (submit && dm.selected_move_folder.is_some())
-                    {
-                        if let (Some(file), Some(folder)) =
-                            (&dm.file_to_move, &dm.selected_move_folder)
-                        {
-                            user_command_bus.publish(
-                                crate::bus::events::user_command::UserCommand::ConfirmMove {
-                                    file: file.clone(),
-                                    destination: folder.clone(),
-                                },
-                            );
-                        }
-                        close_modal = true;
-                    }
-                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                        close_modal = true;
+                    match confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true) {
+                        DialogAction::Confirm => confirm_clicked = true,
+                        DialogAction::Cancel => close_modal = true,
+                        DialogAction::None => {}
                     }
                 });
+                if confirm_clicked || (submit && dm.selected_move_folder.is_some()) {
+                    if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
+                    {
+                        user_command_bus.publish(
+                            crate::bus::events::user_command::UserCommand::ConfirmMove {
+                                file: file.clone(),
+                                destination: folder.clone(),
+                            },
+                        );
+                    }
+                    close_modal = true;
+                }
             });
 
         if close_modal {

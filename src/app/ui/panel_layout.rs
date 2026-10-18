@@ -1,5 +1,27 @@
 //! Left-panel layout state — width and dirty flag so the panel remembers its size across workspace changes.
 
+/// Maximum fraction of the viewport width the left (workspace) panel may
+/// occupy (RUST-021 — the panel-width magic numbers live here, not inline).
+pub const LEFT_PANEL_MAX_WIDTH_FRACTION: f32 = 0.2;
+
+/// Default width in logical pixels of the left panel when no width has been
+/// remembered yet.
+pub const LEFT_PANEL_DEFAULT_WIDTH: f32 = 280.0;
+
+/// Minimum width in logical pixels of the left panel.
+pub const LEFT_PANEL_MIN_WIDTH: f32 = 180.0;
+
+/// Maximum fraction of the viewport width the right (table-of-contents) panel
+/// may occupy.
+pub const RIGHT_PANEL_MAX_WIDTH_FRACTION: f32 = 0.3;
+
+/// Default width in logical pixels of the right panel when no width has been
+/// remembered yet.
+pub const RIGHT_PANEL_DEFAULT_WIDTH: f32 = 200.0;
+
+/// Minimum width in logical pixels of the right panel.
+pub const RIGHT_PANEL_MIN_WIDTH: f32 = 150.0;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelLayout {
     pub left_panel_width: Option<f32>,

@@ -315,3 +315,81 @@ fn test_selectable_combo_empty_options_renders() {
     assert!(!changed);
     assert_no_id_change_in_shapes(&shapes_of(&output));
 }
+
+#[test]
+fn test_confirm_cancel_buttons_reports_confirm() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(DialogAction::None, |ui, action| {
+        let now = confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true);
+        if now != DialogAction::None {
+            *action = now;
+        }
+    });
+    harness.set_size(egui::vec2(400.0, 200.0));
+    harness.run_steps(2);
+
+    harness.get_by_label(crate::ui::strings::OK_BUTTON).click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    assert_eq!(*harness.state(), DialogAction::Confirm);
+}
+
+#[test]
+fn test_confirm_cancel_buttons_reports_cancel() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(DialogAction::None, |ui, action| {
+        let now = confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true);
+        if now != DialogAction::None {
+            *action = now;
+        }
+    });
+    harness.set_size(egui::vec2(400.0, 200.0));
+    harness.run_steps(2);
+
+    harness
+        .get_by_label(crate::ui::strings::CANCEL_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    assert_eq!(*harness.state(), DialogAction::Cancel);
+}
+
+#[test]
+fn test_confirm_cancel_buttons_disabled_confirm_is_inert() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(DialogAction::None, |ui, action| {
+        let now = confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, false);
+        if now != DialogAction::None {
+            *action = now;
+        }
+    });
+    harness.set_size(egui::vec2(400.0, 200.0));
+    harness.run_steps(2);
+
+    harness.get_by_label(crate::ui::strings::OK_BUTTON).click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    assert_eq!(
+        *harness.state(),
+        DialogAction::None,
+        "a disabled confirm button must not report a confirm"
+    );
+}
+
+#[test]
+fn test_confirm_cancel_buttons_renders_without_id_change() {
+    let ctx = egui::Context::default();
+    let output = run_ui_test(&ctx, raw_input(), |ui| {
+        let _ = confirm_cancel_buttons(ui, crate::ui::strings::OK_BUTTON, true);
+    });
+    assert_no_id_change_in_shapes(&shapes_of(&output));
+}

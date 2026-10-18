@@ -21,6 +21,9 @@ fn test_fastmd_dark_preserves_distinct_shades() {
     assert_ne!(palette.code_surface, palette.table_surface);
     assert_ne!(palette.text_muted, palette.text_faint);
     assert_ne!(palette.accent_text_soft, palette.accent_text_subtle);
+    assert_ne!(palette.log_timestamp, palette.log_category);
+    assert_eq!(palette.log_timestamp, egui::Color32::DARK_GRAY);
+    assert_eq!(palette.log_category, egui::Color32::LIGHT_BLUE);
 }
 
 /// `apply_to_visuals` wires the surface/accent/foreground tokens into the

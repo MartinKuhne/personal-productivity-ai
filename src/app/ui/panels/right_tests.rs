@@ -291,3 +291,59 @@ fn test_show_right_panel_long_titles_anchor_at_panel_left_edge() {
              the left side of every row."
     );
 }
+
+#[test]
+fn test_resolve_anchor_exact_id_match() {
+    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
+    assert_eq!(
+        resolve_anchor(&toc, &[], "Getting Started"),
+        "Getting Started"
+    );
+}
+
+#[test]
+fn test_resolve_anchor_is_case_insensitive() {
+    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
+    assert_eq!(
+        resolve_anchor(&toc, &[], "getting started"),
+        "Getting Started"
+    );
+}
+
+#[test]
+fn test_resolve_anchor_treats_hyphen_and_space_as_equivalent() {
+    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
+    // GitHub-style `#getting-started` anchor resolves to the spaced id.
+    assert_eq!(
+        resolve_anchor(&toc, &[], "getting-started"),
+        "Getting Started"
+    );
+    // And the reverse: a spaced anchor resolves against a hyphenated id.
+    let hyphenated = vec![ToCEntry::new("Getting-Started", 1, "Getting-Started")];
+    assert_eq!(
+        resolve_anchor(&hyphenated, &[], "getting started"),
+        "Getting-Started"
+    );
+}
+
+#[test]
+fn test_resolve_anchor_matches_title_when_id_differs() {
+    // ToC ids may be disambiguated (`Intro#1`) while the title stays plain.
+    let toc = vec![ToCEntry::new("Intro", 1, "Intro#1")];
+    assert_eq!(resolve_anchor(&toc, &[], "Intro"), "Intro#1");
+}
+
+#[test]
+fn test_resolve_anchor_falls_back_to_heading_ids() {
+    let heading_ids = vec!["Body".to_string(), "Body#1".to_string()];
+    assert_eq!(resolve_anchor(&[], &heading_ids, "body"), "Body");
+    // The duplicate-disambiguation suffix matches case-insensitively.
+    assert_eq!(resolve_anchor(&[], &heading_ids, "body#1"), "Body#1");
+}
+
+#[test]
+fn test_resolve_anchor_unmatched_returns_anchor_verbatim() {
+    let toc = vec![ToCEntry::new("Intro", 1, "Intro")];
+    assert_eq!(resolve_anchor(&toc, &[], "nowhere"), "nowhere");
+    assert_eq!(resolve_anchor(&[], &[], "nowhere"), "nowhere");
+}

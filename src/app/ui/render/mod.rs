@@ -22,6 +22,7 @@ pub mod agent_render;
 pub mod code;
 pub mod heading;
 pub mod inline;
+mod style;
 mod table;
 pub mod yaml_table;
 
@@ -89,6 +90,10 @@ fn table_cells_contain(cells: &[Vec<Vec<crate::markdown::InlineElem>>], term_low
 }
 
 /// Render parsed markdown events with support for TOC scroll targets.
+/// Test-only convenience wrapper over [`render_markdown_with_search`] for the
+/// render test suites. Production callers go through
+/// [`render_markdown_with_search`] directly (via the centre-panel helpers).
+#[cfg(test)]
 #[tracing::instrument(skip_all, name = "ui.render_markdown", level = "debug")]
 pub fn render_markdown(
     ui: &mut egui::Ui,
