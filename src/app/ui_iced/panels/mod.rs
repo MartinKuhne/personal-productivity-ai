@@ -15,7 +15,11 @@
 //!
 //! - [`top`] — the top toolbar: logo mark, app title, indexing status,
 //!   tag filter and the UI-061..UI-066 hamburger menu ([TASK-011]).
+//! - [`left`] — the file-tree pane: reused `flatten_tree` rows in
+//!   UI-017/UI-018 order, the UI-050 content-search box, the UI-016
+//!   auto-fit solver and the DEC-005 row context menus ([TASK-012]).
 //!
-//! `bottom`, `left`, `right` and `center` follow in [TASK-012]..[TASK-016].
+//! `bottom`, `right` and `center` follow in [TASK-013]..[TASK-016].
 
+pub mod left;
 pub mod top;

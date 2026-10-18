@@ -960,3 +960,206 @@ decide whether the key was consumed).
    gate specified for this task (`cargo clippy -p fastmd --bins --lib --
    -D warnings`) is clean.
 
+### TASK-012 verification log (left file-tree panel ported to iced - 2026-10-18)
+
+**Deliverables.** New `src/app/ui_iced/panels/left.rs` + `left_tests.rs`
+sidecar (37 tests); `pub mod left;` + module-doc bullet in
+`ui_iced/panels/mod.rs`; one new `LayoutMessage::CursorMoved` and four new
+`TreeMessage` variants in `ui_iced/message.rs` (+3 message tests, 16
+there now); `clamped_width` promoted from private to `pub` in
+`ui_iced/layout.rs`; `Debug, PartialEq, Eq` added to
+`ui/tree/flatten.rs::FlatRow`; one additive helper in `ui/strings.rs`
+(`format_match_count`). No pilot or update-loop wiring (that is
+TASK-022/023).
+
+**Port shape - pure view, no `FastMdApp` inside the widget tree.**
+
+`left_panel(&LeftPanelViewModel) -> Element<'_, Message>` renders header +
+search row + (tree rows | search-result cards). Every user action becomes
+`Message::Command(UserCommand)` or a named panel-channel message; the panel
+never publishes to `user_command_bus`, never reads a file and never mutates
+`FastMdApp` - the TASK-022/023 reducer does (FMD-068).
+
+**Reused, not reimplemented (RUST-051).**
+
+| Concern | How the iced panel gets it |
+| --- | --- |
+| Tree hierarchy + tag filtering | calls `crate::ui::panels::left::build_workspace_tree` (crate-internal). `prune_empty_dirs`, `library_for_path` and `insert_path_into_tree` are NOT duplicated |
+| Row ordering (**UI-017** dirs-before-files, **UI-018** hide no-markdown dirs) | calls `crate::ui::tree::flatten_tree` and renders the returned `FlatRow`s **in order**. The iced module adds no sorting of its own - pinned by `tree_rows_keep_directories_before_files_at_every_level` and `tag_filter_prunes_directories_without_matching_files` |
+| Row cache | reads `FastMdApp::cached_tree_rows` while `tree_dirty == false`; **never writes it back** (pinned by `tree_rows_never_write_the_cache_back`) - populating/invalidating is reducer state |
+| UI-016 clamping | `ui_iced::layout::clamped_width`, the same rule the TASK-010 pane-resize uses (promoted to `pub` for this) |
+| Context-menu card, anchoring, dismissal | `ui_iced::overlay::{context_menu_trigger, with_context_menu, MenuItem}` (TASK-017a) |
+| Search engine | `TreeSearch` results are read off the view model; the panel does not scan |
+
+Only what egui bound to `egui::Ui`/`egui::Context` was re-typed: the width
+measurement, the row labels, the click→command mapping (the egui
+`apply_*_row_click` handlers take `&mut TreeNodeContext`, which carries
+`egui::Modifiers`, so they are not framework-free), and the menu item list
+(`ui/tree/render.rs` builds those with `menu_item(ui, ..)` + a bus publish).
+
+`LeftPanelViewModel` (built by `from_app(&FastMdApp)`):
+
+| Field | Source (egui parity) |
+| --- | --- |
+| `rows: Arc<Vec<FlatRow>>` | cached rows, else `build_workspace_tree` + `flatten_tree(expanded_dirs)` |
+| `query: String` | `search().query()` |
+| `is_searching: bool` | `search().is_searching()` |
+| `results: Arc<Vec<SearchResultEntry>>` | `search().results_arc()` |
+| `selected_file: Option<PathBuf>` | `selection().selected_file()` |
+| `selected_files: Vec<PathBuf>` | `selection().selected_files()`, **sorted** (egui collected from a `HashSet` and was not deterministic) |
+| `pdf_backed: HashSet<PathBuf>` | per-row `pdf_backing_tracker().is_pdf_backed()` over the visible file rows - the tracker exposes no enumerator, so a snapshot is the only way to get a `PartialEq` view model |
+| `folder_skills` / `note_skills: Vec<SkillFile>` | `AppConfig::list_skill_files_in(skill_dir(...))` resolved from the "System" content library, **read-only** (see flag 5) |
+| `typst_available: bool` | `fastmd_pdf::is_typst_available()` - gates "Save as PDF..." exactly as egui does |
+| `multi_select: bool` | `false` - see flag 1 |
+
+**UI-016 auto-fit is a pure label→width function, and real measurement is NOT achievable in a pure view.**
+
+`auto_fit_width(rows, viewport_width, measure)` reproduces the egui
+formula exactly - `depth × 18.0 + measured("icon name") + 40.0`, capped at
+`viewport × LEFT_PANEL_MAX_WIDTH_FRACTION` and floored at
+`LEFT_PANEL_MIN_WIDTH` - but takes the measurer as an injected
+`Fn(&str) -> f32`, because a pure view has no font atlas to ask. iced
+0.14 only produces text metrics from inside `Widget::layout`, i.e. during
+runtime layout, not from a stateless view function. **TASK-022 must supply
+the real measurer** (or drive the pane width off a post-layout
+size-reporting pass). Until then the fit is only as good as the measurer
+that is injected; the clamping band itself is exact and pinned by tests.
+
+One deliberate divergence: egui's inline pass produced
+`((longest.min(cap)).max(min)).min(cap)`, which yields the **cap** on a
+viewport so tiny that the 20 % cap falls below the minimum. The iced layer
+uses `clamped_width`, where the **minimum** wins - chosen so the left panel
+behaves exactly like the TASK-010 pane-resize instead of introducing a
+second degenerate rule.
+
+**Context-menu item → command mapping** (all rows, in menu order).
+
+Directory row (`directory_menu_items`, egui `ui/tree/render.rs:18-96`):
+
+| Menu row | Emitted message |
+| --- | --- |
+| `SHOW_IN_EXPLORER_ACTION` | `Command(ShowInExplorer(path))` |
+| `COPY_PATH_ACTION` | `Command(CopyPath(path))` |
+| `RENAME_ACTION` | `Command(Rename(path))` |
+| `MOVE_ACTION` | `Command(Move(path))` |
+| `CREATE_DIRECTORY_ACTION` | `Command(CreateDirectory { parent: path })` |
+| `NEW_DOCUMENT_ACTION` | `Command(CreateDocument { parent: path })` |
+| `DELETE_ACTION` | `Command(Delete(path))` |
+| each folder skill (VFS-122) | `Tree(SkillRunRequested { skill, target_dir: Some(path), target_file: Some(path) })` |
+
+Single file row (`file_menu_items`, egui `ui/tree/render.rs:120-303`):
+
+| Menu row | Emitted message |
+| --- | --- |
+| `EDIT_BUTTON` | `Command(OpenInEditor(path))` |
+| `SHOW_IN_EXPLORER_ACTION` | `Command(ShowInExplorer(path))` |
+| `COPY_PATH_ACTION` | `Command(CopyPath(path))` |
+| `RUN_AS_PROMPT_ACTION` | `Tree(RunAsPromptRequested { path })` |
+| `PRINT_ACTION` | `Tree(PrintRequested { path })` |
+| `SAVE_AS_PDF_ACTION` *(only when `typst_available`)* | `Command(SaveAsPdf(path))` |
+| `RENAME_ACTION` | `Command(Rename(path))` |
+| `MOVE_ACTION` | `Command(Move(path))` |
+| `DELETE_ACTION` | `Command(Delete(path))` |
+| each note skill (VFS-121) | `Tree(SkillRunRequested { skill, target_dir: None, target_file: Some(path) })` |
+
+Multi-selected file row (`multi_select_menu_items`, egui
+`ui/tree/render.rs:100-116`), shown by the same gate egui uses - only when
+`selected_files.len() > 1` **and** this path is one of them:
+
+| Menu row | Emitted message |
+| --- | --- |
+| `MERGE_ACTION` | `Command(MergePrompt(paths))` |
+| `DELETE_ACTION` | `Tree(DeleteSelectedRequested { paths })` |
+
+`SaveAsPdf` is the existing `UserCommand` - its executor already runs the
+`rfd` "Save as" dialog and the background export, so the panel does not
+re-implement that flow.
+
+**Deferred intent - four new `TreeMessage` variants.**
+
+Three egui menu rows do their work *inside* the click: "Run as prompt"
+reads the file (`render.rs:143-160`), each skill row reads the skill file
+(`render.rs:311-337`), "Print" hands a job to the background channel
+(`render.rs:161-173`), and the multi-select "Delete" fans out into N
+`Delete` commands plus a selection clear (`render.rs:108-115`). A pure
+view may not do I/O, and none of these is expressible as one
+`UserCommand`. They therefore emit `RunAsPromptRequested`,
+`SkillRunRequested`, `PrintRequested` and `DeleteSelectedRequested`, each
+naming its target, and the reducer performs the read/dispatch and publishes
+the real command(s). This is recorded as a deliberate exception to
+message.rs's "panel channels carry view-local state only" rule, documented
+in that module's header.
+
+**Cursor tracking - `LayoutMessage::CursorMoved { point: iced::Point }`.**
+
+This closes TASK-017a's open item 1. `MouseArea::on_right_press` takes a
+fixed `Message` and cannot carry the press point
+(`iced_widget-0.14.2/src/mouse_area.rs:68-71`), so the anchor must be
+state the reducer reads back. `Layout` is the honest home: like a split
+drag and the tree auto-fit, a cursor report is a statement about *where in
+the pane geometry something is* - not user intent (so not `Command`) and
+not any panel's private view state. `iced::Point` is `Copy`
+(`iced_core-0.14.0/src/point.rs:7`), so the channel keeps `Copy`; the
+hand-written `PartialEq` gained the matching arm. Coordinates are
+**widget-relative** (`mouse_area.rs:358-360`), so the overlay must be
+mounted against the same element the trigger wrapped (or the offset added) -
+unchanged from the TASK-017a caveat.
+
+**Gate results (this pass).** `cargo check -q` PASS (exit 0, clean);
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS (exit 0);
+`cargo fmt` run, `cargo fmt --check` PASS workspace-wide (exit 0);
+`cargo nextest run --status-level fail --show-progress none` PASS
+(**1397 run / 1397 passed / 1 skipped**, +40 over the 1357 this task
+started from: 37 left-panel + 3 message); `cargo doc --no-deps --quiet`
+PASS (exit 0, no warnings).
+
+**Needs the orchestrator's eyes.**
+
+1. **Modifier-aware multi-select (UI-022) is NOT wired.** egui computed
+   `multi` from `ui.input(|i| i.modifiers)` at click time. iced 0.14's
+   `MouseArea::on_press` carries no modifier state
+   (`mouse_area.rs:38-41`). The panel emits
+   `LeftPanelViewModel::multi_select`, and `from_app` sets it to `false`
+   because nothing on the iced side tracks modifiers yet. **TASK-022 must
+   fold `iced::Event::Keyboard(KeyEvent { modifiers, .. })` into that
+   field**, otherwise every tree click is a single-select and the
+   multi-select menu can never open. The pure functions
+   (`row_click_command(row, multi)`, `context_menu_items(..)`) already take
+   the flag explicitly, so the wiring is a reducer-only change.
+2. **`FlatRow` gained `Debug, PartialEq, Eq` derives** (not in the task's
+   deliverable list). It derived only `Clone`, which blocked a derivable
+   iced view model and blocked comparing flattened row lists in tests - the
+   egui build never needed either. Purely additive; no existing behaviour
+   touched.
+3. **`ui_iced::layout::clamped_width` was made `pub`.** Shared with
+   `auto_fit_width` so every UI-016 width in the iced layer obeys one
+   clamping rule rather than two near-identical ones.
+4. **`strings.rs` was extended again** (additive only): `format_match_count`
+   hoists the `format!("({})", match_count)` the egui panel inlined at
+   `ui/panels/left.rs:303`, per GUD-002.
+5. **Skill lookup deliberately uses the read-only path.**
+   `AppConfig::list_folder_skills()` / `list_note_skills()` call
+   `create_dir_all` as a side effect, which a per-frame view must not do
+   (RUST-006). The port mirrors the egui menu instead: resolve
+   `Skills/{Folder,Note}` under the "System" content library and call
+   `AppConfig::list_skill_files_in`, which returns empty for a missing
+   directory. `skill_dir()` is pure and takes the fallback explicitly.
+6. **UI-050 spec drift, mirrored not fixed.** UI-050 says the search box
+   sits "at the bottom of the directory tree pane"; the egui build has
+   always rendered it directly under the header. This port mirrors the
+   shipped behaviour. Flagging per RUST-041; SPEC.md was not touched.
+7. **Search submit relies on message ordering.** `text_input::on_submit`
+   takes a fixed `Message`, so `Submitted { query }` is built from
+   `view_model.query`. That is correct only because iced processes the
+   keystroke's `QueryChanged` (and rebuilds the view model) before the
+   Enter event - true for the sequential Elm loop, but worth knowing if
+   message batching ever lands.
+8. **Tooltips are not rendered.** iced 0.14 has no tooltip primitive under
+   DEC-005 (`iced_aw` ruled out), so `SEARCH_TRIGGER_TOOLTIP` /
+   `SEARCH_CLEAR_TOOLTIP` have no iced home yet.
+9. **`PdfBackingTracker` still has no enumerator.** The view model snapshots
+   PDF-backed paths by calling `is_pdf_backed()` once per visible file row.
+   Correct but O(rows) read-lock acquisitions per frame; a `snapshot()` /
+   `paths()` accessor on the tracker would make it one lock. Left alone as
+   out of scope.
+

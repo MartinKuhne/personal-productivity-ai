@@ -25,7 +25,12 @@ pub fn initial_rename_value(path: &std::path::Path, fallback_name: &str) -> Stri
 pub const MAX_TREE_DEPTH: usize = 1000;
 
 /// A single visible row in the flattened virtual tree list.
-#[derive(Clone)]
+///
+/// `Debug` and `PartialEq` are additive derives added for the [TASK-012]
+/// iced port: the iced view model holds `FlatRow`s and its tests compare
+/// flattened row lists against expected ones, which the egui build never
+/// needed because it rendered rows straight into `egui` widgets.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlatRow {
     /// Indentation depth (0 = top-level child of root).
     pub depth: usize,

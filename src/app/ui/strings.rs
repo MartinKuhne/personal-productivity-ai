@@ -132,6 +132,16 @@ pub const SEARCH_NO_RESULTS: &str = "No matching files found";
 /// Header label for the search result list.
 pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
 
+/// Formats the per-file match counter shown next to a content-search
+/// result's file name ([TASK-012], UI-050).
+///
+/// The egui left panel inlined `format!("({})", match_count)`
+/// (`src/app/ui/panels/left.rs:303`); the iced port hoists it here so no
+/// user-facing formatting lives in a panel ([GUD-002]).
+pub fn format_match_count(match_count: usize) -> String {
+    format!("({match_count})")
+}
+
 /// Phosphor icon: caret down (U+E136)
 pub const ICON_CARET_DOWN: &str = "\u{E136}";
 

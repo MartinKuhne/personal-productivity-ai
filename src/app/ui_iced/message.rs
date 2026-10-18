@@ -22,6 +22,17 @@
 //!    menu is open, what the search box currently holds, the editor's
 //!    undo request) and the runtime reports the window layer hands us.
 //!
+//! One deliberate exception to rule 2 lives in [`TreeMessage`]
+//! ([TASK-012]): three file-tree context-menu rows — "Run as prompt…",
+//! "Print…" and the multi-select "Delete" — have **no single
+//! [`UserCommand`] equivalent**, and the egui originals read files from
+//! inside the click handler (`src/app/ui/tree/render.rs:143-173`,
+//! `:108-115`). A pure view must not do I/O, so those rows emit a
+//! *deferred-intent* variant that names the target and leaves the read and
+//! the resulting command(s) to the [TASK-022] reducer. They are still user
+//! intent — they are here only because the command channel cannot express
+//! them atomically.
+//!
 //! Consequently some channels are deliberately thin: they exist because a
 //! panel needs explicit state that egui used to hide in widget memory, and
 //! they carry nothing more. Each variant below names the egui behaviour it
@@ -165,6 +176,17 @@ pub struct WindowSnapshot {
 /// The three-band `PaneGrid` geometry lives in [TASK-010]
 /// ([`crate::ui_iced::layout`]); this channel is how its widget events and
 /// its re-fit requests reach `update`.
+///
+/// It also owns the **pointer position** ([`Self::CursorMoved`],
+/// [TASK-012]). That is the honest home for it: like a split drag and the
+/// tree auto-fit, a cursor report is a statement about *where in the pane
+/// geometry something is*, not about what the user asked the application to
+/// do — so it is neither [`Message::Command`] nor any panel's private view
+/// state. It has to live somewhere the reducer reads before it opens an
+/// overlay, because iced's `MouseArea::on_right_press` takes a fixed
+/// `Message` and cannot carry the press point
+/// (`iced_widget-0.14.2/src/mouse_area.rs:68-71`), which is exactly the
+/// gap [`crate::ui_iced::overlay::context_menu_trigger`] documents.
 #[derive(Debug, Clone, Copy)]
 pub enum LayoutMessage {
     /// A pane-grid split was dragged ([`pane_grid::ResizeEvent`]:
@@ -179,6 +201,23 @@ pub enum LayoutMessage {
     /// (`src/app/ui/panels/left.rs:139-186`); in the Elm loop it is an
     /// explicit message so the width change is replayable.
     TreeAutoFit,
+    /// The pointer moved to `point` ([TASK-012], DEC-005).
+    ///
+    /// The reducer stores this and reads it back when a
+    /// [`TreeMessage::ContextMenuOpened`] / [`TabMessage::ContextMenuOpened`]
+    /// arrives, then feeds it to
+    /// [`crate::ui_iced::overlay::OverlaySlot::open_context_menu`].
+    /// `iced::Point` is `Copy` (`iced_core-0.14.0/src/point.rs:7`), so this
+    /// variant does not cost the channel its `Copy`.
+    ///
+    /// Coordinates are **widget-relative** to the element whose
+    /// `MouseArea::on_move` produced them
+    /// (`mouse_area.rs:358-360`); the overlay must be mounted against that
+    /// same element, or the offset added, for the anchor to land correctly.
+    CursorMoved {
+        /// Pointer position in the reporting widget's coordinate space.
+        point: iced::Point,
+    },
 }
 
 /// Field-wise equality for [`LayoutMessage`].
@@ -195,6 +234,7 @@ impl PartialEq for LayoutMessage {
                 a.split == b.split && a.ratio == b.ratio
             }
             (Self::TreeAutoFit, Self::TreeAutoFit) => true,
+            (Self::CursorMoved { point: a }, Self::CursorMoved { point: b }) => a == b,
             _ => false,
         }
     }
@@ -208,6 +248,13 @@ impl PartialEq for LayoutMessage {
 /// (`src/app/ui/tree/handlers.rs:51-69`). What egui kept implicitly in the
 /// `context_menu` widget is explicit state under iced's DEC-005
 /// `overlay::menu` construction, so that is what this channel carries.
+///
+/// The last four variants are **deferred intent** (see the module header):
+/// the egui menu performs file I/O inside the click, which a pure view may
+/// not do, and no single [`UserCommand`] covers them. Each names its target
+/// so the [TASK-022] reducer can perform the read and publish the real
+/// command(s) — the intent stays self-contained and replayable
+/// ([FMD-068]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeMessage {
     /// A right-click opened the row context menu for `path` (DEC-005;
@@ -218,6 +265,40 @@ pub enum TreeMessage {
     },
     /// The row context menu was dismissed (click-away or menu selection).
     ContextMenuClosed,
+    /// "Run as prompt…" on a single file row (UI-020). The egui handler
+    /// reads the file and publishes `RunSkillPrompt` inline
+    /// (`src/app/ui/tree/render.rs:143-160`); here the reducer does it.
+    RunAsPromptRequested {
+        /// The markdown file whose body becomes the prompt.
+        path: PathBuf,
+    },
+    /// A skill row was picked from a directory or file context menu
+    /// (VFS-121 note skills, VFS-122 folder skills). The reducer reads
+    /// `skill` and publishes `RunSkillPrompt { content, target_dir,
+    /// target_file }` (`src/app/ui/tree/render.rs:311-337`).
+    SkillRunRequested {
+        /// Path of the skill file to read.
+        skill: PathBuf,
+        /// Directory the skill runs against — set for folder skills.
+        target_dir: Option<PathBuf>,
+        /// File the skill runs against — set for note skills.
+        target_file: Option<PathBuf>,
+    },
+    /// "Print…" on a file row (UI-014). There is **no** `UserCommand::Print`;
+    /// the egui handler hands the job to the background channel directly
+    /// (`src/app/ui/tree/render.rs:161-173`), so the reducer owns it.
+    PrintRequested {
+        /// The file to print.
+        path: PathBuf,
+    },
+    /// "Delete" on a multi-selected file row (UI-025). egui fans this out
+    /// into one `UserCommand::Delete` per path and then clears the
+    /// selection (`src/app/ui/tree/render.rs:108-115`); one menu row can
+    /// only emit one message, so the whole set travels with it.
+    DeleteSelectedRequested {
+        /// Every selected path, in the order the panel rendered them.
+        paths: Vec<PathBuf>,
+    },
 }
 
 /// Tab-strip / center panel channel ([TASK-021], [TASK-013]).

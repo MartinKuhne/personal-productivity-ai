@@ -299,6 +299,97 @@ fn test_debug_window_controls_stay_on_the_command_channel() {
 }
 
 #[test]
+fn test_cursor_moved_is_a_copy_layout_report_that_stays_distinct() {
+    // [TASK-012]: the context-menu anchor. `MouseArea::on_right_press`
+    // cannot carry a position, so the reducer has to remember this one.
+    let moved = LayoutMessage::CursorMoved {
+        point: iced::Point::new(12.0, 34.0),
+    };
+    let copy = moved;
+    assert_eq!(moved, copy, "CursorMoved must keep the channel `Copy`");
+
+    assert_eq!(
+        Message::Layout(moved),
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: iced::Point::new(12.0, 34.0),
+        })
+    );
+    assert_ne!(
+        Message::Layout(moved),
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: iced::Point::new(12.0, 35.0),
+        }),
+        "a different point must not compare equal"
+    );
+    assert_ne!(
+        Message::Layout(moved),
+        Message::Layout(LayoutMessage::TreeAutoFit),
+        "cursor motion must not collapse into the auto-fit request"
+    );
+}
+
+#[test]
+fn test_tree_deferred_intent_variants_are_all_distinct() {
+    // [TASK-012]: the three egui menu rows that read files or fan out
+    // inside the click have no single `UserCommand`, so each needs its own
+    // separable message.
+    let deferred = vec![
+        Message::Tree(TreeMessage::RunAsPromptRequested {
+            path: sample_path(),
+        }),
+        Message::Tree(TreeMessage::PrintRequested {
+            path: sample_path(),
+        }),
+        Message::Tree(TreeMessage::DeleteSelectedRequested {
+            paths: vec![sample_path()],
+        }),
+        Message::Tree(TreeMessage::SkillRunRequested {
+            skill: PathBuf::from("fixture-workspace/Skills/Note/summarize.md"),
+            target_dir: None,
+            target_file: Some(sample_path()),
+        }),
+        Message::Tree(TreeMessage::SkillRunRequested {
+            skill: PathBuf::from("fixture-workspace/Skills/Folder/tidy.md"),
+            target_dir: Some(sample_path()),
+            target_file: Some(sample_path()),
+        }),
+    ];
+
+    for (i, a) in deferred.iter().enumerate() {
+        for (j, b) in deferred.iter().enumerate() {
+            if i == j {
+                assert_eq!(a, b);
+            } else {
+                assert_ne!(a, b, "deferred intents {i} and {j} must stay separable");
+            }
+        }
+    }
+}
+
+#[test]
+fn test_deferred_tree_intent_stays_off_the_command_channel() {
+    // Guard: these are NOT `UserCommand`s — the view may not read files,
+    // so the reducer must be able to tell "deferred read" from "publish
+    // this now".
+    for message in [
+        Message::Tree(TreeMessage::RunAsPromptRequested {
+            path: sample_path(),
+        }),
+        Message::Tree(TreeMessage::PrintRequested {
+            path: sample_path(),
+        }),
+        Message::Tree(TreeMessage::DeleteSelectedRequested {
+            paths: vec![sample_path()],
+        }),
+    ] {
+        assert!(
+            !matches!(message, Message::Command(_)),
+            "deferred intent must not masquerade as a ready-to-publish command"
+        );
+    }
+}
+
+#[test]
 fn test_debug_messages_are_debuggable() {
     // `Debug` is required for tracing every cross-subsystem interaction
     // ([FMD-071]); spot-check that the rendering names the channels.

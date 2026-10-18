@@ -252,7 +252,11 @@ pub fn apply_pane_resize(
 /// documented in [`apply_pane_resize`]).
 ///
 /// [RUST-020]: pure.
-fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
+///
+/// Shared with the [TASK-012] tree auto-fit
+/// ([`crate::ui_iced::panels::left::auto_fit_width`]) so every UI-016
+/// width in the iced layer obeys one clamping rule.
+pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
     if max < min {
         // Degenerate viewport: the 20%/30% cap sits below the panel
         // minimum — the minimum wins so the side panel stays draggable.
