@@ -27,8 +27,15 @@
 //! - [`editor`] — the inline Markdown editor modal with the DEC-007
 //!   undo/redo history stack, pre-save GFM validation and the
 //!   front-matter-preserving save model ([TASK-014], UI-037..UI-045).
+//! - [`render`] — the Markdown **viewing** render path: the pure
+//!   `RenderEvent` → `RenderBlock` mapping and its iced widgets for
+//!   headings, paragraphs, lists, task checkboxes, fenced code and
+//!   YAML front matter ([TASK-015]).
+//! - [`table_width`] — the iced adapter for the reused pure Fair Table
+//!   Width Algorithm: available width → solver inputs → pinned iced
+//!   column widths ([TASK-015]).
 //!
-//! `update`, `tree`, `render` and `agent` follow in Phase 3/4.
+//! `update`, `tree` and `agent` follow in Phase 3/4.
 
 pub mod editor;
 pub mod fonts;
@@ -37,4 +44,6 @@ pub mod message;
 pub mod overlay;
 pub mod panels;
 pub mod persisted;
+pub mod render;
+pub mod table_width;
 pub mod theme;

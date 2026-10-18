@@ -1527,3 +1527,213 @@ keystroke undoable.
    nothing produces them from a key press yet - iced routes editor key
    events into `Action`s and the app-level shortcut map is TASK-022's. The
    buttons are the only Save/Cancel path in this commit.
+
+### TASK-015 verification log (markdown render path ported to iced - 2026-10-18)
+
+**Scope.** The iced counterpart of `src/app/ui/render/` - the read-only
+markdown *viewing* path - plus a rewrite of the egui FTWA adapter. Both live
+under `src/app/ui_iced/` and are pure: no file I/O, no bus access, no
+application-state mutation. The parser and the pure solver
+(`src/app/markdown/table_width/`) are **not modified** - the adapter is a
+new consumer of them. Nothing is wired into the running app loop; that is
+TASK-022/023.
+
+**Files.**
+
+| File | Role |
+| --- | --- |
+| `src/app/ui_iced/table_width.rs` | iced FTWA adapter: `IcedTextMeasurer` (impl of `markdown::table_layout::TextMeasurer`), `TextMetrics`, `heuristic_width`, `solver_available_width`, `solve_table_layout`, `column_widths`, `column_length`, `needs_horizontal_scroll`, spacing constants (392 lines) |
+| `src/app/ui_iced/table_width_tests.rs` | 32 sidecar tests |
+| `src/app/ui_iced/render/mod.rs` | `RenderContext`, `RenderBlock`, `BlockKind`, `ListMarker`, `TaskCheckbox`, `blocks_from_events`, `render_block`, `render_markdown`, `render_document`, `paragraph_block`, `task_toggle_message`, search matching (451 lines) |
+| `src/app/ui_iced/render/mod_tests.rs` | 30 sidecar tests |
+| `src/app/ui_iced/render/inline.rs` | `SpanModel`, `spans_from_inline`, `span_for_text`/`span_for_link`, `font_for_style`, `to_iced_span`, `rich_text_block`/`rich_text_element` (237 lines) + 22 tests |
+| `src/app/ui_iced/render/heading.rs` | H1..H5 size ladder (`H1_SIZE`..`H5_SIZE`; H6 and out-of-range levels collapse to the `H5_SIZE` floor), blank-heading rule (70 lines) + 10 tests |
+| `src/app/ui_iced/render/code.rs` | `CodeBlockModel`, fenced-block panel on `code_surface`, copy button (136 lines) + 12 tests |
+| `src/app/ui_iced/render/table.rs` | `TableModel`/`TableCellModel`/`TableRowData`, `table_model`, `from_layout`, `table_widget`, `cell_element` (295 lines) + 24 tests |
+| `src/app/ui_iced/render/yaml.rs` | `YamlRowModel`, front-matter key/value rows (161 lines) + 17 tests |
+| `src/app/ui_iced/message.rs` | new `Message::Render(RenderMessage)` channel (`message.rs:120`, enum at `:481`) |
+| `src/app/ui/strings.rs` | `LIST_BULLET` (U+2022), `ORDERED_LIST_MARKER_SUFFIX` (additive only) |
+| `src/app/ui_iced/mod.rs` | `pub mod render;` / `pub mod table_width;` |
+
+**Document model mapped from (untouched).** The view consumes exactly what
+`crate::markdown` already produces:
+
+* `RenderEvent::{FlushInline, Heading, CodeBlock, Table, Space, Separator}`
+  - `FlushInline` carries `elems`, `needs_bullet`, `task_checked`, `indent`
+  and `list_ordinal`, which become `BlockKind::Paragraph { spans, indent,
+  marker, task }`.
+* `InlineElem::{Text, Link, Image, Html, SoftBreak}` - each maps to one
+  `SpanModel` (images via `markdown::image_placeholder`, soft breaks as one
+  space), matching the egui renderer's element-by-element walk.
+* `TextStyle::{bold, italic, code, strikethrough, muted}` - resolved
+  once, at mapping time, into font/size/colour/underline/strikethrough on the
+  `SpanModel`. No style is re-derived inside a widget builder.
+
+**Pure descriptor layer.** Mirrors the top panel's `MenuEntry` pattern
+(TASK-011) so the mapping is testable without an iced runtime:
+
+```text
+RenderEvent ──blocks_from_events──▶ RenderBlock { kind: BlockKind, scroll_to_me }
+                                       │
+              BlockKind::{Heading, Paragraph, Code, Table, Spacer, Separator}
+                                       │
+                            render_block ──▶ Element<'static, Message>
+```
+
+Every `BlockKind` carries fully resolved descriptors -
+`SpanModel`, `CodeBlockModel`, `TableModel`, `YamlRowModel` - so tests
+assert on data (sizes, colours, solved widths, the exact message a link or
+copy button carries) rather than on a widget tree. All widget builders return
+`Element<'static, Message>`; no builder takes a `&mut Ui`-style parameter and
+none can fail.
+
+**FTWA adapter contract.** The solver
+(`markdown::table_width`) and the layout driver
+(`markdown::table_layout::{TableLayoutBuilder, TextMeasurer}`) are reused
+verbatim, as are `ui::table_width::{TablePadding, TableRenderConfig}`. What
+the adapter owns is the *geometry contract*:
+
+| Constant | Value | Why |
+| --- | --- | --- |
+| `CELL_PADDING_X` | `5.0` | per-side cell padding; iced's spacing identity makes the visible gap `2p + s` |
+| `CELL_PADDING_Y` | `1.0` | row padding, same identity vertically |
+| separator | `0.0` | the iced table draws no rule by default in this port |
+| `COLUMN_SPACING` | `10.0` | `2*5 + 0` - equals egui's `item_spacing.x`, so column pitch is unchanged |
+| `ROW_SPACING` | `2.0` | `2*1 + 0` |
+
+The identity is not invented - it is iced's own: `let spacing_x =
+self.padding_x * 2.0 + self.separator_x;`
+(`iced_widget-0.14.2/src/table.rs:258`). `solver_available_width(a) =
+(a - 2 * CELL_PADDING_X).max(0.0)` gives the solver the *content* width, so
+the outer gutter cannot push the table into overflow.
+
+**Injected text measurement.** iced exposes no renderer inside `view()`, so
+measurement is injected: `IcedTextMeasurer::new(&'a dyn Fn(&str, Font, f32)
+-> f32, TextMetrics)`. The default (`IcedTextMeasurer::heuristic`) uses
+`heuristic_width` - `PROPORTIONAL_AVG_ADVANCE = 0.5` em,
+`MONOSPACE_AVG_ADVANCE = 0.6` em per character - which is deterministic and
+therefore testable. TASK-022/023 can inject a renderer-backed closure
+(`text::Width::Some(w)` via a `Renderer::measure`) **without changing any
+signature**. `TextMetrics { body_size, mono_size, line_height }` keeps the
+font sizes the measurer reports and the row height the view reserves in one
+place.
+
+`measure_cell` is ported **verbatim** from the egui measurer
+(`src/app/ui/table_width/mod.rs:415-510`), including its token-merge quirks
+- a word split across two `Text` runs stays one unbreakable token, and a
+single-part run ending in whitespace closes the pending token immediately
+measured with the *previous* run's font. `test_trailing_whitespace_single_
+part_run_closes_the_token_like_egui` locks that quirk so a future
+"cleanup" cannot silently change solved widths.
+
+**New message channel (why `UserCommand` was not enough).** A
+`Message::Render(RenderMessage)` channel was added with three variants:
+
+* `LinkActivated { url, source_file }` - resolving a relative link needs
+  the workspace file list, which the pure view does not have.
+* `TaskToggled { document, task_index, checked }` - `UserCommand::
+  ApplyTaskToggles` exists but mutates the **agent transcript**
+  (`src/app/command_executor.rs:568-576` calls
+  `ui::render::apply_task_toggle(&mut self.agent_transcript.content, ...)`),
+  not the open document. Carrying `document` keeps the command
+  self-contained and replayable ([FMD-068]).
+* `CopyCodeRequested { content }` - iced exposes the clipboard only to
+  `update` (via `EventLoop::clipboard()` / a `Task`), never inside `view`.
+
+**Verified iced 0.14 APIs (local registry sources).**
+
+| API | Citation |
+| --- | --- |
+| `Font::MONOSPACE` / `Font::DEFAULT` | `iced_core-0.14.0/src/font.rs:27` |
+| `text::Span` fields | `iced_core-0.14.0/src/text.rs:379-402` |
+| `Span::{size, font, color, link, background, underline, strikethrough}` | `iced_core-0.14.0/src/text.rs:413-547` |
+| `Rich::with_spans` | `iced_widget-0.14.2/src/text/rich.rs:68-75` |
+| `Rich::on_link_click` | `iced_widget-0.14.2/src/text/rich.rs:140-146` |
+| `table()` / `column()` | `iced_widget-0.14.2/src/table.rs:18-27` / `:34-49` |
+| spacing identity `2*padding + separator` | `iced_widget-0.14.2/src/table.rs:258-259` |
+| all-`Shrink` forces the first column to `Fill` | `iced_widget-0.14.2/src/table.rs:129-133` |
+| `Column::width` | `iced_widget-0.14.2/src/table.rs:650-653` |
+| `table::Style` carries **only** `separator_x`/`separator_y` | `iced_widget-0.14.2/src/table.rs:676-681` |
+| `Scrollable::horizontal()` | `iced_widget-0.14.2/src/scrollable.rs:133-135` |
+| `Wrapping::WordOrGlyph` (there is **no** `WordOrCharacter`) | `iced_core-0.14.0/src/text.rs:181-192` |
+| `checkbox(is_checked)` takes only the bool | `iced_widget-0.14.2/src/helpers.rs:1281` |
+
+Gotchas hit and settled during this task: `iced::Radius` does not exist (use
+the `From<f32>` on `iced::border::Radius`); `iced::widget::Element` does not
+exist (use `iced::Element`); `Space` uses `.width()`/`.height()`, not
+`with_width`/`with_height`; there is no `iced::scrollable::Axis`; and
+`Widget::type_name()` is gone in 0.14, so widget-identity assertions had to
+go.
+
+**Not ported, with reasons.**
+
+1. **GFM column alignment** (`|:---|`, `|---:|`). The parser discards
+   pulldown-cmark's alignment payload at `src/app/markdown/parser.rs:370`
+   (`Event::Start(Tag::Table(_))`), and `RenderEvent::Table` carries only
+   `Vec<Vec<Vec<InlineElem>>>`. Neither build has ever aligned columns; the
+   iced port cannot invent alignment the model does not carry. Adding it means
+   a model change, which this task is explicitly barred from making.
+2. **Per-link hover tooltips** ("Note: ..." on hover). egui attached a
+   tooltip per `Response`. iced's `Rich` is a *single* widget per paragraph,
+   so per-span hover geometry is not available; a tooltip would need a
+   separate overlay per link plus hit-testing. Deferred to the overlay work
+   (TASK-017b), not the render port.
+3. **Viewport culling / estimated-space insertion.** egui skipped
+   off-screen events and inserted estimated height
+   (`src/app/ui/render/mod.rs:174-227`). iced's `scrollable` virtualises
+   nothing, and culling needs live scroll offsets the pure view deliberately
+   does not own. The port renders the full document; if long-document cost
+   shows up, culling belongs in the runtime layer.
+4. **Scroll-to-target execution.** The pure layer computes *which* block
+   matched (`RenderBlock::scroll_to_me`, first match only, matching egui's
+   clear-after-first-hit behaviour) but cannot scroll: that needs a `Task`
+   plus a stable `scrollable` `Id`, i.e. reducer work in TASK-022/023.
+5. **egui's `ui.available_width()`-driven reflow of the code panel.** The
+   iced code block uses `Length::Fill` plus `Wrapping::WordOrGlyph`; egui's
+   horizontal-scroll-on-overflow for long code lines is not reproduced (iced
+   `SelectableText`/`text` wrapping semantics differ). Long lines wrap rather
+   than scroll.
+
+**Gate results (this pass).** `cargo check -q` PASS (exit 0, clean,
+workspace); `cargo clippy -p fastmd --bins --lib -- -D warnings` PASS
+(exit 0); `cargo fmt` run, `cargo fmt --check` PASS workspace-wide (exit 0);
+`cargo nextest run -p fastmd` PASS (**1660 run / 1660 passed / 1 skipped**),
+of which **163** are this task's new sidecar tests (32 `table_width` + 30
+`render::mod` + 24 `render::table` + 22 `render::inline` + 17
+`render::yaml` + 12 `render::code` + 10 `render::heading` + 16
+`ui_iced::message`); `cargo doc --no-deps --quiet` PASS (exit 0, no
+warnings after fixing four intra-doc links in the new module headers).
+
+**Needs the orchestrator's eyes.**
+
+1. **`measure_cell` was reverted to the exact egui behaviour mid-task.** An
+   earlier draft "fixed" the walker's `else if ends_ws` branch (a single-part
+   run ending in whitespace closes the pending token and measures it with the
+   *previous* run's font, so a lone code span is measured at proportional
+   size). That is a latent bug in the egui adapter, but changing it shifts
+   every solved column width. The port now matches egui exactly and the
+   quirk is pinned by test. If the reviewer wants the bug fixed, it should be
+   fixed in **both** adapters in one deliberate change, not smuggled in here.
+2. **The heuristic measurer is not the real shaper.** Column widths in this
+   pass are proportional estimates (0.5 / 0.6 em per char). They are
+   deterministic and test-exact, but real iced shaping will produce different
+   numbers. The injection point is designed so TASK-022/023 swaps in a
+   renderer-backed closure with no code change here - but until then, do not
+   read the pixel widths in tests as production widths.
+3. **`RenderMessage` is a third command vocabulary.** `UserCommand` (bus),
+   `EditorMessage`/`AgentMessage`/... (iced) and now `RenderMessage`. The
+   task brief required a channel that carries document + index + value, and
+   none existed. If the orchestrator prefers folding this into an existing
+   channel, `UserCommand::ApplyTaskToggles` would need its target widened
+   from the agent transcript to an arbitrary document - a bus-level change
+   with its own blast radius.
+4. **`strings.rs` regression caught and fixed by the gate.** An earlier edit
+   had re-wrapped `PDF_BACKED_ERROR` into a form `rustfmt` rejected;
+   `cargo fmt` restored it. The tracked diff for `strings.rs` is now the two
+   new list-marker constants only (+14 lines).
+5. **Table stripe parity depends on `TableRowData` carrying its own index.**
+   `table::column`'s view closure receives only the row *value*, not its
+   position, so the row index is stored in the data. Slightly awkward, but it
+   is what keeps the alternating-row shading identical to egui's.
+6. **No `SPEC.md` changes** were made ([RUST-043]); behaviour is mapped from
+   existing requirements only.

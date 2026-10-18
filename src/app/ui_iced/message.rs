@@ -42,7 +42,7 @@
 //! # Grounding status
 //!
 //! - **Grounded in shipped behaviour:** `Window`, `Layout`, `Command`,
-//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`.
+//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`, `Render`.
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
 //!   and no light/dark toggle exists in the egui build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
@@ -116,6 +116,8 @@ pub enum Message {
     Logs(LogsMessage),
     /// Theme / UI-scale channel ([TASK-008], DEC-008).
     Theme(ThemeMessage),
+    /// Markdown render-path channel ([TASK-015]).
+    Render(RenderMessage),
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a
@@ -446,5 +448,61 @@ pub enum ThemeMessage {
     ScaleChanged {
         /// The user multiplier, sanitised to the persisted scale range.
         multiplier: f32,
+    },
+}
+
+/// Markdown render-path channel ([TASK-021], [TASK-015]).
+///
+/// Every variant is **deferred intent** in the same sense as the last four
+/// [`TreeMessage`] variants: the markdown viewer's links, task checkboxes
+/// and copy-code buttons are user intent, but no [`UserCommand`] expresses
+/// them atomically and the view may not perform the work itself.
+///
+/// * **Links** — the egui renderer called `ui.hyperlink_to`, which pushed
+///   `egui::OutputCommand::OpenUrl` onto the platform output
+///   (`src/app/ui/render/inline.rs:160-163`, dispatched in
+///   `src/app/ui/app/update.rs:73`). iced's `Rich` text hands the clicked
+///   `Link` payload back as a message instead, and resolving it needs the
+///   workspace file list and content roots — state the pure view does not
+///   own. The reducer calls the existing pure
+///   [`crate::ui::link_resolver::resolve_link`] and performs the open,
+///   the tab selection or the scroll.
+/// * **Task checkboxes** — `UserCommand::ApplyTaskToggles` exists but is
+///   wired to the *agent transcript* content
+///   (`src/app/command_executor.rs:568-576`), not to the open document,
+///   which egui mutated in place (`src/app/ui/panels/center.rs:382-383`).
+///   The document path therefore travels with the toggle so [TASK-022] can
+///   pick the right target.
+/// * **Copy code** — egui copied inside the click handler via
+///   `Ui::copy_text` (`src/app/ui/render/code.rs:78-83`). iced exposes the
+///   clipboard only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so
+///   the content rides the message and the reducer writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RenderMessage {
+    /// A markdown link span was clicked; `url` is the raw link target
+    /// exactly as the document wrote it (`https://…`, `#anchor`,
+    /// `wikilink:…`, a relative path).
+    LinkActivated {
+        /// Raw link target from the document.
+        url: String,
+        /// File the link was rendered from, `None` when the text being
+        /// rendered is not backed by a file (e.g. an agent transcript).
+        source_file: Option<PathBuf>,
+    },
+    /// A task-list checkbox was toggled in the document viewer (the P0-2
+    /// write-back egui collected into `pending_toggles`).
+    TaskToggled {
+        /// The document whose markdown carries the checkbox.
+        document: PathBuf,
+        /// Zero-based index of the task item within that document, the
+        /// same ordinal `apply_task_toggle` consumes.
+        task_index: usize,
+        /// The new checked state.
+        checked: bool,
+    },
+    /// The copy button on a fenced code block was pressed.
+    CopyCodeRequested {
+        /// The exact code-block content to place on the clipboard.
+        content: String,
     },
 }

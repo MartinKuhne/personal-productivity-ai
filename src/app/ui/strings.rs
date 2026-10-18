@@ -643,9 +643,23 @@ pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
 /// (UI-038).
 pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
 
+/// Marker glyph rendered in front of an unordered markdown list item
+/// ([TASK-015]; U+2022 BULLET, the same glyph the egui renderer painted).
+pub const LIST_BULLET: &str = "\u{2022}";
+
+/// Separator rendered between an ordered list item's ordinal and its text
+/// ([TASK-015]).
+pub const ORDERED_LIST_MARKER_SUFFIX: &str = ". ";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_markdown_render_marker_strings() {
+        assert_eq!(LIST_BULLET, "\u{2022}");
+        assert_eq!(ORDERED_LIST_MARKER_SUFFIX, ". ");
+    }
 
     #[test]
     fn test_agent_session_close_button_is_close() {

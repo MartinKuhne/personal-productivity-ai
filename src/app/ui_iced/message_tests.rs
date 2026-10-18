@@ -6,8 +6,8 @@
 //! configuration file or database is touched.
 
 use super::{
-    AgentMessage, EditorMessage, LayoutMessage, LogsMessage, Message, SearchMessage, TabMessage,
-    ThemeMessage, TreeMessage, WindowMessage, WindowSnapshot,
+    AgentMessage, EditorMessage, LayoutMessage, LogsMessage, Message, RenderMessage, SearchMessage,
+    TabMessage, ThemeMessage, TreeMessage, WindowMessage, WindowSnapshot,
 };
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
@@ -54,6 +54,10 @@ fn one_message_per_channel() -> Vec<Message> {
             LogCategory::Indexer,
         ))),
         Message::Theme(ThemeMessage::ScaleChanged { multiplier: 1.25 }),
+        Message::Render(RenderMessage::LinkActivated {
+            url: "https://example.com".into(),
+            source_file: Some(sample_path()),
+        }),
     ]
 }
 
@@ -62,8 +66,9 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     let messages = one_message_per_channel();
     assert_eq!(
         messages.len(),
-        10,
-        "TASK-021 fixes the channel set at window, layout, command, tree, tab, editor, agent, search, logs, theme"
+        11,
+        "TASK-021 fixes the channel set at window, layout, command, tree, tab, \
+         editor, agent, search, logs, theme; TASK-015 adds render"
     );
 
     assert!(matches!(messages[0], Message::Window(_)));
@@ -76,6 +81,7 @@ fn test_message_exposes_one_variant_per_logical_channel() {
     assert!(matches!(messages[7], Message::Search(_)));
     assert!(matches!(messages[8], Message::Logs(_)));
     assert!(matches!(messages[9], Message::Theme(_)));
+    assert!(matches!(messages[10], Message::Render(_)));
 }
 
 #[test]
