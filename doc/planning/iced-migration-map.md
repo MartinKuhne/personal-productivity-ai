@@ -311,3 +311,113 @@ All APIs verified against the local iced 0.14 registry sources before use
    `window::icon::from_file_data` shortcut is unavailable; the shared
    `image`-crate decode in `utils::app_icon` is the load-bearing path. If a
    future task wants iced's `from_file_data`, revisit the feature list.
+
+### TASK-009/010 verification log (UI-state persistence + three-band layout — 2026-10-17)
+
+Note: this chunk was resumed from an interrupted prior run whose files were
+present but gate-RED; the fixes made in this pass are listed under "Found &
+fixed" below.
+
+**Egui save path as found (TASK-009 preamble):**
+- Save: `FastMdApp::save` (`src/app/ui/app/mod.rs:250-269`) copies
+  `layout.left/right_panel_width` into `persisted_ui_state`, collects
+  `expanded_dirs` from the orchestrator selection, and writes the JSON via
+  `storage.set_string("ppai_ui_state", json)` (key `mod.rs:44`).
+- Restore: `ui/app/init.rs:162-189` — `get_string` → serde parse with
+  default fallback → v0→v1 migration clears `font_size_scale` and bumps
+  the version (`init.rs:181-189`); panel widths seed `PanelLayout`
+  (`init.rs:191-197`).
+- **FINDING:** the egui build NEVER writes `window_width/height/x/y` in
+  `save()` — window geometry rides eframe's built-in `persistence`
+  feature (`mod.rs:254-256` comment). The fields exist on
+  `PersistedUiState` but are dead in the egui path. No schema bump was
+  needed: the iced path populates the SAME existing fields explicitly via
+  `apply_close_metrics` (DEC-006), since iced has no equivalent automatic
+  geometry persistence.
+
+**Verified APIs (iced 0.14 local registry sources):**
+- `BootFn` accepts `(State, Task<Message>)` — `iced-0.14.0/src/application.rs:540-566` (`IntoBoot` tuple impl :562-566).
+- `.scale_factor(f: impl Fn(&P::State) -> f32)` — `application.rs:410-424`.
+- `iced::window::latest() -> Task<Option<Id>>` — `iced_runtime-0.14.0/src/window.rs:294`; `scale_factor(id) -> Task<f32>` :376; `size(id) -> Task<Size>` :338; `position(id) -> Task<Option<Point>>` :369; `close<T>(id) -> Task<T>` :284; `close_requests() -> Subscription<Id>` :260; `resize_events() -> Subscription<(Id, Size)>` :249.
+- `Task::then` — `iced_runtime-0.14.0/src/task.rs:128`; `Task::chain` :159.
+- `window::Settings`: `size` `iced_core-0.14.0/src/window/settings.rs:36`, `position` :45, `icon` :87, `exit_on_close_request` :100; `Position::{Default, Specific(Point)}` — `position.rs:5-11`.
+- pane_grid (`iced_widget-0.14.2`): `PaneGrid::new(&'a State<T>, view)` — `pane_grid.rs:182-185` (IMMUTABLE borrow in 0.14); `on_resize(leeway, f)` :267-275 (grab area = `spacing + leeway`, :264-266); default `spacing: 0.0` :202; `ResizeEvent { split, ratio }` :1226-1237.
+- `State::with_configuration` — `pane_grid/state.rs:50`; `Internal::from_configuration` :365-401 assigns ids recursing a→b→split; `split_node` allocates the new PANE before the SPLIT :191-201; `resize(split, ratio)` :308; `layout()` :93; `Node::splits()` stack-DFS yields the OUTER split before the nested one — `pane_grid/node.rs:61-76`.
+- `Pane(pub(super) usize)` / `Split(pub(super) usize)` — `pane.rs:5` / `split.rs:5`: ids CANNOT be constructed externally; the pilot discovers them from the built state. For the band config (left | (center | right)): panes Left=0, Center=1, Right=2 (BTreeMap ascending, `state.rs:29`), inner split=3, outer split=4; `splits()` order [4, 3] → `left_split`=4, `right_split`=3 (pinned by `layout_tests.rs`).
+- `Axis::Vertical` divides left/right — `pane_grid/axis.rs:48-71`.
+
+**Design choices / deviations:**
+- `UiStateStorage` trait (`ui_iced/persisted.rs`) MIRRORS the
+  `ConfigStorageHandler` conventions (`Send + Sync`, `Result<PathBuf,
+  String>`, Noop/InMemory/File impls — `config/config.rs:686-724`)
+  instead of reusing it: `save_config(&AppConfig)` is AppConfig-specific
+  with NO load method and is shared with the orchestrator
+  (`orchestrator.rs:50`), so it cannot carry a keyed UI-state payload.
+  Deviation from the task's literal `&dyn ConfigStorageHandler` signature,
+  documented in the module header.
+- `PersistedUiState` stays in `crate::ui::persisted` UNCHANGED (rule 1);
+  iced consumers import it. `migrate_legacy_state` ports the v0→v1
+  semantics verbatim (log level `warn` vs egui's `info` — cosmetic).
+- Pilot storage wiring (rule 4): `FASTMD_ICED_UI_STATE_PATH` env →
+  `FileUiStateStorage`, else `InMemoryUiStateStorage`; the pilot NEVER
+  resolves the platform-default user location ([RUST-024]/[RUST-006]).
+  `FileUiStateStorage::platform_default()` exists for TASK-022 behind a
+  test-context panic shield.
+- Close flow (DEC-006): `CloseRequested` → chained `window::size` +
+  `window::position` report tasks → `CloseSnapshotCaptured` → sync
+  `layout`→`persisted` (faithful port of egui `save()` `mod.rs:251-252`)
+  + `apply_close_metrics` + `save_ui_state` → THEN `window::close(id)`.
+- DEC-008: boot chains `latest()` → `scale_factor(id)` → `ScaleBaseline`;
+  `.scale_factor(|s| s.composed_scale_factor())` composes OS baseline ×
+  persisted multiplier on the UI thread only ([FMD-069]).
+- TASK-010: `should_show_panel` reused via `pub use
+  crate::ui::panels::right::should_show_panel` — single source of truth
+  ([RUST-051]), no verbatim duplication.
+- Resize reduction replays the CLAMPED ratio into `pane_grid::State::resize`
+  so widget geometry matches the persisted width; degenerate viewports
+  (20%/30% cap below the panel minimum) clamp to the MINIMUM so the side
+  panels stay draggable.
+
+**Found & fixed in this pass (prior-run gate breakage):**
+1. `clamped_width` returned `desired` (500) instead of `min` (180) in the
+   degenerate `max < min` case — fixed (min wins).
+2. `test_left_resize_grow_from_existing_width` expected 750px for a 30%
+   drag on a 2500px viewport — violates the 20% cap (500); expectation
+   corrected to 500 / replay 0.2.
+3. f32 exact equality in `test_compose_scale_factor_multiplies_baseline_and_multiplier`
+   (`1.5 × 1.2 = 1.8000001`) — fixed with 1e-6 tolerance.
+4. Pilot close path did not sync `layout`→`persisted` before saving (only
+   `PaneResized` synced) — added the save-time sync mirroring egui `save()`.
+5. `test_split_side_unknown_split_returns_none` probe collided with the
+   band's inner split (`split_node` allocates pane before split → probe's
+   FIRST split is `Split(3)`); now uses the probe's second split
+   (`Split(5)`, outside the band's {3, 4}).
+6. Removed leftover debug scaffolding test `zzz_temp_print_ids` (println
+   probe from the interrupted run).
+7. rustdoc: 6 broken/private intra-doc links in `layout.rs` fixed
+   (`Axis::Vertical`/`PaneGrid` → `pane_grid::` paths; UI-016 constants →
+   plain code spans since `ui::panel_layout` is `pub(crate)` with only
+   `PanelLayout` re-exported, `ui/mod.rs:18,43`).
+8. clippy `redundant_closure`: `Ok::<String, String>` in
+   `InMemoryUiStateStorage::load_ui_state`; the `|| center_pane_element()`
+   closure in `view()` is REQUIRED (the bare fn item forces the builder's
+   `'a = 'static` → E0521 on `&_state.panes`) — kept with a documented
+   `#[allow(clippy::redundant_closure)]`.
+
+**Gate results (this pass):** `cargo check --workspace` PASS;
+`cargo clippy -p fastmd --bins --lib -- -D warnings` PASS;
+`cargo fmt --check` PASS; `cargo nextest run -p fastmd` 1266 run /
+1266 passed / 1 skipped PASS; `cargo doc --no-deps -p fastmd` PASS.
+
+**[UNVERIFIED] runtime items for the user/orchestrator run:**
+- Restore-across-runs: run `cargo run --bin fastmd_iced` twice with
+  `FASTMD_ICED_UI_STATE_PATH` pointed at a scratch file — second launch
+  must open at the saved size/position.
+- The actual window close AFTER the save (the returned `window::close`
+  task needs a live runtime; only the save-before-close reduction is
+  unit-tested).
+- Scale-baseline delivery through the `latest()` → `scale_factor` chain
+  on a real display (esp. >100% DPI), and the composed factor applying
+  to the window.
+- Pane-grid drag feel: leeway grab, clamped-ratio replay, and the
+  right-pane gate visually (pilot gate inputs are `false` stubs).

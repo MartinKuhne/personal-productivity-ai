@@ -8,10 +8,17 @@
 //! - [`fonts`] — `iced::font::load` bootstrap for the FastMD font
 //!   collections ([TASK-007]),
 //! - [`theme`] — FastMD palette tokens mapped into a custom `iced::Theme`
-//!   ([TASK-008], [GUD-003]).
+//!   ([TASK-008], [GUD-003]),
+//! - [`persisted`] — `PersistedUiState` save/load behind an injected
+//!   storage handler, plus DEC-008 scale composition and window-field
+//!   mapping ([TASK-009], DEC-006/[RUST-024]),
+//! - [`layout`] — the three-band pane-grid geometry with pure
+//!   `crate::ui::PanelLayout`-bound resize reductions ([TASK-010], UI-001).
 //!
-//! `layout`, `message`, `update`, `view`, `panels`, `tree`, `render` and
+//! `message`, `update`, `view`, `panels`, `tree`, `render` and
 //! `agent` follow in Phase 3/4.
 
 pub mod fonts;
+pub mod layout;
+pub mod persisted;
 pub mod theme;
