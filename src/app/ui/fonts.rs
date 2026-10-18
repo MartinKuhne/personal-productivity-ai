@@ -80,7 +80,12 @@ pub fn load_fallback_font() -> Option<Vec<u8>> {
 }
 
 /// Embedded Phosphor Regular icon font bytes.
-const PHOSPHOR_REGULAR_FONT: &[u8] = include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf");
+///
+/// Shared with the iced port (`ui_iced::fonts`, [TASK-007]): both UI
+/// frameworks register this byte collection, so it stays declared here as
+/// the single font inventory ([RUST-023], [GUD-002]-friends).
+pub const PHOSPHOR_REGULAR_FONT: &[u8] =
+    include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf");
 
 /// Builds [`egui::FontDefinitions`] configured with default typography,
 /// the Phosphor icon font, and fallback symbols.

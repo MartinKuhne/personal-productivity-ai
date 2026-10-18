@@ -10,17 +10,14 @@ use eframe::egui;
 ///
 /// Falls back to `None` (eframe default) if decoding fails — never panics in production.
 pub fn load_app_icon() -> Option<egui::IconData> {
-    // 32px is a good default for winit; Windows .ico embedding is handled separately via `build.rs`.
-    // Path is relative to this file: `src/app/ui/logo.rs` -> `../../..` -> crate root.
-    let bytes = include_bytes!("../../../assets/icon-32.png");
-    // Decode PNG via `image` crate (egui 0.36 has no `try_from_png_bytes`).
-    let img = image::load_from_memory(bytes).ok()?;
-    let rgba = img.to_rgba8();
-    let (w, h) = (rgba.width(), rgba.height());
+    // Asset embed + PNG decode live in the shared helper so the egui
+    // (`main.rs` via this fn) and iced (`TASK-006`) window bootstraps use
+    // ONE loading function ([RUST-023]).
+    let (rgba, width, height) = crate::utils::app_icon::decode_app_icon_rgba()?;
     Some(egui::IconData {
-        rgba: rgba.into_raw(),
-        width: w,
-        height: h,
+        rgba,
+        width,
+        height,
     })
 }
 

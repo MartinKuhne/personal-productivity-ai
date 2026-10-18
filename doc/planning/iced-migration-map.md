@@ -204,3 +204,110 @@ an iced-version mismatch (all iced crates resolve at 0.14.x: `iced`/`iced_core`/
 3. Closing the window exits the process with exit code 0 (`iced::application(...).run()` returns
    `Ok(())`; the no-op passthrough `update` and empty-state `boot` produce no error path).
 
+
+### TASK-006/007/008 verification log (Phase 2 window bootstrap, fonts, theme — 2026-10-17)
+
+All APIs verified against the local iced 0.14 registry sources before use
+(`C:\Users\mkuhn\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f`):
+
+- **Window bootstrap (TASK-006)**
+  - `.window(window::Settings)` — `iced-0.14.0/src/application.rs:250-255`;
+    `Settings{ size: Size, icon: Option<Icon>, exit_on_close_request: bool }`
+    — `iced_core-0.14.0/src/window/settings.rs:34-101` (`size`:35, `icon`:87,
+    `exit_on_close_request`:92-100, default `true` at :121). The egui 1000x700
+    viewport (`main.rs:49`) is ported as `Settings.size`; default 1024x768
+    unused.
+  - `.title(...)` — `iced-0.14.0/src/application.rs:346-360`; `TitleFn` accepts
+    `&'static str` directly (:579-583), so `strings::WINDOW_TITLE` ("FastMD AI",
+    DEC-010) is passed verbatim.
+  - `iced::window::icon::from_rgba(rgba, width, height) -> Result<Icon, Error>`
+    — `iced_core-0.14.0/src/window/icon.rs:7-11`, re-exported via
+    `iced-0.14.0/src/window/icon.rs:1-2`. The iced `image` feature
+    (`from_file_data`) is NOT enabled in our dependency line, so the icon is
+    decoded through the new shared loader `fastmd::utils::app_icon::
+    decode_app_icon_rgba()` (same `assets/icon-32.png` the egui path embeds;
+    `ui::logo::load_app_icon` now delegates to it — ONE decode function,
+    [RUST-023]).
+  - **Close-requests simplification (deviation-free, DEC-006 groundwork):**
+    with `exit_on_close_request: false` the runtime takes NO action on a close
+    request. `iced::window::close_requests() -> Subscription<Id>` — verified
+    `iced_runtime-0.14.0/src/window.rs:259-268` (it filters
+    `Event::CloseRequested` and yields the requesting window `Id` directly;
+    there is no payload-bearing `CloseRequested` message type to map) — so the
+    pilot maps `Id -> Message::CloseRequested(Id)` with
+    `Subscription::map` (`iced_futures-0.14.0/src/subscription.rs:282`) and
+    `update` issues `iced::window::close(id) -> Task<T>`
+    (`iced_runtime-0.14.0/src/window.rs:283-286`). TASK-009 extends `update`
+    with the persistence save BEFORE the `close(id)` call.
+- **Fonts (TASK-007)**
+  - `iced::font::load(bytes) -> Task<Result<(), Error>>` — verified
+    `iced_runtime-0.14.0/src/font.rs:11`, re-exported as `iced::font::load`
+    through `iced-0.14.0/src/lib.rs:576-580`. `Error` is a variant-less enum
+    (`font.rs:7-8`): Debug-only, no `Display` — error descriptions are
+    formatted with `{error:?}`.
+  - `Task::perform` takes a FUTURE in 0.14 (`iced_runtime-0.14.0/src/task.rs:
+    48-56`), NOT a `Task`; the per-collection outcome mapping uses
+    `Task::map` (`task.rs:111-117`) and the loads are combined with
+    `Task::batch` (`task.rs:88-109`; the batch streams ONE output per child
+    task, so `boot` maps each outcome into `Message::FontLoadFinished(
+    Option<String>)` — `Some(description)` = failed collection ([NFR-001]
+    ERROR log in `update`), `None` = loaded.
+  - `boot` returns `(PilotState, Task<Message>)` — the `(State, Task)` boot
+    contract (`iced-0.14.0/src/application.rs:551-566`, DEC-009).
+  - Byte inventory stays SINGLE-SOURCED with the egui path:
+    `crate::ui::fonts::PHOSPHOR_REGULAR_FONT` (made `pub`) +
+    `load_fallback_font()`/`candidate_fallback_font_paths()` (already
+    egui-free). `ui_iced::fonts::font_collections()` registers Phosphor
+    ("phosphor", mirroring the egui registration key) then the platform
+    fallback; per-widget selection (`Font::MONOSPACE` etc.) is Phase 3.
+  - `iced::window::Id` is `Copy` — `iced_core-0.14.0/src/window/id.rs:6` — so
+    `Message: Clone` holds.
+- **Theme (TASK-008)**
+  - `iced::Theme::custom(name, palette)` / `custom_with_fn` — verified
+    `iced_core-0.14.0/src/theme.rs:91-106`; `iced::theme::palette::Palette`
+    fields (`background/text/primary/success/warning/danger`) —
+    `iced_core-0.14.0/src/theme/palette.rs:7-22`; `Color::from_rgba8(r, g, b,
+    a: f32)` — `iced_core-0.14.0/src/color.rs:89` (alpha is f32, NOT u8).
+  - **egui `Color32` is stored PREMULTIPLIED** (`ecolor-0.36.1/src/color32.rs:
+    31`; `r()`/`g()`/`b()` return premultiplied bytes). `ui_iced::theme::
+    to_iced_color` therefore converts through `to_srgba_unmultiplied`
+    (`ecolor-0.36.1/src/color32.rs:273-286`) — identity for opaque colors,
+    which every `crate::ui::theme::Palette` token is, so the mapping
+    reproduces the egui values bit-exactly ([GUD-003]; caught by the new
+    sidecar test `test_to_iced_color_includes_alpha`, which failed against the
+    naive `r()`-based conversion and drove the fix).
+  - Role mapping: `background<-surface`, `text<-text`, `primary<-accent`,
+    `success<-success`, `warning<-warning`, `danger<-error`. No numeric color
+    literal exists in `ui_iced/theme.rs`. **Where it takes effect:** wired into
+    the pilot via `.theme(|_state| ui_iced::theme::fastmd_dark_theme())`
+    (`iced-0.14.0/src/application.rs:377-392`; `ThemeFn` accepts
+    `Fn(&State) -> impl Into<Option<Theme>>`, :648-670).
+- **Pre-existing gate breakage found & fixed (not caused by this chunk):**
+  `ui::attributions_tests::completeness_against_cargo_manifests` was failing
+  on HEAD since TASK-003 added `iced` to `Cargo.toml` without adding it to
+  `ui::attributions::DIRECT_DEPENDENCIES`. Fixed by adding the iced entry
+  (authors/repository from `iced-0.14.0/Cargo.toml`) and bumping the two
+  hardcoded count assertions 56 -> 57
+  (`attributions_tests.rs:9`, `about_dialog_tests.rs:200,218`).
+- Gate results: `cargo check --workspace` PASS; `cargo clippy -p fastmd
+  --bins --lib -- -D warnings` PASS; `cargo nextest run -p fastmd` 1212 run /
+  1212 passed / 1 skipped PASS; `cargo fmt --check` PASS; `cargo doc --no-deps
+  -p fastmd` PASS. [UNVERIFIED] The runtime behaviors (window opens with
+  title/icon, close button exits, fonts render) are NOT machine-verified in
+  this session — success criteria 1-3 above still need the user/orchestrator
+  run of `cargo run --bin fastmd_iced`.
+
+### Suspicious / for orchestrator attention (TASK-006..008)
+
+1. Pre-existing rustdoc warning (unrelated, `fastmd-agent`): unresolved link
+   `super::ToolRegistry::refresh_state` at
+   `src/agent/tools/registry/groups.rs:58` (introduced by commits #101/#104,
+   long before the migration). `cargo doc -p fastmd` is clean; the warning
+   only appears with `--workspace`.
+2. `strings.rs` was found with a pre-existing uncommitted formatting-only
+   drift in `PDF_BACKED_ERROR` relative to HEAD; `cargo fmt` normalized it
+   back to the HEAD shape (identical string value, no semantic change).
+3. The `iced` feature list does NOT include `image`, so iced's own
+   `window::icon::from_file_data` shortcut is unavailable; the shared
+   `image`-crate decode in `utils::app_icon` is the load-bearing path. If a
+   future task wants iced's `from_file_data`, revisit the feature list.

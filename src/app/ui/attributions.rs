@@ -118,6 +118,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/magiclen/html-escape",
     },
     Attribution {
+        name: "iced",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
         name: "image",
         authors: "The image-rs Developers",
         github_url: "https://github.com/image-rs/image",

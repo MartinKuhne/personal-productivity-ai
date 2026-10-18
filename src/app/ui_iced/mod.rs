@@ -1,10 +1,17 @@
 //! Iced-based UI layer (The Elm Architecture). Lives beside `ui/` until Phase 5 removes the egui UI.
 //!
-//! Currently a facade shell only (`TASK-004`, `doc/planning/iced.md`): the
-//! runtime bootstrap is exercised by the `fastmd_iced` pilot binary
+//! The runtime bootstrap is exercised by the `fastmd_iced` pilot binary
 //! (`src/app/bin/fastmd_iced.rs`) while the egui UI remains untouched. The
-//! subsystem tree (`theme`, `layout`, `message`, `update`, `view`, `panels`,
-//! `tree`, `render`, `agent`) grows module by module in Phases 2..4.
+//! subsystem tree grows module by module in Phases 2..4 (`doc/planning/
+//! iced.md`):
+//!
+//! - [`fonts`] — `iced::font::load` bootstrap for the FastMD font
+//!   collections ([TASK-007]),
+//! - [`theme`] — FastMD palette tokens mapped into a custom `iced::Theme`
+//!   ([TASK-008], [GUD-003]).
+//!
+//! `layout`, `message`, `update`, `view`, `panels`, `tree`, `render` and
+//! `agent` follow in Phase 3/4.
 
-// No public items yet — the pilot keeps its state and view contained in
-// `src/app/bin/fastmd_iced.rs` so this facade stays minimal.
+pub mod fonts;
+pub mod theme;

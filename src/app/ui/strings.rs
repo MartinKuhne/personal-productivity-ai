@@ -7,6 +7,12 @@
 /// the title itself is plain text so it remains searchable and accessible.
 pub const APP_TITLE: &str = "FastMD Viewer";
 
+/// Title of the OS window title bar ("FastMD AI"), per DEC-010
+/// (`doc/planning/iced.md`, TASK-006). Distinct from [`APP_TITLE`]: the top
+/// toolbar keeps showing [`APP_TITLE`] and the About dialog keeps
+/// [`ABOUT_APP_NAME`], which this decision leaves untouched.
+pub const WINDOW_TITLE: &str = "FastMD AI";
+
 /// Label for the batch prompt processing button (now in the hamburger menu).
 pub const BATCH_BUTTON: &str = "Batch...";
 
