@@ -2,15 +2,15 @@
 goal: Migrate the FastMD desktop UI from egui/eframe 0.36 to iced 0.14 under The Elm Architecture, with the quality gate staying green after every phase
 version: 1.0
 date_created: 2026-10-17
-last_updated: 2026-10-17
+last_updated: 2026-10-18
 owner: Martin Kuhne
-status: 'Planned'
+status: 'Completed'
 tags: [migration, architecture, upgrade, ui, refactor]
 ---
 
 # Introduction
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-2196F3)
+![Status: Completed](https://img.shields.io/badge/status-Completed-4CAF50)
 
 This plan migrates the FastMD user interface from **egui/eframe 0.36** (immediate-mode) to **iced 0.14.0** (The Elm Architecture / reactive rendering). The domain layers — `src/app/{markdown,bus,config,workspace,background,agent,export}`, `src/agent`, `src/md2pdf`, `src/fastmd-tool-macros` — are unaffected. Only the UI layer (`src/app/ui/`, 75 non-test source files, 20,380 lines) and the window bootstrap (`src/app/main.rs`) change. The migration is incremental: a parallel iced content module and a parallel binary target keep the egui UI fully working until Phase 5 swaps it out and deletes egui.
 
