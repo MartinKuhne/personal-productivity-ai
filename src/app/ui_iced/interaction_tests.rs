@@ -67,8 +67,11 @@ use crate::ui::strings;
 use crate::ui_iced::app::AppState;
 use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::{EditorViewModel, editor_card};
-use crate::ui_iced::message::{DialogMessage, EditorMessage, LayoutMessage, Message, TreeMessage};
+use crate::ui_iced::message::{
+    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, Message, TreeMessage,
+};
 use crate::ui_iced::overlay::menu_labels;
+use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
 use crate::ui_iced::panels::left::{left_panel, row_icon};
 use crate::ui_iced::panels::top::{HamburgerItem, MENU_MIN_WIDTH, hamburger_items, top_bar};
@@ -393,6 +396,40 @@ fn test_tab_title_click_selects_that_document() {
     );
 }
 
+/// A middle click on a tab closes it (UI-049) — [TASK-027] gap fill: the
+/// `on_middle_press` wiring in `center.rs` existed but no tier drove it.
+#[test]
+fn test_tab_middle_click_closes_that_tab() {
+    let mut state = test_app_state();
+    state
+        .app
+        .tabs_mut()
+        .open_tab(PathBuf::from("/notes/alpha.md"));
+    state
+        .app
+        .tabs_mut()
+        .open_tab(PathBuf::from("/notes/beta.md"));
+    state.rebuild_view_models();
+
+    let mut ui = sim(center_panel(&state.models.center));
+    let bounds = ui
+        .find("beta.md")
+        .expect("beta tab")
+        .visible_bounds()
+        .expect("visible beta tab");
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)),
+    ]);
+
+    assert_emitted(
+        &messages(ui),
+        &Message::Command(crate::bus::events::user_command::UserCommand::CloseTab(1)),
+        "a middle click on the second tab must close index 1",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Editor — typing and saving
 // ---------------------------------------------------------------------------
@@ -443,6 +480,99 @@ fn test_editor_cancel_never_requests_a_save() {
         emitted,
         vec![Message::Editor(EditorMessage::CancelRequested)],
         "Cancel must publish exactly the cancel message",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bottom band — command input Enter submit
+// ---------------------------------------------------------------------------
+/// Enter in the command band submits the field's text as
+/// `AgentMessage::Submit` ([TASK-027] gap fill: the deleted legacy UI
+/// sidecar's `test_send_enter_key_*` / paste-then-enter family). iced's
+/// `text_input` owns the Enter handling, so the tier-2 assertion is that the
+/// real field really produces the submit message once the reducer has taken
+/// the typed text in.
+#[test]
+fn test_command_band_enter_submits_the_typed_prompt() {
+    let mut state = test_app_state();
+
+    // 1. type into the real band field — keystrokes stream as InputChanged.
+    let mut ui = sim(bottom_panel(&state.models.bottom));
+    assert!(
+        focus_first_text_input(&mut ui).is_some(),
+        "the command band must expose its command input as a focusable field"
+    );
+    let _ = ui.typewrite("/models");
+    let typed = messages(ui);
+    assert_emitted(
+        &typed,
+        &Message::Agent(AgentMessage::InputChanged {
+            text: "/models".to_string(),
+        }),
+        "typing must stream the field contents",
+    );
+    assert!(
+        !typed
+            .iter()
+            .any(|m| matches!(m, Message::Agent(AgentMessage::Submit { .. }))),
+        "typing alone must not submit, got {typed:?}"
+    );
+
+    // 2. run the typed text through the real reducer, rebuild, press Enter.
+    for message in typed {
+        let _ = update(&mut state, message);
+    }
+    state.rebuild_view_models();
+    assert_eq!(
+        state.models.bottom.command_input, "/models",
+        "the reducer must hold what the field reported"
+    );
+
+    let mut ui = sim(bottom_panel(&state.models.bottom));
+    focus_first_text_input(&mut ui);
+    let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+
+    assert_emitted(
+        &messages(ui),
+        &Message::Agent(AgentMessage::Submit {
+            text: "/models".to_string(),
+        }),
+        "Enter must submit the field's current text",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Right pane — ToC row click
+// ---------------------------------------------------------------------------
+
+/// Clicking a ToC row publishes `UserCommand::ScrollToHeader` for that
+/// heading ([TASK-027] gap fill: the deleted legacy UI sidecar asserted the
+/// click effect as `apply_toc_row_click`; the iced pane wires the command
+/// inline in `view::toc_body` and nothing drove it until now).
+#[test]
+fn test_toc_row_click_publishes_scroll_to_header() {
+    use crate::markdown::ToCEntry;
+
+    let (mut state, _dir) = state_with_one_file();
+    let path = state.app.file_processor().all_files[0].clone();
+    state.app.selection_mut().selected_file = Some(path);
+    state.app.orchestrator.tabs.toc = vec![
+        ToCEntry::new("Getting Started", 1, "Getting Started"),
+        ToCEntry::new("Nitty Gritty", 2, "Nitty Gritty"),
+    ];
+    state.rebuild_view_models();
+
+    let mut ui = sim(view(&state));
+    let _ = ui.click("Nitty Gritty");
+
+    assert_emitted(
+        &messages(ui),
+        &Message::Command(
+            crate::bus::events::user_command::UserCommand::ScrollToHeader(
+                "Nitty Gritty".to_string(),
+            ),
+        ),
+        "a ToC row click must publish the scroll command for that heading id",
     );
 }
 

@@ -528,7 +528,7 @@ fn test_editor_open_then_save_round_trips_the_file_byte_for_byte() {
     assert_eq!(
         std::fs::read_to_string(&path).expect("read back"),
         original,
-        "an untouched open   save must not change a single byte"
+        "an untouched open then save must not change a single byte"
     );
 }
 

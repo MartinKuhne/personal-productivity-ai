@@ -801,3 +801,111 @@ fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
         row_text_color(&palette, false)
     );
 }
+
+// --- flatten depth guard (UI-017 robustness) --------------------------
+//
+// Gap fill ([TASK-027]): `flatten_tree`'s `MAX_TREE_DEPTH` stack guard had
+// no test anywhere once the legacy UI tree sidecars were deleted. The iced
+// left panel calls that same function, so the guard is asserted through it.
+
+/// A synthetic `root/l0/l1/…` directory chain of `depth` levels, plus the
+/// expanded-dir set that opens every one of them ([RUST-006]: nothing here
+/// touches the filesystem).
+fn deep_chain(depth: usize) -> (TreeNode, HashSet<PathBuf>) {
+    let mut root = TreeNode::new("root".to_string(), PathBuf::from("/root"), true);
+    let mut expanded = HashSet::new();
+    let mut parent = &mut root;
+    for index in 0..depth {
+        let name = format!("level-{index}");
+        let path = parent.path.join(&name);
+        expanded.insert(path.clone());
+        parent
+            .children
+            .insert(name.clone(), TreeNode::new(name.clone(), path, true));
+        parent = parent.children.get_mut(&name).expect("inserted above");
+    }
+    (root, expanded)
+}
+
+#[test]
+fn tree_flatten_stops_at_the_depth_guard_instead_of_overflowing() {
+    let depth_guard = crate::ui::tree::flatten::MAX_TREE_DEPTH;
+    let (root, expanded) = deep_chain(depth_guard + 50);
+
+    let mut rows = Vec::new();
+    flatten_tree(&root, 0, &expanded, &mut rows);
+
+    assert_eq!(
+        rows.len(),
+        depth_guard,
+        "the guard must cut the walk at MAX_TREE_DEPTH rows, not recurse further"
+    );
+    assert_eq!(
+        rows.last().map(|row| row.depth),
+        Some(depth_guard - 1),
+        "the deepest emitted row is the last level inside the guard"
+    );
+}
+
+#[test]
+fn tree_flatten_is_unaffected_below_the_depth_guard() {
+    let (root, expanded) = deep_chain(4);
+
+    let mut rows = Vec::new();
+    flatten_tree(&root, 0, &expanded, &mut rows);
+
+    assert_eq!(
+        rows.len(),
+        4,
+        "a chain inside the guard flattens every level"
+    );
+    assert_eq!(
+        rows.iter().map(|row| row.depth).collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+}
+
+// --- UI-050 search-result branch -------------------------------------
+//
+// Gap fill ([TASK-027]): the deleted legacy UI sidecar asserted the
+// "no results" state of the search view. The state gate itself is covered
+// by `from_app_carries_query_search_state_and_selection`; what was missing
+// was that both branches of the panel body actually build.
+
+#[test]
+fn search_result_branch_builds_the_empty_state() {
+    let (app, _dir) = app_with_system_lib();
+    let mut view_model = LeftPanelViewModel::from_app(&app);
+    view_model.is_searching = true;
+    view_model.results = Arc::new(Vec::new());
+
+    // The no-results branch must build (and not fall through to the tree).
+    let _element = search_results(&view_model);
+}
+
+#[test]
+fn search_result_branch_builds_populated_and_sparse_cards() {
+    let (app, _dir) = app_with_system_lib();
+    let mut view_model = LeftPanelViewModel::from_app(&app);
+    view_model.is_searching = true;
+    view_model.results = Arc::new(vec![
+        SearchResultEntry {
+            path: PathBuf::from("/lib/notes.md"),
+            file_name: "notes.md".to_string(),
+            relative_path: "Work / notes.md".to_string(),
+            snippet: "…the matching line…".to_string(),
+            line_number: 7,
+            match_count: 3,
+        },
+        SearchResultEntry {
+            path: PathBuf::from("/lib/bare.md"),
+            file_name: "bare.md".to_string(),
+            relative_path: String::new(),
+            snippet: String::new(),
+            line_number: 1,
+            match_count: 1,
+        },
+    ]);
+
+    let _element = search_results(&view_model);
+}

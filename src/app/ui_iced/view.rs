@@ -51,6 +51,7 @@ use crate::ui_iced::overlay::{modal, with_context_menu};
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
+use crate::ui_iced::panels::right::toc_indent_pixels;
 use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
@@ -58,9 +59,6 @@ use iced::widget::{button, column, container, scrollable, stack, text};
 
 /// Vertical gap between the three bands, in logical pixels ([TASK-010]).
 const BAND_SPACING_PIXELS: f32 = 8.0;
-
-/// Left padding per heading level in the TOC pane, in logical pixels.
-const TOC_LEVEL_INDENT_PIXELS: f32 = 12.0;
 
 /// Floor for the document render width so a collapsed-viewport solve never
 /// gets a non-positive width.
@@ -162,7 +160,8 @@ fn document_width(state: &AppState) -> f32 {
 }
 
 /// The right (TOC) pane body: one button per heading, publishing the same
-/// [`UserCommand::ScrollToHeader`] the legacy UI ToC rows published.
+/// [`UserCommand::ScrollToHeader`] the legacy UI ToC rows published. The
+/// per-level left pad comes from [`toc_indent_pixels`] ([TASK-027]).
 fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
     let rows: Vec<iced::Element<'_, Message>> = state
         .app
@@ -171,7 +170,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
         .toc
         .iter()
         .map(|entry| {
-            let indent = TOC_LEVEL_INDENT_PIXELS * (entry.level.saturating_sub(1) as f32);
+            let indent = toc_indent_pixels(entry.level);
             container(button(text(entry.title.clone())).on_press(Message::Command(
                 UserCommand::ScrollToHeader(entry.id.clone()),
             )))
@@ -179,7 +178,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
                 top: 2.0,
                 right: 4.0,
                 bottom: 2.0,
-                left: indent + 4.0,
+                left: indent,
             })
             .width(Length::Fill)
             .into()

@@ -2,12 +2,19 @@
 //! [RUST-003]).
 //!
 //! Ported from the legacy UI `ui/panels/right_tests.rs` cases that exercised
-//! the two helpers copied into [`super`], so coverage survives [TASK-029b]'s
+//! the helpers copied into [`super`], so coverage survives [TASK-029b]'s
 //! deletion of the legacy UI panel. The legacy UI sidecar's snapshot / pixel-layout
 //! tests are NOT ported — they drive `Ui` and have no iced-side
 //! counterpart here.
+//!
+//! [`toc_indent_pixels`] is a [TASK-027] gap fill: the legacy UI pinned the
+//! rule as `calculate_indent`, the iced pane computed it inline, and nothing
+//! tested the iced formula until it was extracted here.
 
-use super::{resolve_anchor, should_show_panel};
+use super::{
+    TOC_BASE_INDENT_PIXELS, TOC_LEVEL_INDENT_PIXELS, resolve_anchor, should_show_panel,
+    toc_indent_pixels,
+};
 use crate::markdown::ToCEntry;
 
 // ---------------------------------------------------------------------------
@@ -114,4 +121,64 @@ fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
         "",
         "the empty anchor has nothing to match and must round-trip"
     );
+}
+
+// ---------------------------------------------------------------------------
+// `toc_indent_pixels` — the per-level ToC row indent (UI-001)
+//
+// Gap fill ([TASK-027]): the deleted legacy UI sidecar pinned this rule as
+// `calculate_indent`. The iced pane computed the same shape inline inside
+// `view::toc_body` and no iced test covered it, so the rule is now a
+// function and the assertion lives here. The values are the iced pane's own
+// (base 4 px, 12 px per level) — the legacy ladder used a 10 px step and a
+// 6-level clamp, neither of which the iced pane has or the SPEC asks for.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_toc_indent_pixels_level_one_is_the_base_pad() {
+    assert_eq!(
+        toc_indent_pixels(1),
+        TOC_BASE_INDENT_PIXELS,
+        "a top-level heading gets the base pad and no level indent"
+    );
+}
+
+#[test]
+fn test_toc_indent_pixels_grows_by_one_step_per_level() {
+    for level in 1u32..=6 {
+        let expected = TOC_BASE_INDENT_PIXELS + (level as f32 - 1.0) * TOC_LEVEL_INDENT_PIXELS;
+        assert_eq!(
+            toc_indent_pixels(level),
+            expected,
+            "level {level} must sit one step further in than the level above it"
+        );
+    }
+    // Strictly increasing across the whole heading-level range.
+    for level in 2u32..=6 {
+        assert!(
+            toc_indent_pixels(level) > toc_indent_pixels(level - 1),
+            "deeper levels must indent further, level {level} did not"
+        );
+    }
+}
+
+#[test]
+fn test_toc_indent_pixels_clamps_level_zero_to_the_base() {
+    assert_eq!(
+        toc_indent_pixels(0),
+        TOC_BASE_INDENT_PIXELS,
+        "a malformed level 0 saturates to the base pad and never goes negative"
+    );
+    assert!(toc_indent_pixels(0) > 0.0);
+}
+
+#[test]
+fn test_toc_indent_pixels_stays_finite_for_absurd_levels() {
+    for level in [7u32, 99, 1_000, u32::MAX] {
+        let pad = toc_indent_pixels(level);
+        assert!(
+            pad.is_finite() && pad > 0.0,
+            "level {level} must produce a finite, positive pad, got {pad}"
+        );
+    }
 }

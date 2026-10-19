@@ -586,3 +586,52 @@ fn tab_text_color_uses_distinct_tokens_for_active_and_inactive() {
     assert_eq!(active, palette.text_strong);
     assert_eq!(inactive, palette.text_muted);
 }
+
+// --- UI-034 cross-menu parity ------------------------------------------
+//
+// Gap fill ([TASK-027]): UI-034 requires the tab menu's file actions to be
+// available, identically, on a directory-tree file row. Each menu had its
+// own mapping test; nothing asserted the two menus actually agree.
+
+#[test]
+fn tab_menu_file_actions_match_the_tree_file_menu() {
+    use crate::ui_iced::panels::left::file_menu_items;
+
+    let path = Path::new("/lib/notes.md");
+    let skills = vec![skill("FormatMarkdown", "sys/Skills/Note/FormatMarkdown.md")];
+
+    let tab_items = tab_context_menu_items(0, path, &skills);
+    let tree_items = file_menu_items(path, &skills, false);
+
+    let message_for = |items: &[MenuItem<Message>], label: &str| -> Option<Message> {
+        items
+            .iter()
+            .find(|item| item.label == label)
+            .map(|item| item.message.clone())
+    };
+
+    for label in [
+        strings::EDIT_BUTTON,
+        strings::COPY_PATH_ACTION,
+        strings::SHOW_IN_EXPLORER_ACTION,
+    ] {
+        let from_tree = message_for(&tree_items, label);
+        assert!(
+            from_tree.is_some(),
+            "UI-034: the tree file menu must offer {label}"
+        );
+        assert_eq!(
+            message_for(&tab_items, label),
+            from_tree,
+            "UI-034: {label} must publish the same message from the tab menu and the tree menu"
+        );
+    }
+
+    // The Format Markdown quick task (UI-019 / UI-033) is the same row in
+    // both menus, carrying the same skill + target file.
+    assert_eq!(
+        message_for(&tab_items, "FormatMarkdown"),
+        message_for(&tree_items, "FormatMarkdown"),
+        "UI-034: the Format Markdown skill row must be identical in both menus"
+    );
+}
