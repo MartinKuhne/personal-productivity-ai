@@ -51,7 +51,7 @@ fn test_init_rs_does_not_recreate_tool_context() {
     let count = normalized.matches("std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(crate::agent::AgentToolContext::new").count();
     assert_eq!(
         count,
-        2, // once in `new`, once in `empty_state_via_bus`
-        "FastMdApp::new and empty_state_via_bus must use the shared tool_context, not recreate it inline"
+        1, // once in `empty_state_via_bus` ([TASK-029b] retired the `new` constructor)
+        "empty_state_via_bus must use the shared tool_context, not recreate it inline"
     );
 }

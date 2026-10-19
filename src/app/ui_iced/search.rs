@@ -13,14 +13,14 @@
 //! | Piece | Source |
 //! | --- | --- |
 //! | Result row type | [`SearchResultEntry`] (`src/app/ui/tree_search.rs:15-28`) — re-exported, never re-declared |
-//! | Scoped engine | [`find_search_results_scoped`] (`src/app/ui/tree_search.rs:227-301`) — the same call the egui panel made (`src/app/ui/panels/left.rs:252`) |
+//! | Scoped engine | [`find_search_results_scoped`] (`src/app/ui/tree_search.rs:227-301`) — the same call the legacy UI panel made (`src/app/ui/panels/left.rs:252`) |
 //! | Unscoped engine | [`find_search_results`] (`src/app/ui/tree_search.rs:308-314`) |
 //! | Match-count label | [`strings::format_match_count`] (`src/app/ui/strings.rs:189-191`) |
 //! | Header / empty state | [`strings::SEARCH_RESULTS_HEADER`], [`strings::SEARCH_NO_RESULTS`] |
 //!
 //! ## Why the scan is no longer synchronous
 //!
-//! The egui build ran the scan inside the left panel's paint pass
+//! The legacy UI build ran the scan inside the left panel's paint pass
 //! (`src/app/ui/panels/left.rs:246-252` → `TreeSearch::apply_with_allowed_dirs`),
 //! so a large workspace froze the UI for the whole duration — against
 //! [FMD-060]/[FMD-061]. The iced port keeps the same engine but moves the
@@ -40,7 +40,7 @@
 //!
 //! ## Presentation logic ported as pure functions
 //!
-//! The egui result card decided inline which lines to allocate
+//! The legacy UI result card decided inline which lines to allocate
 //! (`src/app/ui/panels/left.rs:299-323`). Those three predicates live here as
 //! [`shows_match_count`], [`shows_relative_path`] and [`shows_snippet`], and
 //! every user-facing string comes from [`crate::ui::strings`] ([GUD-002]) —
@@ -247,7 +247,7 @@ impl SearchViewModel {
 
 /// Returns `true` when a result row should show its match counter.
 ///
-/// egui gated the counter on `match_count > 1`
+/// the legacy UI gated the counter on `match_count > 1`
 /// (`src/app/ui/panels/left.rs:301`): a single match adds nothing next to
 /// the file name, so only repeated hits are labelled.
 #[must_use]
@@ -257,7 +257,7 @@ pub fn shows_match_count(entry: &SearchResultEntry) -> bool {
 
 /// Returns `true` when a result row should show its library-relative path.
 ///
-/// egui skipped the line when it was empty or identical to the file name
+/// the legacy UI skipped the line when it was empty or identical to the file name
 /// (`src/app/ui/panels/left.rs:309`) — a duplicate line is noise.
 #[must_use]
 pub fn shows_relative_path(entry: &SearchResultEntry) -> bool {
@@ -266,7 +266,7 @@ pub fn shows_relative_path(entry: &SearchResultEntry) -> bool {
 
 /// Returns `true` when a result row should show its preview snippet.
 ///
-/// egui skipped an empty snippet (`src/app/ui/panels/left.rs:316`).
+/// the legacy UI skipped an empty snippet (`src/app/ui/panels/left.rs:316`).
 #[must_use]
 pub fn shows_snippet(entry: &SearchResultEntry) -> bool {
     !entry.snippet.is_empty()

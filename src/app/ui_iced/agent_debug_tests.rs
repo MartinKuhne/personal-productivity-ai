@@ -1,15 +1,15 @@
 //! Sidecar tests for [`crate::ui_iced::agent_debug`] ([TASK-017b4],
 //! UI-048 / REQ-008).
 //!
-//! Covers the pieces the egui window kept inside its widget tree and its
+//! Covers the pieces the legacy UI window kept inside its widget tree and its
 //! render closure — the search predicate, the session-scoped tools
 //! de-duplication, the JSON un-escape pass, the `json_rows` viewport
 //! decision, the explicit expanded-id set that replaces
-//! `egui::CollapsingHeader`, the reused auto-scroll intent and the
+//! `CollapsingHeader`, the reused auto-scroll intent and the
 //! message-channel split — as pure data tests.
 //!
-//! The egui originals (`src/app/ui/agent_debug_window.rs:275-411`) were
-//! `run_ui_test` smoke tests over a live `egui::Context`; every rule they
+//! The legacy UI originals (`src/app/ui/agent_debug_window.rs:275-411`) were
+//! `run_ui_test` smoke tests over a live `Context`; every rule they
 //! pinned is asserted here directly, without a context, a bus or a running
 //! agent. Fixtures build [`AgentDebugEntry`] values in memory and the one
 //! `FastMdApp` used is the in-memory `empty_state` fixture — no files, no
@@ -169,7 +169,7 @@ fn session_boundaries_survive_any_search() {
 
 #[test]
 fn search_never_matches_the_json_body() {
-    // egui searched `summary` only (ui/agent_debug_window.rs:73); the
+    // the legacy UI searched `summary` only (ui/agent_debug_window.rs:73); the
     // payload is display-only.
     let entry = entry_with(
         1,
@@ -184,7 +184,7 @@ fn search_never_matches_the_json_body() {
 
 #[test]
 fn a_whitespace_only_search_is_not_treated_as_empty() {
-    // Parity: egui tested `search_lower.is_empty()`, so " " filters.
+    // Parity: the legacy UI tested `search_lower.is_empty()`, so " " filters.
     let entries = vec![entry(1, DebugEntryKind::Outgoing, "alpha")];
     assert_eq!(filter_debug_entries(&entries, " ").len(), 0);
 }
@@ -272,7 +272,7 @@ fn the_omitted_tools_placeholder_reaches_the_display_json() {
 #[test]
 fn the_dedup_runs_on_the_filtered_list_not_the_raw_buffer() {
     // Searching the first tools entry away promotes the second to
-    // "first visible", so it keeps its tools — egui parity: the pass
+    // "first visible", so it keeps its tools — legacy parity: the pass
     // walks `filtered` (ui/agent_debug_window.rs:79).
     let entries = vec![
         boundary(1),
@@ -445,7 +445,7 @@ fn json_line_count_counts_rendered_lines() {
 }
 
 #[test]
-fn json_row_options_are_the_egui_catalogue() {
+fn json_row_options_are_the_legacy_catalogue() {
     let rows: Vec<usize> = json_row_options(8)
         .iter()
         .map(|option| option.rows)
@@ -758,7 +758,7 @@ fn a_populated_snapshot_renders_collapsed_and_expanded_rows() {
 }
 
 #[test]
-fn from_app_reads_the_same_accessors_the_egui_window_used() {
+fn from_app_reads_the_same_accessors_the_legacy_window_used() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     app.orchestrator.agent_panel_state.show_debug_window = true;
     app.orchestrator.agent_panel_state.debug_search_text = "incoming".to_string();
@@ -851,7 +851,7 @@ fn follow_intent_is_the_logs_rule_itself() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn header_text_matches_the_egui_shape() {
+fn header_text_matches_the_legacy_shape() {
     let entry = entry(1, DebugEntryKind::ToolResults, "Turn 1 — Tool results (1)");
     assert_eq!(
         header_text(&entry),

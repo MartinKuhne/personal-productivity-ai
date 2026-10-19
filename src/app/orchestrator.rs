@@ -545,7 +545,7 @@ impl AppOrchestrator {
                         self.tabs.current_markdown = doc.body().to_string();
                         self.tabs.invalidate_heading_ids_cache();
                         self.tabs.loaded_path = Some(path.clone());
-                        self.tabs.toc = crate::ui::render::build_toc(&self.tabs.current_markdown);
+                        self.tabs.toc = crate::markdown::build_toc(&self.tabs.current_markdown);
                         self.tabs.scroll_to_header_id = None;
                     }
                     Err(err) => {

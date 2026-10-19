@@ -1,7 +1,7 @@
 //! File-watcher plumbing — its consumers (file processor and directory
 //! tracker) and the `notify`-based filesystem watcher.
 //!
-//! All items in this module are egui-free; they are unit-tested without
+//! All items in this module are framework-free; they are unit-tested without
 //! driving the UI. The UI layer treats them as pure state-holding types.
 //!
 //! The bus transport and event payload types live in [`crate::bus`].

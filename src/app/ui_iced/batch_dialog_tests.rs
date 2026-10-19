@@ -4,9 +4,9 @@
 //! ([RUST-003]). No renderer, no bus and no filesystem: every candidate
 //! list is a synthetic literal that is never opened, and the only rule the
 //! tests exercise from the batch subsystem is the pure
-//! `validate_batch_params` the egui dialog already called ([RUST-006]).
+//! `validate_batch_params` the legacy UI dialog already called ([RUST-006]).
 //!
-//! The seven `is_config_valid` cases mirror the egui originals in
+//! The seven `is_config_valid` cases mirror the legacy UI originals in
 //! `src/app/ui/batch_dialog_tests.rs:8-97` so the shared gate is pinned
 //! on both sides of the migration.
 
@@ -243,7 +243,7 @@ fn concurrency_options_are_the_one_to_eight_range() {
 // --- Config snapshot correctness --------------------------------------
 
 #[test]
-fn from_config_copies_every_egui_field() {
+fn from_config_copies_every_thelegacy_field() {
     let config = BatchDialogConfig {
         available_dirs: vec![PathBuf::from(r"C:\fixture\a")],
         available_prompts: vec![prompt("Alpha")],
@@ -269,7 +269,7 @@ fn from_config_copies_every_egui_field() {
 }
 
 #[test]
-fn default_snapshot_matches_the_egui_config_defaults() {
+fn default_snapshot_matches_the_legacy_config_defaults() {
     let model = BatchDialogViewModel::default();
     assert!(model.available_dirs.is_empty());
     assert!(model.available_prompts.is_empty());
@@ -309,7 +309,7 @@ fn build_batch_config_is_none_when_either_pick_is_missing() {
     }
 }
 
-// --- Selection-state rules the egui dialog ran ------------------------
+// --- Selection-state rules the legacy UI dialog ran ------------------------
 
 #[test]
 fn clamp_selection_drops_an_index_past_the_list_end() {
@@ -357,7 +357,7 @@ fn cancel_message_is_cancel_batch_on_the_command_channel() {
 #[test]
 fn every_batch_cancel_path_shares_one_transition() {
     // Cancel button, Close button, scrim and Escape all map to the same
-    // command, matching the egui dialog's single cancel publish.
+    // command, matching the legacy UI dialog's single cancel publish.
     let paths = [cancel_message(), cancel_message(), cancel_message()];
     for path in paths {
         assert_eq!(path, Message::Command(UserCommand::CancelBatch));

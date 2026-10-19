@@ -3,33 +3,33 @@
 //!
 //! Each helper is a one-line `opener` wrapper whose result is discarded, so
 //! there is exactly one code path per function and nothing to branch on.
-//! Following the precedent the egui `os_shell_tests.rs` set ("no `opener`
+//! Following the precedent the legacy UI `os_shell_tests.rs` set ("no `opener`
 //! invocations"), **no test here actually launches an OS process** — a real
 //! open/reveal is an un-cancellable external side effect and is not
 //! test-environment safe ([RUST-006]).
 //!
 //! What IS pinned is the property this task exists to guarantee: every
-//! signature is **egui-free**. The `fn`-pointer assignments below fail to
-//! compile the moment an `egui`/`eframe` type leaks into a parameter or
+//! signature is **framework-free**. The `fn`-pointer assignments below fail to
+//! compile the moment an framework type leaks into a parameter or
 //! return position, which is a stronger check than a runtime assertion.
 
 use super::*;
 
 /// [`open_in_system_editor`] takes exactly a `&Path` and returns `()`.
 #[test]
-fn open_in_system_editor_signature_is_egui_free() {
+fn open_in_system_editor_signature_is_framework_free() {
     let _f: fn(&Path) = open_in_system_editor;
 }
 
 /// [`show_in_file_explorer`] takes exactly a `&Path` and returns `()`.
 #[test]
-fn show_in_file_explorer_signature_is_egui_free() {
+fn show_in_file_explorer_signature_is_framework_free() {
     let _f: fn(&Path) = show_in_file_explorer;
 }
 
 /// [`open_url`] takes exactly a `&str` and returns `()`.
 #[test]
-fn open_url_signature_is_egui_free() {
+fn open_url_signature_is_framework_free() {
     let _f: fn(&str) = open_url;
 }
 

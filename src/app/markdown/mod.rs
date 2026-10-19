@@ -11,7 +11,7 @@
 //!   entry, ToC builder).
 //! - `document` — `Document` parsed-document newtype, front-matter read/write, task-toggle.
 //! - `parser` — `pulldown-cmark`-backed parsing and HTML rendering.
-//! - `table_width` — pure Fair Table Width Algorithm (no egui, no Markdown types).
+//! - `table_width` — pure Fair Table Width Algorithm (no UI framework, no Markdown types).
 //! - `validation` — pre-save Markdown validation for the inline editor
 //!   ([TASK-014], UI-043).
 

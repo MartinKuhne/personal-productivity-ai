@@ -3,7 +3,6 @@
 use super::*;
 use crate::markdown::{InlineElem, TextStyle};
 use crate::ui::theme::Palette;
-use crate::ui_iced::theme::to_iced_color;
 
 fn palette() -> Palette {
     Palette::fastmd_dark()
@@ -14,7 +13,7 @@ fn text(t: &str) -> InlineElem {
 }
 
 #[test]
-fn test_heading_size_ladder_matches_the_egui_renderer() {
+fn test_heading_size_ladder_matches_the_legacy_renderer() {
     assert_eq!(heading_size(1), H1_SIZE);
     assert_eq!(heading_size(2), H2_SIZE);
     assert_eq!(heading_size(3), H3_SIZE);
@@ -44,7 +43,7 @@ fn test_heading_size_numeric_order_is_monotonic_down() {
 
 #[test]
 fn test_out_of_range_levels_collapse_to_the_floor() {
-    // The egui ladder's `_ => 12.0` arm.
+    // The legacy UI ladder's `_ => 12.0` arm.
     assert_eq!(heading_size(0), H5_SIZE);
     assert_eq!(heading_size(7), H5_SIZE);
     assert_eq!(heading_size(u32::MAX), H5_SIZE);
@@ -96,8 +95,8 @@ fn test_heading_spans_keep_inline_styling() {
     ];
     let spans = heading_spans(&elems, 2, palette());
     assert_eq!(spans.len(), 3);
-    assert_eq!(spans[0].color, to_iced_color(palette().text_strong));
-    assert_eq!(spans[1].color, to_iced_color(palette().text));
+    assert_eq!(spans[0].color, palette().text_strong);
+    assert_eq!(spans[1].color, palette().text);
     assert_eq!(spans[2].link.as_deref(), Some("https://x.test"));
     assert!(
         spans.iter().all(|span| span.size == H2_SIZE),

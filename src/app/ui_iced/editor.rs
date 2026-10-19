@@ -1,7 +1,7 @@
 //! Iced port of the inline Markdown editor ([TASK-014]: UI-037..UI-045,
 //! DEC-007).
 //!
-//! Replaces `src/app/ui/editor_egui.rs` + the editing model of
+//! Replaces `src/app/ui/editor_the legacy UI.rs` + the editing model of
 //! `src/app/ui/text_buffer.rs`. Like the other iced views this is a **pure
 //! view over plain state**: [`editor_modal`] renders an [`EditorViewModel`]
 //! into an [`Element`] of [`Message`] and never touches the bus, the disk or
@@ -40,7 +40,7 @@
 //! times rather than 99. Overflow evicts the oldest snapshot
 //! ([`EditorHistory::push`]), and identical consecutive snapshots are
 //! coalesced so a stream of no-op edits cannot flood the stack (the same
-//! rule the egui `UndoStack` used).
+//! rule the legacy UI `UndoStack` used).
 //!
 //! # What iced `text_editor` gives us for free (verified)
 //!
@@ -60,7 +60,7 @@
 //! Reuses [`crate::markdown::validate_markdown`], which parses with
 //! [`crate::markdown::gfm_options`] — the *same* option set
 //! `parse_markdown_to_events` renders with, so the two cannot drift. That
-//! helper was written for this task (the egui build never validated before
+//! helper was written for this task (the legacy UI build never validated before
 //! saving — see the drift note in `doc/planning/iced-migration-map.md`).
 //!
 //! # Front matter (UI-037 / UI-044)
@@ -74,10 +74,10 @@
 //! # Known limitations (flagged for the orchestrator)
 //!
 //! * **Undo/redo resets the caret to the document start.** Per this task's
-//!   contract [`EditorHistory`] snapshots the *text* only; the egui
+//!   contract [`EditorHistory`] snapshots the *text* only; the legacy UI
 //!   `UndoStack` also stored `Cursor`/`Selection` per entry. Extending
 //!   snapshots to carry `iced::widget::text_editor::Cursor` would restore
-//!   the caret the way the egui build did.
+//!   the caret the way the legacy UI build did.
 //! * **The status-bar column is iced's glyph index, not a Unicode character
 //!   count.** `Content::cursor()` maps cosmic-text's `cursor.index`
 //!   (`iced_graphics-0.14.0/src/text/editor.rs:277-303`), which under
@@ -100,7 +100,6 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{EditorMessage, Message};
 use crate::ui_iced::overlay::{ConfirmCancel, confirm_cancel_buttons, modal};
-use crate::ui_iced::theme::to_iced_color;
 
 #[cfg(test)]
 #[path = "editor_tests.rs"]
@@ -116,8 +115,8 @@ pub const MIN_UNDO_STEPS: usize = 100;
 /// undo steps exist, so storing exactly 100 would ship 99 and miss UI-042.
 pub const UNDO_CAPACITY: usize = MIN_UNDO_STEPS + 1;
 
-/// Default editor dialog width in points (UI-038), matching the egui build's
-/// `.default_size(800.0, 600.0)` (`src/app/ui/editor_egui.rs:83`).
+/// Default editor dialog width in points (UI-038), matching the legacy UI build's
+/// `.default_size(800.0, 600.0)` (`src/app/ui/editor_the legacy UI.rs:83`).
 pub const EDITOR_DIALOG_WIDTH: f32 = 800.0;
 
 /// Default editor dialog height in points (UI-038).
@@ -590,7 +589,7 @@ pub fn apply_editor_message(vm: &mut EditorViewModel, message: &EditorMessage) -
 /// mount the card in its own overlay arrangement.
 #[must_use]
 pub fn editor_card(vm: &EditorViewModel) -> Element<'_, Message> {
-    let error_color = to_iced_color(Palette::fastmd_dark().error);
+    let error_color = Palette::fastmd_dark().error;
 
     let title = text(strings::INLINE_EDITOR_WINDOW_TITLE).size(EDITOR_TITLE_SIZE);
 
@@ -620,7 +619,7 @@ pub fn editor_card(vm: &EditorViewModel) -> Element<'_, Message> {
     });
 
     // Save/Cancel on the left, the line/column read-out pushed to the right —
-    // the egui footer's arrangement (`src/app/ui/editor_egui.rs:173-190`).
+    // the legacy UI footer's arrangement (`src/app/ui/editor_the legacy UI.rs:173-190`).
     // `Row` has no main-axis alignment knob, so a filling `Space` does it.
     let footer = Row::with_children(vec![
         buttons.into(),

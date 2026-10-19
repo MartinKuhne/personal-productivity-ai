@@ -512,7 +512,7 @@ async fn test_from_std_bridges_the_blocking_channel() {
 #[tokio::test]
 async fn test_lag_surfaces_as_events_dropped_then_resynchronises() {
     // Capacity 1: the second publish evicts the unread first one and the
-    // receiver reports the loss — the same `Lagged(n)` the egui drain loops
+    // receiver reports the loss — the same `Lagged(n)` the legacy UI drain loops
     // read off `BusReader::try_recv_exposing_lag`.
     let (sender, receiver) = broadcast::channel::<FileEvent>(1);
     let handle = SharedReceiver::new(receiver);

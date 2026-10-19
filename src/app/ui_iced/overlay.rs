@@ -2,10 +2,10 @@
 //! menu and a blocking modal dialog ([TASK-017a], DEC-005 — iced built-ins
 //! only, no `iced_aw`).
 //!
-//! The egui build gets both shapes for free from immediate mode:
+//! The legacy UI build gets both shapes for free from immediate mode:
 //! `response.context_menu(..)` on a hovered row
 //! (`src/app/ui/tree/render.rs:18-60`, `src/app/ui/panels/center.rs:208-315`)
-//! and floating `egui::Window`s (`src/app/ui/modals.rs:26-68`). iced has no
+//! and floating `Window`s (`src/app/ui/modals.rs:26-68`). iced has no
 //! single call that does either, so this module supplies them as **pure view
 //! functions over plain state structs** — no bus access, no side effects, no
 //! `FastMdApp` reads. The individual dialogs (about / batch / tools /
@@ -133,7 +133,7 @@ use iced::widget::{Column, MouseArea, Row, button, container, mouse_area, space,
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Size};
 
 use crate::ui::strings;
-use crate::ui_iced::theme::{scrim_color, to_iced_color};
+use crate::ui_iced::theme::scrim_color;
 
 /// Width of a rendered context-menu card ([TASK-017a]).
 pub const MENU_WIDTH: f32 = 200.0;
@@ -364,15 +364,15 @@ pub fn clamp_anchor(anchor: Point, size: Size, viewport: Size) -> Point {
 ///
 /// # Relocated ([TASK-029])
 ///
-/// Copied verbatim from `crate::ui::widgets::DialogAction`
+/// Copied verbatim from the retired `DialogAction`
 /// (`src/app/ui/widgets.rs:160-169`), which [`ConfirmCancel`] used to map
-/// onto across the boundary. That egui file is deleted by [TASK-029b], so the
-/// iced layer owns its own copy. The enum is **egui-free by construction** —
-/// three unit variants, no `egui`/`eframe` type anywhere.
+/// onto across the boundary. That file was deleted by [TASK-029b], so the
+/// iced layer owns its own copy. The enum is **framework-free by construction** —
+/// three unit variants, no framework type anywhere.
 ///
 /// It is kept as a distinct type rather than folded into [`ConfirmCancel`]
-/// because it is the *egui-parity* vocabulary: `to_dialog_action` exists so
-/// a caller comparing against the egui outcome still compiles, and
+/// because it is the *legacy-parity* vocabulary: `to_dialog_action` exists so
+/// a caller comparing against the retired outcome still compiles, and
 /// `ConfirmCancel` has no `None` member (an iced button either emits a
 /// message or does not exist).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -387,7 +387,7 @@ pub enum DialogAction {
 
 /// The outcome of the shared confirm/cancel button pair ([TASK-017a]).
 ///
-/// The iced re-typing of [`DialogAction`]: the egui helper *returns* the
+/// The iced re-typing of [`DialogAction`]: the legacy UI helper *returns* the
 /// clicked button, whereas iced buttons *emit* messages, so the outcome is
 /// handed to a mapping closure instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -399,7 +399,7 @@ pub enum ConfirmCancel {
 }
 
 impl ConfirmCancel {
-    /// The egui-parity [`DialogAction`] for this outcome.
+    /// The legacy-parity [`DialogAction`] for this outcome.
     #[must_use]
     pub fn to_dialog_action(self) -> DialogAction {
         match self {
@@ -423,7 +423,7 @@ pub fn confirm_cancel_pair<Message>(on: impl Fn(ConfirmCancel) -> Message) -> (M
 ///
 /// `Some` when the dialog is valid and confirming is allowed, `None` when it
 /// is not — `Button::on_press_maybe` renders a `None` handler as an inert
-/// button (`button.rs:170-173`), which is how the egui helper's
+/// button (`button.rs:170-173`), which is how the legacy UI helper's
 /// `add_enabled(confirm_enabled, ..)` behaves
 /// (`src/app/ui/widgets.rs:184-189`).
 #[must_use]
@@ -433,7 +433,7 @@ pub fn confirm_press<Message>(confirm_enabled: bool, message: Message) -> Option
 
 /// Renders the shared confirm + cancel button pair ([TASK-017a]).
 ///
-/// Mirrors `crate::ui::widgets::confirm_cancel_buttons`
+/// Mirrors the retired `confirm_cancel_buttons` helper
 /// (`src/app/ui/widgets.rs:178-194`): the confirm label varies per dialog,
 /// the cancel label is always [`strings::CANCEL_BUTTON`], and
 /// `confirm_enabled == false` leaves the confirm button inert (no message)
@@ -510,9 +510,9 @@ fn card_style(_theme: &iced::Theme) -> container::Style {
     let palette = crate::ui::theme::Palette::fastmd_dark();
 
     container::Style {
-        background: Some(Background::Color(to_iced_color(palette.surface_variant))),
+        background: Some(Background::Color(palette.surface_variant)),
         border: Border {
-            color: to_iced_color(palette.border_strong),
+            color: palette.border_strong,
             width: CARD_BORDER_WIDTH,
             radius: CARD_RADIUS.into(),
         },
@@ -640,7 +640,7 @@ where
 /// Same scrim + card chrome as [`modal`]; only the placement differs. The
 /// card's top-left corner sits at `position`, which the caller resolves
 /// with [`clamp_anchor`] (or a centre fallback) before mounting — the
-/// shape the cursor-anchored small dialogs need, mirroring the egui
+/// shape the cursor-anchored small dialogs need, mirroring the legacy UI
 /// name-entry window's `fixed_pos` behaviour
 /// (`src/app/ui/modals.rs:40-45`). Like [`modal`], any click outside the
 /// card lands on the scrim and emits `on_dismiss`.

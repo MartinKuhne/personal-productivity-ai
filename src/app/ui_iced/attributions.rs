@@ -4,7 +4,7 @@
 //! A **pure view over a plain snapshot**: [`attributions_view`] renders an
 //! [`AttributionsViewModel`] into an [`iced::Element`] of [`Message`] and
 //! performs no I/O. The catalog itself is **reused unchanged** from the
-//! egui build — `crate::ui::attributions::DIRECT_DEPENDENCIES`, the
+//! the legacy UI build — `crate::ui::attributions::DIRECT_DEPENDENCIES`, the
 //! curated `&'static [Attribution]` constant in
 //! `src/app/ui/attributions.rs` (57 direct third-party crates across all
 //! four workspace members, alphabetically sorted, no duplicates). There
@@ -15,7 +15,7 @@
 //!
 //! `Attribution { name, authors, github_url }` — that is the whole row.
 //! The catalog has **no per-crate license or version field**, so this
-//! window shows Crate / Authors / Repository exactly as the egui dialog
+//! window shows Crate / Authors / Repository exactly as the legacy UI dialog
 //! did (`src/app/ui/about_dialog.rs:200-220`), not a license column.
 //! The only license text in the app is FastMD's own MIT license, shown in
 //! the About card ([`crate::ui_iced::about`]). Adding real per-crate
@@ -24,18 +24,18 @@
 //! something this port invents.
 //!
 //! Note also that the catalog is *curated*, not derived from the resolved
-//! dependency graph: `egui_extras` is listed at
+//! dependency graph: `the legacy_extras` is listed at
 //! `src/app/ui/attributions.rs:76` purely to credit its authors even
 //! though the crate is not a real consumer. That curation is preserved
 //! verbatim.
 //!
 //! # Layout
 //!
-//! egui laid the rows out as plain `ui.horizontal` triples inside a
+//! the legacy UI laid the rows out as plain `ui.horizontal` triples inside a
 //! `ScrollArea` — no table widget. This port uses
 //! `iced::widget::table` (`iced_widget-0.14.2/src/table.rs:18-49`) so the
-//! three columns the egui header already names actually line up, per the
-//! migration map's `egui::Table` → `iced::widget::table` mapping
+//! three columns the legacy UI header already names actually line up, per the
+//! migration map's `Table` → `iced::widget::table` mapping
 //! (`doc/planning/iced-migration-map.md` A5).
 //!
 //! ```text
@@ -49,8 +49,8 @@
 //!
 //! The repository cell is clickable: iced has no `hyperlink_to`, so the
 //! row emits the deferred intent [`AboutMessage::RepositoryOpened`] and
-//! the [TASK-022]/[TASK-023] reducer opens the URL (the egui build
-//! pushed `egui::OutputCommand::OpenUrl` from inside the click).
+//! the [TASK-022]/[TASK-023] reducer opens the URL (the legacy UI build
+//! pushed `OutputCommand::OpenUrl` from inside the click).
 //!
 //! The empty catalog renders the same widget tree with an empty table and
 //! an empty-state summary line, so the shape never changes (AGENTS §6).
@@ -67,7 +67,6 @@ use crate::ui_iced::about::{
     ABOUT_BODY_SIZE, ABOUT_SECTION_SPACING, SEPARATOR_WIDTH, close_button,
 };
 use crate::ui_iced::message::{AboutMessage, Message};
-use crate::ui_iced::theme::to_iced_color;
 
 #[cfg(test)]
 #[path = "attributions_tests.rs"]
@@ -86,7 +85,7 @@ pub const ATTRIBUTIONS_HEADER_SIZE: f32 = 14.0;
 /// Logical point size of a table body cell.
 pub const ATTRIBUTIONS_ROW_SIZE: f32 = 14.0;
 
-/// Maximum height of the credits scroll area — egui parity
+/// Maximum height of the credits scroll area — legacy parity
 /// (`ScrollArea::max_height(340.0)`, `src/app/ui/about_dialog.rs:209`).
 pub const ATTRIBUTIONS_LIST_MAX_HEIGHT: f32 = 340.0;
 
@@ -173,7 +172,7 @@ impl AttributionsViewModel {
 ///
 /// Title, count line, the scrollable three-column catalog and the shared
 /// Close footer. The list is capped at
-/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`] (egui's 340px) and scrolls; the
+/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`] (the legacy UI's 340px) and scrolls; the
 /// table is always allocated, empty or not.
 ///
 /// Emitted messages:
@@ -192,11 +191,11 @@ pub fn attributions_view(view_model: &AttributionsViewModel) -> Element<'_, Mess
 
     let title = text(strings::ABOUT_ATTRIBUTIONS_HEADER)
         .size(ATTRIBUTIONS_TITLE_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let summary = text(view_model.summary())
         .size(ABOUT_BODY_SIZE)
-        .color(to_iced_color(palette.text_muted));
+        .color(palette.text_muted);
 
     let list = scrollable(attribution_table(view_model.entries()))
         .height(Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT));
@@ -230,7 +229,7 @@ pub fn attributions_view(view_model: &AttributionsViewModel) -> Element<'_, Mess
 /// the long repository URL — carries `Length::Fill` explicitly and the
 /// short name/author columns stay `Shrink`.
 ///
-/// The header row carries the egui column captions
+/// The header row carries the legacy UI column captions
 /// ([`strings::ABOUT_COL_CRATE`] / [`strings::ABOUT_COL_AUTHORS`] /
 /// [`strings::ABOUT_COL_REPO`]); with zero rows the header still renders,
 /// so the empty state needs no separate widget.
@@ -279,11 +278,11 @@ pub fn attribution_table(entries: &[Attribution]) -> Element<'static, Message> {
 fn header_cell(label: &'static str) -> Element<'static, Message> {
     text(label)
         .size(ATTRIBUTIONS_HEADER_SIZE)
-        .color(to_iced_color(Palette::fastmd_dark().text_strong))
+        .color(Palette::fastmd_dark().text_strong)
         .into()
 }
 
-/// A clickable repository cell — the iced re-typing of egui's
+/// A clickable repository cell — the iced re-typing of the legacy UI's
 /// `ui.hyperlink_to` (`src/app/ui/about_dialog.rs:216`).
 fn repository_cell(url: &'static str) -> Element<'static, Message> {
     mouse_area(
@@ -315,20 +314,20 @@ pub fn repository_press(url: &str) -> Message {
 }
 
 /// Palette colour for the crate-name column (`text_strong` — the row's
-/// primary label, egui's `ui.strong(attr.name)`).
+/// primary label, the legacy UI's `ui.strong(attr.name)`).
 #[must_use]
 pub fn crate_name_color() -> iced::Color {
-    to_iced_color(Palette::fastmd_dark().text_strong)
+    Palette::fastmd_dark().text_strong
 }
 
 /// Palette colour for the authors column (default body `text`).
 #[must_use]
 pub fn authors_color() -> iced::Color {
-    to_iced_color(Palette::fastmd_dark().text)
+    Palette::fastmd_dark().text
 }
 
 /// Palette colour for the repository column (`accent` — it is a link).
 #[must_use]
 pub fn repository_color() -> iced::Color {
-    to_iced_color(Palette::fastmd_dark().accent)
+    Palette::fastmd_dark().accent
 }

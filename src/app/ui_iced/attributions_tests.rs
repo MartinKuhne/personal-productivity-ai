@@ -25,15 +25,15 @@ fn fixture_entries() -> Vec<Attribution> {
     ]
 }
 
-// --- Data source: the reused egui catalog --------------------------------
+// --- Data source: the reused the legacy UI catalog --------------------------------
 
 #[test]
-fn from_catalog_is_the_reused_egui_catalog_verbatim() {
+fn from_catalog_is_the_reused_thelegacy_catalog_verbatim() {
     let vm = AttributionsViewModel::from_catalog();
     assert_eq!(
         vm.entries(),
         DIRECT_DEPENDENCIES,
-        "the iced view must show the same catalog the egui dialog shows, unchanged"
+        "the iced view must show the same catalog the legacy UI dialog shows, unchanged"
     );
 }
 
@@ -196,9 +196,9 @@ fn repository_press_copies_the_url_into_the_message() {
 #[test]
 fn column_colours_resolve_to_palette_tokens() {
     let palette = Palette::fastmd_dark();
-    assert_eq!(crate_name_color(), to_iced_color(palette.text_strong));
-    assert_eq!(authors_color(), to_iced_color(palette.text));
-    assert_eq!(repository_color(), to_iced_color(palette.accent));
+    assert_eq!(crate_name_color(), palette.text_strong);
+    assert_eq!(authors_color(), palette.text);
+    assert_eq!(repository_color(), palette.accent);
 }
 
 #[test]

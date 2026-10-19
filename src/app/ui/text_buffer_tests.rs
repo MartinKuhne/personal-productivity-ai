@@ -4,7 +4,7 @@ use super::*;
 use std::fs;
 use tempfile::tempdir;
 
-use crate::ui::test_helpers::app::noop_producer;
+use crate::ui_iced::test_helpers::noop_producer;
 
 // ---- Cursor ----
 
@@ -98,7 +98,7 @@ fn test_undo_stack_push_clears_redo_branch() {
 
 #[test]
 fn test_undo_stack_coalesces_identical_content() {
-    // egui emits a TextChanged per keystroke; many of those keep the
+    // the legacy UI emits a TextChanged per keystroke; many of those keep the
     // content unchanged. UndoStack should coalesce them so the
     // history doesn't fill up with no-op entries.
     let mut stack = UndoStack::new();

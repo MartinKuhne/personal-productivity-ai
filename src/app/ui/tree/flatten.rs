@@ -28,8 +28,8 @@ pub const MAX_TREE_DEPTH: usize = 1000;
 ///
 /// `Debug` and `PartialEq` are additive derives added for the [TASK-012]
 /// iced port: the iced view model holds `FlatRow`s and its tests compare
-/// flattened row lists against expected ones, which the egui build never
-/// needed because it rendered rows straight into `egui` widgets.
+/// flattened row lists against expected ones, which the legacy UI build never
+/// needed because it rendered rows straight into framework widgets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlatRow {
     /// Indentation depth (0 = top-level child of root).
@@ -44,12 +44,12 @@ pub struct FlatRow {
     pub is_expanded: bool,
 }
 
-/// Sans-spacing slot height passed to `ScrollArea::show_rows`. egui
-/// adds `ui.spacing().item_spacing.y` (default 3.0) on top of this
+/// Sans-spacing slot height passed to a virtualised tree list. The legacy UI
+/// added `item_spacing.y` (default 3.0) on top of this
 /// to compute the actual per-row slot height. The row content
-/// rendered by [`crate::ui::tree::render_flat_row`] is a `ui.horizontal` block whose
-/// height is the max of its children: a `selectable_label`, which
-/// in egui 0.35 is `interact_size.y` (18) — `button_padding.y`
+/// rendered for each flattened entry was a horizontal block whose
+/// height is the max of its children: a selectable label, which
+/// in the legacy renderer is `interact_size.y` (18) — `button_padding.y`
 /// (1 top + 1 bottom) is added inside the frame, but the text is
 /// short enough that the interact_size dominates and the rendered
 /// height reconciles to 18px. To keep the slot exactly matched to

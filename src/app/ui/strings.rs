@@ -2,7 +2,7 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-/// The Document + Bolt logo is painted separately via [`crate::ui::logo::paint_logo`] —
+/// The Document + Bolt logo is rendered separately via [`crate::ui_iced::logo::logo_mark`] —
 ///
 /// the title itself is plain text so it remains searchable and accessible.
 pub const APP_TITLE: &str = "FastMD Viewer";
@@ -150,7 +150,7 @@ pub const TOOLS_ERROR_ICON: &str = "⚠";
 pub const TOOLS_EMPTY_STATE: &str = "No tool groups registered.";
 
 /// Formats one recorded tool-group error for display as `Kind: message`,
-/// the shape both the egui hover tooltip and the iced inline line use.
+/// the shape both the legacy UI hover tooltip and the iced inline line use.
 #[must_use]
 pub fn format_tool_group_error(kind: &str, message: &str) -> String {
     format!("{kind}: {message}")
@@ -159,7 +159,7 @@ pub fn format_tool_group_error(kind: &str, message: &str) -> String {
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 
-/// ID salt for the tag filter combobox in egui.
+/// ID salt for the tag filter combobox in the legacy UI.
 pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 
 /// Default label shown when no tag is selected in the tag filter.
@@ -183,7 +183,7 @@ pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
 /// Formats the per-file match counter shown next to a content-search
 /// result's file name ([TASK-012], UI-050).
 ///
-/// The egui left panel inlined `format!("({})", match_count)`
+/// The legacy UI left panel inlined `format!("({})", match_count)`
 /// (`src/app/ui/panels/left.rs:303`); the iced port hoists it here so no
 /// user-facing formatting lives in a panel ([GUD-002]).
 pub fn format_match_count(match_count: usize) -> String {
@@ -228,7 +228,7 @@ pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
 
-/// ID salt for the hamburger menu in egui.
+/// ID salt for the hamburger menu in the legacy UI.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
 
 /// Glyph drawn in the check slot of an active top-bar hamburger menu row
@@ -297,34 +297,34 @@ pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
 pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
 
-/// ID salt for the table-width-strategy combobox in egui. Kept stable
+/// ID salt for the table-width-strategy combobox in the legacy UI. Kept stable
 /// across releases so the widget's persistent id and any open/closed
 /// state survive a config save round-trip.
 pub const TABLE_WIDTH_STRATEGY_ID_SALT: &str = "table_width_strategy_combobox";
 
-/// Display label for the [`ProportionalToSlack`](crate::ui::table_width::DeficitStrategy::ProportionalToSlack)
+/// Display label for the [`ProportionalToSlack`](crate::markdown::table_width::DeficitStrategy::ProportionalToSlack)
 /// deficit strategy in the top-bar dropdown. Fast (O(|S|)) but may
 /// produce suboptimal G1 (total wrapped lines) on very wide tables.
 pub const TABLE_WIDTH_STRATEGY_PROPORTIONAL: &str = "Proportional";
 
-/// Display label for the [`BreakpointWaterFill`](crate::ui::table_width::DeficitStrategy::BreakpointWaterFill)
+/// Display label for the [`BreakpointWaterFill`](crate::markdown::table_width::DeficitStrategy::BreakpointWaterFill)
 /// deficit strategy in the top-bar dropdown. Greedy marginal-cost
 /// water-fill (O(K log |S|)) — minimizes G1 more aggressively.
 pub const TABLE_WIDTH_STRATEGY_WATERFILL: &str = "Water-fill";
 
-/// Display label for the [`WaterFillRatio`](crate::ui::table_width::DeficitStrategy::WaterFillRatio)
+/// Display label for the [`WaterFillRatio`](crate::markdown::table_width::DeficitStrategy::WaterFillRatio)
 /// survey algorithm (doc §2.10) in the top-bar dropdown. Equalizes the
 /// `max_j / w_j` ratio across columns — the "fair" baseline that
 /// equalizes wrap pressure.
 pub const TABLE_WIDTH_STRATEGY_RATIO: &str = "Ratio-equalize";
 
-/// Display label for the [`LagrangePenalty`](crate::ui::table_width::DeficitStrategy::LagrangePenalty)
+/// Display label for the [`LagrangePenalty`](crate::markdown::table_width::DeficitStrategy::LagrangePenalty)
 /// survey algorithm (doc §2.13) in the top-bar dropdown. Minimizes
 /// total wrap via a global Lagrange-multiplier bisection on per-column
 /// wrap cost.
 pub const TABLE_WIDTH_STRATEGY_LAGRANGE: &str = "Lagrange-penalty";
 
-/// Display label for the [`HybridMinPenaltyWaterFill`](crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
+/// Display label for the [`HybridMinPenaltyWaterFill`](crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
 /// survey algorithm (doc §2.14) in the top-bar dropdown. Per-column
 /// "first-wrap boundary" target plus residual water-fill — the
 /// production pattern.
@@ -531,7 +531,7 @@ pub const ENTER_NEW_NAME: &str = "Enter new name:";
 
 /// Window title for the delete-confirmation dialog ([TASK-017b1]).
 ///
-/// The egui build has no delete confirmation — the tree's Delete row
+/// The legacy UI build has no delete confirmation — the tree's Delete row
 /// publishes `UserCommand::Delete` directly — so this title is new for the
 /// iced port (drift note in `doc/planning/iced-migration-map.md`).
 pub const DELETE_CONFIRM_WINDOW: &str = "Delete";
@@ -762,7 +762,7 @@ pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
 pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
 
 /// Marker glyph rendered in front of an unordered markdown list item
-/// ([TASK-015]; U+2022 BULLET, the same glyph the egui renderer painted).
+/// ([TASK-015]; U+2022 BULLET, the same glyph the legacy UI renderer painted).
 pub const LIST_BULLET: &str = "\u{2022}";
 
 /// Separator rendered between an ordered list item's ordinal and its text
@@ -956,7 +956,7 @@ mod tests {
     fn test_ui_strings_use_phosphor_icons() {
         assert_eq!(
             APP_TITLE, "FastMD Viewer",
-            "APP_TITLE is plain text; logo is painted via ui::logo::paint_logo"
+            "APP_TITLE is plain text; logo is rendered by the logo module"
         );
         assert!(
             !APP_TITLE.contains(ICON_LIGHTNING),

@@ -2,16 +2,16 @@
 //!
 //! The three OS-facing wrappers the iced reducer needs — open a file in the
 //! system default editor, reveal a file in the OS file explorer, and open a
-//! URL in the default browser. They are copied out of the egui
+//! URL in the default browser. They are copied out of the legacy UI
 //! `src/app/ui/os_shell.rs` so `ui_iced` no longer depends on a file
 //! [TASK-029b] deletes.
 //!
-//! # egui-free by construction ([TASK-029] verification)
+//! # framework-free by construction ([TASK-029] verification)
 //!
 //! Every item here routes through the `opener` crate (`Cargo.toml`) and takes
-//! only `&Path` / `&str`. **No `eframe`/`egui` type appears in any
-//! signature or body**, unlike the egui original, whose fourth function
-//! (`dispatch_platform_commands`) drains an `&[egui::OutputCommand]`.
+//! only `&Path` / `&str`. **No framework type appears in any
+//! signature or body**, unlike the legacy UI original, whose fourth function
+//! (`dispatch_platform_commands`) drains an `&[OutputCommand]`.
 //! That drainer is deliberately **not** copied: iced has no platform-output
 //! command list, and the iced link path calls [`open_url`] from the reducer
 //! instead (see the TASK-020 audit note in
@@ -29,7 +29,7 @@ use std::path::Path;
 ///
 /// The result is discarded — a failed open is surfaced by the caller's own
 /// logging and the user can retry ([NFR-001] is the caller's contract here,
-/// same as the egui helper's).
+/// same as the legacy UI helper's).
 pub fn open_in_system_editor(path: &Path) {
     let _ = opener::open(path);
 }

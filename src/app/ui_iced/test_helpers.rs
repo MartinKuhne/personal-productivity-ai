@@ -1,19 +1,19 @@
-//! Egui-free test fixtures for the iced layer ([TASK-029]).
+//! Framework-free test fixtures for the iced layer ([TASK-029]).
 //!
 //! The iced sidecar tests previously borrowed `test_app` /
-//! `test_app_with_config` from the egui
-//! [`crate::ui::test_helpers::app`] module, which [TASK-029b] deletes along
-//! with the rest of `src/app/ui/`. These are the iced-owned replacements.
+//! `test_app_with_config` from the retired `ui/test_helpers/app` module, which
+//! [TASK-029b] deleted along with the rest of the legacy UI layer. These are
+//! the iced-owned replacements.
 //!
-//! # egui-free by construction ([TASK-029] verification)
+//! # Framework-free by construction ([TASK-029] verification)
 //!
 //! Both fixtures build a [`FastMdApp`] through
 //! [`FastMdApp::empty_state`], the bus-driven constructor that needs **no**
-//! `eframe::CreationContext` and applies **no** egui visuals — the same path
-//! the egui fixtures already used. This module imports neither `eframe` nor
-//! `egui`, and [`test_app_state`] builds a full iced
+//! legacy creation context and applies **no** legacy visuals — the same path
+//! the retired fixtures already used. This module imports no UI-framework type,
+//! and [`test_app_state`] builds a full iced
 //! [`AppState`] through [`build_state`], which [TASK-022] verified as the
-//! egui-free state constructor.
+//! framework-free state constructor.
 //!
 //! # Test-environment safety ([RUST-006])
 //!
@@ -59,7 +59,7 @@ pub fn test_app_with_config(config: AppConfig) -> FastMdApp {
 
 /// Create a test [`FastMdApp`] whose chat model posts to `api_url`.
 ///
-/// Mirrors the egui fixture of the same name: tests that drive a `RunAgent`
+/// Mirrors the legacy UI fixture of the same name: tests that drive a `RunAgent`
 /// dispatch must route the LLM call to an in-process wiremock endpoint
 /// instead of the dead `localhost:0` default.
 #[must_use]
@@ -84,7 +84,7 @@ pub fn test_app_with_api_url(api_url: &str) -> FastMdApp {
 
 /// Build a fresh iced [`AppState`] over in-memory storage ([TASK-029]).
 ///
-/// The egui-free counterpart of the panel fixtures above for tests that need
+/// The framework-free counterpart of the panel fixtures above for tests that need
 /// the whole iced application root — view-model rebuilds, overlay state, the
 /// pane grid — not just the domain `FastMdApp`. Both storage handlers are
 /// in-memory, so no user path is touched ([RUST-006]).
@@ -107,4 +107,14 @@ pub fn test_app_state_with(config: AppConfig, persisted: PersistedUiState) -> Ap
         Arc::new(InMemoryUiStateStorage::new()),
         persisted,
     )
+}
+
+/// Create a no-op [`FileEventProducer`] backed by a fresh [`Bus`].
+///
+/// The producer is not connected to the app's event bus, so `save` calls
+/// in tests do not publish file events. Pure helper with no global state;
+/// relocated here from the deleted `ui/test_helpers/app.rs` ([TASK-029b]).
+#[must_use]
+pub fn noop_producer() -> crate::bus::events::file::FileEventProducer {
+    crate::bus::events::file::FileEventProducer::new(Bus::new())
 }

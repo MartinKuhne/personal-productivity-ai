@@ -15,17 +15,17 @@
 //!    *application* to do — open a file, close a tab, run the agent, rename
 //!    a path — is already a self-contained [`UserCommand`] carried by the
 //!    existing command bus (`src/app/bus/events/user_command.rs`), and the
-//!    egui panels publish exactly those. The iced panels keep doing that;
+//!    legacy panels publish exactly those. The iced panels keep doing that;
 //!    they do NOT re-invent a parallel intent vocabulary per panel.
 //! 2. **Panel channels carry view-local state transitions only** — the state
-//!    egui kept implicitly in immediate-mode memory (which row's context
+//!    the legacy UI kept implicitly in immediate-mode memory (which row's context
 //!    menu is open, what the search box currently holds, the editor's
 //!    undo request) and the runtime reports the window layer hands us.
 //!
 //! One deliberate exception to rule 2 lives in [`TreeMessage`]
 //! ([TASK-012]): three file-tree context-menu rows — "Run as prompt…",
 //! "Print…" and the multi-select "Delete" — have **no single
-//! [`UserCommand`] equivalent**, and the egui originals read files from
+//! [`UserCommand`] equivalent**, and the legacy UI originals read files from
 //! inside the click handler (`src/app/ui/tree/render.rs:143-173`,
 //! `:108-115`). A pure view must not do I/O, so those rows emit a
 //! *deferred-intent* variant that names the target and leaves the read and
@@ -34,8 +34,8 @@
 //! them atomically.
 //!
 //! Consequently some channels are deliberately thin: they exist because a
-//! panel needs explicit state that egui used to hide in widget memory, and
-//! they carry nothing more. Each variant below names the egui behaviour it
+//! panel needs explicit state that the legacy UI used to hide in widget memory, and
+//! they carry nothing more. Each variant below names the legacy UI behaviour it
 //! replaces, so a reviewer can check the grounding against
 //! `src/app/ui/`.
 //!
@@ -56,7 +56,7 @@
 //!   state plus its two deferred intents; search, auto-scroll, the JSON
 //!   row count, Clear and close all stay on the command channel).
 //! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
-//!   and no light/dark toggle exists in the egui build, so the only
+//!   and no light/dark toggle exists in the legacy UI build, so the only
 //!   runtime-mutable theme state is the DEC-008 user scale multiplier.
 //! - **Added by [TASK-019]:** `Inbound` — the *background → UI*
 //!   notification channel (`ConfigArrived`, `FileEvent`, `AgentEvent`,
@@ -265,7 +265,7 @@ pub enum LayoutMessage {
     PaneResized(pane_grid::ResizeEvent),
     /// The tree panel should re-fit its width to the longest visible row
     /// (UI-016; the `Message::AutoFitTree` reducer named in [TASK-012]).
-    /// In the egui build this ran inline in `show_left_panel` on the
+    /// In the legacy UI build this ran inline in `show_left_panel` on the
     /// indexing-finished / `left_panel_dirty` transition
     /// (`src/app/ui/panels/left.rs:139-186`); in the Elm loop it is an
     /// explicit message so the width change is replayable.
@@ -313,13 +313,13 @@ impl PartialEq for LayoutMessage {
 ///
 /// Deliberately thin: row selection and directory expansion are *user
 /// intent* and ride [`Message::Command`] as `UserCommand::SelectFile` /
-/// `UserCommand::SelectDirectory` — exactly what the egui tree publishes
-/// (`src/app/ui/tree/handlers.rs:51-69`). What egui kept implicitly in the
+/// `UserCommand::SelectDirectory` — exactly what the legacy UI tree publishes
+/// (`src/app/ui/tree/handlers.rs:51-69`). What the legacy UI kept implicitly in the
 /// `context_menu` widget is explicit state under iced's DEC-005
 /// `overlay::menu` construction, so that is what this channel carries.
 ///
 /// The last four variants are **deferred intent** (see the module header):
-/// the egui menu performs file I/O inside the click, which a pure view may
+/// the legacy UI menu performs file I/O inside the click, which a pure view may
 /// not do, and no single [`UserCommand`] covers them. Each names its target
 /// so the [TASK-022] reducer can perform the read and publish the real
 /// command(s) — the intent stays self-contained and replayable
@@ -334,7 +334,7 @@ pub enum TreeMessage {
     },
     /// The row context menu was dismissed (click-away or menu selection).
     ContextMenuClosed,
-    /// "Run as prompt…" on a single file row (UI-020). The egui handler
+    /// "Run as prompt…" on a single file row (UI-020). The legacy UI handler
     /// reads the file and publishes `RunSkillPrompt` inline
     /// (`src/app/ui/tree/render.rs:143-160`); here the reducer does it.
     RunAsPromptRequested {
@@ -354,13 +354,13 @@ pub enum TreeMessage {
         target_file: Option<PathBuf>,
     },
     /// "Print…" on a file row (UI-014). There is **no** `UserCommand::Print`;
-    /// the egui handler hands the job to the background channel directly
+    /// the legacy UI handler hands the job to the background channel directly
     /// (`src/app/ui/tree/render.rs:161-173`), so the reducer owns it.
     PrintRequested {
         /// The file to print.
         path: PathBuf,
     },
-    /// "Delete" on a multi-selected file row (UI-025). egui fans this out
+    /// "Delete" on a multi-selected file row (UI-025). the legacy UI fans this out
     /// into one `UserCommand::Delete` per path and then clears the
     /// selection (`src/app/ui/tree/render.rs:108-115`); one menu row can
     /// only emit one message, so the whole set travels with it.
@@ -392,7 +392,7 @@ pub enum TabMessage {
 
 /// Inline editor channel ([TASK-021], [TASK-014], DEC-007).
 ///
-/// Grounded in the egui editor (`src/app/ui/editor_egui.rs:173-190`):
+/// Grounded in the legacy UI editor (`src/app/ui/editor_the legacy UI.rs:173-190`):
 /// Save / Cancel buttons plus the live buffer, and in DEC-007's rule that
 /// every `Action::Edit` is intercepted so the undo history lives at OUR
 /// layer (`iced::widget::text_editor` has no native undo/redo).
@@ -439,16 +439,16 @@ pub enum EditorMessage {
 /// `SetDebugSearchText`/`SetDebugAutoScroll`), so nothing is duplicated
 /// here.
 ///
-/// [TASK-018] adds the two pieces of view-local state egui kept in widget
+/// [TASK-018] adds the two pieces of view-local state the legacy UI kept in widget
 /// memory for the agent session view, plus the transcript's viewport report:
 ///
-/// * [`Self::ThinkingToggled`] replaces the `egui::collapsing` disclosure
+/// * [`Self::ThinkingToggled`] replaces the `collapsing` disclosure
 ///   of the "Thinking Process" block (`src/app/ui/panels/center.rs:143`),
 ///   which iced has no built-in equivalent for — the disclosure is
 ///   view-local, not application state, so it is deliberately **not** a
 ///   [`UserCommand`].
 /// * [`Self::ScrollReported`] is the transcript-list counterpart of
-///   [`LogsMessage::ScrollReported`]: egui applied `stick_to_bottom(true)`
+///   [`LogsMessage::ScrollReported`]: the legacy UI applied `stick_to_bottom(true)`
 ///   inside its own `ScrollArea`
 ///   (`src/app/ui/panels/center.rs:140`), whereas iced exposes the geometry
 ///   only through `Scrollable::on_scroll`
@@ -472,7 +472,7 @@ pub enum AgentMessage {
         text: String,
     },
     /// The "Thinking Process" disclosure was expanded or collapsed
-    /// ([TASK-018], UI-048). View-local disclosure state, replacing egui's
+    /// ([TASK-018], UI-048). View-local disclosure state, replacing the legacy UI's
     /// `collapsing` widget memory.
     ThinkingToggled {
         /// The new expanded state of the thinking block.
@@ -520,7 +520,7 @@ pub enum SearchMessage {
     Cleared,
     /// The content scan the reducer dispatched has finished ([TASK-019]).
     ///
-    /// **New for the iced port.** egui ran the scan synchronously inside
+    /// **New for the iced port.** the legacy UI ran the scan synchronously inside
     /// the left panel's paint pass (`src/app/ui/panels/left.rs:246-252`),
     /// so no completion message existed — and a large workspace froze the UI
     /// while it ran, against [FMD-060]/[FMD-061]. Here the reducer runs the
@@ -547,9 +547,9 @@ pub enum SearchMessage {
 /// `UserCommand::ToggleBackgroundLogs`.
 ///
 /// `ScrollReported` was added by [TASK-016] (the channel brief allowed
-/// extending it honestly). egui kept the scroll position inside
+/// extending it honestly). the legacy UI kept the scroll position inside
 /// `ScrollArea`'s own state and applied `stick_to_bottom` there
-/// (`egui-0.36.1/src/containers/scroll_area.rs:1282-1284`); iced exposes
+/// (`legacy-0.36.1/src/containers/scroll_area.rs:1282-1284`); iced exposes
 /// the geometry only through `Scrollable::on_scroll`
 /// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the viewport has
 /// to reach `update` as a message before the pure
@@ -591,7 +591,7 @@ pub enum LogsMessage {
 ///
 /// Minimal by design: UI-002 pins the FastMD dark scheme
 /// (`crate::ui::theme::install_dark`, mirrored by
-/// [`crate::ui_iced::theme::fastmd_dark_theme`]) and the egui build has no
+/// [`crate::ui_iced::theme::fastmd_dark_theme`]) and the legacy UI build has no
 /// light/dark toggle, so no toggle variant is invented. The only
 /// runtime-mutable theme state is the user scale multiplier that DEC-008
 /// composes with the OS baseline.
@@ -613,8 +613,8 @@ pub enum ThemeMessage {
 /// and copy-code buttons are user intent, but no [`UserCommand`] expresses
 /// them atomically and the view may not perform the work itself.
 ///
-/// * **Links** — the egui renderer called `ui.hyperlink_to`, which pushed
-///   `egui::OutputCommand::OpenUrl` onto the platform output
+/// * **Links** — the legacy UI renderer called `ui.hyperlink_to`, which pushed
+///   `OutputCommand::OpenUrl` onto the platform output
 ///   (`src/app/ui/render/inline.rs:160-163`, dispatched in
 ///   `src/app/ui/app/update.rs:73`). iced's `Rich` text hands the clicked
 ///   `Link` payload back as a message instead, and resolving it needs the
@@ -625,10 +625,10 @@ pub enum ThemeMessage {
 /// * **Task checkboxes** — `UserCommand::ApplyTaskToggles` exists but is
 ///   wired to the *agent transcript* content
 ///   (`src/app/command_executor.rs:568-576`), not to the open document,
-///   which egui mutated in place (`src/app/ui/panels/center.rs:382-383`).
+///   which the legacy UI mutated in place (`src/app/ui/panels/center.rs:382-383`).
 ///   The document path therefore travels with the toggle so [TASK-022] can
 ///   pick the right target.
-/// * **Copy code** — egui copied inside the click handler via
+/// * **Copy code** — the legacy UI copied inside the click handler via
 ///   `Ui::copy_text` (`src/app/ui/render/code.rs:78-83`). iced exposes the
 ///   clipboard only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so
 ///   the content rides the message and the reducer writes it.
@@ -645,7 +645,7 @@ pub enum RenderMessage {
         source_file: Option<PathBuf>,
     },
     /// A task-list checkbox was toggled in the document viewer (the P0-2
-    /// write-back egui collected into `pending_toggles`).
+    /// write-back the legacy UI collected into `pending_toggles`).
     TaskToggled {
         /// The document whose markdown carries the checkbox.
         document: PathBuf,
@@ -664,16 +664,16 @@ pub enum RenderMessage {
 
 /// Small-dialog channel ([TASK-017b1], UI-011/UI-015).
 ///
-/// Grounded in the egui name-entry / move / delete dialogs
+/// Grounded in the legacy UI name-entry / move / delete dialogs
 /// (`src/app/ui/modals.rs:26-68`, `:80-158`, `:160-322`) and the
-/// `Dialogs` state model (`src/app/ui/dialogs.rs:25-63`). egui kept the
+/// `Dialogs` state model (`src/app/ui/dialogs.rs:25-63`). the legacy UI kept the
 /// open flag, the typed name and the selected destination in the
 /// `Dialogs` struct plus single-line widget memory; under iced that state
 /// is explicit in [`crate::ui_iced::dialogs::DialogState`] and this
 /// channel is the only way the rendered card mutates it.
 ///
 /// The confirm outcome is deliberately **not** a [`UserCommand`] here:
-/// the egui build validates the trimmed name only in the command
+/// the legacy UI build validates the trimmed name only in the command
 /// executor (`src/app/command_executor.rs:308-371` via
 /// `utils::path::is_safe_basename`), so the view must not pre-decide
 /// validity. The [TASK-022]/[TASK-023] reducer runs
@@ -711,7 +711,7 @@ pub enum DialogMessage {
 
 /// About / attributions window channel ([TASK-017b2]).
 ///
-/// Grounded in the egui About dialog (`src/app/ui/about_dialog.rs`) and
+/// Grounded in the legacy UI About dialog (`src/app/ui/about_dialog.rs`) and
 /// the attribution catalog it renders (`src/app/ui/attributions.rs`).
 /// This is a **separate channel from [`DialogMessage`]**, on purpose:
 /// `DialogMessage`'s vocabulary is name-entry shaped (`NameChanged`,
@@ -727,7 +727,7 @@ pub enum DialogMessage {
 /// (`ui_iced/panels/top.rs:439`). The reducer maps that command onto
 /// [`crate::ui_iced::about::AboutWindowState::open_about`]. What lives
 /// here is only what the rendered cards can do to *their own* visibility
-/// and the two side effects egui performed inside its click handler that
+/// and the two side effects the legacy UI performed inside its click handler that
 /// iced only allows in `update`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AboutMessage {
@@ -735,7 +735,7 @@ pub enum AboutMessage {
     /// About card — show
     /// [`crate::ui_iced::attributions::attributions_view`].
     AttributionsRequested,
-    /// The commit-hash cell was clicked. egui copied the full hash with
+    /// The commit-hash cell was clicked. the legacy UI copied the full hash with
     /// `ctx.copy_text` inside the click handler
     /// (`src/app/ui/about_dialog.rs:68-77`); iced exposes the clipboard
     /// only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so the
@@ -745,8 +745,8 @@ pub enum AboutMessage {
     CopyCommitHashRequested,
     /// A repository link in the attributions list was clicked; `url` is
     /// the catalog's repository URL verbatim. Deferred intent in the same
-    /// sense as [`RenderMessage::LinkActivated`]: egui pushed
-    /// `egui::OutputCommand::OpenUrl` from inside the click, while a
+    /// sense as [`RenderMessage::LinkActivated`]: the legacy UI pushed
+    /// `OutputCommand::OpenUrl` from inside the click, while a
     /// pure view may not open a browser, so the URL travels with the
     /// message and the reducer opens it.
     RepositoryOpened {
@@ -762,10 +762,10 @@ pub enum AboutMessage {
 
 /// Batch prompt-processing dialog channel ([TASK-017b3], BATCH-001..BATCH-014).
 ///
-/// Grounded in the egui dialog (`src/app/ui/batch_dialog.rs:65-183`) and the
+/// Grounded in the legacy UI dialog (`src/app/ui/batch_dialog.rs:65-183`) and the
 /// `BatchDialogConfig` state it mutates
 /// (`src/app/agent/batch/types.rs:224-253`). This channel carries **only the
-/// selection state egui kept in that config** — the directory, prompt,
+/// selection state the legacy UI kept in that config** — the directory, prompt,
 /// wildcard pattern, mode and concurrency the user is composing.
 ///
 /// Everything else the batch dialog does already rides [`Message::Command`]
@@ -776,13 +776,13 @@ pub enum AboutMessage {
 ///   Process button emits directly because the composed config *is* the
 ///   self-contained intent ([FMD-068]);
 /// * cancel / close — `UserCommand::CancelBatch` (`:136`), which is what
-///   the egui dialog published on both its Cancel button and on window
+///   the legacy UI dialog published on both its Cancel button and on window
 ///   close (`ui/batch_dialog.rs:54-61`, `:174-178`).
 ///
 /// So unlike [`DialogMessage`], no validation round-trip lives here: the
 /// Process button is gated by
 /// [`crate::ui_iced::batch_dialog::BatchDialogViewModel::can_start`] at
-/// render time, mirroring egui's `is_config_valid` gate
+/// render time, mirroring the legacy UI's `is_config_valid` gate
 /// (`ui/batch_dialog.rs:152`, `:232-240`), and an invalid composition
 /// simply never emits `StartBatch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -808,12 +808,12 @@ pub enum BatchDialogMessage {
 /// performs is already a self-contained [`UserCommand`] —
 /// `SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` /
 /// `ForgetMcpAuth` (`user_command.rs:80-88`) — and the iced card emits
-/// those through [`Message::Command`] exactly as the egui dialog published
-/// them (`ui/tools_dialog.rs:197-293`). The egui dialog also keeps **no
+/// those through [`Message::Command`] exactly as the legacy UI dialog published
+/// them (`ui/tools_dialog.rs:197-293`). The legacy UI dialog also keeps **no
 /// view-local state at all**: no search box, no selection, no expansion.
 ///
 /// The one thing with no [`UserCommand`] equivalent is *closing* it. The
-/// egui dialog closed via its title-bar `X` (`ui/tools_dialog.rs:61-63`),
+/// the legacy UI dialog closed via its title-bar `X` (`ui/tools_dialog.rs:61-63`),
 /// a window-frame widget that does not exist for an in-window iced modal,
 /// so the scrim click / Escape needs its own dismiss message. Opening is
 /// still `UserCommand::OpenToolsDialog` (`:66`).
@@ -825,7 +825,7 @@ pub enum ToolsDialogMessage {
 
 /// Agent debug window channel ([TASK-017b4], UI-048 / REQ-008).
 ///
-/// Grounded in the egui debug window (`src/app/ui/agent_debug_window.rs`)
+/// Grounded in the legacy UI debug window (`src/app/ui/agent_debug_window.rs`)
 /// and the debug-entry stream it renders
 /// (`AgentSession::state().debug_entries`, `src/agent/session.rs:33`).
 ///
@@ -837,11 +837,11 @@ pub enum ToolsDialogMessage {
 /// * the JSON row count — `UserCommand::SetDebugJsonRows` (`:156`);
 /// * Clear — `UserCommand::ClearDebugEntries` (`:154`);
 /// * close — `UserCommand::ToggleDebugWindow(false)` (`:152`), which is
-///   literally what the egui window published when its title-bar `X` was
+///   literally what the legacy UI window published when its title-bar `X` was
 ///   used (`ui/agent_debug_window.rs:149-153`), so no
 ///   `CloseRequested` variant is invented here.
 ///
-/// What is left is the disclosure state egui kept inside its
+/// What is left is the disclosure state the legacy UI kept inside its
 /// `CollapsingHeader` widget memory — the only one in the codebase
 /// (`ui/agent_debug_window.rs:170`) — plus the two things iced will not
 /// let a view do: copy to the clipboard and report its own viewport
@@ -849,8 +849,8 @@ pub enum ToolsDialogMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentDebugMessage {
     /// The clickable header of entry `id` was pressed, replacing
-    /// `egui::CollapsingHeader`'s built-in toggle. `id` is the entry's
-    /// index in the raw debug-entry list — egui's `orig_idx`
+    /// `CollapsingHeader`'s built-in toggle. `id` is the entry's
+    /// index in the raw debug-entry list — the legacy UI's `orig_idx`
     /// (`ui/agent_debug_window.rs:106`) — and the reducer flips it in
     /// [`crate::ui_iced::agent_debug::AgentDebugWindowState`].
     ///
@@ -866,7 +866,7 @@ pub enum AgentDebugMessage {
     ///
     /// Deferred intent in the same sense as
     /// [`RenderMessage::CopyCodeRequested`] and
-    /// [`AboutMessage::CopyCommitHashRequested`]: egui copied inside the
+    /// [`AboutMessage::CopyCommitHashRequested`]: the legacy UI copied inside the
     /// click handler with `Ui::copy_text`
     /// (`src/app/ui/agent_debug_window.rs:177-184`), while iced exposes
     /// the clipboard to `update` only
@@ -879,7 +879,7 @@ pub enum AgentDebugMessage {
     /// The entry list's viewport geometry changed.
     ///
     /// The auto-scroll counterpart of [`LogsMessage::ScrollReported`]:
-    /// egui applied `stick_to_bottom` inside its own `ScrollArea` state
+    /// the legacy UI applied `stick_to_bottom` inside its own `ScrollArea` state
     /// (`ui/agent_debug_window.rs:103`), whereas iced exposes the
     /// geometry only through `Scrollable::on_scroll`
     /// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the
@@ -902,7 +902,7 @@ pub enum AgentDebugMessage {
 /// Names the four producer channels the bridge in
 /// [`crate::ui_iced::subscription`] reads. The source travels with the
 /// lag report so a warning says *which* bus dropped events, the way the
-/// egui drain loops named them in their `tracing::warn!` calls
+/// the legacy UI drain loops named them in their `tracing::warn!` calls
 /// (`src/app/orchestrator.rs:97-101`, `:436-440`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BusSource {
@@ -976,7 +976,7 @@ pub enum InboundMessage {
     /// A subscriber fell behind a bus and `count` events were discarded
     /// ([FMD-067], [FMD-072]).
     ///
-    /// Ported from the egui drain loops' `BroadcastRecvError::Lagged(n)`
+    /// Ported from the legacy UI drain loops' `BroadcastRecvError::Lagged(n)`
     /// arms (`src/app/orchestrator.rs:96-103`, `:435-449`), which read
     /// the same count off the same tokio broadcast channel. The reducer
     /// should surface the loss to the user and re-synchronise on the next

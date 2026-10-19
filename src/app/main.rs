@@ -2,11 +2,12 @@
 //! FastMd desktop application entry point — initialises tracing, panic hooks and
 //! the crypto provider, then launches the **iced** UI ([TASK-024], DEC-011).
 //!
-//! The egui `eframe::run_native` path is retired here: `cargo run` (the
-//! `fastmd` bin) now boots through [`fastmd::ui_iced::app::launch`] — the very
-//! same launch chain `cargo run --bin fastmd_iced` exercises ([TASK-022]). No
-//! feature flag gates the switch (DEC-011: iced is a regular dependency); the
-//! egui `ui/` tree still compiles and is removed later ([TASK-029]).
+//! The legacy native-launch path is retired here: `cargo run` (the `fastmd` bin)
+//! now boots through [`fastmd::ui_iced::app::launch`] — the very same launch
+//! chain the iced pilot binary exercised before it was folded into this entry
+//! point ([TASK-022], [TASK-029b]). No feature flag gates the switch (DEC-011:
+//! iced is a regular dependency); the framework-free `ui/` tree remains as
+//! shared, renderer-agnostic state ([TASK-029b]).
 //!
 //! Startup ownership after the flip:
 //!
@@ -24,7 +25,7 @@
 //! The retired `main.rs:147-160` "build the app first, *then* publish"
 //! workaround is gone: `boot` constructs every subscriber before it returns the
 //! `Task::perform` that publishes `ConfigArrived`, so the same ordering
-//! guarantee holds without the `eframe` creation-callback trick.
+//! guarantee holds without the legacy creation-callback trick.
 //!
 //! Unit tests live in the sibling `main_tests.rs` sidecar.
 

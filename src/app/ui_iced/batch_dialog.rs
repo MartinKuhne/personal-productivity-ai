@@ -14,13 +14,13 @@
 //! | --- | --- |
 //! | `BatchConfig` / `BatchMode` | `crate::agent::batch::types` — re-exported here, **not** re-declared. `BatchConfig` is the exact payload `UserCommand::StartBatch` carries (`src/app/bus/events/user_command.rs:134`) |
 //! | `PromptInfo` | `crate::agent::batch::types::PromptInfo`, the discovered-prompt record `resolve_prompts` builds (`src/app/agent/batch/prompts.rs:128`) |
-//! | Validity rule | `validate_batch_params` (`src/app/agent/batch/types.rs:48-65`) — the *same* function the egui dialog calls (`ui/batch_dialog.rs:239`), so both builds gate the Process button identically |
-//! | Candidate directories | `DirectoryTracker::dirs_sorted()` / the content-library roots, snapshotted by the reducer — the egui build refreshed them from `orchestrator.directory_tracker` each frame (`src/app/ui/app/render.rs:105`) |
-//! | Candidate prompts | `resolve_prompts(app.tags().prompt_paths(), &app.config().content_libraries)` — the egui dialog's own snapshot call (`ui/batch_dialog.rs:26-27`), made by the reducer rather than at render time |
+//! | Validity rule | `validate_batch_params` (`src/app/agent/batch/types.rs:48-65`) — the *same* function the legacy UI dialog calls (`ui/batch_dialog.rs:239`), so both builds gate the Process button identically |
+//! | Candidate directories | `DirectoryTracker::dirs_sorted()` / the content-library roots, snapshotted by the reducer — the legacy UI build refreshed them from `orchestrator.directory_tracker` each frame (`src/app/ui/app/render.rs:105`) |
+//! | Candidate prompts | `resolve_prompts(app.tags().prompt_paths(), &app.config().content_libraries)` — the legacy UI dialog's own snapshot call (`ui/batch_dialog.rs:26-27`), made by the reducer rather than at render time |
 //! | Run status | `Dialogs::batch_handle` / `BatchHandle::thread.is_finished()` / `Dialogs::batch_cancel_flag` (`ui/batch_dialog.rs:22`, `:187-201`), folded into [`BatchRunStatus`] |
 //!
 //! [`BatchDialogViewModel::from_config`] snapshots a
-//! [`BatchDialogConfig`] (the egui dialog's own state type) with an idle
+//! [`BatchDialogConfig`] (the legacy UI dialog's own state type) with an idle
 //! run status, so the reducer can hand the existing config straight over
 //! without a field-by-field translation.
 //!
@@ -30,32 +30,32 @@
 //! ([`Message::Batch`]). Open, start and cancel already ride
 //! [`Message::Command`]: `UserCommand::OpenBatchDialog`,
 //! `UserCommand::StartBatch(config)` and `UserCommand::CancelBatch` are
-//! exactly what the egui dialog published
+//! exactly what the legacy UI dialog published
 //! (`ui/batch_dialog.rs:169-178`, `:216-225`), and the composed
 //! [`BatchConfig`] travels inside the command, so the intent stays
 //! self-contained and replayable ([FMD-068]).
 //!
 //! # Not ported, with reasons
 //!
-//! * **A selected-file list.** The brief asked for one, but the egui Batch
+//! * **A selected-file list.** The brief asked for one, but the legacy UI Batch
 //!   dialog has **no file selection at all** — it picks a *directory* plus
 //!   a glob pattern and lets the batch subsystem discover the files
 //!   itself (`agent/batch/file_matcher.rs`). The only multi-file selection
 //!   in the app is the tree's merge action (`ui/tree/handlers.rs:71`),
 //!   which is a different feature on a different surface. The scrollable,
 //!   selectable rows this port provides are the **prompt candidates** —
-//!   the list egui put in a combo and which can outgrow one.
+//!   the list the legacy UI put in a combo and which can outgrow one.
 //! * **Merge-prompt candidates.** Same finding: merge prompts belong to
 //!   `UserCommand::MergePrompt` from the tree context menu, never to the
 //!   batch dialog ([RUST-041] brief-drift note).
-//! * **Select-all / select-none.** egui has neither for this dialog
+//! * **Select-all / select-none.** the legacy UI has neither for this dialog
 //!   (single-choice combos throughout), so no such transition is invented
 //!   here. [`clamp_selection`] and [`index_of_selected`] are the two
-//!   selection-state rules egui *does* run.
+//!   selection-state rules the legacy UI *does* run.
 //! * **The spinner.** iced 0.14 has no built-in spinner and DEC-005 rules
 //!   out `iced_aw`; the running view carries the
 //!   [`strings::BATCH_PROCESSING_TEXT`] plus the cancel hint instead.
-//! * **The window chrome** (non-resizable `egui::Window`, title-bar `X`).
+//! * **The window chrome** (non-resizable `Window`, title-bar `X`).
 //!   The card is mounted by the overlay host ([TASK-023]) through
 //!   [`crate::ui_iced::overlay::modal`], which supplies the scrim and the
 //!   dismiss path.
@@ -81,25 +81,24 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{BatchDialogMessage, Message};
 use crate::ui_iced::overlay::{ConfirmCancel, confirm_cancel_buttons};
-use crate::ui_iced::theme::to_iced_color;
 
 /// The batch payload the Process button composes — reused unchanged from
 /// the batch subsystem ([RUST-051]); it is the `UserCommand::StartBatch`
 /// payload (`src/app/bus/events/user_command.rs:134`).
 pub use crate::agent::batch::types::{BatchConfig, BatchMode, PromptInfo};
 
-/// Minimum width of the batch card — egui parity
+/// Minimum width of the batch card — legacy parity
 /// (`ui.set_min_width(500.0)`, `src/app/ui/batch_dialog.rs:42`).
 pub const BATCH_CARD_WIDTH: f32 = 500.0;
 
-/// Vertical gap between card rows — egui parity
+/// Vertical gap between card rows — legacy parity
 /// (`item_spacing.y = 10.0`, `src/app/ui/batch_dialog.rs:43`).
 pub const BATCH_SECTION_SPACING: f32 = 10.0;
 
 /// Logical point size of a field label, row or hint.
 pub const BATCH_BODY_SIZE: f32 = 14.0;
 
-/// Logical point size of the running-view heading — egui `ui.heading`.
+/// Logical point size of the running-view heading — the legacy UI `ui.heading`.
 pub const BATCH_HEADING_SIZE: f32 = 18.0;
 
 /// Maximum height of the scrollable prompt-candidate list.
@@ -108,12 +107,12 @@ pub const BATCH_PROMPT_LIST_MAX_HEIGHT: f32 = 180.0;
 /// Width of the horizontal rules separating card sections.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// Lowest selectable concurrency — the lower bound of the egui combo
+/// Lowest selectable concurrency — the lower bound of the legacy UI combo
 /// (`(1u8..=8)`, `src/app/ui/batch_dialog.rs:137`) and of
 /// `validate_batch_params` (`agent/batch/types.rs:53`).
 pub const CONCURRENCY_MIN: u8 = 1;
 
-/// Highest selectable concurrency (egui parity, `:137`).
+/// Highest selectable concurrency (legacy parity, `:137`).
 pub const CONCURRENCY_MAX: u8 = 8;
 
 /// The default wildcard pattern — `BatchDialogConfig::default()`'s value
@@ -123,14 +122,14 @@ pub const DEFAULT_PATTERN: &str = "*.md";
 
 /// Runtime status of the batch job the dialog may be showing progress for.
 ///
-/// The three booleans the egui dialog read off `Dialogs`
+/// The three booleans the legacy UI dialog read off `Dialogs`
 /// (`ui/batch_dialog.rs:22`, `:187-201`) folded into one plain value so
 /// the view never has to reach for a `BatchHandle` (which owns a
 /// `JoinHandle` and is therefore neither `Clone` nor `Debug`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BatchRunStatus {
     /// A batch worker handle exists (`Dialogs::batch_handle.is_some()`) —
-    /// egui's `is_running`, the flag that switches the card to the
+    /// the legacy UI's `is_running`, the flag that switches the card to the
     /// progress view.
     pub has_handle: bool,
     /// The worker thread has finished (`BatchHandle::thread.is_finished()`).
@@ -154,7 +153,7 @@ impl BatchRunStatus {
     }
 
     /// Whether the card should render the progress view instead of the
-    /// configuration view (egui parity: driven purely by `has_handle`).
+    /// configuration view (legacy parity: driven purely by `has_handle`).
     #[must_use]
     pub fn shows_progress_view(&self) -> bool {
         self.has_handle
@@ -167,7 +166,7 @@ impl BatchRunStatus {
     }
 
     /// The cancellation warning: `Some` only when a finished run was
-    /// cancelled by the user (egui painted it with `palette.warning`,
+    /// cancelled by the user (the legacy UI painted it with `palette.warning`,
     /// `ui/batch_dialog.rs:202`).
     #[must_use]
     pub fn cancellation_text(&self) -> Option<&'static str> {
@@ -256,7 +255,7 @@ impl BatchDialogViewModel {
         Self::default()
     }
 
-    /// Snapshots the egui dialog's own [`BatchDialogConfig`] with an idle
+    /// Snapshots the legacy UI dialog's own [`BatchDialogConfig`] with an idle
     /// run status ([RUST-051] — no field-by-field translation needed).
     #[must_use]
     pub fn from_config(config: &BatchDialogConfig) -> Self {
@@ -279,9 +278,9 @@ impl BatchDialogViewModel {
         self
     }
 
-    /// Whether the composed configuration is valid — the egui dialog's
+    /// Whether the composed configuration is valid — the legacy UI dialog's
     /// `is_config_valid` (`ui/batch_dialog.rs:232-240`), reproduced by
-    /// delegating to the *same* `validate_batch_params` the egui build
+    /// delegating to the *same* `validate_batch_params` the legacy UI build
     /// calls so the two cannot drift.
     ///
     /// Purity: pure.
@@ -323,7 +322,7 @@ impl BatchDialogViewModel {
     }
 
     /// The composed [`BatchConfig`]: `Some` only when both picks resolve
-    /// to real entries, exactly the guard the egui confirm branch applied
+    /// to real entries, exactly the guard the legacy UI confirm branch applied
     /// (`ui/batch_dialog.rs:155-168`).
     ///
     /// Purity: pure.
@@ -341,7 +340,7 @@ impl BatchDialogViewModel {
     }
 
     /// The directory combo's current label, falling back to
-    /// [`strings::BATCH_DIALOG_SELECT_DIRECTORY`] (egui parity, `:69-73`).
+    /// [`strings::BATCH_DIALOG_SELECT_DIRECTORY`] (legacy parity, `:69-73`).
     #[must_use]
     pub fn directory_label(&self) -> String {
         self.selected_directory()
@@ -349,7 +348,7 @@ impl BatchDialogViewModel {
             .unwrap_or_else(|| strings::BATCH_DIALOG_SELECT_DIRECTORY.to_string())
     }
 
-    /// The prompt combo's current label (egui parity, `:103-107`).
+    /// The prompt combo's current label (legacy parity, `:103-107`).
     #[must_use]
     pub fn prompt_label(&self) -> String {
         self.selected_prompt()
@@ -377,13 +376,13 @@ impl BatchDialogViewModel {
             .collect()
     }
 
-    /// The concurrency pick-list options, `1..=8` (egui parity, `:137`).
+    /// The concurrency pick-list options, `1..=8` (legacy parity, `:137`).
     #[must_use]
     pub fn concurrency_options() -> Vec<u8> {
         (CONCURRENCY_MIN..=CONCURRENCY_MAX).collect()
     }
 
-    /// Whether the wildcard pattern field accepts edits — egui hid the row
+    /// Whether the wildcard pattern field accepts edits — the legacy UI hid the row
     /// entirely in Directory mode (`ui/batch_dialog.rs:90`); this port
     /// keeps it allocated and makes it inert instead (AGENTS §6).
     ///
@@ -403,7 +402,7 @@ impl BatchDialogViewModel {
 /// Drops a selection whose index no longer points at a list entry
 /// ([TASK-017b3]).
 ///
-/// The egui dialog ran exactly this whenever the prompt list was rebuilt:
+/// The legacy UI dialog ran exactly this whenever the prompt list was rebuilt:
 /// a stale index would otherwise read out of bounds after the list shrank
 /// or was reordered (`src/app/ui/batch_dialog.rs:28-36`).
 ///
@@ -415,7 +414,7 @@ pub fn clamp_selection(selected: Option<usize>, len: usize) -> Option<usize> {
 
 /// Re-finds a previously selected value's index after its list was
 /// rebuilt, so the selection follows the *path* rather than the position
-/// (the egui refresh rule, `src/app/ui/app/render.rs:102-108`).
+/// (the legacy UI refresh rule, `src/app/ui/app/render.rs:102-108`).
 ///
 /// Purity: pure.
 #[must_use]
@@ -428,7 +427,7 @@ pub fn index_of_selected<'list, T: PartialEq>(
 }
 
 /// The Process button's message: the composed config as
-/// `UserCommand::StartBatch` (egui parity, `ui/batch_dialog.rs:169-171`).
+/// `UserCommand::StartBatch` (legacy parity, `ui/batch_dialog.rs:169-171`).
 ///
 /// `None` when the composition cannot be built, which is exactly when
 /// [`BatchDialogViewModel::can_start`] is `false` and the button is inert.
@@ -442,7 +441,7 @@ pub fn start_message(view_model: &BatchDialogViewModel) -> Option<Message> {
 }
 
 /// The Cancel button, the Close button and the scrim/Escape dismiss all
-/// map to `UserCommand::CancelBatch` — egui published the same command
+/// map to `UserCommand::CancelBatch` — the legacy UI published the same command
 /// from every one of those paths (`ui/batch_dialog.rs:54-61`, `:174-178`,
 /// `:216-225`), so there is one cancel transition for the reducer.
 ///
@@ -594,7 +593,7 @@ fn apply_field<T: PartialEq>(field: &mut T, value: T) -> bool {
 /// The card is the *content* only: the root view mounts it through
 /// [`crate::ui_iced::overlay::modal`] with [`cancel_message()`] as the
 /// dismiss message so a scrim click or Escape cancels, exactly as the
-/// egui window's close path did.
+/// the legacy UI window's close path did.
 ///
 /// ```text
 /// configuration view                          progress view
@@ -637,7 +636,7 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message>
     let label = |text_value: &'static str| {
         text(text_value)
             .size(BATCH_BODY_SIZE)
-            .color(to_iced_color(palette.text_strong))
+            .color(palette.text_strong)
     };
 
     let directory_options = view_model.directory_options();
@@ -661,7 +660,7 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message>
         label(strings::BATCH_DIALOG_PATTERN_LABEL).into(),
         text_input(strings::BATCH_DIALOG_PATTERN_HINT, &view_model.pattern)
             // In Directory mode the pattern is unused, so the field stays
-            // allocated but stops reporting edits (egui hid the row).
+            // allocated but stops reporting edits (the legacy UI hid the row).
             .on_input_maybe(
                 view_model
                     .pattern_editable()
@@ -727,7 +726,7 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message>
     .into()
 }
 
-/// The scrollable prompt-candidate rows — the iced re-typing of egui's
+/// The scrollable prompt-candidate rows — the iced re-typing of the legacy UI's
 /// `selectable_combo` list (`src/app/ui/batch_dialog.rs:108-121`) into
 /// real selectable rows, the same shape the move dialog's destination
 /// picker uses (`ui_iced/dialogs.rs:644-661`).
@@ -753,7 +752,7 @@ fn prompt_row(prompt: &PromptInfo, index: usize, selected: bool) -> Element<'_, 
         .width(Length::Fill)
         .padding(4.0)
         .style(move |_theme| container::Style {
-            background: selected.then(|| Background::Color(to_iced_color(palette.accent))),
+            background: selected.then_some(Background::Color(palette.accent)),
             ..container::Style::default()
         });
 
@@ -785,7 +784,7 @@ fn config_footer(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
     .into()
 }
 
-/// The in-flight / completed progress card (egui's `show_running_view`,
+/// The in-flight / completed progress card (the legacy UI's `show_running_view`,
 /// `src/app/ui/batch_dialog.rs:186-229`).
 fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
@@ -793,7 +792,7 @@ fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
 
     let heading = text(strings::BATCH_RUNNING_HEADING)
         .size(BATCH_HEADING_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let body = if let Some(completed) = status.completion_text() {
         let cancelled = status.cancellation_text().unwrap_or("");
@@ -802,7 +801,7 @@ fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
             text(cancelled)
                 .size(BATCH_BODY_SIZE)
                 .style(move |_theme| iced::widget::text::Style {
-                    color: Some(to_iced_color(palette.warning)),
+                    color: Some(palette.warning),
                 })
                 .into(),
         ])
@@ -815,7 +814,7 @@ fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
                 .into(),
             text(strings::BATCH_RUNNING_CANCEL_HINT)
                 .size(BATCH_BODY_SIZE)
-                .color(to_iced_color(palette.text_muted))
+                .color(palette.text_muted)
                 .into(),
         ])
         .spacing(2.0)

@@ -7,7 +7,7 @@
 //! Send and Queue buttons both emit [`AgentMessage::Submit`], and the
 //! reducer runs the reused [`submit_commands`] helper to decide
 //! `RunAgent` (idle) vs `QueueAgentPrompt` (running) — exactly the
-//! running-vs-idle branch egui kept inline in its widget closure
+//! running-vs-idle branch the legacy UI kept inline in its widget closure
 //! (`src/app/ui/panels/bottom.rs:259-294`). Cancel emits
 //! [`UserCommand::CancelAgent`]; the model pick emits
 //! [`UserCommand::SelectChatModel`]; Clear session emits
@@ -15,7 +15,7 @@
 //!
 //! # Reused, not reimplemented ([RUST-051])
 //!
-//! * [`submit_commands`] and [`clear_command_input_command`] — the egui
+//! * [`submit_commands`] and [`clear_command_input_command`] — the legacy UI
 //!   band's framework-free submit solver, re-exported.
 //! * [`ChatModelEntry`] — the top bar's model row type, reused for the
 //!   selector so both surfaces format and carry the model identically.
@@ -38,11 +38,10 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{AgentMessage, Message};
 use crate::ui_iced::panels::top::ChatModelEntry;
-use crate::ui_iced::theme::to_iced_color;
 
 use super::panel_state::AgentPanelViewModel;
 
-/// The egui command band's framework-free submit solver, reused rather
+/// The legacy UI command band's framework-free submit solver, reused rather
 /// than duplicated ([RUST-051]) — `src/app/ui/panels/bottom.rs:185-202`.
 /// The reducer calls it on [`AgentMessage::Submit`].
 pub use crate::ui_iced::panels::bottom::{clear_command_input_command, submit_commands};
@@ -154,7 +153,7 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     let send_button = button(
         text(strings::AGENT_SEND_BUTTON)
             .size(CONTROL_TEXT_SIZE)
-            .color(to_iced_color(palette.text)),
+            .color(palette.text),
     )
     .on_press_maybe(
         send_enabled(&view_model.command_input, view_model.running).then(|| {
@@ -167,7 +166,7 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     let queue_button = button(
         text(strings::AGENT_QUEUE_BUTTON)
             .size(CONTROL_TEXT_SIZE)
-            .color(to_iced_color(palette.text)),
+            .color(palette.text),
     )
     .on_press_maybe(
         queue_enabled(&view_model.command_input, view_model.running).then(|| {
@@ -180,7 +179,7 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     let cancel_button = button(
         text(strings::STOP_AGENT_BUTTON)
             .size(CONTROL_TEXT_SIZE)
-            .color(to_iced_color(palette.error)),
+            .color(palette.error),
     )
     .on_press_maybe(
         cancel_enabled(view_model.running).then_some(Message::Command(UserCommand::CancelAgent)),
@@ -188,7 +187,7 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
 
     let model_label = text(strings::AGENT_MODEL_LABEL)
         .size(CONTROL_TEXT_SIZE)
-        .color(to_iced_color(palette.text_muted));
+        .color(palette.text_muted);
 
     let model_pick: Element<'_, Message> = pick_list(
         view_model.chat_models.clone(),
@@ -204,14 +203,14 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     let clear_button = button(
         text(strings::AGENT_SESSION_CLOSE_BUTTON)
             .size(CONTROL_TEXT_SIZE)
-            .color(to_iced_color(palette.text_muted)),
+            .color(palette.text_muted),
     )
     .on_press(clear_session_message());
 
     let queue_badge: Element<'_, Message> = match queue_display(&view_model.queued_prompts) {
         Some(label) => text(label)
             .size(CONTROL_TEXT_SIZE)
-            .color(to_iced_color(palette.warning))
+            .color(palette.warning)
             .into(),
         None => Column::<Message>::new().into(),
     };

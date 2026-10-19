@@ -68,16 +68,6 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/BurntSushi/rust-csv",
     },
     Attribution {
-        name: "eframe",
-        authors: "Emil Ernerfeldt",
-        github_url: "https://github.com/emilk/egui",
-    },
-    Attribution {
-        name: "egui_extras",
-        authors: "Dominik Rössler, Emil Ernerfeldt, René Rössler",
-        github_url: "https://github.com/emilk/egui",
-    },
-    Attribution {
         name: "encoding_rs",
         authors: "Henri Sivonen",
         github_url: "https://github.com/hsivonen/encoding_rs",

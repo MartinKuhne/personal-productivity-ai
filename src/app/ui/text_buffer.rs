@@ -1,10 +1,10 @@
-//! Egui-free text editing model — `TextBuffer`, `Cursor`, `Selection`, and `UndoStack`.
+//! Framework-free text editing model — `TextBuffer`, `Cursor`, `Selection`, and `UndoStack`.
 //!
 //! This module is the data layer for the inline markdown editor. It owns the
 //! file content, the front matter (preserved verbatim across saves), the
 //! cursor / selection state, and the undo history. Nothing in this module
-//! imports `eframe::egui`; the rendering layer in
-//! [`crate::ui::editor_egui`] adapts the buffer to egui's immediate-mode
+//! imports the legacy framework; the rendering layer in
+//! [`crate::ui::editor_the legacy UI`] adapts the buffer to the legacy UI's immediate-mode
 //! widgets and writes the resulting cursor position back here.
 //!
 //! ## Why a dedicated `TextBuffer`?
@@ -20,14 +20,14 @@
 //!   the buffer is saved or how undo history is stored, and
 //! - future consumers (e.g. a search-and-replace tool, an external
 //!   diff view) can read and mutate the buffer without going through
-//!   egui's text widget.
+//!   the legacy UI's text widget.
 //!
 //! ## Save path
 //!
 //! [`TextBuffer::save`] writes the buffer to disk, publishes an
 //! `Updated` [`crate::bus::events::file::FileEvent`] so the rest of
 //! the app refreshes immediately, and closes the editor. The publish
-//! needs a [`FileEventProducer`], which is itself egui-free; the
+//! needs a [`FileEventProducer`], which is itself framework-free; the
 //! producer reference is passed in rather than held on the buffer so
 //! the type stays plain Rust data with no framework-specific slots.
 //!
@@ -50,7 +50,7 @@ pub const DEFAULT_UNDO_CAPACITY: usize = 64;
 ///
 /// - `line` is 0-indexed
 /// - `column` is 0-indexed and measured in *characters* (not bytes), to
-///   match what users see on screen and what `egui::TextEdit` reports
+///   match what users see on screen and what `TextEdit` reports
 /// - `char_index` is the char offset into [`TextBuffer::content`], which
 ///   the renderer uses to look up the byte offset for slicing
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -149,10 +149,10 @@ impl UndoStack {
     ///
     /// Consecutive pushes of identical content are coalesced into a
     /// single entry (so a stream of `TextChanged` events from
-    /// `egui::TextEdit` does not flood the history).
+    /// `TextEdit` does not flood the history).
     pub fn push(&mut self, content: String, cursor: Cursor, selection: Selection) {
         // Coalesce with the current position if the content is unchanged
-        // (egui emits a TextChanged per keystroke, most of which are
+        // (the legacy UI emits a TextChanged per keystroke, most of which are
         // no-ops in terms of the buffer's byte stream).
         if let Some(pos) = self.position
             && let Some(current) = self.entries.get(pos)
@@ -235,8 +235,8 @@ impl UndoStack {
 
 /// The text buffer that backs the inline markdown editor.
 ///
-/// `TextBuffer` is plain Rust data: it does not know about egui. The
-/// rendering layer in [`crate::ui::editor_egui`] reads the buffer's
+/// `TextBuffer` is plain Rust data: it does not know about the legacy UI. The
+/// rendering layer in [`crate::ui::editor_the legacy UI`] reads the buffer's
 /// content, displays it, and writes the resulting cursor position back
 /// via [`set_cursor`](Self::set_cursor) before returning.
 #[derive(Debug, Default)]

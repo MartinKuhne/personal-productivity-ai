@@ -146,7 +146,7 @@ fn tab_entries_preserve_strip_order_and_mark_only_the_active_tab() {
 
 #[test]
 fn tab_entries_are_never_unsaved_without_dirty_tracking() {
-    // The shipped egui build has no per-tab dirty flag, so the pure
+    // The shipped the legacy UI build has no per-tab dirty flag, so the pure
     // constructor reports clean. The field exists for TASK-022 to fill.
     let paths = vec![PathBuf::from("a.md")];
     let tabs = tab_entries(&paths, Some(Path::new("a.md")));
@@ -196,7 +196,7 @@ fn other_tab_indices_with_an_out_of_range_keep_closes_everything() {
 
 #[test]
 fn tab_select_command_is_a_single_select_select_file() {
-    // egui parity: the tab strip never multi-selects.
+    // legacy parity: the tab strip never multi-selects.
     assert_eq!(
         tab_select_command(Path::new("lib/note.md")),
         UserCommand::SelectFile {
@@ -245,7 +245,7 @@ fn agent_session_close_message_clears_the_agent_session() {
 // --- tab context menu (UI-026..UI-034) ---------------------------------
 
 #[test]
-fn tab_context_menu_labels_are_in_egui_order() {
+fn tab_context_menu_labels_are_in_thelegacy_order() {
     let items = tab_context_menu_items(1, Path::new("lib/note.md"), &[]);
     assert_eq!(
         menu_labels(&items),
@@ -546,7 +546,7 @@ fn from_app_carries_agent_status_and_thinking() {
 fn thinking_section_visible_only_when_the_buffer_has_content() {
     assert!(!thinking_section_visible(""));
     assert!(thinking_section_visible("reasoning"));
-    // Whitespace is still content — egui's `!is_empty()` said the same.
+    // Whitespace is still content — the legacy UI's `!is_empty()` said the same.
     assert!(thinking_section_visible(" "));
 }
 
@@ -583,6 +583,6 @@ fn tab_text_color_uses_distinct_tokens_for_active_and_inactive() {
     let inactive = tab_text_color(&palette, false);
 
     assert_ne!(active, inactive, "the active tab must be visually distinct");
-    assert_eq!(active, to_iced_color(palette.text_strong));
-    assert_eq!(inactive, to_iced_color(palette.text_muted));
+    assert_eq!(active, palette.text_strong);
+    assert_eq!(inactive, palette.text_muted);
 }

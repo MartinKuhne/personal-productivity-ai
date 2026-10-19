@@ -45,7 +45,7 @@ fn from_build_carries_the_shared_identity_strings() {
     assert_eq!(vm.app_name, strings::ABOUT_APP_NAME);
     assert_eq!(vm.copyright, strings::ABOUT_COPYRIGHT);
     assert_eq!(vm.description, strings::ABOUT_DESCRIPTION);
-    assert_eq!(vm.version, crate::ui::about_dialog::APP_VERSION);
+    assert_eq!(vm.version, APP_VERSION);
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn copy_press_is_offered_when_the_hash_is_known() {
 #[test]
 fn copy_press_is_withheld_on_an_unknown_build() {
     // Nothing meaningful to copy, so the cell must not emit anything —
-    // egui's `copy_commit_hash_to_output` returns early in the same case.
+    // the legacy UI's `copy_commit_hash_to_output` returns early in the same case.
     assert_eq!(commit_copy_press(true), None);
     assert!(unknown_vm().is_build_metadata_unknown());
     assert!(!known_vm().is_build_metadata_unknown());
@@ -305,4 +305,75 @@ fn window_titles_come_from_strings() {
         AboutWindow::Attributions.title(),
         strings::ABOUT_ATTRIBUTIONS_HEADER
     );
+}
+
+// --- Moved helpers ([TASK-029b]) ---------------------------------------
+// Ported from the deleted legacy `about_dialog_tests.rs` sidecar so the
+// owned helpers keep full coverage ([RUST-003]).
+
+#[test]
+fn license_reflow_preserves_words() {
+    // The reflowed license must contain exactly the same words in the same
+    // order (whitespace-only change), keep paragraph breaks, and leave no
+    // single newlines that would pin the label to the file's hard wrap.
+    let words_original: Vec<&str> = LICENSE_TEXT.split_whitespace().collect();
+    let reflowed = license_display_text();
+    let words_reflowed: Vec<&str> = reflowed.split_whitespace().collect();
+    assert_eq!(words_reflowed, words_original);
+    assert_eq!(
+        reflowed.matches("\n\n").count(),
+        LICENSE_TEXT.matches("\n\n").count(),
+        "paragraph breaks must survive the reflow"
+    );
+    let singles = reflowed.replace("\n\n", "").matches('\n').count();
+    assert_eq!(singles, 0, "no single newlines may remain");
+}
+
+#[test]
+fn should_auto_show_about_none_means_first_run() {
+    // Spec FR-016 / SC-008: fresh UI state (no recorded shown version)
+    // must auto-show the About dialog.
+    assert!(
+        should_auto_show_about(None, "0.2.0"),
+        "fresh state should auto-show"
+    );
+}
+
+#[test]
+fn should_auto_show_about_same_version_stays_quiet() {
+    // Spec FR-016 / SC-008: same-version restarts must not re-display.
+    assert!(
+        !should_auto_show_about(Some("0.2.0"), "0.2.0"),
+        "same version should stay quiet"
+    );
+}
+
+#[test]
+fn should_auto_show_about_upgrade_reopens_once() {
+    // Spec FR-016 / SC-008: each upgrade's first start re-displays once.
+    assert!(
+        should_auto_show_about(Some("0.1.0"), "0.2.0"),
+        "upgraded version should auto-show"
+    );
+}
+
+#[test]
+fn apply_first_run_auto_show_opens_and_records() {
+    let mut persisted = crate::ui::PersistedUiState::default();
+    let mut dialogs = crate::ui::Dialogs::new();
+    assert!(apply_first_run_auto_show(
+        &mut persisted,
+        &mut dialogs,
+        "0.2.0"
+    ));
+    assert!(dialogs.about_dialog_open);
+    assert_eq!(persisted.about_shown_for_version.as_deref(), Some("0.2.0"));
+    // Second run at the same version stays quiet and changes nothing.
+    dialogs.about_dialog_open = false;
+    assert!(!apply_first_run_auto_show(
+        &mut persisted,
+        &mut dialogs,
+        "0.2.0"
+    ));
+    assert!(!dialogs.about_dialog_open);
 }

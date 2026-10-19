@@ -10,7 +10,7 @@
 //! what keeps user intent replayable ([FMD-068]) and the view free of
 //! side effects.
 //!
-//! Submodules mirror the egui panes they replace
+//! Submodules mirror the legacy UI panes they replace
 //! (`src/app/ui/panels/`):
 //!
 //! - [`top`] — the top toolbar: logo mark, app title, indexing status,
@@ -26,19 +26,19 @@
 //!   queue-vs-submit intent solver extracted to [`bottom::submit_commands`]
 //!   ([TASK-016], UI-001).
 //! - [`right`] — the ToC pane's two **pure** rules (the visibility gate and
-//!   the anchor → heading-id resolver), relocated out of the egui panel for
-//!   the zero-egui migration ([TASK-029]). The pane *body* itself is still
+//!   the anchor → heading-id resolver), relocated out of the legacy UI panel for
+//!   the framework-free migration ([TASK-029]). The pane *body* itself is still
 //!   rendered inline by [`view::toc_body`](crate::ui_iced::view).
 //!
 //! The Background Processes viewer ([TASK-016], UI-047) is not a pane — the
-//! egui build shows it as a floating window — so it lives in
+//! the legacy UI build shows it as a floating window — so it lives in
 //! [`crate::ui_iced::logs`] and is mounted by the overlay/window host in
 //! [TASK-017]/[TASK-023].
 //!
 //! # Self-containment ([TASK-029])
 //!
 //! Every framework-free helper these four panes need is **owned** by the
-//! iced module that uses it, not `pub use`d out of the egui
+//! iced module that uses it, not `pub use`d out of the legacy UI
 //! `src/app/ui/panels/` tree — those files are deleted by [TASK-029b].
 //! See each submodule's header for what was relocated and why.
 

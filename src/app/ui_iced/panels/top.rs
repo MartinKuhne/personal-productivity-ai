@@ -13,10 +13,10 @@
 //! [logo] FastMD Viewer | <indexing status> [tag filter]        [☰ menu]
 //! ```
 //!
-//! * **Logo** — the egui panel vector-paints `ui::logo::paint_logo`; this
+//! * **Logo** — the retired panel vector-painted its badge; this
 //!   port renders the shared stand-in built by
 //!   [`crate::ui_iced::logo::logo_mark`] at [`LOGO_MARK_SIZE`], because
-//!   the egui paint primitives do not exist in iced. See *Feature-gated
+//!   the legacy UI paint primitives do not exist in iced. See *Feature-gated
 //!   widgets* below and the trade-off table in
 //!   [`crate::ui_iced::logo`].
 //! * **Indexing status** — [`indexing_status_text`] plus the `success`
@@ -34,7 +34,7 @@
 //! child menus, and DEC-005 rules out `iced_aw`. The port therefore keeps
 //! the full hierarchy in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state,
-//! exactly mirroring the egui menu — and renders the **selectable subset**
+//! exactly mirroring the legacy UI menu — and renders the **selectable subset**
 //! ([`hamburger_items`]) as one flat list whose labels carry the owning
 //! submenu name (`"Windows › Agent debug"`), produced by
 //! [`strings::format_menu_row_label`].
@@ -74,11 +74,11 @@
 //! [`strategy_label`]) used to be `pub use`d from
 //! `src/app/ui/panels/top.rs`, a file [TASK-029b] deletes. They are copied
 //! into this module verbatim; every one is a pure `UserCommand` constructor
-//! or a pure path/tag/label solver with **no `egui` type** in its signature
+//! or a pure path/tag/label solver with **no framework type** in its signature
 //! or body.
 //!
 //! `build_indexing_status_text` is **not** copied — it returns an
-//! `egui::RichText` and cannot be relocated egui-free. This module's own
+//! `RichText` and cannot be relocated framework-free. This module's own
 //! [`indexing_status_text`] is the iced re-typing of it.
 //!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
@@ -102,20 +102,19 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
 use crate::ui_iced::logo::logo_mark;
 use crate::ui_iced::message::Message;
-use crate::ui_iced::theme::to_iced_color;
 
-// The framework-free helpers the egui panel owned, **relocated into this
-// module** for the zero-egui migration ([TASK-029]) from
+// The framework-free helpers the legacy UI panel owned, **relocated into this
+// module** for the framework-free migration ([TASK-029]) from
 // `src/app/ui/panels/top.rs:33-121`.
 //
 // They were previously `pub use`d from a file [TASK-029b] deletes. Each is
-// copied verbatim and is egui-free — pure `UserCommand` constructors and
-// pure path/tag/label solvers with no `egui` type in any signature or body
+// copied verbatim and is framework-free — pure `UserCommand` constructors and
+// pure path/tag/label solvers with no framework type in any signature or body
 // — so the iced panel and the [TASK-022] reducer call the same code. The
-// egui panel keeps its own copy until Phase 5.
+// the legacy UI panel keeps its own copy until Phase 5.
 //
 // `build_indexing_status_text` is deliberately **not** copied: it returns an
-// `egui::RichText`, so it cannot be relocated egui-free. The iced panel
+// `RichText`, so it cannot be relocated framework-free. The iced panel
 // owns its own [`indexing_status_text`](crate::ui_iced::panels::top::indexing_status_text)
 // re-typing instead.
 
@@ -126,7 +125,7 @@ use crate::ui_iced::theme::to_iced_color;
 /// Preconditions: None.
 /// Postconditions: Returns the tag name if one is selected, otherwise "Filter by Tag: All".
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
@@ -142,7 +141,7 @@ pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
 /// Preconditions: None.
 /// Postconditions: Returns `None` if an active tag is selected and it is not associated with the selected file. Otherwise returns the original selected file.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn compute_next_selected_file(
@@ -164,7 +163,7 @@ pub fn compute_next_selected_file(
 
 /// Returns the command for clicking the batch-processing button.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_batch_button_click() -> UserCommand {
@@ -173,7 +172,7 @@ pub fn apply_batch_button_click() -> UserCommand {
 
 /// Returns the command for clicking the "Tools..." button.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_tools_button_click() -> UserCommand {
@@ -182,7 +181,7 @@ pub fn apply_tools_button_click() -> UserCommand {
 
 /// Returns the command for clicking the "About FastMD..." button.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_about_button_click() -> UserCommand {
@@ -191,7 +190,7 @@ pub fn apply_about_button_click() -> UserCommand {
 
 /// Returns the command for toggling the background logs window.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
@@ -200,7 +199,7 @@ pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
 
 /// Returns the command for toggling the agent debug window.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_agent_debug_toggle(show: bool) -> UserCommand {
@@ -209,7 +208,7 @@ pub fn apply_agent_debug_toggle(show: bool) -> UserCommand {
 
 /// Returns the command for picking a new chat model.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_chat_model_selection(model_name: String) -> UserCommand {
@@ -218,7 +217,7 @@ pub fn apply_chat_model_selection(model_name: String) -> UserCommand {
 
 /// Returns the command for changing the table-width deficit strategy.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_table_width_strategy_change(strategy: DeficitStrategy) -> UserCommand {
@@ -232,7 +231,7 @@ pub fn apply_table_width_strategy_change(strategy: DeficitStrategy) -> UserComma
 /// strategy in the future is a compile error here until the label is
 /// supplied.
 ///
-/// Relocated from the egui top panel for the zero-egui migration
+/// Relocated from the legacy UI top panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
@@ -269,7 +268,7 @@ pub const BAR_PADDING: f32 = 6.0;
 /// Width of the vertical rule drawn between top-bar groups.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// Minimum width of the hamburger dropdown, mirroring the egui panel's
+/// Minimum width of the hamburger dropdown, mirroring the legacy UI panel's
 /// `ui.set_min_width(180.0)`.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
 
@@ -283,10 +282,10 @@ pub fn phosphor_font() -> Font {
 
 /// Builds the indexing status label shown in the top bar.
 ///
-/// iced re-typing of the egui panel's `build_indexing_status_text`: the
-/// `egui::RichText` return type is replaced by the plain `String` plus the
+/// iced re-typing of the legacy UI panel's `build_indexing_status_text`: the
+/// `RichText` return type is replaced by the plain `String` plus the
 /// [`indexing_status_color`] / [`indexing_status_font`] token lookups, so no
-/// egui type crosses into the iced layer.
+/// the legacy UI type crosses into the iced layer.
 ///
 /// Purity: pure function of `(indexing_finished, file_count)`.
 pub fn indexing_status_text(indexing_finished: bool, file_count: usize) -> String {
@@ -300,23 +299,23 @@ pub fn indexing_status_text(indexing_finished: bool, file_count: usize) -> Strin
 /// Palette token for the indexing status label.
 ///
 /// The `success` token once indexing has finished, the default body `text`
-/// token while it runs — the iced equivalent of the egui panel's
+/// token while it runs — the iced equivalent of the legacy UI panel's
 /// `.color(ui.palette().success)`. No numeric colour is introduced
 /// ([GUD-003]).
 ///
 /// Purity: pure function of `indexing_finished`.
 pub fn indexing_status_color(indexing_finished: bool) -> Color {
     let palette = Palette::fastmd_dark();
-    to_iced_color(if indexing_finished {
+    if indexing_finished {
         palette.success
     } else {
         palette.text
-    })
+    }
 }
 
 /// Font for the indexing status label.
 ///
-/// Italic while indexing (the egui panel's `.italics()`), upright once
+/// Italic while indexing (the legacy UI panel's `.italics()`), upright once
 /// finished. iced 0.14's `Text` has no `.italic()` helper, so the style is
 /// carried on the [`Font`] struct.
 ///
@@ -510,7 +509,7 @@ impl fmt::Display for HamburgerItem {
 
 /// The deficit strategies in hamburger-menu order (UI-066).
 ///
-/// Order is load-bearing and carried over verbatim from the egui panel:
+/// Order is load-bearing and carried over verbatim from the legacy UI panel:
 /// the production default first ([`DeficitStrategy::HybridMinPenaltyWaterFill`],
 /// best G1/G2 trade-off), then the two original FTWA strategies, then the
 /// three survey algorithms from `doc/planning/table-column-width-algorithm.md`
@@ -662,10 +661,10 @@ pub struct TopBarViewModel {
 impl TopBarViewModel {
     /// Snapshots the top bar's inputs off `app`.
     ///
-    /// Reads exactly the accessors the egui panel used:
+    /// Reads exactly the accessors the legacy UI panel used:
     /// `file_processor()`, `tags()`, `config()` and
     /// `orchestrator.{background_manager, agent_panel_state}`. Chat models
-    /// keep the egui selection rule: prefer models declaring the `chat`
+    /// keep the legacy UI selection rule: prefer models declaring the `chat`
     /// use case, fall back to every configured model when none do, then
     /// sort by name.
     pub fn from_app(app: &FastMdApp) -> Self {
@@ -727,7 +726,7 @@ impl TopBarViewModel {
     }
 
     /// The file that should stay selected after the tag filter becomes
-    /// `new_tag` — the egui panel's post-filter selection rule, exposed so
+    /// `new_tag` — the legacy UI panel's post-filter selection rule, exposed so
     /// the [TASK-022] reducer can apply it from the view model alone.
     ///
     /// Delegates to [`compute_next_selected_file`].
@@ -763,7 +762,7 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
 
     let title = text(strings::APP_TITLE)
         .size(TITLE_SIZE)
-        .color(to_iced_color(palette.accent_text));
+        .color(palette.accent_text);
 
     let status = text(indexing_status_text(
         view_model.indexing_finished,

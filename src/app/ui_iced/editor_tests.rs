@@ -2,7 +2,7 @@
 //!
 //! The history stack and the action-classification rule are the test-critical
 //! parts; the view functions are asserted to build for every state they can
-//! be handed. Mirrors the egui `text_buffer_tests.rs` cases whose logic now
+//! be handed. Mirrors the legacy UI `text_buffer_tests.rs` cases whose logic now
 //! lives in this layer (front-matter round-trip, cancel discards, multibyte).
 
 use super::*;
@@ -649,7 +649,7 @@ fn status_text_reports_the_current_line_and_column() {
 #[test]
 fn undo_resets_the_caret_to_the_document_start() {
     // Pins the documented limitation: snapshots carry text only, so the
-    // caret cannot be restored the way the egui UndoStack did.
+    // caret cannot be restored the way the legacy UI UndoStack did.
     let mut vm = open_vm("one\ntwo\nthree");
     let _ = vm.apply_action(Action::Move(Motion::Down));
     assert_eq!(vm.line(), 2);

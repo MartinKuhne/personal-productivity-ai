@@ -7,7 +7,6 @@ use super::*;
 use crate::markdown::model::{InlineElem, TextStyle};
 use crate::ui::theme::Palette;
 use crate::ui_iced::table_width::{COLUMN_SPACING, TextMetrics};
-use crate::ui_iced::theme::to_iced_color;
 use iced::font::{Family, Font};
 
 fn palette() -> Palette {
@@ -190,7 +189,7 @@ fn test_header_cells_are_flagged_and_strong_coloured() {
         for span in &cell_model.spans {
             assert_eq!(
                 span.color,
-                to_iced_color(palette().text_strong),
+                palette().text_strong,
                 "header text is emphasised by colour"
             );
         }
@@ -203,7 +202,7 @@ fn test_body_cells_are_not_header_flagged_and_use_body_colour() {
     for row in model.body_rows() {
         for cell_model in row {
             assert!(!cell_model.is_header);
-            assert_eq!(cell_model.spans[0].color, to_iced_color(palette().text));
+            assert_eq!(cell_model.spans[0].color, palette().text);
         }
     }
 }
@@ -260,7 +259,7 @@ fn test_body_rows_data_indexes_are_sequential() {
 }
 
 #[test]
-fn test_stripe_parity_matches_the_egui_rule() {
+fn test_stripe_parity_matches_the_legacy_rule() {
     assert!(!TableModel::is_striped(0));
     assert!(TableModel::is_striped(1));
     assert!(!TableModel::is_striped(2));

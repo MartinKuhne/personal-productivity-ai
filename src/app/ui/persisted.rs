@@ -1,6 +1,6 @@
-//! UI state persisted across application restarts via `eframe::Storage`.
+//! UI state persisted across application restarts via the legacy `Storage` backend.
 //!
-//! Lives in the `app` module because it is egui-independent data; the
+//! Lives in the `app` module because it is framework-independent data; the
 //! UI layer is responsible for serialising it into / restoring it from
 //! the framework's storage.
 
@@ -30,7 +30,7 @@ use std::path::PathBuf;
 ///   only the meaning and write/read paths changed.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
-/// UI state persisted across application restarts via `eframe::Storage`.
+/// UI state persisted across application restarts via the legacy `Storage` backend.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PersistedUiState {
     /// On-disk schema version (see [`CURRENT_SCHEMA_VERSION`]).

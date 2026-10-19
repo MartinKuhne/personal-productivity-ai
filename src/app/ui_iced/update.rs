@@ -1,5 +1,5 @@
 //! The iced `update` reducer ([TASK-023]) — the one-to-one mirror of the
-//! egui `FastMdApp::update_ui` frame body (`src/app/ui/app/update.rs`).
+//! the legacy UI `FastMdApp::update_ui` frame body (`src/app/ui/app/update.rs`).
 //!
 //! This is the single place user intent is executed and runtime reports are
 //! folded into [`AppState`]. The panels never publish to the command bus
@@ -12,14 +12,14 @@
 //!
 //! 1. the channel-specific reducer mutates state and returns any iced
 //!    [`Task`]s the transition produced;
-//! 2. `finish_frame` runs the per-frame tail the egui loop ran after the
+//! 2. `finish_frame` runs the per-frame tail the legacy UI loop ran after the
 //!    command drain — the tree-row cache transition (`refresh_tree_cache`),
 //!    `AppOrchestrator::handle_file_selection`, the
 //!    finished-batch join (`handle_deferred_actions`), the view-model
 //!    rebuild, the follow-the-stream scroll tasks and the persisted
 //!    panel-width snapshot (`update_persisted_ui_state`).
 //!
-//! egui's four per-frame drains (`drain_config_bus`,
+//! the legacy UI's four per-frame drains (`drain_config_bus`,
 //! `drain_background_channel`, `process_file_events`,
 //! `drain_agent_event_bus`) are **event-driven** here: they run inside the
 //! [`Message::Inbound`] reducer, because in the iced build the only inbound
@@ -33,7 +33,7 @@
 //!
 //! [`Message::Command`] is published on the orchestrator's
 //! `user_command_bus` and drained/executed through
-//! `AppOrchestrator::drain_user_command_bus`, exactly as the egui frame
+//! `AppOrchestrator::drain_user_command_bus`, exactly as the legacy UI frame
 //! loop did — with three deliberate exceptions handled by `route_command`
 //! *before* the executor sees them:
 //!
@@ -41,7 +41,7 @@
 //!   dialog and is **not** executed. The confirmed intent is published later
 //!   by the dialog reducer (`reduce_dialog`), so the destructive action stays
 //!   self-contained
-//!   and replayable ([FMD-068]). egui deleted without asking; the iced port
+//!   and replayable ([FMD-068]). the legacy UI deleted without asking; the iced port
 //!   asks (new behaviour, recorded as drift in the migration map).
 //! * the dialog-opening commands (`Rename`, `Move`, `CreateDirectory`,
 //!   `CreateDocument`, `OpenBatchDialog`, `OpenToolsDialog`,
@@ -128,10 +128,10 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
 
 // ───────────────────────────── frame tail ─────────────────────────────
 
-/// The per-frame tail the egui `update_ui` ran after the drains and before
+/// The per-frame tail the legacy UI `update_ui` ran after the drains and before
 /// the panels were drawn ([TASK-023]).
 ///
-/// Order matters and mirrors egui: the tree-row cache is refreshed first so the
+/// Order matters and mirrors the legacy UI: the tree-row cache is refreshed first so the
 /// view-model rebuild reads through the cache instead of re-walking the
 /// workspace, the file-selection load is kicked off next so a selection change
 /// is in flight before the snapshot is taken, the finished batch is joined
@@ -150,7 +150,7 @@ fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     tasks
 }
 
-/// egui's tree-row cache transition (`ui/panels/left.rs:197-212`): rebuild the
+/// the legacy UI's tree-row cache transition (`ui/panels/left.rs:197-212`): rebuild the
 /// flattened rows only while the tree is dirty (or nothing is cached yet), then
 /// publish them as the cache and clear the flag.
 ///
@@ -169,7 +169,7 @@ fn refresh_tree_cache(state: &mut AppState) {
     state.app.orchestrator.selection.tree_dirty = false;
 }
 
-/// egui `FastMdApp::handle_deferred_actions` — join a batch thread that has
+/// the legacy UI `FastMdApp::handle_deferred_actions` — join a batch thread that has
 /// finished and drop its cancel flag.
 fn join_finished_batch(state: &mut AppState) {
     if let Some(handle) = state.app.orchestrator.dialogs.batch_handle.take() {
@@ -218,7 +218,7 @@ fn snap_to_end(id: &'static str) -> Task<Message> {
     operation::snap_to_end(id)
 }
 
-/// egui `FastMdApp::update_persisted_ui_state` — keep the persisted
+/// the legacy UI `FastMdApp::update_persisted_ui_state` — keep the persisted
 /// snapshot's panel widths in step with the live [`crate::ui::PanelLayout`]
 /// so the next close-time save writes current values.
 fn sync_persisted_panel_widths(state: &mut AppState) {
@@ -229,7 +229,7 @@ fn sync_persisted_panel_widths(state: &mut AppState) {
 // ───────────────────────────── command routing ─────────────────────────────
 
 /// Publishes `command` on the user-command bus and drains/executes it,
-/// exactly as the egui frame loop did ([FMD-066], [FMD-071]).
+/// exactly as the legacy UI frame loop did ([FMD-066], [FMD-071]).
 fn publish_and_drain(state: &mut AppState, command: UserCommand) {
     state.app.orchestrator.user_command_bus.publish(command);
     state.app.orchestrator.drain_user_command_bus();
@@ -346,7 +346,7 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
 
 /// Re-finds the batch dialog's previous directory / prompt picks inside the
 /// freshly built candidate lists, so a reopen follows the **value** the user
-/// chose rather than a stale positional index (the egui refresh rule,
+/// chose rather than a stale positional index (the legacy UI refresh rule,
 /// `ui/app/render.rs:102-108`).
 ///
 /// A pick that no longer resolves is deliberately left alone so
@@ -385,7 +385,7 @@ fn reindex_batch_selection(
 /// Lifts the `TextBuffer` the executor just populated into an
 /// [`EditorViewModel`] ([TASK-023]).
 ///
-/// The egui editor read `TextBuffer::content` (the parsed body) plus the
+/// The legacy UI editor read `TextBuffer::content` (the parsed body) plus the
 /// preserved front matter straight out of the buffer; rebuilding the raw
 /// text through [`DocumentContent`]'s `Display` avoids a second read from
 /// disk while giving [`EditorViewModel::open`] exactly the bytes it expects.
@@ -405,7 +405,7 @@ fn open_editor_from_buffer(state: &mut AppState, path: &Path) {
 /// The directory rows currently visible in the tree — the move dialog's
 /// destination candidates and the content search's scope.
 ///
-/// The egui left panel built the same set by walking the built workspace
+/// The legacy UI left panel built the same set by walking the built workspace
 /// tree (`ui/panels/left.rs:247-249`); the flattened row snapshot is the
 /// iced equivalent, so collapsed directories are excluded exactly as they
 /// were there.
@@ -440,7 +440,7 @@ fn reduce_window(state: &mut AppState, message: WindowMessage) -> Task<Message> 
         WindowMessage::CloseSnapshotCaptured(snapshot) => {
             // DEC-006 phase 2: FIRST persist, THEN close. Panel widths are
             // copied from the live `PanelLayout` right before serialising —
-            // the faithful port of the egui `save()` sync
+            // the faithful port of the legacy UI `save()` sync
             // (`ui/app/mod.rs:251-252`).
             state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
             state.app.persisted_ui_state.right_panel_width = state.app.layout.right_panel_width;
@@ -502,7 +502,7 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
     }
 }
 
-/// The egui left panel's auto-fit-on-dirty transition
+/// The legacy UI left panel's auto-fit-on-dirty transition
 /// (`ui/panels/left.rs:139-186`), reduced from an explicit
 /// [`LayoutMessage::TreeAutoFit`] so the width change is replayable
 /// ([TASK-023]).
@@ -555,7 +555,7 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
             Vec::new()
         }
         TreeMessage::DeleteSelectedRequested { paths } => {
-            // egui parity (`ui/tree/render.rs:108-115`): fan out one
+            // legacy parity (`ui/tree/render.rs:108-115`): fan out one
             // `Delete` per path and clear the selection. Deliberately
             // un-confirmed — `DialogKind::DeleteConfirm` carries a single
             // path, so a multi-select cannot route through it. Recorded as
@@ -584,7 +584,7 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
     state.overlay.context_menu = Some(ContextMenu { anchor, items });
 }
 
-/// egui `RUN_AS_PROMPT_ACTION`: read the file, take the body as the prompt
+/// the legacy UI `RUN_AS_PROMPT_ACTION`: read the file, take the body as the prompt
 /// and run it against that file (`ui/tree/render.rs:143-160`).
 fn run_file_as_prompt(state: &mut AppState, path: &PathBuf) {
     match std::fs::read_to_string(path) {
@@ -610,7 +610,7 @@ fn run_file_as_prompt(state: &mut AppState, path: &PathBuf) {
     }
 }
 
-/// egui `publish_skill` (`ui/tree/render.rs:311-337`): read a skill file
+/// the legacy UI `publish_skill` (`ui/tree/render.rs:311-337`): read a skill file
 /// and run its body against the menu's target.
 fn run_skill(
     state: &mut AppState,
@@ -641,7 +641,7 @@ fn run_skill(
     }
 }
 
-/// egui `PRINT_ACTION` (`ui/tree/render.rs:161-173`): hand the job to the
+/// the legacy UI `PRINT_ACTION` (`ui/tree/render.rs:161-173`): hand the job to the
 /// background channel. There is no `UserCommand::Print`, so the reducer owns it.
 fn print_file(state: &mut AppState, path: &Path) {
     let tx = state.app.orchestrator.tx.clone();
@@ -694,7 +694,7 @@ fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Messa
     }
 }
 
-/// egui `TextBuffer::save` (`ui/text_buffer.rs:329-358`): write the buffer
+/// the legacy UI `TextBuffer::save` (`ui/text_buffer.rs:329-358`): write the buffer
 /// (front matter re-attached), publish the update so the tree and tag
 /// manager refresh, then close (UI-044, UI-045).
 fn save_editor(state: &mut AppState, path: &PathBuf) {
@@ -729,7 +729,7 @@ fn save_editor(state: &mut AppState, path: &PathBuf) {
 /// `text_buffer.is_open` and `tabs.loaded_path` both have to go: the file
 /// reload rule in `AppOrchestrator::process_file_events`
 /// (`orchestrator.rs:144-152`) only drops a stale loaded document while
-/// the editor is closed, and egui's `render.rs:43-45` cleared the same pair.
+/// the editor is closed, and the legacy UI's `render.rs:43-45` cleared the same pair.
 fn close_editor(state: &mut AppState) {
     state.overlay.editor = None;
     state.app.orchestrator.text_buffer.is_open = false;
@@ -799,7 +799,7 @@ fn reduce_search(state: &mut AppState, message: SearchMessage) -> Vec<Task<Messa
 /// [`SearchMessage::ResultsReady`] ([FMD-060], [FMD-061]).
 ///
 /// The scan scope is the currently visible tree directories, matching the
-/// egui panel's `apply_with_allowed_dirs` call
+/// the legacy UI panel's `apply_with_allowed_dirs` call
 /// (`ui/panels/left.rs:246-253`).
 fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
     let all_files = state.app.orchestrator.file_processor.all_files.clone();
@@ -824,7 +824,7 @@ fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
 /// Background-logs panel reductions ([TASK-016], UI-047).
 ///
 /// The filter lives in the shared `BackgroundLogs` ring buffer, which the
-/// egui viewer also mutated — so the reducer writes it there and the
+/// the legacy UI viewer also mutated — so the reducer writes it there and the
 /// view-model picks it up on the next rebuild.
 fn reduce_logs(state: &mut AppState, message: LogsMessage) {
     match message {
@@ -868,13 +868,13 @@ fn reduce_theme(state: &mut AppState, message: ThemeMessage) {
         ThemeMessage::ScaleChanged { multiplier } => {
             // A near-unity or out-of-range multiplier is stored as `None`
             // so a fresh install carries no redundant value and one
-            // corrupt entry self-heals (egui `persist_font_scale`).
+            // corrupt entry self-heals (the legacy UI `persist_font_scale`).
             state.app.persisted_ui_state.font_size_scale = sanitise_scale(multiplier);
         }
     }
 }
 
-/// egui `sanitise_font_scale` + the near-unity collapse
+/// the legacy UI `sanitise_font_scale` + the near-unity collapse
 /// (`ui/app/update.rs:307-320`), expressed against the same bounds.
 fn sanitise_scale(value: f32) -> Option<f32> {
     const MIN: f32 = 0.5;
@@ -897,7 +897,7 @@ fn reduce_render(state: &mut AppState, message: RenderMessage) -> Vec<Task<Messa
             task_index,
             checked,
         } => {
-            // egui mutated the open document in memory only
+            // the legacy UI mutated the open document in memory only
             // (`ui/panels/center.rs:382-383`); no file write.
             if state.app.orchestrator.tabs.loaded_path.as_deref() == Some(document.as_path()) {
                 crate::markdown::document::apply_task_toggle(
@@ -914,9 +914,9 @@ fn reduce_render(state: &mut AppState, message: RenderMessage) -> Vec<Task<Messa
     }
 }
 
-/// egui `FastMdApp::handle_open_link` (`ui/app/update.rs:115-165`),
+/// the legacy UI `FastMdApp::handle_open_link` (`ui/app/update.rs:115-165`),
 /// reduced from a [`RenderMessage::LinkActivated`] instead of an
-/// `egui::OutputCommand::OpenUrl` drain.
+/// `OutputCommand::OpenUrl` drain.
 fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
     let current_file = source_file.or_else(|| state.app.selection().selected_file().cloned());
     let content_roots: Vec<PathBuf> = state
@@ -1081,7 +1081,7 @@ fn reduce_agent_debug(state: &mut AppState, message: AgentDebugMessage) -> Vec<T
 
 /// Inbound *background → UI* reductions ([TASK-019], FMD-065..FMD-067).
 ///
-/// These replace egui's per-frame drains. Each arm runs the same
+/// These replace the legacy UI's per-frame drains. Each arm runs the same
 /// orchestrator routine the frame loop called, triggered by the
 /// [TASK-019] bridge message that names the bus instead.
 fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
@@ -1093,7 +1093,7 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
             // The bridge is the single inbound path ([FMD-065]), so the event
             // the message carries is applied here rather than re-read off a
             // second subscriber. The extra `process_file_events` call keeps the
-            // `DirectoryTracker` drain the egui frame ran per frame alive.
+            // `DirectoryTracker` drain the legacy UI frame ran per frame alive.
             state.app.orchestrator.apply_file_event(event);
             state.app.orchestrator.process_file_events();
         }
@@ -1152,7 +1152,7 @@ fn apply_config_arrival(state: &mut AppState, config: &AppConfig) {
     );
 }
 
-/// egui's `BroadcastRecvError::Lagged(n)` arms (`orchestrator.rs:96-103`,
+/// the legacy UI's `BroadcastRecvError::Lagged(n)` arms (`orchestrator.rs:96-103`,
 /// `:435-449`): report the loss loudly and, for the agent stream, leave the
 /// visible truncation marker the transcript reducer owns.
 fn handle_bus_lag(state: &mut AppState, source: BusSource, count: u64) {

@@ -2,16 +2,16 @@
 //!
 //! The iced build has no `ui_iced/panels/right.rs` **view** yet — the ToC
 //! pane body is rendered inline by [`view::toc_body`](crate::ui_iced::view),
-//! so this module owns only the two *pure* rules the egui ToC panel owned.
+//! so this module owns only the two *pure* rules the legacy UI ToC panel owned.
 //! They are copied here (not shared) so `ui_iced` no longer depends on the
-//! egui `ui/panels/right.rs` file that [TASK-029b] deletes
+//! the legacy UI `ui/panels/right.rs` file that [TASK-029b] deletes
 //! ([TASK-029] self-containment).
 //!
-//! Both helpers are **egui-free by construction**: their signatures mention
+//! Both helpers are **framework-free by construction**: their signatures mention
 //! only `bool`, [`crate::markdown::ToCEntry`] and `String`, so the copy is
-//! byte-identical to the egui original apart from this header. The egui
+//! byte-identical to the legacy UI original apart from this header. The legacy UI
 //! panel keeps its own copy until Phase 5 removes it; the transient
-//! duplication is intentional and dies with the egui tree.
+//! duplication is intentional and dies with the legacy UI tree.
 //!
 //! [`should_show_panel`] is re-exported from [`crate::ui_iced::layout`] to
 //! preserve the public path [TASK-010] established, so
@@ -26,7 +26,7 @@ mod tests;
 
 /// Determines if the right panel should be shown based on application state.
 ///
-/// Copied from the egui ToC panel for the zero-egui migration
+/// Copied from the legacy UI ToC panel for the framework-free migration
 /// ([TASK-029]); the rule is unchanged.
 ///
 /// Precondition: None.
@@ -40,7 +40,7 @@ pub fn should_show_panel(has_toc: bool, has_selected_file: bool) -> bool {
 /// Resolves a markdown link anchor (e.g. `#Getting-Started`) to the concrete
 /// heading id used by the renderer.
 ///
-/// Copied from the egui ToC panel for the zero-egui migration ([TASK-029]);
+/// Copied from the legacy UI ToC panel for the framework-free migration ([TASK-029]);
 /// the matching rule is unchanged.
 ///
 /// Applies the same fuzzy matching in both directions — case-insensitive, and

@@ -1,8 +1,8 @@
-//! Path helpers — safe-basename validation, Windows `PATH` executable resolution, and
-//! PDF-backing detection for Markdown files.
+//! Path helpers — safe-basename validation, Windows `PATH` executable resolution,
+//! PDF-backing detection for Markdown files, and new-document naming/writing.
 
 use std::borrow::Cow;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 /// Purpose: Validate that a user-supplied name is a single safe path segment (no traversal, no separators).
 /// Inputs: `name` (the trimmed candidate basename).
@@ -144,165 +144,58 @@ fn resolve_in_dirs(
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_safe_basename_accepts_normal_names() {
-        assert!(is_safe_basename("file.md"));
-        assert!(is_safe_basename("a"));
-        assert!(is_safe_basename("with spaces.txt"));
-        assert!(is_safe_basename("file.name.with.dots"));
-    }
-
-    #[test]
-    fn test_is_safe_basename_rejects_empty() {
-        assert!(!is_safe_basename(""));
-    }
-
-    #[test]
-    fn test_is_safe_basename_rejects_separators() {
-        assert!(!is_safe_basename("a/b"));
-        assert!(!is_safe_basename(r"a\b"));
-        assert!(!is_safe_basename("/etc/passwd"));
-        assert!(!is_safe_basename(r"\windows\system32"));
-    }
-
-    #[test]
-    fn test_is_safe_basename_rejects_traversal() {
-        assert!(!is_safe_basename(".."));
-        assert!(!is_safe_basename("../etc"));
-        assert!(!is_safe_basename("a/../b"));
-    }
-
-    #[test]
-    fn test_resolve_executable_path_passthrough_on_any_platform() {
-        // Absolute paths, names with separators, and names with an
-        // extension all pass through unchanged on every platform.
-        for cmd in [
-            "cmd.exe",
-            r"C:\Windows\System32\cmd.exe",
-            "tools/mcp",
-            "foo bar",
-        ] {
-            let resolved = resolve_executable_path(cmd);
-            assert_eq!(resolved.as_ref(), cmd);
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_resolve_windows_finds_cmd_in_temp_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let tool = dir.path().join("hello.cmd");
-        std::fs::write(&tool, "@echo off\r\n").unwrap();
-
-        let dirs = vec![dir.path().to_path_buf()];
-        let extensions = vec![".EXE".to_string(), ".CMD".to_string()];
-        let resolved =
-            resolve_in_dirs("hello", &dirs, &extensions).expect("hello.cmd should resolve");
-        assert!(
-            resolved.eq_ignore_ascii_case(tool.to_string_lossy().as_ref()),
-            "resolved: {resolved}"
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_resolve_windows_prefers_pathext_order() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("app.exe"), "MZ").unwrap();
-        std::fs::write(dir.path().join("app.cmd"), "@echo off\r\n").unwrap();
-
-        let dirs = vec![dir.path().to_path_buf()];
-
-        let exe_first = resolve_in_dirs("app", &dirs, &[".EXE".to_string(), ".CMD".to_string()])
-            .expect("app.exe should be found first");
-        assert!(exe_first.to_ascii_lowercase().ends_with("app.exe"));
-
-        let cmd_first = resolve_in_dirs("app", &dirs, &[".CMD".to_string(), ".EXE".to_string()])
-            .expect("app.cmd should be found first");
-        assert!(cmd_first.to_ascii_lowercase().ends_with("app.cmd"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_resolve_windows_missing_command_returns_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let dirs = vec![dir.path().to_path_buf()];
-        assert!(resolve_in_dirs("no_such_tool_xyz", &dirs, &[".EXE".to_string()]).is_none());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_resolve_windows_unchanged_when_not_found() {
-        let unique = format!(
-            "fastmd_no_such_binary_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        let resolved = resolve_executable_path(&unique);
-        assert_eq!(resolved.as_ref(), unique.as_str());
-    }
-
-    // ---- has_pdf_backing ----
-
-    #[test]
-    fn test_has_pdf_backing_returns_true_when_pdf_sibling_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        let md_path = dir.path().join("doc.md");
-        let pdf_path = dir.path().join("doc.pdf");
-        std::fs::write(&md_path, "# Hello").unwrap();
-        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
-        assert!(has_pdf_backing(&md_path));
-    }
-
-    #[test]
-    fn test_has_pdf_backing_returns_false_when_no_pdf_sibling() {
-        let dir = tempfile::tempdir().unwrap();
-        let md_path = dir.path().join("doc.md");
-        std::fs::write(&md_path, "# Hello").unwrap();
-        assert!(!has_pdf_backing(&md_path));
-    }
-
-    #[test]
-    fn test_has_pdf_backing_returns_false_for_non_md_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let pdf_path = dir.path().join("doc.pdf");
-        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
-        assert!(!has_pdf_backing(&pdf_path));
-    }
-
-    #[test]
-    fn test_has_pdf_backing_returns_false_for_nonexistent_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let md_path = dir.path().join("nonexistent.md");
-        assert!(!has_pdf_backing(&md_path));
-    }
-
-    #[test]
-    fn test_has_pdf_backing_is_case_insensitive() {
-        let dir = tempfile::tempdir().unwrap();
-        let md_path = dir.path().join("doc.MD");
-        let pdf_path = dir.path().join("doc.pdf");
-        std::fs::write(&md_path, "# Hello").unwrap();
-        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
-        assert!(has_pdf_backing(&md_path));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn test_resolve_windows_cmd_resolves_to_absolute_exe() {
-        // `cmd` is resolvable through PATH on every normal Windows
-        // install (System32 is on PATH). If for some reason it is not,
-        // resolution degrades to passthrough, which is still correct.
-        let resolved = resolve_executable_path("cmd");
-        if resolved.as_ref() != "cmd" {
-            assert!(Path::new(resolved.as_ref()).is_absolute());
-            assert!(resolved.to_ascii_lowercase().ends_with("cmd.exe"));
-        }
+/// Append `.md` to a user-entered document name when it has no
+/// extension, so the created file is always a markdown document.
+///
+/// Relocated from the deleted `ui/modals.rs` by [TASK-029b]; the
+/// create-document command path is its only consumer.
+#[must_use]
+pub fn unique_document_name(entered: &str) -> String {
+    if Path::new(entered).extension().is_some() {
+        entered.to_owned()
+    } else {
+        format!("{}.md", entered)
     }
 }
+
+/// Write a new markdown document into `parent` using the
+/// user-entered name (`.md` appended when the name has no extension).
+/// If a file with the preferred name already exists, a
+/// `<stem> <date-time><ext>` name is generated instead so the created
+/// file is always unique. Returns the created file's path.
+///
+/// Relocated from the deleted `ui/modals.rs` by [TASK-029b].
+pub fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> {
+    let file_name = unique_document_name(entered);
+    let mut new_path = parent.join(&file_name);
+    if new_path.exists() {
+        new_path = parent.join(date_suffixed_name(&file_name));
+    }
+    std::fs::write(&new_path, "")?;
+    Ok(new_path)
+}
+
+/// Build `<stem> <timestamp><ext>` for a file name, used when the
+/// preferred document name already exists.
+///
+/// Relocated from the deleted `ui/modals.rs` by [TASK-029b].
+#[must_use]
+pub fn date_suffixed_name(file_name: &str) -> String {
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(file_name);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+    let now = chrono::Local::now();
+    let date_str = now.format("%Y-%m-%d %H-%M-%S");
+    format!("{} {}{}", stem, date_str, ext)
+}
+
+#[cfg(test)]
+#[path = "path_tests.rs"]
+mod tests;

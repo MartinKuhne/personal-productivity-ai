@@ -1,4 +1,4 @@
-//! Tests for `ui/render/agent_render.rs`.
+//! Tests for `ui/agent/agent_render.rs`.
 
 use super::*;
 

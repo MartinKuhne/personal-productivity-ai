@@ -1,7 +1,7 @@
 //! Shared FastMD logo mark for the iced layer ([TASK-020]).
 //!
-//! The egui UI **vector-paints** the "Document + Bolt" badge with egui
-//! painter primitives — `crate::ui::logo::paint_logo` draws the badge, the
+//! The retired UI **vector-painted** the "Document + Bolt" badge with the legacy
+//! painter primitives — `ui/logo.rs::paint_logo` drew the badge, the
 //! document polygon, the folded corner, the markdown lines and the bolt
 //! through `Painter::rect_filled` / `Shape::convex_polygon` /
 //! `line_segment`. Those primitives have no iced equivalent under the
@@ -32,7 +32,7 @@
 //! None of the three is enabled, and adding a cargo feature is a build-level
 //! decision for the orchestrator ([TASK-020] constraint), not a view-layer
 //! one. Until one is approved, [`logo_mark`] is the single source of the
-//! stand-in and `crate::ui::logo::paint_logo` remains egui-only.
+//! stand-in and the retired `ui/logo.rs::paint_logo` is gone ([TASK-029b]).
 //!
 //! Unit tests live in the sibling `logo_tests.rs` sidecar.
 
@@ -43,7 +43,6 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
 use crate::ui_iced::message::Message;
-use crate::ui_iced::theme::to_iced_color;
 
 #[cfg(test)]
 #[path = "logo_tests.rs"]
@@ -51,11 +50,11 @@ mod tests;
 
 /// Logical point size of the top-bar logo mark.
 ///
-/// Parity with the `egui::vec2(20.0, 20.0)` box the egui toolbar
-/// allocates for `crate::ui::logo::paint_logo`
-/// (`src/app/ui/panels/top.rs:142`). The iced mark is a 20pt *glyph*
-/// rather than a 20pt *box*, so the drawn artwork is slightly smaller
-/// than the egui badge — inherent to the glyph stand-in.
+/// Parity with the `vec2(20.0, 20.0)` box the retired toolbar
+/// allocated for its vector logo
+/// (`src/app/ui/panels/top.rs:142`, deleted by [TASK-029b]). The iced mark is
+/// a 20pt *glyph* rather than a 20pt *box*, so the drawn artwork is slightly
+/// smaller than the retired badge — inherent to the glyph stand-in.
 pub const LOGO_MARK_SIZE: f32 = 20.0;
 
 /// The glyph standing in for the "Document + Bolt" badge.
@@ -70,12 +69,12 @@ pub fn logo_glyph() -> &'static str {
 
 /// The colour the mark is painted in.
 ///
-/// The `accent_text` palette token, converted once through
-/// [`to_iced_color`] — no numeric colour literal appears here
+/// The `accent_text` palette token read straight from
+/// [`crate::ui::theme::Palette`] - no numeric colour literal appears here
 /// ([GUD-003]).
 #[must_use]
 pub fn logo_color() -> Color {
-    to_iced_color(Palette::fastmd_dark().accent_text)
+    Palette::fastmd_dark().accent_text
 }
 
 /// The font handle the mark is drawn with.

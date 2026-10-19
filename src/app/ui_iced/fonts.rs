@@ -1,11 +1,11 @@
 //! Iced font bootstrap for the FastMD user interface ([TASK-007],
 //! `doc/planning/iced.md`).
 //!
-//! Loads the same font collections the egui build installs via
-//! `egui::FontDefinitions` (`crate::ui::fonts`): the embedded Phosphor icon
+//! Loads the same font collections the legacy UI build installs via
+//! `FontDefinitions` (`crate::ui::fonts`): the embedded Phosphor icon
 //! font and the platform symbol-fallback font, this time through
 //! `iced::font::load(bytes)` — registered with the cosmic-text runtime font
-//! system. The byte-level inventory is shared with the egui path
+//! system. The byte-level inventory is shared with the legacy UI path
 //! (`crate::ui::fonts::{PHOSPHOR_REGULAR_FONT, load_fallback_font}`), so
 //! there is exactly one font inventory ([RUST-023]).
 //!
@@ -17,7 +17,7 @@
 /// Family name under which the embedded Phosphor icon font becomes
 /// addressable in iced (`iced::Font::with_name`) once loaded.
 ///
-/// Mirrors `crate::ui::fonts`' egui registration key `"phosphor"`.
+/// Mirrors `crate::ui::fonts`' the legacy UI registration key `"phosphor"`.
 pub const PHOSPHOR_FONT_NAME: &str = "phosphor";
 
 /// Returns the font collections to register with the iced runtime at boot.

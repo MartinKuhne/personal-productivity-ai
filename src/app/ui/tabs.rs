@@ -35,8 +35,8 @@ pub struct Tabs {
     pub toc: Vec<ToCEntry>,
     /// Pending scroll target as a stable string id (matches
     /// `ToCEntry::id`). The center panel converts it to an
-    /// `egui::Id` at render time. Stored as a string so the
-    /// manager is egui-independent.
+    /// `Id` at render time. Stored as a string so the
+    /// manager is framework-independent.
     pub scroll_to_header_id: Option<String>,
     /// Pending search jump target query. The center panel scrolls
     /// to the first occurrence of this query within the document,
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_toc_entry_id_is_stable_string() {
-        // The manager itself never touches egui::Id. Verify
+        // The manager itself never touches Id. Verify
         // the contract: ToCEntry.id is a plain String.
         let e = ToCEntry::new("Intro", 1, "Intro");
         assert_eq!(e.id, "Intro");
@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_scroll_to_header_id_is_optional_string() {
-        // Confirm the field is an egui-free Option<String>.
+        // Confirm the field is an framework-free Option<String>.
         let mut m = Tabs::new();
         assert_eq!(m.scroll_to_header_id, None);
         m.scroll_to_header_id = Some("Intro".to_string());

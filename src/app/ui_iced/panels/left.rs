@@ -32,27 +32,27 @@
 //!
 //! # Relocated helpers ([TASK-029])
 //!
-//! [`build_workspace_tree`] — the `TreeNode` builder the egui panel owned —
+//! [`build_workspace_tree`] — the `TreeNode` builder the legacy UI panel owned —
 //! used to be called across the boundary at
-//! `crate::ui::panels::left::build_workspace_tree`, a file [TASK-029b]
-//! deletes. It is copied into this module together with its three private
+//! `crate::ui::panels::left::build_workspace_tree`, a module [TASK-029b]
+//! deleted. It is copied into this module together with its three private
 //! helpers (`prune_empty_dirs`, `library_for_path`,
-//! `insert_path_into_tree`). All four are **egui-free**: they touch only
-//! [`TreeNode`], [`ContentLibrary`] and `Path`, never `egui`/`eframe`. The
+//! `insert_path_into_tree`). All four are **framework-free**: they touch only
+//! [`TreeNode`], [`ContentLibrary`] and `Path`, never framework. The
 //! `TreeNode` type itself lives in `crate::ui::app`, a KEPT file, so it is
-//! imported rather than duplicated. The egui panel keeps its own copy until
+//! imported rather than duplicated. The legacy UI panel keeps its own copy until
 //! Phase 5.
 //!
-//! Only what egui bound to `egui::Ui`/`egui::Context` is re-typed here:
+//! Only what the legacy UI bound to `Ui`/`Context` is re-typed here:
 //! the width measurement, the row labels, the click→command mapping and the
 //! context-menu item list.
 //!
 //! # UI-016 auto-fit is a pure label→width function
 //!
-//! egui measured real pixels through `egui::Context`
+//! the legacy UI measured real pixels through `Context`
 //! (`ui/panels/left.rs:145-177`). A pure view has no font atlas to ask, so
 //! [`auto_fit_width`] takes an **injected measurer** (`Fn(&str) -> f32`) and
-//! is otherwise exactly the egui formula: `depth × 18 + label_width + 40`,
+//! is otherwise exactly the legacy UI formula: `depth × 18 + label_width + 40`,
 //! clamped to `[LEFT_PANEL_MIN_WIDTH, viewport × LEFT_PANEL_MAX_WIDTH_FRACTION]`.
 //! **Real pixel measurement is not achievable in a pure view** — iced 0.14
 //! only exposes text metrics after layout, from inside `Widget::layout`
@@ -63,13 +63,13 @@
 //! # Deferred context-menu intent
 //!
 //! "Run as prompt…", "Print…" and the multi-select "Delete" read files or
-//! fan out inside the egui click handler. The panel emits the matching
+//! fan out inside the legacy UI click handler. The panel emits the matching
 //! [`TreeMessage`] variant instead and lets the reducer do the work — see
 //! the [`message`](crate::ui_iced::message) module header.
 //!
 //! # Known gaps (flagged in the TASK-012 verification log)
 //!
-//! * **Modifier-aware multi-select (UI-022).** egui computed `multi` from
+//! * **Modifier-aware multi-select (UI-022).** the legacy UI computed `multi` from
 //!   `ui.input(|i| i.modifiers)` at click time. iced's `MouseArea::on_press`
 //!   carries no modifier state (`mouse_area.rs:38-41`), so the panel emits
 //!   [`LeftPanelViewModel::multi_select`], which `from_app` sets to `false`
@@ -77,11 +77,11 @@
 //!   tracking `iced::Event::Keyboard(KeyEvent { modifiers, .. })` into that
 //!   field; until then every click is a single-select.
 //! * **Tooltips.** iced 0.14 has no tooltip primitive under DEC-005
-//!   (`iced_aw` is ruled out), so the search/clear buttons' egui tooltips
+//!   (`iced_aw` is ruled out), so the search/clear buttons' the legacy UI tooltips
 //!   ([`strings::SEARCH_TRIGGER_TOOLTIP`],
 //!   [`strings::SEARCH_CLEAR_TOOLTIP`]) are not rendered.
 //! * **Search box position.** UI-050 says "at the bottom of the directory
-//!   tree pane"; the egui build has always rendered it directly under the
+//!   tree pane"; the legacy UI build has always rendered it directly under the
 //!   header, and this port mirrors the shipped behaviour rather than the
 //!   spec wording ([RUST-041] drift note).
 //!
@@ -112,7 +112,6 @@ use crate::ui::tree_search::SearchResultEntry;
 use crate::ui_iced::layout::clamped_width;
 use crate::ui_iced::message::{LayoutMessage, Message, SearchMessage, TreeMessage};
 use crate::ui_iced::overlay::MenuItem;
-use crate::ui_iced::theme::to_iced_color;
 
 use super::top::phosphor_font;
 
@@ -133,27 +132,27 @@ const FOLDER_SKILLS_SUBDIR: &str = "Folder";
 /// literal ([RUST-021]).
 pub const NOTE_SKILLS_SUBDIR: &str = "Note";
 
-/// Logical point size of the panel heading (egui parity: `16.0`).
+/// Logical point size of the panel heading (legacy parity: `16.0`).
 pub const HEADER_SIZE: f32 = 16.0;
 
-/// Logical point size of tree rows and search-result titles (egui parity:
+/// Logical point size of tree rows and search-result titles (legacy parity:
 /// the `FontId::proportional(14.0)` the width pass measured at).
 pub const ROW_TEXT_SIZE: f32 = 14.0;
 
-/// Logical point size of the secondary search-result lines (egui parity:
+/// Logical point size of the secondary search-result lines (legacy parity:
 /// `11.0`).
 pub const SECONDARY_TEXT_SIZE: f32 = 11.0;
 
 /// Horizontal indent added per tree depth level, in logical points
-/// (egui parity: `18.0`, `ui/panels/left.rs:169`).
+/// (legacy parity: `18.0`, `ui/panels/left.rs:169`).
 pub const ROW_INDENT_PER_DEPTH: f32 = 18.0;
 
 /// Deepest indent that is drawn; deeper rows clamp to it, guarding against
-/// unbounded indentation (egui parity: `50`, `ui/tree/render.rs:450`).
+/// unbounded indentation (legacy parity: `50`, `ui/tree/render.rs:450`).
 pub const MAX_ROW_INDENT_DEPTH: usize = 50;
 
 /// Width added on top of a measured label for row padding, the selection
-/// frame and the scroll gutter (egui parity: `40.0`).
+/// frame and the scroll gutter (legacy parity: `40.0`).
 pub const ROW_WIDTH_SLACK: f32 = 40.0;
 
 /// Padding inside the panel body.
@@ -165,13 +164,13 @@ pub const ROW_PADDING_Y: f32 = 2.0;
 /// Horizontal padding of one tree row, before the depth indent is added.
 pub const ROW_PADDING_X: f32 = 6.0;
 
-/// Slot height of one search-result card (egui parity: `52.0`, the
-/// `show_rows` slot the egui panel virtualised against).
+/// Slot height of one search-result card (legacy parity: `52.0`, the
+/// `show_rows` slot the legacy UI panel virtualised against).
 pub const SEARCH_ROW_HEIGHT: f32 = 52.0;
 
 /// Icon slot for a file row. Directories draw a caret; a file gets a blank
 /// slot of the same width so the two label shapes stay aligned — the exact
-/// string the egui width measurement used (`ui/panels/left.rs:157`).
+/// string the legacy UI width measurement used (`ui/panels/left.rs:157`).
 pub const FILE_ROW_ICON: &str = " ";
 
 /// The glyph that opens a directory row's caret slot.
@@ -192,7 +191,7 @@ pub fn row_icon(is_dir: bool, is_expanded: bool) -> &'static str {
 
 /// The label a row renders: `"<icon> <name>"`.
 ///
-/// Byte-identical to the string the egui auto-fit pass measured
+/// Byte-identical to the string the legacy UI auto-fit pass measured
 /// (`ui/panels/left.rs:159`), so the same measurer can be swapped between
 /// the two builds and produce the same width.
 ///
@@ -232,7 +231,7 @@ pub fn longest_row_width<'a>(
 ///
 /// Shares [`clamped_width`] with the pane-grid resize reduction, so the
 /// degenerate tiny-viewport case behaves identically in both paths: when the
-/// 20 % cap falls *below* the minimum, the minimum wins. (egui's inline
+/// 20 % cap falls *below* the minimum, the minimum wins. (the legacy UI's inline
 /// version produced the cap there instead — the iced layer deliberately
 /// keeps one rule for every UI-016 width.)
 ///
@@ -261,7 +260,7 @@ pub fn panel_width(remembered: Option<f32>, viewport_width: f32) -> f32 {
 
 /// Whether a row renders as selected.
 ///
-/// Mirrors the egui row exactly: **directory rows are never highlighted**
+/// Mirrors the legacy UI row exactly: **directory rows are never highlighted**
 /// (`selectable_label(false, ..)`, `ui/tree/render.rs:454`); a file row is
 /// selected when it is in the multi-select set or is the single selected
 /// file (`ui/tree/render.rs:456-457`).
@@ -280,7 +279,7 @@ pub fn is_row_selected(
 ///
 /// Re-typed from `apply_file_row_click` / `apply_directory_row_click`
 /// (`ui/tree/handlers.rs:51-69`). Those originals take
-/// `&mut TreeNodeContext`, which carries `egui::Modifiers`, so they are not
+/// `&mut TreeNodeContext`, which carries `Modifiers`, so they are not
 /// framework-free; the iced layer takes the `multi` flag explicitly instead
 /// of reading modifier state.
 ///
@@ -302,9 +301,9 @@ pub fn row_click_command(row: &FlatRow, multi: bool) -> UserCommand {
 
 /// The intent a double-click on a row produces.
 ///
-/// egui parity: double-click **opens a file** in the editor
+/// legacy parity: double-click **opens a file** in the editor
 /// (`ui/tree/render.rs:414-418`) and is a deliberate **no-op on a
-/// directory** — egui fires `clicked()` *and* `double_clicked()` for one
+/// directory** — the legacy UI fires `clicked()` *and* `double_clicked()` for one
 /// double-click, so a second toggle would undo the first (render-audit
 /// P1-9, `ui/tree/render.rs:394-397`).
 ///
@@ -318,7 +317,7 @@ pub fn row_double_click_command(row: &FlatRow) -> Option<UserCommand> {
     }
 }
 
-/// Context-menu rows for a **directory** row, in egui menu order
+/// Context-menu rows for a **directory** row, in the legacy UI menu order
 /// (UI-006; `ui/tree/render.rs:18-96`), followed by the VFS-122 folder
 /// skills.
 ///
@@ -374,11 +373,11 @@ pub fn directory_menu_items(path: &Path, folder_skills: &[SkillFile]) -> Vec<Men
     items
 }
 
-/// Context-menu rows for a **single-selected file**, in egui menu order
+/// Context-menu rows for a **single-selected file**, in the legacy UI menu order
 /// (UI-007, UI-008, UI-009..UI-014, UI-020;
 /// `ui/tree/render.rs:120-303`).
 ///
-/// `typst_available` gates "Save as PDF…" exactly as egui does
+/// `typst_available` gates "Save as PDF…" exactly as the legacy UI does
 /// (`ui/tree/render.rs:194`): the row is absent, not disabled, when the
 /// `typst` CLI is missing.
 ///
@@ -488,7 +487,7 @@ pub struct MenuContext<'a> {
 }
 
 /// The context-menu rows for `row`, choosing the directory / multi-select /
-/// single-file menu by the same rule egui uses
+/// single-file menu by the same rule the legacy UI uses
 /// (`ui/tree/render.rs:420-424`: the multi-select menu only when more than
 /// one file is selected *and* this path is one of them).
 ///
@@ -513,7 +512,7 @@ pub fn context_menu_items(
 /// Resolves the skill directory for `sub` from the "System" content
 /// library, falling back to `fallback` when that library is not configured.
 ///
-/// This is the **read-only** path the egui menu used
+/// This is the **read-only** path the legacy UI menu used
 /// (`ui/tree/render.rs:69-81`): `AppConfig::list_folder_skills()` /
 /// `list_note_skills()` create their directories as a side effect, which a
 /// per-frame view must not do ([RUST-006]).
@@ -539,7 +538,7 @@ pub fn skill_dir(
 /// The flattened rows the panel renders.
 ///
 /// Prefers `FastMdApp::cached_tree_rows` while the tree is clean — the same
-/// cache the egui panel used — but never writes to it: populating and
+/// cache the legacy UI panel used — but never writes to it: populating and
 /// invalidating the cache is reducer state ([TASK-022]), and a view that
 /// mutated it would break the pure-view rule.
 ///
@@ -561,18 +560,18 @@ pub fn tree_rows(app: &FastMdApp) -> Arc<Vec<FlatRow>> {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace-tree construction — relocated from the egui left panel
+// Workspace-tree construction — relocated from the legacy UI left panel
 // ([TASK-029], `src/app/ui/panels/left.rs:18-133`).
 //
-// All four functions are egui-free: their signatures and bodies mention only
+// All four functions are framework-free: their signatures and bodies mention only
 // `TreeNode` (owned by the KEPT `crate::ui::app`), `ContentLibrary`,
-// `Path`/`PathBuf` and `String`. The egui panel keeps its own copy until
+// `Path`/`PathBuf` and `String`. The legacy UI panel keeps its own copy until
 // [TASK-029b] removes it.
 // ---------------------------------------------------------------------------
 
 /// Recursively removes directory nodes that do not contain any child files or subdirectories.
 ///
-/// Relocated from the egui left panel for the zero-egui migration
+/// Relocated from the legacy UI left panel for the framework-free migration
 /// ([TASK-029]); the UI-018 prune rule is unchanged.
 fn prune_empty_dirs(node: &mut TreeNode) {
     node.children.retain(|_, child| {
@@ -588,7 +587,7 @@ fn prune_empty_dirs(node: &mut TreeNode) {
 /// Finds the content library whose root is a prefix of `path`, returning the
 /// library and the library-relative remainder of the path.
 ///
-/// Relocated from the egui left panel for the zero-egui migration
+/// Relocated from the legacy UI left panel for the framework-free migration
 /// ([TASK-029]).
 fn library_for_path<'a>(
     libraries: &'a [ContentLibrary],
@@ -608,7 +607,7 @@ fn library_for_path<'a>(
 /// only difference is whether the *final* component is a file or a directory,
 /// selected by `leaf_is_dir`. Paths outside every library root are ignored.
 ///
-/// Relocated from the egui left panel for the zero-egui migration
+/// Relocated from the legacy UI left panel for the framework-free migration
 /// ([TASK-029]).
 fn insert_path_into_tree(
     root_node: &mut TreeNode,
@@ -648,10 +647,10 @@ fn insert_path_into_tree(
 
 /// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
 ///
-/// Relocated from the egui left panel for the zero-egui migration
+/// Relocated from the legacy UI left panel for the framework-free migration
 /// ([TASK-029]); UI-017's ordering and UI-018's tag-prune behaviour are
 /// unchanged. The tracing span is renamed to the `ui_iced.*` namespace so the
-/// iced and egui builds do not report under one span name while both exist.
+/// iced and the legacy UI builds do not report under one span name while both exist.
 #[tracing::instrument(skip_all, name = "ui_iced.left.build_workspace_tree", level = "debug")]
 #[must_use]
 pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
@@ -721,7 +720,7 @@ pub struct LeftPanelViewModel {
     /// The single selected file.
     pub selected_file: Option<PathBuf>,
     /// The multi-selected files, sorted so emitted commands are
-    /// deterministic (egui collected them from a `HashSet` and was not).
+    /// deterministic (the legacy UI collected them from a `HashSet` and was not).
     pub selected_files: Vec<PathBuf>,
     /// The visible file rows that are PDF-backed — rendered with the
     /// `error` token (REQ-450).
@@ -741,7 +740,7 @@ pub struct LeftPanelViewModel {
 
 impl LeftPanelViewModel {
     /// Snapshots the left panel's inputs off `app`, reading the same
-    /// accessors the egui panel used.
+    /// accessors the legacy UI panel used.
     pub fn from_app(app: &FastMdApp) -> Self {
         let rows = tree_rows(app);
 
@@ -825,9 +824,9 @@ impl LeftPanelViewModel {
 /// merely inert when nothing is being searched, so the widget-tree shape does
 /// not change across the search transition.
 ///
-/// The field takes `Length::Fill`: egui computed
+/// The field takes `Length::Fill`: the legacy UI computed
 /// `(available_width - 56).max(80)` by hand
-/// (`ui/panels/left.rs:235`) because egui does not stretch inputs; iced
+/// (`ui/panels/left.rs:235`) because the legacy UI does not stretch inputs; iced
 /// lays the field out inside the `Row` itself, so neither magic number is
 /// needed here.
 pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
@@ -835,7 +834,7 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
 
     let header = text(strings::WORKSPACE_HEADER)
         .size(HEADER_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let search_field = text_input(strings::SEARCH_PLACEHOLDER, &view_model.query)
         .on_input(|text| Message::Search(SearchMessage::QueryChanged { text }))
@@ -892,7 +891,7 @@ fn tree_body<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message> {
         return container(
             text(strings::NO_MARKDOWN_FILES)
                 .size(ROW_TEXT_SIZE)
-                .color(to_iced_color(palette.text_muted)),
+                .color(palette.text_muted),
         )
         .padding(PANEL_PADDING)
         .into();
@@ -933,7 +932,7 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
             left: ROW_PADDING_X + indent,
         })
         .style(move |_theme| container::Style {
-            background: selected.then(|| Background::Color(to_iced_color(palette.accent))),
+            background: selected.then_some(Background::Color(palette.accent)),
             ..container::Style::default()
         });
 
@@ -961,11 +960,11 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
 /// Purity: pure.
 #[must_use]
 pub fn row_text_color(palette: &Palette, pdf_backed: bool) -> iced::Color {
-    to_iced_color(if pdf_backed {
+    if pdf_backed {
         palette.error
     } else {
         palette.text
-    })
+    }
 }
 
 /// The search-result branch of the panel body (UI-050).
@@ -976,7 +975,7 @@ fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message
         return container(
             text(strings::SEARCH_NO_RESULTS)
                 .size(ROW_TEXT_SIZE)
-                .color(to_iced_color(palette.text_muted)),
+                .color(palette.text_muted),
         )
         .padding(PANEL_PADDING)
         .into();
@@ -993,21 +992,21 @@ fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message
 }
 
 /// One search-result card: title + match count, the library-relative path
-/// and the matching snippet (egui parity, `ui/panels/left.rs:285-341`).
+/// and the matching snippet (legacy parity, `ui/panels/left.rs:285-341`).
 fn search_result_card<'a>(entry: &'a SearchResultEntry) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
     let mut title = Row::with_children(vec![
         text(&entry.file_name)
             .size(ROW_TEXT_SIZE)
-            .color(to_iced_color(palette.text_strong))
+            .color(palette.text_strong)
             .into(),
     ]);
     if entry.match_count > 1 {
         title = title.push(
             text(strings::format_match_count(entry.match_count))
                 .size(SECONDARY_TEXT_SIZE)
-                .color(to_iced_color(palette.text_faint)),
+                .color(palette.text_faint),
         );
     }
 
@@ -1017,7 +1016,7 @@ fn search_result_card<'a>(entry: &'a SearchResultEntry) -> Element<'a, Message> 
         lines = lines.push(
             text(&entry.relative_path)
                 .size(SECONDARY_TEXT_SIZE)
-                .color(to_iced_color(palette.text_faint)),
+                .color(palette.text_faint),
         );
     }
 
@@ -1026,7 +1025,7 @@ fn search_result_card<'a>(entry: &'a SearchResultEntry) -> Element<'a, Message> 
             text(&entry.snippet)
                 .size(SECONDARY_TEXT_SIZE)
                 .font(italic_font())
-                .color(to_iced_color(palette.accent_text_subtle)),
+                .color(palette.accent_text_subtle),
         );
     }
 

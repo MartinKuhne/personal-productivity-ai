@@ -62,7 +62,7 @@ pub const TOC_STUB_TEXT: &str = "toc";
 /// Pure visibility gate for the right (TOC) pane.
 ///
 /// Relocated into the iced tree at [`crate::ui_iced::panels::right`] for the
-/// zero-egui migration ([TASK-029]) and re-exported here, so the
+/// framework-free migration ([TASK-029]) and re-exported here, so the
 /// [`layout`](crate::ui_iced::layout) public path [TASK-010] established is
 /// unchanged and [`view`](crate::ui_iced::view) needs no edit.
 pub use crate::ui_iced::panels::right::should_show_panel;

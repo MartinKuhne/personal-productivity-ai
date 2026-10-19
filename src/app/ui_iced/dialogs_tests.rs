@@ -130,7 +130,7 @@ fn validate_rejects_a_forward_slash_separator() {
     let kind = DialogKind::CreateDocument {
         parent: sample_dir(),
     };
-    // The exact fixture the egui rename test used.
+    // The exact fixture the legacy UI rename test used.
     assert_eq!(
         validate_name(&kind, "invalid/name"),
         Err(strings::DIALOG_NAME_UNSAFE_ERROR.to_string())
@@ -153,7 +153,7 @@ fn validate_rejects_a_parent_directory_traversal() {
     let kind = DialogKind::CreateDirectory {
         parent: sample_dir(),
     };
-    // The exact fixture the egui create-dir test used.
+    // The exact fixture the legacy UI create-dir test used.
     assert_eq!(
         validate_name(&kind, "../invalid_traversal"),
         Err(strings::DIALOG_NAME_UNSAFE_ERROR.to_string())

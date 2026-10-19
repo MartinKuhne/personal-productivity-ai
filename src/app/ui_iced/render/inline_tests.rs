@@ -7,7 +7,6 @@
 use super::*;
 use crate::markdown::{InlineElem, TextStyle};
 use crate::ui_iced::message::RenderMessage;
-use crate::ui_iced::theme::to_iced_color;
 use iced::font::Family;
 use std::path::PathBuf;
 
@@ -32,7 +31,7 @@ fn test_plain_text_run_uses_body_colour_and_default_font() {
     let span = span_for_text("hello", &style(&[]), 14.0, palette());
     assert_eq!(span.text, "hello");
     assert_eq!(span.size, 14.0);
-    assert_eq!(span.color, to_iced_color(palette().text));
+    assert_eq!(span.color, palette().text);
     assert_eq!(span.font, Font::DEFAULT);
     assert_eq!(span.highlight, None);
     assert!(!span.underline);
@@ -45,21 +44,21 @@ fn test_plain_text_run_uses_body_colour_and_default_font() {
 #[test]
 fn test_bold_run_takes_the_strong_colour() {
     let span = span_for_text("b", &style(&["bold"]), 14.0, palette());
-    assert_eq!(span.color, to_iced_color(palette().text_strong));
+    assert_eq!(span.color, palette().text_strong);
 }
 
 #[test]
 fn test_muted_beats_bold() {
-    // Mirrors the egui `text_format` precedence: muted → strong → text.
+    // Mirrors the legacy UI `text_format` precedence: muted → strong → text.
     let span = span_for_text("x", &style(&["bold", "muted"]), 14.0, palette());
-    assert_eq!(span.color, to_iced_color(palette().text_muted));
+    assert_eq!(span.color, palette().text_muted);
 }
 
 #[test]
 fn test_italic_sets_the_font_style_not_the_colour() {
     let span = span_for_text("i", &style(&["italic"]), 14.0, palette());
     assert_eq!(span.font.style, iced::font::Style::Italic);
-    assert_eq!(span.color, to_iced_color(palette().text));
+    assert_eq!(span.color, palette().text);
 }
 
 #[test]
@@ -74,7 +73,7 @@ fn test_strikethrough_flag_is_carried() {
 fn test_code_run_is_monospace_with_a_border_token_highlight() {
     let span = span_for_text("x = 1", &style(&["code"]), 14.0, palette());
     assert_eq!(span.font.family, Family::Monospace);
-    assert_eq!(span.highlight, Some(to_iced_color(palette().border)));
+    assert_eq!(span.highlight, Some(palette().border));
 }
 
 #[test]
@@ -83,7 +82,7 @@ fn test_nested_bold_and_code_compose() {
     assert_eq!(span.font.family, Family::Monospace, "code picks the font");
     assert_eq!(
         span.color,
-        to_iced_color(palette().text_strong),
+        palette().text_strong,
         "bold still sets the colour"
     );
     assert!(span.highlight.is_some(), "code still paints its background");
@@ -125,7 +124,7 @@ fn test_font_for_style_matrix() {
 fn test_link_run_is_accent_coloured_underlined_and_carries_its_target() {
     let span = span_for_link("https://example.com", "Example", 14.0, palette());
     assert_eq!(span.text, "Example");
-    assert_eq!(span.color, to_iced_color(palette().accent_text));
+    assert_eq!(span.color, palette().accent_text);
     assert!(span.underline, "links read as links");
     assert_eq!(span.link.as_deref(), Some("https://example.com"));
     assert_eq!(span.highlight, None);
@@ -154,16 +153,16 @@ fn test_spans_from_inline_covers_every_variant() {
     let spans = spans_from_inline(&elems, 14.0, palette());
     assert_eq!(spans.len(), 5);
 
-    assert_eq!(spans[0].color, to_iced_color(palette().text_strong));
+    assert_eq!(spans[0].color, palette().text_strong);
     assert_eq!(spans[1].link.as_deref(), Some("u"));
     assert_eq!(spans[2].text, "[Image: p.png]");
-    assert_eq!(spans[2].color, to_iced_color(palette().text_muted));
+    assert_eq!(spans[2].color, palette().text_muted);
     assert_eq!(
         spans[2].highlight, None,
         "the image placeholder is not highlighted"
     );
     assert_eq!(spans[3].text, "<b>");
-    assert_eq!(spans[3].color, to_iced_color(palette().text_muted));
+    assert_eq!(spans[3].color, palette().text_muted);
     assert_eq!(spans[4].text, " ", "a soft break renders as a space");
     assert_eq!(spans[4].link, None);
 }
@@ -197,7 +196,7 @@ fn test_to_iced_span_carries_every_field() {
 
     assert_eq!(span.text.as_ref(), "x");
     assert_eq!(span.size, Some(22.0.into()));
-    assert_eq!(span.color, Some(to_iced_color(palette().text_strong)));
+    assert_eq!(span.color, Some(palette().text_strong));
     assert_eq!(span.font, Some(Font::MONOSPACE));
     assert!(span.strikethrough);
     assert!(!span.underline);
@@ -207,7 +206,7 @@ fn test_to_iced_span_carries_every_field() {
     );
     let highlight = span.highlight.unwrap();
     match highlight.background {
-        Background::Color(color) => assert_eq!(color, to_iced_color(palette().border)),
+        Background::Color(color) => assert_eq!(color, palette().border),
         other => panic!("expected a solid background, got {other:?}"),
     }
 }
@@ -285,7 +284,7 @@ fn test_link_message_shape_is_the_render_channel_variant() {
 #[test]
 fn test_empty_models_still_build_a_widget() {
     let element = rich_text_element(&[], None);
-    // A paragraph with no runs must not panic — the egui renderer
+    // A paragraph with no runs must not panic — the legacy UI renderer
     // short-circuited on empty; iced renders an empty Rich instead.
     let _ = element;
 }

@@ -13,7 +13,7 @@ fn logo_glyph_is_the_shared_phosphor_bolt() {
     assert_eq!(
         logo_glyph(),
         strings::ICON_LIGHTNING,
-        "the iced stand-in must be the same Phosphor codepoint the egui \
+        "the iced stand-in must be the same Phosphor codepoint the legacy UI \
          stand-in uses"
     );
 }
@@ -22,7 +22,7 @@ fn logo_glyph_is_the_shared_phosphor_bolt() {
 fn logo_color_is_the_accent_text_token() {
     assert_eq!(
         logo_color(),
-        to_iced_color(Palette::fastmd_dark().accent_text),
+        Palette::fastmd_dark().accent_text,
         "the mark must resolve through the palette, never a literal colour \
          [GUD-003]"
     );
@@ -38,10 +38,10 @@ fn logo_font_is_the_registered_phosphor_family() {
 }
 
 #[test]
-fn logo_mark_size_matches_the_egui_badge() {
+fn logo_mark_size_matches_the_legacy_badge() {
     assert_eq!(
         LOGO_MARK_SIZE, 20.0,
-        "top-bar parity: the egui toolbar allocates vec2(20.0, 20.0) for \
+        "top-bar parity: the legacy UI toolbar allocates vec2(20.0, 20.0) for \
          the badge (ui/panels/top.rs:142)"
     );
 }

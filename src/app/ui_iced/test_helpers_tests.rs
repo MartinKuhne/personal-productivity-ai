@@ -1,7 +1,7 @@
-//! Unit tests for the egui-free iced test fixtures ([TASK-029], [RUST-003]).
+//! Unit tests for the framework-free iced test fixtures ([TASK-029], [RUST-003]).
 //!
 //! The point of these fixtures is that they build real domain state **without
-//! egui** and **without touching a user path**. The tests pin both halves of
+//! the legacy UI** and **without touching a user path**. The tests pin both halves of
 //! that promise.
 
 use super::*;
@@ -9,7 +9,7 @@ use crate::config::ContentLibrary;
 use iced::Size;
 
 #[test]
-fn test_app_builds_an_empty_workspace_egui_free() {
+fn test_app_builds_an_empty_workspace_framework_free() {
     let app = test_app();
 
     // A default config has no content libraries, so the workspace starts empty.
@@ -114,11 +114,11 @@ fn test_app_state_with_seeds_persisted_geometry() {
 }
 
 #[test]
-fn test_app_state_view_models_rebuild_without_egui() {
+fn test_app_state_view_models_rebuild_without_the_legacy_framework() {
     let mut state = test_app_state();
 
     // The view-model rebuild is what every iced panel renders from; running it
-    // here proves the whole snapshot path is egui-free.
+    // here proves the whole snapshot path is framework-free.
     state.rebuild_view_models();
 
     assert!(

@@ -6,7 +6,7 @@ use crate::config::{AppConfig, LlmConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use crate::ui::test_helpers::app::noop_producer;
+use crate::ui_iced::test_helpers::noop_producer;
 
 #[tokio::test]
 async fn test_process_image_no_model() {

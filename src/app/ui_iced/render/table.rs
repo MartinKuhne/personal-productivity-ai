@@ -25,7 +25,7 @@
 //!   [`COLUMN_SPACING`](crate::ui_iced::table_width::COLUMN_SPACING)
 //!   mapping is built on.
 //! * Style carries only the two separator colours — `:676-681` — so the
-//!   egui table's perimeter stroke is painted by wrapping the table in a
+//!   the legacy UI table's perimeter stroke is painted by wrapping the table in a
 //!   bordered container instead.
 //!
 //! # What the document model does not carry
@@ -48,7 +48,6 @@ use crate::ui_iced::table_width::{
     CELL_PADDING_X, CELL_PADDING_Y, IcedTextMeasurer, TablePadding, column_length, column_widths,
     solve_table_layout,
 };
-use crate::ui_iced::theme::to_iced_color;
 use iced::widget::{container, scrollable, table, text};
 use iced::{Background, Element, Length};
 
@@ -61,13 +60,13 @@ pub const TABLE_PERIMETER_WIDTH: f32 = 1.0;
 
 /// Row-index parity that receives the striped background.
 ///
-/// egui striped `row_idx % 2 == 1`
+/// the legacy UI striped `row_idx % 2 == 1`
 /// (`src/app/ui/render/table/configured.rs:77`).
 pub const STRIPE_PARITY: usize = 1;
 
 /// Height reserved for a blank cell, so it still holds its row open.
 ///
-/// The egui cell used `ui.text_style_height(&TextStyle::Body)` for this
+/// The legacy UI cell used `ui.text_style_height(&TextStyle::Body)` for this
 /// (`src/app/ui/render/table/cell.rs:81`).
 pub const EMPTY_CELL_HEIGHT: f32 = 18.0;
 
@@ -179,7 +178,7 @@ pub fn table_model(
 #[must_use]
 pub fn from_layout(layout: &TableLayout, palette: Palette) -> TableModel {
     let widths = column_widths(layout);
-    let strong = to_iced_color(palette.text_strong);
+    let strong = palette.text_strong;
     let rows = layout
         .rows
         .iter()
@@ -193,7 +192,7 @@ pub fn from_layout(layout: &TableLayout, palette: Palette) -> TableModel {
                     if is_header {
                         // GFM header cells are not bold in the AST, so the
                         // header is distinguished by colour — the iced
-                        // stand-in for egui's header emphasis.
+                        // stand-in for the legacy UI's header emphasis.
                         for span in &mut spans {
                             span.color = strong;
                         }
@@ -274,7 +273,7 @@ pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
         .width(Length::Fill)
         .style(move |_theme| container::Style {
             border: iced::Border {
-                color: to_iced_color(palette.border_strong),
+                color: palette.border_strong,
                 width: TABLE_PERIMETER_WIDTH,
                 radius: 0.0.into(),
             },
@@ -286,7 +285,7 @@ pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
 /// Renders one cell.
 ///
 /// A cell with no content allocates [`EMPTY_CELL_HEIGHT`] so a blank cell
-/// still holds its row open — the same reason the egui cell used
+/// still holds its row open — the same reason the legacy UI cell used
 /// `allocate_space` rather than nothing (`cell.rs:83-94`).
 #[must_use]
 pub fn cell_element(cell: Option<&TableCellModel>, striped: bool) -> Element<'static, Message> {
@@ -307,7 +306,7 @@ pub fn cell_element(cell: Option<&TableCellModel>, striped: bool) -> Element<'st
             Length::Shrink
         })
         .style(move |_theme| container::Style {
-            background: striped.then(|| Background::Color(to_iced_color(palette.surface_variant))),
+            background: striped.then_some(Background::Color(palette.surface_variant)),
             ..container::Style::default()
         })
         .into()

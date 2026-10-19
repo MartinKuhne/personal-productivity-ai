@@ -23,7 +23,7 @@
 //!
 //! # Tab interactions → messages
 //!
-//! | Interaction | Emitted | egui source |
+//! | Interaction | Emitted | the legacy UI source |
 //! | --- | --- | --- |
 //! | left-click tab label | `Command(SelectFile { path, multi: false })` | `panels/center.rs:214-221` |
 //! | middle-click tab | `Command(CloseTab(index))` | `panels/center.rs:222-227` |
@@ -31,7 +31,7 @@
 //! | right-click tab | `Tab(ContextMenuOpened { index })` | `response.context_menu(..)` |
 //! | pointer motion over tab | `Layout(CursorMoved { point })` | DEC-005 anchor tracking |
 //!
-//! **Tab selection is a command, not view state.** egui never kept an active
+//! **Tab selection is a command, not view state.** the legacy UI never kept an active
 //! tab index of its own — the active tab *is* `selection().selected_file()`,
 //! so the iced port emits the same `SelectFile` intent and derives the
 //! active flag from the snapshot. There is deliberately no
@@ -43,15 +43,15 @@
 //! its own handlers when the child captured the event
 //! (`iced_widget-0.14.2/src/mouse_area.rs:230-245`), and `Button::update`
 //! calls `shell.capture_event()` on press (`button.rs:312`). So clicking
-//! `×` closes the tab without also selecting it, exactly as egui behaves.
+//! `×` closes the tab without also selecting it, exactly as the legacy UI behaves.
 //!
 //! # Tab context menu (UI-026..UI-034)
 //!
 //! [`tab_context_menu_items`] is the single definition of the tab menu, in
-//! egui order: Edit, Close Tab, Close Others, Close All Tabs, Copy Path,
+//! the legacy UI order: Edit, Close Tab, Close Others, Close All Tabs, Copy Path,
 //! Show in File Explorer, Open in Editor, then the VFS-121 note skills.
 //!
-//! **UI-033 "Format Markdown" is not a `UserCommand`.** In the shipped egui
+//! **UI-033 "Format Markdown" is not a `UserCommand`.** In the shipped the legacy UI
 //! build it is a seeded VFS-121 *note skill* (`Skills/Note/FormatMarkdown.md`)
 //! whose click reads the skill file and publishes
 //! `UserCommand::RunSkillPrompt { content, target_dir: None, target_file }`.
@@ -88,7 +88,7 @@
 //!   belong to that render path.
 //! * **Agent session body (TASK-018).** Header, close intent and the UI-048
 //!   gate are here; the streaming response view is not.
-//! * **Unsaved-changes confirmation (UI-027/UI-029).** The shipped egui
+//! * **Unsaved-changes confirmation (UI-027/UI-029).** The shipped the legacy UI
 //!   build has **no** per-tab dirty tracking anywhere (`Tabs` has no dirty
 //!   flag and no editor-modified signal reaches the tab strip), so
 //!   [`TabEntry::unsaved`] is reported `false` by `from_app`. The field and
@@ -102,10 +102,10 @@
 //! [`apply_tab_close_others_click`], [`apply_tab_close_all_click`]) used to
 //! be `pub use`d from `src/app/ui/panels/center.rs`, a file [TASK-029b]
 //! deletes. They are copied into this module verbatim; every one is a pure
-//! `usize`/`() → UserCommand` constructor with **no `egui` type** in its
-//! signature or body. The egui panel keeps its own copy until Phase 5.
+//! `usize`/`() → UserCommand` constructor with **no framework type** in its
+//! signature or body. The legacy UI panel keeps its own copy until Phase 5.
 //!
-//! `apply_task_toggles_command` (the egui panel's fifth pure constructor) is
+//! `apply_task_toggles_command` (the legacy UI panel's fifth pure constructor) is
 //! **not** copied: no `ui_iced` code reaches it — the iced render path does
 //! not yet emit task-checkbox intents (see the `message` module's UI-048
 //! note).
@@ -128,19 +128,18 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LayoutMessage, Message, TabMessage, TreeMessage};
 use crate::ui_iced::overlay::MenuItem;
-use crate::ui_iced::theme::to_iced_color;
 
 use super::left::{NOTE_SKILLS_SUBDIR, skill_dir};
 use super::top::phosphor_font;
 
-// The egui center panel's framework-free `UserCommand` constructors,
-// **relocated into this module** for the zero-egui migration ([TASK-029])
+// The legacy UI center panel's framework-free `UserCommand` constructors,
+// **relocated into this module** for the framework-free migration ([TASK-029])
 // from `src/app/ui/panels/center.rs:14-64`.
 //
 // They were previously `pub use`d from a file [TASK-029b] deletes. Each is
-// copied verbatim and is egui-free — a pure `usize`/`()`→[`UserCommand`]
-// constructor with no `egui` type in its signature or body — so the iced
-// view and the [TASK-022] reducer call exactly the same code. The egui
+// copied verbatim and is framework-free — a pure `usize`/`()`→[`UserCommand`]
+// constructor with no framework type in its signature or body — so the iced
+// view and the [TASK-022] reducer call exactly the same code. The legacy UI
 // panel keeps its own copy until Phase 5.
 
 /// Purpose: Creates a `UserCommand` to clear all agent-related session state.
@@ -150,7 +149,7 @@ use super::top::phosphor_font;
 /// Preconditions: None.
 /// Postconditions: Returns command that, when executed, hides agent results, clears history and text buffers, and cancels any running agent.
 ///
-/// Relocated from the egui center panel for the zero-egui migration
+/// Relocated from the legacy UI center panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn clear_agent_session_command() -> UserCommand {
@@ -169,7 +168,7 @@ pub fn clear_agent_session_command() -> UserCommand {
 /// at that index; if the closed tab was the selected file the selection
 /// falls back to the new last tab (or `None` if no tabs remain).
 ///
-/// Relocated from the egui center panel for the zero-egui migration
+/// Relocated from the legacy UI center panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_click(i: usize) -> UserCommand {
@@ -178,7 +177,7 @@ pub fn apply_tab_close_click(i: usize) -> UserCommand {
 
 /// The intent for "Close Other Tabs" on the tab at index `i`.
 ///
-/// Relocated from the egui center panel for the zero-egui migration
+/// Relocated from the legacy UI center panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_others_click(i: usize) -> UserCommand {
@@ -187,7 +186,7 @@ pub fn apply_tab_close_others_click(i: usize) -> UserCommand {
 
 /// The intent for "Close All Tabs".
 ///
-/// Relocated from the egui center panel for the zero-egui migration
+/// Relocated from the legacy UI center panel for the framework-free migration
 /// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_all_click() -> UserCommand {
@@ -196,10 +195,10 @@ pub fn apply_tab_close_all_click() -> UserCommand {
 
 /// Logical point size of a tab label.
 ///
-/// egui's `selectable_label` rendered at the default body size (12.5 px);
+/// the legacy UI's `selectable_label` rendered at the default body size (12.5 px);
 /// the port pins 13.0 as the nearest whole-point value. This is a
 /// visual-pass constant, not a ported one — retune it in the visual review
-/// rather than hunting for an egui predecessor.
+/// rather than hunting for an the legacy UI predecessor.
 pub const TAB_TEXT_SIZE: f32 = 13.0;
 
 /// Horizontal padding inside one tab.
@@ -263,7 +262,7 @@ pub fn tab_title(path: &Path) -> String {
 /// Index of the tab holding `selected`, `None` when the selected file is not
 /// open (or nothing is selected).
 ///
-/// This is the iced re-typing of egui's per-tab
+/// This is the iced re-typing of the legacy UI's per-tab
 /// `selected_file() == Some(tab_path)` test, expressed once so the strip and
 /// the view model cannot disagree.
 ///
@@ -315,7 +314,7 @@ pub fn other_tab_indices(tabs: &[TabEntry], keep: usize) -> Vec<usize> {
 
 /// The intent a left-click on a tab produces.
 ///
-/// egui parity: selecting a tab publishes
+/// legacy parity: selecting a tab publishes
 /// `UserCommand::SelectFile { path, multi: false }`
 /// (`src/app/ui/panels/center.rs:214-221`) — never a multi-select, because
 /// the tab strip has no modifier semantics.
@@ -355,7 +354,7 @@ pub fn tab_context_menu_close_message() -> Message {
 }
 
 /// The message the agent-session band's Close button produces — the same
-/// `ClearAgentSession` intent the egui header button publishes
+/// `ClearAgentSession` intent the legacy UI header button publishes
 /// (`src/app/ui/panels/center.rs:112-119`).
 ///
 /// Purity: pure.
@@ -370,7 +369,7 @@ pub fn agent_session_close_message() -> Message {
 /// `AgentTranscript::apply_event` / `split_thinking_and_content`
 /// (`src/app/ui/agent/transcript.rs`) and the agent's response formatter
 /// (AGENT-022); the panel only decides whether the extracted buffer is
-/// non-empty, exactly as egui's `if !thinking.is_empty()` did.
+/// non-empty, exactly as the legacy UI's `if !thinking.is_empty()` did.
 ///
 /// Purity: pure function of `thinking`.
 #[must_use]
@@ -399,19 +398,19 @@ pub fn unsaved_marker(unsaved: bool) -> &'static str {
 /// Purity: pure function of `active` for a given palette.
 #[must_use]
 pub fn tab_text_color(palette: &Palette, active: bool) -> iced::Color {
-    to_iced_color(if active {
+    if active {
         palette.text_strong
     } else {
         palette.text_muted
-    })
+    }
 }
 
-/// Context-menu rows for the tab at `index`, in egui menu order
+/// Context-menu rows for the tab at `index`, in the legacy UI menu order
 /// (UI-026..UI-033; `src/app/ui/panels/center.rs:228-302`), followed by
 /// the VFS-121 note skills.
 ///
 /// `note_skills` is passed in rather than looked up here so the builder stays
-/// pure — the egui original called `config().list_note_skills()` inside the
+/// pure — the legacy UI original called `config().list_note_skills()` inside the
 /// menu closure, which creates directories as a side effect.
 ///
 /// Purity: pure.
@@ -507,19 +506,19 @@ pub struct CenterPanelViewModel {
     /// Kept alongside the per-tab `active` flag because the reducer wants
     /// the index; both come from the same [`active_tab_index`] call.
     pub active_tab: Option<usize>,
-    /// Whether the agent session owns the center pane (egui
+    /// Whether the agent session owns the center pane (the legacy UI
     /// `agent_panel_state.show_results`).
     pub show_agent_session: bool,
-    /// The agent's status line text (egui `agent().state().status`).
+    /// The agent's status line text (the legacy UI `agent().state().status`).
     pub agent_status: String,
-    /// Whether the agent is currently running (egui renders a spinner —
+    /// Whether the agent is currently running (the legacy UI renders a spinner —
     /// iced 0.14 has none, see [`super::top`]).
     pub agent_running: bool,
     /// The extracted agent thinking buffer (UI-048), gated by
     /// [`thinking_section_visible`].
     pub thinking: String,
     /// Whether the active document is PDF-backed — the viewer paints the
-    /// `pdf_surface` token behind it (egui `panels/center.rs:320-321`).
+    /// `pdf_surface` token behind it (the legacy UI `panels/center.rs:320-321`).
     pub active_pdf_backed: bool,
     /// Note skills offered on the tab context menu (VFS-121), which is
     /// where "Format Markdown" (UI-033) comes from.
@@ -528,7 +527,7 @@ pub struct CenterPanelViewModel {
 
 impl CenterPanelViewModel {
     /// Snapshots the center panel's inputs off `app`, reading the same
-    /// accessors the egui panel used.
+    /// accessors the legacy UI panel used.
     ///
     /// Note skills are read through the **read-only** path
     /// (`AppConfig::list_skill_files_in` over the "System" library's
@@ -661,7 +660,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
     let marker = container(
         text(unsaved_marker(tab.unsaved))
             .size(TAB_TEXT_SIZE)
-            .color(to_iced_color(palette.warning)),
+            .color(palette.warning),
     )
     .width(Length::Fixed(UNSAVED_MARKER_WIDTH));
 
@@ -692,9 +691,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         left: TAB_PADDING_X,
     })
     .style(move |_theme| container::Style {
-        background: tab
-            .active
-            .then(|| Background::Color(to_iced_color(palette.accent))),
+        background: tab.active.then_some(Background::Color(palette.accent)),
         ..container::Style::default()
     });
 
@@ -710,9 +707,9 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
 
 /// The document-viewer area below the strip.
 ///
-/// The `pdf_surface` frame mirrors egui's sepia tint for PDF-backed files
+/// The `pdf_surface` frame mirrors the legacy UI's sepia tint for PDF-backed files
 /// (`panels/center.rs:320-323`); the empty state is the same
-/// [`strings::NO_FILE_SELECTED_PROMPT`] the egui panel used.
+/// [`strings::NO_FILE_SELECTED_PROMPT`] the legacy UI panel used.
 fn viewer_area<'a>(
     view_model: &'a CenterPanelViewModel,
     document: Option<iced::Element<'static, Message>>,
@@ -725,7 +722,7 @@ fn viewer_area<'a>(
         (Some(tab), None) => document_preview(tab),
         (None, _) => text(strings::NO_FILE_SELECTED_PROMPT)
             .size(EMPTY_STATE_SIZE)
-            .color(to_iced_color(palette.text_muted))
+            .color(palette.text_muted)
             .into(),
     };
 
@@ -736,7 +733,7 @@ fn viewer_area<'a>(
     .width(Length::Fill)
     .height(Length::Fill)
     .style(move |_theme| container::Style {
-        background: pdf_backed.then(|| Background::Color(to_iced_color(palette.pdf_surface))),
+        background: pdf_backed.then_some(Background::Color(palette.pdf_surface)),
         ..container::Style::default()
     })
     .into()
@@ -754,7 +751,7 @@ fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
     Column::with_children(vec![
         text(&tab.title)
             .size(DOCUMENT_TITLE_SIZE)
-            .color(to_iced_color(palette.text_strong))
+            .color(palette.text_strong)
             .into(),
     ])
     .spacing(VIEWER_SPACING)
@@ -773,7 +770,7 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
     let header = Row::with_children(vec![
         text(strings::AGENT_SESSION_HEADER)
             .size(AGENT_HEADER_SIZE)
-            .color(to_iced_color(palette.accent_text))
+            .color(palette.accent_text)
             .into(),
         container(
             button(text(strings::AGENT_SESSION_CLOSE_BUTTON).size(TAB_TEXT_SIZE))
@@ -791,18 +788,18 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
         view_model.agent_status
     ))
     .size(AGENT_BODY_SIZE)
-    .color(to_iced_color(palette.text_strong));
+    .color(palette.text_strong);
 
     let thinking: Element<'_, Message> = if view_model.show_thinking() {
         Column::with_children(vec![
             text(strings::AGENT_THINKING_PROCESS)
                 .size(AGENT_BODY_SIZE)
-                .color(to_iced_color(palette.text_strong))
+                .color(palette.text_strong)
                 .into(),
             text(&view_model.thinking)
                 .size(AGENT_BODY_SIZE)
                 .font(italic_font())
-                .color(to_iced_color(palette.text_muted))
+                .color(palette.text_muted)
                 .into(),
         ])
         .spacing(VIEWER_SPACING)

@@ -1,10 +1,10 @@
 //! Unit tests for the iced ToC helpers in `right.rs` ([TASK-029],
 //! [RUST-003]).
 //!
-//! Ported from the egui `ui/panels/right_tests.rs` cases that exercised
+//! Ported from the legacy UI `ui/panels/right_tests.rs` cases that exercised
 //! the two helpers copied into [`super`], so coverage survives [TASK-029b]'s
-//! deletion of the egui panel. The egui sidecar's snapshot / pixel-layout
-//! tests are NOT ported — they drive `egui::Ui` and have no iced-side
+//! deletion of the legacy UI panel. The legacy UI sidecar's snapshot / pixel-layout
+//! tests are NOT ported — they drive `Ui` and have no iced-side
 //! counterpart here.
 
 use super::{resolve_anchor, should_show_panel};

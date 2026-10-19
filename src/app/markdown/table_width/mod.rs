@@ -1,12 +1,14 @@
 //! Fair Table Width Algorithm (FTWA) - pure column-width solver.
 //!
-//! Pure layout math with no egui dependency and no Markdown types; consumes
+//! Pure layout math with no UI-framework dependency and no Markdown types; consumes
 //! `&[f32]` measurements. Lives in `markdown::` per `src/desktop/AGENTS.md §5`
 //! (pure layout math belongs in `markdown/`, not `ui/`).
 //!
-//! The egui-bridging adapter - `measure`, `measure_cached`, `ftwa_cached`,
-//! `measure_cell`, and the per-UI caches - lives in `crate::ui::table_width`
-//! and re-exports the pure API via `pub use`.
+//! The framework-bridging adapter - the text measurer, the per-UI caches and the
+//! layout solver entry point - lives in `crate::ui_iced::table_width`
+//! ([`crate::ui_iced::table_width::solve_table_layout`]). [TASK-029b] removed the
+//! retired `crate::ui::table_width` copy that used to sit between this pure solver
+//! and the old renderer.
 //!
 //! Unit tests live in the sibling `algorithm_tests.rs` and `internal_tests.rs` sidecars.
 
@@ -253,7 +255,7 @@ pub fn ftwa(
     // NaN propagates silently through every arithmetic comparison (they
     // all return false against NaN), causing the function to fall through
     // to the deficit branch with NaN sum_max / deficit, eventually
-    // returning NaN-containing widths that crash egui's layout downstream.
+    // returning NaN-containing widths that crash the legacy UI's layout downstream.
     assert!(
         available.is_finite(),
         "ftwa: available must be finite, got {available}"
@@ -292,7 +294,7 @@ pub fn ftwa(
     // max) silently triggers the §3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
     //
-    // Sub-pixel drift tolerance. egui's `layout_no_wrap` can return
+    // Sub-pixel drift tolerance. the legacy UI's `layout_no_wrap` can return
     // `layout_no_wrap("A" + "B")` slightly different from
     // `layout_no_wrap("A") + layout_no_wrap("B")` (kerning and
     // sub-pixel rounding in the font shaper). The upstream

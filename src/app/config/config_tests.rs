@@ -424,16 +424,16 @@ fn deficit_strategy_default_is_hybrid() {
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
     // Round-trip: to_config and from_config compose back to the same
     // variant, so a persisted config with the default value
     // deserialises to the same strategy.
-    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    let s = crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
     assert_eq!(s, "hybrid");
     assert_eq!(
-        crate::ui::table_width::DeficitStrategy::from_config(s),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::from_config(s),
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -529,7 +529,7 @@ fn deficit_strategy_respects_config_value() {
     };
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        crate::markdown::table_width::DeficitStrategy::ProportionalToSlack
     );
 }
 
@@ -538,7 +538,7 @@ fn deficit_strategy_parses_survey_algorithm_strings() {
     // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
     // must parse from its canonical config string. This guards the
     // round-trip with the top-bar combobox.
-    use crate::ui::table_width::DeficitStrategy;
+    use crate::markdown::table_width::DeficitStrategy;
     for (raw, expected) in [
         ("ratio", DeficitStrategy::WaterFillRatio),
         ("lagrange", DeficitStrategy::LagrangePenalty),

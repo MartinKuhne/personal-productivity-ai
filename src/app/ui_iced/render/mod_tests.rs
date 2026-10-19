@@ -10,7 +10,6 @@ use crate::markdown::model::{InlineElem, RenderEvent, TextStyle};
 use crate::markdown::parse_markdown_to_events;
 use crate::ui::theme::Palette;
 use crate::ui_iced::table_width::TextMetrics;
-use crate::ui_iced::theme::to_iced_color;
 use serde_norway::{Mapping, Value};
 
 fn palette() -> Palette {
@@ -99,7 +98,7 @@ fn test_inline_elems_contain_matches_text_link_and_html_only() {
     ));
     assert!(
         !inline_elems_contain(&[InlineElem::Image("needle.png".into())], "needle"),
-        "image placeholders are not searchable, as in the egui build"
+        "image placeholders are not searchable, as in the legacy UI build"
     );
     assert!(!inline_elems_contain(&[InlineElem::SoftBreak], "x"));
     assert!(!inline_elems_contain(&[], "x"));
@@ -173,7 +172,7 @@ fn test_only_the_first_matching_block_is_marked() {
     assert_eq!(
         marked,
         vec![1],
-        "egui cleared the search after the first hit"
+        "the legacy UI cleared the search after the first hit"
     );
 }
 
@@ -295,7 +294,7 @@ fn test_task_item_gets_a_checkbox_with_its_document_index() {
                 checked: true
             }
         ],
-        "task indices count in document order, as the egui walker did"
+        "task indices count in document order, as the legacy UI walker did"
     );
 }
 
@@ -645,8 +644,5 @@ fn test_context_defaults_are_the_fastmd_palette_and_zero_padding() {
     assert_eq!(ctx.palette, palette());
     assert_eq!(ctx.table_padding, TablePadding::ZERO);
     assert!(ctx.search_term.is_none());
-    assert_eq!(
-        to_iced_color(ctx.palette.text),
-        to_iced_color(Palette::fastmd_dark().text)
-    );
+    assert_eq!(ctx.palette.text, Palette::fastmd_dark().text);
 }

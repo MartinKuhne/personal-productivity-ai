@@ -65,7 +65,7 @@ impl TreeSearch {
         &self.query
     }
 
-    /// Mutable access to the search-box text, for the egui `TextEdit`.
+    /// Mutable access to the search-box text, for the legacy UI `TextEdit`.
     pub fn query_mut(&mut self) -> &mut String {
         &mut self.query
     }

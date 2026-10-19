@@ -48,8 +48,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-appender = "0.2"
 base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "persistence"] }
-egui_extras = { version = "0.36", default-features = false }
 # UI framework migration (TASK-003, `doc/planning/iced.md`): iced ships as a
 # REGULAR (non-optional) dependency per DEC-011 — no feature flag exists.
 # The `markdown` feature gates iced's built-in Markdown widget
@@ -111,9 +109,6 @@ windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] 
 [target."cfg(not(windows))".dependencies]
 trash = "5.2.6"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-eframe = { version = "0.36", features = ["wayland", "x11"] }
-
 [dev-dependencies]
 tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
@@ -122,10 +117,7 @@ proptest = "1.4"
 rayon = "1.10"
 # `criterion` is the project-wide micro-benchmark harness.
 criterion = { version = "0.5", features = ["html_reports"] }
-egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
-accesskit = "0.24"
 log = "0.4"
-# `image` is used by `egui_kittest::snapshot`
 image = { version = "0.25", default-features = false, features = ["png"] }
 wiremock = "0.6"
 typst-syntax = "0.15"
@@ -137,12 +129,6 @@ path = "src/app/main.rs"
 [[bin]]
 name = "deploy"
 path = "src/app/bin/deploy.rs"
-
-# Iced pilot binary (TASK-004, `doc/planning/iced.md`): smoke-tests the iced
-# runtime bootstrap in parallel with the egui `fastmd` binary (DEC-011).
-[[bin]]
-name = "fastmd_iced"
-path = "src/app/bin/fastmd_iced.rs"
 
 [[bench]]
 name = "table_width"

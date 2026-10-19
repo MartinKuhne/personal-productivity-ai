@@ -1,6 +1,6 @@
 //! Unit tests for the [TASK-023] iced reducer (`src/app/ui_iced/update.rs`).
 //!
-//! One-to-one coverage of the egui `FastMdApp::update_ui` mirror, channel
+//! One-to-one coverage of the legacy UI `FastMdApp::update_ui` mirror, channel
 //! by channel. The Elm loop's runtime tasks (window close, font load) need
 //! a live iced runtime and stay manual-verify items ([TASK-009] testing
 //! rule 3); everything else — state reduction, bus publish/execute,
@@ -82,7 +82,7 @@ fn with_viewport(state: &mut AppState, width: f32) {
 
 /// Seeds the tree with rows **the way the reducer does**: into the
 /// `FastMdApp::cached_tree_rows` cache with `tree_dirty` cleared, which is
-/// exactly the cache transition `finish_frame` performs (egui's own,
+/// exactly the cache transition `finish_frame` performs (the legacy UI's own,
 /// `ui/panels/left.rs:209-210`).
 ///
 /// Seeding only `models.left.rows` would not survive the view-model rebuild that
@@ -356,7 +356,7 @@ fn test_delete_is_intercepted_and_deferred_to_the_confirm_dialog() {
 }
 
 #[test]
-fn test_rename_opens_the_dialog_prefilled_with_eguis_initial_value() {
+fn test_rename_opens_the_dialog_prefilled_with_thelegacy_initial_value() {
     let (mut state, _storage) = fresh_state();
     let path = PathBuf::from("/notes/report.md");
 
@@ -372,7 +372,7 @@ fn test_rename_opens_the_dialog_prefilled_with_eguis_initial_value() {
     assert_eq!(
         state.overlay.dialog.pending_name(),
         crate::ui::tree::flatten::initial_rename_value(&path, "report.md"),
-        "egui pre-filled the rename field; the iced reducer must too"
+        "the legacy UI pre-filled the rename field; the iced reducer must too"
     );
 }
 
@@ -452,7 +452,7 @@ fn test_cancel_batch_closes_the_dialog_after_cancelling() {
     assert_eq!(drained(&spy), vec![UserCommand::CancelBatch]);
     assert!(
         !state.overlay.batch.is_open(),
-        "CancelBatch dismisses the dialog, as the egui window's close did"
+        "CancelBatch dismisses the dialog, as the legacy UI window's close did"
     );
 }
 
@@ -488,7 +488,7 @@ fn test_open_in_editor_lifts_the_text_buffer_into_an_editor_view_model() {
 
     let vm = state.overlay.editor.as_ref().expect("editor must open");
     assert_eq!(vm.path(), path.as_path());
-    // egui parity: `TextBuffer::open` stores `DocumentContent::parse(raw).body`
+    // legacy parity: `TextBuffer::open` stores `DocumentContent::parse(raw).body`
     // verbatim (`ui/text_buffer.rs:302-304`), and that body keeps the newline the
     // parser leaves after the closing `---`. The front matter is the full fenced
     // block, exactly as `EditorViewModel`'s own contract pins it
@@ -624,7 +624,7 @@ fn test_run_as_prompt_reads_the_body_and_runs_it_against_the_file() {
     assert_eq!(
         drained(&spy),
         vec![UserCommand::RunSkillPrompt {
-            // egui publishes `DocumentContent::parse(&raw).body` verbatim
+            // the legacy UI publishes `DocumentContent::parse(&raw).body` verbatim
             // (`ui/tree/render.rs:145`), and that body keeps the newline the
             // parser leaves after the closing `---`. One-to-one mirror.
             content: "\nSummarise this\n".to_string(),
@@ -731,7 +731,7 @@ fn test_delete_selected_fans_out_and_clears_the_selection() {
             UserCommand::Delete(PathBuf::from("/notes/a.md")),
             UserCommand::Delete(PathBuf::from("/notes/b.md")),
         ],
-        "egui parity: one Delete per selected path, no confirm dialog"
+        "legacy parity: one Delete per selected path, no confirm dialog"
     );
     assert!(state.app.orchestrator.selection.selected_files.is_empty());
     assert!(
@@ -812,7 +812,7 @@ fn test_editor_cancel_discards_the_buffer_and_clears_the_loaded_path() {
     );
     assert!(
         state.app.orchestrator.tabs.loaded_path.is_none(),
-        "egui render.rs:43-45 cleared the same pair"
+        "the legacy UI render.rs:43-45 cleared the same pair"
     );
     assert!(path.exists(), "a cancel must never write anything to disk");
     assert_eq!(
@@ -957,7 +957,7 @@ fn test_thinking_toggle_lands_in_the_rebuilt_agent_view_model() {
     let (mut state, _storage) = fresh_state();
     assert!(
         state.models.agent.thinking_expanded,
-        "egui's collapsing block starts open"
+        "the legacy UI's collapsing block starts open"
     );
 
     let _ = update(
@@ -1167,7 +1167,7 @@ fn test_log_filters_reach_the_rebuilt_view_model() {
         }),
     );
     assert_eq!(state.models.logs.search_text, "index");
-    // egui only ever changes `auto_scroll` through its checkbox
+    // the legacy UI only ever changes `auto_scroll` through its checkbox
     // (`ui/background_logs.rs:115-118`) - a search edit leaves it alone - so
     // the toggle, not the search, is what the rebuilt model must reflect.
     let _ = update(
@@ -1237,7 +1237,7 @@ fn test_near_unity_scale_is_stored_as_none() {
     );
     assert_eq!(
         state.app.persisted_ui_state.font_size_scale, None,
-        "egui stores a fresh install's 1.0 as None so it is never misread"
+        "the legacy UI stores a fresh install's 1.0 as None so it is never misread"
     );
 }
 
@@ -1276,7 +1276,7 @@ fn test_task_toggle_mutates_the_open_document_in_memory_only() {
 
     assert_eq!(
         state.app.orchestrator.tabs.current_markdown, "- [ ] first\n- [x] second\n",
-        "egui applied the toggle to the in-memory source (P0-2)"
+        "the legacy UI applied the toggle to the in-memory source (P0-2)"
     );
 }
 
@@ -1701,7 +1701,7 @@ fn test_debug_entry_toggle_flips_one_row_only() {
     assert!(!state.overlay.debug.is_expanded(2));
     assert!(
         state.overlay.debug.is_expanded(5),
-        "rows toggle independently, as egui's per-header memory did"
+        "rows toggle independently, as the legacy UI's per-header memory did"
     );
 }
 
@@ -1788,7 +1788,7 @@ fn test_config_arrival_projects_onto_the_orchestrator_and_the_agent() {
     assert!(!state.app.orchestrator.inline_editor_enabled);
     // The arrival invalidates the tree cache, and `finish_frame` re-derives the
     // rows inside the same reduction - so the observable end state is a NEW
-    // cache rather than a lingering `tree_dirty` flag. egui cleared that flag in
+    // cache rather than a lingering `tree_dirty` flag. the legacy UI cleared that flag in
     // the left panel's render pass (`ui/panels/left.rs:210`); the iced frame
     // tail does it before the view ever sees the frame.
     let after = state
@@ -1843,7 +1843,7 @@ fn test_file_change_inbound_drains_the_file_processor() {
             .all_files
             .iter()
             .any(|path| path == &PathBuf::from("/notes/new.md")),
-        "the inbound trigger must run the same drain egui ran per frame"
+        "the inbound trigger must run the same drain the legacy UI ran per frame"
     );
 }
 
@@ -1862,7 +1862,7 @@ fn test_background_process_file_load_populates_the_document() {
     );
 
     assert_eq!(state.app.orchestrator.tabs.loaded_path, Some(path));
-    // egui parity: `handle_process_event` stores `Document::new(content).body()`
+    // legacy parity: `handle_process_event` stores `Document::new(content).body()`
     // (`orchestrator.rs:537-539`), which keeps the newline after the closing
     // `---`. The viewer renders it as leading whitespace; the reducer must not
     // rewrite what the shared orchestrator produced.
@@ -1964,7 +1964,7 @@ fn test_frame_tail_populates_the_tree_cache_and_clears_the_dirty_flag() {
 
     assert!(
         state.app.cached_tree_rows.is_some(),
-        "the egui cache transition (`ui/panels/left.rs:209`) must run in the tail"
+        "the legacy UI cache transition (`ui/panels/left.rs:209`) must run in the tail"
     );
     assert!(
         !state.app.orchestrator.selection.tree_dirty,
@@ -2060,7 +2060,7 @@ fn test_frame_tail_syncs_panel_widths_into_the_persisted_snapshot() {
     assert_eq!(
         state.app.persisted_ui_state.right_panel_width,
         Some(161.0),
-        "egui's update_persisted_ui_state ran every frame; so does finish_frame"
+        "the legacy UI's update_persisted_ui_state ran every frame; so does finish_frame"
     );
 }
 

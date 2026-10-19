@@ -13,7 +13,6 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
-use crate::ui_iced::theme::to_iced_color;
 
 use super::{
     AGENT_TRANSCRIPT_SCROLLABLE_ID, agent_transcript_view, link_activated_message,
@@ -84,11 +83,11 @@ fn link_activated_message_has_no_source_file() {
 fn markdown_style_uses_palette_tokens() {
     let palette = Palette::fastmd_dark();
     let style = markdown_style();
-    assert_eq!(style.link_color, to_iced_color(palette.accent));
-    assert_eq!(style.inline_code_color, to_iced_color(palette.text_strong));
+    assert_eq!(style.link_color, palette.accent);
+    assert_eq!(style.inline_code_color, palette.text_strong);
     assert_eq!(
         style.inline_code_highlight.background,
-        iced::Background::Color(to_iced_color(palette.code_surface))
+        iced::Background::Color(palette.code_surface)
     );
 }
 

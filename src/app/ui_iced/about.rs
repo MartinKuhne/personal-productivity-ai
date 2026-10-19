@@ -7,17 +7,17 @@
 //! [`AboutViewModel`] into an [`iced::Element`] of [`Message`] and touches
 //! neither the bus, the disk nor `FastMdApp`. The [TASK-022]/[TASK-023]
 //! reducer owns the open/close state ([`AboutWindowState`]) and the two
-//! side effects the egui dialog performed inside its click handler.
+//! side effects the legacy UI dialog performed inside its click handler.
 //!
 //! # Data sources (all compile-time — no render-time I/O)
 //!
 //! | Field | Source |
 //! | --- | --- |
 //! | App name / copyright / description | `crate::ui::strings` ([GUD-002]) |
-//! | Version | the `fastmd` package version constant in `src/app/ui/about_dialog.rs` (`env!("CARGO_PKG_VERSION")`), reused unchanged |
-//! | Branch / commit / build date | the root `build.rs` `cargo:rustc-env` vars, read with `env!` — the same values the egui dialog's private consts read |
-//! | License body | the shared license reflow in `src/app/ui/about_dialog.rs` over `include_str!("../../../LICENSE")` |
-//! | Attribution count | [`crate::ui::attributions::DIRECT_DEPENDENCIES`] — the same curated catalog the egui dialog renders (see [`crate::ui_iced::attributions`]) |
+//! | Version | [`APP_VERSION`] — the `fastmd` package version constant (`env!("CARGO_PKG_VERSION")`), owned here since [TASK-029b] |
+//! | Branch / commit / build date | the root `build.rs` `cargo:rustc-env` vars, read with `env!` — the same values the legacy dialog's private consts read |
+//! | License body | the shared license reflow [`license_display_text`] over `include_str!("../../../LICENSE")` |
+//! | Attribution count | [`crate::ui::attributions::DIRECT_DEPENDENCIES`] — the same curated catalog the legacy UI dialog renders (see [`crate::ui_iced::attributions`]) |
 //!
 //! # Banner: a glyph, not the PNG
 //!
@@ -45,17 +45,17 @@
 //! (`ui_iced/panels/top.rs:439`), which the reducer maps to
 //! [`AboutWindowState::open_about`].
 //!
-//! # Deliberate deviations from the egui dialog
+//! # Deliberate deviations from the legacy UI dialog
 //!
-//! * **Attributions moved out.** egui renders the whole catalog inline in
+//! * **Attributions moved out.** the legacy UI renders the whole catalog inline in
 //!   the About window (`src/app/ui/about_dialog.rs:200-220`); this port
 //!   keeps only the count plus a
 //!   [`strings::ABOUT_VIEW_ATTRIBUTIONS_BUTTON`] that opens
 //!   [`crate::ui_iced::attributions`], so the credits list gets the
 //!   dedicated, wider window the brief asks for.
-//! * **A version row is new** — the egui dialog never displayed
+//! * **A version row is new** — the legacy UI dialog never displayed
 //!   `CARGO_PKG_VERSION` even though it owns the constant.
-//! * **Copy-to-clipboard is deferred intent.** egui called
+//! * **Copy-to-clipboard is deferred intent.** the legacy UI called
 //!   `ctx.copy_text` inside the click handler
 //!   (`src/app/ui/about_dialog.rs:68-77`); iced exposes the clipboard
 //!   only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so the
@@ -63,7 +63,7 @@
 //!   reducer performs the write.
 //! * **No hover tooltip.** iced 0.14 has no built-in tooltip widget and
 //!   DEC-005 rules out `iced_aw`, so the full-hash reveal cannot follow
-//!   the egui shape. [`AboutViewModel::commit_tooltip`] still produces
+//!   the legacy UI shape. [`AboutViewModel::commit_tooltip`] still produces
 //!   the same text for the reducer to surface another way.
 //! * **Unknown build metadata stays inert** (spec FR-007): the commit cell
 //!   is always allocated, it simply gets no press handler — see
@@ -79,13 +79,12 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logo;
 use crate::ui_iced::message::{AboutMessage, Message};
-use crate::ui_iced::theme::to_iced_color;
 
 #[cfg(test)]
 #[path = "about_tests.rs"]
 mod tests;
 
-/// Width of the About card — egui parity (`default_size: [620.0, 780.0]`,
+/// Width of the About card — legacy parity (`default_size: [620.0, 780.0]`,
 /// `src/app/ui/about_dialog.rs:135`).
 pub const ABOUT_CARD_WIDTH: f32 = 620.0;
 
@@ -104,7 +103,7 @@ pub const ABOUT_BODY_SIZE: f32 = 14.0;
 /// Vertical gap between card sections and between inline labels.
 pub const ABOUT_SECTION_SPACING: f32 = 8.0;
 
-/// Maximum height of the license scroll area — egui parity
+/// Maximum height of the license scroll area — legacy parity
 /// (`ScrollArea::max_height(200.0)`, `src/app/ui/about_dialog.rs:191`).
 pub const LICENSE_MAX_HEIGHT: f32 = 200.0;
 
@@ -112,8 +111,63 @@ pub const LICENSE_MAX_HEIGHT: f32 = 200.0;
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// The sentinel `build.rs` writes when git metadata is unavailable; the
-/// egui dialog tests the same value (`src/app/ui/about_dialog.rs:93`).
+/// legacy dialog tests the same value (`src/app/ui/about_dialog.rs:93`).
 pub const UNKNOWN_BUILD_METADATA: &str = "unknown";
+
+/// Current application version, from the `fastmd` package manifest
+/// ([`env!`] `CARGO_PKG_VERSION`).
+///
+/// Owned by this module since [TASK-029b]; the legacy About dialog held the
+/// same constant.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Full MIT license text bundled at compile time.
+const LICENSE_TEXT: &str = include_str!("../../../LICENSE");
+
+/// Reflows the hard-wrapped `LICENSE_TEXT` (fixed ~78-char lines) into
+/// flowing paragraphs so the label wraps at the available width and the
+/// license section fills the card like every other section. Single
+/// newlines become spaces; blank lines stay as paragraph breaks; the word
+/// sequence is preserved verbatim.
+///
+/// Pure; owned by this module since [TASK-029b].
+#[must_use]
+pub fn license_display_text() -> String {
+    LICENSE_TEXT
+        .split("\n\n")
+        .map(|paragraph| paragraph.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Decides whether the About dialog should open automatically at startup
+/// (spec FR-016): `None` (fresh state, or state written before the flag
+/// existed) or a version mismatch auto-shows; a match stays quiet.
+#[must_use]
+pub fn should_auto_show_about(recorded: Option<&str>, current: &str) -> bool {
+    match recorded {
+        None => true,
+        Some(version) => version != current,
+    }
+}
+
+/// Applies the first-run auto-show decision to startup state (spec FR-016).
+/// When [`should_auto_show_about`] holds for the recorded version, opens
+/// the dialog and records `current` so later starts stay quiet.
+/// Returns `true` when the dialog was auto-opened.
+pub fn apply_first_run_auto_show(
+    persisted: &mut crate::ui::PersistedUiState,
+    dialogs: &mut crate::ui::Dialogs,
+    current: &str,
+) -> bool {
+    if should_auto_show_about(persisted.about_shown_for_version.as_deref(), current) {
+        dialogs.about_dialog_open = true;
+        persisted.about_shown_for_version = Some(current.to_owned());
+        true
+    } else {
+        false
+    }
+}
 
 /// The snapshot the About card renders — application identity plus build
 /// metadata plus the license body.
@@ -157,14 +211,14 @@ impl AboutViewModel {
     pub fn from_build() -> Self {
         Self {
             app_name: strings::ABOUT_APP_NAME,
-            version: crate::ui::about_dialog::APP_VERSION,
+            version: APP_VERSION,
             description: strings::ABOUT_DESCRIPTION,
             copyright: strings::ABOUT_COPYRIGHT,
             branch: env!("BUILD_BRANCH"),
             commit_hash: env!("BUILD_COMMIT_HASH"),
             commit_short_hash: env!("BUILD_COMMIT_SHORT_HASH"),
             build_date: env!("BUILD_DATE"),
-            license_text: crate::ui::about_dialog::license_display_text(),
+            license_text: license_display_text(),
             attribution_count: DIRECT_DEPENDENCIES.len(),
         }
     }
@@ -183,7 +237,7 @@ impl AboutViewModel {
         format!("{} {}", strings::ABOUT_VERSION_LABEL, self.version)
     }
 
-    /// The full-hash reveal line the egui dialog showed on hover
+    /// The full-hash reveal line the legacy UI dialog showed on hover
     /// (`src/app/ui/about_dialog.rs:42-49`). iced 0.14 has no tooltip
     /// widget, so this is text the reducer may surface elsewhere — it is
     /// not rendered by [`about_card`].
@@ -213,7 +267,7 @@ impl AboutViewModel {
 
 /// Renders the About card ([TASK-017b2]).
 ///
-/// Layout, mirroring the egui dialog body (`src/app/ui/about_dialog.rs:147-221`)
+/// Layout, mirroring the legacy UI dialog body (`src/app/ui/about_dialog.rs:147-221`)
 /// with the attributions section replaced by a teaser button:
 ///
 /// ```text
@@ -257,11 +311,11 @@ pub fn about_card(view_model: &AboutViewModel) -> Element<'_, Message> {
     let identity = Column::with_children(vec![
         text(view_model.app_name)
             .size(ABOUT_HEADING_SIZE)
-            .color(to_iced_color(palette.text_strong))
+            .color(palette.text_strong)
             .into(),
         text(view_model.copyright)
             .size(ABOUT_BODY_SIZE)
-            .color(to_iced_color(palette.text_muted))
+            .color(palette.text_muted)
             .into(),
     ])
     .spacing(2.0);
@@ -273,11 +327,11 @@ pub fn about_card(view_model: &AboutViewModel) -> Element<'_, Message> {
     let facts = Column::with_children(vec![
         text(view_model.version_line())
             .size(ABOUT_BODY_SIZE)
-            .color(to_iced_color(palette.text_value))
+            .color(palette.text_value)
             .into(),
         text(view_model.description)
             .size(ABOUT_BODY_SIZE)
-            .color(to_iced_color(palette.text))
+            .color(palette.text)
             .into(),
     ])
     .spacing(2.0);
@@ -335,14 +389,14 @@ pub fn about_footer() -> Element<'static, Message> {
     .into()
 }
 
-/// The Branch / Commit / Built row (egui parity,
+/// The Branch / Commit / Built row (legacy parity,
 /// `src/app/ui/about_dialog.rs:154-183`).
 fn build_metadata_row(view_model: &AboutViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
     let muted = |value: &str| {
         text(value.to_owned())
             .size(ABOUT_BODY_SIZE)
-            .color(to_iced_color(palette.text_muted))
+            .color(palette.text_muted)
     };
 
     Row::with_children(vec![
@@ -363,7 +417,7 @@ fn build_metadata_row(view_model: &AboutViewModel) -> Element<'_, Message> {
 fn commit_cell(view_model: &AboutViewModel) -> Element<'_, Message> {
     let cell = text(view_model.commit_short_hash)
         .size(ABOUT_BODY_SIZE)
-        .color(to_iced_color(Palette::fastmd_dark().text_value));
+        .color(Palette::fastmd_dark().text_value);
 
     let area = mouse_area(cell);
     match commit_copy_press(view_model.is_build_metadata_unknown()) {
@@ -374,7 +428,7 @@ fn commit_cell(view_model: &AboutViewModel) -> Element<'_, Message> {
 
 /// The press handler the commit cell gets: `Some` only when the build
 /// metadata is known, because an `"unknown"` build has nothing
-/// meaningful to copy (egui parity — `copy_commit_hash_to_output` returns
+/// meaningful to copy (legacy parity — `copy_commit_hash_to_output` returns
 /// early, `src/app/ui/about_dialog.rs:69-71`).
 ///
 /// `MouseArea` has no `on_press_maybe` (`iced_widget-0.14.2/src/mouse_area.rs:38`),
@@ -393,7 +447,7 @@ fn license_section(view_model: &AboutViewModel) -> Element<'_, Message> {
 
     let header = text(strings::ABOUT_LICENSE_HEADER)
         .size(ABOUT_HEADER_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let body = scrollable(
         text(&view_model.license_text)
@@ -414,11 +468,11 @@ fn attributions_teaser(view_model: &AboutViewModel) -> Element<'_, Message> {
 
     let header = text(strings::ABOUT_ATTRIBUTIONS_HEADER)
         .size(ABOUT_HEADER_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let summary = text(view_model.attributions_summary())
         .size(ABOUT_BODY_SIZE)
-        .color(to_iced_color(palette.text_muted));
+        .color(palette.text_muted);
 
     let open = button(text(strings::ABOUT_VIEW_ATTRIBUTIONS_BUTTON))
         .on_press(Message::About(AboutMessage::AttributionsRequested));

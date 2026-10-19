@@ -58,7 +58,6 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logs;
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
-use crate::ui_iced::theme::to_iced_color;
 
 use super::panel_state::{AgentPanelViewModel, TranscriptTurn};
 
@@ -71,7 +70,7 @@ use super::panel_state::{AgentPanelViewModel, TranscriptTurn};
 /// view and the reducer cannot drift ([RUST-021]).
 pub const AGENT_TRANSCRIPT_SCROLLABLE_ID: &str = "agent_transcript_scroll";
 
-/// Base logical point size of the transcript body text (egui rendered the
+/// Base logical point size of the transcript body text (the legacy UI rendered the
 /// agent response at the default body size; iced needs it stated).
 pub const TRANSCRIPT_TEXT_SIZE: f32 = 14.0;
 
@@ -122,7 +121,7 @@ pub fn markdown_style() -> iced::widget::markdown::Style {
     iced::widget::markdown::Style {
         font: iced::Font::DEFAULT,
         inline_code_highlight: iced::widget::markdown::Highlight {
-            background: iced::Background::Color(to_iced_color(palette.code_surface)),
+            background: iced::Background::Color(palette.code_surface),
             border: iced::Border::default().rounded(4),
         },
         inline_code_padding: iced::Padding {
@@ -131,10 +130,10 @@ pub fn markdown_style() -> iced::widget::markdown::Style {
             bottom: 0.0,
             left: 1.0,
         },
-        inline_code_color: to_iced_color(palette.text_strong),
+        inline_code_color: palette.text_strong,
         inline_code_font: iced::Font::MONOSPACE,
         code_block_font: iced::Font::MONOSPACE,
-        link_color: to_iced_color(palette.accent),
+        link_color: palette.accent,
     }
 }
 
@@ -172,15 +171,13 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
         TranscriptTurn::User { text: user_text } => container(
             text(user_text)
                 .size(TRANSCRIPT_TEXT_SIZE)
-                .color(to_iced_color(palette.text_strong)),
+                .color(palette.text_strong),
         )
         .padding(4)
         .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(to_iced_color(
-                palette.surface_variant,
-            ))),
+            background: Some(iced::Background::Color(palette.surface_variant)),
             border: iced::Border {
-                color: to_iced_color(palette.border),
+                color: palette.border,
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -197,7 +194,7 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 /// The block is allocated only when [`AgentPanelViewModel::show_thinking`]
 /// holds; the header is a button that flips the disclosure via
 /// [`AgentMessage::ThinkingToggled`], and the body renders the extracted
-/// thinking text in muted italics — the same treatment egui's
+/// thinking text in muted italics — the same treatment the legacy UI's
 /// `collapsing` body used (`src/app/ui/panels/center.rs:143-149`).
 ///
 /// Purity: pure over `view_model`.
@@ -209,7 +206,7 @@ pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> 
         Row::with_children(vec![
             text(strings::AGENT_THINKING_PROCESS)
                 .size(TRANSCRIPT_TEXT_SIZE)
-                .color(to_iced_color(palette.text_strong))
+                .color(palette.text_strong)
                 .into(),
             container(text(if view_model.thinking_expanded {
                 "▾"
@@ -231,7 +228,7 @@ pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> 
         text(&view_model.thinking)
             .size(TRANSCRIPT_TEXT_SIZE)
             .font(italic_font())
-            .color(to_iced_color(palette.text_muted))
+            .color(palette.text_muted)
             .into()
     } else {
         Column::<Message>::new().into()
@@ -265,7 +262,7 @@ pub fn transcript_body(view_model: &AgentPanelViewModel) -> Element<'_, Message>
             text(strings::AGENT_THINKING_LABEL)
                 .size(TRANSCRIPT_TEXT_SIZE)
                 .font(italic_font())
-                .color(to_iced_color(palette.text_muted))
+                .color(palette.text_muted)
                 .into(),
         );
     }

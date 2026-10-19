@@ -100,7 +100,7 @@ fn row_icon_uses_caret_state_for_directories_and_blank_slot_for_files() {
 }
 
 #[test]
-fn row_label_reproduces_the_egui_icon_space_name_format() {
+fn row_label_reproduces_the_legacy_icon_space_name_format() {
     assert_eq!(
         row_label(&dir_row("Work", "/lib/Work", 0)),
         format!("{} Work", strings::ICON_CARET_RIGHT)
@@ -370,7 +370,7 @@ fn file_menu_maps_every_row_and_gates_save_as_pdf_on_typst() {
     assert_eq!(
         menu_labels(&with_typst)[5],
         strings::SAVE_AS_PDF_ACTION,
-        "Save as PDF sits right after Print, as in the egui menu"
+        "Save as PDF sits right after Print, as in the legacy UI menu"
     );
     assert_eq!(
         with_typst[5].message,
@@ -794,8 +794,8 @@ fn view_model_auto_fit_delegates_to_the_pure_solver() {
 #[test]
 fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
     let palette = Palette::fastmd_dark();
-    assert_eq!(row_text_color(&palette, true), to_iced_color(palette.error));
-    assert_eq!(row_text_color(&palette, false), to_iced_color(palette.text));
+    assert_eq!(row_text_color(&palette, true), palette.error);
+    assert_eq!(row_text_color(&palette, false), palette.text);
     assert_ne!(
         row_text_color(&palette, true),
         row_text_color(&palette, false)

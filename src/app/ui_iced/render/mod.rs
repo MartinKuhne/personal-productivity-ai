@@ -5,8 +5,7 @@
 //! [`RenderEvent`] / [`InlineElem`] / [`crate::markdown::model::TextStyle`] — onto iced widgets.
 //! The parser is not modified; nothing here reads a file, touches the bus
 //! or mutates application state. Every colour comes from a
-//! [`Palette`] token via
-//! [`to_iced_color`] ([GUD-003]).
+//! [`Palette`] token directly ([GUD-003]).
 //!
 //! # Pure descriptor layer
 //!
@@ -39,7 +38,7 @@
 //!
 //! # What is NOT ported
 //!
-//! * **Viewport culling.** The egui renderer skipped off-screen events and
+//! * **Viewport culling.** The legacy UI renderer skipped off-screen events and
 //!   inserted estimated space (`src/app/ui/render/mod.rs:174-227`). iced
 //!   `scrollable` virtualises nothing by itself, but culling needs live
 //!   scroll offsets the pure view does not have; deferred to the runtime
@@ -50,7 +49,7 @@
 //!   which is reducer work.
 //! * **Column alignment.** GFM's `|:---|:--:|` row never reaches the
 //!   document model — see the [`table`] module docs.
-//! * **Per-link hover tooltips.** The egui renderer attached
+//! * **Per-link hover tooltips.** The legacy UI renderer attached
 //!   `"Note: <target>"` hover text to wikilinks
 //!   (`src/app/ui/render/style.rs:140-145`); iced's `Rich` text has one
 //!   widget for the whole paragraph, so a per-span tooltip is not
@@ -71,7 +70,6 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::table_width::TablePadding;
 use crate::ui_iced::table_width::{IcedTextMeasurer, TextMetrics};
-use crate::ui_iced::theme::to_iced_color;
 use iced::widget::{Column, Space, checkbox, container, rule, text};
 use iced::{Alignment, Element, Length};
 use std::path::PathBuf;
@@ -101,13 +99,13 @@ pub const INDENT_UNIT: f32 = 20.0;
 
 /// Space around a task-list checkbox.
 ///
-/// Ported from the `ui.add_space(4.0)` calls bracketing the egui checkbox
+/// Ported from the `ui.add_space(4.0)` calls bracketing the legacy UI checkbox
 /// (`src/app/ui/render/inline.rs:134`, `:143`).
 pub const TASK_CHECKBOX_SPACING: f32 = 4.0;
 
 /// Width of the rendered horizontal rule.
 ///
-/// The egui `ui.separator()` line; 1 px matches the top bar's rule.
+/// The legacy UI `ui.separator()` line; 1 px matches the top bar's rule.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// Point size of the list bullet / ordinal marker.
@@ -180,7 +178,7 @@ pub struct RenderBlock {
     /// What to render.
     pub kind: BlockKind,
     /// First block matching the active search term ([TASK-015] port of
-    /// egui's `scroll_to_search` first-match-then-clear rule). The pure
+    /// the legacy UI's `scroll_to_search` first-match-then-clear rule). The pure
     /// layer only marks it; executing the scroll is reducer work.
     pub scroll_to_me: bool,
 }
@@ -249,7 +247,7 @@ impl<'a> RenderContext<'a> {
 ///
 /// Ported from `inline_elems_contain`
 /// (`src/app/ui/render/mod.rs:75-82`): images are excluded because their
-/// placeholder is not searchable text in the egui build either.
+/// placeholder is not searchable text in the legacy UI build either.
 #[must_use]
 pub fn inline_elems_contain(elems: &[InlineElem], term_lower: &str) -> bool {
     elems.iter().any(|elem| match elem {
@@ -280,7 +278,7 @@ pub fn event_contains(event: &RenderEvent, term_lower: &str) -> bool {
 
 /// Maps the parser's event stream onto render blocks.
 ///
-/// `task_index` counts task items in document order exactly as the egui
+/// `task_index` counts task items in document order exactly as the legacy UI
 /// walker did, so the index a toggle carries matches the index
 /// `apply_task_toggle` expects. Blank headings are dropped, matching
 /// `render_markdown_with_search`'s `continue`
@@ -399,7 +397,7 @@ pub fn paragraph_block(
         row = row.push(
             text(marker.text())
                 .size(LIST_MARKER_SIZE)
-                .color(to_iced_color(ctx.palette.text)),
+                .color(ctx.palette.text),
         );
     }
     if let Some(task) = task {

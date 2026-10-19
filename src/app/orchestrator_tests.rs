@@ -396,16 +396,16 @@ fn orchestrator_user_commands_persist_via_injected_config_storage() {
     // Table width strategy change
     orch.apply_user_command(
         crate::bus::events::user_command::UserCommand::ChangeTableWidthStrategy(
-            crate::ui::table_width::DeficitStrategy::WaterFillRatio,
+            crate::markdown::table_width::DeficitStrategy::WaterFillRatio,
         ),
     );
     assert_eq!(
         orch.config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+        crate::markdown::table_width::DeficitStrategy::WaterFillRatio
     );
     assert_eq!(
         storage.latest_config().unwrap().deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+        crate::markdown::table_width::DeficitStrategy::WaterFillRatio
     );
 
     // Tool group enable/disable

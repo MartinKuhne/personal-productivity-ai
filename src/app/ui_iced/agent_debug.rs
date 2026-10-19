@@ -12,9 +12,9 @@
 //!
 //! | Field | Source |
 //! | --- | --- |
-//! | Entries | `AgentSession::state().debug_entries` (`src/agent/session.rs:33`, appended by `push_debug_entry` at `:215`) — the exact read the egui window performed (`src/app/ui/agent_debug_window.rs:21`) |
+//! | Entries | `AgentSession::state().debug_entries` (`src/agent/session.rs:33`, appended by `push_debug_entry` at `:215`) — the exact read the legacy UI window performed (`src/app/ui/agent_debug_window.rs:21`) |
 //! | Types | `AgentDebugEntry` / `DebugEntryKind` / `DebugEntryRow` (`src/agent/events.rs:23-62`), reached through the existing bus re-export `crate::bus::events::debug` (`src/app/bus/events/debug.rs:3`); re-exported here, never re-declared |
-//! | Search / auto-scroll / json-rows / open flag | `AgentPanelState` (`src/app/ui/agent/panel_state.rs:13-31`) — the UI-owned panel state the egui window mutated in place, read here through the same fields |
+//! | Search / auto-scroll / json-rows / open flag | `AgentPanelState` (`src/app/ui/agent/panel_state.rs:13-31`) — the UI-owned panel state the legacy UI window mutated in place, read here through the same fields |
 //! | External-data markers | `crate::agent::datamark::{EXTERNAL_DATA_START, EXTERNAL_DATA_END}` (`src/agent/datamark.rs:27`, `:32`) — the envelope the agent itself writes, not re-typed literals ([RUST-021]) |
 //!
 //! **Live streaming needs no new plumbing.** The agent pushes entries onto
@@ -37,13 +37,13 @@
 //!     .on_press(Message::AgentDebug(AgentDebugMessage::EntryToggled { id }))
 //! ```
 //!
-//! What egui kept inside the header widget's own memory is here a
+//! What the legacy UI kept inside the header widget's own memory is here a
 //! `HashSet<usize>` of row ids held by
 //! [`AgentDebugWindowState::expanded_ids`] and copied into the snapshot
 //! the card renders, so the disclosure state is plain data: inspectable,
 //! replayable and unit-testable without a runtime.
 //!
-//! A row id is the entry's index in the **raw** debug-entry list — egui's
+//! A row id is the entry's index in the **raw** debug-entry list — the legacy UI's
 //! `orig_idx` (`ui/agent_debug_window.rs:106`), the very value its
 //! `push_id(orig_idx)` / `id_salt(("entry_header", id_salt))` used, so
 //! row identity is identical across both builds. Two consequences the
@@ -52,13 +52,13 @@
 //! * ids are **positional**, so `UserCommand::ClearDebugEntries` must be
 //!   followed by [`AgentDebugWindowState::collapse_all`] — otherwise a
 //!   stale id silently re-expands an unrelated new entry;
-//! * egui's `.default_open(false)` maps to the empty set
+//! * the legacy UI's `.default_open(false)` maps to the empty set
 //!   [`AgentDebugWindowState::new`] starts from: nothing is expanded
 //!   until the user clicks.
 //!
 //! # Auto-scroll — the [TASK-016] intent model, reused verbatim
 //!
-//! egui got stick-to-bottom free from `ScrollArea::stick_to_bottom`
+//! the legacy UI got stick-to-bottom free from `ScrollArea::stick_to_bottom`
 //! (`ui/agent_debug_window.rs:103`); iced 0.14 has no such flag, so this
 //! window uses the **same** rule [`crate::ui_iced::logs`] established for
 //! the log viewer rather than a second copy of it:
@@ -80,14 +80,14 @@
 //!
 //! # `json_rows` semantics
 //!
-//! The setting is a **viewport size, not a truncation**. egui computed
+//! The setting is a **viewport size, not a truncation**. the legacy UI computed
 //! `max_h = text_style_height(Monospace) × json_rows` and capped a
 //! scrollable area with it
 //! (`ui/agent_debug_window.rs:204-207`), so an expanded body shows
 //! `min(lines, json_rows)` lines and scrolls to reach the rest — both
 //! vertically and horizontally (`desired_width(f32::INFINITY)`).
 //! [`json_body_height`] reproduces that cap and
-//! [`visible_json_lines`] the count. The catalogue is egui's
+//! [`visible_json_lines`] the count. The catalogue is the legacy UI's
 //! `[8, 16, 24, 32, 64]` ([`JSON_ROW_CATALOG`], default `8` from
 //! `AgentPanelState::default`); [`json_row_options`] additionally keeps
 //! an off-catalogue value visible, which iced's `pick_list` cannot do on
@@ -99,13 +99,13 @@
 //!   [`Message::Command`]** — `UserCommand::SetDebugSearchText` /
 //!   `SetDebugAutoScroll` / `SetDebugJsonRows` / `ClearDebugEntries` /
 //!   `ToggleDebugWindow(bool)` (`src/app/bus/events/user_command.rs:152-160`)
-//!   are exactly what the egui window published or mutated to the same
+//!   are exactly what the legacy UI window published or mutated to the same
 //!   effect, and each is self-contained ([FMD-068]). Nothing is
 //!   duplicated.
 //! * **Disclosure needed a new variant.** An entry's open/closed state has
 //!   no [`UserCommand`] equivalent — it is view-local, not application
 //!   state — so it arrives as [`AgentDebugMessage::EntryToggled`].
-//! * **Copy-JSON is deferred intent.** egui called `Ui::copy_text` inside
+//! * **Copy-JSON is deferred intent.** the legacy UI called `Ui::copy_text` inside
 //!   the click handler (`ui/agent_debug_window.rs:177-184`); iced exposes
 //!   the clipboard to `update` only
 //!   (`iced_core-0.14.0/src/clipboard.rs`), so the exact payload rides
@@ -115,7 +115,7 @@
 //! * **`ScrollReported` is a runtime report**, not intent — the same
 //!   class of payload `LogsMessage::ScrollReported` and
 //!   `LayoutMessage::CursorMoved` carry.
-//! * **Dismissal is a command, not a new variant.** The egui window's
+//! * **Dismissal is a command, not a new variant.** The legacy UI window's
 //!   close path published `UserCommand::ToggleDebugWindow(false)`
 //!   (`ui/agent_debug_window.rs:149-153`), so the scrim click / Escape
 //!   emits [`dismiss_command`] rather than inventing a
@@ -157,24 +157,23 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 use crate::ui_iced::panels::top::phosphor_font;
-use crate::ui_iced::theme::to_iced_color;
 
-/// Width of the debug card — egui parity (`default_size: [600.0, …]`,
+/// Width of the debug card — legacy parity (`default_size: [600.0, …]`,
 /// `src/app/ui/agent_debug_window.rs:19`).
 pub const CARD_WIDTH: f32 = 600.0;
 
-/// Logical point size of an entry's header row (egui's `Body` style, the
+/// Logical point size of an entry's header row (the legacy UI's `Body` style, the
 /// size [`crate::ui_iced::render::code`] recorded for it).
 pub const ENTRY_TEXT_SIZE: f32 = 14.0;
 
-/// Logical point size of a session-boundary label — egui parity
+/// Logical point size of a session-boundary label — legacy parity
 /// (`RichText::new(..).size(12.0)`, `src/app/ui/agent_debug_window.rs:114`).
 pub const BOUNDARY_TEXT_SIZE: f32 = 12.0;
 
 /// Logical point size of the card title.
 pub const TITLE_SIZE: f32 = 18.0;
 
-/// Logical point size of the expanded JSON body (egui rendered it in
+/// Logical point size of the expanded JSON body (the legacy UI rendered it in
 /// `TextStyle::Monospace`, `src/app/ui/agent_debug_window.rs:210`).
 pub const JSON_TEXT_SIZE: f32 = 14.0;
 
@@ -183,18 +182,18 @@ pub const JSON_TEXT_SIZE: f32 = 14.0;
 /// iced's default [`LineHeight`](iced::widget::text::LineHeight) is
 /// `Relative(1.3)` (`iced_core-0.14.0/src/text.rs:215-218`), so a
 /// [`JSON_TEXT_SIZE`] line occupies `JSON_TEXT_SIZE × 1.3` points. This
-/// is the iced stand-in for egui's
+/// is the iced stand-in for the legacy UI's
 /// `ui.text_style_height(&TextStyle::Monospace)`
 /// (`src/app/ui/agent_debug_window.rs:204`) and is what makes the
 /// `json_rows` setting mean "N visible lines".
 pub const JSON_LINE_HEIGHT: f32 = JSON_TEXT_SIZE * 1.3;
 
-/// The `json_rows` catalogue the pick list offers — egui parity
+/// The `json_rows` catalogue the pick list offers — legacy parity
 /// (`[8usize, 16, 24, 32, 64]`, `src/app/ui/agent_debug_window.rs:37`).
 pub const JSON_ROW_CATALOG: [usize; 5] = [8, 16, 24, 32, 64];
 
 /// `chrono` format of the row timestamp, carried over verbatim from the
-/// egui header (`entry.timestamp.format("%H:%M:%S%.3f")`,
+/// the legacy UI header (`entry.timestamp.format("%H:%M:%S%.3f")`,
 /// `src/app/ui/agent_debug_window.rs:165`).
 pub const TIMESTAMP_FORMAT: &str = "%H:%M:%S%.3f";
 
@@ -213,7 +212,7 @@ pub const PROVENANCE_PREFIX: &str = "provenance=";
 
 /// What replaces a `tools` array an earlier entry in the same session
 /// already showed ([`strings::DEBUG_OMITTED_TOOLS_PLACEHOLDER`], the
-/// same text the egui row inserted at `ui/agent_debug_window.rs:128`).
+/// same text the legacy UI row inserted at `ui/agent_debug_window.rs:128`).
 pub const OMITTED_TOOLS_PLACEHOLDER: &str = strings::DEBUG_OMITTED_TOOLS_PLACEHOLDER;
 
 /// Stable iced widget id of the entry list's `scrollable`.
@@ -243,7 +242,7 @@ pub const BODY_SPACING: f32 = 4.0;
 /// Gap between a row's chevron and its label.
 pub const CHEVRON_SPACING: f32 = 6.0;
 
-/// Vertical padding inside a clickable header row — the hit area egui's
+/// Vertical padding inside a clickable header row — the hit area the legacy UI's
 /// `CollapsingHeader` title gave.
 pub const HEADER_PADDING_Y: f32 = 4.0;
 
@@ -251,7 +250,7 @@ pub const HEADER_PADDING_Y: f32 = 4.0;
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// The search text in the form the filter compares against — lower-cased
-/// once, exactly as the egui window did before filtering
+/// once, exactly as the legacy UI window did before filtering
 /// (`src/app/ui/agent_debug_window.rs:58-62`).
 ///
 /// Purity: pure.
@@ -262,7 +261,7 @@ pub fn normalized_search(search: &str) -> String {
 
 /// Whether one debug entry passes the window's search filter.
 ///
-/// The egui predicate, lifted out of the render closure verbatim
+/// The legacy UI predicate, lifted out of the render closure verbatim
 /// (`src/app/ui/agent_debug_window.rs:66-74`):
 ///
 /// * a [`DebugEntryRow::SessionBoundary`] **always** passes, so the
@@ -271,7 +270,7 @@ pub fn normalized_search(search: &str) -> String {
 /// * an empty search passes everything;
 /// * otherwise the row passes when its `summary` contains the needle —
 ///   i.e. the match is **case-insensitive** and **summary-only**. The
-///   JSON body is not searched, egui parity.
+///   JSON body is not searched, legacy parity.
 ///
 /// `search_lower` must already be lower-cased ([`normalized_search`]).
 ///
@@ -287,7 +286,7 @@ pub fn entry_matches(entry: &AgentDebugEntry, search_lower: &str) -> bool {
     entry.summary.to_lowercase().contains(search_lower)
 }
 
-/// The filtered `(original index, entry)` pairs, in list order — egui's
+/// The filtered `(original index, entry)` pairs, in list order — the legacy UI's
 /// `filtered` vector (`src/app/ui/agent_debug_window.rs:63-75`).
 ///
 /// Original indices are carried, not re-numbered: they are the row ids
@@ -310,7 +309,7 @@ pub fn filter_debug_entries<'a>(
 /// Which filtered entries must have their `tools` array replaced because
 /// an earlier entry in the same session already showed one.
 ///
-/// Port of the egui pass at `src/app/ui/agent_debug_window.rs:77-97`.
+/// Port of the legacy UI pass at `src/app/ui/agent_debug_window.rs:77-97`.
 /// Walking the filtered list in order, the **first** entry of a session
 /// that carries a top-level `"tools"` key is kept whole; every later one
 /// in that session is a duplicate — the agent re-sends the same tool
@@ -422,7 +421,7 @@ pub fn unescape_json_strings(value: &mut serde_json::Value) {
 }
 
 /// Whether `trimmed` looks like a JSON object or array — the same
-/// bracket test the egui un-escaper ran
+/// bracket test the legacy UI un-escaper ran
 /// (`src/app/ui/agent_debug_window.rs:236-237`, `:255-256`).
 ///
 /// Purity: pure.
@@ -434,12 +433,12 @@ fn is_json_container(trimmed: &str) -> bool {
 
 /// The JSON an expanded row shows.
 ///
-/// The egui display pipeline in the egui order
+/// The legacy UI display pipeline in the legacy UI order
 /// (`src/app/ui/agent_debug_window.rs:120-135`, `:181-188`, `:203`):
 /// replace a duplicated `tools` array, un-escape the double-encoded
 /// payloads, then `serde_json::to_string_pretty`. A serialization
 /// failure renders as the empty string — the same `unwrap_or_default`
-/// egui used, so a malformed payload degrades to a blank body rather
+/// the legacy UI used, so a malformed payload degrades to a blank body rather
 /// than taking the window down ([FMD-064]).
 ///
 /// Purity: pure function of `content` and `omit_tools`.
@@ -461,7 +460,7 @@ pub fn display_json(content: &serde_json::Value, omit_tools: bool) -> String {
 /// How many lines a JSON body holds.
 ///
 /// Counted on the rendered text because the body is drawn with
-/// `Wrapping::None` (egui's `desired_width(f32::INFINITY)`), so one
+/// `Wrapping::None` (the legacy UI's `desired_width(f32::INFINITY)`), so one
 /// source line is exactly one rendered line.
 ///
 /// Purity: pure.
@@ -476,7 +475,7 @@ pub fn json_line_count(json: &str) -> usize {
 /// truncation — the rest stays reachable by scrolling
 /// (see the module header).
 ///
-/// Boundaries: `json_rows == 0` shows nothing (egui's `max_h == 0`
+/// Boundaries: `json_rows == 0` shows nothing (the legacy UI's `max_h == 0`
 /// collapsed the area; the pick list never offers 0 but the command
 /// channel can carry it); `json_rows >= total_lines` shows everything
 /// and the body does not scroll.
@@ -490,7 +489,7 @@ pub fn visible_json_lines(total_lines: usize, json_rows: usize) -> usize {
 /// Height, in logical points, of an expanded JSON body.
 ///
 /// `visible_json_lines(total_lines, json_rows) × JSON_LINE_HEIGHT` — the
-/// iced equivalent of egui's `ScrollArea::max_height(max_h)` with
+/// iced equivalent of the legacy UI's `ScrollArea::max_height(max_h)` with
 /// `max_h = text_style_height(Monospace) × json_rows`
 /// (`src/app/ui/agent_debug_window.rs:204-207`). A short body takes its
 /// own height; a long one stops at the setting and scrolls.
@@ -513,7 +512,7 @@ pub struct JsonRowsOption {
 
 impl JsonRowsOption {
     /// The intent this option publishes when picked — the existing
-    /// `UserCommand::SetDebugJsonRows`, i.e. what the egui combo wrote
+    /// `UserCommand::SetDebugJsonRows`, i.e. what the legacy UI combo wrote
     /// straight into `AgentPanelState::debug_json_rows`
     /// (`src/app/ui/agent_debug_window.rs:41-47`,
     /// `src/app/command_executor.rs:587`).
@@ -531,7 +530,7 @@ impl std::fmt::Display for JsonRowsOption {
 
 /// The pick-list options for the current `json_rows` value.
 ///
-/// The egui catalogue [`JSON_ROW_CATALOG`]
+/// The legacy UI catalogue [`JSON_ROW_CATALOG`]
 /// (`src/app/ui/agent_debug_window.rs:37-40`) plus the current value
 /// inserted in ascending order when it is not already one of them.
 /// `UserCommand::SetDebugJsonRows` accepts any `usize`, and iced's
@@ -572,7 +571,7 @@ pub fn kind_label(kind: DebugEntryKind) -> &'static str {
 
 /// The collapsed row's label: `HH:MM:SS.fff  [Kind]  summary`.
 ///
-/// egui parity (`src/app/ui/agent_debug_window.rs:163-168`), separators
+/// legacy parity (`src/app/ui/agent_debug_window.rs:163-168`), separators
 /// included.
 ///
 /// Purity: pure function of `entry`.
@@ -622,7 +621,7 @@ pub fn clear_command() -> Message {
     Message::Command(UserCommand::ClearDebugEntries)
 }
 
-/// The dismiss message a scrim click / Escape emits — the egui window's
+/// The dismiss message a scrim click / Escape emits — the legacy UI window's
 /// own close path (`UserCommand::ToggleDebugWindow(false)`,
 /// `src/app/ui/agent_debug_window.rs:149-153`), so no new
 /// `AgentDebugMessage` variant is needed for closing.
@@ -664,7 +663,7 @@ pub fn scroll_reported_message(snapshot: &ScrollSnapshot) -> Message {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DebugEntryView {
     /// Stable row id: the entry's index in the raw debug-entry list it
-    /// was snapshotted from — egui's `orig_idx`
+    /// was snapshotted from — the legacy UI's `orig_idx`
     /// (`src/app/ui/agent_debug_window.rs:106`) and the salt its
     /// `CollapsingHeader` used.
     pub id: usize,
@@ -732,7 +731,7 @@ pub struct AgentDebugViewModel {
 impl AgentDebugViewModel {
     /// Builds a snapshot from the raw pieces.
     ///
-    /// Runs the egui pipeline once, at snapshot time: filter → session
+    /// Runs the legacy UI pipeline once, at snapshot time: filter → session
     /// tools-dedup → display JSON.
     ///
     /// Purity: pure over `entries` and the four settings.
@@ -773,7 +772,7 @@ impl AgentDebugViewModel {
     }
 
     /// Snapshots the window's data off `app` — the same accessors the
-    /// egui window read (`app.orchestrator.agent.state().debug_entries`
+    /// the legacy UI window read (`app.orchestrator.agent.state().debug_entries`
     /// at `src/app/ui/agent_debug_window.rs:21` plus the four
     /// `agent_panel_state` fields), moved out of render so the card stays
     /// I/O-free ([FMD-065]).
@@ -851,7 +850,7 @@ impl AgentDebugViewModel {
 
 /// Renders the agent debug card ([TASK-017b4]).
 ///
-/// Layout, mirroring the egui window body
+/// Layout, mirroring the legacy UI window body
 /// (`src/app/ui/agent_debug_window.rs:23-146`):
 ///
 /// ```text
@@ -878,13 +877,13 @@ impl AgentDebugViewModel {
 /// The card is the *content* only: the root view mounts it through
 /// [`crate::ui_iced::overlay::modal`] with [`dismiss_command()`] as the
 /// dismiss message so a scrim click or Escape closes the window the same
-/// way the egui title-bar `X` did.
+/// way the legacy UI title-bar `X` did.
 ///
 /// The control row and the list are **always allocated** — an empty
 /// buffer renders an empty list rather than a different widget tree
 /// (AGENTS §6). An expanded body *is* added to its own row on expand:
 /// iced rebuilds the tree structurally every frame, so a disclosure
-/// branch does not destabilise sibling identity the way an egui
+/// branch does not destabilise sibling identity the way an the legacy UI
 /// conditional would (same reasoning
 /// [`crate::ui_iced::render::code`] records for its caption).
 ///
@@ -895,11 +894,11 @@ pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message
 
     let title = text(strings::AGENT_DEBUG_WINDOW)
         .size(TITLE_SIZE)
-        .color(to_iced_color(palette.text_strong));
+        .color(palette.text_strong);
 
     let search_label = text(strings::SEARCH_LABEL)
         .size(ENTRY_TEXT_SIZE)
-        .color(to_iced_color(palette.text));
+        .color(palette.text);
 
     let search_field = text_input("", &view_model.search_text).on_input(search_command);
 
@@ -909,7 +908,7 @@ pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message
 
     let rows_label = text(strings::DEBUG_JSON_ROWS_LABEL)
         .size(ENTRY_TEXT_SIZE)
-        .color(to_iced_color(palette.text));
+        .color(palette.text);
 
     let json_rows_pick: Element<'_, Message> = pick_list(
         view_model.json_row_options.clone(),
@@ -973,9 +972,9 @@ pub fn entry_list(view_model: &AgentDebugViewModel) -> Column<'_, Message> {
 /// body can size itself without the row having to own a copy of a
 /// window-level setting.
 ///
-/// A [`DebugEntryRow::SessionBoundary`] renders the egui divider instead
+/// A [`DebugEntryRow::SessionBoundary`] renders the legacy UI divider instead
 /// — rule, centred muted summary, rule (`ui/agent_debug_window.rs:108-118`) —
-/// and is deliberately **not** clickable, because egui's divider had no
+/// and is deliberately **not** clickable, because the legacy UI's divider had no
 /// disclosure either.
 ///
 /// Purity: pure view over `row`.
@@ -997,7 +996,7 @@ pub fn entry_row(row: &DebugEntryView, expanded: bool, json_rows: usize) -> Elem
 fn boundary_row(row: &DebugEntryView) -> Element<'_, Message> {
     let summary = text(row.entry.summary.clone())
         .size(BOUNDARY_TEXT_SIZE)
-        .color(to_iced_color(Palette::fastmd_dark().text_muted))
+        .color(Palette::fastmd_dark().text_muted)
         .width(Length::Fill);
 
     Column::with_children(vec![
@@ -1011,7 +1010,7 @@ fn boundary_row(row: &DebugEntryView) -> Element<'_, Message> {
     .into()
 }
 
-/// The clickable header row that replaces `egui::CollapsingHeader`'s
+/// The clickable header row that replaces `CollapsingHeader`'s
 /// title: chevron + `HH:MM:SS.fff  [Kind]  summary`, wrapped in a
 /// `MouseArea` whose press toggles this row's disclosure.
 fn entry_header(row: &DebugEntryView, expanded: bool) -> Element<'_, Message> {
@@ -1020,11 +1019,11 @@ fn entry_header(row: &DebugEntryView, expanded: bool) -> Element<'_, Message> {
     let caret = text(chevron_glyph(expanded))
         .font(phosphor_font())
         .size(ENTRY_TEXT_SIZE)
-        .color(to_iced_color(palette.text_muted));
+        .color(palette.text_muted);
 
     let label = text(header_text(&row.entry))
         .size(ENTRY_TEXT_SIZE)
-        .color(to_iced_color(palette.text));
+        .color(palette.text);
 
     let header = Row::with_children(vec![caret.into(), label.into()])
         .spacing(CHEVRON_SPACING)
@@ -1050,7 +1049,7 @@ fn entry_header(row: &DebugEntryView, expanded: bool) -> Element<'_, Message> {
 ///
 /// The body is drawn with `Wrapping::None` so a long line keeps its
 /// single-line shape and the `scrollable` scrolls horizontally for it —
-/// egui's `desired_width(f32::INFINITY)` + `ScrollArea::both()`
+/// the legacy UI's `desired_width(f32::INFINITY)` + `ScrollArea::both()`
 /// behaviour (`src/app/ui/agent_debug_window.rs:207-214`).
 fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
@@ -1067,7 +1066,7 @@ fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message>
     let body = text(row.json.clone())
         .font(Font::MONOSPACE)
         .size(JSON_TEXT_SIZE)
-        .color(to_iced_color(palette.text))
+        .color(palette.text)
         .wrapping(iced::widget::text::Wrapping::None);
 
     let scroll =
@@ -1082,9 +1081,9 @@ fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message>
 /// state the reducer holds ([TASK-017b4]).
 ///
 /// Mirrors [`crate::ui_iced::about::AboutWindowState`] for the open flag
-/// and adds the expanded-row set that replaces egui's
+/// and adds the expanded-row set that replaces the legacy UI's
 /// `CollapsingHeader` widget memory. `close()` deliberately **keeps**
-/// the expanded set: hiding the window in egui left the header states
+/// the expanded set: hiding the window in the legacy UI left the header states
 /// untouched, and reopening shows what the user had open. Clearing the
 /// buffer is the one transition that invalidates the ids, which is what
 /// [`Self::collapse_all`] is for.
@@ -1096,7 +1095,7 @@ pub struct AgentDebugWindowState {
 
 impl AgentDebugWindowState {
     /// A closed window with nothing expanded — the parity state for
-    /// egui's `.default_open(false)`.
+    /// the legacy UI's `.default_open(false)`.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -1155,7 +1154,7 @@ impl AgentDebugWindowState {
     /// Toggles row `id` and returns its **new** expanded state.
     ///
     /// Rows toggle independently: opening one never touches another, the
-    /// behaviour egui's per-header memory gave.
+    /// behaviour the legacy UI's per-header memory gave.
     pub fn toggle_entry(&mut self, id: usize) -> bool {
         if self.expanded.remove(&id) {
             false
@@ -1167,7 +1166,7 @@ impl AgentDebugWindowState {
 
     /// Collapses every row and returns how many were open.
     ///
-    /// egui has no collapse-all control, so no widget emits this — it
+    /// the legacy UI has no collapse-all control, so no widget emits this — it
     /// exists for the reducer, which must call it whenever the debug
     /// buffer is cleared. Row ids are positional, so after
     /// `UserCommand::ClearDebugEntries` a stale id would silently expand

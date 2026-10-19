@@ -304,7 +304,7 @@ fn test_search_channel_keeps_typed_text_separate_from_committed_query() {
 }
 
 #[test]
-fn test_logs_channel_covers_every_egui_filter_control() {
+fn test_logs_channel_covers_every_thelegacy_filter_control() {
     let search = Message::Logs(LogsMessage::SearchChanged {
         text: "warn".into(),
     });
@@ -387,7 +387,7 @@ fn test_cursor_moved_is_a_copy_layout_report_that_stays_distinct() {
 
 #[test]
 fn test_tree_deferred_intent_variants_are_all_distinct() {
-    // [TASK-012]: the three egui menu rows that read files or fan out
+    // [TASK-012]: the three the legacy UI menu rows that read files or fan out
     // inside the click have no single `UserCommand`, so each needs its own
     // separable message.
     let deferred = vec![
@@ -598,7 +598,7 @@ fn test_batch_channel_covers_every_selection_transition() {
 fn test_batch_open_start_and_cancel_stay_on_the_command_channel() {
     // [TASK-017b3] channel choice: only the *selection* needed a new
     // channel. Open / Start / Cancel already ride `Message::Command` as
-    // exactly what the egui dialog published, so no `BatchDialogMessage`
+    // exactly what the legacy UI dialog published, so no `BatchDialogMessage`
     // variant duplicates them.
     let commands = [
         Message::Command(UserCommand::OpenBatchDialog),
@@ -687,7 +687,7 @@ fn test_agent_debug_channel_carries_only_what_the_command_channel_cannot() {
 
 #[test]
 fn test_agent_debug_settings_stay_on_the_command_channel() {
-    // No AgentDebug-channel variant duplicates these: the egui window
+    // No AgentDebug-channel variant duplicates these: the legacy UI window
     // published/mutated exactly these, and the iced card keeps doing so.
     let commands = [
         Message::Command(UserCommand::SetDebugSearchText("turn".into())),

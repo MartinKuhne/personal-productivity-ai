@@ -1,7 +1,9 @@
-//! Iced-based UI layer (The Elm Architecture). Lives beside `ui/` until Phase 5 removes the egui UI.
+//! Iced-based UI layer (The Elm Architecture). Lives beside `ui/`; [TASK-029b]
+//! removed the legacy renderer layer that used to sit next to it.
 //!
-//! The runtime bootstrap is exercised by the `fastmd_iced` pilot binary
-//! (`src/app/bin/fastmd_iced.rs`) while the egui UI remains untouched. The
+//! The runtime bootstrap is exercised by the `fastmd` binary itself
+//! (`src/app/main.rs`), which [TASK-024] flipped onto this launch chain; the
+//! `fastmd_iced` pilot that first proved it was retired in [TASK-029b]. The
 //! subsystem tree grows module by module in Phases 2..4 (`doc/planning/
 //! iced.md`):
 //!
@@ -59,7 +61,7 @@
 //!   [`crate::ui_iced::batch_dialog::BatchDialogState`] ([TASK-017b3],
 //!   BATCH-001..BATCH-014).
 //! - [`tools_dialog`] — the Tools dialog: the six-column tool-group table
-//!   that replaces the codebase's only `egui_extras::TableBuilder` with
+//!   that replaces the codebase's only `the legacy_extras::TableBuilder` with
 //!   `iced::widget::table`, over the reused tool-group registry, with
 //!   per-row enable / restart / OAuth actions riding the command channel
 //!   ([TASK-017b3], UI-051..UI-060).
@@ -78,7 +80,7 @@
 //! - [`search`] — the content-search view model: query / committed filter /
 //!   result snapshot / in-progress flag as pure transitions, with the
 //!   filesystem scan left to the reused `ui::tree_search` engine and the
-//!   egui result-card predicates extracted as pure functions ([TASK-019],
+//!   the legacy UI result-card predicates extracted as pure functions ([TASK-019],
 //!   UI-050).
 //! - [`subscription`] — the bus → iced bridge: every inbound
 //!   background→UI notification (`ConfigArrived`, `FileEvent`,
@@ -87,11 +89,11 @@
 //!   `Subscription::batch`, over a pure `bus_event_to_message` mapper
 //!   ([TASK-019], FMD-065..FMD-067).
 //! - [`logo`] — the shared "Document + Bolt" mark: the single place the
-//!   Phosphor-bolt stand-in is constructed, since egui's vector paint
-//!   routine (`ui::logo::paint_logo`) is not portable under DEC-011's
+//!   Phosphor-bolt stand-in is constructed, since the retired vector paint
+//!   routine was not portable under DEC-011's
 //!   feature set ([TASK-020]).
-//! - [`app`] — the iced application root: the egui-free [`app::AppState`]
-//!   (a thin wrapper over the domain `FastMdApp`), the parallel egui-free
+//! - [`app`] — the iced application root: the framework-free [`app::AppState`]
+//!   (a thin wrapper over the domain `FastMdApp`), the parallel framework-free
 //!   constructor, the DEC-008/DEC-009 `boot` task chain and the verified
 //!   `launch()` builder chain ([TASK-022], DEC-006/008/009/010).
 //! - [`update`] — the top-level reducer: the DEC-006 close/save flow, the
@@ -102,23 +104,23 @@
 //!   toolbar, the middle pane grid (left tree / center document-or-agent /
 //!   gated ToC) and the bottom command band, under the overlay host that
 //!   stacks the context menu, editor, dialogs, log viewer, debug window,
-//!   tools, About, attributions and batch windows in the egui draw order
+//!   tools, About, attributions and batch windows in the legacy UI draw order
 //!   ([TASK-023]).
-//! - [`os_shell`] — the egui-free platform wrappers the reducer calls:
+//! - [`os_shell`] — the framework-free platform wrappers the reducer calls:
 //!   open-in-system-editor, reveal-in-file-explorer and open-URL, copied out
-//!   of the egui tree so `ui_iced` owns them outright ([TASK-029]).
-//! - `test_helpers` — `#[cfg(test)]` egui-free fixtures that build a
+//!   of the legacy UI tree so `ui_iced` owns them outright ([TASK-029]).
+//! - `test_helpers` — `#[cfg(test)]` framework-free fixtures that build a
 //!   `FastMdApp` or a whole [`app::AppState`] over in-memory storage for
 //!   the iced sidecar tests ([TASK-029], [RUST-006]).
 //!
 //! # Self-containment ([TASK-029])
 //!
-//! `ui_iced` no longer `pub use`s any helper out of an egui file that
+//! `ui_iced` no longer `pub use`s any helper out of an the legacy UI file that
 //! [TASK-029b] deletes. Every framework-free helper the iced panes need is
 //! **owned** by the iced module that consumes it — see the `//!` note in
 //! [`layout`], [`panels::left`], [`panels::center`], [`panels::top`],
 //! [`panels::bottom`], [`panels::right`], [`table_width`], [`overlay`] and
-//! [`os_shell`]. The egui originals keep their own copies until Phase 5;
+//! [`os_shell`]. The legacy UI originals keep their own copies until Phase 5;
 //! the transient duplication is deliberate.
 //!
 //! Imports that DO remain point at files the migration **keeps** (they are

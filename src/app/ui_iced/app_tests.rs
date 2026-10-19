@@ -2,7 +2,7 @@
 //! (`src/app/ui_iced/app.rs`).
 //!
 //! `launch()` calls `.run()` and is not headlessly testable; these tests
-//! exercise the pieces it composes — the egui-free `build_state`, the
+//! exercise the pieces it composes — the framework-free `build_state`, the
 //! `boot` state/task contract, the DEC-008 scale composition, the
 //! DEC-009 config direct-injection, the CLI workspace injection moved
 //! from `main.rs`, and the window-settings mappers. No test touches a real
@@ -147,7 +147,7 @@ fn test_window_settings_uses_persisted_size_and_position() {
 }
 
 #[test]
-fn test_window_settings_falls_back_to_egui_defaults() {
+fn test_window_settings_falls_back_to_thelegacy_defaults() {
     let settings = window_settings(&PersistedUiState::default());
     assert_eq!(
         settings.size,
@@ -269,11 +269,11 @@ fn test_ui_state_storage_from_env_empty_override_is_in_memory() {
 }
 
 #[test]
-fn test_build_state_is_egui_free_at_the_crate_boundary() {
+fn test_build_state_is_framework_free_at_the_crate_boundary() {
     // The whole `ui_iced` tree (including this constructor) references no
-    // `egui`/`eframe` type; the crate boundary enforces the no-egui
+    // framework type; the crate boundary enforces the framework-free
     // property at link. Calling the constructor and reading a domain field
-    // is the runtime witness that the egui-free path is live.
+    // is the runtime witness that the framework-free path is live.
     let state = fresh_state(PersistedUiState::default());
     assert!(
         state
@@ -281,7 +281,7 @@ fn test_build_state_is_egui_free_at_the_crate_boundary() {
             .content_libraries()
             .iter()
             .any(|lib| lib.root_folder == "M:\\marker_lib"),
-        "egui-free construction must still inject the config"
+        "framework-free construction must still inject the config"
     );
 }
 

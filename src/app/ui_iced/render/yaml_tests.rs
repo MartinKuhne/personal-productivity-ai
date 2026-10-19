@@ -112,7 +112,7 @@ fn test_mapping_document_maps_to_rows() {
 
 #[test]
 fn test_non_mapping_documents_produce_no_rows() {
-    // The egui renderer fell through silently for anything that is not a
+    // The legacy UI renderer fell through silently for anything that is not a
     // key/value mapping.
     let scalar = Value::String("just text".to_string());
     let sequence = Value::Sequence(vec![Value::String("x".to_string())]);

@@ -232,8 +232,8 @@ impl AppConfig {
     /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
     /// Unknown values fall back to `DeficitStrategy::HybridMinPenaltyWaterFill`
     /// (the default set by `default_table_width_strategy` in `config.rs`).
-    pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
-        crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
+    pub fn deficit_strategy(&self) -> crate::markdown::table_width::DeficitStrategy {
+        crate::markdown::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
     }
 
     /// Project the global `AppConfig` into the agent's domain slice.

@@ -4146,3 +4146,179 @@ the new `ui_iced::test_helpers` fixtures unchanged.
    distinct span names while they coexist; log dashboards keyed on the old
    name will see the egui span until Phase 5 and the iced span after.
 6. **No branch created, nothing committed** — left for the orchestrator.
+
+## TASK-029b egui-deletion verification log (the deletion half - 2026-10-18)
+
+Closes the CON-007 zero-egui invariant inside `src/` and `Cargo.toml`. No
+branch created, nothing committed - left for the orchestrator.
+
+### Final sweep result (the invariant itself)
+
+Command (case-insensitive, run from the repo root):
+
+```powershell
+Select-String -Pattern '\begui\b|\beframe\b|\bkittest\b' -CaseSensitive:$false
+```
+
+| Scope | Matches |
+| --- | --- |
+| `src/` (all `.rs`) | **0** |
+| `Cargo.toml` | **0** |
+
+Baseline before this task was 2267 matches in `src/`; after the code deletion
+half it was 765 (comments, doc links and parity notes), and the doc sweep drove
+it to zero. The one surviving literal containing the letters is the Windows font
+file name `seguisym.ttf` in `ui/fonts.rs`, which `\begui\b` correctly does not
+match.
+
+Out of scope for this task and NOT edited (reported for TASK-030):
+
+| Path | Matches |
+| --- | --- |
+| `doc/technical-context/ARCHITECTURE_C4.md` | 9 |
+| `doc/technical-context/Messaging.md` | 2 |
+| `src/app/AGENTS.md` ("MUST consult" rules, `egui::Id` section) | 5 |
+| `doc/distill/` (`egui.md`, `egui-kittest.md`) | 164 |
+| `SPEC.md` (file-map links at the deleted `src/app/ui/` tree) | 3 |
+
+### Files deleted (72)
+
+Legacy rendering layer, all egui- or kittest-owned:
+
+* **Entry / frame loop** - `ui/app/render.rs`, `ui/app/update.rs`
+  (`impl eframe::App`, `show_editor_overlay`, `show_modals`,
+  `render_panels`).
+* **Dialogs** - `ui/about_dialog.rs` (+tests), `ui/batch_dialog.rs` (+tests),
+  `ui/tools_dialog.rs` (+tests), `ui/modals.rs` (+tests),
+  `ui/agent_debug_window.rs`, `ui/background_logs.rs`.
+* **Editor** - `ui/editor_egui.rs` (+tests).
+* **Panels** - `ui/panels/{mod,bottom,center,left,right,top}.rs` (+tests).
+* **Markdown renderers** - `ui/render/{mod,code,heading,inline,style,yaml_table}.rs`
+  (+tests), `ui/render/table/{mod,cell,configured}.rs`,
+  `ui/render/e2e_tests/**` (the kittest snapshot suite, 11 files).
+* **Snapshot harness** - `ui/test_helpers.rs`, `ui/test_helpers/{app,assert,assert_tests,interact,offscreen,snapshot,text,text_tests}.rs`.
+* **Widgets / layout** - `ui/widgets.rs` (+tests), `ui/table_width/mod.rs`,
+  `ui/measure.rs` (+tests), `ui/logo.rs`.
+* **Tree** - `ui/tree/context.rs` (`egui::Modifiers`), `ui/tree/render.rs`
+  (+tests).
+* **OS shell** - `ui/os_shell.rs` (+tests).
+* **Pilot binary** - `src/app/bin/fastmd_iced.rs` (see below).
+
+### RE-TYPE strategy (files kept, egui types replaced 1:1)
+
+Three files under `ui/` were egui-typed but had live non-UI consumers, so they
+were re-typed in place rather than deleted (GUD-003: values must not drift).
+
+| File | Strategy |
+| --- | --- |
+| `ui/theme.rs` | `Palette` and `EditorColors` re-typed onto `iced::Color`. Every numeric value is identical to the retired `Color32` equivalent (`from_gray(N)` -> `from_rgb8(N,N,N)`; DARK_GRAY `(96,96,96)` -> `log_timestamp`; LIGHT_BLUE `(173,216,230)` -> `log_category`; RED `(255,0,0)` -> `EditorColors.error`). Derives reduced to `Debug/Clone/Copy/PartialEq/Default` because `iced::Color` is not `Eq`. |
+| `ui/fonts.rs` | Kept the font byte inventory and the Windows/system font discovery. Dropped the egui-typed loaders (`FontDefinitions`, `FontData`, family insertion); the iced loader lives in `ui_iced/fonts.rs` and shares the same discovery and the same `'phosphor'` family key. |
+| `ui/attributions.rs` | The `eframe` / `egui_extras` credit rows were deleted outright rather than renamed - the strings themselves would have matched the sweep. `DIRECT_DEPENDENCIES` is now 55 entries (was 57); `attributions_tests.rs` asserts 55. |
+
+`to_iced_color` was removed entirely (its only job was
+`egui::Color32 -> iced::Color`); its 196 call sites across 35 `ui_iced` files
+were unwrapped to the bare colour token, which is now the same type on both
+sides.
+
+### `eframe::App` removal
+
+* `impl eframe::App for FastMdApp` deleted from `ui/app/mod.rs`.
+* `FastMdApp::new(cc: &eframe::CreationContext)`, `configure_dark_theme` and
+  `configure_fonts` deleted from `ui/app/init.rs`; `from_parts` (pub(crate))
+  and `empty_state` (pub) remain as the framework-free constructors.
+* The font-tracking private fields the `App` impl needed are gone.
+* `ui/app/render.rs` and `ui/app/update.rs` deleted; a slim framework-free
+  `ui/app/tests.rs` replaces the frame-loop tests.
+* `main.rs` already launched iced via `ui_iced::app::launch` ([TASK-024]), so
+  no entry-point rewiring was needed.
+
+### Pilot binary deletion
+
+`src/app/bin/fastmd_iced.rs` and its `[[bin]]` stanza were removed. Rationale:
+`main.rs` has launched the identical iced chain since [TASK-024], so the pilot
+was a duplicate launch path, and keeping it would have kept a second
+`Message`/`run` surface alive that [TASK-019]/[TASK-022] had already migrated.
+The `FASTMD_ICED_UI_STATE_PATH` env override is retained (it is live wiring,
+not pilot scaffolding).
+
+### Cargo dependencies removed
+
+| Entry | Kind |
+| --- | --- |
+| `eframe` | dependency |
+| `egui_extras` | dependency |
+| the platform-specific `eframe` feature line (linux target) | target dependency |
+| `egui_kittest` | dev-dependency |
+| the kittest-`image` snapshot comment | comment |
+
+`cargo tree` confirms no `eframe`, `egui*` or `accesskit` package remains in
+the graph. `iced` stays a normal dependency (DEC-011).
+
+### Files kept because `ui_iced` needed them
+
+Pure helpers that were egui-free but live-consumed were relocated, not deleted:
+
+| Helper | From | To |
+| --- | --- | --- |
+| `APP_VERSION`, `license_display_text`, `should_auto_show_about`, `apply_first_run_auto_show` | deleted `ui/about_dialog.rs` | `ui_iced/about.rs` (tests ported to `about_tests.rs`) |
+| `filter_logs`, `is_log_visible` | deleted `ui/background_logs.rs` | `ui_iced/logs.rs` |
+| `agent_render` (+tests) | `ui/render/agent_render.rs` | `ui/agent/agent_render.rs` (git-mv; needed by the kept `ui/agent/transcript.rs`) |
+| `write_new_document`, `unique_document_name`, `date_suffixed_name` | deleted `ui/modals.rs` | `utils/path.rs` (needed by `command_executor`) |
+| `noop_producer` | deleted `ui/modals.rs` | `ui_iced/test_helpers.rs` (vision_processor / text_buffer tests) |
+| `build_merge_prompt` | `ui/tree/handlers.rs` | kept in `ui/tree/handlers.rs`, trimmed to that one function (the click handlers are retired; the iced port is `ui_iced::panels::left::row_click_command`) |
+
+### Gate results
+
+| Gate | Result |
+| --- | --- |
+| `cargo check -q --all-targets` | pass - exit 0, no warnings |
+| `cargo clippy -p fastmd --bins --lib -- -D warnings` | pass - exit 0 |
+| `cargo fmt` then `cargo fmt --check` | pass - exit 0 |
+| `cargo nextest run -p fastmd` | **1802 passed, 1 skipped**, 0 failures |
+| `cargo build --bin fastmd` | pass - exit 0 |
+| `cargo doc --no-deps --quiet -p fastmd` | pass - 0 warnings |
+
+### Collateral damage from the automated sweep (fixed in-task)
+
+The doc sweep was a scripted, ordered literal-replace. Two classes of fallout
+were found and repaired:
+
+1. **Snake_case identifiers.** The catch-all rule rewrote `egui` inside test
+   function names, producing identifiers containing spaces. Repaired by
+   stripping the whitespace and re-wording (e.g.
+   `test_build_state_is_the_legacy_UI_free_...` ->
+   `test_build_state_is_framework_free_at_the_crate_boundary`,
+   `..._matches_the_egui_rule` -> `..._matches_the_legacy_rule`). 19 files
+   touched; no test was renamed away from coverage - all still run.
+2. **Clippy fallout from the `to_iced_color` unwrap.** With the conversion call
+   gone, 9 sites became lintable: one `redundant_field_names`
+   (`render/inline.rs`) and eight `unnecessary_lazy_evaluations`
+   (`bool::then(|| Background::Color(..))` -> `then_some(..)`) across
+   `batch_dialog.rs`, `dialogs.rs`, `panels/center.rs` (x2), `panels/left.rs`,
+   `render/table.rs`, `render/yaml.rs` and `render/inline.rs`. All fixed.
+
+### Needs the orchestrator's eyes
+
+1. **Doc drift is untouched by design** ([RUST-043], TASK-030 scope): the
+   counts in the table above (`ARCHITECTURE_C4.md` 9, `Messaging.md` 2,
+   `src/app/AGENTS.md` 5, `doc/distill/` 164, `SPEC.md` 3). `SPEC.md`'s
+   file-map still points at the deleted `src/app/ui/` tree - that is a
+   spec-vs-code drift that needs an explicit instruction before anyone edits it.
+2. **`src/app/AGENTS.md` still mandates consulting `doc/distill/egui.md` and
+   `doc/distill/egui-kittest.md`** and still carries the `egui::Id` stability
+   and conditional-rendering rules. Those instructions now point at a retired
+   stack; TASK-030 must repoint them at the iced guide.
+3. **`cargo clippy -p fastmd --all-targets` is still not clean** - 11 lint
+   sites, all pre-existing (`config/config_tests.rs`,
+   `markdown/link_scanner_tests.rs`, `ui_iced/panels/left_tests.rs`,
+   `ui_iced/render/code_tests.rs`, `ui_iced/message_tests.rs`). This is one
+   fewer than the 12 recorded at TASK-029a: the deleted
+   `ui/batch_dialog_tests.rs` carried one of them. No new lint was introduced
+   by this task. The brief's stated gate (`--bins --lib`) passes.
+4. **`ui/` is now a shared domain-state module, not a UI module.** What is left
+   under it (`theme.rs`, `fonts.rs`, `strings.rs`, `panel_layout.rs`,
+   `persisted.rs`, `tree/flatten.rs`, `agent/*`) is framework-free state and
+   assets consumed by `ui_iced`. If the orchestrator wants a final home for it
+   (e.g. folding into `ui_iced/` or a `domain/` module), that is a naming
+   decision this task deliberately did not make.
+5. **No branch created, nothing committed** - left for the orchestrator.

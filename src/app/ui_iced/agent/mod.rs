@@ -1,13 +1,13 @@
 //! The iced agent panel — the streaming conversation view, prompt row and
 //! chat-model selector ([TASK-018], UI-048).
 //!
-//! Mirrors the egui agent module split by concern ([RUST-051]), reusing the
-//! framework-free pieces the egui build already had and re-typing only what
-//! was bound to `egui::Ui`/`egui::Context`:
+//! Mirrors the legacy UI agent module split by concern ([RUST-051]), reusing the
+//! framework-free pieces the legacy UI build already had and re-typing only what
+//! was bound to `Ui`/`Context`:
 //!
 //! * [`panel_state`] — the conversation/turn model, the UI-048
 //!   thinking-delimiter gate and the [`AgentPanelViewModel`] snapshot.
-//!   Re-exports the egui [`AgentPanelState`] and [`AgentTranscript`]
+//!   Re-exports the legacy UI [`AgentPanelState`] and [`AgentTranscript`]
 //!   unchanged.
 //! * [`transcript`] — the scrolling conversation surface: gated thinking
 //!   disclosure, user turns as themed text, assistant turns through iced's
@@ -51,7 +51,6 @@ use iced::{Alignment, Element, Length};
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
-use crate::ui_iced::theme::to_iced_color;
 
 pub use panel_state::{
     AgentPanelState, AgentPanelViewModel, AgentTranscript, TranscriptBlock, TranscriptTurn,
@@ -81,7 +80,7 @@ pub const PANEL_SPACING: f32 = 6.0;
 pub const PANEL_PADDING: f32 = 8.0;
 
 /// The message the panel header's Close button produces — the same
-/// `ClearAgentSession` intent the egui header used
+/// `ClearAgentSession` intent the legacy UI header used
 /// (`src/app/ui/panels/center.rs:112-119`).
 ///
 /// Purity: pure.
@@ -92,7 +91,7 @@ pub fn close_message() -> Message {
 
 /// Renders the full agent panel from a snapshot ([TASK-018]).
 ///
-/// Layout, mirroring the egui agent session view
+/// Layout, mirroring the legacy UI agent session view
 /// (`src/app/ui/panels/center.rs:108-178` plus the bottom prompt band):
 ///
 /// ```text
@@ -114,7 +113,7 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
     let header = Row::with_children(vec![
         text(strings::AGENT_SESSION_HEADER)
             .size(HEADER_TEXT_SIZE)
-            .color(to_iced_color(palette.accent_text))
+            .color(palette.accent_text)
             .into(),
         container(
             button(text(strings::AGENT_SESSION_CLOSE_BUTTON).size(STATUS_TEXT_SIZE))
@@ -132,7 +131,7 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
         view_model.status
     ))
     .size(STATUS_TEXT_SIZE)
-    .color(to_iced_color(palette.text_strong));
+    .color(palette.text_strong);
 
     let body = agent_transcript_view(view_model);
     let prompt = agent_prompt_row(view_model);

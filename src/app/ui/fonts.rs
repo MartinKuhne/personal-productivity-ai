@@ -1,13 +1,17 @@
 //! Font configuration and fallback loading for the FastMD user interface.
 //!
+//! This module owns the framework-free font inventory: the embedded Phosphor
+//! icon bytes and the system fallback-font discovery. The iced layer
+//! ([`crate::ui_iced::fonts`]) registers these bytes with
+//! `iced::font::load` ([TASK-007], [TASK-029b]).
+//!
 //! Unit tests live in the sibling `fonts_tests.rs` sidecar.
 
-use eframe::egui;
-
-/// Font identifier registered in [`egui::FontDefinitions`] for system symbol fallback.
+/// Font identifier used for the system symbol-fallback collection.
 pub const FALLBACK_FONT_NAME: &str = "fallback_symbols";
 
 /// Candidate system font paths to search for symbol, arrow, and math coverage.
+#[must_use]
 pub fn candidate_fallback_font_paths() -> Vec<std::path::PathBuf> {
     let mut paths = Vec::new();
 
@@ -70,6 +74,7 @@ pub fn candidate_fallback_font_paths() -> Vec<std::path::PathBuf> {
 }
 
 /// Discovers and reads the first available fallback font from the candidate paths.
+#[must_use]
 pub fn load_fallback_font() -> Option<Vec<u8>> {
     for path in candidate_fallback_font_paths() {
         if let Ok(bytes) = std::fs::read(&path) {
@@ -81,90 +86,11 @@ pub fn load_fallback_font() -> Option<Vec<u8>> {
 
 /// Embedded Phosphor Regular icon font bytes.
 ///
-/// Shared with the iced port (`ui_iced::fonts`, [TASK-007]): both UI
-/// frameworks register this byte collection, so it stays declared here as
+/// Shared with the iced port (`ui_iced::fonts`, [TASK-007]): the iced
+/// runtime registers this byte collection, so it stays declared here as
 /// the single font inventory ([RUST-023], [GUD-002]-friends).
 pub const PHOSPHOR_REGULAR_FONT: &[u8] =
     include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf");
-
-/// Builds [`egui::FontDefinitions`] configured with default typography,
-/// the Phosphor icon font, and fallback symbols.
-pub fn build_font_definitions() -> egui::FontDefinitions {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "phosphor".to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(PHOSPHOR_REGULAR_FONT)),
-    );
-    if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-        font_keys.insert(1, "phosphor".to_owned());
-    }
-
-    if let Some(data) = load_fallback_font() {
-        fonts.font_data.insert(
-            FALLBACK_FONT_NAME.to_owned(),
-            std::sync::Arc::new(egui::FontData::from_owned(data)),
-        );
-        if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
-            font_keys.insert(2, FALLBACK_FONT_NAME.to_owned());
-        }
-        if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-            font_keys.insert(1, FALLBACK_FONT_NAME.to_owned());
-        }
-    }
-
-    fonts
-}
-
-/// Applies font configuration to an [`egui::Context`].
-pub fn configure_fonts(ctx: &egui::Context) {
-    ctx.set_fonts(build_font_definitions());
-}
-
-/// Checks whether the proportional font can render the given character without
-/// falling back to a replacement tofu square (`'◻'`) or question mark (`'?'`).
-pub fn is_glyph_supported(ctx: &egui::Context, c: char) -> bool {
-    let mut supported = false;
-    ctx.fonts_mut(|f| {
-        let galley = f.layout_no_wrap(
-            c.to_string(),
-            egui::FontId::proportional(14.0),
-            egui::Color32::WHITE,
-        );
-        supported = !galley.rows.is_empty()
-            && galley
-                .rows
-                .iter()
-                .flat_map(|r| &r.glyphs)
-                .all(|g| g.chr != '◻' && g.chr != '?');
-    });
-    supported
-}
-
-/// Checks whether the configured proportional fonts can render all characters in
-/// the string without falling back to replacement characters.
-pub fn are_glyphs_supported(ctx: &egui::Context, s: &str) -> bool {
-    s.chars().all(|c| is_glyph_supported(ctx, c))
-}
-
-/// Checks whether the monospace font can render the given character without
-/// falling back to a replacement character.
-pub fn is_monospace_glyph_supported(ctx: &egui::Context, c: char) -> bool {
-    let mut supported = false;
-    ctx.fonts_mut(|f| {
-        let galley = f.layout_no_wrap(
-            c.to_string(),
-            egui::FontId::monospace(14.0),
-            egui::Color32::WHITE,
-        );
-        supported = !galley.rows.is_empty()
-            && galley
-                .rows
-                .iter()
-                .flat_map(|r| &r.glyphs)
-                .all(|g| g.chr != '◻' && g.chr != '?');
-    });
-    supported
-}
 
 #[cfg(test)]
 #[path = "fonts_tests.rs"]

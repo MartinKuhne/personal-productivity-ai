@@ -1,16 +1,16 @@
 //! Persisted-UI-state persistence for the iced UI ([TASK-009], DEC-006 and
 //! DEC-008; `doc/planning/iced.md`).
 //!
-//! The pure serde model stays where the egui build uses it —
+//! The pure serde model stays where the legacy UI build uses it —
 //! [`crate::ui::PersistedUiState`] (definition `src/app/ui/persisted.rs`) —
 //! unchanged in shape and semantics ([TASK-009] rule 1). This module is the
 //! iced-side backend around it:
 //!
 //! - [`save_ui_state`]/[`load_ui_state`] serialize the model behind an
 //!   injected [`UiStateStorage`] handler — never against a hardcoded
-//!   platform-default location ([RUST-024], [RUST-006]). The egui save path
+//!   platform-default location ([RUST-024], [RUST-006]). The legacy UI save path
 //!   being ported is `FastMdApp::save` (`src/app/ui/app/mod.rs:250-269`,
-//!   `eframe::Storage` under key `"ppai_ui_state"`, restored in
+//!   the legacy `Storage` backend under key `"ppai_ui_state"`, restored in
 //!   `src/app/ui/app/init.rs:162-189`).
 //! - [`migrate_legacy_state`] carries the v0→v1 `font_size_scale` migration
 //!   semantics verbatim (ported from `ui/app/init.rs:181-188`).
@@ -51,8 +51,8 @@ pub const UI_STATE_LOAD_ERROR_CODE: &str = "ui_state.load.failed";
 /// Storage handler for the persisted UI-state snapshot ([RUST-024]).
 ///
 /// The payload is the serde-JSON serialization of
-/// [`PersistedUiState`], mirroring the eframe `Storage::set_string` /
-/// `get_string` usage of the egui build (`ui/app/mod.rs:267`,
+/// [`PersistedUiState`], mirroring the legacy framework `Storage::set_string` /
+/// `get_string` usage of the legacy UI build (`ui/app/mod.rs:267`,
 /// `ui/app/init.rs:164`).
 pub trait UiStateStorage: Send + Sync {
     /// Persist the JSON payload. Returns the path written, or a
@@ -252,7 +252,7 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
     }
 }
 
-/// Applies the schema-version migration carried over verbatim from the egui
+/// Applies the schema-version migration carried over verbatim from the legacy UI
 /// build (`ui/app/init.rs:181-188`): any state below
 /// [`CURRENT_SCHEMA_VERSION`] gets the legacy `font_size_scale` cleared
 /// (schema v0 stored the absolute OS ppp, not a multiplier — see the
@@ -302,7 +302,7 @@ pub fn apply_close_metrics(state: &mut PersistedUiState, size: Size, position: O
 
 /// Maps the persisted window size onto the booted `iced::window::Settings`
 /// size field ([TASK-009] (b)). `None` when either dimension was never
-/// persisted — the caller's egui-derived default (1000×700, `main.rs:49`)
+/// persisted — the caller's the legacy UI-derived default (1000×700, `main.rs:49`)
 /// applies.
 ///
 /// [RUST-020]: pure.

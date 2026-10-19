@@ -3,7 +3,7 @@
 //! This module owns the **view-side conversation model** the iced agent panel
 //! renders: the typed turn list, the UI-048 thinking-delimiter gate, and the
 //! [`AgentPanelViewModel`] snapshot the widget tree reads. It deliberately
-//! reuses — rather than reimplements — the framework-free pieces the egui
+//! reuses — rather than reimplements — the framework-free pieces the legacy UI
 //! build already had ([RUST-051]):
 //!
 //! * [`AgentPanelState`] (`src/app/ui/agent/panel_state.rs:13`) — the
@@ -14,7 +14,7 @@
 //!
 //! # Why the turn model reads the flat `content` buffer
 //!
-//! The egui agent view rendered `AgentTranscript::content` — the flat
+//! The legacy UI agent view rendered `AgentTranscript::content` — the flat
 //! markdown string — as its single render source
 //! (`src/app/ui/panels/center.rs:153-177`), **not** the structured
 //! `blocks`. That choice is load-bearing and this port keeps it: the content
@@ -39,7 +39,7 @@
 //! up to the first blank line after the marker. A prompt that itself
 //! contains a blank line would be split early (its tail rendering as
 //! assistant markdown). Single newlines inside a prompt are preserved. The
-//! egui build had the same ambiguity — it simply rendered the whole buffer
+//! the legacy UI build had the same ambiguity — it simply rendered the whole buffer
 //! as one blob, so it never distinguished the turns at all.
 //!
 //! Unit tests live in the sibling `panel_state_tests.rs` sidecar.
@@ -49,11 +49,11 @@ use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui_iced::panels::top::{CHAT_USE_CASE, ChatModelEntry};
 
-/// The egui build's UI-owned panel state, reused unchanged ([RUST-051]) —
+/// The legacy UI build's UI-owned panel state, reused unchanged ([RUST-051]) —
 /// `src/app/ui/agent/panel_state.rs:13`.
 pub use crate::ui::agent::panel_state::AgentPanelState;
 
-/// The egui build's `AgentEvent` accumulator and its block enum, reused
+/// The legacy UI build's `AgentEvent` accumulator and its block enum, reused
 /// unchanged ([RUST-051]) — `src/app/ui/agent/transcript.rs`.
 pub use crate::ui::agent::transcript::{AgentTranscript, TranscriptBlock};
 
@@ -225,7 +225,7 @@ pub fn turns_from_content(content: &str) -> Vec<TranscriptTurn> {
 /// `AgentTranscript::apply_event` / `split_thinking_and_content`
 /// (`src/app/ui/agent/transcript.rs`) and the agent's response formatter
 /// (AGENT-022); the panel only decides whether the extracted buffer is
-/// non-empty, exactly as egui's `if !thinking.is_empty()` did
+/// non-empty, exactly as the legacy UI's `if !thinking.is_empty()` did
 /// (`src/app/ui/panels/center.rs:142`). Kept identical to
 /// [`crate::ui_iced::panels::center::thinking_section_visible`] — a test
 /// asserts the two agree so the gate cannot drift while both render paths
@@ -289,7 +289,7 @@ pub struct AgentPanelViewModel {
     /// The extracted thinking buffer (UI-048), gated by
     /// [`thinking_section_visible`].
     pub thinking: String,
-    /// The "Thinking Process" disclosure state (egui kept this in
+    /// The "Thinking Process" disclosure state (the legacy UI kept this in
     /// `collapsing` widget memory; here it is explicit, driven by
     /// [`crate::ui_iced::message::AgentMessage::ThinkingToggled`]).
     pub thinking_expanded: bool,
@@ -306,7 +306,7 @@ pub struct AgentPanelViewModel {
     pub current_chat_model: Option<String>,
     /// The command input's current text (`AgentPanelState::command_input`).
     pub command_input: String,
-    /// Follow-the-stream preference for the transcript scroll. egui hardcoded
+    /// Follow-the-stream preference for the transcript scroll. the legacy UI hardcoded
     /// `stick_to_bottom(true)` on the agent scroll area
     /// (`src/app/ui/panels/center.rs:140`); the field keeps the shared
     /// [`crate::ui_iced::logs::should_follow`] rule usable and lets a future
@@ -316,7 +316,7 @@ pub struct AgentPanelViewModel {
 
 impl AgentPanelViewModel {
     /// Snapshots the agent panel's inputs off `app`, reading the same
-    /// accessors the egui panel used: `agent_panel_state.show_results` /
+    /// accessors the legacy UI panel used: `agent_panel_state.show_results` /
     /// `command_input`, `agent_transcript.content` / `.thinking`,
     /// `agent().state().status` / `.running` / `.pending_prompts`, and the
     /// chat-model list off `config()`.

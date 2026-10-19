@@ -1,7 +1,7 @@
 //! Sidecar tests for [`crate::ui_iced::logs`] ([TASK-016], UI-047).
 //!
 //! Covers the filter predicate (mirroring the assertions that lived in the
-//! egui `background_logs.rs` inline tests, now reached through this layer),
+//! the legacy UI `background_logs.rs` inline tests, now reached through this layer),
 //! the auto-scroll intent rule and its boundaries, the ring-buffer snapshot,
 //! the category→colour-token map over every category the buffer can produce,
 //! and the view builders.
@@ -80,8 +80,8 @@ fn timestamp_text_pads_sub_millisecond_values() {
 }
 
 #[test]
-fn timestamp_format_constant_matches_the_egui_format() {
-    // The egui viewer used exactly this `chrono` format string
+fn timestamp_format_constant_matches_the_legacy_format() {
+    // The legacy UI viewer used exactly this `chrono` format string
     // (`ui/background_logs.rs:142`); pinning the constant pins the column.
     let stamp: DateTime<Local> = Local
         .with_ymd_and_hms(2026, 10, 18, 9, 8, 7)
@@ -108,7 +108,7 @@ fn category_tag_wraps_the_bus_display_label_in_brackets() {
 
 #[test]
 fn category_color_covers_every_category_with_the_log_category_token() {
-    let expected = super::to_iced_color(Palette::fastmd_dark().log_category);
+    let expected = super::Palette::fastmd_dark().log_category;
     for category in ALL_CATEGORIES {
         assert_eq!(
             category_color(category),
@@ -121,11 +121,8 @@ fn category_color_covers_every_category_with_the_log_category_token() {
 #[test]
 fn timestamp_and_message_columns_use_their_own_tokens() {
     let palette = Palette::fastmd_dark();
-    assert_eq!(
-        timestamp_color(),
-        super::to_iced_color(palette.log_timestamp)
-    );
-    assert_eq!(message_color(), super::to_iced_color(palette.text));
+    assert_eq!(timestamp_color(), palette.log_timestamp);
+    assert_eq!(message_color(), palette.text);
     assert_ne!(
         timestamp_color(),
         message_color(),
@@ -138,7 +135,7 @@ fn timestamp_and_message_columns_use_their_own_tokens() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn category_filter_options_lists_all_plus_the_five_egui_categories() {
+fn category_filter_options_lists_all_plus_the_five_thelegacy_categories() {
     let options = category_filter_options();
     let categories: Vec<Option<LogCategory>> =
         options.iter().map(|option| option.category).collect();
@@ -153,7 +150,7 @@ fn category_filter_options_lists_all_plus_the_five_egui_categories() {
             Some(LogCategory::ImageVision),
             Some(LogCategory::LlmTools),
         ],
-        "the pick list must keep the egui build's order and membership"
+        "the pick list must keep the legacy UI build's order and membership"
     );
     assert_eq!(options[0].label, strings::LOG_CATEGORY_ALL);
 }
@@ -196,7 +193,7 @@ fn category_filter_option_displays_its_label() {
 }
 
 // ---------------------------------------------------------------------------
-// Filter predicate (reused from the egui build, exercised through this layer)
+// Filter predicate (reused from the legacy UI build, exercised through this layer)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -527,7 +524,7 @@ fn category_filter_option_is_none_for_an_unoffered_category() {
         BackgroundLogsViewModel::from_logs(&logs)
             .category_filter_option()
             .is_none(),
-        "Batch is not in the egui build's pick list (parity gap, see the \
+        "Batch is not in the legacy UI build's pick list (parity gap, see the \
          TASK-016 verification log)"
     );
 }

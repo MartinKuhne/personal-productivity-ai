@@ -3,7 +3,7 @@
 //! Pure assertions only ([RUST-006]): byte-level inventory checks and the
 //! error-formatting helpers — no `Task` execution (needs a live runtime),
 //! no window/process spawn, besides the delegated system-font *discovery*
-//! which may read standard font directories as the egui path already does.
+//! which may read standard font directories as the legacy UI path already does.
 
 use super::*;
 
@@ -40,10 +40,10 @@ fn test_collections_are_in_registration_order_and_nonempty() {
 }
 
 #[test]
-fn test_phosphor_font_name_matches_egui_registration_key() {
+fn test_phosphor_font_name_matches_thelegacy_registration_key() {
     assert_eq!(
         PHOSPHOR_FONT_NAME, "phosphor",
-        "iced family name must mirror the egui 'phosphor' registration key"
+        "iced family name must mirror the legacy UI 'phosphor' registration key"
     );
 }
 

@@ -1,6 +1,6 @@
 //! Inline styled-run mapping and the iced `Rich` text builder ([TASK-015]).
 //!
-//! The egui build painted the same `InlineElem` runs through three
+//! The legacy UI build painted the same `InlineElem` runs through three
 //! different APIs and kept their shared mapping in
 //! `src/app/ui/render/style.rs` (`styled_text` for the `RichText` path,
 //! `text_format` for the `LayoutJob` path). iced collapses both into one:
@@ -30,7 +30,6 @@
 use crate::markdown::{InlineElem, TextStyle, image_placeholder};
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
-use crate::ui_iced::theme::to_iced_color;
 use iced::widget::rich_text;
 use iced::widget::text::{Rich, Span};
 use iced::{Background, Color, Element, Font, Length};
@@ -38,7 +37,7 @@ use std::path::Path;
 
 /// Point size of body/paragraph inline text.
 ///
-/// The egui renderer passed `None` for the size on paragraph runs, which
+/// The legacy UI renderer passed `None` for the size on paragraph runs, which
 /// meant `TextStyle::Body`; the FastMD body size is 14 pt
 /// (`src/app/ui/render/table/cell.rs:194` uses the same fallback).
 pub const BODY_SIZE: f32 = 14.0;
@@ -50,7 +49,7 @@ pub const LIST_MARKER_SIZE: f32 = 14.0;
 
 /// Horizontal padding around an inline-code highlight.
 ///
-/// egui's `RichText::background_color` painted the background flush to
+/// the legacy UI's `RichText::background_color` painted the background flush to
 /// the glyphs; iced's span highlight takes explicit padding
 /// (`Span::padding`, `iced_core-0.14.0/src/text.rs:532-535`), so a small
 /// inset keeps the code chip readable.
@@ -88,7 +87,7 @@ impl SpanModel {
         Self {
             text: text.into(),
             size,
-            color: to_iced_color(palette.text),
+            color: palette.text,
             font: Font::DEFAULT,
             highlight: None,
             underline: false,
@@ -119,7 +118,7 @@ pub fn font_for_style(style: &TextStyle) -> Font {
 
 /// Maps one styled text run onto a [`SpanModel`].
 ///
-/// Colour precedence mirrors the egui mapping
+/// Colour precedence mirrors the legacy UI mapping
 /// (`src/app/ui/render/style.rs:99-133`): `muted` wins over `bold`,
 /// `bold` wins over the default body colour. Code runs get the `border`
 /// token as their background, exactly as `styled_text` chose it
@@ -136,9 +135,9 @@ pub fn span_for_text(text: &str, style: &TextStyle, size: f32, palette: Palette)
     SpanModel {
         text: text.to_owned(),
         size,
-        color: to_iced_color(color),
+        color,
         font: font_for_style(style),
-        highlight: style.code.then(|| to_iced_color(palette.border)),
+        highlight: style.code.then_some(palette.border),
         underline: false,
         strikethrough: style.strikethrough,
         link: None,
@@ -147,8 +146,8 @@ pub fn span_for_text(text: &str, style: &TextStyle, size: f32, palette: Palette)
 
 /// Maps one link onto a [`SpanModel`].
 ///
-/// Links take the `accent_text` token and are underlined. The egui build
-/// used `ui.hyperlink_to`, whose colour came from egui's own
+/// Links take the `accent_text` token and are underlined. The legacy UI build
+/// used `ui.hyperlink_to`, whose colour came from the legacy UI's own
 /// `Visuals::hyperlink_color` default — not a FastMD token
 /// (`src/app/ui/theme.rs:104-106` says so explicitly) — so the token
 /// choice here is the honest themed equivalent rather than a ported value.
@@ -157,7 +156,7 @@ pub fn span_for_link(url: &str, label: &str, size: f32, palette: Palette) -> Spa
     SpanModel {
         text: label.to_owned(),
         size,
-        color: to_iced_color(palette.accent_text),
+        color: palette.accent_text,
         font: Font::DEFAULT,
         highlight: None,
         underline: true,
@@ -168,10 +167,10 @@ pub fn span_for_link(url: &str, label: &str, size: f32, palette: Palette) -> Spa
 
 /// Maps a slice of parser inline elements onto span models.
 ///
-/// `SoftBreak` becomes a single space (egui rendered `ui.label(" ")`),
+/// `SoftBreak` becomes a single space (the legacy UI rendered `ui.label(" ")`),
 /// `Image` becomes the shared `[Image: url]` placeholder
 /// ([`image_placeholder`]) in the muted colour, and `Html` renders muted
-/// — the same presentation the egui inline renderer gave them
+/// — the same presentation the legacy UI inline renderer gave them
 /// (`src/app/ui/render/inline.rs:146-177`).
 #[must_use]
 pub fn spans_from_inline(elems: &[InlineElem], size: f32, palette: Palette) -> Vec<SpanModel> {
@@ -182,11 +181,11 @@ pub fn spans_from_inline(elems: &[InlineElem], size: f32, palette: Palette) -> V
             InlineElem::Link(url, label) => span_for_link(url, label, size, palette),
             InlineElem::Image(url) => SpanModel {
                 highlight: None,
-                color: to_iced_color(palette.text_muted),
+                color: palette.text_muted,
                 ..SpanModel::plain(image_placeholder(url), size, palette)
             },
             InlineElem::Html(html) => SpanModel {
-                color: to_iced_color(palette.text_muted),
+                color: palette.text_muted,
                 ..SpanModel::plain(html.clone(), size, palette)
             },
             InlineElem::SoftBreak => SpanModel::plain(" ", size, palette),
@@ -220,7 +219,7 @@ pub fn to_iced_span(model: &SpanModel) -> Span<'static, String> {
 /// [`RenderMessage::LinkActivated`] so the reducer can resolve the link
 /// relative to the document it came from; `None` means the rendered text
 /// is not file-backed. Width is `Fill` and wrapping is word-level, which
-/// is the iced equivalent of the `.wrap()` pinning the egui renderer
+/// is the iced equivalent of the `.wrap()` pinning the legacy UI renderer
 /// applied to every label (`src/app/ui/render/inline.rs:150-158`).
 #[must_use]
 pub fn rich_text_block(

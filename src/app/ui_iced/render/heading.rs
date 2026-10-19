@@ -1,6 +1,6 @@
 //! Heading mapping and widget ([TASK-015]).
 //!
-//! The egui renderer (`src/app/ui/render/heading.rs`) painted a heading as
+//! The legacy UI renderer (`src/app/ui/render/heading.rs`) painted a heading as
 //! a wrapped row of `RichText` runs at a level-dependent size. The iced
 //! port keeps the same size ladder as named constants and reuses
 //! [`crate::ui_iced::render::inline`] for the runs themselves, so a
@@ -43,7 +43,7 @@ pub const HEADING_BOTTOM_SPACING: f32 = 4.0;
 /// The point size a heading level renders at.
 ///
 /// Levels outside 1..=6 collapse to [`H5_SIZE`], matching the `_ => 12.0`
-/// arm of the egui ladder.
+/// arm of the legacy UI ladder.
 #[must_use]
 pub fn heading_size(level: u32) -> f32 {
     match level {
@@ -57,7 +57,7 @@ pub fn heading_size(level: u32) -> f32 {
 
 /// Whether a heading renders nothing.
 ///
-/// egui skipped a heading whose plain text trimmed to empty
+/// the legacy UI skipped a heading whose plain text trimmed to empty
 /// (`src/app/ui/render/heading.rs:37-40`), which also keeps it out of the
 /// scroll-id bookkeeping.
 #[must_use]

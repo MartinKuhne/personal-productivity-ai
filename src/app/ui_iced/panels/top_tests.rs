@@ -73,13 +73,10 @@ fn indexing_status_text_unfinished() {
 
 #[test]
 fn indexing_status_color_uses_success_token_when_finished() {
-    let expected = to_iced_color(Palette::fastmd_dark().success);
+    let expected = Palette::fastmd_dark().success;
     assert_eq!(indexing_status_color(true), expected);
     // While indexing the default body-text token is used instead.
-    assert_eq!(
-        indexing_status_color(false),
-        to_iced_color(Palette::fastmd_dark().text)
-    );
+    assert_eq!(indexing_status_color(false), Palette::fastmd_dark().text);
     assert_ne!(indexing_status_color(true), indexing_status_color(false));
 }
 
@@ -223,7 +220,7 @@ fn strategy_menu_order_covers_every_variant_exactly_once() {
             "{variant:?} must appear exactly once in the menu order"
         );
     }
-    // The production default leads the menu, matching the egui panel.
+    // The production default leads the menu, matching the legacy UI panel.
     assert_eq!(
         order[0],
         DeficitStrategy::HybridMinPenaltyWaterFill,
@@ -633,7 +630,7 @@ fn view_model_falls_back_to_all_models_when_none_declare_chat() {
     });
 
     let vm = TopBarViewModel::from_app(&app);
-    // No chat-capable model -> every configured model is listed (egui parity).
+    // No chat-capable model -> every configured model is listed (legacy parity).
     assert_eq!(vm.chat_models.len(), 1);
     assert_eq!(vm.chat_models[0].name, "embed-1");
 }

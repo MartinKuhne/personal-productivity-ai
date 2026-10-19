@@ -1,19 +1,19 @@
 //! YAML front-matter mapping and widget ([TASK-015]).
 //!
-//! The egui renderer (`src/app/ui/render/yaml_table.rs`) painted the
+//! The legacy UI renderer (`src/app/ui/render/yaml_table.rs`) painted the
 //! front-matter mapping as a two-column table with a fixed key column, a
 //! value column that takes the remaining width, and alternating row
 //! backgrounds. The presentation is ported here as themed iced rows; the
 //! parsing stays where it is — [`crate::markdown::parse_yaml_to_pairs`]
 //! ([RUST-051]).
 //!
-//! What the egui build cached in `egui`'s temp data (parsed pairs and row
+//! What the legacy UI build cached in framework's temp data (parsed pairs and row
 //! heights, `yaml_table.rs:26-35`, `:44-57`) is **not** ported: the iced
 //! port is a pure function of its inputs, and the [TASK-022] state layer
 //! is where a cache would live if one proves necessary.
 //!
 //! Non-mapping front matter (a bare string, a sequence, a null document)
-//! yields no rows, exactly as the egui fall-through did — the front-matter
+//! yields no rows, exactly as the legacy UI fall-through did — the front-matter
 //! editor only understands key/value pairs.
 //!
 //! Unit tests live in the sibling `yaml_tests.rs` sidecar.
@@ -21,7 +21,6 @@
 use crate::markdown::parse_yaml_to_pairs;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
-use crate::ui_iced::theme::to_iced_color;
 use iced::widget::{Column, container, text};
 use iced::{Alignment, Background, Element, Length};
 
@@ -32,7 +31,7 @@ pub const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 
 /// Horizontal gap between the key and value columns.
 ///
-/// The 12 px inter-column gap the egui table used
+/// The 12 px inter-column gap the legacy UI table used
 /// (`yaml_table.rs:23`, `:68`).
 pub const YAML_COLUMN_GAP: f32 = 12.0;
 
@@ -52,7 +51,7 @@ pub const YAML_MIN_KEY_WIDTH: f32 = 40.0;
 pub const YAML_MIN_VALUE_WIDTH: f32 = 40.0;
 
 /// Chrome subtracted from the available width before the key column is
-/// clamped — the egui table's frame allowance (`yaml_table.rs:62`).
+/// clamped — the legacy UI table's frame allowance (`yaml_table.rs:62`).
 pub const YAML_WIDTH_CHROME: f32 = 20.0;
 
 /// Space left under the whole front-matter block.
@@ -88,7 +87,7 @@ pub fn is_striped(index: usize) -> bool {
 
 /// Solves the key/value column widths for one viewport width.
 ///
-/// Reproduces the egui clamp chain exactly
+/// Reproduces the legacy UI clamp chain exactly
 /// (`src/app/ui/render/yaml_table.rs:62-63`): the key column is the
 /// preferred width capped by what is left after the frame chrome, floored
 /// at [`YAML_MIN_KEY_WIDTH`]; the value column takes the remainder,
@@ -128,7 +127,7 @@ pub fn yaml_rows_from_value(yaml: &serde_norway::Value, available_width: f32) ->
 
 /// Renders the front-matter block.
 ///
-/// An empty row list renders nothing, matching the egui fall-through for a
+/// An empty row list renders nothing, matching the legacy UI fall-through for a
 /// non-mapping document.
 #[must_use]
 pub fn yaml_block(rows: &[YamlRowModel]) -> Element<'static, Message> {
@@ -142,7 +141,7 @@ pub fn yaml_block(rows: &[YamlRowModel]) -> Element<'static, Message> {
     container(body)
         .width(Length::Fill)
         .style(move |_theme| container::Style {
-            background: Some(Background::Color(to_iced_color(palette.table_surface))),
+            background: Some(Background::Color(palette.table_surface)),
             ..container::Style::default()
         })
         .into()
@@ -155,12 +154,12 @@ pub fn yaml_row(model: &YamlRowModel) -> Element<'static, Message> {
 
     let key = text(model.key.clone())
         .size(14.0)
-        .color(to_iced_color(palette.accent_text_soft))
+        .color(palette.accent_text_soft)
         .width(Length::Fixed(model.key_width.max(0.0)));
 
     let value = text(model.value.clone())
         .size(14.0)
-        .color(to_iced_color(palette.text_value))
+        .color(palette.text_value)
         .width(Length::Fixed(model.value_width.max(0.0)))
         .wrapping(iced::widget::text::Wrapping::Word);
 
@@ -175,7 +174,7 @@ pub fn yaml_row(model: &YamlRowModel) -> Element<'static, Message> {
     container(cells)
         .width(Length::Fill)
         .style(move |_theme| container::Style {
-            background: striped.then(|| Background::Color(to_iced_color(palette.surface_variant))),
+            background: striped.then_some(Background::Color(palette.surface_variant)),
             ..container::Style::default()
         })
         .into()

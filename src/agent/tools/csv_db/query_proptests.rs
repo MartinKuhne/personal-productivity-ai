@@ -14,7 +14,7 @@
 //!   zeros must be 0; `sum` of a column with no numeric
 //!   values must be 0 (the count is 0, sum is 0).
 //!
-//! Per AGENTS.md RUST-058 the csv_db is egui-free, so the
+//! Per AGENTS.md RUST-058 the csv_db is framework-free, so the
 //! proptest can live as a sidecar of `query.rs`.
 //!
 //! # Properties under test

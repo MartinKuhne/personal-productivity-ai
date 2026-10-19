@@ -1,8 +1,8 @@
-//! The iced `view` ([TASK-023]) — the one-to-one mirror of the egui render
+//! The iced `view` ([TASK-023]) — the one-to-one mirror of the legacy UI render
 //! path (`ui/app/render.rs` + the per-panel `show_*` functions).
 //!
 //! Renders the [TASK-010] three-band layout with the real panels mounted,
-//! plus the overlay host (DEC-005) stacked above them in the egui draw
+//! plus the overlay host (DEC-005) stacked above them in the legacy UI draw
 //! order. The window chrome (title, icon, persisted geometry, scale) is
 //! supplied by the builder chain in [`crate::ui_iced::app::launch`], not
 //! here.
@@ -28,7 +28,7 @@
 //!
 //! [`AppState::mounted_layers`] is the single selector that decides what
 //! floats above the bands; the host mounts them in that order, bottom-most
-//! first, matching the egui draw order the panel docs record.
+//! first, matching the legacy UI draw order the panel docs record.
 //!
 //! Unit tests live in the sibling `view_tests.rs` sidecar.
 
@@ -76,7 +76,7 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
 ///
 /// The right (TOC) pane is gated by the reused
 /// [`layout::should_show_panel`] rule — the same `has_toc && has_selected_file`
-/// test the egui right panel used ([RUST-051]).
+/// test the legacy UI right panel used ([RUST-051]).
 fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
     let has_selected_file = state.app.selection().selected_file.is_some();
     let has_toc = !state.app.orchestrator.tabs.toc.is_empty();
@@ -100,7 +100,7 @@ fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
     .into()
 }
 
-/// The center pane body, routed the way egui's `show_center_panel` routed
+/// The center pane body, routed the way the legacy UI's `show_center_panel` routed
 /// it: agent session first, then the open document, then the empty state.
 fn center_body(state: &AppState) -> iced::Element<'_, Message> {
     if state.models.center.show_agent_session {
@@ -112,7 +112,7 @@ fn center_body(state: &AppState) -> iced::Element<'_, Message> {
     }
 }
 
-/// The agent session view — the streaming transcript the egui center pane
+/// The agent session view — the streaming transcript the legacy UI center pane
 /// swapped in while `agent_panel_state.show_results` was on.
 fn agent_session_body(view_model: &AgentPanelViewModel) -> iced::Element<'_, Message> {
     agent_transcript_view(view_model)
@@ -162,7 +162,7 @@ fn document_width(state: &AppState) -> f32 {
 }
 
 /// The right (TOC) pane body: one button per heading, publishing the same
-/// [`UserCommand::ScrollToHeader`] the egui ToC rows published.
+/// [`UserCommand::ScrollToHeader`] the legacy UI ToC rows published.
 fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
     let rows: Vec<iced::Element<'_, Message>> = state
         .app
@@ -269,7 +269,7 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
 }
 
 /// The batch dialog layer: the card over a scrim whose dismiss is the
-/// `CancelBatch` command the egui window's close button published.
+/// `CancelBatch` command the legacy UI window's close button published.
 fn batch_layer(view_model: &BatchDialogViewModel) -> iced::Element<'_, Message> {
     modal(
         batch_dialog_card(view_model),

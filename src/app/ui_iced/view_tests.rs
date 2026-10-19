@@ -164,7 +164,7 @@ fn test_batch_dialog_is_the_topmost_layer() {
             OverlayLayer::About,
             OverlayLayer::Batch,
         ],
-        "z-order mirrors the egui draw order (ui/app/render.rs)"
+        "z-order mirrors the legacy UI draw order (ui/app/render.rs)"
     );
 }
 

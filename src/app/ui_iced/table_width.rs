@@ -5,18 +5,18 @@
 //! `crate::markdown::table_layout::TableLayoutBuilder` that drives it — is
 //! pure `f32` math and is **reused unchanged** ([RUST-051]). What the solver
 //! cannot do is measure text: it consumes `max_content` / `min_content`
-//! widths and a `TextMeasurer` that the egui build supplied from
-//! `egui::Context` text shaping (`src/app/ui/table_width/mod.rs`). This
+//! widths and a `TextMeasurer` that the legacy UI build supplied from
+//! `Context` text shaping (`src/app/ui/table_width/mod.rs`). This
 //! module is the iced-side replacement for exactly that bridging layer.
 //!
 //! # The contract, preserved
 //!
-//! Same three stages the egui adapter ran, in the same order:
+//! Same three stages the legacy UI adapter ran, in the same order:
 //!
 //! 1. **available width → solver width.** The iced `Table` paints
 //!    [`CELL_PADDING_X`] outside every cell on both sides, so the width the
 //!    solver may spend is [`solver_available_width`] = available minus the
-//!    two outer padding bands. The egui adapter had no outer frame padding,
+//!    two outer padding bands. The legacy UI adapter had no outer frame padding,
 //!    so this is the one deliberate numeric difference ([RUST-041] note in
 //!    the TASK-015 verification log).
 //! 2. **solver inputs.** [`IcedTextMeasurer`] implements the pure
@@ -24,7 +24,7 @@
 //!    the whole cell), `min_content` (longest unbreakable token) and the
 //!    ordered token widths the breakpoint curve is built from. Horizontal
 //!    padding is folded in by the *builder*, not by the measurer — exactly
-//!    as `EguiTextMeasurer` left it (`TBL-033` accounting).
+//!    as the legacy text measurer left it (`TBL-033` accounting).
 //! 3. **solver output → iced widths.** [`column_widths`] reads the solved
 //!    per-column widths back out of the layout, and [`column_length`] turns
 //!    one into the `Length::Fixed` a `table::Column` is pinned to.
@@ -39,10 +39,10 @@
 //! (`iced_widget-0.14.2/src/table.rs:258-259`) and starts each row at
 //! `x = padding_x` (`table.rs:263`). Setting `padding_x = CELL_PADDING_X`
 //! with `separator_x = 0` therefore yields a [`COLUMN_SPACING`] of 10 px —
-//! the same gutter the egui table used (`item_spacing.x = 10.0`,
+//! the same gutter the legacy UI table used (`item_spacing.x = 10.0`,
 //! `configured.rs:86`) — without painting a separator line through it.
 //! Vertically the same rule gives [`ROW_SPACING`] = 2 px
-//! (`egui: item_spacing.y = 2.0`, `configured.rs:75`).
+//! (`the legacy UI: item_spacing.y = 2.0`, `configured.rs:75`).
 //!
 //! # Measurement without a renderer
 //!
@@ -59,10 +59,10 @@
 //!
 //! # Relocated helper ([TASK-029])
 //!
-//! [`TablePadding`] used to be `use`d from `crate::ui::table_width`, a file
-//! [TASK-029b] deletes. It is copied into this module verbatim and is
-//! **egui-free** (four `f32` fields, four pure methods). The egui module's
-//! `TableRenderConfig` is likewise egui-free but has no `ui_iced` consumer,
+//! [`TablePadding`] used to be `use`d from `crate::ui::table_width`, a module
+//! [TASK-029b] deleted. It is copied into this module verbatim and is
+//! **framework-free** (four `f32` fields, four pure methods). The retired module's
+//! `TableRenderConfig` is likewise framework-free but has no `ui_iced` consumer,
 //! so it is not copied.
 //!
 //! Unit tests live in the sibling `table_width_tests.rs` sidecar.
@@ -89,13 +89,13 @@ use iced::font::{Family, Font};
 ///
 /// Copied verbatim from `src/app/ui/table_width/mod.rs:29-86`, which used to
 /// be `use`d across the boundary and is deleted by [TASK-029b]. The type is
-/// **egui-free by construction** — four `f32` fields and four pure methods,
-/// no `egui`/`eframe` type anywhere — so the copy is exact.
+/// **framework-free by construction** — four `f32` fields and four pure methods,
+/// no framework type anywhere — so the copy is exact.
 ///
-/// The egui module's `TableRenderConfig` is **also** egui-free but is not
+/// The legacy UI module's `TableRenderConfig` is **also** framework-free but is not
 /// copied: no `ui_iced` code reads it (the iced render path carries
 /// [`RenderContext::table_padding`](crate::ui_iced::render::RenderContext)
-/// instead). The egui module keeps both until Phase 5.
+/// instead). The legacy UI module keeps both until Phase 5.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TablePadding {
     /// Top padding in logical pixels.
@@ -163,14 +163,14 @@ pub const CELL_PADDING_Y: f32 = 1.0;
 
 /// Horizontal gap between adjacent columns.
 ///
-/// Mirrors the egui table's `item_spacing.x = 10.0`
+/// Mirrors the legacy UI table's `item_spacing.x = 10.0`
 /// (`src/app/ui/render/table/configured.rs:86`) and the pure builder's
 /// own default (`src/app/markdown/table_layout.rs:53`).
 pub const COLUMN_SPACING: f32 = 10.0;
 
 /// Vertical gap between adjacent rows.
 ///
-/// Mirrors the egui table's `item_spacing.y = 2.0`
+/// Mirrors the legacy UI table's `item_spacing.y = 2.0`
 /// (`src/app/ui/render/table/configured.rs:75`).
 pub const ROW_SPACING: f32 = 2.0;
 
@@ -218,9 +218,9 @@ pub struct TextMetrics {
 impl TextMetrics {
     /// The FastMD body metrics: 14 pt body, 13 pt mono, 18 px row height.
     ///
-    /// Mirrors the egui defaults the table renderer fell back to
+    /// Mirrors the legacy UI defaults the table renderer fell back to
     /// (`TextStyle::Body` → `FontId::proportional(14.0)`,
-    /// `src/app/ui/render/table/cell.rs:194`) and the 18 px line the egui
+    /// `src/app/ui/render/table/cell.rs:194`) and the 18 px line the legacy UI
     /// markdown renderer used for its height estimates
     /// (`src/app/ui/render/mod.rs:190`).
     pub const FASTMD: TextMetrics = TextMetrics {
@@ -232,7 +232,7 @@ impl TextMetrics {
 
 /// A [`TextMeasurer`] for the pure FTWA builder, driven by iced fonts.
 ///
-/// Implements the same trait the egui `EguiTextMeasurer` did
+/// Implements the same trait the legacy text measurer did
 /// (`src/app/ui/table_width/mod.rs:280-292`), so `TableLayoutBuilder`
 /// cannot tell the two apart.
 pub struct IcedTextMeasurer<'a> {
@@ -300,7 +300,7 @@ impl<'a> IcedTextMeasurer<'a> {
     /// The text a cell element actually displays, and the font it displays
     /// in.
     ///
-    /// Same selection the egui measurer used (`src/app/ui/table_width/mod.rs:440-449`):
+    /// Same selection the legacy UI measurer used (`src/app/ui/table_width/mod.rs:440-449`):
     /// monospace only for `code` runs; links, HTML and the image
     /// placeholder all measure in the body font.
     fn displayed(&self, elem: &InlineElem) -> (String, Font) {
@@ -329,7 +329,7 @@ impl TextMeasurer for IcedTextMeasurer<'_> {
     /// `min_content` is the widest whitespace-separated token across the
     /// cell, measured with the font that token renders in. Token
     /// accumulation across element boundaries — a word split between two
-    /// `Text` runs keeps its identity — is ported verbatim from the egui
+    /// `Text` runs keeps its identity — is ported verbatim from the legacy UI
     /// measurer (`src/app/ui/table_width/mod.rs:415-510`) so the solver
     /// sees the same break opportunities in both builds.
     fn measure_cell(
@@ -393,7 +393,7 @@ impl TextMeasurer for IcedTextMeasurer<'_> {
                         current_font = font;
                     }
                 } else if ends_ws {
-                    // Parity with the egui walker: a single-part run that ends
+                    // Parity with the legacy UI walker: a single-part run that ends
                     // with whitespace closes the pending token immediately,
                     // measured with the *previous* run's font.
                     let token = std::mem::take(&mut current_token);

@@ -59,7 +59,7 @@ fn test_language_caption_rules() {
     );
     assert!(
         !has_language_caption(&model(Some(""), "x")),
-        "empty language tag → no caption (egui's `!lang.is_empty()` guard)"
+        "empty language tag → no caption (the legacy UI's `!lang.is_empty()` guard)"
     );
     assert!(has_language_caption(&model(Some("toml"), "x")));
 }
@@ -94,8 +94,8 @@ fn test_code_surface_and_border_are_palette_tokens() {
     // No numeric colour literal may appear in the render layer ([GUD-003]):
     // the panel's colours must be exactly the palette's tokens.
     let palette = Palette::fastmd_dark();
-    let _surface = crate::ui_iced::theme::to_iced_color(palette.code_surface);
-    let _border = crate::ui_iced::theme::to_iced_color(palette.border);
+    let _surface = palette.code_surface;
+    let _border = palette.border;
     assert!(CODE_BORDER_WIDTH > 0.0);
     assert!(CODE_BORDER_RADIUS >= 0.0);
 }

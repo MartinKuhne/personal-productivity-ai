@@ -1,20 +1,20 @@
-//! Iced application root — the egui-free state construction, the `boot`
+//! Iced application root — the framework-free state construction, the `boot`
 //! entry and the `launch()` builder chain ([TASK-022], DEC-006/008/009/010;
 //! `doc/planning/iced.md`).
 //!
 //! # What lives here
 //!
 //! * [`AppState`] — the iced runtime state. It is a **thin wrapper** around
-//!   the egui-free [`FastMdApp`] domain state plus the iced-specific runtime
+//!   the framework-free [`FastMdApp`] domain state plus the iced-specific runtime
 //!   bits the domain struct never carried (the DEC-008 OS scale baseline, the
 //!   [TASK-010] pane-grid, the live [`BusReceivers`] and the injected
-//!   [`UiStateStorage`]). It is constructible with zero `egui`/`eframe`
+//!   [`UiStateStorage`]). It is constructible with zero framework
 //!   references — the whole `ui_iced` tree is ([DEC-011]).
-//! * [`build_state`] — the **parallel egui-free constructor**. It mirrors
-//!   the plain (non-egui) wiring of `ui/app/init.rs::new` — background
+//! * [`build_state`] — the **parallel framework-free constructor**. It mirrors
+//!   the plain (non-the legacy UI) wiring of `ui/app/init.rs::new` — background
 //!   `Task`, MCP config subscriber, agent session, directory tracker,
 //!   persisted-UI-state projection — but resolves the persisted snapshot
-//!   through the injected [`UiStateStorage`] instead of `eframe::Storage`,
+//!   through the injected [`UiStateStorage`] instead of the legacy `Storage` backend,
 //!   direct-injects the loaded [`AppConfig`] (DEC-009) and hands the real
 //!   background-event channel to the [TASK-019] subscription bridge.
 //! * [`boot`] / [`boot_with_persisted`] — the iced `BootFn` body: build the
@@ -26,16 +26,16 @@
 //! # Why a parallel constructor rather than a shared `init.rs` core
 //!
 //! `init.rs::new` and the iced boot differ in exactly one structural way
-//! that cannot be parameterised without touching the live egui path: the
+//! that cannot be parameterised without touching the live the legacy UI path: the
 //! background-event channel `rx: std::sync::mpsc::Receiver<BackgroundEvent>`
-//! is **single-owner**. The egui path moves it into `AppOrchestrator.rx` and
+//! is **single-owner**. The legacy UI path moves it into `AppOrchestrator.rx` and
 //! drains it per frame; the iced path must move it into the [TASK-019]
 //! `BusReceivers` bridge so background notifications arrive as
 //! `Message::Inbound`. Sharing one core would force a fate-flag or an inert
-//! dummy channel into the shipping egui build. The parallel constructor
-//! keeps `init.rs` byte-identical (zero regression risk on the egui app that
+//! dummy channel into the shipping the legacy UI build. The parallel constructor
+//! keeps `init.rs` byte-identical (zero regression risk on the legacy UI app that
 //! lives until [TASK-024]) at the cost of a temporary duplication that dies
-//! with the egui layer in [TASK-029].
+//! with the legacy UI layer in [TASK-029].
 //!
 //! # Verified iced 0.14 builder chain
 //!
@@ -103,12 +103,12 @@ use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use fastmd_agent::AgentSession;
 
-/// Window width ported from the egui `ViewportBuilder::with_inner_size`
+/// Window width ported from the legacy UI `ViewportBuilder::with_inner_size`
 /// (`src/app/main.rs:49`), in logical points; the DEFAULT applied when the
 /// persisted state carries no window size ([TASK-009] (b)).
 pub const WINDOW_WIDTH_POINTS: f32 = 1000.0;
 
-/// Window height ported from the egui `ViewportBuilder::with_inner_size`
+/// Window height ported from the legacy UI `ViewportBuilder::with_inner_size`
 /// (`src/app/main.rs:49`); see [`WINDOW_WIDTH_POINTS`].
 pub const WINDOW_HEIGHT_POINTS: f32 = 700.0;
 
@@ -126,12 +126,12 @@ pub const UI_STATE_PATH_ENV: &str = "FASTMD_ICED_UI_STATE_PATH";
 
 /// The iced application state ([TASK-022], [TASK-023]).
 ///
-/// A thin wrapper: the egui-free [`FastMdApp`] domain state plus the
+/// A thin wrapper: the framework-free [`FastMdApp`] domain state plus the
 /// iced-specific runtime bits. [TASK-023] adds the view-model half
 /// ([`ViewModels`]) and the floating-window half ([`OverlayState`]); the
 /// boot-owned half below is final.
 pub struct AppState {
-    /// The egui-free FastMD domain state (orchestrator + panels + persisted
+    /// The framework-free FastMD domain state (orchestrator + panels + persisted
     /// snapshot). All domain accessors route through here.
     pub app: FastMdApp,
     /// Live bus receivers for the [TASK-019] inbound subscription bridge.
@@ -209,9 +209,9 @@ pub struct ContextMenu {
 
 /// Reducer-owned floating-window state ([TASK-023]).
 ///
-/// egui kept each of these as a `bool` on [`crate::ui::Dialogs`] plus
+/// the legacy UI kept each of these as a `bool` on [`crate::ui::Dialogs`] plus
 /// widget memory for the contents. iced has to hold the contents
-/// explicitly, and because the egui build could genuinely show several at
+/// explicitly, and because the legacy UI build could genuinely show several at
 /// once (a context menu over an open About window), the single-blocking
 /// overlay [`crate::ui_iced::overlay::OverlaySlot`] does not describe the
 /// real model. One slot per window does; [`mounted_layers`] turns them back
@@ -240,7 +240,7 @@ pub struct OverlayState {
     /// Last reported pointer position, the anchor source for context menus.
     pub cursor: Option<iced::Point>,
     /// The agent transcript's "Thinking Process" disclosure (replaces
-    /// egui's `collapsing` widget memory).
+    /// the legacy UI's `collapsing` widget memory).
     pub thinking_expanded: bool,
     /// Last reported background-logs viewport.
     pub logs_scroll: Option<ScrollSnapshot>,
@@ -251,8 +251,8 @@ pub struct OverlayState {
 }
 
 impl Default for OverlayState {
-    /// A closed-everything overlay with the egui-matching defaults: the
-    /// thinking block starts expanded (egui's `collapsing` opened that way)
+    /// A closed-everything overlay with the legacy UI-matching defaults: the
+    /// thinking block starts expanded (the legacy UI's `collapsing` opened that way)
     /// and no scroll viewport has been reported yet.
     fn default() -> Self {
         Self {
@@ -294,13 +294,13 @@ pub enum OverlayLayer {
     About,
     /// The third-party attributions window.
     Attributions,
-    /// The batch prompt-processing dialog (topmost — egui drew it last).
+    /// The batch prompt-processing dialog (topmost — the legacy UI drew it last).
     Batch,
 }
 
 /// The z-ordered set of showing layers ([TASK-023]).
 ///
-/// Mirrors the egui draw order of `ui/app/render.rs`: the context menu sat
+/// Mirrors the legacy UI draw order of `ui/app/render.rs`: the context menu sat
 /// above the panels, the editor above that, then the small dialogs, the log
 /// viewer, the debug window, the tools dialog, the identity windows and the
 /// batch dialog last.
@@ -379,11 +379,11 @@ impl ViewModels {
     /// Snapshots every view-model off `app`, merging in the reducer-held
     /// state that `from_app` cannot see ([TASK-023]).
     ///
-    /// Three merges are required because the egui originals read state the
+    /// Three merges are required because the legacy UI originals read state the
     /// iced reducer owns instead:
     ///
     /// * the left panel's search fields come from [`SearchViewModel`], not
-    ///   the egui `TreeSearch` that `LeftPanelViewModel::from_app` reads
+    ///   the legacy UI `TreeSearch` that `LeftPanelViewModel::from_app` reads
     ///   (and which stays empty in the iced build);
     /// * the agent panel's disclosure comes from
     ///   [`OverlayState::thinking_expanded`], because
@@ -391,10 +391,10 @@ impl ViewModels {
     /// * the debug window's expanded rows come from [`AgentDebugWindowState`],
     ///   because `AgentDebugViewModel::from_app` returns an empty set.
     ///
-    /// Side effects: the per-snapshot filesystem reads the egui panels
+    /// Side effects: the per-snapshot filesystem reads the legacy UI panels
     /// already paid every frame (skill listings, the Typst PATH probe, the
     /// tree flatten). Rebuilding once per message is strictly cheaper than
-    /// egui's once-per-frame cost.
+    /// the legacy UI's once-per-frame cost.
     #[must_use]
     pub fn from_app(app: &FastMdApp, overlay: &OverlayState) -> Self {
         let mut left = LeftPanelViewModel::from_app(app);
@@ -428,7 +428,7 @@ impl ViewModels {
     }
 }
 
-/// Projects the egui [`crate::ui::Dialogs`] batch-run fields onto the iced
+/// Projects the legacy UI [`crate::ui::Dialogs`] batch-run fields onto the iced
 /// [`BatchRunStatus`] the card renders ([TASK-023]).
 ///
 /// [RUST-020]: pure — reads the handle's liveness, mutates nothing.
@@ -488,14 +488,14 @@ pub struct LaunchInputs {
     pub args: Vec<String>,
 }
 
-/// Builds the full [`AppState`] without touching `egui`/`eframe`
+/// Builds the full [`AppState`] without touching framework
 /// ([TASK-022], [DEC-011]).
 ///
-/// Mirrors the plain wiring of `ui/app/init.rs::new` minus the egui theme /
+/// Mirrors the plain wiring of `ui/app/init.rs::new` minus the legacy UI theme /
 /// font / repaint-callback setup, with three iced-specific differences:
 ///
 /// 1. the persisted snapshot is supplied by the caller (loaded through the
-///    injected [`UiStateStorage`]) rather than `eframe::Storage`;
+///    injected [`UiStateStorage`]) rather than the legacy `Storage` backend;
 /// 2. the loaded `config` is **direct-injected** into the orchestrator and
 ///    the agent (DEC-009) — the UI does not wait on the startup broadcast;
 /// 3. the real background-event `rx` is handed to the [TASK-019]
@@ -506,7 +506,7 @@ pub struct LaunchInputs {
 /// Side effects at construction: spawns the background worker thread
 /// (`BackgroundTask::new`), the MCP config-subscriber thread
 /// (`spawn_config_subscription`) and the `std::sync::mpsc` → async
-/// forwarding thread (inside [`BusReceivers`]) — the same threads the egui
+/// forwarding thread (inside [`BusReceivers`]) — the same threads the legacy UI
 /// `new` path spawns. None of them touch the filesystem until a config
 /// arrives on the bus.
 pub fn build_state(
@@ -539,7 +539,7 @@ pub fn build_state(
     let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
 
     // The agent's streaming-event bus + observer fan-out (bus observer for
-    // the UI, conversation logger for disk) — identical to the egui `new`
+    // the UI, conversation logger for disk) — identical to the legacy UI `new`
     // path, so the iced UI sees the same `AgentEvent` stream.
     let agent_event_bus = Bus::new();
     let agent_event_reader = agent_event_bus.subscribe();
@@ -591,7 +591,7 @@ pub fn build_state(
     let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
     // Project the persisted snapshot onto the live panel/selection/dialog
-    // state (the egui `new` path's `init.rs:191-214`, egui-free).
+    // state (the legacy UI `new` path's `init.rs:191-214`, framework-free).
     let mut persisted = persisted;
     let mut layout = PanelLayout::new();
     if let Some(w) = persisted.left_panel_width {
@@ -614,10 +614,10 @@ pub fn build_state(
         ..Default::default()
     };
     // First-run auto-show (spec FR-016), carried over from `init.rs:210-214`.
-    crate::ui::about_dialog::apply_first_run_auto_show(
+    crate::ui_iced::about::apply_first_run_auto_show(
         &mut persisted,
         &mut dialogs,
-        crate::ui::about_dialog::APP_VERSION,
+        crate::ui_iced::about::APP_VERSION,
     );
 
     let user_command_bus = crate::bus::core::Bus::new();
@@ -867,7 +867,7 @@ fn publish_config_task(bus: Bus<ConfigArrived>, config: AppConfig) -> Task<Messa
 /// DEC-006/DEC-010).
 ///
 /// Size/position seed from the loaded [`PersistedUiState`], falling back to
-/// the egui-derived 1000×700 default (`main.rs:49`). `exit_on_close_request`
+/// the legacy UI-derived 1000×700 default (`main.rs:49`). `exit_on_close_request`
 /// is `false` so the runtime waits for the app to persist before closing
 /// (DEC-006 save-on-close).
 pub fn window_settings(persisted_state: &PersistedUiState) -> iced::window::Settings {
@@ -885,7 +885,7 @@ pub fn window_settings(persisted_state: &PersistedUiState) -> iced::window::Sett
 /// Loads the application icon as an iced window icon ([TASK-006]).
 ///
 /// Decodes the SAME shared asset (`assets/icon-32.png`) that `main.rs` feeds
-/// `egui::ViewportBuilder::with_icon`, via
+/// `ViewportBuilder::with_icon`, via
 /// `crate::utils::app_icon::decode_app_icon_rgba`, then wraps the RGBA
 /// pixels with `iced::window::icon::from_rgba`. Falls back to `None` (iced
 /// default) if decoding fails.
@@ -933,7 +933,7 @@ pub fn launch(inputs: LaunchInputs) -> iced::Result {
     .subscription(|state: &AppState| subscription::subscription(&state.receivers))
     .run();
 
-    // egui `on_exit` port (`ui/app/mod.rs:245-248`): temp-file cleanup and
+    // the legacy UI `on_exit` port (`ui/app/mod.rs:245-248`): temp-file cleanup and
     // UI-log unregistration run when the iced runtime returns.
     crate::export::print::cleanup_temp_files();
     crate::background::logs::unregister_ui_logs();

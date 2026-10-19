@@ -1,20 +1,20 @@
-//! File-system tree widget — expand/collapse, file selection, multi-select,
-//! and context-menu operations (rename, move, delete, new file/dir).
+//! File-system tree model — pure flattening of the workspace tree into
+//! renderable rows, plus the multi-file merge-prompt builder.
+//!
+//! The legacy UI row renderer (`render.rs`) and the legacy-modifier-typed
+//! operation context (`context.rs`) were removed by [TASK-029b]; the iced
+//! left panel ([`crate::ui_iced::panels::left`]) consumes [`FlatRow`]s
+//! and emits [`UserCommand`](crate::bus::events::user_command::UserCommand)
+//! intents directly.
 //!
 //! # Module layout
 //!
 //! | Submodule | Contents |
 //! |-----------|----------|
-//! | [`context`] | [`TreeOpsContext`] flat context struct + [`TreeNodeContext`] alias |
 //! | [`flatten`] | [`FlatRow`], [`flatten_tree`], constants |
-//! | `handlers` | Click handlers: `apply_file_row_click`, `apply_directory_row_click` |
-//! | `render` | Row drawing: [`render_flat_row`], [`draw_tree_node`] |
+//! | `handlers` | `build_merge_prompt` — the multi-file merge prompt |
 
-pub(crate) mod context;
 pub(crate) mod flatten;
 pub(crate) mod handlers;
-pub(crate) mod render;
 
-pub use context::{TreeNodeContext, TreeOpsContext};
 pub use flatten::{FlatRow, TREE_ROW_HEIGHT, flatten_tree};
-pub use render::{draw_tree_node, render_flat_row};

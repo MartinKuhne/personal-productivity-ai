@@ -1,20 +1,22 @@
-//! Initialisation of `FastMdApp` — the egui theme setup and the two
-//! constructors (`new` for the real eframe creation context, `empty_state`
-//! for tests). All one-time wiring (background `Task`, agent session,
-//! directory tracker, persisted-UI state) lives here so the per-frame
-//! `update` and `render` modules can read from an already-initialised
-//! `FastMdApp`.
+//! Initialisation of `FastMdApp` — the framework-free constructors
+//! (`from_parts` for the iced boot path, `empty_state` for tests). All
+//! one-time wiring (background `Task`, agent session, directory tracker,
+//! persisted-UI state) lives here so consumers read from an
+//! already-initialised `FastMdApp`.
+//!
+//! The legacy `new(cc: &CreationContext)` constructor and the theme/font
+//! pinning it performed were removed by [TASK-029b]; the
+//! iced boot path ([`crate::ui_iced::app::build_state`]) assembles the
+//! orchestrator, layout and persisted snapshot itself and hands them to
+//! [`FastMdApp::from_parts`].
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-use eframe::egui;
 
 use crate::background::Task;
 use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
-use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
@@ -22,257 +24,18 @@ use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use fastmd_agent::AgentSession;
 
-use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
+use super::FastMdApp;
 
 impl FastMdApp {
-    /// Purpose: Pin the egui context to the dark theme with the FastMD brand
-    /// palette (RGB(9, 9, 11) surfaces, indigo selection, 8px window corners,
-    /// 4px widget corners, bright off-white text).
-    /// Inputs: `ctx` - The egui context whose theme is to be configured.
-    /// Outputs: None.
-    /// Purity: Impure (mutates the egui context's options).
-    /// Preconditions: `ctx` is a valid egui context.
-    /// Postconditions: The dark theme is the active theme, and the dark
-    /// theme's visuals match the FastMD palette so UI-002 (dark color
-    /// scheme) holds even if the system preference reports light mode.
+    /// Build a `FastMdApp` from already-constructed parts.
     ///
-    /// Delegates to [`crate::ui::theme::install_dark`], which owns the
-    /// palette and the egui theme-pinning rationale.
-    pub fn configure_dark_theme(ctx: &egui::Context) {
-        crate::ui::theme::install_dark(ctx);
-    }
-
-    /// Configure fonts for FastMD including typography defaults, Phosphor icon font,
-    /// and fallback symbol fonts (for arrows, math, and box-drawing glyphs).
-    pub fn configure_fonts(ctx: &egui::Context) {
-        crate::ui::fonts::configure_fonts(ctx);
-    }
-
-    pub fn new(cc: &eframe::CreationContext<'_>, config_bus: Bus<ConfigArrived>) -> Self {
-        // egui 0.35 split the global style into a Dark and a Light
-        // theme, picked at runtime by `ThemePreference` (default
-        // `System`). `set_visuals` writes to the *currently active*
-        // theme only, so on systems that report a light-mode
-        // preference the next frame can flip the active theme back
-        // to the default light visuals and the carefully tuned
-        // dark background is lost. Force the dark theme and apply
-        // our custom visuals to the dark theme explicitly.
-        Self::configure_dark_theme(&cc.egui_ctx);
-        Self::configure_fonts(&cc.egui_ctx);
-
-        // Subscribe before any worker is spawned so the first
-
-        // `ConfigArrived` publish reaches every reader.
-        let config_reader = config_bus.subscribe();
-
-        // `Task::new` and `AgentSession::new` each subscribe
-        // to the same bus, then defer their own work until the
-        // event arrives. The background `Task` spawns a thread that
-        // waits on its own reader; the agent's reader is drained on
-        // the UI thread in `update_ui`.
-        let background_task = Task::new(config_bus.clone());
-        background_task
-            .tx
-            .set_repaint_callback(std::sync::Arc::new({
-                let ctx = cc.egui_ctx.clone();
-                move || ctx.request_repaint()
-            }));
-        // The tools manager subscribes to the same bus and performs
-        // the one-time
-        let tool_context = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
-        ));
-        // Start MCP initialization immediately on the app's initial
-        // background thread, so the UI thread never blocks on MCP
-        // network I/O at startup.
-        crate::agent::spawn_config_subscription(
-            tool_context.clone(),
-            config_bus.clone(),
-            background_task.tx.clone(),
-        );
-        // The file-watcher thread writes the `RecommendedWatcher`
-        // handle into this slot before sending `FsEvent::Finished`;
-        // the UI takes ownership from `task_take_finished_watcher`
-        // in `handle_fs_event`.
-        let finished_watcher_slot = background_task.finished_watcher.clone();
-        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
-        let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
-        crate::background::logs::register_ui_logs(background_manager.clone());
-        // One BrowserSession for the whole app lifetime; shared
-        // with the agent and (read-only) with the Tools dialog
-        // so the UI can call `tick()` / `forget()`. Lazily
-        // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
-        // The agent no longer subscribes to `Bus<ConfigArrived>`.
-        // The orchestrator projects `AppConfig -> AgentConfig`
-        // and pushes the result into the agent's domain-config
-        // cell. We hand `FastMdApp` a `Sender<ConfigArrived>`-style
-        // channel? No — we keep `config_bus` and `config_reader`
-        // so the UI can still drain the bus; the `AgentSession`
-        // itself is built without a `config_bus` parameter.
-        let agent_event_bus = Bus::new();
-        let agent_event_reader = agent_event_bus.subscribe();
-        let agent_event_bus_clone = agent_event_bus.clone();
-        let observer_factory: crate::agent::events::AgentObserverFactory =
-            std::sync::Arc::new(move |session_id| {
-                let bus_observer =
-                    std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
-                        session_id,
-                        agent_event_bus_clone.clone(),
-                    ));
-                let logger_observer = std::sync::Arc::new(
-                    crate::ui::agent::conversation_logger::ConversationLoggerObserver::new(
-                        session_id,
-                        crate::config::AppConfig::get_system_library_path().join("Conversations"),
-                    ),
-                );
-                std::sync::Arc::new(crate::bus::events::agent::CompositeAgentEventObserver::new(
-                    vec![bus_observer, logger_observer],
-                ))
-            });
-
-        let agent_builder = AgentSession::builder()
-            .with_observer_factory(observer_factory)
-            .with_file_observer(std::sync::Arc::new(
-                crate::agent::session::bus_observer::AppFileObserver::new(
-                    background_task.file_event_bus.clone(),
-                ),
-            ))
-            .with_extension(browser_session.clone())
-            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
-                browser_session.clone(),
-            )))
-            .with_extension(Arc::new(pdf_backing_tracker.clone()))
-            .with_tool_call_policy(Arc::new(pdf_backing_tracker.clone()))
-            .with_tool_context(tool_context.clone());
-        #[cfg(feature = "vector-search")]
-        let agent_builder = agent_builder.with_extension(Arc::new(
-            crate::agent::tools::vector_search::VectorSearchExt(
-                background_task.vector_search_service.clone(),
-            ),
-        ));
-        let agent = agent_builder.build();
-
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
-
-        let mut persisted_ui_state: PersistedUiState = cc
-            .storage
-            .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
-            .map(|json| {
-                serde_json::from_str(&json).unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "Failed to parse persisted UI state, using defaults");
-                    PersistedUiState::default()
-                })
-            })
-            .unwrap_or_default();
-
-        // Schema migration: state written by the pre-fix build
-        // has no `schema_version` field (deserialises to 0) and
-        // its `font_size_scale` actually holds the absolute
-        // OS-reported ppp — treating it as a multiplier on top
-        // of the same ppp was the historical compounding bug.
-        // Clear the field on the first launch after the fix so
-        // the user starts at the OS default; other fields
-        // (panel widths, expanded dirs) are preserved.
-        if persisted_ui_state.schema_version < crate::ui::persisted::CURRENT_SCHEMA_VERSION {
-            tracing::info!(
-                from = persisted_ui_state.schema_version,
-                to = crate::ui::persisted::CURRENT_SCHEMA_VERSION,
-                "migrating persisted UI state: clearing legacy font_size_scale"
-            );
-            persisted_ui_state.font_size_scale = None;
-            persisted_ui_state.schema_version = crate::ui::persisted::CURRENT_SCHEMA_VERSION;
-        }
-
-        let mut layout = PanelLayout::new();
-        if let Some(w) = persisted_ui_state.left_panel_width {
-            layout.left_panel_width = Some(w);
-        }
-        if let Some(w) = persisted_ui_state.right_panel_width {
-            layout.right_panel_width = Some(w);
-        }
-
-        let mut selection = FileSelection::new();
-        for dir in &persisted_ui_state.expanded_dirs {
-            selection.expanded_dirs.insert(dir.clone());
-        }
-
-        let mut dialogs = Dialogs::new();
-
-        // First-run auto-show (spec FR-016): fresh UI state or a version
-        // upgrade opens the About dialog once and records the version so
-        // later starts stay quiet. Missing or corrupt state restores to
-        // default (unseen above), which fails open to a single auto-show.
-        crate::ui::about_dialog::apply_first_run_auto_show(
-            &mut persisted_ui_state,
-            &mut dialogs,
-            crate::ui::about_dialog::APP_VERSION,
-        );
-
-        let user_command_bus = crate::bus::core::Bus::new();
-        let user_command_reader = user_command_bus.subscribe();
-
-        Self {
-            orchestrator: crate::orchestrator::AppOrchestrator {
-                content_libraries: Vec::new(),
-                rx: background_task.rx,
-                tx: background_task.tx,
-                file_event_reader: Some(event_bus.subscribe()),
-                file_event_bus: event_bus,
-                file_processor,
-                pdf_backing_tracker,
-                directory_tracker: dir_tracker,
-                tags: Tags::new(),
-                selection,
-                tabs: Tabs::new(),
-                _watcher: None,
-                agent,
-                dialogs,
-                text_buffer: TextBuffer::new(),
-                inline_editor_enabled: false,
-                background_manager,
-                config: AppConfig::default(),
-                config_storage: std::sync::Arc::new(crate::config::FileConfigStorage::new(
-                    crate::config::get_config_path(),
-                )),
-                config_reader: Some(config_reader),
-                pending_file_load: None,
-                finished_watcher_slot,
-                tool_context,
-                agent_event_bus,
-                agent_event_reader: Some(agent_event_reader),
-                agent_event_lagged: false,
-                agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
-                agent_panel_state: AgentPanelState::new(),
-                user_command_bus,
-                user_command_reader: Some(user_command_reader),
-            },
-            layout,
-            cached_tree_rows: None,
-            persisted_ui_state,
-            persisted_font_applied: false,
-            os_baseline_ppp: None,
-            applied_font_scale: 1.0,
-            search: crate::ui::TreeSearch::new(),
-        }
-    }
-
-    /// Build a `FastMdApp` from already-constructed parts, with the
-    /// egui first-frame font-tracking fields at their defaults.
-    ///
-    /// This is the egui-free construction entry point used by the iced boot
+    /// This is the framework-free construction entry point used by the iced boot
     /// path ([`crate::ui_iced::app::build_state`], [TASK-022]): the iced
     /// side assembles the [`crate::orchestrator::AppOrchestrator`], the
-    /// [`PanelLayout`] and the persisted snapshot itself and never runs the
-    /// egui first-frame font-scale application, so the three private
-    /// font-tracking fields (`persisted_font_applied`, `os_baseline_ppp`,
-    /// `applied_font_scale`) are simply initialised. Keeping this here —
-    /// beside the other constructors — lets the private fields stay private
-    /// while giving the iced tree a non-egui way to build the struct.
+    /// [`PanelLayout`] and the persisted snapshot itself. Keeping this
+    /// here — beside the other constructors — lets the private fields stay
+    /// private while giving the iced tree a framework-free way to build
+    /// the struct.
     ///
     /// [RUST-020]: pure construction; no side effects.
     pub(crate) fn from_parts(
@@ -285,9 +48,6 @@ impl FastMdApp {
             layout,
             cached_tree_rows: None,
             persisted_ui_state,
-            persisted_font_applied: false,
-            os_baseline_ppp: None,
-            applied_font_scale: 1.0,
             search: crate::ui::TreeSearch::new(),
         }
     }
@@ -302,16 +62,14 @@ impl FastMdApp {
         // Publish the supplied config into a private bus and let
         // `empty_state_via_bus` build the struct through the same
         // bus-driven init path. This keeps a single code path for
-        // tests that don't need a real `CreationContext`.
+        // tests that don't need a real creation context.
         let bus = crate::bus::config::config_bus();
         bus.publish(ConfigArrived::new(config.clone()));
         Self::empty_state_via_bus(bus, config)
     }
 
     /// Build an `empty_state` `FastMdApp` by publishing `config` into
-    /// a private bus and draining it synchronously. This is the test
-    /// counterpart of [`Self::new`]: no `CreationContext` is needed
-    /// because we don't apply egui visuals.
+    /// a private bus and draining it synchronously.
     fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
         let background_task = Task::new(bus.clone());
         // The `empty_state` test path creates the background `Task`
@@ -433,9 +191,6 @@ impl FastMdApp {
             layout: PanelLayout::new(),
             cached_tree_rows: None,
             persisted_ui_state: PersistedUiState::default(),
-            persisted_font_applied: false,
-            os_baseline_ppp: None,
-            applied_font_scale: 1.0,
             search: crate::ui::TreeSearch::new(),
         }
     }

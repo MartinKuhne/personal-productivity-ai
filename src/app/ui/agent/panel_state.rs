@@ -22,7 +22,7 @@ pub struct AgentPanelState {
     /// The user's command input text.
     pub command_input: String,
     /// Stable string id of the heading the agent-results panel should
-    /// scroll to. The UI layer maps it to an `egui::Id` at render time.
+    /// scroll to. The UI layer maps it to an `Id` at render time.
     pub scroll_to_id: Option<String>,
     /// Number of JSON rows to show in the debug window's expanded entry view.
     pub debug_json_rows: usize,

@@ -136,7 +136,7 @@ fn test_measure_cell_min_is_the_longest_token() {
 
 #[test]
 fn test_measure_cell_fragmented_token_stays_one_token() {
-    // Mirrors the egui `test_measure_cell_fragmented_tokens`: two adjacent
+    // Mirrors the legacy UI `test_measure_cell_fragmented_tokens`: two adjacent
     // runs with no whitespace between them are ONE unbreakable token.
     let measurer = fake_measurer();
     let fragmented = vec![
@@ -207,7 +207,7 @@ fn test_measure_cell_whitespace_only_closes_the_open_token() {
 }
 
 #[test]
-fn test_trailing_whitespace_single_part_run_closes_the_token_like_egui() {
+fn test_trailing_whitespace_single_part_run_closes_the_token_like_the_legacy_renderer() {
     // Parity lock for the walker's `else if ends_ws` branch: a single-part
     // run that ends with whitespace closes the pending token immediately and
     // it is measured with the *previous* run's font, so the two runs stay two

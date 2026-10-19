@@ -23,7 +23,7 @@ type RepaintCallback = Arc<dyn Fn() + Send + Sync>;
 /// Sends typed background events and optionally wakes the UI after delivery.
 ///
 /// The callback is deliberately generic so the application layer does not
-/// depend on egui. The UI installs its callback at startup.
+/// depend on a UI framework. The UI installs its callback at startup.
 #[derive(Clone)]
 pub struct BackgroundEventSender {
     sender: std::sync::mpsc::Sender<BackgroundEvent>,

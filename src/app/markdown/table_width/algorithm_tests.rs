@@ -236,7 +236,7 @@ fn g3_sum_equals_available_with_drift() {
 fn nan_input_panics_instead_of_propagating() {
     // NaN is a programmer error. The function must panic with a
     // clear message, not silently return NaN-containing widths that
-    // would propagate into egui's layout (which then renders garbage
+    // would propagate into the legacy UI's layout (which then renders garbage
     // or asserts deep inside).
     let max_nan = [f32::NAN, 1.0];
     let min = [0.0, 0.0];
@@ -279,7 +279,7 @@ fn max_geq_min_invariant_panics_on_violation() {
     );
 }
 
-/// Sub-pixel drift from egui's font shaping (kerning, sub-pixel
+/// Sub-pixel drift from the legacy UI's font shaping (kerning, sub-pixel
 /// rounding) can make `layout_no_wrap("A" + "B")` differ from
 /// `layout_no_wrap("A") + layout_no_wrap("B")` by a fraction of a
 /// pixel even though the rendered cell *is* the sum of fragments.
@@ -315,7 +315,7 @@ fn infinity_available_panics() {
     // `f32::INFINITY` as `available` is a programmer error: it
     // would lead to `f32::INFINITY * (m / sum_max)` in the surplus
     // share, producing `ColumnWidths` with `f32::INFINITY` widths
-    // that egui's layout cannot use. Like NaN, must be caught at
+    // that the legacy UI's layout cannot use. Like NaN, must be caught at
     // the boundary, not propagated.
     let max = [100.0, 100.0];
     let min = [50.0, 50.0];

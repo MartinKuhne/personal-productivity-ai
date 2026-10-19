@@ -1,4 +1,4 @@
-//! Pure Markdown and YAML parsing logic isolated from egui rendering.
+//! Pure Markdown and YAML parsing logic isolated from UI rendering.
 //!
 //! # Implementation note: pulldown-cmark inline-parser fragmentation
 //!
@@ -899,7 +899,7 @@ mod tests {
     /// text. `Visit <https://example.com> for more.` must yield a
     /// three-element inline run (`Text`, `Link`, `Text`) with no
     /// spurious `Html` variant — the clickable middle element is
-    /// what the renderer turns into an egui `Link` widget.
+    /// what the renderer turns into an the legacy UI `Link` widget.
     #[test]
     fn autolink_mixed_with_plain_text_keeps_text_runs() {
         let md = "Visit <https://example.com> for more.";

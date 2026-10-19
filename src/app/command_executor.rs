@@ -18,7 +18,7 @@ impl AppOrchestrator {
             UserCommand::ShowModels => {
                 self.agent.set_status("Done".to_string());
                 let models_response =
-                    crate::ui::panels::bottom::format_models_list(&self.config.models);
+                    crate::ui_iced::panels::bottom::format_models_list(&self.config.models);
                 self.agent.set_response(models_response);
                 self.agent_panel_state.show_results = true;
             }
@@ -208,11 +208,11 @@ impl AppOrchestrator {
                         self.tabs.loaded_path = Some(path);
                     }
                 } else {
-                    crate::ui::open_in_system_editor(&path);
+                    crate::ui_iced::os_shell::open_in_system_editor(&path);
                 }
             }
             UserCommand::ShowInExplorer(path) => {
-                crate::ui::show_in_file_explorer(&path);
+                crate::ui_iced::os_shell::show_in_file_explorer(&path);
             }
             UserCommand::CopyPath(path) => {
                 let path_str = path.to_string_lossy().to_string();
@@ -342,7 +342,7 @@ impl AppOrchestrator {
                         "User attempted to create document with invalid characters. Operation skipped. Operator should advise user of valid names."
                     );
                 } else {
-                    match crate::ui::modals::write_new_document(&parent, &name) {
+                    match crate::utils::path::write_new_document(&parent, &name) {
                         Ok(new_path) => {
                             let producer = crate::bus::events::file::FileEventProducer::new(
                                 self.file_event_bus.clone(),
@@ -567,7 +567,7 @@ impl AppOrchestrator {
             }
             UserCommand::ApplyTaskToggles { toggles } => {
                 for (idx, checked) in toggles {
-                    crate::ui::render::apply_task_toggle(
+                    crate::markdown::apply_task_toggle(
                         &mut self.agent_transcript.content,
                         idx,
                         checked,

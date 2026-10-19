@@ -67,13 +67,13 @@
 //!
 //! # Dropped events ([FMD-067], [FMD-072])
 //!
-//! The egui build read the dropped-event count from
+//! The legacy UI build read the dropped-event count from
 //! `BusReader::try_recv_exposing_lag() → BroadcastRecvError::Lagged(n)`
 //! (`src/app/bus/core.rs:149-151`) and handled it in its drain loops
 //! (`src/app/orchestrator.rs:96-103` for user commands, `:435-449` for
 //! agent events). The async equivalent is
 //! `broadcast::Receiver::recv() → Err(RecvError::Lagged(n))` — the same
-//! count off the same tokio channel. This bridge does both things the egui
+//! count off the same tokio channel. This bridge does both things the legacy UI
 //! loops did, and does them for **every** bus rather than only the agent
 //! one: it emits a `tracing::warn!` carrying the count, and it forwards an
 //! [`InboundMessage::EventsDropped`] so the reducer can surface the loss
@@ -127,7 +127,7 @@ pub enum InboundBusEvent {
 /// bridge, testable without a live stream.
 ///
 /// Returns `None` when an event must not reach the UI. Every payload
-/// currently published on the four buses *is* UI-observable — the egui
+/// currently published on the four buses *is* UI-observable — the legacy UI
 /// build reacted to each one — so the mapping is total today and `None` is
 /// never produced. The `Option` is kept deliberately: it is the seam where
 /// a future filter (throttling a chatty producer, suppressing another
@@ -320,7 +320,7 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
 }
 
 /// Reports a lag on `source`: a `tracing::warn!` carrying the dropped
-/// count ([FMD-072]) — the same shape the egui drain loops used
+/// count ([FMD-072]) — the same shape the legacy UI drain loops used
 /// (`src/app/orchestrator.rs:97-101`, `:436-440`).
 fn warn_dropped(source: BusSource, count: u64) {
     tracing::warn!(
