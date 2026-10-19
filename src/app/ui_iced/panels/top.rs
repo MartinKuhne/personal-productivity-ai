@@ -92,7 +92,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use iced::widget::{Row, container, pick_list, rule, text};
-use iced::{Alignment, Color, Element, Font, Length};
+use iced::{Alignment, Color, Element, Font, Length, Padding};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::table_width::DeficitStrategy;
@@ -262,8 +262,37 @@ pub const TITLE_SIZE: f32 = 18.0;
 /// Horizontal spacing between top-bar items.
 pub const BAR_SPACING: f32 = 8.0;
 
-/// Inner padding of the top bar.
-pub const BAR_PADDING: f32 = 6.0;
+/// Inner padding of the top bar; small so the fixed [`BAR_HEIGHT_POINTS`]
+/// band still fits the pick lists' content height ([`PICK_LIST_PADDING`])
+/// and the 20 pt logo mark.
+pub const BAR_PADDING: f32 = 2.0;
+
+/// Full-on-screen height of the **top bar band**, in logical points
+/// ([TASK-010] band contract — the same 28 pt the pilot stub bands and
+/// the legacy egui `Panel::top` geometry carried; the migration map A2
+/// row).
+///
+/// The legacy egui toolbar was this compact; without the fixed height
+/// the two pick lists' default button padding (5 pt vertical each)
+/// grew the band to ~40 pt and the bar rendered far taller than the
+/// panel it replaces.
+pub const BAR_HEIGHT_POINTS: f32 = 28.0;
+
+/// Vertical padding of the two top-bar pick lists.
+///
+/// iced's `pick_list` inherits `button::DEFAULT_PADDING` (5 pt vertical)
+/// when unset, which — combined with [`BAR_PADDING`] — pushed the bar's
+/// natural height well past [`BAR_HEIGHT_POINTS`]. Tightening to 2 pt
+/// vertical (horizontal hit-target unchanged at 10 pt) fits both
+/// widgets inside the fixed band (pick_list layout contract:
+/// `iced_widget-0.14.2/src/pick_list.rs:421-432` — height = padding +
+/// text line height).
+pub const PICK_LIST_PADDING: Padding = Padding {
+    top: 2.0,
+    bottom: 2.0,
+    left: 10.0,
+    right: 10.0,
+};
 
 /// Width of the vertical rule drawn between top-bar groups.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
@@ -755,6 +784,10 @@ impl TopBarViewModel {
 /// The tag filter and the hamburger are always allocated (never removed
 /// conditionally) so the widget tree shape does not change across the
 /// indexing-finished transition.
+///
+/// The bar renders as the [TASK-010] full-width band at the fixed
+/// [`BAR_HEIGHT_POINTS`] height (content vertically centred), compact pick
+/// lists via [`PICK_LIST_PADDING`] — parity with the legacy egui toolbar.
 pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -777,6 +810,7 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
         |option| Message::Command(option.command()),
     )
     .placeholder(strings::TAG_FILTER_DEFAULT)
+    .padding(PICK_LIST_PADDING)
     .width(Length::Shrink)
     .into();
 
@@ -786,22 +820,31 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
         |item| Message::Command(item.command),
     )
     .placeholder(strings::HAMBURGER_MENU_BUTTON)
+    .padding(PICK_LIST_PADDING)
     .width(MENU_MIN_WIDTH)
     .into();
 
-    Row::with_children(vec![
-        logo,
-        title.into(),
-        rule::vertical(SEPARATOR_WIDTH).into(),
-        status.into(),
-        tag_filter,
-        container(hamburger)
-            .width(Length::Fill)
-            .align_right(Length::Shrink)
-            .into(),
-    ])
-    .spacing(BAR_SPACING)
-    .padding(BAR_PADDING)
-    .align_y(Alignment::Center)
+    container(
+        Row::with_children(vec![
+            logo,
+            title.into(),
+            rule::vertical(SEPARATOR_WIDTH).into(),
+            status.into(),
+            tag_filter,
+            container(hamburger)
+                .width(Length::Fill)
+                .align_right(Length::Shrink)
+                .into(),
+        ])
+        .spacing(BAR_SPACING)
+        .padding(BAR_PADDING)
+        .align_y(Alignment::Center),
+    )
+    // Full-width band at the [TASK-010] fixed height, its content
+    // vertically centred (`iced_widget-0.14.2/src/container.rs:150-159`).
+    // Without the fixed length the band grows to the pick lists' content
+    // height and renders far taller than the legacy toolbar.
+    .width(Length::Fill)
+    .center_y(BAR_HEIGHT_POINTS)
     .into()
 }

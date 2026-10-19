@@ -685,3 +685,31 @@ fn top_bar_builds_for_both_indexing_states() {
     app.file_processor_mut().indexing_finished = true;
     let _ = top_bar(&TopBarViewModel::from_app(&app));
 }
+
+// --- compact-bar band contract ---------------------------------------------
+
+/// Regression: the top bar renders as the [TASK-010] fixed 28 pt band
+/// the legacy egui `Panel::top` carried. The previous iced port had no
+/// fixed height, so the pick lists' default 5 pt button padding grew
+/// the band to ~40 logical points — the user-visible "navbar way too
+/// tall" report.
+#[test]
+fn top_band_height_matches_legacy_toolbar() {
+    assert_eq!(BAR_HEIGHT_POINTS, 28.0);
+}
+
+/// Regression: both pick lists use the tightened [`PICK_LIST_PADDING`],
+/// whose content height (padding + 16 pt text line) must fit inside the
+/// [`BAR_HEIGHT_POINTS`] band minus the [`BAR_PADDING`] chrome so
+/// nothing is clipped:
+/// `(top + bottom) padding + 16 + 2 * BAR_PADDING <= BAR_HEIGHT_POINTS`.
+#[test]
+fn pick_list_content_fits_inside_the_fixed_band() {
+    let pick_list_content = PICK_LIST_PADDING.top + PICK_LIST_PADDING.bottom + 16.0; // iced default text size
+    let border_allowance = 2.0; // 1 pt style border above + below
+    assert!(
+        pick_list_content + border_allowance + 2.0 * BAR_PADDING <= BAR_HEIGHT_POINTS,
+        "pick list ({pick_list_content} + {border_allowance}) does not fit \
+         BAR_HEIGHT_POINTS = {BAR_HEIGHT_POINTS} with BAR_PADDING = {BAR_PADDING}"
+    );
+}

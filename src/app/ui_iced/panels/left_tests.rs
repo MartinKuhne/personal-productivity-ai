@@ -75,7 +75,7 @@ fn app_with_system_lib() -> (FastMdApp, TempDir) {
 fn select_files(app: &mut FastMdApp, paths: &[&str]) {
     let selection = app.selection_mut().selected_files_mut();
     selection.clear();
-    selection.extend(paths.iter().map(|path| PathBuf::from(path)));
+    selection.extend(paths.iter().map(|path| PathBuf::from(path.to_string())));
 }
 
 /// Seeds one folder skill and one note skill under the system library root.
@@ -174,11 +174,8 @@ fn auto_fit_floors_at_the_minimum_panel_width() {
 #[test]
 fn auto_fit_minimum_wins_when_the_cap_falls_below_it() {
     // 500 px viewport → 20 % cap is 100 px, below the 180 px minimum.
+    const { assert!(LEFT_PANEL_MAX_WIDTH_FRACTION * 500.0 < LEFT_PANEL_MIN_WIDTH) } // fixture sanity
     let rows = vec![file_row("a.md", "/lib/a.md", 0)];
-    assert!(
-        500.0 * LEFT_PANEL_MAX_WIDTH_FRACTION < LEFT_PANEL_MIN_WIDTH,
-        "fixture must actually put the cap below the minimum"
-    );
     assert_eq!(auto_fit_width(&rows, 500.0, measure), LEFT_PANEL_MIN_WIDTH);
 }
 
@@ -654,7 +651,7 @@ fn from_app_carries_query_search_state_and_selection() {
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
 
     *app.search_mut().query_mut() = "crisp".to_string();
-    app.search_mut().apply(&[note.clone()], &[]);
+    app.search_mut().apply(std::slice::from_ref(&note), &[]);
     app.selection_mut().select_file(note.clone());
 
     let view_model = LeftPanelViewModel::from_app(&app);

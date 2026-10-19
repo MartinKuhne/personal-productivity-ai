@@ -1941,7 +1941,6 @@ fn test_boot_reports_reduce_without_panicking() {
     for message in [
         BootMessage::FontLoadFinished(Some("boom".to_string())),
         BootMessage::FontLoadFinished(None),
-        BootMessage::ConfigPublished,
     ] {
         let _ = update(&mut state, Message::Boot(message.clone()));
     }

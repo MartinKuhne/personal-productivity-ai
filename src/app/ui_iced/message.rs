@@ -157,8 +157,8 @@ pub enum Message {
     /// FMD-065..FMD-067) — the only channel no widget can produce.
     Inbound(InboundMessage),
     /// Boot-infrastructure reports ([TASK-022]) — the terminal outcomes of
-    /// the one-shot tasks the `boot` closure returns (font registration,
-    /// the DEC-009 `ConfigArrived` publish). Not a panel channel and not
+    /// the one-shot tasks the `boot` closure returns (font registration).
+    /// Not a panel channel and not
     /// user intent: the producer is the boot task chain itself.
     Boot(BootMessage),
 }
@@ -166,10 +166,10 @@ pub enum Message {
 /// Boot-infrastructure channel ([TASK-022]).
 ///
 /// The `boot` closure returns a batched [`iced::Task`] whose members must
-/// report back through the top-level `Message` type. These two variants are
-/// those reports. They are deliberately **not** folded into [`WindowMessage`]
-/// (font loading and the config handoff are not window concerns) nor into
-/// [`InboundMessage`] (they are produced by the boot task chain, not by a
+/// report back through the top-level `Message` type. The font-registration
+/// report is one such report. It is deliberately **not** folded into
+/// [`WindowMessage`] (font loading is not a window concern) nor into
+/// [`InboundMessage`] (it is produced by the boot task chain, not by a
 /// background bus).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootMessage {
@@ -179,12 +179,6 @@ pub enum BootMessage {
     /// the home the pilot's `FontLoadFinished` was promised in the
     /// module-header fold table.
     FontLoadFinished(Option<String>),
-    /// The DEC-009 startup `ConfigArrived` publish returned. The publish
-    /// runs in a `Task::perform` so background workers observe the arrival
-    /// event *after* every subscriber was constructed in `boot`; this
-    /// variant is its terminal report (the UI itself was direct-injected
-    /// and does not depend on it).
-    ConfigPublished,
 }
 
 /// Wraps a [`UserCommand`] as the [`Message::Command`] channel value, so a

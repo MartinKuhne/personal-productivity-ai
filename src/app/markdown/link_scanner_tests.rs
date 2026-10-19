@@ -167,8 +167,10 @@ fn test_mixed_wikilinks_and_bare_urls() {
 
 #[test]
 fn test_code_style_bypasses_link_parsing() {
-    let mut style = TextStyle::default();
-    style.code = true;
+    let style = TextStyle {
+        code: true,
+        ..Default::default()
+    };
     let input = "https://example.com and [[My Note]]";
     let elems = scan_text_for_links(input, &style);
     assert_eq!(elems.len(), 1);

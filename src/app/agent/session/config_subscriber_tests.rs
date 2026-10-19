@@ -8,13 +8,21 @@ fn test_config_subscriber_falls_back_to_default_on_timeout() {
     // ConfigArrived event, fall back to the default configuration, and still
     // perform MCP startup initialization. Reaching the startup-complete log
     // is only possible via the timeout branch (nothing was ever published).
+    //
+    // The window is injected at 100 ms rather than left at the production
+    // [`CONFIG_ARRIVAL_TIMEOUT`] (10 s) so this step stays a fast test.
     let bus = crate::bus::config::config_bus();
     let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
 
     let tm = Arc::new(arc_swap::ArcSwap::from_pointee(
         crate::agent::AgentToolContext::new(ToolRegistry::new()),
     ));
-    spawn_config_subscription(tm, bus.clone(), BackgroundEventSender::new(tx));
+    spawn_config_subscription_with_timeout(
+        tm,
+        bus.clone(),
+        BackgroundEventSender::new(tx),
+        std::time::Duration::from_millis(100),
+    );
 
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < 5 {

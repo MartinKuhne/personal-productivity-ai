@@ -1172,7 +1172,7 @@ fn handle_bus_lag(state: &mut AppState, source: BusSource, count: u64) {
     }
 }
 
-/// Boot-infrastructure report reductions ([TASK-007], DEC-009).
+/// Boot-infrastructure report reductions ([TASK-007]).
 fn reduce_boot(message: BootMessage) -> Task<Message> {
     match message {
         BootMessage::FontLoadFinished(Some(error)) => {
@@ -1182,15 +1182,6 @@ fn reduce_boot(message: BootMessage) -> Task<Message> {
             Task::none()
         }
         BootMessage::FontLoadFinished(None) => Task::none(),
-        BootMessage::ConfigPublished => {
-            // The DEC-009 publish settled; the UI was direct-injected at
-            // boot so there is nothing to apply here.
-            tracing::debug!(
-                name = "ui_iced.boot.config_publish_settled",
-                "DEC-009 startup config publish settled"
-            );
-            Task::none()
-        }
     }
 }
 

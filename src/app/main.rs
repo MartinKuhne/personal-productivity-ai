@@ -19,7 +19,7 @@
 //! | Optional Discord bot (`discord` feature) | this file |
 //! | Config load + storage-handler injection ([RUST-024]) | this file |
 //! | CLI workspace-argument injection | [`fastmd::ui_iced::app::boot`] ([TASK-022]) |
-//! | DEC-009 `ConfigArrived` publish | [`fastmd::ui_iced::app::boot`] ([TASK-022]) |
+//! | DEC-009 `ConfigArrived` publish | [`fastmd::ui_iced::app::build_state`] — synchronous ([TASK-022]) |
 //! | Title / icon / persisted geometry, theme, scale chain, bus bridge | [`fastmd::ui_iced::app::launch`] |
 //!
 //! The retired `main.rs:147-160` "build the app first, *then* publish"
@@ -140,10 +140,10 @@ fn main() -> iced::Result {
         });
     }
 
-    // CLI workspace injection (`main.rs:59-115`) and the DEC-009
-    // `ConfigArrived` publish are applied inside `boot`; this entry only
-    // hands over the loaded config plus the injected storage handlers
-    // ([RUST-024]) and the raw process arguments.
+    // CLI workspace injection (`main.rs:59-115`) is applied inside `boot`;
+    // the DEC-009 `ConfigArrived` publish happens synchronously inside
+    // `build_state`. This entry only hands over the loaded config plus the
+    // injected storage handlers ([RUST-024]) and the raw process arguments.
     let inputs = LaunchInputs {
         config,
         config_bus,

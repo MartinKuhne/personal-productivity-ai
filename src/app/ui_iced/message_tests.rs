@@ -390,7 +390,7 @@ fn test_tree_deferred_intent_variants_are_all_distinct() {
     // [TASK-012]: the three the legacy UI menu rows that read files or fan out
     // inside the click have no single `UserCommand`, so each needs its own
     // separable message.
-    let deferred = vec![
+    let deferred = [
         Message::Tree(TreeMessage::RunAsPromptRequested {
             path: sample_path(),
         }),
@@ -740,18 +740,17 @@ fn test_search_channel_results_ready_carries_query_and_snapshot() {
 #[test]
 fn test_boot_channel_variants_are_distinct_and_clone_preserving() {
     // [TASK-022]: the boot-infrastructure channel carries the font-load
-    // report and the DEC-009 publish confirmation; the two variants must
-    // stay separable and clone exactly.
+    // report (the DEC-009 config publish is synchronous inside
+    // `build_state`, so no boot task reports it); variants must stay
+    // separable and clone exactly.
     let font_failed = Message::Boot(BootMessage::FontLoadFinished(Some("boom".to_string())));
     let font_ok = Message::Boot(BootMessage::FontLoadFinished(None));
-    let published = Message::Boot(BootMessage::ConfigPublished);
 
     assert_eq!(font_failed.clone(), font_failed);
     assert_eq!(font_ok.clone(), font_ok);
-    assert_eq!(published.clone(), published);
     assert_ne!(font_failed, font_ok, "failure vs success must be separable");
-    assert_ne!(font_ok, published, "font report vs config publish report");
-    assert!(!matches!(published, Message::Command(_)));
+    assert!(matches!(font_ok, Message::Boot(_)));
+    assert!(!matches!(font_ok, Message::Command(_)));
 }
 
 #[test]

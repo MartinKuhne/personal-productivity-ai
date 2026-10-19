@@ -1387,8 +1387,10 @@ fn test_file_config_storage_saves_to_path() {
     let storage = FileConfigStorage::new(path.clone());
     assert_eq!(storage.path(), path.as_path());
 
-    let mut cfg = AppConfig::default();
-    cfg.table_width_strategy = "waterfill".to_string();
+    let cfg = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     let written = storage.save_config(&cfg).unwrap();
     assert_eq!(written, path);
     assert!(path.exists());
@@ -1411,12 +1413,16 @@ fn test_in_memory_config_storage_records_history() {
     assert!(storage.saved_configs().is_empty());
     assert!(storage.latest_config().is_none());
 
-    let mut cfg1 = AppConfig::default();
-    cfg1.table_width_strategy = "waterfill".to_string();
+    let cfg1 = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg1).unwrap();
 
-    let mut cfg2 = AppConfig::default();
-    cfg2.table_width_strategy = "lagrange".to_string();
+    let cfg2 = AppConfig {
+        table_width_strategy: "lagrange".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg2).unwrap();
 
     let history = storage.saved_configs();

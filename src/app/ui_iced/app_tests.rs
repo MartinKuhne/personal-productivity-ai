@@ -10,6 +10,7 @@
 //! and CLI dirs are `tempfile::TempDir` ([RUST-006]).
 
 use super::*;
+use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
@@ -52,6 +53,47 @@ fn fresh_state(persisted: PersistedUiState) -> AppState {
         Arc::new(InMemoryUiStateStorage::new()),
         persisted,
     )
+}
+
+#[test]
+fn test_build_state_publishes_config_arrived_synchronously() {
+    // Regression: `build_state` MUST publish the `ConfigArrived` event
+    // **synchronously**, before returning. The background worker thread
+    // (`BackgroundTask::new`) and the MCP config subscriber both wait for
+    // the event with only a `CONFIG_ARRIVAL_TIMEOUT` (100 ms) window
+    // (`src/app/background/task.rs`, `src/app/agent/session/
+    // config_subscriber.rs`). A publish routed through an iced `Task`
+    // (the former `publish_config_task`) is executed by the iced
+    // scheduler — potentially seconds later, behind the boot font
+    // registration — so both subscribers timed out, fell back to
+    // `AppConfig::default()` and the initial library scan discovered
+    // nothing ("files in the library are not being scanned").
+    //
+    // The reader is subscribed BEFORE `build_state` is called, so any
+    // publish that happens inside it arrives on it.
+    let bus = Bus::<ConfigArrived>::new();
+    let reader = bus.subscribe();
+
+    let _state = build_state(
+        marker_config(),
+        &bus,
+        Arc::new(InMemoryConfigStorage::new()),
+        Arc::new(InMemoryUiStateStorage::new()),
+        PersistedUiState::default(),
+    );
+
+    let event = reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT).expect(
+        "build_state must publish ConfigArrived synchronously so the \
+             background workers read the real configuration",
+    );
+    assert!(
+        event
+            .config
+            .content_libraries
+            .iter()
+            .any(|lib| lib.root_folder == "M:\\marker_lib"),
+        "the published event must carry the loaded configuration"
+    );
 }
 
 #[test]

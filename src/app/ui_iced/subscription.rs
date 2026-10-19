@@ -59,6 +59,7 @@
 //! | `Bus<AgentEvent>` | all 11 `AgentEvent` variants | `Message::Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
 //! | `std::sync::mpsc<BackgroundEvent>` | `Fs(..)` / `Process(..)` / `McpAuth(..)` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
 //! | any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
+//! | winit window events | `CloseRequested(id)` / `Resized(id, size)` | `Message::Window(WindowMessage::CloseRequested(id))` / `Message::Window(WindowMessage::Resized { id, size })` — the `close_requests()` / `resize_events()` lanes; with `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction |
 //!
 //! The bus payload enums do not implement `PartialEq` (see
 //! [`InboundMessage`]'s docs), which is why the mapping lands in one
@@ -90,7 +91,7 @@ use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 
 use crate::bus::core::Bus;
 use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived, FileEvent};
-use crate::ui_iced::message::{BusSource, InboundMessage, Message};
+use crate::ui_iced::message::{BusSource, InboundMessage, Message, WindowMessage};
 
 /// A bus event handed to the pure mapper [`bus_event_to_message`].
 ///
@@ -316,7 +317,47 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
         iced::Subscription::run_with(receivers.file.clone(), file_stream),
         iced::Subscription::run_with(receivers.agent.clone(), agent_stream),
         iced::Subscription::run_with(receivers.background.clone(), background_stream),
+        // The winit window lane — the subscriptions the window reducers
+        // ([TASK-009], DEC-006) were written against. The launch chain sets
+        // `exit_on_close_request: false` ([APP] `ui_iced/app.rs`
+        // `window_settings`), so *nothing* exists that handles the title-bar
+        // close button unless these subscriptions deliver
+        // [`WindowMessage::CloseRequested`] to
+        // [`crate::ui_iced::update::reduce_window`]; they also keep
+        // `AppState::viewport` in step with real window resizes. Both map
+        // through `iced::Subscription::map` (`iced_futures-0.14.0/src/
+        // subscription.rs:224-231`).
+        window_events(),
     ])
+}
+
+/// The winit window-event lane ([TASK-021], DEC-006): close requests and
+/// resizes, delivered by `iced::window::close_requests` /
+/// `iced::window::resize_events`
+/// (`iced_runtime-0.14.0/src/window.rs:249-268`) — the producers the
+/// [`WindowMessage`](crate::ui_iced::message::WindowMessage) variant docs
+/// name. Both map onto `Message::Window` via `Subscription::map`
+/// (`iced_futures-0.14.0/src/subscription.rs:224-231`).
+fn window_events() -> iced::Subscription<Message> {
+    iced::Subscription::batch([
+        iced::window::close_requests().map(close_request_to_message),
+        iced::window::resize_events().map(resize_event_to_message),
+    ])
+}
+
+/// Pure mapping of one `iced::window::close_requests` item onto its
+/// [`Message::Window`] report. Testable without a live window: the id
+/// is only carried, never addressed, so a throwaway [`Id::unique()`]
+/// value drives the test.
+fn close_request_to_message(id: iced::window::Id) -> Message {
+    Message::Window(WindowMessage::CloseRequested(id))
+}
+
+/// Pure mapping of one `iced::window::resize_events` item onto its
+/// [`Message::Window`] report. Testable without a live window because
+/// `iced::Size` is a plain struct.
+fn resize_event_to_message((id, size): (iced::window::Id, iced::Size)) -> Message {
+    Message::Window(WindowMessage::Resized { id, size })
 }
 
 /// Reports a lag on `source`: a `tracing::warn!` carrying the dropped

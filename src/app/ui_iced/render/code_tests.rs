@@ -96,8 +96,8 @@ fn test_code_surface_and_border_are_palette_tokens() {
     let palette = Palette::fastmd_dark();
     let _surface = palette.code_surface;
     let _border = palette.border;
-    assert!(CODE_BORDER_WIDTH > 0.0);
-    assert!(CODE_BORDER_RADIUS >= 0.0);
+    const { assert!(CODE_BORDER_WIDTH > 0.0) };
+    const { assert!(CODE_BORDER_RADIUS >= 0.0) };
 }
 
 #[test]

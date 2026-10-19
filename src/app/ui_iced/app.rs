@@ -19,8 +19,8 @@
 //!   background-event channel to the [TASK-019] subscription bridge.
 //! * [`boot`] / [`boot_with_persisted`] — the iced `BootFn` body: build the
 //!   state, then return the batched boot task chain (font registration,
-//!   the DEC-008 scale-baseline capture, and the DEC-009
-//!   `Task::perform(ConfigArrived)` publish for the background workers).
+//!   the DEC-008 scale-baseline capture). The DEC-009 `ConfigArrived`
+//!   publish is synchronous inside [`build_state`].
 //! * [`launch`] — the full verified builder chain.
 //!
 //! # Why a parallel constructor rather than a shared `init.rs` core
@@ -507,8 +507,10 @@ pub struct LaunchInputs {
 /// (`BackgroundTask::new`), the MCP config-subscriber thread
 /// (`spawn_config_subscription`) and the `std::sync::mpsc` → async
 /// forwarding thread (inside [`BusReceivers`]) — the same threads the legacy UI
-/// `new` path spawns. None of them touch the filesystem until a config
-/// arrives on the bus.
+/// `new` path spawns. The DEC-009 startup `ConfigArrived` is published
+/// synchronously right before returning, after every subscriber above is
+/// registered, so the `CONFIG_ARRIVAL_TIMEOUT` waits never miss it. Until
+/// then, none of them touch the filesystem.
 pub fn build_state(
     config: AppConfig,
     config_bus: &Bus<ConfigArrived>,
@@ -629,6 +631,25 @@ pub fn build_state(
     // (no blocking) — [FMD-065] single inbound path.
     let (_inert_tx, inert_rx) = std::sync::mpsc::channel();
     let receivers = BusReceivers::new(config_bus, &event_bus, &agent_event_bus, background_task.rx);
+
+    // DEC-009 startup `ConfigArrived` publish, performed **synchronously:
+    // the subscribers it must reach — the background worker thread
+    // (`BackgroundTask::new`), the MCP config subscriber
+    // (`spawn_config_subscription`) and the [TASK-019] bridge's config
+    // lane (this publish is the third and last subscriber) — are all
+    // registered above, so ordering is guaranteed without a task
+    // round-trip. Publishing through an iced `Task` (the former
+    // `publish_config_task`) deferred the send to the iced scheduler,
+    // which can land seconds after `boot` (behind the font-registration
+    // boot task); both waiting subscribers then hit their
+    // `CONFIG_ARRIVAL_TIMEOUT`, fell back to `AppConfig::default()` and
+    // the initial library scan discovered nothing.
+    let subscribers = config_bus.publish(ConfigArrived::new(config.clone()));
+    tracing::info!(
+        name = "ui_iced.boot.config_published",
+        subscribers,
+        "DEC-009: startup ConfigArrived published for background workers"
+    );
 
     let app = FastMdApp::from_parts(
         crate::orchestrator::AppOrchestrator {
@@ -793,15 +814,12 @@ pub fn ui_state_storage_from_env(env_override: Option<String>) -> Arc<dyn UiStat
 /// * the DEC-008 scale-baseline capture — `iced::window::latest()`
 ///   (`Task<Option<Id>>`) chained into `iced::window::scale_factor(id)`
 ///   (`Task<f32>`) via `Task::then`, mapped onto
-///   [`WindowMessage::ScaleBaseline`];
-/// * the DEC-009 `Task::perform` that publishes `ConfigArrived` on the
-///   existing bus for the background workers, mapped onto
-///   [`BootMessage::ConfigPublished`].
+///   [`WindowMessage::ScaleBaseline`].
 ///
-/// The publish runs in a task (not inline) so every subscriber — the
-/// background `Task` thread, the MCP subscriber and the eager
-/// [`BusReceivers`] — is constructed *before* the event is sent, which is
-/// the ordering guarantee the retired `main.rs:147-160` workaround enforced.
+/// The DEC-009 `ConfigArrived` publish for the background workers happens
+/// synchronously inside [`build_state`] and is therefore not part of the
+/// task chain (see its doc comment for why a `Task::perform` publish was
+/// retired).
 pub fn boot(inputs: LaunchInputs) -> (AppState, Task<Message>) {
     let persisted = persisted::load_ui_state(inputs.ui_state_storage.as_ref());
     boot_with_persisted(inputs, persisted)
@@ -829,9 +847,14 @@ pub fn boot_with_persisted(
     let font_task = fonts::font_boot_task()
         .map(|outcome| Message::Boot(BootMessage::FontLoadFinished(outcome)));
     let scale_task = scale_baseline_task();
-    let publish_task = publish_config_task(inputs.config_bus, config);
 
-    (state, Task::batch([font_task, scale_task, publish_task]))
+    // The DEC-009 `ConfigArrived` publish is performed synchronously inside
+    // [`build_state`] (right after its last subscriber registers), not as a
+    // `Task::perform` here: a boot task is executed by the iced scheduler
+    // and can land seconds after `boot` returns, which made every
+    // `CONFIG_ARRIVAL_TIMEOUT` subscriber miss the arrival and scan
+    // nothing.
+    (state, Task::batch([font_task, scale_task]))
 }
 
 /// DEC-008 baseline capture: `window::latest()` → `window::scale_factor(id)`
@@ -842,25 +865,6 @@ fn scale_baseline_task() -> Task<Message> {
             .map(|scale| Message::Window(WindowMessage::ScaleBaseline(scale))),
         None => Task::none(),
     })
-}
-
-/// DEC-009 config-arrival publish: the loaded config is sent on the existing
-/// `Bus<ConfigArrived>` from a `Task::perform`
-/// (`iced_runtime-0.14.0/src/task.rs:48-57`) so background workers observe
-/// the arrival event after construction. The UI itself was direct-injected
-/// in [`build_state`] and does not depend on this delivery.
-fn publish_config_task(bus: Bus<ConfigArrived>, config: AppConfig) -> Task<Message> {
-    Task::perform(
-        async move { bus.publish(ConfigArrived::new(config)) },
-        |subscribers| {
-            tracing::info!(
-                name = "ui_iced.boot.config_published",
-                subscribers,
-                "DEC-009: startup ConfigArrived published for background workers"
-            );
-            Message::Boot(BootMessage::ConfigPublished)
-        },
-    )
 }
 
 /// Builds the `window::Settings` for the launched window ([TASK-009] (b),

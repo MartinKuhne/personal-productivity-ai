@@ -23,7 +23,25 @@ pub fn config_bus() -> Bus<ConfigArrived> {
 /// the UI thread. If the event is not observed within this window the
 /// subscriber falls back to [`crate::config::AppConfig::default`] and
 /// emits a `config.arrived.timeout` tracing event.
-pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_millis(100);
+///
+/// The 100 ms value that previously stood here was the direct cause of
+/// the unscanned-workspace defect: when the DEC-009
+/// `ConfigArrived` publish still rode an iced boot `Task::perform`, it
+/// only reached the bus after the runtime's font/first-frame warm-up
+/// — observably > 1 s wall-clock — by which time both waiting
+/// subscribers had fallen back to `AppConfig::default()` and the
+/// indexer scanned it: no content libraries, "Scanned 0 files". The
+/// publish itself is now synchronous inside
+/// [`crate::ui_iced::app::build_state`] (after every subscriber
+/// registers), but the window is kept generous as defense-in-depth:
+/// any future asynchronous publisher must not silently degrade the
+/// initial scan. The fallback also keeps scanning legal after a
+/// genuine mis-ordering instead of wedging the workers forever.
+///
+/// The timeout is only ever waited on by worker/init *threads* and the
+/// agent config-subscriber thread — never on the UI thread — so the
+/// generous window cannot block user input ([FMD-061], `src/app/AGENTS.md`).
+pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(test)]
 mod tests {
@@ -95,6 +113,21 @@ mod tests {
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert!(event.config.inline_editor_enabled);
         assert_eq!(event.config.csv_db_path, cfg.csv_db_path);
+    }
+
+    /// Regression guard: the arrival window must comfortably exceed the
+    /// DEC-009 boot publish's scheduler delay (font load, first frame,
+    /// wgpu warm-up all run before the `Task::perform` that publishes
+    /// `ConfigArrived`). At 100 ms every launch timed out and the
+    /// indexer scanned `AppConfig::default()` — the workspace was
+    /// never scanned ("Scanned 0 files").
+    #[test]
+    fn test_arrival_timeout_exceeds_boot_publish_delay() {
+        assert!(
+            CONFIG_ARRIVAL_TIMEOUT >= Duration::from_secs(10),
+            "CONFIG_ARRIVAL_TIMEOUT must exceed the iced boot publish delay \
+             (observed > 1 s); the 100 ms value left the library unscanned"
+        );
     }
 
     #[test]

@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use super::{
     BackgroundReceiver, BusReceivers, InboundBusEvent, SharedReceiver, agent_stream,
-    background_stream, bus_event_to_message, config_stream, file_stream, subscription,
+    background_stream, bus_event_to_message, close_request_to_message, config_stream, file_stream,
+    resize_event_to_message, subscription,
 };
 use crate::agent::events::{
     AgentDebugEntry, AgentStatus, DebugEntryKind, DebugEntryRow, TokenUsageInfo, ToolSideEffect,
@@ -628,4 +629,36 @@ fn test_bus_receivers_clone_keeps_every_identity_stable() {
     assert_eq!(hash_of(&receivers.file), hash_of(&clone.file));
     assert_eq!(hash_of(&receivers.agent), hash_of(&clone.agent));
     assert_eq!(hash_of(&receivers.background), hash_of(&clone.background));
+}
+
+// --- winit window lane ([TASK-021], DEC-006) --------------------------------
+
+/// Regression: the launch chain sets `exit_on_close_request: false`,
+/// so nothing else in the runtime handles the title-bar close button.
+/// The `window::close_requests` lane must map onto exactly the
+/// `Message::Window(WindowMessage::CloseRequested(id))` report the
+/// DEC-006 `reduce_window` save-and-close arm matches on — the former
+/// build had the reducer but no subscription feeding it, so clicking
+/// the close button did nothing.
+#[test]
+fn test_close_request_maps_to_the_window_message() {
+    let id = iced::window::Id::unique();
+    assert_eq!(
+        close_request_to_message(id),
+        Message::Window(super::WindowMessage::CloseRequested(id)),
+        "the subscription must carry the WindowMessage variant the reducer matches"
+    );
+}
+
+/// Regression: `AppState::viewport` only follows real window resizes
+/// through the `window::resize_events` lane, which the reducer arm was
+/// written against but nothing delivered before.
+#[test]
+fn test_resize_event_maps_to_the_window_message() {
+    let id = iced::window::Id::unique();
+    let size = iced::Size::new(800.0, 600.0);
+    assert_eq!(
+        resize_event_to_message((id, size)),
+        Message::Window(super::WindowMessage::Resized { id, size })
+    );
 }
