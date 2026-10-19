@@ -7,11 +7,48 @@
 
 | Primitive | File | Capacity | Semantics |
 |---|---|---|---|
-| `Bus<T: Clone+Send+'static>` / `BusReader<T>` | `src/app/bus/core.rs:52` | `tokio::broadcast` 8192 | MPMC, `publish` -> all `subscribe` readers, `try_recv`/`try_recv_exposing_lag` non-blocking poll on UI thread, `Lagged(n)` on overflow |
-| `BackgroundEventSender` (`mpsc::Sender<BackgroundEvent>` + repaint callback) | `src/app/bus/events/typed.rs:28` | unbounded | MPSC UI drain `rx.try_recv` each frame, `callback()` wakes egui |
+| `Bus<T: Clone+Send+'static>` / `BusReader<T>` | `src/app/bus/core.rs:52` | `tokio::broadcast` 8192 | MPMC, `publish` -> all `subscribe` readers, `try_recv`/`try_recv_exposing_lag` non-blocking poll, `Lagged(n)` on overflow |
+| `BackgroundEventSender` (`mpsc::Sender<BackgroundEvent>` + optional wake callback) | `src/app/bus/events/typed.rs:28` | unbounded | MPSC; the iced layer consumes it through the `ui_iced::subscription` bridge (a forwarding thread turns `recv` into a `Stream`), so the callback slot stays framework-free and unused in the iced build |
 | `Sender<AgentPrompt>` / `Receiver<AgentPrompt>` | `src/agent/session.rs:66` | unbounded | MPSC UI->driver, driver `recv()` blocks |
 
-All `Bus<T>` drains are fire-and-forget; no caller `await`s a reply. Completion is observed via a follow-on event (e.g. `AgentEvent::SessionFinished`, `FsEvent::Finished`). Only `BatchHandle::join` `src/app/ui/app/update.rs:156` and `AgentSession::drop` `src/agent/session.rs:483` `handle.join()` block.
+All `Bus<T>` drains are fire-and-forget; no caller `await`s a reply. Completion is observed via a follow-on event (e.g. `AgentEvent::SessionFinished`, `FsEvent::Finished`). Only `BatchHandle::join` `src/app/agent/batch/coordinator.rs` and `AgentSession::drop` `src/agent/session.rs:483` `handle.join()` block.
+
+---
+
+## The iced inbound bridge (`ui_iced/subscription.rs`)
+
+Every background→UI notification reaches the interface through one place: an
+`iced::Subscription<Message>` built from the live `BusReceivers` handle and
+handed to `iced::application(...).subscription(...)` at launch. The
+producers are unchanged — this is the single point where the iced layer
+touches a receiver ([FMD-065]).
+
+| Producer | Event | `Message` |
+|---|---|---|
+| `Bus<ConfigArrived>` | `ConfigArrived { config }` | `Message::Inbound(InboundMessage::ConfigArrived(Arc<AppConfig>))` |
+| `Bus<FileEvent>` | all five `FileEventKind`s | `Message::Inbound(InboundMessage::FileChanged(event))` |
+| `Bus<AgentEvent>` | all 11 `AgentEvent` variants | `Message::Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
+| `std::sync::mpsc<BackgroundEvent>` | `Fs` / `Process` / `McpAuth` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
+| any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
+
+Shape notes:
+
+- `Subscription::run` takes a bare `fn() -> S` and cannot carry captured
+  state, so the bridge uses `Subscription::run_with(data, builder)`: the
+  receiver handle is the hashed `data` (hashed by its `Arc` address so clones
+  keep the identity stable) and the builder is a non-capturing `fn` returning
+  a boxed stream.
+- The four streams are merged with `Subscription::batch`.
+- `bus_event_to_message` is the pure half; the stream builders are the only
+  impure half.
+- A lag is not a disconnect: the stream logs the dropped count and keeps
+  running, and the reducer surfaces the loss so the UI can re-synchronise on
+  the next valid event ([FMD-067], [FMD-072]).
+
+Outbound user intent does **not** ride this path. It goes
+`panel -> Message::Command(UserCommand) -> reducer publishes -> 
+AppOrchestrator::drain_user_command_bus -> command_executor`, which keeps
+every intent self-contained and replayable ([FMD-068]).
 
 ---
 
@@ -86,7 +123,7 @@ Helper constructors: `discovered/updated/removed/dir_discovered/dir_removed` + `
 
 ## 3. `BackgroundEvent` — typed mpsc to UI
 
-Wrapper `src/app/bus/events/typed.rs:119` drained `drain_background_channel` `src/app/orchestrator.rs:333` each frame (`rx.try_recv` loop -> `handle_fs_event`/`handle_process_event`/`handle_mcp_auth_event`). Repaint callback `src/app/bus/events/typed.rs:50` wakes egui.
+Wrapper `src/app/bus/events/typed.rs:119`. In the iced build the channel is not polled per frame: `ui_iced::subscription` bridges it onto an `iced::Subscription<Message>` (a dedicated forwarding thread because iced's futures executor is the thread-pool, not tokio), each event arrives as `Message::Inbound(InboundMessage::Background(..))`, and `reduce_inbound` (`src/app/ui_iced/update.rs`) dispatches to `handle_fs_event`/`handle_process_event`/`handle_mcp_auth_event`. The optional wake callback on `BackgroundEventSender` (`src/app/bus/events/typed.rs:50`) is a framework-free hook the iced path does not install — the subscription stream is what wakes the loop.
 
 | Variant | Inner enum | Args | Return | Await? | Produced by | Processed where |
 |---|---|---|---|---|---|---|
@@ -166,7 +203,7 @@ Cancel: UI `agent.cancel` `src/agent/session.rs:227` sets `AtomicBool`; driver `
 | Message | File | Args | Return | Await? | Where processed |
 |---|---|---|---|---|---|
 | `ToolCallRecord` | `src/agent/tool_executor.rs:22` | `call_id`, `name`, `arguments: String`, `result: String` | `(Vec<ToolCallRecord>, Vec<ToolSideEffect>)` from `execute_all` `src/agent/tool_executor.rs:142` | Yes - `run_agent` `process_turn` `src/agent/agent_impl.rs:212` `let (results, side_effects)=executor.execute_all(tc);` blocks driver until tools finish; `execute_parallel` `src/agent/tool_executor.rs:217` `rt.block_on(JoinSet+spawn_blocking)`; `execute_sequential` `src/agent/tool_executor.rs:276` inline | `record_tool_errors` -> `tool_context.rcu`, `extract_side_effects` for `create_note` |
-| `BatchConfig` / `BatchJob` | `src/app/agent/batch/types.rs` | `mode`, `concurrency`, `prompt`, `target_path` | `BatchResult { total, completed, failed, cancelled, duration }` | Yes - `BatchCoordinator::execute` `src/app/agent/batch/coordinator.rs:46` returns `BatchHandle { thread, cancel_flag }`; UI polls `handle_deferred_actions` `src/app/ui/app/update.rs:153` `is_finished`+`join` | `BatchJobExecutor::execute_concurrent` `src/app/agent/batch/executor.rs:39` (`rt.block_on` + `Semaphore` + `run_agent_blocking` `src/app/agent/batch/executor.rs:210`) |
+| `BatchConfig` / `BatchJob` | `src/app/agent/batch/types.rs` | `mode`, `concurrency`, `prompt`, `target_path` | `BatchResult { total, completed, failed, cancelled, duration }` | Yes - `BatchCoordinator::execute` `src/app/agent/batch/coordinator.rs:46` returns `BatchHandle { thread, cancel_flag }`; the iced batch dialog reads the handle status (`Dialogs::batch_handle` + `thread.is_finished()`) into its view-model and the reducer joins the finished handle | `BatchJobExecutor::execute_concurrent` `src/app/agent/batch/executor.rs:39` (`rt.block_on` + `Semaphore` + `run_agent_blocking` `src/app/agent/batch/executor.rs:210`) |
 
 ---
 
@@ -174,10 +211,10 @@ Cancel: UI `agent.cancel` `src/agent/session.rs:227` sets `AtomicBool`; driver `
 
 | Channel | `await`/`join` required? | Why |
 |---|---|---|
-| `Bus<FileEvent>`, `Bus<UserCommand>`, `Bus<AgentEvent>`, `Bus<ConfigArrived>` | No | `try_recv` poll each frame, `Lagged` drops silently, no reply |
-| `BackgroundEvent` mpsc | No | `try_recv` poll, fire-and-forget |
+| `Bus<FileEvent>`, `Bus<UserCommand>`, `Bus<AgentEvent>`, `Bus<ConfigArrived>` | No | Delivered to the UI as `Message::Inbound` off the iced `Subscription`; `Lagged` is reported, never awaited; no reply |
+| `BackgroundEvent` mpsc | No | Forwarded onto the same `Subscription` stream, fire-and-forget |
 | `AgentPrompt` mpsc | No (sender) / blocking `recv` on driver | UI `send` returns immediately; driver blocks |
-| `BatchHandle` | Yes - UI polls `is_finished` then `join` | `handle_deferred_actions` must `join` to reclaim thread |
+| `BatchHandle` | Yes - status read, then `join` | The reducer joins the finished handle to reclaim the worker thread |
 | `AgentSession` driver `JoinHandle` | Yes - on `drop` `src/agent/session.rs:490` | `drop` replaces `prompt_tx` then `handle.join` to avoid use-after-free |
 | `ToolExecutor::execute_all` | Yes - caller blocks driver | LLM turn loop cannot continue until tool results are back |
 

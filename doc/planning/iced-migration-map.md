@@ -4740,3 +4740,151 @@ because a baseline requires a human confirmation pass (see the TASK-025 log).
 - **Tier 2 is deliberately narrow.** `pick_list` menus remain unreachable under `iced_test` 0.14
   (the TASK-025 root-cause note still applies), so hamburger row selection is covered by driving
   the same `HamburgerItem` rows as real buttons rather than the widget itself.
+
+---
+
+## TASK-030 documentation log (docs-only - 2026-10-18)
+
+Documentation-only pass. No Rust code was touched; `cargo check -q` stays clean.
+No branch created, nothing committed - left for the orchestrator.
+
+### 1. Zero-egui sweep result (the TASK-031 invariant)
+
+Command (case-insensitive, run from the repo root):
+
+```powershell
+Select-String -Pattern '\begui\b|\beframe\b|\bkittest\b' -CaseSensitive:$false
+```
+
+| Swept scope | Matches |
+| --- | --- |
+| `src/` (every file, not just `.rs`) | **0** |
+| `Cargo.toml` | **0** |
+| `doc/technical-context/` (every file, incl. `ARCHITECTURE_C4.md`) | **0** |
+| **Total across all swept paths** | **0** |
+
+Baseline at the start of this task was **20** matches across four files
+(`ARCHITECTURE_C4.md` 9, `src/app/AGENTS.md` 5,
+`src/app/markdown/ARCHITECTURE.md` 4, `Messaging.md` 2).
+
+Two files the TASK-029b report did **not** list were also inside the swept
+`src/` scope and are now clean: `src/app/markdown/ARCHITECTURE.md` (4) and
+`src/app/AGENTS.md` (5). Flagging so the earlier report's file list is not
+read as exhaustive.
+
+### 2. What was rewritten
+
+**`doc/technical-context/ARCHITECTURE_C4.md`** - C4 model structure kept
+(Context / Container / Component / Test Surface); only the UI layer was
+re-pointed:
+
+- Level-1 context: the system box now reads "Rust + iced native Windows app".
+- Level-2 container: a real `C4Container` diagram was added (the section
+  previously had one sentence and no diagram) plus the runtime-stack table -
+  `winit` 0.30 (windowing), `wgpu` 27 + `tiny-skia` 0.11 (renderers),
+  `cosmic-text` 0.15 (shaping), `iced` 0.14 / `iced_widget` 0.14.2
+  (Elm runtime + widgets), versions read from `Cargo.lock`. Notes that the
+  app's own async work runs on `tokio` while iced's futures executor is the
+  `thread-pool`, meeting only at the subscription bridge.
+- UI Layer component diagram: replaced with the `ui_iced` subsystem tree -
+  `app` / `update` / `view` / `subscription` / `message` /
+  `layout` / `panels` / `render` / `overlay` / `editor` / `agent`
+  / the floating-window modules / `table_width` / `theme` / `fonts` /
+  `os_shell` / `logo` / `test_helpers` - with the Elm wiring and the
+  three-band `pane_grid` + overlay-host description.
+- Messaging section: the "UI Frame Drain" item was replaced by the
+  bus -> `Subscription` bridge and `reduce_inbound`; the "Non-Blocking UI
+  Integration" principle now describes the subscription path rather than a
+  polled immediate-mode loop.
+- Test Surface: replaced with the four iced test tiers.
+- Also fixed a dangling link (`../../src/desktop/src/agent/lib/mcp/manager.rs`
+  -> `../../src/agent/lib/mcp/mod.rs`, `McpClientManager` -> `McpClients`)
+  because the quality gate forbids dangling links.
+
+**`doc/technical-context/Messaging.md`** - the two repaint-callback
+references now describe the iced model: the `BackgroundEventSender` wake
+callback is a framework-free hook the iced build does not install, the channel
+is bridged onto `iced::Subscription<Message>` by a forwarding thread, and
+`reduce_inbound` dispatches. Added a new section, "The iced inbound bridge",
+with the full bus -> `Message` mapping table, the `run_with` / boxed-stream
+/ `Subscription::batch` shape notes and the `Lagged(n)` handling. Also
+updated the `await`/`join` summary and a stale
+`src/app/ui/app/update.rs` citation.
+
+**`doc/technical-context/AGENTS.md`** - stale `src/desktop/` path
+references corrected to `src/app/`; the "Folder Layout" quality-gate line
+(now describing a block that does not exist) replaced with a check against the
+live `src/app/ui_iced/` tree.
+
+**`src/app/markdown/ARCHITECTURE.md`** - the table pipeline's measurement
+and painter stages now describe the iced adapter
+(`src/app/ui_iced/table_width.rs`, injected width closure, pinned
+`Length::Fixed` columns, scrollable fallback) instead of the removed
+immediate-mode painter.
+
+### 3. Distill replacement
+
+- **Added `doc/distill/iced.md`** - the new UI reference, derived from
+  `doc/iced.md` plus the iced 0.14 crate sources and the conventions
+  actually enforced in `ui_iced`. Sections: the Elm model and the runtime
+  stack; FastMD's shape (launch chain, `AppState`, three-band layout,
+  `Message` channels); the widget table (`pane_grid`, `text_editor`,
+  `table`, `scrollable`, `overlay::menu`, `mouse_area`, `markdown`,
+  `pick_list`, `stack`, ...) with the DEC-005 hand-rolled context-menu /
+  modal rationale; theme + palette + font + scale mapping; the four test tiers
+  with the `iced_test` selector caveats; a 10-point conventions checklist;
+  a "gotchas that cost time" table; and a where-to-look index.
+- **Deleted `doc/distill/egui.md`** (119 refs) and
+  **`doc/distill/egui-kittest.md`** (44 refs).
+- **`doc/distill/perf.md`** - the one `eframe` reference in the binary-size
+  table was re-labelled to the iced stack and annotated that the figures
+  predate the swap and need a re-audit.
+
+### 4. `src/app/AGENTS.md` rule changes
+
+| Rule | Before | After |
+| --- | --- | --- |
+| MUST-consult | `doc/distill/egui.md` (UI), `doc/distill/egui-kittest.md` (snapshot tests) | single rule pointing at `doc/distill/iced.md`; link depth corrected to `../../doc/...` |
+| Where UI lives | implied `ui/` | explicit: live UI in `ui_iced/`; `ui/` is the framework-free domain |
+| `update` purity | "side-effect free where possible" | mutate + return `iced::Task`; no bus/filesystem in `view`; `rebuild_view_models()` MUST run at the end of every `update` entry point |
+| Colour tokens | `Color32::from_*`, `ui.palette()` via `PaletteExt` | `iced::Color::from_*`, `Palette::fastmd_dark().<token>`; role mapping in `ui_iced/theme.rs` adds no literals; exception moved to `ui_iced/logo.rs` |
+| Id stability | `egui::Id`, `ui.push_id((key, "label"), ...)` | `iced::widget::Id` from a `pub const &'static str` + `.id(...)`, `operation::snap_to_end(id)`; `Id::unique()` must never be called from `view`; pane/split ids are discovered from the built `pane_grid::State` |
+| Conditional rendering | "always allocate the widget tree shape", `add_visible` / `set_invisible` / never-wrap-a-panel | obsolete premise replaced: branch on the view-model, `on_press_maybe` for unavailable actions, keep stateful-widget **ids** stable across branches, mount floating surfaces only via the overlay host's `OverlayLayer` order, gate panes with the pure rule functions |
+| String rules | unchanged in substance | link paths corrected to `ui/strings.rs` |
+
+### 5. SPEC.md - reported, NOT edited ([RUST-043])
+
+No SPEC file was modified. Drift for the user's explicit decision:
+
+| # | Location | Text | Drift |
+| --- | --- | --- | --- |
+| 1 | `SPEC.md:11` | "...the Rust programming language and the GPU-accelerated `egui` framework..." | Names a framework the product no longer uses. Suggest: "...and the GPU-accelerated `iced` framework..." (or drop the framework name entirely and keep the outcome: instant startup, minimal footprint, fluid rendering). |
+| 2 | `SPEC.md:37` | "- Egui Documentation: [github.com/ocornut/egui](https://github.com/ocornut/egui)" | Stale reference. Also note the URL was wrong even for the old stack - `ocornut` is the Dear ImGui author; egui lives at `github.com/emilk/egui`. Suggest replacing with `https://iced.rs` / `https://docs.iced.rs`. |
+| 3 | `SPEC.md:21` (requirements-subsection map) | "User Interface Layout & Styling -> `src/app/ui/SPEC.md`" | The link target still exists and is valid, but the **implementation** it governs has moved to `src/app/ui_iced/`; `src/app/ui/` now holds only the framework-free domain (view-models, strings, palette, tab/selection/tree/persisted state). Either re-point the row at `src/app/ui_iced/` or add a note that the UI spec spans `ui/` (domain) + `ui_iced/` (rendering). |
+
+Match count in `SPEC.md`: **4** word matches on **2** lines (`egui` x1 at
+L11; `Egui` + `egui` x2 in the L37 URL). The task brief's "3 refs" is
+line-based; the AllMatches count is 4.
+
+Related, also unedited and already recorded elsewhere: `src/app/ui/SPEC.md`
+still defines `UI-046` (inverted editor scheme), descoped by DEC-002, and
+carries the `UI-051` duplicate-definition anomaly (tab auto-close vs.
+Tools-dialog trigger) documented in the TASK-027 matrix notes.
+
+### 6. Needs the orchestrator's eyes
+
+1. **SPEC.md decisions 1-3 above** - all three require an explicit instruction
+   before any edit ([RUST-043]).
+2. **`doc/adr/egui-phosphor-icons.md`** (6 refs) and
+   **`doc/adr/keep-local-markdown-renderer.md`** (6 refs) still name the old
+   framework. They are ADRs - historical decision records - and are **outside**
+   the TASK-031 sweep, so they were left alone deliberately. If the convention
+   is that superseded ADRs get a status header rather than a rewrite, that
+   header was not added here.
+3. **`doc/planning/egui-widgets.md`** (29 refs) and the remaining planning
+   docs are likewise outside the sweep and left as historical planning records.
+4. **`doc/distill/perf.md`** figures are stale (pre-swap). A re-run of the
+   binary-size audit would let the note be removed.
+5. The new `doc/distill/iced.md` encodes the `pick_list`-opacity and
+   `Esc`-not-wired findings from TASK-025 / GAP-01 as known limitations. If
+   GAP-01 is closed, that row should be updated.

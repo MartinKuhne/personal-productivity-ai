@@ -207,9 +207,15 @@ An empirical audit of the `fastmd` workspace demonstrated the practical impact o
 | :--- | :--- | :--- | :--- | :--- |
 | **PDF Export (`fastmd-pdf`)** | 298 | **168** | **+43.82 MB (57.6%)** | **24.0s** |
 | **AI Agent (`fastmd-agent`)** | 215 | **59** | ~6.5 MB | **4.1s** |
-| **GUI Layer (`eframe` / `wgpu`)** | 158 | **51** | ~18.2 MB | ~12.0s |
+| **GUI Layer (`iced` / `wgpu`)** | 158 | **51** | ~18.2 MB | ~12.0s |
 | **Base Core (`fastmd`)** | 351 | — | **32.23 MB** | ~21.4s |
 | **Full App (Default)** | 519 | — | **76.05 MB** | ~45.0s+ (clean) |
+
+> **Note:** the GUI-layer row above was measured against the pre-iced stack and
+> has not been re-measured since the swap to `iced 0.14`
+> (`winit` + `wgpu`/`tiny-skia` + `cosmic-text`). Treat the crate counts,
+> size and check-time figures in this table as historical until the audit is
+> re-run.
 
 ### Key Takeaways for FastMD
 1. **PDF Export Dominance**: The Typst engine (`fastmd-pdf`) accounts for **57.6% of release binary size** and **32.4% of all dependencies**.

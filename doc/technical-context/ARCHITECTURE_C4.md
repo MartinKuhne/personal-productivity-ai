@@ -9,7 +9,7 @@ C4Context
   Person(user, "User", "Views, edits and batch-processes Markdown libraries; drives an AI agent")
 
   System_Boundary(fb, "FastMD") {
-    System(fastmd, "FastMD Desktop", "Rust + egui native Windows app (crate 'fastmd')")
+    System(fastmd, "FastMD Desktop", "Rust + iced native Windows app (crate 'fastmd')")
   }
 
   System_Ext(llm, "OpenAI-compatible LLM", "OpenRouter / any compatible endpoint")
@@ -33,63 +33,137 @@ C4Context
 ```
 ## Container Diagram (Level 2)
 
-The `fastmd` crate produces a single desktop application
+The `fastmd` crate produces a single desktop application. The UI runs on the
+**iced 0.14** runtime stack, all of it inside the one native binary:
+
+| Layer | Crate (locked in `Cargo.lock`) | Role |
+| --- | --- | --- |
+| Windowing / OS event loop | `winit` 0.30 | Window creation, input events, DPI reports, close requests |
+| GPU renderer | `wgpu` 27 | Hardware-accelerated paint (the `wgpu` cargo feature) |
+| Software renderer | `tiny-skia` 0.11 | CPU paint path when no usable GPU backend is present |
+| Text shaping | `cosmic-text` 0.15 | Font resolution, glyph shaping, text layout, hit-testing |
+| Elm runtime + widgets | `iced` 0.14 / `iced_widget` 0.14.2 | `boot`/`update`/`view`/`subscription` loop, widget kit, theme/palette plumbing |
+
+The application's own async work (buses, background workers, the agent driver)
+runs on `tokio`; iced's futures executor is the default `thread-pool`, so the
+two never share a runtime — they meet only at the `ui_iced::subscription`
+bridge (see the Messaging diagram below).
+
+```mermaid
+C4Container
+  title FastMD — Containers
+
+  Container_Boundary(app_crate, "fastmd crate") {
+    Container(ui_iced, "ui_iced", "Iced UI subsystem: boot/update/view/subscription, panels, overlays, renderers")
+    Container(ui_free, "ui (framework-free)", "Domain view-models, string + palette tokens, tab/selection/tree/persisted state")
+    Container(orch, "AppOrchestrator", "Wires config, workspace, tabs, tags, dialogs, agent session, command executor")
+    Container(bus, "bus", "Bus<T> broadcast + typed mpsc channels + UserCommand intake")
+    Container(bg, "background", "Indexer, file watcher, PDF/image workers, log ring buffer")
+    Container(md, "markdown", "GFM parse -> RenderEvent/InlineElem model, Fair Table Width solver")
+    Container(ws, "workspace", "Content libraries, DirectoryTracker, FileEventProcessor, Tags")
+    Container(exp, "export", "Print + Typst PDF pipeline")
+  }
+
+  Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
+  Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
+
+  Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
+  Rel(ui_iced, bus, "publishes UserCommand; reads buses through the subscription bridge")
+  Rel(ui_iced, iced_rt, "builds Elements; the runtime paints and dispatches input")
+  Rel(ui_iced, orch, "reducer drives orchestrator state transitions")
+  Rel(orch, ws, "file/tag/directory state")
+  Rel(orch, agent_crate, "submits AgentPrompt, observes AgentEvent")
+  Rel(orch, md, "parses the open document")
+  Rel(orch, exp, "print / save-as-PDF jobs")
+  Rel(bg, bus, "publishes FileEvent / BackgroundEvent")
+  Rel(ws, bus, "consumes FileEvent, publishes discovery events")
+```
 
 ## Optional Vector Search
 
 When the `vector-search` feature is enabled, `app/background/vector_search.rs` owns a SahomeDB collection and `app/background/embeddings.rs` builds an OpenAI-compatible embedding client (via `async-openai`) from the user-configured `embeddings` model (AGENT-005). `Task` creates the shared service before starting the initial scan, subscribes it to `Bus<FileEvent>` before scan events are published, and injects the service into `AgentSession` through the existing `Extensions` container. Markdown chunks are hashed, embedded, and stored in the local collection; the read-only `vector_search` built-in tool performs searches through that service. The service does not replay file events emitted before its subscription and reports progress through `BackgroundEvent::Process(LogEntry(...))` every 100 processed Markdown files.
 
 
-`ui/` renders the desktop app. `FastMdApp` (`app.rs`, 1346 lines) is the root
-`eframe::App` and owns all cross-cutting state. A 5-pane layout is enforced by
-`PanelLayout` driving per-pane render functions in `ui/panels/*`. All colours
-flow from `ui/theme.rs`, the single source of truth for the dark palette
-(`Palette`) and the inverted inline-editor palette (`EditorColors`); call sites
-read tokens via `PaletteExt::palette`. Repeated egui idioms (context-menu items,
-selectable combos, modal windows, content frames, muted placeholders) live in
-`ui/widgets.rs`, which panels, modals, the tree and the renderers call instead
+### UI Layer (Level 3)
+
+`ui_iced/` renders the desktop app. The UI is one iced Elm loop — `boot`
+(builds the state, returns the batched boot `Task` chain), `update` (the
+reducer), `view` (pure widget construction) and `subscription` (the inbound
+bus bridge) — wired together by `ui_iced::app::launch`. The loop's state is
+`AppState` (`ui_iced/app.rs`), a **thin wrapper** around the framework-free
+`FastMdApp` domain object plus the iced-specific runtime bits: the pane-grid
+state, the live bus receivers, the injected UI-state storage, the OS scale
+baseline and the last known viewport size.
+
+The window is a **three-band** layout: the top toolbar band, the middle band,
+and the bottom command band. The middle band is an
+`iced::widget::pane_grid` split `left | (center | right)` — file tree,
+document/agent surface, and the gated table-of-contents pane. Pane-grid resize
+drags reduce 1:1 onto the pure `PanelLayout` widths, clamped by the UI-016
+min/max constants. Every floating surface (context menu, inline editor, small
+dialogs, log viewer, agent debug window, tools dialog, About, attributions,
+batch dialog) is mounted by a single **overlay host** above the bands in a
+fixed z-order, with a scrim layer that swallows input below the top card.
+
+The view holds no state. Each panel is a pure function over a
+view-model snapshot; all snapshots live in `AppState::models` and are rebuilt
+by `AppState::rebuild_view_models` at the end of every `update` call, because
+several iced widgets (notably `pick_list`) borrow their option vectors out of
+the snapshot and cannot own them inside `view`. All colours flow from
+`ui/theme.rs`, the single source of truth for the dark palette (`Palette`,
+whose token type is `iced::Color`) and the inverted inline-editor token set
+(`EditorColors`); `ui_iced/theme.rs` maps those semantic tokens onto the iced
+palette roles and hands the resulting `iced::Theme::custom` to the launch
+builder. Repeated iced idioms — the cursor-anchored, viewport-clamped context
+menu, the blocking modal card, the confirm/cancel button pair, the
+follow-the-stream scroll rule — live in `ui_iced/overlay.rs` and
+`ui_iced/logs.rs`, which the panels, modals, tree and renderers call instead
 of hand-rolling the widget tree.
 
 ```mermaid
 C4Component
-  title FastMD — UI Layer
+  title FastMD — UI Layer (ui_iced)
 
-  Component(app, "FastMdApp", "Root eframe::App; owns session, tasks, VFS, tags, dialogs, panels, tabs, selection, bus")
-  Component(panels, "PanelLayout + panels", "5-pane layout")
-  Component(render, "render", "build_toc, render_markdown (GFM), render_yaml_table")
-  Component(tree, "tree", "Flattened directory tree rendering")
-  Component(tabs, "TabManager", "Tabbed documents")
-  Component(sel, "SelectionManager", "Multi-select")
-  Component(dialog, "DialogManager", "Move/rename/create-dir")
-  Component(modals, "modals", "Modal rendering (private)")
-  Component(bglogs, "background_logs", "Background Processes tab")
-  Component(osshell, "os_shell", "OS integration: open in editor, show in explorer, print")
-  Component(theme, "theme", "Palette + Visuals construction; PaletteExt::palette (UI-002/UI-046)")
-  Component(widgets, "widgets", "Shared egui widget helpers: menus, selectable combos, modal windows, content frames, placeholders")
-  Component(tblw_pure, "table_width (pure core)", "Fair Table Width Algorithm: pure f32 column-width solver")
-  Component(tblw_adapter, "table_width (egui adapter)", "egui bridging: measure_cached, ftwa_cached, re-exports pure core")
+  Component(app, "app", "AppState (thin wrapper over FastMdApp) + ViewModels + OverlayState; boot/boot_with_persisted, window_settings, launch() builder chain")
+  Component(update, "update", "Top-level reducer: window close/save, pane resize, Message::Command publish-and-execute, Inbound bus reductions, finish_frame tail + view-model rebuild")
+  Component(view, "view", "Three-band layout with the real panels mounted, under the overlay host (z-ordered floating windows)")
+  Component(sub, "subscription", "bus -> Subscription<Message> bridge: ConfigArrived, FileEvent, AgentEvent, BackgroundEvent, Lagged(n); pure bus_event_to_message mapper")
+  Component(msg, "message", "Top-level Message enum: one variant per logical interaction channel (Window, Layout, Command, Tree, Tab, Editor, Agent, Search, Logs, Theme, Render, Dialog, About, Batch, Tools, AgentDebug, Inbound, Boot)")
+  Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
+  Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
+  Component(render, "render", "Markdown viewing path: RenderEvent -> RenderBlock descriptors -> iced widgets (heading, inline, code, table, yaml)")
+  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair")
+  Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")
+  Component(agentui, "agent", "Agent panel: streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, prompt row with send/queue/cancel + chat-model pick_list")
+  Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card")
+  Component(persist, "persisted", "PersistedUiState save/restore through the injected UI-state storage handler")
+  Component(tablew, "table_width (iced adapter)", "Available width -> FTWA solver inputs -> pinned iced column widths; heuristic text measurer")
+  Component(theme, "theme", "Palette token -> iced palette-role mapping; Theme::custom('FastMD Dark'); scrim colour (UI-002/GUD-003)")
+  Component(fonts, "fonts", "iced::font::load bootstrap for the embedded icon font + platform symbol fallback")
+  Component(osshell, "os_shell", "Framework-free platform wrappers: open-in-system-editor, reveal-in-file-explorer, open-URL")
+  Component(logo, "logo", "The single place the shared logo mark element is constructed")
+  Component(helpers, "test_helpers (cfg(test))", "Framework-free fixtures: test_app / test_app_state over in-memory storage")
 
-  Rel(app, panels, "delegates update()")
-  Rel(app, render, "renders markdown")
-  Rel(app, tree, "draws directory tree")
-  Rel(app, tabs, "tab lifecycle")
-  Rel(app, sel, "selection state")
-  Rel(app, dialog, "modal actions")
-  Rel(app, bglogs, "shows background logs")
-  Rel(app, osshell, "OS integration")
-  Rel(app, theme, "install_dark()")
-  Rel(render, theme, "palette tokens")
-  Rel(panels, theme, "palette tokens")
-  Rel(tree, theme, "palette tokens")
-  Rel(panels, widgets, "shared widget helpers")
-  Rel(render, widgets, "shared widget helpers")
-  Rel(tree, widgets, "shared widget helpers")
-  Rel(render, tblw_adapter, "measure_cached, ftwa_cached")
-  Rel(tblw_adapter, tblw_pure, "re-exports ftwa, Breakpoint, ColumnWidths, DeficitStrategy, CellTokens, compute_column_breakpoints")
+  Rel(app, update, "boot -> update")
+  Rel(app, view, "boot -> view")
+  Rel(app, sub, ".subscription(receivers)")
+  Rel(update, msg, "reduces every channel")
+  Rel(update, sub, "Inbound messages originate here")
+  Rel(view, panels, "mounts the bands")
+  Rel(view, overlay, "stacks the floating layers")
+  Rel(view, render, "renders the open document")
+  Rel(panels, msg, "emits Message::Command / panel channels")
+  Rel(panels, overlay, "context menus + modal cards")
+  Rel(panels, layout, "pane geometry")
+  Rel(render, tablew, "solved column widths")
+  Rel(theme, app, ".theme(fastmd_dark_theme)")
+  Rel(fonts, app, "font boot task in boot()")
+  Rel(update, osshell, "platform side effects")
+  Rel(panels, logo, "logo_mark")
 ```
 
-Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,
-`ToCEntry{title,level,id}`, `PersistedUiState{left_panel_width,collapsed_dirs}`.
+Supporting UI types (framework-free, in `ui/`): `TreeNode{name,path,is_dir,children:BTreeMap}`,
+`ToCEntry{title,level,id}`, `PersistedUiState{schema_version,left/right_panel_width,window_x/y/width/height,font_size_scale,expanded_dirs}`.
 
 ## Component Diagram (Level 3) — Agent Core
 
@@ -136,7 +210,7 @@ C4Component
 `tools/` defines the `Tool` trait and a `ToolManager` (formerly
 `ToolRegistry`) that owns the catalog of built-in and MCP-discovered
 tools, the per-group enable/parallel-safe/error state, and the
-[`McpClientManager`](../../src/desktop/src/agent/lib/mcp/manager.rs). `ToolContext<'a>` is the single
+[`McpClients`](../../src/agent/lib/mcp/mod.rs). `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
 `&Bus<FileEvent>`.
 
@@ -263,7 +337,7 @@ C4Component
 2. **MPMC Broadcast vs MPSC Channels**:
    - **Multi-Producer Multi-Consumer (`Bus<T>`)**: Used when multiple consumers must independently observe the same event (e.g., file changes observed by Indexer, DirectoryTracker, FileEventProcessor, and BusRouter).
    - **Multi-Producer Single-Consumer (`mpsc::channel`)**: Used when events target a single aggregator (e.g., UI frame loop draining `BackgroundEvent` or worker task queues).
-3. **Non-Blocking UI Integration**: `BusReader` provides non-blocking `try_recv()` and `recv_timeout()` methods wrapped in a `Mutex`, allowing the single-threaded `egui` UI loop to poll events without stalling rendering.
+3. **Non-Blocking UI Integration**: `BusReader` provides non-blocking `try_recv()` and `recv_timeout()` methods wrapped in a `Mutex`. In the iced build the UI never polls them directly: `ui_iced::subscription` turns every bus into an `iced::Subscription<Message>`, so background notifications arrive as messages on the Elm loop and the update/view path never blocks on I/O ([FMD-065]).
 
 ### Message Types & Payloads
 
@@ -288,10 +362,11 @@ C4Component
    - Inspects file extensions:
      - `.pdf` paths -> forwarded to `tx_pdf: Sender<PathBuf>` (`PdfConverterWorker`).
      - Image paths (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.avif`) -> forwarded to `tx_img: Sender<PathBuf>` (`ImageVisionWorker`).
-2. **UI Frame Drain (`ui/app/update.rs`)**:
-   - `drain_background_channel()`: Drains `BackgroundEvent` (Fs/Process/McpAuth) from the old mpsc path; dispatches to `FileEventProcessor`, `TagManager`, `BackgroundProcessManager`, tools dialog.
-   - `drain_agent_event_bus()`: Drains `BusReader<AgentEvent>` per frame; routes lifecycle events (`SessionStarted`/`SessionFinished`/`Status`/`Failed`/`TokenUsage`/`DebugEntry`) to `AgentSessionManager`; routes content events (`ContentDelta`/`Thinking`/`ToolCallStarted`/`ToolResult`) to `AgentTranscript` in `ui/agent/transcript.rs`; reissues `ToolSideEffect` as `FsEvent::FileModified`.
-   - UI widget state lives in `AgentPanelState` (`ui/agent/panel_state.rs`): `show_results`, `show_debug_window`, `debug_search_text`, `debug_auto_scroll`, `command_input`, `scroll_to_id`, `active_session_id`.
+2. **UI Inbound Bridge (`ui_iced/subscription.rs` + `ui_iced/update.rs`)**:
+   - The bus→`Subscription` bridge owns one stream per producer (`Bus<ConfigArrived>`, `Bus<FileEvent>`, `Bus<AgentEvent>` and the `std::sync::mpsc<BackgroundEvent>` channel, the last one behind a dedicated forwarding thread because iced's executor is the futures thread-pool, not tokio). Each stream maps its payload to `Message::Inbound(InboundMessage::…)` through the pure `bus_event_to_message` mapper, and the four streams are merged with `Subscription::batch`.
+   - A `Lagged(n)` error on any bus is not a disconnect: the stream logs the count and forwards `InboundMessage::EventsDropped { source, count }` so the reducer can surface the loss and re-synchronise on the next valid event ([FMD-067], [FMD-072]).
+   - `reduce_inbound` in `ui_iced/update.rs` then runs the same orchestrator routine the old per-frame drains ran, keyed by the bus the message names: `apply_file_event` + `process_file_events` for `FileChanged`, `drain_agent_event_bus` for `Agent`, `handle_fs_event` / `handle_process_event` / `handle_mcp_auth_event` for `Background`, and the config projection for `ConfigArrived`. The orchestrator's own readers for those buses are left inert in this build — the bridge is the single inbound path ([FMD-065]).
+   - UI widget state lives in `AgentPanelState` (`ui/agent/panel_state.rs`) plus the reducer-held `OverlayState` / `ViewModels` (`ui_iced/app.rs`): `show_results`, `show_debug_window`, `debug_search_text`, `debug_auto_scroll`, `command_input`, `scroll_to_id`, `active_session_id`.
 
 ### Messaging Actors & Recipients Summary
 
@@ -337,12 +412,23 @@ C4Component
 
 ## Test Surface
 
-- **Integration tests** (`src/desktop/tests/`): background manager, discovery,
-  document, editor, log persistence, PDF converter, pulldown config, table
-  layout.
-- **Inline `#[cfg(test)]` modules:** `agent/agent_impl_tests.rs`,
+- **Integration tests** (`tests/`): the CommonMark spec conformance suite
+  (`commonmark_spec_test.rs`) and the iced visual-test harness
+  (`iced_visual_harness.rs`).
+- **Inline `#[cfg(test)]` sidecar modules:** `agent/agent_impl_tests.rs`,
   `tools/jmap/tests.rs`, `bus/core.rs`, `bus/events/file.rs`, `bus/events/typed.rs`, `bus/config.rs`, `bus/router/bus_router.rs`.
-- **UI tests:** `egui_kittest` 0.35 (eframe + snapshot) harnesses following the
-  egui `__run_test_ctx` / `State::test_ctx` pattern. Dev-deps also include
-  `accesskit 0.24`, `proptest`, `filetime`, `tempfile`, `tokio`.
+- **UI tests — four tiers** (see `doc/distill/iced.md`):
+  1. **Pure model** — the per-module `src/app/ui_iced/*_tests.rs` sidecars
+     (39 files): view-model snapshots, message mappers, geometry solvers,
+     reducers. No widget tree, no runtime.
+  2. **Headless interaction** — `src/app/ui_iced/interaction_tests.rs`,
+     driving the real `view` + real `update` through `iced_test::Simulator`
+     and asserting the emitted `Message`s.
+  3. **Screenshot baselines** — `tests/iced_visual/baselines/` (sha256 of
+     the rendered frame), recorded and compared via the harness.
+  4. **Recorded session replay** — `tests/iced_visual/ice/*.ice` replayed by
+     `iced_test::run`.
+  Tiers 3 and 4 are harness-complete but their artifacts await a human
+  recording pass. Dev-deps also include `iced_test 0.14`, `proptest`,
+  `filetime`, `tempfile`, `tokio` and `wiremock`.
 
