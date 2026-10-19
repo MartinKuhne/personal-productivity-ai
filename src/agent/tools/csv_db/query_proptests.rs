@@ -75,7 +75,7 @@ use tempfile::tempdir;
 fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, String>>) {
     let db_name = "proptest".to_string();
     create_csv(
-        &test_ctx(&config),
+        &test_ctx(config),
         CreateCsvInput {
             db_name: db_name.clone(),
             headers: vec!["item".to_string(), "price".to_string(), "qty".to_string()],
@@ -96,7 +96,7 @@ fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, Strin
         })
         .collect();
     add_rows(
-        &test_ctx(&config),
+        &test_ctx(config),
         AddRowsInput {
             db_name: db_name.clone(),
             rows: rows.clone(),

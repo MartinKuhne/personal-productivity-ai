@@ -55,7 +55,7 @@ pub enum ToolGroupKind {
 }
 
 /// Per-group state, rebuilt by
-/// [`ToolRegistry::refresh_state`](super::ToolRegistry::refresh_state).
+/// [`ToolRegistry::groups`](super::ToolRegistry::groups).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolGroupState {
     /// Stable identifier.
