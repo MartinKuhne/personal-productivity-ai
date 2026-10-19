@@ -147,6 +147,8 @@ pub mod batch_dialog;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
+#[cfg(test)]
+pub mod interaction_tests;
 pub mod layout;
 pub mod logo;
 pub mod logs;

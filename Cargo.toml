@@ -121,6 +121,11 @@ log = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 wiremock = "0.6"
 typst-syntax = "0.15"
+# `iced_test` — headless iced interface driver ([TASK-025], DEC-011).
+# Tests widgets and whole applications without opening a window
+# (`doc/iced.md` "iced_test"). Used by the tier-2 simulator tests in
+# `src/app/ui_iced/interaction_tests.rs`.
+iced_test = "0.14.0"
 
 [[bin]]
 name = "fastmd"

@@ -4322,3 +4322,197 @@ were found and repaired:
    (e.g. folding into `ui_iced/` or a `domain/` module), that is a naming
    decision this task deliberately did not make.
 5. **No branch created, nothing committed** - left for the orchestrator.
+
+---
+
+## TASK-025 test-tier wiring log (iced_test tiers 2/3/4 - 2026-10-18)
+
+### Dependency resolution
+
+`iced_test = "0.14.0"` added to `[dev-dependencies]` in `Cargo.toml`.
+Resolves cleanly against the existing `iced = "0.14.0"`:
+
+```text
+iced_test v0.14.0        [dev-dependencies] -> fastmd
+iced_selector v0.14.0    (pulled in by iced_test)
+iced v0.14.0            (unchanged)
+```
+
+`iced_tester` was **not** added. It is only needed to *record* `.ice`
+sessions (the F12 overlay behind iced's `tester` feature); nothing in the
+tier-2 or tier-3/4 harness needs it to compile or run, so the task left it
+out rather than compile a recording feature into the shipped `iced`
+dependency. Recording a `.ice` file therefore still requires a short-lived
+manifest change - documented in `tests/iced_visual/README.md`.
+
+### Feasibility gate: PASS - the simulator runs headlessly here
+
+Verified first, before writing any real tests. A one-button
+`iced_test::simulator` test (`button("OpenTools").on_press(...)`,
+`ui.click("OpenTools")`, assert `into_messages()`) compiled and passed on
+the first run on this Windows box with no window and no GPU setup step.
+`iced_test::Simulator` builds an `iced_runtime::UserInterface` over the
+`iced_renderer::Renderer` fallback chain (wgpu first, `tiny-skia`
+second); `ICED_TEST_BACKEND=tiny-skia` forces the software path.
+
+Two things the gate surfaced that shaped everything downstream:
+
+1. **`Simulator::into_messages` consumes the simulator.** The example in
+   `doc/iced.md` calls `ui.find(..)` *after* `into_messages()`, which
+   cannot compile. Tests must query first, then drain.
+2. **`&str` selectors are exact-match, not substring.** `iced_selector`
+   0.14.0 matches `Candidate::Text.content == query` and
+   `Candidate::TextInput.text() == query`. `doc/iced.md`'s "selects a
+   widget by the text it contains" reads as substring; it is not. Every
+   selector in the suite passes the full rendered string.
+
+### Tier 2 - `src/app/ui_iced/interaction_tests.rs` (13 tests, all passing)
+
+Declared from `ui_iced/mod.rs` as `#[cfg(test)] pub mod interaction_tests;`
+rather than as a `<file>_tests.rs` sidecar ([RUST-056]) because it spans
+every `ui_iced` view module instead of pairing with one implementation
+file.
+
+Each test renders a **production view function** (no stand-ins) over a
+**`test_app_state()`** fixture (in-memory storage, [RUST-006]) and drives
+it with `click` / `typewrite` / raw `simulate` events. Where a test needs
+state to actually change between two clicks the emitted messages are
+pushed through the **production reducer** `ui_iced::update::update`
+before the view is rebuilt.
+
+| Interaction | Test | Emitted & asserted |
+|---|---|---|
+| Tree row left click | `test_tree_row_left_click_emits_select_file` | `Command(SelectFile { path, multi: false })` |
+| Tree row right click -> live menu | `test_tree_row_right_click_mounts_a_live_context_menu` | `Tree(ContextMenuOpened)`, then reducer-mounted menu rows rendered in `view(&state)`, then a row click publishes its own message |
+| Tree pointer motion | `test_tree_pointer_motion_emits_the_cursor_anchor` | `Layout(CursorMoved)` in the scrollable's viewport frame |
+| Tab strip `x` | `test_tab_strip_close_button_emits_close_tab` | `Command(CloseTab(0))` |
+| Second tab `x` | `test_second_tab_close_button_emits_close_tab_one` | `Command(CloseTab(1))` (per-tab index, not always the first match) |
+| Tab title click | `test_tab_title_click_selects_that_document` | `Command(tab_select_command(beta.md))` |
+| Editor type + Save | `test_editor_typewrite_then_save_emits_save_requested` | `Editor(Action(_))` while typing, `Editor(SaveRequested { path })` on Save |
+| Editor Cancel | `test_editor_cancel_never_requests_a_save` | `Editor(CancelRequested)` only |
+| Name-entry dialog typing | `test_name_entry_dialog_streams_name_changed_messages` | one `Dialog(NameChanged)` per keystroke, accumulated |
+| Name-entry dialog submit | `test_name_entry_dialog_submit_after_reducer_accepts_the_name` | inert while the reducer-held name is empty (click falls through to the scrim -> `Dismissed`), `Dialog(Submitted)` once `update` has accepted `subdir` |
+| Hamburger open | `test_top_bar_hamburger_consumes_the_open_click` | the pick list captures the open click |
+| Hamburger rows | `test_hamburger_rows_emit_their_commands` | every `hamburger_items()` row publishes its own `Message::Command` |
+| Whole-app smoke | `test_full_app_view_is_simulatable_with_an_overlay` | `view(&state)` renders with a dialog mounted above the bands; its field is reachable |
+
+Selector techniques the suite relies on beyond `&str`:
+`Candidate::TextInput` to focus a text field, `Candidate::Focusable` to
+focus a `text_editor` (which does **not** answer a `TextInput` query),
+`Candidate::Container` filtered by width to reach the hamburger holder,
+and a counting closure selector to reach the *n*-th of several identical
+labels.
+
+### Tier 2 gap: `pick_list` menus are unreachable
+
+**The hamburger menu's rows cannot be driven under `iced_test` 0.14.**
+Root cause, verified against the crate source and reproduced with a bare,
+isolated `pick_list` (so it is not a FastMD composition problem):
+
+* `iced_widget::pick_list` draws its closed label **and** its open menu
+  rows with `renderer.fill_text`, not with child `Text` widgets, so no
+  `Candidate::Text` is ever produced for a row;
+* `iced_widget::overlay::menu::Overlay` does **not** override
+  `Overlay::operate`, which is a no-op default in `iced_core` 0.14
+  (`overlay.rs:41`), so the whole menu subtree is invisible to every
+  `Selector`;
+* `Simulator::point_at` deliberately emits no `CursorMoved` event, and
+  the menu sets `hovered_option` only from `CursorMoved` - so even a
+  coordinate-guessed click finds no hovered row. A 180-position scan over
+  the opened menu produced zero messages.
+
+`pick_list` also has no keyboard handling at all in 0.14.2, so `tap_key`
+is not an escape hatch. Covered as far as the tool allows (open-click
+consumed + the real `HamburgerItem` row set driven as buttons). If the
+orchestrator wants the widget itself driven, the options are an upstream
+`Overlay::operate` impl in iced, or replacing the hamburger `pick_list`
+with the app's own `overlay::context_menu_card` (real buttons, already
+fully testable) - a UI decision outside this task.
+
+### Tier 3 / tier 4 harness
+
+```text
+tests/
+  iced_visual_harness.rs    Program adapter + tier-3/4 entry points
+  iced_visual/
+    README.md               recording instructions
+    baselines/.gitkeep      tier-3 baselines (EMPTY - none recorded)
+    ice/.gitkeep            tier-4 recorded sessions (EMPTY - none recorded)
+```
+
+`FastMdProgram` implements `iced_test::program::Program` as a thin
+adapter over the production `build_state` / `update` / `view` +
+`window_settings`, so the harness renders exactly what `launch()`
+renders - no parallel reimplementation. It uses
+`iced_test::futures::backend::null::Executor`: no subscription runs, so
+a recording touches no network, no watcher and no real user config
+([RUST-006]).
+
+Running tests (not ignored, both pass):
+
+* `test_ice_replay_directory_is_wired` - `iced_test::run(program, ice_dir)`
+  over the `.ice` directory. Passes empty today; executes every recorded
+  session the moment one is committed, with no harness change.
+* `test_visual_artifact_directories_exist` - guards the documented layout
+  against drift.
+
+Recording tests (`#[ignore]`d, need a human pass):
+
+* `test_record_app_view_baseline` - whole `view(&AppState)`
+* `test_record_top_band_baseline` - `top_bar(&state.models.top)`
+
+How recording works: `Simulator::snapshot(&theme)` ->
+`Snapshot::matches_hash(path)`. Because `matches_hash` *creates* a missing
+baseline and returns `true` (a silent pass), recording is gated behind
+`FASTMD_RECORD_ICED_BASELINES=1` and the compare path asserts the
+baseline file exists first:
+
+```powershell
+$env:FASTMD_RECORD_ICED_BASELINES = "1"
+cargo test -p fastmd --test iced_visual_harness -- --ignored   # record
+Remove-Item Env:FASTMD_RECORD_ICED_BASELINES
+cargo nextest run -p fastmd --test iced_visual_harness -- --ignored   # assert
+```
+
+Baselines are renderer-specific (`<name>-<renderer>.sha256`); pin
+`$env:ICED_TEST_BACKEND = "tiny-skia"` for GPU-free reproducibility.
+
+### Tiers that could NOT be fully wired
+
+1. **Tier 2, hamburger `pick_list` row selection** - blocked upstream in
+   iced 0.14.2 (see the gap section above). Partially covered.
+2. **Tier 3, committed baselines** - not recorded. A baseline is only
+   meaningful once a human has confirmed the rendered frame is correct;
+   committing an unreviewed hash is worse than committing none. Harness
+   is complete and waiting.
+3. **Tier 4, committed `.ice` sessions** - cannot be produced headlessly:
+   the recorder is an interactive F12 overlay in a real window, and
+   enabling iced's `tester` feature was deliberately avoided. Harness and
+   replay entry point are complete and waiting.
+
+### Quality gate
+
+| Gate | Result |
+|---|---|
+| `cargo check -q` | clean |
+| `cargo nextest run --status-level fail --show-progress none` | **1817 passed, 3 skipped** (2 = the tier-3 recording tests, 1 = pre-existing `recycle_bin::tests::native_backend_live_delete`) |
+| `cargo clippy -p fastmd --bins --lib -- -D warnings` | clean |
+| `cargo clippy -p fastmd --all-targets` | no lint from the new files |
+| `cargo fmt --check` | clean |
+| `cargo doc --no-deps --quiet` | clean |
+
+### Needs the orchestrator's eyes
+
+1. **`doc/iced.md` is wrong in two places** and both cost time to rediscover:
+   the `Simulator` example calls `find` after `into_messages` (cannot
+   compile), and `&str` selectors are described as "contains" when they are
+   exact-match. Worth correcting in the SDK doc.
+2. **The `pick_list` gap is a real UI-testability hole**, not just a test
+   gap: the shipped hamburger cannot be exercised by any automated tool.
+   If closing it matters, the cheapest route is rendering the hamburger
+   with the app's own `overlay::context_menu_card` (real buttons) instead
+   of `pick_list`. That is a UI decision this task did not make.
+3. **Tier 3/4 still need a recording pass.** The harness will not catch
+   pixel drift or replay regressions until someone runs it and commits the
+   artifacts.
+4. **No branch created, nothing committed** - left for the orchestrator.
