@@ -76,14 +76,14 @@ use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
     DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, MenuMessage, Message,
-    RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage,
-    WindowMessage,
+    OverlayMessage, RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage,
+    TreeMessage, WindowMessage,
 };
 use crate::ui_iced::os_shell;
 use crate::ui_iced::panels::bottom::submit_commands;
 use crate::ui_iced::panels::left::ROW_TEXT_SIZE;
 use crate::ui_iced::persisted;
-use crate::ui_iced::table_width::heuristic_width;
+use crate::ui_iced::table_width::fira_sans_width;
 
 /// NFR-001/NFR-004 error-code name for a failed font registration.
 const FONT_LOAD_ERROR_CODE: &str = "ui_iced.boot.font_load_failed";
@@ -129,6 +129,7 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::AgentDebug(message) => tasks.extend(reduce_agent_debug(state, message)),
         Message::Inbound(message) => reduce_inbound(state, message),
         Message::Menu(message) => tasks.extend(reduce_menu(state, message)),
+        Message::Overlay(message) => reduce_overlay(state, message),
         Message::Boot(message) => tasks.push(reduce_boot(message)),
     }
 
@@ -166,6 +167,43 @@ fn dismisses_context_menu(message: &Message) -> bool {
                 | TreeMessage::DeleteSelectedRequested { .. }
         ),
         _ => false,
+    }
+}
+
+/// Floating-overlay / keyboard-modifier reductions (UI-056, UI-022).
+///
+/// Both arms mutate the overlay only — no publish, no I/O — so the whole
+/// channel returns no [`Task`].
+///
+/// * [`OverlayMessage::EscapePressed`] delegates the whole "which layer is
+///   on top" decision to [`OverlayState::close_topmost`], keeping the
+///   reverse-z-order rule in one unit-testable place instead of spread
+///   across the reducer. The return value is deliberately dropped here:
+///   there is no user-visible difference between "closed the batch dialog"
+///   and "closed the context menu", and the layer name is available to any
+///   caller that wants it.
+/// * [`OverlayMessage::ModifiersChanged`] sets or clears **only** the
+///   `SHIFT` bit. Every other modifier bit is left exactly as it is, so
+///   widening the tracked set later cannot silently clobber a modifier this
+///   lane does not observe.
+fn reduce_overlay(state: &mut AppState, message: OverlayMessage) {
+    match message {
+        OverlayMessage::EscapePressed => {
+            state.overlay.close_topmost();
+        }
+        OverlayMessage::ModifiersChanged { shift } => {
+            if shift {
+                state
+                    .overlay
+                    .modifiers
+                    .insert(iced::keyboard::Modifiers::SHIFT);
+            } else {
+                state
+                    .overlay
+                    .modifiers
+                    .remove(iced::keyboard::Modifiers::SHIFT);
+            }
+        }
     }
 }
 
@@ -550,9 +588,12 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
 /// [`LayoutMessage::TreeAutoFit`] so the width change is replayable
 /// ([TASK-023]).
 ///
-/// The measurement uses the [TASK-015] `heuristic_width` measurer: the iced
-/// layer has no font-system handle at reducer time, and the heuristic is the
-/// same one the table solver uses.
+/// The measurement uses the real font-metrics measurer [`fira_sans_width`]
+/// ([TASK-015]), which shapes against the same Fira Sans bytes iced renders
+/// with (`iced_graphics::text::FIRA_SANS_REGULAR`) rather than a
+/// character-count average. Faces we hold no bytes for fall back to
+/// `heuristic_width` inside the measurer, so the call is total and never
+/// measures the wrong face.
 fn auto_fit_tree(state: &mut AppState) {
     let viewport = state.viewport.width;
     if viewport <= 0.0 {
@@ -560,7 +601,7 @@ fn auto_fit_tree(state: &mut AppState) {
     }
     let rows = state.models.left.rows.clone();
     let width = crate::ui_iced::panels::left::auto_fit_width(&rows, viewport, |text: &str| {
-        heuristic_width(text, iced::Font::DEFAULT, ROW_TEXT_SIZE)
+        fira_sans_width(text, iced::Font::DEFAULT, ROW_TEXT_SIZE)
     });
     state.app.layout.set_width(Some(width));
     state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
@@ -593,8 +634,16 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
             run_skill(state, &skill, target_dir, target_file);
             Vec::new()
         }
-        TreeMessage::PrintRequested { path } => {
-            print_file(state, &path);
+        TreeMessage::PrintRequested { path } => vec![print_task(state, path)],
+        TreeMessage::PrintFinished { path, result } => {
+            if let Err(error) = result {
+                tracing::error!(
+                    name = PRINT_NO_CHANNEL_ERROR_CODE,
+                    path = %path.display(),
+                    %error,
+                    "Print request could not be handed to the background channel."
+                );
+            }
             Vec::new()
         }
         TreeMessage::DeleteSelectedRequested { paths } => {
@@ -687,17 +736,24 @@ fn run_skill(
 
 /// the legacy UI `PRINT_ACTION` (`ui/tree/render.rs:161-173`): hand the job to the
 /// background channel. There is no `UserCommand::Print`, so the reducer owns it.
-fn print_file(state: &mut AppState, path: &Path) {
+///
+/// Rendering, the temp-file write and the browser hand-off all block, so they
+/// ride an iced [`Task`] instead of running on the UI thread ([FMD-060],
+/// [FMD-061]); the outcome comes back as [`TreeMessage::PrintFinished`].
+///
+/// The laziness of [`Task`] is also what keeps this testable: reducing a
+/// [`TreeMessage::PrintRequested`] only *builds* the task, so a unit test never
+/// launches a real browser.
+fn print_task(state: &AppState, path: PathBuf) -> Task<Message> {
     let tx = state.app.orchestrator.tx.clone();
-    let job = crate::export::print::PrintJob::new(path.to_path_buf());
-    if let Err(error) = crate::export::print::execute_print_blocking(job, Some(tx)) {
-        tracing::error!(
-            name = PRINT_NO_CHANNEL_ERROR_CODE,
-            path = %path.display(),
-            %error,
-            "Print request could not be handed to the background channel."
-        );
-    }
+    let work_path = path.clone();
+    Task::perform(
+        async move {
+            let job = crate::export::print::PrintJob::new(work_path);
+            crate::export::print::execute_print_blocking(job, Some(tx))
+        },
+        move |result| Message::Tree(TreeMessage::PrintFinished { path, result }),
+    )
 }
 
 /// Tab-strip panel reductions ([TASK-013], [TASK-023]).

@@ -124,6 +124,13 @@ const WORKSPACE_LIBRARY_KIND: &str = "text";
 /// wiring so cross-run restore experiments can point it inside a scratch dir.
 pub const UI_STATE_PATH_ENV: &str = "FASTMD_ICED_UI_STATE_PATH";
 
+/// Name of the production boot preset produced by [`launch_presets`]
+/// ([TASK-022], `doc/planning/iced.md` DEP-007).
+///
+/// The tier-4 `.ice` harness selects a boot strategy by this string; the
+/// live launch chain never reads it (see [`launch_presets`]).
+pub const LAUNCH_PRESET_DEFAULT: &str = "default";
+
 /// The iced application state ([TASK-022], [TASK-023]).
 ///
 /// A thin wrapper: the framework-free [`FastMdApp`] domain state plus the
@@ -278,6 +285,24 @@ pub struct OverlayState {
     pub agent_scroll: Option<ScrollSnapshot>,
     /// Last reported debug-entry viewport.
     pub debug_scroll: Option<ScrollSnapshot>,
+    /// Keyboard modifier state mirrored off the runtime event stream by the
+    /// subscription bridge's keyboard lane (UI-022).
+    ///
+    /// iced's `MouseArea::on_press` and `mouse::Event::ButtonPressed` both
+    /// carry **no** modifier state, so the only way to know a tree row was
+    /// Shift-clicked is to track the keyboard independently and read the
+    /// bit back when the click is reduced. The Shift keydown is delivered
+    /// and reduced before the click message, so the tracked value is
+    /// current at that point.
+    ///
+    /// Only the `SHIFT` bit is maintained today; the field keeps the full
+    /// [`iced::keyboard::Modifiers`] set so a later `CTRL`-based gesture
+    /// needs no shape change.
+    ///
+    /// Grounded in `src/app/ui/SPEC.md` UI-022: "When the user holds the
+    /// shift key, the system shall allow the user to select multiple
+    /// documents."
+    pub modifiers: iced::keyboard::Modifiers,
 }
 
 impl Default for OverlayState {
@@ -301,7 +326,88 @@ impl Default for OverlayState {
             logs_scroll: None,
             agent_scroll: None,
             debug_scroll: None,
+            modifiers: iced::keyboard::Modifiers::empty(),
         }
+    }
+}
+
+impl OverlayState {
+    /// Closes the **top-most** open floating layer, one layer per call
+    /// (UI-056 — "the dialog shall provide a `Close` action (button and
+    /// `Esc` keypress …) that hides the dialog without persisting further
+    /// state").
+    ///
+    /// Returns the name of the layer it closed, or `None` when nothing was
+    /// open. The name is a diagnostic identifier for logs and tests, not
+    /// user-facing text — the UI strings live in `crate::ui::strings`.
+    ///
+    /// # The rule
+    ///
+    /// One `Esc` dismisses exactly one surface, walking the **reverse** of
+    /// the [`mounted_layers`] z-order (bottom-most first), i.e. top-most
+    /// first here:
+    ///
+    /// `Batch` → `Attributions` → `About` → `Tools` → `AgentDebug` →
+    /// `Dialog` → `Editor` → `ContextMenu` → `hamburger`.
+    ///
+    /// That is what makes `Esc` behave like a native stack: pressing it
+    /// over the batch dialog does not also tear down the About window
+    /// underneath, and a second press is required to reach it.
+    ///
+    /// # What `Esc` deliberately does NOT close
+    ///
+    /// The **docked background-log viewer** ([`OverlayLayer::Logs`]) is
+    /// skipped. It is a docked panel, not a modal: it never blocks the
+    /// panels beneath it for a *dismissal*, its visibility is application
+    /// state owned by `UserCommand::ToggleBackgroundLogs` rather than
+    /// reducer-held overlay state, and the user expects it to stay put
+    /// while they keep working. It is therefore not in the `Esc` stack at
+    /// all — and note it is not even reachable from here, since its
+    /// visibility lives on `BackgroundLogsViewModel`, not on
+    /// [`OverlayState`].
+    ///
+    /// The [`OverlayLayer::ContextMenu`] entry is closed whenever the slot
+    /// holds a menu. [`mounted_layers`] additionally requires a non-empty
+    /// item list before it *mounts* one; that is a render concern, and a
+    /// menu slot that is `Some` with no rows is still reducer state worth
+    /// clearing rather than leaving stranded.
+    ///
+    /// [RUST-020]: mutates only `self`; performs no I/O and publishes no
+    /// bus event, which is what keeps the `Esc` reduction thin.
+    pub fn close_topmost(&mut self) -> Option<&'static str> {
+        if self.batch.close() {
+            return Some(CLOSED_LAYER_BATCH);
+        }
+        // `AboutWindowState` holds one `Option`, so the two identity
+        // windows are mutually exclusive; test the higher layer first so the
+        // returned name matches what was actually on top.
+        if self.about.is_attributions() {
+            self.about.close();
+            return Some(CLOSED_LAYER_ATTRIBUTIONS);
+        }
+        if self.about.is_about() {
+            self.about.close();
+            return Some(CLOSED_LAYER_ABOUT);
+        }
+        if self.tools.close() {
+            return Some(CLOSED_LAYER_TOOLS);
+        }
+        if self.debug.close() {
+            return Some(CLOSED_LAYER_AGENT_DEBUG);
+        }
+        if self.dialog.close() {
+            return Some(CLOSED_LAYER_DIALOG);
+        }
+        if self.editor.take().is_some() {
+            return Some(CLOSED_LAYER_EDITOR);
+        }
+        if self.context_menu.take().is_some() {
+            return Some(CLOSED_LAYER_CONTEXT_MENU);
+        }
+        if std::mem::take(&mut self.hamburger_open) {
+            return Some(CLOSED_LAYER_HAMBURGER);
+        }
+        None
     }
 }
 
@@ -328,6 +434,42 @@ pub enum OverlayLayer {
     /// The batch prompt-processing dialog (topmost — the legacy UI drew it last).
     Batch,
 }
+
+/// Layer name [`OverlayState::close_topmost`] reports for the batch
+/// prompt-processing dialog ([UI-056]).
+pub const CLOSED_LAYER_BATCH: &str = "batch";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the third-party
+/// attributions window ([UI-056]).
+pub const CLOSED_LAYER_ATTRIBUTIONS: &str = "attributions";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the About window
+/// ([UI-056]).
+pub const CLOSED_LAYER_ABOUT: &str = "about";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the tools dialog
+/// ([UI-056], UI-051..UI-060).
+pub const CLOSED_LAYER_TOOLS: &str = "tools";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the agent debug
+/// window ([UI-056], UI-048).
+pub const CLOSED_LAYER_AGENT_DEBUG: &str = "agent_debug";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the small
+/// name-entry / move / delete-confirmation dialog ([UI-056]).
+pub const CLOSED_LAYER_DIALOG: &str = "dialog";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the inline editor
+/// modal ([UI-056], UI-045).
+pub const CLOSED_LAYER_EDITOR: &str = "editor";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the floating tree
+/// / tab context menu ([UI-056]).
+pub const CLOSED_LAYER_CONTEXT_MENU: &str = "context_menu";
+
+/// Layer name [`OverlayState::close_topmost`] reports for the top-bar
+/// hamburger menu ([UI-056]).
+pub const CLOSED_LAYER_HAMBURGER: &str = "hamburger";
 
 /// The z-ordered set of showing layers ([TASK-023]).
 ///
@@ -410,12 +552,15 @@ impl ViewModels {
     /// Snapshots every view-model off `app`, merging in the reducer-held
     /// state that `from_app` cannot see ([TASK-023]).
     ///
-    /// Three merges are required because the legacy UI originals read state the
+    /// Four merges are required because the legacy UI originals read state the
     /// iced reducer owns instead:
     ///
     /// * the left panel's search fields come from [`SearchViewModel`], not
     ///   the legacy UI `TreeSearch` that `LeftPanelViewModel::from_app` reads
     ///   (and which stays empty in the iced build);
+    /// * the left panel's `multi_select` comes from
+    ///   [`OverlayState::modifiers`], because `LeftPanelViewModel::from_app`
+    ///   has no modifier input and reports `false` (UI-022);
     /// * the agent panel's disclosure comes from
     ///   [`OverlayState::thinking_expanded`], because
     ///   `AgentPanelViewModel::from_app` hardcodes `true`;
@@ -453,6 +598,10 @@ impl ViewModels {
         left.query = overlay.search.query().to_string();
         left.is_searching = overlay.search.is_filtering();
         left.results = overlay.search.results_arc();
+        // UI-022: `from_app` has no modifier input and defaults the field
+        // to `false`; the tracked keyboard state lives on the overlay, so
+        // the override happens here alongside the other search merges.
+        left.multi_select = overlay.modifiers.shift();
 
         let agent =
             AgentPanelViewModel::from_app(app).with_thinking_expanded(overlay.thinking_expanded);
@@ -960,6 +1109,55 @@ fn window_icon() -> Option<iced::window::Icon> {
     iced::window::icon::from_rgba(rgba, width, height).ok()
 }
 
+/// The named boot strategies the tier-4 `.ice` test harness selects by
+/// name ([TASK-022], `doc/planning/iced.md` DEP-007).
+///
+/// A [`iced::Preset`] is a `(name, boot)` pair: the same
+/// [`boot_with_persisted`] body reached by a stable string instead of by
+/// whatever the launch chain happens to close over. `iced_test::run` picks
+/// one by name to build a reproducible environment for a `.ice` scenario
+/// instead of inheriting whatever the developer's persisted snapshot
+/// happens to hold.
+///
+/// (The path is `iced::Preset`, not `iced::program::Preset`: iced 0.14
+/// imports `program` privately at `iced-0.14.0/src/lib.rs:481` and
+/// re-exports only the struct itself at `:540`.)
+///
+/// # Production behaviour is unchanged
+///
+/// iced's `Application::boot()` calls the `boot` closure handed to
+/// `iced::application(...)` and **never consults the `presets` list**
+/// (`iced-0.14.0/src/application.rs:124-126`, which delegates to
+/// `self.boot.boot()`; the `presets` field is only threaded through the
+/// builder at `:165`, `:181` and read back by `Program::presets` at
+/// `:522-524`). Adding `.presets(...)` is therefore metadata for external
+/// tooling and cannot alter what the shipped app does.
+///
+/// # The set
+///
+/// * `"default"` — the production boot: the caller's `inputs` over the
+///   caller's `persisted` snapshot, exactly what the live launch chain
+///   runs.
+///
+/// Additional named fixtures (an empty-workspace preset, a
+/// pre-populated-dialog preset) belong here as more `.ice` scenarios are
+/// written; the signature already carries everything a preset needs.
+///
+/// [`boot_with_persisted`]: crate::ui_iced::app::boot_with_persisted
+#[must_use]
+pub fn launch_presets(
+    inputs: LaunchInputs,
+    persisted: PersistedUiState,
+) -> Vec<iced::Preset<AppState, Message>> {
+    vec![iced::Preset::new(
+        LAUNCH_PRESET_DEFAULT,
+        // Same re-callable, clone-per-call boot contract as the live chain
+        // ([FMD-068]): the captured handlers are never moved out, so the
+        // preset can be booted repeatedly by the harness.
+        move || boot_with_persisted(inputs.clone(), persisted.clone()),
+    )]
+}
+
 /// The full iced launch builder chain ([TASK-022], DEC-006/008/009/010).
 ///
 /// Wires [`boot`] + [`crate::ui_iced::update::update`] +
@@ -975,7 +1173,11 @@ fn window_icon() -> Option<iced::window::Icon> {
 ///   with the OS DPI factor itself (see
 ///   [`AppState::requested_scale_factor`]);
 /// * `.subscription(...)` — the [TASK-019] bus bridge over the live
-///   [`BusReceivers`].
+///   [`BusReceivers`], plus the window and keyboard lanes;
+/// * `.presets(...)` — the named boot strategies for the tier-4 `.ice`
+///   harness ([`launch_presets`], DEP-007). Metadata only: iced's
+///   `Application::boot()` never reads the list, so production behaviour
+///   is identical with or without it.
 ///
 /// Fonts register through the [TASK-007] boot task (returned by [`boot`])
 /// rather than `.font(bytes)`, matching the pilot's working pattern.
@@ -985,6 +1187,9 @@ fn window_icon() -> Option<iced::window::Icon> {
 pub fn launch(inputs: LaunchInputs) -> iced::Result {
     let persisted = persisted::load_ui_state(inputs.ui_state_storage.as_ref());
     let settings = window_settings(&persisted);
+    // Built before the boot closure captures `inputs`, so the preset list
+    // and the live boot strategy are the same pair of injected handlers.
+    let presets = launch_presets(inputs.clone(), persisted.clone());
 
     let result = iced::application(
         // The closure clones the captured inputs per call so the Elm boot
@@ -999,6 +1204,7 @@ pub fn launch(inputs: LaunchInputs) -> iced::Result {
     .theme(|_state: &AppState| crate::ui_iced::theme::fastmd_dark_theme())
     .scale_factor(|state: &AppState| state.requested_scale_factor())
     .subscription(|state: &AppState| subscription::subscription(&state.receivers))
+    .presets(presets)
     .run();
 
     // the legacy UI `on_exit` port (`ui/app/mod.rs:245-248`): temp-file cleanup and

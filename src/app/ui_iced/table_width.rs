@@ -46,16 +46,36 @@
 //!
 //! # Measurement without a renderer
 //!
-//! iced only hands a text renderer to `Widget::layout`
-//! (`iced_graphics-0.14.0/src/text/renderer.rs`); `view()` has none, so a
-//! pixel-exact `measure_width` is not reachable from the render path. The
-//! measurer therefore takes its width function as an injected `&dyn Fn`
-//! ([`IcedTextMeasurer::new`]) and ships a deterministic
-//! average-advance approximation ([`heuristic_width`]) as the default.
-//! [TASK-022]/[TASK-023] can pass a renderer-backed closure with no
-//! change to this module. The approximation is uniform per font, so every
-//! FTWA regime transition (surplus / deficit / fallback) still fires on
-//! the same *relative* column shapes the renderer-backed path produces.
+//! The renderer-free constraint is unchanged: iced only hands a text
+//! renderer to `Widget::layout`
+//! (`iced_graphics-0.14.0/src/text/renderer.rs`), `view()` has none, and
+//! the reducer never sees one. What changed ([GAP-06]) is that a renderer
+//! is no longer the only route to real metrics. [`fira_sans_width`] shapes
+//! the string with `cosmic-text` over
+//! `iced_graphics::text::FIRA_SANS_REGULAR` — the very bytes iced loads
+//! as its Fira face — and returns true glyph advances with no renderer, no
+//! window, and no handle on iced's own font engine.
+//!
+//! The seam is therefore still an injected `&dyn Fn`
+//! ([`IcedTextMeasurer::new`]), and [`heuristic_width`] is still the
+//! default ([`IcedTextMeasurer::heuristic`]). Two claims this section
+//! used to make are now false and are corrected here ([RUST-041]):
+//!
+//! * *"the approximation is uniform per font, so every FTWA regime
+//!   transition fires on the same relative column shapes"* — real metrics
+//!   are available and are emphatically **not** uniform: `"iiii"` and
+//!   `"MMMM"` now measure differently at the same size, which is precisely
+//!   the difference the flat 0.5 em model could not see.
+//! * *the heuristic is no longer the general-purpose width function*. It
+//!   survives as the **fallback** for any face this build holds no bytes
+//!   for — `Font::MONOSPACE` above all, since measuring Fira Sans in a
+//!   monospace slot would be measuring the wrong face.
+//!
+//! One caveat travels with the real metrics and is documented in full on
+//! [`fira_sans_width`]: `cosmic-text` loads the host's installed fonts
+//! into every engine, and iced pins Fira Sans as the default face only on
+//! `wasm32`, so the app must pin `default_font` itself for the measured
+//! face to be the painted face.
 //!
 //! # Relocated helper ([TASK-029])
 //!
@@ -72,6 +92,7 @@ use crate::markdown::table_layout::{TableLayout, TableLayoutBuilder, TextMeasure
 use crate::markdown::table_width::DeficitStrategy;
 use iced::Length;
 use iced::font::{Family, Font};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Per-cell padding in logical pixels applied around cell content.
 ///
@@ -202,6 +223,192 @@ pub fn heuristic_width(text: &str, font: Font, size: f32) -> f32 {
         PROPORTIONAL_AVG_ADVANCE
     };
     text.chars().count() as f32 * advance * size
+}
+
+/// Family name under which iced registers the Fira Sans bytes.
+///
+/// `iced_graphics` loads `FIRA_SANS_REGULAR` into its font database under
+/// this family, and `iced_test` normalises `Font::DEFAULT` to
+/// `Font::with_name("Fira Sans")`
+/// (`iced_test-0.14.0/src/simulator.rs:66-69`), so asking for the face by
+/// name is asking for what the renderer actually paints.
+const FIRA_SANS_FAMILY_NAME: &str = "Fira Sans";
+
+/// Process-wide `cosmic-text` engine seeded from iced's own Fira Sans bytes.
+///
+/// Built lazily with the same
+/// `FontSystem::new_with_fonts([fontdb::Source::Binary(..)])` construction
+/// iced uses (`iced_graphics-0.14.0/src/text.rs:118-131`), fed from
+/// `iced_graphics::text::FIRA_SANS_REGULAR` rather than a second copy of
+/// the font, so the measured face and the painted face cannot drift.
+///
+/// iced's own engine is reachable only through the global
+/// `iced_graphics::text::font_system()` `RwLock`, whose write lock the
+/// renderer holds while painting; taking it per row would put the reducer
+/// behind the renderer. This module therefore owns a second engine built
+/// from the same bytes.
+///
+/// `new_with_fonts` calls `db.load_system_fonts()` **before** adding the
+/// explicit source (`cosmic-text-0.15.0/src/font/system.rs:396-404`), so
+/// this engine — exactly like iced's own — also carries every font
+/// installed on the host (517 faces on the machine this was measured on).
+/// Fira Sans sits on top of that collection, which is why every
+/// measurement asks for the face by name instead of by generic family.
+///
+/// The `Mutex` is required, not decorative: `cosmic_text::FontSystem`
+/// mutates its shaping and font caches in place, so it is `Send` but not
+/// `Sync` — the `static` below would not compile without it. A poisoned
+/// lock is treated as "no measurement available" and degrades to
+/// [`heuristic_width`] rather than reusing a possibly half-finished cache.
+fn fira_sans_font_system() -> &'static Mutex<cosmic_text::FontSystem> {
+    static FONT_SYSTEM: OnceLock<Mutex<cosmic_text::FontSystem>> = OnceLock::new();
+    FONT_SYSTEM.get_or_init(|| {
+        Mutex::new(cosmic_text::FontSystem::new_with_fonts([
+            cosmic_text::fontdb::Source::Binary(Arc::new(iced_graphics::text::FIRA_SANS_REGULAR)),
+        ]))
+    })
+}
+
+/// Whether the Fira Sans face this module measures with is loaded and
+/// resolvable.
+///
+/// Returns `false` if the shared engine could not be built, its lock was
+/// poisoned, or the family is missing from the database — every one of
+/// which means [`fira_sans_width`] is answering with
+/// [`heuristic_width`] rather than real metrics.
+#[must_use]
+pub fn fira_sans_available() -> bool {
+    let Ok(system) = fira_sans_font_system().lock() else {
+        return false;
+    };
+    system
+        .db()
+        .query(&cosmic_text::fontdb::Query {
+            families: &[cosmic_text::fontdb::Family::Name(FIRA_SANS_FAMILY_NAME)],
+            ..Default::default()
+        })
+        .is_some()
+}
+
+/// Accept a raw measurement only when it is finite and strictly positive;
+/// otherwise return `fallback`.
+///
+/// The single home of the "do not trust this number" rule, so the rule can
+/// be tested directly instead of depending on what the shaper happens to
+/// produce.
+fn usable_width(measured: f32, fallback: f32) -> f32 {
+    if measured.is_finite() && measured > 0.0 {
+        measured
+    } else {
+        fallback
+    }
+}
+
+/// Shape `text` in Fira Sans and return the summed advance of every laid
+/// out line.
+///
+/// `size` must already be finite and positive — `cosmic-text` asserts a
+/// non-zero line height, so [`fira_sans_width`] validates it first. The
+/// return value is raw: it may be `0.0` (nothing shaped, or a poisoned
+/// lock) or non-finite, and callers must pass it through [`usable_width`].
+fn measured_fira_sans_width(text: &str, size: f32) -> f32 {
+    let Ok(mut font_system) = fira_sans_font_system().lock() else {
+        return 0.0;
+    };
+
+    // `Buffer::new_empty` leaves the wrap width unset, so nothing is
+    // wrapped: every paragraph stays on one line and `shape_until_scroll`
+    // shapes the whole buffer rather than a viewport slice.
+    let mut buffer = cosmic_text::Buffer::new_empty(cosmic_text::Metrics::new(size, size));
+    let attrs = cosmic_text::Attrs::new().family(cosmic_text::Family::Name(FIRA_SANS_FAMILY_NAME));
+    buffer.set_text(
+        &mut font_system,
+        text,
+        &attrs,
+        cosmic_text::Shaping::Advanced,
+        None,
+    );
+
+    buffer.layout_runs().map(|run| run.line_w).sum::<f32>()
+}
+
+/// Real, renderer-matching single-line text width for the proportional UI
+/// font, measured with `cosmic-text` ([GAP-06]).
+///
+/// Drop-in replacement for [`heuristic_width`] at the
+/// `Fn(&str, Font, f32) -> f32` seam ([`IcedTextMeasurer::new`]): it
+/// returns the pixel advance of `text` at `size` using actual glyph
+/// advances from the same Fira Sans bytes iced renders with, kerning
+/// included. Narrow and wide glyphs therefore come apart — `"iiii"` is
+/// genuinely shorter than `"MMMM"` — which the flat per-character model
+/// could never express.
+///
+/// # Fallbacks
+///
+/// Every path below lands on a finite number, and all but the size guard on
+/// [`heuristic_width`], so the function is total:
+///
+/// * [`Font::MONOSPACE`] — this build ships **no** monospace bytes, so
+///   shaping mono text with Fira Sans would be measuring the wrong face.
+///   Mono widths stay on the heuristic's `MONOSPACE_AVG_ADVANCE` until a
+///   real mono face is vendored.
+/// * A measurement that is non-finite, or zero for non-empty text — the
+///   FTWA solver panics on non-finite input
+///   (`crate::markdown::table_width::ftwa`), and a zero-width column that
+///   is not really zero-width would collapse the layout, so both are
+///   refused in favour of the heuristic's guaranteed-positive answer.
+/// * A non-finite or non-positive `size` — nothing can be shaped, and the
+///   heuristic would just propagate the bad value, so this returns `0.0`.
+///
+/// Any other family (`SansSerif`, `Serif`, `Cursive`, `Fantasy`, or a
+/// `Family::Name`) is deliberately measured as Fira Sans **by name**, which
+/// is what makes the answer identical on every machine. The generic
+/// families are not usable here: `db.query(SansSerif)` and
+/// `db.query(Monospace)` both return `None` on a host without cosmic-text's
+/// hardcoded generic defaults ("Open Sans" / "Noto Sans Mono") installed,
+/// so measuring through a generic family would drift with whatever the user
+/// happens to have installed.
+///
+/// # Renderer parity caveat ([RUST-041])
+///
+/// iced rewrites its default font to `Font::with_name("Fira Sans")` only
+/// under `target_arch = "wasm32"`
+/// (`iced_graphics-0.14.0/src/settings.rs:38-49`). On native Windows
+/// `Font::DEFAULT` stays the generic `SansSerif`, which cosmic-text
+/// resolves out of the host collection rather than from Fira Sans. Exact
+/// painted-equals-measured parity therefore requires the app to pin
+/// `default_font = Font::with_name("Fira Sans")` in its iced settings;
+/// until it does, this is a stable, Fira-shaped measurement of the intended
+/// face rather than a byte-exact match of whatever the host paints.
+///
+/// # Guarantees
+///
+/// * Empty input is exactly `0.0`.
+/// * The result is always finite and never negative.
+/// * Non-decreasing in the text: `width(prefix) <= width(prefix + rest)`,
+///   which is what keeps the solver's `max_content >= min_content`
+///   invariant intact.
+/// * Never panics — multi-byte UTF-8, emoji, whitespace-only and
+///   pathologically long inputs are all shaped and returned as-is.
+#[must_use]
+pub fn fira_sans_width(text: &str, font: Font, size: f32) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    if !size.is_finite() || size <= 0.0 {
+        // A zero, negative or non-finite size cannot be shaped (`cosmic-text`
+        // asserts a non-zero line height) and would hand the heuristic's
+        // multiply straight back as `NaN`/`inf` — which the FTWA solver
+        // panics on. Answer zero and stay finite.
+        return 0.0;
+    }
+    if font.family == Family::Monospace {
+        return heuristic_width(text, font, size);
+    }
+    usable_width(
+        measured_fira_sans_width(text, size),
+        heuristic_width(text, font, size),
+    )
 }
 
 /// The sizes the adapter measures and lays out at.

@@ -60,6 +60,13 @@
 //! | `std::sync::mpsc<BackgroundEvent>` | `Fs(..)` / `Process(..)` / `McpAuth(..)` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
 //! | any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
 //! | winit window events | `CloseRequested(id)` / `Resized(id, size)` | `Message::Window(WindowMessage::CloseRequested(id))` / `Message::Window(WindowMessage::Resized { id, size })` — the `close_requests()` / `resize_events()` lanes; with `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction |
+//! | runtime keyboard events | `KeyPressed { Escape }` | `Message::Overlay(OverlayMessage::EscapePressed)` — the `escape_to_message` lane; accepted under **both** `Status::Ignored` and `Status::Captured` so `Esc` still dismisses a modal while a `text_editor` holds focus (UI-056) |
+//! | runtime keyboard events | `KeyPressed` / `KeyReleased` `modifiers.shift()` | `Message::Overlay(OverlayMessage::ModifiersChanged { shift })` — the `modifiers_to_message` lane, the UI-022 multi-select input |
+//!
+//! The keyboard lane is the one part of this bridge that reads the iced
+//! **event stream** rather than a producer channel; see the
+//! `keyboard_events` builder below for why it needs `listen_with` and not
+//! `listen`.
 //!
 //! The bus payload enums do not implement `PartialEq` (see
 //! [`InboundMessage`]'s docs), which is why the mapping lands in one
@@ -91,7 +98,7 @@ use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 
 use crate::bus::core::Bus;
 use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived, FileEvent};
-use crate::ui_iced::message::{BusSource, InboundMessage, Message, WindowMessage};
+use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage, WindowMessage};
 
 /// A bus event handed to the pure mapper [`bus_event_to_message`].
 ///
@@ -323,6 +330,11 @@ impl BusReceivers {
 /// only 0.14 form that can carry a live receiver, because
 /// `Subscription::run` takes a bare `fn() -> S` pointer that cannot close
 /// over one.
+///
+/// Alongside the four bus lanes this also merges the winit window lane
+/// (`window_events`) and the runtime keyboard lane (`keyboard_events`),
+/// the two sources that are iced event streams rather than producer
+/// channels.
 pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
     iced::Subscription::batch([
         iced::Subscription::run_with(receivers.config.clone(), config_stream),
@@ -340,6 +352,9 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
         // through `iced::Subscription::map` (`iced_futures-0.14.0/src/
         // subscription.rs:224-231`).
         window_events(),
+        // The keyboard lane — `Esc` dismissal (UI-056) and Shift tracking
+        // (UI-022), the two facts no widget callback can hand us.
+        keyboard_events(),
     ])
 }
 
@@ -370,6 +385,110 @@ fn close_request_to_message(id: iced::window::Id) -> Message {
 /// `iced::Size` is a plain struct.
 fn resize_event_to_message((id, size): (iced::window::Id, iced::Size)) -> Message {
     Message::Window(WindowMessage::Resized { id, size })
+}
+
+/// The runtime keyboard lane ([UI-056], [UI-022]).
+///
+/// Two `listen_with` lanes, not one, because each iced subscription is
+/// identified by its **`fn` pointer** (`listen_with` hashes
+/// `(EventsWith, f)` — `iced_futures-0.14.0/src/event.rs:38-47`) and each
+/// pure mapper answers exactly one question about an event. Keeping them
+/// apart is what lets the sidecar test each rule in isolation instead of
+/// unpicking a combined mapper's precedence, and it mirrors the
+/// [`bus_event_to_message`] pure-half pattern this module already uses.
+///
+/// `listen_with` and **not** `listen` is mandatory here: `listen` filters to
+/// `Status::Ignored` only (`iced_futures-0.14.0/src/event.rs:12-17`), so
+/// an `Esc` pressed while a `text_editor` holds focus would never reach the
+/// reducer and the modal would be undismissable. `listen_with` delivers
+/// every event with its [`iced::event::Status`]
+/// (`iced_futures-0.14.0/src/event.rs:26-47`), which is what lets
+/// [`escape_to_message`] accept `Captured` too.
+fn keyboard_events() -> iced::Subscription<Message> {
+    iced::Subscription::batch([
+        iced::event::listen_with(escape_to_message),
+        iced::event::listen_with(modifiers_to_message),
+    ])
+}
+
+/// Pure `Esc` → dismiss mapping for the keyboard lane ([UI-056]).
+///
+/// A plain `fn` pointer because `iced::event::listen_with` takes one
+/// (`fn(Event, event::Status, window::Id) -> Option<Message>`,
+/// `iced_futures-0.14.0/src/event.rs:26-31`).
+///
+/// * **Both statuses accepted.** `Status::Ignored` is the ordinary case
+///   (nothing under the pointer wanted the key); `Status::Captured` is the
+///   case that matters — a focused `text_editor` swallows the key, and
+///   `Esc` must still close the modal over it.
+/// * **`KeyPressed` only.** A release is not a dismissal; mapping it would
+///   close a freshly reopened layer the instant the user lets go of `Esc`.
+/// * **Everything else `None`**, which tells the runtime to discard the
+///   event rather than deliver a message.
+///
+/// The window id is carried by the callback but not used: the app is
+/// single-window and the dismissal rule is not window-relative.
+///
+/// [RUST-020]: pure.
+#[must_use]
+fn escape_to_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    match status {
+        iced::event::Status::Ignored | iced::event::Status::Captured => match event {
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }) => Some(Message::Overlay(OverlayMessage::EscapePressed)),
+            _ => None,
+        },
+    }
+}
+
+/// Pure Shift-modifier tracking for the keyboard lane ([UI-022]).
+///
+/// The reason this lane exists at all: iced's `MouseArea::on_press` takes a
+/// fixed `Message` and cannot carry the modifier state
+/// (`iced_widget-0.14.2/src/mouse_area.rs:68-71`), and
+/// `mouse::Event::ButtonPressed` carries none
+/// (`iced_core-0.14.0/src/mouse/event.rs:26`). The only place the Shift
+/// bit is observable is the keyboard event's own `modifiers` field
+/// (`iced_core-0.14.0/src/keyboard/event.rs:12-53`), so it is mirrored
+/// onto [`OverlayState::modifiers`](crate::ui_iced::app::OverlayState::modifiers)
+/// here.
+///
+/// **Both** `KeyPressed` and `KeyReleased` are mapped, and both report the
+/// event's *current* Shift bit rather than an edge. That makes the tracked
+/// value self-correcting: a missed release (focus stolen mid-press) is
+/// repaired by the next key event instead of leaving the tree stuck in
+/// multi-select.
+///
+/// **Ordering note (why this is correct for a Shift+click):** the Shift
+/// keydown is delivered and reduced before the row-click message produced by
+/// the subsequent mouse press, so `overlay.modifiers` already reads
+/// `SHIFT` by the time `ViewModels::from_app` projects it into
+/// `LeftPanelViewModel::multi_select`.
+///
+/// The status and window id are irrelevant to the modifier state — a key
+/// the widgets captured still changed the keyboard — so both are ignored.
+///
+/// [RUST-020]: pure.
+#[must_use]
+fn modifiers_to_message(
+    event: iced::Event,
+    _status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    let shift = match event {
+        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { modifiers, .. })
+        | iced::Event::Keyboard(iced::keyboard::Event::KeyReleased { modifiers, .. }) => {
+            modifiers.shift()
+        }
+        _ => return None,
+    };
+    Some(Message::Overlay(OverlayMessage::ModifiersChanged { shift }))
 }
 
 /// Reports a lag on `source`: a `tracing::warn!` carrying the dropped

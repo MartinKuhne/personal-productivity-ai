@@ -69,13 +69,20 @@
 //!
 //! # Known gaps (flagged in the TASK-012 verification log)
 //!
-//! * **Modifier-aware multi-select (UI-022).** the legacy UI computed `multi` from
-//!   `ui.input(|i| i.modifiers)` at click time. iced's `MouseArea::on_press`
-//!   carries no modifier state (`mouse_area.rs:38-41`), so the panel emits
-//!   [`LeftPanelViewModel::multi_select`], which `from_app` sets to `false`
-//!   because no iced-side modifier tracking exists yet. [TASK-022] owns
-//!   tracking `iced::Event::Keyboard(KeyEvent { modifiers, .. })` into that
-//!   field; until then every click is a single-select.
+//! * **Modifier-aware multi-select (UI-022) — CLOSED.** the legacy UI
+//!   computed `multi` from `ui.input(|i| i.modifiers)` at click time.
+//!   iced's `MouseArea::on_press` carries no modifier state
+//!   (`mouse_area.rs:38-41`) and neither does
+//!   `mouse::Event::ButtonPressed` (`iced_core-0.14.0/src/mouse/event.rs:26`),
+//!   so the panel still emits [`LeftPanelViewModel::multi_select`] and
+//!   [`from_app`](LeftPanelViewModel::from_app) still defaults it to
+//!   `false` — it has no modifier input. The gap is closed one level up:
+//!   the subscription bridge's keyboard lane mirrors Shift onto
+//!   [`OverlayState::modifiers`](crate::ui_iced::app::OverlayState::modifiers),
+//!   and `ViewModels::from_app` overrides the field from it alongside the
+//!   other reducer-owned merges. The Shift keydown is delivered and reduced
+//!   **before** the row-click message, so the bit is current when
+//!   [`row_click_command`] runs.
 //! * **Tooltips.** iced 0.14 has no tooltip primitive under DEC-005
 //!   (`iced_aw` is ruled out), so the search/clear buttons' the legacy UI tooltips
 //!   ([`strings::SEARCH_TRIGGER_TOOLTIP`],
@@ -754,15 +761,28 @@ pub struct LeftPanelViewModel {
     /// Whether the `typst` CLI is available (gates "Save as PDF...").
     pub typst_available: bool,
     /// Whether the next row click extends the selection instead of
-    /// replacing it. See the module header: `from_app` cannot know the
-    /// modifier state, so it reports `false` until [TASK-022] feeds
-    /// tracked keyboard modifiers in.
+    /// replacing it (UI-022).
+    ///
+    /// The panel itself cannot know this: iced's `MouseArea::on_press` takes
+    /// a fixed `Message` and carries no modifier state. The value is
+    /// produced by the reducer — [`from_app`](LeftPanelViewModel::from_app)
+    /// defaults it to `false` because it has no modifier input, and
+    /// `ViewModels::from_app` overrides it from
+    /// [`OverlayState::modifiers`](crate::ui_iced::app::OverlayState::modifiers),
+    /// which the subscription bridge's keyboard lane keeps in step with the
+    /// physical Shift key.
     pub multi_select: bool,
 }
 
 impl LeftPanelViewModel {
     /// Snapshots the left panel's inputs off `app`, reading the same
     /// accessors the legacy UI panel used.
+    ///
+    /// [`multi_select`](Self::multi_select) is reported `false`: this
+    /// function takes no modifier input, so the caller that does own it
+    /// (`ViewModels::from_app`) overwrites the field after calling this.
+    /// The signature is deliberately unchanged — existing call sites and
+    /// tests construct the snapshot from `&FastMdApp` alone.
     pub fn from_app(app: &FastMdApp) -> Self {
         let rows = tree_rows(app);
 

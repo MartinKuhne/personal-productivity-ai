@@ -20,7 +20,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, InMemoryConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui::tree::flatten::FlatRow;
-use crate::ui_iced::app::{AppState, OverlayLayer, build_state};
+use crate::ui_iced::app::{AppState, OverlayLayer, ViewModels, build_state};
 use crate::ui_iced::batch_dialog::BatchDialogViewModel;
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::message::BootMessage;
@@ -801,20 +801,38 @@ fn test_skill_run_carries_its_target_through_to_the_command() {
 }
 
 #[test]
-fn test_print_requested_hands_the_job_to_the_background_channel() {
+fn test_print_requested_hands_the_job_to_a_task_not_the_ui_thread() {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let path = dir.path().join("doc.md");
     std::fs::write(&path, "# Doc\n").expect("write seed");
 
     let (mut state, _storage) = fresh_state();
-    // No assertion on the print result is possible without the Typst CLI;
-    // the contract under test is that the reduction completes without
-    // panicking and without publishing a user command (there is none).
+    // There is no `UserCommand::Print`, so nothing may be published. The
+    // render-and-open work must ride a lazy iced Task: `units() > 0` proves a
+    // real task was produced, and because the reducer never polls it no
+    // browser is launched here ([FMD-061]).
     let spy = command_spy(&state);
-    let _ = update(
+    let task = update(
         &mut state,
         Message::Tree(TreeMessage::PrintRequested { path }),
     );
+    assert_eq!(drained(&spy), Vec::<UserCommand>::new());
+    assert!(task.units() > 0, "print must produce a Task, not none()");
+}
+
+#[test]
+fn test_print_finished_reports_failure_without_publishing() {
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let task = update(
+        &mut state,
+        Message::Tree(TreeMessage::PrintFinished {
+            path: PathBuf::from("/notes/a.md"),
+            result: Err("no background channel".to_owned()),
+        }),
+    );
+    // The failure is logged, never re-routed into a command.
+    assert_eq!(task.units(), 0, "settling a print spawns no further work");
     assert_eq!(drained(&spy), Vec::<UserCommand>::new());
 }
 
@@ -2344,4 +2362,181 @@ fn finished_batch_handle() -> std::thread::JoinHandle<crate::agent::batch::types
         std::thread::yield_now();
     }
     handle
+}
+
+// --- Overlay channel: Esc dismissal + Shift tracking (UI-056, UI-022) ------
+
+/// `Esc` reduced through the top-level `update` closes the top-most modal
+/// and leaves the one beneath alone.
+#[test]
+fn test_escape_pressed_reduces_to_the_topmost_layer_only() {
+    let (mut state, _storage) = fresh_state();
+    state.overlay.tools.open();
+    state.overlay.batch.open(BatchDialogViewModel::default());
+
+    let _ = update(&mut state, Message::Overlay(OverlayMessage::EscapePressed));
+
+    assert!(
+        !state.overlay.batch.is_open(),
+        "the batch dialog sat on top and must have closed"
+    );
+    assert!(
+        state.overlay.tools.is_open(),
+        "the tools dialog underneath must survive one Esc"
+    );
+}
+
+/// `Esc` with nothing open is a no-op reduction, not a panic.
+#[test]
+fn test_escape_pressed_with_nothing_open_is_a_no_op() {
+    let (mut state, _storage) = fresh_state();
+    let before = state.overlay.hamburger_open;
+
+    let _ = update(&mut state, Message::Overlay(OverlayMessage::EscapePressed));
+
+    assert_eq!(state.overlay.hamburger_open, before);
+    assert_eq!(state.overlay.close_topmost(), None);
+}
+
+/// The docked log viewer is not in the `Esc` stack: reducing `Esc` with a
+/// visible log viewer and nothing else must leave it visible.
+#[test]
+fn test_escape_pressed_does_not_close_the_docked_logs_panel() {
+    let (mut state, _storage) = fresh_state();
+    state
+        .app
+        .orchestrator
+        .background_manager
+        .lock()
+        .expect("background log buffer")
+        .show_background_logs = true;
+    state.rebuild_view_models();
+    assert!(
+        state.models.logs.visible,
+        "fixture must show the log viewer"
+    );
+
+    let _ = update(&mut state, Message::Overlay(OverlayMessage::EscapePressed));
+
+    assert!(
+        state.models.logs.visible,
+        "a docked panel is not a modal and must not be Esc-closed"
+    );
+}
+
+/// Reducing `ModifiersChanged { shift: true }` sets the `SHIFT` bit.
+#[test]
+fn test_modifiers_changed_sets_the_shift_bit_when_held() {
+    let (mut state, _storage) = fresh_state();
+    assert!(!state.overlay.modifiers.shift());
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
+    );
+
+    assert!(state.overlay.modifiers.shift(), "the SHIFT bit must be set");
+}
+
+/// Reducing `ModifiersChanged { shift: false }` clears the `SHIFT` bit.
+#[test]
+fn test_modifiers_changed_clears_the_shift_bit_when_released() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
+    );
+    assert!(state.overlay.modifiers.shift());
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: false }),
+    );
+
+    assert!(
+        !state.overlay.modifiers.shift(),
+        "the SHIFT bit must be cleared on release"
+    );
+}
+
+/// Only the `SHIFT` bit is touched: a modifier the lane does not observe is
+/// preserved across a Shift update.
+#[test]
+fn test_modifiers_changed_leaves_other_bits_untouched() {
+    let (mut state, _storage) = fresh_state();
+    state
+        .overlay
+        .modifiers
+        .insert(iced::keyboard::Modifiers::CTRL);
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
+    );
+    assert!(state.overlay.modifiers.control(), "CTRL must survive");
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: false }),
+    );
+    assert!(
+        state.overlay.modifiers.control() && !state.overlay.modifiers.shift(),
+        "clearing Shift must not clear CTRL"
+    );
+}
+
+/// UI-022 end to end at the view-model boundary: a held Shift projects into
+/// `left.multi_select`, a released Shift does not.
+#[test]
+fn test_tracked_shift_propagates_into_left_panel_multi_select() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
+    );
+    assert!(
+        state.models.left.multi_select,
+        "Shift held must project into multi_select"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Overlay(OverlayMessage::ModifiersChanged { shift: false }),
+    );
+    assert!(
+        !state.models.left.multi_select,
+        "Shift released must clear multi_select"
+    );
+}
+
+/// `ViewModels::from_app` overrides the `false` that
+/// `LeftPanelViewModel::from_app` hardcodes, in both directions.
+#[test]
+fn test_view_models_from_app_overrides_multi_select_from_the_overlay() {
+    let (mut state, _storage) = fresh_state();
+
+    state.overlay.modifiers = iced::keyboard::Modifiers::empty();
+    let models = ViewModels::from_app(&state.app, &state.overlay);
+    assert!(!models.left.multi_select);
+
+    state.overlay.modifiers = iced::keyboard::Modifiers::SHIFT;
+    let models = ViewModels::from_app(&state.app, &state.overlay);
+    assert!(
+        models.left.multi_select,
+        "the overlay modifier snapshot must win over from_app's default"
+    );
+}
+
+/// An `Esc` message must not be mistaken for context-menu-dismissing intent
+/// by the pre-match guard — `close_topmost` owns that transition instead.
+#[test]
+fn test_escape_pressed_is_not_a_context_menu_dismissing_command() {
+    assert!(
+        !dismisses_context_menu(&Message::Overlay(OverlayMessage::EscapePressed)),
+        "the generic dismiss guard must not pre-empt close_topmost"
+    );
+    assert!(!dismisses_context_menu(&Message::Overlay(
+        OverlayMessage::ModifiersChanged { shift: true }
+    )));
 }

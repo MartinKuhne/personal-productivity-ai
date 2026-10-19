@@ -63,6 +63,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/chronotope/chrono",
     },
     Attribution {
+        name: "cosmic-text",
+        authors: "Jeremy Soller, System76 contributors",
+        github_url: "https://github.com/pop-os/cosmic-text",
+    },
+    Attribution {
         name: "csv",
         authors: "Andrew Gallant",
         github_url: "https://github.com/BurntSushi/rust-csv",
@@ -109,6 +114,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
     },
     Attribution {
         name: "iced",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_graphics",
         authors: "Héctor Ramón Jiménez, iced contributors",
         github_url: "https://github.com/iced-rs/iced",
     },

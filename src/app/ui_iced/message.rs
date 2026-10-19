@@ -67,6 +67,13 @@
 //!   (`AgentEvent`, `BackgroundEvent`, `BackgroundLogEntry`, `AppConfig`)
 //!   do not implement `PartialEq`, so they cannot ride a channel that
 //!   derives it.
+//! - **Added for UI-056 / UI-022:** `Overlay` — the *runtime keyboard*
+//!   report channel (`EscapePressed`, `ModifiersChanged`). Like `Inbound` it
+//!   is a dedicated channel because no widget can produce it: iced's
+//!   `MouseArea` press callbacks and `mouse::Event::ButtonPressed` both
+//!   carry no modifier state, so `Esc` dismissal and the Shift bit have to
+//!   be observed off the raw event stream by the subscription bridge's
+//!   keyboard lane. See [`OverlayMessage`].
 //!
 //! # How the pilot's messages fold in
 //!
@@ -158,6 +165,11 @@ pub enum Message {
     Inbound(InboundMessage),
     /// The top-bar hamburger menu channel ([TASK-023] fix menu visibility).
     Menu(MenuMessage),
+    /// The floating-overlay / keyboard-modifier channel ([UI-056], [UI-022]) —
+    /// the runtime keyboard reports the overlay host and the modifier-aware
+    /// tree selection need, produced only by the [TASK-019] subscription
+    /// bridge's keyboard lane.
+    Overlay(OverlayMessage),
     /// Boot-infrastructure reports ([TASK-022]) — the terminal outcomes of
     /// the one-shot tasks the `boot` closure returns (font registration).
     /// Not a panel channel and not
@@ -352,9 +364,22 @@ pub enum TreeMessage {
     /// "Print…" on a file row (UI-014). There is **no** `UserCommand::Print`;
     /// the legacy UI handler hands the job to the background channel directly
     /// (`src/app/ui/tree/render.rs:161-173`), so the reducer owns it.
+    ///
+    /// The render, temp-file write and browser hand-off all block, so they ride
+    /// an iced `Task` rather than running on the UI thread ([FMD-060],
+    /// [FMD-061]) and report back through [`TreeMessage::PrintFinished`].
     PrintRequested {
         /// The file to print.
         path: PathBuf,
+    },
+    /// The `iced::Task` spawned for a [`TreeMessage::PrintRequested`] has settled.
+    /// Carries the outcome so a failure is logged from the reducer instead of
+    /// the UI thread ever having touched the browser itself.
+    PrintFinished {
+        /// The file the print was attempted for.
+        path: PathBuf,
+        /// `Ok(())` once the browser has been handed the rendered document.
+        result: Result<(), String>,
     },
     /// "Delete" on a multi-selected file row (UI-025). the legacy UI fans this out
     /// into one `UserCommand::Delete` per path and then clears the
@@ -926,6 +951,47 @@ pub enum MenuMessage {
     /// A selectable menu row was picked. The wrapped command executes via
     /// `route_command` and the menu closes.
     RowActivated(UserCommand),
+}
+
+/// Floating-overlay / keyboard-modifier channel ([UI-056], [UI-022]).
+///
+/// Both variants are **runtime keyboard reports** produced by the keyboard
+/// lane of [`crate::ui_iced::subscription`], never by a widget: iced's
+/// `MouseArea` click callbacks carry no modifier state
+/// (`iced_widget-0.14.2/src/mouse_area.rs:38-41`) and its
+/// `mouse::Event::ButtonPressed` carries none either
+/// (`iced_core-0.14.0/src/mouse/event.rs:26`), so both facts have to be
+/// observed off the event stream and folded into
+/// [`OverlayState`](crate::ui_iced::app::OverlayState) before the click or
+/// dismissal that depends on them is reduced.
+///
+/// * [`Self::EscapePressed`] closes the **top-most** open modal — one
+///   `Esc`, one layer ([UI-056]: "the dialog shall provide a `Close` action
+///   (button and `Esc` keypress…) that hides the dialog without persisting
+///   further state"). Which layer that is, and why the docked log viewer is
+///   excluded, is the rule owned by
+///   [`OverlayState::close_topmost`](crate::ui_iced::app::OverlayState::close_topmost);
+///   this channel only says "Escape went down".
+/// * [`Self::ModifiersChanged`] mirrors the Shift key onto
+///   [`OverlayState::modifiers`](crate::ui_iced::app::OverlayState::modifiers)
+///   so `LeftPanelViewModel::multi_select` (UI-022) is current when a tree
+///   row click is reduced.
+///
+/// It is **not** [`Message::Command`]: neither report is a request for the
+/// *application* to do something ([FMD-068] rule 1) — they are statements
+/// about the input device, the same class of payload
+/// [`LayoutMessage::CursorMoved`] carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayMessage {
+    /// `Escape` was pressed while the event was either ignored by a widget
+    /// or captured by one (a focused `text_editor` still has to lose the
+    /// modal), so the reducer closes the top-most open floating layer.
+    EscapePressed,
+    /// The tracked Shift modifier state changed.
+    ModifiersChanged {
+        /// Whether the Shift key is currently held down.
+        shift: bool,
+    },
 }
 
 /// Which inbound bus a notification arrived from ([TASK-019]).

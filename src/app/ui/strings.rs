@@ -121,6 +121,11 @@ pub const TOOLS_LIST_COLUMN: &str = "Tools";
 /// Caption for the per-group prompt char count column header.
 pub const TOOLS_CHAR_COUNT_COLUMN: &str = "Prompt";
 
+/// Chip shown beside a tool-group row's char count when every tool in the
+/// group is `ReadOnly` and therefore parallel-safe ([UI-058], TOOL-020).
+/// Informational only — a row without the chip is *not* marked unsafe.
+pub const TOOLS_PARALLEL_CHIP: &str = "✓ parallel";
+
 /// Button label that triggers the OAuth flow for an eligible MCP server.
 pub const TOOLS_AUTH_BUTTON: &str = "Authenticate";
 
@@ -843,6 +848,7 @@ mod tests {
         assert_eq!(TOOLS_KIND_COLUMN, "Kind");
         assert_eq!(TOOLS_ACTIONS_COLUMN, "Actions");
         assert_eq!(TOOLS_ERROR_ICON, "⚠");
+        assert_eq!(TOOLS_PARALLEL_CHIP, "✓ parallel");
         assert_eq!(TOOLS_EMPTY_STATE, "No tool groups registered.");
     }
 

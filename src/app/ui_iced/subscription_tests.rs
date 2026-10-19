@@ -11,8 +11,9 @@ use uuid::Uuid;
 
 use super::{
     BackgroundReceiver, BusReceivers, InboundBusEvent, SharedReceiver, agent_stream,
-    background_stream, bus_event_to_message, close_request_to_message, config_stream, file_stream,
-    resize_event_to_message, subscription,
+    background_stream, bus_event_to_message, close_request_to_message, config_stream,
+    escape_to_message, file_stream, keyboard_events, modifiers_to_message, resize_event_to_message,
+    subscription,
 };
 use crate::agent::events::{
     AgentDebugEntry, AgentStatus, DebugEntryKind, DebugEntryRow, TokenUsageInfo, ToolSideEffect,
@@ -23,7 +24,7 @@ use crate::bus::events::{
     FsEvent, LogCategory, McpAuthEvent, ProcessEvent,
 };
 use crate::config::AppConfig;
-use crate::ui_iced::message::{BusSource, InboundMessage, Message};
+use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage};
 
 fn sample_path() -> PathBuf {
     PathBuf::from("workspace/notes.md")
@@ -729,4 +730,232 @@ fn test_resize_event_maps_to_the_window_message() {
         resize_event_to_message((id, size)),
         Message::Window(super::WindowMessage::Resized { id, size })
     );
+}
+
+// --- keyboard lane (UI-056 Esc dismissal, UI-022 Shift tracking) ------------
+
+/// A `KeyPressed` runtime event for `key` carrying `modifiers`.
+fn pressed(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> iced::Event {
+    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers,
+        text: None,
+        repeat: false,
+    })
+}
+
+/// A `KeyReleased` runtime event for `key` carrying `modifiers`.
+fn released(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> iced::Event {
+    iced::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers,
+    })
+}
+
+fn escape() -> iced::keyboard::Key {
+    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+}
+
+fn letter_a() -> iced::keyboard::Key {
+    iced::keyboard::Key::Character("a".into())
+}
+
+/// UI-056: `Esc` with nothing under it focused must dismiss.
+#[test]
+fn test_escape_ignored_maps_to_the_dismiss_message() {
+    assert_eq!(
+        escape_to_message(
+            pressed(escape(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Ignored,
+            iced::window::Id::unique(),
+        ),
+        Some(Message::Overlay(OverlayMessage::EscapePressed)),
+        "an ignored Escape must still reach the overlay reducer"
+    );
+}
+
+/// UI-056: `Esc` **captured by a focused `text_editor`** must still dismiss.
+/// This is the case `iced::event::listen` cannot serve — it filters to
+/// `Status::Ignored` only (`iced_futures-0.14.0/src/event.rs:12-17`) — and
+/// is the whole reason the lane uses `listen_with`.
+#[test]
+fn test_escape_captured_by_a_focused_widget_still_maps_to_the_dismiss_message() {
+    assert_eq!(
+        escape_to_message(
+            pressed(escape(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Captured,
+            iced::window::Id::unique(),
+        ),
+        Some(Message::Overlay(OverlayMessage::EscapePressed)),
+        "a captured Escape must not be swallowed by the focused editor"
+    );
+}
+
+/// UI-056: only Escape dismisses; any other key press is discarded so the
+/// lane stays silent for ordinary typing.
+#[test]
+fn test_non_escape_key_press_maps_to_none() {
+    for status in [iced::event::Status::Ignored, iced::event::Status::Captured] {
+        assert_eq!(
+            escape_to_message(
+                pressed(letter_a(), iced::keyboard::Modifiers::SHIFT),
+                status,
+                iced::window::Id::unique(),
+            ),
+            None,
+            "a non-Escape press must produce no dismiss under {status:?}"
+        );
+    }
+}
+
+/// UI-056: releasing `Esc` is not a dismissal — mapping it would close a
+/// layer reopened while the key was still down.
+#[test]
+fn test_escape_release_maps_to_none() {
+    for status in [iced::event::Status::Ignored, iced::event::Status::Captured] {
+        assert_eq!(
+            escape_to_message(
+                released(escape(), iced::keyboard::Modifiers::empty()),
+                status,
+                iced::window::Id::unique(),
+            ),
+            None,
+            "a KeyReleased Escape must produce no dismiss under {status:?}"
+        );
+    }
+}
+
+/// UI-056: non-keyboard runtime events are not dismisses either.
+#[test]
+fn test_escape_ignores_non_keyboard_events() {
+    let events = [
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Window(iced::window::Event::CloseRequested),
+    ];
+    for event in events {
+        assert_eq!(
+            escape_to_message(
+                event.clone(),
+                iced::event::Status::Ignored,
+                iced::window::Id::unique()
+            ),
+            None,
+            "a non-keyboard event must produce no dismiss: {event:?}"
+        );
+    }
+}
+
+/// UI-022: a key event with Shift held reports `shift: true`.
+#[test]
+fn test_modifier_mapper_reports_shift_held() {
+    let event = pressed(letter_a(), iced::keyboard::Modifiers::SHIFT);
+    assert_eq!(
+        modifiers_to_message(
+            event,
+            iced::event::Status::Ignored,
+            iced::window::Id::unique()
+        ),
+        Some(Message::Overlay(OverlayMessage::ModifiersChanged {
+            shift: true
+        })),
+        "Shift held must be reported as shift: true"
+    );
+}
+
+/// UI-022: the same mapper on a key event without Shift reports `false`,
+/// which is what clears the tracked bit on release.
+#[test]
+fn test_modifier_mapper_reports_shift_not_held() {
+    let event = pressed(letter_a(), iced::keyboard::Modifiers::empty());
+    assert_eq!(
+        modifiers_to_message(
+            event,
+            iced::event::Status::Ignored,
+            iced::window::Id::unique()
+        ),
+        Some(Message::Overlay(OverlayMessage::ModifiersChanged {
+            shift: false
+        })),
+        "no Shift must be reported as shift: false"
+    );
+}
+
+/// UI-022: releases are mapped too, and report the event's own bit rather
+/// than an edge — that is what makes the tracked value self-correcting
+/// after a missed release.
+#[test]
+fn test_modifier_mapper_tracks_releases_with_their_own_bit() {
+    assert_eq!(
+        modifiers_to_message(
+            released(letter_a(), iced::keyboard::Modifiers::SHIFT),
+            iced::event::Status::Captured,
+            iced::window::Id::unique(),
+        ),
+        Some(Message::Overlay(OverlayMessage::ModifiersChanged {
+            shift: true
+        })),
+        "a release still carrying SHIFT must report true"
+    );
+    assert_eq!(
+        modifiers_to_message(
+            released(escape(), iced::keyboard::Modifiers::empty()),
+            iced::event::Status::Ignored,
+            iced::window::Id::unique(),
+        ),
+        Some(Message::Overlay(OverlayMessage::ModifiersChanged {
+            shift: false
+        })),
+        "even an Escape release refreshes the tracked bit"
+    );
+}
+
+/// UI-022: only keyboard events carry a modifier report.
+#[test]
+fn test_modifier_mapper_ignores_non_keyboard_events() {
+    let events = [
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Window(iced::window::Event::CloseRequested),
+    ];
+    for event in events {
+        assert_eq!(
+            modifiers_to_message(
+                event.clone(),
+                iced::event::Status::Ignored,
+                iced::window::Id::unique()
+            ),
+            None,
+            "a non-keyboard event carries no modifier report: {event:?}"
+        );
+    }
+}
+
+/// The keyboard lane must be constructible and mergeable into the main
+/// subscription without the two `listen_with` recipes collapsing into one
+/// identity (they are keyed by their `fn` pointer, so they stay distinct).
+#[test]
+fn test_keyboard_lane_builds_and_merges_into_the_main_subscription() {
+    let lane = keyboard_events();
+    drop(lane);
+
+    let (sender, receiver) = std::sync::mpsc::channel::<BackgroundEvent>();
+    drop(sender);
+    let receivers = BusReceivers::new(
+        &Bus::<ConfigArrived>::new(),
+        &Bus::<FileEvent>::new(),
+        &Bus::<AgentEvent>::new(),
+        receiver,
+    );
+    // Adding the keyboard lane must not break the whole-subscription build.
+    let merged = subscription(&receivers);
+    drop(merged);
 }

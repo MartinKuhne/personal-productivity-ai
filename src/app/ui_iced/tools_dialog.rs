@@ -26,11 +26,11 @@
 //! | # | the legacy UI column (`ui/tools_dialog.rs:143-148`) | iced column | Width |
 //! | --- | --- | --- | --- |
 //! | 1 | `Column::auto().at_least(28.0)` — enable checkbox | `checkbox` + `.on_toggle` (`iced_widget-0.14.2/src/checkbox.rs:119`, `:155`) | `Shrink` |
-//! | 2 | `Column::remainder().at_least(140.0).clip(true)` — group | strong `text` + always-allocated error line | `Fill` |
+//! | 2 | `Column::remainder().at_least(140.0).clip(true)` — group | strong `text` name (the error rides the `⚠` tooltip, not this cell) | `Fill` |
 //! | 3 | `Column::auto().at_least(72.0)` — kind | `text` from [`kind_label`] | `Shrink` |
 //! | 4 | `Column::remainder().at_least(120.0)` — tools | comma-joined `text` | `Fill` |
-//! | 5 | `Column::auto().at_least(80.0)` — prompt char count | `text` of the summed count | `Shrink` |
-//! | 6 | `Column::remainder().at_least(140.0)` — actions | `Row` of [`ToolAction`] buttons | `Fill` |
+//! | 5 | `Column::auto().at_least(80.0)` — prompt char count | `text` of the summed count + the `✓ parallel` chip (see below) | `Shrink` |
+//! | 6 | `Column::remainder().at_least(140.0)` — actions | `Row` of [`ToolAction`] buttons, led by the `⚠` tooltip marker | `Fill` |
 //!
 //! Verified `iced::widget::table` API: `table(columns, rows)`
 //! `iced_widget-0.14.2/src/table.rs:18-28`, `column(header, view)`
@@ -50,14 +50,27 @@
 //! * the `⚠` marker ([`strings::TOOLS_ERROR_ICON`]) uses
 //!   [`Palette::warning`] — exact legacy parity
 //!   (`src/app/ui/tools_dialog.rs:255`).
-//! * the error **text** uses [`Palette::error`], not `warning`. the legacy UI never
-//!   showed the text at all: it hid `"{kind:?}: {message}"` in a hover
-//!   tooltip (`:215`, `:256`). iced 0.14 has no built-in tooltip and
-//!   DEC-005 rules out `iced_aw`, so the message has to be visible
-//!   inline — and inline, next to a warning-coloured marker, a message
-//!   that describes a *failure* reads correctly in the stronger
-//!   `error` token. Both come from the shared palette; no numeric literal
-//!   is introduced ([GUD-003]).
+//! * the tooltip **body** — the `Kind: message` line the marker carries —
+//!   uses [`Palette::error`], not `warning`. iced 0.14 ships a tooltip
+//!   widget, [`iced::widget::tooltip::Tooltip`]
+//!   (`iced_widget-0.14.2/src/tooltip.rs:94-109`, `Position` `:407-412`),
+//!   so the message is revealed on hover exactly as the legacy UI revealed
+//!   it (`:215`, `:256`) rather than pinned inline in the group cell.
+//!   Hovered text that describes a *failure* reads correctly in the
+//!   stronger `error` token next to a warning-coloured marker. Both come
+//!   from the shared palette; no numeric literal is introduced
+//!   ([GUD-003]).
+//!
+//! # The parallel-safe chip ([UI-058])
+//!
+//! A group whose `parallel_safe` is `true` gets a `✓ parallel` chip
+//! ([`strings::TOOLS_PARALLEL_CHIP`]) after its char count, painted with
+//! [`Palette::success`] inside a styled `container` — the shape
+//! `doc/planning/iced-migration-map.md:99` prescribes for UI-052/UI-058.
+//! The chip is informational: a row without one is **not** marked unsafe,
+//! so nothing is rendered in its place and no "not parallel" chip exists.
+//! [`parallel_chip_label`] is the pure rule the renderer and the tests
+//! share.
 //!
 //! # Message channel
 //!
@@ -81,7 +94,9 @@ mod tests;
 
 use std::collections::HashMap;
 
-use iced::widget::{Column, Row, button, checkbox, rule, scrollable, table, text};
+use iced::widget::{
+    Column, Row, button, checkbox, container, rule, scrollable, table, text, tooltip,
+};
 use iced::{Alignment, Element, Length, Size};
 
 use crate::bus::events::user_command::UserCommand;
@@ -135,8 +150,23 @@ pub const TOOLS_HEADER_SIZE: f32 = 14.0;
 /// Logical point size of a table body cell.
 pub const TOOLS_ROW_SIZE: f32 = 14.0;
 
-/// Logical point size of the inline error line.
+/// Logical point size of the error tooltip body.
 pub const TOOLS_ERROR_SIZE: f32 = 12.0;
+
+/// Logical point size of the `✓ parallel` chip.
+pub const TOOLS_CHIP_SIZE: f32 = 12.0;
+
+/// Padding inside the `✓ parallel` chip.
+pub const CHIP_PADDING: f32 = 2.0;
+
+/// Corner radius of the `✓ parallel` chip.
+pub const CHIP_RADIUS: f32 = 3.0;
+
+/// Gap between a row's char count and its `✓ parallel` chip.
+pub const CHIP_SPACING: f32 = 6.0;
+
+/// Gap between the `⚠` marker and its hover tooltip.
+pub const TOOLTIP_GAP: f32 = 4.0;
 
 /// Horizontal padding inside a table cell.
 pub const CELL_PADDING_X: f32 = 6.0;
@@ -239,6 +269,11 @@ pub struct ToolGroupRow {
     pub tools_label: String,
     /// Summed prompt char count (column 5).
     pub prompt_char_count: usize,
+    /// Whether every tool in the group is `ReadOnly`, i.e. the group may
+    /// run concurrently — carried through from
+    /// [`ToolGroupState::parallel_safe`] and rendered as the `✓ parallel`
+    /// chip beside the char count ([UI-058], TOOL-020).
+    pub parallel_safe: bool,
     /// The rendered `Kind: message` error line, `None` when clean.
     pub error: Option<String>,
 }
@@ -336,12 +371,35 @@ pub fn kind_label(kind: ToolGroupKind) -> &'static str {
 }
 
 /// Renders one recorded group error as the `Kind: message` line the legacy UI put
-/// in its hover tooltip (`src/app/ui/tools_dialog.rs:215`, `:256`).
+/// in its hover tooltip (`src/app/ui/tools_dialog.rs:215`, `:256`) and that this
+/// port shows in the `⚠` marker's tooltip ([UI-057]).
 ///
 /// Purity: pure.
 #[must_use]
 pub fn error_line_text(error: &ToolGroupError) -> String {
     strings::format_tool_group_error(&format!("{:?}", error.kind), &error.message)
+}
+
+/// The body a row's `⚠` hover tooltip shows — the `Kind: message` line —
+/// and `None` when the row is clean and no marker is rendered at all
+/// ([UI-057]).
+///
+/// Purity: pure function of the row.
+#[must_use]
+pub fn error_tooltip_body(row: &ToolGroupRow) -> Option<&str> {
+    row.error.as_deref()
+}
+
+/// The chip label a row's Prompt column renders, `Some` only when the
+/// group is flagged parallel-safe ([UI-058]).
+///
+/// `None` means "render no chip", **not** "render an unsafe marker": the
+/// chip's absence carries no negative signal.
+///
+/// Purity: pure function of the row.
+#[must_use]
+pub fn parallel_chip_label(row: &ToolGroupRow) -> Option<&'static str> {
+    row.parallel_safe.then_some(strings::TOOLS_PARALLEL_CHIP)
 }
 
 /// Maps one [`ToolGroupState`] to its row model ([TASK-017b3]).
@@ -366,6 +424,7 @@ pub fn row_from_group(
         auth_state: auth_state_for(group, facts),
         tools_label: group.tool_names.join(", "),
         prompt_char_count: group.prompt_char_count(char_count_for_tool),
+        parallel_safe: group.parallel_safe,
         error: group.last_error.as_ref().map(error_line_text),
     }
 }
@@ -470,11 +529,25 @@ pub fn error_marker_color() -> iced::Color {
     Palette::fastmd_dark().warning
 }
 
-/// The token the inline error text is painted with — `Palette::error`.
+/// The token the error tooltip body is painted with — `Palette::error`.
 /// See the module header for why this differs from the marker.
 #[must_use]
 pub fn error_text_color() -> iced::Color {
     Palette::fastmd_dark().error
+}
+
+/// The token the `✓ parallel` chip is painted with — `Palette::success`,
+/// the palette's completion-role colour. Resolved through the shared
+/// palette so no numeric literal reaches the panel ([GUD-003]).
+#[must_use]
+pub fn parallel_chip_color() -> iced::Color {
+    Palette::fastmd_dark().success
+}
+
+/// The token the `✓ parallel` chip's surface uses.
+#[must_use]
+pub fn parallel_chip_surface_color() -> iced::Color {
+    Palette::fastmd_dark().surface_variant
 }
 
 /// The token a disabled / informational cell uses.
@@ -638,10 +711,13 @@ impl ToolsDialogViewModel {
 /// Tools
 /// 9 Group
 /// ─────────────────────────────────────────────────────────────────
-/// ☑ │ Filesystem        │ Internal    │ read, write │ 1204 │
-/// ☑ │ my-server         │ MCP (remote)│ fetch       │  612 │ ⚠ Execution: … [Restart] [Authenticate] [Forget]
+/// ☑ │ Filesystem        │ Internal    │ read, write │ 1204 [✓ parallel] │
+/// ☑ │ my-server         │ MCP (remote)│ fetch       │  612 │ ⚠ →hover: "Execution: …"  [Restart] [Authenticate] [Forget]
 /// ─────────────────────────────────────────────────────────────────
 /// ```
+///
+/// The parallel-safe chip renders only on `parallel_safe` rows ([UI-058]);
+/// the error text renders only inside the marker's tooltip ([UI-057]).
 ///
 /// The card is the *content* only: the root view mounts it through
 /// [`crate::ui_iced::overlay::modal`] with [`dismiss_message()`] as the
@@ -729,12 +805,7 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
         .width(Length::Fill),
         table::column(
             header_cell(strings::TOOLS_CHAR_COUNT_COLUMN),
-            move |row: ToolGroupRow| -> Element<'static, Message> {
-                text(row.prompt_char_count.to_string())
-                    .size(TOOLS_ROW_SIZE)
-                    .color(Palette::fastmd_dark().text_value)
-                    .into()
-            },
+            move |row: ToolGroupRow| -> Element<'static, Message> { char_count_cell(&row) },
         )
         .width(Length::Shrink),
         table::column(
@@ -761,36 +832,81 @@ fn header_cell(label: &'static str) -> Element<'static, Message> {
         .into()
 }
 
-/// The group-name cell: the strong name plus the always-allocated error
-/// line (empty when the row is clean, so the cell's shape never changes —
-/// AGENTS §6).
-fn group_cell(row: &ToolGroupRow) -> Element<'static, Message> {
-    let error = row.error.clone().unwrap_or_default();
-    Column::with_children(vec![
-        text(row.display_name.clone())
-            .size(TOOLS_ROW_SIZE)
-            .color(row_label_color())
+/// The Prompt column's cell: the summed char count, followed by the
+/// `✓ parallel` chip when — and only when — the group is parallel-safe
+/// ([UI-058]). The chip's absence is not a negative signal, so a
+/// non-parallel row renders the count alone.
+fn char_count_cell(row: &ToolGroupRow) -> Element<'static, Message> {
+    let count: Element<'static, Message> = text(row.prompt_char_count.to_string())
+        .size(TOOLS_ROW_SIZE)
+        .color(Palette::fastmd_dark().text_value)
+        .into();
+
+    match parallel_chip_label(row) {
+        Some(label) => Row::with_children(vec![count, parallel_chip(label)])
+            .spacing(CHIP_SPACING)
+            .align_y(Alignment::Center)
             .into(),
-        text(error)
-            .size(TOOLS_ERROR_SIZE)
-            .style(move |_theme| iced::widget::text::Style {
-                color: Some(error_text_color()),
-            })
-            .into(),
-    ])
-    .spacing(1.0)
+        None => count,
+    }
+}
+
+/// The `✓ parallel` chip — a styled `container` around the label, painted
+/// with [`Palette::success`] on a [`Palette::surface_variant`] fill: the
+/// shape `doc/planning/iced-migration-map.md:99` prescribes for UI-052.
+/// Every colour comes from the shared palette ([GUD-003]).
+fn parallel_chip(label: &'static str) -> Element<'static, Message> {
+    let palette = Palette::fastmd_dark();
+
+    container(
+        text(label)
+            .size(TOOLS_CHIP_SIZE)
+            .color(parallel_chip_color()),
+    )
+    .padding(CHIP_PADDING)
+    .style(move |_theme| container::Style {
+        background: Some(parallel_chip_surface_color().into()),
+        border: iced::Border {
+            color: palette.border,
+            width: SEPARATOR_WIDTH,
+            radius: CHIP_RADIUS.into(),
+        },
+        ..container::Style::default()
+    })
     .into()
 }
 
-/// The Actions cell: the `⚠` marker plus the row's mapped action buttons.
+/// The group-name cell: the strong display name on a single line. The
+/// row's error is deliberately **not** rendered here — [UI-057] carries it
+/// in the `⚠` marker's hover tooltip (see [`actions_cell`]), so the cell
+/// keeps the same shape whether or not an error was recorded.
+fn group_cell(row: &ToolGroupRow) -> Element<'static, Message> {
+    text(row.display_name.clone())
+        .size(TOOLS_ROW_SIZE)
+        .color(row_label_color())
+        .into()
+}
+
+/// The Actions cell: the `⚠` marker wrapped in an
+/// [`iced::widget::tooltip::Tooltip`] whose body is the row's
+/// `Kind: message` line ([UI-057]), plus the row's mapped action buttons.
+/// A clean row keeps the marker slot empty and mounts no tooltip.
 fn actions_cell(row: &ToolGroupRow) -> Element<'static, Message> {
-    let marker = if row.has_error() {
-        text(strings::TOOLS_ERROR_ICON)
-            .size(TOOLS_ROW_SIZE)
-            .color(error_marker_color())
-            .into()
-    } else {
-        text("").size(TOOLS_ROW_SIZE).into()
+    let marker = match error_tooltip_body(row) {
+        Some(body) => tooltip::Tooltip::new(
+            text(strings::TOOLS_ERROR_ICON)
+                .size(TOOLS_ROW_SIZE)
+                .color(error_marker_color()),
+            text(body.to_owned())
+                .size(TOOLS_ERROR_SIZE)
+                .style(|_theme| iced::widget::text::Style {
+                    color: Some(error_text_color()),
+                }),
+            tooltip::Position::Bottom,
+        )
+        .gap(TOOLTIP_GAP)
+        .into(),
+        None => text("").size(TOOLS_ROW_SIZE).into(),
     };
 
     let buttons = row_actions(row).into_iter().fold(

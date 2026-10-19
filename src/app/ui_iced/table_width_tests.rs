@@ -5,6 +5,13 @@
 //! solver-output → iced column-width mapping. Measurement is driven by a
 //! fixed-width fake ([`fixed_width`]: 5 px per body character, 10 px per
 //! monospace character) so every assertion is exact.
+//!
+//! The [GAP-06] section exercises the real measurer ([`fira_sans_width`])
+//! against iced's own Fira Sans bytes through `cosmic-text`. Those
+//! assertions are deliberately *relational* — narrow < wide, monotone in
+//! length, always finite, mono equal to the heuristic — rather than pinned
+//! to literal pixel values, so they hold across Fira Sans releases while
+//! still failing if the real path degrades into the heuristic.
 
 use super::*;
 use crate::markdown::model::{InlineElem, TextStyle};
@@ -465,9 +472,429 @@ fn test_solver_input_uses_the_declared_strategy_unchanged() {
 }
 
 #[test]
+fn test_fira_sans_is_pinned_by_name_because_the_engine_also_holds_system_fonts() {
+    // `FontSystem::new_with_fonts` calls `db.load_system_fonts()` before
+    // adding the explicit sources
+    // (`cosmic-text-0.15.0/src/font/system.rs:396-404`), so this engine
+    // carries the host's whole installed-font collection alongside Fira
+    // Sans — 517 faces on the machine this was measured on. Asking for the
+    // face BY NAME is therefore not a nicety: it is the only thing that
+    // pins the measurement to iced's Fira Sans instead of leaving it to
+    // host-dependent generic-family resolution.
+    let guard = match fira_sans_font_system().lock() {
+        Ok(guard) => guard,
+        Err(_) => panic!("shared Fira Sans engine lock was poisoned"),
+    };
+    let db = guard.db();
+
+    let fira = db
+        .query(&cosmic_text::fontdb::Query {
+            families: &[cosmic_text::fontdb::Family::Name("Fira Sans")],
+            ..Default::default()
+        })
+        .and_then(|id| db.face(id).map(|face| face.post_script_name.clone()));
+
+    assert!(
+        fira.as_deref().is_some_and(|n| n.starts_with("Fira")),
+        "the by-name request must land on iced's own Fira Sans face, got {fira:?}"
+    );
+    assert!(
+        db.faces().count() > 1,
+        "the host font collection is expected to be loaded alongside Fira Sans; \
+         if that ever stops being true the by-name pin is still correct but this \
+         test should be revisited"
+    );
+}
+
+#[test]
 fn test_cell_tokens_type_is_reachable_from_the_adapter() {
     // Guards the re-export surface the render layer relies on.
     let measurer = fake_measurer();
     let (_, _, tokens): (f32, f32, CellTokens) = measurer.measure_cell(&cell("x y"));
     assert_eq!(tokens.token_widths.len(), 2);
+}
+
+// --- real font metrics via cosmic-text ([GAP-06]) ----------------------
+
+/// Body size used across the real-metrics tests.
+const REAL_BODY_SIZE: f32 = 14.0;
+
+/// Corpus every real-metrics result must survive: ASCII, narrow and wide
+/// glyphs, multi-byte UTF-8, emoji, a ZWJ family sequence, whitespace in
+/// all its forms, a NUL byte, a zero-width space, and a 10 000-character
+/// string.
+fn real_metrics_corpus() -> Vec<String> {
+    let mut corpus: Vec<String> = [
+        "a",
+        "ab",
+        "iiii",
+        "MMMM",
+        "Hello, world!",
+        "readme.md",
+        "   ",
+        "\t",
+        " ",
+        "\u{0}",
+        "\u{200b}",
+        "é",
+        "ümlaut",
+        "日本語",
+        "Привет",
+        "🎉",
+        "👨‍👩‍👧‍👦",
+        "mixed 日本語 é 🎉 tail",
+    ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect();
+    corpus.push("x".repeat(10_000));
+    corpus
+}
+
+/// Measurer over the real Fira Sans metrics with the FastMD body metrics.
+fn real_measurer() -> IcedTextMeasurer<'static> {
+    IcedTextMeasurer::new(&fira_sans_width, TextMetrics::FASTMD)
+}
+
+#[test]
+fn test_fira_sans_available_reports_the_loaded_face() {
+    assert!(
+        fira_sans_available(),
+        "iced's FIRA_SANS_REGULAR must resolve as a face; if this is false the \
+         measurer is silently answering with the heuristic"
+    );
+}
+
+#[test]
+fn test_fira_sans_width_empty_is_zero() {
+    assert_eq!(fira_sans_width("", Font::DEFAULT, REAL_BODY_SIZE), 0.0);
+    assert_eq!(fira_sans_width("", Font::MONOSPACE, REAL_BODY_SIZE), 0.0);
+    assert_eq!(fira_sans_width("", Font::DEFAULT, 0.0), 0.0);
+    assert_eq!(fira_sans_width("", Font::DEFAULT, f32::NAN), 0.0);
+}
+
+#[test]
+fn test_fira_sans_width_separates_narrow_from_wide_glyphs() {
+    // The whole point of GAP-06: the flat model cannot tell "iiii" from
+    // "MMMM", real metrics can, and narrow comes out genuinely narrow.
+    let narrow = fira_sans_width("iiii", Font::DEFAULT, REAL_BODY_SIZE);
+    let wide = fira_sans_width("MMMM", Font::DEFAULT, REAL_BODY_SIZE);
+
+    assert_eq!(
+        heuristic_width("iiii", Font::DEFAULT, REAL_BODY_SIZE),
+        heuristic_width("MMMM", Font::DEFAULT, REAL_BODY_SIZE),
+        "the heuristic is glyph-blind: same char count, same width"
+    );
+    assert!(
+        narrow < wide,
+        "'iiii' ({narrow}) must measure narrower than 'MMMM' ({wide})"
+    );
+    assert!(
+        wide > narrow * 1.5,
+        "'MMMM' should be far wider than 'iiii', got {narrow} vs {wide}"
+    );
+    assert_ne!(
+        narrow,
+        heuristic_width("iiii", Font::DEFAULT, REAL_BODY_SIZE)
+    );
+    assert_ne!(wide, heuristic_width("MMMM", Font::DEFAULT, REAL_BODY_SIZE));
+}
+
+#[test]
+fn test_fira_sans_width_is_monotonic_in_length() {
+    assert!(fira_sans_width("a", Font::DEFAULT, REAL_BODY_SIZE) > 0.0);
+    assert!(
+        fira_sans_width("ab", Font::DEFAULT, REAL_BODY_SIZE)
+            >= fira_sans_width("a", Font::DEFAULT, REAL_BODY_SIZE),
+        "appending a glyph must not shrink the width"
+    );
+    assert!(
+        fira_sans_width("abc", Font::DEFAULT, REAL_BODY_SIZE)
+            > fira_sans_width("ab", Font::DEFAULT, REAL_BODY_SIZE)
+    );
+}
+
+#[test]
+fn test_fira_sans_width_is_monotonic_across_every_prefix() {
+    // Walk every prefix of a mixed-script string; the running width must
+    // never go backwards. This is the FTWA `max_content >= min_content`
+    // invariant expressed over a single string.
+    let base = "File.md 日本語 read me é 🎉 now";
+    let chars: Vec<char> = base.chars().collect();
+    let mut previous = 0.0_f32;
+    for end in 0..=chars.len() {
+        let prefix: String = chars[..end].iter().collect();
+        let width = fira_sans_width(&prefix, Font::DEFAULT, REAL_BODY_SIZE);
+        assert!(
+            width >= previous,
+            "prefix {prefix:?} measured {width}, below its predecessor {previous}"
+        );
+        previous = width;
+    }
+    assert!(previous > 0.0);
+}
+
+#[test]
+fn test_fira_sans_width_grows_with_size() {
+    let small = fira_sans_width("Hello World", Font::DEFAULT, 14.0);
+    let large = fira_sans_width("Hello World", Font::DEFAULT, 28.0);
+    assert!(
+        large > small,
+        "28pt ({large}) must be wider than 14pt ({small})"
+    );
+}
+
+#[test]
+fn test_fira_sans_width_multibyte_utf8_is_positive_and_finite() {
+    for text in ["é", "ümlaut", "日本語", "Привет", "🎉", "👨‍👩‍👧‍👦"]
+    {
+        let width = fira_sans_width(text, Font::DEFAULT, REAL_BODY_SIZE);
+        assert!(
+            width.is_finite() && width > 0.0,
+            "{text:?} measured {width}, want finite and positive"
+        );
+    }
+}
+
+#[test]
+fn test_fira_sans_width_whitespace_only_does_not_panic_and_stays_positive() {
+    for text in [" ", "   ", "\t", " \u{a0} "] {
+        let width = fira_sans_width(text, Font::DEFAULT, REAL_BODY_SIZE);
+        assert!(
+            width.is_finite() && width > 0.0,
+            "whitespace-only {text:?} measured {width}"
+        );
+    }
+}
+
+#[test]
+fn test_fira_sans_width_very_long_string_is_finite() {
+    let long = "x".repeat(10_000);
+    let width = fira_sans_width(&long, Font::DEFAULT, REAL_BODY_SIZE);
+    assert!(width.is_finite(), "10k chars produced {width}");
+    assert!(width > 0.0);
+    let short = "x".repeat(100);
+    assert!(
+        width > fira_sans_width(&short, Font::DEFAULT, REAL_BODY_SIZE),
+        "10k glyphs must be wider than 100"
+    );
+}
+
+#[test]
+fn test_fira_sans_width_monospace_falls_back_to_the_heuristic_exactly() {
+    // No monospace bytes are vendored, so mono must NOT be measured with
+    // Fira Sans — it must be the heuristic, bit for bit.
+    for text in ["a", "ab", "iiii", "MMMM", "hello world", "日本語", "\t"] {
+        assert_eq!(
+            fira_sans_width(text, Font::MONOSPACE, 13.0),
+            heuristic_width(text, Font::MONOSPACE, 13.0),
+            "mono {text:?} must equal the heuristic"
+        );
+    }
+}
+
+#[test]
+fn test_fira_sans_width_proportional_samples_are_not_the_heuristic() {
+    // Guards against the real path silently degrading into the fallback.
+    let mut differed = 0;
+    for text in ["iiii", "MMMM", "hello world", "readme.md", "é"] {
+        if fira_sans_width(text, Font::DEFAULT, REAL_BODY_SIZE)
+            != heuristic_width(text, Font::DEFAULT, REAL_BODY_SIZE)
+        {
+            differed += 1;
+        }
+    }
+    assert_eq!(differed, 5, "every proportional sample should differ");
+}
+
+#[test]
+fn test_fira_sans_width_degenerate_sizes_never_produce_nan_or_inf() {
+    for size in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for font in [Font::DEFAULT, Font::MONOSPACE] {
+            let width = fira_sans_width("hello", font, size);
+            assert!(
+                width.is_finite(),
+                "size {size} with {font:?} produced {width}, which would panic the FTWA solver"
+            );
+            assert!(
+                width >= 0.0,
+                "size {size} produced a negative width {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_fira_sans_width_is_finite_and_non_negative_over_the_corpus() {
+    for text in real_metrics_corpus() {
+        for size in [1.0, 14.0, 64.0] {
+            for font in [Font::DEFAULT, Font::MONOSPACE] {
+                let width = fira_sans_width(&text, font, size);
+                assert!(
+                    width.is_finite() && width >= 0.0,
+                    "{text:?} at {size} with {font:?} produced {width}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_usable_width_accepts_only_finite_positive_measurements() {
+    assert_eq!(usable_width(12.5, 99.0), 12.5);
+    assert_eq!(usable_width(0.0001, 99.0), 0.0001);
+    assert_eq!(usable_width(0.0, 99.0), 99.0, "zero is not a usable width");
+    assert_eq!(usable_width(-1.0, 99.0), 99.0, "negative is not usable");
+    assert_eq!(
+        usable_width(f32::NAN, 99.0),
+        99.0,
+        "NaN must never reach the solver"
+    );
+    assert_eq!(usable_width(f32::INFINITY, 99.0), 99.0);
+    assert_eq!(usable_width(f32::NEG_INFINITY, 99.0), 99.0);
+}
+
+#[test]
+fn test_real_measurer_uses_the_real_metrics_function() {
+    let measurer = real_measurer();
+    let (max, _, _) = measurer.measure_cell(&cell("abcd"));
+    assert_eq!(max, fira_sans_width("abcd", Font::DEFAULT, 14.0));
+    assert_ne!(
+        max,
+        heuristic_width("abcd", Font::DEFAULT, 14.0),
+        "the seam must be carrying the real measurer, not the heuristic"
+    );
+}
+
+#[test]
+fn test_real_measurer_cell_max_is_at_least_cell_min() {
+    let measurer = real_measurer();
+    for text in ["hello", "hello world", "a bb cccc", "日本語 text"] {
+        let (max, min, tokens) = measurer.measure_cell(&cell(text));
+        assert!(
+            max.is_finite() && min.is_finite(),
+            "{text:?} produced non-finite inputs"
+        );
+        assert!(min > 0.0, "{text:?} min must be positive, got {min}");
+        assert!(
+            max >= min,
+            "{text:?}: max_content ({max}) must be >= min_content ({min})"
+        );
+        assert!(!tokens.token_widths.is_empty());
+    }
+}
+
+#[test]
+fn test_real_measurer_multi_word_cell_splits_into_tokens() {
+    let measurer = real_measurer();
+    let (max, min, tokens) = measurer.measure_cell(&cell("hello world"));
+    assert_eq!(tokens.token_widths.len(), 2);
+    assert!(
+        max > min,
+        "a two-word cell has slack to break at: {max} vs {min}"
+    );
+    assert_eq!(
+        min,
+        fira_sans_width("hello", Font::DEFAULT, 14.0).max(fira_sans_width(
+            "world",
+            Font::DEFAULT,
+            14.0
+        ))
+    );
+}
+
+#[test]
+fn test_real_measurer_code_run_still_falls_back_to_the_mono_heuristic() {
+    let measurer = real_measurer();
+    let code_cell = vec![InlineElem::Text(
+        "ab".to_string(),
+        TextStyle {
+            code: true,
+            ..Default::default()
+        },
+    )];
+    let (max, min, _) = measurer.measure_cell(&code_cell);
+    assert_eq!(max, heuristic_width("ab", Font::MONOSPACE, 13.0));
+    assert_eq!(min, max);
+}
+
+#[test]
+fn test_real_measurer_space_width_and_line_height_are_sane() {
+    let measurer = real_measurer();
+    let space = measurer.space_width();
+    assert!(
+        space.is_finite() && space > 0.0,
+        "a real space advance must be positive, got {space}"
+    );
+    assert_eq!(measurer.line_height(), 18.0);
+}
+
+#[test]
+fn test_real_measurer_solves_a_wide_table_without_scroll() {
+    let measurer = real_measurer();
+    let layout = solve_table_layout(
+        &grid(2, 3),
+        1000.0,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+        TablePadding::ZERO,
+        &measurer,
+    );
+    assert!(!needs_horizontal_scroll(&layout));
+    let widths = column_widths(&layout);
+    assert_eq!(widths.len(), 3);
+    assert!(
+        widths.iter().all(|w| w.is_finite() && *w > 0.0),
+        "real metrics must not collapse a column: {widths:?}"
+    );
+}
+
+#[test]
+fn test_real_measurer_zero_width_still_falls_back_to_scroll() {
+    let measurer = real_measurer();
+    let layout = solve_table_layout(
+        &[vec![cell("hello")]],
+        0.0,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+        TablePadding::ZERO,
+        &measurer,
+    );
+    assert!(needs_horizontal_scroll(&layout));
+    let widths = column_widths(&layout);
+    assert_eq!(widths.len(), 1);
+    assert!(widths[0].is_finite() && widths[0] > 0.0);
+}
+
+#[test]
+fn test_real_metrics_change_solved_columns_the_heuristic_could_not() {
+    // Narrow-vs-wide column pair: the heuristic solves both to the same
+    // width, real metrics solve them apart. This is the visible behaviour
+    // change GAP-06 delivers.
+    let cells = vec![vec![cell("iiii"), cell("MMMM")]];
+    let real = solve_table_layout(
+        &cells,
+        1000.0,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+        TablePadding::ZERO,
+        &real_measurer(),
+    );
+    let heuristic = solve_table_layout(
+        &cells,
+        1000.0,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+        TablePadding::ZERO,
+        &IcedTextMeasurer::heuristic(TextMetrics::FASTMD),
+    );
+
+    let real_widths = column_widths(&real);
+    let heuristic_widths = column_widths(&heuristic);
+    assert_eq!(real_widths.len(), 2);
+    assert_eq!(heuristic_widths.len(), 2);
+    assert!(
+        real_widths[0] < heuristic_widths[0],
+        "narrow column should shrink under real metrics: {real_widths:?} vs {heuristic_widths:?}"
+    );
+    assert!(
+        real_widths[1] > heuristic_widths[1],
+        "wide column should grow under real metrics: {real_widths:?} vs {heuristic_widths:?}"
+    );
 }

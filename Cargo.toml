@@ -61,6 +61,19 @@ iced = { version = "0.14.0", features = [
     "advanced-shaping",
     "markdown",
 ] }
+# `cosmic-text` and `iced_graphics` are DIRECT dependencies so the text
+# measurer can shape strings with the same Fira Sans bytes iced paints with
+# (`iced_graphics::text::FIRA_SANS_REGULAR`) instead of the flat
+# character-count heuristic ([GAP-06], `src/app/ui_iced/table_width.rs`).
+# Both are ALREADY in the dependency graph through `iced`
+# (`iced` -> `iced_renderer` -> `iced_graphics` -> `cosmic-text` 0.15, and
+# `iced_graphics` requests `cosmic-text` with its default features), so
+# naming them here pulls in no additional compilation — it only makes the
+# two items reachable by path. `fira-sans` on `iced_graphics` is the
+# `cfg` gate for the `FIRA_SANS_REGULAR` const and mirrors the feature
+# already enabled on `iced` above.
+cosmic-text = "0.15.0"
+iced_graphics = { version = "0.14.0", features = ["fira-sans"] }
 notify = "8"
 playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

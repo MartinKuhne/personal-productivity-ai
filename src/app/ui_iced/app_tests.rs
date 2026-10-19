@@ -11,8 +11,10 @@
 
 use super::*;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
+use crate::bus::events::user_command::UserCommand;
 use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
+use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
 
 /// A config carrying a recognisable marker library so direct-injection is
@@ -351,6 +353,264 @@ fn test_build_state_with_noop_storage_does_not_touch_disk() {
         PersistedUiState::default(),
     );
     assert_eq!(state.app.config().content_libraries.len(), 1);
+}
+
+// --- Esc dismissal (UI-056) -----------------------------------------------
+
+/// Open the small name-entry dialog.
+fn open_dialog(overlay: &mut OverlayState) {
+    overlay.dialog.open(DialogKind::CreateDirectory {
+        parent: PathBuf::from("M:\\lib"),
+    });
+}
+
+/// Open the inline editor modal.
+fn open_editor(overlay: &mut OverlayState) {
+    overlay.editor = Some(EditorViewModel::open("M:\\lib\\note.md", "body"));
+}
+
+/// Open a floating context menu with one row.
+fn open_context_menu(overlay: &mut OverlayState) {
+    overlay.context_menu = Some(ContextMenu {
+        anchor: iced::Point::new(12.0, 34.0),
+        items: vec![MenuItem::new(
+            crate::ui::strings::OPEN_IN_EDITOR_ACTION,
+            Message::Command(UserCommand::OpenInEditor(PathBuf::from("M:\\lib\\note.md"))),
+        )],
+    });
+}
+
+/// Open the batch dialog over an empty candidate set.
+fn open_batch(overlay: &mut OverlayState) {
+    overlay.batch.open(BatchDialogViewModel::default());
+}
+
+/// Nothing open → `Esc` consumes nothing.
+#[test]
+fn test_close_topmost_returns_none_when_nothing_is_open() {
+    let mut overlay = OverlayState::default();
+    assert_eq!(overlay.close_topmost(), None);
+}
+
+/// One row of the closable-layer table: the layer name `close_topmost` must
+/// report, an opener for it, and a predicate telling whether it is open.
+type ClosableLayer = (
+    &'static str,
+    fn(&mut OverlayState),
+    fn(&OverlayState) -> bool,
+);
+
+/// Every closable layer is reported under its own name and ends up closed.
+#[test]
+fn test_close_topmost_closes_each_layer_in_turn() {
+    let cases: Vec<ClosableLayer> = vec![
+        (CLOSED_LAYER_BATCH, open_batch, |o| o.batch.is_open()),
+        (
+            CLOSED_LAYER_ATTRIBUTIONS,
+            |o| {
+                o.about.open_attributions();
+            },
+            |o| o.about.is_attributions(),
+        ),
+        (
+            CLOSED_LAYER_ABOUT,
+            |o| {
+                o.about.open_about();
+            },
+            |o| o.about.is_about(),
+        ),
+        (
+            CLOSED_LAYER_TOOLS,
+            |o| {
+                o.tools.open();
+            },
+            |o| o.tools.is_open(),
+        ),
+        (
+            CLOSED_LAYER_AGENT_DEBUG,
+            |o| {
+                o.debug.open();
+            },
+            |o| o.debug.is_open(),
+        ),
+        (CLOSED_LAYER_DIALOG, open_dialog, |o| o.dialog.is_open()),
+        (CLOSED_LAYER_EDITOR, open_editor, |o| o.editor.is_some()),
+        (CLOSED_LAYER_CONTEXT_MENU, open_context_menu, |o| {
+            o.context_menu.is_some()
+        }),
+        (
+            CLOSED_LAYER_HAMBURGER,
+            |o| o.hamburger_open = true,
+            |o| o.hamburger_open,
+        ),
+    ];
+
+    for (name, open, is_open) in cases {
+        let mut overlay = OverlayState::default();
+        open(&mut overlay);
+        assert!(is_open(&overlay), "fixture must leave {name} open");
+
+        assert_eq!(
+            overlay.close_topmost(),
+            Some(name),
+            "Esc over a lone {name} must report that layer"
+        );
+        assert!(
+            !is_open(&overlay),
+            "{name} must be closed after close_topmost"
+        );
+        assert_eq!(
+            overlay.close_topmost(),
+            None,
+            "a second Esc over the now-empty {name} must consume nothing"
+        );
+    }
+}
+
+/// One `Esc` = one layer: the top-most closes and the one beneath survives.
+#[test]
+fn test_close_topmost_closes_only_the_topmost_layer() {
+    let mut overlay = OverlayState::default();
+    open_dialog(&mut overlay);
+    open_batch(&mut overlay);
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_BATCH));
+    assert!(!overlay.batch.is_open(), "the batch dialog was on top");
+    assert!(
+        overlay.dialog.is_open(),
+        "the dialog underneath must survive a single Esc"
+    );
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_DIALOG));
+    assert!(!overlay.dialog.is_open());
+    assert_eq!(overlay.close_topmost(), None);
+}
+
+/// The full reverse-z-order walk: open every closable layer at once and
+/// confirm `Esc` peels them off exactly in [`mounted_layers`] order,
+/// reversed.
+#[test]
+fn test_close_topmost_walks_the_reverse_z_order() {
+    let mut overlay = OverlayState::default();
+    open_batch(&mut overlay);
+    overlay.about.open_attributions();
+    overlay.tools.open();
+    overlay.debug.open();
+    open_dialog(&mut overlay);
+    open_editor(&mut overlay);
+    open_context_menu(&mut overlay);
+    overlay.hamburger_open = true;
+
+    let expected = [
+        CLOSED_LAYER_BATCH,
+        CLOSED_LAYER_ATTRIBUTIONS,
+        CLOSED_LAYER_TOOLS,
+        CLOSED_LAYER_AGENT_DEBUG,
+        CLOSED_LAYER_DIALOG,
+        CLOSED_LAYER_EDITOR,
+        CLOSED_LAYER_CONTEXT_MENU,
+        CLOSED_LAYER_HAMBURGER,
+    ];
+    for name in expected {
+        assert_eq!(
+            overlay.close_topmost(),
+            Some(name),
+            "the stack must peel off in reverse z-order"
+        );
+    }
+    assert_eq!(overlay.close_topmost(), None, "the stack must run out");
+}
+
+/// The docked log viewer is NOT part of the `Esc` stack: it is a docked
+/// panel whose visibility is application state owned by
+/// `UserCommand::ToggleBackgroundLogs`, not reducer-held overlay state.
+#[test]
+fn test_close_topmost_never_closes_the_docked_logs_panel() {
+    // `OverlayState` carries no logs-visibility field at all, which is the
+    // structural half of the guarantee; the behavioural half is that a
+    // fully-populated overlay still drains to `None` without ever naming a
+    // `logs` layer.
+    let mut overlay = OverlayState::default();
+    open_batch(&mut overlay);
+    overlay.tools.open();
+
+    let mut drained = Vec::new();
+    while let Some(layer) = overlay.close_topmost() {
+        drained.push(layer);
+    }
+    assert_eq!(
+        drained,
+        vec![CLOSED_LAYER_BATCH, CLOSED_LAYER_TOOLS],
+        "no drained layer may be the docked log viewer"
+    );
+    assert!(
+        !drained.contains(&"logs"),
+        "the docked Logs panel must not be Esc-closable"
+    );
+}
+
+/// Closing the editor must drop the live `text_editor::Content` with it, so
+/// a reopen starts from a fresh buffer rather than the discarded one.
+#[test]
+fn test_close_topmost_drops_the_editor_buffer_entirely() {
+    let mut overlay = OverlayState::default();
+    open_editor(&mut overlay);
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_EDITOR));
+    assert!(
+        overlay.editor.is_none(),
+        "the owned Content must be taken, not merely hidden"
+    );
+}
+
+// --- launch presets (TASK-022 / DEP-007) -----------------------------------
+
+/// The preset list must exist and name its production strategy `"default"`.
+/// `.run()` is never called — the preset closure is not invoked either, so
+/// no threads or bus subscribers are built by this test.
+#[test]
+fn test_launch_presets_returns_the_default_preset() {
+    let presets = launch_presets(launch_inputs(), PersistedUiState::default());
+
+    assert!(
+        !presets.is_empty(),
+        "the launch chain must expose at least one preset"
+    );
+    assert_eq!(
+        presets[0].name(),
+        LAUNCH_PRESET_DEFAULT,
+        "the production preset must be selectable by the harness name"
+    );
+    assert_eq!(
+        LAUNCH_PRESET_DEFAULT, "default",
+        "the `.ice` harness selects by this literal string"
+    );
+}
+
+/// Presets are keyed by name only at this layer; the list must stay stable
+/// across calls so a harness lookup cannot drift between runs.
+#[test]
+fn test_launch_presets_names_are_stable_across_calls() {
+    let first = launch_presets(launch_inputs(), populated_persisted());
+    let second = launch_presets(launch_inputs(), PersistedUiState::default());
+
+    let first_names: Vec<&str> = first.iter().map(|preset| preset.name()).collect();
+    let second_names: Vec<&str> = second.iter().map(|preset| preset.name()).collect();
+    assert_eq!(
+        first_names, second_names,
+        "the preset name set must not depend on the persisted snapshot"
+    );
+}
+
+/// A `LaunchInputs` / `PersistedUiState` pair built over in-memory storage
+/// so no real user path is touched ([RUST-006]).
+fn launch_inputs() -> LaunchInputs {
+    LaunchInputs {
+        config: marker_config(),
+        config_bus: Bus::<ConfigArrived>::new(),
+        config_storage: Arc::new(InMemoryConfigStorage::new()),
+        ui_state_storage: Arc::new(InMemoryUiStateStorage::new()),
+        args: vec!["fastmd".to_string()],
+    }
 }
 
 // --- test-local helpers (mirror the production prefix-stripping) ---------

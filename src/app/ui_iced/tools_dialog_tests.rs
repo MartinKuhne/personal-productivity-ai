@@ -66,6 +66,7 @@ fn row_carries_identity_kind_and_labels() {
     assert_eq!(row.kind_label, strings::TOOLS_KIND_INTERNAL);
     assert!(row.enabled);
     assert_eq!(row.tools_label, "read_note, write_note");
+    assert!(!row.parallel_safe);
     assert!(!row.has_error());
     assert_eq!(row.mcp_server(), None);
 }
@@ -141,6 +142,151 @@ fn error_line_text_ignores_the_timestamp() {
     };
     assert_eq!(error_line_text(&a), error_line_text(&b));
     assert_eq!(error_line_text(&a), "Discovery: boom");
+}
+
+// --- parallel-safe chip (UI-058) ---------------------------------------
+
+#[test]
+fn row_from_group_carries_parallel_safe_through_in_both_directions() {
+    let unsafe_group = ToolGroupState {
+        parallel_safe: false,
+        ..mcp_group("serial", ToolGroupKind::McpRemote, false)
+    };
+    let safe_group = ToolGroupState {
+        parallel_safe: true,
+        ..internal_group(InternalToolGroup::Filesystem)
+    };
+
+    let serial = row_from_group(&unsafe_group, McpAuthFacts::default(), &name_len);
+    let parallel = row_from_group(&safe_group, McpAuthFacts::default(), &name_len);
+
+    assert!(
+        !serial.parallel_safe,
+        "a `false` group must not gain the flag on the way to the row"
+    );
+    assert!(
+        parallel.parallel_safe,
+        "a `true` group must not lose the flag on the way to the row"
+    );
+}
+
+#[test]
+fn the_row_fixtures_cover_both_parallel_safe_values() {
+    // The mapping tests lean on these helpers; pinning both values here
+    // keeps a future edit from collapsing the pair into one case.
+    assert!(!internal_group(InternalToolGroup::Web).parallel_safe);
+    assert!(mcp_group("srv", ToolGroupKind::McpStdio, false).parallel_safe);
+}
+
+#[test]
+fn a_parallel_safe_row_gets_the_chip_label_from_strings() {
+    let row = row_from_group(
+        &ToolGroupState {
+            parallel_safe: true,
+            ..internal_group(InternalToolGroup::Filesystem)
+        },
+        McpAuthFacts::default(),
+        &name_len,
+    );
+
+    assert_eq!(
+        parallel_chip_label(&row),
+        Some(strings::TOOLS_PARALLEL_CHIP),
+        "the chip text must come from `ui::strings`, never a panel literal"
+    );
+    assert_eq!(parallel_chip_label(&row), Some("✓ parallel"));
+}
+
+#[test]
+fn a_row_that_is_not_parallel_safe_gets_no_chip_at_all() {
+    let row = row_from_group(
+        &internal_group(InternalToolGroup::Filesystem),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+
+    assert_eq!(
+        parallel_chip_label(&row),
+        None,
+        "UI-058: the chip's absence is not a negative signal, so no \
+         \"not parallel\" label may appear"
+    );
+}
+
+#[test]
+fn the_char_count_cell_builds_with_and_without_the_chip() {
+    let safe = row_from_group(
+        &ToolGroupState {
+            parallel_safe: true,
+            ..mcp_group("srv", ToolGroupKind::McpRemote, false)
+        },
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    let not_safe = row_from_group(
+        &internal_group(InternalToolGroup::Filesystem),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+
+    assert!(std::mem::size_of_val(&char_count_cell(&safe)) > 0);
+    assert!(std::mem::size_of_val(&char_count_cell(&not_safe)) > 0);
+}
+
+// --- error tooltip (UI-057) --------------------------------------------
+
+#[test]
+fn the_error_tooltip_body_is_the_kind_colon_message_line() {
+    let group = ToolGroupState {
+        last_error: Some(ToolGroupError {
+            kind: ToolErrorKind::Execution,
+            message: "Permission denied".to_string(),
+            occurred_at_unix_ms: 1_700_000_000_000,
+        }),
+        ..internal_group(InternalToolGroup::Filesystem)
+    };
+    let row = row_from_group(&group, McpAuthFacts::default(), &name_len);
+
+    assert_eq!(
+        error_tooltip_body(&row),
+        Some("Execution: Permission denied"),
+        "the tooltip body is the already-derived `Kind: message` line"
+    );
+    assert_eq!(error_tooltip_body(&row), row.error.as_deref());
+}
+
+#[test]
+fn a_clean_row_has_no_tooltip_body() {
+    let row = row_from_group(
+        &internal_group(InternalToolGroup::Web),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    assert_eq!(error_tooltip_body(&row), None);
+}
+
+#[test]
+fn the_actions_cell_builds_with_and_without_an_error_marker() {
+    let errored = row_from_group(
+        &ToolGroupState {
+            last_error: Some(ToolGroupError {
+                kind: ToolErrorKind::Authentication,
+                message: "401".to_string(),
+                occurred_at_unix_ms: 0,
+            }),
+            ..mcp_group("github", ToolGroupKind::McpRemote, true)
+        },
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    let clean = row_from_group(
+        &internal_group(InternalToolGroup::Weather),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+
+    assert!(std::mem::size_of_val(&actions_cell(&errored)) > 0);
+    assert!(std::mem::size_of_val(&actions_cell(&clean)) > 0);
 }
 
 #[test]
@@ -486,14 +632,30 @@ fn the_enable_checkbox_emits_set_tool_group_enabled() {
 #[test]
 fn the_error_marker_uses_the_warning_token_and_the_text_the_error_token() {
     // the legacy UI painted the marker with `palette.warning`
-    // (src/app/ui/tools_dialog.rs:255); the inline text uses the
-    // stronger `error` token because iced has no tooltip to hide it in.
+    // (src/app/ui/tools_dialog.rs:255); the tooltip body uses the
+    // stronger `error` token. iced 0.14 ships
+    // `iced::widget::tooltip::Tooltip`, so the body is revealed on hover
+    // exactly as the legacy UI revealed it — it is no longer inline.
     assert_eq!(error_marker_color(), Palette::fastmd_dark().warning);
     assert_eq!(error_text_color(), Palette::fastmd_dark().error);
     assert_ne!(
         error_marker_color(),
         error_text_color(),
         "the marker and the message must stay visually distinct"
+    );
+}
+
+#[test]
+fn the_parallel_chip_tokens_come_from_the_shared_palette() {
+    assert_eq!(parallel_chip_color(), Palette::fastmd_dark().success);
+    assert_eq!(
+        parallel_chip_surface_color(),
+        Palette::fastmd_dark().surface_variant
+    );
+    assert_ne!(
+        parallel_chip_color(),
+        Palette::fastmd_dark().error,
+        "the parallel-safe chip must not read as an error badge"
     );
 }
 
