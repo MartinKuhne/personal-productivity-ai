@@ -71,6 +71,21 @@ fn cancel_only_while_running() {
     assert!(!cancel_enabled(false));
 }
 
+/// The agent window's always-allocated Stop label must read as inactive
+/// while idle, matching the bottom band (`stop_button_color`).
+#[test]
+fn cancel_button_label_drops_to_muted_while_idle() {
+    let palette = crate::ui::theme::Palette::fastmd_dark();
+    assert_eq!(
+        crate::ui_iced::panels::bottom::stop_button_color(true),
+        palette.error
+    );
+    assert_eq!(
+        crate::ui_iced::panels::bottom::stop_button_color(false),
+        palette.text_muted
+    );
+}
+
 #[test]
 fn send_and_queue_are_mutually_exclusive_for_a_prompt() {
     for running in [false, true] {

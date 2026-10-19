@@ -23,8 +23,18 @@
 //!   palette token once indexing has finished.
 //! * **Tag filter** — an [`iced::widget::pick_list()`] over
 //!   [`TagFilterOption`]; emits [`UserCommand::SelectTagFilter`].
-//! * **Hamburger** — an [`iced::widget::pick_list()`] placeholdered with
-//!   [`strings::HAMBURGER_MENU_BUTTON`], fed by [`hamburger_items`].
+//! * **Hamburger** — a ☰ [`iced::widget::button()`] labelled with
+//!   [`strings::HAMBURGER_MENU_BUTTON`], emitting
+//!   [`Message::Menu`] [`MenuMessage::Opened`];
+//!   the [TASK-023] reducer flips
+//!   [`crate::ui_iced::app::OverlayState::hamburger_open`] and the
+//!   overlay host mounts [`hamburger_menu_card`] anchored at
+//!   [`hamburger_menu_anchor`]. The previous port gave this duty to a
+//!   [`pick_list()`], which was a *dropdown*, not the legacy menu: it had no
+//!   open/closed state, its closed title bar leaked the last-picked row,
+//!   and it could render only the flattened selectable rows (no section
+//!   headers, no no-models placeholder — see *Nested submenus* below). A
+//!   "Menu" button that opens a real menu restores the UI-061..UI-066.
 //!
 //! # Nested submenus (UI-062/UI-064/UI-066)
 //!
@@ -34,17 +44,11 @@
 //! child menus, and DEC-005 rules out `iced_aw`. The port therefore keeps
 //! the full hierarchy in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state,
-//! exactly mirroring the legacy UI menu — and renders the **selectable subset**
-//! ([`hamburger_items`]) as one flat list whose labels carry the owning
-//! submenu name (`"Windows › Agent debug"`), produced by
-//! [`strings::format_menu_row_label`].
-//!
-//! Only selectable rows reach the widget because a iced dropdown must
-//! produce a [`Message`] for *any* row the user clicks, and the panel is
-//! allowed to emit only real user intent. Non-selectable rows — section
-//! headers and UI-064's [`strings::NO_CHAT_MODELS_CONFIGURED`] placeholder
-//! — stay in the model and are filtered out by [`HamburgerItem::from_entry`]
-//! rather than being rendered as rows that would fire a meaningless command.
+//! exactly mirroring the legacy UI menu — and the menu card renders every
+//! row: section headers as muted non-selectable text, the UI-064
+//! [`strings::NO_CHAT_MODELS_CONFIGURED`] placeholder as muted text, and
+//! selectable rows as buttons carrying
+//! [`hamburger_row_message`].
 //!
 //! # Feature-gated widgets
 //!
@@ -91,8 +95,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use iced::widget::{Row, container, pick_list, rule, text};
-use iced::{Alignment, Color, Element, Font, Length, Padding};
+use iced::widget::{Column, Row, button, container, pick_list, rule, text};
+use iced::{Alignment, Color, Element, Font, Length, Padding, Point, Size};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::table_width::DeficitStrategy;
@@ -101,7 +105,8 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
 use crate::ui_iced::logo::logo_mark;
-use crate::ui_iced::message::Message;
+use crate::ui_iced::message::{MenuMessage, Message};
+use crate::ui_iced::overlay::{MENU_PADDING, MENU_ROW_SPACING, MENU_WIDTH, card_style};
 
 // The framework-free helpers the legacy UI panel owned, **relocated into this
 // module** for the framework-free migration ([TASK-029]) from
@@ -297,9 +302,78 @@ pub const PICK_LIST_PADDING: Padding = Padding {
 /// Width of the vertical rule drawn between top-bar groups.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// Minimum width of the hamburger dropdown, mirroring the legacy UI panel's
-/// `ui.set_min_width(180.0)`.
+/// Minimum width of the hamburger menu card, mirroring the legacy UI panel's
+/// `ui.set_min_width(180.0)`. The shared context-menu card width
+/// ([`MENU_WIDTH`], 200 pt) already satisfies it, so the menu card reuses
+/// that constant; [`MENU_MIN_WIDTH`] stays as the documented legacy bound.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
+
+/// Height of the Phosphor ☰ glyph the hamburger button renders.
+///
+/// The glyph is drawn in the icon font at the same size the tag-filter
+/// pick list's text renders, so the button's padding (`PICK_LIST_PADDING`)
+/// keeps both controls the same height inside the fixed bar band.
+pub const MENU_BUTTON_GLYPH_SIZE: f32 = 16.0;
+
+/// Text size of a selectable hamburger-menu row.
+pub const MENU_ROW_TEXT_SIZE: f32 = 14.0;
+
+/// Text size of a hamburger-menu section header (visually quieter than a
+/// row — the same "group heading" treatment the legacy UI menu gave its
+/// submenus).
+pub const MENU_HEADER_TEXT_SIZE: f32 = 13.0;
+
+/// Right inset between the hamburger menu card and the window's right edge;
+/// the legacy dropdown slid out from the right-aligned ☰ button.
+pub const MENU_ANCHOR_RIGHT_MARGIN: f32 = 12.0;
+
+/// Gap between the top bar's bottom edge and the hamburger menu card.
+pub const MENU_ANCHOR_BELOW_BAR: f32 = 4.0;
+
+/// Where the overlay host mounts the hamburger menu card.
+///
+/// The ☰ button is right-aligned in the fixed [`BAR_HEIGHT_POINTS`] band,
+/// so the anchor is its top-left corner as seen from the window geometry:
+/// one [`MENU_ANCHOR_BELOW_BAR`] below the bar, one
+/// [`MENU_ANCHOR_RIGHT_MARGIN`] in from the right edge, both clamped to
+/// non-negative coordinates by the window-independent `max` guards.
+///
+/// The overlay host adds its own `MENU_ANCHOR_GAP` before clamping
+/// against `viewport`, so a tiny window pushes the card onto the screen
+/// ([TASK-017a] clamp contract).
+///
+/// Purity: pure function of `viewport`.
+#[must_use]
+pub fn hamburger_menu_anchor(viewport: Size) -> Point {
+    Point::new(
+        (viewport.width - MENU_WIDTH - MENU_ANCHOR_RIGHT_MARGIN).max(0.0),
+        BAR_HEIGHT_POINTS + MENU_ANCHOR_BELOW_BAR,
+    )
+}
+
+/// The [`Message`] a selectable hamburger menu row publishes ([FMD-068]).
+///
+/// The row's own [`UserCommand`] is the self-contained intent; it rides the
+/// menu channel so the reducer can close the menu in the same reduction
+/// ([`MenuMessage::RowActivated`]).
+///
+/// Purity: pure function of `command`.
+#[must_use]
+pub fn hamburger_row_message(command: &UserCommand) -> Message {
+    Message::Menu(MenuMessage::RowActivated(command.clone()))
+}
+
+/// The label a selectable hamburger row renders.
+///
+/// Menu-card rows sit *below* their section header, so unlike the flattened
+/// dropdown port they carry no `"Windows › "` prefix — the check slot
+/// (`✓`, blank when unchecked) plus the row label is the full text.
+///
+/// Purity: pure function of `(label, checked)`.
+#[must_use]
+pub fn hamburger_row_label(label: &str, checked: bool) -> String {
+    strings::format_menu_row_label(None, label, checked)
+}
 
 /// The Phosphor icon font handle used for the logo mark.
 ///
@@ -639,6 +713,60 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     entries
 }
 
+/// Renders the full hamburger menu card over the app palette, one row per
+/// [`MenuEntry`] (UI-061..UI-066).
+///
+/// Row shapes:
+///
+/// * [`MenuEntryKind::SectionHeader`] — muted, non-interactive text. A
+///   header is the submenu's name rendered *above* its rows, so no
+///   `format_menu_row_label` check-slot prefixing.
+/// * [`MenuEntryKind::Placeholder`] — muted, non-interactive text (the
+///   UI-064 no-chat-models placeholder).
+/// * [`MenuEntryKind::Action`] — a button whose label is
+///   [`hamburger_row_label`] and whose press emits [`hamburger_row_message`]
+///   (the row's own [`UserCommand`]).
+///
+/// The card is [`MENU_WIDTH`] wide, `MENU_PADDING` padded and carries the
+/// shared context-menu chrome (`card_style`, [GUD-003]); rows sit on the
+/// shared [`MENU_ROW_SPACING`] rhythm, which is what makes
+/// [`crate::ui_iced::overlay::menu_size`] a faithful clamp input even with
+/// headers mixed in.
+///
+/// Purity: pure view function; clones every label into the element so the
+/// returned [`Element`] is `'static` and can be folded into the overlay
+/// host's base without tying the whole view tree to the entries' lifetime.
+/// Emits [`Message::Menu`] only.
+pub fn hamburger_menu_card(entries: &[MenuEntry]) -> Element<'static, Message> {
+    let palette = Palette::fastmd_dark();
+
+    let mut rows = Column::<Message>::new().spacing(MENU_ROW_SPACING);
+    for entry in entries {
+        let row: Element<'static, Message> = match &entry.kind {
+            MenuEntryKind::Action(command) => button(
+                text(hamburger_row_label(&entry.label, entry.checked)).size(MENU_ROW_TEXT_SIZE),
+            )
+            .width(Length::Fill)
+            .on_press(hamburger_row_message(command))
+            .into(),
+            MenuEntryKind::SectionHeader | MenuEntryKind::Placeholder => container(
+                text(entry.label.clone())
+                    .size(MENU_HEADER_TEXT_SIZE)
+                    .color(palette.text_muted),
+            )
+            .width(Length::Fill)
+            .into(),
+        };
+        rows = rows.push(row);
+    }
+
+    container(rows)
+        .width(Length::Fixed(MENU_WIDTH))
+        .padding(MENU_PADDING)
+        .style(card_style)
+        .into()
+}
+
 /// The non-selectable heading row for a submenu.
 fn section_header(section: MenuSection) -> MenuEntry {
     MenuEntry {
@@ -814,14 +942,13 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     .width(Length::Shrink)
     .into();
 
-    let hamburger: Element<'_, Message> = pick_list(
-        hamburger_items(view_model),
-        None::<&HamburgerItem>,
-        |item| Message::Command(item.command),
+    let hamburger: Element<'_, Message> = button(
+        text(strings::HAMBURGER_MENU_BUTTON)
+            .font(phosphor_font())
+            .size(MENU_BUTTON_GLYPH_SIZE),
     )
-    .placeholder(strings::HAMBURGER_MENU_BUTTON)
     .padding(PICK_LIST_PADDING)
-    .width(MENU_MIN_WIDTH)
+    .on_press(Message::Menu(MenuMessage::Opened))
     .into();
 
     container(

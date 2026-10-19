@@ -200,14 +200,7 @@ impl AppOrchestrator {
     }
 
     pub fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
-        let mut closed_any = false;
-        for path in paths {
-            if self.tabs.tabs.contains(path) {
-                self.tabs.tabs.retain(|p| p != path);
-                closed_any = true;
-            }
-        }
-        if !closed_any {
+        if !self.tabs.close_tabs(paths) {
             return;
         }
         if let Some(selected) = self.selection.selected_file().cloned() {
@@ -533,7 +526,26 @@ impl AppOrchestrator {
                 );
             }
             ProcessEvent::FileLoaded { path, content } => {
-                self.pending_file_load = None;
+                // [`pending_file_load`](Self::pending_file_load) is a single slot and
+                // the read runs on its own thread, so this result may belong to a
+                // file the user has already moved on from. Release our own marker
+                // either way — leaving it set would block a later re-selection of
+                // the same path behind a load that no longer exists — but only
+                // project the bytes onto the document the user is actually looking
+                // at. A stale landing otherwise overwrites `loaded_path` and `toc`
+                // with a document nobody asked for, which is what made the ToC
+                // pane flip between two files' heading sets with no user action.
+                if self.pending_file_load.as_deref() == Some(path.as_path()) {
+                    self.pending_file_load = None;
+                }
+                if self.selection.selected_file().map(PathBuf::as_path) != Some(path.as_path()) {
+                    tracing::debug!(
+                        name = "orchestrator.file_load.stale_dropped",
+                        path = %path.display(),
+                        "Dropped FileLoaded for a file that is no longer selected"
+                    );
+                    return;
+                }
                 match content {
                     Ok(content) => {
                         // Parse the file once into a `Document` and

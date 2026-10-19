@@ -356,3 +356,51 @@ fn vm_with_thinking_expanded_overrides_field() {
     let vm = vm.with_thinking_expanded(true);
     assert!(vm.thinking_expanded);
 }
+
+// ---------------------------------------------------------------------------
+// from_app — visibility gate ([FMD-060])
+// ---------------------------------------------------------------------------
+
+/// Regression: the whole transcript was re-parsed through `markdown::parse` and
+/// the thinking buffer cloned on every message, even while the agent session was
+/// off screen. During a workspace scan that is pure UI-thread waste.
+#[test]
+fn from_app_skips_the_transcript_parse_while_not_visible() {
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.agent_panel_state.show_results = false;
+    app.orchestrator.agent_transcript.content =
+        "**User:** question\n\nSome long assistant answer with `code`.".to_string();
+    app.orchestrator.agent_transcript.thinking = "deep thought".to_string();
+
+    let vm = AgentPanelViewModel::from_app(&app);
+
+    assert!(!vm.visible);
+    assert!(
+        vm.turns.is_empty(),
+        "an off-screen session must not re-parse the transcript"
+    );
+    assert!(
+        vm.thinking.is_empty(),
+        "an off-screen session must not clone the thinking buffer"
+    );
+}
+
+/// Starting a session must produce the full transcript again — the gate may not
+/// strand the panel on an empty snapshot.
+#[test]
+fn from_app_parses_the_transcript_once_the_session_is_visible() {
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.agent_panel_state.show_results = false;
+    app.orchestrator.agent_transcript.content =
+        "**User:** question\n\nAn assistant answer.".to_string();
+    app.orchestrator.agent_transcript.thinking = "deep thought".to_string();
+
+    assert!(AgentPanelViewModel::from_app(&app).turns.is_empty());
+
+    app.orchestrator.agent_panel_state.show_results = true;
+    let vm = AgentPanelViewModel::from_app(&app);
+
+    assert!(vm.visible);
+    assert_eq!(vm.turns.len(), 2, "a visible session parses both turns");
+    assert_eq!(vm.thinking, "deep thought");
+}

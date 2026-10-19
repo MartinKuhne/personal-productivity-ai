@@ -713,3 +713,78 @@ fn pick_list_content_fits_inside_the_fixed_band() {
          BAR_HEIGHT_POINTS = {BAR_HEIGHT_POINTS} with BAR_PADDING = {BAR_PADDING}"
     );
 }
+
+// --- hamburger menu card ----------------------------------------------------
+
+/// The card anchor sits one bar-height plus the below-bar gap down, and one
+/// right-margin in from the window's right edge.
+#[test]
+fn hamburger_anchor_hangs_below_the_bar_at_the_right_edge() {
+    let wide = Size::new(1600.0, 900.0);
+    let anchor = hamburger_menu_anchor(wide);
+    assert_eq!(anchor.y, BAR_HEIGHT_POINTS + MENU_ANCHOR_BELOW_BAR);
+    assert_eq!(
+        anchor.x,
+        1600.0 - MENU_WIDTH - MENU_ANCHOR_RIGHT_MARGIN,
+        "the card must right-align under the ☰ button"
+    );
+}
+
+/// A viewport narrower than the card must not push the anchor off-screen to
+/// the left — the `max(0.0)` guard clamps it.
+#[test]
+fn hamburger_anchor_clamps_to_non_negative_x_on_a_narrow_viewport() {
+    let narrow = Size::new(MENU_WIDTH * 0.5, 400.0);
+    assert_eq!(hamburger_menu_anchor(narrow).x, 0.0);
+}
+
+/// A selectable row's message is the row's own command riding the menu
+/// channel, so the reducer can close the menu in the same reduction
+/// ([FMD-068]).
+#[test]
+fn hamburger_row_message_wraps_the_row_command_on_the_menu_channel() {
+    let command = apply_about_button_click();
+    assert_eq!(
+        hamburger_row_message(&command),
+        Message::Menu(MenuMessage::RowActivated(command))
+    );
+}
+
+/// Card rows render *below* their section header, so the label carries the
+/// check slot but no `"Windows › "` submenu prefix.
+#[test]
+fn hamburger_row_label_has_check_slot_and_no_submenu_prefix() {
+    let checked = hamburger_row_label("Hybrid", true);
+    let unchecked = hamburger_row_label("Hybrid", false);
+    assert!(
+        checked.contains('✓'),
+        "checked row must show the tick: {checked}"
+    );
+    assert!(checked.ends_with("Hybrid"));
+    assert!(!unchecked.contains('✓'));
+    assert!(
+        !unchecked.contains('›'),
+        "card rows carry no submenu prefix"
+    );
+    assert!(unchecked.ends_with("Hybrid"));
+}
+
+/// The card builds for the full production entry set — headers, the
+/// no-models placeholder and every action row — without panicking, and
+/// keeps the `'static` lifetime the overlay host needs.
+#[test]
+fn hamburger_menu_card_builds_for_the_full_entry_set() {
+    let app = test_app();
+    let view_model = TopBarViewModel::from_app(&app);
+    let entries = build_menu_entries(&view_model);
+    let card: Element<'static, Message> = hamburger_menu_card(&entries);
+    let _ = card;
+}
+
+/// An empty entry list still builds a (header-less) card rather than
+/// panicking — the overlay host clamps the size, never the shape.
+#[test]
+fn hamburger_menu_card_builds_for_an_empty_entry_list() {
+    let card: Element<'static, Message> = hamburger_menu_card(&[]);
+    let _ = card;
+}

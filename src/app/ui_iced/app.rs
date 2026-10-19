@@ -141,9 +141,13 @@ pub struct AppState {
     /// Injected UI-state storage handler ([RUST-024], DEC-006). Used by the
     /// close/save reduction in [`crate::ui_iced::update`].
     pub storage: Arc<dyn UiStateStorage>,
-    /// OS-reported baseline scale captured at boot (DEC-008); `None` until
-    /// the chained `window::latest()` → `window::scale_factor` task settles,
-    /// in which case `1.0` applies.
+    /// OS-reported DPI baseline captured at boot (DEC-008); `None` until the
+    /// chained `window::latest()` → `window::scale_factor` task settles.
+    ///
+    /// Diagnostic only — read through [`AppState::effective_scale_factor`].
+    /// iced already multiplies the `.scale_factor(...)` closure's return value
+    /// by this same OS factor, so it must NOT be folded back into the request
+    /// (see [`AppState::requested_scale_factor`]).
     pub os_scale: Option<f32>,
     /// The last known logical window size; the pane-resize ratio input
     /// ([TASK-010]). Seeded from the booted (persisted) window size.
@@ -160,9 +164,31 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// The DEC-008 composed scale: OS baseline × persisted user multiplier.
-    /// Fed to `.scale_factor(...)` per frame on the UI thread ([FMD-069]).
-    pub fn composed_scale_factor(&self) -> f32 {
+    /// The value to hand to iced's `.scale_factor(...)` builder ([DEC-008]).
+    ///
+    /// **This is the user multiplier alone.** iced 0.14 multiplies whatever this
+    /// closure returns by the window's own OS DPI factor before it builds the
+    /// viewport (`iced_winit-0.14.1/src/window/state.rs:68` and `:212`:
+    /// `Viewport::with_physical_size(physical, window.scale_factor() * scale_factor)`),
+    /// so folding [`AppState::os_scale`] in here applies the OS scale **twice**.
+    /// That was the bug that made the whole UI jump larger a moment after boot:
+    /// the first frame renders at `os × 1.0`, then the DEC-008 scale-baseline
+    /// task lands and the composed value became `os × os`.
+    ///
+    /// The DEC-008 intent — "the persisted multiplier sits on top of the OS
+    /// baseline" — is preserved, because iced supplies the baseline itself.
+    #[must_use]
+    pub fn requested_scale_factor(&self) -> f32 {
+        self.app.persisted_ui_state.font_size_scale.unwrap_or(1.0)
+    }
+
+    /// The effective on-screen scale: the OS DPI factor iced applies times the
+    /// persisted user multiplier ([DEC-008]).
+    ///
+    /// Diagnostic only — never feed this to `.scale_factor(...)`, it would
+    /// double-count the OS factor (see [`Self::requested_scale_factor`]).
+    #[must_use]
+    pub fn effective_scale_factor(&self) -> f32 {
         persisted::compose_scale_factor(
             self.os_scale.unwrap_or(1.0),
             self.app.persisted_ui_state.font_size_scale,
@@ -224,6 +250,10 @@ pub struct OverlayState {
     pub dialog_anchor: Option<iced::Point>,
     /// The floating tree / tab context menu.
     pub context_menu: Option<ContextMenu>,
+    /// Whether the top-bar hamburger menu is open ([TASK-023] fix). A
+    /// reducer-held bool because the menu card is mounted by the shared
+    /// overlay host, which rebuilds from state every frame.
+    pub hamburger_open: bool,
     /// The inline editor buffer (owns the live `text_editor::Content`, so
     /// the overlay as a whole is not `Clone`).
     pub editor: Option<EditorViewModel>,
@@ -259,6 +289,7 @@ impl Default for OverlayState {
             dialog: DialogState::new(),
             dialog_anchor: None,
             context_menu: None,
+            hamburger_open: false,
             editor: None,
             debug: AgentDebugWindowState::new(),
             tools: ToolsDialogState::new(),
@@ -391,12 +422,33 @@ impl ViewModels {
     /// * the debug window's expanded rows come from [`AgentDebugWindowState`],
     ///   because `AgentDebugViewModel::from_app` returns an empty set.
     ///
-    /// Side effects: the per-snapshot filesystem reads the legacy UI panels
-    /// already paid every frame (skill listings, the Typst PATH probe, the
-    /// tree flatten). Rebuilding once per message is strictly cheaper than
-    /// the legacy UI's once-per-frame cost.
+    /// Side effects: the remaining filesystem reads are the tree flatten and
+    /// the skill listings. Everything a closed window would need is skipped so
+    /// a workspace scan cannot starve the UI thread ([FMD-060]):
+    ///
+    /// * the Typst PATH probe is memoised process-wide
+    ///   (`fastmd_pdf::find_typst_binary`);
+    /// * the note-skill folder is read **once** here and handed to both the
+    ///   left panel and the tab strip ([`note_skill_files`]);
+    /// * the Tools registry deep clone is built only while that dialog is open;
+    /// * the debug window's per-entry deep clone + JSON pretty-print is skipped
+    ///   while it is closed ([`AgentDebugViewModel::closed`]);
+    /// * the background-log ring buffer is not cloned while the viewer is
+    ///   closed ([`BackgroundLogsViewModel::closed`]) — which also stops the
+    ///   UI contending that mutex with the worker thread that fills it;
+    /// * the agent transcript is not re-parsed while the session is off screen.
+    ///
+    /// [`note_skill_files`]: crate::ui_iced::panels::left::note_skill_files
+    /// [`AgentDebugViewModel::closed`]: crate::ui_iced::agent_debug::AgentDebugViewModel::closed
+    /// [`BackgroundLogsViewModel::closed`]: crate::ui_iced::logs::BackgroundLogsViewModel::closed
     #[must_use]
     pub fn from_app(app: &FastMdApp, overlay: &OverlayState) -> Self {
+        // The note-skill folder backs both the left panel's file menu and the
+        // tab strip's context menu. Read it once per rebuild and hand the same
+        // listing to both, instead of each panel hitting the directory itself
+        // ([FMD-060]).
+        let note_skills = crate::ui_iced::panels::left::note_skill_files(app);
+
         let mut left = LeftPanelViewModel::from_app(app);
         left.query = overlay.search.query().to_string();
         left.is_searching = overlay.search.is_filtering();
@@ -412,15 +464,25 @@ impl ViewModels {
             BatchDialogViewModel::from_config(&app.orchestrator.dialogs.batch_dialog_config)
                 .with_status(batch_run_status(&app.orchestrator.dialogs));
 
+        // The tools snapshot deep-clones the whole tool-group registry plus
+        // per-tool auth facts and char counts. It is only rendered while the
+        // dialog is open, so building it every message is pure waste during
+        // a workspace scan ([FMD-060]).
+        let tools = if overlay.tools.is_open() {
+            ToolsDialogViewModel::from_app(app)
+        } else {
+            ToolsDialogViewModel::empty()
+        };
+
         Self {
             top: TopBarViewModel::from_app(app),
             left,
-            center: CenterPanelViewModel::from_app(app),
+            center: CenterPanelViewModel::from_app_with_note_skills(app, note_skills),
             bottom: BottomPanelViewModel::from_app(app),
             agent,
             logs: BackgroundLogsViewModel::from_app(app),
             debug,
-            tools: ToolsDialogViewModel::from_app(app),
+            tools,
             batch,
             about: AboutViewModel::from_build(),
             attributions: AttributionsViewModel::from_catalog(),
@@ -909,7 +971,9 @@ fn window_icon() -> Option<iced::window::Icon> {
 ///   `exit_on_close_request: false` (DEC-006);
 /// * `.theme(...)` — the custom FastMD dark theme ([`crate::ui_iced::theme`],
 ///   [TASK-008]);
-/// * `.scale_factor(...)` — the DEC-008 composed baseline × multiplier;
+/// * `.scale_factor(...)` — the DEC-008 user multiplier; iced composes it
+///   with the OS DPI factor itself (see
+///   [`AppState::requested_scale_factor`]);
 /// * `.subscription(...)` — the [TASK-019] bus bridge over the live
 ///   [`BusReceivers`].
 ///
@@ -933,7 +997,7 @@ pub fn launch(inputs: LaunchInputs) -> iced::Result {
     .title(crate::ui::strings::WINDOW_TITLE)
     .window(settings)
     .theme(|_state: &AppState| crate::ui_iced::theme::fastmd_dark_theme())
-    .scale_factor(|state: &AppState| state.composed_scale_factor())
+    .scale_factor(|state: &AppState| state.requested_scale_factor())
     .subscription(|state: &AppState| subscription::subscription(&state.receivers))
     .run();
 

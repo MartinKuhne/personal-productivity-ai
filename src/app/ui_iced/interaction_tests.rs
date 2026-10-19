@@ -42,12 +42,14 @@
 //! driven at all. This was verified against a bare, isolated `pick_list`,
 //! so it is not a FastMD composition problem.
 //!
-//! The hamburger is covered as far as the tool allows:
-//! [`test_top_bar_hamburger_consumes_the_open_click`] proves the widget
-//! receives and captures the open click, and
-//! [`test_hamburger_rows_emit_their_commands`] drives the *same*
-//! [`HamburgerItem`] rows the pick list is fed, rendered as real buttons,
-//! so the row → `Message::Command` contract is still exercised end to end.
+//! The tag filter is still a `pick_list` and stays covered as far as the
+//! tool allows. The hamburger is **no longer affected**: it is a ☰ button
+//! plus a real card mounted by the overlay host, so its rows are ordinary
+//! `Text`/`Button` widgets. [`test_top_bar_hamburger_consumes_the_open_click`]
+//! proves the ☰ captures the open click, and
+//! [`test_hamburger_menu_opens_and_routes_a_row_through_the_reducer`]
+//! drives the whole loop — reducer opens, real `view()` mounts the card,
+//! a row click publishes its own `UserCommand`, the reducer closes it.
 //!
 //! # Test-environment safety ([RUST-006])
 //!
@@ -68,13 +70,16 @@ use crate::ui_iced::app::AppState;
 use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::{EditorViewModel, editor_card};
 use crate::ui_iced::message::{
-    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, Message, TreeMessage,
+    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, TreeMessage,
 };
 use crate::ui_iced::overlay::menu_labels;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
 use crate::ui_iced::panels::left::{left_panel, row_icon};
-use crate::ui_iced::panels::top::{HamburgerItem, MENU_MIN_WIDTH, hamburger_items, top_bar};
+use crate::ui_iced::panels::top::{
+    MenuEntry, MenuEntryKind, apply_about_button_click, build_menu_entries, hamburger_menu_card,
+    hamburger_row_label, hamburger_row_message, top_bar,
+};
 use crate::ui_iced::test_helpers::test_app_state;
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
@@ -675,66 +680,121 @@ fn test_name_entry_dialog_submit_after_reducer_accepts_the_name() {
 // Top bar — hamburger menu
 // ---------------------------------------------------------------------------
 
-/// Clicking the hamburger consumes the click (the pick list opens). The
-/// open menu itself cannot be observed — see the module header.
+/// Clicking the ☰ button captures the click and opens the menu.
 #[test]
 fn test_top_bar_hamburger_consumes_the_open_click() {
     let state = test_app_state();
     let mut ui = sim(top_bar(&state.models.top));
 
-    let bar = ui
+    let glyph = strings::HAMBURGER_MENU_BUTTON;
+    let bounds = ui
         .find(|candidate: Candidate<'_>| match candidate {
-            Candidate::Container { bounds, .. } if bounds.width == MENU_MIN_WIDTH => Some(bounds),
+            Candidate::Text {
+                content, bounds, ..
+            } if content == glyph => Some(bounds),
             _ => None,
         })
-        .expect("the hamburger holder");
+        .expect("the ☰ hamburger button");
 
-    ui.point_at(bar.center());
-    let statuses = ui.simulate(left_click());
+    click_at(&mut ui, bounds.center());
+    let emitted = messages(ui);
     assert!(
-        matches!(statuses.first(), Some(iced::event::Status::Captured)),
-        "the hamburger must capture the open click, got {statuses:?}"
+        emitted.contains(&Message::Menu(MenuMessage::Opened)),
+        "the ☰ button must publish the open message, got {emitted:?}"
     );
 }
 
-/// The rows the pick list is fed each publish their own `UserCommand`.
+/// The full loop: `Opened` mounts the card in the real `view()`, a row pick
+/// publishes that row's own [`UserCommand`] on the menu channel, and the
+/// reducer closes the menu in the same reduction ([FMD-068]).
+#[test]
+fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
+    let mut state = test_app_state();
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    state.rebuild_view_models();
+    assert!(state.overlay.hamburger_open, "Opened must flip the flag");
+
+    let about = strings::format_menu_row_label(None, strings::MENU_ABOUT, false);
+    let mut ui = sim(view(&state));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text {
+                content, bounds, ..
+            } if content == about.as_str() => Some(bounds),
+            _ => None,
+        })
+        .expect("the About row inside the mounted hamburger card");
+    click_at(&mut ui, bounds.center());
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &Message::Menu(MenuMessage::RowActivated(apply_about_button_click())),
+        "clicking the About row must publish its own command on the menu channel",
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::RowActivated(apply_about_button_click())),
+    );
+    assert!(
+        !state.overlay.hamburger_open,
+        "a row pick must close the menu in the same reduction"
+    );
+}
+
+/// A click that misses the mounted card lands on the blocker and closes it.
+#[test]
+fn test_hamburger_menu_click_away_closes_the_card() {
+    let mut state = test_app_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    state.rebuild_view_models();
+
+    let mut ui = sim(view(&state));
+    // Far bottom-left corner: outside the right-anchored card.
+    click_at(&mut ui, iced::Point::new(4.0, 760.0));
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &Message::Menu(MenuMessage::Closed),
+        "a click outside the card must close it",
+    );
+}
+
+/// Every selectable row of the production [`hamburger_menu_card`] publishes
+/// its own `UserCommand` on the menu channel when clicked.
 ///
-/// Rendered as plain buttons because the pick list's own menu is not
-/// selectable under `iced_test` (module header). The row set, labels and
-/// commands are the production [`hamburger_items`] output, so this drives
-/// the same contract the widget drives.
+/// The card is rendered standalone here; the full-view loop (reducer open →
+/// mounted card → row pick) is covered by
+/// [`test_hamburger_menu_opens_and_routes_a_row_through_the_reducer`].
 #[test]
 fn test_hamburger_rows_emit_their_commands() {
     let state = test_app_state();
-    let items: Vec<HamburgerItem> = hamburger_items(&state.models.top);
+    let entries = build_menu_entries(&state.models.top);
+    let actions: Vec<&MenuEntry> = entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, MenuEntryKind::Action(_)))
+        .collect();
     assert!(
-        items.len() >= 5,
+        actions.len() >= 5,
         "the hamburger must offer the full UI-061..UI-066 row set"
     );
 
-    // `Element` is neither `Clone` nor `Debug`, so the row list is rebuilt
-    // for each click rather than shared.
-    let fragment = || -> Element<'static, Message> {
-        let rows: Vec<Element<'static, Message>> = items
-            .iter()
-            .map(|item| {
-                Element::from(
-                    iced::widget::button(iced::widget::text(item.label.clone()))
-                        .on_press(Message::Command(item.command.clone())),
-                )
-            })
-            .collect();
-        iced::widget::column(rows).into()
-    };
-
-    for item in &items {
-        let mut ui = sim(fragment());
-        let _ = ui.click(item.label.as_str());
+    // `Element` is neither `Clone` nor `Debug`, so the card is rebuilt for
+    // each click rather than shared.
+    for entry in actions {
+        let command = match &entry.kind {
+            MenuEntryKind::Action(command) => command,
+            other => unreachable!("filtered to Action rows, got {other:?}"),
+        };
+        let label = hamburger_row_label(&entry.label, entry.checked);
+        let mut ui = sim(hamburger_menu_card(&entries));
+        let _ = ui.click(label.as_str());
         assert_eq!(
             messages(ui),
-            vec![Message::Command(item.command.clone())],
+            vec![hamburger_row_message(command)],
             "hamburger row {:?} must publish its own command",
-            item.label,
+            entry.label,
         );
     }
 }

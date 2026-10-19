@@ -485,6 +485,31 @@ impl BackgroundLogsViewModel {
         }
     }
 
+    /// The snapshot for a closed log viewer.
+    ///
+    /// The counters and filter settings ride along so the header and pick-lists
+    /// stay coherent, but the whole-buffer clone [`Self::from_logs`] performs is
+    /// skipped. The ring buffer holds up
+    /// [`MAX_LOG_ENTRIES`](crate::background::logs::MAX_LOG_ENTRIES) entries and
+    /// a workspace scan fills it, so cloning it for a window nobody is looking at
+    /// is both wasted work and needless contention with the worker thread that
+    /// pushes into the same mutex ([FMD-060], [FMD-064]).
+    ///
+    /// Purity: read-only over `logs`.
+    #[must_use]
+    pub fn closed(logs: &BackgroundLogs) -> Self {
+        Self {
+            visible: false,
+            entries: Vec::new(),
+            total_entries: logs.get_logs().len(),
+            search_text: logs.search_text.clone(),
+            category_filter: logs.filter_category,
+            category_options: category_filter_options(),
+            auto_scroll: logs.auto_scroll,
+            access_error: false,
+        }
+    }
+
     /// Snapshots the buffer off `app`.
     ///
     /// Unlike the legacy UI build — which called `.lock().unwrap()` and would
@@ -492,10 +517,14 @@ impl BackgroundLogsViewModel {
     /// (`src/app/ui/background_logs.rs:49-64`) — a poisoned buffer degrades
     /// to [`Self::unavailable`] so one wedged worker cannot take the UI down
     /// ([FMD-064]).
+    ///
+    /// While the viewer is closed the entry clone is skipped — see
+    /// [`Self::closed`] ([FMD-060]).
     #[must_use]
     pub fn from_app(app: &FastMdApp) -> Self {
         match app.orchestrator.background_manager.lock() {
-            Ok(manager) => Self::from_logs(&manager),
+            Ok(manager) if manager.show_background_logs => Self::from_logs(&manager),
+            Ok(manager) => Self::closed(&manager),
             Err(_) => Self::unavailable(),
         }
     }

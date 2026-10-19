@@ -701,6 +701,28 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     root_node
 }
 
+/// The note-skill listing the file menu and the tab-strip context menu both draw
+/// from.
+///
+/// Read through the **read-only** path because `AppConfig::list_note_skills()`
+/// `create_dir_all`s as a side effect, which a per-frame view must not do
+/// ([RUST-006]) — the same rule [TASK-012] established for
+/// [`LeftPanelViewModel::from_app`].
+///
+/// Hoisted out of both panels so [`ViewModels::from_app`](crate::ui_iced::app::ViewModels)
+/// can read the directory once per rebuild instead of once per panel
+/// ([FMD-060]).
+///
+/// Purity: reads the filesystem; otherwise pure.
+#[must_use]
+pub fn note_skill_files(app: &FastMdApp) -> Vec<SkillFile> {
+    AppConfig::list_skill_files_in(&skill_dir(
+        app.content_libraries(),
+        NOTE_SKILLS_SUBDIR,
+        AppConfig::get_skills_note_dir,
+    ))
+}
+
 /// Everything the left panel needs to render, snapshotted off `FastMdApp`.
 ///
 /// Mirrors [`super::top::TopBarViewModel`]: the widget tree reads only this

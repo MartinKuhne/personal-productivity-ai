@@ -156,6 +156,8 @@ pub enum Message {
     /// Inbound *background → UI* notification channel ([TASK-019],
     /// FMD-065..FMD-067) — the only channel no widget can produce.
     Inbound(InboundMessage),
+    /// The top-bar hamburger menu channel ([TASK-023] fix menu visibility).
+    Menu(MenuMessage),
     /// Boot-infrastructure reports ([TASK-022]) — the terminal outcomes of
     /// the one-shot tasks the `boot` closure returns (font registration).
     /// Not a panel channel and not
@@ -891,8 +893,42 @@ pub enum AgentDebugMessage {
     },
 }
 
-/// Which inbound bus a notification arrived from ([TASK-019]).
+/// Top-bar hamburger menu channel.
 ///
+/// Grounded in the legacy UI hamburger menu (`src/app/ui/panels/top.rs`
+/// `ui.menu_button("☰ Menu")`): opening the menu is a **view-local
+/// transition** — the menu is floating widget state, not application state
+/// — so it must not ride [`Message::Command`] ([FMD-068] rule 1). The
+/// channel exists because the port wrongly replaced the click-opened menu
+/// with a `pick_list` dropdown: the "menu" had no open/closed state at all,
+/// its title bar rendered the last-picked row and no header rows were
+/// renderable (the two defects the menu-migration bug report names).
+///
+/// * [`Self::Opened`] / [`Self::Closed`] — the menu's open ⇄ closed bookends,
+///   carrying nothing.
+/// * [`Self::RowActivated`] — a selectable row was picked. The wrapped
+///   [`UserCommand`] IS the row's user intent ([FMD-068]); the reducer
+///   executes it through `route_command` and closes the menu in the same
+///   reduction, which is what a dropdown/menu selection does.
+///
+/// The menu rows themselves are built from
+/// [`crate::ui_iced::panels::top::build_menu_entries`], the full
+/// UI-061..UI-066 hierarchy including the non-selectable section headers
+/// and the no-chat-models placeholder. `Message` derives `PartialEq` on
+/// every channel; the payloads here are `UserCommand: PartialEq`, so the
+/// channel derives it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuMessage {
+    /// The ☰ button opened the menu.
+    Opened,
+    /// The menu was dismissed (click-away) without picking a row.
+    Closed,
+    /// A selectable menu row was picked. The wrapped command executes via
+    /// `route_command` and the menu closes.
+    RowActivated(UserCommand),
+}
+
+/// Which inbound bus a notification arrived from ([TASK-019]).
 /// Names the four producer channels the bridge in
 /// [`crate::ui_iced::subscription`] reads. The source travels with the
 /// lag report so a warning says *which* bus dropped events, the way the
@@ -960,6 +996,15 @@ pub enum InboundMessage {
     ConfigArrived(Arc<AppConfig>),
     /// A filesystem mutation arrived on `Bus<FileEvent>`.
     FileChanged(FileEvent),
+    /// A burst of filesystem mutations drained off `Bus<FileEvent>` in one
+    /// go ([FMD-060]).
+    ///
+    /// The bridge coalesces every event already queued when it wakes, so a
+    /// watcher storm costs **one** reduction — and one tree rebuild —
+    /// instead of one per event. Semantics are exactly the single-event
+    /// arm applied in order, with the trailing `process_file_events()`
+    /// call hoisted out of the loop.
+    FileChangedBatch(Vec<FileEvent>),
     /// An agent lifecycle or streaming event arrived on
     /// `Bus<AgentEvent>`.
     Agent(Arc<AgentEvent>),
@@ -967,6 +1012,10 @@ pub enum InboundMessage {
     /// indexer/watcher `Fs` progress, a worker `Process` log entry or file
     /// load, or an `McpAuth` completion.
     Background(Arc<BackgroundEvent>),
+    /// A burst of typed background events drained off the `BackgroundEvent`
+    /// channel in one go ([FMD-060]) — same semantics as the
+    /// [`InboundMessage::Background`] arm applied in order.
+    BackgroundBatch(Vec<Arc<BackgroundEvent>>),
     /// A subscriber fell behind a bus and `count` events were discarded
     /// ([FMD-067], [FMD-072]).
     ///
@@ -990,8 +1039,12 @@ impl PartialEq for InboundMessage {
         match (self, other) {
             (Self::ConfigArrived(a), Self::ConfigArrived(b)) => Arc::ptr_eq(a, b),
             (Self::FileChanged(a), Self::FileChanged(b)) => a == b,
+            (Self::FileChangedBatch(a), Self::FileChangedBatch(b)) => a == b,
             (Self::Agent(a), Self::Agent(b)) => Arc::ptr_eq(a, b),
             (Self::Background(a), Self::Background(b)) => Arc::ptr_eq(a, b),
+            (Self::BackgroundBatch(a), Self::BackgroundBatch(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| Arc::ptr_eq(x, y))
+            }
             (
                 Self::EventsDropped {
                     source: source_a,

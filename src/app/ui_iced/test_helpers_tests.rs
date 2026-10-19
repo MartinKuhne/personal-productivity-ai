@@ -108,9 +108,9 @@ fn test_app_state_with_seeds_persisted_geometry() {
     assert_eq!(state.app.layout.left_panel_width, Some(280.0));
     assert_eq!(state.app.layout.right_panel_width, Some(200.0));
     assert_eq!(state.viewport, Size::new(998.0, 688.0));
-    // DEC-008: with no OS baseline yet, the composed scale is the persisted
+    // DEC-008: with no OS baseline yet, the requested scale is the persisted
     // multiplier alone.
-    assert!((state.composed_scale_factor() - 1.25).abs() < 1e-6);
+    assert!((state.requested_scale_factor() - 1.25).abs() < 1e-6);
 }
 
 #[test]

@@ -439,6 +439,102 @@ fn from_logs_carries_entries_and_flags() {
     assert_eq!(view_model.filtered_out(), 0);
 }
 
+/// Regression: the viewer was cloned whole on every message even while closed.
+/// The ring buffer holds up 10 000 entries and a workspace scan fills it, so
+/// that clone was both wasted work and contention with the worker thread pushing
+/// into the same mutex ([FMD-060], [FMD-064]).
+#[test]
+fn from_app_skips_the_entry_clone_while_the_viewer_is_closed() {
+    let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    {
+        let mut manager = app
+            .orchestrator
+            .background_manager
+            .lock()
+            .expect("log buffer lock");
+        manager.show_background_logs = false;
+        for index in 0..50 {
+            manager.push_log(stamped(LogCategory::Indexer, "Indexing file", index));
+        }
+    }
+
+    let view_model = BackgroundLogsViewModel::from_app(&app);
+
+    assert!(!view_model.visible);
+    assert!(
+        view_model.entries.is_empty(),
+        "a closed viewer must not clone the ring buffer"
+    );
+    assert_eq!(
+        view_model.total_entries, 50,
+        "the counter still rides along so the header stays honest"
+    );
+    assert_eq!(
+        view_model.category_options.len(),
+        category_filter_options().len(),
+        "the filter pick-list stays populated so the control does not render empty"
+    );
+    assert!(!view_model.access_error);
+}
+
+/// Opening the viewer must produce the entries again — the gate may not strand
+/// the window on an empty snapshot.
+#[test]
+fn from_app_clones_entries_once_the_viewer_opens() {
+    let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    {
+        let mut manager = app
+            .orchestrator
+            .background_manager
+            .lock()
+            .expect("log buffer lock");
+        manager.show_background_logs = false;
+        manager.push_log(stamped(LogCategory::Watcher, "File modified", 1));
+    }
+
+    assert!(BackgroundLogsViewModel::from_app(&app).entries.is_empty());
+
+    {
+        let mut manager = app
+            .orchestrator
+            .background_manager
+            .lock()
+            .expect("log buffer lock");
+        manager.show_background_logs = true;
+    }
+
+    let view_model = BackgroundLogsViewModel::from_app(&app);
+    assert!(view_model.visible);
+    assert_eq!(
+        view_model.entries.len(),
+        1,
+        "opening must populate the entries"
+    );
+    assert_eq!(view_model.entries[0].message, "File modified");
+}
+
+#[test]
+fn closed_keeps_settings_and_reports_no_access_error() {
+    let mut logs = buffer_with(&[stamped(LogCategory::Indexer, "Index 1", 1)]);
+    logs.show_background_logs = true;
+    logs.search_text = "index".to_string();
+    logs.filter_category = Some(LogCategory::Indexer);
+    logs.auto_scroll = true;
+
+    let view_model = BackgroundLogsViewModel::closed(&logs);
+
+    assert!(
+        !view_model.visible,
+        "`closed` always reports a closed window"
+    );
+    assert!(view_model.entries.is_empty());
+    assert_eq!(view_model.total_entries, 1);
+    assert_eq!(view_model.search_text, "index");
+    assert_eq!(view_model.category_filter, Some(LogCategory::Indexer));
+    assert!(view_model.auto_scroll);
+    assert!(!view_model.access_error);
+}
+
 #[test]
 fn from_logs_applies_the_buffers_own_filters() {
     let mut logs = buffer_with(&[

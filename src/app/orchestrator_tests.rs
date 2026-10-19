@@ -272,6 +272,9 @@ fn handle_fs_event_finished_marks_indexing() {
 fn handle_process_event_file_loaded_ok_populates_tabs() {
     let mut orch = harness();
     let path = PathBuf::from("/tmp/notes.md");
+    // The real flow only ever spawns a read for a file that IS selected
+    // (`handle_file_selection`), so the projection precondition is a selection.
+    orch.selection.select_file(path.clone());
 
     orch.handle_process_event(ProcessEvent::FileLoaded {
         path: path.clone(),
@@ -280,6 +283,72 @@ fn handle_process_event_file_loaded_ok_populates_tabs() {
 
     assert_eq!(orch.tabs.loaded_path, Some(path));
     assert!(orch.tabs.current_markdown.contains("Body"));
+}
+
+/// Regression: a read that was still in flight when the user moved on must not
+/// overwrite the document. Landing it used to repoint `loaded_path` and rebuild
+/// `toc` from the abandoned file, flipping the ToC pane between two files'
+/// heading sets with no user action.
+#[test]
+fn handle_process_event_drops_file_loaded_for_a_deslected_file() {
+    let mut orch = harness();
+    let abandoned = PathBuf::from("/tmp/abandoned.md");
+    let current = PathBuf::from("/tmp/current.md");
+
+    // The user moved from `abandoned` to `current`; the read for `current` is in
+    // flight and `pending_file_load` names it.
+    orch.tabs.open_tab(current.clone());
+    orch.selection.select_file(current.clone());
+    orch.pending_file_load = Some(current.clone());
+
+    // The abandoned read lands first.
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: abandoned,
+        content: Ok("# Abandoned\n\nShould never be shown".to_string()),
+    });
+
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "a stale landing must not repoint the open document"
+    );
+    assert!(
+        orch.tabs.current_markdown.is_empty(),
+        "a stale landing must not overwrite the rendered body"
+    );
+    assert!(
+        orch.tabs.toc.is_empty(),
+        "a stale landing must not populate the ToC"
+    );
+    assert_eq!(
+        orch.pending_file_load,
+        Some(current),
+        "the load still pending for the current selection must survive"
+    );
+}
+
+/// Regression: releasing the pending marker for the landing path even when it is
+/// no longer selected. Leaving it set would block re-selecting the same file
+/// behind a load that has already returned.
+#[test]
+fn handle_process_event_releases_pending_marker_for_its_own_path() {
+    let mut orch = harness();
+    let path = PathBuf::from("/tmp/notes.md");
+    orch.pending_file_load = Some(path.clone());
+    // The harness starts with nothing selected, which is the precondition here.
+
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: path.clone(),
+        content: Ok("# Title\n\nBody".to_string()),
+    });
+
+    assert_eq!(
+        orch.pending_file_load, None,
+        "the marker for the returned path must be released so a later re-select can load"
+    );
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "nothing is selected, so nothing may be projected"
+    );
 }
 
 #[test]

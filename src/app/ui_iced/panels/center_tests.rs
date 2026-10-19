@@ -635,3 +635,53 @@ fn tab_menu_file_actions_match_the_tree_file_menu() {
         "UI-034: the Format Markdown skill row must be identical in both menus"
     );
 }
+
+/// The caller-supplied note-skill listing must be used verbatim, so
+/// `ViewModels::from_app` can read the skill directory once per rebuild and
+/// share it with the left panel instead of each panel hitting the FS
+/// ([FMD-060]).
+#[test]
+fn from_app_with_note_skills_uses_the_supplied_listing() {
+    let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let supplied = vec![crate::config::SkillFile {
+        name: "SuppliedSkill".to_string(),
+        path: std::path::PathBuf::from("/skills/SuppliedSkill.md"),
+    }];
+
+    let vm = CenterPanelViewModel::from_app_with_note_skills(&app, supplied.clone());
+
+    assert_eq!(
+        vm.note_skills, supplied,
+        "the supplied listing must land in the snapshot untouched"
+    );
+}
+
+/// `from_app` and `from_app_with_note_skills` must agree on everything except
+/// where the listing came from.
+#[test]
+fn from_app_and_the_parameterized_form_agree_apart_from_the_listing() {
+    let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let read_by_panel = CenterPanelViewModel::from_app(&app);
+    let supplied = vec![crate::config::SkillFile {
+        name: "SuppliedSkill".to_string(),
+        path: std::path::PathBuf::from("/skills/SuppliedSkill.md"),
+    }];
+    let injected = CenterPanelViewModel::from_app_with_note_skills(&app, supplied.clone());
+
+    assert_eq!(
+        injected.tabs, read_by_panel.tabs,
+        "the tab strip must not differ"
+    );
+    assert_eq!(
+        injected.active_tab, read_by_panel.active_tab,
+        "the active tab must not differ"
+    );
+    assert_eq!(
+        injected.show_agent_session, read_by_panel.show_agent_session,
+        "the agent-session gate must not differ"
+    );
+    assert_eq!(
+        injected.note_skills, supplied,
+        "only the listing source differs"
+    );
+}

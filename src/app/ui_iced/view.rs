@@ -46,13 +46,15 @@ use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::background_logs_view;
-use crate::ui_iced::message::{LayoutMessage, Message, TreeMessage};
-use crate::ui_iced::overlay::{modal, with_context_menu};
+use crate::ui_iced::message::{LayoutMessage, MenuMessage, Message, TreeMessage};
+use crate::ui_iced::overlay::{menu_size, modal, with_card_at, with_context_menu};
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
 use crate::ui_iced::panels::right::toc_indent_pixels;
-use crate::ui_iced::panels::top::top_bar;
+use crate::ui_iced::panels::top::{
+    build_menu_entries, hamburger_menu_anchor, hamburger_menu_card, top_bar,
+};
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
 use iced::widget::{button, column, container, scrollable, stack, text};
@@ -193,10 +195,12 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// The overlay host: the bands with every mounted floating window stacked
 /// above them, bottom-most first ([TASK-023], DEC-005).
 ///
-/// The context menu is folded into the base with
-/// [`with_context_menu`] rather than stacked as its own layer because that
-/// helper owns the click-away blocker + anchored-card composition the tree
-/// and tab menus need; every higher window is a full-screen modal.
+/// The context menu and the hamburger menu are both folded into the base
+/// with [`with_context_menu`] / [`with_card_at`] rather than stacked as
+/// their own layer because those helpers own the click-away blocker +
+/// anchored-card composition the tree, tab and top-bar menus need; every
+/// higher window is a full-screen modal. The reducer keeps the two menus
+/// mutually exclusive, so at most one of the two folds is live per frame.
 fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
     let mut base = base_bands(state);
 
@@ -209,6 +213,18 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
             &menu.items,
             state.viewport,
             Message::Tree(TreeMessage::ContextMenuClosed),
+        );
+    }
+
+    if state.overlay.hamburger_open {
+        let entries = build_menu_entries(&state.models.top);
+        base = with_card_at(
+            base,
+            hamburger_menu_anchor(state.viewport),
+            hamburger_menu_card(&entries),
+            menu_size(entries.len()),
+            state.viewport,
+            Message::Menu(MenuMessage::Closed),
         );
     }
 

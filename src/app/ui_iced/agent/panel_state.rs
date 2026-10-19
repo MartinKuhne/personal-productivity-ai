@@ -325,10 +325,24 @@ impl AgentPanelViewModel {
         let transcript = &app.orchestrator.agent_transcript;
         let state = app.agent().state();
 
+        // Re-parsing the whole transcript through `markdown::parse` and cloning
+        // the thinking buffer is the most expensive thing this snapshot does, and
+        // it is only ever rendered by the agent-session body. While the session is
+        // not on screen, skip it ([FMD-060]).
+        let visible = panel.show_results;
+        let (turns, thinking) = if visible {
+            (
+                turns_from_content(&transcript.content),
+                transcript.thinking.clone(),
+            )
+        } else {
+            (Vec::new(), String::new())
+        };
+
         Self {
-            visible: panel.show_results,
-            turns: turns_from_content(&transcript.content),
-            thinking: transcript.thinking.clone(),
+            visible,
+            turns,
+            thinking,
             thinking_expanded: true,
             status: state.status.clone(),
             running: state.running,

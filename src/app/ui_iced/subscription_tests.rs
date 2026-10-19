@@ -570,15 +570,83 @@ async fn test_stream_delivers_events_in_publish_order() {
         bus.publish(FileEvent::discovered_one(path.clone()));
     }
 
+    // Everything queued before the stream wakes is coalesced into **one**
+    // batch ([FMD-060]) that preserves publication order ([FMD-066]).
     let mut stream = file_stream(&handle);
-    for path in &paths {
-        assert_eq!(
-            stream.next().await.expect("an event"),
-            Message::Inbound(InboundMessage::FileChanged(FileEvent::discovered_one(
-                path.clone()
-            ))),
-            "publication order per publisher must be preserved ([FMD-066])"
-        );
+    assert_eq!(
+        stream.next().await.expect("a coalesced batch"),
+        Message::Inbound(InboundMessage::FileChangedBatch(
+            paths
+                .iter()
+                .map(|path| FileEvent::discovered_one(path.clone()))
+                .collect()
+        )),
+        "publication order per publisher must be preserved ([FMD-066])"
+    );
+}
+
+#[tokio::test]
+async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
+    let bus: Bus<FileEvent> = Bus::new();
+    let handle = SharedReceiver::from_bus(&bus);
+
+    // One event wakes the stream...
+    let mut stream = file_stream(&handle);
+    let first = FileEvent::discovered_one(PathBuf::from("first.md"));
+    bus.publish(first.clone());
+    assert_eq!(
+        stream.next().await.expect("the lone event"),
+        Message::Inbound(InboundMessage::FileChanged(first)),
+        "a lone event must ride the single-event arm, not a batch"
+    );
+
+    // ...and a burst published while the stream sleeps arrives as one batch.
+    let burst: Vec<FileEvent> = (0..3)
+        .map(|i| FileEvent::updated_one(PathBuf::from(format!("burst{i}.md"))))
+        .collect();
+    for event in &burst {
+        bus.publish(event.clone());
+    }
+    assert_eq!(
+        stream.next().await.expect("the coalesced burst"),
+        Message::Inbound(InboundMessage::FileChangedBatch(burst)),
+        "a queued burst must cost exactly one message ([FMD-060])"
+    );
+}
+
+#[tokio::test]
+async fn test_background_stream_coalesces_a_queued_burst() {
+    let (sender, receiver) = mpsc::unbounded_channel::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_unbounded(receiver);
+    let burst = vec![
+        BackgroundEvent::Fs(FsEvent::DirParsed {
+            path: PathBuf::from("dir"),
+        }),
+        BackgroundEvent::Fs(FsEvent::FileParsed {
+            path: PathBuf::from("a.md"),
+            tags: vec![],
+        }),
+        BackgroundEvent::Fs(FsEvent::Finished),
+    ];
+    for event in burst.clone() {
+        sender.send(event).expect("send");
+    }
+
+    let mut stream = background_stream(&handle);
+    let message = stream.next().await.expect("the coalesced burst");
+    match message {
+        Message::Inbound(InboundMessage::BackgroundBatch(events)) => {
+            assert_eq!(events.len(), 3, "the whole queued burst must coalesce");
+            assert!(
+                matches!(&*events[0], BackgroundEvent::Fs(FsEvent::DirParsed { .. })),
+                "order must be preserved ([FMD-066])"
+            );
+            assert!(
+                matches!(&*events[2], BackgroundEvent::Fs(FsEvent::Finished)),
+                "order must be preserved ([FMD-066])"
+            );
+        }
+        other => panic!("expected Inbound(BackgroundBatch), got {other:?}"),
     }
 }
 

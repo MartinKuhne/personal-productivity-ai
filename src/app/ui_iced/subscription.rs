@@ -108,12 +108,18 @@ pub enum InboundBusEvent {
     /// A filesystem mutation on `Bus<FileEvent>`
     /// (`src/app/bus/events/file.rs:28`).
     File(FileEvent),
+    /// A coalesced burst of filesystem mutations drained off
+    /// `Bus<FileEvent>` in one wake-up ([FMD-060]).
+    FileBatch(Vec<FileEvent>),
     /// An agent turn event on `Bus<AgentEvent>`
     /// (`src/app/bus/events/agent.rs:21`).
     Agent(AgentEvent),
     /// A typed background event on the `std::sync::mpsc` channel
     /// (`src/app/bus/events/typed.rs:119`).
     Background(BackgroundEvent),
+    /// A coalesced burst of typed background events drained in one
+    /// wake-up ([FMD-060]).
+    BackgroundBatch(Vec<BackgroundEvent>),
     /// `count` events were discarded because a subscriber fell behind
     /// ([FMD-067]).
     Dropped {
@@ -141,12 +147,18 @@ pub fn bus_event_to_message(event: InboundBusEvent) -> Option<Message> {
             Arc::new(arrived.config),
         ))),
         InboundBusEvent::File(event) => Some(Message::Inbound(InboundMessage::FileChanged(event))),
+        InboundBusEvent::FileBatch(events) => {
+            Some(Message::Inbound(InboundMessage::FileChangedBatch(events)))
+        }
         InboundBusEvent::Agent(event) => {
             Some(Message::Inbound(InboundMessage::Agent(Arc::new(event))))
         }
         InboundBusEvent::Background(event) => Some(Message::Inbound(InboundMessage::Background(
             Arc::new(event),
         ))),
+        InboundBusEvent::BackgroundBatch(events) => Some(Message::Inbound(
+            InboundMessage::BackgroundBatch(events.into_iter().map(Arc::new).collect()),
+        )),
         InboundBusEvent::Dropped { source, count } => {
             Some(Message::Inbound(InboundMessage::EventsDropped {
                 source,
@@ -410,6 +422,12 @@ fn config_stream(
 }
 
 /// The `Bus<FileEvent>` lane.
+///
+/// Every event already queued when the stream wakes is coalesced into one
+/// [`InboundMessage::FileChangedBatch`] ([FMD-060]): a watcher storm then
+/// costs the reducer a single pass — one tree rebuild, one view-model
+/// rebuild — instead of one per event. A lone event still rides the plain
+/// [`InboundMessage::FileChanged`] arm, so the common case is unchanged.
 fn file_stream(
     handle: &SharedReceiver<FileEvent>,
 ) -> iced::futures::stream::BoxStream<'static, Message> {
@@ -417,10 +435,23 @@ fn file_stream(
     iced::futures::stream::unfold(inner, |inner| async move {
         let received = {
             let mut receiver = inner.lock().await;
-            receiver.recv().await
+            receiver.recv().await.map(|first| {
+                let mut batch = vec![first];
+                while let Ok(extra) = receiver.try_recv() {
+                    batch.push(extra);
+                }
+                batch
+            })
         };
         match received {
-            Ok(event) => Some((bus_event_to_message(InboundBusEvent::File(event)), inner)),
+            Ok(mut batch) => {
+                let event = if batch.len() == 1 {
+                    InboundBusEvent::File(batch.remove(0))
+                } else {
+                    InboundBusEvent::FileBatch(batch)
+                };
+                Some((bus_event_to_message(event), inner))
+            }
             Err(broadcast::error::RecvError::Closed) => None,
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 warn_dropped(BusSource::File, count);
@@ -469,6 +500,11 @@ fn agent_stream(
 
 /// The `BackgroundEvent` lane (indexer / watcher progress, worker logs,
 /// file-load results, MCP OAuth completions).
+///
+/// Like the file lane, every event already queued when the stream wakes is
+/// coalesced into one [`InboundMessage::BackgroundBatch`] so indexer
+/// progress storms cost one reduction instead of one per event
+/// ([FMD-060]).
 fn background_stream(
     handle: &BackgroundReceiver,
 ) -> iced::futures::stream::BoxStream<'static, Message> {
@@ -476,13 +512,21 @@ fn background_stream(
     iced::futures::stream::unfold(inner, |inner| async move {
         let received = {
             let mut receiver = inner.lock().await;
-            receiver.recv().await
+            receiver.recv().await.map(|first| {
+                let mut batch = vec![first];
+                while let Ok(extra) = receiver.try_recv() {
+                    batch.push(extra);
+                }
+                batch
+            })
         };
-        received.map(|event| {
-            (
-                bus_event_to_message(InboundBusEvent::Background(event)),
-                inner,
-            )
+        received.map(|mut batch| {
+            let event = if batch.len() == 1 {
+                InboundBusEvent::Background(batch.remove(0))
+            } else {
+                InboundBusEvent::BackgroundBatch(batch)
+            };
+            (bus_event_to_message(event), inner)
         })
     })
     .filter_map(iced::futures::future::ready)

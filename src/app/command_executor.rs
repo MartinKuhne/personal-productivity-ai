@@ -35,13 +35,16 @@ impl AppOrchestrator {
                 self.agent.queue_prompt(prompt);
             }
             UserCommand::CloseAllTabs => {
-                self.tabs.tabs.clear();
+                self.tabs.close_all();
                 *self.selection.selected_file_mut() = None;
             }
             UserCommand::CloseTab(idx) => {
-                if idx < self.tabs.tabs.len() {
-                    self.tabs.tabs.remove(idx);
-                }
+                // `Tabs` owns the vector/set/caches; executive closures must
+                // not bypass it or the shadow set blocks later re-opens.
+                // The close may no-op when the index is stale; the vector is
+                // the authority and the selection reconciliation below leaves
+                // state consistent either way.
+                let _ = self.tabs.close_tab_at(idx);
                 if let Some(selected) = self.selection.selected_file_mut().clone() {
                     if !self.tabs.tabs.contains(&selected) {
                         *self.selection.selected_file_mut() = self.tabs.tabs.last().cloned();
@@ -53,10 +56,7 @@ impl AppOrchestrator {
                 }
             }
             UserCommand::CloseOtherTabs(idx) => {
-                if idx < self.tabs.tabs.len() {
-                    let keep = self.tabs.tabs[idx].clone();
-                    self.tabs.tabs.clear();
-                    self.tabs.tabs.push(keep.clone());
+                if let Some(keep) = self.tabs.keep_only(idx) {
                     *self.selection.selected_file_mut() = Some(keep);
                 }
             }
@@ -203,7 +203,7 @@ impl AppOrchestrator {
                             Some(&self.pdf_backing_tracker),
                         );
                         if !self.tabs.tabs.contains(&path) {
-                            self.tabs.tabs.push(path.clone());
+                            self.tabs.open_tab(path.clone());
                         }
                         self.tabs.loaded_path = Some(path);
                     }

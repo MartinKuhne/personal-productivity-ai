@@ -75,7 +75,7 @@ use crate::ui_iced::editor::{EditorViewModel, apply_editor_message};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
-    DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message,
+    DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, MenuMessage, Message,
     RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage,
     WindowMessage,
 };
@@ -101,6 +101,15 @@ const PRINT_NO_CHANNEL_ERROR_CODE: &str = "ui_iced.file.print_no_channel";
 pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
     let mut tasks: Vec<Task<Message>> = Vec::new();
 
+    // A context-menu row carries its own intent message ([FMD-068]), so the
+    // reducer has to dismiss the menu when it handles one — the way a native
+    // dropdown closes on selection. The hamburger card already does this itself
+    // in [`reduce_menu`]; the tree and tab menus had no equivalent, which is why
+    // they stayed pinned open after a pick.
+    if dismisses_context_menu(&message) {
+        state.overlay.context_menu = None;
+    }
+
     match message {
         Message::Window(message) => tasks.push(reduce_window(state, message)),
         Message::Layout(message) => reduce_layout(state, message),
@@ -119,11 +128,45 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::Tools(message) => reduce_tools(state, message),
         Message::AgentDebug(message) => tasks.extend(reduce_agent_debug(state, message)),
         Message::Inbound(message) => reduce_inbound(state, message),
+        Message::Menu(message) => tasks.extend(reduce_menu(state, message)),
         Message::Boot(message) => tasks.push(reduce_boot(message)),
     }
 
     tasks.extend(finish_frame(state));
     Task::batch(tasks)
+}
+
+// ───────────────────────────── overlay dismissal ─────────────────────────────
+
+/// Whether `message` is user intent that a floating tree or tab context-menu row
+/// can emit, and must therefore dismiss the menu ([FMD-068]).
+///
+/// The row vocabulary is exactly what the two menu builders produce:
+/// [`Message::Command`] for every application intent
+/// ([`crate::ui_iced::panels::left::context_menu_items`] and
+/// [`crate::ui_iced::panels::center::tab_context_menu_items`]) plus the four
+/// [`TreeMessage`] kinds that read files or fan out and so cannot ride a
+/// `UserCommand`.
+///
+/// Anything else — pointer motion, an explicit close, an inbound event — leaves
+/// the menu alone. [`TreeMessage::ContextMenuOpened`] and
+/// [`TreeMessage::ContextMenuClosed`] are deliberately absent: the first
+/// replaces the menu and the second closes it through its own arm.
+///
+/// [RUST-020]: pure.
+#[must_use]
+fn dismisses_context_menu(message: &Message) -> bool {
+    match message {
+        Message::Command(_) => true,
+        Message::Tree(message) => matches!(
+            message,
+            TreeMessage::RunAsPromptRequested { .. }
+                | TreeMessage::SkillRunRequested { .. }
+                | TreeMessage::PrintRequested { .. }
+                | TreeMessage::DeleteSelectedRequested { .. }
+        ),
+        _ => false,
+    }
 }
 
 // ───────────────────────────── frame tail ─────────────────────────────
@@ -581,6 +624,7 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
         .find(|row| &row.path == path)
         .map(|row| state.models.left.menu_items_for(row))
         .unwrap_or_default();
+    state.overlay.hamburger_open = false;
     state.overlay.context_menu = Some(ContextMenu { anchor, items });
 }
 
@@ -662,10 +706,40 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
         TabMessage::ContextMenuOpened { index } => {
             let anchor = state.overlay.cursor.unwrap_or_default();
             let items = state.models.center.menu_items_for(index);
+            state.overlay.hamburger_open = false;
             state.overlay.context_menu = Some(ContextMenu { anchor, items });
         }
         TabMessage::ContextMenuClosed => {
             state.overlay.context_menu = None;
+        }
+    }
+}
+
+/// Top-bar hamburger-menu reductions.
+///
+/// Opened / Closed only flip [`OverlayState::hamburger_open`]; the view
+/// mounts the card from the [`TopBarViewModel`] snapshot
+/// ([`crate::ui_iced::panels::top::build_menu_entries`]) anchored under the
+/// ☰ button. A row pick publishes the row's own [`UserCommand`] through
+/// [`route_command`] and closes the menu in the same reduction — the row's
+/// intent stays self-contained ([FMD-068]) and the click lands exactly like
+/// a dropdown selection.
+fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>> {
+    match message {
+        MenuMessage::Opened => {
+            // The two menus never share the screen: opening the hamburger
+            // dismisses any live tree/tab context menu.
+            state.overlay.context_menu = None;
+            state.overlay.hamburger_open = true;
+            Vec::new()
+        }
+        MenuMessage::Closed => {
+            state.overlay.hamburger_open = false;
+            Vec::new()
+        }
+        MenuMessage::RowActivated(command) => {
+            state.overlay.hamburger_open = false;
+            route_command(state, command)
         }
     }
 }
@@ -1097,28 +1171,48 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
             state.app.orchestrator.apply_file_event(event);
             state.app.orchestrator.process_file_events();
         }
+        InboundMessage::FileChangedBatch(events) => {
+            // Same semantics as the single-event arm, with the tracker drain
+            // hoisted out of the loop: the whole burst lands in one tree
+            // rebuild ([FMD-060]).
+            for event in events {
+                state.app.orchestrator.apply_file_event(event);
+            }
+            state.app.orchestrator.process_file_events();
+        }
         InboundMessage::Agent(_) => {
             state.app.orchestrator.drain_agent_event_bus();
         }
-        InboundMessage::Background(event) => match event.as_ref() {
-            BackgroundEvent::Fs(fs_event) => {
-                state.app.orchestrator.handle_fs_event(fs_event.clone())
+        InboundMessage::Background(event) => {
+            apply_background_event(state, event.as_ref());
+        }
+        InboundMessage::BackgroundBatch(events) => {
+            for event in &events {
+                apply_background_event(state, event.as_ref());
             }
-            BackgroundEvent::Process(process_event) => {
-                state
-                    .app
-                    .orchestrator
-                    .handle_process_event(process_event.clone());
-            }
-            BackgroundEvent::McpAuth(auth_event) => {
-                state
-                    .app
-                    .orchestrator
-                    .handle_mcp_auth_event(auth_event.clone());
-            }
-        },
+        }
         InboundMessage::EventsDropped { source, count } => {
             handle_bus_lag(state, source, count);
+        }
+    }
+}
+
+/// Applies one typed background event to the orchestrator — the body the
+/// single and batched [`InboundMessage::Background`] arms share.
+fn apply_background_event(state: &mut AppState, event: &BackgroundEvent) {
+    match event {
+        BackgroundEvent::Fs(fs_event) => state.app.orchestrator.handle_fs_event(fs_event.clone()),
+        BackgroundEvent::Process(process_event) => {
+            state
+                .app
+                .orchestrator
+                .handle_process_event(process_event.clone());
+        }
+        BackgroundEvent::McpAuth(auth_event) => {
+            state
+                .app
+                .orchestrator
+                .handle_mcp_auth_event(auth_event.clone());
         }
     }
 }

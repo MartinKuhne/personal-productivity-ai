@@ -73,6 +73,53 @@ fn test_clear_history_resets_fields() {
     assert!(mgr.state.token_usage.is_none());
 }
 
+/// A submitted prompt commits `running = true` only once the driver
+/// channel accepted it — the Stop button must not light up over a turn
+/// that never started.
+#[test]
+fn submit_prompt_marks_running_after_send_succeeds() {
+    let mut mgr = make_session();
+    let session_id = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::events::AgentPrompt {
+        session_id,
+        text: "hello".to_string(),
+        system_prompts: Vec::new(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    assert!(mgr.state.running);
+    assert_eq!(mgr.state.status, AGENT_LAUNCHING_STATUS);
+    assert_eq!(mgr.current_session_id(), Some(session_id));
+    // Release the driver thread so the test does not leave a turn running.
+    mgr.cancel();
+    assert!(!mgr.state.running);
+}
+
+/// If the driver thread is gone the send fails; `running` must roll back
+/// to `false` (no `SessionFinished`/`Failed` observer event will ever
+/// clear it again) instead of leaving the UI with an uncancellable Stop.
+#[test]
+fn submit_prompt_rolls_back_running_when_driver_channel_closed() {
+    let mut mgr = make_session();
+    let (tx, rx) = mpsc::channel::<crate::events::AgentPrompt>();
+    drop(rx);
+    mgr.prompt_tx = tx;
+    let session_id = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::events::AgentPrompt {
+        session_id,
+        text: "hello".to_string(),
+        system_prompts: Vec::new(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    assert!(!mgr.state.running, "launch must not report running");
+    assert_eq!(mgr.state.status, AGENT_LAUNCH_FAILED_STATUS);
+}
+
 #[test]
 fn test_set_agent_config_round_trip() {
     let mgr = make_session();

@@ -795,6 +795,71 @@ fn from_app_reads_the_same_accessors_the_legacy_window_used() {
     );
 }
 
+/// Regression: with the debug window closed the per-entry deep clone plus
+/// `to_string_pretty` still ran for every entry on every message. `debug_entries`
+/// is uncapped, so during a workspace scan that alone could stall the UI thread.
+#[test]
+fn from_app_skips_the_row_pipeline_while_the_window_is_closed() {
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.agent_panel_state.show_debug_window = false;
+    app.orchestrator.agent_panel_state.debug_search_text = "incoming".to_string();
+    app.orchestrator.agent_panel_state.debug_auto_scroll = false;
+    app.orchestrator.agent_panel_state.debug_json_rows = 24;
+
+    app.orchestrator.agent.state_mut().debug_entries.push(entry(
+        1,
+        DebugEntryKind::Outgoing,
+        "Turn 1 — Outgoing",
+    ));
+    app.orchestrator.agent.state_mut().debug_entries.push(entry(
+        2,
+        DebugEntryKind::Incoming,
+        "Turn 1 — Incoming",
+    ));
+
+    let view_model = AgentDebugViewModel::from_app(&app);
+
+    assert!(!view_model.visible);
+    assert!(
+        view_model.rows.is_empty(),
+        "a closed window must not build any row"
+    );
+    assert_eq!(
+        view_model.total_entries, 2,
+        "the counter still rides along so the header stays honest"
+    );
+    assert_eq!(view_model.search_text, "incoming");
+    assert_eq!(view_model.json_rows, 24);
+    assert_eq!(
+        view_model.json_row_options.len(),
+        AgentDebugViewModel::closed(0, "", false, 24)
+            .json_row_options
+            .len(),
+        "the pick-list stays populated so the control does not render empty"
+    );
+}
+
+/// Opening the window must produce the full rows again — the gate may not strand
+/// the card on an empty snapshot.
+#[test]
+fn from_app_builds_rows_once_the_window_opens() {
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.agent_panel_state.show_debug_window = false;
+    app.orchestrator.agent.state_mut().debug_entries.push(entry(
+        1,
+        DebugEntryKind::Incoming,
+        "Turn 1 — Incoming",
+    ));
+
+    assert!(AgentDebugViewModel::from_app(&app).rows.is_empty());
+
+    app.orchestrator.agent_panel_state.show_debug_window = true;
+    let view_model = AgentDebugViewModel::from_app(&app);
+
+    assert!(view_model.visible);
+    assert_eq!(view_model.rows.len(), 1, "opening must populate the rows");
+}
+
 // ---------------------------------------------------------------------------
 // Auto-scroll — the reused [TASK-016] intent rule
 // ---------------------------------------------------------------------------

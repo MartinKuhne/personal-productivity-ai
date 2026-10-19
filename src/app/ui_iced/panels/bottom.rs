@@ -78,7 +78,7 @@
 mod tests;
 
 use iced::widget::{Column, Row, button, container, text, text_input};
-use iced::{Alignment, Element, Font, Length};
+use iced::{Alignment, Color, Element, Font, Length};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;
@@ -336,6 +336,26 @@ pub fn stop_enabled(agent_running: bool) -> bool {
     agent_running
 }
 
+/// Colour of the always-allocated Stop button's label.
+///
+/// A disabled `Button::on_press_maybe(None)` still renders in its enabled
+/// look, which made the idle band present a red "Stop" over nothing running
+/// (the button-visibility defect UI-001 reports). The label therefore
+/// drops to the `text_muted` token while idle and returns to `error` the
+/// moment a turn is cancellable — same palette rule as
+/// [`crate::ui_iced::panels::top::indexing_status_color`] ([GUD-003]).
+///
+/// Purity: pure function of `running`.
+#[must_use]
+pub fn stop_button_color(running: bool) -> Color {
+    let palette = Palette::fastmd_dark();
+    if running {
+        palette.error
+    } else {
+        palette.text_muted
+    }
+}
+
 /// Renders the iced bottom command band from a view-model snapshot
 /// ([TASK-016]).
 ///
@@ -384,7 +404,7 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     let stop_button = button(
         text(strings::STOP_AGENT_BUTTON)
             .size(STOP_BUTTON_TEXT_SIZE)
-            .color(palette.error),
+            .color(stop_button_color(view_model.agent_running)),
     )
     .on_press_maybe(
         stop_enabled(view_model.agent_running)

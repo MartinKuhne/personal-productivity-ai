@@ -159,9 +159,14 @@ fn test_update_scale_baseline_stores_os_scale() {
     );
     assert_eq!(state.os_scale, Some(1.5));
     assert_eq!(
-        state.composed_scale_factor(),
+        state.effective_scale_factor(),
         1.5 * 1.25,
-        "DEC-008: baseline × persisted multiplier"
+        "DEC-008: on-screen scale is baseline × persisted multiplier"
+    );
+    assert_eq!(
+        state.requested_scale_factor(),
+        1.25,
+        "the iced request must stay the user multiplier: iced applies the OS factor itself"
     );
 }
 
@@ -607,6 +612,118 @@ fn test_tree_context_menu_closes() {
     assert!(state.overlay.context_menu.is_none());
 }
 
+/// Regression: picking a context-menu row ran the action but left the card
+/// pinned on screen. A menu row carries its own intent ([FMD-068]), so handling
+/// one must also dismiss the menu the way a native dropdown closes.
+#[test]
+fn test_activating_a_context_menu_row_dismisses_the_menu() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row("/notes/a.md")]);
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md"),
+        }),
+    );
+    assert!(
+        state.overlay.context_menu.is_some(),
+        "precondition: the menu is open"
+    );
+
+    // An empty multi-select delete is the benign stand-in for a picked row: it
+    // rides the same dismissal arm without touching the filesystem.
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::DeleteSelectedRequested { paths: Vec::new() }),
+    );
+
+    assert!(
+        state.overlay.context_menu.is_none(),
+        "picking a row must close the menu"
+    );
+    assert_eq!(
+        state.mounted_layers(),
+        Vec::<OverlayLayer>::new(),
+        "a dismissed menu must stop blocking input"
+    );
+}
+
+/// A picked `Message::Command` row dismisses the menu too — that is the channel
+/// every application intent in both the tree and the tab menu rides.
+#[test]
+fn test_command_row_dismisses_the_context_menu() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row("/notes/a.md")]);
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md"),
+        }),
+    );
+
+    // `SelectFile` is the in-process, side-effect-free member of the row set.
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::SelectFile {
+            path: PathBuf::from("/notes/a.md"),
+            multi: false,
+        }),
+    );
+
+    assert!(
+        state.overlay.context_menu.is_none(),
+        "a command row must close the menu"
+    );
+}
+
+/// The full row vocabulary the two menu builders emit, pinned against the pure
+/// predicate so a newly added menu row kind cannot silently skip dismissal.
+#[test]
+fn dismisses_context_menu_covers_the_row_message_vocabulary() {
+    // Every intent a menu row can carry.
+    assert!(dismisses_context_menu(&Message::Command(
+        UserCommand::CopyPath(PathBuf::from("/notes/a.md"))
+    )));
+    assert!(dismisses_context_menu(&Message::Tree(
+        TreeMessage::RunAsPromptRequested {
+            path: PathBuf::from("/notes/a.md")
+        }
+    )));
+    assert!(dismisses_context_menu(&Message::Tree(
+        TreeMessage::SkillRunRequested {
+            skill: PathBuf::from("/skills/s.md"),
+            target_dir: None,
+            target_file: None,
+        }
+    )));
+    assert!(dismisses_context_menu(&Message::Tree(
+        TreeMessage::PrintRequested {
+            path: PathBuf::from("/notes/a.md")
+        }
+    )));
+    assert!(dismisses_context_menu(&Message::Tree(
+        TreeMessage::DeleteSelectedRequested {
+            paths: vec![PathBuf::from("/notes/a.md")]
+        }
+    )));
+
+    // Non-activation traffic must leave an open menu alone.
+    assert!(!dismisses_context_menu(&Message::Tree(
+        TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md")
+        }
+    )));
+    assert!(!dismisses_context_menu(&Message::Tree(
+        TreeMessage::ContextMenuClosed
+    )));
+    assert!(!dismisses_context_menu(&Message::Layout(
+        LayoutMessage::CursorMoved {
+            point: Point::new(1.0, 2.0)
+        }
+    )));
+    assert!(!dismisses_context_menu(&Message::Menu(MenuMessage::Closed)));
+}
+
 #[test]
 fn test_run_as_prompt_reads_the_body_and_runs_it_against_the_file() {
     let dir = tempfile::TempDir::new().expect("temp dir");
@@ -779,6 +896,83 @@ fn test_tab_context_menu_for_a_missing_tab_mounts_nothing() {
         Message::Tab(TabMessage::ContextMenuOpened { index: 9 }),
     );
     assert_eq!(state.mounted_layers(), Vec::<OverlayLayer>::new());
+}
+
+// ───────────────────────────── Menu (hamburger) ─────────────────────────────
+
+#[test]
+fn test_menu_opened_flips_the_flag() {
+    let (mut state, _storage) = fresh_state();
+    assert!(!state.overlay.hamburger_open);
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert!(state.overlay.hamburger_open, "Opened must show the card");
+}
+
+#[test]
+fn test_menu_closed_clears_the_flag() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(&mut state, Message::Menu(MenuMessage::Closed));
+    assert!(
+        !state.overlay.hamburger_open,
+        "Closed must unmount the card"
+    );
+}
+
+#[test]
+fn test_menu_row_activation_routes_the_command_and_closes() {
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::RowActivated(UserCommand::OpenAboutDialog)),
+    );
+    assert!(
+        !state.overlay.hamburger_open,
+        "a row pick must close the menu in the same reduction"
+    );
+    assert!(
+        drained(&spy).contains(&UserCommand::OpenAboutDialog),
+        "the row's own command must be routed ([FMD-068])"
+    );
+}
+
+#[test]
+fn test_menu_opening_dismisses_a_live_context_menu() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row("/notes/a.md")]);
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md"),
+        }),
+    );
+    assert!(state.overlay.context_menu.is_some());
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert!(
+        state.overlay.context_menu.is_none(),
+        "the two menus never share the screen"
+    );
+}
+
+#[test]
+fn test_context_menu_opening_dismisses_the_hamburger() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row("/notes/a.md")]);
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md"),
+        }),
+    );
+    assert!(
+        !state.overlay.hamburger_open,
+        "opening a context menu must dismiss the hamburger"
+    );
 }
 
 // ───────────────────────────── Editor ─────────────────────────────
@@ -1851,6 +2045,9 @@ fn test_file_change_inbound_drains_the_file_processor() {
 fn test_background_process_file_load_populates_the_document() {
     let (mut state, _storage) = fresh_state();
     let path = PathBuf::from("/notes/loaded.md");
+    // The reducer only ever sees a load result for the file the user selected
+    // (`handle_file_selection` gates the spawn on it), so select first.
+    state.app.orchestrator.selection.select_file(path.clone());
     let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
         path: path.clone(),
         content: Ok("---\ntitle: L\n---\nLoaded body".to_string()),
@@ -1871,6 +2068,50 @@ fn test_background_process_file_load_populates_the_document() {
         "\nLoaded body"
     );
     assert!(state.app.orchestrator.tabs.current_yaml.is_some());
+}
+
+/// Regression: a late load result for a file the user has already switched away
+/// from must leave the open document and the ToC snapshot untouched. This is the
+/// reducer-level guard behind "the ToC pane randomly turns on and off".
+#[test]
+fn test_background_process_file_load_for_a_deslected_file_is_dropped() {
+    let (mut state, _storage) = fresh_state();
+    let abandoned = PathBuf::from("/notes/abandoned.md");
+    let current = PathBuf::from("/notes/current.md");
+
+    state
+        .app
+        .orchestrator
+        .selection
+        .select_file(current.clone());
+    state.app.orchestrator.pending_file_load = Some(current.clone());
+
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path: abandoned,
+        content: Ok("# Abandoned\n\nMust not appear".to_string()),
+    });
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+
+    assert_eq!(
+        state.app.orchestrator.tabs.loaded_path, None,
+        "the abandoned read must not repoint the open document"
+    );
+    assert!(
+        state.app.orchestrator.tabs.current_markdown.is_empty(),
+        "the abandoned body must not reach the viewer"
+    );
+    assert!(
+        state.app.orchestrator.tabs.toc.is_empty(),
+        "the abandoned headings must not light the ToC pane up"
+    );
+    assert_eq!(
+        state.app.orchestrator.pending_file_load,
+        Some(current),
+        "the load still pending for the current selection must survive"
+    );
 }
 
 #[test]

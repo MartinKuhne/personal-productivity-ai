@@ -122,14 +122,14 @@ use iced::widget::{Column, Row, button, container, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Padding};
 
 use crate::bus::events::user_command::UserCommand;
-use crate::config::{AppConfig, SkillFile};
+use crate::config::SkillFile;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LayoutMessage, Message, TabMessage, TreeMessage};
 use crate::ui_iced::overlay::MenuItem;
 
-use super::left::{NOTE_SKILLS_SUBDIR, skill_dir};
+use super::left::note_skill_files;
 use super::top::phosphor_font;
 
 // The legacy UI center panel's framework-free `UserCommand` constructors,
@@ -529,12 +529,21 @@ impl CenterPanelViewModel {
     /// Snapshots the center panel's inputs off `app`, reading the same
     /// accessors the legacy UI panel used.
     ///
-    /// Note skills are read through the **read-only** path
-    /// (`AppConfig::list_skill_files_in` over the "System" library's
-    /// `Skills/Note` folder) because `AppConfig::list_note_skills()`
-    /// `create_dir_all`s as a side effect, which a per-frame view must not
-    /// do ([RUST-006]) — the same rule [TASK-012] established.
+    /// Reads the note-skill folder itself; prefer
+    /// [`Self::from_app_with_note_skills`] when the caller already has the
+    /// listing.
     pub fn from_app(app: &FastMdApp) -> Self {
+        let note_skills = note_skill_files(app);
+        Self::from_app_with_note_skills(app, note_skills)
+    }
+
+    /// [`Self::from_app`] with the note-skill listing supplied by the caller.
+    ///
+    /// The same folder backs the left panel's file menu and the tab strip's
+    /// context menu, so [`ViewModels::from_app`](crate::ui_iced::app::ViewModels)
+    /// reads it once per rebuild and hands the result to both instead of each
+    /// panel hitting the directory itself ([FMD-060]).
+    pub fn from_app_with_note_skills(app: &FastMdApp, note_skills: Vec<SkillFile>) -> Self {
         let selected = app.selection().selected_file().cloned();
         let paths = &app.tabs().tabs;
         let active_tab = active_tab_index(paths, selected.as_deref());
@@ -550,11 +559,7 @@ impl CenterPanelViewModel {
             active_pdf_backed: selected
                 .as_deref()
                 .is_some_and(|path| app.pdf_backing_tracker().is_pdf_backed(path)),
-            note_skills: AppConfig::list_skill_files_in(&skill_dir(
-                app.content_libraries(),
-                NOTE_SKILLS_SUBDIR,
-                AppConfig::get_skills_note_dir,
-            )),
+            note_skills,
         }
     }
 

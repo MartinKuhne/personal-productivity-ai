@@ -18,10 +18,11 @@ use crate::ui_iced::test_helpers::test_app;
 
 use super::{
     BottomPanelViewModel, compute_file_context, compute_prompt_prefix, format_models_list,
-    parse_command_intent, stop_enabled, submit_commands,
+    parse_command_intent, stop_button_color, stop_enabled, submit_commands,
 };
 
 use crate::bus::events::user_command::UserCommand;
+use crate::ui::theme::Palette;
 
 /// A file path that never touches the filesystem — the band only formats it.
 fn note_path() -> PathBuf {
@@ -230,6 +231,15 @@ fn running_submit_does_not_parse_slash_commands() {
 fn stop_is_enabled_only_while_the_agent_runs() {
     assert!(stop_enabled(true));
     assert!(!stop_enabled(false));
+}
+
+/// The always-allocated Stop label must read as *inactive* while idle — a
+/// red, live-looking Stop over a turn that never ran is the UI-001 defect.
+#[test]
+fn stop_button_label_drops_to_muted_while_idle() {
+    let palette = Palette::fastmd_dark();
+    assert_eq!(stop_button_color(true), palette.error);
+    assert_eq!(stop_button_color(false), palette.text_muted);
 }
 
 // ---------------------------------------------------------------------------

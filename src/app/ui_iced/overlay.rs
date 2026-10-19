@@ -506,7 +506,11 @@ fn scrim_style(_theme: &iced::Theme) -> container::Style {
 }
 
 /// The card chrome shared by the context menu and the modal dialog.
-fn card_style(_theme: &iced::Theme) -> container::Style {
+///
+/// `pub(crate)` so the hamburger menu card ([`crate::ui_iced::panels::top`])
+/// reuses the exact same chrome instead of inventing a second dark card
+/// style ([GUD-003] — the style's colours come from the app palette).
+pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     let palette = crate::ui::theme::Palette::fastmd_dark();
 
     container::Style {
@@ -547,6 +551,54 @@ where
         .into()
 }
 
+/// Mounts a **prebuilt card** over `base`, anchored at `anchor` ([TASK-017a]).
+///
+/// The generic half of [`with_context_menu`] for callers that render the
+/// card themselves (the hamburger menu, whose rows mix non-selectable
+/// section headers with buttons). Same layering — base, transparent
+/// [`input_blocker`], card pushed to the `clamp_anchor`ed position — and
+/// the same close semantics: a click that misses the card emits `on_close`.
+///
+/// `viewport` is the size of the area `base` fills; `size` is the card's
+/// rendered size (deterministic per [`menu_size`] when rows are
+/// uniform-height buttons).
+#[must_use]
+pub fn with_card_at<'a, Message>(
+    base: Element<'a, Message>,
+    anchor: Point,
+    card: Element<'a, Message>,
+    size: Size,
+    viewport: Size,
+    on_close: Message,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let position = clamp_anchor(
+        Point::new(anchor.x + MENU_ANCHOR_GAP, anchor.y + MENU_ANCHOR_GAP),
+        size,
+        viewport,
+    );
+
+    stack(vec![
+        base,
+        input_blocker(on_close).into(),
+        container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: position.y,
+                right: 0.0,
+                bottom: 0.0,
+                left: position.x,
+            })
+            .into(),
+    ])
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
 /// Mounts a context menu over `base`, anchored at `anchor` ([TASK-017a]).
 ///
 /// Layers, bottom to top: `base`, a transparent [`input_blocker`], then the
@@ -573,29 +625,14 @@ where
         return base;
     }
 
-    let position = clamp_anchor(
-        Point::new(anchor.x + MENU_ANCHOR_GAP, anchor.y + MENU_ANCHOR_GAP),
+    with_card_at(
+        base,
+        anchor,
+        context_menu_card(items),
         menu_size(items.len()),
         viewport,
-    );
-
-    stack(vec![
-        base,
-        input_blocker(on_close).into(),
-        container(context_menu_card(items))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: position.y,
-                right: 0.0,
-                bottom: 0.0,
-                left: position.x,
-            })
-            .into(),
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+        on_close,
+    )
 }
 
 /// A blocking modal overlay: scrim + centred dialog card ([TASK-017a]).

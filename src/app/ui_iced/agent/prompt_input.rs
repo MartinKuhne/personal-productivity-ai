@@ -179,7 +179,9 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     let cancel_button = button(
         text(strings::STOP_AGENT_BUTTON)
             .size(CONTROL_TEXT_SIZE)
-            .color(palette.error),
+            .color(crate::ui_iced::panels::bottom::stop_button_color(
+                view_model.running,
+            )),
     )
     .on_press_maybe(
         cancel_enabled(view_model.running).then_some(Message::Command(UserCommand::CancelAgent)),

@@ -154,24 +154,35 @@ fn test_build_state_projects_persisted_panel_widths() {
 }
 
 #[test]
-fn test_composed_scale_factor_uses_persisted_multiplier_without_baseline() {
+fn test_requested_scale_factor_uses_persisted_multiplier_without_baseline() {
     let state = fresh_state(populated_persisted());
-    // No OS baseline yet → 1.0 × persisted 1.25.
-    assert_eq!(state.composed_scale_factor(), 1.0 * 1.25);
+    // No OS baseline yet → the user multiplier stands alone.
+    assert_eq!(state.requested_scale_factor(), 1.25);
 }
 
 #[test]
-fn test_composed_scale_factor_multiplies_baseline_by_multiplier() {
-    // DEC-008 composition: baseline × persisted multiplier.
+fn test_requested_scale_factor_ignores_os_baseline() {
+    // Regression: iced multiplies the `.scale_factor(...)` return value by the
+    // window's own OS DPI factor, so folding `os_scale` in here scaled the whole
+    // UI by os² and made it jump larger once the boot scale-baseline landed.
+    // The request must stay the user multiplier alone.
     let mut state = fresh_state(populated_persisted());
     state.os_scale = Some(1.5);
-    assert_eq!(state.composed_scale_factor(), 1.5 * 1.25);
+    assert_eq!(state.requested_scale_factor(), 1.25);
 }
 
 #[test]
-fn test_composed_scale_factor_defaults_to_one_when_no_multiplier() {
+fn test_effective_scale_factor_composes_baseline_and_multiplier() {
+    // DEC-008: the on-screen scale is the OS baseline times the user multiplier.
+    let mut state = fresh_state(populated_persisted());
+    state.os_scale = Some(1.5);
+    assert_eq!(state.effective_scale_factor(), 1.5 * 1.25);
+}
+
+#[test]
+fn test_requested_scale_factor_defaults_to_one_when_no_multiplier() {
     let state = fresh_state(PersistedUiState::default());
-    assert_eq!(state.composed_scale_factor(), 1.0);
+    assert_eq!(state.requested_scale_factor(), 1.0);
 }
 
 #[test]

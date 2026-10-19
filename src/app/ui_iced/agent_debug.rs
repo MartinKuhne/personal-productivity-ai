@@ -771,16 +771,57 @@ impl AgentDebugViewModel {
         }
     }
 
+    /// The snapshot for a window nobody can see.
+    ///
+    /// The filter settings and counters still ride along so the pick-lists stay
+    /// coherent, but the per-entry deep clone plus `serde_json::to_string_pretty`
+    /// that [`Self::from_entries`] performs is skipped. `debug_entries` is an
+    /// uncapped buffer, so building rows for a closed window is the single
+    /// largest avoidable cost on the UI thread during a workspace scan
+    /// ([FMD-060]).
+    ///
+    /// Purity: pure over its arguments.
+    #[must_use]
+    pub fn closed(
+        total_entries: usize,
+        search_text: &str,
+        auto_scroll: bool,
+        json_rows: usize,
+    ) -> Self {
+        Self {
+            visible: false,
+            rows: Vec::new(),
+            total_entries,
+            search_text: search_text.to_string(),
+            json_rows,
+            json_row_options: json_row_options(json_rows),
+            auto_scroll,
+            expanded: HashSet::new(),
+        }
+    }
+
     /// Snapshots the window's data off `app` — the same accessors the
     /// the legacy UI window read (`app.orchestrator.agent.state().debug_entries`
     /// at `src/app/ui/agent_debug_window.rs:21` plus the four
     /// `agent_panel_state` fields), moved out of render so the card stays
     /// I/O-free ([FMD-065]).
+    ///
+    /// While the window is closed the row pipeline is skipped entirely — see
+    /// [`Self::closed`] ([FMD-060]).
     #[must_use]
     pub fn from_app(app: &FastMdApp) -> Self {
         let panel = &app.orchestrator.agent_panel_state;
+        let entries = &app.orchestrator.agent.state().debug_entries;
+        if !panel.show_debug_window {
+            return Self::closed(
+                entries.len(),
+                &panel.debug_search_text,
+                panel.debug_auto_scroll,
+                panel.debug_json_rows,
+            );
+        }
         Self::from_entries(
-            &app.orchestrator.agent.state().debug_entries,
+            entries,
             panel.show_debug_window,
             &panel.debug_search_text,
             panel.debug_auto_scroll,
