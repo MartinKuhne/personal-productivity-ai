@@ -163,6 +163,9 @@ pub const CARD_RADIUS: f32 = 4.0;
 /// Horizontal gap between the confirm and cancel buttons ([TASK-017a]).
 pub const CONFIRM_CANCEL_SPACING: f32 = 8.0;
 
+/// Mouse interaction used by the modal scrim while it blocks the UI beneath it.
+const SCRIM_INTERACTION: iced::mouse::Interaction = iced::mouse::Interaction::Idle;
+
 /// The single overlay slot an app holds ([TASK-017a]).
 ///
 /// `Kind` is the caller's own modal vocabulary — the tree, tabs and editor
@@ -476,7 +479,7 @@ where
 }
 
 /// A full-area, dimmed layer that swallows the click landing on it — the
-/// modal scrim ([TASK-017a]).
+/// modal scrim ([TASK-017a]). The default cursor stays visible over the scrim.
 #[must_use]
 pub fn scrim_blocker<'a, Message>(on_click: Message) -> MouseArea<'a, Message>
 where
@@ -489,7 +492,7 @@ where
             .style(scrim_style),
     )
     .on_press(on_click)
-    .interaction(iced::mouse::Interaction::Hidden)
+    .interaction(SCRIM_INTERACTION)
 }
 
 /// A `Space` stretched to fill its parent.

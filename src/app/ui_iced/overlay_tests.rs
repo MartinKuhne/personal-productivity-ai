@@ -430,6 +430,15 @@ fn both_blockers_fill_the_available_area() {
 }
 
 #[test]
+fn scrim_keeps_the_default_cursor_visible() {
+    assert_eq!(
+        SCRIM_INTERACTION,
+        iced::mouse::Interaction::Idle,
+        "a modal scrim should block underlying interaction without hiding the cursor"
+    );
+}
+
+#[test]
 fn with_context_menu_renders_the_base_unchanged_for_an_empty_menu() {
     let base: Element<'_, TestMessage> = text("base").into();
     let base_size = base.as_widget().size();
