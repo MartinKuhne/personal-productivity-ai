@@ -245,7 +245,7 @@ fn agent_session_close_message_clears_the_agent_session() {
 // --- tab context menu (UI-026..UI-034) ---------------------------------
 
 #[test]
-fn tab_context_menu_labels_are_in_thelegacy_order() {
+fn tab_context_menu_labels_are_in_the_expected_order() {
     let items = tab_context_menu_items(1, Path::new("lib/note.md"), &[]);
     assert_eq!(
         menu_labels(&items),

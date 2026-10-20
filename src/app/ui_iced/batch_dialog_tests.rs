@@ -242,7 +242,7 @@ fn concurrency_options_are_the_one_to_eight_range() {
 // --- Config snapshot correctness --------------------------------------
 
 #[test]
-fn from_config_copies_every_thelegacy_field() {
+fn from_config_copies_every_config_field() {
     let config = BatchDialogConfig {
         available_dirs: vec![PathBuf::from(r"C:\fixture\a")],
         available_prompts: vec![prompt("Alpha")],
@@ -268,7 +268,7 @@ fn from_config_copies_every_thelegacy_field() {
 }
 
 #[test]
-fn default_snapshot_matches_the_legacy_config_defaults() {
+fn default_snapshot_matches_the_config_defaults() {
     let model = BatchDialogViewModel::default();
     assert!(model.available_dirs.is_empty());
     assert!(model.available_prompts.is_empty());

@@ -114,7 +114,7 @@ fn test_app_state_with_seeds_persisted_geometry() {
 }
 
 #[test]
-fn test_app_state_view_models_rebuild_without_the_legacy_framework() {
+fn test_app_state_view_models_rebuild_framework_free() {
     let mut state = test_app_state();
 
     // The view-model rebuild is what every iced panel renders from; running it

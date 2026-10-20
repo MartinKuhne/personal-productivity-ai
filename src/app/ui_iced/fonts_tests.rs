@@ -40,10 +40,10 @@ fn test_collections_are_in_registration_order_and_nonempty() {
 }
 
 #[test]
-fn test_phosphor_font_name_matches_thelegacy_registration_key() {
+fn test_phosphor_font_name_is_the_registration_key() {
     assert_eq!(
         PHOSPHOR_FONT_NAME, "phosphor",
-        "iced family name must mirror the legacy UI 'phosphor' registration key"
+        "iced family name must be the 'phosphor' registration key"
     );
 }
 

@@ -13,7 +13,7 @@ fn text(t: &str) -> InlineElem {
 }
 
 #[test]
-fn test_heading_size_ladder_matches_the_legacy_renderer() {
+fn test_heading_size_ladder_maps_every_level() {
     assert_eq!(heading_size(1), H1_SIZE);
     assert_eq!(heading_size(2), H2_SIZE);
     assert_eq!(heading_size(3), H3_SIZE);

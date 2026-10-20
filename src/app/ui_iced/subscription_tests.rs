@@ -241,7 +241,7 @@ fn test_dropped_report_maps_to_events_dropped_with_count() {
         assert_eq!(
             message,
             Message::Inbound(InboundMessage::EventsDropped { source, count: 17 }),
-            "the dropped count must survive the mapping ([FMD-072])"
+            "the dropped count must survive the mapping"
         );
     }
 }
@@ -516,7 +516,7 @@ async fn test_stream_delivers_events_in_publish_order() {
                 .map(|path| FileEvent::discovered_one(path.clone()))
                 .collect()
         )),
-        "publication order per publisher must be preserved ([FMD-066])"
+        "publication order per publisher must be preserved"
     );
 }
 
@@ -545,7 +545,7 @@ async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
     assert_eq!(
         stream.next().await.expect("the coalesced burst"),
         Message::Inbound(InboundMessage::FileChangedBatch(burst)),
-        "a queued burst must cost exactly one message ([FMD-060])"
+        "a queued burst must cost exactly one message"
     );
 }
 
@@ -574,11 +574,11 @@ async fn test_background_stream_coalesces_a_queued_burst() {
             assert_eq!(events.len(), 3, "the whole queued burst must coalesce");
             assert!(
                 matches!(&*events[0], BackgroundEvent::Fs(FsEvent::DirParsed { .. })),
-                "order must be preserved ([FMD-066])"
+                "order must be preserved"
             );
             assert!(
                 matches!(&*events[2], BackgroundEvent::Fs(FsEvent::Finished)),
-                "order must be preserved ([FMD-066])"
+                "order must be preserved"
             );
         }
         other => panic!("expected Inbound(BackgroundBatch), got {other:?}"),

@@ -388,7 +388,7 @@ fn a_disabled_confirm_emits_nothing() {
 }
 
 #[test]
-fn confirm_cancel_outcomes_map_to_the_legacy_dialog_actions() {
+fn confirm_cancel_outcomes_map_to_dialog_actions() {
     assert_eq!(
         ConfirmCancel::Confirm.to_dialog_action(),
         DialogAction::Confirm

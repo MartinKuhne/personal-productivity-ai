@@ -38,7 +38,7 @@ fn logo_font_is_the_registered_phosphor_family() {
 }
 
 #[test]
-fn logo_mark_size_matches_the_legacy_badge() {
+fn logo_mark_size_matches_the_top_bar_slot() {
     assert_eq!(
         LOGO_MARK_SIZE, 20.0,
         "top-bar parity: the legacy UI toolbar allocates vec2(20.0, 20.0) for \

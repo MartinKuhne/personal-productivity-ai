@@ -59,7 +59,7 @@ fn test_language_caption_rules() {
     );
     assert!(
         !has_language_caption(&model(Some(""), "x")),
-        "empty language tag → no caption (the legacy UI's `!lang.is_empty()` guard)"
+        "empty language tag → no caption"
     );
     assert!(has_language_caption(&model(Some("toml"), "x")));
 }

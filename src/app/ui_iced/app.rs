@@ -840,7 +840,7 @@ pub fn build_state(
     tracing::info!(
         name = "ui_iced.boot.config_published",
         subscribers,
-        "DEC-009: startup ConfigArrived published for background workers"
+        "startup ConfigArrived published for background workers"
     );
 
     let app = FastMdApp::from_parts(

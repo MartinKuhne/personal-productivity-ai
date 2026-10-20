@@ -270,10 +270,7 @@ fn test_editor_channel_distinguishes_edit_actions_from_button_intents() {
         path: sample_path(),
     });
 
-    assert_ne!(
-        edit, motion,
-        "edit vs caret motion must be separable (DEC-007)"
-    );
+    assert_ne!(edit, motion, "edit vs caret motion must be separable");
     assert_ne!(save, cancel);
     assert_ne!(undo, redo);
     assert_eq!(undo.clone(), undo);
@@ -303,7 +300,7 @@ fn test_search_channel_keeps_typed_text_separate_from_committed_query() {
 }
 
 #[test]
-fn test_logs_channel_covers_every_thelegacy_filter_control() {
+fn test_logs_channel_covers_every_filter_control() {
     let search = Message::Logs(LogsMessage::SearchChanged {
         text: "warn".into(),
     });
@@ -456,7 +453,7 @@ fn test_debug_messages_are_debuggable() {
     ] {
         assert!(
             rendered.contains(channel),
-            "Debug output must name the {channel} channel for [FMD-071] tracing"
+            "Debug output must name the {channel} channel for tracing"
         );
     }
 }

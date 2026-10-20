@@ -98,7 +98,7 @@ fn test_inline_elems_contain_matches_text_link_and_html_only() {
     ));
     assert!(
         !inline_elems_contain(&[InlineElem::Image("needle.png".into())], "needle"),
-        "image placeholders are not searchable, as in the legacy UI build"
+        "image placeholders are not searchable"
     );
     assert!(!inline_elems_contain(&[InlineElem::SoftBreak], "x"));
     assert!(!inline_elems_contain(&[], "x"));
@@ -169,11 +169,7 @@ fn test_only_the_first_matching_block_is_marked() {
         .filter(|(_, block)| block.scroll_to_me)
         .map(|(index, _)| index)
         .collect();
-    assert_eq!(
-        marked,
-        vec![1],
-        "the legacy UI cleared the search after the first hit"
-    );
+    assert_eq!(marked, vec![1], "the search clears after the first hit");
 }
 
 #[test]
@@ -294,7 +290,7 @@ fn test_task_item_gets_a_checkbox_with_its_document_index() {
                 checked: true
             }
         ],
-        "task indices count in document order, as the legacy UI walker did"
+        "task indices count in document order"
     );
 }
 

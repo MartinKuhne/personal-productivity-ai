@@ -275,7 +275,7 @@ fn test_match_count_line_shows_only_for_repeated_hits() {
     assert!(!shows_match_count(&entry("a.md", "Lib", "hit", 0)));
     assert!(
         !shows_match_count(&entry("a.md", "Lib", "hit", 1)),
-        "a single match adds nothing next to the file name (legacy parity)"
+        "a single match adds nothing next to the file name"
     );
     assert!(shows_match_count(&entry("a.md", "Lib", "hit", 2)));
 }

@@ -259,7 +259,7 @@ fn test_body_rows_data_indexes_are_sequential() {
 }
 
 #[test]
-fn test_stripe_parity_matches_the_legacy_rule() {
+fn test_striping_alternates_on_odd_rows() {
     assert!(!TableModel::is_striped(0));
     assert!(TableModel::is_striped(1));
     assert!(!TableModel::is_striped(2));

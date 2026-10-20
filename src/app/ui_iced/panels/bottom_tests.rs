@@ -193,7 +193,7 @@ fn running_submit_of_a_blank_prompt_publishes_nothing_at_all() {
 }
 
 #[test]
-fn submit_trims_only_trailing_whitespace_like_the_legacy_band() {
+fn submit_trims_only_trailing_whitespace() {
     // `command_input.trim_end()` — leading indentation the user
     // typed is preserved verbatim, only the trailing newline/spaces go.
     assert_eq!(

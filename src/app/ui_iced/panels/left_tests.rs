@@ -100,7 +100,7 @@ fn row_icon_uses_caret_state_for_directories_and_blank_slot_for_files() {
 }
 
 #[test]
-fn row_label_reproduces_the_legacy_icon_space_name_format() {
+fn row_label_uses_the_icon_space_name_format() {
     assert_eq!(
         row_label(&dir_row("Work", "/lib/Work", 0)),
         format!("{} Work", strings::ICON_CARET_RIGHT)
@@ -367,7 +367,7 @@ fn file_menu_maps_every_row_and_gates_save_as_pdf_on_typst() {
     assert_eq!(
         menu_labels(&with_typst)[5],
         strings::SAVE_AS_PDF_ACTION,
-        "Save as PDF sits right after Print, as in the legacy UI menu"
+        "Save as PDF sits right after Print"
     );
     assert_eq!(
         with_typst[5].message,
@@ -614,7 +614,7 @@ fn tree_rows_never_write_the_cache_back() {
     let _ = tree_rows(&app);
     assert!(
         app.cached_tree_rows.is_none(),
-        "the pure view must not mutate app state ([FMD-065])"
+        "the pure view must not mutate app state"
     );
 }
 
@@ -637,7 +637,7 @@ fn from_app_snapshots_an_empty_workspace() {
     assert!(view_model.pdf_backed.is_empty());
     assert!(
         !view_model.multi_select,
-        "modifier tracking is [TASK-022] work, so the snapshot starts inert"
+        "the snapshot starts with no modifier tracked"
     );
 }
 

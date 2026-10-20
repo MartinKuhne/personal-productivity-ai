@@ -78,7 +78,7 @@ fn timestamp_text_pads_sub_millisecond_values() {
 }
 
 #[test]
-fn timestamp_format_constant_matches_the_legacy_format() {
+fn timestamp_format_constant_renders_hhmmssfff() {
     // `TIMESTAMP_FORMAT` is what the timestamp column renders through;
     // pinning the constant pins the column.
     let stamp: DateTime<Local> = Local
@@ -133,7 +133,7 @@ fn timestamp_and_message_columns_use_their_own_tokens() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn category_filter_options_lists_all_plus_the_five_thelegacy_categories() {
+fn category_filter_options_lists_all_plus_the_five_categories() {
     let options = category_filter_options();
     let categories: Vec<Option<LogCategory>> =
         options.iter().map(|option| option.category).collect();
@@ -148,7 +148,7 @@ fn category_filter_options_lists_all_plus_the_five_thelegacy_categories() {
             Some(LogCategory::ImageVision),
             Some(LogCategory::LlmTools),
         ],
-        "the pick list must keep the legacy UI build's order and membership"
+        "the pick list must keep the fixed order and membership"
     );
     assert_eq!(options[0].label, strings::LOG_CATEGORY_ALL);
 }

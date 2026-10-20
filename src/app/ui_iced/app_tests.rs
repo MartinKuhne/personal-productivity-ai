@@ -201,7 +201,7 @@ fn test_window_settings_uses_persisted_size_and_position() {
 }
 
 #[test]
-fn test_window_settings_falls_back_to_thelegacy_defaults() {
+fn test_window_settings_falls_back_to_the_default_size() {
     let settings = window_settings(&PersistedUiState::default());
     assert_eq!(
         settings.size,

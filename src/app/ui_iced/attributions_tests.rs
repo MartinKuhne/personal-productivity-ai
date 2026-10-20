@@ -28,12 +28,12 @@ fn fixture_entries() -> Vec<Attribution> {
 // --- Data source: the shared catalog ----------------------------------------
 
 #[test]
-fn from_catalog_is_the_reused_thelegacy_catalog_verbatim() {
+fn from_catalog_is_the_shared_catalog_verbatim() {
     let vm = AttributionsViewModel::from_catalog();
     assert_eq!(
         vm.entries(),
         DIRECT_DEPENDENCIES,
-        "the iced view must show the same catalog the legacy UI dialog shows, unchanged"
+        "the view must show the shared catalog unchanged"
     );
 }
 

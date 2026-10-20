@@ -440,7 +440,7 @@ fn json_line_count_counts_rendered_lines() {
 }
 
 #[test]
-fn json_row_options_are_the_legacy_catalogue() {
+fn json_row_options_are_the_curated_catalogue() {
     let rows: Vec<usize> = json_row_options(8)
         .iter()
         .map(|option| option.rows)
@@ -753,7 +753,7 @@ fn a_populated_snapshot_renders_collapsed_and_expanded_rows() {
 }
 
 #[test]
-fn from_app_reads_the_same_accessors_the_legacy_window_used() {
+fn from_app_reads_the_agent_panel_state_accessors() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     app.orchestrator.agent_panel_state.show_debug_window = true;
     app.orchestrator.agent_panel_state.debug_search_text = "incoming".to_string();
@@ -911,7 +911,7 @@ fn follow_intent_is_the_logs_rule_itself() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn header_text_matches_the_legacy_shape() {
+fn header_text_matches_the_three_column_shape() {
     let entry = entry(1, DebugEntryKind::ToolResults, "Turn 1 — Tool results (1)");
     assert_eq!(
         header_text(&entry),

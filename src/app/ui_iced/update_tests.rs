@@ -160,7 +160,7 @@ fn test_update_scale_baseline_stores_os_scale() {
     assert_eq!(
         state.effective_scale_factor(),
         1.5 * 1.25,
-        "DEC-008: on-screen scale is baseline × persisted multiplier"
+        "on-screen scale is baseline × persisted multiplier"
     );
     assert_eq!(
         state.requested_scale_factor(),
@@ -320,7 +320,7 @@ fn test_command_channel_publishes_and_executes() {
     assert_eq!(
         drained(&spy),
         vec![UserCommand::SelectTagFilter(Some("iced".to_string()))],
-        "the intent must also be observable on the bus ([FMD-066])"
+        "the intent must also be observable on the bus"
     );
 }
 
@@ -351,7 +351,7 @@ fn test_delete_is_intercepted_and_deferred_to_the_confirm_dialog() {
     assert_eq!(
         drained(&spy),
         vec![UserCommand::Delete(path)],
-        "confirming publishes the self-contained intent ([FMD-068])"
+        "confirming publishes the self-contained intent"
     );
     assert!(
         !state.overlay.dialog.is_open(),
@@ -360,7 +360,7 @@ fn test_delete_is_intercepted_and_deferred_to_the_confirm_dialog() {
 }
 
 #[test]
-fn test_rename_opens_the_dialog_prefilled_with_thelegacy_initial_value() {
+fn test_rename_opens_the_dialog_prefilled_with_the_current_name() {
     let (mut state, _storage) = fresh_state();
     let path = PathBuf::from("/notes/report.md");
 
@@ -376,7 +376,7 @@ fn test_rename_opens_the_dialog_prefilled_with_thelegacy_initial_value() {
     assert_eq!(
         state.overlay.dialog.pending_name(),
         crate::ui::tree::flatten::initial_rename_value(&path, "report.md"),
-        "the legacy UI pre-filled the rename field; the iced reducer must too"
+        "the rename reducer must pre-fill the dialog field"
     );
 }
 
@@ -456,7 +456,7 @@ fn test_cancel_batch_closes_the_dialog_after_cancelling() {
     assert_eq!(drained(&spy), vec![UserCommand::CancelBatch]);
     assert!(
         !state.overlay.batch.is_open(),
-        "CancelBatch dismisses the dialog, as the legacy UI window's close did"
+        "CancelBatch dismisses the dialog"
     );
 }
 
@@ -865,7 +865,7 @@ fn test_delete_selected_fans_out_and_clears_the_selection() {
             UserCommand::Delete(PathBuf::from("/notes/a.md")),
             UserCommand::Delete(PathBuf::from("/notes/b.md")),
         ],
-        "legacy parity: one Delete per selected path, no confirm dialog"
+        "one Delete per selected path, no confirm dialog"
     );
     assert!(state.app.orchestrator.selection.selected_files.is_empty());
     assert!(
@@ -995,7 +995,7 @@ fn test_menu_row_activation_routes_the_command_and_closes() {
     assert_eq!(state.overlay.hamburger_submenu, None);
     assert!(
         drained(&spy).contains(&UserCommand::OpenAboutDialog),
-        "the row's own command must be routed ([FMD-068])"
+        "the row's own command must be routed"
     );
 }
 
@@ -1080,7 +1080,7 @@ fn test_editor_cancel_discards_the_buffer_and_clears_the_loaded_path() {
     );
     assert!(
         state.app.orchestrator.tabs.loaded_path.is_none(),
-        "the legacy UI render.rs:43-45 cleared the same pair"
+        "cancelling must clear the loaded path too"
     );
     assert!(path.exists(), "a cancel must never write anything to disk");
     assert_eq!(
@@ -1225,7 +1225,7 @@ fn test_thinking_toggle_lands_in_the_rebuilt_agent_view_model() {
     let (mut state, _storage) = fresh_state();
     assert!(
         state.models.agent.thinking_expanded,
-        "the legacy UI's collapsing block starts open"
+        "the collapsing block starts open"
     );
 
     let _ = update(
@@ -1373,7 +1373,7 @@ fn test_stale_search_results_are_dropped() {
     assert_eq!(
         state.overlay.search.result_count(),
         0,
-        "a superseded scan must not paint under the newer term ([FMD-062])"
+        "a superseded scan must not paint under the newer term"
     );
 }
 
@@ -1505,7 +1505,7 @@ fn test_near_unity_scale_is_stored_as_none() {
     );
     assert_eq!(
         state.app.persisted_ui_state.font_size_scale, None,
-        "the legacy UI stores a fresh install's 1.0 as None so it is never misread"
+        "a fresh install's 1.0 scale is stored as None so it is never misread"
     );
 }
 
@@ -1544,7 +1544,7 @@ fn test_task_toggle_mutates_the_open_document_in_memory_only() {
 
     assert_eq!(
         state.app.orchestrator.tabs.current_markdown, "- [ ] first\n- [x] second\n",
-        "the legacy UI applied the toggle to the in-memory source (P0-2)"
+        "the toggle applies to the in-memory source"
     );
 }
 
@@ -1969,7 +1969,7 @@ fn test_debug_entry_toggle_flips_one_row_only() {
     assert!(!state.overlay.debug.is_expanded(2));
     assert!(
         state.overlay.debug.is_expanded(5),
-        "rows toggle independently, as the legacy UI's per-header memory did"
+        "rows toggle independently per header"
     );
 }
 
@@ -2110,7 +2110,7 @@ fn test_file_change_inbound_drains_the_file_processor() {
             .all_files
             .iter()
             .any(|path| path == &PathBuf::from("/notes/new.md")),
-        "the inbound trigger must run the same drain the legacy UI ran per frame"
+        "the inbound trigger must run the per-frame drain"
     );
 }
 
@@ -2230,7 +2230,7 @@ fn test_agent_bus_lag_marks_the_transcript_truncated() {
             .agent_transcript
             .thinking
             .contains(crate::orchestrator::LAG_TRUNCATION_MARKER),
-        "[FMD-067] the loss must be visible, not silent"
+        "the loss must be visible, not silent"
     );
 }
 
@@ -2277,7 +2277,7 @@ fn test_frame_tail_populates_the_tree_cache_and_clears_the_dirty_flag() {
 
     assert!(
         state.app.cached_tree_rows.is_some(),
-        "the legacy UI cache transition (`ui/panels/left.rs:209`) must run in the tail"
+        "the cache transition must run in the tail"
     );
     assert!(
         !state.app.orchestrator.selection.tree_dirty,
@@ -2373,7 +2373,7 @@ fn test_frame_tail_syncs_panel_widths_into_the_persisted_snapshot() {
     assert_eq!(
         state.app.persisted_ui_state.right_panel_width,
         Some(161.0),
-        "the legacy UI's update_persisted_ui_state ran every frame; so does finish_frame"
+        "finish_frame persists the UI state every frame"
     );
 }
 

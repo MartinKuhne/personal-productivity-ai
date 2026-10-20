@@ -214,7 +214,7 @@ fn test_measure_cell_whitespace_only_closes_the_open_token() {
 }
 
 #[test]
-fn test_trailing_whitespace_single_part_run_closes_the_token_like_the_legacy_renderer() {
+fn test_trailing_whitespace_single_part_run_closes_the_token() {
     // The walker's `else if ends_ws` branch: a single-part
     // run that ends with whitespace closes the pending token immediately and
     // it is measured with the *previous* run's font, so the two runs stay two
