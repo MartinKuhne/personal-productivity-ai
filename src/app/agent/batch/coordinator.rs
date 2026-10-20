@@ -148,12 +148,12 @@ mod tests {
     use super::*;
     use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::AppConfig;
-    use std::sync::mpsc;
+    use tokio::sync::broadcast;
 
     #[test]
     fn test_coordinator_new_and_execute() {
         let dir = tempfile::tempdir().unwrap();
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn test_coordinator_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 
@@ -222,7 +222,7 @@ mod tests {
         std::fs::write(dir.path().join("test2.md"), "").unwrap();
         std::fs::write(dir.path().join("test3.md"), "").unwrap();
 
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 

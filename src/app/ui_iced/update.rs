@@ -1239,6 +1239,11 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
         InboundMessage::Agent(_) => {
             state.app.orchestrator.drain_agent_event_bus();
         }
+        InboundMessage::AgentBatch(_events) => {
+            // Same semantics as the single-event arm: the whole burst lands
+            // in one drain call ([FMD-060]).
+            state.app.orchestrator.drain_agent_event_bus();
+        }
         InboundMessage::Background(event) => {
             apply_background_event(state, event.as_ref());
         }

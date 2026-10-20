@@ -1074,6 +1074,10 @@ pub enum InboundMessage {
     /// An agent lifecycle or streaming event arrived on
     /// `Bus<AgentEvent>`.
     Agent(Arc<AgentEvent>),
+    /// A burst of agent events drained off `Bus<AgentEvent>` in one
+    /// go ([FMD-060]) — same semantics as the
+    /// [`InboundMessage::Agent`] arm applied in order.
+    AgentBatch(Vec<Arc<AgentEvent>>),
     /// A typed background event arrived on the `BackgroundEvent` channel —
     /// indexer/watcher `Fs` progress, a worker `Process` log entry or file
     /// load, or an `McpAuth` completion.

@@ -21,7 +21,7 @@ fn test_scan_libraries_discovers_md() {
         priority: 0,
     });
 
-    let (tx, _rx) = std::sync::mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let reader = bus.subscribe();
@@ -64,7 +64,7 @@ fn test_scan_libraries_skips_git() {
         priority: 0,
     });
 
-    let (tx, _rx) = std::sync::mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let reader = bus.subscribe();
@@ -105,7 +105,7 @@ fn test_scan_libraries_queues_pdf() {
         priority: 0,
     });
 
-    let (tx, _rx) = std::sync::mpsc::channel();
+    let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -129,7 +129,7 @@ fn test_scan_libraries_queues_pdf() {
 fn test_spawn_workers_creates_correct_number() {
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
-    let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+    let (tx_gui, _rx_gui) = tokio::sync::broadcast::channel(16);
     let tx_gui = BackgroundEventSender::new(tx_gui);
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
     assert_eq!(workers.len(), 4);
@@ -155,7 +155,7 @@ fn test_spawn_workers_processes_all_items() {
 
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
-    let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+    let (tx_gui, mut rx_gui) = tokio::sync::broadcast::channel(16);
     let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
@@ -167,11 +167,20 @@ fn test_spawn_workers_processes_all_items() {
     drop(tx_work);
 
     let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    while let Ok(ev) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
-        if let BackgroundEvent::Fs(FsEvent::FileParsed { path, .. }) = ev {
-            parsed_paths.insert(path);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    rt.block_on(async {
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            if let Ok(ev) = rx_gui.recv().await {
+                if let BackgroundEvent::Fs(FsEvent::FileParsed { path, .. }) = ev {
+                    parsed_paths.insert(path);
+                }
+            }
         }
-    }
+    });
     for w in workers {
         let _ = w.join();
     }
@@ -191,7 +200,7 @@ fn test_spawn_workers_processes_all_items() {
 fn test_spawn_workers_terminates_when_sender_dropped_with_empty_queue() {
     let (_tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
-    let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+    let (tx_gui, _rx_gui) = tokio::sync::broadcast::channel(16);
     let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
@@ -223,7 +232,7 @@ fn test_spawn_workers_terminates_when_sender_dropped_with_empty_queue() {
 fn test_spawn_workers_handles_missing_file() {
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
-    let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+    let (tx_gui, mut rx_gui) = tokio::sync::broadcast::channel(16);
     let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(1, rx_work, tx_gui);
@@ -233,19 +242,24 @@ fn test_spawn_workers_handles_missing_file() {
 
     let mut got_file_parsed = false;
     let start = std::time::Instant::now();
-    while start.elapsed() < std::time::Duration::from_secs(2) {
-        if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) =
-            rx_gui.recv_timeout(std::time::Duration::from_millis(100))
-        {
-            assert_eq!(path, missing);
-            assert!(
-                tags.is_empty(),
-                "missing file must produce an empty tag list, got {tags:?}"
-            );
-            got_file_parsed = true;
-            break;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    rt.block_on(async {
+        while start.elapsed() < std::time::Duration::from_secs(2) {
+            if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) = rx_gui.recv().await
+            {
+                assert_eq!(path, missing);
+                assert!(
+                    tags.is_empty(),
+                    "missing file must produce an empty tag list, got {tags:?}"
+                );
+                got_file_parsed = true;
+                break;
+            }
         }
-    }
+    });
     assert!(
         got_file_parsed,
         "worker must produce a FileParsed message for a missing file"

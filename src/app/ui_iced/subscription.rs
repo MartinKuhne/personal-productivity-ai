@@ -57,6 +57,7 @@
 //! | `Bus<ConfigArrived>` | `ConfigArrived { config }` | `Message::Inbound(InboundMessage::ConfigArrived(Arc<AppConfig>))` |
 //! | `Bus<FileEvent>` | `FileEvent { kind, paths }` (all five `FileEventKind`s) | `Message::Inbound(InboundMessage::FileChanged(event))` |
 //! | `Bus<AgentEvent>` | all 11 `AgentEvent` variants | `Message::Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
+//! | `Bus<AgentEvent>` | coalesced burst | `Message::Inbound(InboundMessage::AgentBatch(Vec<Arc<AgentEvent>>))` |
 //! | `std::sync::mpsc<BackgroundEvent>` | `Fs(..)` / `Process(..)` / `McpAuth(..)` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
 //! | any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
 //! | winit window events | `CloseRequested(id)` / `Resized(id, size)` | `Message::Window(WindowMessage::CloseRequested(id))` / `Message::Window(WindowMessage::Resized { id, size })` — the `close_requests()` / `resize_events()` lanes; with `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction |
@@ -94,7 +95,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use iced::futures::StreamExt;
-use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use crate::bus::core::Bus;
 use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived, FileEvent};
@@ -121,6 +122,9 @@ pub enum InboundBusEvent {
     /// An agent turn event on `Bus<AgentEvent>`
     /// (`src/app/bus/events/agent.rs:21`).
     Agent(AgentEvent),
+    /// A coalesced burst of agent events drained off
+    /// `Bus<AgentEvent>` in one wake-up ([FMD-060]).
+    AgentBatch(Vec<AgentEvent>),
     /// A typed background event on the `std::sync::mpsc` channel
     /// (`src/app/bus/events/typed.rs:119`).
     Background(BackgroundEvent),
@@ -160,6 +164,9 @@ pub fn bus_event_to_message(event: InboundBusEvent) -> Option<Message> {
         InboundBusEvent::Agent(event) => {
             Some(Message::Inbound(InboundMessage::Agent(Arc::new(event))))
         }
+        InboundBusEvent::AgentBatch(events) => Some(Message::Inbound(InboundMessage::AgentBatch(
+            events.into_iter().map(Arc::new).collect(),
+        ))),
         InboundBusEvent::Background(event) => Some(Message::Inbound(InboundMessage::Background(
             Arc::new(event),
         ))),
@@ -223,52 +230,32 @@ impl<T: Clone + Send + 'static> Hash for SharedReceiver<T> {
     }
 }
 
-/// Handle to the `std::sync::mpsc` background-event channel, bridged onto
-/// an async stream.
+/// Handle to the `tokio::sync::broadcast` background-event channel.
 ///
-/// `std::sync::mpsc::Receiver::recv()` blocks, and this build's iced
-/// executor is a `futures` thread pool with no `spawn_blocking`
-/// (`iced_futures-0.14.0/src/backend/native/thread_pool.rs:4`). Blocking a
-/// pool thread for the life of the app would starve it, so one dedicated
-/// OS thread owns the blocking receive and forwards into a
-/// reactor-free `tokio` unbounded channel that the stream polls.
-///
-/// The forwarding thread exits when the producer drops its sender
-/// (`recv()` errors) or the bridge's sending half is closed.
-#[derive(Clone)]
+/// Background workers send via `broadcast::Sender` (never blocks).
+/// The subscription polls the `broadcast::Receiver` on the iced executor.
+/// Uses `Arc<Mutex<...>>` so that clones share the same receiver, ensuring
+/// messages sent after subscription are received by all clones (unlike
+/// `resubscribe()` which only sees messages sent after the resubscribe call).
 pub struct BackgroundReceiver {
-    inner: Arc<AsyncMutex<mpsc::UnboundedReceiver<BackgroundEvent>>>,
+    inner: Arc<tokio::sync::Mutex<broadcast::Receiver<BackgroundEvent>>>,
 }
 
 impl BackgroundReceiver {
-    /// Bridges the blocking `source` receiver onto an async channel.
-    pub fn from_std(source: std::sync::mpsc::Receiver<BackgroundEvent>) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        std::thread::spawn(move || {
-            while let Ok(event) = source.recv() {
-                if sender.send(event).is_err() {
-                    break;
-                }
-            }
-        });
+    /// Wraps a broadcast receiver.
+    pub fn from_broadcast(receiver: broadcast::Receiver<BackgroundEvent>) -> Self {
         Self {
-            inner: Arc::new(AsyncMutex::new(receiver)),
+            inner: Arc::new(tokio::sync::Mutex::new(receiver)),
         }
     }
+}
 
-    /// Wraps an already-async unbounded receiver (used by tests to avoid a
-    /// forwarding thread).
-    pub fn from_unbounded(receiver: mpsc::UnboundedReceiver<BackgroundEvent>) -> Self {
+/// We need Clone for Subscription::run_with - clones share the same receiver.
+impl Clone for BackgroundReceiver {
+    fn clone(&self) -> Self {
         Self {
-            inner: Arc::new(AsyncMutex::new(receiver)),
+            inner: Arc::clone(&self.inner),
         }
-    }
-
-    /// Async lock on the underlying receiver.
-    pub async fn lock(
-        &self,
-    ) -> tokio::sync::MutexGuard<'_, mpsc::UnboundedReceiver<BackgroundEvent>> {
-        self.inner.lock().await
     }
 }
 
@@ -276,7 +263,9 @@ impl BackgroundReceiver {
 /// [`SharedReceiver`]'s `Hash` docs for the same reasoning.
 impl Hash for BackgroundReceiver {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        Arc::as_ptr(&self.inner).hash(state);
+        // Hash based on the receiver's internal state
+        // Since we can't get a stable pointer, use TypeId
+        std::any::TypeId::of::<BackgroundEvent>().hash(state);
     }
 }
 
@@ -293,7 +282,7 @@ pub struct BusReceivers {
     pub file: SharedReceiver<FileEvent>,
     /// `Bus<AgentEvent>` — the agent's streaming turn events.
     pub agent: SharedReceiver<AgentEvent>,
-    /// The `std::sync::mpsc<BackgroundEvent>` channel.
+    /// The `tokio::sync::mpsc<BackgroundEvent>` channel.
     pub background: BackgroundReceiver,
 }
 
@@ -303,13 +292,13 @@ impl BusReceivers {
         config_bus: &Bus<ConfigArrived>,
         file_bus: &Bus<FileEvent>,
         agent_bus: &Bus<AgentEvent>,
-        background_rx: std::sync::mpsc::Receiver<BackgroundEvent>,
+        background_rx: broadcast::Receiver<BackgroundEvent>,
     ) -> Self {
         Self {
             config: SharedReceiver::from_bus(config_bus),
             file: SharedReceiver::from_bus(file_bus),
             agent: SharedReceiver::from_bus(agent_bus),
-            background: BackgroundReceiver::from_std(background_rx),
+            background: BackgroundReceiver::from_broadcast(background_rx),
         }
     }
 }
@@ -589,6 +578,12 @@ fn file_stream(
 }
 
 /// The `Bus<AgentEvent>` lane — the highest-volume channel of the four.
+///
+/// Every event already queued when the stream wakes is coalesced into one
+/// [`InboundMessage::AgentBatch`] ([FMD-060]): a burst of thinking deltas,
+/// tool calls, or status updates then costs the reducer a single pass
+/// instead of one per event. A lone event still rides the plain
+/// [`InboundMessage::Agent`] arm, so the common case is unchanged.
 fn agent_stream(
     handle: &SharedReceiver<AgentEvent>,
 ) -> iced::futures::stream::BoxStream<'static, Message> {
@@ -596,10 +591,23 @@ fn agent_stream(
     iced::futures::stream::unfold(inner, |inner| async move {
         let received = {
             let mut receiver = inner.lock().await;
-            receiver.recv().await
+            receiver.recv().await.map(|first| {
+                let mut batch = vec![first];
+                while let Ok(extra) = receiver.try_recv() {
+                    batch.push(extra);
+                }
+                batch
+            })
         };
         match received {
-            Ok(event) => Some((bus_event_to_message(InboundBusEvent::Agent(event)), inner)),
+            Ok(mut batch) => {
+                let event = if batch.len() == 1 {
+                    InboundBusEvent::Agent(batch.remove(0))
+                } else {
+                    InboundBusEvent::AgentBatch(batch)
+                };
+                Some((bus_event_to_message(event), inner))
+            }
             Err(broadcast::error::RecvError::Closed) => None,
             Err(broadcast::error::RecvError::Lagged(count)) => {
                 warn_dropped(BusSource::Agent, count);
@@ -629,24 +637,27 @@ fn background_stream(
 ) -> iced::futures::stream::BoxStream<'static, Message> {
     let inner = Arc::clone(&handle.inner);
     iced::futures::stream::unfold(inner, |inner| async move {
-        let received = {
+        // recv() returns Result; on channel closed (RecvError::Closed), return None to end stream
+        let first = {
             let mut receiver = inner.lock().await;
-            receiver.recv().await.map(|first| {
-                let mut batch = vec![first];
-                while let Ok(extra) = receiver.try_recv() {
-                    batch.push(extra);
-                }
-                batch
-            })
+            match receiver.recv().await {
+                Ok(event) => event,
+                Err(_) => return None, // Channel closed, end the stream
+            }
         };
-        received.map(|mut batch| {
-            let event = if batch.len() == 1 {
-                InboundBusEvent::Background(batch.remove(0))
-            } else {
-                InboundBusEvent::BackgroundBatch(batch)
-            };
-            (bus_event_to_message(event), inner)
-        })
+        let mut batch = vec![first];
+        {
+            let mut receiver = inner.lock().await;
+            while let Ok(extra) = receiver.try_recv() {
+                batch.push(extra);
+            }
+        }
+        let event = if batch.len() == 1 {
+            InboundBusEvent::Background(batch.remove(0))
+        } else {
+            InboundBusEvent::BackgroundBatch(batch)
+        };
+        Some((bus_event_to_message(event), inner))
     })
     .filter_map(iced::futures::future::ready)
     .boxed()

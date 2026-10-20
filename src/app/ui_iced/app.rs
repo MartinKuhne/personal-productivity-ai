@@ -68,8 +68,8 @@ use std::sync::{Arc, Mutex};
 use iced::widget::pane_grid;
 use iced::{Size, Task};
 
-use crate::background::Task as BackgroundTask;
 use crate::background::logs::BackgroundLogs;
+use crate::background::Task as BackgroundTask;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::{AppConfig, ConfigStorageHandler, ContentLibrary};
@@ -99,8 +99,8 @@ use crate::ui_iced::subscription::{self, BusReceivers};
 use crate::ui_iced::tools_dialog::{ToolsDialogState, ToolsDialogViewModel};
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
-use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use crate::workspace::Tags;
 use fastmd_agent::AgentSession;
 
 /// Window width ported from the legacy UI `ViewportBuilder::with_inner_size`
@@ -841,7 +841,12 @@ pub fn build_state(
     // an inert, never-fed channel. `try_recv` on it returns immediately
     // (no blocking) — [FMD-065] single inbound path.
     let (_inert_tx, inert_rx) = std::sync::mpsc::channel();
-    let receivers = BusReceivers::new(config_bus, &event_bus, &agent_event_bus, background_task.rx);
+    let receivers = BusReceivers::new(
+        config_bus,
+        &event_bus,
+        &agent_event_bus,
+        background_task.tx.subscribe(),
+    );
 
     // DEC-009 startup `ConfigArrived` publish, performed **synchronously:
     // the subscribers it must reach — the background worker thread

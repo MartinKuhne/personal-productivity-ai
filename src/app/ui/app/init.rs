@@ -134,6 +134,9 @@ impl FastMdApp {
         let agent = agent_builder.build();
         agent.set_agent_config(config.to_agent_config());
 
+        // Extract needed fields from background_task BEFORE moving file_event_bus
+        let rx_std = background_task.rx_std();
+        let tx = background_task.tx;
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
@@ -158,8 +161,8 @@ impl FastMdApp {
         Self {
             orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries,
-                rx: background_task.rx,
-                tx: background_task.tx,
+                rx: rx_std,
+                tx,
                 file_event_bus: event_bus.clone(),
                 file_event_reader: Some(event_bus.subscribe()),
                 file_processor,

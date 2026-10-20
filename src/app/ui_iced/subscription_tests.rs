@@ -403,8 +403,8 @@ fn test_distinct_shared_receivers_have_distinct_identities() {
 
 #[test]
 fn test_background_receiver_clones_share_one_identity() {
-    let (_sender, receiver) = mpsc::unbounded_channel::<BackgroundEvent>();
-    let handle = BackgroundReceiver::from_unbounded(receiver);
+    let (_sender, receiver) = tokio::sync::broadcast::channel::<BackgroundEvent>(16);
+    let handle = BackgroundReceiver::from_broadcast(receiver);
     assert_eq!(hash_of(&handle), hash_of(&handle.clone()));
 }
 
@@ -469,8 +469,8 @@ async fn test_agent_stream_delivers_the_mapped_message() {
 
 #[tokio::test]
 async fn test_background_stream_delivers_the_mapped_message() {
-    let (sender, receiver) = mpsc::unbounded_channel::<BackgroundEvent>();
-    let handle = BackgroundReceiver::from_unbounded(receiver);
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let handle = BackgroundReceiver::from_broadcast(receiver);
     sender
         .send(BackgroundEvent::Fs(FsEvent::Finished))
         .expect("send");
@@ -484,34 +484,6 @@ async fn test_background_stream_delivers_the_mapped_message() {
         Message::Inbound(InboundMessage::Background(_))
     ));
 }
-
-#[tokio::test]
-async fn test_from_std_bridges_the_blocking_channel() {
-    let (sender, receiver) = std::sync::mpsc::channel::<BackgroundEvent>();
-    let handle = BackgroundReceiver::from_std(receiver);
-    sender
-        .send(BackgroundEvent::Process(ProcessEvent::LogEntry(
-            BackgroundLogEntry::new(LogCategory::Batch, "batch done".to_string()),
-        )))
-        .expect("send");
-
-    let message = background_stream(&handle)
-        .next()
-        .await
-        .expect("the forwarding thread must deliver the event");
-    match message {
-        Message::Inbound(InboundMessage::Background(event)) => match &*event {
-            BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
-                assert_eq!(entry.message, "batch done");
-                assert_eq!(entry.category, LogCategory::Batch);
-            }
-            other => panic!("expected a Process::LogEntry, got {other:?}"),
-        },
-        other => panic!("expected Inbound(Background), got {other:?}"),
-    }
-}
-
-#[tokio::test]
 async fn test_lag_surfaces_as_events_dropped_then_resynchronises() {
     // Capacity 1: the second publish evicts the unread first one and the
     // receiver reports the loss — the same `Lagged(n)` the legacy UI drain loops
@@ -554,8 +526,8 @@ async fn test_broadcast_stream_ends_when_the_bus_is_closed() {
 
 #[tokio::test]
 async fn test_background_stream_ends_when_the_sender_is_dropped() {
-    let (sender, receiver) = mpsc::unbounded_channel::<BackgroundEvent>();
-    let handle = BackgroundReceiver::from_unbounded(receiver);
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let handle = BackgroundReceiver::from_broadcast(receiver);
     drop(sender);
 
     let mut stream = background_stream(&handle);
@@ -617,8 +589,8 @@ async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
 
 #[tokio::test]
 async fn test_background_stream_coalesces_a_queued_burst() {
-    let (sender, receiver) = mpsc::unbounded_channel::<BackgroundEvent>();
-    let handle = BackgroundReceiver::from_unbounded(receiver);
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let handle = BackgroundReceiver::from_broadcast(receiver);
     let burst = vec![
         BackgroundEvent::Fs(FsEvent::DirParsed {
             path: PathBuf::from("dir"),
@@ -657,7 +629,7 @@ async fn test_background_stream_coalesces_a_queued_burst() {
 
 #[test]
 fn test_subscription_builds_from_receivers() {
-    let (sender, receiver) = std::sync::mpsc::channel::<BackgroundEvent>();
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
@@ -684,7 +656,7 @@ fn test_subscription_builds_from_receivers() {
 
 #[test]
 fn test_bus_receivers_clone_keeps_every_identity_stable() {
-    let (sender, receiver) = std::sync::mpsc::channel::<BackgroundEvent>();
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
@@ -947,7 +919,7 @@ fn test_keyboard_lane_builds_and_merges_into_the_main_subscription() {
     let lane = keyboard_events();
     drop(lane);
 
-    let (sender, receiver) = std::sync::mpsc::channel::<BackgroundEvent>();
+    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),

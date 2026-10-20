@@ -18,12 +18,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 
 /// Owns the background worker threads and their event channel.
 pub struct Task {
-    /// Receiver for typed background events drained by the UI.
-    pub rx: Receiver<BackgroundEvent>,
-    /// Sender handed to every background worker.
+    /// Broadcast sender handed to every background worker.
     pub tx: BackgroundEventSender,
     /// File-event bus shared by background workers and the UI.
     pub file_event_bus: Bus<FileEvent>,
@@ -38,8 +37,9 @@ pub struct Task {
 impl Task {
     /// Wait for configuration, then spawn the background workers.
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
-        let (raw_tx, rx) = channel();
-        let tx = BackgroundEventSender::new(raw_tx);
+        // Use broadcast channel like other buses (ConfigArrived, FileEvent, AgentEvent)
+        let (tx_broadcast, _rx_broadcast) = broadcast::channel(1024);
+        let tx = BackgroundEventSender::new(tx_broadcast);
         let tx_clone = tx.clone();
         let file_event_bus = Bus::new();
         let bus_clone = file_event_bus.clone();
@@ -86,7 +86,6 @@ impl Task {
         });
 
         Self {
-            rx,
             tx,
             file_event_bus,
             finished_watcher,
@@ -116,6 +115,27 @@ impl Task {
             .lock()
             .ok()
             .and_then(|mut slot| slot.take())
+    }
+
+    /// Provide a std::sync::mpsc receiver for test compatibility.
+    /// Spawns a bridge thread that forwards from the broadcast receiver.
+    pub fn rx_std(&self) -> Receiver<BackgroundEvent> {
+        let (std_tx, std_rx) = channel::<BackgroundEvent>();
+        let mut rx = self.tx.subscribe();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for bridge");
+            rt.block_on(async move {
+                while let Ok(event) = rx.recv().await {
+                    if std_tx.send(event).is_err() {
+                        break;
+                    }
+                }
+            });
+        });
+        std_rx
     }
 
     fn run_indexing(

@@ -27,8 +27,26 @@ use uuid::Uuid;
 fn harness() -> AppOrchestrator {
     let file_event_bus: Bus<FileEvent> = Bus::new();
     let agent_event_bus: Bus<SeamAgentEvent> = Bus::new();
-    let (bg_tx_raw, bg_rx): (_, Receiver<BackgroundEvent>) = channel();
-    let tx = BackgroundEventSender::new(bg_tx_raw);
+    // Use broadcast channel for tx (matching production BackgroundEventSender)
+    let (bg_tx, bg_rx_broadcast) = tokio::sync::broadcast::channel(16);
+    let tx = BackgroundEventSender::new(bg_tx);
+    // Use std mpsc for rx (orchestrator expects this type)
+    // Bridge: forward from broadcast receiver to std mpsc sender
+    let (bg_tx_std, bg_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime for bridge");
+        rt.block_on(async move {
+            let mut rx = bg_rx_broadcast;
+            while let Ok(event) = rx.recv().await {
+                if bg_tx_std.send(event).is_err() {
+                    break;
+                }
+            }
+        });
+    });
 
     let file_event_reader = file_event_bus.subscribe();
     let file_processor = FileEventProcessor::new(file_event_bus.subscribe());
@@ -236,6 +254,9 @@ fn drain_background_channel_routes_all_variants() {
             .into(),
         )
         .unwrap();
+
+    // Give the bridge thread time to forward events from broadcast to std mpsc
+    std::thread::sleep(std::time::Duration::from_millis(50));
 
     orch.drain_background_channel();
 

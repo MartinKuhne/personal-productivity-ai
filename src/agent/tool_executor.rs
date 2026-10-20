@@ -11,12 +11,27 @@ use crate::tools::Safety;
 use crate::tools::registry::execute_tool;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// Cheap, shallow-clone handle to a shared cache. The
 /// `ToolExecutor` does not own a `ToolCache` directly; the
 /// cache is a process-wide singleton exposed by
 /// [`crate::tools::registry::cache::cache`].
 type SharedCache = Arc<crate::tools::registry::cache::ToolCache>;
+
+/// Shared tokio runtime for parallel tool execution.
+/// Initialized once on first use to avoid per-call runtime creation overhead.
+fn shared_tokio_runtime() -> &'static Arc<tokio::runtime::Runtime> {
+    static RT: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
+    RT.get_or_init(|| {
+        Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("failed to create shared tokio runtime for tool execution"),
+        )
+    })
+}
 
 /// Result record for an individual executed tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,16 +230,7 @@ impl ToolExecutor {
     }
 
     fn execute_parallel(&self, calls: &[serde_json::Value]) -> Vec<ToolCallRecord> {
-        let rt = match tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                tracing::error!(name = "agent.runtime.build_failed", error = %e);
-                return Vec::new();
-            }
-        };
+        let rt = shared_tokio_runtime();
         let policy = self.policy.clone();
         let extensions = self.extensions.clone();
         let mut completed = Vec::new();

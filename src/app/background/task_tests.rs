@@ -13,18 +13,27 @@ use tempfile::tempdir;
 /// handle), or the deadline elapses. Returns the matched event so
 /// callers can also assert on the variant.
 fn wait_for_finished(task: &Task, timeout_secs: u64) -> Option<BackgroundEvent> {
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-            && matches!(
-                ev,
-                BackgroundEvent::Fs(FsEvent::Finished | FsEvent::FinishedWithoutWatcher)
-            )
-        {
-            return Some(ev);
+    let mut rx = task.tx.subscribe();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    rt.block_on(async move {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+        while tokio::time::Instant::now() < deadline {
+            let timeout = deadline - tokio::time::Instant::now();
+            if let Ok(ev) = tokio::time::timeout(timeout, rx.recv()).await
+                && let Ok(event) = ev
+                && matches!(
+                    event,
+                    BackgroundEvent::Fs(FsEvent::Finished | FsEvent::FinishedWithoutWatcher)
+                )
+            {
+                return Some(event);
+            }
         }
-    }
-    None
+        None
+    })
 }
 
 #[test]
@@ -246,28 +255,38 @@ fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
     task.file_event_bus
         .publish(FileEvent::discovered_one(pdf_path.clone()));
 
-    let mut saw_success = false;
-    let start = std::time::Instant::now();
-    let mut all_messages: Vec<String> = Vec::new();
-    while start.elapsed().as_secs() < 5 {
-        let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) else {
-            continue;
-        };
-        match ev {
-            BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
-                all_messages.push(format!("{:?}: {}", entry.category, entry.message));
-                if entry.category == LogCategory::PdfConverter
-                    && entry.message.contains("Successfully converted")
-                {
-                    saw_success = true;
-                    break;
+    let mut rx = task.tx.subscribe();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    let (saw_success, all_messages) = rt.block_on(async move {
+        let mut saw_success = false;
+        let mut all_messages: Vec<String> = Vec::new();
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            let timeout = deadline - tokio::time::Instant::now();
+            let ev = match tokio::time::timeout(timeout, rx.recv()).await {
+                Ok(Ok(ev)) => ev,
+                _ => continue,
+            };
+            match ev {
+                BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
+                    all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                    if entry.category == LogCategory::PdfConverter
+                        && entry.message.contains("Successfully converted")
+                    {
+                        saw_success = true;
+                        break;
+                    }
+                }
+                other => {
+                    all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
                 }
             }
-            other => {
-                all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
-            }
         }
-    }
+        (saw_success, all_messages)
+    });
     if !saw_success {
         eprintln!("Test saw messages: {:?}", all_messages);
     }

@@ -17,6 +17,7 @@
 
 use crate::bus::events::messages::BackgroundLogEntry;
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 
 type RepaintCallback = Arc<dyn Fn() + Send + Sync>;
 
@@ -26,13 +27,13 @@ type RepaintCallback = Arc<dyn Fn() + Send + Sync>;
 /// depend on a UI framework. The UI installs its callback at startup.
 #[derive(Clone)]
 pub struct BackgroundEventSender {
-    sender: std::sync::mpsc::Sender<BackgroundEvent>,
+    sender: broadcast::Sender<BackgroundEvent>,
     repaint: Arc<Mutex<Option<RepaintCallback>>>,
 }
 
 impl BackgroundEventSender {
     /// Wrap a typed background-event sender without a repaint callback.
-    pub fn new(sender: std::sync::mpsc::Sender<BackgroundEvent>) -> Self {
+    pub fn new(sender: broadcast::Sender<BackgroundEvent>) -> Self {
         Self {
             sender,
             repaint: Arc::new(Mutex::new(None)),
@@ -50,7 +51,7 @@ impl BackgroundEventSender {
     pub fn send(
         &self,
         event: BackgroundEvent,
-    ) -> Result<(), std::sync::mpsc::SendError<BackgroundEvent>> {
+    ) -> Result<(), broadcast::error::SendError<BackgroundEvent>> {
         self.sender.send(event)?;
         if let Ok(callback) = self.repaint.lock()
             && let Some(callback) = callback.as_ref()
@@ -58,6 +59,12 @@ impl BackgroundEventSender {
             callback();
         }
         Ok(())
+    }
+
+    /// Create a new broadcast receiver for this sender.
+    /// Each call returns a fresh receiver that sees all messages sent after this call.
+    pub fn subscribe(&self) -> broadcast::Receiver<BackgroundEvent> {
+        self.sender.subscribe()
     }
 }
 
@@ -205,7 +212,7 @@ mod tests {
 
     #[test]
     fn sender_calls_repaint_callback_after_delivery() {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
         let sender = BackgroundEventSender::new(tx);
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let calls_for_callback = Arc::clone(&calls);
@@ -215,17 +222,25 @@ mod tests {
 
         sender.send(FsEvent::Finished.into()).unwrap();
 
-        assert!(matches!(
-            rx.recv().unwrap(),
-            BackgroundEvent::Fs(FsEvent::Finished)
-        ));
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime for test");
+        rt.block_on(async {
+            assert!(matches!(
+                rx.recv().await.unwrap(),
+                BackgroundEvent::Fs(FsEvent::Finished)
+            ));
+        });
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn sender_does_not_call_repaint_callback_after_failed_delivery() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        drop(rx);
+    fn sender_calls_repaint_callback_even_with_no_subscribers() {
+        // With broadcast, send() succeeds even with no subscribers (returns Ok(0)).
+        // The repaint callback is called after a successful send.
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        // Drop the receiver so there are no subscribers
         let sender = BackgroundEventSender::new(tx);
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let calls_for_callback = Arc::clone(&calls);
@@ -233,7 +248,8 @@ mod tests {
             calls_for_callback.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }));
 
-        assert!(sender.send(FsEvent::Finished.into()).is_err());
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(sender.send(FsEvent::Finished.into()).is_ok());
+        // Callback is called because send() succeeds (broadcast doesn't fail on no subscribers)
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

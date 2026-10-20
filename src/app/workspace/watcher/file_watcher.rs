@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_watcher_new_creates_struct() {
         let config = AppConfig::default();
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -282,8 +282,8 @@ mod tests {
         let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot);
     }
 
-    #[test]
-    fn test_watcher_start_sends_finished() {
+    #[tokio::test]
+    async fn test_watcher_start_sends_finished() {
         let mut config = AppConfig::default();
         let dir = tempdir().unwrap();
         config.content_libraries.push(ContentLibrary {
@@ -294,7 +294,7 @@ mod tests {
             priority: 0,
         });
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -308,7 +308,7 @@ mod tests {
         let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot.clone());
         watcher.start();
 
-        let event = rx.recv_timeout(std::time::Duration::from_millis(1000));
+        let event = rx.recv().await;
         assert!(event.is_ok());
         match event.unwrap() {
             BackgroundEvent::Fs(FsEvent::Finished) => {
@@ -335,7 +335,7 @@ mod tests {
             readonly: true,
             priority: 0,
         });
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -435,7 +435,7 @@ mod tests {
             readonly: true,
             priority: 0,
         });
-        let (tx, _rx) = std::sync::mpsc::channel();
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
