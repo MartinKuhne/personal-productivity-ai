@@ -1,42 +1,35 @@
-//! Iced port of the third-party attributions window — the credits list
-//! behind the About dialog's attributions section ([TASK-017b2]).
+//! Third-party attributions window — the credits list behind the About
+//! dialog's attributions section.
 //!
 //! A **pure view over a plain snapshot**: [`attributions_view`] renders an
 //! [`AttributionsViewModel`] into an [`iced::Element`] of [`Message`] and
-//! performs no I/O. The catalog itself is **reused unchanged** from the
-//! the legacy UI build — `crate::ui::attributions::DIRECT_DEPENDENCIES`, the
-//! curated `&'static [Attribution]` constant in
-//! `src/app/ui/attributions.rs` (57 direct third-party crates across all
-//! four workspace members, alphabetically sorted, no duplicates). There
-//! is no generated `cargo-about` file and no runtime shell-out anywhere in
-//! either build; the data is compiled in.
+//! performs no I/O. The catalog itself is **reused unchanged** —
+//! `crate::ui::attributions::DIRECT_DEPENDENCIES`, the curated
+//! `&'static [Attribution]` constant in `src/app/ui/attributions.rs` (57
+//! direct third-party crates across all four workspace members,
+//! alphabetically sorted, no duplicates). There is no generated
+//! `cargo-about` file and no runtime shell-out anywhere; the data is
+//! compiled in.
 //!
 //! # What the catalog actually carries
 //!
 //! `Attribution { name, authors, github_url }` — that is the whole row.
 //! The catalog has **no per-crate license or version field**, so this
-//! window shows Crate / Authors / Repository exactly as the legacy UI dialog
-//! did (`src/app/ui/about_dialog.rs:200-220`), not a license column.
+//! window shows Crate / Authors / Repository and no license column.
 //! The only license text in the app is FastMD's own MIT license, shown in
 //! the About card ([`crate::ui_iced::about`]). Adding real per-crate
 //! license data means a new compile-time pipeline (e.g. a `cargo-about`
-//! generated file) — a data-source decision for the orchestrator, not
-//! something this port invents.
+//! generated file) — a data-source decision, not something this view
+//! invents.
 //!
-//! Note also that the catalog is *curated*, not derived from the resolved
-//! dependency graph: `the legacy_extras` is listed at
-//! `src/app/ui/attributions.rs:76` purely to credit its authors even
-//! though the crate is not a real consumer. That curation is preserved
-//! verbatim.
+//! The catalog is *curated*, not derived from the resolved dependency
+//! graph: entries are chosen by hand and listed verbatim.
 //!
 //! # Layout
 //!
-//! the legacy UI laid the rows out as plain `ui.horizontal` triples inside a
-//! `ScrollArea` — no table widget. This port uses
-//! `iced::widget::table` (`iced_widget-0.14.2/src/table.rs:18-49`) so the
-//! three columns the legacy UI header already names actually line up, per the
-//! migration map's `Table` → `iced::widget::table` mapping
-//! (`doc/planning/iced-migration-map.md` A5).
+//! The rows render through `iced::widget::table`
+//! (`iced_widget-0.14.2/src/table.rs:18-49`) so the three columns the
+//! header names actually line up.
 //!
 //! ```text
 //! Third-Party Attributions
@@ -49,8 +42,7 @@
 //!
 //! The repository cell is clickable: iced has no `hyperlink_to`, so the
 //! row emits the deferred intent [`AboutMessage::RepositoryOpened`] and
-//! the [TASK-022]/[TASK-023] reducer opens the URL (the legacy UI build
-//! pushed `OutputCommand::OpenUrl` from inside the click).
+//! the reducer opens the URL.
 //!
 //! The empty catalog renders the same widget tree with an empty table and
 //! an empty-state summary line, so the shape never changes (AGENTS §6).
@@ -85,8 +77,7 @@ pub const ATTRIBUTIONS_HEADER_SIZE: f32 = 14.0;
 /// Logical point size of a table body cell.
 pub const ATTRIBUTIONS_ROW_SIZE: f32 = 14.0;
 
-/// Maximum height of the credits scroll area — legacy parity
-/// (`ScrollArea::max_height(340.0)`, `src/app/ui/about_dialog.rs:209`).
+/// Maximum height of the credits scroll area, in logical pixels.
 pub const ATTRIBUTIONS_LIST_MAX_HEIGHT: f32 = 340.0;
 
 /// Horizontal padding inside a table cell.
@@ -168,12 +159,12 @@ impl AttributionsViewModel {
     }
 }
 
-/// Renders the third-party attributions window ([TASK-017b2]).
+/// Renders the third-party attributions window.
 ///
 /// Title, count line, the scrollable three-column catalog and the shared
 /// Close footer. The list is capped at
-/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`] (the legacy UI's 340px) and scrolls; the
-/// table is always allocated, empty or not.
+/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`] and scrolls; the table is always
+/// allocated, empty or not.
 ///
 /// Emitted messages:
 /// * a repository cell → [`AboutMessage::RepositoryOpened`]
@@ -221,7 +212,7 @@ pub fn attributions_view(view_model: &AttributionsViewModel) -> Element<'_, Mess
     .into()
 }
 
-/// The credits table: Crate / Authors / Repository ([TASK-017b2]).
+/// The credits table: Crate / Authors / Repository.
 ///
 /// Column widths follow the same rule `ui_iced::logs::log_table` learned
 /// the hard way: iced promotes the first all-`Shrink` column to `Fill`
@@ -229,7 +220,7 @@ pub fn attributions_view(view_model: &AttributionsViewModel) -> Element<'_, Mess
 /// the long repository URL — carries `Length::Fill` explicitly and the
 /// short name/author columns stay `Shrink`.
 ///
-/// The header row carries the legacy UI column captions
+/// The header row carries the column captions
 /// ([`strings::ABOUT_COL_CRATE`] / [`strings::ABOUT_COL_AUTHORS`] /
 /// [`strings::ABOUT_COL_REPO`]); with zero rows the header still renders,
 /// so the empty state needs no separate widget.
@@ -282,8 +273,7 @@ fn header_cell(label: &'static str) -> Element<'static, Message> {
         .into()
 }
 
-/// A clickable repository cell — the iced re-typing of the legacy UI's
-/// `ui.hyperlink_to` (`src/app/ui/about_dialog.rs:216`).
+/// A clickable repository cell.
 fn repository_cell(url: &'static str) -> Element<'static, Message> {
     mouse_area(
         container(
@@ -314,7 +304,7 @@ pub fn repository_press(url: &str) -> Message {
 }
 
 /// Palette colour for the crate-name column (`text_strong` — the row's
-/// primary label, the legacy UI's `ui.strong(attr.name)`).
+/// primary label).
 #[must_use]
 pub fn crate_name_color() -> iced::Color {
     Palette::fastmd_dark().text_strong

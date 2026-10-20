@@ -1,9 +1,9 @@
-//! Unit tests for the iced font bootstrap ([TASK-007]).
+//! Unit tests for the iced font bootstrap.
 //!
 //! Pure assertions only ([RUST-006]): byte-level inventory checks and the
 //! error-formatting helpers — no `Task` execution (needs a live runtime),
 //! no window/process spawn, besides the delegated system-font *discovery*
-//! which may read standard font directories as the legacy UI path already does.
+//! which may read standard font directories.
 
 use super::*;
 

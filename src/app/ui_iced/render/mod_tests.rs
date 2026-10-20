@@ -1,4 +1,4 @@
-//! Unit tests for the iced markdown render mapping ([TASK-015]).
+//! Unit tests for the iced markdown render mapping.
 //!
 //! Covers the pure `RenderEvent` → `RenderBlock` mapping — every event
 //! kind, the task-index counter, the blank-heading rule and the

@@ -1,5 +1,4 @@
-//! Sidecar unit tests for the top-level iced `Message` vocabulary
-//! ([TASK-021], `doc/planning/iced.md`).
+//! Sidecar unit tests for the top-level iced `Message` vocabulary.
 //!
 //! Pure data tests only ([RUST-006]): every path is a synthetic relative
 //! fixture literal that is never opened, and no user profile, live
@@ -118,8 +117,8 @@ fn test_every_channel_message_clones_to_an_equal_value() {
 
 #[test]
 fn test_agent_channel_thinking_and_scroll_variants() {
-    // TASK-018 added the thinking-disclosure and transcript-scroll-report
-    // variants to the Agent channel.
+    // The Agent channel carries the thinking-disclosure and
+    // transcript-scroll-report variants.
     let toggled = Message::Agent(AgentMessage::ThinkingToggled { expanded: true });
     assert!(matches!(
         toggled,
@@ -218,8 +217,8 @@ fn test_window_snapshot_carries_every_close_metric() {
 
 #[test]
 fn test_pilot_messages_fold_into_the_window_and_layout_channels() {
-    // The mapping documented in the module header: each pilot `Message`
-    // variant from `src/app/bin/fastmd_iced.rs:239-267` has a home here.
+    // The window and layout channels carry every runtime report the window
+    // layer and the pane grid produce.
     let id = iced::window::Id::unique();
     let (_panes, band) = middle_band_state();
 
@@ -243,8 +242,8 @@ fn test_pilot_messages_fold_into_the_window_and_layout_channels() {
         )),
     ];
 
-    // Distinctness: no two folded messages collapse onto each other, so the
-    // pilot's reduction branches stay separable after the fold.
+    // Distinctness: no two of these messages collapse onto each other, so
+    // the reducer's branches stay separable.
     for (i, a) in folded.iter().enumerate() {
         for (j, b) in folded.iter().enumerate() {
             if i == j {
@@ -357,7 +356,7 @@ fn test_debug_window_controls_stay_on_the_command_channel() {
 
 #[test]
 fn test_cursor_moved_is_a_copy_layout_report_that_stays_distinct() {
-    // [TASK-012]: the context-menu anchor. `MouseArea::on_right_press`
+    // The context-menu anchor. `MouseArea::on_right_press`
     // cannot carry a position, so the reducer has to remember this one.
     let moved = LayoutMessage::CursorMoved {
         point: iced::Point::new(12.0, 34.0),
@@ -387,7 +386,7 @@ fn test_cursor_moved_is_a_copy_layout_report_that_stays_distinct() {
 
 #[test]
 fn test_tree_deferred_intent_variants_are_all_distinct() {
-    // [TASK-012]: the three the legacy UI menu rows that read files or fan out
+    // The menu rows that read files or fan out
     // inside the click have no single `UserCommand`, so each needs its own
     // separable message.
     let deferred = [
@@ -448,8 +447,8 @@ fn test_deferred_tree_intent_stays_off_the_command_channel() {
 
 #[test]
 fn test_debug_messages_are_debuggable() {
-    // `Debug` is required for tracing every cross-subsystem interaction
-    // ([FMD-071]); spot-check that the rendering names the channels.
+    // `Debug` is required for tracing every cross-subsystem interaction;
+    // spot-check that the rendering names the channels.
     let rendered = format!("{:?}", one_message_per_channel());
     for channel in [
         "Window", "Layout", "Command", "Tree", "Tab", "Editor", "Agent", "Search", "Logs", "Theme",
@@ -464,7 +463,7 @@ fn test_debug_messages_are_debuggable() {
 
 #[test]
 fn test_dialog_channel_covers_every_small_dialog_interaction() {
-    // [TASK-017b1]: the name-entry / move / delete dialogs' view-local
+    // The name-entry / move / delete dialogs' view-local
     // transitions. Each is a distinct message so the reducer can route it.
     let name_changed = Message::Dialog(DialogMessage::NameChanged {
         text: "draft".into(),
@@ -508,7 +507,7 @@ fn test_dialog_channel_covers_every_small_dialog_interaction() {
 
 #[test]
 fn test_about_channel_covers_every_identity_window_interaction() {
-    // [TASK-017b2]: the About + attributions windows' view-local
+    // The About + attributions windows' view-local
     // transitions and deferred intents. Each stays separable so the
     // reducer can route it.
     let attributions = Message::About(AboutMessage::AttributionsRequested);
@@ -546,7 +545,7 @@ fn test_about_channel_covers_every_identity_window_interaction() {
 
 #[test]
 fn test_about_channel_is_not_the_small_dialog_channel() {
-    // [TASK-017b2] channel choice: About/attributions deliberately do NOT
+    // Channel choice: About/attributions deliberately do NOT
     // ride `Message::Dialog`. A close on one channel must never be
     // mistakable for a dismiss on the other.
     assert_ne!(
@@ -561,7 +560,7 @@ fn test_about_channel_is_not_the_small_dialog_channel() {
 
 #[test]
 fn test_batch_channel_covers_every_selection_transition() {
-    // [TASK-017b3]: the batch dialog's composed selection. Each variant
+    // The batch dialog's composed selection. Each variant
     // stays separable so the reducer can route it to one field.
     let all = [
         Message::Batch(BatchDialogMessage::DirectorySelected(Some(1))),
@@ -596,10 +595,9 @@ fn test_batch_channel_covers_every_selection_transition() {
 
 #[test]
 fn test_batch_open_start_and_cancel_stay_on_the_command_channel() {
-    // [TASK-017b3] channel choice: only the *selection* needed a new
-    // channel. Open / Start / Cancel already ride `Message::Command` as
-    // exactly what the legacy UI dialog published, so no `BatchDialogMessage`
-    // variant duplicates them.
+    // Channel choice: only the *selection* needed a new
+    // channel. Open / Start / Cancel already ride `Message::Command`, so no
+    // `BatchDialogMessage` variant duplicates them.
     let commands = [
         Message::Command(UserCommand::OpenBatchDialog),
         Message::Command(UserCommand::CancelBatch),
@@ -617,7 +615,7 @@ fn test_batch_open_start_and_cancel_stay_on_the_command_channel() {
 
 #[test]
 fn test_tools_channel_carries_only_the_dismiss() {
-    // [TASK-017b3]: every tool-group action is already a `UserCommand`,
+    // Every tool-group action is already a `UserCommand`,
     // so the Tools channel holds exactly one variant.
     assert_eq!(
         Message::Tools(ToolsDialogMessage::CloseRequested),
@@ -657,7 +655,7 @@ fn test_tool_group_actions_ride_the_command_channel_not_the_tools_channel() {
 
 #[test]
 fn test_agent_debug_channel_carries_only_what_the_command_channel_cannot() {
-    // [TASK-017b4]: search text, auto-scroll, the JSON row count, Clear
+    // Search text, auto-scroll, the JSON row count, Clear
     // and close are already `UserCommand`s, so the AgentDebug channel
     // holds only disclosure plus the two deferred/runtime payloads iced
     // will not let a view handle itself.
@@ -687,8 +685,8 @@ fn test_agent_debug_channel_carries_only_what_the_command_channel_cannot() {
 
 #[test]
 fn test_agent_debug_settings_stay_on_the_command_channel() {
-    // No AgentDebug-channel variant duplicates these: the legacy UI window
-    // published/mutated exactly these, and the iced card keeps doing so.
+    // No AgentDebug-channel variant duplicates these: the card emits
+    // exactly these as commands.
     let commands = [
         Message::Command(UserCommand::SetDebugSearchText("turn".into())),
         Message::Command(UserCommand::SetDebugAutoScroll(true)),
@@ -711,8 +709,8 @@ fn test_agent_debug_settings_stay_on_the_command_channel() {
 
 #[test]
 fn test_search_channel_results_ready_carries_query_and_snapshot() {
-    // TASK-019 added the async completion variant: the reducer runs the
-    // reused `ui::tree_search` engine in a Task and reports back here.
+    // The async completion variant: the reducer runs the
+    // `ui::tree_search` engine in a Task and reports back here.
     let results = Arc::new(vec![SearchResultEntry {
         path: sample_path(),
         file_name: "notes.md".into(),
@@ -739,8 +737,8 @@ fn test_search_channel_results_ready_carries_query_and_snapshot() {
 
 #[test]
 fn test_boot_channel_variants_are_distinct_and_clone_preserving() {
-    // [TASK-022]: the boot-infrastructure channel carries the font-load
-    // report (the DEC-009 config publish is synchronous inside
+    // The boot-infrastructure channel carries the font-load
+    // report (the config publish is synchronous inside
     // `build_state`, so no boot task reports it); variants must stay
     // separable and clone exactly.
     let font_failed = Message::Boot(BootMessage::FontLoadFinished(Some("boom".to_string())));
@@ -770,7 +768,7 @@ fn test_search_results_ready_is_distinct_from_submitted() {
 fn test_inbound_channel_is_not_a_widget_channel() {
     // Every inbound variant is distinct from every panel channel that could
     // superficially look similar — background notifications never ride the
-    // Agent/Logs/Tree channels ([TASK-019]).
+    // Agent/Logs/Tree channels.
     let inbound_logs = Message::Inbound(InboundMessage::EventsDropped {
         source: BusSource::Background,
         count: 1,

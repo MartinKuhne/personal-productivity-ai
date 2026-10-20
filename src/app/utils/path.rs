@@ -147,8 +147,7 @@ fn resolve_in_dirs(
 /// Append `.md` to a user-entered document name when it has no
 /// extension, so the created file is always a markdown document.
 ///
-/// Relocated from the deleted `ui/modals.rs` by [TASK-029b]; the
-/// create-document command path is its only consumer.
+/// A name that already carries an extension is returned unchanged.
 #[must_use]
 pub fn unique_document_name(entered: &str) -> String {
     if Path::new(entered).extension().is_some() {
@@ -163,8 +162,6 @@ pub fn unique_document_name(entered: &str) -> String {
 /// If a file with the preferred name already exists, a
 /// `<stem> <date-time><ext>` name is generated instead so the created
 /// file is always unique. Returns the created file's path.
-///
-/// Relocated from the deleted `ui/modals.rs` by [TASK-029b].
 pub fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> {
     let file_name = unique_document_name(entered);
     let mut new_path = parent.join(&file_name);
@@ -177,8 +174,6 @@ pub fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathB
 
 /// Build `<stem> <timestamp><ext>` for a file name, used when the
 /// preferred document name already exists.
-///
-/// Relocated from the deleted `ui/modals.rs` by [TASK-029b].
 #[must_use]
 pub fn date_suffixed_name(file_name: &str) -> String {
     let path = Path::new(file_name);

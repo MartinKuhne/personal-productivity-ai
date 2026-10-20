@@ -1,14 +1,11 @@
 //! Fair Table Width Algorithm (FTWA) - pure column-width solver.
 //!
 //! Pure layout math with no UI-framework dependency and no Markdown types; consumes
-//! `&[f32]` measurements. Lives in `markdown::` per `src/desktop/AGENTS.md §5`
-//! (pure layout math belongs in `markdown/`, not `ui/`).
+//! `&[f32]` measurements. Pure layout math belongs in `markdown/`, not `ui/`.
 //!
 //! The framework-bridging adapter - the text measurer, the per-UI caches and the
 //! layout solver entry point - lives in `crate::ui_iced::table_width`
-//! ([`crate::ui_iced::table_width::solve_table_layout`]). [TASK-029b] removed the
-//! retired `crate::ui::table_width` copy that used to sit between this pure solver
-//! and the old renderer.
+//! ([`crate::ui_iced::table_width::solve_table_layout`]).
 //!
 //! Unit tests live in the sibling `algorithm_tests.rs` and `internal_tests.rs` sidecars.
 
@@ -31,9 +28,8 @@ pub struct Breakpoint {
 
 /// Table-width algorithm selector. Covers both the original FTWA
 /// "deficit distribution" strategies (which build a minimum-cardinality
-/// wrap set and shrink it) and three additional algorithms from the
-/// survey in `doc/planning/table-column-width-algorithm.md` that operate
-/// on all columns directly (no wrap set).
+/// wrap set and shrink it) and three additional survey algorithms that
+/// operate on all columns directly (no wrap set).
 ///
 /// All strategies preserve the never-break-token invariant
 /// (`w_j >= min_content[j]`) and the §3.6 fallback when the container is
@@ -216,9 +212,8 @@ pub struct ColumnWidths {
 ///
 /// # Examples
 ///
-/// (This function is not part of the public API; the `ui::table_width`
-/// module is intentionally private. See the unit tests in this file
-/// for usage examples covering all three regimes.)
+/// (See the `algorithm_tests.rs` and `internal_tests.rs` sidecars for
+/// usage examples covering all three regimes.)
 pub fn ftwa(
     max_content: &[f32],
     min_content: &[f32],
@@ -255,7 +250,7 @@ pub fn ftwa(
     // NaN propagates silently through every arithmetic comparison (they
     // all return false against NaN), causing the function to fall through
     // to the deficit branch with NaN sum_max / deficit, eventually
-    // returning NaN-containing widths that crash the legacy UI's layout downstream.
+    // returning NaN-containing widths that corrupt layout downstream.
     assert!(
         available.is_finite(),
         "ftwa: available must be finite, got {available}"
@@ -294,9 +289,10 @@ pub fn ftwa(
     // max) silently triggers the §3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
     //
-    // Sub-pixel drift tolerance. the legacy UI's `layout_no_wrap` can return
-    // `layout_no_wrap("A" + "B")` slightly different from
-    // `layout_no_wrap("A") + layout_no_wrap("B")` (kerning and
+    // Sub-pixel drift tolerance. Measuring a merged string without
+    // wrapping can return a width slightly different from the sum of
+    // the parts measured separately: `measure("A" + "B")` vs
+    // `measure("A") + measure("B")` (kerning and
     // sub-pixel rounding in the font shaper). The upstream
     // `measure_cell` builds `min_content` from the merged string when
     // no whitespace separates consecutive `InlineElem`s, while

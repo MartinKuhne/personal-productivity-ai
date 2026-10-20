@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 /// Pure UI view state for the agent panel, owned by `AppOrchestrator`.
 ///
-/// Fields previously lived on `AgentSession` / `AgentState` (the
-/// agent-domain structs). Moving them here enforces SC-007: the agent
-/// layer has no UI widget state (migration step 6, FR-013).
+/// Keeping these fields here — rather than on the agent-domain structs
+/// (`AgentSession` / `AgentState`) — keeps the agent layer free of UI
+/// widget state.
 pub struct AgentPanelState {
     /// Whether the agent results panel is visible.
     pub show_results: bool,

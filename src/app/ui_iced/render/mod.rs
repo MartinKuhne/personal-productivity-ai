@@ -1,16 +1,15 @@
-//! Iced markdown render path ([TASK-015], `doc/planning/iced.md`).
+//! Iced markdown render path.
 //!
-//! The iced counterpart of `src/app/ui/render/`: it maps the **existing,
-//! untouched** document model — `crate::markdown`'s
-//! [`RenderEvent`] / [`InlineElem`] / [`crate::markdown::model::TextStyle`] — onto iced widgets.
-//! The parser is not modified; nothing here reads a file, touches the bus
-//! or mutates application state. Every colour comes from a
-//! [`Palette`] token directly ([GUD-003]).
+//! Maps the **existing, untouched** document model — `crate::markdown`'s
+//! [`RenderEvent`] / [`InlineElem`] / [`crate::markdown::model::TextStyle`]
+//! — onto iced widgets. The parser is not modified; nothing here reads a
+//! file, touches the bus or mutates application state. Every colour comes
+//! from a [`Palette`] token directly.
 //!
 //! # Pure descriptor layer
 //!
 //! Rendering is split so the mapping is testable without an iced runtime,
-//! mirroring the top panel's `MenuEntry` pattern ([TASK-011]):
+//! following the top panel's `MenuEntry` pattern:
 //!
 //! ```text
 //! RenderEvent ──blocks_from_events──▶ RenderBlock { kind: BlockKind, scroll_to_me }
@@ -36,24 +35,19 @@
 //! * [`table`] — the FTWA-solved grid on `iced::widget::table`
 //! * [`yaml`] — front-matter key/value rows
 //!
-//! # What is NOT ported
+//! # Not implemented
 //!
-//! * **Viewport culling.** The legacy UI renderer skipped off-screen events and
-//!   inserted estimated space (`src/app/ui/render/mod.rs:174-227`). iced
-//!   `scrollable` virtualises nothing by itself, but culling needs live
-//!   scroll offsets the pure view does not have; deferred to the runtime
-//!   wiring in [TASK-022]/[TASK-023].
+//! * **Viewport culling.** Off-screen events are rendered in full. iced
+//!   `scrollable` virtualises nothing by itself, and culling needs live
+//!   scroll offsets that the pure view does not have.
 //! * **Scroll-to-target execution.** The pure layer still *marks* the
 //!   first block matching a search term ([`RenderBlock::scroll_to_me`]),
 //!   but performing the scroll needs a `Task` against a `scrollable` `Id`,
 //!   which is reducer work.
 //! * **Column alignment.** GFM's `|:---|:--:|` row never reaches the
 //!   document model — see the [`table`] module docs.
-//! * **Per-link hover tooltips.** The legacy UI renderer attached
-//!   `"Note: <target>"` hover text to wikilinks
-//!   (`src/app/ui/render/style.rs:140-145`); iced's `Rich` text has one
-//!   widget for the whole paragraph, so a per-span tooltip is not
-//!   expressible.
+//! * **Per-link hover tooltips.** iced's `Rich` text uses one widget for the
+//!   whole paragraph, so a per-span tooltip is not expressible.
 //!
 //! Unit tests live in the sibling `mod_tests.rs` sidecar.
 
@@ -86,26 +80,15 @@ use table::TableModel;
 pub const BLOCK_SPACING: f32 = 6.0;
 
 /// Vertical gap between the front-matter block and the document body.
-///
-/// Ported from the `ui.add_space(8.0)` that closed `render_yaml_table`
-/// (`src/app/ui/render/yaml_table.rs:157`).
 pub const DOCUMENT_SPACING: f32 = 8.0;
 
 /// One indentation level of a nested list item, in logical pixels.
-///
-/// Ported from `item.indent as f32 * 20.0`
-/// (`src/app/ui/render/inline.rs:122-124`).
 pub const INDENT_UNIT: f32 = 20.0;
 
 /// Space around a task-list checkbox.
-///
-/// Ported from the `ui.add_space(4.0)` calls bracketing the legacy UI checkbox
-/// (`src/app/ui/render/inline.rs:134`, `:143`).
 pub const TASK_CHECKBOX_SPACING: f32 = 4.0;
 
-/// Width of the rendered horizontal rule.
-///
-/// The legacy UI `ui.separator()` line; 1 px matches the top bar's rule.
+/// Width of the rendered horizontal rule; 1 px matches the top bar's rule.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// Point size of the list bullet / ordinal marker.
@@ -177,17 +160,17 @@ pub enum BlockKind {
 pub struct RenderBlock {
     /// What to render.
     pub kind: BlockKind,
-    /// First block matching the active search term ([TASK-015] port of
-    /// the legacy UI's `scroll_to_search` first-match-then-clear rule). The pure
-    /// layer only marks it; executing the scroll is reducer work.
+    /// First block matching the active search term, following the
+    /// first-match-then-clear rule. The pure layer only marks it; executing
+    /// the scroll is reducer work.
     pub scroll_to_me: bool,
 }
 
 /// Everything the mapping needs that is not in the document itself.
 ///
 /// Built once per render pass. The default [`IcedTextMeasurer`] is the
-/// deterministic heuristic; [TASK-022]/[TASK-023] can inject a
-/// renderer-backed one without touching the mapping.
+/// deterministic heuristic; a renderer-backed one can be injected without
+/// touching the mapping.
 pub struct RenderContext<'a> {
     /// Resolved colour tokens for this pass.
     pub palette: Palette,
@@ -245,9 +228,7 @@ impl<'a> RenderContext<'a> {
 
 /// Whether one inline element's text carries `term_lower`.
 ///
-/// Ported from `inline_elems_contain`
-/// (`src/app/ui/render/mod.rs:75-82`): images are excluded because their
-/// placeholder is not searchable text in the legacy UI build either.
+/// Images are excluded because their placeholder is not searchable text.
 #[must_use]
 pub fn inline_elems_contain(elems: &[InlineElem], term_lower: &str) -> bool {
     elems.iter().any(|elem| match elem {
@@ -259,9 +240,6 @@ pub fn inline_elems_contain(elems: &[InlineElem], term_lower: &str) -> bool {
 }
 
 /// Whether an event's rendered content contains `term_lower`.
-///
-/// Ported from the per-event search tests in
-/// `src/app/ui/render/mod.rs:236-291`.
 #[must_use]
 pub fn event_contains(event: &RenderEvent, term_lower: &str) -> bool {
     match event {
@@ -278,11 +256,9 @@ pub fn event_contains(event: &RenderEvent, term_lower: &str) -> bool {
 
 /// Maps the parser's event stream onto render blocks.
 ///
-/// `task_index` counts task items in document order exactly as the legacy UI
-/// walker did, so the index a toggle carries matches the index
-/// `apply_task_toggle` expects. Blank headings are dropped, matching
-/// `render_markdown_with_search`'s `continue`
-/// (`src/app/ui/render/mod.rs:271-273`).
+/// `task_index` counts task items in document order, so the index a toggle
+/// carries matches the index `apply_task_toggle` expects. Blank headings are
+/// dropped and produce no block.
 #[must_use]
 pub fn blocks_from_events(
     events: &[RenderEvent],
@@ -433,7 +409,7 @@ pub fn render_block(block: &RenderBlock, ctx: &RenderContext<'_>) -> Element<'st
     }
 }
 
-/// Renders parsed markdown events into one column ([TASK-015] entry point).
+/// Renders parsed markdown events into one column.
 ///
 /// `available_width` is the pixel width the viewer area has been given;
 /// it drives the table width solve. The returned element borrows nothing,

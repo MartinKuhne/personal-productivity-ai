@@ -1,11 +1,10 @@
 //! UI subsystem — app state, agent view models, text/tab/selection/dialog
 //! managers, theme tokens, and shared helpers.
 //!
-//! The legacy UI rendering layer (panels, renderers, widgets, modals, the
-//! the legacy `App` impl and the legacy snapshot harness harness) was removed by [TASK-029b]
-//! as part of the framework-free migration ([CON-007]); the live UI now lives
-//! in [`crate::ui_iced`]. What remains here is the framework-free domain
-//! the iced UI builds on.
+//! This tree is framework-free: no rendering code lives here. The live,
+//! rendering UI is [`crate::ui_iced`], which builds on the view-models,
+//! strings, palette tokens and the tab / selection / tree / persisted state
+//! re-exported from here.
 
 pub mod agent;
 pub mod app;

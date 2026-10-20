@@ -1,9 +1,8 @@
-//! Unit tests for `layout.rs` ([TASK-010]) — pane/split id mapping and the
+//! Unit tests for `layout.rs` — pane/split id mapping and the
 //! pure `PanelLayout` resize reductions ([RUST-003]).
 //!
 //! Widget rendering itself is not unit-testable here; only state
-//! reductions, id discovery, and gate wiring are asserted ([TASK-010]
-//! testing rule).
+//! reductions, id discovery, and gate wiring are asserted.
 
 use super::*;
 use crate::ui::panel_layout::PanelLayout;
@@ -12,7 +11,7 @@ use crate::ui::panel_layout::PanelLayout;
 const VIEWPORT: f32 = 1000.0;
 
 // ---------------------------------------------------------------------------
-// Ids & shape contract ([TASK-010]: pane id → region mapping)
+// Ids & shape contract (pane id → region mapping)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -110,14 +109,13 @@ fn test_middle_band_configuration_is_two_level_vertical() {
 }
 
 // ---------------------------------------------------------------------------
-// Gate reuse ([TASK-010]: `should_show_panel`)
+// Gate reuse (`should_show_panel`)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_should_show_panel_gates_via_layout_module() {
-    // Re-exported from the iced ToC module (`ui_iced/panels/right.rs`) for
-    // the framework-free migration ([TASK-029]); assert the gate contract at the
-    // [TASK-010] import path.
+    // Re-exported from the iced ToC module (`ui_iced/panels/right.rs`);
+    // assert the gate contract at the `layout` import path.
     assert!(should_show_panel(true, true));
     assert!(!should_show_panel(true, false));
     assert!(!should_show_panel(false, true));
@@ -125,7 +123,7 @@ fn test_should_show_panel_gates_via_layout_module() {
 }
 
 // ---------------------------------------------------------------------------
-// Resize → PanelLayout reductions ([TASK-010]; UI-016 clamping)
+// Resize → PanelLayout reductions (UI-016 clamping)
 // ---------------------------------------------------------------------------
 
 fn resize_event(split: Split, ratio: f32) -> pane_grid::ResizeEvent {
@@ -311,7 +309,7 @@ fn test_clamped_width_min_wins_over_degenerate_cap() {
     // Desired above the cap.
     assert_eq!(clamped_width(500.0, 180.0, 200.0), 200.0);
     // Degenerate cap below the minimum: the minimum wins so the
-    // side panel stays draggable ([TASK-010] clamping semantics).
+    // side panel stays draggable.
     assert_eq!(clamped_width(50.0, 180.0, 20.0), 180.0);
     assert_eq!(clamped_width(500.0, 180.0, 20.0), 180.0);
 }

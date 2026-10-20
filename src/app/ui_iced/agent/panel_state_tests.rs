@@ -1,5 +1,4 @@
-//! Sidecar tests for [`crate::ui_iced::agent::panel_state`] ([TASK-018],
-//! UI-048).
+//! Sidecar tests for [`crate::ui_iced::agent::panel_state`] (UI-048).
 //!
 //! Covers the turn→render-model mapping (user vs assistant, Markdown
 //! passthrough, the `**User:** ` marker convention), the UI-048
@@ -154,7 +153,7 @@ fn turns_drop_blank_assistant_spans() {
 #[test]
 fn turns_keep_truncation_marker_in_assistant_span() {
     // The bus-lag truncation marker is ordinary text in the buffer and must
-    // ride along inside an assistant span (FMD-067 loss notice).
+    // ride along inside an assistant span (the bus-lag loss notice).
     let marker = crate::orchestrator::LAG_TRUNCATION_MARKER;
     let turns = turns_from_content(&format!("before\n\n{marker}\n\nafter"));
     assert_eq!(turns.len(), 1);
@@ -358,12 +357,13 @@ fn vm_with_thinking_expanded_overrides_field() {
 }
 
 // ---------------------------------------------------------------------------
-// from_app — visibility gate ([FMD-060])
+// from_app — visibility gate
 // ---------------------------------------------------------------------------
 
-/// Regression: the whole transcript was re-parsed through `markdown::parse` and
-/// the thinking buffer cloned on every message, even while the agent session was
-/// off screen. During a workspace scan that is pure UI-thread waste.
+/// Regression guard: while the agent session is off screen the transcript
+/// must not be re-parsed through `markdown::parse` and the thinking buffer
+/// must not be cloned — doing either during a workspace scan is pure
+/// UI-thread waste.
 #[test]
 fn from_app_skips_the_transcript_parse_while_not_visible() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());

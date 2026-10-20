@@ -1,33 +1,30 @@
-//! Background-process log viewer — the iced port of
-//! `src/app/ui/background_logs.rs` ([TASK-016], UI-047).
+//! Background-process log viewer (UI-047).
 //!
-//! # Same ring buffer, read-only
+//! # One ring buffer, read-only
 //!
-//! The rows rendered here come from the one source the legacy UI build read:
-//! [`BackgroundLogs`] (`src/app/background/logs.rs:262-337`) — a
+//! The rows rendered here come from a single source: [`BackgroundLogs`]
+//! (`src/app/background/logs.rs:262-337`) — a
 //! `VecDeque<BackgroundLogEntry>` bounded by `MAX_LOG_ENTRIES` (10 000,
 //! `logs.rs:14`) shared as `SharedBackgroundLogs = Arc<Mutex<BackgroundLogs>>`
 //! (`logs.rs:339`). REQ-460..465 own that buffer and this module leaves them
 //! untouched: [`BackgroundLogsViewModel::from_logs`] takes `&BackgroundLogs`
 //! and calls only [`BackgroundLogs::get_logs`] (`logs.rs:301`). It never
 //! calls `push_log` / `clear_logs`, never locks, never reads a file and never
-//! touches the bus — the [TASK-022]/[TASK-023] reducer snapshots the buffer
-//! and hands the snapshot down ([FMD-065], [FMD-069]).
+//! touches the bus — the reducer snapshots the buffer and hands the snapshot
+//! down.
 //!
 //! # Reused, not reimplemented ([RUST-051])
 //!
-//! The filter predicate is the legacy UI build's own [`is_log_visible`] and
-//! [`filter_logs`] (`src/app/ui/background_logs.rs:15-46`). Neither takes an
-//! the legacy UI type, so they are re-exported here rather than copied: both UIs
-//! filter through literally the same code, which is what keeps UI-047's
-//! filtering behaviour identical across the migration.
+//! The filter predicate is [`is_log_visible`] / [`filter_logs`]. Neither takes
+//! a UI-framework type, so the pair lives here and every caller filters
+//! through literally the same code, which keeps UI-047's filtering behaviour
+//! identical everywhere it is used.
 //!
 //! # Auto-scroll is an intent, not an action
 //!
-//! the legacy UI got stick-to-bottom for free from `ScrollArea::stick_to_bottom`
-//! (`legacy-0.36.1/src/containers/scroll_area.rs:655-658`). iced 0.14 has no
-//! such flag — programmatic scrolling is a runtime *operation* dispatched
-//! from `update` (`iced::widget::operation::scrollable::scroll_to`,
+//! iced 0.14 has no built-in stick-to-bottom flag — programmatic scrolling is
+//! a runtime *operation* dispatched from `update`
+//! (`iced::widget::operation::scrollable::scroll_to`,
 //! `iced_runtime-0.14.0/src/widget/operation.rs:31-39`). The pure layer
 //! therefore computes **whether** to follow and the reducer performs it:
 //!
@@ -37,30 +34,27 @@
 //!              should_follow(auto_scroll, Some(snapshot))          (pure decision)
 //!                                   │
 //!   scroll_to(LOG_SCROLLABLE_ID, AbsoluteOffset { y: snapshot.max_offset() })
-//!                                                    (TASK-022/023 reducer Task)
+//!                                                         (reducer Task)
 //! ```
 //!
-//! The decision reproduces the legacy UI's rule exactly: follow only while the
-//! preference is on **and** the viewport was already at the end — or the
-//! content is shorter than the viewport, the legacy UI's `available_offset < 0`
-//! "stuck" case (`scroll_area.rs:1282-1284`, stuck recompute at
-//! `:1543-1550`). A user who has scrolled up is never yanked back down.
-//! With no report yet ([`should_follow`] gets `None`) the intent is *false*:
-//! the view must not invent a scroll position it has never been told about.
+//! The rule: follow only while the preference is on **and** the viewport was
+//! already at the end — or the content is shorter than the viewport, the
+//! negative-offset "stuck" case. A user who has scrolled up is never yanked
+//! back down. With no report yet ([`should_follow`] gets `None`) the intent is
+//! *false*: the view must not invent a scroll position it has never been told
+//! about.
 //!
 //! # Row colour tokens — and why there is no severity mapping
 //!
-//! The task brief asked for "level → colour". There is no level to map:
-//! [`BackgroundLogEntry`] carries `timestamp`, `category` and `message` only
-//! (`src/app/bus/events/messages.rs:63-68`) — no severity field exists in the
-//! ring buffer, and the legacy UI viewer painted **every** row with the same two
-//! tokens (`palette.log_timestamp` on the time column, `palette.log_category`
-//! on the `[Category]` tag, default body text for the message;
-//! `src/app/ui/background_logs.rs:138-151`). [`category_color`] is still an
-//! exhaustive `match` over all seven [`LogCategory`] variants so the parity
-//! choice is explicit and a future variant is a compile error rather than a
-//! silent fall-through ([RUST-041] drift note). No numeric colour is
-//! introduced anywhere ([GUD-003]).
+//! There is no level to map: [`BackgroundLogEntry`] carries `timestamp`,
+//! `category` and `message` only (`src/app/bus/events/messages.rs:63-68`) —
+//! no severity field exists in the ring buffer. Every row is painted with the
+//! same two tokens (`palette.log_timestamp` on the time column,
+//! `palette.log_category` on the `[Category]` tag, default body text for the
+//! message). [`category_color`] is still an exhaustive `match` over all seven
+//! [`LogCategory`] variants so the choice is explicit and a future variant is
+//! a compile error rather than a silent fall-through ([RUST-041] drift note).
+//! No numeric colour is introduced anywhere.
 //!
 //! # Verified iced 0.14 APIs (local registry sources)
 //!
@@ -93,7 +87,7 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LogsMessage, Message};
 
-/// Log filter predicate — owned by this module since [TASK-029b].
+/// Log filter predicate.
 ///
 /// Determines if a log entry matches the given category and search text.
 /// Inputs: `log` (the log entry), `category` (optional filter category), `search_lower` (lowercase search string).
@@ -118,8 +112,7 @@ pub fn is_log_visible(
     true
 }
 
-/// Filters an iterator of log entries based on category and search text —
-/// owned by this module since [TASK-029b].
+/// Filters an iterator of log entries based on category and search text.
 /// Inputs: `logs` (iterator of log entries), `category` (optional filter), `search_text` (raw search string).
 /// Outputs: `Vec<BackgroundLogEntry>` - a collection of cloned log entries that match the criteria.
 /// Purity: Pure.
@@ -136,13 +129,10 @@ pub fn filter_logs<'a>(
         .collect()
 }
 
-/// `chrono` format of the timestamp column, carried over verbatim from the
-/// the legacy UI viewer (`log.timestamp.format("%H:%M:%S%.3f")`,
-/// `src/app/ui/background_logs.rs:142`).
+/// `chrono` format of the timestamp column: `HH:MM:SS.mmm`.
 pub const TIMESTAMP_FORMAT: &str = "%H:%M:%S%.3f";
 
-/// Logical point size of every log row (the legacy UI rendered at the `Body` text
-/// style; iced needs the size stated explicitly).
+/// Logical point size of every log row.
 pub const ROW_TEXT_SIZE: f32 = 14.0;
 
 /// Horizontal padding inside a log-table cell.
@@ -157,23 +147,21 @@ pub const PANEL_PADDING: f32 = 6.0;
 /// Spacing between the controls in the filter row.
 pub const FILTER_SPACING: f32 = 6.0;
 
-/// Width of the horizontal rule under the filter row (the legacy UI's
-/// `ui.separator()`).
+/// Width of the horizontal rule under the filter row.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// Slack, in logical points, allowed when deciding whether the viewport is
 /// "at the bottom".
 ///
-/// the legacy UI compared the offset to the available offset with exact `f32`
-/// equality (`scroll_area.rs:1545`). iced reports the offset after its own
-/// clamping and rounding, so an exact comparison would drop the stick on a
-/// sub-pixel difference; 1 pt is far below what a user can perceive and far
-/// above the accumulation error of a frame's worth of rows.
+/// iced reports the offset after its own clamping and rounding, so an exact
+/// `f32` comparison would drop the stick on a sub-pixel difference; 1 pt is
+/// far below what a user can perceive and far above the accumulation error
+/// of a frame's worth of rows.
 pub const BOTTOM_STICK_TOLERANCE: f32 = 1.0;
 
 /// Stable iced widget id of the log list's `scrollable`.
 ///
-/// The [TASK-022]/[TASK-023] reducer needs a stable id to aim a
+/// The reducer needs a stable id to aim a
 /// `operation::scrollable::scroll_to` at
 /// (`iced_runtime-0.14.0/src/widget/operation.rs:31-39`); a widget without
 /// an explicit id cannot be scrolled programmatically at all. Named once
@@ -191,11 +179,9 @@ pub fn timestamp_text(timestamp: &chrono::DateTime<chrono::Local>) -> String {
 /// The bracketed category tag of a log row, e.g. `[Indexer]`.
 ///
 /// The label comes from [`LogCategory`]'s own `Display` impl
-/// (`src/app/bus/events/messages.rs:41-54`) — the same one the legacy UI row
-/// formatted (`format!("[{}]", log.category)`,
-/// `src/app/ui/background_logs.rs:147`) — so no label literal is added to
-/// this layer ([GUD-002]) and every category the buffer can produce is
-/// covered by construction.
+/// (`src/app/bus/events/messages.rs:41-54`), so no label literal is added
+/// to this layer and every category the buffer can produce is covered by
+/// construction.
 ///
 /// Purity: pure function of `category`.
 #[must_use]
@@ -205,12 +191,11 @@ pub fn category_tag(category: LogCategory) -> String {
 
 /// Colour token of the category tag.
 ///
-/// Parity: the legacy UI viewer used the single `log_category` token for **every**
-/// category (`src/app/ui/background_logs.rs:146-149`); there is no
-/// per-severity colour in the shipping build and none is invented here. The
+/// The single `log_category` token is used for **every** category; there is
+/// no per-severity colour in the data and none is invented here. The
 /// `match` is exhaustive over all seven [`LogCategory`] variants anyway, so
 /// differentiating a category later is a deliberate, compiler-checked edit
-/// rather than a fall-through ([GUD-003]).
+/// rather than a fall-through.
 ///
 /// Purity: pure function of `category`.
 #[must_use]
@@ -227,8 +212,7 @@ pub fn category_color(category: LogCategory) -> iced::Color {
     }
 }
 
-/// Colour token of the timestamp column (`palette.log_timestamp`, the legacy UI
-/// row's own token).
+/// Colour token of the timestamp column (`palette.log_timestamp`).
 ///
 /// Purity: pure.
 #[must_use]
@@ -236,8 +220,8 @@ pub fn timestamp_color() -> iced::Color {
     Palette::fastmd_dark().log_timestamp
 }
 
-/// Colour token of the message column (the default body `text` token — the legacy UI
-/// applied no colour to the message label at all).
+/// Colour token of the message column (the default body `text` token; no
+/// colour is applied to the message label beyond it).
 ///
 /// Purity: pure.
 #[must_use]
@@ -289,18 +273,15 @@ impl std::fmt::Display for CategoryFilterOption {
     }
 }
 
-/// The category filter options, in the legacy UI build's order
-/// (`src/app/ui/background_logs.rs:84-106`): "All" first, then the five
-/// categories the shipping combo offered, each labelled from
-/// [`crate::ui::strings`] ([GUD-002]).
+/// The category filter options, in display order: "All" first, then the
+/// five categories the combo offers, each labelled from
+/// [`crate::ui::strings`].
 ///
-/// **Parity note:** `LogCategory::Print` and `LogCategory::Batch` are *not*
-/// offered here because the legacy UI combo never offered them, even though the
-/// ring buffer can produce both (`logs.rs:51-54` routes `print`/`batch`
-/// targets into them). Their rows still render and are reachable through the
-/// "All" view and the text search. Widening the list is a product decision
-/// (it needs two new `strings` constants), not a port decision — flagged in
-/// the TASK-016 verification log.
+/// `LogCategory::Print` and `LogCategory::Batch` are *not* offered here,
+/// even though the ring buffer can produce both (`logs.rs:51-54` routes
+/// `print`/`batch` targets into them). Their rows still render and are
+/// reachable through the "All" view and the text search. Widening the list
+/// is a product decision — it needs two new `strings` constants.
 #[must_use]
 pub fn category_filter_options() -> Vec<CategoryFilterOption> {
     vec![
@@ -359,9 +340,8 @@ impl ScrollSnapshot {
 
     /// Whether the viewport sits at the end of the content.
     ///
-    /// True when the content fits ([`Self::fits`]) — the legacy UI treated
-    /// `available_offset < 0` as stuck (`scroll_area.rs:1543-1549`) — or
-    /// when the offset is within [`BOTTOM_STICK_TOLERANCE`] of
+    /// True when the content fits ([`Self::fits`]) — nothing left to scroll —
+    /// or when the offset is within [`BOTTOM_STICK_TOLERANCE`] of
     /// [`Self::max_offset`].
     ///
     /// Purity: pure.
@@ -400,11 +380,8 @@ pub fn scroll_snapshot(viewport: &scrollable::Viewport) -> ScrollSnapshot {
 /// end this frame?
 ///
 /// `true` only when the preference is on **and** the viewport was already at
-/// the end. This is the legacy UI's `stick_to_end` rule
-/// (`if stick_to_end[d] && state.scroll_stuck_to_end[d] { offset = content - viewport }`,
-/// `legacy-0.36.1/src/containers/scroll_area.rs:1282-1284`): a user who has
-/// scrolled up to read history is never yanked back down, and turning the
-/// preference off stops the follow immediately.
+/// the end: a user who has scrolled up to read history is never yanked back
+/// down, and turning the preference off stops the follow immediately.
 ///
 /// `None` (no viewport report yet) is deliberately **false** — with no
 /// geometry there is nothing to follow, and scrolling blind would fight the
@@ -442,7 +419,7 @@ pub struct BackgroundLogsViewModel {
     /// first, newest last — the order the tail of the list is read in).
     pub entries: Vec<BackgroundLogEntry>,
     /// Total entries in the buffer before filtering, so the UI can show how
-    /// much the filter hid ([FMD-067]'s "report the loss, do not hide it").
+    /// much the filter hid rather than hiding the loss.
     pub total_entries: usize,
     /// The free-text search filter.
     pub search_text: String,
@@ -463,8 +440,7 @@ impl BackgroundLogsViewModel {
     /// Snapshots a ring-buffer borrow.
     ///
     /// Read-only: calls [`BackgroundLogs::get_logs`] and reads the public
-    /// filter fields, exactly as the legacy UI viewer did
-    /// (`src/app/ui/background_logs.rs:127`).
+    /// filter fields.
     ///
     /// Purity: read-only over `logs`.
     #[must_use]
@@ -493,7 +469,7 @@ impl BackgroundLogsViewModel {
     /// [`MAX_LOG_ENTRIES`](crate::background::logs::MAX_LOG_ENTRIES) entries and
     /// a workspace scan fills it, so cloning it for a window nobody is looking at
     /// is both wasted work and needless contention with the worker thread that
-    /// pushes into the same mutex ([FMD-060], [FMD-064]).
+    /// pushes into the same mutex.
     ///
     /// Purity: read-only over `logs`.
     #[must_use]
@@ -512,14 +488,11 @@ impl BackgroundLogsViewModel {
 
     /// Snapshots the buffer off `app`.
     ///
-    /// Unlike the legacy UI build — which called `.lock().unwrap()` and would
-    /// panic the whole UI on a poisoned lock
-    /// (`src/app/ui/background_logs.rs:49-64`) — a poisoned buffer degrades
-    /// to [`Self::unavailable`] so one wedged worker cannot take the UI down
-    /// ([FMD-064]).
+    /// A poisoned lock degrades to [`Self::unavailable`] rather than
+    /// panicking, so one wedged worker cannot take the UI down.
     ///
     /// While the viewer is closed the entry clone is skipped — see
-    /// [`Self::closed`] ([FMD-060]).
+    /// [`Self::closed`].
     #[must_use]
     pub fn from_app(app: &FastMdApp) -> Self {
         match app.orchestrator.background_manager.lock() {
@@ -588,11 +561,9 @@ impl BackgroundLogsViewModel {
     }
 }
 
-/// Renders the background-process log viewer from a snapshot
-/// ([TASK-016], UI-047).
+/// Renders the background-process log viewer from a snapshot (UI-047).
 ///
-/// Layout, mirroring the legacy UI window body
-/// (`src/app/ui/background_logs.rs:76-154`):
+/// Layout:
 ///
 /// ```text
 /// Search: [__________] Category: [All ▾]  [x] Auto-scroll   [Clear]
@@ -678,18 +649,16 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
 
 /// The log table inside its scrollable ([`LOG_SCROLLABLE_ID`]).
 ///
-/// Three columns matching the legacy UI row layout — timestamp, `[Category]`,
-/// message — built with `iced::widget::table` as the migration mapping
-/// requires (`doc/planning/iced.md` A5: `Table`/`TableBuilder` →
-/// `iced::widget::table`).
+/// Three columns — timestamp, `[Category]`, message — built with
+/// `iced::widget::table`.
 ///
 /// The message column is `Length::Fill` explicitly: iced forces the *first*
 /// all-`Shrink` column to `Fill` instead
 /// (`iced_widget-0.14.2/src/table.rs:129-133`), which would pin the
 /// timestamp wide and starve the message.
 ///
-/// iced's `table` requires a header element per column; the legacy UI build had
-/// none, so the headers are empty text — allocated, not removed (AGENTS §6).
+/// iced's `table` requires a header element per column, so the headers are
+/// empty text — allocated, not removed (AGENTS §6).
 ///
 /// Purity: pure over `entries`; the only effect is the `ScrollReported`
 /// message the scrollable emits when the user scrolls.

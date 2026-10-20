@@ -1,16 +1,14 @@
-//! Fenced code-block mapping and widget ([TASK-015]).
+//! Fenced code-block mapping and widget.
 //!
-//! The legacy UI renderer painted a bordered `code_surface` panel holding a
-//! monospace label, a weak language caption and a copy-to-clipboard button
-//! (`src/app/ui/render/code.rs`). The iced port keeps that presentation:
+//! A fence renders as a bordered `code_surface` panel holding a monospace
+//! label, a muted language caption and a copy-to-clipboard button:
 //! [`Font::MONOSPACE`] (`iced_core-0.14.0/src/font.rs:27-31`) on a
 //! [`Palette::code_surface`] background with a [`Palette::border`] frame.
 //!
 //! The copy button cannot copy from the view: iced exposes the clipboard to
 //! `update` only (`iced_core-0.14.0/src/clipboard.rs:7-38` has `read`/
-//! `write` on the `Clipboard` trait, reached from the update signature),
-//! whereas the legacy UI's `Ui::copy_text` worked inside the click handler. The
-//! content therefore rides on the button's
+//! `write` on the `Clipboard` trait, reached from the update signature).
+//! The content therefore rides on the button's
 //! [`RenderMessage::CopyCodeRequested`] message and the reducer writes it
 //! — which also makes the message part of the pure model and directly
 //! assertable in tests.
@@ -24,17 +22,10 @@ use crate::ui_iced::panels::top::phosphor_font;
 use iced::widget::{Column, Row, button, container, text};
 use iced::{Alignment, Background, Element, Font, Length, Padding};
 
-/// Point size of the monospace code text.
-///
-/// The legacy UI block used `RichText::new(content).monospace()` with no
-/// explicit size, i.e. the body size (14 pt).
+/// Point size of the monospace code text — the body size, 14 pt.
 pub const CODE_TEXT_SIZE: f32 = 14.0;
 
 /// Point size of the language caption.
-///
-/// The legacy UI caption was `RichText::new(lang).weak().small()`
-/// (`src/app/ui/render/code.rs:42`); 11 pt is the iced equivalent of
-/// the legacy UI's `small()`.
 pub const CODE_LANGUAGE_SIZE: f32 = 11.0;
 
 /// Inner padding of the code panel.
@@ -43,22 +34,15 @@ pub const CODE_PADDING: f32 = 8.0;
 /// Gap between the caption, the code and the copy button.
 pub const CODE_SPACING: f32 = 4.0;
 
-/// Width of the copy button's column.
-///
-/// Mirrors the `button_width = 30.0` the legacy UI layout reserved so the
-/// wrapping code label always left room for the button
-/// (`src/app/ui/render/code.rs:47`).
+/// Width of the copy button's column, so the wrapping code label always
+/// leaves room for the button.
 pub const CODE_COPY_COLUMN_WIDTH: f32 = 30.0;
 
-/// Border width drawn around the code panel.
-///
-/// The legacy UI panel used `bordered_panel`, whose stroke is 1 px.
+/// Border width drawn around the code panel, in logical pixels.
 pub const CODE_BORDER_WIDTH: f32 = 1.0;
 
-/// Corner radius of the code panel's border.
-///
-/// Matches the 4 px corner radius the FastMD dark visuals put on
-/// interactive containers (`src/app/ui/theme.rs:112-115`).
+/// Corner radius of the code panel's border, matching the 4 px radius the
+/// FastMD dark visuals put on interactive containers.
 pub const CODE_BORDER_RADIUS: f32 = 4.0;
 
 /// A fenced code block, resolved against the palette.
@@ -90,9 +74,7 @@ pub fn code_block_model(language: Option<&str>, content: &str) -> CodeBlockModel
 
 /// Whether the language caption renders.
 ///
-/// An absent *or* empty tag shows no caption, matching the legacy UI guard
-/// `if let Some(lang) = language && !lang.is_empty()`
-/// (`src/app/ui/render/code.rs:39-43`).
+/// An absent *or* empty tag shows no caption.
 #[must_use]
 pub fn has_language_caption(model: &CodeBlockModel) -> bool {
     model
@@ -104,8 +86,8 @@ pub fn has_language_caption(model: &CodeBlockModel) -> bool {
 /// Renders a fenced code block.
 ///
 /// iced rebuilds the widget tree structurally each frame, so the caption's
-/// presence does not destabilise sibling identity the way an the legacy UI
-/// conditional would; no placeholder allocation is needed.
+/// presence does not destabilise sibling identity; no placeholder
+/// allocation is needed.
 #[must_use]
 pub fn code_block(model: &CodeBlockModel) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();

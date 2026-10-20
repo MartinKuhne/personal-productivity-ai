@@ -3,7 +3,7 @@
 //! This module owns the framework-free font inventory: the embedded Phosphor
 //! icon bytes and the system fallback-font discovery. The iced layer
 //! ([`crate::ui_iced::fonts`]) registers these bytes with
-//! `iced::font::load` ([TASK-007], [TASK-029b]).
+//! `iced::font::load`.
 //!
 //! Unit tests live in the sibling `fonts_tests.rs` sidecar.
 
@@ -86,9 +86,8 @@ pub fn load_fallback_font() -> Option<Vec<u8>> {
 
 /// Embedded Phosphor Regular icon font bytes.
 ///
-/// Shared with the iced port (`ui_iced::fonts`, [TASK-007]): the iced
-/// runtime registers this byte collection, so it stays declared here as
-/// the single font inventory ([RUST-023], [GUD-002]-friends).
+/// The iced runtime registers this byte collection, so it stays declared
+/// here as the single font inventory ([RUST-023]).
 pub const PHOSPHOR_REGULAR_FONT: &[u8] =
     include_bytes!("../../../assets/fonts/Phosphor-Regular.ttf");
 

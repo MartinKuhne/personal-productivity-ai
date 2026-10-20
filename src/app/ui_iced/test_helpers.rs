@@ -1,19 +1,16 @@
-//! Framework-free test fixtures for the iced layer ([TASK-029]).
+//! Framework-free test fixtures for the iced layer.
 //!
-//! The iced sidecar tests previously borrowed `test_app` /
-//! `test_app_with_config` from the retired `ui/test_helpers/app` module, which
-//! [TASK-029b] deleted along with the rest of the legacy UI layer. These are
-//! the iced-owned replacements.
+//! These are the `test_app` / `test_app_with_config` fixtures the iced
+//! sidecar tests build on.
 //!
-//! # Framework-free by construction ([TASK-029] verification)
+//! # Framework-free by construction
 //!
 //! Both fixtures build a [`FastMdApp`] through
 //! [`FastMdApp::empty_state`], the bus-driven constructor that needs **no**
-//! legacy creation context and applies **no** legacy visuals — the same path
-//! the retired fixtures already used. This module imports no UI-framework type,
-//! and [`test_app_state`] builds a full iced
-//! [`AppState`] through [`build_state`], which [TASK-022] verified as the
-//! framework-free state constructor.
+//! creation context and applies **no** visuals. This module imports no
+//! UI-framework type, and [`test_app_state`] builds a full iced
+//! [`AppState`] through [`build_state`], the framework-free state
+//! constructor.
 //!
 //! # Test-environment safety ([RUST-006])
 //!
@@ -59,9 +56,8 @@ pub fn test_app_with_config(config: AppConfig) -> FastMdApp {
 
 /// Create a test [`FastMdApp`] whose chat model posts to `api_url`.
 ///
-/// Mirrors the legacy UI fixture of the same name: tests that drive a `RunAgent`
-/// dispatch must route the LLM call to an in-process wiremock endpoint
-/// instead of the dead `localhost:0` default.
+/// Tests that drive a `RunAgent` dispatch must route the LLM call to an
+/// in-process wiremock endpoint instead of the dead `localhost:0` default.
 #[must_use]
 pub fn test_app_with_api_url(api_url: &str) -> FastMdApp {
     let mut models = std::collections::HashMap::new();
@@ -82,7 +78,7 @@ pub fn test_app_with_api_url(api_url: &str) -> FastMdApp {
     FastMdApp::empty_state(config)
 }
 
-/// Build a fresh iced [`AppState`] over in-memory storage ([TASK-029]).
+/// Build a fresh iced [`AppState`] over in-memory storage.
 ///
 /// The framework-free counterpart of the panel fixtures above for tests that need
 /// the whole iced application root — view-model rebuilds, overlay state, the
@@ -112,8 +108,7 @@ pub fn test_app_state_with(config: AppConfig, persisted: PersistedUiState) -> Ap
 /// Create a no-op [`FileEventProducer`] backed by a fresh [`Bus`].
 ///
 /// The producer is not connected to the app's event bus, so `save` calls
-/// in tests do not publish file events. Pure helper with no global state;
-/// relocated here from the deleted `ui/test_helpers/app.rs` ([TASK-029b]).
+/// in tests do not publish file events. Pure helper with no global state.
 #[must_use]
 pub fn noop_producer() -> crate::bus::events::file::FileEventProducer {
     crate::bus::events::file::FileEventProducer::new(Bus::new())

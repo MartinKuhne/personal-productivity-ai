@@ -1,10 +1,9 @@
-//! The iced `update` reducer ([TASK-023]) — the one-to-one mirror of the
-//! the legacy UI `FastMdApp::update_ui` frame body (`src/app/ui/app/update.rs`).
+//! The iced `update` reducer.
 //!
 //! This is the single place user intent is executed and runtime reports are
 //! folded into [`AppState`]. The panels never publish to the command bus
 //! themselves — they emit [`Message::Command`] and this reducer performs the
-//! publish + execution ([FMD-068], [FMD-069]).
+//! publish + execution.
 //!
 //! # Frame shape
 //!
@@ -12,20 +11,19 @@
 //!
 //! 1. the channel-specific reducer mutates state and returns any iced
 //!    [`Task`]s the transition produced;
-//! 2. `finish_frame` runs the per-frame tail the legacy UI loop ran after the
-//!    command drain — the tree-row cache transition (`refresh_tree_cache`),
-//!    `AppOrchestrator::handle_file_selection`, the
-//!    finished-batch join (`handle_deferred_actions`), the view-model
-//!    rebuild, the follow-the-stream scroll tasks and the persisted
-//!    panel-width snapshot (`update_persisted_ui_state`).
+//! 2. `finish_frame` runs the per-frame tail — `refresh_tree_cache`,
+//!    `AppOrchestrator::handle_file_selection`, `join_finished_batch`, the
+//!    view-model rebuild (`rebuild_view_models`), the follow-the-stream
+//!    scroll tasks (`follow_scroll_tasks`) and the persisted panel-width
+//!    sync (`sync_persisted_panel_widths`).
 //!
-//! the legacy UI's four per-frame drains (`drain_config_bus`,
+//! The four orchestrator drains (`drain_config_bus`,
 //! `drain_background_channel`, `process_file_events`,
 //! `drain_agent_event_bus`) are **event-driven** here: they run inside the
-//! [`Message::Inbound`] reducer, because in the iced build the only inbound
-//! path is the [TASK-019] [`subscription::BusReceivers`](crate::ui_iced::subscription::BusReceivers)
-//! bridge ([FMD-065]). `Inbound(FileChanged)` therefore applies the event the
-//! message **carries** through `AppOrchestrator::apply_file_event` rather than
+//! [`Message::Inbound`] reducer, because the only inbound path is the
+//! [`subscription::BusReceivers`](crate::ui_iced::subscription::BusReceivers)
+//! bridge. `Inbound(FileChanged)` therefore applies the event the message
+//! **carries** through `AppOrchestrator::apply_file_event` rather than
 //! re-reading a second bus subscriber — the orchestrator's own
 //! `file_event_reader` is left inert for exactly that reason.
 //!
@@ -33,16 +31,13 @@
 //!
 //! [`Message::Command`] is published on the orchestrator's
 //! `user_command_bus` and drained/executed through
-//! `AppOrchestrator::drain_user_command_bus`, exactly as the legacy UI frame
-//! loop did — with three deliberate exceptions handled by `route_command`
-//! *before* the executor sees them:
+//! `AppOrchestrator::drain_user_command_bus`, with three deliberate
+//! exceptions handled by `route_command` *before* the executor sees them:
 //!
-//! * [`UserCommand::Delete`] opens the [TASK-017b1] delete-confirmation
-//!   dialog and is **not** executed. The confirmed intent is published later
-//!   by the dialog reducer (`reduce_dialog`), so the destructive action stays
-//!   self-contained
-//!   and replayable ([FMD-068]). the legacy UI deleted without asking; the iced port
-//!   asks (new behaviour, recorded as drift in the migration map).
+//! * [`UserCommand::Delete`] opens the delete-confirmation dialog and is
+//!   **not** executed. The confirmed intent is published later by the dialog
+//!   reducer (`reduce_dialog`), so the destructive action stays
+//!   self-contained and replayable.
 //! * the dialog-opening commands (`Rename`, `Move`, `CreateDirectory`,
 //!   `CreateDocument`, `OpenBatchDialog`, `OpenToolsDialog`,
 //!   `OpenAboutDialog`) execute normally **and** open the matching iced
@@ -94,18 +89,17 @@ const READ_FAILED_ERROR_CODE: &str = "ui_iced.file.read_failed";
 /// NFR-004 error-code name for a print request with no background channel.
 const PRINT_NO_CHANNEL_ERROR_CODE: &str = "ui_iced.file.print_no_channel";
 
-/// Top-level iced reducer ([TASK-023]).
+/// Top-level iced reducer.
 ///
 /// `impl UpdateFn ... for T where T: Fn(&mut State, Message) -> C, C:
 /// Into<Task<Message>>` (`iced-0.14.0/src/application.rs:609-617`).
 pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
     let mut tasks: Vec<Task<Message>> = Vec::new();
 
-    // A context-menu row carries its own intent message ([FMD-068]), so the
-    // reducer has to dismiss the menu when it handles one — the way a native
-    // dropdown closes on selection. The hamburger card already does this itself
-    // in [`reduce_menu`]; the tree and tab menus had no equivalent, which is why
-    // they stayed pinned open after a pick.
+    // A context-menu row carries its own intent message, so the reducer has to
+    // dismiss the menu when it handles one — the way a native dropdown closes
+    // on selection. The hamburger card already does this itself in
+    // [`reduce_menu`]; the tree and tab menus are covered here.
     if dismisses_context_menu(&message) {
         state.overlay.context_menu = None;
     }
@@ -140,7 +134,7 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
 // ───────────────────────────── overlay dismissal ─────────────────────────────
 
 /// Whether `message` is user intent that a floating tree or tab context-menu row
-/// can emit, and must therefore dismiss the menu ([FMD-068]).
+/// can emit, and must therefore dismiss the menu.
 ///
 /// The row vocabulary is exactly what the two menu builders produce:
 /// [`Message::Command`] for every application intent
@@ -209,15 +203,15 @@ fn reduce_overlay(state: &mut AppState, message: OverlayMessage) {
 
 // ───────────────────────────── frame tail ─────────────────────────────
 
-/// The per-frame tail the legacy UI `update_ui` ran after the drains and before
-/// the panels were drawn ([TASK-023]).
+/// The per-frame tail that runs after the reduction and before the panels are
+/// drawn.
 ///
-/// Order matters and mirrors the legacy UI: the tree-row cache is refreshed first so the
-/// view-model rebuild reads through the cache instead of re-walking the
-/// workspace, the file-selection load is kicked off next so a selection change
-/// is in flight before the snapshot is taken, the finished batch is joined
-/// after that (it changes the batch status the card renders), and only then is
-/// every view-model rebuilt.
+/// Order matters: the tree-row cache is refreshed first so the view-model
+/// rebuild reads through the cache instead of re-walking the workspace, the
+/// file-selection load is kicked off next so a selection change is in flight
+/// before the snapshot is taken, the finished batch is joined after that (it
+/// changes the batch status the card renders), and only then is every
+/// view-model rebuilt.
 fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     let mut tasks = Vec::new();
 
@@ -231,9 +225,9 @@ fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     tasks
 }
 
-/// the legacy UI's tree-row cache transition (`ui/panels/left.rs:197-212`): rebuild the
-/// flattened rows only while the tree is dirty (or nothing is cached yet), then
-/// publish them as the cache and clear the flag.
+/// Tree-row cache transition: rebuild the flattened rows only while the tree
+/// is dirty (or nothing is cached yet), then publish them as the cache and
+/// clear the flag.
 ///
 /// Without this the iced build re-walks the whole workspace on **every**
 /// message: nothing else in the iced path ever fills
@@ -250,8 +244,7 @@ fn refresh_tree_cache(state: &mut AppState) {
     state.app.orchestrator.selection.tree_dirty = false;
 }
 
-/// the legacy UI `FastMdApp::handle_deferred_actions` — join a batch thread that has
-/// finished and drop its cancel flag.
+/// Join a batch thread that has finished and drop its cancel flag.
 fn join_finished_batch(state: &mut AppState) {
     if let Some(handle) = state.app.orchestrator.dialogs.batch_handle.take() {
         if handle.thread.is_finished() {
@@ -269,7 +262,7 @@ fn join_finished_batch(state: &mut AppState) {
 }
 
 /// Dispatches the stick-to-bottom scroll operations the [`logs::should_follow`]
-/// rule decided for each of the three streaming lists ([TASK-023]).
+/// rule decided for each of the three streaming lists.
 ///
 /// With no viewport report yet `should_follow` is `false`, so a freshly
 /// booted app never scrolls anything blind.
@@ -294,14 +287,14 @@ fn follow_scroll_tasks(state: &AppState) -> Vec<Task<Message>> {
     tasks
 }
 
-/// Snaps one scrollable to its end ([TASK-023]).
+/// Snaps one scrollable to its end.
 fn snap_to_end(id: &'static str) -> Task<Message> {
     operation::snap_to_end(id)
 }
 
-/// the legacy UI `FastMdApp::update_persisted_ui_state` — keep the persisted
-/// snapshot's panel widths in step with the live [`crate::ui::PanelLayout`]
-/// so the next close-time save writes current values.
+/// Keep the persisted snapshot's panel widths in step with the live
+/// [`crate::ui::PanelLayout`] so the next close-time save writes current
+/// values.
 fn sync_persisted_panel_widths(state: &mut AppState) {
     state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
     state.app.persisted_ui_state.right_panel_width = state.app.layout.right_panel_width;
@@ -309,22 +302,21 @@ fn sync_persisted_panel_widths(state: &mut AppState) {
 
 // ───────────────────────────── command routing ─────────────────────────────
 
-/// Publishes `command` on the user-command bus and drains/executes it,
-/// exactly as the legacy UI frame loop did ([FMD-066], [FMD-071]).
+/// Publishes `command` on the user-command bus and drains/executes it.
 fn publish_and_drain(state: &mut AppState, command: UserCommand) {
     state.app.orchestrator.user_command_bus.publish(command);
     state.app.orchestrator.drain_user_command_bus();
 }
 
 /// Routes a user command: intercept the window-opening and confirmation
-/// kinds, publish + execute everything else ([TASK-023]).
+/// kinds, publish + execute everything else.
 ///
 /// Returns any iced [`Task`]s the routing produced (clipboard writes ride
 /// the individual channel reducers; the command path is synchronous).
 fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message>> {
     match command {
-        // New in the iced port: deletion is confirmed first. The intent is
-        // published by `reduce_dialog` once the user confirms.
+        // Deletion is confirmed first. The intent is published by
+        // `reduce_dialog` once the user confirms.
         UserCommand::Delete(path) => {
             state
                 .overlay
@@ -427,8 +419,7 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
 
 /// Re-finds the batch dialog's previous directory / prompt picks inside the
 /// freshly built candidate lists, so a reopen follows the **value** the user
-/// chose rather than a stale positional index (the legacy UI refresh rule,
-/// `ui/app/render.rs:102-108`).
+/// chose rather than a stale positional index.
 ///
 /// A pick that no longer resolves is deliberately left alone so
 /// [`BatchDialogState::open`] drops it: silently sliding the selection onto an
@@ -464,12 +455,12 @@ fn reindex_batch_selection(
 }
 
 /// Lifts the `TextBuffer` the executor just populated into an
-/// [`EditorViewModel`] ([TASK-023]).
+/// [`EditorViewModel`].
 ///
-/// The legacy UI editor read `TextBuffer::content` (the parsed body) plus the
-/// preserved front matter straight out of the buffer; rebuilding the raw
-/// text through [`DocumentContent`]'s `Display` avoids a second read from
-/// disk while giving [`EditorViewModel::open`] exactly the bytes it expects.
+/// `TextBuffer::content` holds the parsed body and the front matter is
+/// preserved alongside it; rebuilding the raw text through
+/// [`DocumentContent`]'s `Display` avoids a second read from disk while
+/// giving [`EditorViewModel::open`] exactly the bytes it expects.
 fn open_editor_from_buffer(state: &mut AppState, path: &Path) {
     let buffer = &state.app.orchestrator.text_buffer;
     if !buffer.is_open {
@@ -486,10 +477,8 @@ fn open_editor_from_buffer(state: &mut AppState, path: &Path) {
 /// The directory rows currently visible in the tree — the move dialog's
 /// destination candidates and the content search's scope.
 ///
-/// The legacy UI left panel built the same set by walking the built workspace
-/// tree (`ui/panels/left.rs:247-249`); the flattened row snapshot is the
-/// iced equivalent, so collapsed directories are excluded exactly as they
-/// were there.
+/// Built from the flattened row snapshot, so collapsed directories are
+/// excluded.
 fn visible_directories(state: &AppState) -> Vec<PathBuf> {
     state
         .models
@@ -503,11 +492,11 @@ fn visible_directories(state: &AppState) -> Vec<PathBuf> {
 
 // ───────────────────────────── window / layout ─────────────────────────────
 
-/// Window-lifecycle reductions ([TASK-009], DEC-006/DEC-008).
+/// Window-lifecycle reductions.
 fn reduce_window(state: &mut AppState, message: WindowMessage) -> Task<Message> {
     match message {
         WindowMessage::CloseRequested(id) => {
-            // DEC-006 phase 1: BEFORE closing, report the current window
+            // Phase 1: BEFORE closing, report the current window
             // metrics through the chained runtime tasks so the next message
             // can persist + close in one reduction.
             iced::window::size(id).then(move |size| {
@@ -519,10 +508,8 @@ fn reduce_window(state: &mut AppState, message: WindowMessage) -> Task<Message> 
             })
         }
         WindowMessage::CloseSnapshotCaptured(snapshot) => {
-            // DEC-006 phase 2: FIRST persist, THEN close. Panel widths are
-            // copied from the live `PanelLayout` right before serialising —
-            // the faithful port of the legacy UI `save()` sync
-            // (`ui/app/mod.rs:251-252`).
+            // Phase 2: FIRST persist, THEN close. Panel widths are
+            // copied from the live `PanelLayout` right before serialising.
             state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
             state.app.persisted_ui_state.right_panel_width = state.app.layout.right_panel_width;
             persisted::apply_close_metrics(
@@ -543,20 +530,20 @@ fn reduce_window(state: &mut AppState, message: WindowMessage) -> Task<Message> 
             iced::window::close(snapshot.id)
         }
         WindowMessage::ScaleBaseline(baseline) => {
-            // DEC-008: store the OS baseline; `.scale_factor(...)` composes
-            // it with the persisted multiplier per frame ([FMD-069]).
+            // Store the OS baseline; `.scale_factor(...)` composes
+            // it with the persisted multiplier per frame.
             state.os_scale = Some(baseline);
             Task::none()
         }
         WindowMessage::Resized { size, .. } => {
-            // Keep the logical viewport current ([TASK-010] input).
+            // Keep the logical viewport current.
             state.viewport = size;
             Task::none()
         }
     }
 }
 
-/// Pane-geometry and cursor reductions ([TASK-010], [TASK-012]).
+/// Pane-geometry and cursor reductions.
 fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
     match message {
         LayoutMessage::PaneResized(event) => {
@@ -583,13 +570,11 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
     }
 }
 
-/// The legacy UI left panel's auto-fit-on-dirty transition
-/// (`ui/panels/left.rs:139-186`), reduced from an explicit
-/// [`LayoutMessage::TreeAutoFit`] so the width change is replayable
-/// ([TASK-023]).
+/// The left panel's auto-fit-on-dirty transition, reduced from an explicit
+/// [`LayoutMessage::TreeAutoFit`] so the width change is replayable.
 ///
-/// The measurement uses the real font-metrics measurer [`fira_sans_width`]
-/// ([TASK-015]), which shapes against the same Fira Sans bytes iced renders
+/// The measurement uses the real font-metrics measurer [`fira_sans_width`],
+/// which shapes against the same Fira Sans bytes iced renders
 /// with (`iced_graphics::text::FIRA_SANS_REGULAR`) rather than a
 /// character-count average. Faces we hold no bytes for fall back to
 /// `heuristic_width` inside the measurer, so the call is total and never
@@ -611,7 +596,7 @@ fn auto_fit_tree(state: &mut AppState) {
 
 // ───────────────────────────── tree / tab ─────────────────────────────
 
-/// File-tree panel reductions ([TASK-012], [TASK-023]).
+/// File-tree panel reductions.
 fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>> {
     match message {
         TreeMessage::ContextMenuOpened { path } => {
@@ -647,11 +632,9 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
             Vec::new()
         }
         TreeMessage::DeleteSelectedRequested { paths } => {
-            // legacy parity (`ui/tree/render.rs:108-115`): fan out one
-            // `Delete` per path and clear the selection. Deliberately
-            // un-confirmed — `DialogKind::DeleteConfirm` carries a single
-            // path, so a multi-select cannot route through it. Recorded as
-            // an asymmetry in the migration map.
+            // Fan out one `Delete` per path and clear the selection.
+            // Deliberately un-confirmed — `DialogKind::DeleteConfirm` carries
+            // a single path, so a multi-select cannot route through it.
             for path in paths {
                 publish_and_drain(state, UserCommand::Delete(path));
             }
@@ -662,7 +645,7 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
 }
 
 /// Builds the row's context-menu rows from the left-panel view-model and
-/// anchors them at the last reported cursor position ([TASK-023]).
+/// anchors them at the last reported cursor position.
 fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
     let anchor = state.overlay.cursor.unwrap_or_default();
     let items = state
@@ -674,11 +657,11 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
         .map(|row| state.models.left.menu_items_for(row))
         .unwrap_or_default();
     state.overlay.hamburger_open = false;
+    state.overlay.hamburger_submenu = None;
     state.overlay.context_menu = Some(ContextMenu { anchor, items });
 }
 
-/// the legacy UI `RUN_AS_PROMPT_ACTION`: read the file, take the body as the prompt
-/// and run it against that file (`ui/tree/render.rs:143-160`).
+/// Read the file, take the body as the prompt and run it against that file.
 fn run_file_as_prompt(state: &mut AppState, path: &PathBuf) {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
@@ -703,8 +686,7 @@ fn run_file_as_prompt(state: &mut AppState, path: &PathBuf) {
     }
 }
 
-/// the legacy UI `publish_skill` (`ui/tree/render.rs:311-337`): read a skill file
-/// and run its body against the menu's target.
+/// Read a skill file and run its body against the menu's target.
 fn run_skill(
     state: &mut AppState,
     skill: &PathBuf,
@@ -734,12 +716,12 @@ fn run_skill(
     }
 }
 
-/// the legacy UI `PRINT_ACTION` (`ui/tree/render.rs:161-173`): hand the job to the
-/// background channel. There is no `UserCommand::Print`, so the reducer owns it.
+/// Hand the print job to the background channel. There is no
+/// `UserCommand::Print`, so the reducer owns it.
 ///
 /// Rendering, the temp-file write and the browser hand-off all block, so they
-/// ride an iced [`Task`] instead of running on the UI thread ([FMD-060],
-/// [FMD-061]); the outcome comes back as [`TreeMessage::PrintFinished`].
+/// ride an iced [`Task`] instead of running on the UI thread; the outcome
+/// comes back as [`TreeMessage::PrintFinished`].
 ///
 /// The laziness of [`Task`] is also what keeps this testable: reducing a
 /// [`TreeMessage::PrintRequested`] only *builds* the task, so a unit test never
@@ -756,13 +738,14 @@ fn print_task(state: &AppState, path: PathBuf) -> Task<Message> {
     )
 }
 
-/// Tab-strip panel reductions ([TASK-013], [TASK-023]).
+/// Tab-strip panel reductions.
 fn reduce_tab(state: &mut AppState, message: TabMessage) {
     match message {
         TabMessage::ContextMenuOpened { index } => {
             let anchor = state.overlay.cursor.unwrap_or_default();
             let items = state.models.center.menu_items_for(index);
             state.overlay.hamburger_open = false;
+            state.overlay.hamburger_submenu = None;
             state.overlay.context_menu = Some(ContextMenu { anchor, items });
         }
         TabMessage::ContextMenuClosed => {
@@ -778,7 +761,7 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
 /// ([`crate::ui_iced::panels::top::build_menu_entries`]) anchored under the
 /// ☰ button. A row pick publishes the row's own [`UserCommand`] through
 /// [`route_command`] and closes the menu in the same reduction — the row's
-/// intent stays self-contained ([FMD-068]) and the click lands exactly like
+/// intent stays self-contained and the click lands exactly like
 /// a dropdown selection.
 fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>> {
     match message {
@@ -787,14 +770,29 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
             // dismisses any live tree/tab context menu.
             state.overlay.context_menu = None;
             state.overlay.hamburger_open = true;
+            state.overlay.hamburger_submenu = None;
             Vec::new()
         }
         MenuMessage::Closed => {
             state.overlay.hamburger_open = false;
+            state.overlay.hamburger_submenu = None;
+            Vec::new()
+        }
+        MenuMessage::SubmenuOpened(section) => {
+            if state.overlay.hamburger_open
+                && section != crate::ui_iced::panels::top::MenuSection::Direct
+            {
+                state.overlay.hamburger_submenu = Some(section);
+            }
+            Vec::new()
+        }
+        MenuMessage::SubmenuClosed => {
+            state.overlay.hamburger_submenu = None;
             Vec::new()
         }
         MenuMessage::RowActivated(command) => {
             state.overlay.hamburger_open = false;
+            state.overlay.hamburger_submenu = None;
             route_command(state, command)
         }
     }
@@ -802,7 +800,7 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
 
 // ───────────────────────────── editor ─────────────────────────────
 
-/// Inline editor reductions ([TASK-014], DEC-007, UI-042..UI-045).
+/// Inline editor reductions (UI-042..UI-045).
 fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Message>> {
     match message {
         EditorMessage::SaveRequested { path } => {
@@ -824,9 +822,8 @@ fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Messa
     }
 }
 
-/// the legacy UI `TextBuffer::save` (`ui/text_buffer.rs:329-358`): write the buffer
-/// (front matter re-attached), publish the update so the tree and tag
-/// manager refresh, then close (UI-044, UI-045).
+/// Write the buffer (front matter re-attached), publish the update so the
+/// tree and tag manager refresh, then close (UI-044, UI-045).
 fn save_editor(state: &mut AppState, path: &PathBuf) {
     let Some(vm) = state.overlay.editor.as_ref() else {
         return;
@@ -859,7 +856,7 @@ fn save_editor(state: &mut AppState, path: &PathBuf) {
 /// `text_buffer.is_open` and `tabs.loaded_path` both have to go: the file
 /// reload rule in `AppOrchestrator::process_file_events`
 /// (`orchestrator.rs:144-152`) only drops a stale loaded document while
-/// the editor is closed, and the legacy UI's `render.rs:43-45` cleared the same pair.
+/// the editor is closed.
 fn close_editor(state: &mut AppState) {
     state.overlay.editor = None;
     state.app.orchestrator.text_buffer.is_open = false;
@@ -868,7 +865,7 @@ fn close_editor(state: &mut AppState) {
 
 // ───────────────────────────── agent / search ─────────────────────────────
 
-/// Agent panel and command-input reductions ([TASK-018], UI-041).
+/// Agent panel and command-input reductions (UI-041).
 fn reduce_agent(state: &mut AppState, message: AgentMessage) {
     match message {
         AgentMessage::InputChanged { text } => {
@@ -897,7 +894,7 @@ fn reduce_agent(state: &mut AppState, message: AgentMessage) {
     }
 }
 
-/// Workspace content-search reductions ([TASK-019], UI-050).
+/// Workspace content-search reductions (UI-050).
 fn reduce_search(state: &mut AppState, message: SearchMessage) -> Vec<Task<Message>> {
     match message {
         SearchMessage::QueryChanged { text } => {
@@ -926,11 +923,9 @@ fn reduce_search(state: &mut AppState, message: SearchMessage) -> Vec<Task<Messa
 }
 
 /// Runs the reused search engine off the UI thread and reports back through
-/// [`SearchMessage::ResultsReady`] ([FMD-060], [FMD-061]).
+/// [`SearchMessage::ResultsReady`].
 ///
-/// The scan scope is the currently visible tree directories, matching the
-/// the legacy UI panel's `apply_with_allowed_dirs` call
-/// (`ui/panels/left.rs:246-253`).
+/// The scan scope is the currently visible tree directories.
 fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
     let all_files = state.app.orchestrator.file_processor.all_files.clone();
     let libraries = state.app.content_libraries().to_vec();
@@ -951,11 +946,11 @@ fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
 
 // ───────────────────────────── logs / theme ─────────────────────────────
 
-/// Background-logs panel reductions ([TASK-016], UI-047).
+/// Background-logs panel reductions (UI-047).
 ///
-/// The filter lives in the shared `BackgroundLogs` ring buffer, which the
-/// the legacy UI viewer also mutated — so the reducer writes it there and the
-/// view-model picks it up on the next rebuild.
+/// The filter lives in the shared `BackgroundLogs` ring buffer, so the
+/// reducer writes it there and the view-model picks it up on the next
+/// rebuild.
 fn reduce_logs(state: &mut AppState, message: LogsMessage) {
     match message {
         LogsMessage::SearchChanged { text } => {
@@ -992,20 +987,20 @@ fn reduce_logs(state: &mut AppState, message: LogsMessage) {
     }
 }
 
-/// Theme / UI-scale reductions ([TASK-008], DEC-008).
+/// Theme / UI-scale reductions.
 fn reduce_theme(state: &mut AppState, message: ThemeMessage) {
     match message {
         ThemeMessage::ScaleChanged { multiplier } => {
             // A near-unity or out-of-range multiplier is stored as `None`
             // so a fresh install carries no redundant value and one
-            // corrupt entry self-heals (the legacy UI `persist_font_scale`).
+            // corrupt entry self-heals.
             state.app.persisted_ui_state.font_size_scale = sanitise_scale(multiplier);
         }
     }
 }
 
-/// the legacy UI `sanitise_font_scale` + the near-unity collapse
-/// (`ui/app/update.rs:307-320`), expressed against the same bounds.
+/// Clamp a UI-scale multiplier: keep the value only when it is finite,
+/// inside the supported bounds, and not near unity.
 fn sanitise_scale(value: f32) -> Option<f32> {
     const MIN: f32 = 0.5;
     const MAX: f32 = 3.0;
@@ -1015,7 +1010,7 @@ fn sanitise_scale(value: f32) -> Option<f32> {
 
 // ───────────────────────────── render path ─────────────────────────────
 
-/// Markdown render-path reductions ([TASK-015], [TASK-023]).
+/// Markdown render-path reductions.
 fn reduce_render(state: &mut AppState, message: RenderMessage) -> Vec<Task<Message>> {
     match message {
         RenderMessage::LinkActivated { url, source_file } => {
@@ -1027,8 +1022,7 @@ fn reduce_render(state: &mut AppState, message: RenderMessage) -> Vec<Task<Messa
             task_index,
             checked,
         } => {
-            // the legacy UI mutated the open document in memory only
-            // (`ui/panels/center.rs:382-383`); no file write.
+            // Toggle the open document in memory only; no file write.
             if state.app.orchestrator.tabs.loaded_path.as_deref() == Some(document.as_path()) {
                 crate::markdown::document::apply_task_toggle(
                     &mut state.app.orchestrator.tabs.current_markdown,
@@ -1044,9 +1038,9 @@ fn reduce_render(state: &mut AppState, message: RenderMessage) -> Vec<Task<Messa
     }
 }
 
-/// the legacy UI `FastMdApp::handle_open_link` (`ui/app/update.rs:115-165`),
-/// reduced from a [`RenderMessage::LinkActivated`] instead of an
-/// `OutputCommand::OpenUrl` drain.
+/// Opens an activated link, driven by [`RenderMessage::LinkActivated`]:
+/// resolve it against the current file and the content roots, then select,
+/// scroll or hand the URL to the OS.
 fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
     let current_file = source_file.or_else(|| state.app.selection().selected_file().cloned());
     let content_roots: Vec<PathBuf> = state
@@ -1095,7 +1089,7 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
 
 // ───────────────────────────── dialogs ─────────────────────────────
 
-/// Small-dialog reductions ([TASK-017b1], UI-011/UI-015).
+/// Small-dialog reductions (UI-011/UI-015).
 fn reduce_dialog(state: &mut AppState, message: DialogMessage) -> Vec<Task<Message>> {
     match message {
         DialogMessage::NameChanged { text } => {
@@ -1128,8 +1122,7 @@ fn reduce_dialog(state: &mut AppState, message: DialogMessage) -> Vec<Task<Messa
     }
 }
 
-/// The self-contained command a validated dialog submit produces
-/// ([FMD-068]).
+/// The self-contained command a validated dialog submit produces.
 fn confirmed_command(kind: &DialogKind, name: String, destination: Option<PathBuf>) -> UserCommand {
     match kind {
         DialogKind::CreateDirectory { parent } => UserCommand::ConfirmCreateDirectory {
@@ -1154,7 +1147,7 @@ fn confirmed_command(kind: &DialogKind, name: String, destination: Option<PathBu
 
 // ───────────────────────────── about / batch / tools / debug ─────────────────────────────
 
-/// About / attributions window reductions ([TASK-017b2]).
+/// About / attributions window reductions.
 fn reduce_about(state: &mut AppState, message: AboutMessage) -> Vec<Task<Message>> {
     match message {
         AboutMessage::CopyCommitHashRequested => {
@@ -1172,17 +1165,17 @@ fn reduce_about(state: &mut AppState, message: AboutMessage) -> Vec<Task<Message
     }
 }
 
-/// Batch dialog selection reductions ([TASK-017b3], BATCH-001..BATCH-014).
+/// Batch dialog selection reductions (BATCH-001..BATCH-014).
 fn reduce_batch(state: &mut AppState, message: BatchDialogMessage) {
     state.overlay.batch.apply(message);
 }
 
-/// Tools dialog dismiss reduction ([TASK-017b3], UI-051..UI-060).
+/// Tools dialog dismiss reduction (UI-051..UI-060).
 fn reduce_tools(state: &mut AppState, message: ToolsDialogMessage) {
     state.overlay.tools.apply(message);
 }
 
-/// Agent debug window reductions ([TASK-017b4], UI-048 / REQ-008).
+/// Agent debug window reductions (UI-048).
 fn reduce_agent_debug(state: &mut AppState, message: AgentDebugMessage) -> Vec<Task<Message>> {
     match message {
         AgentDebugMessage::CopyJsonRequested { content } => {
@@ -1209,28 +1202,27 @@ fn reduce_agent_debug(state: &mut AppState, message: AgentDebugMessage) -> Vec<T
 
 // ───────────────────────────── inbound ─────────────────────────────
 
-/// Inbound *background → UI* reductions ([TASK-019], FMD-065..FMD-067).
+/// Inbound *background → UI* reductions.
 ///
-/// These replace the legacy UI's per-frame drains. Each arm runs the same
-/// orchestrator routine the frame loop called, triggered by the
-/// [TASK-019] bridge message that names the bus instead.
+/// Each arm runs the orchestrator routine that consumes its bus, triggered
+/// by the bridge message that names the bus.
 fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
     match message {
         InboundMessage::ConfigArrived(config) => {
             apply_config_arrival(state, &config);
         }
         InboundMessage::FileChanged(event) => {
-            // The bridge is the single inbound path ([FMD-065]), so the event
-            // the message carries is applied here rather than re-read off a
-            // second subscriber. The extra `process_file_events` call keeps the
-            // `DirectoryTracker` drain the legacy UI frame ran per frame alive.
+            // The bridge is the single inbound path, so the event the message
+            // carries is applied here rather than re-read off a second
+            // subscriber. The extra `process_file_events` call keeps the
+            // `DirectoryTracker` drain running.
             state.app.orchestrator.apply_file_event(event);
             state.app.orchestrator.process_file_events();
         }
         InboundMessage::FileChangedBatch(events) => {
             // Same semantics as the single-event arm, with the tracker drain
             // hoisted out of the loop: the whole burst lands in one tree
-            // rebuild ([FMD-060]).
+            // rebuild.
             for event in events {
                 state.app.orchestrator.apply_file_event(event);
             }
@@ -1241,7 +1233,7 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
         }
         InboundMessage::AgentBatch(_events) => {
             // Same semantics as the single-event arm: the whole burst lands
-            // in one drain call ([FMD-060]).
+            // in one drain call.
             state.app.orchestrator.drain_agent_event_bus();
         }
         InboundMessage::Background(event) => {
@@ -1307,9 +1299,9 @@ fn apply_config_arrival(state: &mut AppState, config: &AppConfig) {
     );
 }
 
-/// the legacy UI's `BroadcastRecvError::Lagged(n)` arms (`orchestrator.rs:96-103`,
-/// `:435-449`): report the loss loudly and, for the agent stream, leave the
-/// visible truncation marker the transcript reducer owns.
+/// Handle a lagging bus subscriber: report the loss loudly and, for the
+/// agent stream, leave the visible truncation marker the transcript reducer
+/// owns.
 fn handle_bus_lag(state: &mut AppState, source: BusSource, count: u64) {
     tracing::warn!(
         name = "ui_iced.bus.lagged",
@@ -1327,12 +1319,12 @@ fn handle_bus_lag(state: &mut AppState, source: BusSource, count: u64) {
     }
 }
 
-/// Boot-infrastructure report reductions ([TASK-007]).
+/// Boot-infrastructure report reductions.
 fn reduce_boot(message: BootMessage) -> Task<Message> {
     match message {
         BootMessage::FontLoadFinished(Some(error)) => {
             // NFR-001: a font-registration failure must produce an ERROR
-            // log. Non-fatal: iced keeps its default font set ([FMD-064]).
+            // log. Non-fatal: iced keeps its default font set.
             tracing::error!(name = FONT_LOAD_ERROR_CODE, %error, "Font registration failed");
             Task::none()
         }

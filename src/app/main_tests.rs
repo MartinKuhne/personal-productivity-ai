@@ -1,10 +1,9 @@
-//! Unit tests for the [TASK-024] production entry point (`src/app/main.rs`).
+//! Unit tests for the production entry point (`src/app/main.rs`).
 //!
 //! `main()` routes to `app::launch()`, which calls `.run()` — not headlessly
-//! testable, and no GUI-launch test is invented here. What *is* testable is the
-//! piece the entry flip introduced: the persisted-UI-state location policy
-//! ([RUST-024], DEC-006) and a compile-time pin that the entry's target really
-//! is the iced launch path.
+//! testable, and no GUI-launch test is invented here. What *is* testable is
+//! the persisted-UI-state location policy ([RUST-024]) and a compile-time
+//! pin that the entry's target really is the iced launch path.
 //!
 //! No test touches a real user path: the override branch is pointed at a
 //! `tempfile::TempDir`, and the platform-default branch is only ever asserted

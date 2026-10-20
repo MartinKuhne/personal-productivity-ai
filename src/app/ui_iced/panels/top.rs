@@ -1,11 +1,11 @@
-//! Iced port of the top toolbar panel ([TASK-011], UI-061..UI-066).
+//! Top toolbar panel (UI-061..UI-066).
 //!
-//! Replaces `src/app/ui/panels/top.rs`. The panel is a **pure view**: it
+//! The panel is a **pure view**: it
 //! renders a [`TopBarViewModel`] snapshot into an
 //! [`iced::Element`] of [`Message`] and emits
 //! [`Message::Command`] for every user action. It never touches the
-//! `UserCommand` bus itself — the [TASK-022]/[TASK-023] reducer publishes
-//! what the panel emits ([FMD-068]).
+//! `UserCommand` bus itself — the reducer publishes
+//! what the panel emits, and each intent is self-contained and replayable.
 //!
 //! # Shape
 //!
@@ -13,77 +13,70 @@
 //! [logo] FastMD Viewer | <indexing status> [tag filter]        [☰ menu]
 //! ```
 //!
-//! * **Logo** — the retired panel vector-painted its badge; this
-//!   port renders the shared stand-in built by
-//!   [`crate::ui_iced::logo::logo_mark`] at [`LOGO_MARK_SIZE`], because
-//!   the legacy UI paint primitives do not exist in iced. See *Feature-gated
-//!   widgets* below and the trade-off table in
+//! * **Logo** — the shared stand-in built by
+//!   [`crate::ui_iced::logo::logo_mark`] at [`LOGO_MARK_SIZE`]. See
+//!   *Feature-gated widgets* below and the trade-off table in
 //!   [`crate::ui_iced::logo`].
 //! * **Indexing status** — [`indexing_status_text`] plus the `success`
 //!   palette token once indexing has finished.
 //! * **Tag filter** — an [`iced::widget::pick_list()`] over
 //!   [`TagFilterOption`]; emits [`UserCommand::SelectTagFilter`].
-//! * **Hamburger** — a ☰ [`iced::widget::button()`] labelled with
+//! * **Hamburger** — a literal ☰ [`iced::widget::button()`] labelled with
 //!   [`strings::HAMBURGER_MENU_BUTTON`], emitting
 //!   [`Message::Menu`] [`MenuMessage::Opened`];
-//!   the [TASK-023] reducer flips
+//!   the reducer flips
 //!   [`crate::ui_iced::app::OverlayState::hamburger_open`] and the
 //!   overlay host mounts [`hamburger_menu_card`] anchored at
-//!   [`hamburger_menu_anchor`]. The previous port gave this duty to a
-//!   [`pick_list()`], which was a *dropdown*, not the legacy menu: it had no
-//!   open/closed state, its closed title bar leaked the last-picked row,
-//!   and it could render only the flattened selectable rows (no section
-//!   headers, no no-models placeholder — see *Nested submenus* below). A
-//!   "Menu" button that opens a real menu restores the UI-061..UI-066.
+//!   [`hamburger_menu_anchor`]. A button that opens a real menu is what
+//!   UI-061..UI-066 needs: a [`pick_list()`] would be a *dropdown*, not a
+//!   menu — it has no open/closed state, its closed title bar leaks the
+//!   last-picked row, and it can render only flattened selectable rows
+//!   (no section headers, and no "no models configured" placeholder — see
+//!   *Nested submenus* below).
 //!
 //! # Nested submenus (UI-062/UI-064/UI-066)
 //!
 //! iced 0.14's built-in dropdowns are **single-level**:
 //! `overlay::menu::Menu` renders each option as one plain
 //! [`ToString::to_string`] row, has no separators, no disabled rows and no
-//! child menus, and DEC-005 rules out `iced_aw`. The port therefore keeps
-//! the full hierarchy in the *pure model* — [`build_menu_entries`] returns
-//! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state,
-//! exactly mirroring the legacy UI menu — and the menu card renders every
-//! row: section headers as muted non-selectable text, the UI-064
-//! [`strings::NO_CHAT_MODELS_CONFIGURED`] placeholder as muted text, and
-//! selectable rows as buttons carrying
+//! child menus, and `iced_aw` is not a dependency. The full hierarchy is
+//! therefore kept in the *pure model* — [`build_menu_entries`] returns
+//! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state.
+//! The card renders one level at a time: top-level submenu buttons carry a
+//! `>` cue, while submenu contents are selectable rows carrying
 //! [`hamburger_row_message`].
 //!
 //! # Feature-gated widgets
 //!
 //! * **Logo** — `iced::widget::image` needs the `image` feature and
 //!   `iced::widget::svg` needs `svg`; neither is enabled in `Cargo.toml`
-//!   (DEC-011 added iced with `wgpu`, `tiny-skia`, `fira-sans`,
+//!   (iced is built with `wgpu`, `tiny-skia`, `fira-sans`,
 //!   `advanced-shaping` and `markdown` only). A `text` mark is used
 //!   instead, single-sourced through [`crate::ui_iced::logo`], which also
-//!   records the raster / SVG / `canvas` cost of each option. Adding any of
-//!   them is a build-level decision for the orchestrator, not this task
-//!   ([TASK-020]).
+//!   records the raster / SVG / `canvas` cost of each option.
 //! * **Spinner** — iced 0.14 has **no** spinner widget at all (there is no
 //!   `iced::widget::spin`, and `iced_widget-0.14.2` contains no spinner
 //!   implementation). An indeterminate indicator would need `progress_bar`
 //!   driven by a timer subscription, which is runtime wiring outside this
-//!   task. The panel renders the status text only; the "indexing in
+//!   panel. The panel renders the status text only; the "indexing in
 //!   progress" state stays legible through the italic wording and the
 //!   [`strings::build_indexing_progress_text`] ellipsis.
 //!
-//! # Relocated helpers ([TASK-029])
+//! # Relocated helpers
 //!
 //! The bar's ten framework-free helpers ([`get_tag_filter_text`],
 //! [`compute_next_selected_file`], [`apply_batch_button_click`],
 //! [`apply_tools_button_click`], [`apply_about_button_click`],
 //! [`apply_background_logs_toggle`], [`apply_agent_debug_toggle`],
 //! [`apply_chat_model_selection`], [`apply_table_width_strategy_change`],
-//! [`strategy_label`]) used to be `pub use`d from
-//! `src/app/ui/panels/top.rs`, a file [TASK-029b] deletes. They are copied
-//! into this module verbatim; every one is a pure `UserCommand` constructor
-//! or a pure path/tag/label solver with **no framework type** in its signature
-//! or body.
+//! [`strategy_label`]) are **owned by this module**. Each is a pure
+//! `UserCommand` constructor or a pure path/tag/label solver with **no
+//! framework type** in its signature or body, so the panel and the reducer
+//! call the same code.
 //!
-//! `build_indexing_status_text` is **not** copied — it returns an
+//! `build_indexing_status_text` is **not** one of them — it returns an
 //! `RichText` and cannot be relocated framework-free. This module's own
-//! [`indexing_status_text`] is the iced re-typing of it.
+//! [`indexing_status_text`] is the iced equivalent.
 //!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
@@ -108,20 +101,15 @@ use crate::ui_iced::logo::logo_mark;
 use crate::ui_iced::message::{MenuMessage, Message};
 use crate::ui_iced::overlay::{MENU_PADDING, MENU_ROW_SPACING, MENU_WIDTH, card_style};
 
-// The framework-free helpers the legacy UI panel owned, **relocated into this
-// module** for the framework-free migration ([TASK-029]) from
-// `src/app/ui/panels/top.rs:33-121`.
+// The framework-free helpers this panel owns, **relocated into this
+// module**. Each is framework-free — pure `UserCommand` constructors and
+// pure path/tag/label solvers with no framework type in any signature or
+// body — so the panel and the reducer call the same code.
 //
-// They were previously `pub use`d from a file [TASK-029b] deletes. Each is
-// copied verbatim and is framework-free — pure `UserCommand` constructors and
-// pure path/tag/label solvers with no framework type in any signature or body
-// — so the iced panel and the [TASK-022] reducer call the same code. The
-// the legacy UI panel keeps its own copy until Phase 5.
-//
-// `build_indexing_status_text` is deliberately **not** copied: it returns an
-// `RichText`, so it cannot be relocated framework-free. The iced panel
+// `build_indexing_status_text` is deliberately **not** here: it returns an
+// `RichText`, so it cannot be relocated framework-free. This module
 // owns its own [`indexing_status_text`](crate::ui_iced::panels::top::indexing_status_text)
-// re-typing instead.
+// instead.
 
 /// Purpose: Determines the display text for the tag filter combobox.
 /// Inputs: selected_tag (optional string reference)
@@ -129,9 +117,6 @@ use crate::ui_iced::overlay::{MENU_PADDING, MENU_ROW_SPACING, MENU_WIDTH, card_s
 /// Purity: Pure function.
 /// Preconditions: None.
 /// Postconditions: Returns the tag name if one is selected, otherwise "Filter by Tag: All".
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
     selected_tag
@@ -145,9 +130,6 @@ pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
 /// Purity: Pure function.
 /// Preconditions: None.
 /// Postconditions: Returns `None` if an active tag is selected and it is not associated with the selected file. Otherwise returns the original selected file.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn compute_next_selected_file(
     selected_file: Option<&PathBuf>,
@@ -167,77 +149,53 @@ pub fn compute_next_selected_file(
 }
 
 /// Returns the command for clicking the batch-processing button.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_batch_button_click() -> UserCommand {
     UserCommand::OpenBatchDialog
 }
 
 /// Returns the command for clicking the "Tools..." button.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_tools_button_click() -> UserCommand {
     UserCommand::OpenToolsDialog
 }
 
 /// Returns the command for clicking the "About FastMD..." button.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_about_button_click() -> UserCommand {
     UserCommand::OpenAboutDialog
 }
 
 /// Returns the command for toggling the background logs window.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_background_logs_toggle(show: bool) -> UserCommand {
     UserCommand::ToggleBackgroundLogs(show)
 }
 
 /// Returns the command for toggling the agent debug window.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_agent_debug_toggle(show: bool) -> UserCommand {
     UserCommand::ToggleAgentDebugWindow(show)
 }
 
 /// Returns the command for picking a new chat model.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_chat_model_selection(model_name: String) -> UserCommand {
     UserCommand::SelectChatModel(model_name)
 }
 
 /// Returns the command for changing the table-width deficit strategy.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_table_width_strategy_change(strategy: DeficitStrategy) -> UserCommand {
     UserCommand::ChangeTableWidthStrategy(strategy)
 }
 
 /// Human-readable label for a [`DeficitStrategy`] variant, used as the
-/// `selected_text` of the top-bar table-width-strategy combobox and as
-/// the row label inside the dropdown. The match is intentionally
+/// row label inside the top-bar Table wrap algorithm submenu. The match is
+/// intentionally
 /// exhaustive over every variant of `DeficitStrategy` so adding a new
 /// strategy in the future is a compile error here until the label is
 /// supplied.
-///
-/// Relocated from the legacy UI top panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
     match strategy {
@@ -252,13 +210,12 @@ pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
 /// `LlmConfig::has_use_case` key selecting the chat-capable models
 /// (UI-064). Not user-facing text, but named so the literal appears once
 /// ([RUST-021]). Made `pub` so the agent panel's model selector
-/// ([`crate::ui_iced::agent`]) filters on the exact same key
-/// ([TASK-018]).
+/// ([`crate::ui_iced::agent`]) filters on the exact same key.
 pub const CHAT_USE_CASE: &str = "chat";
 
 /// Logical point size of the logo mark — the shared constant owned by
 /// [`crate::ui_iced::logo`], re-exported here so the top-bar public
-/// surface is unchanged ([TASK-020], [RUST-051]).
+/// surface includes it ([RUST-051]).
 pub use crate::ui_iced::logo::LOGO_MARK_SIZE;
 
 /// Logical point size of the app-title heading.
@@ -272,15 +229,13 @@ pub const BAR_SPACING: f32 = 8.0;
 /// and the 20 pt logo mark.
 pub const BAR_PADDING: f32 = 2.0;
 
-/// Full-on-screen height of the **top bar band**, in logical points
-/// ([TASK-010] band contract — the same 28 pt the pilot stub bands and
-/// the legacy egui `Panel::top` geometry carried; the migration map A2
-/// row).
+/// Full-on-screen height of the **top bar band**, in logical points — the
+/// 28 pt band contract this bar is laid out against.
 ///
-/// The legacy egui toolbar was this compact; without the fixed height
+/// The bar must stay this compact; without the fixed height
 /// the two pick lists' default button padding (5 pt vertical each)
 /// grew the band to ~40 pt and the bar rendered far taller than the
-/// panel it replaces.
+/// layout expects.
 pub const BAR_HEIGHT_POINTS: f32 = 28.0;
 
 /// Vertical padding of the two top-bar pick lists.
@@ -302,29 +257,29 @@ pub const PICK_LIST_PADDING: Padding = Padding {
 /// Width of the vertical rule drawn between top-bar groups.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// Minimum width of the hamburger menu card, mirroring the legacy UI panel's
-/// `ui.set_min_width(180.0)`. The shared context-menu card width
+/// Minimum width of the hamburger menu card, in logical points. The shared
+/// context-menu card width
 /// ([`MENU_WIDTH`], 200 pt) already satisfies it, so the menu card reuses
-/// that constant; [`MENU_MIN_WIDTH`] stays as the documented legacy bound.
+/// that constant; [`MENU_MIN_WIDTH`] stays as the documented lower bound.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
 
-/// Height of the Phosphor ☰ glyph the hamburger button renders.
+/// Height of the ☰ glyph the hamburger button renders.
 ///
-/// The glyph is drawn in the icon font at the same size the tag-filter
-/// pick list's text renders, so the button's padding (`PICK_LIST_PADDING`)
-/// keeps both controls the same height inside the fixed bar band.
+/// The requested Unicode glyph uses the regular text font, at the same size
+/// the tag-filter pick list's text renders; button padding keeps both controls
+/// the same height inside the fixed bar band.
 pub const MENU_BUTTON_GLYPH_SIZE: f32 = 16.0;
 
 /// Text size of a selectable hamburger-menu row.
 pub const MENU_ROW_TEXT_SIZE: f32 = 14.0;
 
 /// Text size of a hamburger-menu section header (visually quieter than a
-/// row — the same "group heading" treatment the legacy UI menu gave its
+/// row — the same "group heading" treatment the menu gives its
 /// submenus).
 pub const MENU_HEADER_TEXT_SIZE: f32 = 13.0;
 
 /// Right inset between the hamburger menu card and the window's right edge;
-/// the legacy dropdown slid out from the right-aligned ☰ button.
+/// the menu opens out from the right-aligned ☰ button.
 pub const MENU_ANCHOR_RIGHT_MARGIN: f32 = 12.0;
 
 /// Gap between the top bar's bottom edge and the hamburger menu card.
@@ -339,8 +294,7 @@ pub const MENU_ANCHOR_BELOW_BAR: f32 = 4.0;
 /// non-negative coordinates by the window-independent `max` guards.
 ///
 /// The overlay host adds its own `MENU_ANCHOR_GAP` before clamping
-/// against `viewport`, so a tiny window pushes the card onto the screen
-/// ([TASK-017a] clamp contract).
+/// against `viewport`, so a tiny window pushes the card onto the screen.
 ///
 /// Purity: pure function of `viewport`.
 #[must_use]
@@ -351,7 +305,7 @@ pub fn hamburger_menu_anchor(viewport: Size) -> Point {
     )
 }
 
-/// The [`Message`] a selectable hamburger menu row publishes ([FMD-068]).
+/// The [`Message`] a selectable hamburger menu row publishes.
 ///
 /// The row's own [`UserCommand`] is the self-contained intent; it rides the
 /// menu channel so the reducer can close the menu in the same reduction
@@ -363,11 +317,11 @@ pub fn hamburger_row_message(command: &UserCommand) -> Message {
     Message::Menu(MenuMessage::RowActivated(command.clone()))
 }
 
-/// The label a selectable hamburger row renders.
+/// The label a command-bearing hamburger row renders.
 ///
-/// Menu-card rows sit *below* their section header, so unlike the flattened
-/// dropdown port they carry no `"Windows › "` prefix — the check slot
-/// (`✓`, blank when unchecked) plus the row label is the full text.
+/// Menu-card rows sit *below* their submenu title, so they carry no submenu
+/// prefix — the check slot (`✓`, blank when unchecked) plus the row label is
+/// the full text.
 ///
 /// Purity: pure function of `(label, checked)`.
 #[must_use]
@@ -377,18 +331,17 @@ pub fn hamburger_row_label(label: &str, checked: bool) -> String {
 
 /// The Phosphor icon font handle used for the logo mark.
 ///
-/// The family is registered by [`crate::ui_iced::fonts`] at boot
-/// ([TASK-007]); `PHOSPHOR_FONT_NAME` is the shared registration key.
+/// The family is registered by [`crate::ui_iced::fonts`] at boot;
+/// `PHOSPHOR_FONT_NAME` is the shared registration key.
 pub fn phosphor_font() -> Font {
     Font::with_name(PHOSPHOR_FONT_NAME)
 }
 
 /// Builds the indexing status label shown in the top bar.
 ///
-/// iced re-typing of the legacy UI panel's `build_indexing_status_text`: the
-/// `RichText` return type is replaced by the plain `String` plus the
+/// The status is a plain `String` plus the
 /// [`indexing_status_color`] / [`indexing_status_font`] token lookups, so no
-/// the legacy UI type crosses into the iced layer.
+/// framework-specific type crosses into this layer.
 ///
 /// Purity: pure function of `(indexing_finished, file_count)`.
 pub fn indexing_status_text(indexing_finished: bool, file_count: usize) -> String {
@@ -402,9 +355,7 @@ pub fn indexing_status_text(indexing_finished: bool, file_count: usize) -> Strin
 /// Palette token for the indexing status label.
 ///
 /// The `success` token once indexing has finished, the default body `text`
-/// token while it runs — the iced equivalent of the legacy UI panel's
-/// `.color(ui.palette().success)`. No numeric colour is introduced
-/// ([GUD-003]).
+/// token while it runs. No numeric colour is introduced here.
 ///
 /// Purity: pure function of `indexing_finished`.
 pub fn indexing_status_color(indexing_finished: bool) -> Color {
@@ -418,7 +369,7 @@ pub fn indexing_status_color(indexing_finished: bool) -> Color {
 
 /// Font for the indexing status label.
 ///
-/// Italic while indexing (the legacy UI panel's `.italics()`), upright once
+/// Italic while indexing, upright once
 /// finished. iced 0.14's `Text` has no `.italic()` helper, so the style is
 /// carried on the [`Font`] struct.
 ///
@@ -527,7 +478,7 @@ impl MenuSection {
     pub fn title(self) -> Option<&'static str> {
         match self {
             MenuSection::Direct => None,
-            MenuSection::Windows => Some(strings::MENU_WINDOWS),
+            MenuSection::Windows => Some(strings::MENU_WINDOWS_TITLE),
             MenuSection::ChatModels => Some(strings::MENU_CHAT_MODELS),
             MenuSection::TableWrap => Some(strings::MENU_TABLE_WRAP_ALGORITHM),
         }
@@ -539,25 +490,25 @@ impl MenuSection {
 pub enum MenuEntryKind {
     /// Selecting the row publishes the wrapped intent.
     Action(UserCommand),
-    /// A non-selectable group heading.
-    SectionHeader,
+    /// Selecting the row opens the named submenu.
+    Submenu(MenuSection),
     /// A non-selectable informational row — UI-064's "no models
     /// configured" placeholder.
     Placeholder,
 }
 
 impl MenuEntryKind {
-    /// The intent this row publishes, or `None` for non-selectable rows.
+    /// The intent this row publishes, or `None` for navigation/placeholder rows.
     pub fn command(&self) -> Option<&UserCommand> {
         match self {
             MenuEntryKind::Action(command) => Some(command),
-            MenuEntryKind::SectionHeader | MenuEntryKind::Placeholder => None,
+            MenuEntryKind::Submenu(_) | MenuEntryKind::Placeholder => None,
         }
     }
 
     /// Whether the row can be picked.
     pub fn is_selectable(&self) -> bool {
-        self.command().is_some()
+        matches!(self, MenuEntryKind::Action(_) | MenuEntryKind::Submenu(_))
     }
 }
 
@@ -577,20 +528,20 @@ pub struct MenuEntry {
 /// A selectable hamburger row: the rendered label plus the intent it
 /// publishes.
 ///
-/// This is the widget-facing projection of [`MenuEntry`]: only rows with a
-/// real [`UserCommand`] survive, because a iced dropdown has to answer a
-/// click on *any* row with a `Message` and the panel must not invent intent.
+/// This is the command-facing projection of [`MenuEntry`]: only rows with a
+/// real [`UserCommand`] survive; submenu navigation is represented by
+/// [`MenuMessage`] instead.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HamburgerItem {
-    /// Fully formatted dropdown label (check slot + submenu prefix + label).
+    /// Fully formatted label (check slot + submenu name + row label).
     pub label: String,
     /// The intent published when this row is picked.
     pub command: UserCommand,
 }
 
 impl HamburgerItem {
-    /// Projects a [`MenuEntry`] onto a selectable row, returning `None`
-    /// for section headers and placeholders.
+    /// Projects a [`MenuEntry`] onto a command row, returning `None` for
+    /// submenu buttons and placeholders.
     pub fn from_entry(entry: &MenuEntry) -> Option<Self> {
         let command = entry.kind.command()?.clone();
         Some(Self {
@@ -612,11 +563,11 @@ impl fmt::Display for HamburgerItem {
 
 /// The deficit strategies in hamburger-menu order (UI-066).
 ///
-/// Order is load-bearing and carried over verbatim from the legacy UI panel:
+/// Order is load-bearing:
 /// the production default first ([`DeficitStrategy::HybridMinPenaltyWaterFill`],
 /// best G1/G2 trade-off), then the two original FTWA strategies, then the
-/// three survey algorithms from `doc/planning/table-column-width-algorithm.md`
-/// §2.10 / §2.13 / §2.14. A new strategy must be appended here as well as
+/// three survey algorithms (§2.10 / §2.13 / §2.14 of the table-width
+/// algorithm). A new strategy must be appended here as well as
 /// to `DeficitStrategy` so [`strategy_label`] stays exhaustive.
 pub fn strategy_menu_order() -> [DeficitStrategy; 5] {
     [
@@ -628,9 +579,9 @@ pub fn strategy_menu_order() -> [DeficitStrategy; 5] {
     ]
 }
 
-/// Builds the complete hamburger menu — every row, including the
-/// non-selectable section headers and the empty-chat-models placeholder —
-/// in UI-061..UI-066 order.
+/// Builds the hamburger menu model: top-level actions and submenu buttons,
+/// submenu contents, and the empty-chat-models placeholder, in UI-061..UI-066
+/// order.
 ///
 /// Purity: pure function of the view model.
 pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
@@ -650,10 +601,9 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
         },
     ];
 
-    // Windows submenu — window-visibility toggles (UI-062, UI-063). A
-    // toggle row carries the value it *switches to*, and is checked while
-    // the window is currently shown.
-    entries.push(section_header(MenuSection::Windows));
+    // The submenu entry is on the root level; its toggles render only after
+    // the user opens that submenu.
+    entries.push(submenu_entry(MenuSection::Windows));
     entries.push(MenuEntry {
         label: strings::MENU_BACKGROUND_OPERATIONS.to_string(),
         section: MenuSection::Windows,
@@ -670,7 +620,7 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     });
 
     // Chat models submenu (UI-064, UI-065).
-    entries.push(section_header(MenuSection::ChatModels));
+    entries.push(submenu_entry(MenuSection::ChatModels));
     if view_model.chat_models.is_empty() {
         entries.push(MenuEntry {
             label: strings::NO_CHAT_MODELS_CONFIGURED.to_string(),
@@ -691,7 +641,7 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     }
 
     // Table wrap algorithm submenu (UI-066).
-    entries.push(section_header(MenuSection::TableWrap));
+    entries.push(submenu_entry(MenuSection::TableWrap));
     for variant in strategy_menu_order() {
         let is_selected = variant == view_model.current_strategy;
         entries.push(MenuEntry {
@@ -713,35 +663,78 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     entries
 }
 
-/// Renders the full hamburger menu card over the app palette, one row per
-/// [`MenuEntry`] (UI-061..UI-066).
+/// Number of visible rows used by the anchored menu's viewport clamp.
+///
+/// The root shows direct actions and submenu buttons. A submenu shows its
+/// title, a back action and the submenu's entries.
+#[must_use]
+pub fn hamburger_menu_row_count(
+    entries: &[MenuEntry],
+    active_submenu: Option<MenuSection>,
+) -> usize {
+    match active_submenu {
+        Some(section) => {
+            entries
+                .iter()
+                .filter(|entry| entry.section == section)
+                .count()
+                + 2
+        }
+        None => entries
+            .iter()
+            .filter(|entry| entry.section == MenuSection::Direct)
+            .count(),
+    }
+}
+
+/// Renders the visible level of the hamburger menu over the app palette
+/// (UI-061..UI-066).
 ///
 /// Row shapes:
 ///
-/// * [`MenuEntryKind::SectionHeader`] — muted, non-interactive text. A
-///   header is the submenu's name rendered *above* its rows, so no
-///   `format_menu_row_label` check-slot prefixing.
+/// * [`MenuEntryKind::Submenu`] — a clickable row with a trailing `>` cue.
 /// * [`MenuEntryKind::Placeholder`] — muted, non-interactive text (the
 ///   UI-064 no-chat-models placeholder).
 /// * [`MenuEntryKind::Action`] — a button whose label is
 ///   [`hamburger_row_label`] and whose press emits [`hamburger_row_message`]
 ///   (the row's own [`UserCommand`]).
 ///
-/// The card is [`MENU_WIDTH`] wide, `MENU_PADDING` padded and carries the
-/// shared context-menu chrome (`card_style`, [GUD-003]); rows sit on the
-/// shared [`MENU_ROW_SPACING`] rhythm, which is what makes
-/// [`crate::ui_iced::overlay::menu_size`] a faithful clamp input even with
-/// headers mixed in.
+/// The card uses the shared context-menu chrome and regular iced button
+/// styling, keeping it on the application's foreground and background
+/// palette.
 ///
 /// Purity: pure view function; clones every label into the element so the
 /// returned [`Element`] is `'static` and can be folded into the overlay
 /// host's base without tying the whole view tree to the entries' lifetime.
 /// Emits [`Message::Menu`] only.
-pub fn hamburger_menu_card(entries: &[MenuEntry]) -> Element<'static, Message> {
+pub fn hamburger_menu_card(
+    entries: &[MenuEntry],
+    active_submenu: Option<MenuSection>,
+) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
 
     let mut rows = Column::<Message>::new().spacing(MENU_ROW_SPACING);
-    for entry in entries {
+    if let Some(section) = active_submenu {
+        rows = rows
+            .push(
+                container(
+                    text(section.title().unwrap_or_default())
+                        .size(MENU_HEADER_TEXT_SIZE)
+                        .color(palette.text_muted),
+                )
+                .width(Length::Fill),
+            )
+            .push(
+                button(text(strings::MENU_BACK_TO_MAIN))
+                    .width(Length::Fill)
+                    .on_press(Message::Menu(MenuMessage::SubmenuClosed)),
+            );
+    }
+
+    for entry in entries.iter().filter(|entry| match active_submenu {
+        Some(section) => entry.section == section,
+        None => entry.section == MenuSection::Direct,
+    }) {
         let row: Element<'static, Message> = match &entry.kind {
             MenuEntryKind::Action(command) => button(
                 text(hamburger_row_label(&entry.label, entry.checked)).size(MENU_ROW_TEXT_SIZE),
@@ -749,7 +742,13 @@ pub fn hamburger_menu_card(entries: &[MenuEntry]) -> Element<'static, Message> {
             .width(Length::Fill)
             .on_press(hamburger_row_message(command))
             .into(),
-            MenuEntryKind::SectionHeader | MenuEntryKind::Placeholder => container(
+            MenuEntryKind::Submenu(section) => button(
+                text(strings::format_menu_submenu_label(&entry.label)).size(MENU_ROW_TEXT_SIZE),
+            )
+            .width(Length::Fill)
+            .on_press(Message::Menu(MenuMessage::SubmenuOpened(*section)))
+            .into(),
+            MenuEntryKind::Placeholder => container(
                 text(entry.label.clone())
                     .size(MENU_HEADER_TEXT_SIZE)
                     .color(palette.text_muted),
@@ -767,17 +766,23 @@ pub fn hamburger_menu_card(entries: &[MenuEntry]) -> Element<'static, Message> {
         .into()
 }
 
-/// The non-selectable heading row for a submenu.
-fn section_header(section: MenuSection) -> MenuEntry {
+/// Creates a top-level menu entry that opens `section`.
+fn submenu_entry(section: MenuSection) -> MenuEntry {
+    let label = match section {
+        MenuSection::Windows => strings::MENU_WINDOWS,
+        MenuSection::ChatModels => strings::MENU_CHAT_MODELS,
+        MenuSection::TableWrap => strings::MENU_TABLE_WRAP_ALGORITHM,
+        MenuSection::Direct => unreachable!("direct actions are not submenus"),
+    };
     MenuEntry {
-        label: section.title().unwrap_or_default().to_string(),
-        section,
-        kind: MenuEntryKind::SectionHeader,
+        label: label.to_string(),
+        section: MenuSection::Direct,
+        kind: MenuEntryKind::Submenu(section),
         checked: false,
     }
 }
 
-/// The selectable hamburger rows the pick list renders, in menu order.
+/// The command-bearing hamburger rows, in menu order.
 ///
 /// Purity: pure function of the view model.
 pub fn hamburger_items(view_model: &TopBarViewModel) -> Vec<HamburgerItem> {
@@ -791,7 +796,7 @@ pub fn hamburger_items(view_model: &TopBarViewModel) -> Vec<HamburgerItem> {
 ///
 /// Holding the data in a plain struct keeps the widget tree free of
 /// `FastMdApp` reads, which is what makes the panel unit-testable without a
-/// live runtime ([TASK-011] testing rule) and keeps the view decoupled from
+/// live runtime and keeps the view decoupled from
 /// where each field comes from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TopBarViewModel {
@@ -818,10 +823,10 @@ pub struct TopBarViewModel {
 impl TopBarViewModel {
     /// Snapshots the top bar's inputs off `app`.
     ///
-    /// Reads exactly the accessors the legacy UI panel used:
+    /// Reads only these accessors:
     /// `file_processor()`, `tags()`, `config()` and
     /// `orchestrator.{background_manager, agent_panel_state}`. Chat models
-    /// keep the legacy UI selection rule: prefer models declaring the `chat`
+    /// follow this selection rule: prefer models declaring the `chat`
     /// use case, fall back to every configured model when none do, then
     /// sort by name.
     pub fn from_app(app: &FastMdApp) -> Self {
@@ -883,8 +888,8 @@ impl TopBarViewModel {
     }
 
     /// The file that should stay selected after the tag filter becomes
-    /// `new_tag` — the legacy UI panel's post-filter selection rule, exposed so
-    /// the [TASK-022] reducer can apply it from the view model alone.
+    /// `new_tag` — the post-filter selection rule, exposed so
+    /// the reducer can apply it from the view model alone.
     ///
     /// Delegates to [`compute_next_selected_file`].
     pub fn next_selected_file_for(
@@ -897,25 +902,21 @@ impl TopBarViewModel {
     }
 }
 
-/// Renders the iced top toolbar from a view-model snapshot ([TASK-011]).
+/// Renders the top toolbar from a view-model snapshot.
 ///
-/// The returned element emits [`Message::Command`] only:
+/// The returned element emits [`Message::Command`] for the tag filter and
+/// [`Message::Menu`] for hamburger navigation:
 /// * tag filter pick → [`UserCommand::SelectTagFilter`]
-/// * Batch → [`UserCommand::OpenBatchDialog`]
-/// * Tools → [`UserCommand::OpenToolsDialog`]
-/// * Background operations / Agent debug → [`UserCommand::ToggleBackgroundLogs`]
-///   / [`UserCommand::ToggleAgentDebugWindow`]
-/// * chat model → [`UserCommand::SelectChatModel`]
-/// * strategy → [`UserCommand::ChangeTableWidthStrategy`]
-/// * About → [`UserCommand::OpenAboutDialog`]
+/// * hamburger open / submenu navigation → [`MenuMessage`]
+/// * hamburger row → the row's wrapped [`UserCommand`], routed by the reducer
 ///
 /// The tag filter and the hamburger are always allocated (never removed
 /// conditionally) so the widget tree shape does not change across the
 /// indexing-finished transition.
 ///
-/// The bar renders as the [TASK-010] full-width band at the fixed
-/// [`BAR_HEIGHT_POINTS`] height (content vertically centred), compact pick
-/// lists via [`PICK_LIST_PADDING`] — parity with the legacy egui toolbar.
+/// The bar renders as a full-width band at the fixed
+/// [`BAR_HEIGHT_POINTS`] height (content vertically centred), with compact
+/// pick lists via [`PICK_LIST_PADDING`].
 pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -942,14 +943,11 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     .width(Length::Shrink)
     .into();
 
-    let hamburger: Element<'_, Message> = button(
-        text(strings::HAMBURGER_MENU_BUTTON)
-            .font(phosphor_font())
-            .size(MENU_BUTTON_GLYPH_SIZE),
-    )
-    .padding(PICK_LIST_PADDING)
-    .on_press(Message::Menu(MenuMessage::Opened))
-    .into();
+    let hamburger: Element<'_, Message> =
+        button(text(strings::HAMBURGER_MENU_BUTTON).size(MENU_BUTTON_GLYPH_SIZE))
+            .padding(PICK_LIST_PADDING)
+            .on_press(Message::Menu(MenuMessage::Opened))
+            .into();
 
     container(
         Row::with_children(vec![
@@ -958,19 +956,17 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
             rule::vertical(SEPARATOR_WIDTH).into(),
             status.into(),
             tag_filter,
-            container(hamburger)
-                .width(Length::Fill)
-                .align_right(Length::Shrink)
-                .into(),
+            container(hamburger).align_right(Length::Fill).into(),
         ])
         .spacing(BAR_SPACING)
         .padding(BAR_PADDING)
+        .width(Length::Fill)
         .align_y(Alignment::Center),
     )
-    // Full-width band at the [TASK-010] fixed height, its content
+    // Full-width band at the fixed height, its content
     // vertically centred (`iced_widget-0.14.2/src/container.rs:150-159`).
     // Without the fixed length the band grows to the pick lists' content
-    // height and renders far taller than the legacy toolbar.
+    // height and renders far taller than the band contract allows.
     .width(Length::Fill)
     .center_y(BAR_HEIGHT_POINTS)
     .into()

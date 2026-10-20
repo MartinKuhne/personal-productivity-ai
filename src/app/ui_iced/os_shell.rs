@@ -1,21 +1,16 @@
-//! Platform-shell helpers for the iced layer ([TASK-029]).
+//! Platform-shell helpers for the iced layer.
 //!
 //! The three OS-facing wrappers the iced reducer needs — open a file in the
 //! system default editor, reveal a file in the OS file explorer, and open a
-//! URL in the default browser. They are copied out of the legacy UI
-//! `src/app/ui/os_shell.rs` so `ui_iced` no longer depends on a file
-//! [TASK-029b] deletes.
+//! URL in the default browser.
 //!
-//! # framework-free by construction ([TASK-029] verification)
+//! # Framework-free by construction
 //!
 //! Every item here routes through the `opener` crate (`Cargo.toml`) and takes
-//! only `&Path` / `&str`. **No framework type appears in any
-//! signature or body**, unlike the legacy UI original, whose fourth function
-//! (`dispatch_platform_commands`) drains an `&[OutputCommand]`.
-//! That drainer is deliberately **not** copied: iced has no platform-output
-//! command list, and the iced link path calls [`open_url`] from the reducer
-//! instead (see the TASK-020 audit note in
-//! `doc/planning/iced-migration-map.md`).
+//! only `&Path` / `&str`. **No framework type appears in any signature or
+//! body.** There is no platform-output command list to drain: iced has no such
+//! concept, so the reducer calls [`open_url`] directly when it needs to open
+//! a link.
 //!
 //! Unit tests live in the sibling `os_shell_tests.rs` sidecar.
 
@@ -28,8 +23,7 @@ use std::path::Path;
 /// Open a file in the system default editor.
 ///
 /// The result is discarded — a failed open is surfaced by the caller's own
-/// logging and the user can retry ([NFR-001] is the caller's contract here,
-/// same as the legacy UI helper's).
+/// logging and the user can retry ([NFR-001] is the caller's contract here).
 pub fn open_in_system_editor(path: &Path) {
     let _ = opener::open(path);
 }

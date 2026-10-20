@@ -1,12 +1,11 @@
-//! Iced port of the left file-tree panel ([TASK-012]: UI-004..UI-018,
-//! UI-020..UI-025 and UI-050).
+//! Left file-tree panel (UI-004..UI-018, UI-020..UI-025 and UI-050).
 //!
-//! Replaces `src/app/ui/panels/left.rs`. Like [`top`](super::top), the panel
-//! is a **pure view**: it renders a [`LeftPanelViewModel`] snapshot into an
-//! [`iced::Element`] of [`Message`] and emits [`Message::Command`] for user
-//! intent. It never touches the `UserCommand` bus, never reads a file and
-//! never mutates `FastMdApp` — the [TASK-022] reducer does all of that
-//! ([FMD-068]).
+//! Like [`top`](super::top), the panel is a **pure view**: it renders a
+//! [`LeftPanelViewModel`] snapshot into an [`iced::Element`] of [`Message`]
+//! and emits [`Message::Command`] for user intent. It never touches the
+//! `UserCommand` bus, never reads a file and never mutates `FastMdApp` —
+//! the reducer does all of that, so every intent is self-contained and
+//! replayable.
 //!
 //! # Shape
 //!
@@ -25,72 +24,65 @@
 //!   then name-ascending) and **UI-018** (a tag filter prunes directories
 //!   with no matching files) actually live. Rendering the reused rows *in
 //!   order* is what preserves both requirements — this module adds no
-//!   sorting of its own. `crate::ui::tree` is a file the migration KEEPS, so
+//!   sorting of its own. `crate::ui::tree` is framework-free shared code, so
 //!   that import stays.
 //! * [`crate::ui_iced::layout::clamped_width`] is the single UI-016
 //!   clamping rule shared with the pane-grid resize reduction.
 //!
-//! # Relocated helpers ([TASK-029])
+//! # Workspace-tree construction
 //!
-//! [`build_workspace_tree`] — the `TreeNode` builder the legacy UI panel owned —
-//! used to be called across the boundary at
-//! `crate::ui::panels::left::build_workspace_tree`, a module [TASK-029b]
-//! deleted. It is copied into this module together with its three private
-//! helpers (`prune_empty_dirs`, `library_for_path`,
-//! `insert_path_into_tree`). All four are **framework-free**: they touch only
-//! [`TreeNode`], [`ContentLibrary`] and `Path`, never framework. The
-//! `TreeNode` type itself lives in `crate::ui::app`, a KEPT file, so it is
-//! imported rather than duplicated. The legacy UI panel keeps its own copy until
-//! Phase 5.
+//! [`build_workspace_tree`] builds the `TreeNode` hierarchy inside this
+//! module, together with its three private helpers (`prune_empty_dirs`,
+//! `library_for_path`, `insert_path_into_tree`). All four are
+//! **framework-free**: they touch only [`TreeNode`], [`ContentLibrary`] and
+//! `Path`, never a UI framework type. The `TreeNode` type itself lives in
+//! `crate::ui::app`, so it is imported rather than duplicated.
 //!
-//! Only what the legacy UI bound to `Ui`/`Context` is re-typed here:
-//! the width measurement, the row labels, the click→command mapping and the
-//! context-menu item list.
+//! The rest of the module is the panel's own typing: the width measurement,
+//! the row labels, the click→command mapping and the context-menu item list.
 //!
 //! # UI-016 auto-fit is a pure label→width function
 //!
-//! the legacy UI measured real pixels through `Context`
-//! (`ui/panels/left.rs:145-177`). A pure view has no font atlas to ask, so
-//! [`auto_fit_width`] takes an **injected measurer** (`Fn(&str) -> f32`) and
-//! is otherwise exactly the legacy UI formula: `depth × 18 + label_width + 40`,
-//! clamped to `[LEFT_PANEL_MIN_WIDTH, viewport × LEFT_PANEL_MAX_WIDTH_FRACTION]`.
+//! A pure view has no font atlas to ask, so [`auto_fit_width`] takes an
+//! **injected measurer** (`Fn(&str) -> f32`) and is otherwise the plain
+//! formula `depth × 18 + label_width + 40`, clamped to
+//! `[LEFT_PANEL_MIN_WIDTH, viewport × LEFT_PANEL_MAX_WIDTH_FRACTION]`.
 //! **Real pixel measurement is not achievable in a pure view** — iced 0.14
 //! only exposes text metrics after layout, from inside `Widget::layout`
-//! (`iced_core-0.14.0/src/layout.rs`), which is runtime plumbing owned by
-//! [TASK-022]. Until then the reducer passes a measurer (an approximation
-//! is fine for a clamped fit) or keeps the user's remembered width.
+//! (`iced_core-0.14.0/src/layout.rs`). The reducer therefore supplies the
+//! measurer (an approximation is fine for a clamped fit) or keeps the
+//! user's remembered width.
 //!
 //! # Deferred context-menu intent
 //!
 //! "Run as prompt…", "Print…" and the multi-select "Delete" read files or
-//! fan out inside the legacy UI click handler. The panel emits the matching
+//! fan out across many commands, so the panel emits the matching
 //! [`TreeMessage`] variant instead and lets the reducer do the work — see
 //! the [`message`](crate::ui_iced::message) module header.
 //!
-//! # Known gaps (flagged in the TASK-012 verification log)
+//! # Known gaps
 //!
-//! * **Modifier-aware multi-select (UI-022) — CLOSED.** the legacy UI
-//!   computed `multi` from `ui.input(|i| i.modifiers)` at click time.
-//!   iced's `MouseArea::on_press` carries no modifier state
+//! * **Modifier-aware multi-select (UI-022) — CLOSED.** iced's
+//!   `MouseArea::on_press` carries no modifier state
 //!   (`mouse_area.rs:38-41`) and neither does
 //!   `mouse::Event::ButtonPressed` (`iced_core-0.14.0/src/mouse/event.rs:26`),
-//!   so the panel still emits [`LeftPanelViewModel::multi_select`] and
-//!   [`from_app`](LeftPanelViewModel::from_app) still defaults it to
-//!   `false` — it has no modifier input. The gap is closed one level up:
+//!   so multi-select is carried as the [`LeftPanelViewModel::multi_select`]
+//!   field and [`from_app`](LeftPanelViewModel::from_app) defaults it to
+//!   `false` — it has no modifier input. The value is supplied one level up:
 //!   the subscription bridge's keyboard lane mirrors Shift onto
 //!   [`OverlayState::modifiers`](crate::ui_iced::app::OverlayState::modifiers),
 //!   and `ViewModels::from_app` overrides the field from it alongside the
 //!   other reducer-owned merges. The Shift keydown is delivered and reduced
 //!   **before** the row-click message, so the bit is current when
 //!   [`row_click_command`] runs.
-//! * **Tooltips.** iced 0.14 has no tooltip primitive under DEC-005
-//!   (`iced_aw` is ruled out), so the search/clear buttons' the legacy UI tooltips
+//! * **Tooltips.** iced 0.14 has no tooltip primitive, so the search and
+//!   clear buttons' tooltips
 //!   ([`strings::SEARCH_TRIGGER_TOOLTIP`],
 //!   [`strings::SEARCH_CLEAR_TOOLTIP`]) are not rendered.
 //! * **Search box position.** UI-050 says "at the bottom of the directory
-//!   tree pane"; the legacy UI build has always rendered it directly under the
-//!   header, and this port mirrors the shipped behaviour rather than the
-//!   spec wording ([RUST-041] drift note).
+//!   tree pane"; the panel renders it directly under the header, which is
+//!   the shipped behaviour rather than the spec wording ([RUST-041] drift
+//!   note).
 //!
 //! Unit tests live in the sibling `left_tests.rs` sidecar.
 
@@ -139,27 +131,25 @@ const FOLDER_SKILLS_SUBDIR: &str = "Folder";
 /// literal ([RUST-021]).
 pub const NOTE_SKILLS_SUBDIR: &str = "Note";
 
-/// Logical point size of the panel heading (legacy parity: `16.0`).
+/// Logical point size of the panel heading.
 pub const HEADER_SIZE: f32 = 16.0;
 
-/// Logical point size of tree rows and search-result titles (legacy parity:
-/// the `FontId::proportional(14.0)` the width pass measured at).
+/// Logical point size of tree rows and search-result titles — the size the
+/// width pass measures at.
 pub const ROW_TEXT_SIZE: f32 = 14.0;
 
-/// Logical point size of the secondary search-result lines (legacy parity:
-/// `11.0`).
+/// Logical point size of the secondary search-result lines.
 pub const SECONDARY_TEXT_SIZE: f32 = 11.0;
 
-/// Horizontal indent added per tree depth level, in logical points
-/// (legacy parity: `18.0`, `ui/panels/left.rs:169`).
+/// Horizontal indent added per tree depth level, in logical points.
 pub const ROW_INDENT_PER_DEPTH: f32 = 18.0;
 
 /// Deepest indent that is drawn; deeper rows clamp to it, guarding against
-/// unbounded indentation (legacy parity: `50`, `ui/tree/render.rs:450`).
+/// unbounded indentation.
 pub const MAX_ROW_INDENT_DEPTH: usize = 50;
 
 /// Width added on top of a measured label for row padding, the selection
-/// frame and the scroll gutter (legacy parity: `40.0`).
+/// frame and the scroll gutter.
 pub const ROW_WIDTH_SLACK: f32 = 40.0;
 
 /// Padding inside the panel body.
@@ -171,13 +161,12 @@ pub const ROW_PADDING_Y: f32 = 2.0;
 /// Horizontal padding of one tree row, before the depth indent is added.
 pub const ROW_PADDING_X: f32 = 6.0;
 
-/// Slot height of one search-result card (legacy parity: `52.0`, the
-/// `show_rows` slot the legacy UI panel virtualised against).
+/// Slot height of one search-result card, in logical pixels.
 pub const SEARCH_ROW_HEIGHT: f32 = 52.0;
 
 /// Icon slot for a file row. Directories draw a caret; a file gets a blank
-/// slot of the same width so the two label shapes stay aligned — the exact
-/// string the legacy UI width measurement used (`ui/panels/left.rs:157`).
+/// slot of the same width so the two label shapes stay aligned — the width
+/// measurement uses this same string.
 pub const FILE_ROW_ICON: &str = " ";
 
 /// The glyph that opens a directory row's caret slot.
@@ -198,9 +187,8 @@ pub fn row_icon(is_dir: bool, is_expanded: bool) -> &'static str {
 
 /// The label a row renders: `"<icon> <name>"`.
 ///
-/// Byte-identical to the string the legacy UI auto-fit pass measured
-/// (`ui/panels/left.rs:159`), so the same measurer can be swapped between
-/// the two builds and produce the same width.
+/// The auto-fit pass measures this exact string, so any measurer swapped in
+/// produces the same width for the same rows.
 ///
 /// Purity: pure function of `row`.
 #[must_use]
@@ -238,9 +226,7 @@ pub fn longest_row_width<'a>(
 ///
 /// Shares [`clamped_width`] with the pane-grid resize reduction, so the
 /// degenerate tiny-viewport case behaves identically in both paths: when the
-/// 20 % cap falls *below* the minimum, the minimum wins. (the legacy UI's inline
-/// version produced the cap there instead — the iced layer deliberately
-/// keeps one rule for every UI-016 width.)
+/// 20 % cap falls *below* the minimum, the minimum wins.
 ///
 /// Purity: pure for a pure `measure`.
 #[must_use]
@@ -267,10 +253,8 @@ pub fn panel_width(remembered: Option<f32>, viewport_width: f32) -> f32 {
 
 /// Whether a row renders as selected.
 ///
-/// Mirrors the legacy UI row exactly: **directory rows are never highlighted**
-/// (`selectable_label(false, ..)`, `ui/tree/render.rs:454`); a file row is
-/// selected when it is in the multi-select set or is the single selected
-/// file (`ui/tree/render.rs:456-457`).
+/// **Directory rows are never highlighted**; a file row is selected when it
+/// is in the multi-select set or is the single selected file.
 ///
 /// Purity: pure.
 #[must_use]
@@ -282,13 +266,11 @@ pub fn is_row_selected(
     !row.is_dir && (selected_files.contains(&row.path) || selected_file == Some(row.path.as_path()))
 }
 
-/// The intent a left-click on a row produces.
+/// The intent a left-click on a row produces: a directory row selects the
+/// directory and toggles its expansion; a file row selects the file.
 ///
-/// Re-typed from `apply_file_row_click` / `apply_directory_row_click`
-/// (`ui/tree/handlers.rs:51-69`). Those originals take
-/// `&mut TreeNodeContext`, which carries `Modifiers`, so they are not
-/// framework-free; the iced layer takes the `multi` flag explicitly instead
-/// of reading modifier state.
+/// The `multi` flag is passed in explicitly because iced's press message
+/// carries no modifier state.
 ///
 /// Purity: pure.
 #[must_use]
@@ -308,11 +290,9 @@ pub fn row_click_command(row: &FlatRow, multi: bool) -> UserCommand {
 
 /// The intent a double-click on a row produces.
 ///
-/// legacy parity: double-click **opens a file** in the editor
-/// (`ui/tree/render.rs:414-418`) and is a deliberate **no-op on a
-/// directory** — the legacy UI fires `clicked()` *and* `double_clicked()` for one
-/// double-click, so a second toggle would undo the first (render-audit
-/// P1-9, `ui/tree/render.rs:394-397`).
+/// Double-click **opens a file** in the editor and is a deliberate **no-op
+/// on a directory**: one double-click also fires the single-click handler,
+/// so a second expand toggle would undo the first.
 ///
 /// Purity: pure.
 #[must_use]
@@ -324,9 +304,8 @@ pub fn row_double_click_command(row: &FlatRow) -> Option<UserCommand> {
     }
 }
 
-/// Context-menu rows for a **directory** row, in the legacy UI menu order
-/// (UI-006; `ui/tree/render.rs:18-96`), followed by the VFS-122 folder
-/// skills.
+/// Context-menu rows for a **directory** row, in menu order (UI-006),
+/// followed by the VFS-122 folder skills.
 ///
 /// Purity: pure.
 #[must_use]
@@ -380,13 +359,11 @@ pub fn directory_menu_items(path: &Path, folder_skills: &[SkillFile]) -> Vec<Men
     items
 }
 
-/// Context-menu rows for a **single-selected file**, in the legacy UI menu order
-/// (UI-007, UI-008, UI-009..UI-014, UI-020;
-/// `ui/tree/render.rs:120-303`).
+/// Context-menu rows for a **single-selected file**, in menu order
+/// (UI-007, UI-008, UI-009..UI-014, UI-020).
 ///
-/// `typst_available` gates "Save as PDF…" exactly as the legacy UI does
-/// (`ui/tree/render.rs:194`): the row is absent, not disabled, when the
-/// `typst` CLI is missing.
+/// `typst_available` gates "Save as PDF…": the row is absent, not
+/// disabled, when the `typst` CLI is missing.
 ///
 /// Purity: pure.
 #[must_use]
@@ -457,7 +434,7 @@ pub fn file_menu_items(
 }
 
 /// Context-menu rows for a file inside a **multi-selection**
-/// (UI-023, UI-024, UI-025; `ui/tree/render.rs:100-116`).
+/// (UI-023, UI-024, UI-025).
 ///
 /// `paths` is the whole selection; the reducer receives it whole because
 /// one menu row can only emit one message.
@@ -494,9 +471,8 @@ pub struct MenuContext<'a> {
 }
 
 /// The context-menu rows for `row`, choosing the directory / multi-select /
-/// single-file menu by the same rule the legacy UI uses
-/// (`ui/tree/render.rs:420-424`: the multi-select menu only when more than
-/// one file is selected *and* this path is one of them).
+/// single-file menu: the multi-select menu applies only when more than one
+/// file is selected *and* this path is one of them.
 ///
 /// Purity: pure.
 #[must_use]
@@ -519,8 +495,7 @@ pub fn context_menu_items(
 /// Resolves the skill directory for `sub` from the "System" content
 /// library, falling back to `fallback` when that library is not configured.
 ///
-/// This is the **read-only** path the legacy UI menu used
-/// (`ui/tree/render.rs:69-81`): `AppConfig::list_folder_skills()` /
+/// This is the **read-only** path: `AppConfig::list_folder_skills()` /
 /// `list_note_skills()` create their directories as a side effect, which a
 /// per-frame view must not do ([RUST-006]).
 ///
@@ -544,10 +519,9 @@ pub fn skill_dir(
 
 /// The flattened rows the panel renders.
 ///
-/// Prefers `FastMdApp::cached_tree_rows` while the tree is clean — the same
-/// cache the legacy UI panel used — but never writes to it: populating and
-/// invalidating the cache is reducer state ([TASK-022]), and a view that
-/// mutated it would break the pure-view rule.
+/// Prefers `FastMdApp::cached_tree_rows` while the tree is clean but never
+/// writes to it: populating and invalidating the cache is reducer state, and
+/// a view that mutated it would break the pure-view rule.
 ///
 /// Purity: read-only over `app`.
 #[must_use]
@@ -567,19 +541,16 @@ pub fn tree_rows(app: &FastMdApp) -> Arc<Vec<FlatRow>> {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace-tree construction — relocated from the legacy UI left panel
-// ([TASK-029], `src/app/ui/panels/left.rs:18-133`).
+// Workspace-tree construction.
 //
-// All four functions are framework-free: their signatures and bodies mention only
-// `TreeNode` (owned by the KEPT `crate::ui::app`), `ContentLibrary`,
-// `Path`/`PathBuf` and `String`. The legacy UI panel keeps its own copy until
-// [TASK-029b] removes it.
+// All four functions are framework-free: their signatures and bodies mention
+// only `TreeNode` (owned by `crate::ui::app`), `ContentLibrary`,
+// `Path`/`PathBuf` and `String`.
 // ---------------------------------------------------------------------------
 
 /// Recursively removes directory nodes that do not contain any child files or subdirectories.
 ///
-/// Relocated from the legacy UI left panel for the framework-free migration
-/// ([TASK-029]); the UI-018 prune rule is unchanged.
+/// This is the UI-018 prune rule.
 fn prune_empty_dirs(node: &mut TreeNode) {
     node.children.retain(|_, child| {
         if child.is_dir {
@@ -593,9 +564,6 @@ fn prune_empty_dirs(node: &mut TreeNode) {
 
 /// Finds the content library whose root is a prefix of `path`, returning the
 /// library and the library-relative remainder of the path.
-///
-/// Relocated from the legacy UI left panel for the framework-free migration
-/// ([TASK-029]).
 fn library_for_path<'a>(
     libraries: &'a [ContentLibrary],
     path: &'a std::path::Path,
@@ -609,13 +577,10 @@ fn library_for_path<'a>(
 /// Inserts `path` under the content library that contains it, creating the
 /// intermediate directory nodes on the way down.
 ///
-/// The two passes over the workspace (discovered files, discovered
-/// directories) previously duplicated this library-match + component-walk; the
-/// only difference is whether the *final* component is a file or a directory,
-/// selected by `leaf_is_dir`. Paths outside every library root are ignored.
-///
-/// Relocated from the legacy UI left panel for the framework-free migration
-/// ([TASK-029]).
+/// One walk serves both passes over the workspace (discovered files,
+/// discovered directories); the only difference is whether the *final*
+/// component is a file or a directory, selected by `leaf_is_dir`. Paths
+/// outside every library root are ignored.
 fn insert_path_into_tree(
     root_node: &mut TreeNode,
     libraries: &[ContentLibrary],
@@ -654,10 +619,8 @@ fn insert_path_into_tree(
 
 /// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
 ///
-/// Relocated from the legacy UI left panel for the framework-free migration
-/// ([TASK-029]); UI-017's ordering and UI-018's tag-prune behaviour are
-/// unchanged. The tracing span is renamed to the `ui_iced.*` namespace so the
-/// iced and the legacy UI builds do not report under one span name while both exist.
+/// UI-017 ordering and UI-018 tag pruning are applied by [`flatten_tree`]
+/// over the result. The tracing span lives in the `ui_iced.*` namespace.
 #[tracing::instrument(skip_all, name = "ui_iced.left.build_workspace_tree", level = "debug")]
 #[must_use]
 pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
@@ -713,12 +676,10 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
 ///
 /// Read through the **read-only** path because `AppConfig::list_note_skills()`
 /// `create_dir_all`s as a side effect, which a per-frame view must not do
-/// ([RUST-006]) — the same rule [TASK-012] established for
-/// [`LeftPanelViewModel::from_app`].
+/// ([RUST-006]) — the same rule [`LeftPanelViewModel::from_app`] follows.
 ///
 /// Hoisted out of both panels so [`ViewModels::from_app`](crate::ui_iced::app::ViewModels)
-/// can read the directory once per rebuild instead of once per panel
-/// ([FMD-060]).
+/// can read the directory once per rebuild instead of once per panel.
 ///
 /// Purity: reads the filesystem; otherwise pure.
 #[must_use]
@@ -749,7 +710,7 @@ pub struct LeftPanelViewModel {
     /// The single selected file.
     pub selected_file: Option<PathBuf>,
     /// The multi-selected files, sorted so emitted commands are
-    /// deterministic (the legacy UI collected them from a `HashSet` and was not).
+    /// deterministic.
     pub selected_files: Vec<PathBuf>,
     /// The visible file rows that are PDF-backed — rendered with the
     /// `error` token (REQ-450).
@@ -775,8 +736,7 @@ pub struct LeftPanelViewModel {
 }
 
 impl LeftPanelViewModel {
-    /// Snapshots the left panel's inputs off `app`, reading the same
-    /// accessors the legacy UI panel used.
+    /// Snapshots the left panel's inputs off `app`.
     ///
     /// [`multi_select`](Self::multi_select) is reported `false`: this
     /// function takes no modifier input, so the caller that does own it
@@ -852,8 +812,7 @@ impl LeftPanelViewModel {
     }
 }
 
-/// Renders the iced left file-tree panel from a view-model snapshot
-/// ([TASK-012]).
+/// Renders the left file-tree panel from a view-model snapshot.
 ///
 /// Emitted messages:
 /// * row click → [`Message::Command`] `SelectDirectory` / `SelectFile`
@@ -866,11 +825,8 @@ impl LeftPanelViewModel {
 /// merely inert when nothing is being searched, so the widget-tree shape does
 /// not change across the search transition.
 ///
-/// The field takes `Length::Fill`: the legacy UI computed
-/// `(available_width - 56).max(80)` by hand
-/// (`ui/panels/left.rs:235`) because the legacy UI does not stretch inputs; iced
-/// lays the field out inside the `Row` itself, so neither magic number is
-/// needed here.
+/// The search field takes `Length::Fill`: iced lays the input out inside the
+/// `Row` itself, so no hand-computed width is needed.
 pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -1034,7 +990,7 @@ fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message
 }
 
 /// One search-result card: title + match count, the library-relative path
-/// and the matching snippet (legacy parity, `ui/panels/left.rs:285-341`).
+/// and the matching snippet.
 fn search_result_card<'a>(entry: &'a SearchResultEntry) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 

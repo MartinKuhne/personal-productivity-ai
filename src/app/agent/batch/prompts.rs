@@ -40,8 +40,8 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
 
             // `Document` pairs the front-matter and body in one
             // value, so the prompt tag check and the body
-            // extraction no longer re-split the content via
-            // `parse_front_matter` separately.
+            // extraction read them from the same parse instead of
+            // calling `parse_front_matter` separately.
             let doc = Document::new(content);
             let Some(fm) = doc.front_matter() else {
                 continue;

@@ -1,6 +1,5 @@
 //! Orchestrator unit tests — error and corner-case paths for the
-//! app-level orchestrator dispatchers that previously had zero direct
-//! coverage (close-test-gaps P2).
+//! app-level orchestrator dispatchers.
 
 use super::*;
 use crate::background::LogCategory;
@@ -307,9 +306,9 @@ fn handle_process_event_file_loaded_ok_populates_tabs() {
 }
 
 /// Regression: a read that was still in flight when the user moved on must not
-/// overwrite the document. Landing it used to repoint `loaded_path` and rebuild
-/// `toc` from the abandoned file, flipping the ToC pane between two files'
-/// heading sets with no user action.
+/// overwrite the document. Landing it must not repoint `loaded_path` or rebuild
+/// `toc` from the abandoned file, which would flip the ToC pane between two
+/// files' heading sets with no user action.
 #[test]
 fn handle_process_event_drops_file_loaded_for_a_deslected_file() {
     let mut orch = harness();
@@ -347,9 +346,9 @@ fn handle_process_event_drops_file_loaded_for_a_deslected_file() {
     );
 }
 
-/// Regression: releasing the pending marker for the landing path even when it is
-/// no longer selected. Leaving it set would block re-selecting the same file
-/// behind a load that has already returned.
+/// Regression: release the pending marker for the landing path even when it is
+/// not currently selected. Leaving it set would block re-selecting the same
+/// file behind a load that has already returned.
 #[test]
 fn handle_process_event_releases_pending_marker_for_its_own_path() {
     let mut orch = harness();
@@ -530,7 +529,8 @@ fn test_select_file_command_loads_markdown_content() {
         "loaded_path must remain None until file content is actually read into memory"
     );
 
-    // Drive handle_file_selection() as update_ui does each frame
+    // Drive handle_file_selection() the way the application drives it each
+    // frame
     orch.handle_file_selection();
 
     // Drain background channel to receive ProcessEvent::FileLoaded

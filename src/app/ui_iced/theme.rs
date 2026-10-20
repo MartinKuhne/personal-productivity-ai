@@ -1,10 +1,9 @@
-//! iced theme construction from the FastMD colour tokens ([TASK-008],
-//! `doc/planning/iced.md`).
+//! iced theme construction from the FastMD colour tokens.
 //!
-//! [`crate::ui::theme::Palette`] stays the single source of truth for every
-//! numeric colour value ([GUD-003]). Since [TASK-029b] the tokens are
-//! `iced::Color` already, so this module only *maps* the semantic tokens
-//! onto iced structures — no colour conversion remains:
+//! [`crate::ui::theme::Palette`] is the single source of truth for every
+//! numeric colour value. The tokens are `iced::Color`, so this module only
+//! *maps* the semantic tokens onto iced structures — it adds no colour
+//! conversion and no literals of its own:
 //!
 //! - [`iced_theme_palette`] — the semantic token → iced palette-role mapping
 //!   into `iced::theme::palette::Palette` (`background`/`text`/`primary`/
@@ -13,10 +12,10 @@
 //!   `iced::application(...).theme(...)` builder (verified
 //!   `iced-0.14.0/src/application.rs:377-392`),
 //! - [`scrim_color`] — the dimmed `surface` token the blocking modal overlay
-//!   paints with ([TASK-017a], `ui_iced/overlay.rs`).
+//!   paints with (`ui_iced/overlay.rs`).
 //!
 //! No numeric colour literal appears here: every value flows out of
-//! [`crate::ui::theme::Palette::fastmd_dark`] ([GUD-003]).
+//! [`crate::ui::theme::Palette::fastmd_dark`].
 //!
 //! Verified iced APIs (local sources): `Theme::custom` /
 //! `Theme::custom_with_fn` — `iced_core-0.14.0/src/theme.rs:91-106`;
@@ -30,10 +29,10 @@ use crate::ui::theme::Palette;
 /// Name under which the FastMD custom iced theme is registered.
 pub const FASTMD_THEME_NAME: &str = "FastMD Dark";
 
-/// Maps the FastMD dark tokens ([`Palette`]) onto the
-/// iced palette roles ([GUD-003]: tokens in, no numeric literals added).
+/// Maps the FastMD dark tokens ([`Palette`]) onto the iced palette roles:
+/// tokens in, no numeric literals added.
 ///
-/// Role assignments (semantic, matching the legacy theme wiring):
+/// Role assignments (semantic):
 /// - `background` ← `surface` — panel/window fills,
 /// - `text` ← `text` — default body text,
 /// - `primary` ← `accent` — selection / brand colour,
@@ -50,18 +49,17 @@ pub fn iced_theme_palette(palette: &Palette) -> iced::theme::palette::Palette {
     }
 }
 
-/// Alpha the modal scrim dims the `surface` token to ([TASK-017a]).
+/// Alpha the modal scrim dims the `surface` token to.
 ///
-/// The legacy build had no scrim — its floating windows sat over an
-/// undimmed viewport — so this is a new, overlay-specific token. 0.55 keeps
-/// the background legible while reading clearly as "input is blocked".
+/// 0.55 keeps the background legible while reading clearly as
+/// "input is blocked".
 pub const SCRIM_ALPHA: f32 = 0.55;
 
-/// The semi-transparent modal scrim colour ([TASK-017a]).
+/// The semi-transparent modal scrim colour.
 ///
 /// Derived from the [`crate::ui::theme::Palette::surface`] token at
 /// [`SCRIM_ALPHA`] rather than from a new literal, so the value stays
-/// anchored to the FastMD palette ([GUD-003]).
+/// anchored to the FastMD palette.
 #[must_use]
 pub fn scrim_color() -> iced::Color {
     let mut color = Palette::fastmd_dark().surface;
@@ -69,7 +67,7 @@ pub fn scrim_color() -> iced::Color {
     color
 }
 
-/// Builds the canned FastMD dark iced theme ([TASK-008]).
+/// Builds the canned FastMD dark iced theme.
 ///
 /// Uses `iced::Theme::custom(name, palette)` — `iced_core-0.14.0/src/
 /// theme.rs:91-96` — over the canonical dark tokens, so the iced widgets'

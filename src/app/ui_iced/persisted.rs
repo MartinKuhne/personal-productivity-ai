@@ -1,34 +1,30 @@
-//! Persisted-UI-state persistence for the iced UI ([TASK-009], DEC-006 and
-//! DEC-008; `doc/planning/iced.md`).
+//! Persisted-UI-state persistence for the iced UI.
 //!
-//! The pure serde model stays where the legacy UI build uses it —
-//! [`crate::ui::PersistedUiState`] (definition `src/app/ui/persisted.rs`) —
-//! unchanged in shape and semantics ([TASK-009] rule 1). This module is the
-//! iced-side backend around it:
+//! The pure serde model is [`crate::ui::PersistedUiState`] (defined in
+//! `src/app/ui/persisted.rs`), unchanged in shape and semantics. This
+//! module is the backend around it:
 //!
 //! - [`save_ui_state`]/[`load_ui_state`] serialize the model behind an
 //!   injected [`UiStateStorage`] handler — never against a hardcoded
-//!   platform-default location ([RUST-024], [RUST-006]). The legacy UI save path
-//!   being ported is `FastMdApp::save` (`src/app/ui/app/mod.rs:250-269`,
-//!   the legacy `Storage` backend under key `"ppai_ui_state"`, restored in
-//!   `src/app/ui/app/init.rs:162-189`).
-//! - [`migrate_legacy_state`] carries the v0→v1 `font_size_scale` migration
-//!   semantics verbatim (ported from `ui/app/init.rs:181-188`).
-//! - [`compose_scale_factor`] implements the DEC-008 composition: the OS
-//!   baseline (`iced::window::scale_factor`, captured at boot) multiplied by
-//!   the persisted user-chosen multiplier.
+//!   platform-default location ([RUST-024], [RUST-006]).
+//! - [`migrate_legacy_state`] carries the v0→v1 `font_size_scale`
+//!   migration: state below [`CURRENT_SCHEMA_VERSION`] gets the legacy
+//!   absolute scale cleared and the version bumped.
+//! - [`compose_scale_factor`] composes the OS baseline
+//!   (`iced::window::scale_factor`, captured at boot) with the persisted
+//!   user-chosen multiplier.
 //! - [`restore_window_size`]/[`restore_window_position`] map the model's
 //!   window fields onto the booted `iced::window::Settings` (`size`/
 //!   `position` — verified `iced_core-0.14.0/src/window/settings.rs:35,45`),
 //!   and [`apply_close_metrics`] writes the same fields back at close time
-//!   (DEC-006 standby save, then `iced::window::close`).
+//!   (the standby save, then `iced::window::close`).
 //!
 //! The [`UiStateStorage`] trait deliberately mirrors the
 //! [`crate::config::ConfigStorageHandler`] conventions (`Send + Sync`,
 //! `Result<_, String>`, in-memory/noop/file implementations) instead of
-//! wrapping it: that trait is `AppConfig`-specific (`config.rs:686-689`,
-//! `save_config(&AppConfig)`) and is shared with the orchestrator
-//! (`orchestrator.rs:50`), so it cannot carry a keyed UI-state payload.
+//! wrapping it: that trait is `AppConfig`-specific (`save_config(&AppConfig)`)
+//! and is shared with the orchestrator, so it cannot carry a keyed UI-state
+//! payload.
 //!
 //! Unit tests live in the sibling `persisted_tests.rs` sidecar.
 
@@ -50,10 +46,7 @@ pub const UI_STATE_LOAD_ERROR_CODE: &str = "ui_state.load.failed";
 
 /// Storage handler for the persisted UI-state snapshot ([RUST-024]).
 ///
-/// The payload is the serde-JSON serialization of
-/// [`PersistedUiState`], mirroring the legacy framework `Storage::set_string` /
-/// `get_string` usage of the legacy UI build (`ui/app/mod.rs:267`,
-/// `ui/app/init.rs:164`).
+/// The payload is the serde-JSON serialization of [`PersistedUiState`].
 pub trait UiStateStorage: Send + Sync {
     /// Persist the JSON payload. Returns the path written, or a
     /// descriptive tag for memory-backed implementations.
@@ -116,8 +109,7 @@ impl UiStateStorage for InMemoryUiStateStorage {
 /// A [`UiStateStorage`] implementation that writes the payload to an
 /// explicitly injected file path. Mirrors
 /// [`crate::config::FileConfigStorage`]: the path is always provided by the
-/// caller (production wiring in TASK-022, a `tempfile::TempDir` fixture in
-/// tests — [RUST-006]).
+/// caller (a `tempfile::TempDir` fixture in tests — [RUST-006]).
 #[derive(Debug, Clone)]
 pub struct FileUiStateStorage {
     path: PathBuf,
@@ -139,9 +131,9 @@ impl FileUiStateStorage {
     /// `~/.fastmd/`).
     ///
     /// # Safety Guard ([RUST-006], [RUST-024])
-    /// Panics inside test environments: production wiring (TASK-022) must
-    /// resolve this at launch; tests must use an injected
-    /// `tempfile::TempDir` path via [`FileUiStateStorage::new`] instead.
+    /// Panics inside test environments: production wiring must resolve this
+    /// at launch; tests must use an injected `tempfile::TempDir` path via
+    /// [`FileUiStateStorage::new`] instead.
     pub fn platform_default() -> Self {
         #[cfg(test)]
         panic!(
@@ -207,7 +199,7 @@ impl UiStateStorage for FileUiStateStorage {
 }
 
 /// Serializes `state` to JSON and persists it through the injected
-/// `handler` ([TASK-009] (a), DEC-006 standby save, [RUST-024]).
+/// `handler` ([RUST-024]).
 ///
 /// Pure apart from the storage side effect; failures are returned, never
 /// raised, so callers can produce the required [NFR-001] ERROR log.
@@ -222,8 +214,8 @@ pub fn save_ui_state(
 
 /// Loads the persisted UI state through the injected `handler`, restoring
 /// the default on absence (`None`), unreadable payloads, corrupt JSON, or a
-/// legacy schema version ([TASK-009] rule; ported semantics of
-/// `ui/app/init.rs:162-189`). Never panics on corruption ([FMD-064]).
+/// legacy schema version. Never panics on corruption: a bad snapshot costs
+/// the saved layout, nothing more.
 ///
 /// Logs load failures as [NFR-001] ERROR (with
 /// [`UI_STATE_LOAD_ERROR_CODE`]).
@@ -252,8 +244,7 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
     }
 }
 
-/// Applies the schema-version migration carried over verbatim from the legacy UI
-/// build (`ui/app/init.rs:181-188`): any state below
+/// Applies the schema-version migration: any state below
 /// [`CURRENT_SCHEMA_VERSION`] gets the legacy `font_size_scale` cleared
 /// (schema v0 stored the absolute OS ppp, not a multiplier — see the
 /// history in `src/app/ui/persisted.rs`) and the version bumped so the
@@ -272,8 +263,8 @@ pub fn migrate_legacy_state(mut state: PersistedUiState) -> PersistedUiState {
     state
 }
 
-/// Composes the composed UI scale factor out of the OS-reported baseline and
-/// the persisted user-chosen multiplier (DEC-008): the multiplier is applied
+/// Composes the UI scale factor out of the OS-reported baseline and
+/// the persisted user-chosen multiplier: the multiplier is applied
 /// *on top of* the baseline, `None` keeping the baseline verbatim (so legacy
 /// absolute-ppp values migrated in [`migrate_legacy_state`] cannot
 /// compound).
@@ -284,7 +275,7 @@ pub fn compose_scale_factor(os_baseline: f32, persisted_multiplier: Option<f32>)
 }
 
 /// Snapshots the closing window's metrics into the model's window fields
-/// (DEC-006 standby save, [TASK-009] (a)→(b)). The window width/height are
+/// (the standby save at close). The window width/height are
 /// logical points (`iced::window::size(id) -> Task<Size>`); the position is
 /// applied only when the runtime reported one (`Some(point)`), leaving
 /// previously-mapped coordinates untouched otherwise.
@@ -301,9 +292,9 @@ pub fn apply_close_metrics(state: &mut PersistedUiState, size: Size, position: O
 }
 
 /// Maps the persisted window size onto the booted `iced::window::Settings`
-/// size field ([TASK-009] (b)). `None` when either dimension was never
-/// persisted — the caller's the legacy UI-derived default (1000×700, `main.rs:49`)
-/// applies.
+/// size field. `None` when either dimension was never persisted — the
+/// caller's own default (1000×700, `WINDOW_WIDTH_POINTS` /
+/// `WINDOW_HEIGHT_POINTS` in [`crate::ui_iced::app`]) applies.
 ///
 /// [RUST-020]: pure.
 pub fn restore_window_size(state: &PersistedUiState) -> Option<Size> {
@@ -311,7 +302,7 @@ pub fn restore_window_size(state: &PersistedUiState) -> Option<Size> {
 }
 
 /// Maps the persisted window position onto the booted
-/// `iced::window::Position` ([TASK-009] (b)). Partial coordinates (only one
+/// `iced::window::Position`. Partial coordinates (only one
 /// axis persisted) fall back to [`Position::Default`] — mapping semantics of
 /// never silently inventing the missing axis.
 ///

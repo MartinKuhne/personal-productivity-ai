@@ -1,4 +1,4 @@
-//! Sidecar unit tests for `ui_iced/attributions.rs` ([TASK-017b2]).
+//! Sidecar unit tests for `ui_iced/attributions.rs`.
 //!
 //! Pure view-model and widget-construction tests ([RUST-003]). The catalog
 //! is compile-time data, so these tests read it directly and assert the
@@ -25,7 +25,7 @@ fn fixture_entries() -> Vec<Attribution> {
     ]
 }
 
-// --- Data source: the reused the legacy UI catalog --------------------------------
+// --- Data source: the shared catalog ----------------------------------------
 
 #[test]
 fn from_catalog_is_the_reused_thelegacy_catalog_verbatim() {
@@ -191,7 +191,7 @@ fn repository_press_copies_the_url_into_the_message() {
     );
 }
 
-// --- Colours come from palette tokens ([GUD-003]) -------------------------
+// --- Colours come from palette tokens ---------------------------------------
 
 #[test]
 fn column_colours_resolve_to_palette_tokens() {

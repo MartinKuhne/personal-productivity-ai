@@ -1,4 +1,4 @@
-//! Unit tests for the inline styled-run mapping ([TASK-015]).
+//! Unit tests for the inline styled-run mapping.
 //!
 //! Asserts the pure [`SpanModel`] mapping for every `InlineElem` variant
 //! and every `TextStyle` flag, then that the mapping survives the hop into
@@ -49,7 +49,7 @@ fn test_bold_run_takes_the_strong_colour() {
 
 #[test]
 fn test_muted_beats_bold() {
-    // Mirrors the legacy UI `text_format` precedence: muted → strong → text.
+    // Colour precedence: muted → strong → text.
     let span = span_for_text("x", &style(&["bold", "muted"]), 14.0, palette());
     assert_eq!(span.color, palette().text_muted);
 }
@@ -284,7 +284,6 @@ fn test_link_message_shape_is_the_render_channel_variant() {
 #[test]
 fn test_empty_models_still_build_a_widget() {
     let element = rich_text_element(&[], None);
-    // A paragraph with no runs must not panic — the legacy UI renderer
-    // short-circuited on empty; iced renders an empty Rich instead.
+    // A paragraph with no runs must not panic; iced renders an empty `Rich`.
     let _ = element;
 }

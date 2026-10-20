@@ -1,94 +1,37 @@
 //! Top-level iced `Message` enum — the single message type driving the
-//! FastMD Elm loop ([TASK-021], `doc/planning/iced.md` PAT-001).
+//! FastMD Elm loop.
 //!
 //! # Channel design
 //!
 //! [`Message`] has **one variant per logical interaction channel**. Each
 //! channel is its own small sub-enum (`Debug`/`Clone`, plus `Copy` wherever
 //! every payload field is `Copy`), so the top level stays flat and readable
-//! while each panel owns a vocabulary it can grow independently
-//! ([TASK-011]..[TASK-020]).
+//! while each panel owns a vocabulary it can grow independently.
 //!
-//! Two routing rules keep the channels from overlapping ([FMD-068]):
+//! Two routing rules keep the channels from overlapping:
 //!
-//! 1. **User intent rides [`Message::Command`].** Anything the user asked the
-//!    *application* to do — open a file, close a tab, run the agent, rename
-//!    a path — is already a self-contained [`UserCommand`] carried by the
-//!    existing command bus (`src/app/bus/events/user_command.rs`), and the
-//!    legacy panels publish exactly those. The iced panels keep doing that;
-//!    they do NOT re-invent a parallel intent vocabulary per panel.
-//! 2. **Panel channels carry view-local state transitions only** — the state
-//!    the legacy UI kept implicitly in immediate-mode memory (which row's context
-//!    menu is open, what the search box currently holds, the editor's
-//!    undo request) and the runtime reports the window layer hands us.
+//! 1. **User intent rides [`Message::Command`].** Anything the user asked
+//!    the *application* to do — open a file, close a tab, run the agent,
+//!    rename a path — is a self-contained [`UserCommand`] carried by the
+//!    command bus (`src/app/bus/events/user_command.rs`). Panels emit those
+//!    directly and never re-invent a parallel intent vocabulary per panel.
+//! 2. **Panel channels carry view-local state transitions only** — state no
+//!    widget holds on its own behalf (which row's context menu is open, what
+//!    the search box currently holds, the editor's undo request) plus the
+//!    runtime reports the window layer hands us.
 //!
-//! One deliberate exception to rule 2 lives in [`TreeMessage`]
-//! ([TASK-012]): three file-tree context-menu rows — "Run as prompt…",
-//! "Print…" and the multi-select "Delete" — have **no single
-//! [`UserCommand`] equivalent**, and the legacy UI originals read files from
-//! inside the click handler (`src/app/ui/tree/render.rs:143-173`,
-//! `:108-115`). A pure view must not do I/O, so those rows emit a
-//! *deferred-intent* variant that names the target and leaves the read and
-//! the resulting command(s) to the [TASK-022] reducer. They are still user
-//! intent — they are here only because the command channel cannot express
-//! them atomically.
+//! One deliberate exception to rule 2 lives in [`TreeMessage`]: three
+//! file-tree context-menu rows — "Run as prompt…", "Print…" and the
+//! multi-select "Delete" — have **no single [`UserCommand`] equivalent**
+//! and would have to read files from inside the click handler. A pure view
+//! must not do I/O, so those rows emit a *deferred-intent* variant that
+//! names the target and leaves the read and the resulting command(s) to the
+//! reducer. They are still user intent — they are here only because the
+//! command channel cannot express them atomically.
 //!
 //! Consequently some channels are deliberately thin: they exist because a
-//! panel needs explicit state that the legacy UI used to hide in widget memory, and
-//! they carry nothing more. Each variant below names the legacy UI behaviour it
-//! replaces, so a reviewer can check the grounding against
-//! `src/app/ui/`.
-//!
-//! # Grounding status
-//!
-//! - **Grounded in shipped behaviour:** `Window`, `Layout`, `Command`,
-//!   `Editor`, `Search`, `Logs`, `Agent`, `Tab`, `Tree`, `Render`,
-//!   `Dialog` ([TASK-017b1] — the small name-entry / move /
-//!   delete-confirmation dialogs; the delete *confirmation* itself is new,
-//!   see the `DialogMessage` docs and the migration-map drift note) and
-//!   `About` ([TASK-017b2] — the About window plus the third-party
-//!   attributions window; the credits list itself is unchanged, only its
-//!   placement moved out of the About dialog), `Batch` ([TASK-017b3] — the
-//!   batch dialog's composed selection only; open / start / cancel stay on
-//!   the command channel), `Tools` ([TASK-017b3] — the tools dialog's
-//!   dismiss; every tool-group action stays on the command channel) and
-//!   `AgentDebug` ([TASK-017b4] — the agent debug window's disclosure
-//!   state plus its two deferred intents; search, auto-scroll, the JSON
-//!   row count, Clear and close all stay on the command channel).
-//! - **Minimal on purpose:** `Theme` — UI-002 pins the FastMD dark scheme
-//!   and no light/dark toggle exists in the legacy UI build, so the only
-//!   runtime-mutable theme state is the DEC-008 user scale multiplier.
-//! - **Added by [TASK-019]:** `Inbound` — the *background → UI*
-//!   notification channel (`ConfigArrived`, `FileEvent`, `AgentEvent`,
-//!   `BackgroundEvent`, plus the bus lag report). It is a **dedicated
-//!   channel** rather than new variants on `Logs`/`Agent`/`Tree`, for two
-//!   reasons documented on [`InboundMessage`]: those panel channels are
-//!   widget-only by rule 2 above, and the bus payload enums
-//!   (`AgentEvent`, `BackgroundEvent`, `BackgroundLogEntry`, `AppConfig`)
-//!   do not implement `PartialEq`, so they cannot ride a channel that
-//!   derives it.
-//! - **Added for UI-056 / UI-022:** `Overlay` — the *runtime keyboard*
-//!   report channel (`EscapePressed`, `ModifiersChanged`). Like `Inbound` it
-//!   is a dedicated channel because no widget can produce it: iced's
-//!   `MouseArea` press callbacks and `mouse::Event::ButtonPressed` both
-//!   carry no modifier state, so `Esc` dismissal and the Shift bit have to
-//!   be observed off the raw event stream by the subscription bridge's
-//!   keyboard lane. See [`OverlayMessage`].
-//!
-//! # How the pilot's messages fold in
-//!
-//! The `fastmd_iced` pilot's private `Message` enum
-//! (`src/app/bin/fastmd_iced.rs:239-267`) maps 1:1 onto the `Window` and
-//! `Layout` channels, which is why those variants keep the pilot's shapes:
-//!
-//! | Pilot variant | This enum |
-//! | --- | --- |
-//! | `FontLoadFinished(Option<String>)` | `Message::Boot(BootMessage::FontLoadFinished(..))` — [TASK-022] gave the font bootstrap its own boot-infrastructure channel |
-//! | `CloseRequested(Id)` | `Message::Window(WindowMessage::CloseRequested(id))` |
-//! | `CloseSnapshotCaptured { id, size, position }` | `Message::Window(WindowMessage::CloseSnapshotCaptured(WindowSnapshot { .. }))` |
-//! | `ScaleBaseline(f32)` | `Message::Window(WindowMessage::ScaleBaseline(scale))` |
-//! | `WindowResized(Size)` | `Message::Window(WindowMessage::Resized { id, size })` — the pilot dropped the window id; `resize_events()` delivers it, so [TASK-022] carries it |
-//! | `PaneResized(pane_grid::ResizeEvent)` | `Message::Layout(LayoutMessage::PaneResized(event))` |
+//! panel needs explicit state a retained widget would otherwise hide, and
+//! they carry nothing more.
 //!
 //! Unit tests live in the sibling `message_tests.rs` sidecar.
 
@@ -103,11 +46,12 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::ui::tree_search::SearchResultEntry;
+use crate::ui_iced::panels::top::MenuSection;
 use iced::widget::pane_grid;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// The single top-level message of the iced Elm loop ([TASK-021]).
+/// The single top-level message of the iced Elm loop.
 ///
 /// `Message` is `Clone` but not `Copy`: the [`UserCommand`] payload carries
 /// `String`/`PathBuf`/`Vec` fields ([`UserCommand`] derives `Clone, Debug,
@@ -116,10 +60,11 @@ use std::sync::Arc;
 /// [`WindowMessage`], [`LayoutMessage`], [`TabMessage`] and
 /// [`ThemeMessage`].
 ///
-/// `PartialEq` is derived on every channel (and on this enum) because every
-/// payload supports it; message equality is what lets a replay/dedup check —
-/// and the [TASK-021] sidecar tests — compare a recorded message against a
-/// freshly produced one.
+/// `PartialEq` is implemented on every channel (and on this enum): derived
+/// where every payload supports it, hand-written where it does not (see
+/// [`LayoutMessage`] and [`InboundMessage`]). Message equality is what lets
+/// a replay/dedup check compare a recorded message against a freshly
+/// produced one.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
     /// Window-lifecycle channel (close requests, close snapshot, scale
@@ -130,54 +75,52 @@ pub enum Message {
     /// The command channel: user intent forwarded to the orchestrator's
     /// `UserCommand` executor unchanged.
     Command(UserCommand),
-    /// File-tree panel channel ([TASK-012]).
+    /// File-tree panel channel.
     Tree(TreeMessage),
-    /// Tab-strip / center panel channel ([TASK-013]).
+    /// Tab-strip / center panel channel.
     Tab(TabMessage),
-    /// Inline editor channel ([TASK-014], DEC-007).
+    /// Inline editor channel.
     Editor(EditorMessage),
-    /// Agent panel / command-input channel ([TASK-018]).
+    /// Agent panel / command-input channel.
     Agent(AgentMessage),
-    /// Workspace content-search channel ([TASK-019], UI-050).
+    /// Workspace content-search channel (UI-050).
     Search(SearchMessage),
-    /// Background-logs panel channel ([TASK-016], UI-047).
+    /// Background-logs panel channel (UI-047).
     Logs(LogsMessage),
-    /// Theme / UI-scale channel ([TASK-008], DEC-008).
+    /// Theme / UI-scale channel.
     Theme(ThemeMessage),
-    /// Markdown render-path channel ([TASK-015]).
+    /// Markdown render-path channel.
     Render(RenderMessage),
     /// Small individual dialogs — create-directory / create-document /
-    /// rename / move / delete-confirmation ([TASK-017b1], UI-011/UI-015).
+    /// rename / move / delete-confirmation (UI-011/UI-015).
     Dialog(DialogMessage),
-    /// The About window and the third-party attributions window
-    /// ([TASK-017b2]).
+    /// The About window and the third-party attributions window.
     About(AboutMessage),
     /// The batch prompt-processing dialog's own selection state
-    /// ([TASK-017b3], BATCH-001..BATCH-014).
+    /// (BATCH-001..BATCH-014).
     Batch(BatchDialogMessage),
-    /// The tools dialog's window visibility ([TASK-017b3], UI-051..UI-060).
+    /// The tools dialog's window visibility (UI-051..UI-060).
     Tools(ToolsDialogMessage),
-    /// The agent debug window's own disclosure state ([TASK-017b4],
-    /// UI-048 / REQ-008).
+    /// The agent debug window's own disclosure state (UI-048).
     AgentDebug(AgentDebugMessage),
-    /// Inbound *background → UI* notification channel ([TASK-019],
-    /// FMD-065..FMD-067) — the only channel no widget can produce.
+    /// Inbound *background → UI* notification channel — the only channel
+    /// no widget can produce.
     Inbound(InboundMessage),
-    /// The top-bar hamburger menu channel ([TASK-023] fix menu visibility).
+    /// The top-bar hamburger menu channel.
     Menu(MenuMessage),
-    /// The floating-overlay / keyboard-modifier channel ([UI-056], [UI-022]) —
+    /// The floating-overlay / keyboard-modifier channel (UI-056, UI-022) —
     /// the runtime keyboard reports the overlay host and the modifier-aware
-    /// tree selection need, produced only by the [TASK-019] subscription
-    /// bridge's keyboard lane.
+    /// tree selection need, produced only by the subscription bridge's
+    /// keyboard lane.
     Overlay(OverlayMessage),
-    /// Boot-infrastructure reports ([TASK-022]) — the terminal outcomes of
-    /// the one-shot tasks the `boot` closure returns (font registration).
-    /// Not a panel channel and not
-    /// user intent: the producer is the boot task chain itself.
+    /// Boot-infrastructure reports — the terminal outcomes of the one-shot
+    /// tasks the `boot` closure returns (font registration). Not a panel
+    /// channel and not user intent: the producer is the boot task chain
+    /// itself.
     Boot(BootMessage),
 }
 
-/// Boot-infrastructure channel ([TASK-022]).
+/// Boot-infrastructure channel.
 ///
 /// The `boot` closure returns a batched [`iced::Task`] whose members must
 /// report back through the top-level `Message` type. The font-registration
@@ -187,11 +130,9 @@ pub enum Message {
 /// background bus).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BootMessage {
-    /// One font collection settled registering ([TASK-007]). `Some` holds
-    /// the failure description (logged as an [NFR-001] `ERROR`, non-fatal
-    /// per [FMD-064]); `None` means the collection loaded cleanly. This is
-    /// the home the pilot's `FontLoadFinished` was promised in the
-    /// module-header fold table.
+    /// One font collection settled registering. `Some` holds the failure
+    /// description, logged as an `ERROR` ([NFR-001]) but non-fatal; `None`
+    /// means the collection loaded cleanly.
     FontLoadFinished(Option<String>),
 }
 
@@ -203,8 +144,7 @@ impl From<UserCommand> for Message {
     }
 }
 
-/// Window-lifecycle channel ([TASK-021]; pilot parity per the module
-/// header table).
+/// Window-lifecycle channel.
 ///
 /// Every variant is a *runtime report* from the iced window layer — a
 /// subscription or a chained `Task` result — not user intent. The user's
@@ -214,19 +154,17 @@ impl From<UserCommand> for Message {
 pub enum WindowMessage {
     /// The window manager asked to close a window (title-bar close /
     /// `Alt+F4`). With `exit_on_close_request: false` the runtime waits for
-    /// the app to persist state and call `iced::window::close`
-    /// ([TASK-009], DEC-006).
+    /// the app to persist state and call `iced::window::close`.
     CloseRequested(iced::window::Id),
     /// The metrics needed by the close-time snapshot have arrived, reported
-    /// through the chained `window::size` → `window::position` tasks
-    /// ([TASK-009] (a), DEC-006 phase 2).
+    /// through the chained `window::size` → `window::position` tasks.
     CloseSnapshotCaptured(WindowSnapshot),
-    /// The OS-reported baseline scale factor arrived ([TASK-009], DEC-008);
-    /// the composed factor is `baseline × user multiplier`.
+    /// The OS-reported baseline scale factor arrived; the composed factor is
+    /// `baseline × user multiplier`.
     ScaleBaseline(f32),
     /// A window changed size ([`iced::window::resize_events`] delivers
     /// `(Id, Size)`; the id is carried so a multi-window runtime can route
-    /// the event, which the single-window pilot dropped).
+    /// the event).
     Resized {
         /// The window that changed size.
         id: iced::window::Id,
@@ -235,8 +173,7 @@ pub enum WindowMessage {
     },
 }
 
-/// The window metrics captured at close time for the DEC-006 standby save
-/// ([TASK-009], [TASK-021]).
+/// The window metrics captured at close time.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowSnapshot {
     /// The window the snapshot belongs to.
@@ -248,37 +185,33 @@ pub struct WindowSnapshot {
     pub position: Option<iced::Point>,
 }
 
-/// Pane-geometry channel ([TASK-021]).
+/// Pane-geometry channel.
 ///
-/// The three-band `PaneGrid` geometry lives in [TASK-010]
-/// ([`crate::ui_iced::layout`]); this channel is how its widget events and
-/// its re-fit requests reach `update`.
+/// The three-band `PaneGrid` geometry lives in [`crate::ui_iced::layout`];
+/// this channel is how its widget events and its re-fit requests reach
+/// `update`.
 ///
-/// It also owns the **pointer position** ([`Self::CursorMoved`],
-/// [TASK-012]). That is the honest home for it: like a split drag and the
-/// tree auto-fit, a cursor report is a statement about *where in the pane
-/// geometry something is*, not about what the user asked the application to
-/// do — so it is neither [`Message::Command`] nor any panel's private view
-/// state. It has to live somewhere the reducer reads before it opens an
-/// overlay, because iced's `MouseArea::on_right_press` takes a fixed
-/// `Message` and cannot carry the press point
-/// (`iced_widget-0.14.2/src/mouse_area.rs:68-71`), which is exactly the
-/// gap [`crate::ui_iced::overlay::context_menu_trigger`] documents.
+/// It also owns the **pointer position** ([`Self::CursorMoved`]). That is
+/// the honest home for it: like a split drag and the tree auto-fit, a cursor
+/// report is a statement about *where in the pane geometry something is*,
+/// not about what the user asked the application to do — so it is neither
+/// [`Message::Command`] nor any panel's private view state. It has to live
+/// somewhere the reducer reads before it opens an overlay, because iced's
+/// `MouseArea::on_right_press` takes a fixed `Message` and cannot carry the
+/// press point (`iced_widget-0.14.2/src/mouse_area.rs:68-71`), which is
+/// exactly the gap [`crate::ui_iced::overlay::context_menu_trigger`]
+/// documents.
 #[derive(Debug, Clone, Copy)]
 pub enum LayoutMessage {
     /// A pane-grid split was dragged ([`pane_grid::ResizeEvent`]:
-    /// `split` + `ratio`), fed through `PaneGrid::on_resize`
-    /// ([TASK-010]). Reduces onto `PanelLayout` widths under the UI-016
-    /// clamps.
+    /// `split` + `ratio`), fed through `PaneGrid::on_resize`. Reduces onto
+    /// `PanelLayout` widths under the UI-016 clamps.
     PaneResized(pane_grid::ResizeEvent),
     /// The tree panel should re-fit its width to the longest visible row
-    /// (UI-016; the `Message::AutoFitTree` reducer named in [TASK-012]).
-    /// In the legacy UI build this ran inline in `show_left_panel` on the
-    /// indexing-finished / `left_panel_dirty` transition
-    /// (`src/app/ui/panels/left.rs:139-186`); in the Elm loop it is an
-    /// explicit message so the width change is replayable.
+    /// (UI-016). In the Elm loop this is an explicit message so the width
+    /// change is replayable.
     TreeAutoFit,
-    /// The pointer moved to `point` ([TASK-012], DEC-005).
+    /// The pointer moved to `point`.
     ///
     /// The reducer stores this and reads it back when a
     /// [`TreeMessage::ContextMenuOpened`] / [`TabMessage::ContextMenuOpened`]
@@ -317,34 +250,31 @@ impl PartialEq for LayoutMessage {
     }
 }
 
-/// File-tree panel channel ([TASK-021], [TASK-012]).
+/// File-tree panel channel.
 ///
 /// Deliberately thin: row selection and directory expansion are *user
 /// intent* and ride [`Message::Command`] as `UserCommand::SelectFile` /
-/// `UserCommand::SelectDirectory` — exactly what the legacy UI tree publishes
-/// (`src/app/ui/tree/handlers.rs:51-69`). What the legacy UI kept implicitly in the
-/// `context_menu` widget is explicit state under iced's DEC-005
+/// `UserCommand::SelectDirectory`. What a retained `context_menu` widget
+/// would hold implicitly is explicit state under the iced
 /// `overlay::menu` construction, so that is what this channel carries.
 ///
 /// The last four variants are **deferred intent** (see the module header):
-/// the legacy UI menu performs file I/O inside the click, which a pure view may
-/// not do, and no single [`UserCommand`] covers them. Each names its target
-/// so the [TASK-022] reducer can perform the read and publish the real
-/// command(s) — the intent stays self-contained and replayable
-/// ([FMD-068]).
+/// the menu actions would perform file I/O inside the click, which a pure
+/// view may not do, and no single [`UserCommand`] covers them. Each names
+/// its target so the reducer can perform the read and publish the real
+/// command(s) — the intent stays self-contained and replayable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeMessage {
-    /// A right-click opened the row context menu for `path` (DEC-005;
-    /// [TASK-017] renders the overlay).
+    /// A right-click opened the row context menu for `path`; the overlay
+    /// host renders it.
     ContextMenuOpened {
         /// The row whose menu is open.
         path: PathBuf,
     },
     /// The row context menu was dismissed (click-away or menu selection).
     ContextMenuClosed,
-    /// "Run as prompt…" on a single file row (UI-020). The legacy UI handler
-    /// reads the file and publishes `RunSkillPrompt` inline
-    /// (`src/app/ui/tree/render.rs:143-160`); here the reducer does it.
+    /// "Run as prompt…" on a single file row (UI-020). The reducer reads
+    /// the file and publishes `RunSkillPrompt`.
     RunAsPromptRequested {
         /// The markdown file whose body becomes the prompt.
         path: PathBuf,
@@ -352,7 +282,7 @@ pub enum TreeMessage {
     /// A skill row was picked from a directory or file context menu
     /// (VFS-121 note skills, VFS-122 folder skills). The reducer reads
     /// `skill` and publishes `RunSkillPrompt { content, target_dir,
-    /// target_file }` (`src/app/ui/tree/render.rs:311-337`).
+    /// target_file }`.
     SkillRunRequested {
         /// Path of the skill file to read.
         skill: PathBuf,
@@ -361,13 +291,12 @@ pub enum TreeMessage {
         /// File the skill runs against — set for note skills.
         target_file: Option<PathBuf>,
     },
-    /// "Print…" on a file row (UI-014). There is **no** `UserCommand::Print`;
-    /// the legacy UI handler hands the job to the background channel directly
-    /// (`src/app/ui/tree/render.rs:161-173`), so the reducer owns it.
+    /// "Print…" on a file row (UI-014). There is **no** `UserCommand::Print`,
+    /// so the reducer owns the whole job.
     ///
-    /// The render, temp-file write and browser hand-off all block, so they ride
-    /// an iced `Task` rather than running on the UI thread ([FMD-060],
-    /// [FMD-061]) and report back through [`TreeMessage::PrintFinished`].
+    /// The render, temp-file write and browser hand-off all block, so they
+    /// ride an iced `Task` rather than running on the UI thread, and report
+    /// back through [`TreeMessage::PrintFinished`].
     PrintRequested {
         /// The file to print.
         path: PathBuf,
@@ -381,23 +310,21 @@ pub enum TreeMessage {
         /// `Ok(())` once the browser has been handed the rendered document.
         result: Result<(), String>,
     },
-    /// "Delete" on a multi-selected file row (UI-025). the legacy UI fans this out
-    /// into one `UserCommand::Delete` per path and then clears the
-    /// selection (`src/app/ui/tree/render.rs:108-115`); one menu row can
-    /// only emit one message, so the whole set travels with it.
+    /// "Delete" on a multi-selected file row (UI-025), fanned out into one
+    /// `UserCommand::Delete` per path followed by a selection clear; one
+    /// menu row can only emit one message, so the whole set travels with it.
     DeleteSelectedRequested {
         /// Every selected path, in the order the panel rendered them.
         paths: Vec<PathBuf>,
     },
 }
 
-/// Tab-strip / center panel channel ([TASK-021], [TASK-013]).
+/// Tab-strip / center panel channel.
 ///
 /// Same split as [`TreeMessage`]: selecting a tab, closing one
 /// (`×` / middle-click), closing others/all, copying the path and revealing
-/// it in the explorer are all `UserCommand`s already
-/// (`src/app/ui/panels/center.rs:208-315`). The tab strip's own view state
-/// is which tab's context menu is showing.
+/// it in the explorer are all `UserCommand`s already. The tab strip's own
+/// view state is which tab's context menu is showing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TabMessage {
     /// A right-click opened the context menu of the tab at `index`
@@ -411,21 +338,20 @@ pub enum TabMessage {
     ContextMenuClosed,
 }
 
-/// Inline editor channel ([TASK-021], [TASK-014], DEC-007).
+/// Inline editor channel.
 ///
-/// Grounded in the legacy UI editor (`src/app/ui/editor_the legacy UI.rs:173-190`):
-/// Save / Cancel buttons plus the live buffer, and in DEC-007's rule that
-/// every `Action::Edit` is intercepted so the undo history lives at OUR
-/// layer (`iced::widget::text_editor` has no native undo/redo).
+/// Save / Cancel buttons plus the live buffer, with every `Action::Edit`
+/// intercepted so the undo history lives at OUR layer
+/// (`iced::widget::text_editor` has no native undo/redo).
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorMessage {
     /// An [`iced::widget::text_editor::Action`] was performed in the buffer
-    /// — the DEC-007 interception point. `Action::is_edit()` separates
+    /// — the interception point. `Action::is_edit()` separates
     /// content-changing actions (push an undo snapshot) from caret/selection
     /// actions.
     Action(iced::widget::text_editor::Action),
     /// The user asked to save the buffer to `path` (UI-043). The path is
-    /// carried so the write target travels with the intent ([FMD-068]).
+    /// carried so the write target travels with the intent.
     SaveRequested {
         /// File the buffer belongs to.
         path: PathBuf,
@@ -433,25 +359,23 @@ pub enum EditorMessage {
     /// The user cancelled the editor: discard the buffer, close the overlay
     /// (UI-045).
     CancelRequested,
-    /// Replay one snapshot back from the per-tab undo stack (UI-042,
-    /// DEC-007). Per-tab stacks make the tab path part of the intent.
+    /// Replay one snapshot back from the per-tab undo stack (UI-042).
+    /// Per-tab stacks make the tab path part of the intent.
     Undo {
         /// The tab whose buffer is being undone.
         path: PathBuf,
     },
-    /// Replay one snapshot forward on the per-tab redo stack (UI-042,
-    /// DEC-007).
+    /// Replay one snapshot forward on the per-tab redo stack (UI-042).
     Redo {
         /// The tab whose buffer is being redone.
         path: PathBuf,
     },
 }
 
-/// Agent panel / command-input channel ([TASK-021], [TASK-018]).
+/// Agent panel / command-input channel.
 ///
-/// Grounded in `src/app/ui/panels/bottom.rs:226-294` and
-/// `AgentPanelState::command_input`. Running, cancelling, queueing a prompt
-/// and clearing the input are all `UserCommand`s
+/// Running, cancelling, queueing a prompt and clearing the input are all
+/// `UserCommand`s
 /// (`RunAgent` / `CancelAgent` / `QueueAgentPrompt` / `ClearCommandInput`),
 /// produced by the reducer after parsing the submitted text with the
 /// existing `parse_command_intent` helper. The agent *debug* window's
@@ -460,21 +384,18 @@ pub enum EditorMessage {
 /// `SetDebugSearchText`/`SetDebugAutoScroll`), so nothing is duplicated
 /// here.
 ///
-/// [TASK-018] adds the two pieces of view-local state the legacy UI kept in widget
-/// memory for the agent session view, plus the transcript's viewport report:
+/// Two pieces of view-local state back the agent session view, plus the
+/// transcript's viewport report:
 ///
-/// * [`Self::ThinkingToggled`] replaces the `collapsing` disclosure
-///   of the "Thinking Process" block (`src/app/ui/panels/center.rs:143`),
+/// * [`Self::ThinkingToggled`] drives the "Thinking Process" disclosure,
 ///   which iced has no built-in equivalent for — the disclosure is
 ///   view-local, not application state, so it is deliberately **not** a
 ///   [`UserCommand`].
 /// * [`Self::ScrollReported`] is the transcript-list counterpart of
-///   [`LogsMessage::ScrollReported`]: the legacy UI applied `stick_to_bottom(true)`
-///   inside its own `ScrollArea`
-///   (`src/app/ui/panels/center.rs:140`), whereas iced exposes the geometry
-///   only through `Scrollable::on_scroll`
+///   [`LogsMessage::ScrollReported`]: iced exposes scroll geometry only
+///   through `Scrollable::on_scroll`
 ///   (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the viewport has
-///   to reach `update` as a message before the reused
+///   to reach `update` as a message before the shared
 ///   [`crate::ui_iced::logs::should_follow`] rule can decide anything. A
 ///   runtime report, not user intent — the same class of payload
 ///   [`LayoutMessage::CursorMoved`] carries.
@@ -492,14 +413,13 @@ pub enum AgentMessage {
         /// parser, not the widget callback).
         text: String,
     },
-    /// The "Thinking Process" disclosure was expanded or collapsed
-    /// ([TASK-018], UI-048). View-local disclosure state, replacing the legacy UI's
-    /// `collapsing` widget memory.
+    /// The "Thinking Process" disclosure was expanded or collapsed (UI-048).
+    /// View-local disclosure state.
     ThinkingToggled {
         /// The new expanded state of the thinking block.
         expanded: bool,
     },
-    /// The transcript list's viewport geometry changed ([TASK-018]).
+    /// The transcript list's viewport geometry changed.
     ///
     /// The reducer stores this and feeds it to
     /// [`crate::ui_iced::logs::should_follow`] together with the
@@ -517,12 +437,11 @@ pub enum AgentMessage {
     },
 }
 
-/// Workspace content-search channel ([TASK-021], [TASK-019], UI-050).
+/// Workspace content-search channel (UI-050).
 ///
-/// Grounded in `src/app/ui/panels/left.rs:230-265` and
-/// `TreeSearch` (`src/app/ui/tree_search.rs:37-146`): the query text is
-/// kept separate from the committed filter so a partial edit never
-/// re-scans the workspace.
+/// Backed by `crate::ui::tree_search` (`src/app/ui/tree_search.rs:37-146`):
+/// the query text is kept separate from the committed filter so a partial
+/// edit never re-scans the workspace.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SearchMessage {
     /// The search-box text changed while typing; does NOT start a scan.
@@ -539,17 +458,15 @@ pub enum SearchMessage {
     /// The search was cleared (`✕` button) — the tree view returns
     /// (`TreeSearch::clear`).
     Cleared,
-    /// The content scan the reducer dispatched has finished ([TASK-019]).
+    /// The content scan the reducer dispatched has finished.
     ///
-    /// **New for the iced port.** the legacy UI ran the scan synchronously inside
-    /// the left panel's paint pass (`src/app/ui/panels/left.rs:246-252`),
-    /// so no completion message existed — and a large workspace froze the UI
-    /// while it ran, against [FMD-060]/[FMD-061]. Here the reducer runs the
-    /// *same* reused engine (`crate::ui::tree_search::find_search_results_scoped`)
-    /// in a iced `Task` and reports the outcome through this variant, which
+    /// The reducer runs the engine
+    /// (`crate::ui::tree_search::find_search_results_scoped`) in an iced
+    /// `Task` so a large workspace never blocks the UI, and reports the
+    /// outcome through this variant, which
     /// [`crate::ui_iced::search::SearchViewModel::apply_results`] then
     /// snapshots — dropping it if a newer committed filter has superseded
-    /// the scan ([FMD-062]).
+    /// the scan.
     ResultsReady {
         /// The term the scan actually ran for, echoed back so the reducer can
         /// detect a superseded (stale) result set.
@@ -560,18 +477,13 @@ pub enum SearchMessage {
     },
 }
 
-/// Background-logs panel channel ([TASK-021], [TASK-016], UI-047).
+/// Background-logs panel channel (UI-047).
 ///
-/// Grounded in `src/app/ui/background_logs.rs:70-123`: the filter row is
-/// a text search, a category combo and an auto-scroll checkbox, plus a
-/// Clear button. Window visibility is NOT here — it is
+/// The filter row is a text search, a category combo and an auto-scroll
+/// checkbox, plus a Clear button. Window visibility is NOT here — it is
 /// `UserCommand::ToggleBackgroundLogs`.
 ///
-/// `ScrollReported` was added by [TASK-016] (the channel brief allowed
-/// extending it honestly). the legacy UI kept the scroll position inside
-/// `ScrollArea`'s own state and applied `stick_to_bottom` there
-/// (`legacy-0.36.1/src/containers/scroll_area.rs:1282-1284`); iced exposes
-/// the geometry only through `Scrollable::on_scroll`
+/// iced exposes scroll geometry only through `Scrollable::on_scroll`
 /// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the viewport has
 /// to reach `update` as a message before the pure
 /// [`crate::ui_iced::logs::should_follow`] rule can decide anything. It is
@@ -590,7 +502,7 @@ pub enum LogsMessage {
     AutoScrollToggled(bool),
     /// The Clear button emptied the visible log list.
     Cleared,
-    /// The log list's viewport geometry changed ([TASK-016]).
+    /// The log list's viewport geometry changed.
     ///
     /// The reducer stores this and feeds it to
     /// [`crate::ui_iced::logs::should_follow`] together with the
@@ -608,18 +520,18 @@ pub enum LogsMessage {
     },
 }
 
-/// Theme / UI-scale channel ([TASK-021], [TASK-008], DEC-008).
+/// Theme / UI-scale channel.
 ///
 /// Minimal by design: UI-002 pins the FastMD dark scheme
 /// (`crate::ui::theme::install_dark`, mirrored by
-/// [`crate::ui_iced::theme::fastmd_dark_theme`]) and the legacy UI build has no
-/// light/dark toggle, so no toggle variant is invented. The only
-/// runtime-mutable theme state is the user scale multiplier that DEC-008
-/// composes with the OS baseline.
+/// [`crate::ui_iced::theme::fastmd_dark_theme`]) and there is no
+/// light/dark toggle, so no toggle variant exists. The only
+/// runtime-mutable theme state is the user scale multiplier, composed with
+/// the OS baseline.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThemeMessage {
-    /// The user-chosen UI scale multiplier changed (DEC-008); the value
-    /// handed to `.scale_factor(...)` is `os_baseline × multiplier`, and the
+    /// The user-chosen UI scale multiplier changed; the value handed to
+    /// `.scale_factor(...)` is `os_baseline × multiplier`, and the
     /// multiplier is what `PersistedUiState::font_size_scale` stores.
     ScaleChanged {
         /// The user multiplier, sanitised to the persisted scale range.
@@ -627,32 +539,26 @@ pub enum ThemeMessage {
     },
 }
 
-/// Markdown render-path channel ([TASK-021], [TASK-015]).
+/// Markdown render-path channel.
 ///
 /// Every variant is **deferred intent** in the same sense as the last four
 /// [`TreeMessage`] variants: the markdown viewer's links, task checkboxes
 /// and copy-code buttons are user intent, but no [`UserCommand`] expresses
 /// them atomically and the view may not perform the work itself.
 ///
-/// * **Links** — the legacy UI renderer called `ui.hyperlink_to`, which pushed
-///   `OutputCommand::OpenUrl` onto the platform output
-///   (`src/app/ui/render/inline.rs:160-163`, dispatched in
-///   `src/app/ui/app/update.rs:73`). iced's `Rich` text hands the clicked
-///   `Link` payload back as a message instead, and resolving it needs the
-///   workspace file list and content roots — state the pure view does not
-///   own. The reducer calls the existing pure
-///   [`crate::ui::link_resolver::resolve_link`] and performs the open,
-///   the tab selection or the scroll.
+/// * **Links** — iced's `Rich` text hands the clicked `Link` payload back
+///   as a message, and resolving it needs the workspace file list and
+///   content roots — state the pure view does not own. The reducer calls
+///   the existing pure [`crate::ui::link_resolver::resolve_link`] and
+///   performs the open, the tab selection or the scroll.
 /// * **Task checkboxes** — `UserCommand::ApplyTaskToggles` exists but is
 ///   wired to the *agent transcript* content
-///   (`src/app/command_executor.rs:568-576`), not to the open document,
-///   which the legacy UI mutated in place (`src/app/ui/panels/center.rs:382-383`).
-///   The document path therefore travels with the toggle so [TASK-022] can
+///   (`src/app/command_executor.rs:568-576`), not to the open document.
+///   The document path therefore travels with the toggle so the reducer can
 ///   pick the right target.
-/// * **Copy code** — the legacy UI copied inside the click handler via
-///   `Ui::copy_text` (`src/app/ui/render/code.rs:78-83`). iced exposes the
-///   clipboard only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so
-///   the content rides the message and the reducer writes it.
+/// * **Copy code** — iced exposes the clipboard only to `update`
+///   (`iced_core-0.14.0/src/clipboard.rs`), so the content rides the
+///   message and the reducer writes it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderMessage {
     /// A markdown link span was clicked; `url` is the raw link target
@@ -665,8 +571,8 @@ pub enum RenderMessage {
         /// rendered is not backed by a file (e.g. an agent transcript).
         source_file: Option<PathBuf>,
     },
-    /// A task-list checkbox was toggled in the document viewer (the P0-2
-    /// write-back the legacy UI collected into `pending_toggles`).
+    /// A task-list checkbox was toggled in the document viewer; the reducer
+    /// writes the change back to that document's markdown.
     TaskToggled {
         /// The document whose markdown carries the checkbox.
         document: PathBuf,
@@ -683,25 +589,21 @@ pub enum RenderMessage {
     },
 }
 
-/// Small-dialog channel ([TASK-017b1], UI-011/UI-015).
+/// Small-dialog channel (UI-011/UI-015).
 ///
-/// Grounded in the legacy UI name-entry / move / delete dialogs
-/// (`src/app/ui/modals.rs:26-68`, `:80-158`, `:160-322`) and the
-/// `Dialogs` state model (`src/app/ui/dialogs.rs:25-63`). the legacy UI kept the
-/// open flag, the typed name and the selected destination in the
-/// `Dialogs` struct plus single-line widget memory; under iced that state
-/// is explicit in [`crate::ui_iced::dialogs::DialogState`] and this
-/// channel is the only way the rendered card mutates it.
+/// The open flag, the typed name and the selected destination are held
+/// explicitly in [`crate::ui_iced::dialogs::DialogState`], and this channel
+/// is the only way the rendered card mutates it.
 ///
-/// The confirm outcome is deliberately **not** a [`UserCommand`] here:
-/// the legacy UI build validates the trimmed name only in the command
-/// executor (`src/app/command_executor.rs:308-371` via
+/// The confirm outcome is deliberately **not** a [`UserCommand`] here: the
+/// trimmed name is validated only in the command executor
+/// (`src/app/command_executor.rs:308-371` via
 /// `utils::path::is_safe_basename`), so the view must not pre-decide
-/// validity. The [TASK-022]/[TASK-023] reducer runs
+/// validity. The reducer runs
 /// [`crate::ui_iced::dialogs::DialogState::submit`], and only a valid
 /// [`crate::ui_iced::dialogs::SubmitOutcome::Completed`] becomes the
 /// matching `Confirm*` command — the intent stays self-contained and
-/// replayable ([FMD-068]).
+/// replayable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DialogMessage {
     /// The pending name text changed while the user types.
@@ -722,18 +624,15 @@ pub enum DialogMessage {
     /// [`crate::ui_iced::overlay::OverlaySlot::close`] reports for
     /// Escape consumption.
     Dismissed,
-    /// A destination folder row was picked in the move dialog (the
-    /// `selectable_label` equivalent of `ui/modals.rs:116-124`).
+    /// A destination folder row was picked in the move dialog.
     DestinationSelected {
         /// The folder the user picked as the move target.
         path: PathBuf,
     },
 }
 
-/// About / attributions window channel ([TASK-017b2]).
+/// About / attributions window channel.
 ///
-/// Grounded in the legacy UI About dialog (`src/app/ui/about_dialog.rs`) and
-/// the attribution catalog it renders (`src/app/ui/attributions.rs`).
 /// This is a **separate channel from [`DialogMessage`]**, on purpose:
 /// `DialogMessage`'s vocabulary is name-entry shaped (`NameChanged`,
 /// `Submitted`, `DestinationSelected`) and drives
@@ -748,28 +647,24 @@ pub enum DialogMessage {
 /// (`ui_iced/panels/top.rs:439`). The reducer maps that command onto
 /// [`crate::ui_iced::about::AboutWindowState::open_about`]. What lives
 /// here is only what the rendered cards can do to *their own* visibility
-/// and the two side effects the legacy UI performed inside its click handler that
-/// iced only allows in `update`.
+/// and the side effects iced only allows in `update`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AboutMessage {
     /// The "View third-party attributions…" button was pressed in the
     /// About card — show
     /// [`crate::ui_iced::attributions::attributions_view`].
     AttributionsRequested,
-    /// The commit-hash cell was clicked. the legacy UI copied the full hash with
-    /// `ctx.copy_text` inside the click handler
-    /// (`src/app/ui/about_dialog.rs:68-77`); iced exposes the clipboard
-    /// only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so the
-    /// reducer performs the write. The cell never emits this on an
-    /// `"unknown"` build (spec FR-007) — see
+    /// The commit-hash cell was clicked; iced exposes the clipboard only to
+    /// `update` (`iced_core-0.14.0/src/clipboard.rs`), so the reducer
+    /// performs the write. The cell never emits this on an `"unknown"`
+    /// build (spec FR-007) — see
     /// [`crate::ui_iced::about::commit_copy_press`].
     CopyCommitHashRequested,
     /// A repository link in the attributions list was clicked; `url` is
     /// the catalog's repository URL verbatim. Deferred intent in the same
-    /// sense as [`RenderMessage::LinkActivated`]: the legacy UI pushed
-    /// `OutputCommand::OpenUrl` from inside the click, while a
-    /// pure view may not open a browser, so the URL travels with the
-    /// message and the reducer opens it.
+    /// sense as [`RenderMessage::LinkActivated`]: a pure view may not open
+    /// a browser, so the URL travels with the message and the reducer opens
+    /// it.
     RepositoryOpened {
         /// The repository URL to open.
         url: String,
@@ -781,13 +676,12 @@ pub enum AboutMessage {
     CloseRequested,
 }
 
-/// Batch prompt-processing dialog channel ([TASK-017b3], BATCH-001..BATCH-014).
+/// Batch prompt-processing dialog channel (BATCH-001..BATCH-014).
 ///
-/// Grounded in the legacy UI dialog (`src/app/ui/batch_dialog.rs:65-183`) and the
-/// `BatchDialogConfig` state it mutates
-/// (`src/app/agent/batch/types.rs:224-253`). This channel carries **only the
-/// selection state the legacy UI kept in that config** — the directory, prompt,
-/// wildcard pattern, mode and concurrency the user is composing.
+/// This channel carries **only the dialog's own selection state** — the
+/// directory, prompt, wildcard pattern, mode and concurrency the user is
+/// composing, held in `BatchDialogConfig`
+/// (`src/app/agent/batch/types.rs:224-253`).
 ///
 /// Everything else the batch dialog does already rides [`Message::Command`]
 /// and is deliberately **not** duplicated here:
@@ -795,17 +689,14 @@ pub enum AboutMessage {
 /// * open — `UserCommand::OpenBatchDialog` (`user_command.rs:64`);
 /// * start — `UserCommand::StartBatch(BatchConfig)` (`:134`), which the
 ///   Process button emits directly because the composed config *is* the
-///   self-contained intent ([FMD-068]);
-/// * cancel / close — `UserCommand::CancelBatch` (`:136`), which is what
-///   the legacy UI dialog published on both its Cancel button and on window
-///   close (`ui/batch_dialog.rs:54-61`, `:174-178`).
+///   self-contained intent;
+/// * cancel / close — `UserCommand::CancelBatch` (`:136`), published by
+///   both the Cancel button and the scrim dismiss.
 ///
 /// So unlike [`DialogMessage`], no validation round-trip lives here: the
 /// Process button is gated by
 /// [`crate::ui_iced::batch_dialog::BatchDialogViewModel::can_start`] at
-/// render time, mirroring the legacy UI's `is_config_valid` gate
-/// (`ui/batch_dialog.rs:152`, `:232-240`), and an invalid composition
-/// simply never emits `StartBatch`.
+/// render time, and an invalid composition simply never emits `StartBatch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchDialogMessage {
     /// The directory pick-list selection changed (`None` clears it).
@@ -823,31 +714,28 @@ pub enum BatchDialogMessage {
     ConcurrencyChanged(u8),
 }
 
-/// Tools dialog window channel ([TASK-017b3], UI-051..UI-060).
+/// Tools dialog window channel (UI-051..UI-060).
 ///
 /// Deliberately a **single-variant** channel. Every action the tools dialog
 /// performs is already a self-contained [`UserCommand`] —
 /// `SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` /
-/// `ForgetMcpAuth` (`user_command.rs:80-88`) — and the iced card emits
-/// those through [`Message::Command`] exactly as the legacy UI dialog published
-/// them (`ui/tools_dialog.rs:197-293`). The legacy UI dialog also keeps **no
-/// view-local state at all**: no search box, no selection, no expansion.
+/// `ForgetMcpAuth` (`user_command.rs:80-88`) — and the card emits those
+/// through [`Message::Command`]. The dialog keeps **no view-local state at
+/// all**: no search box, no selection, no expansion.
 ///
-/// The one thing with no [`UserCommand`] equivalent is *closing* it. The
-/// the legacy UI dialog closed via its title-bar `X` (`ui/tools_dialog.rs:61-63`),
-/// a window-frame widget that does not exist for an in-window iced modal,
-/// so the scrim click / Escape needs its own dismiss message. Opening is
-/// still `UserCommand::OpenToolsDialog` (`:66`).
+/// The one thing with no [`UserCommand`] equivalent is *closing* it. An
+/// in-window iced modal has no title-bar `X`, so the scrim click / Escape
+/// needs its own dismiss message. Opening is
+/// `UserCommand::OpenToolsDialog` (`:66`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolsDialogMessage {
     /// The scrim was clicked or Escape pressed — hide the tools dialog.
     CloseRequested,
 }
 
-/// Agent debug window channel ([TASK-017b4], UI-048 / REQ-008).
+/// Agent debug window channel (UI-048).
 ///
-/// Grounded in the legacy UI debug window (`src/app/ui/agent_debug_window.rs`)
-/// and the debug-entry stream it renders
+/// The window renders the debug-entry stream
 /// (`AgentSession::state().debug_entries`, `src/agent/session.rs:33`).
 ///
 /// This channel carries **only what the command channel cannot express**.
@@ -858,21 +746,16 @@ pub enum ToolsDialogMessage {
 /// * the JSON row count — `UserCommand::SetDebugJsonRows` (`:156`);
 /// * Clear — `UserCommand::ClearDebugEntries` (`:154`);
 /// * close — `UserCommand::ToggleDebugWindow(false)` (`:152`), which is
-///   literally what the legacy UI window published when its title-bar `X` was
-///   used (`ui/agent_debug_window.rs:149-153`), so no
-///   `CloseRequested` variant is invented here.
+///   literally what the window's dismiss publishes, so no
+///   `CloseRequested` variant exists here.
 ///
-/// What is left is the disclosure state the legacy UI kept inside its
-/// `CollapsingHeader` widget memory — the only one in the codebase
-/// (`ui/agent_debug_window.rs:170`) — plus the two things iced will not
-/// let a view do: copy to the clipboard and report its own viewport
-/// geometry.
+/// What is left is the per-entry disclosure state plus the two things iced
+/// will not let a view do: copy to the clipboard and report its own
+/// viewport geometry.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentDebugMessage {
-    /// The clickable header of entry `id` was pressed, replacing
-    /// `CollapsingHeader`'s built-in toggle. `id` is the entry's
-    /// index in the raw debug-entry list — the legacy UI's `orig_idx`
-    /// (`ui/agent_debug_window.rs:106`) — and the reducer flips it in
+    /// The clickable header of entry `id` was pressed. `id` is the entry's
+    /// index in the raw debug-entry list, and the reducer flips it in
     /// [`crate::ui_iced::agent_debug::AgentDebugWindowState`].
     ///
     /// View-local disclosure, not application state, so it is
@@ -887,10 +770,8 @@ pub enum AgentDebugMessage {
     ///
     /// Deferred intent in the same sense as
     /// [`RenderMessage::CopyCodeRequested`] and
-    /// [`AboutMessage::CopyCommitHashRequested`]: the legacy UI copied inside the
-    /// click handler with `Ui::copy_text`
-    /// (`src/app/ui/agent_debug_window.rs:177-184`), while iced exposes
-    /// the clipboard to `update` only
+    /// [`AboutMessage::CopyCommitHashRequested`]: iced exposes the
+    /// clipboard to `update` only
     /// (`iced_core-0.14.0/src/clipboard.rs`), so the payload travels
     /// with the message and the reducer writes it.
     CopyJsonRequested {
@@ -900,11 +781,9 @@ pub enum AgentDebugMessage {
     /// The entry list's viewport geometry changed.
     ///
     /// The auto-scroll counterpart of [`LogsMessage::ScrollReported`]:
-    /// the legacy UI applied `stick_to_bottom` inside its own `ScrollArea` state
-    /// (`ui/agent_debug_window.rs:103`), whereas iced exposes the
-    /// geometry only through `Scrollable::on_scroll`
+    /// iced exposes scroll geometry only through `Scrollable::on_scroll`
     /// (`iced_widget-0.14.2/src/scrollable.rs:164-168`), so the
-    /// viewport has to reach `update` as a message before the reused
+    /// viewport has to reach `update` as a message before the shared
     /// [`crate::ui_iced::logs::should_follow`] rule can decide
     /// anything. A runtime report, not user intent — the same class of
     /// payload [`LayoutMessage::CursorMoved`] carries.
@@ -920,34 +799,34 @@ pub enum AgentDebugMessage {
 
 /// Top-bar hamburger menu channel.
 ///
-/// Grounded in the legacy UI hamburger menu (`src/app/ui/panels/top.rs`
-/// `ui.menu_button("☰ Menu")`): opening the menu is a **view-local
-/// transition** — the menu is floating widget state, not application state
-/// — so it must not ride [`Message::Command`] ([FMD-068] rule 1). The
-/// channel exists because the port wrongly replaced the click-opened menu
-/// with a `pick_list` dropdown: the "menu" had no open/closed state at all,
-/// its title bar rendered the last-picked row and no header rows were
-/// renderable (the two defects the menu-migration bug report names).
+/// Opening the menu is a **view-local transition** — the menu is floating
+/// widget state, not application state — so it must not ride
+/// [`Message::Command`] (rule 1 in the module header). The channel carries
+/// the open/closed state the menu needs in order to render as a menu rather
+/// than as a value display.
 ///
-/// * [`Self::Opened`] / [`Self::Closed`] — the menu's open ⇄ closed bookends,
-///   carrying nothing.
+/// * [`Self::Opened`] / [`Self::Closed`] — the menu's open ⇄ closed bookends.
+/// * [`Self::SubmenuOpened`] / [`Self::SubmenuClosed`] — view-local
+///   navigation between the top-level menu and one submenu.
 /// * [`Self::RowActivated`] — a selectable row was picked. The wrapped
-///   [`UserCommand`] IS the row's user intent ([FMD-068]); the reducer
-///   executes it through `route_command` and closes the menu in the same
-///   reduction, which is what a dropdown/menu selection does.
+///   [`UserCommand`] IS the row's user intent; the reducer executes it
+///   through `route_command` and closes the menu in the same reduction,
+///   which is what a menu selection does.
 ///
 /// The menu rows themselves are built from
 /// [`crate::ui_iced::panels::top::build_menu_entries`], the full
-/// UI-061..UI-066 hierarchy including the non-selectable section headers
-/// and the no-chat-models placeholder. `Message` derives `PartialEq` on
-/// every channel; the payloads here are `UserCommand: PartialEq`, so the
-/// channel derives it.
+/// UI-061..UI-066 hierarchy and the no-chat-models placeholder. `Message`
+/// derives `PartialEq` on every channel; the payloads here are comparable.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuMessage {
     /// The ☰ button opened the menu.
     Opened,
     /// The menu was dismissed (click-away) without picking a row.
     Closed,
+    /// A top-level submenu button was activated.
+    SubmenuOpened(MenuSection),
+    /// The user navigated back to the top-level menu.
+    SubmenuClosed,
     /// A selectable menu row was picked. The wrapped command executes via
     /// `route_command` and the menu closes.
     RowActivated(UserCommand),
@@ -978,7 +857,7 @@ pub enum MenuMessage {
 ///   row click is reduced.
 ///
 /// It is **not** [`Message::Command`]: neither report is a request for the
-/// *application* to do something ([FMD-068] rule 1) — they are statements
+/// *application* to do something (rule 1) — they are statements
 /// about the input device, the same class of payload
 /// [`LayoutMessage::CursorMoved`] carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -994,15 +873,15 @@ pub enum OverlayMessage {
     },
 }
 
-/// Which inbound bus a notification arrived from ([TASK-019]).
+/// Which inbound bus a notification arrived from.
 /// Names the four producer channels the bridge in
 /// [`crate::ui_iced::subscription`] reads. The source travels with the
-/// lag report so a warning says *which* bus dropped events, the way the
-/// the legacy UI drain loops named them in their `tracing::warn!` calls
+/// lag report so a warning says *which* bus dropped events, as the drain
+/// loops name them in their `tracing::warn!` calls
 /// (`src/app/orchestrator.rs:97-101`, `:436-440`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BusSource {
-    /// `Bus<ConfigArrived>` — the one-shot configuration handoff (DEC-009).
+    /// `Bus<ConfigArrived>` — the one-shot configuration handoff.
     Config,
     /// `Bus<FileEvent>` — filesystem mutations from the watcher, the
     /// initial scan, tools and the agent.
@@ -1014,20 +893,19 @@ pub enum BusSource {
     Background,
 }
 
-/// Inbound *background → UI* notification channel ([TASK-019],
-/// FMD-065..FMD-067).
+/// Inbound *background → UI* notification channel.
 ///
 /// Every other channel of [`Message`] is produced by a widget. This one is
 /// produced only by the subscription bridge
 /// ([`crate::ui_iced::subscription::bus_event_to_message`]), which is the
-/// single place the iced layer touches a live receiver ([FMD-065]: the
-/// notification runs one way — background → UI — and the UI never
-/// publishes back through it; outbound intent rides [`Message::Command`]).
+/// single place the iced layer touches a live receiver: the notification
+/// runs one way — background → UI — and the UI never publishes back through
+/// it; outbound intent rides [`Message::Command`].
 ///
 /// # Why a dedicated channel rather than new `Agent`/`Logs`/`Tree` variants
 ///
-/// The [TASK-021] channel rule keeps panel channels for *view-local state*
-/// only; a bus notification is neither view-local nor widget-produced.
+/// The channel rule keeps panel channels for *view-local state* only; a bus
+/// notification is neither view-local nor widget-produced.
 /// Beyond that rule, the payloads simply could not ride them: `AgentEvent`
 /// (`src/app/bus/events/agent.rs:20`), `BackgroundEvent`
 /// (`src/app/bus/events/typed.rs:118`), `BackgroundLogEntry`
@@ -1047,23 +925,22 @@ pub enum BusSource {
 /// * `AppConfig`, `AgentEvent` and `BackgroundEvent` compare by
 ///   **delivery identity** (`Arc::ptr_eq`): two messages are equal iff they
 ///   carry the same shared notification instance. Cloning a [`Message`]
-///   preserves that identity, which is what the [TASK-021]
-///   "clone must preserve the channel and its payload exactly" rule needs;
-///   two independently delivered events are *two deliveries* and never
-///   compare equal, which is the correct answer for a dedup check on
-///   notifications.
+///   preserves that identity, which is what the "clone must preserve the
+///   channel and its payload exactly" rule needs; two independently
+///   delivered events are *two deliveries* and never compare equal, which
+///   is the correct answer for a dedup check on notifications.
 #[derive(Debug, Clone)]
 pub enum InboundMessage {
-    /// DEC-009: the application configuration has been loaded and
-    /// published on `Bus<ConfigArrived>`. The reducer projects it onto the
-    /// agent config, content libraries, batch-directory list and inline
-    /// editor flag exactly as `AppOrchestrator::drain_config_bus` does
+    /// The application configuration has been loaded and published on
+    /// `Bus<ConfigArrived>`. The reducer projects it onto the agent config,
+    /// content libraries, batch-directory list and inline editor flag as
+    /// `AppOrchestrator::drain_config_bus` does
     /// (`src/app/orchestrator.rs:287-331`).
     ConfigArrived(Arc<AppConfig>),
     /// A filesystem mutation arrived on `Bus<FileEvent>`.
     FileChanged(FileEvent),
     /// A burst of filesystem mutations drained off `Bus<FileEvent>` in one
-    /// go ([FMD-060]).
+    /// go.
     ///
     /// The bridge coalesces every event already queued when it wakes, so a
     /// watcher storm costs **one** reduction — and one tree rebuild —
@@ -1074,26 +951,25 @@ pub enum InboundMessage {
     /// An agent lifecycle or streaming event arrived on
     /// `Bus<AgentEvent>`.
     Agent(Arc<AgentEvent>),
-    /// A burst of agent events drained off `Bus<AgentEvent>` in one
-    /// go ([FMD-060]) — same semantics as the
-    /// [`InboundMessage::Agent`] arm applied in order.
+    /// A burst of agent events drained off `Bus<AgentEvent>` in one go —
+    /// same semantics as the [`InboundMessage::Agent`] arm applied in
+    /// order.
     AgentBatch(Vec<Arc<AgentEvent>>),
     /// A typed background event arrived on the `BackgroundEvent` channel —
     /// indexer/watcher `Fs` progress, a worker `Process` log entry or file
     /// load, or an `McpAuth` completion.
     Background(Arc<BackgroundEvent>),
     /// A burst of typed background events drained off the `BackgroundEvent`
-    /// channel in one go ([FMD-060]) — same semantics as the
+    /// channel in one go — same semantics as the
     /// [`InboundMessage::Background`] arm applied in order.
     BackgroundBatch(Vec<Arc<BackgroundEvent>>),
-    /// A subscriber fell behind a bus and `count` events were discarded
-    /// ([FMD-067], [FMD-072]).
+    /// A subscriber fell behind a bus and `count` events were discarded.
     ///
-    /// Ported from the legacy UI drain loops' `BroadcastRecvError::Lagged(n)`
-    /// arms (`src/app/orchestrator.rs:96-103`, `:435-449`), which read
-    /// the same count off the same tokio broadcast channel. The reducer
-    /// should surface the loss to the user and re-synchronise on the next
-    /// valid event, as [FMD-067] requires.
+    /// The count comes off the same tokio broadcast channel the drain loops
+    /// read for their `BroadcastRecvError::Lagged(n)` arms
+    /// (`src/app/orchestrator.rs:96-103`, `:435-449`). The reducer
+    /// surfaces the loss to the user and re-synchronises on the next valid
+    /// event.
     EventsDropped {
         /// The bus that discarded events.
         source: BusSource,

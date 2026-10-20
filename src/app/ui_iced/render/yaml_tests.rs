@@ -1,4 +1,4 @@
-//! Unit tests for the YAML front-matter mapping ([TASK-015]).
+//! Unit tests for the YAML front-matter mapping.
 
 use super::*;
 use crate::ui::theme::Palette;
@@ -112,8 +112,7 @@ fn test_mapping_document_maps_to_rows() {
 
 #[test]
 fn test_non_mapping_documents_produce_no_rows() {
-    // The legacy UI renderer fell through silently for anything that is not a
-    // key/value mapping.
+    // Anything that is not a key/value mapping produces no rows.
     let scalar = Value::String("just text".to_string());
     let sequence = Value::Sequence(vec![Value::String("x".to_string())]);
     let null = Value::Null;
@@ -185,7 +184,7 @@ fn test_yaml_row_builds_at_a_collapsed_width() {
 
 #[test]
 fn test_yaml_colours_come_from_palette_tokens() {
-    // [GUD-003] guard: the tokens the renderer uses must exist and be
+    // Guard: the tokens the renderer uses must exist and be
     // distinct, and no literal colour is introduced by this module.
     let palette = palette();
     assert_ne!(palette.accent_text_soft, palette.text_value);

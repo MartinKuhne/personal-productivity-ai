@@ -1,4 +1,4 @@
-//! Tests for `ui_iced/panels/center.rs` ([TASK-013]).
+//! Tests for `ui_iced/panels/center.rs`.
 //!
 //! Widget construction cannot be driven headlessly without the iced
 //! simulator, so these tests cover the state/mapping layer the widget tree
@@ -146,8 +146,8 @@ fn tab_entries_preserve_strip_order_and_mark_only_the_active_tab() {
 
 #[test]
 fn tab_entries_are_never_unsaved_without_dirty_tracking() {
-    // The shipped the legacy UI build has no per-tab dirty flag, so the pure
-    // constructor reports clean. The field exists for TASK-022 to fill.
+    // The app has no per-tab dirty flag, so the pure constructor reports
+    // clean. The field exists for the reducer to fill.
     let paths = vec![PathBuf::from("a.md")];
     let tabs = tab_entries(&paths, Some(Path::new("a.md")));
     assert!(!tabs[0].unsaved);
@@ -196,7 +196,7 @@ fn other_tab_indices_with_an_out_of_range_keep_closes_everything() {
 
 #[test]
 fn tab_select_command_is_a_single_select_select_file() {
-    // legacy parity: the tab strip never multi-selects.
+    // The tab strip never multi-selects.
     assert_eq!(
         tab_select_command(Path::new("lib/note.md")),
         UserCommand::SelectFile {
@@ -546,7 +546,7 @@ fn from_app_carries_agent_status_and_thinking() {
 fn thinking_section_visible_only_when_the_buffer_has_content() {
     assert!(!thinking_section_visible(""));
     assert!(thinking_section_visible("reasoning"));
-    // Whitespace is still content — the legacy UI's `!is_empty()` said the same.
+    // Whitespace is still content.
     assert!(thinking_section_visible(" "));
 }
 
@@ -589,9 +589,9 @@ fn tab_text_color_uses_distinct_tokens_for_active_and_inactive() {
 
 // --- UI-034 cross-menu parity ------------------------------------------
 //
-// Gap fill ([TASK-027]): UI-034 requires the tab menu's file actions to be
-// available, identically, on a directory-tree file row. Each menu had its
-// own mapping test; nothing asserted the two menus actually agree.
+// UI-034 requires the tab menu's file actions to be available,
+// identically, on a directory-tree file row; the test below asserts the two
+// menus actually agree.
 
 #[test]
 fn tab_menu_file_actions_match_the_tree_file_menu() {
@@ -638,8 +638,7 @@ fn tab_menu_file_actions_match_the_tree_file_menu() {
 
 /// The caller-supplied note-skill listing must be used verbatim, so
 /// `ViewModels::from_app` can read the skill directory once per rebuild and
-/// share it with the left panel instead of each panel hitting the FS
-/// ([FMD-060]).
+/// share it with the left panel instead of each panel hitting the FS.
 #[test]
 fn from_app_with_note_skills_uses_the_supplied_listing() {
     let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());

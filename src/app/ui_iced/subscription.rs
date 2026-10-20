@@ -1,12 +1,9 @@
-//! Bus → iced subscription bridge ([TASK-019], FMD-065..FMD-067).
+//! Bus → iced subscription bridge.
 //!
-//! Turns the application's existing producer channels into one
-//! [`iced::Subscription<Message>`] the [TASK-022] runtime can hand to
-//! `.subscription(...)`. The producers are unchanged: background work keeps
-//! notifying, and this module is the single place the iced layer ever
-//! touches a live receiver ([FMD-065] — notification runs one way,
-//! background → UI; outbound user intent rides [`Message::Command`] and is
-//! not this module's concern).
+//! Turns the application's producer channels into one
+//! [`iced::Subscription<Message>`] the runtime hands to `.subscription(...)`.
+//! Notification runs one way, background → UI; outbound user intent rides
+//! [`Message::Command`] and is not this module's concern.
 //!
 //! # Verified iced 0.14 primitives
 //!
@@ -60,7 +57,7 @@
 //! | `Bus<AgentEvent>` | coalesced burst | `Message::Inbound(InboundMessage::AgentBatch(Vec<Arc<AgentEvent>>))` |
 //! | `std::sync::mpsc<BackgroundEvent>` | `Fs(..)` / `Process(..)` / `McpAuth(..)` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
 //! | any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
-//! | winit window events | `CloseRequested(id)` / `Resized(id, size)` | `Message::Window(WindowMessage::CloseRequested(id))` / `Message::Window(WindowMessage::Resized { id, size })` — the `close_requests()` / `resize_events()` lanes; with `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction |
+//! | winit window events | `CloseRequested(id)` / `Resized(id, size)` | `Message::Window(WindowMessage::CloseRequested(id))` / `Message::Window(WindowMessage::Resized { id, size })` — the `close_requests()` / `resize_events()` lanes; with `exit_on_close_request: false` the close lane is the only path to the save-and-close reduction |
 //! | runtime keyboard events | `KeyPressed { Escape }` | `Message::Overlay(OverlayMessage::EscapePressed)` — the `escape_to_message` lane; accepted under **both** `Status::Ignored` and `Status::Captured` so `Esc` still dismisses a modal while a `text_editor` holds focus (UI-056) |
 //! | runtime keyboard events | `KeyPressed` / `KeyReleased` `modifiers.shift()` | `Message::Overlay(OverlayMessage::ModifiersChanged { shift })` — the `modifiers_to_message` lane, the UI-022 multi-select input |
 //!
@@ -74,17 +71,12 @@
 //! dedicated inbound channel instead of spreading across the `Agent`,
 //! `Logs` and `Tree` panel channels.
 //!
-//! # Dropped events ([FMD-067], [FMD-072])
+//! # Dropped events
 //!
-//! The legacy UI build read the dropped-event count from
-//! `BusReader::try_recv_exposing_lag() → BroadcastRecvError::Lagged(n)`
-//! (`src/app/bus/core.rs:149-151`) and handled it in its drain loops
-//! (`src/app/orchestrator.rs:96-103` for user commands, `:435-449` for
-//! agent events). The async equivalent is
-//! `broadcast::Receiver::recv() → Err(RecvError::Lagged(n))` — the same
-//! count off the same tokio channel. This bridge does both things the legacy UI
-//! loops did, and does them for **every** bus rather than only the agent
-//! one: it emits a `tracing::warn!` carrying the count, and it forwards an
+//! A lagging subscriber surfaces as
+//! `broadcast::Receiver::recv() → Err(RecvError::Lagged(n))`. For **every**
+//! bus the bridge reports the loss instead of swallowing it: it emits a
+//! `tracing::warn!` carrying the count, and it forwards an
 //! [`InboundMessage::EventsDropped`] so the reducer can surface the loss
 //! and re-synchronise on the next valid event. The stream then keeps
 //! running — a lag is not a disconnect.
@@ -107,33 +99,32 @@ use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage
 /// The union of every payload type that reaches the iced layer, so the
 /// mapping is one testable function instead of four parallel ones. The
 /// `Dropped` arm is not a bus payload: it is the lag report the streams
-/// synthesise from `RecvError::Lagged(n)` ([FMD-072]).
+/// synthesise from `RecvError::Lagged(n)`.
 #[derive(Debug, Clone)]
 pub enum InboundBusEvent {
     /// The one-shot configuration handoff on `Bus<ConfigArrived>`
-    /// (`src/app/bus/events/config.rs:10`, DEC-009). Boxed: `AppConfig`
+    /// (`src/app/bus/events/config.rs:10`). Boxed: `AppConfig`
     /// is ~800 bytes and would otherwise dominate the enum's layout.
     Config(Box<ConfigArrived>),
     /// A filesystem mutation on `Bus<FileEvent>`
     /// (`src/app/bus/events/file.rs:28`).
     File(FileEvent),
     /// A coalesced burst of filesystem mutations drained off
-    /// `Bus<FileEvent>` in one wake-up ([FMD-060]).
+    /// `Bus<FileEvent>` in one wake-up.
     FileBatch(Vec<FileEvent>),
     /// An agent turn event on `Bus<AgentEvent>`
     /// (`src/app/bus/events/agent.rs:21`).
     Agent(AgentEvent),
     /// A coalesced burst of agent events drained off
-    /// `Bus<AgentEvent>` in one wake-up ([FMD-060]).
+    /// `Bus<AgentEvent>` in one wake-up.
     AgentBatch(Vec<AgentEvent>),
     /// A typed background event on the `std::sync::mpsc` channel
     /// (`src/app/bus/events/typed.rs:119`).
     Background(BackgroundEvent),
     /// A coalesced burst of typed background events drained in one
-    /// wake-up ([FMD-060]).
+    /// wake-up.
     BackgroundBatch(Vec<BackgroundEvent>),
-    /// `count` events were discarded because a subscriber fell behind
-    /// ([FMD-067]).
+    /// `count` events were discarded because a subscriber fell behind.
     Dropped {
         /// Which bus discarded them.
         source: BusSource,
@@ -146,9 +137,9 @@ pub enum InboundBusEvent {
 /// bridge, testable without a live stream.
 ///
 /// Returns `None` when an event must not reach the UI. Every payload
-/// currently published on the four buses *is* UI-observable — the legacy UI
-/// build reacted to each one — so the mapping is total today and `None` is
-/// never produced. The `Option` is kept deliberately: it is the seam where
+/// currently published on the four buses *is* UI-observable, so the mapping
+/// is total today and `None` is never produced. The `Option` is kept
+/// deliberately: it is the seam where
 /// a future filter (throttling a chatty producer, suppressing another
 /// session's events) can drop a class of events without touching the stream
 /// plumbing, and the streams drop `None`s on their way through.
@@ -276,7 +267,7 @@ impl Hash for BackgroundReceiver {
 /// stable across frames.
 #[derive(Clone)]
 pub struct BusReceivers {
-    /// `Bus<ConfigArrived>` — the DEC-009 configuration handoff.
+    /// `Bus<ConfigArrived>` — the configuration handoff.
     pub config: SharedReceiver<ConfigArrived>,
     /// `Bus<FileEvent>` — watcher / scan / tool / agent file mutations.
     pub file: SharedReceiver<FileEvent>,
@@ -308,7 +299,7 @@ impl BusReceivers {
 /// [`iced::Subscription::batch`]
 /// (`iced_futures-0.14.0/src/subscription.rs:212-221`).
 ///
-/// Ready to be handed straight to `.subscription(...)` in [TASK-022]:
+/// Ready to be handed straight to `.subscription(...)`:
 ///
 /// ```ignore
 /// iced::application(App::boot, App::update, App::view)
@@ -331,7 +322,7 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
         iced::Subscription::run_with(receivers.agent.clone(), agent_stream),
         iced::Subscription::run_with(receivers.background.clone(), background_stream),
         // The winit window lane — the subscriptions the window reducers
-        // ([TASK-009], DEC-006) were written against. The launch chain sets
+        // were written against. The launch chain sets
         // `exit_on_close_request: false` ([APP] `ui_iced/app.rs`
         // `window_settings`), so *nothing* exists that handles the title-bar
         // close button unless these subscriptions deliver
@@ -347,7 +338,7 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
     ])
 }
 
-/// The winit window-event lane ([TASK-021], DEC-006): close requests and
+/// The winit window-event lane: close requests and
 /// resizes, delivered by `iced::window::close_requests` /
 /// `iced::window::resize_events`
 /// (`iced_runtime-0.14.0/src/window.rs:249-268`) — the producers the
@@ -481,8 +472,7 @@ fn modifiers_to_message(
 }
 
 /// Reports a lag on `source`: a `tracing::warn!` carrying the dropped
-/// count ([FMD-072]) — the same shape the legacy UI drain loops used
-/// (`src/app/orchestrator.rs:97-101`, `:436-440`).
+/// count, so the loss is visible rather than silent.
 fn warn_dropped(source: BusSource, count: u64) {
     tracing::warn!(
         name = "ui_iced.subscription.bus_lagged",
@@ -532,7 +522,7 @@ fn config_stream(
 /// The `Bus<FileEvent>` lane.
 ///
 /// Every event already queued when the stream wakes is coalesced into one
-/// [`InboundMessage::FileChangedBatch`] ([FMD-060]): a watcher storm then
+/// [`InboundMessage::FileChangedBatch`]: a watcher storm then
 /// costs the reducer a single pass — one tree rebuild, one view-model
 /// rebuild — instead of one per event. A lone event still rides the plain
 /// [`InboundMessage::FileChanged`] arm, so the common case is unchanged.
@@ -580,7 +570,7 @@ fn file_stream(
 /// The `Bus<AgentEvent>` lane — the highest-volume channel of the four.
 ///
 /// Every event already queued when the stream wakes is coalesced into one
-/// [`InboundMessage::AgentBatch`] ([FMD-060]): a burst of thinking deltas,
+/// [`InboundMessage::AgentBatch`]: a burst of thinking deltas,
 /// tool calls, or status updates then costs the reducer a single pass
 /// instead of one per event. A lone event still rides the plain
 /// [`InboundMessage::Agent`] arm, so the common case is unchanged.
@@ -630,8 +620,7 @@ fn agent_stream(
 ///
 /// Like the file lane, every event already queued when the stream wakes is
 /// coalesced into one [`InboundMessage::BackgroundBatch`] so indexer
-/// progress storms cost one reduction instead of one per event
-/// ([FMD-060]).
+/// progress storms cost one reduction instead of one per event.
 fn background_stream(
     handle: &BackgroundReceiver,
 ) -> iced::futures::stream::BoxStream<'static, Message> {

@@ -2,7 +2,7 @@
 //!
 //! Pure token-value tests only ([RUST-006]): every assertion compares the
 //! re-typed `iced::Color` tokens against the exact u8 triples the palette
-//! declares ([GUD-003] single source of truth).
+//! declares, keeping the palette the single source of truth.
 
 use super::*;
 
@@ -29,8 +29,8 @@ fn test_fastmd_dark_preserves_distinct_shades() {
     assert_eq!(palette.log_category, Color::from_rgb8(173, 216, 230));
 }
 
-/// Every palette token is fully opaque (α = 1.0) — the iced theme mapping
-/// relies on this ([TASK-008]: no palette token carries translucency).
+/// Every palette token is fully opaque (α = 1.0) — the theme mapping
+/// relies on this: no palette token carries translucency.
 #[test]
 fn test_fastmd_dark_tokens_are_opaque() {
     let palette = Palette::fastmd_dark();
@@ -64,7 +64,7 @@ fn test_fastmd_dark_tokens_are_opaque() {
 
 /// The u8 round-trip is exact for every declared brand value: the re-typed
 /// `iced::Color` tokens normalise 0..255 bytes to f32 / 255.0 without
-/// drift ([GUD-003] values identical).
+/// drift.
 #[test]
 fn test_brand_values_round_trip_through_rgba8() {
     let palette = Palette::fastmd_dark();

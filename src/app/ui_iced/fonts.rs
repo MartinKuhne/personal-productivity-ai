@@ -1,23 +1,19 @@
-//! Iced font bootstrap for the FastMD user interface ([TASK-007],
-//! `doc/planning/iced.md`).
+//! Font bootstrap for the FastMD user interface.
 //!
-//! Loads the same font collections the legacy UI build installs via
-//! `FontDefinitions` (`crate::ui::fonts`): the embedded Phosphor icon
-//! font and the platform symbol-fallback font, this time through
-//! `iced::font::load(bytes)` — registered with the cosmic-text runtime font
-//! system. The byte-level inventory is shared with the legacy UI path
+//! Registers the font inventory held by `crate::ui::fonts` — the embedded
+//! Phosphor icon font and the platform symbol-fallback font — through
+//! `iced::font::load(bytes)`, which adds them to the cosmic-text runtime
+//! font system. The byte-level inventory is shared
 //! (`crate::ui::fonts::{PHOSPHOR_REGULAR_FONT, load_fallback_font}`), so
 //! there is exactly one font inventory ([RUST-023]).
 //!
 //! Per-widget font *selection* (`iced::Font::MONOSPACE` / family names)
-//! happens later in the render code (Phase 3) and is out of scope here.
+//! happens in the render code and is out of scope here.
 //!
 //! Unit tests live in the sibling `fonts_tests.rs` sidecar.
 
 /// Family name under which the embedded Phosphor icon font becomes
 /// addressable in iced (`iced::Font::with_name`) once loaded.
-///
-/// Mirrors `crate::ui::fonts`' the legacy UI registration key `"phosphor"`.
 pub const PHOSPHOR_FONT_NAME: &str = "phosphor";
 
 /// Returns the font collections to register with the iced runtime at boot.
@@ -40,7 +36,7 @@ pub fn font_collections() -> Vec<std::borrow::Cow<'static, [u8]>> {
 ///
 /// Returns `None` when the collection registered cleanly, `Some(message)`
 /// describing the failure otherwise. Failures are non-fatal: iced keeps its
-/// default font set and the app remains usable (FMD-064); callers log the
+/// default font set and the app remains usable; callers log the
 /// message as an ERROR ([NFR-001]).
 pub fn font_load_error_message(result: &Result<(), iced::font::Error>) -> Option<String> {
     result
@@ -49,7 +45,7 @@ pub fn font_load_error_message(result: &Result<(), iced::font::Error>) -> Option
 }
 
 /// Builds the boot task that registers every FastMD font collection with the
-/// iced runtime font system ([TASK-007]).
+/// iced runtime font system.
 ///
 /// Each collection is loaded via `iced::font::load(bytes)` (
 /// `iced_runtime-0.14.0/src/font.rs:11`, re-exported as `iced::font::load`

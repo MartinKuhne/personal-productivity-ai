@@ -1,15 +1,4 @@
-//! Unit tests for the iced ToC helpers in `right.rs` ([TASK-029],
-//! [RUST-003]).
-//!
-//! Ported from the legacy UI `ui/panels/right_tests.rs` cases that exercised
-//! the helpers copied into [`super`], so coverage survives [TASK-029b]'s
-//! deletion of the legacy UI panel. The legacy UI sidecar's snapshot / pixel-layout
-//! tests are NOT ported — they drive `Ui` and have no iced-side
-//! counterpart here.
-//!
-//! [`toc_indent_pixels`] is a [TASK-027] gap fill: the legacy UI pinned the
-//! rule as `calculate_indent`, the iced pane computed it inline, and nothing
-//! tested the iced formula until it was extracted here.
+//! Unit tests for the iced ToC helpers in `right.rs` ([RUST-003]).
 
 use super::{
     TOC_BASE_INDENT_PIXELS, TOC_LEVEL_INDENT_PIXELS, resolve_anchor, should_show_panel,
@@ -126,12 +115,9 @@ fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
 // ---------------------------------------------------------------------------
 // `toc_indent_pixels` — the per-level ToC row indent (UI-001)
 //
-// Gap fill ([TASK-027]): the deleted legacy UI sidecar pinned this rule as
-// `calculate_indent`. The iced pane computed the same shape inline inside
-// `view::toc_body` and no iced test covered it, so the rule is now a
-// function and the assertion lives here. The values are the iced pane's own
-// (base 4 px, 12 px per level) — the legacy ladder used a 10 px step and a
-// 6-level clamp, neither of which the iced pane has or the SPEC asks for.
+// The rule is `TOC_BASE_INDENT_PIXELS + (level - 1) * TOC_LEVEL_INDENT_PIXELS`
+// (base 4 px, 12 px per level beyond the first), saturated at the base for
+// `level == 0` and unclamped above it.
 // ---------------------------------------------------------------------------
 
 #[test]

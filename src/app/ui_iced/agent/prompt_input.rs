@@ -1,22 +1,22 @@
 //! The iced agent prompt row — prompt box, send / queue / cancel controls and
-//! the chat-model selector ([TASK-018], UI-001 / UI-064 / UI-065).
+//! the chat-model selector (UI-001 / UI-064 / UI-065).
 //!
 //! This is the agent-panel-composed prompt surface. It shares its intent
 //! vocabulary with the pane-level command band
 //! ([`crate::ui_iced::panels::bottom`]) rather than re-inventing one: the
 //! Send and Queue buttons both emit [`AgentMessage::Submit`], and the
-//! reducer runs the reused [`submit_commands`] helper to decide
-//! `RunAgent` (idle) vs `QueueAgentPrompt` (running) — exactly the
-//! running-vs-idle branch the legacy UI kept inline in its widget closure
-//! (`src/app/ui/panels/bottom.rs:259-294`). Cancel emits
+//! reducer runs the shared [`submit_commands`] helper to decide
+//! `RunAgent` (idle) vs `QueueAgentPrompt` (running), so the running-vs-idle
+//! branch lives in one place instead of per widget. Cancel emits
 //! [`UserCommand::CancelAgent`]; the model pick emits
 //! [`UserCommand::SelectChatModel`]; Clear session emits
 //! [`UserCommand::ClearAgentSession`].
 //!
-//! # Reused, not reimplemented ([RUST-051])
+//! # Shared, not reimplemented ([RUST-051])
 //!
-//! * [`submit_commands`] and [`clear_command_input_command`] — the legacy UI
-//!   band's framework-free submit solver, re-exported.
+//! * [`submit_commands`] and [`clear_command_input_command`] — the
+//!   framework-free submit solver, re-exported from
+//!   [`crate::ui_iced::panels::bottom`].
 //! * [`ChatModelEntry`] — the top bar's model row type, reused for the
 //!   selector so both surfaces format and carry the model identically.
 //!
@@ -41,9 +41,8 @@ use crate::ui_iced::panels::top::ChatModelEntry;
 
 use super::panel_state::AgentPanelViewModel;
 
-/// The legacy UI command band's framework-free submit solver, reused rather
-/// than duplicated ([RUST-051]) — `src/app/ui/panels/bottom.rs:185-202`.
-/// The reducer calls it on [`AgentMessage::Submit`].
+/// The framework-free submit solver, shared rather than duplicated
+/// ([RUST-051]). The reducer calls it on [`AgentMessage::Submit`].
 pub use crate::ui_iced::panels::bottom::{clear_command_input_command, submit_commands};
 
 /// Logical point size of the prompt controls.
@@ -101,8 +100,7 @@ pub fn select_model_message(name: &str) -> Message {
 }
 
 /// The [`Message`] the Clear-session control produces — the same
-/// `ClearAgentSession` intent the agent header's Close button carries
-/// (`src/app/ui/panels/center.rs:112-119`).
+/// `ClearAgentSession` intent the agent header's Close button carries.
 ///
 /// Purity: pure.
 #[must_use]
@@ -126,7 +124,7 @@ pub fn current_model_option<'a>(
     options.iter().find(|entry| entry.name == current)
 }
 
-/// Renders the agent prompt row from a snapshot ([TASK-018]).
+/// Renders the agent prompt row from a snapshot.
 ///
 /// Emitted messages:
 /// * typing → [`AgentMessage::InputChanged`]

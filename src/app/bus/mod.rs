@@ -17,10 +17,10 @@
 //! - [`config`] — the configuration-arrival bus constructor and
 //!   subscriber timeout.
 //!
-//! See the architecture review (`doc/planning/application-architecture-review.md`,
-//! P1-6) for the background-event migration that split the legacy
-//! `BackgroundMessage` god-enum into per-domain sub-enums
-//! (`AgentEvent`, `FsEvent`, `ProcessEvent`) under `events::typed`.
+//! Background events are split into per-domain sub-enums under
+//! `events::typed` — `FsEvent` for the file watcher and indexer,
+//! `ProcessEvent` for background workers — rather than one combined
+//! god-enum. Agent events flow on their own `Bus<AgentEvent>`.
 
 pub mod config;
 pub mod core;

@@ -1,4 +1,4 @@
-//! Unit tests for the iced theme mapping ([TASK-008], re-typed [TASK-029b]).
+//! Unit tests for the iced theme mapping.
 //!
 //! All colour values come from [`crate::ui::theme::Palette::fastmd_dark`]
 //! ([RUST-006]: pure computation only — no window/process spawn, no
@@ -8,7 +8,7 @@ use super::*;
 use crate::ui::theme::Palette;
 
 /// One spot-checked palette token: `(token, expected R, G, B)` — the u8
-/// values the palette declares ([GUD-003] single source of truth).
+/// values the palette declares as the single source of truth.
 fn palette_spot_checks(palette: &Palette) -> [(iced::Color, u8, u8, u8); 5] {
     [
         (palette.surface, 9, 9, 11),
@@ -39,7 +39,7 @@ fn test_palette_tokens_preserve_rgb_spot_checks() {
 #[test]
 fn test_palette_tokens_are_opaque() {
     // Every token in `Palette` is fully opaque (α = 1.0), which is what
-    // lets the theme mapping pass tokens through untouched ([TASK-029b]).
+    // lets the theme mapping pass tokens through untouched.
     let palette = Palette::fastmd_dark();
     assert_eq!(palette.surface.a, 1.0);
     assert_eq!(palette.accent.a, 1.0);
@@ -73,7 +73,7 @@ fn test_scrim_color_dims_surface_token_to_scrim_alpha() {
     let surface = Palette::fastmd_dark().surface;
 
     // RGB must be the untouched `surface` token — the scrim only changes α, so
-    // no new colour value enters the palette ([GUD-003]).
+    // no new colour value enters the palette.
     assert_eq!(scrim.r, surface.r);
     assert_eq!(scrim.g, surface.g);
     assert_eq!(scrim.b, surface.b);

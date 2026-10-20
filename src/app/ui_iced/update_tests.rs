@@ -1,9 +1,9 @@
-//! Unit tests for the [TASK-023] iced reducer (`src/app/ui_iced/update.rs`).
+//! Unit tests for the iced reducer (`src/app/ui_iced/update.rs`).
 //!
-//! One-to-one coverage of the legacy UI `FastMdApp::update_ui` mirror, channel
-//! by channel. The Elm loop's runtime tasks (window close, font load) need
-//! a live iced runtime and stay manual-verify items ([TASK-009] testing
-//! rule 3); everything else — state reduction, bus publish/execute,
+//! Channel-by-channel coverage of the reducer. The Elm loop's runtime tasks
+//! (window close, font load) need
+//! a live iced runtime and stay manual-verify items; everything else —
+//! state reduction, bus publish/execute,
 //! deferred-intent file I/O and the view-model rebuild — is exercised here.
 //!
 //! [RUST-006]: every filesystem touch runs inside a `tempfile::TempDir`;
@@ -60,7 +60,7 @@ fn fresh_state() -> (AppState, Arc<InMemoryUiStateStorage>) {
 }
 
 /// An extra subscriber on the orchestrator's user-command bus, so a test
-/// can see exactly which intents the reducer published ([FMD-066]).
+/// can see exactly which intents the reducer published.
 fn command_spy(state: &AppState) -> BusReader<UserCommand> {
     state.app.orchestrator.user_command_bus.subscribe()
 }
@@ -82,8 +82,7 @@ fn with_viewport(state: &mut AppState, width: f32) {
 
 /// Seeds the tree with rows **the way the reducer does**: into the
 /// `FastMdApp::cached_tree_rows` cache with `tree_dirty` cleared, which is
-/// exactly the cache transition `finish_frame` performs (the legacy UI's own,
-/// `ui/panels/left.rs:209-210`).
+/// exactly the cache transition `finish_frame` performs.
 ///
 /// Seeding only `models.left.rows` would not survive the view-model rebuild that
 /// every `update` runs - the rebuild would re-derive the rows from the real
@@ -493,7 +492,7 @@ fn test_open_in_editor_lifts_the_text_buffer_into_an_editor_view_model() {
 
     let vm = state.overlay.editor.as_ref().expect("editor must open");
     assert_eq!(vm.path(), path.as_path());
-    // legacy parity: `TextBuffer::open` stores `DocumentContent::parse(raw).body`
+    // `TextBuffer::open` stores `DocumentContent::parse(raw).body`
     // verbatim (`ui/text_buffer.rs:302-304`), and that body keeps the newline the
     // parser leaves after the closing `---`. The front matter is the full fenced
     // block, exactly as `EditorViewModel`'s own contract pins it
@@ -613,7 +612,7 @@ fn test_tree_context_menu_closes() {
 }
 
 /// Regression: picking a context-menu row ran the action but left the card
-/// pinned on screen. A menu row carries its own intent ([FMD-068]), so handling
+/// pinned on screen. A menu row carries its own intent, so handling
 /// one must also dismiss the menu the way a native dropdown closes.
 #[test]
 fn test_activating_a_context_menu_row_dismisses_the_menu() {
@@ -741,9 +740,9 @@ fn test_run_as_prompt_reads_the_body_and_runs_it_against_the_file() {
     assert_eq!(
         drained(&spy),
         vec![UserCommand::RunSkillPrompt {
-            // the legacy UI publishes `DocumentContent::parse(&raw).body` verbatim
+            // the reducer publishes `DocumentContent::parse(&raw).body` verbatim
             // (`ui/tree/render.rs:145`), and that body keeps the newline the
-            // parser leaves after the closing `---`. One-to-one mirror.
+            // parser leaves after the closing `---`.
             content: "\nSummarise this\n".to_string(),
             target_dir: None,
             target_file: Some(path),
@@ -810,7 +809,7 @@ fn test_print_requested_hands_the_job_to_a_task_not_the_ui_thread() {
     // There is no `UserCommand::Print`, so nothing may be published. The
     // render-and-open work must ride a lazy iced Task: `units() > 0` proves a
     // real task was produced, and because the reducer never polls it no
-    // browser is launched here ([FMD-061]).
+    // browser is launched here.
     let spy = command_spy(&state);
     let task = update(
         &mut state,
@@ -921,20 +920,57 @@ fn test_tab_context_menu_for_a_missing_tab_mounts_nothing() {
 #[test]
 fn test_menu_opened_flips_the_flag() {
     let (mut state, _storage) = fresh_state();
+    state.overlay.hamburger_submenu = Some(crate::ui_iced::panels::top::MenuSection::Windows);
     assert!(!state.overlay.hamburger_open);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     assert!(state.overlay.hamburger_open, "Opened must show the card");
+    assert_eq!(state.overlay.hamburger_submenu, None);
 }
 
 #[test]
 fn test_menu_closed_clears_the_flag() {
     let (mut state, _storage) = fresh_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(
+            crate::ui_iced::panels::top::MenuSection::Windows,
+        )),
+    );
     let _ = update(&mut state, Message::Menu(MenuMessage::Closed));
     assert!(
         !state.overlay.hamburger_open,
         "Closed must unmount the card"
     );
+    assert_eq!(state.overlay.hamburger_submenu, None);
+}
+
+#[test]
+fn test_menu_submenu_navigation_requires_an_open_menu() {
+    use crate::ui_iced::panels::top::MenuSection;
+
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
+    );
+    assert_eq!(state.overlay.hamburger_submenu, None);
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
+    );
+    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
+
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Direct)),
+    );
+    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
+    assert_eq!(state.overlay.hamburger_submenu, None);
 }
 
 #[test]
@@ -944,12 +980,19 @@ fn test_menu_row_activation_routes_the_command_and_closes() {
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     let _ = update(
         &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(
+            crate::ui_iced::panels::top::MenuSection::Windows,
+        )),
+    );
+    let _ = update(
+        &mut state,
         Message::Menu(MenuMessage::RowActivated(UserCommand::OpenAboutDialog)),
     );
     assert!(
         !state.overlay.hamburger_open,
         "a row pick must close the menu in the same reduction"
     );
+    assert_eq!(state.overlay.hamburger_submenu, None);
     assert!(
         drained(&spy).contains(&UserCommand::OpenAboutDialog),
         "the row's own command must be routed ([FMD-068])"
@@ -969,6 +1012,12 @@ fn test_menu_opening_dismisses_a_live_context_menu() {
     assert!(state.overlay.context_menu.is_some());
 
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(
+            crate::ui_iced::panels::top::MenuSection::Windows,
+        )),
+    );
     assert!(
         state.overlay.context_menu.is_none(),
         "the two menus never share the screen"
@@ -980,6 +1029,12 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
     let (mut state, _storage) = fresh_state();
     seed_rows(&mut state, vec![file_row("/notes/a.md")]);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(
+            crate::ui_iced::panels::top::MenuSection::Windows,
+        )),
+    );
 
     let _ = update(
         &mut state,
@@ -991,6 +1046,7 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
         !state.overlay.hamburger_open,
         "opening a context menu must dismiss the hamburger"
     );
+    assert_eq!(state.overlay.hamburger_submenu, None);
 }
 
 // ───────────────────────────── Editor ─────────────────────────────
@@ -1379,8 +1435,8 @@ fn test_log_filters_reach_the_rebuilt_view_model() {
         }),
     );
     assert_eq!(state.models.logs.search_text, "index");
-    // the legacy UI only ever changes `auto_scroll` through its checkbox
-    // (`ui/background_logs.rs:115-118`) - a search edit leaves it alone - so
+    // `auto_scroll` only ever changes through its checkbox - a search edit
+    // leaves it alone - so
     // the toggle, not the search, is what the rebuilt model must reflect.
     let _ = update(
         &mut state,
@@ -2000,9 +2056,8 @@ fn test_config_arrival_projects_onto_the_orchestrator_and_the_agent() {
     assert!(!state.app.orchestrator.inline_editor_enabled);
     // The arrival invalidates the tree cache, and `finish_frame` re-derives the
     // rows inside the same reduction - so the observable end state is a NEW
-    // cache rather than a lingering `tree_dirty` flag. the legacy UI cleared that flag in
-    // the left panel's render pass (`ui/panels/left.rs:210`); the iced frame
-    // tail does it before the view ever sees the frame.
+    // cache rather than a lingering `tree_dirty` flag. The frame tail clears
+    // that flag before the view ever sees the frame.
     let after = state
         .app
         .cached_tree_rows
@@ -2077,7 +2132,7 @@ fn test_background_process_file_load_populates_the_document() {
     );
 
     assert_eq!(state.app.orchestrator.tabs.loaded_path, Some(path));
-    // legacy parity: `handle_process_event` stores `Document::new(content).body()`
+    // `handle_process_event` stores `Document::new(content).body()`
     // (`orchestrator.rs:537-539`), which keeps the newline after the closing
     // `---`. The viewer renders it as leading whitespace; the reducer must not
     // rewrite what the shared orchestrator produced.

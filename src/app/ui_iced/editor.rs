@@ -1,14 +1,11 @@
-//! Iced port of the inline Markdown editor ([TASK-014]: UI-037..UI-045,
-//! DEC-007).
+//! Inline Markdown editor (UI-037..UI-045).
 //!
-//! Replaces `src/app/ui/editor_the legacy UI.rs` + the editing model of
-//! `src/app/ui/text_buffer.rs`. Like the other iced views this is a **pure
-//! view over plain state**: [`editor_modal`] renders an [`EditorViewModel`]
-//! into an [`Element`] of [`Message`] and never touches the bus, the disk or
-//! `FastMdApp`. The [TASK-022] reducer owns the file write (UI-044) and the
-//! overlay lifecycle.
+//! A **pure view over plain state**: [`editor_modal`] renders an
+//! [`EditorViewModel`] into an [`Element`] of [`Message`] and never touches
+//! the bus, the disk or `FastMdApp`. The reducer owns the file write
+//! (UI-044) and the overlay lifecycle.
 //!
-//! # DEC-007 — why the undo stack is ours
+//! # Why the undo stack is ours
 //!
 //! `iced::widget::text_editor` has **no native undo/redo**. In iced 0.14 the
 //! widget does not even mutate its own buffer: `TextEditor` reports every
@@ -16,8 +13,8 @@
 //! (`iced_widget-0.14.2/src/text_editor.rs:212-222`) and the *application*
 //! applies it with `Content::perform`
 //! (`iced_widget-0.14.2/src/text_editor.rs:411-416`, and the crate's own
-//! example at `text_editor.rs:28-30`). That callback is exactly the
-//! interception point DEC-007 asks for, and [`EditorHistory`] is the stack.
+//! example at `text_editor.rs:28-30`). That callback is the interception
+//! point, and [`EditorHistory`] is the stack.
 //!
 //! [`classify_action`] is the interception rule. It delegates to
 //! `Action::is_edit()` — verified at
@@ -39,8 +36,7 @@
 //! *plus* 100 previous ones — so a full 100-step undo is available at all
 //! times rather than 99. Overflow evicts the oldest snapshot
 //! ([`EditorHistory::push`]), and identical consecutive snapshots are
-//! coalesced so a stream of no-op edits cannot flood the stack (the same
-//! rule the legacy UI `UndoStack` used).
+//! coalesced so a stream of no-op edits cannot flood the stack.
 //!
 //! # What iced `text_editor` gives us for free (verified)
 //!
@@ -51,7 +47,7 @@
 //! | UI-041 navigation | `Motion::{Left, Right, WordLeft, WordRight, Home, End, PageUp, PageDown, DocumentStart, DocumentEnd}` (`iced_core-0.14.0/src/text/editor.rs:119-147`), with `Motion::widen()` mapping Ctrl+Left→WordLeft, Ctrl+Home→DocumentStart |
 //! | UI-038 monospace | `Font::MONOSPACE` (`iced_core-0.14.0/src/font.rs:27`) |
 //!
-//! What iced does **not** provide, and this module adds: undo/redo (DEC-007),
+//! What iced does **not** provide, and this module adds: undo/redo,
 //! the front-matter-preserving save model (UI-037/UI-044), and pre-save GFM
 //! validation (UI-043).
 //!
@@ -59,9 +55,7 @@
 //!
 //! Reuses [`crate::markdown::validate_markdown`], which parses with
 //! [`crate::markdown::gfm_options`] — the *same* option set
-//! `parse_markdown_to_events` renders with, so the two cannot drift. That
-//! helper was written for this task (the legacy UI build never validated before
-//! saving — see the drift note in `doc/planning/iced-migration-map.md`).
+//! `parse_markdown_to_events` renders with, so the two cannot drift.
 //!
 //! # Front matter (UI-037 / UI-044)
 //!
@@ -71,13 +65,12 @@
 //! re-joins them verbatim so the reducer's write preserves the original
 //! YAML exactly.
 //!
-//! # Known limitations (flagged for the orchestrator)
+//! # Known limitations
 //!
-//! * **Undo/redo resets the caret to the document start.** Per this task's
-//!   contract [`EditorHistory`] snapshots the *text* only; the legacy UI
-//!   `UndoStack` also stored `Cursor`/`Selection` per entry. Extending
-//!   snapshots to carry `iced::widget::text_editor::Cursor` would restore
-//!   the caret the way the legacy UI build did.
+//! * **Undo/redo resets the caret to the document start.** [`EditorHistory`]
+//!   snapshots the *text* only. Extending snapshots to carry
+//!   `iced::widget::text_editor::Cursor` would restore the caret alongside
+//!   the text.
 //! * **The status-bar column is iced's glyph index, not a Unicode character
 //!   count.** `Content::cursor()` maps cosmic-text's `cursor.index`
 //!   (`iced_graphics-0.14.0/src/text/editor.rs:277-303`), which under
@@ -115,8 +108,7 @@ pub const MIN_UNDO_STEPS: usize = 100;
 /// undo steps exist, so storing exactly 100 would ship 99 and miss UI-042.
 pub const UNDO_CAPACITY: usize = MIN_UNDO_STEPS + 1;
 
-/// Default editor dialog width in points (UI-038), matching the legacy UI build's
-/// `.default_size(800.0, 600.0)` (`src/app/ui/editor_the legacy UI.rs:83`).
+/// Default editor dialog width in points (UI-038).
 pub const EDITOR_DIALOG_WIDTH: f32 = 800.0;
 
 /// Default editor dialog height in points (UI-038).
@@ -134,7 +126,7 @@ pub const EDITOR_STATUS_SIZE: f32 = 12.0;
 /// Vertical gap between the dialog's stacked sections.
 pub const EDITOR_SECTION_SPACING: f32 = 8.0;
 
-/// Whether an iced [`Action`] changes buffer content ([DEC-007]).
+/// Whether an iced [`Action`] changes buffer content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
     /// A content-changing edit — [`EditorHistory::push`] a snapshot.
@@ -143,7 +135,7 @@ pub enum ActionKind {
     CaretOnly,
 }
 
-/// Classifies an [`Action`] for the DEC-007 interception rule.
+/// Classifies an [`Action`] for the undo interception rule.
 ///
 /// Delegates to `Action::is_edit()` (`iced_core-0.14.0/src/text/editor.rs:94-99`):
 /// `Action::Edit(..)` is the only content-changing variant, so every other
@@ -174,8 +166,7 @@ pub fn display_line_column(cursor: EditorCursor) -> (usize, usize) {
     (cursor.position.line + 1, cursor.position.column + 1)
 }
 
-/// A bounded linear undo / redo history of text snapshots ([UI-042],
-/// [DEC-007]).
+/// A bounded linear undo / redo history of text snapshots ([UI-042]).
 ///
 /// The pure core of the editor: no iced types, no I/O, no clock. `cursor`
 /// indexes the snapshot that is the buffer's *current* state, so undo and
@@ -432,7 +423,7 @@ impl EditorViewModel {
     }
 
     /// The user-facing validation message, built from
-    /// [`crate::ui::strings`] ([GUD-002]), or `None` when the body is valid.
+    /// [`crate::ui::strings`], or `None` when the body is valid.
     #[must_use]
     pub fn validation_message(&self) -> Option<String> {
         let error = self.validation_error?;
@@ -474,16 +465,15 @@ impl EditorViewModel {
         &self.history
     }
 
-    /// Applies one intercepted [`Action`] to the buffer — the DEC-007
-    /// interception handler.
+    /// Applies one intercepted [`Action`] to the buffer.
     ///
     /// iced never mutates `Content` itself, so `perform` is what actually
     /// edits the text. A content-changing action additionally records the
     /// new snapshot and re-runs UI-043 validation; a caret/selection/viewport
     /// action only refreshes the status-bar position.
     ///
-    /// Returns how the action was classified, so the reducer can log it
-    /// ([FMD-071]).
+    /// Returns how the action was classified, so the reducer can log it as a
+    /// discrete interaction.
     pub fn apply_action(&mut self, action: Action) -> ActionKind {
         let kind = classify_action(&action);
         self.content.perform(action);
@@ -544,7 +534,7 @@ impl EditorViewModel {
     }
 }
 
-/// The user-facing label for a [`MarkdownErrorKind`] ([GUD-002]).
+/// The user-facing label for a [`MarkdownErrorKind`].
 #[must_use]
 pub fn validation_reason(kind: MarkdownErrorKind) -> &'static str {
     match kind {
@@ -553,18 +543,18 @@ pub fn validation_reason(kind: MarkdownErrorKind) -> &'static str {
 }
 
 /// Reduces an [`EditorMessage`] onto `vm` — the pure entry point the
-/// [TASK-022]/[TASK-023] reducer delegates to.
+/// application reducer delegates to.
 ///
 /// Pure: no file I/O, no bus publish, no overlay mutation. Returns whether
 /// the buffer changed, which is all the caller needs to decide on a
 /// re-render.
 ///
-/// * [`EditorMessage::Action`] — the DEC-007 interception; applied through
+/// * [`EditorMessage::Action`] — the undo interception; applied through
 ///   [`EditorViewModel::apply_action`].
 /// * [`EditorMessage::Undo`] / [`EditorMessage::Redo`] — replay one snapshot
 ///   on the stack, but **only** when the message names this buffer's file.
-///   The path travels with the intent ([FMD-068]), so a message aimed at
-///   another tab is ignored rather than corrupting this buffer.
+///   The path travels with the intent, so a message aimed at another tab is
+///   ignored rather than corrupting this buffer.
 /// * [`EditorMessage::SaveRequested`] / [`EditorMessage::CancelRequested`] —
 ///   never mutate the buffer here. The reducer performs the write (UI-044)
 ///   and closes the overlay (UI-045); the view only *emits* them.
@@ -618,8 +608,7 @@ pub fn editor_card(vm: &EditorViewModel) -> Element<'_, Message> {
         })
     });
 
-    // Save/Cancel on the left, the line/column read-out pushed to the right —
-    // the legacy UI footer's arrangement (`src/app/ui/editor_the legacy UI.rs:173-190`).
+    // Save/Cancel on the left, the line/column read-out pushed to the right.
     // `Row` has no main-axis alignment knob, so a filling `Space` does it.
     let footer = Row::with_children(vec![
         buttons.into(),

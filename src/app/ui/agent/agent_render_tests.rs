@@ -281,8 +281,8 @@ fn test_format_result_search_email_single_page_no_paging() {
 
 #[test]
 fn test_format_result_search_email_empty_result() {
-    // Empty result: hint carries the human-readable message; `results` is an
-    // empty structured array (the old string sentinel no longer applies).
+    // Empty result: hint carries the human-readable message; `results`
+    // is an empty structured array.
     let result = serde_json::json!({
         "status": "success",
         "data": {

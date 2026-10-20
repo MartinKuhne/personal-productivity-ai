@@ -1,4 +1,4 @@
-//! Unit tests for the iced content-search view model ([TASK-019]).
+//! Unit tests for the iced content-search view model.
 
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -62,13 +62,12 @@ pub struct AppOrchestrator {
     /// returned `Lagged(n)`. Cleared on the next `SessionStarted` or
     /// `Status` boundary (re-sync point).
     pub agent_event_lagged: bool,
-    /// UI-owned view model accumulating `AgentEvent` deltas into a displayable
-    /// transcript (migration step 5, T015). The UI renders agent response and
-    /// thinking from this buffer instead of `AgentState::response`/`thinking`.
+    /// UI-owned view model accumulating `AgentEvent` deltas into a
+    /// displayable transcript. The UI renders agent response and thinking
+    /// from this buffer instead of `AgentState::response`/`thinking`.
     pub agent_transcript: AgentTranscript,
     /// UI-owned panel state (show_results, show_debug_window, scroll_to_id,
-    /// command_input, etc.) — extracted from `AgentSession` in
-    /// migration step 6 (FR-013, SC-007).
+    /// command_input, etc.).
     pub agent_panel_state: AgentPanelState,
     /// Event bus for centralized UI user commands.
     pub user_command_bus: Bus<UserCommand>,
@@ -140,13 +139,12 @@ impl AppOrchestrator {
     /// index, the PDF-backing tracker, the tag manager, the open tabs and the
     /// tree-dirty flag.
     ///
-    /// Extracted verbatim out of [`Self::process_file_events`]'s drain loop so
-    /// the iced reducer can apply the event carried by
+    /// The reducer applies the event carried by
     /// [`InboundMessage::FileChanged`](crate::ui_iced::message::InboundMessage::FileChanged)
-    /// itself. In the iced build the [TASK-019] subscription bridge is the
-    /// single inbound path ([FMD-065]), so the orchestrator's own
-    /// `file_event_reader` is left inert and this is the only applier — no
-    /// event is applied twice.
+    /// through this method. The subscription bridge is the single inbound
+    /// path — background work notifies the UI instead of invoking it
+    /// synchronously — so the orchestrator's own `file_event_reader` is left
+    /// inert and this is the only applier: no event is applied twice.
     pub fn apply_file_event(&mut self, event: crate::bus::events::file::FileEvent) {
         use crate::bus::events::file::FileEventKind;
 
@@ -350,16 +348,15 @@ impl AppOrchestrator {
         }
     }
 
-    /// Drain the `Bus<AgentEvent>` reader (migration step 5, T015).
+    /// Drain the `Bus<AgentEvent>` reader.
     ///
-    /// Routes all agent events through the new bus: updates
+    /// Routes all agent events through the agent event bus: updates
     /// `AgentState` (lifecycle: `running`, `status`, `history`,
     /// `token_usage`, `debug_entries`) and builds the `AgentTranscript`
     /// view model from `ContentDelta`/`Thinking`/`ToolCallStarted`/
     /// `ToolResult` deltas. Reissues `ToolSideEffect` as
     /// `FsEvent::FileModified`. Handles `Lagged(n)` by emitting a visible
-    /// truncation marker into the transcript (research.md §1, quickstart
-    /// scenario 5).
+    /// truncation marker into the transcript.
     #[tracing::instrument(skip_all, name = "orchestrator.drain_agent_event_bus", level = "debug")]
     pub fn drain_agent_event_bus(&mut self) {
         let Some(reader) = self.agent_event_reader.as_mut() else {

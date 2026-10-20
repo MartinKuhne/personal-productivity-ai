@@ -1,10 +1,8 @@
-//! Sidecar tests for [`crate::ui_iced::logs`] ([TASK-016], UI-047).
+//! Sidecar tests for [`crate::ui_iced::logs`] (UI-047).
 //!
-//! Covers the filter predicate (mirroring the assertions that lived in the
-//! the legacy UI `background_logs.rs` inline tests, now reached through this layer),
-//! the auto-scroll intent rule and its boundaries, the ring-buffer snapshot,
-//! the category→colour-token map over every category the buffer can produce,
-//! and the view builders.
+//! Covers the filter predicate, the auto-scroll intent rule and its
+//! boundaries, the ring-buffer snapshot, the category→colour-token map over
+//! every category the buffer can produce, and the view builders.
 //!
 //! Fixtures build [`BackgroundLogs`] and [`BackgroundLogEntry`] values
 //! directly — no files, no bus, no worker threads and no user paths
@@ -81,8 +79,8 @@ fn timestamp_text_pads_sub_millisecond_values() {
 
 #[test]
 fn timestamp_format_constant_matches_the_legacy_format() {
-    // The legacy UI viewer used exactly this `chrono` format string
-    // (`ui/background_logs.rs:142`); pinning the constant pins the column.
+    // `TIMESTAMP_FORMAT` is what the timestamp column renders through;
+    // pinning the constant pins the column.
     let stamp: DateTime<Local> = Local
         .with_ymd_and_hms(2026, 10, 18, 9, 8, 7)
         .unwrap()
@@ -193,7 +191,7 @@ fn category_filter_option_displays_its_label() {
 }
 
 // ---------------------------------------------------------------------------
-// Filter predicate (reused from the legacy UI build, exercised through this layer)
+// Filter predicate (exercised through this layer)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -439,10 +437,10 @@ fn from_logs_carries_entries_and_flags() {
     assert_eq!(view_model.filtered_out(), 0);
 }
 
-/// Regression: the viewer was cloned whole on every message even while closed.
-/// The ring buffer holds up 10 000 entries and a workspace scan fills it, so
-/// that clone was both wasted work and contention with the worker thread pushing
-/// into the same mutex ([FMD-060], [FMD-064]).
+/// Regression guard: the viewer must not be cloned whole on every message
+/// while it is closed. The ring buffer holds up 10 000 entries and a
+/// workspace scan fills it, so that clone is both wasted work and
+/// contention with the worker thread pushing into the same mutex.
 #[test]
 fn from_app_skips_the_entry_clone_while_the_viewer_is_closed() {
     let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());

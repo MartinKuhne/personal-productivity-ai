@@ -1,4 +1,4 @@
-//! Tests for `ui_iced/panels/top.rs` ([TASK-011]).
+//! Tests for `ui_iced/panels/top.rs`.
 //!
 //! Widget construction cannot be driven headlessly without the iced
 //! simulator, so these tests cover the state/mapping layer the widget is
@@ -220,7 +220,7 @@ fn strategy_menu_order_covers_every_variant_exactly_once() {
             "{variant:?} must appear exactly once in the menu order"
         );
     }
-    // The production default leads the menu, matching the legacy UI panel.
+    // The production default leads the menu.
     assert_eq!(
         order[0],
         DeficitStrategy::HybridMinPenaltyWaterFill,
@@ -281,7 +281,10 @@ fn chat_model_entry_label_matches_ui_064_format() {
 #[test]
 fn menu_section_titles_use_the_submenu_strings() {
     assert_eq!(MenuSection::Direct.title(), None);
-    assert_eq!(MenuSection::Windows.title(), Some(strings::MENU_WINDOWS));
+    assert_eq!(
+        MenuSection::Windows.title(),
+        Some(strings::MENU_WINDOWS_TITLE)
+    );
     assert_eq!(
         MenuSection::ChatModels.title(),
         Some(strings::MENU_CHAT_MODELS)
@@ -324,26 +327,40 @@ fn menu_entries_are_ordered_per_ui_061_to_066() {
 }
 
 #[test]
-fn section_headers_are_present_and_not_selectable() {
+fn submenu_entries_are_clickable_and_name_their_destination() {
     let entries = build_menu_entries(&view_model_with_models());
-    let headers: Vec<&MenuEntry> = entries
+    let submenus: Vec<&MenuEntry> = entries
         .iter()
-        .filter(|e| e.kind == MenuEntryKind::SectionHeader)
+        .filter(|entry| matches!(entry.kind, MenuEntryKind::Submenu(_)))
         .collect();
 
     assert_eq!(
-        headers.len(),
+        submenus.len(),
         3,
-        "Windows / Chat models / Table wrap headers"
+        "Windows / Chat models / Table wrap must be clickable submenus"
     );
-    assert_eq!(headers[0].section, MenuSection::Windows);
-    assert_eq!(headers[1].section, MenuSection::ChatModels);
-    assert_eq!(headers[2].section, MenuSection::TableWrap);
-    for header in headers {
-        assert!(!header.kind.is_selectable());
-        assert_eq!(header.kind.command(), None);
-        assert!(!header.checked);
-    }
+    let destinations: Vec<MenuSection> = submenus
+        .iter()
+        .map(|entry| match &entry.kind {
+            MenuEntryKind::Submenu(section) => *section,
+            _ => unreachable!("filtered to submenu rows"),
+        })
+        .collect();
+    assert_eq!(
+        destinations,
+        vec![
+            MenuSection::Windows,
+            MenuSection::ChatModels,
+            MenuSection::TableWrap
+        ]
+    );
+    assert!(
+        submenus
+            .iter()
+            .all(|entry| entry.section == MenuSection::Direct)
+    );
+    assert!(submenus.iter().all(|entry| entry.kind.is_selectable()));
+    assert!(submenus.iter().all(|entry| entry.kind.command().is_none()));
 }
 
 #[test]
@@ -377,12 +394,15 @@ fn hamburger_items_are_all_selectable_and_drop_headers_and_placeholders() {
     let items = hamburger_items(&view_model_with_models());
     let entries = build_menu_entries(&view_model_with_models());
 
-    let selectable = entries.iter().filter(|e| e.kind.is_selectable()).count();
+    let selectable = entries
+        .iter()
+        .filter(|entry| matches!(entry.kind, MenuEntryKind::Action(_)))
+        .count();
     assert_eq!(items.len(), selectable);
     assert_eq!(
         items.len(),
         entries.len() - 3,
-        "the three section headers are the only dropped rows"
+        "submenu rows do not produce UserCommands"
     );
 }
 
@@ -406,7 +426,7 @@ fn hamburger_item_labels_carry_submenu_prefix_and_check_slot() {
         "label must keep the item string: {agent_debug:?}"
     );
     assert!(
-        agent_debug.label.contains(strings::MENU_WINDOWS),
+        agent_debug.label.contains(strings::MENU_WINDOWS_TITLE),
         "label must carry the owning submenu name: {agent_debug:?}"
     );
     assert!(
@@ -512,8 +532,8 @@ fn window_toggle_rows_carry_the_switched_to_value() {
 
 #[test]
 fn hamburger_item_from_entry_rejects_non_actionable_rows() {
-    let header = section_header(MenuSection::Windows);
-    assert_eq!(HamburgerItem::from_entry(&header), None);
+    let submenu = submenu_entry(MenuSection::Windows);
+    assert_eq!(HamburgerItem::from_entry(&submenu), None);
 
     let placeholder = MenuEntry {
         label: strings::NO_CHAT_MODELS_CONFIGURED.to_string(),
@@ -630,7 +650,7 @@ fn view_model_falls_back_to_all_models_when_none_declare_chat() {
     });
 
     let vm = TopBarViewModel::from_app(&app);
-    // No chat-capable model -> every configured model is listed (legacy parity).
+    // No chat-capable model -> every configured model is listed.
     assert_eq!(vm.chat_models.len(), 1);
     assert_eq!(vm.chat_models[0].name, "embed-1");
 }
@@ -688,11 +708,9 @@ fn top_bar_builds_for_both_indexing_states() {
 
 // --- compact-bar band contract ---------------------------------------------
 
-/// Regression: the top bar renders as the [TASK-010] fixed 28 pt band
-/// the legacy egui `Panel::top` carried. The previous iced port had no
-/// fixed height, so the pick lists' default 5 pt button padding grew
-/// the band to ~40 logical points — the user-visible "navbar way too
-/// tall" report.
+/// Regression: the top bar keeps its fixed 28 pt band. Without a fixed
+/// height the pick lists' default 5 pt button padding grows the band to
+/// ~40 logical points — the user-visible "navbar way too tall" report.
 #[test]
 fn top_band_height_matches_legacy_toolbar() {
     assert_eq!(BAR_HEIGHT_POINTS, 28.0);
@@ -739,8 +757,7 @@ fn hamburger_anchor_clamps_to_non_negative_x_on_a_narrow_viewport() {
 }
 
 /// A selectable row's message is the row's own command riding the menu
-/// channel, so the reducer can close the menu in the same reduction
-/// ([FMD-068]).
+/// channel, so the reducer can close the menu in the same reduction.
 #[test]
 fn hamburger_row_message_wraps_the_row_command_on_the_menu_channel() {
     let command = apply_about_button_click();
@@ -751,7 +768,7 @@ fn hamburger_row_message_wraps_the_row_command_on_the_menu_channel() {
 }
 
 /// Card rows render *below* their section header, so the label carries the
-/// check slot but no `"Windows › "` submenu prefix.
+/// check slot but no submenu prefix.
 #[test]
 fn hamburger_row_label_has_check_slot_and_no_submenu_prefix() {
     let checked = hamburger_row_label("Hybrid", true);
@@ -763,10 +780,18 @@ fn hamburger_row_label_has_check_slot_and_no_submenu_prefix() {
     assert!(checked.ends_with("Hybrid"));
     assert!(!unchecked.contains('✓'));
     assert!(
-        !unchecked.contains('›'),
+        !unchecked.contains('>'),
         "card rows carry no submenu prefix"
     );
     assert!(unchecked.ends_with("Hybrid"));
+}
+
+#[test]
+fn submenu_label_uses_the_required_right_arrow_cue() {
+    assert_eq!(
+        strings::format_menu_submenu_label(strings::MENU_WINDOWS),
+        "Windows... >"
+    );
 }
 
 /// The card builds for the full production entry set — headers, the
@@ -777,14 +802,33 @@ fn hamburger_menu_card_builds_for_the_full_entry_set() {
     let app = test_app();
     let view_model = TopBarViewModel::from_app(&app);
     let entries = build_menu_entries(&view_model);
-    let card: Element<'static, Message> = hamburger_menu_card(&entries);
+    let card: Element<'static, Message> = hamburger_menu_card(&entries, None);
     let _ = card;
+    let submenu: Element<'static, Message> =
+        hamburger_menu_card(&entries, Some(MenuSection::ChatModels));
+    let _ = submenu;
 }
 
 /// An empty entry list still builds a (header-less) card rather than
 /// panicking — the overlay host clamps the size, never the shape.
 #[test]
 fn hamburger_menu_card_builds_for_an_empty_entry_list() {
-    let card: Element<'static, Message> = hamburger_menu_card(&[]);
+    let card: Element<'static, Message> = hamburger_menu_card(&[], None);
     let _ = card;
+}
+
+#[test]
+fn hamburger_menu_row_count_matches_the_visible_level() {
+    let entries = build_menu_entries(&view_model_with_models());
+    assert_eq!(hamburger_menu_row_count(&entries, None), 6);
+    assert_eq!(
+        hamburger_menu_row_count(&entries, Some(MenuSection::Windows)),
+        4,
+        "submenu rows include title and back navigation"
+    );
+    assert_eq!(
+        hamburger_menu_row_count(&entries, Some(MenuSection::TableWrap)),
+        7,
+        "all five strategies remain visible in their submenu"
+    );
 }

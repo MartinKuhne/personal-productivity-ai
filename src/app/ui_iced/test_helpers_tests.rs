@@ -1,8 +1,8 @@
-//! Unit tests for the framework-free iced test fixtures ([TASK-029], [RUST-003]).
+//! Unit tests for the framework-free iced test fixtures ([RUST-003]).
 //!
-//! The point of these fixtures is that they build real domain state **without
-//! the legacy UI** and **without touching a user path**. The tests pin both halves of
-//! that promise.
+//! These fixtures build real domain state **without a UI framework** and
+//! **without touching a user path**; the tests pin both halves of that
+//! promise.
 
 use super::*;
 use crate::config::ContentLibrary;
@@ -72,7 +72,7 @@ fn test_app_state_builds_a_valid_iced_state() {
     let state = test_app_state();
 
     // The iced root is fully wired: domain state, pane grid and view-models
-    // all exist, and the config direct-injection (DEC-009) landed.
+    // all exist, and the config is injected directly into the built app.
     assert!(
         state.app.config().models.contains_key("default") || state.app.config().models.is_empty(),
         "the config must be reachable off the built state"
@@ -108,7 +108,7 @@ fn test_app_state_with_seeds_persisted_geometry() {
     assert_eq!(state.app.layout.left_panel_width, Some(280.0));
     assert_eq!(state.app.layout.right_panel_width, Some(200.0));
     assert_eq!(state.viewport, Size::new(998.0, 688.0));
-    // DEC-008: with no OS baseline yet, the requested scale is the persisted
+    // With no OS baseline yet, the requested scale is the persisted
     // multiplier alone.
     assert!((state.requested_scale_factor() - 1.25).abs() < 1e-6);
 }

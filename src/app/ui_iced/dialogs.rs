@@ -1,63 +1,53 @@
-//! Iced port of the small individual dialogs — the shared name-entry
-//! dialog (create-directory UI-011 / create-document UI-015), the rename
+//! The small individual dialogs — the shared name-entry dialog
+//! (create-directory UI-011 / create-document UI-015), the rename
 //! dialog, the move dialog and the delete-confirmation dialog.
 //!
 //! This is a **pure view over plain state**: [`dialog_card`] renders a
 //! [`DialogState`] into an [`iced::Element`] of [`Message`] and never
-//! touches the bus, the disk or `FastMdApp`. The [TASK-022]/[TASK-023]
-//! reducer owns the filesystem action: it opens the dialog from the tree's
-//! deferred intents, runs [`DialogState::submit`] on the confirm message,
-//! and publishes the matching `UserCommand::Confirm*` only when
-//! validation passes ([FMD-068]).
+//! touches the bus, the disk or `FastMdApp`. The reducer owns the
+//! filesystem action: it opens the dialog from the tree's deferred
+//! intents, runs [`DialogState::submit`] on the confirm message, and
+//! publishes the matching `UserCommand::Confirm*` only when validation
+//! passes.
 //!
-//! # Ported state model
+//! # State model
 //!
-//! [`DialogState`] replaces the per-dialog flag fields of
-//! `crate::ui::dialogs::Dialogs` (`src/app/ui/dialogs.rs:25-63`) with a
-//! single `Option<DialogKind>`. the legacy UI kept one independent `bool` per
-//! dialog and did **not** enforce mutual exclusion; the iced port
-//! consolidates to one dialog at a time because the overlay contract
+//! [`DialogState`] holds a single `Option<DialogKind>` rather than one
+//! independent flag per dialog. The overlay contract
 //! ([`crate::ui_iced::overlay::OverlaySlot`]) allows exactly one blocking
-//! modal — opening a dialog replaces whatever was open, the same rule
+//! modal, so opening a dialog replaces whatever was open — the same rule
 //! [`crate::ui_iced::overlay::OverlaySlot::open_modal`] enforces.
 //!
-//! # Validation lives in the executor, not the legacy UI dialog
+//! # Validation lives in the dialog
 //!
-//! Verified against the legacy UI build: the name-entry window only checks
-//! `!name.trim().is_empty()` before publishing (`src/app/ui/modals.rs:174-184`
-//! for create-directory, `:216-226` for create-document, `:304-314` for
-//! rename) and the move dialog only requires a selected folder
-//! (`src/app/ui/modals.rs:138-148`). The real name rule lives in the
-//! command executor — `crate::utils::path::is_safe_basename`
+//! A window-level check for a non-blank name and a selected destination is
+//! not enough on its own: the real name rule lives in the command executor
+//! — `crate::utils::path::is_safe_basename`
 //! (`src/app/utils/path.rs:13-27`), called at
 //! `src/app/command_executor.rs:309/338/365` — which silently skips the
 //! operation on a bad name. [`validate_name`] merges both layers into one
-//! pure rule and surfaces the failure as a visible error line, an
-//! improvement over the legacy UI's silent close (flagged in the migration map).
+//! pure rule and surfaces the failure as a visible error line rather than
+//! closing silently.
 //!
 //! # Anchor model
 //!
-//! The legacy UI name-entry window captures the pointer position once per open
-//! session and pins the window there with `fixed_pos`, falling back to the
-//! viewport centre when no pointer is known
-//! (`src/app/ui/modals.rs:26-45`). The iced port keeps the same shape:
-//! the reducer captures the tracked [`crate::ui_iced::message::LayoutMessage::CursorMoved`]
-//! point when it opens the dialog and passes it to [`dialog_card`], which
-//! resolves the final top-left with [`resolve_dialog_anchor`] — the
-//! cursor point clamped by [`crate::ui_iced::overlay::clamp_anchor`], or
-//! the viewport centre when there is no cursor. The card's size is
-//! deterministic ([`dialog_size`]) because every row is a fixed-height
-//! widget, so the clamp cannot drift from the real layout — the same
-//! argument [`crate::ui_iced::overlay::menu_size`] makes for menus.
+//! The pointer position is captured once per open session and the window is
+//! pinned there, falling back to the viewport centre when no pointer is
+//! known. The reducer captures the tracked
+//! [`crate::ui_iced::message::LayoutMessage::CursorMoved`] point when it
+//! opens the dialog and passes it to [`dialog_card`], which resolves the
+//! final top-left with [`resolve_dialog_anchor`] — the cursor point clamped
+//! by [`crate::ui_iced::overlay::clamp_anchor`], or the viewport centre
+//! when there is no cursor. The card's size is deterministic
+//! ([`dialog_size`]) because every row is a fixed-height widget, so the
+//! clamp cannot drift from the real layout — the same argument
+//! [`crate::ui_iced::overlay::menu_size`] makes for menus.
 //!
-//! # The delete confirmation is new behaviour
+//! # The delete confirmation
 //!
-//! The legacy UI build has **no** delete confirmation: the tree's Delete row
-//! publishes `UserCommand::Delete` directly
-//! (`src/app/ui/tree/render.rs:63/112/270`). [`DialogKind::DeleteConfirm`]
-//! is added because the migration brief requires a confirm step; the
-//! reducer decides whether to route `UserCommand::Delete` through it
-//! ([RUST-041] drift note in `doc/planning/iced-migration-map.md`).
+//! [`DialogKind::DeleteConfirm`] adds an explicit confirm step: the tree's
+//! Delete row can publish `UserCommand::Delete` on its own, so the reducer
+//! decides whether to route it through the dialog ([RUST-041]).
 //!
 //! Unit tests live in the sibling `dialogs_tests.rs` sidecar.
 
@@ -78,7 +68,7 @@ use crate::utils::path::is_safe_basename;
 #[path = "dialogs_tests.rs"]
 mod tests;
 
-/// Width of every small-dialog card ([TASK-017b1]).
+/// Width of every small-dialog card.
 pub const DIALOG_WIDTH: f32 = 320.0;
 
 /// Logical point size of the dialog title.
@@ -109,16 +99,14 @@ pub const DIALOG_BUTTONS_HEIGHT: f32 = 32.0;
 /// Vertical gap between adjacent card rows.
 pub const DIALOG_SECTION_SPACING: f32 = 8.0;
 
-/// Maximum height of the move dialog's destination list — legacy parity
-/// (`ScrollArea::max_height(200.0)`, `src/app/ui/modals.rs:110`).
+/// Maximum height of the move dialog's destination list, in logical pixels.
 pub const MOVE_LIST_MAX_HEIGHT: f32 = 200.0;
 
 /// Which small dialog is open, carrying the target(s) the reducer needs to
-/// execute the action ([FMD-068]).
+/// execute the action.
 ///
-/// The payloads mirror the legacy UI `Dialogs` fields exactly:
-/// `create_dir_parent` / `create_document_parent` become `parent`,
-/// `file_to_rename` / `file_to_move` / the delete target become `path`.
+/// Each payload is self-contained: the create kinds carry `parent`, the
+/// rename / move / delete kinds carry `path`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DialogKind {
     /// Create a new directory under `parent` (UI-011).
@@ -142,7 +130,7 @@ pub enum DialogKind {
         /// The path being moved.
         path: PathBuf,
     },
-    /// Confirm deleting the file or directory at `path` (new — see the
+    /// Confirm deleting the file or directory at `path` (see the
     /// module header).
     DeleteConfirm {
         /// The path the user is being asked about.
@@ -161,7 +149,7 @@ impl DialogKind {
         }
     }
 
-    /// The card title for this kind, from `crate::ui::strings` ([GUD-002]).
+    /// The card title for this kind, from `crate::ui::strings`.
     #[must_use]
     pub fn title(&self) -> &'static str {
         match self {
@@ -187,9 +175,8 @@ impl DialogKind {
         }
     }
 
-    /// The confirm button label: `Delete` for the confirmation, `Ok` for
-    /// every other kind (legacy parity — all four the legacy UI dialogs used
-    /// [`strings::OK_BUTTON`]).
+    /// The confirm button label: `Delete` for the confirmation,
+    /// [`strings::OK_BUTTON`] for every other kind.
     #[must_use]
     pub fn confirm_label(&self) -> &'static str {
         match self {
@@ -220,11 +207,11 @@ impl DialogKind {
     }
 }
 
-/// The outcome of [`DialogState::submit`] ([TASK-017b1]).
+/// The outcome of [`DialogState::submit`].
 ///
 /// `Completed` carries everything the reducer needs to publish the
 /// matching `UserCommand` without re-reading dialog state that the close
-/// has already cleared ([FMD-068]): the kind, the trimmed name (name-entry
+/// has already cleared: the kind, the trimmed name (name-entry
 /// kinds) and the picked destination (move). `Invalid` keeps the dialog
 /// open with the error surfaced.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,17 +227,16 @@ pub enum SubmitOutcome {
     },
     /// Validation failed; the dialog stays open with `message` shown.
     Invalid {
-        /// The user-facing error line ([GUD-002]).
+        /// The user-facing error line.
         message: String,
     },
 }
 
-/// The small-dialog state model — the iced port of the name-entry / move
-/// fields of `crate::ui::dialogs::Dialogs`.
+/// The small-dialog state model behind the name-entry / move / delete
+/// dialogs.
 ///
 /// Pure state: every transition is a plain method with no I/O. Only one
-/// dialog is open at a time (see the module header for why this is
-/// stricter than the legacy UI flag fields).
+/// dialog is open at a time (see the module header).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DialogState {
     open: Option<DialogKind>,
@@ -315,10 +301,8 @@ impl DialogState {
     /// Opens the move dialog for `path` with the reducer-supplied
     /// destination candidates.
     ///
-    /// The candidate list is data the pure view cannot build itself — the
-    /// the legacy UI dialog assembled it from the content libraries and the file
-    /// processor at render time (`src/app/ui/modals.rs:95-106`); here the
-    /// reducer snapshots it and hands it in on open.
+    /// The candidate list is data the pure view cannot build itself: the
+    /// reducer snapshots the destinations and hands them in on open.
     pub fn open_move(&mut self, path: PathBuf, destinations: Vec<PathBuf>) {
         *self = Self {
             open: Some(DialogKind::Move { path }),
@@ -434,14 +418,13 @@ impl DialogState {
     }
 }
 
-/// Validates a name-entry value for `kind` ([TASK-017b1]).
+/// Validates a name-entry value for `kind`.
 ///
-/// The merged rule from the two the legacy UI layers (see the module header):
-/// the dialog's own non-blank check plus the executor's
-/// [`is_safe_basename`] single-segment rule (no `/`, no `\`, no `..`
-/// traversal). Kinds without a name field ([`DialogKind::Move`],
-/// [`DialogKind::DeleteConfirm`]) accept anything — their gating lives in
-/// [`DialogState::can_confirm`].
+/// The merged rule from both layers (see the module header): the dialog's
+/// own non-blank check plus the executor's [`is_safe_basename`]
+/// single-segment rule (no `/`, no `\`, no `..` traversal). Kinds without
+/// a name field ([`DialogKind::Move`], [`DialogKind::DeleteConfirm`])
+/// accept anything — their gating lives in [`DialogState::can_confirm`].
 ///
 /// Purity: pure.
 pub fn validate_name(kind: &DialogKind, name: &str) -> Result<(), String> {
@@ -458,14 +441,13 @@ pub fn validate_name(kind: &DialogKind, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The deterministic rendered size of a dialog card ([TASK-017b1]).
+/// The deterministic rendered size of a dialog card.
 ///
 /// Every row is a fixed-height widget, so this is exact rather than an
 /// estimate — the same property [`crate::ui_iced::overlay::menu_size`]
 /// provides for menus, and what makes [`resolve_dialog_anchor`] safe to
 /// run before the card has been laid out. The error row is always
-/// allocated (the legacy UI conditional-rendering rule), so the size does not
-/// change when an error appears.
+/// allocated, so the size does not change when an error appears.
 #[must_use]
 pub fn dialog_size(kind: &DialogKind) -> Size {
     let chrome =
@@ -487,17 +469,14 @@ pub fn dialog_size(kind: &DialogKind) -> Size {
     }
 }
 
-/// Resolves the card's top-left corner from the open-time anchor
-/// ([TASK-017b1]).
+/// Resolves the card's top-left corner from the open-time anchor.
 ///
 /// `Some(point)` is the cursor position the reducer captured from
 /// [`crate::ui_iced::message::LayoutMessage::CursorMoved`] when the
 /// dialog opened, clamped by [`clamp_anchor`] so the card stays on
 /// screen. `None` — no pointer known, e.g. a keyboard-opened dialog —
-/// centres the card in the viewport (the legacy UI fallback,
-/// `src/app/ui/modals.rs:33-35`, but truly centred rather than
-/// top-left-at-centre). The result is never negative even when the
-/// viewport is smaller than the card.
+/// centres the card in the viewport. The result is never negative even
+/// when the viewport is smaller than the card.
 ///
 /// Purity: pure.
 #[must_use]
@@ -511,8 +490,7 @@ pub fn resolve_dialog_anchor(anchor: Option<Point>, size: Size, viewport: Size) 
     }
 }
 
-/// Renders the open dialog as a blocking, anchored modal card
-/// ([TASK-017b1]).
+/// Renders the open dialog as a blocking, anchored modal card.
 ///
 /// The card is mounted with [`modal_at`] at the position resolved by
 /// [`resolve_dialog_anchor`]: near the captured cursor, clamped on
@@ -637,9 +615,8 @@ fn move_card(state: &DialogState) -> Element<'_, Message> {
     .into()
 }
 
-/// One selectable destination row — the iced re-typing of the legacy UI's
-/// `selectable_label` (`src/app/ui/modals.rs:116-124`): the picked row
-/// carries the accent background, a press emits `DestinationSelected`.
+/// One selectable destination row: the picked row carries the accent
+/// background, a press emits `DestinationSelected`.
 fn destination_row(folder: &Path, selected: bool) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -681,9 +658,9 @@ fn delete_confirm_card(kind: &DialogKind) -> Element<'_, Message> {
         .into()
 }
 
-/// The always-allocated error line ([GUD-002]: the text is empty, never
-/// absent, so the card's widget shape does not change across the
-/// error/no-error transition).
+/// The always-allocated error line: the text is empty, never absent, so
+/// the card's widget shape does not change across the error/no-error
+/// transition.
 fn error_line(state: &DialogState) -> Element<'_, Message> {
     let error_color = Palette::fastmd_dark().error;
     text(state.error().unwrap_or(""))

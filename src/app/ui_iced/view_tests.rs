@@ -1,4 +1,4 @@
-//! Unit tests for the [TASK-023] iced view (`src/app/ui_iced/view.rs`).
+//! Unit tests for the iced view (`src/app/ui_iced/view.rs`).
 //!
 //! iced elements are not inspectable without a renderer, so the view is
 //! tested two ways:

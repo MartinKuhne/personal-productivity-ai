@@ -276,18 +276,12 @@ fn test_debug_impls() {
     assert!(s2.contains("AppConfig"));
 }
 
-/// Regression: previously the three `test_load_config_*` tests mutated
-/// the process-wide `APPDATA` env var, and `load_config()` read it
-/// back. Under the parallel test runner, another test could overwrite
-/// `APPDATA` between the `set_var` and the `load_config` call, so
-/// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see another test's value instead of
-/// the expected `None`.
-///
-/// The refactor that moved the file I/O behind a path parameter
-/// removed the shared state; this test pins that property by loading
-/// N independent config files from N threads simultaneously and
-/// asserting every thread sees its own data.
+/// Regression: `load_config_from_path` takes the path as an argument
+/// and never reads the process-wide `APPDATA` env var, so tests cannot
+/// interfere with one another through shared environment state. This
+/// test pins that isolation by loading N independent config files
+/// from N threads simultaneously and asserting every thread sees its
+/// own data.
 #[test]
 fn test_load_config_from_path_is_isolated() {
     use std::sync::{Arc, Barrier};

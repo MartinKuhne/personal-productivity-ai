@@ -1,14 +1,12 @@
-//! The iced agent panel — the streaming conversation view, prompt row and
-//! chat-model selector ([TASK-018], UI-048).
+//! The agent panel — the streaming conversation view, prompt row and
+//! chat-model selector (UI-048).
 //!
-//! Mirrors the legacy UI agent module split by concern ([RUST-051]), reusing the
-//! framework-free pieces the legacy UI build already had and re-typing only what
-//! was bound to `Ui`/`Context`:
+//! The module is split by concern ([RUST-051]): the framework-free pieces are
+//! reused as they are, and only what the render layer needs is re-typed.
 //!
 //! * [`panel_state`] — the conversation/turn model, the UI-048
 //!   thinking-delimiter gate and the [`AgentPanelViewModel`] snapshot.
-//!   Re-exports the legacy UI [`AgentPanelState`] and [`AgentTranscript`]
-//!   unchanged.
+//!   Re-exports [`AgentPanelState`] and [`AgentTranscript`] unchanged.
 //! * [`transcript`] — the scrolling conversation surface: gated thinking
 //!   disclosure, user turns as themed text, assistant turns through iced's
 //!   built-in Markdown widget, the "Agent is thinking…" placeholder, and
@@ -20,15 +18,14 @@
 //! # What is NOT here
 //!
 //! The **conversation logger** (`src/app/ui/agent/conversation_logger.rs`)
-//! is deliberately kept out of the view. It is a `AgentEventObserver` that
+//! is deliberately kept out of the view. It is an `AgentEventObserver` that
 //! writes prompt/response pairs and mutating-tool records to timestamped
 //! markdown files under the system library's `Conversations` folder
 //! (VFS-110..114) — pure persistence/background work with no render
-//! surface. In the iced build it stays reducer/background plumbing (the
-//! [TASK-022]/[TASK-023] update path or a background observer), not a
-//! view concern. Its pure formatting helpers (`format_turn_entry`,
-//! `format_prompt_heading`, `format_write_tool_calls`, …) are unchanged and
-//! unneeded by the view, so nothing is re-exported from them here.
+//! surface. It stays reducer/background plumbing (the `update` path or a
+//! background observer), not a view concern. Its pure formatting helpers
+//! (`format_turn_entry`, `format_prompt_heading`, `format_write_tool_calls`,
+//! …) are not needed by the view, so nothing is re-exported from them here.
 //!
 //! # Composition
 //!
@@ -36,8 +33,7 @@
 //! [`transcript`] body and the [`prompt_input`] row into one
 //! `Element<Message>`. The panel is a pure view: it reads only the
 //! [`AgentPanelViewModel`] snapshot and emits messages; the reducer owns
-//! the bus, the agent session and the follow-the-stream scroll operation
-//! ([FMD-065], [FMD-068], [FMD-069]).
+//! the bus, the agent session and the follow-the-stream scroll operation.
 //!
 //! Unit tests live in the sibling `mod_tests.rs` sidecar.
 
@@ -79,9 +75,8 @@ pub const PANEL_SPACING: f32 = 6.0;
 /// Padding around the panel.
 pub const PANEL_PADDING: f32 = 8.0;
 
-/// The message the panel header's Close button produces — the same
-/// `ClearAgentSession` intent the legacy UI header used
-/// (`src/app/ui/panels/center.rs:112-119`).
+/// The message the panel header's Close button produces: the
+/// `ClearAgentSession` intent.
 ///
 /// Purity: pure.
 #[must_use]
@@ -89,10 +84,9 @@ pub fn close_message() -> Message {
     prompt_input::clear_session_message()
 }
 
-/// Renders the full agent panel from a snapshot ([TASK-018]).
+/// Renders the full agent panel from a snapshot.
 ///
-/// Layout, mirroring the legacy UI agent session view
-/// (`src/app/ui/panels/center.rs:108-178` plus the bottom prompt band):
+/// Layout:
 ///
 /// ```text
 /// 🤖 FastMD Agent Session                         [Close]

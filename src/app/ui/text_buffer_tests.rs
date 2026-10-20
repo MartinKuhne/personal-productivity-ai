@@ -98,9 +98,9 @@ fn test_undo_stack_push_clears_redo_branch() {
 
 #[test]
 fn test_undo_stack_coalesces_identical_content() {
-    // the legacy UI emits a TextChanged per keystroke; many of those keep the
-    // content unchanged. UndoStack should coalesce them so the
-    // history doesn't fill up with no-op entries.
+    // the editor emits a change notification per keystroke; many of
+    // those keep the content unchanged. UndoStack should coalesce them
+    // so the history doesn't fill up with no-op entries.
     let mut stack = UndoStack::new();
     for _ in 0..10 {
         stack.push(

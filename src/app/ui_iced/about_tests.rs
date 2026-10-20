@@ -1,4 +1,4 @@
-//! Sidecar unit tests for `ui_iced/about.rs` ([TASK-017b2]).
+//! Sidecar unit tests for `ui_iced/about.rs`.
 //!
 //! Pure view-model, state-transition and widget-construction tests
 //! ([RUST-003]). No renderer, no bus, no filesystem: every fixture is a
@@ -85,9 +85,8 @@ fn from_build_build_metadata_is_present() {
     ] {
         assert!(!value.is_empty(), "build.rs always emits a non-empty value");
     }
-    // Data-model invariant mirrored from `ui/about_dialog_tests.rs`: the
-    // short hash is the leading run of the full hash, or both fall back to
-    // "unknown" (spec FR-007).
+    // Data-model invariant: the short hash is the leading run of the full
+    // hash, or both fall back to "unknown" (spec FR-007).
     if vm.is_build_metadata_unknown() {
         assert_eq!(vm.commit_short_hash, UNKNOWN_BUILD_METADATA);
     } else {
@@ -140,9 +139,8 @@ fn version_line_uses_the_label_and_the_version() {
 
 #[test]
 fn commit_tooltip_reveals_full_hash_and_hint() {
-    // Mirrors `ui::about_dialog_tests::commit_tooltip_reveals_full_hash_and_hint`
-    // for the iced layer: the reveal text carries the full hash, the
-    // centralised prefix and the copy hint ([GUD-002]).
+    // The reveal text carries the full hash, the centralised prefix and the
+    // copy hint.
     let tooltip = known_vm().commit_tooltip();
     assert!(tooltip.contains("0123456789abcdef0123456789abcdef01234567"));
     assert!(tooltip.contains(strings::ABOUT_FULL_COMMIT_PREFIX));
@@ -169,8 +167,7 @@ fn copy_press_is_offered_when_the_hash_is_known() {
 
 #[test]
 fn copy_press_is_withheld_on_an_unknown_build() {
-    // Nothing meaningful to copy, so the cell must not emit anything —
-    // the legacy UI's `copy_commit_hash_to_output` returns early in the same case.
+    // Nothing meaningful to copy, so the cell must not emit anything.
     assert_eq!(commit_copy_press(true), None);
     assert!(unknown_vm().is_build_metadata_unknown());
     assert!(!known_vm().is_build_metadata_unknown());
@@ -180,7 +177,7 @@ fn copy_press_is_withheld_on_an_unknown_build() {
 
 #[test]
 fn banner_glyph_is_the_shared_phosphor_bolt() {
-    // The `image`/`svg` iced features are not compiled in (DEC-011), so
+    // The `image`/`svg` iced features are not compiled in, so
     // the banner is the same Phosphor stand-in the top bar uses.
     assert_eq!(banner_glyph(), strings::ICON_LIGHTNING);
     let _mark: Element<'static, Message> = banner_mark();
@@ -307,9 +304,7 @@ fn window_titles_come_from_strings() {
     );
 }
 
-// --- Moved helpers ([TASK-029b]) ---------------------------------------
-// Ported from the deleted legacy `about_dialog_tests.rs` sidecar so the
-// owned helpers keep full coverage ([RUST-003]).
+// --- License reflow and first-run auto-show ([RUST-003]) ----------------
 
 #[test]
 fn license_reflow_preserves_words() {

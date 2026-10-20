@@ -1,4 +1,4 @@
-//! Unit tests for the iced FTWA adapter ([TASK-015]).
+//! Unit tests for the iced FTWA adapter.
 //!
 //! Covers the three stages of the adapter contract: available-width →
 //! solver-input mapping, the [`IcedTextMeasurer`] cell measurements, and
@@ -6,7 +6,7 @@
 //! fixed-width fake ([`fixed_width`]: 5 px per body character, 10 px per
 //! monospace character) so every assertion is exact.
 //!
-//! The [GAP-06] section exercises the real measurer ([`fira_sans_width`])
+//! The real-metrics section exercises the real measurer ([`fira_sans_width`])
 //! against iced's own Fira Sans bytes through `cosmic-text`. Those
 //! assertions are deliberately *relational* — narrow < wide, monotone in
 //! length, always finite, mono equal to the heuristic — rather than pinned
@@ -143,8 +143,8 @@ fn test_measure_cell_min_is_the_longest_token() {
 
 #[test]
 fn test_measure_cell_fragmented_token_stays_one_token() {
-    // Mirrors the legacy UI `test_measure_cell_fragmented_tokens`: two adjacent
-    // runs with no whitespace between them are ONE unbreakable token.
+    // Two adjacent runs with no whitespace between them are ONE
+    // unbreakable token.
     let measurer = fake_measurer();
     let fragmented = vec![
         InlineElem::Text("super".to_string(), TextStyle::default()),
@@ -215,7 +215,7 @@ fn test_measure_cell_whitespace_only_closes_the_open_token() {
 
 #[test]
 fn test_trailing_whitespace_single_part_run_closes_the_token_like_the_legacy_renderer() {
-    // Parity lock for the walker's `else if ends_ws` branch: a single-part
+    // The walker's `else if ends_ws` branch: a single-part
     // run that ends with whitespace closes the pending token immediately and
     // it is measured with the *previous* run's font, so the two runs stay two
     // separate tokens (they do NOT merge into one unbreakable token).
@@ -514,7 +514,7 @@ fn test_cell_tokens_type_is_reachable_from_the_adapter() {
     assert_eq!(tokens.token_widths.len(), 2);
 }
 
-// --- real font metrics via cosmic-text ([GAP-06]) ----------------------
+// --- real font metrics via cosmic-text --------------------------------
 
 /// Body size used across the real-metrics tests.
 const REAL_BODY_SIZE: f32 = 14.0;
@@ -575,8 +575,8 @@ fn test_fira_sans_width_empty_is_zero() {
 
 #[test]
 fn test_fira_sans_width_separates_narrow_from_wide_glyphs() {
-    // The whole point of GAP-06: the flat model cannot tell "iiii" from
-    // "MMMM", real metrics can, and narrow comes out genuinely narrow.
+    // The flat model cannot tell "iiii" from "MMMM"; real metrics can, and
+    // narrow comes out genuinely narrow.
     let narrow = fira_sans_width("iiii", Font::DEFAULT, REAL_BODY_SIZE);
     let wide = fira_sans_width("MMMM", Font::DEFAULT, REAL_BODY_SIZE);
 
@@ -867,8 +867,7 @@ fn test_real_measurer_zero_width_still_falls_back_to_scroll() {
 #[test]
 fn test_real_metrics_change_solved_columns_the_heuristic_could_not() {
     // Narrow-vs-wide column pair: the heuristic solves both to the same
-    // width, real metrics solve them apart. This is the visible behaviour
-    // change GAP-06 delivers.
+    // width, real metrics solve them apart — the visible behaviour change.
     let cells = vec![vec![cell("iiii"), cell("MMMM")]];
     let real = solve_table_layout(
         &cells,

@@ -1,4 +1,4 @@
-//! Tests for `ui_iced/overlay.rs` ([TASK-017a]).
+//! Tests for `ui_iced/overlay.rs`.
 //!
 //! iced widget rendering cannot be driven headlessly without the simulator,
 //! so these tests cover the state and mapping layer the widgets are built
@@ -492,7 +492,7 @@ fn modal_fills_its_parent() {
 
 #[test]
 fn modal_at_fills_its_parent_like_modal() {
-    // [TASK-017b1]: the anchored sibling of `modal` keeps the same
+    // The anchored sibling of `modal` keeps the same
     // full-area scrim contract; only the card placement differs.
     let card: Element<'_, TestMessage> = text("anchored dialog").into();
 

@@ -1,43 +1,40 @@
-//! Iced port of the About window — application identity, build metadata,
-//! the MIT license and the entry point into the third-party attributions
-//! list ([TASK-017b2]).
+//! About window — application identity, build metadata, the MIT license
+//! and the entry point into the third-party attributions list.
 //!
-//! Ports `src/app/ui/about_dialog.rs`. Like every other `ui_iced` view
-//! this is a **pure view over a plain snapshot**: [`about_card`] renders an
+//! A **pure view over a plain snapshot**: [`about_card`] renders an
 //! [`AboutViewModel`] into an [`iced::Element`] of [`Message`] and touches
-//! neither the bus, the disk nor `FastMdApp`. The [TASK-022]/[TASK-023]
-//! reducer owns the open/close state ([`AboutWindowState`]) and the two
-//! side effects the legacy UI dialog performed inside its click handler.
+//! neither the bus, the disk nor `FastMdApp`. The reducer owns the
+//! open/close state ([`AboutWindowState`]) and performs the two side
+//! effects the card only requests.
 //!
 //! # Data sources (all compile-time — no render-time I/O)
 //!
 //! | Field | Source |
 //! | --- | --- |
-//! | App name / copyright / description | `crate::ui::strings` ([GUD-002]) |
-//! | Version | [`APP_VERSION`] — the `fastmd` package version constant (`env!("CARGO_PKG_VERSION")`), owned here since [TASK-029b] |
-//! | Branch / commit / build date | the root `build.rs` `cargo:rustc-env` vars, read with `env!` — the same values the legacy dialog's private consts read |
+//! | App name / copyright / description | `crate::ui::strings` |
+//! | Version | [`APP_VERSION`] — the `fastmd` package version constant (`env!("CARGO_PKG_VERSION")`), owned here |
+//! | Branch / commit / build date | the root `build.rs` `cargo:rustc-env` vars, read with `env!` |
 //! | License body | the shared license reflow [`license_display_text`] over `include_str!("../../../LICENSE")` |
-//! | Attribution count | [`crate::ui::attributions::DIRECT_DEPENDENCIES`] — the same curated catalog the legacy UI dialog renders (see [`crate::ui_iced::attributions`]) |
+//! | Attribution count | [`crate::ui::attributions::DIRECT_DEPENDENCIES`] — the curated catalog also rendered by [`crate::ui_iced::attributions`] |
 //!
 //! # Banner: a glyph, not the PNG
 //!
 //! `Cargo.toml` enables iced's `wgpu`, `tiny-skia`, `fira-sans`,
-//! `advanced-shaping` and `markdown` features only (DEC-011 — minimal
-//! features), so `iced::widget::image` and `iced::widget::svg` **do not
-//! exist** in this build. The compiled-in `assets/icon-32.png`
+//! `advanced-shaping` and `markdown` features only, so
+//! `iced::widget::image` and `iced::widget::svg` **do not exist** in this
+//! build. The compiled-in `assets/icon-32.png`
 //! ([`crate::utils::app_icon::APP_ICON_PNG`]) therefore cannot be shown;
 //! the banner is the shared "Document + Bolt" stand-in from
-//! [`crate::ui_iced::logo`] — the same mark the top bar renders
-//! ([TASK-011], [TASK-020]). That module records the raster / SVG /
-//! `canvas` trade-off; enabling any of those features is a build-level
-//! decision for the orchestrator, not this task.
+//! [`crate::ui_iced::logo`] — the same mark the top bar renders. That
+//! module records the raster / SVG / `canvas` trade-off; enabling any of
+//! those features is a build-level decision, not this module's.
 //!
 //! # Message channel
 //!
 //! These windows ride their **own** [`Message::About`] channel rather than
-//! the [TASK-017b1] [`crate::ui_iced::dialogs`] one. `DialogMessage`'s
-//! vocabulary is name-entry shaped (`NameChanged`, `DestinationSelected`,
-//! `Submitted`) and none of it applies here, while the About vocabulary
+//! the [`crate::ui_iced::dialogs`] one. `DialogMessage`'s vocabulary is
+//! name-entry shaped (`NameChanged`, `DestinationSelected`, `Submitted`)
+//! and none of it applies here, while the About vocabulary
 //! ([`AboutMessage`]) has nothing in common with it; sharing one channel
 //! would force two unrelated state models into `DialogState`. Opening the
 //! dialog itself stays user intent on the command channel — the hamburger
@@ -45,26 +42,20 @@
 //! (`ui_iced/panels/top.rs:439`), which the reducer maps to
 //! [`AboutWindowState::open_about`].
 //!
-//! # Deliberate deviations from the legacy UI dialog
+//! # Design notes
 //!
-//! * **Attributions moved out.** the legacy UI renders the whole catalog inline in
-//!   the About window (`src/app/ui/about_dialog.rs:200-220`); this port
-//!   keeps only the count plus a
+//! * **Attributions live elsewhere.** The card keeps only the count plus a
 //!   [`strings::ABOUT_VIEW_ATTRIBUTIONS_BUTTON`] that opens
-//!   [`crate::ui_iced::attributions`], so the credits list gets the
-//!   dedicated, wider window the brief asks for.
-//! * **A version row is new** — the legacy UI dialog never displayed
-//!   `CARGO_PKG_VERSION` even though it owns the constant.
-//! * **Copy-to-clipboard is deferred intent.** the legacy UI called
-//!   `ctx.copy_text` inside the click handler
-//!   (`src/app/ui/about_dialog.rs:68-77`); iced exposes the clipboard
+//!   [`crate::ui_iced::attributions`], so the credits list gets a
+//!   dedicated, wider window.
+//! * **Copy-to-clipboard is deferred intent.** iced exposes the clipboard
 //!   only to `update` (`iced_core-0.14.0/src/clipboard.rs`), so the
 //!   commit cell emits [`AboutMessage::CopyCommitHashRequested`] and the
 //!   reducer performs the write.
 //! * **No hover tooltip.** iced 0.14 has no built-in tooltip widget and
-//!   DEC-005 rules out `iced_aw`, so the full-hash reveal cannot follow
-//!   the legacy UI shape. [`AboutViewModel::commit_tooltip`] still produces
-//!   the same text for the reducer to surface another way.
+//!   `iced_aw` is not a dependency, so the full-hash reveal cannot be a
+//!   tooltip. [`AboutViewModel::commit_tooltip`] still produces the text
+//!   for the reducer to surface another way.
 //! * **Unknown build metadata stays inert** (spec FR-007): the commit cell
 //!   is always allocated, it simply gets no press handler — see
 //!   [`commit_copy_press`].
@@ -84,8 +75,7 @@ use crate::ui_iced::message::{AboutMessage, Message};
 #[path = "about_tests.rs"]
 mod tests;
 
-/// Width of the About card — legacy parity (`default_size: [620.0, 780.0]`,
-/// `src/app/ui/about_dialog.rs:135`).
+/// Width of the About card, in logical pixels.
 pub const ABOUT_CARD_WIDTH: f32 = 620.0;
 
 /// Logical point size of the app-name heading.
@@ -103,22 +93,17 @@ pub const ABOUT_BODY_SIZE: f32 = 14.0;
 /// Vertical gap between card sections and between inline labels.
 pub const ABOUT_SECTION_SPACING: f32 = 8.0;
 
-/// Maximum height of the license scroll area — legacy parity
-/// (`ScrollArea::max_height(200.0)`, `src/app/ui/about_dialog.rs:191`).
+/// Maximum height of the license scroll area, in logical pixels.
 pub const LICENSE_MAX_HEIGHT: f32 = 200.0;
 
 /// Width of the horizontal rules separating card sections.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// The sentinel `build.rs` writes when git metadata is unavailable; the
-/// legacy dialog tests the same value (`src/app/ui/about_dialog.rs:93`).
+/// The sentinel `build.rs` writes when git metadata is unavailable.
 pub const UNKNOWN_BUILD_METADATA: &str = "unknown";
 
 /// Current application version, from the `fastmd` package manifest
-/// ([`env!`] `CARGO_PKG_VERSION`).
-///
-/// Owned by this module since [TASK-029b]; the legacy About dialog held the
-/// same constant.
+/// ([`env!`] `CARGO_PKG_VERSION`). Owned by this module.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Full MIT license text bundled at compile time.
@@ -130,7 +115,7 @@ const LICENSE_TEXT: &str = include_str!("../../../LICENSE");
 /// newlines become spaces; blank lines stay as paragraph breaks; the word
 /// sequence is preserved verbatim.
 ///
-/// Pure; owned by this module since [TASK-029b].
+/// Pure; owned by this module.
 #[must_use]
 pub fn license_display_text() -> String {
     LICENSE_TEXT
@@ -237,10 +222,9 @@ impl AboutViewModel {
         format!("{} {}", strings::ABOUT_VERSION_LABEL, self.version)
     }
 
-    /// The full-hash reveal line the legacy UI dialog showed on hover
-    /// (`src/app/ui/about_dialog.rs:42-49`). iced 0.14 has no tooltip
-    /// widget, so this is text the reducer may surface elsewhere — it is
-    /// not rendered by [`about_card`].
+    /// The full-hash reveal line: the full commit hash plus the copy hint.
+    /// iced 0.14 has no tooltip widget, so this is text the reducer may
+    /// surface elsewhere — it is not rendered by [`about_card`].
     #[must_use]
     pub fn commit_tooltip(&self) -> String {
         format!(
@@ -265,10 +249,9 @@ impl AboutViewModel {
     }
 }
 
-/// Renders the About card ([TASK-017b2]).
+/// Renders the About card.
 ///
-/// Layout, mirroring the legacy UI dialog body (`src/app/ui/about_dialog.rs:147-221`)
-/// with the attributions section replaced by a teaser button:
+/// Layout, with the attributions section rendered as a teaser button:
 ///
 /// ```text
 /// [⚡]  FastMD Viewer
@@ -357,7 +340,7 @@ pub fn about_card(view_model: &AboutViewModel) -> Element<'_, Message> {
 /// The glyph the About banner renders.
 ///
 /// Delegated to [`crate::ui_iced::logo::logo_glyph`] — the About card does
-/// not own its own mark ([TASK-020], [RUST-051]).
+/// not own its own mark ([RUST-051]).
 #[must_use]
 pub fn banner_glyph() -> &'static str {
     logo::logo_glyph()
@@ -389,8 +372,7 @@ pub fn about_footer() -> Element<'static, Message> {
     .into()
 }
 
-/// The Branch / Commit / Built row (legacy parity,
-/// `src/app/ui/about_dialog.rs:154-183`).
+/// The Branch / Commit / Built row.
 fn build_metadata_row(view_model: &AboutViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
     let muted = |value: &str| {
@@ -428,8 +410,7 @@ fn commit_cell(view_model: &AboutViewModel) -> Element<'_, Message> {
 
 /// The press handler the commit cell gets: `Some` only when the build
 /// metadata is known, because an `"unknown"` build has nothing
-/// meaningful to copy (legacy parity — `copy_commit_hash_to_output` returns
-/// early, `src/app/ui/about_dialog.rs:69-71`).
+/// meaningful to copy.
 ///
 /// `MouseArea` has no `on_press_maybe` (`iced_widget-0.14.2/src/mouse_area.rs:38`),
 /// so the option is resolved here and the caller attaches the handler only
@@ -482,7 +463,7 @@ fn attributions_teaser(view_model: &AboutViewModel) -> Element<'_, Message> {
         .into()
 }
 
-/// Which of the two identity windows is showing ([TASK-017b2]).
+/// Which of the two identity windows is showing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AboutWindow {
     /// The About card ([`about_card`]).
@@ -493,7 +474,7 @@ pub enum AboutWindow {
 }
 
 impl AboutWindow {
-    /// The window title, from `crate::ui::strings` ([GUD-002]).
+    /// The window title, from `crate::ui::strings`.
     #[must_use]
     pub fn title(&self) -> &'static str {
         match self {
@@ -503,8 +484,7 @@ impl AboutWindow {
     }
 }
 
-/// Which identity window is open — the pure state the reducer holds
-/// ([TASK-017b2]).
+/// Which identity window is open — the pure state the reducer holds.
 ///
 /// One window at a time, the same one-at-a-time rule
 /// [`crate::ui_iced::dialogs::DialogState`] applies: opening replaces

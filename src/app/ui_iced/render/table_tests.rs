@@ -1,4 +1,4 @@
-//! Unit tests for the markdown table mapping and widget ([TASK-015]).
+//! Unit tests for the markdown table mapping and widget.
 //!
 //! The solve is driven by the same fixed-width fake the adapter sidecar
 //! uses (5 px per body character) so solved widths are exact.

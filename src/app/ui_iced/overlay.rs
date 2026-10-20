@@ -1,15 +1,11 @@
 //! Reusable overlay primitives for the iced UI: a cursor-anchored context
-//! menu and a blocking modal dialog ([TASK-017a], DEC-005 — iced built-ins
-//! only, no `iced_aw`).
+//! menu and a blocking modal dialog, built from iced built-ins only.
 //!
-//! The legacy UI build gets both shapes for free from immediate mode:
-//! `response.context_menu(..)` on a hovered row
-//! (`src/app/ui/tree/render.rs:18-60`, `src/app/ui/panels/center.rs:208-315`)
-//! and floating `Window`s (`src/app/ui/modals.rs:26-68`). iced has no
-//! single call that does either, so this module supplies them as **pure view
-//! functions over plain state structs** — no bus access, no side effects, no
-//! `FastMdApp` reads. The individual dialogs (about / batch / tools /
-//! agent-debug / attributions) are a later chunk and are NOT ported here.
+//! iced has no single call that produces either shape, so this module
+//! supplies them as **pure view functions over plain state structs** — no
+//! bus access, no side effects, no `FastMdApp` reads. The individual
+//! dialogs (about / batch / tools / agent-debug / attributions) are built
+//! on top of these primitives.
 //!
 //! # Verified iced 0.14 APIs
 //!
@@ -61,7 +57,7 @@
 //!   [`clamp_anchor`] cannot drift out of sync with the real layout.
 //! * Centred, blocking modals with a dimmed scrim ([`modal`]), and the
 //!   same modal placed at an explicit clamped top-left position
-//!   ([`modal_at`], [TASK-017b1] — the cursor-anchored small dialogs).
+//!   ([`modal_at`] — the cursor-anchored small dialogs).
 //!
 //! ## What is NOT achievable with built-ins (and the workaround)
 //!
@@ -76,8 +72,8 @@
 //!   full-window root in the trigger (its bounds *are* the viewport), or add
 //!   the wrapped widget's known offset. A menu mounted on the same element
 //!   that produced the anchor needs no conversion at all.
-//! * **No submenu nesting.** `Menu` is single-level and DEC-005 rules out
-//!   `iced_aw`; the same flattening the hamburger menu already uses
+//! * **No submenu nesting.** `Menu` is single-level and `iced_aw` is not a
+//!   dependency; the same flattening the hamburger menu already uses
 //!   (`panels/top.rs:584-626`) applies to context menus.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
 //!   (`menu.rs:244-270`), but we are not using `Menu`. [`clamp_anchor`]
@@ -86,9 +82,8 @@
 //!
 //! # Expected call shapes
 //!
-//! *Tree* ([TASK-012]) and *tabs* ([TASK-013]) — the panel builds
-//! `Vec<MenuItem<Message>>` from its own action list and the app root mounts
-//! it:
+//! *Tree* and *tabs* — the panel builds `Vec<MenuItem<Message>>` from its
+//! own action list and the app root mounts it:
 //!
 //! ```text
 //! // row widget (tree row / tab strip):
@@ -102,7 +97,7 @@
 //! }
 //! ```
 //!
-//! *Editor* ([TASK-014]) — the blocking save/cancel dialog:
+//! *Editor* — the blocking save/cancel dialog:
 //!
 //! ```text
 //! // app root view:
@@ -135,38 +130,38 @@ use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Size}
 use crate::ui::strings;
 use crate::ui_iced::theme::scrim_color;
 
-/// Width of a rendered context-menu card ([TASK-017a]).
+/// Width of a rendered context-menu card.
 pub const MENU_WIDTH: f32 = 200.0;
 
-/// Height of one rendered context-menu row ([TASK-017a]).
+/// Height of one rendered context-menu row.
 pub const MENU_ROW_HEIGHT: f32 = 24.0;
 
-/// Vertical gap between adjacent context-menu rows ([TASK-017a]).
+/// Vertical gap between adjacent context-menu rows.
 pub const MENU_ROW_SPACING: f32 = 2.0;
 
-/// Padding inside the context-menu card ([TASK-017a]).
+/// Padding inside the context-menu card.
 pub const MENU_PADDING: f32 = 4.0;
 
 /// Gap left between the anchor point and the menu card so the cursor does
-/// not sit on the first row ([TASK-017a]).
+/// not sit on the first row.
 pub const MENU_ANCHOR_GAP: f32 = 2.0;
 
-/// Padding inside a modal dialog card ([TASK-017a]).
+/// Padding inside a modal dialog card.
 pub const MODAL_PADDING: f32 = 16.0;
 
-/// Width of the card border ([TASK-017a]).
+/// Width of the card border.
 pub const CARD_BORDER_WIDTH: f32 = 1.0;
 
-/// Corner radius of the card border ([TASK-017a]).
+/// Corner radius of the card border.
 pub const CARD_RADIUS: f32 = 4.0;
 
-/// Horizontal gap between the confirm and cancel buttons ([TASK-017a]).
+/// Horizontal gap between the confirm and cancel buttons.
 pub const CONFIRM_CANCEL_SPACING: f32 = 8.0;
 
 /// Mouse interaction used by the modal scrim while it blocks the UI beneath it.
 const SCRIM_INTERACTION: iced::mouse::Interaction = iced::mouse::Interaction::Idle;
 
-/// The single overlay slot an app holds ([TASK-017a]).
+/// The single overlay slot an app holds.
 ///
 /// `Kind` is the caller's own modal vocabulary — the tree, tabs and editor
 /// each define what modals exist, while the primitive only owns the
@@ -271,11 +266,11 @@ impl<Kind> OverlaySlot<Kind> {
     }
 }
 
-/// One row of a context menu ([TASK-017a]).
+/// One row of a context menu.
 ///
 /// `Display` is the row label, so the same type serves as the menu's model
-/// and as what a test asserts against. Labels must come from
-/// `crate::ui::strings` ([GUD-002]) — the primitive never invents one.
+/// and as what a test asserts against. Labels come from
+/// `crate::ui::strings`; the primitive never invents one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MenuItem<Message> {
     /// The label rendered on the row.
@@ -310,7 +305,7 @@ impl<Message> fmt::Display for MenuItem<Message> {
     }
 }
 
-/// The row labels a menu projects, in render order ([TASK-017a]).
+/// The row labels a menu projects, in render order.
 ///
 /// This is the `MenuItem` → visible-row projection; a menu with `n` items
 /// always renders exactly `n` rows.
@@ -319,7 +314,7 @@ pub fn menu_labels<Message>(items: &[MenuItem<Message>]) -> Vec<String> {
     items.iter().map(|item| item.label.clone()).collect()
 }
 
-/// The row index carrying `message`, if any row does ([TASK-017a]).
+/// The row index carrying `message`, if any row does.
 ///
 /// Lets a reducer recover which row produced a message without the widget
 /// having to encode the index itself.
@@ -331,7 +326,7 @@ pub fn menu_index_of<Message: PartialEq>(
     items.iter().position(|item| &item.message == message)
 }
 
-/// The deterministic rendered size of a context-menu card ([TASK-017a]).
+/// The deterministic rendered size of a context-menu card.
 ///
 /// Rows are uniform-height buttons, so this is exact rather than an
 /// estimate — which is what makes [`clamp_anchor`] safe to run before the
@@ -350,8 +345,7 @@ pub fn menu_size(item_count: usize) -> Size {
     )
 }
 
-/// Clamps `anchor` so a `size` box placed at it stays inside `viewport`
-/// ([TASK-017a]).
+/// Clamps `anchor` so a `size` box placed at it stays inside `viewport`.
 ///
 /// The lower bound wins when the viewport is smaller than the box, so the
 /// result is always `>= 0` and the card's top-left corner is on screen.
@@ -365,19 +359,13 @@ pub fn clamp_anchor(anchor: Point, size: Size, viewport: Size) -> Point {
 
 /// The outcome of a confirm / cancel button pair.
 ///
-/// # Relocated ([TASK-029])
-///
-/// Copied verbatim from the retired `DialogAction`
-/// (`src/app/ui/widgets.rs:160-169`), which [`ConfirmCancel`] used to map
-/// onto across the boundary. That file was deleted by [TASK-029b], so the
-/// iced layer owns its own copy. The enum is **framework-free by construction** —
-/// three unit variants, no framework type anywhere.
+/// The enum is **framework-free by construction** — three unit variants,
+/// no framework type anywhere.
 ///
 /// It is kept as a distinct type rather than folded into [`ConfirmCancel`]
-/// because it is the *legacy-parity* vocabulary: `to_dialog_action` exists so
-/// a caller comparing against the retired outcome still compiles, and
-/// `ConfirmCancel` has no `None` member (an iced button either emits a
-/// message or does not exist).
+/// because it carries a `None` member: `ConfirmCancel` has none, since an
+/// iced button either emits a message or does not exist.
+/// [`ConfirmCancel::to_dialog_action`] maps the two real outcomes across.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogAction {
     /// Neither button was clicked.
@@ -388,11 +376,11 @@ pub enum DialogAction {
     Cancel,
 }
 
-/// The outcome of the shared confirm/cancel button pair ([TASK-017a]).
+/// The outcome of the shared confirm/cancel button pair.
 ///
-/// The iced re-typing of [`DialogAction`]: the legacy UI helper *returns* the
-/// clicked button, whereas iced buttons *emit* messages, so the outcome is
-/// handed to a mapping closure instead.
+/// Iced buttons *emit* messages rather than *returning* the clicked
+/// button, so the outcome is handed to a mapping closure instead.
+/// [`Self::to_dialog_action`] maps onto [`DialogAction`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmCancel {
     /// The confirm button (OK / Save / Process).
@@ -402,7 +390,7 @@ pub enum ConfirmCancel {
 }
 
 impl ConfirmCancel {
-    /// The legacy-parity [`DialogAction`] for this outcome.
+    /// The equivalent [`DialogAction`] for this outcome.
     #[must_use]
     pub fn to_dialog_action(self) -> DialogAction {
         match self {
@@ -412,8 +400,7 @@ impl ConfirmCancel {
     }
 }
 
-/// The `(confirm, cancel)` message pair a mapping closure produces
-/// ([TASK-017a]).
+/// The `(confirm, cancel)` message pair a mapping closure produces.
 ///
 /// Split out so the button pair and its tests read from exactly one place.
 #[must_use]
@@ -421,26 +408,21 @@ pub fn confirm_cancel_pair<Message>(on: impl Fn(ConfirmCancel) -> Message) -> (M
     (on(ConfirmCancel::Confirm), on(ConfirmCancel::Cancel))
 }
 
-/// The press handler the confirm button gets for a given enabled flag
-/// ([TASK-017a]).
+/// The press handler the confirm button gets for a given enabled flag.
 ///
-/// `Some` when the dialog is valid and confirming is allowed, `None` when it
-/// is not — `Button::on_press_maybe` renders a `None` handler as an inert
-/// button (`button.rs:170-173`), which is how the legacy UI helper's
-/// `add_enabled(confirm_enabled, ..)` behaves
-/// (`src/app/ui/widgets.rs:184-189`).
+/// `Some` when the dialog is valid and confirming is allowed, `None` when
+/// it is not. `Button::on_press_maybe` renders a `None` handler as an
+/// inert button (`button.rs:170-173`).
 #[must_use]
 pub fn confirm_press<Message>(confirm_enabled: bool, message: Message) -> Option<Message> {
     confirm_enabled.then_some(message)
 }
 
-/// Renders the shared confirm + cancel button pair ([TASK-017a]).
+/// Renders the shared confirm + cancel button pair.
 ///
-/// Mirrors the retired `confirm_cancel_buttons` helper
-/// (`src/app/ui/widgets.rs:178-194`): the confirm label varies per dialog,
-/// the cancel label is always [`strings::CANCEL_BUTTON`], and
-/// `confirm_enabled == false` leaves the confirm button inert (no message)
-/// while cancel still works.
+/// The confirm label varies per dialog, the cancel label is always
+/// [`strings::CANCEL_BUTTON`], and `confirm_enabled == false` leaves the
+/// confirm button inert (no message) while cancel still works.
 #[must_use]
 pub fn confirm_cancel_buttons<'a, Message>(
     confirm_label: &'a str,
@@ -462,8 +444,7 @@ where
     .align_y(Alignment::Center)
 }
 
-/// A full-area, transparent layer that swallows the click landing on it
-/// ([TASK-017a]).
+/// A full-area, transparent layer that swallows the click landing on it.
 ///
 /// `Interaction::Hidden` keeps the cursor from reporting hover to layers
 /// below, and `on_press` captures the event (`mouse_area.rs:376-379`) so
@@ -479,7 +460,7 @@ where
 }
 
 /// A full-area, dimmed layer that swallows the click landing on it — the
-/// modal scrim ([TASK-017a]). The default cursor stays visible over the scrim.
+/// modal scrim. The default cursor stays visible over the scrim.
 #[must_use]
 pub fn scrim_blocker<'a, Message>(on_click: Message) -> MouseArea<'a, Message>
 where
@@ -512,7 +493,7 @@ fn scrim_style(_theme: &iced::Theme) -> container::Style {
 ///
 /// `pub(crate)` so the hamburger menu card ([`crate::ui_iced::panels::top`])
 /// reuses the exact same chrome instead of inventing a second dark card
-/// style ([GUD-003] — the style's colours come from the app palette).
+/// style; the style's colours come from the app palette.
 pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     let palette = crate::ui::theme::Palette::fastmd_dark();
 
@@ -527,7 +508,7 @@ pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     }
 }
 
-/// The context-menu card: one button per item ([TASK-017a]).
+/// The context-menu card: one button per item.
 ///
 /// Each row emits its own [`MenuItem::message`] on press, so no external
 /// hover state is needed.
@@ -554,7 +535,7 @@ where
         .into()
 }
 
-/// Mounts a **prebuilt card** over `base`, anchored at `anchor` ([TASK-017a]).
+/// Mounts a **prebuilt card** over `base`, anchored at `anchor`.
 ///
 /// The generic half of [`with_context_menu`] for callers that render the
 /// card themselves (the hamburger menu, whose rows mix non-selectable
@@ -602,7 +583,7 @@ where
     .into()
 }
 
-/// Mounts a context menu over `base`, anchored at `anchor` ([TASK-017a]).
+/// Mounts a context menu over `base`, anchored at `anchor`.
 ///
 /// Layers, bottom to top: `base`, a transparent [`input_blocker`], then the
 /// menu card pushed to the clamped anchor. A click that misses the card hits
@@ -638,7 +619,7 @@ where
     )
 }
 
-/// A blocking modal overlay: scrim + centred dialog card ([TASK-017a]).
+/// A blocking modal overlay: scrim + centred dialog card.
 ///
 /// The returned element fills its parent, so the caller stacks it over the
 /// rest of the UI (`stack(vec![root, modal(card, on_dismiss)])`). Any click
@@ -675,15 +656,13 @@ where
 }
 
 /// A blocking modal anchored at an explicit top-left `position` instead of
-/// centred ([TASK-017b1]).
+/// centred.
 ///
 /// Same scrim + card chrome as [`modal`]; only the placement differs. The
 /// card's top-left corner sits at `position`, which the caller resolves
 /// with [`clamp_anchor`] (or a centre fallback) before mounting — the
-/// shape the cursor-anchored small dialogs need, mirroring the legacy UI
-/// name-entry window's `fixed_pos` behaviour
-/// (`src/app/ui/modals.rs:40-45`). Like [`modal`], any click outside the
-/// card lands on the scrim and emits `on_dismiss`.
+/// shape the cursor-anchored small dialogs need. Like [`modal`], any click
+/// outside the card lands on the scrim and emits `on_dismiss`.
 #[must_use]
 pub fn modal_at<'a, Message>(
     content: Element<'a, Message>,
@@ -716,7 +695,7 @@ where
     .into()
 }
 
-/// Wraps `content` as a context-menu trigger ([TASK-017a]).
+/// Wraps `content` as a context-menu trigger.
 ///
 /// `MouseArea::on_right_press` cannot carry the cursor position
 /// (`mouse_area.rs:68-71`), so the two halves are wired together here:

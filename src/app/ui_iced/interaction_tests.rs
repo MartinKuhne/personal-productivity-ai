@@ -1,4 +1,4 @@
-//! Tier-2 iced **interaction** tests ([TASK-025]).
+//! Tier-2 iced **interaction** tests.
 //!
 //! Tier 1 for `ui_iced` is the per-module `*_tests.rs` sidecar set, which
 //! exercises the pure model/mapping layer. This module is tier 2: it drives
@@ -43,7 +43,7 @@
 //! so it is not a FastMD composition problem.
 //!
 //! The tag filter is still a `pick_list` and stays covered as far as the
-//! tool allows. The hamburger is **no longer affected**: it is a ☰ button
+//! tool allows. The hamburger is **not affected**: it is a ☰ button
 //! plus a real card mounted by the overlay host, so its rows are ordinary
 //! `Text`/`Button` widgets. [`test_top_bar_hamburger_consumes_the_open_click`]
 //! proves the ☰ captures the open click, and
@@ -77,8 +77,8 @@ use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
 use crate::ui_iced::panels::left::{left_panel, row_icon};
 use crate::ui_iced::panels::top::{
-    MenuEntry, MenuEntryKind, apply_about_button_click, build_menu_entries, hamburger_menu_card,
-    hamburger_row_label, hamburger_row_message, top_bar,
+    MenuEntry, MenuEntryKind, MenuSection, apply_about_button_click, build_menu_entries,
+    hamburger_menu_card, hamburger_row_label, hamburger_row_message, top_bar,
 };
 use crate::ui_iced::test_helpers::test_app_state;
 use crate::ui_iced::update::update;
@@ -229,7 +229,7 @@ fn alpha_row_label() -> String {
 // ---------------------------------------------------------------------------
 
 /// A left click on a tree row publishes `SelectFile` for that row's path
-/// (UI-017, [FMD-068]).
+/// (UI-017).
 #[test]
 fn test_tree_row_left_click_emits_select_file() {
     let (state, _dir) = state_with_one_file();
@@ -257,7 +257,7 @@ fn test_tree_row_left_click_emits_select_file() {
 
 /// A right click on a tree row opens the context menu, and the menu is then
 /// really mounted in the rebuilt full-app view with its own clickable rows
-/// (UI-006, DEC-005).
+/// (UI-006).
 #[test]
 fn test_tree_row_right_click_mounts_a_live_context_menu() {
     let (mut state, _dir) = state_with_one_file();
@@ -401,8 +401,8 @@ fn test_tab_title_click_selects_that_document() {
     );
 }
 
-/// A middle click on a tab closes it (UI-049) — [TASK-027] gap fill: the
-/// `on_middle_press` wiring in `center.rs` existed but no tier drove it.
+/// A middle click on a tab closes it (UI-049), driven through the
+/// `on_middle_press` wiring in `center`.
 #[test]
 fn test_tab_middle_click_closes_that_tab() {
     let mut state = test_app_state();
@@ -492,8 +492,7 @@ fn test_editor_cancel_never_requests_a_save() {
 // Bottom band — command input Enter submit
 // ---------------------------------------------------------------------------
 /// Enter in the command band submits the field's text as
-/// `AgentMessage::Submit` ([TASK-027] gap fill: the deleted legacy UI
-/// sidecar's `test_send_enter_key_*` / paste-then-enter family). iced's
+/// `AgentMessage::Submit`. iced's
 /// `text_input` owns the Enter handling, so the tier-2 assertion is that the
 /// real field really produces the submit message once the reducer has taken
 /// the typed text in.
@@ -551,9 +550,7 @@ fn test_command_band_enter_submits_the_typed_prompt() {
 // ---------------------------------------------------------------------------
 
 /// Clicking a ToC row publishes `UserCommand::ScrollToHeader` for that
-/// heading ([TASK-027] gap fill: the deleted legacy UI sidecar asserted the
-/// click effect as `apply_toc_row_click`; the iced pane wires the command
-/// inline in `view::toc_body` and nothing drove it until now).
+/// heading, driven through the command wiring in `view::toc_body`.
 #[test]
 fn test_toc_row_click_publishes_scroll_to_header() {
     use crate::markdown::ToCEntry;
@@ -704,9 +701,36 @@ fn test_top_bar_hamburger_consumes_the_open_click() {
     );
 }
 
+/// The hamburger occupies the far-right end of the 1024-point simulator
+/// viewport, rather than sitting immediately after the tag selector.
+#[test]
+fn test_top_bar_hamburger_is_at_the_far_right_edge() {
+    let state = test_app_state();
+    let mut ui = sim(top_bar(&state.models.top));
+    let glyph = strings::HAMBURGER_MENU_BUTTON;
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text {
+                content, bounds, ..
+            } if content == glyph => Some(bounds),
+            _ => None,
+        })
+        .expect("the ☰ hamburger button");
+
+    assert!(
+        bounds.x > 900.0,
+        "hamburger should be at the far right of the 1024-point viewport, got x={}",
+        bounds.x
+    );
+    assert!(
+        bounds.x + bounds.width <= 1024.0,
+        "hamburger should remain inside the viewport, got {bounds:?}"
+    );
+}
+
 /// The full loop: `Opened` mounts the card in the real `view()`, a row pick
 /// publishes that row's own [`UserCommand`] on the menu channel, and the
-/// reducer closes the menu in the same reduction ([FMD-068]).
+/// reducer closes the menu in the same reduction.
 #[test]
 fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
     let mut state = test_app_state();
@@ -741,6 +765,63 @@ fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
         !state.overlay.hamburger_open,
         "a row pick must close the menu in the same reduction"
     );
+}
+
+/// Clicking a submenu button changes the mounted card to that submenu, and
+/// the back row returns to the root menu without executing an application
+/// command.
+#[test]
+fn test_hamburger_submenu_navigation_round_trips_through_the_reducer() {
+    let mut state = test_app_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+
+    let mut ui = sim(view(&state));
+    let submenu_label = strings::format_menu_submenu_label(strings::MENU_WINDOWS);
+    let _ = ui.click(submenu_label.as_str());
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
+        "Windows must open as a clickable submenu",
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
+    );
+    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
+
+    let mut ui = sim(view(&state));
+    let background_label = hamburger_row_label(strings::MENU_BACKGROUND_OPERATIONS, false);
+    let debug_label = hamburger_row_label(strings::MENU_AGENT_DEBUG, false);
+    assert!(ui.find(background_label.as_str()).is_ok());
+    assert!(ui.find(debug_label.as_str()).is_ok());
+    assert!(ui.find(strings::MENU_CHAT_MODELS).is_err());
+
+    let _ = ui.click(strings::MENU_BACK_TO_MAIN);
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &Message::Menu(MenuMessage::SubmenuClosed),
+        "the back row must return to the top-level menu",
+    );
+    let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
+    assert_eq!(state.overlay.hamburger_submenu, None);
+
+    let mut ui = sim(view(&state));
+    let chat_models = strings::format_menu_submenu_label(strings::MENU_CHAT_MODELS);
+    let _ = ui.click(chat_models.as_str());
+    assert!(
+        messages(ui).contains(&Message::Menu(MenuMessage::SubmenuOpened(
+            MenuSection::ChatModels,
+        )))
+    );
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::ChatModels)),
+    );
+    let mut ui = sim(view(&state));
+    assert!(ui.find(strings::NO_CHAT_MODELS_CONFIGURED).is_ok());
 }
 
 /// A click that misses the mounted card lands on the blocker and closes it.
@@ -788,7 +869,8 @@ fn test_hamburger_rows_emit_their_commands() {
             other => unreachable!("filtered to Action rows, got {other:?}"),
         };
         let label = hamburger_row_label(&entry.label, entry.checked);
-        let mut ui = sim(hamburger_menu_card(&entries));
+        let active_submenu = (entry.section != MenuSection::Direct).then_some(entry.section);
+        let mut ui = sim(hamburger_menu_card(&entries, active_submenu));
         let _ = ui.click(label.as_str());
         assert_eq!(
             messages(ui),
@@ -826,7 +908,7 @@ fn test_full_app_view_is_simulatable_with_an_overlay() {
 
 /// The `Layout(CursorMoved)` anchor the tree emits for menu positioning is
 /// synthesised by the row's `mouse_area` as soon as the cursor position
-/// changes ([TASK-025] verified: `Simulator::point_at` alone emits no
+/// changes (verified: `Simulator::point_at` alone emits no
 /// event, so a following event is what surfaces the move).
 #[test]
 fn test_tree_pointer_motion_emits_the_cursor_anchor() {

@@ -1,11 +1,9 @@
-//! The iced `view` ([TASK-023]) — the one-to-one mirror of the legacy UI render
-//! path (`ui/app/render.rs` + the per-panel `show_*` functions).
+//! The iced `view` — the render path for the whole application window.
 //!
-//! Renders the [TASK-010] three-band layout with the real panels mounted,
-//! plus the overlay host (DEC-005) stacked above them in the legacy UI draw
-//! order. The window chrome (title, icon, persisted geometry, scale) is
-//! supplied by the builder chain in [`crate::ui_iced::app::launch`], not
-//! here.
+//! Renders the three-band layout with the real panels mounted, plus the
+//! overlay host stacked above them. The window chrome (title, icon,
+//! persisted geometry, scale) is supplied by the builder chain in
+//! [`crate::ui_iced::app::launch`], not here.
 //!
 //! # Purity
 //!
@@ -13,7 +11,7 @@
 //! bus, never touches the filesystem and never mutates anything — every
 //! decision it makes (which overlays are mounted, what the document body
 //! is, whether the TOC pane shows) is already encoded in the state the
-//! reducer produced ([FMD-069]).
+//! reducer produced.
 //!
 //! # Why the view-models come from `AppState`
 //!
@@ -28,7 +26,7 @@
 //!
 //! [`AppState::mounted_layers`] is the single selector that decides what
 //! floats above the bands; the host mounts them in that order, bottom-most
-//! first, matching the legacy UI draw order the panel docs record.
+//! first.
 //!
 //! Unit tests live in the sibling `view_tests.rs` sidecar.
 
@@ -53,13 +51,14 @@ use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
 use crate::ui_iced::panels::right::toc_indent_pixels;
 use crate::ui_iced::panels::top::{
-    build_menu_entries, hamburger_menu_anchor, hamburger_menu_card, top_bar,
+    build_menu_entries, hamburger_menu_anchor, hamburger_menu_card, hamburger_menu_row_count,
+    top_bar,
 };
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
 use iced::widget::{button, column, container, scrollable, stack, text};
 
-/// Vertical gap between the three bands, in logical pixels ([TASK-010]).
+/// Vertical gap between the three bands, in logical pixels.
 const BAND_SPACING_PIXELS: f32 = 8.0;
 
 /// Floor for the document render width so a collapsed-viewport solve never
@@ -72,11 +71,11 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
     overlay_host(state)
 }
 
-/// The three bands with the real panels mounted ([TASK-023]).
+/// The three bands with the real panels mounted.
 ///
-/// The right (TOC) pane is gated by the reused
-/// [`layout::should_show_panel`] rule — the same `has_toc && has_selected_file`
-/// test the legacy UI right panel used ([RUST-051]).
+/// The right (TOC) pane is gated by the pure
+/// [`layout::should_show_panel`] rule — `has_toc && has_selected_file`
+/// ([RUST-051]).
 fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
     let has_selected_file = state.app.selection().selected_file.is_some();
     let has_toc = !state.app.orchestrator.tabs.toc.is_empty();
@@ -100,8 +99,8 @@ fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
     .into()
 }
 
-/// The center pane body, routed the way the legacy UI's `show_center_panel` routed
-/// it: agent session first, then the open document, then the empty state.
+/// The center pane body, in routing order: agent session first, then the open
+/// document, then the empty state.
 fn center_body(state: &AppState) -> iced::Element<'_, Message> {
     if state.models.center.show_agent_session {
         agent_session_body(&state.models.agent)
@@ -112,13 +111,13 @@ fn center_body(state: &AppState) -> iced::Element<'_, Message> {
     }
 }
 
-/// The agent session view — the streaming transcript the legacy UI center pane
-/// swapped in while `agent_panel_state.show_results` was on.
+/// The agent session view — the streaming transcript, shown while the center
+/// pane's `show_agent_session` flag is on.
 fn agent_session_body(view_model: &AgentPanelViewModel) -> iced::Element<'_, Message> {
     agent_transcript_view(view_model)
 }
 
-/// The active document rendered through the [TASK-015] markdown path
+/// The active document rendered through the markdown path
 /// (front-matter table above the body, FTWA table solve, task checkboxes).
 fn document_body(state: &AppState) -> iced::Element<'static, Message> {
     let tabs = &state.app.orchestrator.tabs;
@@ -161,9 +160,9 @@ fn document_width(state: &AppState) -> f32 {
     (state.viewport.width - left - right).max(MIN_DOCUMENT_WIDTH_PIXELS)
 }
 
-/// The right (TOC) pane body: one button per heading, publishing the same
-/// [`UserCommand::ScrollToHeader`] the legacy UI ToC rows published. The
-/// per-level left pad comes from [`toc_indent_pixels`] ([TASK-027]).
+/// The right (TOC) pane body: one button per heading, each publishing a
+/// [`UserCommand::ScrollToHeader`]. The per-level left pad comes from
+/// [`toc_indent_pixels`].
 fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
     let rows: Vec<iced::Element<'_, Message>> = state
         .app
@@ -193,7 +192,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 }
 
 /// The overlay host: the bands with every mounted floating window stacked
-/// above them, bottom-most first ([TASK-023], DEC-005).
+/// above them, bottom-most first.
 ///
 /// The context menu and the hamburger menu are both folded into the base
 /// with [`with_context_menu`] / [`with_card_at`] rather than stacked as
@@ -221,8 +220,11 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
         base = with_card_at(
             base,
             hamburger_menu_anchor(state.viewport),
-            hamburger_menu_card(&entries),
-            menu_size(entries.len()),
+            hamburger_menu_card(&entries, state.overlay.hamburger_submenu),
+            menu_size(hamburger_menu_row_count(
+                &entries,
+                state.overlay.hamburger_submenu,
+            )),
             state.viewport,
             Message::Menu(MenuMessage::Closed),
         );
@@ -283,8 +285,8 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
     }
 }
 
-/// The batch dialog layer: the card over a scrim whose dismiss is the
-/// `CancelBatch` command the legacy UI window's close button published.
+/// The batch dialog layer: the card over a scrim whose dismiss publishes the
+/// `CancelBatch` command.
 fn batch_layer(view_model: &BatchDialogViewModel) -> iced::Element<'_, Message> {
     modal(
         batch_dialog_card(view_model),

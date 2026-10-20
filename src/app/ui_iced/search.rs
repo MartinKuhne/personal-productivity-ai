@@ -1,4 +1,4 @@
-//! Iced content-search view model ([TASK-019], UI-050).
+//! Content-search view model (UI-050).
 //!
 //! The iced half of the workspace content search. This module owns the
 //! **view-model** part of `src/app/ui/tree_search.rs` — the query text, the
@@ -13,18 +13,17 @@
 //! | Piece | Source |
 //! | --- | --- |
 //! | Result row type | [`SearchResultEntry`] (`src/app/ui/tree_search.rs:15-28`) — re-exported, never re-declared |
-//! | Scoped engine | [`find_search_results_scoped`] (`src/app/ui/tree_search.rs:227-301`) — the same call the legacy UI panel made (`src/app/ui/panels/left.rs:252`) |
+//! | Scoped engine | [`find_search_results_scoped`] (`src/app/ui/tree_search.rs:227-301`) |
 //! | Unscoped engine | [`find_search_results`] (`src/app/ui/tree_search.rs:308-314`) |
 //! | Match-count label | [`strings::format_match_count`] (`src/app/ui/strings.rs:189-191`) |
 //! | Header / empty state | [`strings::SEARCH_RESULTS_HEADER`], [`strings::SEARCH_NO_RESULTS`] |
 //!
-//! ## Why the scan is no longer synchronous
+//! ## Asynchronous scan
 //!
-//! The legacy UI build ran the scan inside the left panel's paint pass
-//! (`src/app/ui/panels/left.rs:246-252` → `TreeSearch::apply_with_allowed_dirs`),
-//! so a large workspace froze the UI for the whole duration — against
-//! [FMD-060]/[FMD-061]. The iced port keeps the same engine but moves the
-//! call off the UI thread:
+//! The engine call (`TreeSearch::apply_with_allowed_dirs`) is kept off the UI
+//! thread so a large workspace can never freeze input: the UI must stay
+//! responsive while background work runs, and a user action must be accepted
+//! within one frame regardless of background load.
 //!
 //! 1. [`SearchViewModel::submit`] commits the trimmed term, drops the stale
 //!    result list and raises the in-progress flag, returning the term the
@@ -36,15 +35,14 @@
 //!
 //! Step 3 is **guarded against stale results**: a scan superseded by a newer
 //! committed filter is dropped rather than painted, so a slow search for an
-//! old term can never overwrite a fast one for a new term ([FMD-062]).
+//! old term can never overwrite a fast one for a new term.
 //!
-//! ## Presentation logic ported as pure functions
+//! ## Presentation logic as pure functions
 //!
-//! The legacy UI result card decided inline which lines to allocate
-//! (`src/app/ui/panels/left.rs:299-323`). Those three predicates live here as
-//! [`shows_match_count`], [`shows_relative_path`] and [`shows_snippet`], and
-//! every user-facing string comes from [`crate::ui::strings`] ([GUD-002]) —
-//! this module contains no literal UI text.
+//! Which lines a result row allocates is decided by three pure predicates —
+//! [`shows_match_count`], [`shows_relative_path`] and [`shows_snippet`] — and
+//! every user-facing string comes from [`crate::ui::strings`], so this module
+//! contains no literal UI text.
 //!
 //! Unit tests live in the sibling `search_tests.rs` sidecar.
 
@@ -60,13 +58,12 @@ pub use crate::ui::tree_search::SearchResultEntry;
 /// The search engines, reused unchanged ([RUST-051]) —
 /// `src/app/ui/tree_search.rs:227` and `:308`.
 ///
-/// The [TASK-022]/[TASK-023] reducer calls these from a `Task` and feeds
-/// the returned vector back through
-/// [`SearchViewModel::apply_results`]; nothing in the iced layer
+/// The reducer calls these from a `Task` and feeds the returned vector back
+/// through [`SearchViewModel::apply_results`]; nothing in this layer
 /// re-implements scanning.
 pub use crate::ui::tree_search::{find_search_results, find_search_results_scoped};
 
-/// Workspace content-search view model ([TASK-019], UI-050).
+/// Workspace content-search view model (UI-050).
 ///
 /// Mirrors `TreeSearch` (`src/app/ui/tree_search.rs:37`) minus the
 /// scan-on-commit behaviour: the query text stays separate from the
@@ -187,7 +184,8 @@ impl SearchViewModel {
     ///
     /// Results whose query is not the currently committed filter are
     /// **stale** — a newer submission superseded the scan — and are dropped
-    /// without touching any state ([FMD-062]).
+    /// without touching any state, so an in-flight scan can never override a
+    /// newer user action.
     ///
     /// Returns whether the snapshot was applied.
     pub fn apply_results(&mut self, query: &str, results: Vec<SearchResultEntry>) -> bool {
@@ -247,9 +245,8 @@ impl SearchViewModel {
 
 /// Returns `true` when a result row should show its match counter.
 ///
-/// the legacy UI gated the counter on `match_count > 1`
-/// (`src/app/ui/panels/left.rs:301`): a single match adds nothing next to
-/// the file name, so only repeated hits are labelled.
+/// The counter is gated on `match_count > 1`: a single match adds nothing
+/// next to the file name, so only repeated hits are labelled.
 #[must_use]
 pub fn shows_match_count(entry: &SearchResultEntry) -> bool {
     entry.match_count > 1
@@ -257,8 +254,8 @@ pub fn shows_match_count(entry: &SearchResultEntry) -> bool {
 
 /// Returns `true` when a result row should show its library-relative path.
 ///
-/// the legacy UI skipped the line when it was empty or identical to the file name
-/// (`src/app/ui/panels/left.rs:309`) — a duplicate line is noise.
+/// The line is skipped when it is empty or identical to the file name — a
+/// duplicate line is noise.
 #[must_use]
 pub fn shows_relative_path(entry: &SearchResultEntry) -> bool {
     !entry.relative_path.is_empty() && entry.relative_path != entry.file_name
@@ -266,7 +263,7 @@ pub fn shows_relative_path(entry: &SearchResultEntry) -> bool {
 
 /// Returns `true` when a result row should show its preview snippet.
 ///
-/// the legacy UI skipped an empty snippet (`src/app/ui/panels/left.rs:316`).
+/// An empty snippet is never shown.
 #[must_use]
 pub fn shows_snippet(entry: &SearchResultEntry) -> bool {
     !entry.snippet.is_empty()
@@ -276,8 +273,8 @@ pub fn shows_snippet(entry: &SearchResultEntry) -> bool {
 ///
 /// The single-source-of-truth label behind any non-widget presentation of a
 /// result (tooltips, logs, a11y text). Every piece is user-facing text and
-/// therefore comes from [`crate::ui::strings`] ([GUD-002]); the separator is
-/// the only literal here and it is punctuation, not copy.
+/// therefore comes from [`crate::ui::strings`]; the separator is the only
+/// literal here and it is punctuation, not copy.
 #[must_use]
 pub fn format_result_row(entry: &SearchResultEntry) -> String {
     let mut label = entry.file_name.clone();

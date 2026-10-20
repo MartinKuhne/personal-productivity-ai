@@ -1,14 +1,13 @@
-//! Sidecar unit tests for `ui_iced/tools_dialog.rs` ([TASK-017b3]).
+//! Sidecar unit tests for `ui_iced/tools_dialog.rs`.
 //!
 //! Pure mapping, state-transition and widget-construction tests
 //! ([RUST-003]). Every group is a synthetic [`ToolGroupState`] literal, so
 //! no registry, subprocess, network or filesystem is touched
 //! ([RUST-006]); the only app-level read is one `FastMdApp::empty_state`
-//! smoke test that mirrors the existing the legacy UI fixtures.
+//! smoke test.
 //!
-//! The `compute_dialog_size` cases mirror the legacy UI originals in
-//! `src/app/ui/tools_dialog_tests.rs:127-188` so the height rule is
-//! pinned on both sides of the migration.
+//! The `compute_dialog_size` cases pin the height rule across the
+//! row-count and viewport range the dialog can face.
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
@@ -587,7 +586,7 @@ fn command_helpers_carry_their_own_target() {
 
 #[test]
 fn every_row_action_rides_the_command_channel() {
-    // [FMD-068]: the tools dialog has no private intent vocabulary —
+    // The tools dialog has no private intent vocabulary —
     // each action is already a self-contained UserCommand.
     let group = ToolGroupState {
         last_error: Some(ToolGroupError {
@@ -631,11 +630,10 @@ fn the_enable_checkbox_emits_set_tool_group_enabled() {
 
 #[test]
 fn the_error_marker_uses_the_warning_token_and_the_text_the_error_token() {
-    // the legacy UI painted the marker with `palette.warning`
-    // (src/app/ui/tools_dialog.rs:255); the tooltip body uses the
+    // The marker uses `palette.warning` and the tooltip body uses the
     // stronger `error` token. iced 0.14 ships
     // `iced::widget::tooltip::Tooltip`, so the body is revealed on hover
-    // exactly as the legacy UI revealed it — it is no longer inline.
+    // rather than shown inline.
     assert_eq!(error_marker_color(), Palette::fastmd_dark().warning);
     assert_eq!(error_text_color(), Palette::fastmd_dark().error);
     assert_ne!(
@@ -718,7 +716,7 @@ fn card_and_table_build_for_a_populated_and_an_empty_model() {
     assert!(std::mem::size_of_val(&tools_table(empty.rows())) > 0);
 }
 
-// --- height rule (mirrors the legacy UI compute_dialog_size tests) ----------
+// --- height rule -----------------------------------------------------------
 
 #[test]
 fn dialog_size_fits_few_rows_on_a_large_screen() {
@@ -857,8 +855,8 @@ fn dismiss_message_is_the_tools_channel_not_a_command() {
 
 #[test]
 fn from_app_snapshots_the_registered_internal_groups() {
-    // `empty_state` is the in-memory app fixture the legacy UI dialog tests
-    // already used; no user paths are read ([RUST-006]).
+    // `empty_state` is an in-memory app fixture; no user paths are read
+    // ([RUST-006]).
     let app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     let view_model = ToolsDialogViewModel::from_app(&app);
 

@@ -1,22 +1,17 @@
-//! Shared FastMD logo mark for the iced layer ([TASK-020]).
+//! Shared FastMD logo mark for the iced layer.
 //!
-//! The retired UI **vector-painted** the "Document + Bolt" badge with the legacy
-//! painter primitives — `ui/logo.rs::paint_logo` drew the badge, the
-//! document polygon, the folded corner, the markdown lines and the bolt
-//! through `Painter::rect_filled` / `Shape::convex_polygon` /
-//! `line_segment`. Those primitives have no iced equivalent under the
-//! feature set DEC-011 enabled, so every iced surface keeps the Phosphor
-//! bolt stand-in [TASK-011] already used by the top bar and the About
-//! banner. This module exists so that stand-in is **built in exactly one
+//! The "Document + Bolt" badge is not drawn as artwork in this build: iced
+//! exposes no painter primitives for it under the enabled feature set, so
+//! every iced surface uses the Phosphor bolt stand-in the top bar already
+//! uses. This module exists so that stand-in is **built in exactly one
 //! place** ([RUST-051]) instead of being re-typed per surface.
 //!
 //! # What the mark is
 //!
 //! [`logo_mark`] = [`logo_glyph`] (a Phosphor codepoint from
-//! [`crate::ui::strings`], [GUD-002]) painted in the `accent_text`
-//! palette token ([GUD-003]) at a caller-supplied point size. It emits no
-//! message of its own, so the returned element is `'static` and drops into
-//! any panel or card.
+//! [`crate::ui::strings`]) painted in the `accent_text` palette token at
+//! a caller-supplied point size. It emits no message of its own, so the
+//! returned element is `'static` and drops into any panel or card.
 //!
 //! # Why the real artwork is not rendered (feature trade-off)
 //!
@@ -27,12 +22,11 @@
 //! | --- | --- | --- | --- |
 //! | Raster badge | `image` → `iced_renderer/image` → `iced_graphics/image` | `iced::widget::image` rendering `crate::utils::app_icon::APP_ICON_PNG` (the real 32px mark) | `image` 0.25 is **already** in the tree (used by `utils::app_icon`); net new crate is `kamadak-exif` |
 //! | Vector SVG | `svg` → `iced_wgpu/svg` + `iced_tiny_skia/svg` | `iced::widget::svg` over `assets/icon.svg` (present, 1.5 kB) | `resvg` (which brings `usvg` and its text stack) — **absent** from `Cargo.lock`; heaviest option |
-//! | Re-painted vectors | `canvas` → `iced_renderer/geometry` | `iced::widget::canvas` — a `Program` re-implementing `paint_logo`'s polygons | `lyon` / `lyon_path` — **absent** from `Cargo.lock`; plus a hand port of ~140 lines of paint code |
+//! | Re-painted vectors | `canvas` → `iced_renderer/geometry` | `iced::widget::canvas` — a `Program` re-implementing the badge's polygons | `lyon` / `lyon_path` — **absent** from `Cargo.lock`; plus ~140 lines of hand-written paint code |
 //!
-//! None of the three is enabled, and adding a cargo feature is a build-level
-//! decision for the orchestrator ([TASK-020] constraint), not a view-layer
-//! one. Until one is approved, [`logo_mark`] is the single source of the
-//! stand-in and the retired `ui/logo.rs::paint_logo` is gone ([TASK-029b]).
+//! None of the three is enabled, and adding a cargo feature is a
+//! build-level decision, not a view-layer one. Until one is approved,
+//! [`logo_mark`] is the single source of the stand-in.
 //!
 //! Unit tests live in the sibling `logo_tests.rs` sidecar.
 
@@ -50,18 +44,16 @@ mod tests;
 
 /// Logical point size of the top-bar logo mark.
 ///
-/// Parity with the `vec2(20.0, 20.0)` box the retired toolbar
-/// allocated for its vector logo
-/// (`src/app/ui/panels/top.rs:142`, deleted by [TASK-029b]). The iced mark is
-/// a 20pt *glyph* rather than a 20pt *box*, so the drawn artwork is slightly
-/// smaller than the retired badge — inherent to the glyph stand-in.
+/// The mark is a 20pt *glyph* rather than a 20pt *box*, so the drawn
+/// artwork is slightly smaller than a square 20pt badge would be —
+/// inherent to the glyph stand-in.
 pub const LOGO_MARK_SIZE: f32 = 20.0;
 
 /// The glyph standing in for the "Document + Bolt" badge.
 ///
 /// A single Phosphor codepoint ([`strings::ICON_LIGHTNING`]) — the mark is
 /// a glyph, never a literal, so the codepoint lives in `strings.rs` like
-/// every other user-facing character ([GUD-002]).
+/// every other user-facing character.
 #[must_use]
 pub fn logo_glyph() -> &'static str {
     strings::ICON_LIGHTNING
@@ -70,8 +62,7 @@ pub fn logo_glyph() -> &'static str {
 /// The colour the mark is painted in.
 ///
 /// The `accent_text` palette token read straight from
-/// [`crate::ui::theme::Palette`] - no numeric colour literal appears here
-/// ([GUD-003]).
+/// [`crate::ui::theme::Palette`] - no numeric colour literal appears here.
 #[must_use]
 pub fn logo_color() -> Color {
     Palette::fastmd_dark().accent_text
@@ -79,15 +70,15 @@ pub fn logo_color() -> Color {
 
 /// The font handle the mark is drawn with.
 ///
-/// The Phosphor family registered by [`crate::ui_iced::fonts`] at boot
-/// ([TASK-007]); `PHOSPHOR_FONT_NAME` is the shared registration key, so
-/// this is the same handle `panels::top::phosphor_font()` wraps.
+/// The Phosphor family registered by [`crate::ui_iced::fonts`] at boot;
+/// `PHOSPHOR_FONT_NAME` is the shared registration key, so this is the
+/// same handle `panels::top::phosphor_font()` wraps.
 #[must_use]
 pub fn logo_font() -> Font {
     Font::with_name(PHOSPHOR_FONT_NAME)
 }
 
-/// Renders the logo mark at `size` logical points ([TASK-020]).
+/// Renders the logo mark at `size` logical points.
 ///
 /// The one place the stand-in is constructed. The top bar passes
 /// [`LOGO_MARK_SIZE`]; the About banner passes

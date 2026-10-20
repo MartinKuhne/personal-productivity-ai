@@ -1,4 +1,4 @@
-//! Sidecar unit tests for `ui_iced/dialogs.rs` ([TASK-017b1]).
+//! Sidecar unit tests for `ui_iced/dialogs.rs`.
 //!
 //! Pure state, validation and geometry tests only ([RUST-006]): every path
 //! is a synthetic fixture literal that is never opened, and no user
@@ -130,7 +130,7 @@ fn validate_rejects_a_forward_slash_separator() {
     let kind = DialogKind::CreateDocument {
         parent: sample_dir(),
     };
-    // The exact fixture the legacy UI rename test used.
+    // A `/` inside the name is a path separator, so the name is unsafe.
     assert_eq!(
         validate_name(&kind, "invalid/name"),
         Err(strings::DIALOG_NAME_UNSAFE_ERROR.to_string())
@@ -153,7 +153,7 @@ fn validate_rejects_a_parent_directory_traversal() {
     let kind = DialogKind::CreateDirectory {
         parent: sample_dir(),
     };
-    // The exact fixture the legacy UI create-dir test used.
+    // A `..` segment escapes the parent directory, so the name is unsafe.
     assert_eq!(
         validate_name(&kind, "../invalid_traversal"),
         Err(strings::DIALOG_NAME_UNSAFE_ERROR.to_string())

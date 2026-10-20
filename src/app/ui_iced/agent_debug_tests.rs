@@ -1,17 +1,12 @@
-//! Sidecar tests for [`crate::ui_iced::agent_debug`] ([TASK-017b4],
-//! UI-048 / REQ-008).
+//! Sidecar tests for [`crate::ui_iced::agent_debug`] (UI-048).
 //!
-//! Covers the pieces the legacy UI window kept inside its widget tree and its
-//! render closure — the search predicate, the session-scoped tools
-//! de-duplication, the JSON un-escape pass, the `json_rows` viewport
-//! decision, the explicit expanded-id set that replaces
-//! `CollapsingHeader`, the reused auto-scroll intent and the
-//! message-channel split — as pure data tests.
+//! Covers the window's rules as pure data tests: the search predicate, the
+//! session-scoped tools de-duplication, the JSON un-escape pass, the
+//! `json_rows` viewport decision, the explicit expanded-id set that drives
+//! disclosure, the auto-scroll intent and the message-channel split.
 //!
-//! The legacy UI originals (`src/app/ui/agent_debug_window.rs:275-411`) were
-//! `run_ui_test` smoke tests over a live `Context`; every rule they
-//! pinned is asserted here directly, without a context, a bus or a running
-//! agent. Fixtures build [`AgentDebugEntry`] values in memory and the one
+//! Every rule is asserted directly, without a bus or a running agent.
+//! Fixtures build [`AgentDebugEntry`] values in memory and the one
 //! `FastMdApp` used is the in-memory `empty_state` fixture — no files, no
 //! user paths ([RUST-006]).
 
@@ -169,8 +164,7 @@ fn session_boundaries_survive_any_search() {
 
 #[test]
 fn search_never_matches_the_json_body() {
-    // the legacy UI searched `summary` only (ui/agent_debug_window.rs:73); the
-    // payload is display-only.
+    // Only `summary` is searched; the payload is display-only.
     let entry = entry_with(
         1,
         DebugEntryKind::Outgoing,
@@ -184,7 +178,8 @@ fn search_never_matches_the_json_body() {
 
 #[test]
 fn a_whitespace_only_search_is_not_treated_as_empty() {
-    // Parity: the legacy UI tested `search_lower.is_empty()`, so " " filters.
+    // A whitespace-only term is not treated as empty: it filters everything
+    // out.
     let entries = vec![entry(1, DebugEntryKind::Outgoing, "alpha")];
     assert_eq!(filter_debug_entries(&entries, " ").len(), 0);
 }
@@ -272,8 +267,8 @@ fn the_omitted_tools_placeholder_reaches_the_display_json() {
 #[test]
 fn the_dedup_runs_on_the_filtered_list_not_the_raw_buffer() {
     // Searching the first tools entry away promotes the second to
-    // "first visible", so it keeps its tools — legacy parity: the pass
-    // walks `filtered` (ui/agent_debug_window.rs:79).
+    // "first visible", so it keeps its tools: the de-dup pass walks
+    // `filtered`, not the raw buffer.
     let entries = vec![
         boundary(1),
         tools_entry(1, "alpha-tool"),
@@ -861,7 +856,7 @@ fn from_app_builds_rows_once_the_window_opens() {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-scroll — the reused [TASK-016] intent rule
+// Auto-scroll — the shared intent rule
 // ---------------------------------------------------------------------------
 
 #[test]

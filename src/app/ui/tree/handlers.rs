@@ -1,13 +1,10 @@
 //! Merge-prompt builder for multi-file "merge" agent commands.
 //!
-//! The tree row click handlers that used to live here
-//! (`apply_file_row_click`, `apply_directory_row_click`) were retired by
-//! [TASK-029b] with the legacy UI tree renderer — the iced left panel owns the
-//! equivalent logic in
+//! Tree row clicks are owned by the left panel's
 //! [`row_click_command`](crate::ui_iced::panels::left::row_click_command).
-//! What remains is the framework-free prompt builder the
-//! [`CommandExecutor`](crate::command_executor) uses for the multi-file
-//! merge command.
+//! What lives here is the framework-free prompt builder that the
+//! [`command_executor`](crate::command_executor) module uses for the
+//! multi-file merge command.
 //!
 //! Unit tests live in the sibling `handlers_tests.rs` sidecar.
 

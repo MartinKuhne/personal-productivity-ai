@@ -24,23 +24,20 @@ pub fn config_bus() -> Bus<ConfigArrived> {
 /// subscriber falls back to [`crate::config::AppConfig::default`] and
 /// emits a `config.arrived.timeout` tracing event.
 ///
-/// The 100 ms value that previously stood here was the direct cause of
-/// the unscanned-workspace defect: when the DEC-009
-/// `ConfigArrived` publish still rode an iced boot `Task::perform`, it
-/// only reached the bus after the runtime's font/first-frame warm-up
-/// — observably > 1 s wall-clock — by which time both waiting
-/// subscribers had fallen back to `AppConfig::default()` and the
-/// indexer scanned it: no content libraries, "Scanned 0 files". The
-/// publish itself is now synchronous inside
-/// [`crate::ui_iced::app::build_state`] (after every subscriber
-/// registers), but the window is kept generous as defense-in-depth:
-/// any future asynchronous publisher must not silently degrade the
-/// initial scan. The fallback also keeps scanning legal after a
-/// genuine mis-ordering instead of wedging the workers forever.
+/// The window is deliberately generous. Boot warm-up (font load, first
+/// frame, wgpu initialisation) runs before the `Task::perform` that
+/// publishes `ConfigArrived`, so arrival can be more than 1 s
+/// wall-clock after a subscriber starts waiting. The publish itself is
+/// synchronous inside [`crate::ui_iced::app::build_state`] once every
+/// subscriber has registered, but the generous window is kept as
+/// defense-in-depth: a future asynchronous publisher must not silently
+/// degrade the initial scan. The fallback also keeps scanning legal
+/// after a genuine mis-ordering instead of wedging the workers forever.
 ///
 /// The timeout is only ever waited on by worker/init *threads* and the
 /// agent config-subscriber thread — never on the UI thread — so the
-/// generous window cannot block user input ([FMD-061], `src/app/AGENTS.md`).
+/// generous window cannot block user input: a user action must be
+/// accepted within one frame regardless of background load.
 pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(test)]
@@ -116,11 +113,12 @@ mod tests {
     }
 
     /// Regression guard: the arrival window must comfortably exceed the
-    /// DEC-009 boot publish's scheduler delay (font load, first frame,
+    /// boot publish's scheduler delay (font load, first frame, and
     /// wgpu warm-up all run before the `Task::perform` that publishes
-    /// `ConfigArrived`). At 100 ms every launch timed out and the
-    /// indexer scanned `AppConfig::default()` — the workspace was
-    /// never scanned ("Scanned 0 files").
+    /// `ConfigArrived`). A window shorter than that warm-up times out
+    /// on every launch, so the indexer would scan
+    /// `AppConfig::default()` and the workspace would never be scanned
+    /// ("Scanned 0 files").
     #[test]
     fn test_arrival_timeout_exceeds_boot_publish_delay() {
         assert!(

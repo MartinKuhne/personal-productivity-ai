@@ -1,36 +1,31 @@
-//! Iced adapter for the Fair Table Width Algorithm ([TASK-015],
-//! `doc/planning/iced.md`).
+//! Iced adapter for the Fair Table Width Algorithm.
 //!
 //! The solver itself — `crate::markdown::table_width::ftwa` plus the
 //! `crate::markdown::table_layout::TableLayoutBuilder` that drives it — is
 //! pure `f32` math and is **reused unchanged** ([RUST-051]). What the solver
 //! cannot do is measure text: it consumes `max_content` / `min_content`
-//! widths and a `TextMeasurer` that the legacy UI build supplied from
-//! `Context` text shaping (`src/app/ui/table_width/mod.rs`). This
-//! module is the iced-side replacement for exactly that bridging layer.
+//! widths and a `TextMeasurer`. This module is the iced-side bridging layer
+//! that supplies them.
 //!
-//! # The contract, preserved
+//! # The pipeline
 //!
-//! Same three stages the legacy UI adapter ran, in the same order:
+//! Three stages, in this order:
 //!
 //! 1. **available width → solver width.** The iced `Table` paints
 //!    [`CELL_PADDING_X`] outside every cell on both sides, so the width the
 //!    solver may spend is [`solver_available_width`] = available minus the
-//!    two outer padding bands. The legacy UI adapter had no outer frame padding,
-//!    so this is the one deliberate numeric difference ([RUST-041] note in
-//!    the TASK-015 verification log).
+//!    two outer padding bands.
 //! 2. **solver inputs.** [`IcedTextMeasurer`] implements the pure
 //!    [`TextMeasurer`] trait: per-cell `max_content` (single-line width of
 //!    the whole cell), `min_content` (longest unbreakable token) and the
 //!    ordered token widths the breakpoint curve is built from. Horizontal
-//!    padding is folded in by the *builder*, not by the measurer — exactly
-//!    as the legacy text measurer left it (`TBL-033` accounting).
+//!    padding is folded in by the *builder*, not by the measurer — the
+//!    `TBL-033` accounting.
 //! 3. **solver output → iced widths.** [`column_widths`] reads the solved
 //!    per-column widths back out of the layout, and [`column_length`] turns
 //!    one into the `Length::Fixed` a `table::Column` is pinned to.
-//!    `TableLayout::needs_horizontal_scroll` selects the §3.6
-//!    horizontal-scroll fallback, mirroring
-//!    `src/app/ui/render/table/configured.rs:122-144`.
+//!    `TableLayout::needs_horizontal_scroll` selects the
+//!    horizontal-scroll fallback.
 //!
 //! # Column geometry
 //!
@@ -38,35 +33,28 @@
 //! `spacing = 2 * padding + separator`
 //! (`iced_widget-0.14.2/src/table.rs:258-259`) and starts each row at
 //! `x = padding_x` (`table.rs:263`). Setting `padding_x = CELL_PADDING_X`
-//! with `separator_x = 0` therefore yields a [`COLUMN_SPACING`] of 10 px —
-//! the same gutter the legacy UI table used (`item_spacing.x = 10.0`,
-//! `configured.rs:86`) — without painting a separator line through it.
-//! Vertically the same rule gives [`ROW_SPACING`] = 2 px
-//! (`the legacy UI: item_spacing.y = 2.0`, `configured.rs:75`).
+//! with `separator_x = 0` therefore yields a [`COLUMN_SPACING`] of 10 px
+//! without painting a separator line through the gutter. Vertically the
+//! same rule gives [`ROW_SPACING`] = 2 px.
 //!
 //! # Measurement without a renderer
 //!
-//! The renderer-free constraint is unchanged: iced only hands a text
-//! renderer to `Widget::layout`
+//! iced only hands a text renderer to `Widget::layout`
 //! (`iced_graphics-0.14.0/src/text/renderer.rs`), `view()` has none, and
-//! the reducer never sees one. What changed ([GAP-06]) is that a renderer
-//! is no longer the only route to real metrics. [`fira_sans_width`] shapes
-//! the string with `cosmic-text` over
+//! the reducer never sees one. A renderer is not the only route to real
+//! metrics: [`fira_sans_width`] shapes the string with `cosmic-text` over
 //! `iced_graphics::text::FIRA_SANS_REGULAR` — the very bytes iced loads
 //! as its Fira face — and returns true glyph advances with no renderer, no
 //! window, and no handle on iced's own font engine.
 //!
-//! The seam is therefore still an injected `&dyn Fn`
-//! ([`IcedTextMeasurer::new`]), and [`heuristic_width`] is still the
-//! default ([`IcedTextMeasurer::heuristic`]). Two claims this section
-//! used to make are now false and are corrected here ([RUST-041]):
+//! The seam is an injected `&dyn Fn` ([`IcedTextMeasurer::new`]), and
+//! [`heuristic_width`] is the default ([`IcedTextMeasurer::heuristic`]).
+//! Two properties of that split matter:
 //!
-//! * *"the approximation is uniform per font, so every FTWA regime
-//!   transition fires on the same relative column shapes"* — real metrics
-//!   are available and are emphatically **not** uniform: `"iiii"` and
-//!   `"MMMM"` now measure differently at the same size, which is precisely
-//!   the difference the flat 0.5 em model could not see.
-//! * *the heuristic is no longer the general-purpose width function*. It
+//! * Real metrics are emphatically **not** uniform per font: `"iiii"` and
+//!   `"MMMM"` measure differently at the same size, which is precisely the
+//!   difference a flat 0.5 em model cannot see.
+//! * The heuristic is **not** the general-purpose width function. It
 //!   survives as the **fallback** for any face this build holds no bytes
 //!   for — `Font::MONOSPACE` above all, since measuring Fira Sans in a
 //!   monospace slot would be measuring the wrong face.
@@ -77,13 +65,10 @@
 //! `wasm32`, so the app must pin `default_font` itself for the measured
 //! face to be the painted face.
 //!
-//! # Relocated helper ([TASK-029])
+//! # `TablePadding`
 //!
-//! [`TablePadding`] used to be `use`d from `crate::ui::table_width`, a module
-//! [TASK-029b] deleted. It is copied into this module verbatim and is
-//! **framework-free** (four `f32` fields, four pure methods). The retired module's
-//! `TableRenderConfig` is likewise framework-free but has no `ui_iced` consumer,
-//! so it is not copied.
+//! [`TablePadding`] is **framework-free** — four `f32` fields and four pure
+//! methods — so it lives here, alongside the adapter that consumes it.
 //!
 //! Unit tests live in the sibling `table_width_tests.rs` sidecar.
 
@@ -98,25 +83,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 ///
 /// Padding is resolved per cell by taking the most-specific non-`None` layer
 /// (per-cell override > per-column override > global default), then sanitised
-/// (negative components clamped to `0.0`, satisfying `TBL-050`). Resolved
-/// horizontal padding is factored into column width accounting (`TBL-033`):
-/// every returned `max_content`/`min_content` is increased by
-/// `padding.horizontal()`. Vertical padding is applied as inner frame margin
-/// in the cell renderer and increases the rendered row height.
+/// (negative components clamped to `0.0`). Resolved horizontal padding is
+/// factored into column width accounting (`TBL-033`): every returned
+/// `max_content`/`min_content` is increased by `padding.horizontal()`.
+/// Vertical padding is applied as inner frame margin in the cell renderer
+/// and increases the rendered row height.
 ///
-/// See [contracts/table-renderer.md](../../../specs/002-table-layout-renderer/contracts/table-renderer.md) Part C.
-///
-/// # Relocated ([TASK-029])
-///
-/// Copied verbatim from `src/app/ui/table_width/mod.rs:29-86`, which used to
-/// be `use`d across the boundary and is deleted by [TASK-029b]. The type is
-/// **framework-free by construction** — four `f32` fields and four pure methods,
-/// no framework type anywhere — so the copy is exact.
-///
-/// The legacy UI module's `TableRenderConfig` is **also** framework-free but is not
-/// copied: no `ui_iced` code reads it (the iced render path carries
-/// [`RenderContext::table_padding`](crate::ui_iced::render::RenderContext)
-/// instead). The legacy UI module keeps both until Phase 5.
+/// The type is **framework-free by construction** — four `f32` fields and
+/// four pure methods, no framework type anywhere. The iced render path
+/// carries it as
+/// [`RenderContext::table_padding`](crate::ui_iced::render::RenderContext).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TablePadding {
     /// Top padding in logical pixels.
@@ -138,7 +114,7 @@ impl TablePadding {
         right: 0.0,
     };
 
-    /// Clamp each negative component to `0.0` (`TBL-050` malformed-input branch).
+    /// Clamp each negative component to `0.0` (malformed-input branch).
     #[must_use]
     pub fn sanitised(self) -> Self {
         Self {
@@ -182,17 +158,11 @@ pub const CELL_PADDING_X: f32 = 5.0;
 /// Paired with `separator_y = 0` this yields [`ROW_SPACING`].
 pub const CELL_PADDING_Y: f32 = 1.0;
 
-/// Horizontal gap between adjacent columns.
-///
-/// Mirrors the legacy UI table's `item_spacing.x = 10.0`
-/// (`src/app/ui/render/table/configured.rs:86`) and the pure builder's
-/// own default (`src/app/markdown/table_layout.rs:53`).
+/// Horizontal gap between adjacent columns, matching the pure builder's own
+/// default (`src/app/markdown/table_layout.rs:53`).
 pub const COLUMN_SPACING: f32 = 10.0;
 
 /// Vertical gap between adjacent rows.
-///
-/// Mirrors the legacy UI table's `item_spacing.y = 2.0`
-/// (`src/app/ui/render/table/configured.rs:75`).
 pub const ROW_SPACING: f32 = 2.0;
 
 /// Average glyph advance of the proportional UI font, in em units.
@@ -206,8 +176,7 @@ pub const PROPORTIONAL_AVG_ADVANCE: f32 = 0.5;
 /// Monospaced faces sit near 0.6 em.
 pub const MONOSPACE_AVG_ADVANCE: f32 = 0.6;
 
-/// Renderer-free text width used until a real iced renderer is reachable
-/// from `view()` ([TASK-022]/[TASK-023]).
+/// Renderer-free text width approximation.
 ///
 /// Counts Unicode scalar values, so multi-byte UTF-8 text is measured by
 /// character count rather than byte count. Monotone in the character count,
@@ -333,7 +302,7 @@ fn measured_fira_sans_width(text: &str, size: f32) -> f32 {
 }
 
 /// Real, renderer-matching single-line text width for the proportional UI
-/// font, measured with `cosmic-text` ([GAP-06]).
+/// font, measured with `cosmic-text`.
 ///
 /// Drop-in replacement for [`heuristic_width`] at the
 /// `Fn(&str, Font, f32) -> f32` seam ([`IcedTextMeasurer::new`]): it
@@ -424,12 +393,6 @@ pub struct TextMetrics {
 
 impl TextMetrics {
     /// The FastMD body metrics: 14 pt body, 13 pt mono, 18 px row height.
-    ///
-    /// Mirrors the legacy UI defaults the table renderer fell back to
-    /// (`TextStyle::Body` → `FontId::proportional(14.0)`,
-    /// `src/app/ui/render/table/cell.rs:194`) and the 18 px line the legacy UI
-    /// markdown renderer used for its height estimates
-    /// (`src/app/ui/render/mod.rs:190`).
     pub const FASTMD: TextMetrics = TextMetrics {
         body_size: 14.0,
         mono_size: 13.0,
@@ -438,10 +401,6 @@ impl TextMetrics {
 }
 
 /// A [`TextMeasurer`] for the pure FTWA builder, driven by iced fonts.
-///
-/// Implements the same trait the legacy text measurer did
-/// (`src/app/ui/table_width/mod.rs:280-292`), so `TableLayoutBuilder`
-/// cannot tell the two apart.
 pub struct IcedTextMeasurer<'a> {
     width_of: &'a dyn Fn(&str, Font, f32) -> f32,
     metrics: TextMetrics,
@@ -507,8 +466,7 @@ impl<'a> IcedTextMeasurer<'a> {
     /// The text a cell element actually displays, and the font it displays
     /// in.
     ///
-    /// Same selection the legacy UI measurer used (`src/app/ui/table_width/mod.rs:440-449`):
-    /// monospace only for `code` runs; links, HTML and the image
+    /// Monospace only for `code` runs; links, HTML and the image
     /// placeholder all measure in the body font.
     fn displayed(&self, elem: &InlineElem) -> (String, Font) {
         match elem {
@@ -535,10 +493,9 @@ impl TextMeasurer for IcedTextMeasurer<'_> {
     /// (elements are laid out flush, zero inter-element spacing);
     /// `min_content` is the widest whitespace-separated token across the
     /// cell, measured with the font that token renders in. Token
-    /// accumulation across element boundaries — a word split between two
-    /// `Text` runs keeps its identity — is ported verbatim from the legacy UI
-    /// measurer (`src/app/ui/table_width/mod.rs:415-510`) so the solver
-    /// sees the same break opportunities in both builds.
+    /// accumulation crosses element boundaries — a word split between two
+    /// `Text` runs keeps its identity — so the solver sees the same break
+    /// opportunities wherever the text was split.
     fn measure_cell(
         &self,
         cell: &[InlineElem],
@@ -600,9 +557,9 @@ impl TextMeasurer for IcedTextMeasurer<'_> {
                         current_font = font;
                     }
                 } else if ends_ws {
-                    // Parity with the legacy UI walker: a single-part run that ends
-                    // with whitespace closes the pending token immediately,
-                    // measured with the *previous* run's font.
+                    // A single-part run that ends with whitespace closes the
+                    // pending token immediately, measured with the
+                    // *previous* run's font.
                     let token = std::mem::take(&mut current_token);
                     self.record_token(&token, current_font, &mut min_w, &mut token_widths);
                 } else {
@@ -700,7 +657,7 @@ pub fn column_length(width: f32) -> Length {
     Length::Fixed(width.max(0.0))
 }
 
-/// Whether the solved table needs the §3.6 horizontal-scroll fallback.
+/// Whether the solved table needs the horizontal-scroll fallback.
 ///
 /// Thin accessor so the render layer reads the intent rather than the
 /// field, and the fallback rule has one named home in this adapter.

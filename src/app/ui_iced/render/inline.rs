@@ -1,12 +1,9 @@
-//! Inline styled-run mapping and the iced `Rich` text builder ([TASK-015]).
+//! Inline styled-run mapping and the iced `Rich` text builder.
 //!
-//! The legacy UI build painted the same `InlineElem` runs through three
-//! different APIs and kept their shared mapping in
-//! `src/app/ui/render/style.rs` (`styled_text` for the `RichText` path,
-//! `text_format` for the `LayoutJob` path). iced collapses both into one:
-//! a [`Span`] carries size, font, colour, background highlight, underline
+//! A [`Span`] carries size, font, colour, background highlight, underline
 //! and strikethrough, and a [`Rich`] text widget lays a slice of them out
-//! as one wrapped run with clickable links.
+//! as one wrapped run with clickable links — one API covers every styled
+//! inline run the parser produces.
 //!
 //! The mapping is split in two so it is testable without a renderer:
 //!
@@ -35,22 +32,15 @@ use iced::widget::text::{Rich, Span};
 use iced::{Background, Color, Element, Font, Length};
 use std::path::Path;
 
-/// Point size of body/paragraph inline text.
-///
-/// The legacy UI renderer passed `None` for the size on paragraph runs, which
-/// meant `TextStyle::Body`; the FastMD body size is 14 pt
-/// (`src/app/ui/render/table/cell.rs:194` uses the same fallback).
+/// Point size of body/paragraph inline text — the FastMD body size, 14 pt.
 pub const BODY_SIZE: f32 = 14.0;
 
 /// Point size of the list bullet / ordinal marker.
-///
-/// Ported from `src/app/ui/render/inline.rs:128-131` (`RichText::new(…).size(14.0)`).
 pub const LIST_MARKER_SIZE: f32 = 14.0;
 
 /// Horizontal padding around an inline-code highlight.
 ///
-/// the legacy UI's `RichText::background_color` painted the background flush to
-/// the glyphs; iced's span highlight takes explicit padding
+/// Iced's span highlight takes explicit padding
 /// (`Span::padding`, `iced_core-0.14.0/src/text.rs:532-535`), so a small
 /// inset keeps the code chip readable.
 pub const CODE_HIGHLIGHT_PADDING: f32 = 1.0;
@@ -118,11 +108,9 @@ pub fn font_for_style(style: &TextStyle) -> Font {
 
 /// Maps one styled text run onto a [`SpanModel`].
 ///
-/// Colour precedence mirrors the legacy UI mapping
-/// (`src/app/ui/render/style.rs:99-133`): `muted` wins over `bold`,
-/// `bold` wins over the default body colour. Code runs get the `border`
-/// token as their background, exactly as `styled_text` chose it
-/// (`style.rs:82`).
+/// Colour precedence: `muted` wins over `bold`, `bold` wins over the
+/// default body colour. Code runs get the `border` token as their
+/// background.
 #[must_use]
 pub fn span_for_text(text: &str, style: &TextStyle, size: f32, palette: Palette) -> SpanModel {
     let color = if style.muted {
@@ -146,11 +134,7 @@ pub fn span_for_text(text: &str, style: &TextStyle, size: f32, palette: Palette)
 
 /// Maps one link onto a [`SpanModel`].
 ///
-/// Links take the `accent_text` token and are underlined. The legacy UI build
-/// used `ui.hyperlink_to`, whose colour came from the legacy UI's own
-/// `Visuals::hyperlink_color` default — not a FastMD token
-/// (`src/app/ui/theme.rs:104-106` says so explicitly) — so the token
-/// choice here is the honest themed equivalent rather than a ported value.
+/// Links take the `accent_text` token and are underlined.
 #[must_use]
 pub fn span_for_link(url: &str, label: &str, size: f32, palette: Palette) -> SpanModel {
     SpanModel {
@@ -167,11 +151,9 @@ pub fn span_for_link(url: &str, label: &str, size: f32, palette: Palette) -> Spa
 
 /// Maps a slice of parser inline elements onto span models.
 ///
-/// `SoftBreak` becomes a single space (the legacy UI rendered `ui.label(" ")`),
-/// `Image` becomes the shared `[Image: url]` placeholder
-/// ([`image_placeholder`]) in the muted colour, and `Html` renders muted
-/// — the same presentation the legacy UI inline renderer gave them
-/// (`src/app/ui/render/inline.rs:146-177`).
+/// `SoftBreak` becomes a single space, `Image` becomes the shared
+/// `[Image: url]` placeholder ([`image_placeholder`]) in the muted colour,
+/// and `Html` renders muted.
 #[must_use]
 pub fn spans_from_inline(elems: &[InlineElem], size: f32, palette: Palette) -> Vec<SpanModel> {
     elems
@@ -218,9 +200,7 @@ pub fn to_iced_span(model: &SpanModel) -> Span<'static, String> {
 /// `source_file` is carried into every emitted
 /// [`RenderMessage::LinkActivated`] so the reducer can resolve the link
 /// relative to the document it came from; `None` means the rendered text
-/// is not file-backed. Width is `Fill` and wrapping is word-level, which
-/// is the iced equivalent of the `.wrap()` pinning the legacy UI renderer
-/// applied to every label (`src/app/ui/render/inline.rs:150-158`).
+/// is not file-backed. Width is `Fill` and wrapping is word-level.
 #[must_use]
 pub fn rich_text_block(
     models: &[SpanModel],

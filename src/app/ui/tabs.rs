@@ -74,16 +74,15 @@ impl Tabs {
         }
     }
 
-    /// Opens the tab for `path` unless it is still open.
+    /// Opens the tab for `path` unless it is already open.
     ///
-    /// `tabs_set` is the change detector the legacy mutations
-    /// bypassed (`command_executor.rs` historically pushed into
-    /// [`Tabs::tabs`](Self::tabs) directly), so `path` **already present in
-    /// [`Tabs::tabs`](Self::tabs) is treated as open even when the shadow set
-    /// has drifted** — the vector is the authority and the set is healed
-    /// from it. Without that healing, a `CloseTab` mutation that left the
-    /// path in the set (but not the vector) silently blocked every
-    /// subsequent re-open of the same file.
+    /// `tabs_set` is the change detector, and mutations may push into
+    /// [`Tabs::tabs`](Self::tabs) directly without touching it, so a `path`
+    /// **already present in [`Tabs::tabs`](Self::tabs) is treated as open
+    /// even when the shadow set has drifted** — the vector is the authority
+    /// and the set is healed from it. Without that healing, a `CloseTab`
+    /// mutation that left the path in the set (but not the vector) would
+    /// silently block every subsequent re-open of the same file.
     ///
     /// Purity: pure — mutates only this manager.
     pub fn open_tab(&mut self, path: PathBuf) {
@@ -478,7 +477,7 @@ mod tests {
         assert_eq!(manager.close_tab_at(0), Some(a.clone()));
         assert!(!manager.tabs.contains(&a));
 
-        // The set must no longer block the re-open.
+        // The set must not block the re-open.
         manager.open_tab(a.clone());
         assert!(manager.tabs.contains(&a));
         assert_eq!(manager.tabs.len(), 2);
@@ -552,8 +551,8 @@ mod tests {
         assert_eq!(manager.tabs, vec![b.clone(), a.clone()]);
     }
 
-    /// Healing: a manager whose set/vector disagree after a legacy direct
-    /// mutation still opens (no duplicate) and closes (vector and set in
+    /// Healing: a manager whose set/vector disagree after a direct mutation
+    /// still opens (no duplicate) and closes (vector and set in
     /// step again).
     #[test]
     fn open_and_close_heal_set_desync() {

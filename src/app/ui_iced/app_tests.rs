@@ -1,13 +1,12 @@
-//! Unit tests for the [TASK-022] iced application root
-//! (`src/app/ui_iced/app.rs`).
+//! Unit tests for the iced application root (`src/app/ui_iced/app.rs`).
 //!
 //! `launch()` calls `.run()` and is not headlessly testable; these tests
 //! exercise the pieces it composes — the framework-free `build_state`, the
-//! `boot` state/task contract, the DEC-008 scale composition, the
-//! DEC-009 config direct-injection, the CLI workspace injection moved
-//! from `main.rs`, and the window-settings mappers. No test touches a real
-//! user path: storage is `InMemoryConfigStorage` / `InMemoryUiStateStorage`
-//! and CLI dirs are `tempfile::TempDir` ([RUST-006]).
+//! `boot` state/task contract, the scale composition, the config
+//! direct-injection, the CLI workspace injection from `main.rs`, and the
+//! window-settings mappers. No test touches a real user path: storage is
+//! `InMemoryConfigStorage` / `InMemoryUiStateStorage` and CLI dirs are
+//! `tempfile::TempDir` ([RUST-006]).
 
 use super::*;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
@@ -100,7 +99,7 @@ fn test_build_state_publishes_config_arrived_synchronously() {
 
 #[test]
 fn test_boot_injects_config_into_state() {
-    // DEC-009: the loaded config is direct-injected during boot, so the UI
+    // The loaded config is direct-injected during boot, so the UI
     // never waits on the startup broadcast for its own state.
     let bus = Bus::<ConfigArrived>::new();
     let (state, _task) = boot(LaunchInputs {
@@ -175,7 +174,7 @@ fn test_requested_scale_factor_ignores_os_baseline() {
 
 #[test]
 fn test_effective_scale_factor_composes_baseline_and_multiplier() {
-    // DEC-008: the on-screen scale is the OS baseline times the user multiplier.
+    // The on-screen scale is the OS baseline times the user multiplier.
     let mut state = fresh_state(populated_persisted());
     state.os_scale = Some(1.5);
     assert_eq!(state.effective_scale_factor(), 1.5 * 1.25);
@@ -440,7 +439,10 @@ fn test_close_topmost_closes_each_layer_in_turn() {
         }),
         (
             CLOSED_LAYER_HAMBURGER,
-            |o| o.hamburger_open = true,
+            |o| {
+                o.hamburger_open = true;
+                o.hamburger_submenu = Some(crate::ui_iced::panels::top::MenuSection::Windows);
+            },
             |o| o.hamburger_open,
         ),
     ];
@@ -459,6 +461,7 @@ fn test_close_topmost_closes_each_layer_in_turn() {
             !is_open(&overlay),
             "{name} must be closed after close_topmost"
         );
+        assert_eq!(overlay.hamburger_submenu, None);
         assert_eq!(
             overlay.close_topmost(),
             None,
@@ -562,7 +565,7 @@ fn test_close_topmost_drops_the_editor_buffer_entirely() {
     );
 }
 
-// --- launch presets (TASK-022 / DEP-007) -----------------------------------
+// --- launch presets ---------------------------------------------------------
 
 /// The preset list must exist and name its production strategy `"default"`.
 /// `.run()` is never called — the preset closure is not invoked either, so

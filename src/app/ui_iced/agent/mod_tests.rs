@@ -1,5 +1,4 @@
-//! Sidecar tests for [`crate::ui_iced::agent`] composition ([TASK-018],
-//! UI-048).
+//! Sidecar tests for [`crate::ui_iced::agent`] composition (UI-048).
 //!
 //! Verifies the top-level `agent_panel` builder assembles without a live
 //! iced runtime across the idle ⇄ running and empty ⇄ populated transitions,

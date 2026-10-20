@@ -1,19 +1,19 @@
-//! Iced port of the center panel — the document tab strip and the viewer
-//! area ([TASK-013]: UI-026..UI-034, UI-048, UI-049).
+//! Center panel — the document tab strip and the viewer area
+//! (UI-026..UI-034, UI-048, UI-049).
 //!
-//! Replaces `src/app/ui/panels/center.rs`. Like [`top`](super::top) and
-//! [`left`](super::left), the panel is a **pure view**: it renders a
-//! [`CenterPanelViewModel`] snapshot into an [`iced::Element`] of [`Message`]
-//! and *emits* [`Message::Command`] for user intent. It never touches the
-//! `UserCommand` bus, never reads a file and never mutates `FastMdApp` — the
-//! [TASK-022] reducer does all of that ([FMD-068]).
+//! Like [`top`](super::top) and [`left`](super::left), the panel is a
+//! **pure view**: it renders a [`CenterPanelViewModel`] snapshot into an
+//! [`iced::Element`] of [`Message`] and *emits* [`Message::Command`] for
+//! user intent. It never touches the `UserCommand` bus, never reads a file
+//! and never mutates `FastMdApp` — the reducer does all of that, so every
+//! intent is self-contained and replayable.
 //!
 //! # Shape
 //!
 //! ```text
 //! [ ●note.md × ][ other.md × ][ notes.md × ]   <- tab strip (UI-049)
 //! ┌──────────────────────────────────────────┐
-//! │ document viewer area  (render: TASK-015) │
+//! │ document viewer area                     │
 //! └──────────────────────────────────────────┘
 //! ```
 //!
@@ -23,18 +23,18 @@
 //!
 //! # Tab interactions → messages
 //!
-//! | Interaction | Emitted | the legacy UI source |
-//! | --- | --- | --- |
-//! | left-click tab label | `Command(SelectFile { path, multi: false })` | `panels/center.rs:214-221` |
-//! | middle-click tab | `Command(CloseTab(index))` | `panels/center.rs:222-227` |
-//! | `×` button | `Command(CloseTab(index))` | `panels/center.rs:304-313` |
-//! | right-click tab | `Tab(ContextMenuOpened { index })` | `response.context_menu(..)` |
-//! | pointer motion over tab | `Layout(CursorMoved { point })` | DEC-005 anchor tracking |
+//! | Interaction | Emitted |
+//! | --- | --- |
+//! | left-click tab label | `Command(SelectFile { path, multi: false })` |
+//! | middle-click tab | `Command(CloseTab(index))` |
+//! | `×` button | `Command(CloseTab(index))` |
+//! | right-click tab | `Tab(ContextMenuOpened { index })` |
+//! | pointer motion over tab | `Layout(CursorMoved { point })` (the menu anchor) |
 //!
-//! **Tab selection is a command, not view state.** the legacy UI never kept an active
+//! **Tab selection is a command, not view state.** The panel keeps no active
 //! tab index of its own — the active tab *is* `selection().selected_file()`,
-//! so the iced port emits the same `SelectFile` intent and derives the
-//! active flag from the snapshot. There is deliberately no
+//! so a click emits the `SelectFile` intent and the active flag is derived
+//! from the snapshot. There is deliberately no
 //! `TabMessage::TabSelected` variant ([`message`](crate::ui_iced::message)
 //! routing rule 1).
 //!
@@ -43,25 +43,24 @@
 //! its own handlers when the child captured the event
 //! (`iced_widget-0.14.2/src/mouse_area.rs:230-245`), and `Button::update`
 //! calls `shell.capture_event()` on press (`button.rs:312`). So clicking
-//! `×` closes the tab without also selecting it, exactly as the legacy UI behaves.
+//! `×` closes the tab without also selecting it.
 //!
 //! # Tab context menu (UI-026..UI-034)
 //!
 //! [`tab_context_menu_items`] is the single definition of the tab menu, in
-//! the legacy UI order: Edit, Close Tab, Close Others, Close All Tabs, Copy Path,
+//! this order: Edit, Close Tab, Close Others, Close All Tabs, Copy Path,
 //! Show in File Explorer, Open in Editor, then the VFS-121 note skills.
 //!
-//! **UI-033 "Format Markdown" is not a `UserCommand`.** In the shipped the legacy UI
-//! build it is a seeded VFS-121 *note skill* (`Skills/Note/FormatMarkdown.md`)
-//! whose click reads the skill file and publishes
+//! **UI-033 "Format Markdown" is not a `UserCommand`.** It is a seeded
+//! VFS-121 *note skill* (`Skills/Note/FormatMarkdown.md`) whose click reads
+//! the skill file and publishes
 //! `UserCommand::RunSkillPrompt { content, target_dir: None, target_file }`.
 //! A pure view may not read files, so the row emits the **existing**
 //! [`TreeMessage::SkillRunRequested`] deferred-intent variant — the same one
 //! the file-tree's note-skill rows emit. Reusing it rather than adding a
-//! `TabMessage` twin is what UI-034's "consistent behaviour across both UI
-//! locations" asks for (GUD-001, GUD-002), and it keeps
-//! `TabMessage: Copy` intact. The [TASK-022] reducer can route both variants
-//! through one handler.
+//! `TabMessage` twin keeps UI-034's "consistent behaviour across both menu
+//! locations" and keeps `TabMessage: Copy` intact. The reducer routes both
+//! variants through one handler.
 //!
 //! Menu **separators** are not representable: the overlay card is a uniform
 //! column of buttons ([`overlay`](crate::ui_iced::overlay)) and its
@@ -70,45 +69,42 @@
 //!
 //! # UI-048 — the thinking delimiter
 //!
-//! The `🤔…🤔` extraction is NOT a center-panel concern: it already lives in
+//! The `🤔…🤔` extraction is NOT a center-panel concern: it lives in
 //! `AgentTranscript::apply_event` / `split_thinking_and_content`
 //! (`src/app/ui/agent/transcript.rs`) and in the agent's response formatter
-//! (AGENT-022). What the center panel owned is the *gate* — show the
-//! "Thinking Process" block only when the buffer is non-empty — which is
-//! ported here as the pure [`thinking_section_visible`]. The collapsible
-//! disclosure and the response markdown are the agent-session render path
-//! ([TASK-018]); this module renders the band's header, status and thinking
-//! text and stops there.
+//! (AGENT-022). What the center panel owns is the *gate* — show the
+//! "Thinking Process" block only when the buffer is non-empty — expressed
+//! here as the pure [`thinking_section_visible`]. The collapsible disclosure
+//! and the response markdown belong to the agent-session render path; this
+//! module renders the band's header, status and thinking text and stops
+//! there.
 //!
-//! # Deferred to other tasks
+//! # Deferred elsewhere
 //!
-//! * **Document rendering (TASK-015).** The viewer area renders the active
-//!   tab's title only. The YAML front-matter table, the search-aware markdown
-//!   renderer, the FTWA table strategy and the task-checkbox toggles all
-//!   belong to that render path.
-//! * **Agent session body (TASK-018).** Header, close intent and the UI-048
-//!   gate are here; the streaming response view is not.
-//! * **Unsaved-changes confirmation (UI-027/UI-029).** The shipped the legacy UI
-//!   build has **no** per-tab dirty tracking anywhere (`Tabs` has no dirty
-//!   flag and no editor-modified signal reaches the tab strip), so
-//!   [`TabEntry::unsaved`] is reported `false` by `from_app`. The field and
-//!   its marker exist so the view is ready for it; [TASK-022] populates it
-//!   when dirty tracking lands. Flagged as spec drift per [RUST-041].
+//! * **Document rendering.** The viewer area renders the active tab's title
+//!   only. The YAML front-matter table, the search-aware markdown renderer,
+//!   the FTWA table strategy and the task-checkbox toggles all belong to
+//!   that render path.
+//! * **Agent session body.** Header, close intent and the UI-048 gate are
+//!   here; the streaming response view is not.
+//! * **Unsaved-changes confirmation (UI-027/UI-029).** The app has **no**
+//!   per-tab dirty tracking anywhere (`Tabs` has no dirty flag and no
+//!   editor-modified signal reaches the tab strip), so [`TabEntry::unsaved`]
+//!   is reported `false` by `from_app`. The field and its marker exist so
+//!   the view is ready for it; the reducer populates it when dirty tracking
+//!   lands. Flagged as spec drift per [RUST-041].
 //!
-//! # Relocated helpers ([TASK-029])
+//! # Framework-free `UserCommand` constructors
 //!
-//! The band's four framework-free `UserCommand` constructors
+//! This module owns four framework-free `UserCommand` constructors
 //! ([`clear_agent_session_command`], [`apply_tab_close_click`],
-//! [`apply_tab_close_others_click`], [`apply_tab_close_all_click`]) used to
-//! be `pub use`d from `src/app/ui/panels/center.rs`, a file [TASK-029b]
-//! deletes. They are copied into this module verbatim; every one is a pure
-//! `usize`/`() → UserCommand` constructor with **no framework type** in its
-//! signature or body. The legacy UI panel keeps its own copy until Phase 5.
+//! [`apply_tab_close_others_click`], [`apply_tab_close_all_click`]). Every
+//! one is a pure `usize`/`() → UserCommand` constructor with **no framework
+//! type** in its signature or body, so the view and the reducer call exactly
+//! the same code.
 //!
-//! `apply_task_toggles_command` (the legacy UI panel's fifth pure constructor) is
-//! **not** copied: no `ui_iced` code reaches it — the iced render path does
-//! not yet emit task-checkbox intents (see the `message` module's UI-048
-//! note).
+//! There is no task-toggle constructor here: the render path does not yet
+//! emit task-checkbox intents (see the `message` module's UI-048 note).
 //!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
@@ -132,15 +128,10 @@ use crate::ui_iced::overlay::MenuItem;
 use super::left::note_skill_files;
 use super::top::phosphor_font;
 
-// The legacy UI center panel's framework-free `UserCommand` constructors,
-// **relocated into this module** for the framework-free migration ([TASK-029])
-// from `src/app/ui/panels/center.rs:14-64`.
-//
-// They were previously `pub use`d from a file [TASK-029b] deletes. Each is
-// copied verbatim and is framework-free — a pure `usize`/`()`→[`UserCommand`]
-// constructor with no framework type in its signature or body — so the iced
-// view and the [TASK-022] reducer call exactly the same code. The legacy UI
-// panel keeps its own copy until Phase 5.
+// Framework-free `UserCommand` constructors owned by this module. Each is a
+// pure `usize`/`()`→[`UserCommand`] constructor with no framework type in
+// its signature or body, so the view and the reducer call exactly the same
+// code.
 
 /// Purpose: Creates a `UserCommand` to clear all agent-related session state.
 /// Inputs: None
@@ -148,9 +139,6 @@ use super::top::phosphor_font;
 /// Purity: Pure (returns command, no state mutation).
 /// Preconditions: None.
 /// Postconditions: Returns command that, when executed, hides agent results, clears history and text buffers, and cancels any running agent.
-///
-/// Relocated from the legacy UI center panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn clear_agent_session_command() -> UserCommand {
     UserCommand::ClearAgentSession
@@ -167,27 +155,18 @@ pub fn clear_agent_session_command() -> UserCommand {
 /// Postconditions: Returns the command that, when executed, removes the tab
 /// at that index; if the closed tab was the selected file the selection
 /// falls back to the new last tab (or `None` if no tabs remain).
-///
-/// Relocated from the legacy UI center panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_click(i: usize) -> UserCommand {
     UserCommand::CloseTab(i)
 }
 
 /// The intent for "Close Other Tabs" on the tab at index `i`.
-///
-/// Relocated from the legacy UI center panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_others_click(i: usize) -> UserCommand {
     UserCommand::CloseOtherTabs(i)
 }
 
 /// The intent for "Close All Tabs".
-///
-/// Relocated from the legacy UI center panel for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn apply_tab_close_all_click() -> UserCommand {
     UserCommand::CloseAllTabs
@@ -195,10 +174,8 @@ pub fn apply_tab_close_all_click() -> UserCommand {
 
 /// Logical point size of a tab label.
 ///
-/// the legacy UI's `selectable_label` rendered at the default body size (12.5 px);
-/// the port pins 13.0 as the nearest whole-point value. This is a
-/// visual-pass constant, not a ported one — retune it in the visual review
-/// rather than hunting for an the legacy UI predecessor.
+/// Pinned at 13.0, the nearest whole point to the 12.5 px default body
+/// size. This is a visual-pass constant — retune it in the visual review.
 pub const TAB_TEXT_SIZE: f32 = 13.0;
 
 /// Horizontal padding inside one tab.
@@ -245,10 +222,9 @@ pub const VIEWER_SPACING: f32 = 6.0;
 /// The title a tab renders: the file name, or the empty string when the path
 /// has none (e.g. a bare root).
 ///
-/// Mirrors the inline mapping `Tabs::tab_strip` caches
-/// (`src/app/ui/tabs.rs:117-122`); the iced view cannot call `tab_strip()`
-/// because the cache needs `&mut Tabs` and a view model is built from
-/// `&FastMdApp`.
+/// This is the same mapping `Tabs::tab_strip` caches; the view cannot call
+/// `tab_strip()` because that cache needs `&mut Tabs` while a view model is
+/// built from `&FastMdApp`.
 ///
 /// Purity: pure function of `path`.
 #[must_use]
@@ -262,9 +238,8 @@ pub fn tab_title(path: &Path) -> String {
 /// Index of the tab holding `selected`, `None` when the selected file is not
 /// open (or nothing is selected).
 ///
-/// This is the iced re-typing of the legacy UI's per-tab
-/// `selected_file() == Some(tab_path)` test, expressed once so the strip and
-/// the view model cannot disagree.
+/// The `selected_file() == Some(tab_path)` test is stated once here so the
+/// strip and the view model cannot disagree.
 ///
 /// Purity: pure.
 #[must_use]
@@ -314,10 +289,8 @@ pub fn other_tab_indices(tabs: &[TabEntry], keep: usize) -> Vec<usize> {
 
 /// The intent a left-click on a tab produces.
 ///
-/// legacy parity: selecting a tab publishes
-/// `UserCommand::SelectFile { path, multi: false }`
-/// (`src/app/ui/panels/center.rs:214-221`) — never a multi-select, because
-/// the tab strip has no modifier semantics.
+/// Selecting a tab publishes `UserCommand::SelectFile { path, multi: false }`
+/// — never a multi-select, because the tab strip has no modifier semantics.
 ///
 /// Purity: pure.
 #[must_use]
@@ -353,9 +326,8 @@ pub fn tab_context_menu_close_message() -> Message {
     Message::Tab(TabMessage::ContextMenuClosed)
 }
 
-/// The message the agent-session band's Close button produces — the same
-/// `ClearAgentSession` intent the legacy UI header button publishes
-/// (`src/app/ui/panels/center.rs:112-119`).
+/// The message the agent-session band's Close button produces: the
+/// `ClearAgentSession` intent that hides the session and clears its state.
 ///
 /// Purity: pure.
 #[must_use]
@@ -369,7 +341,7 @@ pub fn agent_session_close_message() -> Message {
 /// `AgentTranscript::apply_event` / `split_thinking_and_content`
 /// (`src/app/ui/agent/transcript.rs`) and the agent's response formatter
 /// (AGENT-022); the panel only decides whether the extracted buffer is
-/// non-empty, exactly as the legacy UI's `if !thinking.is_empty()` did.
+/// non-empty.
 ///
 /// Purity: pure function of `thinking`.
 #[must_use]
@@ -393,7 +365,7 @@ pub fn unsaved_marker(unsaved: bool) -> &'static str {
 }
 
 /// Label colour for a tab: `text_strong` on the active tab, `text_muted` on
-/// the others. No numeric colour is introduced ([GUD-003]).
+/// the others. Only palette tokens are used; no numeric colour is added.
 ///
 /// Purity: pure function of `active` for a given palette.
 #[must_use]
@@ -405,13 +377,12 @@ pub fn tab_text_color(palette: &Palette, active: bool) -> iced::Color {
     }
 }
 
-/// Context-menu rows for the tab at `index`, in the legacy UI menu order
-/// (UI-026..UI-033; `src/app/ui/panels/center.rs:228-302`), followed by
-/// the VFS-121 note skills.
+/// Context-menu rows for the tab at `index`, in menu order (UI-026..UI-033),
+/// followed by the VFS-121 note skills.
 ///
 /// `note_skills` is passed in rather than looked up here so the builder stays
-/// pure — the legacy UI original called `config().list_note_skills()` inside the
-/// menu closure, which creates directories as a side effect.
+/// pure: `list_note_skills()` creates its directories as a side effect,
+/// which a per-frame view must not do.
 ///
 /// Purity: pure.
 #[must_use]
@@ -474,7 +445,7 @@ pub struct TabEntry {
     /// The rendered label (the file name).
     pub title: String,
     /// Whether the document has unsaved changes (UI-027). Reported `false`
-    /// until [TASK-022] lands dirty tracking — see the module header.
+    /// until dirty tracking lands — see the module header.
     pub unsaved: bool,
     /// Whether this is the active document.
     pub active: bool,
@@ -506,19 +477,20 @@ pub struct CenterPanelViewModel {
     /// Kept alongside the per-tab `active` flag because the reducer wants
     /// the index; both come from the same [`active_tab_index`] call.
     pub active_tab: Option<usize>,
-    /// Whether the agent session owns the center pane (the legacy UI
-    /// `agent_panel_state.show_results`).
+    /// Whether the agent session owns the center pane
+    /// (`agent_panel_state.show_results`).
     pub show_agent_session: bool,
-    /// The agent's status line text (the legacy UI `agent().state().status`).
+    /// The agent's status line text (`agent().state().status`).
     pub agent_status: String,
-    /// Whether the agent is currently running (the legacy UI renders a spinner —
-    /// iced 0.14 has none, see [`super::top`]).
+    /// Whether the agent is currently running. iced 0.14 has no spinner
+    /// widget, so the running state is carried through the status text
+    /// (see [`super::top`]).
     pub agent_running: bool,
     /// The extracted agent thinking buffer (UI-048), gated by
     /// [`thinking_section_visible`].
     pub thinking: String,
     /// Whether the active document is PDF-backed — the viewer paints the
-    /// `pdf_surface` token behind it (the legacy UI `panels/center.rs:320-321`).
+    /// `pdf_surface` token behind it.
     pub active_pdf_backed: bool,
     /// Note skills offered on the tab context menu (VFS-121), which is
     /// where "Format Markdown" (UI-033) comes from.
@@ -526,8 +498,7 @@ pub struct CenterPanelViewModel {
 }
 
 impl CenterPanelViewModel {
-    /// Snapshots the center panel's inputs off `app`, reading the same
-    /// accessors the legacy UI panel used.
+    /// Snapshots the center panel's inputs off `app`.
     ///
     /// Reads the note-skill folder itself; prefer
     /// [`Self::from_app_with_note_skills`] when the caller already has the
@@ -542,7 +513,7 @@ impl CenterPanelViewModel {
     /// The same folder backs the left panel's file menu and the tab strip's
     /// context menu, so [`ViewModels::from_app`](crate::ui_iced::app::ViewModels)
     /// reads it once per rebuild and hands the result to both instead of each
-    /// panel hitting the directory itself ([FMD-060]).
+    /// panel hitting the directory itself.
     pub fn from_app_with_note_skills(app: &FastMdApp, note_skills: Vec<SkillFile>) -> Self {
         let selected = app.selection().selected_file().cloned();
         let paths = &app.tabs().tabs;
@@ -592,7 +563,7 @@ impl CenterPanelViewModel {
     }
 }
 
-/// Renders the iced center panel from a view-model snapshot ([TASK-013]).
+/// Renders the center panel from a view-model snapshot.
 ///
 /// Emitted messages:
 /// * tab left-click → [`Message::Command`] `SelectFile { multi: false }`
@@ -607,8 +578,7 @@ pub fn center_panel(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
     center_panel_rendered(view_model, None)
 }
 
-/// The center panel with a pre-rendered document body in the viewer area
-/// ([TASK-023]).
+/// The center panel with a pre-rendered document body in the viewer area.
 ///
 /// Same chrome as [`center_panel`]; the rendered element replaces the
 /// placeholder title inside the always-allocated scrollable. The body is
@@ -617,8 +587,8 @@ pub fn center_panel(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 /// `Element<'static, Message>`, and `Element` is neither `Clone` nor
 /// `Debug` — a snapshot struct could not own one.
 ///
-/// `None` keeps the [TASK-013] placeholder behaviour, which is what the
-/// empty state (no open tab) renders.
+/// `None` keeps the placeholder behaviour, which is what the empty state
+/// (no open tab) renders.
 pub fn center_panel_rendered<'a>(
     view_model: &'a CenterPanelViewModel,
     document: Option<iced::Element<'static, Message>>,
@@ -712,9 +682,8 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
 
 /// The document-viewer area below the strip.
 ///
-/// The `pdf_surface` frame mirrors the legacy UI's sepia tint for PDF-backed files
-/// (`panels/center.rs:320-323`); the empty state is the same
-/// [`strings::NO_FILE_SELECTED_PROMPT`] the legacy UI panel used.
+/// The `pdf_surface` frame tints the area for PDF-backed documents; the
+/// empty state shows [`strings::NO_FILE_SELECTED_PROMPT`].
 fn viewer_area<'a>(
     view_model: &'a CenterPanelViewModel,
     document: Option<iced::Element<'static, Message>>,
@@ -744,10 +713,10 @@ fn viewer_area<'a>(
     .into()
 }
 
-/// The active document's render block — the [TASK-013] placeholder.
+/// The active document's render block — the placeholder.
 ///
-/// The real [TASK-015] render (YAML front-matter table, search-aware
-/// markdown, FTWA table strategy, task-checkbox toggles) is supplied to
+/// The real render (YAML front-matter table, search-aware markdown, FTWA
+/// table strategy, task-checkbox toggles) is supplied to
 /// [`center_panel_rendered`] by the root view; this is what shows when no
 /// rendered body was handed in, so the pane is never blank.
 fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
@@ -767,8 +736,8 @@ fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
 /// `show_results` is on.
 ///
 /// Carries the header, the close intent and the UI-048 thinking block. The
-/// streaming response markdown and the collapsible disclosure are
-/// [TASK-018]'s render path.
+/// streaming response markdown and the collapsible disclosure belong to the
+/// agent-session render path.
 fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 

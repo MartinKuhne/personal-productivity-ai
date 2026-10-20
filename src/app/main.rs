@@ -1,15 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! FastMd desktop application entry point — initialises tracing, panic hooks and
-//! the crypto provider, then launches the **iced** UI ([TASK-024], DEC-011).
+//! the crypto provider, then launches the **iced** UI.
 //!
-//! The legacy native-launch path is retired here: `cargo run` (the `fastmd` bin)
-//! now boots through [`fastmd::ui_iced::app::launch`] — the very same launch
-//! chain the iced pilot binary exercised before it was folded into this entry
-//! point ([TASK-022], [TASK-029b]). No feature flag gates the switch (DEC-011:
-//! iced is a regular dependency); the framework-free `ui/` tree remains as
-//! shared, renderer-agnostic state ([TASK-029b]).
+//! `cargo run` (the `fastmd` bin) boots through
+//! [`fastmd::ui_iced::app::launch`]. No feature flag gates the UI: iced is a
+//! regular dependency, and the framework-free `ui/` tree supplies shared,
+//! renderer-agnostic state.
 //!
-//! Startup ownership after the flip:
+//! Startup ownership:
 //!
 //! | Step | Lives in |
 //! | --- | --- |
@@ -18,14 +16,13 @@
 //! | `rustls` ring crypto-provider install | this file |
 //! | Optional Discord bot (`discord` feature) | this file |
 //! | Config load + storage-handler injection ([RUST-024]) | this file |
-//! | CLI workspace-argument injection | [`fastmd::ui_iced::app::boot`] ([TASK-022]) |
-//! | DEC-009 `ConfigArrived` publish | [`fastmd::ui_iced::app::build_state`] — synchronous ([TASK-022]) |
+//! | CLI workspace-argument injection | [`fastmd::ui_iced::app::boot`] |
+//! | `ConfigArrived` publish | [`fastmd::ui_iced::app::build_state`] — synchronous |
 //! | Title / icon / persisted geometry, theme, scale chain, bus bridge | [`fastmd::ui_iced::app::launch`] |
 //!
-//! The retired `main.rs:147-160` "build the app first, *then* publish"
-//! workaround is gone: `boot` constructs every subscriber before it returns the
-//! `Task::perform` that publishes `ConfigArrived`, so the same ordering
-//! guarantee holds without the legacy creation-callback trick.
+//! `boot` constructs every subscriber before it returns the `Task::perform`
+//! that publishes `ConfigArrived`, so every subscriber is in place before the
+//! first arrival is emitted.
 //!
 //! Unit tests live in the sibling `main_tests.rs` sidecar.
 
@@ -43,8 +40,7 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-/// Where the shipping binary keeps the persisted iced UI-state snapshot
-/// ([TASK-024], DEC-006).
+/// Where the shipping binary keeps the persisted iced UI-state snapshot.
 ///
 /// The *decision* is kept apart from the storage construction so the
 /// persistence-location policy is unit-testable without touching the
@@ -62,8 +58,7 @@ enum UiStateSource {
 /// Decide where the UI-state snapshot lives from the raw environment override.
 ///
 /// A missing or empty value means "no override", matching
-/// [`app::ui_state_storage_from_env`]'s rule so the pilot binary and the
-/// shipping binary agree on what counts as an override.
+/// [`app::ui_state_storage_from_env`]'s rule for what counts as an override.
 fn resolve_ui_state_source(env_override: Option<String>) -> UiStateSource {
     match env_override.filter(|path| !path.is_empty()) {
         Some(path) => UiStateSource::Override(PathBuf::from(path)),
@@ -119,8 +114,8 @@ fn main() -> iced::Result {
 
     // The configuration-arrival bus is the fan-out channel that
     // each subsystem (background workers, agent, UI) subscribes to.
-    // The UI no longer waits on it — it is direct-injected by `boot`
-    // (DEC-009) — but the background workers still need the handle so
+    // The UI does not wait on it — `boot` injects the config directly —
+    // but the background workers still need the handle so
     // `boot` can publish the first arrival after they are constructed.
     let config_bus = fastmd::bus::config::config_bus();
 
@@ -140,8 +135,8 @@ fn main() -> iced::Result {
         });
     }
 
-    // CLI workspace injection (`main.rs:59-115`) is applied inside `boot`;
-    // the DEC-009 `ConfigArrived` publish happens synchronously inside
+    // CLI workspace injection is applied inside `boot`; the
+    // `ConfigArrived` publish happens synchronously inside
     // `build_state`. This entry only hands over the loaded config plus the
     // injected storage handlers ([RUST-024]) and the raw process arguments.
     let inputs = LaunchInputs {

@@ -1,9 +1,8 @@
-//! Tests for `ui_iced/editor.rs` ([TASK-014]: UI-037..UI-045, DEC-007).
+//! Tests for `ui_iced/editor.rs` (UI-037..UI-045).
 //!
 //! The history stack and the action-classification rule are the test-critical
 //! parts; the view functions are asserted to build for every state they can
-//! be handed. Mirrors the legacy UI `text_buffer_tests.rs` cases whose logic now
-//! lives in this layer (front-matter round-trip, cancel discards, multibyte).
+//! be handed (front-matter round-trip, cancel discards, multibyte).
 
 use super::*;
 use crate::markdown::DocumentContent;
@@ -314,7 +313,7 @@ fn cap_holds_after_a_full_undo_then_new_edits() {
 }
 
 // =========================================================================
-// Action classification (DEC-007)
+// Action classification
 // =========================================================================
 
 #[test]
@@ -649,7 +648,7 @@ fn status_text_reports_the_current_line_and_column() {
 #[test]
 fn undo_resets_the_caret_to_the_document_start() {
     // Pins the documented limitation: snapshots carry text only, so the
-    // caret cannot be restored the way the legacy UI UndoStack did.
+    // caret cannot be restored — it lands back at the document start.
     let mut vm = open_vm("one\ntwo\nthree");
     let _ = vm.apply_action(Action::Move(Motion::Down));
     assert_eq!(vm.line(), 2);
@@ -672,7 +671,7 @@ fn multibyte_body_survives_open_and_edit() {
 }
 
 // =========================================================================
-// apply_editor_message — the pure reducer entry point (TASK-022/023)
+// apply_editor_message — the pure reducer entry point
 // =========================================================================
 
 #[test]

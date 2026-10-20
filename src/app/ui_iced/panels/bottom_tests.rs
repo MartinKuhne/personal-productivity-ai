@@ -1,7 +1,7 @@
-//! Sidecar tests for [`crate::ui_iced::panels::bottom`] ([TASK-016],
-//! UI-001's bottom command band).
+//! Sidecar tests for [`crate::ui_iced::panels::bottom`] —
+//! UI-001's bottom command band.
 //!
-//! Covers the reused the legacy UI helpers reached through this layer, the extracted
+//! Covers the reused domain helpers reached through this layer, the extracted
 //! submit-intent solver (idle vs running, blank input, whitespace trimming),
 //! the Stop-button gate, the `FastMdApp` snapshot and the view builder.
 //!
@@ -29,14 +29,14 @@ fn note_path() -> PathBuf {
     PathBuf::from("workspace/notes/note.md")
 }
 
-/// Open `path` as a tab and select it, the state the legacy UI band read.
+/// Open `path` as a tab and select it — the state the band reads.
 fn open_and_select(app: &mut crate::ui::app::FastMdApp, path: &Path) {
     app.orchestrator.tabs.tabs.push(path.to_path_buf());
     app.selection_mut().selected_file = Some(path.to_path_buf());
 }
 
 // ---------------------------------------------------------------------------
-// Reused legacy-side helpers ([RUST-051]) — reachable and unchanged
+// Reused domain-side helpers ([RUST-051]) — reachable and unchanged
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -139,7 +139,7 @@ fn format_models_list_lists_name_cost_and_use_case() {
 }
 
 // ---------------------------------------------------------------------------
-// Submit intent (extracted from the legacy UI band's inline branch)
+// Submit intent (idle vs running branch resolution)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -187,14 +187,14 @@ fn running_submit_queues_the_prompt_then_clears() {
 
 #[test]
 fn running_submit_of_a_blank_prompt_publishes_nothing_at_all() {
-    // the legacy UI's `if !prompt.is_empty()` guard: no queue message *and* no clear.
+    // The `!prompt.is_empty()` guard: no queue message *and* no clear.
     assert!(submit_commands(true, "").is_empty());
     assert!(submit_commands(true, "   ").is_empty());
 }
 
 #[test]
 fn submit_trims_only_trailing_whitespace_like_the_legacy_band() {
-    // the legacy UI called `command_input.trim_end()` — leading indentation the user
+    // `command_input.trim_end()` — leading indentation the user
     // typed is preserved verbatim, only the trailing newline/spaces go.
     assert_eq!(
         submit_commands(true, "  keep me\n"),
@@ -216,8 +216,8 @@ fn submit_trims_only_trailing_whitespace_like_the_legacy_band() {
 
 #[test]
 fn running_submit_does_not_parse_slash_commands() {
-    // While the agent runs, everything is queued verbatim — the legacy UI band
-    // never routed `/models` through the parser in that branch.
+    // While the agent runs, everything is queued verbatim — `/models` is not
+    // routed through the parser in that branch.
     assert_eq!(
         submit_commands(true, "/models"),
         vec![

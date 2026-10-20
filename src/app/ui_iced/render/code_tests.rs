@@ -1,4 +1,4 @@
-//! Unit tests for the fenced code-block mapping ([TASK-015]).
+//! Unit tests for the fenced code-block mapping.
 
 use super::*;
 use crate::ui::theme::Palette;
@@ -91,7 +91,7 @@ fn test_code_block_builds_for_multiline_content() {
 
 #[test]
 fn test_code_surface_and_border_are_palette_tokens() {
-    // No numeric colour literal may appear in the render layer ([GUD-003]):
+    // No numeric colour literal may appear in the render layer:
     // the panel's colours must be exactly the palette's tokens.
     let palette = Palette::fastmd_dark();
     let _surface = palette.code_surface;

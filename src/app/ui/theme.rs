@@ -7,9 +7,8 @@
 //! literals here means a brand change touches one file rather than a dozen
 //! panel and renderer modules.
 //!
-//! The token type is `iced::Color` ([GUD-003]: the numeric VALUES are
-//! identical to the legacy scheme they replace — only the type changed with
-//! the framework swap, [TASK-029b]).
+//! The token type is `iced::Color`; the numeric values are the hand-tuned
+//! FastMD brand scheme.
 //!
 //! The UI is dark-only (UI-002); the inverted inline-editor palette required by
 //! UI-046 is modelled as [`EditorColors`] and stays a deliberately separate,
@@ -22,9 +21,8 @@ use iced::Color;
 /// The FastMD dark colour palette (UI-002).
 ///
 /// Every field is a semantic token; call sites should read tokens by role
-/// rather than embedding raw colour literals. The values reproduce the
-/// hand-tuned scheme that previously lived inline in
-/// `FastMdApp::configure_dark_theme`.
+/// rather than embedding raw colour literals. The values are the app's
+/// hand-tuned dark scheme.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     /// Base surface fill for panels and windows (RGB(9, 9, 11)).

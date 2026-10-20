@@ -1,4 +1,4 @@
-//! Unit tests for the heading mapping ([TASK-015]).
+//! Unit tests for the heading mapping.
 
 use super::*;
 use crate::markdown::{InlineElem, TextStyle};
@@ -43,7 +43,7 @@ fn test_heading_size_numeric_order_is_monotonic_down() {
 
 #[test]
 fn test_out_of_range_levels_collapse_to_the_floor() {
-    // The legacy UI ladder's `_ => 12.0` arm.
+    // The `_ => 12.0` fallback arm.
     assert_eq!(heading_size(0), H5_SIZE);
     assert_eq!(heading_size(7), H5_SIZE);
     assert_eq!(heading_size(u32::MAX), H5_SIZE);

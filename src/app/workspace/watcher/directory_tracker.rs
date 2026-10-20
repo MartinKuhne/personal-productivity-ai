@@ -15,9 +15,7 @@ use std::path::{Path, PathBuf};
 ///   preceding `DirDiscovered`.
 ///
 /// The tracker is the single source of truth for "all directories that
-/// exist in the content libraries". It replaces the scattered `all_dirs`
-/// management that previously lived in `FileEventProcessor`, `app.rs`,
-/// and `modals.rs`.
+/// exist in the content libraries".
 pub struct DirectoryTracker {
     reader: BusReader<FileEvent>,
     dirs: HashSet<PathBuf>,

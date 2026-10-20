@@ -1,5 +1,4 @@
-//! Unit tests for `utils/path.rs` (extracted to a sidecar per [RUST-056],
-//! [TASK-029b]).
+//! Unit tests for `utils/path.rs` (extracted to a sidecar per [RUST-056]).
 
 use super::*;
 use std::fs;
@@ -161,7 +160,7 @@ fn test_resolve_windows_cmd_resolves_to_absolute_exe() {
     }
 }
 
-// ---- document naming helpers (ported from the deleted `modals_tests.rs`) ----
+// ---- document naming helpers ----
 
 #[test]
 fn unique_document_name_appends_md_only_when_no_extension() {

@@ -1,4 +1,4 @@
-//! Unit tests for the bus → iced subscription bridge ([TASK-019]).
+//! Unit tests for the bus → iced subscription bridge.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -506,7 +506,7 @@ async fn test_stream_delivers_events_in_publish_order() {
     }
 
     // Everything queued before the stream wakes is coalesced into **one**
-    // batch ([FMD-060]) that preserves publication order ([FMD-066]).
+    // batch that preserves publication order per publisher.
     let mut stream = file_stream(&handle);
     assert_eq!(
         stream.next().await.expect("a coalesced batch"),
@@ -634,15 +634,14 @@ fn test_bus_receivers_clone_keeps_every_identity_stable() {
     assert_eq!(hash_of(&receivers.background), hash_of(&clone.background));
 }
 
-// --- winit window lane ([TASK-021], DEC-006) --------------------------------
+// --- winit window lane ---------------------------------------------------
 
 /// Regression: the launch chain sets `exit_on_close_request: false`,
 /// so nothing else in the runtime handles the title-bar close button.
 /// The `window::close_requests` lane must map onto exactly the
 /// `Message::Window(WindowMessage::CloseRequested(id))` report the
-/// DEC-006 `reduce_window` save-and-close arm matches on — the former
-/// build had the reducer but no subscription feeding it, so clicking
-/// the close button did nothing.
+/// `reduce_window` save-and-close arm matches on; with no subscription
+/// feeding that arm, clicking the close button does nothing.
 #[test]
 fn test_close_request_maps_to_the_window_message() {
     let id = iced::window::Id::unique();
@@ -654,8 +653,8 @@ fn test_close_request_maps_to_the_window_message() {
 }
 
 /// Regression: `AppState::viewport` only follows real window resizes
-/// through the `window::resize_events` lane, which the reducer arm was
-/// written against but nothing delivered before.
+/// through the `window::resize_events` lane, which the reducer arm is
+/// written against.
 #[test]
 fn test_resize_event_maps_to_the_window_message() {
     let id = iced::window::Id::unique();

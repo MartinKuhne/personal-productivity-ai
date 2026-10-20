@@ -1,12 +1,10 @@
-//! Iced port of the bottom command band ([TASK-016]; UI-001's "Bottom Pane
-//! (command prompt)").
+//! Bottom command band — UI-001's "Bottom Pane (command prompt)".
 //!
-//! Replaces `src/app/ui/panels/bottom.rs`. Like [`top`](super::top) and
-//! [`left`](super::left), the band is a **pure view**: it renders a
-//! [`BottomPanelViewModel`] snapshot into an [`iced::Element`] of
-//! [`Message`] and never touches the `UserCommand` bus, the agent session or
-//! `FastMdApp` itself — the [TASK-022]/[TASK-023] reducer publishes what the
-//! band emits ([FMD-068]).
+//! Like [`top`](super::top) and [`left`](super::left), the band is a **pure
+//! view**: it renders a [`BottomPanelViewModel`] snapshot into an
+//! [`iced::Element`] of [`Message`] and never touches the `UserCommand` bus,
+//! the agent session or `FastMdApp` itself — the reducer publishes what the
+//! band emits, so every intent is self-contained and replayable.
 //!
 //! # Shape
 //!
@@ -26,50 +24,39 @@
 //!
 //! # Reused, not reimplemented ([RUST-051])
 //!
-//! The band's framework-free helpers were **relocated into this module** for
-//! the framework-free migration ([TASK-029]): [`compute_prompt_prefix`],
+//! The band's framework-free helpers — [`compute_prompt_prefix`],
 //! [`compute_file_context`], [`format_models_list`],
-//! [`parse_command_intent`] and [`clear_command_input_command`] used to be
-//! `pub use`d from `src/app/ui/panels/bottom.rs`, a file [TASK-029b]
-//! deletes. They are copied here verbatim — every one is framework-free (pure
-//! `Path`/`String`/`UserCommand` signatures, no framework type anywhere in the
-//! body), so the iced view, the [TASK-022] reducer and the iced sidecar
-//! tests all run the same rules the legacy UI band ran. The legacy UI panel keeps its
-//! own copy until Phase 5; the transient duplication dies with it.
+//! [`parse_command_intent`] and [`clear_command_input_command`] — live in
+//! this module. Every one is framework-free (pure `Path`/`String`/
+//! `UserCommand` signatures, no framework type anywhere in the body), so
+//! the view, the reducer and the sidecar tests all run the same rules.
 //!
-//! The one piece of *behaviour* that the legacy UI kept inline inside the widget
-//! closure — "running → queue the prompt, idle → parse the intent, then clear
-//! the input" — is extracted into [`submit_commands`] so it is testable
-//! without a runtime. The reducer calls it and publishes the returned
-//! commands in order.
+//! The submit behaviour — "running → queue the prompt, idle → parse the
+//! intent, then clear the input" — is extracted into [`submit_commands`] so
+//! it is testable without a runtime. The reducer calls it and publishes the
+//! returned commands in order.
 //!
-//! # Not ported, with reasons
+//! # Not implemented, with reasons
 //!
-//! * **The IME Enter workaround** (`ui/panels/bottom.rs:13-40`). the legacy UI needed
-//!   `is_enter_pressed` because `the legacy winit backend` swallows the raw `Key::Enter`
-//!   when an IME claims it (`VK_PROCESSKEY`) and only an
-//!   `Event::Ime(Commit("\n"))` arrives. iced 0.14 does not surface IME
-//!   commits to the application at all — `text_input` publishes its
-//!   `on_submit` message from its own key handling
-//!   (`iced_widget-0.14.2/src/text_input.rs:1050-1056`), so there is no
+//! * **IME Enter workaround.** iced 0.14 does not surface IME commits to
+//!   the application at all — `text_input` publishes its `on_submit`
+//!   message from its own key handling
+//!   (`iced_widget-0.14.2/src/text_input.rs:1050-1056`) — so there is no
 //!   second delivery path to reconcile and no equivalent helper to write.
-//! * **Shift+Enter = newline.** The legacy UI band submitted on Enter *unless*
-//!   Shift was held (`ui/panels/bottom.rs:238-243`). iced's `text_input`
-//!   publishes `on_submit` on Enter with **no modifier check**
-//!   (`text_input.rs:1050-1056`), and the message is a fixed `Message`, so
-//!   the view cannot branch on Shift. A faithful multi-line field would need
-//!   `text_editor` (DEC-007, [TASK-014]) whose `Action::Edit(Edit::Enter)`
-//!   likewise carries no modifiers — the gap is framework-wide, not a shortcut
-//!   taken here. Flagged for [TASK-018]/[TASK-022]: if multi-line prompts
-//!   matter, the reducer must own a `text_editor` buffer and treat Enter as
-//!   submit unconditionally, or the hint text must change.
-//! * **The Tier-4 `on_click("send")` sink** (`ui/panels/bottom.rs:148-159`)
-//!   is `legacy-snapshot-harness` plumbing. CON-003 rules it out; the iced equivalent is
-//!   the `iced_test::simulator` tier of [TASK-025]/[TASK-026].
-//! * **Hand-rolled right-alignment.** the legacy UI computed a 100 pt rect by hand to
-//!   park the Stop button at the far right (`ui/panels/bottom.rs:194-209`).
-//!   iced's `Row` lays it out, so neither the magic number nor the
-//!   `available_rect_before_wrap` bookkeeping is needed.
+//! * **Shift+Enter = newline.** iced's `text_input` publishes `on_submit`
+//!   on Enter with **no modifier check** (`text_input.rs:1050-1056`), and
+//!   the message is a fixed `Message`, so the view cannot branch on Shift.
+//!   A faithful multi-line field would need `text_editor`, whose
+//!   `Action::Edit(Edit::Enter)` likewise carries no modifiers — the gap is
+//!   framework-wide. If multi-line prompts matter, the reducer must own a
+//!   `text_editor` buffer and treat Enter as submit unconditionally, or the
+//!   hint text must change.
+//! * **No test-only "send" click sink.** The band exposes no synthetic click
+//!   target for harnesses; interaction tests drive the real `on_submit`
+//!   message through the `iced_test::simulator` tier.
+//! * **Hand-rolled right-alignment.** iced's `Row` lays the Stop button
+//!   out, so neither a magic number nor `available_rect_before_wrap`
+//!   bookkeeping is needed.
 //!
 //! Unit tests live in the sibling `bottom_tests.rs` sidecar.
 
@@ -86,21 +73,12 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{AgentMessage, Message};
 
-// The legacy UI band's framework-free helpers, **relocated into this module**
-// for the framework-free migration ([TASK-029]) from
-// `src/app/ui/panels/bottom.rs:44-142`.
-//
-// Each is copied verbatim and is framework-free: no framework type appears
-// in any signature or body. See the individual items below.
-//
-// The legacy UI panel keeps its own copy until [TASK-029b] removes it; the
-// transient duplication is intentional.
+// Framework-free helpers owned by this module. Each is framework-free: no
+// framework type appears in any signature or body. See the individual items
+// below.
 
 /// Parses the user prompt to determine the intended command.
 /// Computes the prompt prefix based on the selected directory and available content libraries.
-///
-/// Relocated from the legacy UI bottom band for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn compute_prompt_prefix(
     selected_dir: Option<&std::path::Path>,
@@ -121,9 +99,6 @@ pub fn compute_prompt_prefix(
 
 /// Computes the file name context display from the active file.
 /// Returns `None` when there is no active file context.
-///
-/// Relocated from the legacy UI bottom band for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn compute_file_context(
     active_file: Option<&std::path::Path>,
@@ -152,9 +127,6 @@ pub fn compute_file_context(
 }
 
 /// Renders the chat-model catalogue the `/models` command reports.
-///
-/// Relocated from the legacy UI bottom band for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn format_models_list(
     models: &std::collections::HashMap<String, crate::config::LlmConfig>,
@@ -186,9 +158,6 @@ pub fn format_models_list(
 /// Purity: Pure (no state mutation).
 /// Preconditions: None.
 /// Postconditions: Returns the command corresponding to the parsed intent.
-///
-/// Relocated from the legacy UI bottom band for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn parse_command_intent(prompt: &str) -> Option<UserCommand> {
     let trimmed = prompt.trim();
@@ -209,9 +178,6 @@ pub fn parse_command_intent(prompt: &str) -> Option<UserCommand> {
 /// Inputs: None
 /// Outputs: `UserCommand::ClearCommandInput`
 /// Purity: Pure (returns command, no state mutation).
-///
-/// Relocated from the legacy UI bottom band for the framework-free migration
-/// ([TASK-029]).
 #[must_use]
 pub fn clear_command_input_command() -> UserCommand {
     UserCommand::ClearCommandInput
@@ -257,10 +223,9 @@ pub struct BottomPanelViewModel {
 }
 
 impl BottomPanelViewModel {
-    /// Snapshots the band's inputs off `app`, reading exactly the accessors
-    /// the legacy UI band used: `selection().agent_context(..)`,
-    /// `selection().prompt_dir(..)`, `content_libraries()`,
-    /// `agent().state().running` and
+    /// Snapshots the band's inputs off `app`:
+    /// `selection().agent_context(..)`, `selection().prompt_dir(..)`,
+    /// `content_libraries()`, `agent().state().running` and
     /// `orchestrator.agent_panel_state.command_input`.
     pub fn from_app(app: &FastMdApp) -> Self {
         let tabs = &app.orchestrator.tabs.tabs;
@@ -290,14 +255,10 @@ impl BottomPanelViewModel {
 
 /// The commands a submit produces, in publish order.
 ///
-/// Extracted from the legacy UI band's inline submit branch
-/// (`src/app/ui/panels/bottom.rs:259-294`), which ran the same two paths
-/// inside the widget closure:
-///
 /// * **Agent running** — the prompt is queued behind the current turn
 ///   ([`UserCommand::QueueAgentPrompt`]) and the input is cleared. A
 ///   blank/whitespace prompt queues nothing, so no stray clear is published
-///   either (the legacy UI's `if !prompt.is_empty()` guard).
+///   either.
 /// * **Agent idle** — [`parse_command_intent`] decides the command
 ///   (`/models` → `ShowModels`, `/model …` → the deprecation notice,
 ///   anything else → `RunAgent`), followed by
@@ -305,7 +266,7 @@ impl BottomPanelViewModel {
 ///   nothing is published at all.
 ///
 /// The clear command travels with the intent so the reducer's result is
-/// replayable from the returned vector alone ([FMD-068]).
+/// replayable from the returned vector alone.
 ///
 /// Purity: pure function of `(agent_running, raw)`.
 #[must_use]
@@ -339,11 +300,11 @@ pub fn stop_enabled(agent_running: bool) -> bool {
 /// Colour of the always-allocated Stop button's label.
 ///
 /// A disabled `Button::on_press_maybe(None)` still renders in its enabled
-/// look, which made the idle band present a red "Stop" over nothing running
-/// (the button-visibility defect UI-001 reports). The label therefore
-/// drops to the `text_muted` token while idle and returns to `error` the
-/// moment a turn is cancellable — same palette rule as
-/// [`crate::ui_iced::panels::top::indexing_status_color`] ([GUD-003]).
+/// look, which would present a red "Stop" over nothing running (the
+/// button-visibility defect UI-001 reports). The label therefore drops to
+/// the `text_muted` token while idle and returns to `error` the moment a
+/// turn is cancellable — same palette rule as
+/// [`crate::ui_iced::panels::top::indexing_status_color`].
 ///
 /// Purity: pure function of `running`.
 #[must_use]
@@ -356,8 +317,7 @@ pub fn stop_button_color(running: bool) -> Color {
     }
 }
 
-/// Renders the iced bottom command band from a view-model snapshot
-/// ([TASK-016]).
+/// Renders the bottom command band from a view-model snapshot.
 ///
 /// Emitted messages:
 /// * typing → [`Message::Agent`] [`AgentMessage::InputChanged`]
@@ -390,8 +350,7 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
         .size(file_size)
         .color(palette.text_muted);
 
-    // the legacy UI stacked the prefix above the file name
-    // (`ui/panels/bottom.rs:214-224`); the Column keeps that shape.
+    // The prompt prefix sits above the file name; the Column keeps that shape.
     let context_group = Column::with_children(vec![prompt_prefix.into(), file_label.into()])
         .spacing(CONTEXT_SPACING);
 

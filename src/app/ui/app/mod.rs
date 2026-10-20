@@ -7,9 +7,7 @@
 //! and modal reads. Construction lives in the sibling `init` module
 //! (`FastMdApp::from_parts`, [`FastMdApp::empty_state`]).
 //!
-//! The legacy immediate-mode frame loop (`update` / `render` siblings and
-//! the legacy `App` trait impl) was removed by [TASK-029b]; the iced
-//! reducer in [`crate::ui_iced::update`] drives this state instead.
+//! The iced reducer in [`crate::ui_iced::update`] drives this state.
 //!
 //! Unit tests live in the sibling `tests.rs` sidecar.
 

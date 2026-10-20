@@ -4,9 +4,7 @@
 //! persisted-UI state) lives here so consumers read from an
 //! already-initialised `FastMdApp`.
 //!
-//! The legacy `new(cc: &CreationContext)` constructor and the theme/font
-//! pinning it performed were removed by [TASK-029b]; the
-//! iced boot path ([`crate::ui_iced::app::build_state`]) assembles the
+//! The boot path ([`crate::ui_iced::app::build_state`]) assembles the
 //! orchestrator, layout and persisted snapshot itself and hands them to
 //! [`FastMdApp::from_parts`].
 
@@ -29,12 +27,12 @@ use super::FastMdApp;
 impl FastMdApp {
     /// Build a `FastMdApp` from already-constructed parts.
     ///
-    /// This is the framework-free construction entry point used by the iced boot
-    /// path ([`crate::ui_iced::app::build_state`], [TASK-022]): the iced
-    /// side assembles the [`crate::orchestrator::AppOrchestrator`], the
+    /// This is the framework-free construction entry point used by the boot
+    /// path ([`crate::ui_iced::app::build_state`]): the iced side
+    /// assembles the [`crate::orchestrator::AppOrchestrator`], the
     /// [`PanelLayout`] and the persisted snapshot itself. Keeping this
     /// here — beside the other constructors — lets the private fields stay
-    /// private while giving the iced tree a framework-free way to build
+    /// private while giving the boot path a framework-free way to build
     /// the struct.
     ///
     /// [RUST-020]: pure construction; no side effects.
@@ -61,8 +59,7 @@ impl FastMdApp {
     pub fn empty_state(config: crate::config::AppConfig) -> Self {
         // Publish the supplied config into a private bus and let
         // `empty_state_via_bus` build the struct through the same
-        // bus-driven init path. This keeps a single code path for
-        // tests that don't need a real creation context.
+        // bus-driven init path. This keeps a single code path for tests.
         let bus = crate::bus::config::config_bus();
         bus.publish(ConfigArrived::new(config.clone()));
         Self::empty_state_via_bus(bus, config)

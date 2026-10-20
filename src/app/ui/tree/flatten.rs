@@ -26,10 +26,9 @@ pub const MAX_TREE_DEPTH: usize = 1000;
 
 /// A single visible row in the flattened virtual tree list.
 ///
-/// `Debug` and `PartialEq` are additive derives added for the [TASK-012]
-/// iced port: the iced view model holds `FlatRow`s and its tests compare
-/// flattened row lists against expected ones, which the legacy UI build never
-/// needed because it rendered rows straight into framework widgets.
+/// `Debug` and `PartialEq` are required because the view model holds
+/// `FlatRow`s directly and tests compare flattened row lists against
+/// expected ones.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlatRow {
     /// Indentation depth (0 = top-level child of root).
@@ -44,21 +43,16 @@ pub struct FlatRow {
     pub is_expanded: bool,
 }
 
-/// Sans-spacing slot height passed to a virtualised tree list. The legacy UI
-/// added `item_spacing.y` (default 3.0) on top of this
-/// to compute the actual per-row slot height. The row content
-/// rendered for each flattened entry was a horizontal block whose
-/// height is the max of its children: a selectable label, which
-/// in the legacy renderer is `interact_size.y` (18) — `button_padding.y`
-/// (1 top + 1 bottom) is added inside the frame, but the text is
-/// short enough that the interact_size dominates and the rendered
-/// height reconciles to 18px. To keep the slot exactly matched to
-/// the rendered content (and avoid empty space accumulating at the
-/// bottom of every row), this constant is set so that
-/// `TREE_ROW_HEIGHT + item_spacing.y` == actual `selectable_label`
-/// height. The companion regression test
-/// `test_tree_row_height_matches_selectable_label_height` pins
-/// this invariant.
+/// Slot height, in logical pixels, passed to a virtualised tree list.
+///
+/// The value is the rendered row height (18px) minus the 3px of
+/// between-row spacing a virtualised list adds on top of the slot, so
+/// the slot matches the rendered content exactly and empty space does
+/// not accumulate at the bottom of each row. The row content is a
+/// horizontal block whose height is the maximum of its children: a
+/// selectable label whose interactive height is 18px — the 1px top and
+/// 1px bottom button padding sits inside the frame, and the text is
+/// short enough that the interactive height dominates.
 pub const TREE_ROW_HEIGHT: f32 = 15.0;
 
 /// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
@@ -99,9 +93,8 @@ mod tests {
     /// Regression: the rename dialog must pre-fill with just the file stem
     /// (no extension). The modal reattaches the original extension on
     /// submit, so the user should only ever type the base name. Both
-    /// context-menu entry points in `draw_tree_node` go through
-    /// `initial_rename_value`, so testing the helper covers both call
-    /// sites.
+    /// rename call sites go through `initial_rename_value`, so testing
+    /// the helper covers them together.
     #[test]
     fn test_initial_rename_value_strips_extension() {
         assert_eq!(

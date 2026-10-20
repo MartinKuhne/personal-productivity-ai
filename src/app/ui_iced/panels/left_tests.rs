@@ -1,4 +1,4 @@
-//! Tests for `ui_iced/panels/left.rs` ([TASK-012]).
+//! Tests for `ui_iced/panels/left.rs`.
 //!
 //! Widget construction cannot be driven headlessly without the iced
 //! simulator, so these tests cover the state/mapping layer the widget is
@@ -801,9 +801,8 @@ fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
 
 // --- flatten depth guard (UI-017 robustness) --------------------------
 //
-// Gap fill ([TASK-027]): `flatten_tree`'s `MAX_TREE_DEPTH` stack guard had
-// no test anywhere once the legacy UI tree sidecars were deleted. The iced
-// left panel calls that same function, so the guard is asserted through it.
+// `flatten_tree`'s `MAX_TREE_DEPTH` stack guard is asserted through the
+// iced left panel, which calls that same function.
 
 /// A synthetic `root/l0/l1/…` directory chain of `depth` levels, plus the
 /// expanded-dir set that opens every one of them ([RUST-006]: nothing here
@@ -864,10 +863,9 @@ fn tree_flatten_is_unaffected_below_the_depth_guard() {
 
 // --- UI-050 search-result branch -------------------------------------
 //
-// Gap fill ([TASK-027]): the deleted legacy UI sidecar asserted the
-// "no results" state of the search view. The state gate itself is covered
-// by `from_app_carries_query_search_state_and_selection`; what was missing
-// was that both branches of the panel body actually build.
+// The state gate is covered by
+// `from_app_carries_query_search_state_and_selection`; the tests below
+// assert that both branches of the panel body actually build.
 
 #[test]
 fn search_result_branch_builds_the_empty_state() {

@@ -1,4 +1,4 @@
-//! Tests for `markdown/validation.rs` ([TASK-014], UI-043).
+//! Tests for `markdown/validation.rs` (UI-043).
 //!
 //! Covers the happy path (valid GFM bodies of every flavour UI-043 names),
 //! every fence-detection branch, and the failure path's location data.

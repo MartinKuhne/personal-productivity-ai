@@ -1,10 +1,9 @@
-//! Sidecar unit tests for `ui/app/mod.rs` ([TASK-029b]).
+//! Sidecar unit tests for `ui/app/mod.rs`.
 //!
-//! The legacy immediate-mode frame-loop tests (update/render passes,
-//! legacy-context theme pinning, font-scale compounding) retired with the
-//! the legacy `App` impl; the iced reducer carries that coverage in
+//! Frame-loop coverage (update/render passes, theme pinning, font-scale
+//! compounding) lives with the iced reducer in
 //! `src/app/ui_iced/update_tests.rs`. What remains here exercises the
-//! framework-free data definitions that survived the swap.
+//! framework-free data definitions the iced UI builds on.
 
 use super::*;
 use crate::config::AppConfig;

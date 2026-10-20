@@ -1,8 +1,8 @@
 //! UI agent view models — transcript accumulator, display formatting and
 //! panel state.
 //!
-//! `agent_render` was relocated here from `ui/render/` by [TASK-029b]: it
-//! is framework-free display formatting consumed by [`transcript`].
+//! `agent_render` is framework-free display formatting consumed by
+//! [`transcript`].
 //!
 //! Unit tests live in the sibling `mod_tests.rs` sidecar (per submodule).
 

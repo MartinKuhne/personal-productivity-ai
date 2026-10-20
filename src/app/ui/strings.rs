@@ -2,24 +2,23 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-/// The Document + Bolt logo is rendered separately via [`crate::ui_iced::logo::logo_mark`] —
-///
-/// the title itself is plain text so it remains searchable and accessible.
+/// The Document + Bolt logo is rendered separately via
+/// [`crate::ui_iced::logo::logo_mark`]; the title itself is plain text so it
+/// remains searchable and accessible.
 pub const APP_TITLE: &str = "FastMD Viewer";
 
-/// Title of the OS window title bar ("FastMD AI"), per DEC-010
-/// (`doc/planning/iced.md`, TASK-006). Distinct from [`APP_TITLE`]: the top
-/// toolbar keeps showing [`APP_TITLE`] and the About dialog keeps
-/// [`ABOUT_APP_NAME`], which this decision leaves untouched.
+/// Title of the OS window title bar ("FastMD AI").
+/// Distinct from [`APP_TITLE`]: the top toolbar keeps showing [`APP_TITLE`]
+/// and the About dialog keeps [`ABOUT_APP_NAME`].
 pub const WINDOW_TITLE: &str = "FastMD AI";
 
-/// Label for the batch prompt processing button (now in the hamburger menu).
+/// Label for the batch prompt processing button.
 pub const BATCH_BUTTON: &str = "Batch...";
 
 /// Label for the batch prompt processing entry in the hamburger menu.
 pub const MENU_BATCH: &str = "Batch...";
 
-/// Label for the tools dialog button (now in the hamburger menu).
+/// Label for the tools dialog button.
 pub const TOOLS_BUTTON: &str = "Tools...";
 
 /// Label for the tools dialog entry in the hamburger menu.
@@ -80,24 +79,23 @@ pub const ABOUT_COL_REPO: &str = "Repository";
 /// `on_click` event name fired when the user clicks About FastMD from the hamburger menu.
 pub const ABOUT_EVENT: &str = "about_button";
 
-/// Label for the version row in the About window ([TASK-017b2]).
+/// Label for the version row in the About window.
 pub const ABOUT_VERSION_LABEL: &str = "Version:";
 
-/// One-line product description shown in the About window ([TASK-017b2]).
+/// One-line product description shown in the About window.
 /// Read from the `fastmd` package manifest description so the two can
 /// never drift.
 pub const ABOUT_DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
 
 /// Button in the About window that opens the third-party attributions
-/// window ([TASK-017b2]).
+/// window.
 pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON: &str = "View third-party attributions...";
 
-/// Empty-state line for the attributions list ([TASK-017b2]).
+/// Empty-state line for the attributions list.
 pub const ABOUT_ATTRIBUTIONS_EMPTY: &str = "No third-party dependencies recorded.";
 
 /// Formats the third-party dependency counter shown under the About
-/// window's attributions teaser and the credits window title
-/// ([TASK-017b2]).
+/// window's attributions teaser and the credits window title.
 pub fn format_attribution_count(count: usize) -> String {
     if count == 1 {
         format!("{count} direct third-party dependency")
@@ -154,8 +152,7 @@ pub const TOOLS_ERROR_ICON: &str = "⚠";
 /// Empty-state line shown when no tool group is registered at all.
 pub const TOOLS_EMPTY_STATE: &str = "No tool groups registered.";
 
-/// Formats one recorded tool-group error for display as `Kind: message`,
-/// the shape both the legacy UI hover tooltip and the iced inline line use.
+/// Formats one recorded tool-group error for display as `Kind: message`.
 #[must_use]
 pub fn format_tool_group_error(kind: &str, message: &str) -> String {
     format!("{kind}: {message}")
@@ -164,7 +161,7 @@ pub fn format_tool_group_error(kind: &str, message: &str) -> String {
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 
-/// ID salt for the tag filter combobox in the legacy UI.
+/// ID salt for the tag filter combobox.
 pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 
 /// Default label shown when no tag is selected in the tag filter.
@@ -186,11 +183,9 @@ pub const SEARCH_NO_RESULTS: &str = "No matching files found";
 pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
 
 /// Formats the per-file match counter shown next to a content-search
-/// result's file name ([TASK-012], UI-050).
+/// result's file name (UI-050).
 ///
-/// The legacy UI left panel inlined `format!("({})", match_count)`
-/// (`src/app/ui/panels/left.rs:303`); the iced port hoists it here so no
-/// user-facing formatting lives in a panel ([GUD-002]).
+/// User-facing formatting lives here rather than in a panel.
 pub fn format_match_count(match_count: usize) -> String {
     format!("({match_count})")
 }
@@ -231,28 +226,27 @@ pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
 
 /// Label for the hamburger menu button in the top toolbar.
-pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
+pub const HAMBURGER_MENU_BUTTON: &str = "☰";
 
-/// ID salt for the hamburger menu in the legacy UI.
+/// ID salt for the hamburger menu.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
 
 /// Glyph drawn in the check slot of an active top-bar hamburger menu row
 /// (UI-065, UI-066). U+2713 CHECK MARK.
 const MENU_CHECK_GLYPH: char = '\u{2713}';
 
-/// Glyph drawn between a submenu name and its item label in the iced
-/// top-bar hamburger menu, standing in for the nested-popup arrow.
-const MENU_SUBMENU_ARROW: char = '\u{203A}';
+/// ASCII arrow appended to submenu names in the top-bar hamburger menu.
+const MENU_SUBMENU_ARROW: &str = ">";
 
-/// Formats one row of the top-bar hamburger menu for the iced port
-/// ([TASK-011]).
+/// Label for returning from a hamburger submenu to the top-level menu.
+pub const MENU_BACK_TO_MAIN: &str = "< Main menu";
+
+/// Formats one row of the top-bar hamburger menu.
 ///
-/// iced 0.14's built-in dropdowns are single-level and render every row as
-/// plain text, so the submenu a row belongs to is carried inside the row
-/// label rather than in a nested popup. The layout is
-/// `"<check slot> <submenu> › <label>"`, with the submenu segment omitted
-/// for top-level rows. The check slot is always present (blank when
-/// unchecked) so checked and unchecked rows stay column-aligned.
+/// The layout is `"<check slot> <submenu> > <label>"`, with the submenu
+/// segment omitted for top-level rows. The check slot is always present
+/// (blank when unchecked) so checked and unchecked rows stay
+/// column-aligned.
 pub fn format_menu_row_label(submenu: Option<&str>, label: &str, checked: bool) -> String {
     let mut out = String::with_capacity(label.len() + 16);
     out.push(if checked { MENU_CHECK_GLYPH } else { ' ' });
@@ -260,18 +254,27 @@ pub fn format_menu_row_label(submenu: Option<&str>, label: &str, checked: bool) 
     if let Some(submenu) = submenu {
         out.push_str(submenu);
         out.push(' ');
-        out.push(MENU_SUBMENU_ARROW);
+        out.push_str(MENU_SUBMENU_ARROW);
         out.push(' ');
     }
     out.push_str(label);
     out
 }
 
+/// Formats a top-level submenu button with the visible `>` navigation cue.
+#[must_use]
+pub fn format_menu_submenu_label(label: &str) -> String {
+    format!("{label} {MENU_SUBMENU_ARROW}")
+}
+
 /// Submenu label for the Table Wrap Algorithm submenu in the top hamburger menu.
 pub const MENU_TABLE_WRAP_ALGORITHM: &str = "Table wrap algorithm";
 
-/// Submenu label for the Windows submenu in the top hamburger menu.
-pub const MENU_WINDOWS: &str = "Windows";
+/// Top-level label for the Windows submenu in the top hamburger menu.
+pub const MENU_WINDOWS: &str = "Windows...";
+
+/// Heading shown inside the Windows submenu and in its row descriptions.
+pub const MENU_WINDOWS_TITLE: &str = "Windows";
 
 /// Menu item label for opening/toggling the Background Operations (processes/logs) window.
 pub const MENU_BACKGROUND_OPERATIONS: &str = "Background operations";
@@ -302,7 +305,7 @@ pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
 pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
 
-/// ID salt for the table-width-strategy combobox in the legacy UI. Kept stable
+/// ID salt for the table-width-strategy combobox. Kept stable
 /// across releases so the widget's persistent id and any open/closed
 /// state survive a config save round-trip.
 pub const TABLE_WIDTH_STRATEGY_ID_SALT: &str = "table_width_strategy_combobox";
@@ -397,7 +400,7 @@ pub const TABLE_OF_CONTENTS_HEADER: &str = "Table of Contents";
 /// Uses Phosphor [`ICON_ROBOT`] icon.
 pub const AGENT_SESSION_HEADER: &str = "\u{E762} FastMD Agent Session";
 
-/// Button label to close the agent session view (replaces "Back to document").
+/// Button label to close the agent session view.
 pub const AGENT_SESSION_CLOSE_BUTTON: &str = "Close";
 
 /// Prefix label for agent status text.
@@ -416,29 +419,28 @@ pub const AGENT_THINKING_LABEL: &str = "Agent is thinking...";
 pub const AGENT_TOOL_CALL_PARAM: &str = "Tool call parameter string";
 
 /// Markdown prefix the orchestrator injects ahead of a user prompt when it
-/// appends the prompt to a continuing agent transcript
-/// (`src/app/orchestrator.rs:268`). The iced agent panel parses this marker
-/// back out to render the user turn as themed text rather than assistant
-/// markdown ([TASK-018], UI-048 turn model).
+/// appends the prompt to a continuing agent transcript. The agent panel
+/// parses this marker back out to render the user turn as themed text
+/// rather than assistant markdown (UI-048 turn model).
 pub const AGENT_USER_TURN_MARKER: &str = "**User:** ";
 
-/// Send-button label in the agent prompt row ([TASK-018]).
+/// Send-button label in the agent prompt row.
 pub const AGENT_SEND_BUTTON: &str = "Send";
 
 /// Queue-button label shown while the agent is running, behind which the
-/// prompt is parked until the current turn finishes ([TASK-018]).
+/// prompt is parked until the current turn finishes.
 pub const AGENT_QUEUE_BUTTON: &str = "Queue";
 
 /// Label prefix for the chat-model selector in the agent prompt row
-/// ([TASK-018], UI-064/065 selection).
+/// (UI-064/065 selection).
 pub const AGENT_MODEL_LABEL: &str = "Model:";
 
-/// Prefix for the queued-prompt count badge in the agent prompt row
-/// ([TASK-018]). Pair with [`format_queued_prompts_label`].
+/// Prefix for the queued-prompt count badge in the agent prompt row.
+/// Pair with [`format_queued_prompts_label`].
 pub const AGENT_QUEUED_PREFIX: &str = "Queued: ";
 
 /// Formats the queued-prompt count badge label
-/// (`Queued: 3`) from the number of parked prompts ([TASK-018]).
+/// (`Queued: 3`) from the number of parked prompts.
 #[must_use]
 pub fn format_queued_prompts_label(count: usize) -> String {
     format!("{AGENT_QUEUED_PREFIX}{count}")
@@ -512,8 +514,7 @@ pub const SELECT_DESTINATION_FOLDER: &str = "Select destination folder:";
 /// Generic OK button label.
 pub const OK_BUTTON: &str = "Ok";
 
-/// Generic Close button label ([TASK-017b2] — the About and attributions
-/// window footers).
+/// Generic Close button label (the About and attributions window footers).
 pub const CLOSE_BUTTON: &str = "Close";
 
 /// Window title for create directory dialog.
@@ -534,14 +535,10 @@ pub const RENAME_WINDOW: &str = "Rename";
 /// Label prompt in rename dialog.
 pub const ENTER_NEW_NAME: &str = "Enter new name:";
 
-/// Window title for the delete-confirmation dialog ([TASK-017b1]).
-///
-/// The legacy UI build has no delete confirmation — the tree's Delete row
-/// publishes `UserCommand::Delete` directly — so this title is new for the
-/// iced port (drift note in `doc/planning/iced-migration-map.md`).
+/// Window title for the delete-confirmation dialog.
 pub const DELETE_CONFIRM_WINDOW: &str = "Delete";
 
-/// Delete-confirmation prompt naming the target ([TASK-017b1]).
+/// Delete-confirmation prompt naming the target.
 ///
 /// Formatting helper rather than a bare constant because the target name is
 /// interpolated into the sentence.
@@ -550,20 +547,19 @@ pub fn format_delete_confirm_prompt(name: &str) -> String {
     format!("Delete \"{name}\"?")
 }
 
-/// Error shown when a name-entry dialog is submitted with no name
-/// ([TASK-017b1]).
+/// Error shown when a name-entry dialog is submitted with no name.
 pub const DIALOG_NAME_EMPTY_ERROR: &str = "Name must not be empty.";
 
 /// Error shown when a name-entry dialog holds a name that is not a safe
-/// single path segment (separators or `..`) ([TASK-017b1]).
+/// single path segment (separators or `..`).
 pub const DIALOG_NAME_UNSAFE_ERROR: &str = "Name contains invalid characters.";
 
 /// Error shown when the move dialog is confirmed with no destination
-/// selected ([TASK-017b1]).
+/// selected.
 pub const DIALOG_MOVE_NO_DESTINATION_ERROR: &str = "Select a destination folder.";
 
-/// Error returned when a submit arrives while no dialog is open
-/// ([TASK-017b1]). Defensive: the view never renders a card when closed.
+/// Error returned when a submit arrives while no dialog is open. Defensive:
+/// the view never renders a card when closed.
 pub const DIALOG_NOT_OPEN_ERROR: &str = "No dialog is open.";
 
 // Batch Dialog
@@ -767,11 +763,10 @@ pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
 pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
 
 /// Marker glyph rendered in front of an unordered markdown list item
-/// ([TASK-015]; U+2022 BULLET, the same glyph the legacy UI renderer painted).
+/// (U+2022 BULLET).
 pub const LIST_BULLET: &str = "\u{2022}";
 
-/// Separator rendered between an ordered list item's ordinal and its text
-/// ([TASK-015]).
+/// Separator rendered between an ordered list item's ordinal and its text.
 pub const ORDERED_LIST_MARKER_SUFFIX: &str = ". ";
 
 #[cfg(test)]
@@ -928,19 +923,22 @@ mod tests {
 
     #[test]
     fn test_hamburger_menu_strings() {
-        assert_eq!(HAMBURGER_MENU_BUTTON, ICON_LIST);
+        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
         assert_eq!(MENU_ABOUT, "About FastMD...");
         assert_eq!(ABOUT_EVENT, "about_button");
         assert_eq!(ABOUT_DIALOG_TITLE, "About FastMD");
         assert_eq!(ABOUT_APP_NAME, "FastMD Viewer");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
-        assert_eq!(MENU_WINDOWS, "Windows");
+        assert_eq!(MENU_WINDOWS, "Windows...");
+        assert_eq!(MENU_WINDOWS_TITLE, "Windows");
+        assert_eq!(MENU_BACK_TO_MAIN, "< Main menu");
         assert_eq!(MENU_BACKGROUND_OPERATIONS, "Background operations");
         assert_eq!(MENU_AGENT_DEBUG, "Agent debug");
         assert_eq!(MENU_CHAT_MODELS, "Chat models");
         assert_eq!(NO_CHAT_MODELS_CONFIGURED, "No models configured");
         assert_eq!(CHAT_MODEL_SELECTION_EVENT, "chat_model_selection");
+        assert_eq!(format_menu_submenu_label(MENU_WINDOWS), "Windows... >");
         assert_eq!(
             format_chat_model_menu_label("gpt-4o", 15),
             "gpt-4o (Cost: 15)"
@@ -973,10 +971,7 @@ mod tests {
             "APP_TITLE should not use raw lightning emoji"
         );
 
-        assert_eq!(
-            HAMBURGER_MENU_BUTTON, ICON_LIST,
-            "HAMBURGER_MENU_BUTTON should use Phosphor LIST icon"
-        );
+        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
 
         assert!(
             STOP_AGENT_BUTTON.contains(ICON_STOP),

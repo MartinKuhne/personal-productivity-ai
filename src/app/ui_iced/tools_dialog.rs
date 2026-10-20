@@ -1,36 +1,34 @@
-//! Iced port of the Tools dialog — the tool-group table with per-group
-//! enable, error-restart and MCP OAuth controls ([TASK-017b3],
-//! UI-051..UI-060).
+//! Tools dialog — the tool-group table with per-group enable, error-restart
+//! and MCP OAuth controls (UI-051..UI-060).
 //!
 //! A **pure view over a plain snapshot**: [`tools_dialog_card`] renders a
 //! [`ToolsDialogViewModel`] into an [`iced::Element`] of [`Message`] and
-//! touches neither the bus, the disk nor `FastMdApp`. The
-//! [TASK-022]/[TASK-023] reducer owns the open/close state
-//! ([`ToolsDialogState`]) and executes the [`UserCommand`]s the rows emit.
+//! touches neither the bus, the disk nor `FastMdApp`. The reducer owns the
+//! open/close state ([`ToolsDialogState`]) and executes the [`UserCommand`]s
+//! the rows emit.
 //!
 //! # Data source — the tool-group registry, reused unchanged ([RUST-051])
 //!
 //! | Field | Source |
 //! | --- | --- |
-//! | Group rows | [`crate::agent::tools::registry::ToolRegistry::groups`] (`src/agent/tools/registry/mod.rs:268-341`) — the same snapshot the legacy UI dialog read (`src/app/ui/tools_dialog.rs:41-46`). Internal families first, MCP servers sorted by name |
+//! | Group rows | [`crate::agent::tools::registry::ToolRegistry::groups`] (`src/agent/tools/registry/mod.rs:268-341`) — internal families first, MCP servers sorted by name |
 //! | Row shape | [`ToolGroupState`] / [`ToolGroupId`] / [`ToolGroupKind`] / [`ToolGroupError`] (`src/agent/tools/registry/groups.rs:9-90`), re-exported here, never re-declared |
-//! | Prompt char count | [`ToolGroupState::prompt_char_count`] (`groups.rs:99-104`) — the subsystem's own summing helper, fed the registry's `tool_char_count` (`registry/mod.rs:255-263`) with the empty prompt context the legacy UI row used (`ui/tools_dialog.rs:194`) |
-//! | OAuth eligibility | [`crate::agent::lib::mcp::McpClients::needs_authentication`] (`src/agent/lib/mcp/mod.rs:320-327`) — the canonical rule (SSE without a static `Authorization` header). The legacy UI dialog carried a private copy of the identical function (`ui/tools_dialog.rs:296-303`); this port calls the shared one instead of adding a third copy |
+//! | Prompt char count | [`ToolGroupState::prompt_char_count`] (`groups.rs:99-104`) — the subsystem's own summing helper, fed the registry's `tool_char_count` (`registry/mod.rs:255-263`) with the empty prompt context [`PROMPT_CONTEXT`] carries |
+//! | OAuth eligibility | [`crate::agent::lib::mcp::McpClients::needs_authentication`] (`src/agent/lib/mcp/mod.rs:320-327`) — the canonical rule (SSE without a static `Authorization` header), called directly so no call site re-implements it |
 //! | OAuth in flight | `Dialogs::is_oauth_in_progress(server)` (`src/app/ui/dialogs.rs:112-117`), snapshotted into [`McpAuthFacts`] by the reducer |
 //!
-//! # `the legacy_extras::TableBuilder` → `iced::widget::table`
+//! # Table rendering
 //!
-//! This dialog was the codebase's only real `the legacy_extras` consumer, so the
-//! swap is the whole point of the port. The six columns map one-for-one:
+//! The table is an `iced::widget::table`, and the six columns map one-for-one:
 //!
-//! | # | the legacy UI column (`ui/tools_dialog.rs:143-148`) | iced column | Width |
+//! | # | Column | iced widget | Width |
 //! | --- | --- | --- | --- |
-//! | 1 | `Column::auto().at_least(28.0)` — enable checkbox | `checkbox` + `.on_toggle` (`iced_widget-0.14.2/src/checkbox.rs:119`, `:155`) | `Shrink` |
-//! | 2 | `Column::remainder().at_least(140.0).clip(true)` — group | strong `text` name (the error rides the `⚠` tooltip, not this cell) | `Fill` |
-//! | 3 | `Column::auto().at_least(72.0)` — kind | `text` from [`kind_label`] | `Shrink` |
-//! | 4 | `Column::remainder().at_least(120.0)` — tools | comma-joined `text` | `Fill` |
-//! | 5 | `Column::auto().at_least(80.0)` — prompt char count | `text` of the summed count + the `✓ parallel` chip (see below) | `Shrink` |
-//! | 6 | `Column::remainder().at_least(140.0)` — actions | `Row` of [`ToolAction`] buttons, led by the `⚠` tooltip marker | `Fill` |
+//! | 1 | enable checkbox | `checkbox` + `.on_toggle` (`iced_widget-0.14.2/src/checkbox.rs:119`, `:155`) | `Shrink` |
+//! | 2 | group | strong `text` name (the error rides the `⚠` tooltip, not this cell) | `Fill` |
+//! | 3 | kind | `text` from [`kind_label`] | `Shrink` |
+//! | 4 | tools | comma-joined `text` | `Fill` |
+//! | 5 | prompt char count | `text` of the summed count + the `✓ parallel` chip (see below) | `Shrink` |
+//! | 6 | actions | `Row` of [`ToolAction`] buttons, led by the `⚠` tooltip marker | `Fill` |
 //!
 //! Verified `iced::widget::table` API: `table(columns, rows)`
 //! `iced_widget-0.14.2/src/table.rs:18-28`, `column(header, view)`
@@ -38,52 +36,45 @@
 //! rule `:129-133` (three explicit `Fill`s here keep the wide columns
 //! wide and the short ones tight).
 //!
-//! **Not carried over:** `striped`, `resizable` and the per-column
-//! `at_least` minimums. iced 0.14's `table` has no row striping and no
-//! user-resizable columns (`table.rs:676-681` exposes only
-//! `separator_x`/`separator_y` in its style), and `Column` takes a single
-//! `Length` with no minimum. Column proportions are therefore expressed as
-//! `Fill`/`Shrink` ratios rather than pixel floors.
+//! There is no row striping and no user-resizable column: iced 0.14's
+//! `table` exposes only `separator_x`/`separator_y` in its style
+//! (`table.rs:676-681`), and `Column` takes a single `Length` with no
+//! minimum. Column proportions are therefore expressed as `Fill`/`Shrink`
+//! ratios rather than pixel floors.
 //!
 //! # Error highlighting — which token, and why two
 //!
 //! * the `⚠` marker ([`strings::TOOLS_ERROR_ICON`]) uses
-//!   [`Palette::warning`] — exact legacy parity
-//!   (`src/app/ui/tools_dialog.rs:255`).
+//!   [`Palette::warning`].
 //! * the tooltip **body** — the `Kind: message` line the marker carries —
 //!   uses [`Palette::error`], not `warning`. iced 0.14 ships a tooltip
 //!   widget, [`iced::widget::tooltip::Tooltip`]
 //!   (`iced_widget-0.14.2/src/tooltip.rs:94-109`, `Position` `:407-412`),
-//!   so the message is revealed on hover exactly as the legacy UI revealed
-//!   it (`:215`, `:256`) rather than pinned inline in the group cell.
-//!   Hovered text that describes a *failure* reads correctly in the
-//!   stronger `error` token next to a warning-coloured marker. Both come
-//!   from the shared palette; no numeric literal is introduced
-//!   ([GUD-003]).
+//!   so the message is revealed on hover rather than pinned inline in the
+//!   group cell. Hovered text that describes a *failure* reads correctly in
+//!   the stronger `error` token next to a warning-coloured marker. Both come
+//!   from the shared palette; no numeric literal is introduced.
 //!
 //! # The parallel-safe chip ([UI-058])
 //!
 //! A group whose `parallel_safe` is `true` gets a `✓ parallel` chip
 //! ([`strings::TOOLS_PARALLEL_CHIP`]) after its char count, painted with
-//! [`Palette::success`] inside a styled `container` — the shape
-//! `doc/planning/iced-migration-map.md:99` prescribes for UI-052/UI-058.
-//! The chip is informational: a row without one is **not** marked unsafe,
-//! so nothing is rendered in its place and no "not parallel" chip exists.
+//! [`Palette::success`] inside a styled `container`. The chip is
+//! informational: a row without one is **not** marked unsafe, so nothing is
+//! rendered in its place and no "not parallel" chip exists.
 //! [`parallel_chip_label`] is the pure rule the renderer and the tests
 //! share.
 //!
 //! # Message channel
 //!
-//! Every row action already rides [`Message::Command`]:
+//! Every row action rides [`Message::Command`]:
 //! `UserCommand::SetToolGroupEnabled` / `ClearToolGroupError` /
-//! `StartMcpAuth` / `ForgetMcpAuth` are exactly what the legacy UI dialog
-//! published (`ui/tools_dialog.rs:197-293`), and each carries its own
-//! [`ToolGroupId`] or server name, so the intent stays self-contained
-//! ([FMD-068]). The legacy UI dialog keeps **no view-local state** — no
-//! search box, no selection, no expansion — so nothing else needs a
-//! channel. The single exception is dismissal: the legacy UI closed through the
-//! window frame's `X` (`:61-63`), which an in-window iced modal does
-//! not have, so the scrim click / Escape emits
+//! `StartMcpAuth` / `ForgetMcpAuth`. Each carries its own [`ToolGroupId`]
+//! or server name, so the intent is self-contained and replayable from the
+//! command alone. The dialog keeps **no view-local state** — no search box,
+//! no selection, no expansion — so nothing else needs a channel. The single
+//! exception is dismissal: an in-window modal has no window-frame `X`, so
+//! the scrim click / Escape emits
 //! [`ToolsDialogMessage::CloseRequested`].
 //!
 //! Unit tests live in the sibling `tools_dialog_tests.rs` sidecar.
@@ -110,32 +101,28 @@ pub use crate::agent::tools::registry::{
     InternalToolGroup, ToolErrorKind, ToolGroupError, ToolGroupId, ToolGroupKind, ToolGroupState,
 };
 
-/// Default width of the tools card — legacy parity (`DEFAULT_WIDTH`,
-/// `src/app/ui/tools_dialog.rs:101`).
+/// Default width of the tools card.
 pub const DEFAULT_WIDTH: f32 = 720.0;
 
-/// Minimum width of the tools card — legacy parity (`MIN_WIDTH`, `:99`).
+/// Minimum width of the tools card.
 pub const MIN_WIDTH: f32 = 520.0;
 
-/// Height budget for one tool-group row — legacy parity (`ROW_HEIGHT`, `:81`).
+/// Height budget for one tool-group row.
 pub const ROW_HEIGHT: f32 = 24.0;
 
-/// Height of the table header row — legacy parity (`HEADER_HEIGHT`, `:83`).
+/// Height of the table header row.
 pub const HEADER_HEIGHT: f32 = 20.0;
 
-/// Title bar + window border + interior padding above the table — the legacy UI
-/// parity (`CHROME_HEIGHT`, `:86`).
+/// Title bar + window border + interior padding above the table.
 pub const CHROME_HEIGHT: f32 = 56.0;
 
-/// Extra padding for the dialog scroll area — legacy parity
-/// (`EXTRA_PADDING`, `:88`).
+/// Extra padding for the dialog scroll area.
 pub const EXTRA_PADDING: f32 = 8.0;
 
-/// Minimum height of the tools dialog — legacy parity (`MIN_HEIGHT`, `:90`).
+/// Minimum height of the tools dialog.
 pub const MIN_HEIGHT: f32 = 200.0;
 
-/// Hard cap so a 4K monitor does not produce a 2000-px-tall dialog —
-/// legacy parity (`MAX_HEIGHT_HARD_CAP`, `:97`).
+/// Hard cap so a 4K monitor does not produce a 2000-px-tall dialog.
 pub const MAX_HEIGHT_HARD_CAP: f32 = 1200.0;
 
 /// Maximum height of the scrollable group list inside the card.
@@ -185,12 +172,11 @@ pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// The prompt context the char-count column is measured against.
 ///
-/// the legacy UI measured against the empty string and labelled the column as
-/// informational (`src/app/ui/tools_dialog.rs:194`); the value is
-/// carried here so the measurement stays identical and named.
+/// The column is measured against the empty string and is informational;
+/// the value is carried here so the measurement stays named.
 pub const PROMPT_CONTEXT: &str = "";
 
-/// The OAuth facts one MCP row needs ([TASK-017b3]).
+/// The OAuth facts one MCP row needs.
 ///
 /// Both halves are read off live subsystems at snapshot time — the
 /// config's transport/header shape and the dialog manager's in-flight
@@ -221,8 +207,7 @@ pub enum ToolAuthState {
     /// Eligible and idle — the Authenticate button fires.
     Available,
     /// Eligible and already running — the button is shown but inert so a
-    /// second click cannot double-spawn the flow (legacy parity,
-    /// `src/app/ui/tools_dialog.rs:271-277`).
+    /// second click cannot double-spawn the flow.
     InProgress,
 }
 
@@ -250,7 +235,7 @@ impl ToolAuthState {
     }
 }
 
-/// One rendered row of the tools table ([TASK-017b3]).
+/// One rendered row of the tools table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolGroupRow {
     /// The group's stable identity, carried by every action.
@@ -259,7 +244,7 @@ pub struct ToolGroupRow {
     pub display_name: String,
     /// Internal vs MCP stdio vs MCP remote.
     pub kind: ToolGroupKind,
-    /// The kind column's label, from `crate::ui::strings` ([GUD-002]).
+    /// The kind column's label, from `crate::ui::strings`.
     pub kind_label: &'static str,
     /// Whether the group is currently enabled.
     pub enabled: bool,
@@ -295,14 +280,14 @@ impl ToolGroupRow {
     }
 }
 
-/// One button in a row's Actions cell ([TASK-017b3]).
+/// One button in a row's Actions cell.
 ///
 /// `press == None` renders an inert button (`Button::on_press_maybe`,
 /// `iced_widget-0.14.2/src/button.rs:170-173`), which is how the
 /// "Authenticating…" state stays allocated without being clickable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolAction {
-    /// The button label, from `crate::ui::strings` ([GUD-002]).
+    /// The button label, from `crate::ui::strings`.
     pub label: &'static str,
     /// The message the button emits, `None` when inert.
     pub press: Option<Message>,
@@ -332,11 +317,10 @@ impl ToolAction {
 }
 
 /// Maps a group's identity, its live `needs_auth` flag and the server's
-/// OAuth facts into the row's auth state ([TASK-017b3]).
+/// OAuth facts into the row's auth state.
 ///
-/// The conjunction is the legacy UI dialog's exactly: an MCP group **and**
-/// `needs_auth` **and** a config-eligible server
-/// (`src/app/ui/tools_dialog.rs:266-270`).
+/// The conjunction: an MCP group **and** `needs_auth` **and** a
+/// config-eligible server.
 ///
 /// Purity: pure function of the three inputs.
 #[must_use]
@@ -358,7 +342,7 @@ pub fn auth_state_for(group: &ToolGroupState, facts: McpAuthFacts) -> ToolAuthSt
 }
 
 /// The kind column's label for a [`ToolGroupKind`], from
-/// `crate::ui::strings` ([GUD-002]).
+/// `crate::ui::strings`.
 ///
 /// Purity: pure.
 #[must_use]
@@ -370,9 +354,8 @@ pub fn kind_label(kind: ToolGroupKind) -> &'static str {
     }
 }
 
-/// Renders one recorded group error as the `Kind: message` line the legacy UI put
-/// in its hover tooltip (`src/app/ui/tools_dialog.rs:215`, `:256`) and that this
-/// port shows in the `⚠` marker's tooltip ([UI-057]).
+/// Renders one recorded group error as the `Kind: message` line shown in
+/// the `⚠` marker's hover tooltip ([UI-057]).
 ///
 /// Purity: pure.
 #[must_use]
@@ -402,7 +385,7 @@ pub fn parallel_chip_label(row: &ToolGroupRow) -> Option<&'static str> {
     row.parallel_safe.then_some(strings::TOOLS_PARALLEL_CHIP)
 }
 
-/// Maps one [`ToolGroupState`] to its row model ([TASK-017b3]).
+/// Maps one [`ToolGroupState`] to its row model.
 ///
 /// `char_count_for_tool` is the registry's per-tool schema-size lookup,
 /// fed to the subsystem's own [`ToolGroupState::prompt_char_count`]
@@ -452,13 +435,10 @@ pub fn rows_from_groups(
         .collect()
 }
 
-/// The actions a row's Actions cell renders, in render order
-/// ([TASK-017b3]).
-///
-/// Mirrors the legacy UI cell (`src/app/ui/tools_dialog.rs:252-293`):
-/// Restart when an error is recorded, then Authenticate (or the inert
-/// in-progress variant) plus Forget for an eligible MCP group. A clean
-/// internal row gets nothing.
+/// The actions a row's Actions cell renders, in render order: Restart when
+/// an error is recorded, then Authenticate (or the inert in-progress
+/// variant) plus Forget for an eligible MCP group. A clean internal row
+/// gets nothing.
 ///
 /// Purity: pure function of the row.
 #[must_use]
@@ -522,8 +502,7 @@ pub fn dismiss_message() -> Message {
     Message::Tools(ToolsDialogMessage::CloseRequested)
 }
 
-/// The token the `⚠` error marker is painted with — `Palette::warning`,
-/// exact legacy parity (`src/app/ui/tools_dialog.rs:255`).
+/// The token the `⚠` error marker is painted with — `Palette::warning`.
 #[must_use]
 pub fn error_marker_color() -> iced::Color {
     Palette::fastmd_dark().warning
@@ -538,7 +517,7 @@ pub fn error_text_color() -> iced::Color {
 
 /// The token the `✓ parallel` chip is painted with — `Palette::success`,
 /// the palette's completion-role colour. Resolved through the shared
-/// palette so no numeric literal reaches the panel ([GUD-003]).
+/// palette so no numeric literal reaches the panel.
 #[must_use]
 pub fn parallel_chip_color() -> iced::Color {
     Palette::fastmd_dark().success
@@ -562,18 +541,15 @@ pub fn row_label_color() -> iced::Color {
     Palette::fastmd_dark().text_strong
 }
 
-/// The tools dialog's height budget for `row_count` rows in a `viewport`
-/// ([TASK-017b3]).
+/// The tools dialog's height budget for `row_count` rows in a `viewport`.
 ///
-/// Ports `compute_dialog_size` (`src/app/ui/tools_dialog.rs:76-115`)
-/// unchanged: preferred height is
+/// Preferred height is
 /// `CHROME + HEADER + row_count * ROW_HEIGHT + EXTRA_PADDING`, clamped
 /// into `[MIN_HEIGHT, min(viewport.height * 0.85, MAX_HEIGHT_HARD_CAP)]`
 /// so the dialog grows to fit every row when the screen has room and
 /// scrolls otherwise.
 ///
-/// Returns `(default_size, min_size, max_height)` in the legacy UI shape so
-/// the legacy UI size tests port across 1:1.
+/// Returns `(default_size, min_size, max_height)`.
 ///
 /// Purity: pure.
 #[must_use]
@@ -616,8 +592,7 @@ impl ToolsDialogViewModel {
     ///
     /// `char_count_for_tool` is the registry's
     /// `ToolRegistry::tool_char_count` bound to the running config and
-    /// [`PROMPT_CONTEXT`], exactly what the legacy UI row called
-    /// (`src/app/ui/tools_dialog.rs:236-247`).
+    /// [`PROMPT_CONTEXT`].
     ///
     /// Purity: pure over `groups` and the supplied lookups.
     #[must_use]
@@ -631,9 +606,8 @@ impl ToolsDialogViewModel {
         }
     }
 
-    /// Snapshots the dialog's data off `app` — the reads the legacy UI dialog
-    /// performed at render time, moved to snapshot time so the view stays
-    /// I/O-free ([FMD-065]).
+    /// Snapshots the dialog's data off `app` at snapshot time so the view
+    /// stays I/O-free.
     #[must_use]
     pub fn from_app(app: &crate::ui::app::FastMdApp) -> Self {
         use crate::agent::lib::mcp::McpClients;
@@ -705,7 +679,7 @@ impl ToolsDialogViewModel {
     }
 }
 
-/// Renders the tools dialog card ([TASK-017b3]).
+/// Renders the tools dialog card.
 ///
 /// ```text
 /// Tools
@@ -758,12 +732,9 @@ pub fn tools_dialog_card(view_model: &ToolsDialogViewModel) -> Element<'_, Messa
     .into()
 }
 
-/// The six-column group table ([TASK-017b3]).
-///
-/// Column-by-column parity with the legacy UI `TableBuilder` layout — see the
-/// module header for the mapping table and the verified iced citations.
-/// With zero rows the header still renders, so the empty state needs no
-/// separate widget.
+/// The six-column group table — see the module header for the column
+/// mapping and the verified iced citations. With zero rows the header still
+/// renders, so the empty state needs no separate widget.
 ///
 /// Purity: pure over `rows`.
 #[must_use]
@@ -852,9 +823,8 @@ fn char_count_cell(row: &ToolGroupRow) -> Element<'static, Message> {
 }
 
 /// The `✓ parallel` chip — a styled `container` around the label, painted
-/// with [`Palette::success`] on a [`Palette::surface_variant`] fill: the
-/// shape `doc/planning/iced-migration-map.md:99` prescribes for UI-052.
-/// Every colour comes from the shared palette ([GUD-003]).
+/// with [`Palette::success`] on a [`Palette::surface_variant`] fill.
+/// Every colour comes from the shared palette.
 fn parallel_chip(label: &'static str) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -922,12 +892,10 @@ fn actions_cell(row: &ToolGroupRow) -> Element<'static, Message> {
         .into()
 }
 
-/// Which tools dialog is open — the pure state the reducer holds
-/// ([TASK-017b3]).
+/// Which tools dialog is open — the pure state the reducer holds.
 ///
-/// Mirrors [`crate::ui_iced::about::AboutWindowState`]: one window at a
-/// time, `open` replaces whatever was showing, and `close` reports
-/// whether anything was consumed so an Escape handler can tell a
+/// One window at a time, `open` replaces whatever was showing, and `close`
+/// reports whether anything was consumed so an Escape handler can tell a
 /// consumed key from a no-op. Opening is user intent and rides
 /// [`UserCommand::OpenToolsDialog`]; only the dismiss needs a message of
 /// its own (see the module header).

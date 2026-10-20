@@ -1,5 +1,5 @@
-//! Sidecar tests for [`crate::ui_iced::agent::prompt_input`] ([TASK-018],
-//! UI-001 / UI-064 / UI-065).
+//! Sidecar tests for [`crate::ui_iced::agent::prompt_input`]
+//! (UI-001 / UI-064 / UI-065).
 //!
 //! Covers the send / queue / cancel gating predicates, the queued-prompt
 //! badge, the model-pick and clear-session message constructors, the

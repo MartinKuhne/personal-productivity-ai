@@ -1,4 +1,4 @@
-//! Pre-save Markdown validation for the inline editor ([TASK-014], UI-043).
+//! Pre-save Markdown validation for the inline editor (UI-043).
 //!
 //! UI-043 requires the editor to validate the body "by parsing it with the
 //! same GFM parser used for rendering (pulldown-cmark with `ENABLE_TABLES`,
@@ -56,7 +56,7 @@ const MAX_FENCE_INDENT: usize = 3;
 /// The class of Markdown defect [`validate_markdown`] found.
 ///
 /// Carries no message text: user-facing wording belongs in
-/// [`crate::ui::strings`] ([GUD-002]), so the view maps this kind onto a
+/// [`crate::ui::strings`], so the view maps this kind onto a
 /// label and this type stays a machine-readable fact.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkdownErrorKind {

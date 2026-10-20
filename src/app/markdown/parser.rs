@@ -899,7 +899,7 @@ mod tests {
     /// text. `Visit <https://example.com> for more.` must yield a
     /// three-element inline run (`Text`, `Link`, `Text`) with no
     /// spurious `Html` variant — the clickable middle element is
-    /// what the renderer turns into an the legacy UI `Link` widget.
+    /// what the renderer turns into a clickable link.
     #[test]
     fn autolink_mixed_with_plain_text_keeps_text_runs() {
         let md = "Visit <https://example.com> for more.";

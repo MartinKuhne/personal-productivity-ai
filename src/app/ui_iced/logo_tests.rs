@@ -1,4 +1,4 @@
-//! Unit tests for the shared iced logo mark ([TASK-020]).
+//! Unit tests for the shared iced logo mark.
 //!
 //! Pure assertions ([RUST-006]): glyph/colour/font identity against the
 //! shared tokens, and element-construction smoke tests. No renderer, no

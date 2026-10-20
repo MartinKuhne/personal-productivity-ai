@@ -1,5 +1,4 @@
-//! Sidecar tests for [`crate::ui_iced::agent::transcript`] ([TASK-018],
-//! UI-048).
+//! Sidecar tests for [`crate::ui_iced::agent::transcript`] (UI-048).
 //!
 //! Covers the message constructors (scroll report, link activation), the
 //! Markdown styling mapped from palette tokens (no numeric literals), the
@@ -76,7 +75,7 @@ fn link_activated_message_has_no_source_file() {
 }
 
 // ---------------------------------------------------------------------------
-// Markdown styling — palette-token mapping (GUD-003)
+// Markdown styling — palette-token mapping
 // ---------------------------------------------------------------------------
 
 #[test]

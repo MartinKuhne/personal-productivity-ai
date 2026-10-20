@@ -1,20 +1,17 @@
-//! YAML front-matter mapping and widget ([TASK-015]).
+//! YAML front-matter mapping and widget.
 //!
-//! The legacy UI renderer (`src/app/ui/render/yaml_table.rs`) painted the
-//! front-matter mapping as a two-column table with a fixed key column, a
-//! value column that takes the remaining width, and alternating row
-//! backgrounds. The presentation is ported here as themed iced rows; the
-//! parsing stays where it is — [`crate::markdown::parse_yaml_to_pairs`]
-//! ([RUST-051]).
+//! The front-matter mapping is a two-column layout: a key column with a
+//! preferred width, a value column that takes the remaining width, and
+//! alternating row backgrounds. Parsing stays where it is —
+//! [`crate::markdown::parse_yaml_to_pairs`] ([RUST-051]).
 //!
-//! What the legacy UI build cached in framework's temp data (parsed pairs and row
-//! heights, `yaml_table.rs:26-35`, `:44-57`) is **not** ported: the iced
-//! port is a pure function of its inputs, and the [TASK-022] state layer
-//! is where a cache would live if one proves necessary.
+//! Nothing is cached: the block is a pure function of its inputs, so the
+//! parsed pairs and the solved row widths are recomputed per frame. Were a
+//! cache ever to prove necessary, it belongs in the state layer, not here.
 //!
 //! Non-mapping front matter (a bare string, a sequence, a null document)
-//! yields no rows, exactly as the legacy UI fall-through did — the front-matter
-//! editor only understands key/value pairs.
+//! yields no rows — the front-matter view only understands key/value
+//! pairs.
 //!
 //! Unit tests live in the sibling `yaml_tests.rs` sidecar.
 
@@ -24,40 +21,26 @@ use crate::ui_iced::message::Message;
 use iced::widget::{Column, container, text};
 use iced::{Alignment, Background, Element, Length};
 
-/// Preferred width of the key column.
-///
-/// Ported from `YAML_KEY_COLUMN_WIDTH` (`src/app/ui/render/yaml_table.rs:24`).
+/// Preferred width of the key column, in logical pixels.
 pub const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 
-/// Horizontal gap between the key and value columns.
-///
-/// The 12 px inter-column gap the legacy UI table used
-/// (`yaml_table.rs:23`, `:68`).
+/// Horizontal gap between the key and value columns, in logical pixels.
 pub const YAML_COLUMN_GAP: f32 = 12.0;
 
 /// Vertical gap between front-matter rows.
 pub const YAML_ROW_SPACING: f32 = 4.0;
 
 /// Floor for the key column when the viewport is narrow.
-///
-/// Ported from the `.max(40.0)` clamp on `key_col_width`
-/// (`src/app/ui/render/yaml_table.rs:62`).
 pub const YAML_MIN_KEY_WIDTH: f32 = 40.0;
 
 /// Floor for the value column.
-///
-/// Ported from the `.max(40.0)` clamp on `value_col_width`
-/// (`src/app/ui/render/yaml_table.rs:63`).
 pub const YAML_MIN_VALUE_WIDTH: f32 = 40.0;
 
 /// Chrome subtracted from the available width before the key column is
-/// clamped — the legacy UI table's frame allowance (`yaml_table.rs:62`).
+/// clamped — the frame allowance around the block.
 pub const YAML_WIDTH_CHROME: f32 = 20.0;
 
 /// Space left under the whole front-matter block.
-///
-/// Ported from the `ui.add_space(8.0)` that closed `render_yaml_table`
-/// (`src/app/ui/render/yaml_table.rs:157`).
 pub const YAML_BOTTOM_SPACING: f32 = 8.0;
 
 /// Row-index parity that receives the striped background.
@@ -87,11 +70,9 @@ pub fn is_striped(index: usize) -> bool {
 
 /// Solves the key/value column widths for one viewport width.
 ///
-/// Reproduces the legacy UI clamp chain exactly
-/// (`src/app/ui/render/yaml_table.rs:62-63`): the key column is the
-/// preferred width capped by what is left after the frame chrome, floored
-/// at [`YAML_MIN_KEY_WIDTH`]; the value column takes the remainder,
-/// floored at [`YAML_MIN_VALUE_WIDTH`].
+/// The key column is the preferred width capped by what is left after the
+/// frame chrome, floored at [`YAML_MIN_KEY_WIDTH`]; the value column takes
+/// the remainder, floored at [`YAML_MIN_VALUE_WIDTH`].
 #[must_use]
 pub fn yaml_column_widths(available_width: f32) -> (f32, f32) {
     let key_width =
@@ -127,8 +108,7 @@ pub fn yaml_rows_from_value(yaml: &serde_norway::Value, available_width: f32) ->
 
 /// Renders the front-matter block.
 ///
-/// An empty row list renders nothing, matching the legacy UI fall-through for a
-/// non-mapping document.
+/// An empty row list renders nothing.
 #[must_use]
 pub fn yaml_block(rows: &[YamlRowModel]) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();

@@ -1,7 +1,6 @@
-//! Iced pane-grid layout of the FASTMD three-band geometry ([TASK-010],
-//! UI-001, `doc/planning/iced.md`).
+//! Iced pane-grid layout of the FASTMD three-band geometry (UI-001).
 //!
-//! The pilot view is a vertical `column![]` of three full-width bands:
+//! The view is a vertical `column![]` of three full-width bands:
 //! the top band stub, the middle band, and the bottom band stub. The
 //! middle band is an `iced::widget::pane_grid` split horizontally into the
 //! left (file tree stub), center (content pane) and right (table-of-contents
@@ -15,7 +14,7 @@
 //!   rather than hardcoded, and the shape contract is pinned by tests;
 //! - the right pane is gated by [`should_show_panel`] — the pure ToC rule,
 //!   owned by [`crate::ui_iced::panels::right`] and re-exported here so the
-//!   [TASK-010] public path stays stable ([RUST-051]: one iced-side home for
+//!   public path stays stable ([RUST-051]: one iced-side home for
 //!   the gate);
 //! - pane-grid resize drag events ([`pane_grid::ResizeEvent`] fields
 //!   `split`/`ratio` — `iced_widget-0.14.2/src/pane_grid.rs:1226-1237`, fed
@@ -27,8 +26,8 @@
 //!   default, `pane_grid.rs:202`), so pixel widths convert to split ratios
 //!   via `ratio = width / viewport_width` without a spacing term.
 //!
-//! Widget construction is exercised by the pilot binary only; these
-//! unit-testable pieces are the state reductions ([TASK-010] testing rule).
+//! Widget construction is exercised by the running app; the pieces here are
+//! the unit-testable state reductions.
 //!
 //! Unit tests live in the sibling `layout_tests.rs` sidecar.
 
@@ -50,9 +49,8 @@ pub const RESIZE_LEEWAY_PIXELS: f32 = 10.0;
 /// Full-on-screen height of the stub top/bottom bands, in logical points.
 pub const STUB_BAND_HEIGHT_POINTS: f32 = 28.0;
 
-/// Text rendered inside every stub region ([TASK-010]); dev-scaffolding
-/// label, not user-facing copy — promoted from an inline literal per
-/// [RUST-021] so the stub wording lives in exactly one place.
+/// Text rendered inside every stub region: a dev-scaffolding label, not
+/// user-facing copy — kept in exactly one place per [RUST-021].
 pub const STUB_TEXT: &str = "stub";
 
 /// Text rendered inside the right (TOC) pane when
@@ -61,13 +59,12 @@ pub const TOC_STUB_TEXT: &str = "toc";
 
 /// Pure visibility gate for the right (TOC) pane.
 ///
-/// Relocated into the iced tree at [`crate::ui_iced::panels::right`] for the
-/// framework-free migration ([TASK-029]) and re-exported here, so the
-/// [`layout`](crate::ui_iced::layout) public path [TASK-010] established is
-/// unchanged and [`view`](crate::ui_iced::view) needs no edit.
+/// Owned by [`crate::ui_iced::panels::right`] and re-exported here so the
+/// [`layout`](crate::ui_iced::layout) public path stays stable and
+/// [`view`](crate::ui_iced::view) can resolve it from either name.
 pub use crate::ui_iced::panels::right::should_show_panel;
 
-/// Contents of each middle-band pane ([TASK-010]) — [RUST-011]: pub item.
+/// Contents of each middle-band pane — [RUST-011]: pub item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PaneKind {
     /// The left (file tree) pane.
@@ -106,7 +103,7 @@ pub struct MiddleBandPanes {
 }
 
 /// Builds the middle-band pane tree: a vertical split of (left | (center |
-/// right)) ([TASK-010], UI-001).
+/// right)) (UI-001).
 ///
 /// Tree construction ([RUST-020]): pure — a fresh [`Configuration`] per
 /// call, so callers own the mutable [`pane_grid::State`].
@@ -179,7 +176,7 @@ pub enum PaneSide {
 
 /// Classifies a resize event's split against the known middle-band splits.
 ///
-/// [RUST-020]: pure. Returns `None` for any splitting the pilot does not
+/// [RUST-020]: pure. Returns `None` for any split this layout does not
 /// own (defensive; keeps unknown-id handling out of the caller).
 pub fn split_side(panes: &MiddleBandPanes, split: Split) -> Option<PaneSide> {
     if split == panes.left_split {
@@ -191,8 +188,8 @@ pub fn split_side(panes: &MiddleBandPanes, split: Split) -> Option<PaneSide> {
     }
 }
 
-/// Reduces a `PaneGrid` resize event onto the panel widths ([TASK-010],
-/// UI-016 clamping).
+/// Reduces a `PaneGrid` resize event onto the panel widths (UI-016
+/// clamping).
 ///
 /// On success returns the `(split, ratio)` pair to replay into
 /// `pane_grid::State::resize` (`iced_widget-0.14.2/src/pane_grid/state.rs:
@@ -257,7 +254,7 @@ pub fn apply_pane_resize(
 ///
 /// [RUST-020]: pure.
 ///
-/// Shared with the [TASK-012] tree auto-fit
+/// Shared with the tree auto-fit
 /// ([`crate::ui_iced::panels::left::auto_fit_width`]) so every UI-016
 /// width in the iced layer obeys one clamping rule.
 pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
@@ -270,16 +267,15 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
     }
 }
 
-/// Builds the middle band area ([TASK-010], [TASK-023]): a
-/// [`pane_grid::PaneGrid`] over the pilot's pane state whose three pane
-/// bodies are supplied by the caller.
+/// Builds the middle band area: a [`pane_grid::PaneGrid`] over the
+/// middle-band pane state whose three pane bodies are supplied by the caller.
 ///
 /// Each body is a builder closure rather than a single `Element` because the
 /// pane-grid view callback runs once per pane per frame and `Element` is not
 /// `Clone`. The right (TOC) body is only mounted when
 /// [`should_show_panel`] passes; the gate is evaluated here so the rule
 /// stays in the one place the iced layer defines it
-/// ([`crate::ui_iced::panels::right::should_show_panel`], [TASK-029]).
+/// ([`crate::ui_iced::panels::right::should_show_panel`]).
 ///
 /// `on_resize` maps a [`pane_grid::ResizeEvent`] into the caller's message
 /// type (`on_resize` contract verified at
@@ -337,14 +333,12 @@ fn fill_pane<'a, Message: 'a>(body: iced::Element<'a, Message>) -> iced::Element
         .into()
 }
 
-/// Builds the top band stub ([TASK-010]): a full-width `row![]` bar of
-/// fixed height.
+/// Builds the top band stub: a full-width `row![]` bar of fixed height.
 pub fn top_band<'a, Message: 'a>() -> iced::Element<'a, Message> {
     band_bar()
 }
 
-/// Builds the bottom band stub ([TASK-010]): a full-width `row![]` bar of
-/// fixed height.
+/// Builds the bottom band stub: a full-width `row![]` bar of fixed height.
 pub fn bottom_band<'a, Message: 'a>() -> iced::Element<'a, Message> {
     band_bar()
 }

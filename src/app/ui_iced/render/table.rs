@@ -1,4 +1,4 @@
-//! Markdown table mapping and the iced `Table` widget ([TASK-015]).
+//! Markdown table mapping and the iced `Table` widget.
 //!
 //! Two layers, split so the width solving is testable without building any
 //! widget:
@@ -25,7 +25,7 @@
 //!   [`COLUMN_SPACING`](crate::ui_iced::table_width::COLUMN_SPACING)
 //!   mapping is built on.
 //! * Style carries only the two separator colours — `:676-681` — so the
-//!   the legacy UI table's perimeter stroke is painted by wrapping the table in a
+//!   perimeter stroke around the grid is painted by wrapping the table in a
 //!   bordered container instead.
 //!
 //! # What the document model does not carry
@@ -33,7 +33,7 @@
 //! GFM's alignment row (`|:---|:--:|---:|`) is consumed by
 //! `pulldown-cmark` and never reaches `RenderEvent::Table`
 //! (`src/app/markdown/parser.rs:383-397` pushes the head row and the
-//! body rows only). Column alignment is therefore **not ported** — every
+//! body rows only). Column alignment is therefore **not available** — every
 //! column is left-aligned. Flagged as spec drift per [RUST-041].
 //!
 //! Unit tests live in the sibling `table_tests.rs` sidecar.
@@ -51,23 +51,18 @@ use crate::ui_iced::table_width::{
 use iced::widget::{container, scrollable, table, text};
 use iced::{Background, Element, Length};
 
-/// Border width of the table's perimeter frame.
+/// Border width of the table's perimeter frame, in logical pixels.
 ///
-/// Ported from `TABLE_PERIMETER_STROKE`
-/// (`src/app/ui/render/table/configured.rs:36-39`), which drew a 1 px
-/// `border_strong` line around the whole grid.
+/// A `border_strong` line frames the whole grid.
 pub const TABLE_PERIMETER_WIDTH: f32 = 1.0;
 
 /// Row-index parity that receives the striped background.
 ///
-/// the legacy UI striped `row_idx % 2 == 1`
-/// (`src/app/ui/render/table/configured.rs:77`).
+/// Body rows where `index % 2 == 1` are striped.
 pub const STRIPE_PARITY: usize = 1;
 
-/// Height reserved for a blank cell, so it still holds its row open.
-///
-/// The legacy UI cell used `ui.text_style_height(&TextStyle::Body)` for this
-/// (`src/app/ui/render/table/cell.rs:81`).
+/// Height reserved for a blank cell, in logical pixels, so it still holds
+/// its row open.
 pub const EMPTY_CELL_HEIGHT: f32 = 18.0;
 
 /// One rendered table cell.
@@ -102,7 +97,7 @@ pub struct TableModel {
     pub rows: Vec<Vec<TableCellModel>>,
     /// Solved per-column widths, in column order.
     pub column_widths: Vec<f32>,
-    /// §3.6 fallback: the table cannot fit and needs a horizontal scroll.
+    /// Overflow fallback: the table cannot fit and needs a horizontal scroll.
     pub needs_horizontal_scroll: bool,
     /// Total solved width including the column gutters.
     pub total_width: f32,
@@ -191,8 +186,7 @@ pub fn from_layout(layout: &TableLayout, palette: Palette) -> TableModel {
                     let mut spans = spans_from_inline(&cell.content, BODY_SIZE, palette);
                     if is_header {
                         // GFM header cells are not bold in the AST, so the
-                        // header is distinguished by colour — the iced
-                        // stand-in for the legacy UI's header emphasis.
+                        // header is distinguished by colour.
                         for span in &mut spans {
                             span.color = strong;
                         }
@@ -219,9 +213,8 @@ pub fn from_layout(layout: &TableLayout, palette: Palette) -> TableModel {
 ///
 /// The framed block is always allocated; an empty model renders an empty
 /// frame. When [`TableModel::needs_horizontal_scroll`] is set the grid is
-/// wrapped in a horizontal `scrollable` pinned to its solved width — the
-/// iced equivalent of the §3.6 fallback in
-/// `src/app/ui/render/table/configured.rs:122-144`.
+/// wrapped in a horizontal `scrollable` pinned to its solved width, the
+/// overflow fallback for a table that cannot fit.
 #[must_use]
 pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
@@ -284,9 +277,8 @@ pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
 
 /// Renders one cell.
 ///
-/// A cell with no content allocates [`EMPTY_CELL_HEIGHT`] so a blank cell
-/// still holds its row open — the same reason the legacy UI cell used
-/// `allocate_space` rather than nothing (`cell.rs:83-94`).
+/// A cell with no content still allocates [`EMPTY_CELL_HEIGHT`] so a blank
+/// cell holds its row open.
 #[must_use]
 pub fn cell_element(cell: Option<&TableCellModel>, striped: bool) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();

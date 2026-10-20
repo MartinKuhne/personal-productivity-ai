@@ -1,6 +1,6 @@
 //! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
 //!
-//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008; CONFIG-009 superseded by VFS-004/009) for the full specification.
+//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008, plus VFS-004/VFS-009 for virtual path resolution) for the full specification.
 //!
 //! The VFS domain types ([`VirtualPath`], [`VirtualPathError`], and the
 //! behaviour on [`ContentLibrary`]) now live under

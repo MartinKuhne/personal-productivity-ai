@@ -1,5 +1,5 @@
 //! The iced agent transcript view — the streaming conversation surface
-//! ([TASK-018], UI-048).
+//! (UI-048).
 //!
 //! Renders an [`AgentPanelViewModel`] snapshot into a scrollable column:
 //! the gated "Thinking Process" disclosure, the ordered turn list (user
@@ -9,9 +9,9 @@
 //!
 //! # Built-in Markdown widget (verified iced 0.14.2 API)
 //!
-//! The plan pins the agent transcript to `iced::widget::markdown` (not the
-//! custom TASK-015 renderer, which the document viewer keeps for FTWA
-//! tables + theme-token control). Verified against the local registry source
+//! The transcript renders through `iced::widget::markdown` rather than the
+//! custom renderer the document viewer uses, which exists for FTWA tables
+//! plus theme-token control. Verified against the local registry source
 //! `iced_widget-0.14.2/src/markdown.rs`:
 //!
 //! | API | Citation |
@@ -31,15 +31,14 @@
 //! [`RenderMessage::LinkActivated`] with `source_file: None` — the variant
 //! the message channel already reserves for "text not backed by a file
 //! (e.g. an agent transcript)"
-//! (`src/app/ui_iced/message.rs:538-544`). The reducer resolves the link
-//! ([TASK-022]).
+//! (`src/app/ui_iced/message.rs:538-544`). The reducer resolves the link.
 //!
 //! # Feature gate
 //!
 //! The widget needs iced's `markdown` cargo feature
 //! (`iced-0.14.0/Cargo.toml:93` `markdown = ["iced_widget/markdown"]`,
 //! `iced_widget-0.14.2/Cargo.toml:51` `markdown = ["dep:pulldown-cmark"]`).
-//! It is enabled in the workspace `Cargo.toml` for this task.
+//! It is enabled in the workspace `Cargo.toml`.
 //!
 //! # Auto-scroll
 //!
@@ -63,15 +62,15 @@ use super::panel_state::{AgentPanelViewModel, TranscriptTurn};
 
 /// Stable iced widget id of the transcript `scrollable`.
 ///
-/// The [TASK-022]/[TASK-023] reducer needs a stable id to aim
+/// The reducer needs a stable id to aim
 /// `operation::scrollable::scroll_to` at
 /// (`iced_runtime-0.14.0/src/widget/operation.rs:31-39`); a widget without
 /// an explicit id cannot be scrolled programmatically. Named once so the
 /// view and the reducer cannot drift ([RUST-021]).
 pub const AGENT_TRANSCRIPT_SCROLLABLE_ID: &str = "agent_transcript_scroll";
 
-/// Base logical point size of the transcript body text (the legacy UI rendered the
-/// agent response at the default body size; iced needs it stated).
+/// Base logical point size of the transcript body text — the default body
+/// size, stated explicitly because iced needs it.
 pub const TRANSCRIPT_TEXT_SIZE: f32 = 14.0;
 
 /// Spacing between transcript blocks.
@@ -112,7 +111,7 @@ pub fn link_activated_message(url: String) -> Message {
 }
 
 /// The Markdown text [`iced::widget::markdown::Style`] mapped from the FastMD dark palette tokens
-/// ([GUD-003] — no numeric colour literal is introduced).
+/// — no numeric colour literal is introduced.
 ///
 /// Purity: pure.
 #[must_use]
@@ -194,8 +193,7 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 /// The block is allocated only when [`AgentPanelViewModel::show_thinking`]
 /// holds; the header is a button that flips the disclosure via
 /// [`AgentMessage::ThinkingToggled`], and the body renders the extracted
-/// thinking text in muted italics — the same treatment the legacy UI's
-/// `collapsing` body used (`src/app/ui/panels/center.rs:143-149`).
+/// thinking text in muted italics.
 ///
 /// Purity: pure over `view_model`.
 #[must_use]
@@ -273,7 +271,7 @@ pub fn transcript_body(view_model: &AgentPanelViewModel) -> Element<'_, Message>
         .into()
 }
 
-/// Renders the scrolling agent transcript from a snapshot ([TASK-018]).
+/// Renders the scrolling agent transcript from a snapshot.
 ///
 /// Emitted messages:
 /// * thinking header → [`AgentMessage::ThinkingToggled`]

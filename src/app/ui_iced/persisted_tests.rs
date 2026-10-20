@@ -1,5 +1,5 @@
-//! Unit tests for `persisted.rs` ([TASK-009]) — the persisted-UI-state
-//! save/load backend, DEC-008 scale composition, and window-field mapping.
+//! Unit tests for `persisted.rs` — the persisted-UI-state save/load
+//! backend, scale composition, and window-field mapping.
 //!
 //! Per [RUST-006] every persistence path runs against either
 //! `InMemoryUiStateStorage` or a `tempfile::TempDir` file; no test touches a
@@ -43,8 +43,7 @@ fn populated_state() -> PersistedUiState {
 }
 
 /// Field-by-field equality for [`PersistedUiState`] (the model has no
-/// `PartialEq` derive; its semantics stay untouched per [TASK-009] rule 1).
-/// `expand_sets_equal` controls whether `expanded_dirs` is compared too.
+/// `PartialEq` derive). `expanded_dirs` is compared by length only.
 fn assert_same_state(a: &PersistedUiState, b: &PersistedUiState) {
     assert_eq!(a.schema_version, b.schema_version);
     assert_eq!(a.left_panel_width, b.left_panel_width);
@@ -166,7 +165,7 @@ fn test_corrupt_payload_restores_default() {
     let path = temp.path().join("ui_state.json");
 
     // A garbage payload simulates a corrupted snapshot (disk failure /
-    // truncated write): loading must not panic (FMD-064) and must restore
+    // truncated write): loading must not panic and must restore
     // the default state, logging [NFR-001].
     std::fs::write(&path, "this is not json{{{{").expect("temp file write");
     let storage = FileUiStateStorage::new(path);
@@ -240,8 +239,8 @@ fn test_compose_scale_factor_without_multiplier_keeps_baseline() {
 
 #[test]
 fn test_compose_scale_factor_does_not_compound_after_migration() {
-    // DEC-008 regression shape: v0's absolute-ppp bug re-applied 1.5 on
-    // top of 1.5 (compound 2.25). After the v1 migration the persisted
+    // Regression shape: v0's absolute-ppp bug re-applied 1.5 on top of
+    // 1.5 (compound 2.25). After the v1 migration the persisted
     // multiplier is the ONLY source of additional scale.
     let baseline = 1.5;
     let migrated = migrate_legacy_state(PersistedUiState {

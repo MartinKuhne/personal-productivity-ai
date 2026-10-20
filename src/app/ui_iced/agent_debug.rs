@@ -1,67 +1,56 @@
-//! Agent debug window — the iced port of
-//! `src/app/ui/agent_debug_window.rs` ([TASK-017b4], UI-048 / REQ-008).
+//! Agent debug window (UI-048).
 //!
 //! A **pure view over a plain snapshot**: [`agent_debug_card`] renders an
 //! [`AgentDebugViewModel`] into an [`iced::Element`] of [`Message`] and
-//! touches neither the bus, the disk nor the agent. The
-//! [TASK-022]/[TASK-023] reducer owns the window's own state
-//! ([`AgentDebugWindowState`]) and executes the [`UserCommand`]s and
-//! deferred intents the card emits.
+//! touches neither the bus, the disk nor the agent. The reducer owns the
+//! window's own state ([`AgentDebugWindowState`]) and executes the
+//! [`UserCommand`]s and deferred intents the card emits.
 //!
-//! # Debug-entry data source — reused unchanged ([RUST-051])
+//! # Debug-entry data source ([RUST-051])
 //!
 //! | Field | Source |
 //! | --- | --- |
-//! | Entries | `AgentSession::state().debug_entries` (`src/agent/session.rs:33`, appended by `push_debug_entry` at `:215`) — the exact read the legacy UI window performed (`src/app/ui/agent_debug_window.rs:21`) |
+//! | Entries | `AgentSession::state().debug_entries` (`src/agent/session.rs:33`, appended by `push_debug_entry` at `:215`) |
 //! | Types | `AgentDebugEntry` / `DebugEntryKind` / `DebugEntryRow` (`src/agent/events.rs:23-62`), reached through the existing bus re-export `crate::bus::events::debug` (`src/app/bus/events/debug.rs:3`); re-exported here, never re-declared |
-//! | Search / auto-scroll / json-rows / open flag | `AgentPanelState` (`src/app/ui/agent/panel_state.rs:13-31`) — the UI-owned panel state the legacy UI window mutated in place, read here through the same fields |
+//! | Search / auto-scroll / json-rows / open flag | `AgentPanelState` (`src/app/ui/agent/panel_state.rs:13-31`) — the UI-owned panel state, read here through the same fields |
 //! | External-data markers | `crate::agent::datamark::{EXTERNAL_DATA_START, EXTERNAL_DATA_END}` (`src/agent/datamark.rs:27`, `:32`) — the envelope the agent itself writes, not re-typed literals ([RUST-021]) |
 //!
 //! **Live streaming needs no new plumbing.** The agent pushes entries onto
-//! that same `Vec` while a turn runs; the [TASK-022] subscription bridge
-//! turns each inbound `AgentEvent::DebugEntry` into a redraw and the next
-//! snapshot picks the new rows up. The view never pulls from a live stream
-//! at render time ([FMD-065]) and never writes to the buffer ([FMD-069]).
+//! that same `Vec` while a turn runs; the subscription bridge turns each
+//! inbound `AgentEvent::DebugEntry` into a redraw and the next snapshot
+//! picks the new rows up. The view never pulls from a live stream at
+//! render time and never writes to the buffer.
 //!
-//! # `CollapsingHeader` → an explicit expanded-id set
+//! # Disclosure — an explicit expanded-id set
 //!
-//! `src/app/ui/agent_debug_window.rs:170` is the **only**
-//! `CollapsingHeader` in the codebase (row A9 of
-//! `doc/planning/iced-migration-map.md:30`, compile-checked in
-//! TASK-001), and iced 0.14 has no equivalent widget. The mapping's
-//! offered shapes — "`toggler`-driven branch, or `container` with a
-//! disclose-arrow `Row`" — are taken in the second form:
+//! iced 0.14 has no `CollapsingHeader` widget, so disclosure takes the
+//! shape of a disclose-arrow row:
 //!
 //! ```text
 //! mouse_area(Row[ caret glyph, "HH:MM:SS.fff  [Kind]  summary" ])
 //!     .on_press(Message::AgentDebug(AgentDebugMessage::EntryToggled { id }))
 //! ```
 //!
-//! What the legacy UI kept inside the header widget's own memory is here a
-//! `HashSet<usize>` of row ids held by
+//! Which rows are open is a `HashSet<usize>` of row ids held by
 //! [`AgentDebugWindowState::expanded_ids`] and copied into the snapshot
 //! the card renders, so the disclosure state is plain data: inspectable,
 //! replayable and unit-testable without a runtime.
 //!
-//! A row id is the entry's index in the **raw** debug-entry list — the legacy UI's
-//! `orig_idx` (`ui/agent_debug_window.rs:106`), the very value its
-//! `push_id(orig_idx)` / `id_salt(("entry_header", id_salt))` used, so
-//! row identity is identical across both builds. Two consequences the
-//! reducer must honour ([RUST-041] drift note):
+//! A row id is the entry's index in the **raw** debug-entry list — the
+//! value carried by [`DebugEntryView::id`]. Two consequences the reducer
+//! must honour ([RUST-041] drift note):
 //!
 //! * ids are **positional**, so `UserCommand::ClearDebugEntries` must be
 //!   followed by [`AgentDebugWindowState::collapse_all`] — otherwise a
 //!   stale id silently re-expands an unrelated new entry;
-//! * the legacy UI's `.default_open(false)` maps to the empty set
-//!   [`AgentDebugWindowState::new`] starts from: nothing is expanded
-//!   until the user clicks.
+//! * nothing is expanded until the user clicks: [`AgentDebugWindowState::new`]
+//!   starts from the empty set.
 //!
-//! # Auto-scroll — the [TASK-016] intent model, reused verbatim
+//! # Auto-scroll — the log viewer's intent model
 //!
-//! the legacy UI got stick-to-bottom free from `ScrollArea::stick_to_bottom`
-//! (`ui/agent_debug_window.rs:103`); iced 0.14 has no such flag, so this
-//! window uses the **same** rule [`crate::ui_iced::logs`] established for
-//! the log viewer rather than a second copy of it:
+//! iced 0.14 has no `stick_to_bottom` flag, so this window uses the
+//! **same** rule [`crate::ui_iced::logs`] established for the log viewer
+//! rather than a second copy of it:
 //!
 //! ```text
 //! Scrollable::on_scroll ─▶ Message::AgentDebug(ScrollReported { .. })  (view emits)
@@ -69,7 +58,7 @@
 //!              logs::should_follow(auto_scroll, Some(snapshot))        (pure decision)
 //!                                   │
 //!   operation::scrollable::scroll_to(DEBUG_SCROLLABLE_ID, AbsoluteOffset { y: snapshot.max_offset() })
-//!                                                    (TASK-022/023 reducer Task)
+//!                                                    (reducer Task)
 //! ```
 //!
 //! [`AgentDebugViewModel::follow_intent`] delegates straight to
@@ -80,18 +69,15 @@
 //!
 //! # `json_rows` semantics
 //!
-//! The setting is a **viewport size, not a truncation**. the legacy UI computed
-//! `max_h = text_style_height(Monospace) × json_rows` and capped a
-//! scrollable area with it
-//! (`ui/agent_debug_window.rs:204-207`), so an expanded body shows
-//! `min(lines, json_rows)` lines and scrolls to reach the rest — both
-//! vertically and horizontally (`desired_width(f32::INFINITY)`).
-//! [`json_body_height`] reproduces that cap and
-//! [`visible_json_lines`] the count. The catalogue is the legacy UI's
-//! `[8, 16, 24, 32, 64]` ([`JSON_ROW_CATALOG`], default `8` from
-//! `AgentPanelState::default`); [`json_row_options`] additionally keeps
-//! an off-catalogue value visible, which iced's `pick_list` cannot do on
-//! its own.
+//! The setting is a **viewport size, not a truncation**. An expanded body
+//! is capped at `json_rows` lines: it shows `min(lines, json_rows)` lines
+//! and scrolls to reach the rest — both vertically and horizontally,
+//! because the body is drawn with `Wrapping::None`.
+//! [`json_body_height`] computes the cap and
+//! [`visible_json_lines`] the count. The catalogue is
+//! [`JSON_ROW_CATALOG`] (default `8` from `AgentPanelState::default`);
+//! [`json_row_options`] additionally keeps an off-catalogue value
+//! visible, which iced's `pick_list` cannot do on its own.
 //!
 //! # Message-channel choices
 //!
@@ -99,26 +85,22 @@
 //!   [`Message::Command`]** — `UserCommand::SetDebugSearchText` /
 //!   `SetDebugAutoScroll` / `SetDebugJsonRows` / `ClearDebugEntries` /
 //!   `ToggleDebugWindow(bool)` (`src/app/bus/events/user_command.rs:152-160`)
-//!   are exactly what the legacy UI window published or mutated to the same
-//!   effect, and each is self-contained ([FMD-068]). Nothing is
-//!   duplicated.
-//! * **Disclosure needed a new variant.** An entry's open/closed state has
+//!   are the commands that carry each intent, and each is self-contained.
+//!   Nothing is duplicated.
+//! * **Disclosure needs a new variant.** An entry's open/closed state has
 //!   no [`UserCommand`] equivalent — it is view-local, not application
 //!   state — so it arrives as [`AgentDebugMessage::EntryToggled`].
-//! * **Copy-JSON is deferred intent.** the legacy UI called `Ui::copy_text` inside
-//!   the click handler (`ui/agent_debug_window.rs:177-184`); iced exposes
-//!   the clipboard to `update` only
-//!   (`iced_core-0.14.0/src/clipboard.rs`), so the exact payload rides
-//!   [`AgentDebugMessage::CopyJsonRequested`] — the same shape
-//!   `RenderMessage::CopyCodeRequested` and
+//! * **Copy-JSON is deferred intent.** iced exposes the clipboard to
+//!   `update` only (`iced_core-0.14.0/src/clipboard.rs`), so the exact
+//!   payload rides [`AgentDebugMessage::CopyJsonRequested`] — the same
+//!   shape `RenderMessage::CopyCodeRequested` and
 //!   `AboutMessage::CopyCommitHashRequested` use.
 //! * **`ScrollReported` is a runtime report**, not intent — the same
 //!   class of payload `LogsMessage::ScrollReported` and
 //!   `LayoutMessage::CursorMoved` carry.
-//! * **Dismissal is a command, not a new variant.** The legacy UI window's
-//!   close path published `UserCommand::ToggleDebugWindow(false)`
-//!   (`ui/agent_debug_window.rs:149-153`), so the scrim click / Escape
-//!   emits [`dismiss_command`] rather than inventing a
+//! * **Dismissal is a command, not a new variant.** Closing publishes
+//!   `UserCommand::ToggleDebugWindow(false)`, so the scrim click / Escape
+//!   emits [`dismiss_command`] rather than inventing an
 //!   `AgentDebugMessage::CloseRequested`.
 //!
 //! # Verified iced 0.14 APIs (local registry sources)
@@ -158,48 +140,37 @@ use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 use crate::ui_iced::panels::top::phosphor_font;
 
-/// Width of the debug card — legacy parity (`default_size: [600.0, …]`,
-/// `src/app/ui/agent_debug_window.rs:19`).
+/// Width of the debug card, in logical pixels.
 pub const CARD_WIDTH: f32 = 600.0;
 
-/// Logical point size of an entry's header row (the legacy UI's `Body` style, the
-/// size [`crate::ui_iced::render::code`] recorded for it).
+/// Logical point size of an entry's header row.
 pub const ENTRY_TEXT_SIZE: f32 = 14.0;
 
-/// Logical point size of a session-boundary label — legacy parity
-/// (`RichText::new(..).size(12.0)`, `src/app/ui/agent_debug_window.rs:114`).
+/// Logical point size of a session-boundary label.
 pub const BOUNDARY_TEXT_SIZE: f32 = 12.0;
 
 /// Logical point size of the card title.
 pub const TITLE_SIZE: f32 = 18.0;
 
-/// Logical point size of the expanded JSON body (the legacy UI rendered it in
-/// `TextStyle::Monospace`, `src/app/ui/agent_debug_window.rs:210`).
+/// Logical point size of the expanded JSON body, rendered in a monospace face.
 pub const JSON_TEXT_SIZE: f32 = 14.0;
 
 /// Height of one JSON line in logical points.
 ///
 /// iced's default [`LineHeight`](iced::widget::text::LineHeight) is
 /// `Relative(1.3)` (`iced_core-0.14.0/src/text.rs:215-218`), so a
-/// [`JSON_TEXT_SIZE`] line occupies `JSON_TEXT_SIZE × 1.3` points. This
-/// is the iced stand-in for the legacy UI's
-/// `ui.text_style_height(&TextStyle::Monospace)`
-/// (`src/app/ui/agent_debug_window.rs:204`) and is what makes the
-/// `json_rows` setting mean "N visible lines".
+/// [`JSON_TEXT_SIZE`] line occupies `JSON_TEXT_SIZE × 1.3` points. That is
+/// what makes the `json_rows` setting mean "N visible lines".
 pub const JSON_LINE_HEIGHT: f32 = JSON_TEXT_SIZE * 1.3;
 
-/// The `json_rows` catalogue the pick list offers — legacy parity
-/// (`[8usize, 16, 24, 32, 64]`, `src/app/ui/agent_debug_window.rs:37`).
+/// The `json_rows` catalogue the pick list offers: 8, 16, 24, 32 and 64.
 pub const JSON_ROW_CATALOG: [usize; 5] = [8, 16, 24, 32, 64];
 
-/// `chrono` format of the row timestamp, carried over verbatim from the
-/// the legacy UI header (`entry.timestamp.format("%H:%M:%S%.3f")`,
-/// `src/app/ui/agent_debug_window.rs:165`).
+/// `chrono` format of the row timestamp: hour, minute, second and
+/// millisecond.
 pub const TIMESTAMP_FORMAT: &str = "%H:%M:%S%.3f";
 
-/// The top-level JSON key whose duplicate occurrences are elided
-/// (`content.as_object()…contains_key("tools")`,
-/// `src/app/ui/agent_debug_window.rs:87`).
+/// The top-level JSON key whose duplicate occurrences are elided.
 pub const TOOLS_KEY: &str = "tools";
 
 /// The `provenance=` header prefix the external-data envelope starts with.
@@ -211,13 +182,12 @@ pub const TOOLS_KEY: &str = "tools";
 pub const PROVENANCE_PREFIX: &str = "provenance=";
 
 /// What replaces a `tools` array an earlier entry in the same session
-/// already showed ([`strings::DEBUG_OMITTED_TOOLS_PLACEHOLDER`], the
-/// same text the legacy UI row inserted at `ui/agent_debug_window.rs:128`).
+/// already showed.
 pub const OMITTED_TOOLS_PLACEHOLDER: &str = strings::DEBUG_OMITTED_TOOLS_PLACEHOLDER;
 
 /// Stable iced widget id of the entry list's `scrollable`.
 ///
-/// The [TASK-022]/[TASK-023] reducer must aim
+/// The reducer must aim
 /// `operation::scrollable::scroll_to` at a stable id
 /// (`iced_runtime-0.14.0/src/widget/operation.rs:31-39`); a widget
 /// without one cannot be scrolled programmatically at all. Named once so
@@ -242,16 +212,14 @@ pub const BODY_SPACING: f32 = 4.0;
 /// Gap between a row's chevron and its label.
 pub const CHEVRON_SPACING: f32 = 6.0;
 
-/// Vertical padding inside a clickable header row — the hit area the legacy UI's
-/// `CollapsingHeader` title gave.
+/// Vertical padding inside a clickable header row, i.e. the height of its
+/// hit area.
 pub const HEADER_PADDING_Y: f32 = 4.0;
 
 /// Width of the rules separating card sections and boundary rows.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// The search text in the form the filter compares against — lower-cased
-/// once, exactly as the legacy UI window did before filtering
-/// (`src/app/ui/agent_debug_window.rs:58-62`).
+/// The search text in the form the filter compares against: lower-cased once.
 ///
 /// Purity: pure.
 #[must_use]
@@ -261,8 +229,7 @@ pub fn normalized_search(search: &str) -> String {
 
 /// Whether one debug entry passes the window's search filter.
 ///
-/// The legacy UI predicate, lifted out of the render closure verbatim
-/// (`src/app/ui/agent_debug_window.rs:66-74`):
+/// A row passes when any of the following holds:
 ///
 /// * a [`DebugEntryRow::SessionBoundary`] **always** passes, so the
 ///   filtered list keeps its session structure instead of collapsing into
@@ -270,7 +237,7 @@ pub fn normalized_search(search: &str) -> String {
 /// * an empty search passes everything;
 /// * otherwise the row passes when its `summary` contains the needle —
 ///   i.e. the match is **case-insensitive** and **summary-only**. The
-///   JSON body is not searched, legacy parity.
+///   JSON body is not searched.
 ///
 /// `search_lower` must already be lower-cased ([`normalized_search`]).
 ///
@@ -286,8 +253,7 @@ pub fn entry_matches(entry: &AgentDebugEntry, search_lower: &str) -> bool {
     entry.summary.to_lowercase().contains(search_lower)
 }
 
-/// The filtered `(original index, entry)` pairs, in list order — the legacy UI's
-/// `filtered` vector (`src/app/ui/agent_debug_window.rs:63-75`).
+/// The filtered `(original index, entry)` pairs, in list order.
 ///
 /// Original indices are carried, not re-numbered: they are the row ids
 /// the expanded set keys on.
@@ -309,7 +275,6 @@ pub fn filter_debug_entries<'a>(
 /// Which filtered entries must have their `tools` array replaced because
 /// an earlier entry in the same session already showed one.
 ///
-/// Port of the legacy UI pass at `src/app/ui/agent_debug_window.rs:77-97`.
 /// Walking the filtered list in order, the **first** entry of a session
 /// that carries a top-level `"tools"` key is kept whole; every later one
 /// in that session is a duplicate — the agent re-sends the same tool
@@ -353,9 +318,6 @@ pub fn duplicate_tool_indices(filtered: &[(usize, &AgentDebugEntry)]) -> HashSet
 /// envelopes inside a debug payload so the expanded body reads as real
 /// structure instead of escaped text.
 ///
-/// Verbatim port of `unescape_json_strings`
-/// (`src/app/ui/agent_debug_window.rs:222-273`):
-///
 /// * objects and arrays recurse into their children;
 /// * a string that trims to `{…}` / `[…]` is parsed and replaced by the
 ///   parsed value, recursively — this is what turns the agent's
@@ -366,11 +328,10 @@ pub fn duplicate_tool_indices(filtered: &[(usize, &AgentDebugEntry)]) -> HashSet
 ///   parsed the same way;
 /// * every other value is left exactly as it arrived.
 ///
-/// The JSON branch returns before the envelope branch is tried, exactly as
-/// the original did, so a string that parses as JSON is never mistaken
-/// for an envelope.
+/// The JSON branch returns before the envelope branch is tried, so a
+/// string that parses as JSON is never mistaken for an envelope.
 ///
-/// The only effect is on `value`, as in the original.
+/// The only effect is on `value`.
 pub fn unescape_json_strings(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -420,9 +381,7 @@ pub fn unescape_json_strings(value: &mut serde_json::Value) {
     }
 }
 
-/// Whether `trimmed` looks like a JSON object or array — the same
-/// bracket test the legacy UI un-escaper ran
-/// (`src/app/ui/agent_debug_window.rs:236-237`, `:255-256`).
+/// Whether `trimmed` looks like a JSON object or array.
 ///
 /// Purity: pure.
 #[must_use]
@@ -433,13 +392,10 @@ fn is_json_container(trimmed: &str) -> bool {
 
 /// The JSON an expanded row shows.
 ///
-/// The legacy UI display pipeline in the legacy UI order
-/// (`src/app/ui/agent_debug_window.rs:120-135`, `:181-188`, `:203`):
-/// replace a duplicated `tools` array, un-escape the double-encoded
-/// payloads, then `serde_json::to_string_pretty`. A serialization
-/// failure renders as the empty string — the same `unwrap_or_default`
-/// the legacy UI used, so a malformed payload degrades to a blank body rather
-/// than taking the window down ([FMD-064]).
+/// The display pipeline: replace a duplicated `tools` array, un-escape the
+/// double-encoded payloads, then `serde_json::to_string_pretty`. A
+/// serialization failure renders as the empty string, so a malformed
+/// payload degrades to a blank body rather than taking the window down.
 ///
 /// Purity: pure function of `content` and `omit_tools`.
 #[must_use]
@@ -460,8 +416,7 @@ pub fn display_json(content: &serde_json::Value, omit_tools: bool) -> String {
 /// How many lines a JSON body holds.
 ///
 /// Counted on the rendered text because the body is drawn with
-/// `Wrapping::None` (the legacy UI's `desired_width(f32::INFINITY)`), so one
-/// source line is exactly one rendered line.
+/// `Wrapping::None`, so one source line is exactly one rendered line.
 ///
 /// Purity: pure.
 #[must_use]
@@ -475,10 +430,9 @@ pub fn json_line_count(json: &str) -> usize {
 /// truncation — the rest stays reachable by scrolling
 /// (see the module header).
 ///
-/// Boundaries: `json_rows == 0` shows nothing (the legacy UI's `max_h == 0`
-/// collapsed the area; the pick list never offers 0 but the command
-/// channel can carry it); `json_rows >= total_lines` shows everything
-/// and the body does not scroll.
+/// Boundaries: `json_rows == 0` shows nothing (the pick list never offers
+/// 0, but the command channel can carry it); `json_rows >= total_lines`
+/// shows everything and the body does not scroll.
 ///
 /// Purity: pure.
 #[must_use]
@@ -488,11 +442,8 @@ pub fn visible_json_lines(total_lines: usize, json_rows: usize) -> usize {
 
 /// Height, in logical points, of an expanded JSON body.
 ///
-/// `visible_json_lines(total_lines, json_rows) × JSON_LINE_HEIGHT` — the
-/// iced equivalent of the legacy UI's `ScrollArea::max_height(max_h)` with
-/// `max_h = text_style_height(Monospace) × json_rows`
-/// (`src/app/ui/agent_debug_window.rs:204-207`). A short body takes its
-/// own height; a long one stops at the setting and scrolls.
+/// `visible_json_lines(total_lines, json_rows) × JSON_LINE_HEIGHT`. A short
+/// body takes its own height; a long one stops at the setting and scrolls.
 ///
 /// Purity: pure.
 #[must_use]
@@ -500,7 +451,7 @@ pub fn json_body_height(total_lines: usize, json_rows: usize) -> f32 {
     visible_json_lines(total_lines, json_rows) as f32 * JSON_LINE_HEIGHT
 }
 
-/// One entry of the "JSON rows" pick list ([TASK-017b4]).
+/// One entry of the "JSON rows" pick list.
 ///
 /// Carries the number rather than its label so a selection can never be
 /// mistaken for the value it names.
@@ -511,11 +462,9 @@ pub struct JsonRowsOption {
 }
 
 impl JsonRowsOption {
-    /// The intent this option publishes when picked — the existing
-    /// `UserCommand::SetDebugJsonRows`, i.e. what the legacy UI combo wrote
-    /// straight into `AgentPanelState::debug_json_rows`
-    /// (`src/app/ui/agent_debug_window.rs:41-47`,
-    /// `src/app/command_executor.rs:587`).
+    /// The intent this option publishes when picked:
+    /// `UserCommand::SetDebugJsonRows`, which writes the value into
+    /// `AgentPanelState::debug_json_rows`.
     #[must_use]
     pub fn command(self) -> Message {
         Message::Command(UserCommand::SetDebugJsonRows(self.rows))
@@ -530,13 +479,12 @@ impl std::fmt::Display for JsonRowsOption {
 
 /// The pick-list options for the current `json_rows` value.
 ///
-/// The legacy UI catalogue [`JSON_ROW_CATALOG`]
-/// (`src/app/ui/agent_debug_window.rs:37-40`) plus the current value
-/// inserted in ascending order when it is not already one of them.
-/// `UserCommand::SetDebugJsonRows` accepts any `usize`, and iced's
-/// `pick_list` can only display a value it can find among its options —
-/// without this, an off-catalogue setting would render as the empty
-/// placeholder and hide what the window is actually doing.
+/// [`JSON_ROW_CATALOG`] plus the current value inserted in ascending order
+/// when it is not already one of them. `UserCommand::SetDebugJsonRows`
+/// accepts any `usize`, and iced's `pick_list` can only display a value it
+/// can find among its options — without this, an off-catalogue setting
+/// would render as the empty placeholder and hide what the window is
+/// actually doing.
 ///
 /// Purity: pure.
 #[must_use]
@@ -557,7 +505,7 @@ pub fn json_row_options(current: usize) -> Vec<JsonRowsOption> {
     options
 }
 
-/// The kind column's label, from `crate::ui::strings` ([GUD-002]).
+/// The kind column's label, taken from `crate::ui::strings`.
 ///
 /// Purity: pure.
 #[must_use]
@@ -571,8 +519,7 @@ pub fn kind_label(kind: DebugEntryKind) -> &'static str {
 
 /// The collapsed row's label: `HH:MM:SS.fff  [Kind]  summary`.
 ///
-/// legacy parity (`src/app/ui/agent_debug_window.rs:163-168`), separators
-/// included.
+/// Separators included.
 ///
 /// Purity: pure function of `entry`.
 #[must_use]
@@ -621,10 +568,9 @@ pub fn clear_command() -> Message {
     Message::Command(UserCommand::ClearDebugEntries)
 }
 
-/// The dismiss message a scrim click / Escape emits — the legacy UI window's
-/// own close path (`UserCommand::ToggleDebugWindow(false)`,
-/// `src/app/ui/agent_debug_window.rs:149-153`), so no new
-/// `AgentDebugMessage` variant is needed for closing.
+/// The dismiss message a scrim click / Escape emits:
+/// `UserCommand::ToggleDebugWindow(false)`, so no `AgentDebugMessage`
+/// variant is needed for closing.
 #[must_use]
 pub fn dismiss_command() -> Message {
     Message::Command(UserCommand::ToggleDebugWindow(false))
@@ -655,17 +601,15 @@ pub fn scroll_reported_message(snapshot: &ScrollSnapshot) -> Message {
     })
 }
 
-/// One rendered row of the debug list ([TASK-017b4]).
+/// One rendered row of the debug list.
 ///
 /// The bus entry travels unchanged; only the display JSON is
 /// pre-computed, so the view performs no serialization, no un-escaping
-/// and no dedup pass at render time ([FMD-065]).
+/// and no dedup pass at render time.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DebugEntryView {
     /// Stable row id: the entry's index in the raw debug-entry list it
-    /// was snapshotted from — the legacy UI's `orig_idx`
-    /// (`src/app/ui/agent_debug_window.rs:106`) and the salt its
-    /// `CollapsingHeader` used.
+    /// was snapshotted from.
     pub id: usize,
     /// The bus entry, unchanged.
     pub entry: AgentDebugEntry,
@@ -708,7 +652,7 @@ pub struct AgentDebugViewModel {
     /// The rows that passed the filter, in list order.
     pub rows: Vec<DebugEntryView>,
     /// Total entries before filtering, so the UI can report how much the
-    /// filter hid ([FMD-067]).
+    /// filter hid.
     pub total_entries: usize,
     /// The free-text search filter.
     pub search_text: String,
@@ -731,7 +675,7 @@ pub struct AgentDebugViewModel {
 impl AgentDebugViewModel {
     /// Builds a snapshot from the raw pieces.
     ///
-    /// Runs the legacy UI pipeline once, at snapshot time: filter → session
+    /// Runs the whole pipeline once, at snapshot time: filter → session
     /// tools-dedup → display JSON.
     ///
     /// Purity: pure over `entries` and the four settings.
@@ -777,8 +721,7 @@ impl AgentDebugViewModel {
     /// coherent, but the per-entry deep clone plus `serde_json::to_string_pretty`
     /// that [`Self::from_entries`] performs is skipped. `debug_entries` is an
     /// uncapped buffer, so building rows for a closed window is the single
-    /// largest avoidable cost on the UI thread during a workspace scan
-    /// ([FMD-060]).
+    /// largest avoidable cost on the UI thread during a workspace scan.
     ///
     /// Purity: pure over its arguments.
     #[must_use]
@@ -800,14 +743,13 @@ impl AgentDebugViewModel {
         }
     }
 
-    /// Snapshots the window's data off `app` — the same accessors the
-    /// the legacy UI window read (`app.orchestrator.agent.state().debug_entries`
-    /// at `src/app/ui/agent_debug_window.rs:21` plus the four
-    /// `agent_panel_state` fields), moved out of render so the card stays
-    /// I/O-free ([FMD-065]).
+    /// Snapshots the window's data off `app`: the debug-entry buffer from
+    /// `app.orchestrator.agent.state().debug_entries` plus the four
+    /// `agent_panel_state` fields, read outside render so the card stays
+    /// I/O-free.
     ///
     /// While the window is closed the row pipeline is skipped entirely — see
-    /// [`Self::closed`] ([FMD-060]).
+    /// [`Self::closed`].
     #[must_use]
     pub fn from_app(app: &FastMdApp) -> Self {
         let panel = &app.orchestrator.agent_panel_state;
@@ -873,10 +815,9 @@ impl AgentDebugViewModel {
     /// The auto-scroll **intent** for this snapshot's preference and the
     /// last reported viewport geometry.
     ///
-    /// Delegates to [`crate::ui_iced::logs::should_follow`] — the
-    /// [TASK-016] rule, reused rather than copied, so both stick-to-bottom
-    /// windows follow identically. Executing it is reducer work against
-    /// [`DEBUG_SCROLLABLE_ID`].
+    /// Delegates to [`crate::ui_iced::logs::should_follow`], reused rather
+    /// than copied, so both stick-to-bottom windows follow identically.
+    /// Executing it is reducer work against [`DEBUG_SCROLLABLE_ID`].
     #[must_use]
     pub fn follow_intent(&self, snapshot: Option<ScrollSnapshot>) -> bool {
         logs::should_follow(self.auto_scroll, snapshot)
@@ -889,10 +830,9 @@ impl AgentDebugViewModel {
     }
 }
 
-/// Renders the agent debug card ([TASK-017b4]).
+/// Renders the agent debug card.
 ///
-/// Layout, mirroring the legacy UI window body
-/// (`src/app/ui/agent_debug_window.rs:23-146`):
+/// Layout:
 ///
 /// ```text
 /// Agent Debug
@@ -917,16 +857,13 @@ impl AgentDebugViewModel {
 ///
 /// The card is the *content* only: the root view mounts it through
 /// [`crate::ui_iced::overlay::modal`] with [`dismiss_command()`] as the
-/// dismiss message so a scrim click or Escape closes the window the same
-/// way the legacy UI title-bar `X` did.
+/// dismiss message so a scrim click or Escape closes the window.
 ///
 /// The control row and the list are **always allocated** — an empty
 /// buffer renders an empty list rather than a different widget tree
 /// (AGENTS §6). An expanded body *is* added to its own row on expand:
 /// iced rebuilds the tree structurally every frame, so a disclosure
-/// branch does not destabilise sibling identity the way an the legacy UI
-/// conditional would (same reasoning
-/// [`crate::ui_iced::render::code`] records for its caption).
+/// branch does not destabilise sibling identity.
 ///
 /// Purity: pure view over `view_model`.
 #[must_use]
@@ -1013,10 +950,9 @@ pub fn entry_list(view_model: &AgentDebugViewModel) -> Column<'_, Message> {
 /// body can size itself without the row having to own a copy of a
 /// window-level setting.
 ///
-/// A [`DebugEntryRow::SessionBoundary`] renders the legacy UI divider instead
-/// — rule, centred muted summary, rule (`ui/agent_debug_window.rs:108-118`) —
-/// and is deliberately **not** clickable, because the legacy UI's divider had no
-/// disclosure either.
+/// A [`DebugEntryRow::SessionBoundary`] renders a divider instead — rule,
+/// centred muted summary, rule — and is deliberately **not** clickable,
+/// because a divider has nothing to disclose.
 ///
 /// Purity: pure view over `row`.
 #[must_use]
@@ -1089,9 +1025,7 @@ fn entry_header(row: &DebugEntryView, expanded: bool) -> Element<'_, Message> {
 /// monospace JSON, capped at the `json_rows` viewport.
 ///
 /// The body is drawn with `Wrapping::None` so a long line keeps its
-/// single-line shape and the `scrollable` scrolls horizontally for it —
-/// the legacy UI's `desired_width(f32::INFINITY)` + `ScrollArea::both()`
-/// behaviour (`src/app/ui/agent_debug_window.rs:207-214`).
+/// single-line shape and the `scrollable` scrolls horizontally for it.
 fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
@@ -1119,14 +1053,13 @@ fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message>
 }
 
 /// Which debug rows are open and whether the window is showing — the pure
-/// state the reducer holds ([TASK-017b4]).
+/// state the reducer holds.
 ///
 /// Mirrors [`crate::ui_iced::about::AboutWindowState`] for the open flag
-/// and adds the expanded-row set that replaces the legacy UI's
-/// `CollapsingHeader` widget memory. `close()` deliberately **keeps**
-/// the expanded set: hiding the window in the legacy UI left the header states
-/// untouched, and reopening shows what the user had open. Clearing the
-/// buffer is the one transition that invalidates the ids, which is what
+/// and adds the expanded-row set. `close()` deliberately **keeps** the
+/// expanded set: hiding the window leaves the disclosure states untouched,
+/// and reopening shows what the user had open. Clearing the buffer is the
+/// one transition that invalidates the ids, which is what
 /// [`Self::collapse_all`] is for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentDebugWindowState {
@@ -1135,8 +1068,7 @@ pub struct AgentDebugWindowState {
 }
 
 impl AgentDebugWindowState {
-    /// A closed window with nothing expanded — the parity state for
-    /// the legacy UI's `.default_open(false)`.
+    /// A closed window with nothing expanded.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -1194,8 +1126,7 @@ impl AgentDebugWindowState {
 
     /// Toggles row `id` and returns its **new** expanded state.
     ///
-    /// Rows toggle independently: opening one never touches another, the
-    /// behaviour the legacy UI's per-header memory gave.
+    /// Rows toggle independently: opening one never touches another.
     pub fn toggle_entry(&mut self, id: usize) -> bool {
         if self.expanded.remove(&id) {
             false
@@ -1207,11 +1138,10 @@ impl AgentDebugWindowState {
 
     /// Collapses every row and returns how many were open.
     ///
-    /// the legacy UI has no collapse-all control, so no widget emits this — it
-    /// exists for the reducer, which must call it whenever the debug
-    /// buffer is cleared. Row ids are positional, so after
-    /// `UserCommand::ClearDebugEntries` a stale id would silently expand
-    /// an unrelated new entry.
+    /// No widget emits this — it exists for the reducer, which must call it
+    /// whenever the debug buffer is cleared. Row ids are positional, so
+    /// after `UserCommand::ClearDebugEntries` a stale id would silently
+    /// expand an unrelated new entry.
     pub fn collapse_all(&mut self) -> usize {
         let count = self.expanded.len();
         self.expanded.clear();

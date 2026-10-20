@@ -1,8 +1,8 @@
-//! Unit tests for the framework-free font inventory ([TASK-029b]).
+//! Unit tests for the framework-free font inventory.
 //!
 //! Pure inventory/discovery tests only ([RUST-006]): no renderer, no
-//! windowing. Glyph-shape coverage moved with the framework — the iced
-//! runtime registers these bytes via `crate::ui_iced::fonts`.
+//! windowing. Glyph-shape coverage belongs to the rendering layer — the
+//! iced runtime registers these bytes via `crate::ui_iced::fonts`.
 
 use super::*;
 

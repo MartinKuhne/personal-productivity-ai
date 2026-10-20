@@ -1,14 +1,13 @@
-//! Sidecar unit tests for `ui_iced/batch_dialog.rs` ([TASK-017b3]).
+//! Sidecar unit tests for `ui_iced/batch_dialog.rs`.
 //!
 //! Pure view-model, state-transition and widget-construction tests
 //! ([RUST-003]). No renderer, no bus and no filesystem: every candidate
 //! list is a synthetic literal that is never opened, and the only rule the
 //! tests exercise from the batch subsystem is the pure
-//! `validate_batch_params` the legacy UI dialog already called ([RUST-006]).
+//! `validate_batch_params` gate ([RUST-006]).
 //!
-//! The seven `is_config_valid` cases mirror the legacy UI originals in
-//! `src/app/ui/batch_dialog_tests.rs:8-97` so the shared gate is pinned
-//! on both sides of the migration.
+//! The seven `is_config_valid` cases pin that shared gate across its full
+//! valid and invalid range.
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
@@ -309,7 +308,7 @@ fn build_batch_config_is_none_when_either_pick_is_missing() {
     }
 }
 
-// --- Selection-state rules the legacy UI dialog ran ------------------------
+// --- Selection-state rules ------------------------------------------------
 
 #[test]
 fn clamp_selection_drops_an_index_past_the_list_end() {
@@ -357,7 +356,7 @@ fn cancel_message_is_cancel_batch_on_the_command_channel() {
 #[test]
 fn every_batch_cancel_path_shares_one_transition() {
     // Cancel button, Close button, scrim and Escape all map to the same
-    // command, matching the legacy UI dialog's single cancel publish.
+    // command — a single cancel publish.
     let paths = [cancel_message(), cancel_message(), cancel_message()];
     for path in paths {
         assert_eq!(path, Message::Command(UserCommand::CancelBatch));

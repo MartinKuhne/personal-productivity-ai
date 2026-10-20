@@ -2,7 +2,7 @@
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (MD-001..MD-018) for the full specification.
 //!
-//! Per `src/desktop/AGENTS.md`, this subsystem is the single import point for `pulldown-cmark`,
+//! Per `src/app/AGENTS.md`, this subsystem is the single import point for `pulldown-cmark`,
 //! `serde_norway` front-matter/table parsing, and Markdown AST types. `ui/`, `tools/`, `print.rs`,
 //! and `editor.rs` call into `markdown::` rather than handling Markdown directly.
 //!
@@ -13,7 +13,7 @@
 //! - `parser` — `pulldown-cmark`-backed parsing and HTML rendering.
 //! - `table_width` — pure Fair Table Width Algorithm (no UI framework, no Markdown types).
 //! - `validation` — pre-save Markdown validation for the inline editor
-//!   ([TASK-014], UI-043).
+//!   (UI-043).
 
 pub(crate) mod document;
 pub(crate) mod link_scanner;
