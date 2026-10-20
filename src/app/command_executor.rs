@@ -72,6 +72,81 @@ impl AppOrchestrator {
             UserCommand::OpenAboutDialog => {
                 self.dialogs.about_dialog_open = true;
             }
+            UserCommand::OpenFindDialog => {
+                self.dialogs.find_dialog_open = true;
+                self.dialogs.find_focus_requested = true;
+                if !self.dialogs.find_query.trim().is_empty()
+                    && !self.tabs.current_markdown.is_empty()
+                {
+                    let total = crate::ui::find_dialog::count_document_matches(
+                        &self.tabs.current_markdown,
+                        &self.dialogs.find_query,
+                    );
+                    if total > 0 {
+                        self.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new(
+                            self.dialogs.find_query.clone(),
+                            self.dialogs.find_match_index.min(total - 1),
+                        ));
+                    }
+                }
+            }
+            UserCommand::CloseFindDialog => {
+                self.dialogs.find_dialog_open = false;
+            }
+            UserCommand::SetFindQuery(query) => {
+                self.dialogs.find_query = query.clone();
+                self.dialogs.find_match_index = 0;
+                if !query.trim().is_empty() && !self.tabs.current_markdown.is_empty() {
+                    let total = crate::ui::find_dialog::count_document_matches(
+                        &self.tabs.current_markdown,
+                        &query,
+                    );
+                    if total > 0 {
+                        self.tabs.scroll_to_search =
+                            Some(crate::ui::tabs::SearchJump::new(query, 0));
+                    }
+                }
+            }
+            UserCommand::FindNext => {
+                if !self.dialogs.find_query.trim().is_empty()
+                    && !self.tabs.current_markdown.is_empty()
+                {
+                    let total = crate::ui::find_dialog::count_document_matches(
+                        &self.tabs.current_markdown,
+                        &self.dialogs.find_query,
+                    );
+                    if total > 0 {
+                        self.dialogs.find_match_index = crate::ui::find_dialog::next_match_index(
+                            self.dialogs.find_match_index,
+                            total,
+                        );
+                        self.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new(
+                            self.dialogs.find_query.clone(),
+                            self.dialogs.find_match_index,
+                        ));
+                    }
+                }
+            }
+            UserCommand::FindPrevious => {
+                if !self.dialogs.find_query.trim().is_empty()
+                    && !self.tabs.current_markdown.is_empty()
+                {
+                    let total = crate::ui::find_dialog::count_document_matches(
+                        &self.tabs.current_markdown,
+                        &self.dialogs.find_query,
+                    );
+                    if total > 0 {
+                        self.dialogs.find_match_index = crate::ui::find_dialog::prev_match_index(
+                            self.dialogs.find_match_index,
+                            total,
+                        );
+                        self.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new(
+                            self.dialogs.find_query.clone(),
+                            self.dialogs.find_match_index,
+                        ));
+                    }
+                }
+            }
             UserCommand::ToggleBackgroundLogs(show) => {
                 self.background_manager.lock().unwrap().show_background_logs = show;
             }

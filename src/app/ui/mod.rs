@@ -9,6 +9,7 @@ pub mod background_logs;
 pub mod batch_dialog;
 pub(crate) mod dialogs;
 pub mod editor_egui;
+pub mod find_dialog;
 pub mod fonts;
 pub(crate) mod link_resolver;
 pub mod logo;
@@ -38,13 +39,14 @@ pub mod widgets;
 pub(crate) use crate::markdown::ToCEntry;
 pub(crate) use app::{FastMdApp, TreeNode};
 pub use dialogs::{Dialogs, OAuthFlowStatus};
+pub use find_dialog::show_find_dialog;
 pub use link_resolver::{LinkAction, resolve_link};
 pub(crate) use os_shell::{open_in_system_editor, show_in_file_explorer};
 pub use panel_layout::PanelLayout;
 pub use persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
 pub use selection::FileSelection;
 pub use tab_item::TabItem;
-pub use tabs::Tabs;
+pub use tabs::{SearchJump, Tabs};
 pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};
 pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,

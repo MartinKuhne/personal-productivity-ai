@@ -139,6 +139,18 @@ pub enum UserCommand {
     /// `ALT+A` — toggle the agent debug window.
     ToggleAgentDebugWindowShortcut,
 
+    // ── Find dialog (surface G / C) ────────────────────────────────────
+    /// Open the in-document find dialog and request focus on search input.
+    OpenFindDialog,
+    /// Close the in-document find dialog.
+    CloseFindDialog,
+    /// Jump to the next occurrence of the search term in the active document.
+    FindNext,
+    /// Jump to the previous occurrence of the search term in the active document.
+    FindPrevious,
+    /// Set the search query and jump to the first occurrence.
+    SetFindQuery(String),
+
     // ── Agent session (surface C) ─────────────────────────────────────
     /// Clear the agent session (close button in agent panel).
     ClearAgentSession,

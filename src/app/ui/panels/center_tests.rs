@@ -127,7 +127,7 @@ fn test_center_panel_scroll_to_search_cleared_on_match() {
     app.orchestrator.selection.selected_file = Some(path.clone());
     app.orchestrator.tabs.current_markdown =
         "# Heading 1\n\nSome paragraph containing keyword.\n".to_string();
-    app.orchestrator.tabs.scroll_to_search = Some("keyword".to_string());
+    app.orchestrator.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new("keyword", 0));
 
     let ctx = egui::Context::default();
     let raw_input = egui::RawInput {
@@ -143,5 +143,45 @@ fn test_center_panel_scroll_to_search_cleared_on_match() {
     });
 
     // scroll_to_search should be consumed and cleared after jumping to the match
+    assert_eq!(app.orchestrator.tabs.scroll_to_search, None);
+}
+
+#[test]
+fn test_center_panel_scroll_to_subsequent_matches() {
+    let mut app = crate::ui::app::FastMdApp::empty_state(crate::config::AppConfig::default());
+    let path = PathBuf::from("/tmp/multi_search_doc.md");
+    app.orchestrator.tabs.tabs.push(path.clone());
+    app.orchestrator.selection.selected_file = Some(path);
+    app.orchestrator.tabs.current_markdown =
+        "# First Section\n\nFirst keyword paragraph.\n\nSecond keyword paragraph.\n\nThird keyword paragraph.\n".to_string();
+
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        )),
+        ..egui::RawInput::default()
+    };
+
+    // First jump (match 0)
+    app.orchestrator.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new("keyword", 0));
+    let _ = crate::ui::test_helpers::run_ui_test(&ctx, raw_input.clone(), |ui| {
+        show_center_panel(&mut app, ui);
+    });
+    assert_eq!(app.orchestrator.tabs.scroll_to_search, None);
+
+    // Subsequent jump (match 1)
+    app.orchestrator.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new("keyword", 1));
+    let _ = crate::ui::test_helpers::run_ui_test(&ctx, raw_input.clone(), |ui| {
+        show_center_panel(&mut app, ui);
+    });
+    assert_eq!(app.orchestrator.tabs.scroll_to_search, None);
+
+    // Subsequent jump (match 2)
+    app.orchestrator.tabs.scroll_to_search = Some(crate::ui::tabs::SearchJump::new("keyword", 2));
+    let _ = crate::ui::test_helpers::run_ui_test(&ctx, raw_input, |ui| {
+        show_center_panel(&mut app, ui);
+    });
     assert_eq!(app.orchestrator.tabs.scroll_to_search, None);
 }

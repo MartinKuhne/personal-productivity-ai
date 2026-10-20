@@ -89,6 +89,27 @@ fn table_cells_contain(cells: &[Vec<Vec<crate::markdown::InlineElem>>], term_low
     })
 }
 
+/// Purpose: Checks whether a given `RenderEvent` contains the search query.
+/// Inputs: `event` - render event to test, `term_lower` - lowercase query string
+/// Outputs: `true` if the event contains `term_lower`
+/// Purity: Pure
+pub fn render_event_contains_query(event: &crate::markdown::RenderEvent, term_lower: &str) -> bool {
+    match event {
+        crate::markdown::RenderEvent::FlushInline { elems, .. } => {
+            inline_elems_contain(elems, term_lower)
+        }
+        crate::markdown::RenderEvent::CodeBlock { content, .. } => {
+            content.to_lowercase().contains(term_lower)
+        }
+        crate::markdown::RenderEvent::Heading { elems, .. } => {
+            let text = heading_plain_text(elems);
+            text.trim().to_lowercase().contains(term_lower)
+        }
+        crate::markdown::RenderEvent::Table(cells) => table_cells_contain(cells, term_lower),
+        crate::markdown::RenderEvent::Space(_) | crate::markdown::RenderEvent::Separator => false,
+    }
+}
+
 /// Render parsed markdown events with support for TOC scroll targets.
 /// Test-only convenience wrapper over [`render_markdown_with_search`] for the
 /// render test suites. Production callers go through
@@ -120,7 +141,7 @@ pub fn render_markdown_with_search(
     ui: &mut egui::Ui,
     markdown_text: &str,
     scroll_to_id_str: &mut Option<String>,
-    scroll_to_search: &mut Option<String>,
+    scroll_to_search: &mut Option<crate::ui::tabs::SearchJump>,
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
     heading_ids: Option<&[String]>,
@@ -175,6 +196,9 @@ pub fn render_markdown_with_search(
     let viewport_margin = 400.0_f32;
     let can_cull = scroll_to_id_str.is_none() && scroll_to_search.is_none();
 
+    let mut match_ordinal = 0usize;
+    let target_jump = scroll_to_search.clone();
+
     for event in events.iter() {
         let top_y = ui.cursor().min.y;
         if can_cull && clip.is_positive() && top_y > clip.max.y + viewport_margin {
@@ -225,6 +249,21 @@ pub fn render_markdown_with_search(
                 }
             }
         }
+
+        let is_match = if let Some(target) = &target_jump {
+            render_event_contains_query(event, &target.query.to_lowercase())
+        } else {
+            false
+        };
+        let should_scroll = if is_match {
+            let target_idx = target_jump.as_ref().map(|s| s.match_index).unwrap_or(0);
+            let is_target = match_ordinal == target_idx;
+            match_ordinal += 1;
+            is_target
+        } else {
+            false
+        };
+
         match event {
             RenderEvent::FlushInline {
                 elems,
@@ -233,11 +272,6 @@ pub fn render_markdown_with_search(
                 indent,
                 list_ordinal,
             } => {
-                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
-                    inline_elems_contain(elems, &target.to_lowercase())
-                } else {
-                    false
-                };
                 let item = InlineRenderItem {
                     elems,
                     needs_bullet: *needs_bullet,
@@ -248,23 +282,12 @@ pub fn render_markdown_with_search(
                     scroll_to_me: should_scroll,
                 };
                 render_inline(ui, &item, pending_toggles);
-                if should_scroll {
-                    *scroll_to_search = None;
-                }
                 if task_checked.is_some() {
                     task_index += 1;
                 }
             }
             RenderEvent::CodeBlock { language, content } => {
-                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
-                    content.to_lowercase().contains(&target.to_lowercase())
-                } else {
-                    false
-                };
                 render_code_block_scroll(ui, language.as_deref(), content, should_scroll);
-                if should_scroll {
-                    *scroll_to_search = None;
-                }
             }
             RenderEvent::Heading { level, elems } => {
                 let text = heading_plain_text(elems);
@@ -277,20 +300,12 @@ pub fn render_markdown_with_search(
                 } else {
                     heading_id_for(trimmed)
                 };
-                if let Some(target) = scroll_to_search.as_deref()
-                    && trimmed.to_lowercase().contains(&target.to_lowercase())
-                {
+                if should_scroll {
                     *scroll_to_id_str = Some(heading_id_str.clone());
-                    *scroll_to_search = None;
                 }
                 render_heading(ui, elems, *level, scroll_to_id_str, &heading_id_str);
             }
             RenderEvent::Table(cells) => {
-                let should_scroll = if let Some(target) = scroll_to_search.as_deref() {
-                    table_cells_contain(cells, &target.to_lowercase())
-                } else {
-                    false
-                };
                 render_table_with_config(
                     ui,
                     cells,
@@ -300,7 +315,6 @@ pub fn render_markdown_with_search(
                 );
                 if should_scroll {
                     ui.scroll_to_cursor(Some(egui::Align::Center));
-                    *scroll_to_search = None;
                 }
                 table_ordinal += 1;
             }
@@ -311,6 +325,10 @@ pub fn render_markdown_with_search(
                 ui.separator();
             }
         }
+    }
+
+    if scroll_to_search.is_some() {
+        *scroll_to_search = None;
     }
 }
 
