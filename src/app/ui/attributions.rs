@@ -83,6 +83,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/MartinKuhne/fast_h2m",
     },
     Attribution {
+        name: "futures",
+        authors: "Tokio Contributors, Rust Project Developers",
+        github_url: "https://github.com/rust-lang/futures-rs",
+    },
+    Attribution {
         name: "futures-util",
         authors: "Tokio Contributors, Rust Project Developers",
         github_url: "https://github.com/rust-lang/futures-rs",

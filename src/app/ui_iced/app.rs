@@ -68,8 +68,8 @@ use std::sync::{Arc, Mutex};
 use iced::widget::pane_grid;
 use iced::{Size, Task};
 
-use crate::background::logs::BackgroundLogs;
 use crate::background::Task as BackgroundTask;
+use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::{AppConfig, ConfigStorageHandler, ContentLibrary};
@@ -99,8 +99,8 @@ use crate::ui_iced::subscription::{self, BusReceivers};
 use crate::ui_iced::tools_dialog::{ToolsDialogState, ToolsDialogViewModel};
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use crate::workspace::Tags;
+use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use fastmd_agent::AgentSession;
 
 /// Window width ported from the legacy UI `ViewportBuilder::with_inner_size`
@@ -845,7 +845,7 @@ pub fn build_state(
         config_bus,
         &event_bus,
         &agent_event_bus,
-        background_task.tx.subscribe(),
+        background_task.rx_futures,
     );
 
     // DEC-009 startup `ConfigArrived` publish, performed **synchronously:

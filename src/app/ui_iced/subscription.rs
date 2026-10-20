@@ -91,10 +91,11 @@
 //!
 //! Unit tests live in the sibling `subscription_tests.rs` sidecar.
 
+use futures::channel::mpsc::UnboundedReceiver;
+use futures::lock::Mutex as FuturesMutex;
+use futures::stream::StreamExt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-
-use iced::futures::StreamExt;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use crate::bus::core::Bus;
@@ -230,22 +231,21 @@ impl<T: Clone + Send + 'static> Hash for SharedReceiver<T> {
     }
 }
 
-/// Handle to the `tokio::sync::broadcast` background-event channel.
+/// Handle to the futures-compatible background-event channel.
 ///
-/// Background workers send via `broadcast::Sender` (never blocks).
-/// The subscription polls the `broadcast::Receiver` on the iced executor.
-/// Uses `Arc<Mutex<...>>` so that clones share the same receiver, ensuring
-/// messages sent after subscription are received by all clones (unlike
-/// `resubscribe()` which only sees messages sent after the resubscribe call).
+/// Background workers send via `tokio::sync::broadcast::Sender` (never blocks).
+/// A dedicated tokio bridge task forwards events to a `futures::channel::mpsc` channel.
+/// The subscription polls the `UnboundedReceiver` on the iced executor (futures executor).
+/// Uses `Arc<FuturesMutex<...>>` so that clones share the same receiver.
 pub struct BackgroundReceiver {
-    inner: Arc<tokio::sync::Mutex<broadcast::Receiver<BackgroundEvent>>>,
+    inner: Arc<FuturesMutex<UnboundedReceiver<BackgroundEvent>>>,
 }
 
 impl BackgroundReceiver {
-    /// Wraps a broadcast receiver.
-    pub fn from_broadcast(receiver: broadcast::Receiver<BackgroundEvent>) -> Self {
+    /// Wraps a futures-compatible receiver.
+    pub fn from_futures(receiver: UnboundedReceiver<BackgroundEvent>) -> Self {
         Self {
-            inner: Arc::new(tokio::sync::Mutex::new(receiver)),
+            inner: Arc::new(FuturesMutex::new(receiver)),
         }
     }
 }
@@ -282,7 +282,7 @@ pub struct BusReceivers {
     pub file: SharedReceiver<FileEvent>,
     /// `Bus<AgentEvent>` — the agent's streaming turn events.
     pub agent: SharedReceiver<AgentEvent>,
-    /// The `tokio::sync::mpsc<BackgroundEvent>` channel.
+    /// The `futures::channel::mpsc<BackgroundEvent>` channel.
     pub background: BackgroundReceiver,
 }
 
@@ -292,13 +292,13 @@ impl BusReceivers {
         config_bus: &Bus<ConfigArrived>,
         file_bus: &Bus<FileEvent>,
         agent_bus: &Bus<AgentEvent>,
-        background_rx: broadcast::Receiver<BackgroundEvent>,
+        background_rx: UnboundedReceiver<BackgroundEvent>,
     ) -> Self {
         Self {
             config: SharedReceiver::from_bus(config_bus),
             file: SharedReceiver::from_bus(file_bus),
             agent: SharedReceiver::from_bus(agent_bus),
-            background: BackgroundReceiver::from_broadcast(background_rx),
+            background: BackgroundReceiver::from_futures(background_rx),
         }
     }
 }
@@ -637,19 +637,24 @@ fn background_stream(
 ) -> iced::futures::stream::BoxStream<'static, Message> {
     let inner = Arc::clone(&handle.inner);
     iced::futures::stream::unfold(inner, |inner| async move {
-        // recv() returns Result; on channel closed (RecvError::Closed), return None to end stream
+        // next() returns Option; on channel closed (None), return None to end stream
         let first = {
             let mut receiver = inner.lock().await;
-            match receiver.recv().await {
-                Ok(event) => event,
-                Err(_) => return None, // Channel closed, end the stream
+            match receiver.next().await {
+                Some(event) => event,
+                None => return None, // Channel closed, end the stream
             }
         };
         let mut batch = vec![first];
         {
             let mut receiver = inner.lock().await;
-            while let Ok(extra) = receiver.try_recv() {
-                batch.push(extra);
+            // Try to drain additional events that are already queued
+            loop {
+                match receiver.try_recv() {
+                    Ok(extra) => batch.push(extra),
+                    Err(e) if e.is_empty() => break,
+                    Err(_) => break, // Disconnected or other error
+                }
             }
         }
         let event = if batch.len() == 1 {

@@ -1532,6 +1532,7 @@ dependencies = [
  "fastmd-agent",
  "fastmd-pdf",
  "filetime",
+ "futures",
  "futures-util",
  "glob",
  "html-escape",

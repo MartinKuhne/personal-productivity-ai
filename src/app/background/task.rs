@@ -14,6 +14,7 @@ use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::bus::router::BusRouter;
 use crate::config::AppConfig;
 use crate::workspace::watcher::FileWatcher;
+use futures::channel::mpsc::UnboundedReceiver;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
@@ -24,6 +25,9 @@ use tokio::sync::broadcast;
 pub struct Task {
     /// Broadcast sender handed to every background worker.
     pub tx: BackgroundEventSender,
+    /// Futures-compatible receiver for the iced subscription bridge.
+    /// This is fed by a tokio bridge task that forwards from the broadcast channel.
+    pub rx_futures: UnboundedReceiver<BackgroundEvent>,
     /// File-event bus shared by background workers and the UI.
     pub file_event_bus: Bus<FileEvent>,
     /// Slot containing the watcher after initial scan completion.
@@ -38,7 +42,7 @@ impl Task {
     /// Wait for configuration, then spawn the background workers.
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
         // Use broadcast channel like other buses (ConfigArrived, FileEvent, AgentEvent)
-        let (tx_broadcast, _rx_broadcast) = broadcast::channel(1024);
+        let (tx_broadcast, rx_broadcast) = broadcast::channel(1024);
         let tx = BackgroundEventSender::new(tx_broadcast);
         let tx_clone = tx.clone();
         let file_event_bus = Bus::new();
@@ -53,6 +57,28 @@ impl Task {
         let finished_watcher_for_worker = finished_watcher.clone();
         #[cfg(feature = "vector-search")]
         let vector_search_service_for_thread = vector_search_service.clone();
+
+        // Create a futures-compatible channel for the iced subscription bridge.
+        // A tokio bridge task will forward events from the broadcast channel to this sender.
+        let (futures_tx, futures_rx) = futures::channel::mpsc::unbounded::<BackgroundEvent>();
+        let futures_tx_for_bridge = futures_tx.clone();
+
+        // Spawn the tokio bridge task that forwards from broadcast to futures channel.
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for broadcast->futures bridge");
+            rt.block_on(async move {
+                let mut rx = rx_broadcast;
+                while let Ok(event) = rx.recv().await {
+                    if futures_tx_for_bridge.unbounded_send(event).is_err() {
+                        // Receiver dropped, bridge can stop
+                        break;
+                    }
+                }
+            });
+        });
 
         std::thread::spawn(move || {
             #[cfg(feature = "vector-search")]
@@ -87,6 +113,7 @@ impl Task {
 
         Self {
             tx,
+            rx_futures: futures_rx,
             file_event_bus,
             finished_watcher,
             #[cfg(feature = "vector-search")]

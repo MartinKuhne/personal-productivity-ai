@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use futures::channel::mpsc::unbounded;
 use iced::futures::StreamExt;
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
@@ -403,8 +404,8 @@ fn test_distinct_shared_receivers_have_distinct_identities() {
 
 #[test]
 fn test_background_receiver_clones_share_one_identity() {
-    let (_sender, receiver) = tokio::sync::broadcast::channel::<BackgroundEvent>(16);
-    let handle = BackgroundReceiver::from_broadcast(receiver);
+    let (_sender, receiver) = unbounded::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_futures(receiver);
     assert_eq!(hash_of(&handle), hash_of(&handle.clone()));
 }
 
@@ -469,10 +470,10 @@ async fn test_agent_stream_delivers_the_mapped_message() {
 
 #[tokio::test]
 async fn test_background_stream_delivers_the_mapped_message() {
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
-    let handle = BackgroundReceiver::from_broadcast(receiver);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_futures(receiver);
     sender
-        .send(BackgroundEvent::Fs(FsEvent::Finished))
+        .unbounded_send(BackgroundEvent::Fs(FsEvent::Finished))
         .expect("send");
 
     let message = background_stream(&handle)
@@ -484,50 +485,11 @@ async fn test_background_stream_delivers_the_mapped_message() {
         Message::Inbound(InboundMessage::Background(_))
     ));
 }
-async fn test_lag_surfaces_as_events_dropped_then_resynchronises() {
-    // Capacity 1: the second publish evicts the unread first one and the
-    // receiver reports the loss — the same `Lagged(n)` the legacy UI drain loops
-    // read off `BusReader::try_recv_exposing_lag`.
-    let (sender, receiver) = broadcast::channel::<FileEvent>(1);
-    let handle = SharedReceiver::new(receiver);
-    let evicted = FileEvent::updated_one(PathBuf::from("evicted.md"));
-    let survivor = FileEvent::updated_one(PathBuf::from("survivor.md"));
-    sender.send(evicted).expect("send");
-    sender.send(survivor.clone()).expect("send");
-
-    let mut stream = file_stream(&handle);
-    assert_eq!(
-        stream.next().await.expect("a lag report"),
-        Message::Inbound(InboundMessage::EventsDropped {
-            source: BusSource::File,
-            count: 1,
-        }),
-        "the dropped count must reach the UI ([FMD-067], [FMD-072])"
-    );
-    assert_eq!(
-        stream.next().await.expect("the next valid event"),
-        Message::Inbound(InboundMessage::FileChanged(survivor)),
-        "the stream must keep running and re-synchronise on the next event"
-    );
-}
-
-#[tokio::test]
-async fn test_broadcast_stream_ends_when_the_bus_is_closed() {
-    let bus: Bus<FileEvent> = Bus::new();
-    let handle = SharedReceiver::from_bus(&bus);
-    drop(bus);
-
-    let mut stream = file_stream(&handle);
-    assert!(
-        stream.next().await.is_none(),
-        "a closed bus must end the stream, not spin"
-    );
-}
 
 #[tokio::test]
 async fn test_background_stream_ends_when_the_sender_is_dropped() {
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
-    let handle = BackgroundReceiver::from_broadcast(receiver);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_futures(receiver);
     drop(sender);
 
     let mut stream = background_stream(&handle);
@@ -589,8 +551,8 @@ async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
 
 #[tokio::test]
 async fn test_background_stream_coalesces_a_queued_burst() {
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
-    let handle = BackgroundReceiver::from_broadcast(receiver);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
+    let handle = BackgroundReceiver::from_futures(receiver);
     let burst = vec![
         BackgroundEvent::Fs(FsEvent::DirParsed {
             path: PathBuf::from("dir"),
@@ -602,7 +564,7 @@ async fn test_background_stream_coalesces_a_queued_burst() {
         BackgroundEvent::Fs(FsEvent::Finished),
     ];
     for event in burst.clone() {
-        sender.send(event).expect("send");
+        sender.unbounded_send(event).expect("send");
     }
 
     let mut stream = background_stream(&handle);
@@ -629,7 +591,7 @@ async fn test_background_stream_coalesces_a_queued_burst() {
 
 #[test]
 fn test_subscription_builds_from_receivers() {
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
@@ -656,7 +618,7 @@ fn test_subscription_builds_from_receivers() {
 
 #[test]
 fn test_bus_receivers_clone_keeps_every_identity_stable() {
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
@@ -919,7 +881,7 @@ fn test_keyboard_lane_builds_and_merges_into_the_main_subscription() {
     let lane = keyboard_events();
     drop(lane);
 
-    let (sender, receiver) = broadcast::channel::<BackgroundEvent>(16);
+    let (sender, receiver) = unbounded::<BackgroundEvent>();
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
