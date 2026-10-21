@@ -2,7 +2,7 @@
 //! discovered files to PDF/vision worker queues by extension.
 
 use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind, FileEvent};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
@@ -56,14 +56,17 @@ impl BusRouter {
                     break;
                 }
 
-                if !matches!(
-                    event.kind,
-                    FileEventKind::Discovered | FileEventKind::Updated
-                ) {
-                    continue;
-                }
+                // [REQ-330..332]: route file events with kind Added/Changed;
+                // deletions and directory events are not conversion work.
+                let paths = match &event {
+                    FileEvent::FileChanged(FileChanged {
+                        kind: FileChangedKind::Added | FileChangedKind::Changed,
+                        files,
+                    }) => files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                    _ => continue,
+                };
 
-                for p in &event.paths {
+                for p in &paths {
                     let ext = p
                         .extension()
                         .and_then(|e| e.to_str())

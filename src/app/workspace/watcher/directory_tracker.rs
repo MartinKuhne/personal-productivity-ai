@@ -1,7 +1,7 @@
 //! Maintains the set of all known directories by consuming file events from the event bus.
 
 use crate::bus::core::BusReader;
-use crate::bus::events::file::{FileEvent, FileEventKind};
+use crate::bus::events::file::{DirectoryChangedKind, FileChangedKind, FileEvent};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -37,33 +37,31 @@ impl DirectoryTracker {
         let mut changed = false;
 
         while let Ok(event) = self.reader.try_recv() {
-            match event.kind {
-                FileEventKind::DirDiscovered => {
-                    for p in &event.paths {
-                        if self.dirs.insert(p.clone()) {
+            match event {
+                FileEvent::DirectoryChanged(dir) => match dir.kind {
+                    DirectoryChangedKind::Added => {
+                        if self.dirs.insert(dir.path) {
                             changed = true;
                         }
                     }
-                }
-                FileEventKind::DirRemoved => {
-                    for p in &event.paths {
-                        if self.remove_dir_and_descendants(p) {
+                    DirectoryChangedKind::Deleted => {
+                        if self.remove_dir_and_descendants(&dir.path) {
                             changed = true;
                         }
                     }
-                }
-                FileEventKind::Discovered => {
-                    // Safety net: ensure parent directory is tracked.
-                    for p in &event.paths {
-                        if let Some(parent) = p.parent()
-                            && self.dirs.insert(parent.to_path_buf())
-                        {
-                            changed = true;
+                },
+                FileEvent::FileChanged(file_changed) => {
+                    // Safety net: for newly added files, ensure the parent
+                    // directory is tracked.
+                    if file_changed.kind == FileChangedKind::Added {
+                        for entry in &file_changed.files {
+                            if let Some(parent) = entry.path.parent()
+                                && self.dirs.insert(parent.to_path_buf())
+                            {
+                                changed = true;
+                            }
                         }
                     }
-                }
-                FileEventKind::Removed | FileEventKind::Updated => {
-                    // No directory state change for file removals or updates.
                 }
             }
         }

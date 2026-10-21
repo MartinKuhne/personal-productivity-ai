@@ -1,7 +1,7 @@
 //! Drains file events from the bus to maintain running lists of all known files and directories.
 
 use crate::bus::core::BusReader;
-use crate::bus::events::file::{FileEvent, FileEventKind};
+use crate::bus::events::file::{FileChangedKind, FileEvent};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -101,28 +101,31 @@ impl FileEventProcessor {
         let mut needs_reload = false;
 
         while let Ok(event) = self.reader.try_recv() {
-            match event.kind {
-                FileEventKind::Discovered => {
-                    for p in &event.paths {
-                        if self.add_file(p.clone()) {
-                            needs_reload = true;
+            match event {
+                FileEvent::FileChanged(file_changed) => match file_changed.kind {
+                    FileChangedKind::Added => {
+                        for entry in &file_changed.files {
+                            if self.add_file(entry.path.clone()) {
+                                needs_reload = true;
+                            }
                         }
                     }
-                }
-                FileEventKind::Updated => {
-                    // Mark that loaded file may need refresh if it's the active file
-                    // The actual reload decision is made by FastMdApp based on loaded_path
-                    // We just signal that something changed.
-                    needs_reload = true;
-                }
-                FileEventKind::Removed => {
-                    for p in &event.paths {
-                        self.remove_file(p);
+                    FileChangedKind::Changed => {
+                        // Mark that loaded file may need refresh if it's the
+                        // active file. The actual reload decision is made by
+                        // FastMdApp based on loaded_path. We just signal that
+                        // something changed.
+                        needs_reload = true;
                     }
-                    // Deletion handled by FastMdApp; we just signal change
-                    needs_reload = true;
-                }
-                FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
+                    FileChangedKind::Deleted => {
+                        for entry in &file_changed.files {
+                            self.remove_file(&entry.path);
+                        }
+                        // Deletion handled by FastMdApp; we just signal change
+                        needs_reload = true;
+                    }
+                },
+                FileEvent::DirectoryChanged(_) => {
                     // Directory events are handled by DirectoryTracker.
                 }
             }
@@ -238,19 +241,10 @@ mod tests {
     fn test_process_events_updated_and_dir_ignored() {
         let bus = Bus::new();
         let mut p = FileEventProcessor::new(bus.subscribe());
-        bus.publish(FileEvent {
-            kind: FileEventKind::Updated,
-            paths: vec![PathBuf::from("x.md")],
-        });
+        bus.publish(FileEvent::updated_one(PathBuf::from("x.md")));
         assert!(p.process_events());
-        bus.publish(FileEvent {
-            kind: FileEventKind::DirDiscovered,
-            paths: vec![PathBuf::from("docs")],
-        });
-        bus.publish(FileEvent {
-            kind: FileEventKind::DirRemoved,
-            paths: vec![PathBuf::from("docs")],
-        });
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("docs")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("docs")));
         // Dir events do not set needs_reload, so false when only those queued
         assert!(!p.process_events());
         // No events -> false

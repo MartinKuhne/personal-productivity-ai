@@ -113,27 +113,16 @@ impl Indexer {
 
             let mut batch_paths: Vec<PathBuf> = Vec::new();
             let mut current_parent: Option<PathBuf> = None;
-            // [REQ-320] The crawler publishes one `[DirectoryChanged]`
-            // (`DirDiscovered`, kind `Added`) event per library carrying the
-            // fully qualified paths of every enumerated directory
-            // ([REQ-321], [REQ-333]) — kind-homogeneous per [REQ-332].
-            let mut dir_batch: Vec<PathBuf> = Vec::new();
 
             let flush_batch = |batch: &mut Vec<PathBuf>, bus: &Bus<FileEvent>| {
                 if !batch.is_empty() {
                     bus.publish(FileEvent::discovered(std::mem::take(batch)));
                 }
             };
-            let flush_dirs = |dirs: &mut Vec<PathBuf>, bus: &Bus<FileEvent>| {
-                if !dirs.is_empty() {
-                    bus.publish(FileEvent::dir_discovered(std::mem::take(dirs)));
-                }
-            };
 
             for entry in walker.filter_map(|e| e.ok()) {
                 if self.cancel.load(Ordering::SeqCst) {
                     flush_batch(&mut batch_paths, &self.bus);
-                    flush_dirs(&mut dir_batch, &self.bus);
                     return;
                 }
                 files_scanned += 1;
@@ -179,12 +168,14 @@ impl Indexer {
                         }
                     }
                 } else if path.is_dir() {
-                    // [REQ-320] Directory enumeration is published as a
-                    // `[DirectoryChanged]` event on the file-event bus (the
-                    // directory manager's channel) instead of the redundant
-                    // `FsEvent::DirParsed` background-channel copy the
-                    // crawler used to send.
-                    dir_batch.push(path.to_path_buf());
+                    // [REQ-320..322] Emit a `[DirectoryChanged]` event with
+                    // the fully qualified path ([REQ-321]) and `Kind` = Added
+                    // as soon as the directory is enumerated — on the
+                    // file-event bus, the directory manager's channel
+                    // ([REQ-431]). One directory per event; no batching,
+                    // because `[DirectoryChanged].Path` is singular.
+                    self.bus
+                        .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
@@ -209,7 +200,6 @@ impl Indexer {
             }
 
             flush_batch(&mut batch_paths, &self.bus);
-            flush_dirs(&mut dir_batch, &self.bus);
         }
 
         #[cfg(feature = "image-library")]

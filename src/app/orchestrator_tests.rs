@@ -8,7 +8,7 @@ use crate::bus::core::Bus;
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+use crate::bus::events::typed::{FsEvent, McpAuthEvent, ProcessEvent};
 use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
@@ -17,7 +17,6 @@ use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use arc_swap::ArcSwap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 

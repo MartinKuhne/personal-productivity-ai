@@ -316,7 +316,7 @@ C4Component
   title FastMD — Messaging & Event Bus Subsystem
 
   Component(core, "Bus<T> / BusReader<T>", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
-  Component(fev, "FileEvent & FileEventProducer", "FileEventKind{Discovered, Updated, Removed, DirDiscovered, DirRemoved}; FileEventProducer convenience wrapper")
+  Component(fev, "FileEvent & FileEventProducer", "FileEvent union on Bus<FileEvent>: FileChanged{kind Added|Deleted|Changed, files[{path, file_name}]} ([REQ-330..334]), DirectoryChanged{path, kind Added|Deleted} ([REQ-320..322]); FileEventProducer convenience wrapper")
   Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: FsEvent, ProcessEvent, McpAuthEvent (AgentEvent removed — agent events now on Bus<AgentEvent>)")
   Component(cfg_bus, "ConfigArrived & config_bus", "Startup config broadcast; published synchronously by ui_iced::app::build_state (DEC-009); subscribers fall back to AppConfig::default() after CONFIG_ARRIVAL_TIMEOUT (10 s, defense-in-depth)")
   Component(router, "BusRouter", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
@@ -341,10 +341,10 @@ C4Component
 
 ### Message Types & Payloads
 
-- **`FileEvent`** (`bus/events/file.rs`): Published whenever content libraries change on disk or in memory.
-  - Variants (`FileEventKind`): `Discovered`, `Updated`, `Removed`, `DirDiscovered`, `DirRemoved` — kind-homogeneous per event (one `Kind` per event, per [REQ-332]).
-  - Content: `paths: Vec<PathBuf>` (fully qualified, [REQ-333]); `FileEvent::file_names()` derives the per-file `FileName` property ([REQ-334]).
-  - Helpers: `FileEventProducer` simplifies publishing single or batch file/dir operations, including rename semantics (`Removed` + `Discovered`).
+- **`FileEvent`** (`bus/events/file.rs`): the transport union on `Bus<FileEvent>` — every producer publishes one of the two spec events, every consumer matches the variant it manages.
+  - **`FileChanged`** ([REQ-330..334]): one event-level `Kind` (`FileChangedKind::{Added, Deleted, Changed}`) describes the whole `[Files]` list ([REQ-331]); every entry (`FileEntry`) carries a fully qualified `path` ([REQ-333]) and its materialized `file_name` ([REQ-334]). Kind-homogeneous per event: a rename publishes a `[Deleted]` event followed by a separate `[Added]` event ([REQ-404]).
+  - **`DirectoryChanged`** ([REQ-320..322]): one directory per event — a fully qualified `path` ([REQ-321]) plus `kind` (`DirectoryChangedKind::{Added, Deleted}`, [REQ-322]).
+  - Producers: the crawler (`Indexer::scan_libraries`) emits one `FileChanged[Added]` batch per enumerated parent directory and one `DirectoryChanged[Added]` per directory, at enumeration time ([REQ-320]/[REQ-330]); the watcher emits `FileChanged[Added]` for created files (`Changed` for modifications, `Deleted` for deletions; rename split as `Deleted(old)` + `Added(new)` per [REQ-404]) and `DirectoryChanged[Added/Deleted]` for directory lifecycle ([REQ-402], derived from notify's create/remove kinds; `Remove(Any)` paths without an extension are treated as folders, since workspace-tracked files always carry an extension).
   - Producers: the crawler (`Indexer::scan_libraries`) emits one `Discovered` batch per directory plus one `DirDiscovered` batch per library ([REQ-320]/[REQ-330]: emits on enumeration); the watcher emits `Discovered` for created files (`Updated` for modifications, `Removed` for deletions, rename split as `Removed(old)` + `Discovered(new)` per [REQ-404]) and `DirDiscovered`/`DirRemoved` for directory lifecycle ([REQ-402], derived from notify's create/remove kinds; `Remove(Any)` paths without an extension are treated as folders, since workspace-tracked files always carry an extension).
 - **`BackgroundEvent`** (`bus/events/typed.rs`): Top-level enum carrying domain-specific asynchronous updates to the UI loop:
   - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`. `DirParsed` is dormant: the crawler now publishes directory events on `Bus<FileEvent>` instead ([REQ-320]); the variant is retained for the test routing harness.
@@ -391,7 +391,7 @@ C4Component
   title FastMD — Supporting Modules
 
   Component(cfg, "config", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) published synchronously by ui_iced::app::build_state to fan the loaded config out to the background Task thread and the MCP config subscriber on startup. VFS types re-exported from app::vfs for backwards compat.")
-  Component(ev, "file_events", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
+  Component(ev, "file_events", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent union {FileChanged{kind, files[{path,file_name}]}, DirectoryChanged{path, kind}}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
   Component(fp, "file_processor", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
   Component(dt, "directory_tracker", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
   Component(tm, "tag_manager", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")

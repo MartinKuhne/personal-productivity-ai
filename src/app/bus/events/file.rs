@@ -5,6 +5,12 @@
 //! implementations, the agent) and consumed by code that needs to react
 //! to those changes (the tag manager, directory tree, indexer, etc.).
 //!
+//! Two events are defined here, matching the specification vocabulary
+//! ([REQ-320..334]): a `[DirectoryChanged]` event ([`DirectoryChanged`])
+//! carried one directory at a time, and a `[FileChanged]` event
+//! ([`FileChanged`]) carrying a `[Files]` list. [`FileEvent`] is the
+//! transport union the two share on the bus.
+//!
 //! The transport itself lives in [`crate::bus::core`]; this module
 //! defines only the event payloads and a thin [`FileEventProducer`]
 //! convenience for the common publish operations.
@@ -12,92 +18,158 @@
 use crate::bus::core::Bus;
 use std::path::PathBuf;
 
-/// What happened to a file-system entry in one of the configured content
-/// libraries.
+/// The `Kind` property of a `[DirectoryChanged]` event ([REQ-322]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileEventKind {
-    Discovered,
-    Updated,
-    Removed,
-    DirDiscovered,
-    DirRemoved,
+pub enum DirectoryChangedKind {
+    /// A not-previously-known directory was enumerated or created.
+    Added,
+    /// A known directory was deleted (consumers cascade to descendants).
+    Deleted,
 }
 
-/// A single file-system event published to the bus.
+/// A `[DirectoryChanged]` event ([REQ-320..322]): one directory per event,
+/// with a fully qualified path ([REQ-321]) and an event-level `Kind`
+/// ([REQ-322]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileEvent {
-    pub kind: FileEventKind,
-    pub paths: Vec<PathBuf>,
+pub struct DirectoryChanged {
+    /// [REQ-321] The fully qualified path of the directory.
+    pub path: PathBuf,
+    /// [REQ-322] Whether the directory was added or deleted.
+    pub kind: DirectoryChangedKind,
+}
+
+/// The `Kind` property of a `[FileChanged]` event ([REQ-333]; previously
+/// REC-332 in the first revision).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileChangedKind {
+    /// A not-previously-known file was enumerated or created.
+    Added,
+    /// A known file was deleted.
+    Deleted,
+    /// A known file changed its content.
+    Changed,
+}
+
+/// One file inside the `[Files]` list of a `[FileChanged]` event, with its
+/// per-file properties ([REQ-333] `Path`, [REQ-334] `FileName`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileEntry {
+    /// [REQ-333] The fully qualified path of the file.
+    pub path: PathBuf,
+    /// [REQ-334] The file name component of `path`.
+    pub file_name: String,
+}
+
+impl FileEntry {
+    /// Builds an entry deriving `file_name` from `path` ([REQ-334]); a path
+    /// with no final component (a filesystem root) yields an empty string.
+    pub fn from_path(path: PathBuf) -> Self {
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Self { path, file_name }
+    }
+}
+
+/// A `[FileChanged]` event ([REQ-330..334]): one event-level `Kind`
+/// ([REQ-332]) describing every file in the `[Files]` list ([REQ-331]); each
+/// file carries its own `Path` ([REQ-333]) and `FileName` ([REQ-334]).
+///
+/// The design is kind-homogeneous: an observer that observes several changes
+/// of different kinds (e.g. a rename's delete+create pair, [REQ-404])
+/// publishes separate events per kind rather than mixing kinds in one event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChanged {
+    /// [REQ-332] The single kind describing every entry in `files`.
+    pub kind: FileChangedKind,
+    /// [REQ-331] The files this event notifies about.
+    pub files: Vec<FileEntry>,
+}
+
+impl FileChanged {
+    /// Fully qualified paths of the `[Files]` list, aligned by index.
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.files.iter().map(|f| f.path.clone()).collect()
+    }
+}
+
+/// Transport union for the file-system event bus (`Bus<FileEvent>`): every
+/// producer publishes one of the two spec events, every consumer matches the
+/// variant it manages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileEvent {
+    /// A `[FileChanged]` event ([REQ-330..334]).
+    FileChanged(FileChanged),
+    /// A `[DirectoryChanged]` event ([REQ-320..322]).
+    DirectoryChanged(DirectoryChanged),
 }
 
 impl FileEvent {
-    /// Per-file `FileName` values ([REQ-334]): one entry per path, aligned
-    /// by index. Directory events carry the directory name; a path with no
-    /// final component (a filesystem root) contributes an empty string.
-    pub fn file_names(&self) -> Vec<String> {
-        self.paths
-            .iter()
-            .map(|p| {
-                p.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default()
-            })
-            .collect()
-    }
-
+    /// A `[FileChanged][Added]` batch ([REQ-330..332]: `Kind` = Added).
     pub fn discovered(paths: Vec<PathBuf>) -> Self {
-        Self {
-            kind: FileEventKind::Discovered,
-            paths,
-        }
+        let files = paths.into_iter().map(FileEntry::from_path).collect();
+        Self::FileChanged(FileChanged {
+            kind: FileChangedKind::Added,
+            files,
+        })
     }
 
     pub fn discovered_one(path: PathBuf) -> Self {
         Self::discovered(vec![path])
     }
 
+    /// A `[FileChanged][Changed]` batch ([REQ-332]: `Kind` = Changed).
     pub fn updated(paths: Vec<PathBuf>) -> Self {
-        Self {
-            kind: FileEventKind::Updated,
-            paths,
-        }
+        let files = paths.into_iter().map(FileEntry::from_path).collect();
+        Self::FileChanged(FileChanged {
+            kind: FileChangedKind::Changed,
+            files,
+        })
     }
 
     pub fn updated_one(path: PathBuf) -> Self {
         Self::updated(vec![path])
     }
 
+    /// A `[FileChanged][Deleted]` batch ([REQ-332]: `Kind` = Deleted).
     pub fn removed(paths: Vec<PathBuf>) -> Self {
-        Self {
-            kind: FileEventKind::Removed,
-            paths,
-        }
+        let files = paths.into_iter().map(FileEntry::from_path).collect();
+        Self::FileChanged(FileChanged {
+            kind: FileChangedKind::Deleted,
+            files,
+        })
     }
 
     pub fn removed_one(path: PathBuf) -> Self {
         Self::removed(vec![path])
     }
 
-    pub fn dir_discovered(paths: Vec<PathBuf>) -> Self {
-        Self {
-            kind: FileEventKind::DirDiscovered,
-            paths,
-        }
-    }
-
+    /// A `[DirectoryChanged][Added]` event ([REQ-320..322]): one directory
+    /// per event, `Kind` = Added.
     pub fn dir_discovered_one(path: PathBuf) -> Self {
-        Self::dir_discovered(vec![path])
+        Self::DirectoryChanged(DirectoryChanged {
+            path,
+            kind: DirectoryChangedKind::Added,
+        })
     }
 
-    pub fn dir_removed(paths: Vec<PathBuf>) -> Self {
-        Self {
-            kind: FileEventKind::DirRemoved,
-            paths,
-        }
-    }
-
+    /// A `[DirectoryChanged][Deleted]` event ([REQ-320..322]): one directory
+    /// per event, `Kind` = Deleted.
     pub fn dir_removed_one(path: PathBuf) -> Self {
-        Self::dir_removed(vec![path])
+        Self::DirectoryChanged(DirectoryChanged {
+            path,
+            kind: DirectoryChangedKind::Deleted,
+        })
+    }
+
+    /// Fully qualified paths of the payload if it is a `[FileChanged]`
+    /// event; empty for directory events.
+    pub fn file_paths(&self) -> Vec<PathBuf> {
+        match self {
+            FileEvent::FileChanged(changed) => changed.paths(),
+            FileEvent::DirectoryChanged(_) => Vec::new(),
+        }
     }
 }
 
@@ -162,58 +234,86 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_file_event_file_names_matches_paths_by_index() {
-        // REQ-334: for each file, the event shall have a file name.
-        let paths = vec![
+    fn test_file_changed_carries_per_file_properties() {
+        // [REQ-331]/[REQ-333]/[REQ-334]: one `[Files]` list whose entries
+        // each carry Path and FileName; a single event-level Kind.
+        let e = FileEvent::discovered(vec![
             PathBuf::from("/libs/docs/notes.md"),
             PathBuf::from("/libs/docs/todo.txt"),
-        ];
-        let e = FileEvent::discovered(paths);
-        let names = e.file_names();
-        assert_eq!(names.len(), e.paths.len());
-        assert_eq!(names[0], "notes.md");
-        assert_eq!(names[1], "todo.txt");
+        ]);
+        let FileEvent::FileChanged(changed) = &e else {
+            panic!("file event must be FileChanged");
+        };
+        assert_eq!(changed.kind, FileChangedKind::Added);
+        assert_eq!(changed.files.len(), 2);
+        assert_eq!(changed.files[0].path, PathBuf::from("/libs/docs/notes.md"));
+        assert_eq!(changed.files[0].file_name, "notes.md");
+        assert_eq!(changed.files[1].path, PathBuf::from("/libs/docs/todo.txt"));
+        assert_eq!(changed.files[1].file_name, "todo.txt");
+        // Index-aligned helper for consumers that only need paths.
+        assert_eq!(
+            e.file_paths(),
+            vec![
+                PathBuf::from("/libs/docs/notes.md"),
+                PathBuf::from("/libs/docs/todo.txt")
+            ]
+        );
     }
 
     #[test]
-    fn test_file_event_file_names_dir_and_unnamed_path() {
-        // A directory event carries the directory name; a path without a
-        // final component (a root) yields an empty string rather than a
-        // panic.
-        let d = FileEvent::dir_discovered_one(PathBuf::from("/libs/docs/subdir"));
-        assert_eq!(d.file_names(), vec!["subdir".to_string()]);
-
-        let root = FileEvent::discovered_one(PathBuf::from("C:\\"));
-        assert_eq!(root.file_names(), vec![String::new()]);
+    fn test_file_entry_unnamed_path_is_empty_file_name() {
+        let entry = FileEntry::from_path(PathBuf::from("C:\\"));
+        assert_eq!(entry.file_name, "");
     }
 
     #[test]
-    fn test_file_event_constructors() {
-        let p = PathBuf::from("docs/notes.md");
-        let d = FileEvent::discovered_one(p.clone());
-        assert_eq!(d.kind, FileEventKind::Discovered);
-        assert_eq!(d.paths, vec![p]);
-
-        let p = PathBuf::from("docs/notes.md");
-        let u = FileEvent::updated_one(p.clone());
-        assert_eq!(u.kind, FileEventKind::Updated);
-
-        let p = PathBuf::from("docs/notes.md");
-        let r = FileEvent::removed_one(p.clone());
-        assert_eq!(r.kind, FileEventKind::Removed);
+    fn test_file_event_kinds() {
+        assert!(
+            matches!(
+                FileEvent::updated_one(PathBuf::from("a.md")),
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Changed,
+                    ..
+                })
+            ),
+            "updated_one builds [FileChanged][Changed]"
+        );
+        assert!(
+            matches!(
+                FileEvent::removed_one(PathBuf::from("a.md")),
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Deleted,
+                    ..
+                })
+            ),
+            "removed_one builds [FileChanged][Deleted]"
+        );
     }
 
     #[test]
-    fn test_dir_event_constructors() {
-        let p = PathBuf::from("docs/subdir");
-        let d = FileEvent::dir_discovered_one(p.clone());
-        assert_eq!(d.kind, FileEventKind::DirDiscovered);
-        assert_eq!(d.paths, vec![p]);
-
-        let p = PathBuf::from("docs/subdir");
-        let r = FileEvent::dir_removed_one(p.clone());
-        assert_eq!(r.kind, FileEventKind::DirRemoved);
-        assert_eq!(r.paths, vec![p]);
+    fn test_dir_changed_kind_values() {
+        // [REQ-320]/[REQ-321]/[REQ-322]: one directory per event, fully
+        // qualified path, Kind ∈ {Added, Deleted}.
+        let added = FileEvent::dir_discovered_one(PathBuf::from("/libs/docs/subdir"));
+        assert!(matches!(
+            &added,
+            FileEvent::DirectoryChanged(DirectoryChanged {
+                path,
+                kind: DirectoryChangedKind::Added,
+            }) if path == &PathBuf::from("/libs/docs/subdir")
+        ));
+        assert!(
+            matches!(
+                FileEvent::dir_removed_one(PathBuf::from("/libs/docs/subdir")),
+                FileEvent::DirectoryChanged(DirectoryChanged {
+                    kind: DirectoryChangedKind::Deleted,
+                    ..
+                })
+            ),
+            "dir_removed_one builds [DirectoryChanged][Deleted]"
+        );
+        // Directory events carry no file entries.
+        assert!(added.file_paths().is_empty());
     }
 
     #[test]
@@ -226,12 +326,29 @@ mod tests {
         bus.publish(FileEvent::removed_one(path.clone()));
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e1.kind, FileEventKind::Discovered);
-        assert_eq!(e1.paths, vec![path]);
+        assert!(matches!(
+            e1,
+            FileEvent::FileChanged(FileChanged {
+                kind: FileChangedKind::Added,
+                ..
+            })
+        ));
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e2.kind, FileEventKind::Updated);
+        assert!(matches!(
+            e2,
+            FileEvent::FileChanged(FileChanged {
+                kind: FileChangedKind::Changed,
+                ..
+            })
+        ));
         let e3 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e3.kind, FileEventKind::Removed);
+        assert!(matches!(
+            e3,
+            FileEvent::FileChanged(FileChanged {
+                kind: FileChangedKind::Deleted,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -244,8 +361,16 @@ mod tests {
         producer.publish_discovered(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(event.kind, FileEventKind::Discovered);
-        assert_eq!(event.paths, vec![path]);
+        assert!(
+            matches!(
+                event,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Added,
+                    ref files,
+                }) if files.len() == 1 && files[0].path == path
+            ),
+            "publish_discovered writes [FileChanged][Added]"
+        );
     }
 
     #[test]
@@ -258,8 +383,16 @@ mod tests {
         producer.publish_updated(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(event.kind, FileEventKind::Updated);
-        assert_eq!(event.paths, vec![path]);
+        assert!(
+            matches!(
+                event,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Changed,
+                    ..
+                })
+            ),
+            "publish_updated writes [FileChanged][Changed]"
+        );
     }
 
     #[test]
@@ -272,8 +405,16 @@ mod tests {
         producer.publish_removed(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(event.kind, FileEventKind::Removed);
-        assert_eq!(event.paths, vec![path]);
+        assert!(
+            matches!(
+                event,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Deleted,
+                    ..
+                })
+            ),
+            "publish_removed writes [FileChanged][Deleted]"
+        );
     }
 
     #[test]
@@ -287,11 +428,27 @@ mod tests {
         producer.publish_rename(&old, &new);
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e1.kind, FileEventKind::Removed);
-        assert_eq!(e1.paths, vec![old]);
+        assert!(
+            matches!(
+                e1,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Deleted,
+                    ..
+                })
+            ),
+            "rename publishes the delete-half first"
+        );
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e2.kind, FileEventKind::Discovered);
-        assert_eq!(e2.paths, vec![new]);
+        assert!(
+            matches!(
+                e2,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Added,
+                    ..
+                })
+            ),
+            "rename then publishes the create-half"
+        );
     }
 
     #[test]
@@ -304,8 +461,13 @@ mod tests {
         producer.publish_dir_discovered(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(event.kind, FileEventKind::DirDiscovered);
-        assert_eq!(event.paths, vec![path]);
+        assert!(matches!(
+            event,
+            FileEvent::DirectoryChanged(DirectoryChanged {
+                kind: DirectoryChangedKind::Added,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -318,8 +480,13 @@ mod tests {
         producer.publish_dir_removed(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(event.kind, FileEventKind::DirRemoved);
-        assert_eq!(event.paths, vec![path]);
+        assert!(matches!(
+            event,
+            FileEvent::DirectoryChanged(DirectoryChanged {
+                kind: DirectoryChangedKind::Deleted,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -333,10 +500,20 @@ mod tests {
         producer.publish_dir_rename(&old, &new);
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e1.kind, FileEventKind::DirRemoved);
-        assert_eq!(e1.paths, vec![old]);
+        assert!(matches!(
+            e1,
+            FileEvent::DirectoryChanged(DirectoryChanged {
+                kind: DirectoryChangedKind::Deleted,
+                ..
+            })
+        ));
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
-        assert_eq!(e2.kind, FileEventKind::DirDiscovered);
-        assert_eq!(e2.paths, vec![new]);
+        assert!(matches!(
+            e2,
+            FileEvent::DirectoryChanged(DirectoryChanged {
+                kind: DirectoryChangedKind::Added,
+                ..
+            })
+        ));
     }
 }

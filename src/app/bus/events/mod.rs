@@ -26,7 +26,10 @@ pub(crate) mod user_command;
 pub use agent::{AgentEvent, BusAgentEventObserver, CompositeAgentEventObserver};
 pub use config::ConfigArrived;
 pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-pub use file::{FileEvent, FileEventKind, FileEventProducer};
+pub use file::{
+    DirectoryChanged, DirectoryChangedKind, FileChanged, FileChangedKind, FileEntry, FileEvent,
+    FileEventProducer,
+};
 pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
 pub use typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 pub use user_command::{UserCommand, UserCommandProducer};

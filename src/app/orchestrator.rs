@@ -146,51 +146,57 @@ impl AppOrchestrator {
     /// synchronously — so the orchestrator's own `file_event_reader` is left
     /// inert and this is the only applier: no event is applied twice.
     pub fn apply_file_event(&mut self, event: crate::bus::events::file::FileEvent) {
-        use crate::bus::events::file::FileEventKind;
+        use crate::bus::events::file::{DirectoryChangedKind, FileChangedKind};
 
-        match event.kind {
-            FileEventKind::Discovered => {
-                self.pdf_backing_tracker.process_discovered(&event.paths);
-                for p in &event.paths {
-                    if Self::is_workspace_file(p) {
-                        self.file_processor.add_file(p.clone());
-                        if let Some(parent) = p.parent() {
-                            let parent = parent.to_path_buf();
-                            self.file_processor.add_dir(parent);
+        match event {
+            crate::bus::events::file::FileEvent::FileChanged(changed) => {
+                let paths = changed.paths();
+                match changed.kind {
+                    FileChangedKind::Added => {
+                        self.pdf_backing_tracker.process_discovered(&paths);
+                        for p in &paths {
+                            if Self::is_workspace_file(p) {
+                                self.file_processor.add_file(p.clone());
+                                if let Some(parent) = p.parent() {
+                                    let parent = parent.to_path_buf();
+                                    self.file_processor.add_dir(parent);
+                                }
+                            }
+                        }
+                        self.selection.tree_dirty = true;
+                    }
+                    FileChangedKind::Changed => {
+                        for p in &paths {
+                            if self.tabs.loaded_path.as_ref() == Some(p)
+                                && !self.text_buffer.is_open
+                            {
+                                self.tabs.loaded_path = None;
+                            }
                         }
                     }
-                }
-                self.selection.tree_dirty = true;
-            }
-            FileEventKind::Updated => {
-                for p in &event.paths {
-                    if self.tabs.loaded_path.as_ref() == Some(p) && !self.text_buffer.is_open {
-                        self.tabs.loaded_path = None;
+                    FileChangedKind::Deleted => {
+                        self.pdf_backing_tracker.process_removed(&paths);
+                        for p in &paths {
+                            self.file_processor.remove_file(p);
+                            if self.tabs.loaded_path.as_ref() == Some(p) {
+                                self.tabs.loaded_path = None;
+                            }
+                            self.tags.remove_file(p);
+                        }
+                        self.close_tabs_for_removed_files(&paths);
+                        self.tags.rebuild();
+                        self.selection.tree_dirty = true;
                     }
                 }
             }
-            FileEventKind::Removed => {
-                self.pdf_backing_tracker.process_removed(&event.paths);
-                for p in &event.paths {
-                    self.file_processor.remove_file(p);
-                    if self.tabs.loaded_path.as_ref() == Some(p) {
-                        self.tabs.loaded_path = None;
+            crate::bus::events::file::FileEvent::DirectoryChanged(dir_changed) => {
+                match dir_changed.kind {
+                    DirectoryChangedKind::Added => {
+                        self.file_processor.add_dir(dir_changed.path.clone());
                     }
-                    self.tags.remove_file(p);
-                }
-                self.close_tabs_for_removed_files(&event.paths);
-                self.tags.rebuild();
-                self.selection.tree_dirty = true;
-            }
-            FileEventKind::DirDiscovered => {
-                for p in &event.paths {
-                    self.file_processor.add_dir(p.clone());
-                }
-                self.selection.tree_dirty = true;
-            }
-            FileEventKind::DirRemoved => {
-                for p in &event.paths {
-                    self.file_processor.remove_dir(p);
+                    DirectoryChangedKind::Deleted => {
+                        self.file_processor.remove_dir(&dir_changed.path);
+                    }
                 }
                 self.selection.tree_dirty = true;
             }

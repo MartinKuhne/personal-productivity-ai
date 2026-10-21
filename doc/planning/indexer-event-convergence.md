@@ -32,12 +32,16 @@ Current implementation (as-verified by code review, 2026-10-20):
   `workspace/watcher/file_processor.rs`
 - Watcher: `src/app/workspace/watcher/file_watcher.rs`
 - PDF: `src/app/background/pdf_converter.rs`, `src/app/bus/router/bus_router.rs`
-- Event vocabulary mapping (code → spec):
-  - `FileEventKind::Discovered` ≙ `[FileChanged][Added]`
-  - `FileEventKind::Removed`    ≙ `[FileChanged][Deleted]`
-  - `FileEventKind::Updated`    ≙ `[FileChanged][Changed]`
-  - `FileEventKind::DirDiscovered` ≙ `[DirectoryChanged][Added]`
-  - `FileEventKind::DirRemoved`    ≙ `[DirectoryChanged][Deleted]`
+- Event vocabulary → literally implemented on 2026-10-20 (variant names
+  retired):
+  - `FileChanged { kind: Added, files: [FileEntry{path, file_name}] }` =
+    `[FileChanged][Added]` ([REQ-330..334])
+  - `FileChanged { kind: Deleted }`  = `[FileChanged][Deleted]`
+  - `FileChanged { kind: Changed }`  = `[FileChanged][Changed]`
+  - `FileEvent::DirectoryChanged(DirectoryChanged{path, kind: Added})` =
+    `[DirectoryChanged][Added]` ([REQ-320..322])
+  - `FileEvent::DirectoryChanged(DirectoryChanged{path, kind: Deleted})` =
+    `[DirectoryChanged][Deleted]`
   - `FsEvent::FileParsed` / `FsEvent::DirParsed` — worker→UI results channel
     (post-tag-parse), distinct from the spec's `[FileChanged]`
 
@@ -65,18 +69,21 @@ Current implementation (as-verified by code review, 2026-10-20):
 ## Phase 1 — Event vocabulary (System state: REQ-320..333)
 
 - [x] **T1.1 — `FileName` property per file ([REQ-334]).** DONE
-      2026-10-20: `FileEvent::file_names()` (index-aligned, dirs carry the
-      dir name, roots yield an empty string) + tests in `file.rs`.
-      Files: `bus/events/file.rs`.
+      2026-10-20 (revised same day to the literal spec shape): the
+      `[Files]` list entries materialize per-file `path` ([REQ-333]) and
+      `file_name` ([REQ-334]) as `FileEntry` — no derived helper. Files:
+      `bus/events/file.rs`.
 - [x] **T1.2 — Event-level `Kind` values ([REQ-322], [REQ-332]).** DONE
       2026-10-20: crawler batches already kind-homogeneous; watcher mapping
-      fixed (create/rename-target → `Discovered`, confirmed `Modify(Any)`/
-      `Number::Name(From-To)` delivery on Windows) with tests in
-      `file_watcher.rs` (`test_watcher_rename_is_delete_then_create`).
+      fixed (create/rename-target → `FileChanged[Added]`, confirmed
+      `Modify(Any)` + `Modify(Name(From|To))` delivery on Windows) with test
+      `test_watcher_rename_is_delete_then_create` in `file_watcher.rs`.
 - [x] **T1.3 — "emits on enumeration" ([REQ-320], [REQ-330]).** DONE
-      2026-10-20: producers emit raw (crawler publishes `Discovered` per dir
-      batch + one `DirDiscovered` per library; watcher emits per notify
-      event), consumers dedupe via set inserts (unchanged). Regression test
+      2026-10-20: producers emit raw events at enumeration time (crawler
+      publishes one `FileChanged[Added]` batch per parent directory and one
+      `DirectoryChanged[Added]` per directory — singular `Path` per
+      [REQ-321]; watcher emits per notify event), consumers dedupe via set
+      inserts (unchanged). Regression test
       `test_scan_libraries_publishes_dir_discovered_on_bus`.
 
 ## Phase 2 — Concurrent Workspace Indexer Pipeline (REQ-301..306)

@@ -428,11 +428,30 @@ impl FileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::events::FileEventKind;
+    use crate::bus::events::file::{DirectoryChangedKind, FileChangedKind, FileEvent};
     use crate::bus::events::typed::BackgroundEvent;
     use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::{AppConfig, ContentLibrary};
     use tempfile::tempdir;
+
+    /// Predicate helper: does `ev` carry `[FileChanged]` with `kind` and `path`?
+    fn is_file_event_of_kind(
+        ev: &FileEvent,
+        kind: FileChangedKind,
+        path: &std::path::Path,
+    ) -> bool {
+        matches!(ev, FileEvent::FileChanged(changed) if changed.kind == kind
+            && changed.files.iter().any(|f| f.path == path))
+    }
+
+    /// Predicate helper: does `ev` carry `[DirectoryChanged]` with `kind` and `path`?
+    fn is_dir_event_of_kind(
+        ev: &FileEvent,
+        kind: DirectoryChangedKind,
+        path: &std::path::Path,
+    ) -> bool {
+        matches!(ev, FileEvent::DirectoryChanged(dir) if dir.kind == kind && dir.path == path)
+    }
 
     #[test]
     fn test_watcher_new_creates_struct() {
@@ -547,7 +566,7 @@ mod tests {
         // Create -> `[FileChanged][Added]` on the bus (REQ-332).
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&file),
+            |e| is_file_event_of_kind(e, FileChangedKind::Added, &file),
             std::time::Duration::from_secs(5),
         );
 
@@ -556,15 +575,15 @@ mod tests {
         std::fs::write(&file, "hello world").unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Updated && e.paths.contains(&file),
+            |e| is_file_event_of_kind(e, FileChangedKind::Changed, &file),
             std::time::Duration::from_secs(5),
         );
 
-        // Remove -> FileEvent::Removed.
+        // Remove -> `[FileChanged][Deleted]`.
         std::fs::remove_file(&file).unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Removed && e.paths.contains(&file),
+            |e| is_file_event_of_kind(e, FileChangedKind::Deleted, &file),
             std::time::Duration::from_secs(5),
         );
     }
@@ -582,14 +601,14 @@ mod tests {
         std::fs::create_dir_all(&subdir).unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::DirDiscovered && e.paths.contains(&subdir),
+            |e| is_dir_event_of_kind(e, DirectoryChangedKind::Added, &subdir),
             std::time::Duration::from_secs(5),
         );
 
         std::fs::remove_dir(&subdir).unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::DirRemoved && e.paths.contains(&subdir),
+            |e| is_dir_event_of_kind(e, DirectoryChangedKind::Deleted, &subdir),
             std::time::Duration::from_secs(5),
         );
     }
@@ -608,19 +627,19 @@ mod tests {
         std::fs::write(&old, "hello").unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&old),
+            |e| is_file_event_of_kind(e, FileChangedKind::Added, &old),
             std::time::Duration::from_secs(5),
         );
 
         std::fs::rename(&old, &new).unwrap();
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Removed && e.paths.contains(&old),
+            |e| is_file_event_of_kind(e, FileChangedKind::Deleted, &old),
             std::time::Duration::from_secs(5),
         );
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&new),
+            |e| is_file_event_of_kind(e, FileChangedKind::Added, &new),
             std::time::Duration::from_secs(5),
         );
     }

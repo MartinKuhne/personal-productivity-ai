@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use futures::channel::mpsc::unbounded;
 use iced::futures::StreamExt;
-use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
 use super::{
@@ -21,8 +20,8 @@ use crate::agent::events::{
 };
 use crate::bus::core::Bus;
 use crate::bus::events::{
-    AgentEvent, BackgroundEvent, BackgroundLogEntry, ConfigArrived, FileEvent, FileEventKind,
-    FsEvent, LogCategory, McpAuthEvent, ProcessEvent,
+    AgentEvent, BackgroundEvent, BackgroundLogEntry, ConfigArrived, FileEvent, FsEvent,
+    LogCategory, McpAuthEvent, ProcessEvent,
 };
 use crate::config::AppConfig;
 use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage};
@@ -176,23 +175,23 @@ fn test_config_arrived_maps_to_inbound_config() {
 
 #[test]
 fn test_every_file_event_kind_maps_to_file_changed() {
-    for kind in [
-        FileEventKind::Discovered,
-        FileEventKind::Updated,
-        FileEventKind::Removed,
-        FileEventKind::DirDiscovered,
-        FileEventKind::DirRemoved,
-    ] {
-        let event = FileEvent {
-            kind,
-            paths: vec![sample_path()],
-        };
+    // The transport union's full taxonomy — three [FileChanged] kinds and
+    // two [DirectoryChanged] kinds ([REQ-322]/[REQ-332]) — must all map to
+    // the inbound file lane unchanged.
+    let events = [
+        FileEvent::discovered_one(sample_path()),
+        FileEvent::updated_one(sample_path()),
+        FileEvent::removed_one(sample_path()),
+        FileEvent::dir_discovered_one(sample_path()),
+        FileEvent::dir_removed_one(sample_path()),
+    ];
+    for event in events {
         let message = bus_event_to_message(InboundBusEvent::File(event.clone()))
             .expect("file events must map");
         assert_eq!(
             message,
             Message::Inbound(InboundMessage::FileChanged(event)),
-            "FileEventKind::{kind:?} must arrive unchanged"
+            "event must arrive unchanged"
         );
     }
 }
@@ -257,20 +256,14 @@ fn test_mapping_is_total_over_every_current_bus_event() {
         assert!(bus_event_to_message(InboundBusEvent::Background(event)).is_some());
         total += 1;
     }
-    for kind in [
-        FileEventKind::Discovered,
-        FileEventKind::Updated,
-        FileEventKind::Removed,
-        FileEventKind::DirDiscovered,
-        FileEventKind::DirRemoved,
+    for event in [
+        FileEvent::discovered_one(sample_path()),
+        FileEvent::updated_one(sample_path()),
+        FileEvent::removed_one(sample_path()),
+        FileEvent::dir_discovered_one(sample_path()),
+        FileEvent::dir_removed_one(sample_path()),
     ] {
-        assert!(
-            bus_event_to_message(InboundBusEvent::File(FileEvent {
-                kind,
-                paths: vec![sample_path()],
-            }))
-            .is_some()
-        );
+        assert!(bus_event_to_message(InboundBusEvent::File(event)).is_some());
         total += 1;
     }
     assert!(

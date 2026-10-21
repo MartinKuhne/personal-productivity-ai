@@ -4,7 +4,7 @@
 
 use crate::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
-use crate::bus::events::file::{FileEvent, FileEventKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind, FileEvent};
 use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::library_display_label;
 use crate::config::{AppConfig, ContentLibrary, VirtualPath};
@@ -191,18 +191,26 @@ impl VectorSearchService {
 
                 let mut reader = reader.into_inner();
                 while let Ok(event) = reader.recv().await {
-                    for path in event.paths {
-                        match event.kind {
-                            FileEventKind::Discovered | FileEventKind::Updated => {
-                                if is_markdown(&path) {
-                                    service.index_path_async(&path).await;
-                                    processed += 1;
-                                    log_progress(processed, &tx);
+                    match event {
+                        FileEvent::FileChanged(FileChanged { kind, files }) => {
+                            for entry in files {
+                                let path = entry.path;
+                                match kind {
+                                    FileChangedKind::Added | FileChangedKind::Changed => {
+                                        if is_markdown(&path) {
+                                            service.index_path_async(&path).await;
+                                            processed += 1;
+                                            log_progress(processed, &tx);
+                                        }
+                                    }
+                                    FileChangedKind::Deleted => {
+                                        service.remove_path_async(&path).await;
+                                    }
                                 }
                             }
-                            FileEventKind::Removed => service.remove_path_async(&path).await,
-                            FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {}
                         }
+                        // Directories contribute no searchable content.
+                        FileEvent::DirectoryChanged(_) => {}
                     }
                 }
             });

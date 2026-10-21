@@ -307,7 +307,7 @@ impl AgentEventObserver for CompositeAgentEventObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::events::file::FileEventKind;
+    use crate::bus::events::file::{FileChanged, FileChangedKind};
     use std::path::PathBuf;
 
     #[test]
@@ -328,8 +328,16 @@ mod tests {
         let ev = file_reader
             .try_recv()
             .expect("file event must be published");
-        assert_eq!(ev.kind, FileEventKind::Updated);
-        assert_eq!(ev.paths, vec![test_path.clone()]);
+        assert!(
+            matches!(
+                &ev,
+                FileEvent::FileChanged(FileChanged {
+                    kind: FileChangedKind::Changed,
+                    files,
+                }) if files.len() == 1 && files[0].path == test_path
+            ),
+            "tool side effect publishes [FileChanged][Changed] for the path"
+        );
 
         let agent_ev = agent_reader
             .try_recv()

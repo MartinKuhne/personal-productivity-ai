@@ -1,7 +1,7 @@
 //! Tests for `background/indexer.rs`.
 
 use super::*;
-use crate::bus::events::file::FileEventKind;
+use crate::bus::events::file::{DirectoryChanged, FileEvent};
 use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
@@ -40,19 +40,18 @@ fn test_scan_libraries_discovers_md() {
 
     let mut discovered = Vec::new();
     while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        if ev.kind == FileEventKind::Discovered {
-            discovered.extend(ev.paths);
-        }
+        // `[DirectoryChanged]` events contribute no file paths.
+        discovered.extend(ev.file_paths());
     }
     assert_eq!(discovered.len(), 2);
 }
 
 #[test]
 fn test_scan_libraries_publishes_dir_discovered_on_bus() {
-    // [REQ-320] The crawler publishes one `[DirectoryChanged]` event
-    // (kind `Added`) per library on the file-event bus, and no longer
-    // sends the redundant `FsEvent::DirParsed` on the background
-    // channel.
+    // [REQ-320..322] The crawler emits one `[DirectoryChanged]` event
+    // (kind `Added`, one directory per event) per enumerated directory on
+    // the file-event bus, and no longer sends the redundant
+    // `FsEvent::DirParsed` on the background channel.
     let mut config = AppConfig::default();
     let dir = tempdir().unwrap();
     let subdir = dir.path().join("docs");
@@ -84,19 +83,29 @@ fn test_scan_libraries_publishes_dir_discovered_on_bus() {
     #[cfg(not(feature = "image-library"))]
     indexer.scan_libraries(&tx_work, &tx_pdf);
 
-    // Directory events: one kind-homogeneous DirDiscovered event that
-    // carries every enumerated directory path (root + "docs").
+    // Directory events: one `[DirectoryChanged]` event per enumerated
+    // directory (root + "docs"), each carrying singular `Path`.
     let mut dir_events = 0;
-    let mut dir_paths = Vec::new();
+    let mut seen_root = false;
+    let mut seen_subdir = false;
     while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        if ev.kind == FileEventKind::DirDiscovered {
-            dir_events += 1;
-            dir_paths.extend(ev.paths);
+        let FileEvent::DirectoryChanged(DirectoryChanged { path, .. }) = &ev else {
+            continue;
+        };
+        dir_events += 1;
+        if path == &dir.path().to_path_buf() {
+            seen_root = true;
+        }
+        if path == &subdir {
+            seen_subdir = true;
         }
     }
-    assert_eq!(dir_events, 1, "directory events must be one batch");
-    assert!(dir_paths.contains(&dir.path().to_path_buf()));
-    assert!(dir_paths.contains(&subdir));
+    assert_eq!(
+        dir_events, 2,
+        "one [DirectoryChanged] event per enumerated directory"
+    );
+    assert!(seen_root, "library root must be enumerated");
+    assert!(seen_subdir, "sub-directory must be enumerated");
 
     // No `FsEvent::DirParsed` may appear on the background channel.
     drop(tx_work); // silence unused-variable warnings on cfg combinations
@@ -146,9 +155,8 @@ fn test_scan_libraries_skips_git() {
 
     let mut discovered = Vec::new();
     while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        if ev.kind == FileEventKind::Discovered {
-            discovered.extend(ev.paths);
-        }
+        // Directory events contribute no file paths.
+        discovered.extend(ev.file_paths());
     }
     assert_eq!(discovered.len(), 1);
     assert!(discovered[0].ends_with("visible.md"));
@@ -237,10 +245,8 @@ fn test_spawn_workers_processes_all_items() {
     rt.block_on(async {
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_secs(5) {
-            if let Ok(ev) = rx_gui.recv().await {
-                if let BackgroundEvent::Fs(FsEvent::FileParsed { path, .. }) = ev {
-                    parsed_paths.insert(path);
-                }
+            if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, .. })) = rx_gui.recv().await {
+                parsed_paths.insert(path);
             }
         }
     });
