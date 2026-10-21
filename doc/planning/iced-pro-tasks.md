@@ -96,7 +96,7 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 ### M1 — Design tokens (UIF-TOK-*)
 
-- [ ] **INC-02** Spatial + geometry tokens: `token/space.rs` (`UIF-TOK-001`),
+- [x] **INC-02** Spatial + geometry tokens: `token/space.rs` (`UIF-TOK-001`),
       `token/size.rs` (`UIF-TOK-002`), `token/shape.rs` (`UIF-TOK-003`).
       Tests assert every value against the spec tables and the 24×24 hit-target floor.
       **Commit:** `feat(iced-pro): add spatial, sizing and shape tokens`

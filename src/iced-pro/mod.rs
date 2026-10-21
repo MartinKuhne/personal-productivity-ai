@@ -15,3 +15,5 @@
 //! The crate is standalone: the `fastmd` application does not consume it yet.
 //! Wiring the app onto this framework is a separate, later project (decision
 //! D-3 in `doc/planning/iced-pro-tasks.md`).
+
+pub mod token;
