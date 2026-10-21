@@ -279,28 +279,42 @@ Tool inventory (matches `Tools.md` + conditional tools):
 
 ## Component Diagram (Level 3) — Background Workers
 
-`background/` hosts long-running workers, coordinated by `background_task::Task`
-which owns the `mpsc` channels, `Bus<FileChanged>`, `Bus<DirectoryChanged>`,
-and the `notify::RecommendedWatcher`.
+`background/` hosts the crawler and long-running workers, coordinated by `background::Task`,
+which owns the worker queues, event buses, and the `BackgroundEvent` broadcaster.
 
 ```mermaid
 C4Component
   title FastMD — Background Workers
 
-  Component(task, "Task", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileChanged>, dir_event_bus: Bus<DirectoryChanged>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
-  Component(indexer, "Indexer", "Worker pool up to 4 threads")
+  Component(task, "Task", "Owns BackgroundEvent broadcaster, file/directory buses, worker queues, and watcher slot; starts indexing after ConfigArrived or timeout")
+  Component(indexer, "Indexer", "Background crawler; publishes file and directory events")
+  Component(filebus, "Bus<FileChanged>", "File additions, changes, and deletions")
+  Component(dirbus, "Bus<DirectoryChanged>", "Directory additions and deletions")
+  Component(bev, "BackgroundEvent", "Background results delivered to the UI through the async bridge")
+  Component(tags, "TagManager", "Subscribes to FileChanged; four workers attempt YAML front-matter extraction")
   Component(watcher, "FileWatcher", "notify 6.0; recursive; auto-watch new dirs")
   Component(pdf, "PdfConverterWorker", "PdfConversionJob queue; pdf_converter_command")
   Component(vision, "ImageVisionWorker", "process_image: base64 data URL -> vision use_case model")
-  Component(router, "BusRouter", "Routes FileChanged file events to PDF/image worker queues")
+  Component(router, "BusRouter", "PDF manager subscribes before scan; routes eligible PDFs; image routing is feature-gated")
   Component(bgmgr, "BackgroundProcessManager", "VecDeque ring buffer MAX_LOG_ENTRIES=10_000; filter/search/auto_scroll/show_background_logs; log persistence to logs/background-process.log; SharedProcessManager = Arc<Mutex<...>>")
   Component(bgmodels, "models", "BackgroundLogEntry, LogCategory{Indexer,Watcher,PDF Converter,Image Vision,LLM Tools}")
 
   Rel(task, indexer, "drives")
+  Rel(task, tags, "spawns")
+  Rel(task, filebus, "owns")
+  Rel(task, dirbus, "owns")
+  Rel(indexer, filebus, "publishes file discoveries")
+  Rel(indexer, dirbus, "publishes directory discoveries")
+  Rel(tags, filebus, "subscribes")
+  Rel(tags, bev, "publishes tag results")
   Rel(task, watcher, "owns")
+  Rel(watcher, filebus, "publishes file changes")
+  Rel(watcher, dirbus, "publishes directory changes")
   Rel(task, pdf, "spawns")
   Rel(task, vision, "spawns")
   Rel(task, router, "wires")
+  Rel(router, filebus, "subscribes")
+  Rel(router, pdf, "queues eligible PDFs")
   Rel(bgmgr, bgmodels, "stores entries")
 ```
 
@@ -320,16 +334,20 @@ C4Component
   Component(dev, "DirectoryChanged", "DirectoryChanged{path, kind Added|Deleted} on Bus<DirectoryChanged> ([REQ-320..322]); DirectoryEventProducer publishes directory-only changes")
   Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: FsEvent, ProcessEvent, McpAuthEvent (AgentEvent removed — agent events now on Bus<AgentEvent>)")
   Component(cfg_bus, "ConfigArrived & config_bus", "Startup config broadcast; published synchronously by ui_iced::app::build_state (DEC-009); subscribers fall back to AppConfig::default() after CONFIG_ARRIVAL_TIMEOUT (10 s, defense-in-depth)")
-  Component(router, "BusRouter", "Subscribes to Bus<FileChanged>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
-  Component(task, "Task", "Owns rx/tx: mpsc::channel<BackgroundEvent>, file_event_bus: Bus<FileChanged>, and dir_event_bus: Bus<DirectoryChanged>")
-  Component(ui, "FastMdApp", "UI thread loop; drains Task.rx (BackgroundEvent) on every frame pass")
+  Component(router, "BusRouter", "Subscribes to Bus<FileChanged>; routes eligible .pdf and feature-gated image paths to worker queues")
+  Component(tags, "TagManager", "Subscribes to Bus<FileChanged>; a four-thread pool attempts YAML extraction for Added/Changed paths")
+  Component(task, "Task", "Owns BackgroundEvent broadcast sender, file_event_bus: Bus<FileChanged>, and dir_event_bus: Bus<DirectoryChanged>")
+  Component(ui, "FastMdApp", "UI thread loop; receives Task BackgroundEvents through the iced subscription")
 
   Rel(fev, core, "uses Bus<FileChanged>")
   Rel(dev, core, "uses Bus<DirectoryChanged>")
   Rel(cfg_bus, core, "uses Bus<ConfigArrived>")
   Rel(router, core, "subscribes to Bus<FileChanged>")
+  Rel(tags, core, "subscribes to Bus<FileChanged>")
+  Rel(tags, bev, "sends FsEvent tag results")
+  Rel(task, tags, "spawns tag workers")
   Rel(task, core, "owns both file and directory buses")
-  Rel(ui, task, "drains rx: Receiver<BackgroundEvent>")
+  Rel(ui, task, "receives BackgroundEvent through the async bridge")
   Rel(router, task, "forwards PDF/image paths to worker channels")
 ```
 
@@ -338,7 +356,7 @@ C4Component
 1. **Explicit Thread Communication**: Shared mutable state across thread boundaries is strictly avoided. Subsystems communicate exclusively via event channels.
 2. **MPMC Broadcast vs MPSC Channels**:
    - **Multi-Producer Multi-Consumer (`Bus<T>`)**: Used when multiple consumers must independently observe the same event (for example, `FileChanged` is observed by the workspace projection, PDF-backing tracker, `BusRouter`, and vector search; `DirectoryChanged` is observed by the workspace projection).
-   - **Multi-Producer Single-Consumer (`mpsc::channel`)**: Used when events target a single aggregator (e.g., UI frame loop draining `BackgroundEvent` or worker task queues).
+   - **Multi-Producer Single-Consumer (`mpsc::channel`)**: Used when events target a single recipient (e.g., PDF/image worker queues or `AgentPrompt`). `BackgroundEvent` instead uses its own Tokio broadcast channel before the iced bridge forwards it to the UI.
 3. **Non-Blocking UI Integration**: `BusReader` provides non-blocking `try_recv()` and `recv_timeout()` methods wrapped in a `Mutex`. In the iced build the UI never polls them directly: `ui_iced::subscription` turns every bus into an `iced::Subscription<Message>`, so background notifications arrive as messages on the Elm loop and the update/view path never blocks on I/O ([FMD-065]).
 
 ### Message Types & Payloads
@@ -360,11 +378,13 @@ C4Component
 1. **`BusRouter` (`bus/router/bus_router.rs`)**:
    - Subscribes to `Bus<FileChanged>` only; directory lifecycle events do not enter the conversion router.
    - Filters for `[FileChanged][Added]` and `[FileChanged][Changed]` events.
-   - Inspects file extensions:
-     - `.pdf` paths -> forwarded to `tx_pdf: Sender<PathBuf>` (`PdfConverterWorker`).
-     - Image paths (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.avif`) -> forwarded to `tx_img: Sender<PathBuf>` (`ImageVisionWorker`).
-2. **UI Inbound Bridge (`ui_iced/subscription.rs` + `ui_iced/update.rs`)**:
-   - The bus→`Subscription` bridge owns one stream per bus (`Bus<ConfigArrived>`, `Bus<FileChanged>`, `Bus<DirectoryChanged>`, `Bus<AgentEvent>`) and one for the `std::sync::mpsc<BackgroundEvent>` channel, the last one behind a dedicated forwarding thread because iced's executor is the futures thread-pool, not tokio. Each stream maps its payload to `Message::Inbound(InboundMessage::…)` through the pure `bus_event_to_message` mapper. They are merged with `Subscription::batch` alongside the winit **window lane** (`iced::window::close_requests` / `resize_events`, mapped by the pure `close_request_to_message` / `resize_event_to_message` helpers onto `Message::Window`). With `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction and the resize lane keeps `AppState::viewport` in step with real resizes.
+   - The production PDF route subscribes before the initial crawler publishes; it filters `.pdf` Added/Changed entries, checks the corresponding `.md` timestamp, and only queues conversion when a converter is configured.
+   - With `image-library`, the post-scan image route filters image extensions and forwards paths to `ImageVisionWorker`.
+2. **`TagManager` (`background/tag_manager.rs`)**:
+   - Subscribes to `Bus<FileChanged>` before the initial scan, ignores deletions, and queues every Added/Changed path for four background YAML-front-matter readers ([REQ-422]).
+   - Workers return `FsEvent::FileParsed` / `FsEvent::FileModified` via `BackgroundEvent`; the UI reducer applies tag state, while `AppOrchestrator::is_workspace_file` keeps hidden formats such as PDFs out of the visible workspace ([REQ-451], [FMD-069]).
+3. **UI Inbound Bridge (`ui_iced/subscription.rs` + `ui_iced/update.rs`)**:
+    - The bus→`Subscription` bridge owns one stream per bus (`Bus<ConfigArrived>`, `Bus<FileChanged>`, `Bus<DirectoryChanged>`, `Bus<AgentEvent>`) and one for `Task.rx_futures` (`futures::channel::mpsc<BackgroundEvent>`). A dedicated thread forwards `BackgroundEvent` values from the task's Tokio broadcast receiver into that futures channel for iced's executor. Each stream maps its payload to `Message::Inbound(InboundMessage::…)` through the pure `bus_event_to_message` mapper. They are merged with `Subscription::batch` alongside the winit **window lane** (`iced::window::close_requests` / `resize_events`, mapped by the pure `close_request_to_message` / `resize_event_to_message` helpers onto `Message::Window`). With `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction and the resize lane keeps `AppState::viewport` in step with real resizes.
    - A `Lagged(n)` error on any bus is not a disconnect: the stream logs the count and forwards `InboundMessage::EventsDropped { source, count }` so the reducer can surface the loss and re-synchronise on the next valid event ([FMD-067], [FMD-072]).
    - `reduce_inbound` in `ui_iced/update.rs` applies `FileChanged` and `DirectoryChanged` messages to the orchestrator's `Workspace` projection, then runs `process_file_events` to drain any legacy/catch-up readers; it also calls `drain_agent_event_bus` for `Agent`, `handle_fs_event` / `handle_process_event` / `handle_mcp_auth_event` for `Background`, and the config projection for `ConfigArrived`. The subscription bridge is the live inbound path in the iced build ([FMD-065]).
    - UI widget state lives in `AgentPanelState` (`ui/agent/panel_state.rs`) plus the reducer-held `OverlayState` / `ViewModels` (`ui_iced/app.rs`): `show_results`, `show_debug_window`, `debug_search_text`, `debug_auto_scroll`, `command_input`, `scroll_to_id`, `active_session_id`.
@@ -373,9 +393,9 @@ C4Component
 
 | Channel / Bus | Transport Primitive | Payload Type | Producers (Actors) | Consumers (Recipients) |
 |---|---|---|---|---|
-| `Bus<FileChanged>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileChanged` | `FileWatcher`, `Indexer`, filesystem commands, agent/tool file operations | `Workspace` / `AppOrchestrator`, PDF-backing tracker, `BusRouter`, vector search |
+| `Bus<FileChanged>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileChanged` | `FileWatcher`, `Indexer`, filesystem commands, agent/tool file operations | `Workspace` / `AppOrchestrator`, PDF-backing tracker, `TagManager`, `BusRouter`, vector search |
 | `Bus<DirectoryChanged>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `DirectoryChanged` | `FileWatcher`, `Indexer`, directory commands | `Workspace` / `AppOrchestrator` |
-| `BackgroundEvent` | `std::sync::mpsc::channel` | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`) | Agent Thread, Indexer Pool, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop) |
+| `BackgroundEvent` | `tokio::sync::broadcast` (1024 cap) | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`) | `TagManager` workers, Indexer, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop via async bridge) |
 | `Bus<ConfigArrived>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `ConfigArrived` | `ui_iced::app::build_state` (synchronous, DEC-009) | background `Task` thread, MCP config subscriber, subscription bridge → UI reducer |
 | `Bus<AgentEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `AgentEvent` (11 variants) | Agent driver thread (`run_agent`) | `FastMdApp` (UI frame drain → `AgentTranscript` + `AgentSessionManager`) |
 | `AgentPrompt` | `std::sync::mpsc::channel` | `AgentPrompt { session_id, text, cancel_flag, ... }` | `AgentSessionManager::submit_prompt` (UI → agent) | Agent driver thread (`recv()` loop) |

@@ -2,9 +2,7 @@
 
 use super::*;
 use crate::bus::events::file::{FileChanged, FileChangedKind};
-use crate::bus::events::typed::FsEvent;
-#[cfg(feature = "image-library")]
-use crate::bus::events::typed::ProcessEvent;
+use crate::bus::events::typed::{FsEvent, ProcessEvent};
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
 
@@ -48,6 +46,38 @@ fn test_background_task_new_no_libraries() {
 
     let got = wait_for_finished(&task, 5);
     assert!(got.is_some(), "Should complete initialization");
+}
+
+#[test]
+fn indexing_completion_continues_when_the_initial_tag_flush_fails() {
+    let (event_tx, _) = broadcast::channel(8);
+    let tx = BackgroundEventSender::new(event_tx);
+    let mut events = tx.subscribe();
+    let mut watcher_started = false;
+
+    let tags_flushed = finish_initial_indexing(
+        || false,
+        &tx,
+        || {
+            watcher_started = true;
+            tx.send(FsEvent::FinishedWithoutWatcher.into())
+                .expect("completion event should be delivered");
+        },
+    );
+
+    assert!(!tags_flushed, "the flush failure remains observable");
+    assert!(watcher_started, "watcher startup must not be skipped");
+    let report = events.try_recv().expect("degraded indexing report");
+    assert!(matches!(
+        report,
+        BackgroundEvent::Process(ProcessEvent::LogEntry(entry))
+            if entry.category == crate::background::LogCategory::Indexer
+                && entry.message == TAG_FLUSH_FAILURE_MESSAGE
+    ));
+    assert!(matches!(
+        events.try_recv().expect("indexing completion event"),
+        BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher)
+    ));
 }
 
 #[test]
@@ -125,8 +155,10 @@ fn test_initial_scan_publishes_discovered_events() {
         priority: 0,
     });
 
-    let task = Task::new_for_test(config);
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
     let reader = task.file_event_bus.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
 
     let got = wait_for_finished(&task, 5);
     assert!(got.is_some(), "Should complete initialization");
@@ -149,6 +181,56 @@ fn test_initial_scan_publishes_discovered_events() {
         .collect();
     names.sort();
     assert_eq!(names, vec!["a.md", "b.md", "c.txt"]);
+}
+
+#[test]
+fn test_initial_scan_routes_pdf_to_converter_through_file_events() {
+    use crate::background::LogCategory;
+    use crate::bus::events::typed::ProcessEvent;
+
+    let directory = tempdir().unwrap();
+    std::fs::write(directory.path().join("scan.pdf"), b"pdf").unwrap();
+    let mut config = AppConfig::default();
+    #[cfg(windows)]
+    let command = vec!["cmd".to_string(), "/C".to_string(), "echo done".to_string()];
+    #[cfg(not(windows))]
+    let command = vec!["true".to_string()];
+    config.pdf_converter_command = Some(command);
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: directory.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let converted = runtime.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(BackgroundEvent::Process(ProcessEvent::LogEntry(entry))) =
+                    events.recv().await
+                    && entry.category == LogCategory::PdfConverter
+                    && entry.message.contains("Successfully converted")
+                {
+                    break true;
+                }
+            }
+        })
+        .await
+    });
+    assert!(
+        converted.is_ok(),
+        "initial scan PDF must reach the converter"
+    );
 }
 
 #[test]
@@ -236,8 +318,10 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
         priority: 0,
     });
 
-    let task = Task::new_for_test(config);
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
     let reader = task.file_event_bus.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
 
     let _ = wait_for_finished(&task, 5);
 
@@ -257,6 +341,138 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
         })
         .expect("initial scan should publish [FileChanged][Added] for PDFs");
     assert_eq!(pdf_discovered.paths()[0], dir.path().join("report.pdf"));
+}
+
+#[test]
+fn test_tag_processor_reads_tags_from_live_file_bus_events() {
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(AppConfig::default()));
+    assert!(wait_for_finished(&task, 5).is_some());
+
+    let dir = tempdir().unwrap();
+    let added_path = dir.path().join("added.md");
+    std::fs::write(&added_path, "---\ntags: [added-tag]\n---\nbody").unwrap();
+    task.file_event_bus
+        .publish(FileChanged::discovered_one(added_path.clone()));
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let added = rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) =
+                    events.recv().await
+                    && path == added_path
+                {
+                    break tags;
+                }
+            }
+        })
+        .await
+        .expect("tag manager should parse FileChanged[Added]")
+    });
+    assert_eq!(added, vec!["added-tag"]);
+
+    let changed_path = dir.path().join("changed.md");
+    std::fs::write(&changed_path, "---\ntags: [changed-tag]\n---\nbody").unwrap();
+    task.file_event_bus
+        .publish(FileChanged::updated_one(changed_path.clone()));
+
+    let changed = rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Ok(BackgroundEvent::Fs(FsEvent::FileModified { path, tags })) =
+                    events.recv().await
+                    && path == changed_path
+                {
+                    break tags;
+                }
+            }
+        })
+        .await
+        .expect("tag manager should parse FileChanged[Changed]")
+    });
+    assert_eq!(changed, vec!["changed-tag"]);
+}
+
+#[test]
+fn initial_indexing_delivers_all_tag_results_before_finished() {
+    let directory = tempdir().unwrap();
+    let paths = ["first.md", "second.markdown", "third.txt"].map(|name| {
+        let path = directory.path().join(name);
+        std::fs::write(&path, "---\ntags: [indexed]\n---\nbody").unwrap();
+        path
+    });
+    let mut config = AppConfig::default();
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: directory.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let parsed_before_finished = runtime.block_on(async {
+        let mut parsed = std::collections::HashSet::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(!timeout.is_zero(), "indexing completion deadline elapsed");
+            match tokio::time::timeout(timeout, events.recv()).await {
+                Ok(Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags }))) => {
+                    assert_eq!(tags, vec!["indexed"]);
+                    parsed.insert(path);
+                }
+                Ok(Ok(BackgroundEvent::Fs(
+                    FsEvent::Finished | FsEvent::FinishedWithoutWatcher,
+                ))) => break parsed,
+                Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    panic!("background event channel closed before indexing finished")
+                }
+                Err(_) => panic!("indexing completion deadline elapsed"),
+            }
+        }
+    });
+
+    assert_eq!(parsed_before_finished, paths.into_iter().collect());
+}
+
+#[test]
+fn test_pdf_router_subscribes_before_initial_scan_events() {
+    let bus = Bus::new();
+    let (tx_pdf, rx_pdf) = channel();
+    #[cfg(feature = "image-library")]
+    let (tx_img, _rx_img) = channel();
+
+    #[cfg(feature = "image-library")]
+    let router = BusRouter::new_pdf_only(bus.clone(), tx_pdf, true, tx_img);
+    #[cfg(not(feature = "image-library"))]
+    let router = BusRouter::new_pdf_only(bus.clone(), tx_pdf, true);
+
+    router.spawn();
+    assert_eq!(bus.subscriber_count(), 1);
+    let pdf = PathBuf::from("scan-time.pdf");
+    bus.publish(FileChanged::discovered_one(pdf.clone()));
+    assert_eq!(
+        rx_pdf
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap(),
+        pdf
+    );
 }
 
 #[test]

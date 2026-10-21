@@ -876,11 +876,14 @@ pub fn build_state(
         "startup ConfigArrived published for background workers"
     );
 
+    let user_file_operation_worker =
+        crate::background::UserFileOperationWorker::spawn(background_task.tx.clone());
     let app = FastMdApp::from_parts(
         crate::orchestrator::AppOrchestrator {
             content_libraries: config.content_libraries.clone(),
             rx: inert_rx,
             tx: background_task.tx,
+            user_file_operation_worker,
             file_event_bus: event_bus,
             dir_event_bus,
             // Single inbound path: the [`BusReceivers`] bridge owns
@@ -907,6 +910,7 @@ pub fn build_state(
             // the orchestrator's sync reader.
             config_reader: None,
             pending_file_load: None,
+            pending_editor_open: None,
             finished_watcher_slot,
             tool_context,
             agent_event_bus,

@@ -31,15 +31,14 @@ fn test_watcher_new_creates_struct() {
     let tx = BackgroundEventSender::new(tx);
     let file_bus = Bus::new();
     let dir_bus = Bus::new();
-    let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
     #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
     let slot = Arc::new(Mutex::new(None));
 
     #[cfg(feature = "image-library")]
-    let _watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, tx_img, slot);
+    let _watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_img, slot);
     #[cfg(not(feature = "image-library"))]
-    let _watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, slot);
+    let _watcher = FileWatcher::new(config, tx, file_bus, dir_bus, slot);
 }
 
 #[tokio::test]
@@ -58,15 +57,14 @@ async fn test_watcher_start_sends_finished() {
     let tx = BackgroundEventSender::new(tx);
     let file_bus = Bus::new();
     let dir_bus = Bus::new();
-    let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
     #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
     let slot = Arc::new(Mutex::new(None));
 
     #[cfg(feature = "image-library")]
-    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, tx_img, slot.clone());
+    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_img, slot.clone());
     #[cfg(not(feature = "image-library"))]
-    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, slot.clone());
+    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, slot.clone());
     watcher.start();
 
     let event = rx.recv().await;
@@ -104,23 +102,14 @@ fn spawn_watcher_on(
     let tx = BackgroundEventSender::new(tx);
     let file_bus = Bus::new();
     let dir_bus = Bus::new();
-    let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
     #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
     let slot = Arc::new(Mutex::new(None));
 
     #[cfg(feature = "image-library")]
-    let watcher = FileWatcher::new(
-        config,
-        tx,
-        file_bus.clone(),
-        dir_bus.clone(),
-        tx_pdf,
-        tx_img,
-        slot,
-    );
+    let watcher = FileWatcher::new(config, tx, file_bus.clone(), dir_bus.clone(), tx_img, slot);
     #[cfg(not(feature = "image-library"))]
-    let watcher = FileWatcher::new(config, tx, file_bus.clone(), dir_bus.clone(), tx_pdf, slot);
+    let watcher = FileWatcher::new(config, tx, file_bus.clone(), dir_bus.clone(), slot);
     (watcher, file_bus, dir_bus)
 }
 
@@ -269,7 +258,7 @@ fn test_watcher_ignores_git_directory_and_non_workspace_files() {
 }
 
 #[test]
-fn test_watcher_routes_pdf_to_converter_queue() {
+fn test_watcher_publishes_pdf_to_file_event_bus() {
     let dir = tempdir().unwrap();
     let mut config = AppConfig::default();
     config.content_libraries.push(ContentLibrary {
@@ -282,28 +271,34 @@ fn test_watcher_routes_pdf_to_converter_queue() {
     let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
     let file_bus = Bus::new();
+    let file_reader = file_bus.subscribe();
     let dir_bus = Bus::new();
-    let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
     #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
     let slot = Arc::new(Mutex::new(None));
 
     #[cfg(feature = "image-library")]
-    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, tx_img, slot);
+    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_img, slot);
     #[cfg(not(feature = "image-library"))]
-    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, tx_pdf, slot);
+    let mut watcher = FileWatcher::new(config, tx, file_bus, dir_bus, slot);
     watcher.start();
 
-    // Minimal valid PDF so `should_convert` does not depend on metadata.
+    // A PDF is published as a file event; the separate PDF manager decides
+    // whether a configured converter should receive it.
     let pdf = dir.path().join("doc.pdf");
     std::fs::write(&pdf, b"%PDF-1.4\n%%EOF\n").unwrap();
 
-    let start = std::time::Instant::now();
-    while start.elapsed() < std::time::Duration::from_secs(5) {
-        match rx_pdf.recv_timeout(std::time::Duration::from_millis(100)) {
-            Ok(p) if p == pdf => return,
-            Ok(_) | Err(_) => continue,
-        }
-    }
-    panic!("PDF path never reached the converter queue");
+    let event = wait_for_bus_event(
+        &file_reader,
+        |event| {
+            event.paths().contains(&pdf)
+                && matches!(
+                    event.kind,
+                    FileChangedKind::Added | FileChangedKind::Changed
+                )
+        },
+        std::time::Duration::from_secs(5),
+        "PDF file event",
+    );
+    assert!(event.paths().contains(&pdf));
 }

@@ -83,6 +83,12 @@ pub enum FsEvent {
         path: std::path::PathBuf,
         tags: Vec<String>,
     },
+    /// A complete replacement for the UI's per-file tag index after the
+    /// background subscriber detects that it missed file-bus events.
+    TagsResynchronized {
+        /// Current paths and extracted YAML tags in configured file libraries.
+        files: Vec<(std::path::PathBuf, Vec<String>)>,
+    },
     FileDeleted {
         path: std::path::PathBuf,
     },
@@ -104,6 +110,8 @@ pub enum ProcessEvent {
         path: std::path::PathBuf,
         content: Result<String, String>,
     },
+    /// Completion of a user-triggered file operation performed off the UI thread.
+    UserFileOperationCompleted(crate::background::UserFileOperationResult),
 }
 
 /// MCP OAuth authorization events emitted by the background thread

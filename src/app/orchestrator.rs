@@ -2,9 +2,9 @@
 //! Unit tests live in the sibling `orchestrator_tests.rs` sidecar.
 
 use crate::agent::AgentSession;
-use crate::agent::events::ToolSideEffect;
 use crate::background::logs::SharedBackgroundLogs;
 use crate::background::{BackgroundLogEntry, LogCategory};
+use crate::background::{UserFileOperation, UserFileOperationResult, UserFileOperationWorker};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;
@@ -20,7 +20,7 @@ use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, Tabs, TextBuffer};
 use crate::workspace::Tags;
 use crate::workspace::watcher::Workspace;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -33,6 +33,8 @@ pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundEvent>,
     pub tx: BackgroundEventSender,
+    /// Background worker owning user-triggered filesystem operations.
+    pub user_file_operation_worker: UserFileOperationWorker,
     /// File-event bus (`[FileChanged]`) — the file-change transport shared
     /// with the background workers ([REQ-330..334]).
     pub file_event_bus: Bus<FileChanged>,
@@ -59,6 +61,8 @@ pub struct AppOrchestrator {
     pub config_storage: std::sync::Arc<dyn crate::config::ConfigStorageHandler>,
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
+    /// Path of the latest editor-open request; older worker results are ignored.
+    pub pending_editor_open: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     /// Event bus for agent events. Owned by the application orchestration layer.
@@ -390,8 +394,9 @@ impl AppOrchestrator {
     /// `AgentState` (lifecycle: `running`, `status`, `history`,
     /// `token_usage`, `debug_entries`) and builds the `AgentTranscript`
     /// view model from `ContentDelta`/`Thinking`/`ToolCallStarted`/
-    /// `ToolResult` deltas. Reissues `ToolSideEffect` as
-    /// `FsEvent::FileModified`. Handles `Lagged(n)` by emitting a visible
+    /// `ToolResult` deltas. File-side effects flow through the file-change
+    /// bus, and tag extraction is delegated to the background tag manager.
+    /// Handles `Lagged(n)` by emitting a visible
     /// truncation marker into the transcript.
     #[tracing::instrument(skip_all, name = "orchestrator.drain_agent_event_bus", level = "debug")]
     pub fn drain_agent_event_bus(&mut self) {
@@ -400,7 +405,6 @@ impl AppOrchestrator {
         };
         // Collect events into a buffer so we can release the reader borrow
         // before calling `self.handle_fs_event` (which needs `&mut self`).
-        let mut pending_side_effects: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
         let mut next_prompt: Option<String> = None;
         loop {
             match reader.try_recv_exposing_lag() {
@@ -441,15 +445,7 @@ impl AppOrchestrator {
                         SeamAgentEvent::DebugEntry { entry, .. } => {
                             self.agent.push_debug_entry(entry.clone());
                         }
-                        SeamAgentEvent::ToolSideEffect { effect, .. } => match effect {
-                            ToolSideEffect::FileCreated { path, tags } => {
-                                pending_side_effects.push((path.clone(), tags.clone()));
-                            }
-                            ToolSideEffect::FileChanged { path } => {
-                                let tags = crate::agent::utils::tags::extract_tags_from_file(path);
-                                pending_side_effects.push((path.clone(), tags));
-                            }
-                        },
+                        SeamAgentEvent::ToolSideEffect { .. } => {}
                         // Transcript-building events:
                         SeamAgentEvent::ContentDelta { .. }
                         | SeamAgentEvent::Thinking { .. }
@@ -481,9 +477,6 @@ impl AppOrchestrator {
                 }
             }
         }
-        for (path, tags) in pending_side_effects {
-            self.handle_fs_event(FsEvent::FileModified { path, tags });
-        }
         if let Some(prompt) = next_prompt {
             self.start_agent_session(prompt);
         }
@@ -494,7 +487,9 @@ impl AppOrchestrator {
         match ev {
             FsEvent::FileParsed { path, tags } => {
                 self.tags.add_tags(path.clone(), tags);
-                self.workspace.add_file(path);
+                if Self::is_workspace_file(&path) {
+                    self.workspace.add_file(path);
+                }
                 self.selection.tree_dirty = true;
             }
             FsEvent::DirParsed { path } => {
@@ -516,11 +511,17 @@ impl AppOrchestrator {
             }
             FsEvent::FileModified { path, tags } => {
                 self.tags.add_tags(path.clone(), tags);
-                self.workspace.add_file(path.clone());
+                if Self::is_workspace_file(&path) {
+                    self.workspace.add_file(path.clone());
+                }
                 self.tags.rebuild();
                 if self.tabs.loaded_path.as_ref() == Some(&path) {
                     self.tabs.loaded_path = None;
                 }
+                self.selection.tree_dirty = true;
+            }
+            FsEvent::TagsResynchronized { files } => {
+                self.tags.replace_all(files);
                 self.selection.tree_dirty = true;
             }
             FsEvent::FileDeleted { path } => {
@@ -624,6 +625,247 @@ impl AppOrchestrator {
                     }
                 }
             }
+            ProcessEvent::UserFileOperationCompleted(result) => {
+                self.handle_user_file_operation_result(result);
+            }
+        }
+    }
+
+    /// Queue one user-requested file operation for background execution.
+    pub fn queue_user_file_operation(&self, operation: UserFileOperation) -> bool {
+        match self.user_file_operation_worker.submit(operation) {
+            Ok(()) => true,
+            Err(error) => {
+                self.log_file_operation_error(
+                    "FILE-4012",
+                    "Could not queue user file operation",
+                    &error,
+                );
+                false
+            }
+        }
+    }
+
+    fn handle_user_file_operation_result(&mut self, result: UserFileOperationResult) {
+        match result {
+            UserFileOperationResult::PromptLoaded {
+                content: Ok(content),
+                target_dir,
+                target_file,
+            } => {
+                self.apply_user_command(UserCommand::RunSkillPrompt {
+                    content,
+                    target_dir,
+                    target_file,
+                });
+            }
+            UserFileOperationResult::PromptLoaded {
+                content: Err(error),
+                ..
+            } => self.log_file_operation_error("FILE-4001", "Failed to read prompt file", &error),
+            UserFileOperationResult::EditorOpened { path, content } => {
+                if self.pending_editor_open.as_ref() != Some(&path) {
+                    tracing::debug!(
+                        name = "file_operation.editor_open.stale_dropped",
+                        path = %path.display(),
+                        "Dropped an editor-open result superseded by a newer request."
+                    );
+                    return;
+                }
+                self.pending_editor_open = None;
+                match content {
+                    Ok(Some(content)) => {
+                        self.text_buffer
+                            .open(&path, &content, Some(&self.pdf_backing_tracker));
+                        if !self.tabs.tabs.contains(&path) {
+                            self.tabs.open_tab(path.clone());
+                        }
+                        self.tabs.loaded_path = Some(path);
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.log_file_operation_error(
+                        "FILE-4002",
+                        &format!("Failed to open {} in editor", path.display()),
+                        &error,
+                    ),
+                }
+            }
+            UserFileOperationResult::EditorSaved {
+                path,
+                result: Ok(()),
+                ..
+            } => {
+                self.file_event_bus.publish(FileChanged::updated_one(path));
+            }
+            UserFileOperationResult::EditorSaved {
+                path,
+                result: Err(error),
+                ..
+            } => self.log_file_operation_error(
+                "FILE-4003",
+                &format!("Failed to save {}", path.display()),
+                &error,
+            ),
+            UserFileOperationResult::Moved {
+                source,
+                destination,
+                is_directory,
+                result: Ok(()),
+            } => self.apply_path_move(&source, &destination, is_directory),
+            UserFileOperationResult::Moved {
+                source,
+                destination,
+                result: Err(error),
+                ..
+            } => self.log_file_operation_error(
+                "FILE-4004",
+                &format!(
+                    "Failed to move {} to {}",
+                    source.display(),
+                    destination.display()
+                ),
+                &error,
+            ),
+            UserFileOperationResult::Deleted {
+                path,
+                is_directory,
+                result: Ok(()),
+            } => {
+                if is_directory {
+                    crate::bus::events::directory::DirectoryEventProducer::new(
+                        self.dir_event_bus.clone(),
+                    )
+                    .publish_removed(&path);
+                } else {
+                    crate::bus::events::file::FileEventProducer::new(self.file_event_bus.clone())
+                        .publish_removed(&path);
+                }
+            }
+            UserFileOperationResult::Deleted {
+                path,
+                result: Err(error),
+                ..
+            } => self.log_file_operation_error(
+                "FILE-4005",
+                &format!("Failed to delete {} to trash", path.display()),
+                &error,
+            ),
+            UserFileOperationResult::DirectoryCreated {
+                path,
+                result: Ok(()),
+            } => {
+                self.workspace.add_dir(path.clone());
+                crate::bus::events::directory::DirectoryEventProducer::new(
+                    self.dir_event_bus.clone(),
+                )
+                .publish_discovered(&path);
+                if let Some(watcher) = &mut self._watcher {
+                    use notify::Watcher;
+                    if let Err(error) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
+                        self.log_file_operation_error(
+                            "FILE-4006",
+                            &format!("Failed to watch {}", path.display()),
+                            &error.to_string(),
+                        );
+                    }
+                }
+            }
+            UserFileOperationResult::DirectoryCreated {
+                path,
+                result: Err(error),
+            } => self.log_file_operation_error(
+                "FILE-4007",
+                &format!("Failed to create directory {}", path.display()),
+                &error,
+            ),
+            UserFileOperationResult::DocumentCreated { path: Ok(path) } => {
+                crate::bus::events::file::FileEventProducer::new(self.file_event_bus.clone())
+                    .publish_discovered(&path);
+            }
+            UserFileOperationResult::DocumentCreated { path: Err(error) } => self
+                .log_file_operation_error(
+                    "FILE-4008",
+                    "Failed to create Markdown document",
+                    &error,
+                ),
+            UserFileOperationResult::PdfSaved {
+                markdown_path,
+                result: Err(error),
+            } => self.log_file_operation_error(
+                "FILE-4010",
+                &format!("Failed to export {} as PDF", markdown_path.display()),
+                &error,
+            ),
+            UserFileOperationResult::PdfSaved { result: Ok(_), .. } => {}
+            UserFileOperationResult::Revealed {
+                path,
+                result: Err(error),
+            } => self.log_file_operation_error(
+                "FILE-4011",
+                &format!("Failed to reveal {} in Explorer", path.display()),
+                &error,
+            ),
+            UserFileOperationResult::Revealed { result: Ok(()), .. } => {}
+        }
+    }
+
+    fn apply_path_move(&mut self, source: &Path, destination: &Path, is_directory: bool) {
+        if is_directory {
+            crate::bus::events::directory::DirectoryEventProducer::new(self.dir_event_bus.clone())
+                .publish_rename(source, destination);
+            self.workspace.remove_dir(source);
+            self.workspace.add_dir(destination.to_path_buf());
+        } else {
+            crate::bus::events::file::FileEventProducer::new(self.file_event_bus.clone())
+                .publish_rename(source, destination);
+            self.workspace.remove_file(source);
+            let extension = destination
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .unwrap_or("");
+            if extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown") {
+                self.workspace.add_file(destination.to_path_buf());
+            }
+            let tags = self.tags.file_tags().get(source).cloned();
+            self.tags.remove_file(source);
+            if let Some(tags) = tags {
+                self.tags.add_tags(destination.to_path_buf(), tags);
+                self.tags.rebuild();
+            }
+        }
+        if self.tabs.loaded_path.as_deref() == Some(source) {
+            self.tabs.loaded_path = Some(destination.to_path_buf());
+        }
+        if self.selection.selected_file.as_deref() == Some(source) {
+            self.selection.selected_file = Some(destination.to_path_buf());
+        }
+        if self.selection.selected_dir.as_deref() == Some(source) {
+            self.selection.selected_dir = Some(destination.to_path_buf());
+        }
+        for tab in &mut self.tabs.tabs {
+            if tab == source {
+                *tab = destination.to_path_buf();
+            }
+        }
+        if self.selection.expanded_dirs.remove(source) {
+            self.selection
+                .expanded_dirs
+                .insert(destination.to_path_buf());
+        }
+        self.selection.tree_dirty = true;
+    }
+
+    fn log_file_operation_error(&self, code: &str, message: &str, error: &str) {
+        tracing::error!(
+            error_code = code,
+            error = %error,
+            "{message}"
+        );
+        if let Ok(mut manager) = self.background_manager.lock() {
+            manager.push_log(BackgroundLogEntry::new(
+                LogCategory::Watcher,
+                format!("{message}: {error}"),
+            ));
         }
     }
 

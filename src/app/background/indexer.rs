@@ -10,12 +10,13 @@ use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
 use crate::bus::events::file::{FileChanged, FileChangedKind};
-use crate::bus::events::typed::{BackgroundEventSender, FsEvent};
+use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::AppConfig;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
+#[cfg(feature = "image-library")]
+use std::sync::mpsc::Sender;
 use tracing::instrument;
 
 pub struct Indexer {
@@ -45,68 +46,18 @@ impl Indexer {
         }
     }
 
-    pub fn spawn_workers(
-        num: usize,
-        rx_work: Arc<Mutex<Receiver<PathBuf>>>,
-        tx_gui: BackgroundEventSender,
-    ) -> Vec<std::thread::JoinHandle<()>> {
-        let mut workers = Vec::new();
-        for _ in 0..num {
-            let rx = rx_work.clone();
-            let tx_clone = tx_gui.clone();
-            let handle = std::thread::spawn(move || {
-                loop {
-                    let path = {
-                        let rx = match rx.lock() {
-                            Ok(guard) => guard,
-                            Err(_) => break,
-                        };
-                        match rx.recv() {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::info!(
-                                    name = "background_task.worker_shutdown",
-                                    error = %e,
-                                    "Worker channel closed. Shutting down worker thread."
-                                );
-                                break;
-                            }
-                        }
-                    };
-                    let tags = {
-                        let _span = tracing::debug_span!(
-                            "indexer.parse_file",
-                            path = %path.display()
-                        )
-                        .entered();
-                        crate::agent::utils::tags::extract_tags_from_file(&path)
-                    };
-                    let _ = tx_clone.send(FsEvent::FileParsed { path, tags }.into());
-                    std::thread::yield_now();
-                }
-            });
-            workers.push(handle);
-        }
-        workers
-    }
-
     /// Walk every content library and emit `[FileChanged][Added]` batches
     /// per directory containing **all** files found inside it (Markdown,
     /// PDF, image, etc.), batching them into the `paths` vec.  This keeps
     /// the event count low during the initial scan — downstream consumers
     /// iterate `event.paths` regardless, so the behaviour is identical.
     ///
-    /// Each library is walked independently with its own batch; PDF and
-    /// image files are also forwarded on their respective channels for
-    /// background conversion / vision processing. The `tx_img` parameter
-    /// is only present when the `image-library` Cargo feature is enabled.
+    /// Each library is walked independently with its own batch. PDF routing
+    /// is performed by the background PDF manager from the file bus; image
+    /// files are forwarded on their channel when the `image-library` feature
+    /// is enabled.
     #[instrument(skip_all, name = "indexer.scan_libraries")]
-    pub fn scan_libraries(
-        &self,
-        tx_work: &Sender<PathBuf>,
-        tx_pdf: &Sender<PathBuf>,
-        #[cfg(feature = "image-library")] tx_img: &Sender<PathBuf>,
-    ) {
+    pub fn scan_libraries(&self, #[cfg(feature = "image-library")] tx_img: &Sender<PathBuf>) {
         let mut files_scanned = 0;
         let mut pdfs_queued = 0;
         #[cfg(feature = "image-library")]
@@ -152,13 +103,11 @@ impl Indexer {
                         let ext_str = ext.to_string_lossy().to_lowercase();
                         if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
                             batch_paths.push(path.to_path_buf());
-                            let _ = tx_work.send(path.to_path_buf());
                         } else if ext_str == "pdf" {
                             batch_paths.push(path.to_path_buf());
                             let job = PdfConversionJob::new(path.to_path_buf());
-                            if job.should_convert() {
+                            if self.config.pdf_converter_command.is_some() && job.should_convert() {
                                 pdfs_queued += 1;
-                                let _ = tx_pdf.send(path.to_path_buf());
                             }
                         } else if matches!(
                             ext_str.as_str(),

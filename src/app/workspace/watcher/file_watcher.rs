@@ -1,6 +1,5 @@
-//! Filesystem watcher — observes content-library directories and routes changes to PDF converter and vision processor queues.
+//! Filesystem watcher — publishes content-library changes to file and directory event buses.
 
-use crate::background::PdfConversionJob;
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
@@ -9,6 +8,7 @@ use crate::bus::events::typed::FsEvent;
 use crate::config::AppConfig;
 use notify::Watcher;
 use std::path::PathBuf;
+#[cfg(feature = "image-library")]
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -19,7 +19,6 @@ pub struct FileWatcher {
     file_bus: Bus<FileChanged>,
     /// Directory-event bus: `[DirectoryChanged]` events are published here.
     dir_bus: Bus<DirectoryChanged>,
-    tx_pdf: Sender<PathBuf>,
     /// Image-vision sender. Only present when the `image-library`
     /// Cargo feature is enabled; the `is_img` detection below
     /// compiles out without the feature.
@@ -41,7 +40,6 @@ impl FileWatcher {
         tx: crate::bus::events::typed::BackgroundEventSender,
         file_bus: Bus<FileChanged>,
         dir_bus: Bus<DirectoryChanged>,
-        tx_pdf: Sender<PathBuf>,
         #[cfg(feature = "image-library")] tx_img: Sender<PathBuf>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     ) -> Self {
@@ -50,7 +48,6 @@ impl FileWatcher {
             tx,
             file_bus,
             dir_bus,
-            tx_pdf,
             #[cfg(feature = "image-library")]
             tx_img,
             finished_watcher,
@@ -61,7 +58,6 @@ impl FileWatcher {
         let tx_notify = self.tx.clone();
         #[cfg(feature = "image-library")]
         let config_watcher = self.config.clone();
-        let tx_pdf_watcher = self.tx_pdf.clone();
         #[cfg(feature = "image-library")]
         let tx_img_watcher = self.tx_img.clone();
         let file_bus_watcher = self.file_bus.clone();
@@ -173,22 +169,8 @@ impl FileWatcher {
                             });
                         } else if let Some(ext) = new.extension() {
                             let ext_str = ext.to_string_lossy().to_lowercase();
-                            if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
-                                let tags = crate::agent::utils::tags::extract_tags_from_file(&new);
-                                let _ = tx_notify.send(
-                                    FsEvent::FileModified {
-                                        path: new.clone(),
-                                        tags,
-                                    }
-                                    .into(),
-                                );
+                            if matches!(ext_str.as_str(), "md" | "markdown" | "txt" | "pdf") {
                                 file_bus_watcher.publish(FileChanged::discovered_one(new.clone()));
-                            } else if ext_str == "pdf" {
-                                file_bus_watcher.publish(FileChanged::discovered_one(new.clone()));
-                                let job = PdfConversionJob::new(new.clone());
-                                if job.should_convert() {
-                                    let _ = tx_pdf_watcher.send(new.clone());
-                                }
                             }
                         }
                         return;
@@ -302,17 +284,6 @@ impl FileWatcher {
                                             )
                                     );
                                     if path.is_file() {
-                                        let tags =
-                                            crate::agent::utils::tags::extract_tags_from_file(
-                                                &path,
-                                            );
-                                        let _ = tx_notify.send(
-                                            FsEvent::FileModified {
-                                                path: path.clone(),
-                                                tags,
-                                            }
-                                            .into(),
-                                        );
                                         // [REQ-332] A not-previously-seen file is
                                         // `[FileChanged][Added]`; modifying an
                                         // existing one is `[FileChanged][Changed]`.
@@ -327,16 +298,11 @@ impl FileWatcher {
                                         // Rename delivered as a separate event:
                                         // the old name is already gone —
                                         // `[FileChanged][Deleted]`.
-                                        let _ = tx_notify.send(
-                                            FsEvent::FileDeleted { path: path.clone() }.into(),
-                                        );
                                         file_bus_watcher
                                             .publish(FileChanged::removed_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
-                                    let _ = tx_notify
-                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
                                     file_bus_watcher
                                         .publish(FileChanged::removed_one(path.clone()));
                                 }
@@ -366,10 +332,6 @@ impl FileWatcher {
                                         file_bus_watcher
                                             .publish(FileChanged::updated_one(path.clone()));
                                     }
-                                    let job = PdfConversionJob::new(path.clone());
-                                    if job.should_convert() {
-                                        let _ = tx_pdf_watcher.send(path.clone());
-                                    }
                                 }
                                 _ => {}
                             }
@@ -396,8 +358,6 @@ impl FileWatcher {
                                         _ => {}
                                     }
                                 } else if !path.exists() {
-                                    let _ = tx_notify
-                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
                                     file_bus_watcher
                                         .publish(FileChanged::removed_one(path.clone()));
                                 }
@@ -405,8 +365,6 @@ impl FileWatcher {
                             #[cfg(not(feature = "image-library"))]
                             {
                                 if !path.exists() {
-                                    let _ = tx_notify
-                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
                                     file_bus_watcher
                                         .publish(FileChanged::removed_one(path.clone()));
                                 }

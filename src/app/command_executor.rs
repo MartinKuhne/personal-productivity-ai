@@ -106,63 +106,10 @@ impl AppOrchestrator {
             }
 
             UserCommand::ConfirmMove { file, destination } => {
-                let is_directory = file.is_dir();
-                let mut new_path = destination.clone();
-                new_path.push(file.file_name().unwrap());
-                if let Err(e) = std::fs::rename(&file, &new_path) {
-                    tracing::error!(
-                        name = "ui.file.move_failed",
-                        source = %file.display(),
-                        destination = %new_path.display(),
-                        error = %e,
-                        "Failed to move file. Likely cause: permission denied or file in use. Operator should check file locks."
-                    );
-                } else {
-                    if is_directory {
-                        // [REQ-404] Directory moves use the directory bus;
-                        // classify the entry before the filesystem move.
-                        let dir_producer =
-                            crate::bus::events::directory::DirectoryEventProducer::new(
-                                self.dir_event_bus.clone(),
-                            );
-                        dir_producer.publish_rename(&file, &new_path);
-                    } else {
-                        let file_producer = crate::bus::events::file::FileEventProducer::new(
-                            self.file_event_bus.clone(),
-                        );
-                        file_producer.publish_rename(&file, &new_path);
-                    }
-                    if self.tabs.loaded_path.as_ref() == Some(&file) {
-                        self.tabs.loaded_path = Some(new_path.clone());
-                    }
-                    if self.selection.selected_file.as_ref() == Some(&file) {
-                        self.selection.selected_file = Some(new_path.clone());
-                    }
-                    if self.selection.selected_dir.as_ref() == Some(&file) {
-                        self.selection.selected_dir = Some(new_path.clone());
-                    }
-                    for tab in self.tabs.tabs.iter_mut() {
-                        if *tab == file {
-                            *tab = new_path.clone();
-                        }
-                    }
-                    if is_directory {
-                        self.workspace.remove_dir(&file);
-                        self.workspace.add_dir(new_path.clone());
-                    } else {
-                        self.workspace.remove_file(&file);
-                        let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        if ext == "md" || ext == "markdown" {
-                            self.workspace.add_file(new_path.clone());
-                        }
-                        let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
-                        self.tags.remove_file(&file);
-                        self.tags.add_tags(new_path.clone(), tags);
-                    }
-                    if self.selection.expanded_dirs.remove(&file) {
-                        self.selection.expanded_dirs.insert(new_path.clone());
-                    }
-                }
+                self.queue_user_file_operation(crate::background::UserFileOperation::Move {
+                    source: file,
+                    destination,
+                });
             }
             UserCommand::SelectFile { path, multi } => {
                 if multi {
@@ -206,25 +153,21 @@ impl AppOrchestrator {
                 self.selection.selected_file = None;
             }
             UserCommand::OpenInEditor(path) => {
-                if self.inline_editor_enabled {
-                    if let Ok(file_content) = std::fs::read_to_string(&path) {
-                        let _is_pdf_backed = self.pdf_backing_tracker.is_pdf_backed(&path);
-                        self.text_buffer.open(
-                            &path,
-                            &file_content,
-                            Some(&self.pdf_backing_tracker),
-                        );
-                        if !self.tabs.tabs.contains(&path) {
-                            self.tabs.open_tab(path.clone());
-                        }
-                        self.tabs.loaded_path = Some(path);
-                    }
-                } else {
-                    crate::ui_iced::os_shell::open_in_system_editor(&path);
+                self.pending_editor_open = Some(path.clone());
+                let queued = self.queue_user_file_operation(
+                    crate::background::UserFileOperation::OpenEditor {
+                        path,
+                        inline: self.inline_editor_enabled,
+                    },
+                );
+                if !queued {
+                    self.pending_editor_open = None;
                 }
             }
             UserCommand::ShowInExplorer(path) => {
-                crate::ui_iced::os_shell::show_in_file_explorer(&path);
+                self.queue_user_file_operation(crate::background::UserFileOperation::Reveal {
+                    path,
+                });
             }
             UserCommand::CopyPath(path) => {
                 let path_str = path.to_string_lossy().to_string();
@@ -253,12 +196,11 @@ impl AppOrchestrator {
                     .save_file();
 
                 if let Some(target) = target_path {
-                    let mut job =
-                        crate::export::pdf::SaveAsPdfJob::from_path(path_to_export.clone());
-                    job.output_path = Some(target);
-                    let _ = crate::export::pdf::execute_save_as_pdf_blocking(
-                        job,
-                        Some(self.tx.clone()),
+                    self.queue_user_file_operation(
+                        crate::background::UserFileOperation::SaveAsPdf {
+                            markdown_path: path_to_export,
+                            output_path: target,
+                        },
                     );
                 }
             }
@@ -274,23 +216,9 @@ impl AppOrchestrator {
                 self.dialogs.move_dialog_open = true;
             }
             UserCommand::Delete(path) => {
-                let is_directory = path.is_dir();
-                if let Err(e) = crate::utils::recycle_bin::delete(&path) {
-                    tracing::error!(
-                        name = "ui.file.delete_failed",
-                        path = %path.display(),
-                        error = %e,
-                        "Failed to delete to trash"
-                    );
-                } else if is_directory {
-                    crate::bus::events::directory::DirectoryEventProducer::new(
-                        self.dir_event_bus.clone(),
-                    )
-                    .publish_removed(&path);
-                } else {
-                    crate::bus::events::file::FileEventProducer::new(self.file_event_bus.clone())
-                        .publish_removed(&path);
-                }
+                self.queue_user_file_operation(crate::background::UserFileOperation::Delete {
+                    path,
+                });
             }
             UserCommand::CreateDirectory { parent } => {
                 self.dialogs.create_dir_parent = Some(parent);
@@ -324,58 +252,14 @@ impl AppOrchestrator {
                 self.start_agent_session(prompt);
             }
             UserCommand::ConfirmCreateDirectory { parent, name } => {
-                if !crate::utils::path::is_safe_basename(&name) {
-                    tracing::warn!(
-                        name = "ui.directory.invalid_name",
-                        name_input = %name,
-                        "User attempted to create directory with invalid characters. Operation skipped. Operator should advise user of valid names."
-                    );
-                } else {
-                    let new_dir_path = parent.join(&name);
-                    if let Err(e) = std::fs::create_dir_all(&new_dir_path) {
-                        tracing::error!(
-                            name = "ui.directory.create_failed",
-                            path = %new_dir_path.display(),
-                            error = %e,
-                            "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
-                        );
-                    } else {
-                        self.workspace.add_dir(new_dir_path.clone());
-                        let dir_producer =
-                            crate::bus::events::directory::DirectoryEventProducer::new(
-                                self.dir_event_bus.clone(),
-                            );
-                        dir_producer.publish_discovered(&new_dir_path);
-                        if let Some(watcher) = &mut self._watcher {
-                            use notify::Watcher;
-                            let _ = watcher.watch(&new_dir_path, notify::RecursiveMode::Recursive);
-                        }
-                    }
-                }
+                self.queue_user_file_operation(
+                    crate::background::UserFileOperation::CreateDirectory { parent, name },
+                );
             }
             UserCommand::ConfirmCreateDocument { parent, name } => {
-                if !crate::utils::path::is_safe_basename(&name) {
-                    tracing::warn!(
-                        name = "ui.file.invalid_name",
-                        name_input = %name,
-                        "User attempted to create document with invalid characters. Operation skipped. Operator should advise user of valid names."
-                    );
-                } else {
-                    match crate::utils::path::write_new_document(&parent, &name) {
-                        Ok(new_path) => {
-                            let producer = crate::bus::events::file::FileEventProducer::new(
-                                self.file_event_bus.clone(),
-                            );
-                            producer.publish_discovered(&new_path);
-                        }
-                        Err(e) => tracing::error!(
-                            name = "ui.file.create_failed",
-                            parent = %parent.display(),
-                            error = %e,
-                            "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
-                        ),
-                    }
-                }
+                self.queue_user_file_operation(
+                    crate::background::UserFileOperation::CreateDocument { parent, name },
+                );
             }
             UserCommand::ConfirmRename {
                 path: file,
@@ -392,34 +276,30 @@ impl AppOrchestrator {
                     let ext = file
                         .extension()
                         .and_then(|e| e.to_str())
-                        .map(|e| format!(".{}", e))
+                        .map(|e| format!(".{e}"))
                         .unwrap_or_default();
-                    let new_name_with_ext = format!("{}{}", new_name, ext);
+                    let new_name_with_ext = format!("{new_name}{ext}");
                     let mut new_path = file.clone();
                     new_path.set_file_name(&new_name_with_ext);
-                    if let Err(e) = std::fs::rename(&file, &new_path) {
+                    if let Err(error) = std::fs::rename(&file, &new_path) {
                         tracing::error!(
                             name = "ui.file.rename_failed",
                             source = %file.display(),
                             destination = %new_path.display(),
-                            error = %e,
+                            error = %error,
                             "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
                         );
                     } else {
                         if is_directory {
-                            // The renamed entry is a directory: mirror the
-                            // rename on the directory bus ([REQ-404]
-                            // delete+create). Classify before the rename.
-                            let dir_producer =
-                                crate::bus::events::directory::DirectoryEventProducer::new(
-                                    self.dir_event_bus.clone(),
-                                );
-                            dir_producer.publish_rename(&file, &new_path);
+                            crate::bus::events::directory::DirectoryEventProducer::new(
+                                self.dir_event_bus.clone(),
+                            )
+                            .publish_rename(&file, &new_path);
                         } else {
-                            let file_producer = crate::bus::events::file::FileEventProducer::new(
+                            crate::bus::events::file::FileEventProducer::new(
                                 self.file_event_bus.clone(),
-                            );
-                            file_producer.publish_rename(&file, &new_path);
+                            )
+                            .publish_rename(&file, &new_path);
                         }
                         if self.tabs.loaded_path.as_ref() == Some(&file) {
                             self.tabs.loaded_path = Some(new_path.clone());

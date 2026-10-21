@@ -74,6 +74,47 @@ fn drained(spy: &BusReader<UserCommand>) -> Vec<UserCommand> {
     seen
 }
 
+fn user_file_operation_events(
+    state: &AppState,
+) -> tokio::sync::broadcast::Receiver<BackgroundEvent> {
+    state.app.orchestrator.tx.subscribe()
+}
+
+fn receive_user_file_operation(
+    receiver: &mut tokio::sync::broadcast::Receiver<BackgroundEvent>,
+) -> BackgroundEvent {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match receiver.recv().await {
+                    Ok(
+                        event @ BackgroundEvent::Process(ProcessEvent::UserFileOperationCompleted(
+                            _,
+                        )),
+                    ) => break event,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        panic!("background event bus closed before the operation completed")
+                    }
+                }
+            }
+        })
+        .await
+        .expect("background file operation timed out")
+    })
+}
+
+fn apply_user_file_operation(state: &mut AppState, event: BackgroundEvent) {
+    let _ = update(
+        state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+}
+
 /// Resizes the state's viewport so width-dependent reductions have a
 /// defined geometry.
 fn with_viewport(state: &mut AppState, width: f32) {
@@ -484,11 +525,14 @@ fn test_open_in_editor_lifts_the_text_buffer_into_an_editor_view_model() {
 
     let (mut state, _storage) = fresh_state();
     state.app.orchestrator.inline_editor_enabled = true;
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
         Message::Command(UserCommand::OpenInEditor(path.clone())),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     let vm = state.overlay.editor.as_ref().expect("editor must open");
     assert_eq!(vm.path(), path.as_path());
@@ -519,15 +563,20 @@ fn test_editor_open_then_save_round_trips_the_file_byte_for_byte() {
 
     let (mut state, _storage) = fresh_state();
     state.app.orchestrator.inline_editor_enabled = true;
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
         Message::Command(UserCommand::OpenInEditor(path.clone())),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
     let _ = update(
         &mut state,
         Message::Editor(EditorMessage::SaveRequested { path: path.clone() }),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     assert_eq!(
         std::fs::read_to_string(&path).expect("read back"),
@@ -537,18 +586,71 @@ fn test_editor_open_then_save_round_trips_the_file_byte_for_byte() {
 }
 
 #[test]
-fn test_open_in_editor_does_not_mount_when_the_buffer_refused() {
+fn editor_save_completes_through_a_background_result() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let path = dir.path().join("deferred-save.md");
+    let original = "original";
+    std::fs::write(&path, original).expect("write seed");
     let (mut state, _storage) = fresh_state();
-    state.app.orchestrator.inline_editor_enabled = false;
+    state.overlay.editor = Some(crate::ui_iced::editor::EditorViewModel::open(
+        &path, "updated",
+    ));
+    let mut events = user_file_operation_events(&state);
+
+    let task = update(
+        &mut state,
+        Message::Editor(EditorMessage::SaveRequested { path: path.clone() }),
+    );
+
+    assert_eq!(task.units(), 0, "the reducer only queues background I/O");
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "updated");
+}
+
+#[test]
+fn test_open_in_editor_does_not_mount_when_background_read_fails() {
+    let (mut state, _storage) = fresh_state();
+    state.app.orchestrator.inline_editor_enabled = true;
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
         Message::Command(UserCommand::OpenInEditor(PathBuf::from("/notes/a.md"))),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     assert!(
         state.overlay.editor.is_none(),
-        "with the inline editor disabled the command opens the OS editor instead"
+        "a failed background read must not mount an editor"
+    );
+}
+
+#[test]
+fn editor_open_result_for_a_superseded_path_does_not_mount_the_editor() {
+    let (mut state, _storage) = fresh_state();
+    state.app.orchestrator.inline_editor_enabled = true;
+    let old_path = PathBuf::from("/tmp/old-editor.md");
+    let current_path = PathBuf::from("/tmp/current-editor.md");
+    state.app.orchestrator.pending_editor_open = Some(current_path.clone());
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(
+            BackgroundEvent::Process(ProcessEvent::UserFileOperationCompleted(
+                crate::background::UserFileOperationResult::EditorOpened {
+                    path: old_path,
+                    content: Ok(Some("stale contents".to_string())),
+                },
+            )),
+        ))),
+    );
+
+    assert!(state.overlay.editor.is_none());
+    assert_eq!(
+        state.app.orchestrator.pending_editor_open,
+        Some(current_path)
     );
 }
 
@@ -731,11 +833,14 @@ fn test_run_as_prompt_reads_the_body_and_runs_it_against_the_file() {
 
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
         Message::Tree(TreeMessage::RunAsPromptRequested { path: path.clone() }),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     assert_eq!(
         drained(&spy),
@@ -752,9 +857,34 @@ fn test_run_as_prompt_reads_the_body_and_runs_it_against_the_file() {
 }
 
 #[test]
+fn run_as_prompt_defers_file_read_until_its_background_task_runs() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let path = dir.path().join("deferred-prompt.md");
+    std::fs::write(&path, "Read me").expect("write seed");
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let mut events = user_file_operation_events(&state);
+
+    let task = update(
+        &mut state,
+        Message::Tree(TreeMessage::RunAsPromptRequested { path }),
+    );
+
+    assert_eq!(task.units(), 0, "the UI only queues the file read");
+    assert!(
+        drained(&spy).is_empty(),
+        "prompt execution waits for file read"
+    );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
+    assert_eq!(drained(&spy).len(), 1, "prompt command follows file read");
+}
+
+#[test]
 fn test_run_as_prompt_on_a_missing_file_logs_and_publishes_nothing() {
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
@@ -762,6 +892,8 @@ fn test_run_as_prompt_on_a_missing_file_logs_and_publishes_nothing() {
             path: PathBuf::from("/definitely/not/here.md"),
         }),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     assert_eq!(
         drained(&spy),
@@ -779,6 +911,7 @@ fn test_skill_run_carries_its_target_through_to_the_command() {
 
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
@@ -788,6 +921,8 @@ fn test_skill_run_carries_its_target_through_to_the_command() {
             target_file: None,
         }),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     assert_eq!(
         drained(&spy),
@@ -1125,10 +1260,13 @@ fn open_editor(dir: &tempfile::TempDir) -> (AppState, PathBuf) {
     let (mut state, _storage) = fresh_state();
     state.app.orchestrator.inline_editor_enabled = true;
     state.app.orchestrator.tabs.loaded_path = Some(path.clone());
+    let mut events = user_file_operation_events(&state);
     let _ = update(
         &mut state,
         Message::Command(UserCommand::OpenInEditor(path.clone())),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
     (state, path)
 }
 
@@ -1160,11 +1298,14 @@ fn test_editor_cancel_discards_the_buffer_and_clears_the_loaded_path() {
 fn test_editor_save_writes_the_document_and_closes() {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let (mut state, path) = open_editor(&dir);
+    let mut events = user_file_operation_events(&state);
 
     let _ = update(
         &mut state,
         Message::Editor(EditorMessage::SaveRequested { path: path.clone() }),
     );
+    let event = receive_user_file_operation(&mut events);
+    apply_user_file_operation(&mut state, event);
 
     let written = std::fs::read_to_string(&path).expect("file saved");
     assert!(

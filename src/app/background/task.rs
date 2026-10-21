@@ -4,6 +4,7 @@
 
 use super::indexer::Indexer;
 use super::pdf_converter::PdfConverterWorker;
+use super::tag_manager::TagManager;
 #[cfg(feature = "image-library")]
 use super::vision_processor::ImageVisionWorker;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
@@ -21,6 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
+
+const TAG_FLUSH_FAILURE_MESSAGE: &str =
+    "Tag extraction did not complete before indexing finished; some tags may be missing.";
 
 /// Owns the background worker threads and their event channel.
 pub struct Task {
@@ -188,18 +192,34 @@ impl Task {
         #[cfg(feature = "vector-search")]
         vector_search_service.start(config.clone(), file_event_bus.subscribe(), tx.clone());
 
-        let (tx_work, rx_work) = channel::<PathBuf>();
-        let rx_work = Arc::new(Mutex::new(rx_work));
         let (tx_pdf, rx_pdf) = channel::<PathBuf>();
         #[cfg(feature = "image-library")]
         let (tx_img, rx_img) = channel::<PathBuf>();
 
         let cmd_template = config.pdf_converter_command.clone();
+        let pdf_converter_configured = cmd_template.is_some();
         PdfConverterWorker::new(rx_pdf, tx.clone(), file_event_bus.clone(), cmd_template).spawn();
         #[cfg(feature = "image-library")]
         ImageVisionWorker::new(rx_img, tx.clone(), config.clone(), file_event_bus.clone()).spawn();
 
-        let workers = Indexer::spawn_workers(4, rx_work, tx.clone());
+        let tag_manager =
+            TagManager::new(file_event_bus.clone(), tx.clone(), config.clone()).spawn();
+        #[cfg(feature = "image-library")]
+        BusRouter::new_pdf_only(
+            file_event_bus.clone(),
+            tx_pdf.clone(),
+            pdf_converter_configured,
+            tx_img.clone(),
+        )
+        .spawn();
+        #[cfg(not(feature = "image-library"))]
+        BusRouter::new_pdf_only(
+            file_event_bus.clone(),
+            tx_pdf.clone(),
+            pdf_converter_configured,
+        )
+        .spawn();
+
         let indexer = Indexer::new(
             config.clone(),
             tx.clone(),
@@ -208,32 +228,54 @@ impl Task {
             cancel,
         );
         #[cfg(feature = "image-library")]
-        indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+        indexer.scan_libraries(&tx_img);
         #[cfg(not(feature = "image-library"))]
-        indexer.scan_libraries(&tx_work, &tx_pdf);
-
-        drop(tx_work);
-        for worker in workers {
-            let _ = worker.join();
-        }
-
+        indexer.scan_libraries();
         let mut file_watcher = FileWatcher::new(
             config,
             tx.clone(),
             file_event_bus.clone(),
             dir_event_bus.clone(),
-            tx_pdf.clone(),
             #[cfg(feature = "image-library")]
             tx_img.clone(),
             finished_watcher,
         );
-        file_watcher.start();
-
         #[cfg(feature = "image-library")]
-        BusRouter::new(file_event_bus.clone(), tx_pdf, tx_img).spawn();
-        #[cfg(not(feature = "image-library"))]
-        BusRouter::new(file_event_bus.clone(), tx_pdf).spawn();
+        BusRouter::new_images_only(file_event_bus, tx_pdf, tx_img).spawn();
+        finish_initial_indexing(|| tag_manager.flush(), &tx, || file_watcher.start());
     }
+}
+
+fn finish_initial_indexing(
+    flush_tags: impl FnOnce() -> bool,
+    tx: &BackgroundEventSender,
+    start_watcher: impl FnOnce(),
+) -> bool {
+    let tags_flushed = flush_tags();
+    if !tags_flushed {
+        tracing::error!(
+            name = "background.indexer.tag_flush_failed",
+            "Initial scan finished without confirming complete tag extraction; the background process log records degraded indexing."
+        );
+        if let Err(error) = tx.send(
+            crate::background::BackgroundLogEntry::new(
+                crate::background::LogCategory::Indexer,
+                TAG_FLUSH_FAILURE_MESSAGE.to_string(),
+            )
+            .into(),
+        ) {
+            tracing::error!(
+                name = "background.indexer.tag_flush_report_failed",
+                error = %error,
+                "Could not report degraded initial tag extraction."
+            );
+        }
+    }
+
+    // A failed tag flush is degraded indexing, not a reason to skip watcher
+    // startup or suppress the normal indexing-finished event.
+    start_watcher();
+    tags_flushed
 }
 
 #[cfg(test)]

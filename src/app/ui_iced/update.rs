@@ -55,8 +55,7 @@ use std::sync::Arc;
 use iced::Task;
 use iced::widget::operation;
 
-use crate::bus::events::file::FileChanged;
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::markdown::document::DocumentContent;
@@ -82,9 +81,6 @@ use crate::ui_iced::table_width::fira_sans_width;
 
 /// NFR-001/NFR-004 error-code name for a failed font registration.
 const FONT_LOAD_ERROR_CODE: &str = "ui_iced.boot.font_load_failed";
-
-/// NFR-004 error-code name for a failed deferred-intent file read.
-const READ_FAILED_ERROR_CODE: &str = "ui_iced.file.read_failed";
 
 /// NFR-004 error-code name for a print request with no background channel.
 const PRINT_NO_CHANNEL_ERROR_CODE: &str = "ui_iced.file.print_no_channel";
@@ -407,7 +403,6 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
         }
         UserCommand::OpenInEditor(path) => {
             publish_and_drain(state, UserCommand::OpenInEditor(path.clone()));
-            open_editor_from_buffer(state, &path);
             Vec::new()
         }
         command => {
@@ -608,7 +603,13 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
             Vec::new()
         }
         TreeMessage::RunAsPromptRequested { path } => {
-            run_file_as_prompt(state, &path);
+            let _queued = state.app.orchestrator.queue_user_file_operation(
+                crate::background::UserFileOperation::LoadPrompt {
+                    path: path.clone(),
+                    target_dir: None,
+                    target_file: Some(path.clone()),
+                },
+            );
             Vec::new()
         }
         TreeMessage::SkillRunRequested {
@@ -616,7 +617,13 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
             target_dir,
             target_file,
         } => {
-            run_skill(state, &skill, target_dir, target_file);
+            let _queued = state.app.orchestrator.queue_user_file_operation(
+                crate::background::UserFileOperation::LoadPrompt {
+                    path: skill,
+                    target_dir,
+                    target_file,
+                },
+            );
             Vec::new()
         }
         TreeMessage::PrintRequested { path } => vec![print_task(state, path)],
@@ -659,61 +666,6 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
     state.overlay.hamburger_open = false;
     state.overlay.hamburger_menu_state.close_all();
     state.overlay.context_menu = Some(ContextMenu::from_legacy_items(anchor, items));
-}
-
-/// Read the file, take the body as the prompt and run it against that file.
-fn run_file_as_prompt(state: &mut AppState, path: &PathBuf) {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => {
-            let content = DocumentContent::parse(&raw).body;
-            publish_and_drain(
-                state,
-                UserCommand::RunSkillPrompt {
-                    content,
-                    target_dir: None,
-                    target_file: Some(path.clone()),
-                },
-            );
-        }
-        Err(error) => {
-            tracing::error!(
-                name = READ_FAILED_ERROR_CODE,
-                path = %path.display(),
-                %error,
-                "Failed to read file content to run as prompt."
-            );
-        }
-    }
-}
-
-/// Read a skill file and run its body against the menu's target.
-fn run_skill(
-    state: &mut AppState,
-    skill: &PathBuf,
-    target_dir: Option<PathBuf>,
-    target_file: Option<PathBuf>,
-) {
-    match std::fs::read_to_string(skill) {
-        Ok(raw) => {
-            let content = DocumentContent::parse(&raw).body;
-            publish_and_drain(
-                state,
-                UserCommand::RunSkillPrompt {
-                    content,
-                    target_dir,
-                    target_file,
-                },
-            );
-        }
-        Err(error) => {
-            tracing::error!(
-                name = READ_FAILED_ERROR_CODE,
-                path = %skill.display(),
-                %error,
-                "Failed to read skill file content to run as prompt."
-            );
-        }
-    }
 }
 
 /// Hand the print job to the background channel. There is no
@@ -847,31 +799,21 @@ fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Messa
 
 /// Write the buffer (front matter re-attached), publish the update so the
 /// tree and tag manager refresh, then close (UI-044, UI-045).
-fn save_editor(state: &mut AppState, path: &PathBuf) {
+fn save_editor(state: &mut AppState, path: &Path) {
     let Some(vm) = state.overlay.editor.as_ref() else {
         return;
     };
-    if vm.path() != path.as_path() {
+    if vm.path() != path {
         return;
     }
     let full_text = vm.document().to_string();
 
-    if let Err(error) = std::fs::write(path, &full_text) {
-        tracing::error!(
-            name = "editor.file.save_failed",
-            path = %path.display(),
-            %error,
-            "Failed to save file from inline editor. Likely cause: disk full or permission denied. Operator should verify disk space and write permissions."
-        );
-        return;
-    }
-
-    state
-        .app
-        .orchestrator
-        .file_event_bus
-        .publish(FileChanged::updated_one(path.clone()));
-    close_editor(state);
+    let _queued = state.app.orchestrator.queue_user_file_operation(
+        crate::background::UserFileOperation::SaveEditor {
+            path: path.to_path_buf(),
+            content: full_text,
+        },
+    );
 }
 
 /// Discards the editor buffer and clears the domain open flags.
@@ -1291,6 +1233,61 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
 fn apply_background_event(state: &mut AppState, event: &BackgroundEvent) {
     match event {
         BackgroundEvent::Fs(fs_event) => state.app.orchestrator.handle_fs_event(fs_event.clone()),
+        BackgroundEvent::Process(ProcessEvent::UserFileOperationCompleted(
+            crate::background::UserFileOperationResult::PromptLoaded {
+                content: Ok(content),
+                target_dir,
+                target_file,
+            },
+        )) => {
+            publish_and_drain(
+                state,
+                UserCommand::RunSkillPrompt {
+                    content: content.clone(),
+                    target_dir: target_dir.clone(),
+                    target_file: target_file.clone(),
+                },
+            );
+        }
+        BackgroundEvent::Process(process_event @ ProcessEvent::UserFileOperationCompleted(_)) => {
+            let editor_open = match process_event {
+                ProcessEvent::UserFileOperationCompleted(
+                    crate::background::UserFileOperationResult::EditorOpened {
+                        path,
+                        content: Ok(Some(_)),
+                    },
+                ) if state.app.orchestrator.pending_editor_open.as_ref() == Some(path) => {
+                    Some(path.clone())
+                }
+                _ => None,
+            };
+            let editor_saved = match process_event {
+                ProcessEvent::UserFileOperationCompleted(
+                    crate::background::UserFileOperationResult::EditorSaved {
+                        path,
+                        saved_content,
+                        result: Ok(()),
+                    },
+                ) => Some((path.clone(), saved_content.clone())),
+                _ => None,
+            };
+            state
+                .app
+                .orchestrator
+                .handle_process_event(process_event.clone());
+
+            if let Some(path) = editor_open {
+                open_editor_from_buffer(state, &path);
+            }
+            if let Some((path, saved_content)) = editor_saved
+                && state.overlay.editor.as_ref().is_some_and(|editor| {
+                    editor.path() == path.as_path()
+                        && editor.document().to_string() == saved_content
+                })
+            {
+                close_editor(state);
+            }
+        }
         BackgroundEvent::Process(process_event) => {
             state
                 .app

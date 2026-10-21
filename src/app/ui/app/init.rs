@@ -133,6 +133,8 @@ impl FastMdApp {
         // Extract needed fields from background_task BEFORE moving file_event_bus
         let rx_std = background_task.rx_std();
         let tx = background_task.tx;
+        let user_file_operation_worker =
+            crate::background::UserFileOperationWorker::spawn(tx.clone());
         let event_bus = background_task.file_event_bus;
         let dir_event_bus = background_task.dir_event_bus;
         // The single source of truth for file/directory state. File events
@@ -164,6 +166,7 @@ impl FastMdApp {
                 content_libraries,
                 rx: rx_std,
                 tx,
+                user_file_operation_worker,
                 file_event_bus: event_bus.clone(),
                 dir_event_bus: dir_event_bus.clone(),
                 file_event_reader: Some(event_bus.subscribe()),
@@ -182,6 +185,7 @@ impl FastMdApp {
                 config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
                 config_reader: None,
                 pending_file_load: None,
+                pending_editor_open: None,
                 finished_watcher_slot,
                 tool_context,
                 agent_event_bus,

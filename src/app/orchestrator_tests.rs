@@ -75,6 +75,7 @@ fn harness() -> AppOrchestrator {
     AppOrchestrator {
         content_libraries: Vec::new(),
         rx: bg_rx,
+        user_file_operation_worker: crate::background::UserFileOperationWorker::spawn(tx.clone()),
         tx,
         file_event_bus,
         dir_event_bus,
@@ -94,6 +95,7 @@ fn harness() -> AppOrchestrator {
         config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
         config_reader: None,
         pending_file_load: None,
+        pending_editor_open: None,
         finished_watcher_slot: Arc::new(Mutex::new(None)),
         tool_context,
         agent_event_bus,
@@ -103,6 +105,32 @@ fn harness() -> AppOrchestrator {
         agent_panel_state: AgentPanelState::new(),
         user_command_bus: crate::bus::core::Bus::new(),
         user_command_reader: None,
+    }
+}
+
+fn finish_user_file_operation(orch: &mut AppOrchestrator) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(!timeout.is_zero(), "file operation completion timed out");
+        match orch.rx.recv_timeout(timeout) {
+            Ok(crate::bus::events::typed::BackgroundEvent::Process(
+                event @ crate::bus::events::typed::ProcessEvent::UserFileOperationCompleted(_),
+            )) => {
+                orch.handle_process_event(event);
+                return;
+            }
+            Ok(crate::bus::events::typed::BackgroundEvent::Process(event)) => {
+                orch.handle_process_event(event);
+            }
+            Ok(_) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("file operation completion timed out")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("background channel disconnected before file operation completed")
+            }
+        }
     }
 }
 
@@ -219,6 +247,7 @@ fn moving_directory_publishes_only_directory_events() {
         file: old_path.clone(),
         destination,
     });
+    finish_user_file_operation(&mut orch);
 
     assert!(std::fs::metadata(&new_path).unwrap().is_dir());
     assert!(file_reader.try_recv().is_err());
@@ -246,6 +275,7 @@ fn moving_file_publishes_only_file_events() {
         file: old_path.clone(),
         destination,
     });
+    finish_user_file_operation(&mut orch);
 
     let deleted = file_reader.try_recv().unwrap();
     let added = file_reader.try_recv().unwrap();
@@ -264,13 +294,10 @@ fn deleting_directory_publishes_only_directory_event() {
     std::fs::create_dir(&path).unwrap();
     let file_reader = orch.file_event_bus.subscribe();
     let dir_reader = orch.dir_event_bus.subscribe();
-    let recycle_bin = std::sync::Arc::new(crate::utils::recycle_bin::MockRecycleBinBackend::new());
-
-    crate::utils::recycle_bin::with_thread_backend(recycle_bin, || {
-        orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
-            path.clone(),
-        ));
-    });
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
+        path.clone(),
+    ));
+    finish_user_file_operation(&mut orch);
 
     assert!(file_reader.try_recv().is_err());
     let deleted = dir_reader.try_recv().unwrap();
@@ -286,13 +313,10 @@ fn deleting_file_publishes_only_file_event() {
     std::fs::write(&path, "content").unwrap();
     let file_reader = orch.file_event_bus.subscribe();
     let dir_reader = orch.dir_event_bus.subscribe();
-    let recycle_bin = std::sync::Arc::new(crate::utils::recycle_bin::MockRecycleBinBackend::new());
-
-    crate::utils::recycle_bin::with_thread_backend(recycle_bin, || {
-        orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
-            path.clone(),
-        ));
-    });
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
+        path.clone(),
+    ));
+    finish_user_file_operation(&mut orch);
 
     let deleted = file_reader.try_recv().unwrap();
     assert_eq!(deleted.kind, FileChangedKind::Deleted);
@@ -314,6 +338,7 @@ fn creating_directory_publishes_only_directory_event() {
             name: "created".to_string(),
         },
     );
+    finish_user_file_operation(&mut orch);
 
     assert!(std::fs::metadata(&path).unwrap().is_dir());
     let added = dir_reader.try_recv().unwrap();
@@ -336,6 +361,7 @@ fn creating_document_publishes_only_file_event() {
             name: "created".to_string(),
         },
     );
+    finish_user_file_operation(&mut orch);
 
     assert!(path.exists());
     let added = file_reader.try_recv().unwrap();
@@ -517,6 +543,48 @@ fn handle_fs_event_file_modified_clears_stale_loaded_path() {
 }
 
 #[test]
+fn tag_results_for_pdf_paths_do_not_add_them_to_the_workspace() {
+    let mut orch = harness();
+    let path = PathBuf::from("report.pdf");
+
+    orch.handle_fs_event(FsEvent::FileParsed {
+        path: path.clone(),
+        tags: Vec::new(),
+    });
+    orch.handle_fs_event(FsEvent::FileModified {
+        path: path.clone(),
+        tags: vec!["from-header".into()],
+    });
+
+    assert!(!orch.workspace.contains_file(&path));
+    assert_eq!(
+        orch.tags.file_tags().get(&path),
+        Some(&vec!["from-header".into()])
+    );
+}
+
+#[test]
+fn tag_resynchronization_replaces_stale_file_and_unique_tag_state() {
+    let mut orch = harness();
+    let stale_path = PathBuf::from("stale.md");
+    let current_path = PathBuf::from("current.md");
+    orch.tags
+        .add_tags(stale_path.clone(), vec!["stale-only".into()]);
+
+    orch.handle_fs_event(FsEvent::TagsResynchronized {
+        files: vec![(current_path.clone(), vec!["current-only".into()])],
+    });
+
+    assert!(!orch.tags.file_tags().contains_key(&stale_path));
+    assert_eq!(
+        orch.tags.file_tags().get(&current_path),
+        Some(&vec!["current-only".into()])
+    );
+    assert!(!orch.tags.all_tags().contains("stale-only"));
+    assert!(orch.tags.all_tags().contains("current-only"));
+}
+
+#[test]
 fn handle_fs_event_finished_marks_indexing() {
     let mut orch = harness();
     orch.handle_fs_event(FsEvent::FinishedWithoutWatcher);
@@ -604,6 +672,24 @@ fn handle_process_event_releases_pending_marker_for_its_own_path() {
         orch.tabs.loaded_path, None,
         "nothing is selected, so nothing may be projected"
     );
+}
+
+#[test]
+fn handle_process_event_drops_editor_open_superseded_by_another_path() {
+    let mut orch = harness();
+    let old_path = PathBuf::from("/tmp/old-editor.md");
+    let current_path = PathBuf::from("/tmp/current-editor.md");
+    orch.pending_editor_open = Some(current_path.clone());
+
+    orch.handle_process_event(ProcessEvent::UserFileOperationCompleted(
+        crate::background::UserFileOperationResult::EditorOpened {
+            path: old_path,
+            content: Ok(Some("stale contents".to_string())),
+        },
+    ));
+
+    assert_eq!(orch.pending_editor_open, Some(current_path));
+    assert_eq!(orch.tabs.loaded_path, None);
 }
 
 #[test]
