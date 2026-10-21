@@ -100,7 +100,7 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       `token/size.rs` (`UIF-TOK-002`), `token/shape.rs` (`UIF-TOK-003`).
       Tests assert every value against the spec tables and the 24×24 hit-target floor.
       **Commit:** `feat(iced-pro): add spatial, sizing and shape tokens`
-- [ ] **INC-03** Typography scale: `token/typography.rs` (`UIF-TOK-004`) —
+- [x] **INC-03** Typography scale: `token/typography.rs` (`UIF-TOK-004`) —
       size, line height, weight, tracking per rung; 12px absolute floor.
       **Commit:** `feat(iced-pro): add typography scale tokens`
 - [ ] **INC-04** Semantic colour tokens: `token/color.rs` (`UIF-TOK-005`) —
@@ -215,3 +215,8 @@ Recorded as they are found; none resolved yet.
 - **G-3** `UIF-VER-004` asks for "deterministic offscreen visual snapshots".
   iced has no first-class snapshot API; INC-18 should assert on resolved style
   values rather than pixels unless a workable harness is found.
+- **G-4** The spec prints line-height multipliers rounded to two decimals, so a
+  rung's derived ratio only matches the printed figure within a tolerance. The
+  tightest case is `type.ui_compact`: `18 / 13 = 1.3846…`, which is `0.0046`
+  from the printed `1.38×`. INC-03 pins the ratio at `5e-3`. Any future line-height
+  retune must stay inside that band or the multiplier test must be re-derived.
