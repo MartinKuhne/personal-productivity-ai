@@ -31,6 +31,20 @@ pub struct FileEvent {
 }
 
 impl FileEvent {
+    /// Per-file `FileName` values ([REQ-334]): one entry per path, aligned
+    /// by index. Directory events carry the directory name; a path with no
+    /// final component (a filesystem root) contributes an empty string.
+    pub fn file_names(&self) -> Vec<String> {
+        self.paths
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
     pub fn discovered(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::Discovered,
@@ -146,6 +160,32 @@ impl FileEventProducer {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn test_file_event_file_names_matches_paths_by_index() {
+        // REQ-334: for each file, the event shall have a file name.
+        let paths = vec![
+            PathBuf::from("/libs/docs/notes.md"),
+            PathBuf::from("/libs/docs/todo.txt"),
+        ];
+        let e = FileEvent::discovered(paths);
+        let names = e.file_names();
+        assert_eq!(names.len(), e.paths.len());
+        assert_eq!(names[0], "notes.md");
+        assert_eq!(names[1], "todo.txt");
+    }
+
+    #[test]
+    fn test_file_event_file_names_dir_and_unnamed_path() {
+        // A directory event carries the directory name; a path without a
+        // final component (a root) yields an empty string rather than a
+        // panic.
+        let d = FileEvent::dir_discovered_one(PathBuf::from("/libs/docs/subdir"));
+        assert_eq!(d.file_names(), vec!["subdir".to_string()]);
+
+        let root = FileEvent::discovered_one(PathBuf::from("C:\\"));
+        assert_eq!(root.file_names(), vec![String::new()]);
+    }
 
     #[test]
     fn test_file_event_constructors() {

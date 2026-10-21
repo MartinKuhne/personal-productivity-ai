@@ -178,10 +178,30 @@ fn test_bus_subscribers_see_discovered_events() {
         tree_events.push(ev);
     }
 
-    assert_eq!(tag_events.len(), 1);
-    assert_eq!(tree_events.len(), 1);
-    assert_eq!(tag_events[0].paths[0], tree_events[0].paths[0]);
-    assert_eq!(tag_events[0].kind, FileEventKind::Discovered);
+    assert_eq!(tag_events.len(), 2);
+    assert_eq!(tree_events.len(), 2);
+    // Kind-homogeneous convergence ([REQ-330]/[REQ-332]/[REQ-320]): the file
+    // batch arrives as one `[FileChanged][Added]` event and the enumerated
+    // directories as one `[DirectoryChanged][Added]` event.
+    let file_event = tag_events
+        .iter()
+        .find(|e| e.kind == FileEventKind::Discovered)
+        .expect("file event");
+    let dir_event = tag_events
+        .iter()
+        .find(|e| e.kind == FileEventKind::DirDiscovered)
+        .expect("directory event");
+    let tree_file_event = tree_events
+        .iter()
+        .find(|e| e.kind == FileEventKind::Discovered)
+        .expect("file event for tree reader");
+    let tree_dir_event = tree_events
+        .iter()
+        .find(|e| e.kind == FileEventKind::DirDiscovered)
+        .expect("directory event for tree reader");
+    // Both subscribers observe the same event payloads.
+    assert_eq!(file_event.paths, tree_file_event.paths);
+    assert_eq!(dir_event.paths, tree_dir_event.paths);
 }
 
 #[test]

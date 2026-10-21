@@ -48,6 +48,69 @@ fn test_scan_libraries_discovers_md() {
 }
 
 #[test]
+fn test_scan_libraries_publishes_dir_discovered_on_bus() {
+    // [REQ-320] The crawler publishes one `[DirectoryChanged]` event
+    // (kind `Added`) per library on the file-event bus, and no longer
+    // sends the redundant `FsEvent::DirParsed` on the background
+    // channel.
+    let mut config = AppConfig::default();
+    let dir = tempdir().unwrap();
+    let subdir = dir.path().join("docs");
+    std::fs::create_dir_all(&subdir).unwrap();
+    std::fs::write(dir.path().join("a.md"), "test").unwrap();
+
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: dir.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let (tx, mut rx) = tokio::sync::broadcast::channel(64);
+    let tx = BackgroundEventSender::new(tx);
+    let bus = Bus::new();
+    let reader = bus.subscribe();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let indexer = Indexer::new(config, tx, bus.clone(), cancel);
+
+    let (tx_work, _rx_work) = std::sync::mpsc::channel();
+    let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+    #[cfg(feature = "image-library")]
+    let (tx_img, _rx_img) = std::sync::mpsc::channel();
+
+    #[cfg(feature = "image-library")]
+    indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+    #[cfg(not(feature = "image-library"))]
+    indexer.scan_libraries(&tx_work, &tx_pdf);
+
+    // Directory events: one kind-homogeneous DirDiscovered event that
+    // carries every enumerated directory path (root + "docs").
+    let mut dir_events = 0;
+    let mut dir_paths = Vec::new();
+    while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        if ev.kind == FileEventKind::DirDiscovered {
+            dir_events += 1;
+            dir_paths.extend(ev.paths);
+        }
+    }
+    assert_eq!(dir_events, 1, "directory events must be one batch");
+    assert!(dir_paths.contains(&dir.path().to_path_buf()));
+    assert!(dir_paths.contains(&subdir));
+
+    // No `FsEvent::DirParsed` may appear on the background channel.
+    drop(tx_work); // silence unused-variable warnings on cfg combinations
+    drop(tx_pdf);
+    let mut dir_parsed = 0;
+    while let Ok(ev) = rx.try_recv() {
+        if let BackgroundEvent::Fs(FsEvent::DirParsed { .. }) = ev {
+            dir_parsed += 1;
+        }
+    }
+    assert_eq!(dir_parsed, 0, "crawler must not emit DirParsed anymore");
+}
+
+#[test]
 fn test_scan_libraries_skips_git() {
     let mut config = AppConfig::default();
     let dir = tempdir().unwrap();

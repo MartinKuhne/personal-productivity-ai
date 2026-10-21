@@ -64,6 +64,118 @@ impl FileWatcher {
         let watcher_result =
             notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                 if let Ok(event) = res {
+                    // [REQ-402]/[REQ-322] Directory lifecycle events come
+                    // straight from the notify kinds (no filesystem probing
+                    // needed after a delete). Published as kind-homogeneous
+                    // `[DirectoryChanged][Added]` / `[DirectoryChanged][Deleted]`
+                    // events ([REQ-320], [REQ-332]).
+                    match event.kind {
+                        notify::EventKind::Create(kind) => {
+                            let is_folder = matches!(kind, notify::event::CreateKind::Folder)
+                                || (kind == notify::event::CreateKind::Any
+                                    && event.paths.iter().any(|p| p.is_dir()));
+                            if is_folder {
+                                for path in &event.paths {
+                                    if path.components().any(|c| c.as_os_str() == ".git") {
+                                        continue;
+                                    }
+                                    let _ = tx_notify.send(
+                                        BackgroundLogEntry::new(
+                                            LogCategory::Watcher,
+                                            format!(
+                                                "Directory created {:?}",
+                                                path.file_name().unwrap_or_default()
+                                            ),
+                                        )
+                                        .into(),
+                                    );
+                                    bus_watcher
+                                        .publish(FileEvent::dir_discovered_one(path.clone()));
+                                }
+                                // [REQ-407] The library roots are watched with
+                                // `RecursiveMode::Recursive` (see `start`), so
+                                // a newly created directory is already covered;
+                                // no extra registration is needed.
+                                return;
+                            }
+                        }
+                        notify::EventKind::Remove(remove_kind) => {
+                            // `[Folder]` is unambiguous. The Windows backend
+                            // often reports `[Any]` instead: workspace-tracked
+                            // files always carry extensions (md/txt/pdf/
+                            // image), so a gone extension-less path is treated
+                            // as a removed directory ([REQ-402]/[REQ-322]).
+                            let removed_dirs: Vec<PathBuf> = match remove_kind {
+                                notify::event::RemoveKind::Folder => event.paths.clone(),
+                                notify::event::RemoveKind::Any => event
+                                    .paths
+                                    .iter()
+                                    .filter(|p| p.extension().is_none())
+                                    .cloned()
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            if !removed_dirs.is_empty() {
+                                for path in &removed_dirs {
+                                    if path.components().any(|c| c.as_os_str() == ".git") {
+                                        continue;
+                                    }
+                                    let _ = tx_notify.send(
+                                        BackgroundLogEntry::new(
+                                            LogCategory::Watcher,
+                                            format!(
+                                                "Directory deleted {:?}",
+                                                path.file_name().unwrap_or_default()
+                                            ),
+                                        )
+                                        .into(),
+                                    );
+                                    bus_watcher.publish(FileEvent::dir_removed_one(path.clone()));
+                                }
+                                return;
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // [REQ-404] A rename is treated as delete(old) followed by
+                    // create(new). Backends that deliver one notification with
+                    // both names are handled here; backends that split it into
+                    // separate Remove/Create events are handled naturally by
+                    // the per-path logic below ([REQ-332]: kind-homogeneous
+                    // events).
+                    if let notify::EventKind::Modify(notify::event::ModifyKind::Name(_)) =
+                        event.kind
+                        && event.paths.len() >= 2
+                    {
+                        let old = event.paths[0].clone();
+                        let new = event.paths[1].clone();
+                        if new.is_dir() {
+                            bus_watcher.publish(FileEvent::dir_removed_one(old.clone()));
+                            bus_watcher.publish(FileEvent::dir_discovered_one(new.clone()));
+                        } else if let Some(ext) = new.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
+                                let tags = crate::agent::utils::tags::extract_tags_from_file(&new);
+                                let _ = tx_notify.send(
+                                    FsEvent::FileModified {
+                                        path: new.clone(),
+                                        tags,
+                                    }
+                                    .into(),
+                                );
+                                bus_watcher.publish(FileEvent::discovered_one(new.clone()));
+                            } else if ext_str == "pdf" {
+                                bus_watcher.publish(FileEvent::discovered_one(new.clone()));
+                                let job = PdfConversionJob::new(new.clone());
+                                if job.should_convert() {
+                                    let _ = tx_pdf_watcher.send(new.clone());
+                                }
+                            }
+                        }
+                        return;
+                    }
+
                     for path in event.paths {
                         if path.components().any(|c| c.as_os_str() == ".git") {
                             continue;
@@ -150,6 +262,27 @@ impl FileWatcher {
                         if is_md {
                             match event.kind {
                                 notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                    // [REQ-332] A not-previously-seen file is
+                                    // `[FileChanged][Added]`; modifying an
+                                    // existing one is `[FileChanged][Changed]`.
+                                    // The create-half of a rename `[Name::To]`
+                                    // (or `[Name::Both]` on backends that
+                                    // deliver both names in one notification)
+                                    // is also an addition ([REQ-404]).
+                                    let is_added = matches!(
+                                        event.kind,
+                                        notify::EventKind::Create(_)
+                                            | notify::EventKind::Modify(
+                                                notify::event::ModifyKind::Name(
+                                                    notify::event::RenameMode::To
+                                                ),
+                                            )
+                                            | notify::EventKind::Modify(
+                                                notify::event::ModifyKind::Name(
+                                                    notify::event::RenameMode::Both
+                                                ),
+                                            )
+                                    );
                                     if path.is_file() {
                                         let tags =
                                             crate::agent::utils::tags::extract_tags_from_file(
@@ -162,7 +295,24 @@ impl FileWatcher {
                                             }
                                             .into(),
                                         );
-                                        bus_watcher.publish(FileEvent::updated_one(path.clone()));
+                                        // [REQ-332] A not-previously-seen file is
+                                        // `[FileChanged][Added]`; modifying an
+                                        // existing one is `[FileChanged][Changed]`.
+                                        if is_added {
+                                            bus_watcher
+                                                .publish(FileEvent::discovered_one(path.clone()));
+                                        } else {
+                                            bus_watcher
+                                                .publish(FileEvent::updated_one(path.clone()));
+                                        }
+                                    } else if !path.exists() {
+                                        // Rename delivered as a separate event:
+                                        // the old name is already gone —
+                                        // `[FileChanged][Deleted]`.
+                                        let _ = tx_notify.send(
+                                            FsEvent::FileDeleted { path: path.clone() }.into(),
+                                        );
+                                        bus_watcher.publish(FileEvent::removed_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
@@ -175,7 +325,26 @@ impl FileWatcher {
                         } else if is_pdf {
                             match event.kind {
                                 notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                    bus_watcher.publish(FileEvent::updated_one(path.clone()));
+                                    let is_added = matches!(
+                                        event.kind,
+                                        notify::EventKind::Create(_)
+                                            | notify::EventKind::Modify(
+                                                notify::event::ModifyKind::Name(
+                                                    notify::event::RenameMode::To
+                                                ),
+                                            )
+                                            | notify::EventKind::Modify(
+                                                notify::event::ModifyKind::Name(
+                                                    notify::event::RenameMode::Both
+                                                ),
+                                            )
+                                    );
+                                    if is_added {
+                                        bus_watcher
+                                            .publish(FileEvent::discovered_one(path.clone()));
+                                    } else {
+                                        bus_watcher.publish(FileEvent::updated_one(path.clone()));
+                                    }
                                     let job = PdfConversionJob::new(path.clone());
                                     if job.should_convert() {
                                         let _ = tx_pdf_watcher.send(path.clone());
@@ -375,10 +544,10 @@ mod tests {
         let file = dir.path().join("notes.md");
         std::fs::write(&file, "hello").unwrap();
 
-        // Create -> FileModified on the typed bus.
+        // Create -> `[FileChanged][Added]` on the bus (REQ-332).
         wait_for_bus_event(
             &reader,
-            |e| e.kind == FileEventKind::Updated && e.paths.contains(&file),
+            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&file),
             std::time::Duration::from_secs(5),
         );
 
@@ -396,6 +565,62 @@ mod tests {
         wait_for_bus_event(
             &reader,
             |e| e.kind == FileEventKind::Removed && e.paths.contains(&file),
+            std::time::Duration::from_secs(5),
+        );
+    }
+
+    #[test]
+    fn test_watcher_publishes_directory_events() {
+        // [REQ-402]/[REQ-322] Directory create/remove emit kind-homogeneous
+        // DirectoryChanged events with the fully qualified path ([REQ-321]).
+        let dir = tempdir().unwrap();
+        let (mut watcher, bus) = spawn_watcher_on(dir.path());
+        let reader = bus.subscribe();
+        watcher.start();
+
+        let subdir = dir.path().join("newdocs");
+        std::fs::create_dir_all(&subdir).unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::DirDiscovered && e.paths.contains(&subdir),
+            std::time::Duration::from_secs(5),
+        );
+
+        std::fs::remove_dir(&subdir).unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::DirRemoved && e.paths.contains(&subdir),
+            std::time::Duration::from_secs(5),
+        );
+    }
+
+    #[test]
+    fn test_watcher_rename_is_delete_then_create() {
+        // [REQ-404] A rename must surface as a Removed(old) followed by an
+        // Added(new), regardless of how the backend delivers the notification.
+        let dir = tempdir().unwrap();
+        let (mut watcher, bus) = spawn_watcher_on(dir.path());
+        let reader = bus.subscribe();
+        watcher.start();
+
+        let old = dir.path().join("before.md");
+        let new = dir.path().join("after.md");
+        std::fs::write(&old, "hello").unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&old),
+            std::time::Duration::from_secs(5),
+        );
+
+        std::fs::rename(&old, &new).unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Removed && e.paths.contains(&old),
+            std::time::Duration::from_secs(5),
+        );
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Discovered && e.paths.contains(&new),
             std::time::Duration::from_secs(5),
         );
     }

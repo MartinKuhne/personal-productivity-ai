@@ -342,11 +342,12 @@ C4Component
 ### Message Types & Payloads
 
 - **`FileEvent`** (`bus/events/file.rs`): Published whenever content libraries change on disk or in memory.
-  - Variants (`FileEventKind`): `Discovered`, `Updated`, `Removed`, `DirDiscovered`, `DirRemoved`.
-  - Content: `paths: Vec<PathBuf>`.
+  - Variants (`FileEventKind`): `Discovered`, `Updated`, `Removed`, `DirDiscovered`, `DirRemoved` — kind-homogeneous per event (one `Kind` per event, per [REQ-332]).
+  - Content: `paths: Vec<PathBuf>` (fully qualified, [REQ-333]); `FileEvent::file_names()` derives the per-file `FileName` property ([REQ-334]).
   - Helpers: `FileEventProducer` simplifies publishing single or batch file/dir operations, including rename semantics (`Removed` + `Discovered`).
+  - Producers: the crawler (`Indexer::scan_libraries`) emits one `Discovered` batch per directory plus one `DirDiscovered` batch per library ([REQ-320]/[REQ-330]: emits on enumeration); the watcher emits `Discovered` for created files (`Updated` for modifications, `Removed` for deletions, rename split as `Removed(old)` + `Discovered(new)` per [REQ-404]) and `DirDiscovered`/`DirRemoved` for directory lifecycle ([REQ-402], derived from notify's create/remove kinds; `Remove(Any)` paths without an extension are treated as folders, since workspace-tracked files always carry an extension).
 - **`BackgroundEvent`** (`bus/events/typed.rs`): Top-level enum carrying domain-specific asynchronous updates to the UI loop:
-  - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`.
+  - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`. `DirParsed` is dormant: the crawler now publishes directory events on `Bus<FileEvent>` instead ([REQ-320]); the variant is retained for the test routing harness.
   - **`ProcessEvent`**: `LogEntry(BackgroundLogEntry)`, `FileLoaded { path, content }`.
   - **`McpAuthEvent`**: `Completed { server_name, error }`.
 - **`AgentEvent`** (`agent/events.rs`): Agent→UI `Bus<AgentEvent>` broadcast (tokio, capacity 8192). 11 session-tagged variants: `SessionStarted`, `SessionFinished{history}`, `Status(status: AgentStatus)`, `Thinking`, `ContentDelta`, `ToolCallStarted{id,name,args}`, `ToolResult{id,name,result}`, `ToolSideEffect`, `DebugEntry`, `TokenUsage`, `Failed`. Every variant carries `session_id: Uuid`.
