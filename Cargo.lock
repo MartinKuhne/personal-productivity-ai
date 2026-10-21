@@ -2398,6 +2398,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iced-pro"
+version = "0.2.0"
+dependencies = [
+ "iced",
+ "iced_test",
+ "proptest",
+]
+
+[[package]]
 name = "iced_core"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

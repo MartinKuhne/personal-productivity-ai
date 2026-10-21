@@ -13,6 +13,7 @@ members = [
     ".",
     "src/agent",
     "src/fastmd-tool-macros",
+    "src/iced-pro",
     "src/md2pdf",
 ]
 

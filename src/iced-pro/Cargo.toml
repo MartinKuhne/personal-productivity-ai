@@ -1,0 +1,26 @@
+[package]
+name = "iced-pro"
+version = "0.2.0"
+edition = "2024"
+description = "Reusable iced widget library implementing the FastMD UI framework specification"
+license = "MIT"
+repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
+categories = ["gui"]
+keywords = ["iced", "ui", "widgets", "design-tokens"]
+
+[lib]
+path = "mod.rs"
+
+[dependencies]
+# Same feature set `fastmd` uses, minus `markdown` — this crate does not
+# render markdown, only framework widgets driven by semantic design tokens.
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tiny-skia",
+    "fira-sans",
+    "advanced-shaping",
+] }
+
+[dev-dependencies]
+iced_test = "0.14.0"
+proptest = "1.4"

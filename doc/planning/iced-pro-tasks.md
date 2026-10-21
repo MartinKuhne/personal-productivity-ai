@@ -96,25 +96,25 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 ### M1 — Design tokens (UIF-TOK-*)
 
-- [x] **INC-02** Spatial + geometry tokens: `token/space.rs` (`UIF-TOK-001`),
+- [ ] **INC-02** Spatial + geometry tokens: `token/space.rs` (`UIF-TOK-001`),
       `token/size.rs` (`UIF-TOK-002`), `token/shape.rs` (`UIF-TOK-003`).
       Tests assert every value against the spec tables and the 24×24 hit-target floor.
       **Commit:** `feat(iced-pro): add spatial, sizing and shape tokens`
-- [x] **INC-03** Typography scale: `token/typography.rs` (`UIF-TOK-004`) —
+- [ ] **INC-03** Typography scale: `token/typography.rs` (`UIF-TOK-004`) —
       size, line height, weight, tracking per rung; 12px absolute floor.
       **Commit:** `feat(iced-pro): add typography scale tokens`
-- [x] **INC-04** Semantic colour tokens: `token/color.rs` (`UIF-TOK-005`) —
+- [ ] **INC-04** Semantic colour tokens: `token/color.rs` (`UIF-TOK-005`) —
       surfaces incl. `scrim` alpha, borders, accents, text roles, status colours,
       and the `editor.inverted.*` set.
       **Commit:** `feat(iced-pro): add semantic colour tokens`
-- [x] **INC-05** Contrast solver: `token/contrast.rs` (`UIF-TOK-006`, `UIF-VER-001`)
+- [ ] **INC-05** Contrast solver: `token/contrast.rs` (`UIF-TOK-006`, `UIF-VER-001`)
       — relative luminance, contrast ratio, and a checked table of every mandated
       text/surface and border/surface pairing.
       **Commit:** `feat(iced-pro): add WCAG contrast solver and token invariants`
 
 ### M2 — Interaction state machine
 
-- [x] **INC-06** `state.rs` — `InteractionState { Rest, Hovered, Pressed, Focused,
+- [ ] **INC-06** `state.rs` — `InteractionState { Rest, Hovered, Pressed, Focused,
       Disabled, Invalid }` plus a pure priority resolver (`Disabled` > `Invalid` >
       `Pressed` > `Focused` > `Hovered` > `Rest`) and transition helpers.
       Tests: every precedence combination, no-implicit-transition rules.
