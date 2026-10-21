@@ -438,6 +438,15 @@ fn scrim_keeps_the_default_cursor_visible() {
 }
 
 #[test]
+fn menu_click_away_blocker_keeps_the_default_cursor_visible() {
+    assert_eq!(
+        MENU_BLOCKER_INTERACTION,
+        iced::mouse::Interaction::Idle,
+        "the menu blocker must dismiss outside clicks without hiding the pointer"
+    );
+}
+
+#[test]
 fn with_context_menu_renders_the_base_unchanged_for_an_empty_menu() {
     let base: Element<'_, TestMessage> = text("base").into();
     let base_size = base.as_widget().size();

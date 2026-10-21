@@ -159,6 +159,9 @@ pub const CONFIRM_CANCEL_SPACING: f32 = 8.0;
 /// Mouse interaction used by the modal scrim while it blocks the UI beneath it.
 const SCRIM_INTERACTION: iced::mouse::Interaction = iced::mouse::Interaction::Idle;
 
+/// Mouse interaction for the click-away blocker behind an open menu.
+const MENU_BLOCKER_INTERACTION: iced::mouse::Interaction = iced::mouse::Interaction::Idle;
+
 /// The single overlay slot an app holds.
 ///
 /// `Kind` is the caller's own modal vocabulary — the tree, tabs and editor
@@ -444,9 +447,9 @@ where
 
 /// A full-area, transparent layer that swallows the click landing on it.
 ///
-/// `Interaction::Hidden` keeps the cursor from reporting hover to layers
-/// below, and `on_press` captures the event (`mouse_area.rs:376-379`) so
-/// the base tree never sees it (`stack.rs:262-264`).
+/// `Interaction::Idle` leaves the default pointer visible, while `on_press`
+/// still captures the event (`mouse_area.rs:376-379`) so the base tree never
+/// sees it (`stack.rs:262-264`).
 #[must_use]
 pub fn input_blocker<'a, Message>(on_click: Message) -> MouseArea<'a, Message>
 where
@@ -454,7 +457,7 @@ where
 {
     mouse_area(full_area())
         .on_press(on_click)
-        .interaction(iced::mouse::Interaction::Hidden)
+        .interaction(MENU_BLOCKER_INTERACTION)
 }
 
 /// A full-area, dimmed layer that swallows the click landing on it — the
