@@ -107,7 +107,7 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       surfaces incl. `scrim` alpha, borders, accents, text roles, status colours,
       and the `editor.inverted.*` set.
       **Commit:** `feat(iced-pro): add semantic colour tokens`
-- [ ] **INC-05** Contrast solver: `token/contrast.rs` (`UIF-TOK-006`, `UIF-VER-001`)
+- [x] **INC-05** Contrast solver: `token/contrast.rs` (`UIF-TOK-006`, `UIF-VER-001`)
       — relative luminance, contrast ratio, and a checked table of every mandated
       text/surface and border/surface pairing.
       **Commit:** `feat(iced-pro): add WCAG contrast solver and token invariants`
@@ -237,6 +237,51 @@ Recorded as they are found; none resolved yet.
   **`3.9985:1`**, which fails the `UIF-TOK-006` 4.5:1 normal-text rule. The
   spec's `RGB(180, 0, 0)` measures `7.14:1`. `iced-pro` follows the spec per D-4;
   the app's value needs fixing when `fastmd` is wired onto this framework.
+- **G-7 — BLOCKING: five mandated pairings cannot pass their own threshold.**
+  INC-05 measured every pairing the spec's usage contracts require. Five fail.
+  These are pinned by `test_contract_mandated_pairings_cannot_clear_their_rule`
+  rather than waived, so the conflict stays visible:
+
+  | # | Pairing | Measured | Rule | Short by | Where the spec requires it |
+  |---|---|---|---|---|---|
+  | 1 | `text.strong` on `accent.primary` | **4.4669** | 4.5 | 0.0331 | Selection Foreground Lock (`UIF-TOK-006` rule 3), Primary button, selected tree row |
+  | 2 | `status.danger` on `surface.overlay` | 4.1473 | 4.5 | 0.3527 | Input-dialog validation slot (§4.5.1), modal error banner (§4.6.1) |
+  | 3 | `status.danger` on `surface.raised` | 4.3800 | 4.5 | 0.1200 | Danger button resting foreground (§3.1) |
+  | 4 | `accent.primary` on `surface.active` | 2.8441 | 3.0 | 0.1559 | Secondary button pressed border (§3.1) |
+  | 5 | `border.strong` on `surface.active` | 2.8775 | 3.0 | 0.1225 | Ghost pressed border (§3.1), latched navbar trigger (§4.2.2) |
+
+  Pairing 1 was independently re-derived outside the crate and confirmed
+  (`L(accent.primary) = 0.185063`, ratio `4.4669`). The spec's own printed
+  `4.46:1` agrees — the spec simply never checked it against its own rule 1.
+  **Rule 1 and rule 3 are mutually unsatisfiable at the literal token values.**
+  A one-unit retune clears it: `RGB(98, 101, 240)` → `4.5268`.
+
+  Also measured under threshold but *not currently mandated* anywhere, so they are
+  latent rather than active defects: `text.disabled` on `surface.hover` (4.4734)
+  and `surface.active` (3.7781); `status.warning` on `surface.active` (4.3777);
+  `status.danger` on `surface.active` (2.9740).
+
+  **Resolution is a design decision and is pending user input.** Options are
+  recorded in §5.
+
+---
+
+## 5. Open decision — resolving the G-7 contrast conflicts
+
+The spec's literal token values cannot satisfy the spec's own contrast rules in
+five places. Every downstream widget increment builds on these values, so the
+choice must be made before M3.
+
+| Option | What it means | Cost |
+|---|---|---|
+| **A — Retune the offending tokens minimally** | Nudge `accent.primary`, `status.danger` and the `surface.active`/border relationship until all five pairings clear their rule. E.g. `accent.primary` → `RGB(98, 101, 240)` gives `4.5268`. | Changes brand values slightly; visually near-indistinguishable. Keeps the spec's rules intact and the gate strict. |
+| **B — Keep the literal values, record accepted deviations** | Tokens stay exactly as the spec prints them. Each shortfall becomes a named, test-pinned documented exception. | The `UIF-VER-001` gate ships knowingly below WCAG AA. Honest, but the accessibility rule is soft. |
+| **C — Escalate the spec for redesign** | Stop at M2 and send the five conflicts back to the spec author. | Blocks the plan on an external dependency. |
+
+**Supervisor recommendation: A.** The shortfalls are all under 0.36 of a ratio
+point and the fixes are one- or two-unit channel changes. Option A keeps
+`UIF-VER-001` a real gate rather than a documented exception, and the visual
+difference is not perceptible.
 - **G-2** The spec defines `size.hit_target.min` as `24 × 24` but navbar icon
   buttons are given a `28 × 28` floor in `UIF-ATOM-001`. Both hold; the atom rule
   is the stricter one and should win for navbar-class controls.
