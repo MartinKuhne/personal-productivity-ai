@@ -106,6 +106,7 @@ impl AppOrchestrator {
             }
 
             UserCommand::ConfirmMove { file, destination } => {
+                let is_directory = file.is_dir();
                 let mut new_path = destination.clone();
                 new_path.push(file.file_name().unwrap());
                 if let Err(e) = std::fs::rename(&file, &new_path) {
@@ -117,10 +118,20 @@ impl AppOrchestrator {
                         "Failed to move file. Likely cause: permission denied or file in use. Operator should check file locks."
                     );
                 } else {
-                    let producer = crate::bus::events::file::FileEventProducer::new(
-                        self.file_event_bus.clone(),
-                    );
-                    producer.publish_rename(&file, &new_path);
+                    if is_directory {
+                        // [REQ-404] Directory moves use the directory bus;
+                        // classify the entry before the filesystem move.
+                        let dir_producer =
+                            crate::bus::events::directory::DirectoryEventProducer::new(
+                                self.dir_event_bus.clone(),
+                            );
+                        dir_producer.publish_rename(&file, &new_path);
+                    } else {
+                        let file_producer = crate::bus::events::file::FileEventProducer::new(
+                            self.file_event_bus.clone(),
+                        );
+                        file_producer.publish_rename(&file, &new_path);
+                    }
                     if self.tabs.loaded_path.as_ref() == Some(&file) {
                         self.tabs.loaded_path = Some(new_path.clone());
                     }
@@ -135,18 +146,19 @@ impl AppOrchestrator {
                             *tab = new_path.clone();
                         }
                     }
-                    self.file_processor.remove_file(&file);
-                    if self.file_processor.contains_dir(&file) {
-                        self.file_processor.remove_dir(&file);
-                        self.file_processor.add_dir(new_path.clone());
+                    if is_directory {
+                        self.workspace.remove_dir(&file);
+                        self.workspace.add_dir(new_path.clone());
+                    } else {
+                        self.workspace.remove_file(&file);
+                        let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if ext == "md" || ext == "markdown" {
+                            self.workspace.add_file(new_path.clone());
+                        }
+                        let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
+                        self.tags.remove_file(&file);
+                        self.tags.add_tags(new_path.clone(), tags);
                     }
-                    let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if ext == "md" || ext == "markdown" {
-                        self.file_processor.add_file(new_path.clone());
-                    }
-                    let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
-                    self.tags.remove_file(&file);
-                    self.tags.add_tags(new_path.clone(), tags);
                     if self.selection.expanded_dirs.remove(&file) {
                         self.selection.expanded_dirs.insert(new_path.clone());
                     }
@@ -262,6 +274,7 @@ impl AppOrchestrator {
                 self.dialogs.move_dialog_open = true;
             }
             UserCommand::Delete(path) => {
+                let is_directory = path.is_dir();
                 if let Err(e) = crate::utils::recycle_bin::delete(&path) {
                     tracing::error!(
                         name = "ui.file.delete_failed",
@@ -269,9 +282,14 @@ impl AppOrchestrator {
                         error = %e,
                         "Failed to delete to trash"
                     );
+                } else if is_directory {
+                    crate::bus::events::directory::DirectoryEventProducer::new(
+                        self.dir_event_bus.clone(),
+                    )
+                    .publish_removed(&path);
                 } else {
-                    self.file_event_bus
-                        .publish(crate::bus::events::file::FileEvent::removed_one(path));
+                    crate::bus::events::file::FileEventProducer::new(self.file_event_bus.clone())
+                        .publish_removed(&path);
                 }
             }
             UserCommand::CreateDirectory { parent } => {
@@ -322,11 +340,12 @@ impl AppOrchestrator {
                             "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
                         );
                     } else {
-                        self.file_processor.add_dir(new_dir_path.clone());
-                        let producer = crate::bus::events::file::FileEventProducer::new(
-                            self.file_event_bus.clone(),
-                        );
-                        producer.publish_dir_discovered(&new_dir_path);
+                        self.workspace.add_dir(new_dir_path.clone());
+                        let dir_producer =
+                            crate::bus::events::directory::DirectoryEventProducer::new(
+                                self.dir_event_bus.clone(),
+                            );
+                        dir_producer.publish_discovered(&new_dir_path);
                         if let Some(watcher) = &mut self._watcher {
                             use notify::Watcher;
                             let _ = watcher.watch(&new_dir_path, notify::RecursiveMode::Recursive);
@@ -362,6 +381,7 @@ impl AppOrchestrator {
                 path: file,
                 new_name,
             } => {
+                let is_directory = file.is_dir();
                 if !crate::utils::path::is_safe_basename(&new_name) {
                     tracing::warn!(
                         name = "ui.file.invalid_rename",
@@ -386,10 +406,21 @@ impl AppOrchestrator {
                             "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
                         );
                     } else {
-                        let producer = crate::bus::events::file::FileEventProducer::new(
-                            self.file_event_bus.clone(),
-                        );
-                        producer.publish_rename(&file, &new_path);
+                        if is_directory {
+                            // The renamed entry is a directory: mirror the
+                            // rename on the directory bus ([REQ-404]
+                            // delete+create). Classify before the rename.
+                            let dir_producer =
+                                crate::bus::events::directory::DirectoryEventProducer::new(
+                                    self.dir_event_bus.clone(),
+                                );
+                            dir_producer.publish_rename(&file, &new_path);
+                        } else {
+                            let file_producer = crate::bus::events::file::FileEventProducer::new(
+                                self.file_event_bus.clone(),
+                            );
+                            file_producer.publish_rename(&file, &new_path);
+                        }
                         if self.tabs.loaded_path.as_ref() == Some(&file) {
                             self.tabs.loaded_path = Some(new_path.clone());
                         }
@@ -404,18 +435,19 @@ impl AppOrchestrator {
                                 *tab = new_path.clone();
                             }
                         }
-                        self.file_processor.remove_file(&file);
-                        if self.file_processor.contains_dir(&file) {
-                            self.file_processor.remove_dir(&file);
-                            self.file_processor.add_dir(new_path.clone());
+                        if is_directory {
+                            self.workspace.remove_dir(&file);
+                            self.workspace.add_dir(new_path.clone());
+                        } else {
+                            self.workspace.remove_file(&file);
+                            let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            if ext == "md" || ext == "markdown" {
+                                self.workspace.add_file(new_path.clone());
+                            }
+                            let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
+                            self.tags.remove_file(&file);
+                            self.tags.add_tags(new_path.clone(), tags);
                         }
-                        let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        if ext == "md" || ext == "markdown" {
-                            self.file_processor.add_file(new_path.clone());
-                        }
-                        let tags = crate::agent::utils::tags::extract_tags_from_file(&new_path);
-                        self.tags.remove_file(&file);
-                        self.tags.add_tags(new_path.clone(), tags);
                         if self.selection.expanded_dirs.remove(&file) {
                             self.selection.expanded_dirs.insert(new_path.clone());
                         }

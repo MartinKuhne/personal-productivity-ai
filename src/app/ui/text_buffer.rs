@@ -25,7 +25,7 @@
 //! ## Save path
 //!
 //! [`TextBuffer::save`] writes the buffer to disk, publishes an
-//! `Updated` [`crate::bus::events::file::FileEvent`] so the rest of
+//! `[FileChanged][Changed]` ([`crate::bus::events::file::FileChanged`]) so the rest of
 //! the app refreshes immediately, and closes the editor. The publish
 //! needs a [`FileEventProducer`], which is itself framework-free; the
 //! producer reference is passed in rather than held on the buffer so
@@ -322,7 +322,7 @@ impl TextBuffer {
     /// Persist the buffer to disk and notify the rest of the app.
     ///
     /// On success: writes the file (re-attaching the preserved front
-    /// matter), publishes a `FileEvent::Updated` via `producer`, and
+    /// matter), publishes a `[FileChanged][Changed]` via `producer`, and
     /// closes the editor. On failure: sets `error_message` and returns
     /// the error to the caller; the editor stays open so the user can
     /// retry.

@@ -1,11 +1,15 @@
-//! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
+//! Initial recursive scanner — walks content-library directories emitting
+//! `[FileChanged][Added]` batches for text/PDF files and
+//! `[DirectoryChanged][Added]` events for each directory, one bus per event
+//! type ([REQ-320..334]).
 //!
 //! Unit tests live in the sibling `indexer_tests.rs` sidecar.
 
 use crate::background::PdfConversionJob;
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::bus::events::typed::{BackgroundEventSender, FsEvent};
 use crate::config::AppConfig;
 use std::path::PathBuf;
@@ -17,7 +21,10 @@ use tracing::instrument;
 pub struct Indexer {
     config: AppConfig,
     tx: BackgroundEventSender,
-    bus: Bus<FileEvent>,
+    /// File bus: `[FileChanged][Added]` batches are published here.
+    file_bus: Bus<FileChanged>,
+    /// Directory bus: `[DirectoryChanged][Added]` events are published here.
+    dir_bus: Bus<DirectoryChanged>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -25,13 +32,15 @@ impl Indexer {
     pub fn new(
         config: AppConfig,
         tx: BackgroundEventSender,
-        bus: Bus<FileEvent>,
+        file_bus: Bus<FileChanged>,
+        dir_bus: Bus<DirectoryChanged>,
         cancel: Arc<AtomicBool>,
     ) -> Self {
         Self {
             config,
             tx,
-            bus,
+            file_bus,
+            dir_bus,
             cancel,
         }
     }
@@ -81,7 +90,7 @@ impl Indexer {
         workers
     }
 
-    /// Walk every content library and emit a single `FileEvent::Discovered`
+    /// Walk every content library and emit `[FileChanged][Added]` batches
     /// per directory containing **all** files found inside it (Markdown,
     /// PDF, image, etc.), batching them into the `paths` vec.  This keeps
     /// the event count low during the initial scan — downstream consumers
@@ -114,15 +123,21 @@ impl Indexer {
             let mut batch_paths: Vec<PathBuf> = Vec::new();
             let mut current_parent: Option<PathBuf> = None;
 
-            let flush_batch = |batch: &mut Vec<PathBuf>, bus: &Bus<FileEvent>| {
+            let flush_batch = |batch: &mut Vec<PathBuf>, bus: &Bus<FileChanged>| {
                 if !batch.is_empty() {
-                    bus.publish(FileEvent::discovered(std::mem::take(batch)));
+                    bus.publish(FileChanged {
+                        kind: FileChangedKind::Added,
+                        files: std::mem::take(batch)
+                            .into_iter()
+                            .map(crate::bus::events::file::FileEntry::from_path)
+                            .collect(),
+                    });
                 }
             };
 
             for entry in walker.filter_map(|e| e.ok()) {
                 if self.cancel.load(Ordering::SeqCst) {
-                    flush_batch(&mut batch_paths, &self.bus);
+                    flush_batch(&mut batch_paths, &self.file_bus);
                     return;
                 }
                 files_scanned += 1;
@@ -130,7 +145,7 @@ impl Indexer {
                 if path.is_file() {
                     let parent = path.parent().map(|p| p.to_path_buf());
                     if parent != current_parent {
-                        flush_batch(&mut batch_paths, &self.bus);
+                        flush_batch(&mut batch_paths, &self.file_bus);
                         current_parent = parent;
                     }
                     if let Some(ext) = path.extension() {
@@ -153,7 +168,7 @@ impl Indexer {
                             // Image-vision branch. Only compiled when
                             // the `image-library` Cargo feature is on;
                             // without it, image files still appear on
-                            // the `FileEvent` bus (via `batch_paths`
+                            // the file bus (via `batch_paths`
                             // above) but never get processed for
                             // vision.
                             #[cfg(feature = "image-library")]
@@ -171,11 +186,12 @@ impl Indexer {
                     // [REQ-320..322] Emit a `[DirectoryChanged]` event with
                     // the fully qualified path ([REQ-321]) and `Kind` = Added
                     // as soon as the directory is enumerated — on the
-                    // file-event bus, the directory manager's channel
-                    // ([REQ-431]). One directory per event; no batching,
-                    // because `[DirectoryChanged].Path` is singular.
-                    self.bus
-                        .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
+                    // directory bus ([REQ-320]). One directory per event; no
+                    // batching, because `[DirectoryChanged].Path` is singular.
+                    self.dir_bus.publish(DirectoryChanged {
+                        path: path.to_path_buf(),
+                        kind: DirectoryChangedKind::Added,
+                    });
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
@@ -199,7 +215,7 @@ impl Indexer {
                 }
             }
 
-            flush_batch(&mut batch_paths, &self.bus);
+            flush_batch(&mut batch_paths, &self.file_bus);
         }
 
         #[cfg(feature = "image-library")]

@@ -597,12 +597,12 @@ fn tag_filter_option_commands_cover_all_and_each_tag() {
 #[test]
 fn view_model_snapshots_indexing_state() {
     let mut app = test_app();
-    app.file_processor_mut().indexing_finished = false;
+    app.workspace_mut().indexing_finished = false;
     let vm = TopBarViewModel::from_app(&app);
     assert!(!vm.indexing_finished);
-    assert_eq!(vm.file_count, app.file_processor().all_files.len());
+    assert_eq!(vm.file_count, app.workspace().all_files.len());
 
-    app.file_processor_mut().indexing_finished = true;
+    app.workspace_mut().indexing_finished = true;
     let vm = TopBarViewModel::from_app(&app);
     assert!(vm.indexing_finished);
 }
@@ -716,10 +716,10 @@ fn top_bar_builds_for_both_indexing_states() {
     // The element cannot be rendered headlessly, but building the widget
     // tree must not panic for either branch of the indexing flag.
     let mut app = test_app();
-    app.file_processor_mut().indexing_finished = false;
+    app.workspace_mut().indexing_finished = false;
     let _ = top_bar(&TopBarViewModel::from_app(&app));
 
-    app.file_processor_mut().indexing_finished = true;
+    app.workspace_mut().indexing_finished = true;
     let _ = top_bar(&TopBarViewModel::from_app(&app));
 }
 

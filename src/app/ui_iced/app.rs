@@ -94,7 +94,7 @@ use crate::ui_iced::tools_dialog::{ToolsDialogState, ToolsDialogViewModel};
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
 use crate::workspace::Tags;
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use crate::workspace::watcher::Workspace;
 use fastmd_agent::AgentSession;
 
 /// Default window width, in logical points, applied when the persisted state
@@ -748,7 +748,6 @@ pub fn build_state(
         background_task.tx.clone(),
     );
     let finished_watcher_slot = background_task.finished_watcher.clone();
-    let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
     let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
     crate::background::logs::register_ui_logs(background_manager.clone());
 
@@ -807,7 +806,11 @@ pub fn build_state(
     agent.set_agent_config(config.to_agent_config());
 
     let event_bus = background_task.file_event_bus;
-    let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+    let dir_event_bus = background_task.dir_event_bus;
+    // The single source of truth for file/directory state. Under the iced
+    // bridge the reducer applies every event the messages carry, so the
+    // projection's internal readers stay unwired (no double application).
+    let workspace = Workspace::new(None, Some(dir_event_bus.subscribe()));
 
     // Project the persisted snapshot onto the live panel/selection/dialog
     // state.
@@ -850,6 +853,7 @@ pub fn build_state(
     let receivers = BusReceivers::new(
         config_bus,
         &event_bus,
+        &dir_event_bus,
         &agent_event_bus,
         background_task.rx_futures,
     );
@@ -878,9 +882,16 @@ pub fn build_state(
             rx: inert_rx,
             tx: background_task.tx,
             file_event_bus: event_bus,
-            file_processor,
+            dir_event_bus,
+            // Single inbound path: the [`BusReceivers`] bridge owns
+            // `Bus<FileChanged>` delivery and the reducer applies each
+            // `Inbound(FileChanged)` payload through
+            // `AppOrchestrator::apply_file_changed`. A live reader here would
+            // apply every event a second time, so it is inert — the same
+            // treatment `rx` above gets.
+            file_event_reader: None,
+            workspace,
             pdf_backing_tracker,
-            directory_tracker: dir_tracker,
             tags: Tags::new(),
             selection,
             tabs: Tabs::new(),
@@ -895,13 +906,6 @@ pub fn build_state(
             // Config arrivals reach the UI through the subscription bridge, not
             // the orchestrator's sync reader.
             config_reader: None,
-            // Single inbound path: the [`BusReceivers`] bridge owns
-            // `Bus<FileEvent>` delivery and the reducer applies each
-            // `Inbound(FileChanged)` payload through
-            // `AppOrchestrator::apply_file_event`. A live reader here would
-            // apply every event a second time, so it is inert — the same
-            // treatment `rx` above gets.
-            file_event_reader: None,
             pending_file_load: None,
             finished_watcher_slot,
             tool_context,

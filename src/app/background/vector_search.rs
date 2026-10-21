@@ -4,7 +4,7 @@
 
 use crate::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
-use crate::bus::events::file::{FileChanged, FileChangedKind, FileEvent};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::library_display_label;
 use crate::config::{AppConfig, ContentLibrary, VirtualPath};
@@ -80,7 +80,7 @@ impl VectorSearchService {
     pub(crate) fn start(
         &self,
         config: AppConfig,
-        reader: BusReader<FileEvent>,
+        reader: BusReader<FileChanged>,
         tx: BackgroundEventSender,
     ) {
         let service = self.clone();
@@ -191,26 +191,21 @@ impl VectorSearchService {
 
                 let mut reader = reader.into_inner();
                 while let Ok(event) = reader.recv().await {
-                    match event {
-                        FileEvent::FileChanged(FileChanged { kind, files }) => {
-                            for entry in files {
-                                let path = entry.path;
-                                match kind {
-                                    FileChangedKind::Added | FileChangedKind::Changed => {
-                                        if is_markdown(&path) {
-                                            service.index_path_async(&path).await;
-                                            processed += 1;
-                                            log_progress(processed, &tx);
-                                        }
-                                    }
-                                    FileChangedKind::Deleted => {
-                                        service.remove_path_async(&path).await;
-                                    }
+                    let FileChanged { kind, files } = event;
+                    for entry in files {
+                        let path = entry.path;
+                        match kind {
+                            FileChangedKind::Added | FileChangedKind::Changed => {
+                                if is_markdown(&path) {
+                                    service.index_path_async(&path).await;
+                                    processed += 1;
+                                    log_progress(processed, &tx);
                                 }
                             }
+                            FileChangedKind::Deleted => {
+                                service.remove_path_async(&path).await;
+                            }
                         }
-                        // Directories contribute no searchable content.
-                        FileEvent::DirectoryChanged(_) => {}
                     }
                 }
             });
@@ -640,7 +635,7 @@ fn resolve_and_read(
 /// Start the optional vector worker and return its shared tool service.
 pub fn start(
     config: AppConfig,
-    bus: Bus<FileEvent>,
+    bus: Bus<FileChanged>,
     tx: BackgroundEventSender,
 ) -> Arc<VectorSearchService> {
     let service = Arc::new(VectorSearchService::new());

@@ -1,7 +1,7 @@
 //! Tests for `app/background_task.rs`.
 
 use super::*;
-use crate::bus::events::file::{FileChangedKind, FileEvent};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::bus::events::typed::FsEvent;
 #[cfg(feature = "image-library")]
 use crate::bus::events::typed::ProcessEvent;
@@ -9,8 +9,8 @@ use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
 
 /// True when `ev` is a `[FileChanged]` event with the given kind.
-fn is_file_changed_of_kind(ev: &FileEvent, kind: FileChangedKind) -> bool {
-    matches!(ev, FileEvent::FileChanged(changed) if changed.kind == kind)
+fn is_file_changed_of_kind(ev: &FileChanged, kind: FileChangedKind) -> bool {
+    ev.kind == kind
 }
 
 /// Helper: pump the typed channel until the file watcher signals
@@ -140,11 +140,11 @@ fn test_initial_scan_publishes_discovered_events() {
         .iter()
         .filter(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
         .collect();
-    let total: usize = discovered.iter().map(|e| e.file_paths().len()).sum();
+    let total: usize = discovered.iter().map(|e| e.paths().len()).sum();
     assert_eq!(total, 3);
     let mut names: Vec<String> = discovered
         .iter()
-        .flat_map(|e| e.file_paths())
+        .flat_map(|e| e.paths())
         .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect();
     names.sort();
@@ -168,6 +168,8 @@ fn test_bus_subscribers_see_discovered_events() {
     let task = Task::new_for_test(config);
     let tag_reader = task.file_event_bus.subscribe();
     let tree_reader = task.file_event_bus.subscribe();
+    let tag_dir_reader = task.dir_event_bus.subscribe();
+    let tree_dir_reader = task.dir_event_bus.subscribe();
 
     let _ = wait_for_finished(&task, 5);
 
@@ -179,40 +181,45 @@ fn test_bus_subscribers_see_discovered_events() {
     while let Ok(ev) = tree_reader.recv_timeout(std::time::Duration::from_millis(100)) {
         tree_events.push(ev);
     }
+    let mut tag_dir_events = Vec::new();
+    while let Ok(ev) = tag_dir_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        tag_dir_events.push(ev);
+    }
+    let mut tree_dir_events = Vec::new();
+    while let Ok(ev) = tree_dir_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        tree_dir_events.push(ev);
+    }
 
-    assert_eq!(tag_events.len(), 2);
-    assert_eq!(tree_events.len(), 2);
-    // The scan emits one `[FileChanged][Added]` file batch and — with the
-    // library root enumerated — one `[DirectoryChanged][Added]` event,
-    // kind-homogeneous ([REQ-320..334]).
+    // One bus per event: the scan emits exactly one
+    // `[FileChanged][Added]` file batch on the file bus and — with the
+    // library root enumerated — exactly one `[DirectoryChanged][Added]`
+    // event on the directory bus ([REQ-320..334]).
+    assert_eq!(tag_events.len(), 1);
+    assert_eq!(tree_events.len(), 1);
+    assert_eq!(tag_dir_events.len(), 1);
+    assert_eq!(tree_dir_events.len(), 1);
     let file_event = tag_events
         .iter()
         .find(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
         .expect("file event");
-    let dir_event = tag_events
-        .iter()
-        .find(|e| matches!(e, FileEvent::DirectoryChanged(_)))
-        .expect("directory event");
+    let dir_changed = &tag_dir_events[0];
     let tree_file_event = tree_events
         .iter()
         .find(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
         .expect("file event for tree reader");
-    let tree_dir_event = tree_events
-        .iter()
-        .find(|e| matches!(e, FileEvent::DirectoryChanged(_)))
-        .expect("directory event for tree reader");
+    let tree_dir_changed = &tree_dir_events[0];
     // Both subscribers observe the same file payloads.
-    assert_eq!(file_event.file_paths(), tree_file_event.file_paths());
-    assert_eq!(file_event.file_paths(), vec![dir.path().join("a.md")]);
-    // The directory event carries the enumerated library root ([REQ-321]).
-    let FileEvent::DirectoryChanged(dir_changed) = dir_event else {
-        panic!("expected [DirectoryChanged]");
-    };
+    assert_eq!(file_event.paths(), tree_file_event.paths());
+    assert_eq!(file_event.paths(), vec![dir.path().join("a.md")]);
+    // The directory event carries the enumerated library root ([REQ-321]),
+    // kind-homogeneous `Added` ([REQ-322]).
     assert_eq!(dir_changed.path, dir.path());
-    let FileEvent::DirectoryChanged(tree_dir_changed) = tree_dir_event else {
-        panic!("expected [DirectoryChanged] for tree reader");
-    };
+    assert_eq!(
+        dir_changed.kind,
+        crate::bus::events::DirectoryChangedKind::Added
+    );
     assert_eq!(tree_dir_changed.path, dir.path());
+    assert_eq!(tree_dir_changed.kind, dir_changed.kind);
 }
 
 #[test]
@@ -243,16 +250,13 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
         .iter()
         .find(|e| {
             is_file_changed_of_kind(e, FileChangedKind::Added)
-                && e.file_paths()
+                && e.paths()
                     .first()
                     .map(|p| p.extension().and_then(|x| x.to_str()) == Some("pdf"))
                     .unwrap_or(false)
         })
         .expect("initial scan should publish [FileChanged][Added] for PDFs");
-    assert_eq!(
-        pdf_discovered.file_paths()[0],
-        dir.path().join("report.pdf")
-    );
+    assert_eq!(pdf_discovered.paths()[0], dir.path().join("report.pdf"));
 }
 
 #[test]
@@ -290,7 +294,7 @@ fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
     let pdf_path = dir.path().join("dropped.pdf");
     std::fs::write(&pdf_path, b"dummy").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(pdf_path.clone()));
+        .publish(FileChanged::discovered_one(pdf_path.clone()));
 
     let mut rx = task.tx.subscribe();
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -366,7 +370,7 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
     let pdf_path = dir.path().join("dropped.pdf");
     std::fs::write(&pdf_path, b"dummy").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(pdf_path.clone()));
+        .publish(FileChanged::discovered_one(pdf_path.clone()));
 
     let expected_md = {
         let mut p = pdf_path.clone();
@@ -380,7 +384,7 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
         match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(event) => {
                 if is_file_changed_of_kind(&event, FileChangedKind::Added)
-                    && event.file_paths().contains(&expected_md)
+                    && event.paths().contains(&expected_md)
                 {
                     saw_discovered = true;
                     break;
@@ -432,7 +436,7 @@ fn test_bus_published_image_triggers_vision_via_subscriber() {
     let img_path = dir.path().join("dropped.png");
     std::fs::write(&img_path, b"dummy image data").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(img_path.clone()));
+        .publish(FileChanged::discovered_one(img_path.clone()));
 
     let rx = task.rx_std();
     let start = std::time::Instant::now();

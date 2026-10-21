@@ -15,7 +15,7 @@
 //! | `BatchConfig` / `BatchMode` | `crate::agent::batch::types` — re-exported here, **not** re-declared. `BatchConfig` is the exact payload `UserCommand::StartBatch` carries (`src/app/bus/events/user_command.rs:134`) |
 //! | `PromptInfo` | `crate::agent::batch::types::PromptInfo`, the discovered-prompt record `resolve_prompts` builds (`src/app/agent/batch/prompts.rs:128`) |
 //! | Validity rule | `validate_batch_params` (`src/app/agent/batch/types.rs:48-65`) — the single gate the Process button checks |
-//! | Candidate directories | `DirectoryTracker::dirs_sorted()` / the content-library roots, snapshotted by the reducer |
+//! | Candidate directories | `Workspace::dirs_sorted()` / the content-library roots, snapshotted by the reducer |
 //! | Candidate prompts | `resolve_prompts(app.tags().prompt_paths(), &app.config().content_libraries)`, snapshotted by the reducer rather than at render time |
 //! | Run status | `Dialogs::batch_handle` / `BatchHandle::thread.is_finished()` / `Dialogs::batch_cancel_flag` (`src/app/ui/dialogs.rs:49-50`), folded into [`BatchRunStatus`] |
 //!

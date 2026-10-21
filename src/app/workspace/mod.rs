@@ -8,4 +8,4 @@ pub(crate) mod watcher;
 
 pub use tags::Tags;
 pub use vfs::{VirtualPath, VirtualPathError, library_display_label};
-pub use watcher::{DirectoryTracker, FileEventProcessor, FileWatcher};
+pub use watcher::{FileWatcher, Workspace};

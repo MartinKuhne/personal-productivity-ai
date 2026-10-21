@@ -5,7 +5,7 @@
 
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::file::FileChanged;
 use crate::bus::events::typed::BackgroundEventSender;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -221,7 +221,7 @@ impl PdfConversionJob {
 pub struct PdfConverterWorker {
     rx: Receiver<PathBuf>,
     tx: BackgroundEventSender,
-    bus: Bus<FileEvent>,
+    bus: Bus<FileChanged>,
     cmd: Option<Vec<String>>,
 }
 
@@ -229,7 +229,7 @@ impl PdfConverterWorker {
     pub fn new(
         rx: Receiver<PathBuf>,
         tx: BackgroundEventSender,
-        bus: Bus<FileEvent>,
+        bus: Bus<FileChanged>,
         cmd: Option<Vec<String>>,
     ) -> Self {
         Self { rx, tx, bus, cmd }
@@ -246,7 +246,7 @@ impl PdfConverterWorker {
                 if job.should_convert() {
                     let output_md = job.output_md.clone();
                     if job.execute(cmd, tx).await.is_ok() {
-                        bus.publish(FileEvent::discovered_one(output_md));
+                        bus.publish(FileChanged::discovered_one(output_md));
                     }
                 }
             }

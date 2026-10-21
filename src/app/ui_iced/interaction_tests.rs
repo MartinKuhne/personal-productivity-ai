@@ -206,7 +206,7 @@ fn state_with_one_file() -> (AppState, tempfile::TempDir) {
     });
     state
         .app
-        .file_processor_mut()
+        .workspace_mut()
         .all_files
         .push(PathBuf::from(format!("{root}/alpha.md")));
     state
@@ -687,7 +687,7 @@ fn test_toc_row_click_publishes_scroll_to_header() {
     use crate::markdown::ToCEntry;
 
     let (mut state, _dir) = state_with_one_file();
-    let path = state.app.file_processor().all_files[0].clone();
+    let path = state.app.workspace().all_files[0].clone();
     state.app.selection_mut().selected_file = Some(path);
     state.app.orchestrator.tabs.toc = vec![
         ToCEntry::new("Getting Started", 1, "Getting Started"),

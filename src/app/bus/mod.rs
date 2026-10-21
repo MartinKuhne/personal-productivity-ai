@@ -11,7 +11,7 @@
 //!
 //! - [`core`] — the transport primitive: `Bus<T>` / `BusReader<T>`.
 //! - [`events`] — every event payload that flows over a bus or
-//!   channel (`FileEvent`, `BackgroundEvent`, `ConfigArrived`, …).
+//!   channel (`FileChanged`, `BackgroundEvent`, `ConfigArrived`, …).
 //! - [`router`] — bus-side plumbing (per-format fan-out, generic
 //!   channel-drain workers).
 //! - [`config`] — the configuration-arrival bus constructor and

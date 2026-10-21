@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use super::{
     BackgroundReceiver, BusReceivers, InboundBusEvent, SharedReceiver, agent_stream,
-    background_stream, bus_event_to_message, close_request_to_message, config_stream,
+    background_stream, bus_event_to_message, close_request_to_message, config_stream, dir_stream,
     escape_to_message, file_stream, keyboard_events, modifiers_to_message, resize_event_to_message,
     subscription,
 };
@@ -20,8 +20,8 @@ use crate::agent::events::{
 };
 use crate::bus::core::Bus;
 use crate::bus::events::{
-    AgentEvent, BackgroundEvent, BackgroundLogEntry, ConfigArrived, FileEvent, FsEvent,
-    LogCategory, McpAuthEvent, ProcessEvent,
+    AgentEvent, BackgroundEvent, BackgroundLogEntry, ConfigArrived, DirectoryChanged,
+    DirectoryChangedKind, FileChanged, FsEvent, LogCategory, McpAuthEvent, ProcessEvent,
 };
 use crate::config::AppConfig;
 use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage};
@@ -174,23 +174,40 @@ fn test_config_arrived_maps_to_inbound_config() {
 }
 
 #[test]
-fn test_every_file_event_kind_maps_to_file_changed() {
-    // The transport union's full taxonomy — three [FileChanged] kinds and
-    // two [DirectoryChanged] kinds ([REQ-322]/[REQ-332]) — must all map to
-    // the inbound file lane unchanged.
-    let events = [
-        FileEvent::discovered_one(sample_path()),
-        FileEvent::updated_one(sample_path()),
-        FileEvent::removed_one(sample_path()),
-        FileEvent::dir_discovered_one(sample_path()),
-        FileEvent::dir_removed_one(sample_path()),
+fn test_every_file_event_kind_maps_to_its_inbound_lane() {
+    // One bus per event: the three [FileChanged] kinds ([REQ-332]) ride the
+    // file lane and the two [DirectoryChanged] kinds ([REQ-322]) ride the
+    // directory lane — each must map to its own inbound variant unchanged.
+    let file_events = [
+        FileChanged::discovered_one(sample_path()),
+        FileChanged::updated_one(sample_path()),
+        FileChanged::removed_one(sample_path()),
     ];
-    for event in events {
+    for event in file_events {
         let message = bus_event_to_message(InboundBusEvent::File(event.clone()))
             .expect("file events must map");
         assert_eq!(
             message,
             Message::Inbound(InboundMessage::FileChanged(event)),
+            "event must arrive unchanged"
+        );
+    }
+    let dir_events = [
+        DirectoryChanged {
+            path: sample_path(),
+            kind: DirectoryChangedKind::Added,
+        },
+        DirectoryChanged {
+            path: sample_path(),
+            kind: DirectoryChangedKind::Deleted,
+        },
+    ];
+    for event in dir_events {
+        let message = bus_event_to_message(InboundBusEvent::Directory(event.clone()))
+            .expect("directory events must map");
+        assert_eq!(
+            message,
+            Message::Inbound(InboundMessage::DirectoryChanged(event)),
             "event must arrive unchanged"
         );
     }
@@ -232,6 +249,7 @@ fn test_dropped_report_maps_to_events_dropped_with_count() {
     for source in [
         BusSource::Config,
         BusSource::File,
+        BusSource::Directory,
         BusSource::Agent,
         BusSource::Background,
     ] {
@@ -257,13 +275,24 @@ fn test_mapping_is_total_over_every_current_bus_event() {
         total += 1;
     }
     for event in [
-        FileEvent::discovered_one(sample_path()),
-        FileEvent::updated_one(sample_path()),
-        FileEvent::removed_one(sample_path()),
-        FileEvent::dir_discovered_one(sample_path()),
-        FileEvent::dir_removed_one(sample_path()),
+        FileChanged::discovered_one(sample_path()),
+        FileChanged::updated_one(sample_path()),
+        FileChanged::removed_one(sample_path()),
     ] {
         assert!(bus_event_to_message(InboundBusEvent::File(event)).is_some());
+        total += 1;
+    }
+    for event in [
+        DirectoryChanged {
+            path: sample_path(),
+            kind: DirectoryChangedKind::Added,
+        },
+        DirectoryChanged {
+            path: sample_path(),
+            kind: DirectoryChangedKind::Deleted,
+        },
+    ] {
+        assert!(bus_event_to_message(InboundBusEvent::Directory(event)).is_some());
         total += 1;
     }
     assert!(
@@ -324,13 +353,17 @@ fn test_two_independent_deliveries_of_equal_data_are_not_equal() {
 
 #[test]
 fn test_file_events_compare_by_value() {
-    let a = bus_event_to_message(InboundBusEvent::File(FileEvent::updated_one(sample_path())))
-        .expect("maps");
-    let b = bus_event_to_message(InboundBusEvent::File(FileEvent::updated_one(sample_path())))
-        .expect("maps");
+    let a = bus_event_to_message(InboundBusEvent::File(FileChanged::updated_one(
+        sample_path(),
+    )))
+    .expect("maps");
+    let b = bus_event_to_message(InboundBusEvent::File(FileChanged::updated_one(
+        sample_path(),
+    )))
+    .expect("maps");
     assert_eq!(
         a, b,
-        "`FileEvent` supports `PartialEq`, so equal payloads compare equal"
+        "`FileChanged` supports `PartialEq`, so equal payloads compare equal"
     );
 }
 
@@ -341,8 +374,10 @@ fn test_inbound_variants_of_different_kinds_are_not_equal() {
         count: 1,
     })
     .expect("maps");
-    let file = bus_event_to_message(InboundBusEvent::File(FileEvent::updated_one(sample_path())))
-        .expect("maps");
+    let file = bus_event_to_message(InboundBusEvent::File(FileChanged::updated_one(
+        sample_path(),
+    )))
+    .expect("maps");
     assert_ne!(dropped, file);
     assert_ne!(file, dropped);
 }
@@ -374,7 +409,7 @@ fn test_events_dropped_distinguishes_source_and_count() {
 
 #[test]
 fn test_shared_receiver_clones_share_one_identity() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let handle = SharedReceiver::from_bus(&bus);
     assert_eq!(
         hash_of(&handle),
@@ -385,7 +420,7 @@ fn test_shared_receiver_clones_share_one_identity() {
 
 #[test]
 fn test_distinct_shared_receivers_have_distinct_identities() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let first = SharedReceiver::from_bus(&bus);
     let second = SharedReceiver::from_bus(&bus);
     assert_ne!(
@@ -424,9 +459,9 @@ async fn test_config_stream_delivers_the_mapped_message() {
 
 #[tokio::test]
 async fn test_file_stream_delivers_the_mapped_message() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let handle = SharedReceiver::from_bus(&bus);
-    let event = FileEvent::discovered_one(sample_path());
+    let event = FileChanged::discovered_one(sample_path());
     bus.publish(event.clone());
 
     let message = file_stream(&handle)
@@ -436,6 +471,28 @@ async fn test_file_stream_delivers_the_mapped_message() {
     assert_eq!(
         message,
         Message::Inbound(InboundMessage::FileChanged(event))
+    );
+}
+
+#[tokio::test]
+async fn test_dir_stream_delivers_the_mapped_message() {
+    // One bus per event: the directory lane reads `Bus<DirectoryChanged>`
+    // and maps each event to `InboundMessage::DirectoryChanged` unchanged.
+    let bus: Bus<DirectoryChanged> = Bus::new();
+    let handle = SharedReceiver::from_bus(&bus);
+    let event = DirectoryChanged {
+        path: PathBuf::from("workspace/notes"),
+        kind: DirectoryChangedKind::Added,
+    };
+    bus.publish(event.clone());
+
+    let message = dir_stream(&handle)
+        .next()
+        .await
+        .expect("the published directory event must arrive");
+    assert_eq!(
+        message,
+        Message::Inbound(InboundMessage::DirectoryChanged(event))
     );
 }
 
@@ -491,11 +548,11 @@ async fn test_background_stream_ends_when_the_sender_is_dropped() {
 
 #[tokio::test]
 async fn test_stream_delivers_events_in_publish_order() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let handle = SharedReceiver::from_bus(&bus);
     let paths: Vec<PathBuf> = (0..4).map(|i| PathBuf::from(format!("f{i}.md"))).collect();
     for path in &paths {
-        bus.publish(FileEvent::discovered_one(path.clone()));
+        bus.publish(FileChanged::discovered_one(path.clone()));
     }
 
     // Everything queued before the stream wakes is coalesced into **one**
@@ -506,7 +563,7 @@ async fn test_stream_delivers_events_in_publish_order() {
         Message::Inbound(InboundMessage::FileChangedBatch(
             paths
                 .iter()
-                .map(|path| FileEvent::discovered_one(path.clone()))
+                .map(|path| FileChanged::discovered_one(path.clone()))
                 .collect()
         )),
         "publication order per publisher must be preserved"
@@ -515,12 +572,12 @@ async fn test_stream_delivers_events_in_publish_order() {
 
 #[tokio::test]
 async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let handle = SharedReceiver::from_bus(&bus);
 
     // One event wakes the stream...
     let mut stream = file_stream(&handle);
-    let first = FileEvent::discovered_one(PathBuf::from("first.md"));
+    let first = FileChanged::discovered_one(PathBuf::from("first.md"));
     bus.publish(first.clone());
     assert_eq!(
         stream.next().await.expect("the lone event"),
@@ -529,8 +586,8 @@ async fn test_file_stream_coalesces_events_queued_while_it_sleeps() {
     );
 
     // ...and a burst published while the stream sleeps arrives as one batch.
-    let burst: Vec<FileEvent> = (0..3)
-        .map(|i| FileEvent::updated_one(PathBuf::from(format!("burst{i}.md"))))
+    let burst: Vec<FileChanged> = (0..3)
+        .map(|i| FileChanged::updated_one(PathBuf::from(format!("burst{i}.md"))))
         .collect();
     for event in &burst {
         bus.publish(event.clone());
@@ -588,7 +645,8 @@ fn test_subscription_builds_from_receivers() {
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
-        &Bus::<FileEvent>::new(),
+        &Bus::<FileChanged>::new(),
+        &Bus::<DirectoryChanged>::new(),
         &Bus::<AgentEvent>::new(),
         receiver,
     );
@@ -604,7 +662,8 @@ fn test_subscription_builds_from_receivers() {
     drop(again);
 
     assert_send_static::<SharedReceiver<ConfigArrived>>();
-    assert_send_static::<SharedReceiver<FileEvent>>();
+    assert_send_static::<SharedReceiver<FileChanged>>();
+    assert_send_static::<SharedReceiver<DirectoryChanged>>();
     assert_send_static::<SharedReceiver<AgentEvent>>();
     assert_send_static::<BackgroundReceiver>();
 }
@@ -615,7 +674,8 @@ fn test_bus_receivers_clone_keeps_every_identity_stable() {
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
-        &Bus::<FileEvent>::new(),
+        &Bus::<FileChanged>::new(),
+        &Bus::<DirectoryChanged>::new(),
         &Bus::<AgentEvent>::new(),
         receiver,
     );
@@ -623,6 +683,7 @@ fn test_bus_receivers_clone_keeps_every_identity_stable() {
 
     assert_eq!(hash_of(&receivers.config), hash_of(&clone.config));
     assert_eq!(hash_of(&receivers.file), hash_of(&clone.file));
+    assert_eq!(hash_of(&receivers.dir), hash_of(&clone.dir));
     assert_eq!(hash_of(&receivers.agent), hash_of(&clone.agent));
     assert_eq!(hash_of(&receivers.background), hash_of(&clone.background));
 }
@@ -877,7 +938,8 @@ fn test_keyboard_lane_builds_and_merges_into_the_main_subscription() {
     drop(sender);
     let receivers = BusReceivers::new(
         &Bus::<ConfigArrived>::new(),
-        &Bus::<FileEvent>::new(),
+        &Bus::<FileChanged>::new(),
+        &Bus::<DirectoryChanged>::new(),
         &Bus::<AgentEvent>::new(),
         receiver,
     );

@@ -1,9 +1,14 @@
 //! Event payload types — every type that flows over a `Bus<T>` or a
 //! channel in this crate.
 //!
+//! One event type per bus: file-system file changes ride `Bus<FileChanged>`
+//! (`file`) and directory lifecycle changes ride `Bus<DirectoryChanged>`
+//! (`directory`).
+//!
 //! | Module | Payload(s) | Channel |
 //! | --- | --- | --- |
-//! | `file` | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
+//! | `file` | `FileChanged`, `FileChangedKind`, `FileEntry`, `FileEventProducer` | `Bus<FileChanged>` |
+//! | `directory` | `DirectoryChanged`, `DirectoryChangedKind`, `DirectoryEventProducer` | `Bus<DirectoryChanged>` |
 //! | `messages` | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with `typed` |
 //! | `typed` | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`), `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` |
 //! | `config` | `ConfigArrived` | `Bus<ConfigArrived>` |
@@ -18,6 +23,7 @@
 pub(crate) mod agent;
 pub(crate) mod config;
 pub(crate) mod debug;
+pub(crate) mod directory;
 pub(crate) mod file;
 pub(crate) mod messages;
 pub(crate) mod typed;
@@ -26,10 +32,8 @@ pub(crate) mod user_command;
 pub use agent::{AgentEvent, BusAgentEventObserver, CompositeAgentEventObserver};
 pub use config::ConfigArrived;
 pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-pub use file::{
-    DirectoryChanged, DirectoryChangedKind, FileChanged, FileChangedKind, FileEntry, FileEvent,
-    FileEventProducer,
-};
+pub use directory::{DirectoryChanged, DirectoryChangedKind, DirectoryEventProducer};
+pub use file::{FileChanged, FileChangedKind, FileEntry, FileEventProducer};
 pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
 pub use typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 pub use user_command::{UserCommand, UserCommandProducer};

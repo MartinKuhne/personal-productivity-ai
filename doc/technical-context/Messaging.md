@@ -26,7 +26,8 @@ touches a receiver ([FMD-065]).
 | Producer | Event | `Message` |
 |---|---|---|
 | `Bus<ConfigArrived>` | `ConfigArrived { config }` | `Message::Inbound(InboundMessage::ConfigArrived(Arc<AppConfig>))` |
-| `Bus<FileEvent>` | all five `FileEventKind`s | `Message::Inbound(InboundMessage::FileChanged(event))` |
+| `Bus<FileChanged>` | `FileChanged { kind, files }` (three `FileChangedKind`s; bursts may be batched) | `Message::Inbound(InboundMessage::FileChanged(event))` / `FileChangedBatch` |
+| `Bus<DirectoryChanged>` | `DirectoryChanged { path, kind }` (bursts may be batched) | `Message::Inbound(InboundMessage::DirectoryChanged(event))` / `DirectoryChangedBatch` |
 | `Bus<AgentEvent>` | all 11 `AgentEvent` variants | `Message::Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
 | `std::sync::mpsc<BackgroundEvent>` | `Fs` / `Process` / `McpAuth` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
 | any bus, on `Lagged(n)` | dropped-event report | `Message::Inbound(InboundMessage::EventsDropped { source, count })` |
@@ -38,7 +39,7 @@ Shape notes:
   receiver handle is the hashed `data` (hashed by its `Arc` address so clones
   keep the identity stable) and the builder is a non-capturing `fn` returning
   a boxed stream.
-- The four streams are merged with `Subscription::batch`.
+- The bus and background-event streams are merged with `Subscription::batch`.
 - `bus_event_to_message` is the pure half; the stream builders are the only
   impure half.
 - A lag is not a disconnect: the stream logs the dropped count and keeps
@@ -95,29 +96,30 @@ Unified typed intake. Every variant carries all data the executor needs (no `&mu
 | `SaveAsPdf(PathBuf)` | `path` | `()` | No | `rfd::FileDialog::save_file` + `execute_save_as_pdf_blocking` (UI thread, cf. fix proposal) |
 | `Rename(PathBuf)` | `path` | `()` | No | `dialogs.file_to_rename` + open rename dialog |
 | `Move(PathBuf)` | `path` | `()` | No | `dialogs.file_to_move` |
-| `Delete(PathBuf)` | `path` | `()` | No | `recycle_bin::delete` + `FileEvent::removed_one` publish |
+| `Delete(PathBuf)` | `path` | `()` | No | `recycle_bin::delete` + directory or file deletion event, routed by entry type |
 | `CreateDirectory { parent }` | `parent: PathBuf` | `()` | No | open create-dir dialog |
 | `CreateDocument { parent }` | `parent: PathBuf` | `()` | No | open create-document dialog |
 | `RunSkillPrompt { content, target_dir, target_file }` | `content`, `Option<PathBuf>` x2 | `()` | No | set selection + `start_agent_session(content)` |
 | `MergePrompt(Vec<PathBuf>)` | `files` | `()` | No | `build_merge_prompt` + `start_agent_session` |
-| `ConfirmMove { file, destination }` | `PathBuf` x2 | `()` | No | `fs::rename` + `FileEventProducer::publish_rename` + `file_processor/tags/expanded_dirs` update |
-| `ConfirmCreateDirectory { parent, name }` | `parent`, `name: String` | `()` | No | `fs::create_dir_all` + `publish_dir_discovered` + `watcher.watch` |
+| `ConfirmMove { file, destination }` | `PathBuf` x2 | `()` | No | `fs::rename` + file- or directory-bus rename events + workspace/tags/expanded_dirs update |
+| `ConfirmCreateDirectory { parent, name }` | `parent`, `name: String` | `()` | No | `fs::create_dir_all` + `DirectoryEventProducer` + `watcher.watch` |
 | `ConfirmCreateDocument { parent, name }` | `parent`, `name` | `()` | No | `write_new_document` + `publish_discovered` |
-| `ConfirmRename { path, new_name }` | `path`, `new_name` | `()` | No | `fs::rename` + publish + processor/tags/tabs fixup |
+| `ConfirmRename { path, new_name }` | `path`, `new_name` | `()` | No | `fs::rename` + file- or directory-bus rename events + workspace/tags/tabs fixup |
 | `StartBatch(BatchConfig)` | `config: BatchConfig` | `()` | No | `BatchCoordinator::new` + `coordinator.execute()` `src/app/agent/batch/coordinator.rs:46` (`thread::spawn`) -> `batch_handle` |
 | `CancelBatch` | — | `()` | No | close batch dialog, clear prompts |
 
 ---
 
-## 2. `FileEvent` — filesystem truth (multi-producer, multi-consumer)
+## 2. File and directory events — filesystem truth (multi-producer, multi-consumer)
 
-Defined `src/app/bus/events/file.rs:28`, kind `FileEventKind` `src/app/bus/events/file.rs:18` (`Discovered|Updated|Removed|DirDiscovered|DirRemoved`). Payload `paths: Vec<PathBuf>`.
+The event contracts intentionally use distinct buses: file changes use `Bus<FileChanged>` (`src/app/bus/events/file.rs`) and directory lifecycle changes use `Bus<DirectoryChanged>` (`src/app/bus/events/directory.rs`). Neither event payload is a union of the other.
 
 | Message | Args | Return | Await? | Producers | Processed where |
 |---|---|---|---|---|---|
-| `FileEvent { kind, paths }` | `kind`, `Vec<PathBuf>` | `()` | No | `FileWatcher` `src/app/workspace/watcher/file_watcher.rs`, `Indexer` `src/app/background/indexer.rs`, dialogs via `FileEventProducer` `src/app/bus/events/file.rs:103` (`publish_discovered/updated/removed/dir_*` + `publish_rename`), `BusAgentEventObserver::on_tool_side_effect` `src/app/bus/events/agent.rs:184` | `AppOrchestrator::process_file_events` `src/app/orchestrator.rs:112` -> `FileEventProcessor`/`DirectoryTracker`/`Tags`/`PdfBackingTracker`; `BusRouter::spawn` `src/app/bus/router/bus_router.rs:37` routes `Discovered/Updated` `.pdf` -> `tx_pdf`, images -> `tx_img`; `DirectoryTracker::process_events` |
+| `FileChanged { kind, files }` | `FileChangedKind::{Added, Deleted, Changed}`, `Vec<FileEntry>` | `()` | No | `FileWatcher`, `Indexer`, filesystem commands, agent/tool file operations via `FileEventProducer` | `AppOrchestrator`/`Workspace`, `PdfBackingTracker`, `BusRouter` (PDF/image routing), vector search |
+| `DirectoryChanged { path, kind }` | one `PathBuf`, `DirectoryChangedKind::{Added, Deleted}` | `()` | No | `FileWatcher`, `Indexer`, directory commands via `DirectoryEventProducer` | `AppOrchestrator`/`Workspace` (deletion cascades to descendants) |
 
-Helper constructors: `discovered/updated/removed/dir_discovered/dir_removed` + `_one` variants `src/app/bus/events/file.rs:34`. Rename = `Removed` + `Discovered` pair.
+`FileChanged` carries a kind-homogeneous file list; a file rename emits `Deleted(old)` followed by `Added(new)`. `DirectoryChanged` carries one directory path per event; a directory rename likewise emits `Deleted(old)` then `Added(new)`. The `Workspace` projection owns the unified file and directory indexes while the two event transports remain separate.
 
 ---
 
@@ -135,10 +137,10 @@ Wrapper `src/app/bus/events/typed.rs:119`. In the iced build the channel is not 
 
 | Variant | Args | Return | Await? | Processed where |
 |---|---|---|---|---|
-| `FileParsed { path, tags }` | `PathBuf`, `Vec<String>` | `()` | No | `tags.add_tags`, `file_processor.add_file`, `tree_dirty` |
-| `DirParsed { path }` | `PathBuf` | `()` | No | `file_processor.add_dir`, `tree_dirty` |
-| `FileModified { path, tags }` | `PathBuf`, `Vec<String>` | `()` | No | `tags.add_tags`+`rebuild`, `file_processor.add_file`, clear `loaded_path`, `tree_dirty`; also emitted from `drain_agent_event_bus` `src/app/orchestrator.rs:447` for `ToolSideEffect` |
-| `FileDeleted { path }` | `PathBuf` | `()` | No | `file_processor.remove_file`, `tags.remove/rebuild`, `close_tabs_for_removed_files` |
+| `FileParsed { path, tags }` | `PathBuf`, `Vec<String>` | `()` | No | `tags.add_tags`, `Workspace.add_file`, `tree_dirty` |
+| `DirParsed { path }` | `PathBuf` | `()` | No | `Workspace.add_dir`, `tree_dirty` |
+| `FileModified { path, tags }` | `PathBuf`, `Vec<String>` | `()` | No | `tags.add_tags`+`rebuild`, `Workspace.add_file`, clear `loaded_path`, `tree_dirty`; also emitted from `drain_agent_event_bus` for `ToolSideEffect` |
+| `FileDeleted { path }` | `PathBuf` | `()` | No | `Workspace.remove_file`, `tags.remove/rebuild`, `close_tabs_for_removed_files` |
 | `Finished` | — | `()` | No | `task_take_finished_watcher` -> `_watcher`, `indexing_finished=true`, `tags.rebuild` |
 | `FinishedWithoutWatcher` | — | `()` | No | `indexing_finished=true` |
 
@@ -211,11 +213,11 @@ Cancel: UI `agent.cancel` `src/agent/session.rs:227` sets `AtomicBool`; driver `
 
 | Channel | `await`/`join` required? | Why |
 |---|---|---|
-| `Bus<FileEvent>`, `Bus<UserCommand>`, `Bus<AgentEvent>`, `Bus<ConfigArrived>` | No | Delivered to the UI as `Message::Inbound` off the iced `Subscription`; `Lagged` is reported, never awaited; no reply |
+| `Bus<FileChanged>`, `Bus<DirectoryChanged>`, `Bus<UserCommand>`, `Bus<AgentEvent>`, `Bus<ConfigArrived>` | No | Delivered to the UI as `Message::Inbound` off the iced `Subscription`; `Lagged` is reported, never awaited; no reply |
 | `BackgroundEvent` mpsc | No | Forwarded onto the same `Subscription` stream, fire-and-forget |
 | `AgentPrompt` mpsc | No (sender) / blocking `recv` on driver | UI `send` returns immediately; driver blocks |
 | `BatchHandle` | Yes - status read, then `join` | The reducer joins the finished handle to reclaim the worker thread |
 | `AgentSession` driver `JoinHandle` | Yes - on `drop` `src/agent/session.rs:490` | `drop` replaces `prompt_tx` then `handle.join` to avoid use-after-free |
 | `ToolExecutor::execute_all` | Yes - caller blocks driver | LLM turn loop cannot continue until tool results are back |
 
-> All tables reflect code at `feature/user-command-bus` HEAD. Regenerate after touching `src/app/bus/events/*` or `src/agent/events.rs`.
+> Filesystem event tables reflect the current event contracts. Update them after changing `src/app/bus/events/*` or `src/agent/events.rs`.

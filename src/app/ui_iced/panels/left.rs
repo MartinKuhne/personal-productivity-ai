@@ -625,7 +625,7 @@ fn insert_path_into_tree(
 #[must_use]
 pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     let filtered_files: Vec<&std::path::PathBuf> = app
-        .file_processor()
+        .workspace()
         .all_files
         .iter()
         .filter(|p| {
@@ -661,7 +661,7 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     }
 
     if app.tags().selected_tag.is_none() {
-        for dir in app.file_processor().all_dirs.iter() {
+        for dir in app.workspace().all_dirs.iter() {
             insert_path_into_tree(&mut root_node, app.content_libraries(), dir, true);
         }
     } else {

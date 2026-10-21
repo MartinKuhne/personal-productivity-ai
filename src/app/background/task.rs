@@ -9,7 +9,8 @@ use super::vision_processor::ImageVisionWorker;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::directory::DirectoryChanged;
+use crate::bus::events::file::FileChanged;
 use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::bus::router::BusRouter;
 use crate::config::AppConfig;
@@ -28,8 +29,12 @@ pub struct Task {
     /// Futures-compatible receiver for the iced subscription bridge.
     /// This is fed by a tokio bridge task that forwards from the broadcast channel.
     pub rx_futures: UnboundedReceiver<BackgroundEvent>,
-    /// File-event bus shared by background workers and the UI.
-    pub file_event_bus: Bus<FileEvent>,
+    /// File-event bus — payload `[FileChanged]`, shared by background workers
+    /// and the UI ([REQ-330..334]).
+    pub file_event_bus: Bus<FileChanged>,
+    /// Directory-event bus — payload `[DirectoryChanged]`, shared by the
+    /// crawler/watcher and the UI ([REQ-320..322]).
+    pub dir_event_bus: Bus<DirectoryChanged>,
     /// Slot containing the watcher after initial scan completion.
     pub finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     #[cfg(feature = "vector-search")]
@@ -41,12 +46,14 @@ pub struct Task {
 impl Task {
     /// Wait for configuration, then spawn the background workers.
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
-        // Use broadcast channel like other buses (ConfigArrived, FileEvent, AgentEvent)
+        // Use broadcast channel like other buses (ConfigArrived, FileChanged, DirectoryChanged, AgentEvent)
         let (tx_broadcast, rx_broadcast) = broadcast::channel(1024);
         let tx = BackgroundEventSender::new(tx_broadcast);
         let tx_clone = tx.clone();
-        let file_event_bus = Bus::new();
-        let bus_clone = file_event_bus.clone();
+        let file_event_bus: Bus<FileChanged> = Bus::new();
+        let dir_event_bus: Bus<DirectoryChanged> = Bus::new();
+        let file_bus_clone = file_event_bus.clone();
+        let dir_bus_clone = dir_event_bus.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let finished_watcher = Arc::new(Mutex::new(None));
@@ -103,7 +110,8 @@ impl Task {
             Self::run_indexing(
                 config,
                 tx_clone,
-                bus_clone,
+                file_bus_clone,
+                dir_bus_clone,
                 cancel_clone,
                 finished_watcher_for_worker,
                 #[cfg(feature = "vector-search")]
@@ -115,6 +123,7 @@ impl Task {
             tx,
             rx_futures: futures_rx,
             file_event_bus,
+            dir_event_bus,
             finished_watcher,
             #[cfg(feature = "vector-search")]
             vector_search_service,
@@ -168,7 +177,8 @@ impl Task {
     fn run_indexing(
         config: crate::config::AppConfig,
         tx: BackgroundEventSender,
-        file_event_bus: Bus<FileEvent>,
+        file_event_bus: Bus<FileChanged>,
+        dir_event_bus: Bus<DirectoryChanged>,
         cancel: Arc<AtomicBool>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
         #[cfg(feature = "vector-search")] vector_search_service: Arc<
@@ -190,7 +200,13 @@ impl Task {
         ImageVisionWorker::new(rx_img, tx.clone(), config.clone(), file_event_bus.clone()).spawn();
 
         let workers = Indexer::spawn_workers(4, rx_work, tx.clone());
-        let indexer = Indexer::new(config.clone(), tx.clone(), file_event_bus.clone(), cancel);
+        let indexer = Indexer::new(
+            config.clone(),
+            tx.clone(),
+            file_event_bus.clone(),
+            dir_event_bus.clone(),
+            cancel,
+        );
         #[cfg(feature = "image-library")]
         indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
         #[cfg(not(feature = "image-library"))]
@@ -205,6 +221,7 @@ impl Task {
             config,
             tx.clone(),
             file_event_bus.clone(),
+            dir_event_bus.clone(),
             tx_pdf.clone(),
             #[cfg(feature = "image-library")]
             tx_img.clone(),

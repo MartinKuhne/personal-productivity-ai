@@ -35,7 +35,7 @@ pub fn is_markdown_file(path: &Path) -> bool {
 /// Enumerate every Markdown file under `root`.
 ///
 /// This is the reusable file list: callers that already track workspace files
-/// (e.g. the UI `FileEventProcessor::all_files`) pass their list straight to
+/// (e.g. the UI `Workspace::all_files`) pass their list straight to
 /// [`search_files_parallel`]; callers without one (e.g. the agent tool)
 /// build it once here and then fan out in parallel instead of
 /// interleaving a sequential walk with per-line reads.

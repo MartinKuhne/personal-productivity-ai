@@ -77,10 +77,11 @@
 //!   filesystem scan left to the reused `ui::tree_search` engine and the
 //!   result-card predicates extracted as pure functions (UI-050).
 //! - [`subscription`] — the bus → iced bridge: every inbound
-//!   background→UI notification (`ConfigArrived`, `FileEvent`,
-//!   `AgentEvent`, `BackgroundEvent`) plus the `Lagged(n)` dropped-event
-//!   report, folded into one `Subscription<Message>` merged with
-//!   `Subscription::batch`, over a pure `bus_event_to_message` mapper.
+//!   background→UI notification (`ConfigArrived`, `FileChanged`,
+//!   `DirectoryChanged`, `AgentEvent`, `BackgroundEvent`) plus the
+//!   `Lagged(n)` dropped-event report, folded into one `Subscription<Message>`
+//!   merged with `Subscription::batch`, over a pure `bus_event_to_message`
+//!   mapper.
 //!   Background work notifies the UI of results; the UI is never invoked
 //!   synchronously by background work.
 //! - [`logo`] — the shared "Document + Bolt" mark: the single place the

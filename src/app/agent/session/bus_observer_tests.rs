@@ -7,13 +7,13 @@ use std::time::Duration;
 
 #[test]
 fn new_creates_observer() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let _obs = AppFileObserver::new(bus);
 }
 
 #[test]
 fn on_file_changed_publishes_updated_event() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let reader = bus.subscribe();
     let obs = AppFileObserver::new(bus);
     let path = PathBuf::from("/tmp/note.md");
@@ -26,10 +26,10 @@ fn on_file_changed_publishes_updated_event() {
     assert!(
         matches!(
             &ev,
-            FileEvent::FileChanged(FileChanged {
+            FileChanged {
                 kind: FileChangedKind::Changed,
                 files,
-            }) if files.len() == 1 && files[0].path == path
+            } if files.len() == 1 && files[0].path == path
         ),
         "on_file_changed publishes [FileChanged][Changed]"
     );
@@ -37,7 +37,7 @@ fn on_file_changed_publishes_updated_event() {
 
 #[test]
 fn on_file_changed_is_trait_object_safe() {
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let reader = bus.subscribe();
     let obs: Box<dyn OnFileChanged> = Box::new(AppFileObserver::new(bus));
     let path = PathBuf::from("/tmp/trait.md");
@@ -48,10 +48,10 @@ fn on_file_changed_is_trait_object_safe() {
     assert!(
         matches!(
             &ev,
-            FileEvent::FileChanged(FileChanged {
+            FileChanged {
                 kind: FileChangedKind::Changed,
                 files,
-            }) if files.len() == 1 && files[0].path == path
+            } if files.len() == 1 && files[0].path == path
         ),
         "trait object publishes [FileChanged][Changed]"
     );

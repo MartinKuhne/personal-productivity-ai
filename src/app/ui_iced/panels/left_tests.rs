@@ -512,12 +512,12 @@ fn tree_rows_keep_directories_before_files_at_every_level() {
     let lib_root = dir.path().to_path_buf();
     let sub = lib_root.join("middle");
 
-    app.file_processor_mut().all_files = vec![
+    app.workspace_mut().all_files = vec![
         lib_root.join("aardvark.md"),
         lib_root.join("zebra.md"),
         sub.join("inner.md"),
     ];
-    app.file_processor_mut().all_dirs = vec![sub.clone()];
+    app.workspace_mut().all_dirs = vec![sub.clone()];
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
     app.selection_mut().expanded_dirs.insert(sub.clone());
 
@@ -547,8 +547,8 @@ fn collapsed_directories_hide_their_children() {
     let lib_root = dir.path().to_path_buf();
     let sub = lib_root.join("middle");
 
-    app.file_processor_mut().all_files = vec![lib_root.join("top.md"), sub.join("inner.md")];
-    app.file_processor_mut().all_dirs = vec![sub.clone()];
+    app.workspace_mut().all_files = vec![lib_root.join("top.md"), sub.join("inner.md")];
+    app.workspace_mut().all_dirs = vec![sub.clone()];
     // The library is expanded but `middle` is not.
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
 
@@ -566,8 +566,8 @@ fn tag_filter_prunes_directories_without_matching_files() {
 
     let match_file = matching.join("keep.md");
     let other_file = orphan.join("drop.md");
-    app.file_processor_mut().all_files = vec![match_file.clone(), other_file.clone()];
-    app.file_processor_mut().all_dirs = vec![matching.clone(), orphan.clone()];
+    app.workspace_mut().all_files = vec![match_file.clone(), other_file.clone()];
+    app.workspace_mut().all_dirs = vec![matching.clone(), orphan.clone()];
     app.tags_mut()
         .add_tags(match_file.clone(), vec!["keep".to_string()]);
     app.tags_mut()
@@ -647,7 +647,7 @@ fn from_app_carries_query_search_state_and_selection() {
     let lib_root = dir.path().to_path_buf();
     let note = lib_root.join("note.md");
     std::fs::write(&note, b"# Notes\ncrisp apples are great.\n").unwrap();
-    app.file_processor_mut().all_files = vec![note.clone()];
+    app.workspace_mut().all_files = vec![note.clone()];
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
 
     *app.search_mut().query_mut() = "crisp".to_string();
@@ -694,7 +694,7 @@ fn from_app_marks_only_pdf_backed_visible_files() {
     std::fs::write(backed.with_extension("pdf"), b"%PDF-1.4").unwrap();
     std::fs::write(&plain, b"# plain").unwrap();
 
-    app.file_processor_mut().all_files = vec![backed.clone(), plain.clone()];
+    app.workspace_mut().all_files = vec![backed.clone(), plain.clone()];
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
     app.pdf_backing_tracker()
         .process_discovered(&[backed.clone(), plain.clone()]);
@@ -776,7 +776,7 @@ fn is_multi_selected_requires_more_than_one_file() {
 fn view_model_auto_fit_delegates_to_the_pure_solver() {
     let (mut app, dir) = app_with_system_lib();
     let lib_root = dir.path().to_path_buf();
-    app.file_processor_mut().all_files = vec![lib_root.join("note.md")];
+    app.workspace_mut().all_files = vec![lib_root.join("note.md")];
     app.selection_mut().expanded_dirs.insert(lib_root.clone());
 
     let view_model = LeftPanelViewModel::from_app(&app);

@@ -2,14 +2,14 @@
 //! discovered files to PDF/vision worker queues by extension.
 
 use crate::bus::core::Bus;
-use crate::bus::events::file::{FileChanged, FileChangedKind, FileEvent};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
-/// Subscribes to a [`Bus<FileEvent>`] and fans out newly discovered /
+/// Subscribes to a [`Bus<FileChanged>`] and fans out newly discovered /
 /// updated files to per-format worker channels by extension.
 pub struct BusRouter {
-    bus: Bus<FileEvent>,
+    bus: Bus<FileChanged>,
     tx_pdf: Sender<PathBuf>,
     /// Image-vision sender. Only present when the `image-library`
     /// Cargo feature is enabled; the image-routing branch below
@@ -22,7 +22,7 @@ impl BusRouter {
     /// The `tx_img` parameter is only present when the
     /// `image-library` Cargo feature is enabled.
     pub fn new(
-        bus: Bus<FileEvent>,
+        bus: Bus<FileChanged>,
         tx_pdf: Sender<PathBuf>,
         #[cfg(feature = "image-library")] tx_img: Sender<PathBuf>,
     ) -> Self {
@@ -57,12 +57,13 @@ impl BusRouter {
                 }
 
                 // [REQ-330..332]: route file events with kind Added/Changed;
-                // deletions and directory events are not conversion work.
+                // deletions are not conversion work. Directory events ride
+                // the separate directory bus and never reach this router.
                 let paths = match &event {
-                    FileEvent::FileChanged(FileChanged {
+                    FileChanged {
                         kind: FileChangedKind::Added | FileChangedKind::Changed,
                         files,
-                    }) => files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                    } => files.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
                     _ => continue,
                 };
 
@@ -126,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_forwards_pdf() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -138,7 +139,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test.pdf")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test.pdf")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
@@ -147,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_ignores_md() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -159,7 +160,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test.md")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test.md")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
@@ -168,7 +169,7 @@ mod tests {
     #[cfg(feature = "image-library")]
     #[test]
     fn test_img_router_forwards_image() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, _rx_pdf) = channel();
         let (tx_img, rx_img) = channel();
 
@@ -176,7 +177,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test.png")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test.png")));
 
         let path = rx_img.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
@@ -186,7 +187,7 @@ mod tests {
     #[cfg(feature = "image-library")]
     #[test]
     fn test_img_router_ignores_pdf() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, _rx_pdf) = channel();
         let (tx_img, rx_img) = channel();
 
@@ -194,7 +195,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test.pdf")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test.pdf")));
 
         let path = rx_img.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
@@ -202,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_ignores_no_extension() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -214,7 +215,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
@@ -222,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_normalizes_uppercase_extension() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -234,16 +235,18 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered_one(PathBuf::from("test.PDF")));
+        bus.publish(FileChanged::discovered_one(PathBuf::from("test.PDF")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
         assert_eq!(path.unwrap(), PathBuf::from("test.PDF"));
     }
 
+    /// Deleted events are not conversion work; directory events ride the
+    /// separate directory bus and can never reach this router by type.
     #[test]
-    fn test_pdf_router_filters_removed_and_directory_events() {
-        let bus: Bus<FileEvent> = Bus::new();
+    fn test_pdf_router_filters_deleted_events() {
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -255,9 +258,10 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::removed_one(PathBuf::from("gone.pdf")));
-        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("dir.pdf")));
-        bus.publish(FileEvent::dir_removed_one(PathBuf::from("dir2.pdf")));
+        bus.publish(FileChanged::removed_one(PathBuf::from("gone.pdf")));
+        // [DirectoryChanged] events (e.g. for a directory named "dir.pdf")
+        // live on `Bus<DirectoryChanged>` — the router is typed on the file
+        // bus and cannot observe them at all.
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
@@ -265,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_forwards_updated_pdf() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -277,7 +281,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::updated_one(PathBuf::from("upd.pdf")));
+        bus.publish(FileChanged::updated_one(PathBuf::from("upd.pdf")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
@@ -286,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_pdf_router_empty_payload_is_noop() {
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
         let (tx_pdf, rx_pdf) = channel();
         #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = channel();
@@ -298,7 +302,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered(Vec::new()));
+        bus.publish(FileChanged::discovered(Vec::new()));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());

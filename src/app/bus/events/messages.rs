@@ -2,7 +2,7 @@
 //! channel.
 //!
 //! The per-domain event payloads (`BackgroundEvent`, `FsEvent`,
-//! `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in their
+//! `ProcessEvent`, `ConfigArrived`) live in their
 //! respective modules under [`super`]. Agent events live in
 //! [`crate::agent::events`]. This module is reserved for types
 //! shared across channels or independent of any single event domain —

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::agent::AgentSession;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::Tags;
-use crate::workspace::watcher::FileEventProcessor;
+use crate::workspace::watcher::Workspace;
 
 #[derive(Clone)]
 pub struct TreeNode {
@@ -71,12 +71,15 @@ impl FastMdApp {
         &mut self.orchestrator.content_libraries
     }
 
-    pub fn file_processor(&self) -> &FileEventProcessor {
-        &self.orchestrator.file_processor
+    /// Access the workspace projection (single source of truth on file and
+    /// directory state).
+    pub fn workspace(&self) -> &Workspace {
+        &self.orchestrator.workspace
     }
 
-    pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
-        &mut self.orchestrator.file_processor
+    /// Mutable access to the workspace projection.
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.orchestrator.workspace
     }
 
     pub fn pdf_backing_tracker(&self) -> &crate::agent::session::PdfBackingTracker {

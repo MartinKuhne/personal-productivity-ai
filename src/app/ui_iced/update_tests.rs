@@ -1688,11 +1688,7 @@ fn test_workspace_markdown_link_selects_the_file_and_carries_the_anchor() {
         readonly: false,
         priority: 0,
     }];
-    state
-        .app
-        .orchestrator
-        .file_processor
-        .add_file(target.clone());
+    state.app.orchestrator.workspace.add_file(target.clone());
     let spy = command_spy(&state);
 
     let _ = update(
@@ -2160,9 +2156,10 @@ fn test_config_arrival_marks_the_tree_dirty() {
 }
 
 #[test]
-fn test_file_change_inbound_drains_the_file_processor() {
+fn test_file_change_inbound_drains_the_workspace() {
     let (mut state, _storage) = fresh_state();
-    let event = crate::bus::events::file::FileEvent::discovered_one(PathBuf::from("/notes/new.md"));
+    let event =
+        crate::bus::events::file::FileChanged::discovered_one(PathBuf::from("/notes/new.md"));
 
     let _ = update(
         &mut state,
@@ -2173,7 +2170,7 @@ fn test_file_change_inbound_drains_the_file_processor() {
         state
             .app
             .orchestrator
-            .file_processor
+            .workspace
             .all_files
             .iter()
             .any(|path| path == &PathBuf::from("/notes/new.md")),

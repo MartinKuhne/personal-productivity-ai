@@ -60,7 +60,7 @@ C4Container
     Container(bus, "bus", "Bus<T> broadcast + typed mpsc channels + UserCommand intake")
     Container(bg, "background", "Indexer, file watcher, PDF/image workers, log ring buffer")
     Container(md, "markdown", "GFM parse -> RenderEvent/InlineElem model, Fair Table Width solver")
-    Container(ws, "workspace", "Content libraries, DirectoryTracker, FileEventProcessor, Tags")
+    Container(ws, "workspace", "Workspace file/directory projection, content libraries, Tags")
     Container(exp, "export", "Print + Typst PDF pipeline")
   }
 
@@ -75,13 +75,13 @@ C4Container
   Rel(orch, agent_crate, "submits AgentPrompt, observes AgentEvent")
   Rel(orch, md, "parses the open document")
   Rel(orch, exp, "print / save-as-PDF jobs")
-  Rel(bg, bus, "publishes FileEvent / BackgroundEvent")
-  Rel(ws, bus, "consumes FileEvent, publishes discovery events")
+  Rel(bg, bus, "publishes FileChanged / DirectoryChanged / BackgroundEvent")
+  Rel(ws, bus, "consumes separate file and directory event buses")
 ```
 
 ## Optional Vector Search
 
-When the `vector-search` feature is enabled, `app/background/vector_search.rs` owns a SahomeDB collection and `app/background/embeddings.rs` builds an OpenAI-compatible embedding client (via `async-openai`) from the user-configured `embeddings` model (AGENT-005). `Task` creates the shared service before starting the initial scan, subscribes it to `Bus<FileEvent>` before scan events are published, and injects the service into `AgentSession` through the existing `Extensions` container. Markdown chunks are hashed, embedded, and stored in the local collection; the read-only `vector_search` built-in tool performs searches through that service. The service does not replay file events emitted before its subscription and reports progress through `BackgroundEvent::Process(LogEntry(...))` every 100 processed Markdown files.
+When the `vector-search` feature is enabled, `app/background/vector_search.rs` owns a SahomeDB collection and `app/background/embeddings.rs` builds an OpenAI-compatible embedding client (via `async-openai`) from the user-configured `embeddings` model (AGENT-005). `Task` creates the shared service before starting the initial scan, subscribes it to `Bus<FileChanged>` before scan events are published, and injects the service into `AgentSession` through the existing `Extensions` container. Markdown chunks are hashed, embedded, and stored in the local collection; the read-only `vector_search` built-in tool performs searches through that service. The service does not replay file events emitted before its subscription and reports progress through `BackgroundEvent::Process(LogEntry(...))` every 100 processed Markdown files.
 
 
 ### UI Layer (Level 3)
@@ -127,7 +127,7 @@ C4Component
   Component(app, "app", "AppState (thin wrapper over FastMdApp) + ViewModels + OverlayState; boot/boot_with_persisted (build_state performs the synchronous DEC-009 ConfigArrived publish), window_settings, launch() builder chain")
   Component(update, "update", "Top-level reducer: window close/save, pane resize, Message::Command publish-and-execute, Inbound bus reductions, finish_frame tail + view-model rebuild")
   Component(view, "view", "Three-band layout with the real panels mounted, under the overlay host (z-ordered floating windows)")
-  Component(sub, "subscription", "Inbound Subscription<Message> lanes: ConfigArrived, FileEvent, AgentEvent, BackgroundEvent (pure bus_event_to_message mapper, Lagged(n) surfaced) + the winit window lane (close_requests, resize_events)")
+  Component(sub, "subscription", "Inbound Subscription<Message> lanes: ConfigArrived, FileChanged, DirectoryChanged, AgentEvent, BackgroundEvent (pure bus_event_to_message mapper, Lagged(n) surfaced) + the winit window lane (close_requests, resize_events)")
   Component(msg, "message", "Top-level Message enum: one variant per logical interaction channel (Window, Layout, Command, Tree, Tab, Editor, Agent, Search, Logs, Theme, Render, Dialog, About, Batch, Tools, AgentDebug, Inbound, Boot)")
   Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
   Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
@@ -212,7 +212,7 @@ C4Component
 tools, the per-group enable/parallel-safe/error state, and the
 [`McpClients`](../../src/agent/lib/mcp/mod.rs). `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
-`&Bus<FileEvent>`.
+`&Bus<FileChanged>`.
 
 ```mermaid
 C4Component
@@ -280,19 +280,19 @@ Tool inventory (matches `Tools.md` + conditional tools):
 ## Component Diagram (Level 3) — Background Workers
 
 `background/` hosts long-running workers, coordinated by `background_task::Task`
-which owns the `mpsc` channels and the `notify::RecommendedWatcher`. A
-`Bus<FileEvent>` (see Event Bus below) feeds producers and consumers.
+which owns the `mpsc` channels, `Bus<FileChanged>`, `Bus<DirectoryChanged>`,
+and the `notify::RecommendedWatcher`.
 
 ```mermaid
 C4Component
   title FastMD — Background Workers
 
-  Component(task, "Task", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
+  Component(task, "Task", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileChanged>, dir_event_bus: Bus<DirectoryChanged>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
   Component(indexer, "Indexer", "Worker pool up to 4 threads")
   Component(watcher, "FileWatcher", "notify 6.0; recursive; auto-watch new dirs")
   Component(pdf, "PdfConverterWorker", "PdfConversionJob queue; pdf_converter_command")
   Component(vision, "ImageVisionWorker", "process_image: base64 data URL -> vision use_case model")
-  Component(router, "BusRouter", "Routes FileEvents between producers and consumers")
+  Component(router, "BusRouter", "Routes FileChanged file events to PDF/image worker queues")
   Component(bgmgr, "BackgroundProcessManager", "VecDeque ring buffer MAX_LOG_ENTRIES=10_000; filter/search/auto_scroll/show_background_logs; log persistence to logs/background-process.log; SharedProcessManager = Arc<Mutex<...>>")
   Component(bgmodels, "models", "BackgroundLogEntry, LogCategory{Indexer,Watcher,PDF Converter,Image Vision,LLM Tools}")
 
@@ -316,17 +316,19 @@ C4Component
   title FastMD — Messaging & Event Bus Subsystem
 
   Component(core, "Bus<T> / BusReader<T>", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
-  Component(fev, "FileEvent & FileEventProducer", "FileEvent union on Bus<FileEvent>: FileChanged{kind Added|Deleted|Changed, files[{path, file_name}]} ([REQ-330..334]), DirectoryChanged{path, kind Added|Deleted} ([REQ-320..322]); FileEventProducer convenience wrapper")
+  Component(fev, "FileChanged", "FileChanged{kind Added|Deleted|Changed, files[{path, file_name}]} on Bus<FileChanged> ([REQ-330..334]); FileEventProducer publishes file-only changes")
+  Component(dev, "DirectoryChanged", "DirectoryChanged{path, kind Added|Deleted} on Bus<DirectoryChanged> ([REQ-320..322]); DirectoryEventProducer publishes directory-only changes")
   Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: FsEvent, ProcessEvent, McpAuthEvent (AgentEvent removed — agent events now on Bus<AgentEvent>)")
   Component(cfg_bus, "ConfigArrived & config_bus", "Startup config broadcast; published synchronously by ui_iced::app::build_state (DEC-009); subscribers fall back to AppConfig::default() after CONFIG_ARRIVAL_TIMEOUT (10 s, defense-in-depth)")
-  Component(router, "BusRouter", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
-  Component(task, "Task", "Owns rx/tx: mpsc::channel<BackgroundEvent> and file_event_bus: Bus<FileEvent>")
+  Component(router, "BusRouter", "Subscribes to Bus<FileChanged>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
+  Component(task, "Task", "Owns rx/tx: mpsc::channel<BackgroundEvent>, file_event_bus: Bus<FileChanged>, and dir_event_bus: Bus<DirectoryChanged>")
   Component(ui, "FastMdApp", "UI thread loop; drains Task.rx (BackgroundEvent) on every frame pass")
 
-  Rel(fev, core, "uses Bus<FileEvent>")
+  Rel(fev, core, "uses Bus<FileChanged>")
+  Rel(dev, core, "uses Bus<DirectoryChanged>")
   Rel(cfg_bus, core, "uses Bus<ConfigArrived>")
-  Rel(router, core, "subscribes to Bus<FileEvent>")
-  Rel(task, core, "owns Bus<FileEvent>")
+  Rel(router, core, "subscribes to Bus<FileChanged>")
+  Rel(task, core, "owns both file and directory buses")
   Rel(ui, task, "drains rx: Receiver<BackgroundEvent>")
   Rel(router, task, "forwards PDF/image paths to worker channels")
 ```
@@ -335,19 +337,17 @@ C4Component
 
 1. **Explicit Thread Communication**: Shared mutable state across thread boundaries is strictly avoided. Subsystems communicate exclusively via event channels.
 2. **MPMC Broadcast vs MPSC Channels**:
-   - **Multi-Producer Multi-Consumer (`Bus<T>`)**: Used when multiple consumers must independently observe the same event (e.g., file changes observed by Indexer, DirectoryTracker, FileEventProcessor, and BusRouter).
+   - **Multi-Producer Multi-Consumer (`Bus<T>`)**: Used when multiple consumers must independently observe the same event (for example, `FileChanged` is observed by the workspace projection, PDF-backing tracker, `BusRouter`, and vector search; `DirectoryChanged` is observed by the workspace projection).
    - **Multi-Producer Single-Consumer (`mpsc::channel`)**: Used when events target a single aggregator (e.g., UI frame loop draining `BackgroundEvent` or worker task queues).
 3. **Non-Blocking UI Integration**: `BusReader` provides non-blocking `try_recv()` and `recv_timeout()` methods wrapped in a `Mutex`. In the iced build the UI never polls them directly: `ui_iced::subscription` turns every bus into an `iced::Subscription<Message>`, so background notifications arrive as messages on the Elm loop and the update/view path never blocks on I/O ([FMD-065]).
 
 ### Message Types & Payloads
 
-- **`FileEvent`** (`bus/events/file.rs`): the transport union on `Bus<FileEvent>` — every producer publishes one of the two spec events, every consumer matches the variant it manages.
-  - **`FileChanged`** ([REQ-330..334]): one event-level `Kind` (`FileChangedKind::{Added, Deleted, Changed}`) describes the whole `[Files]` list ([REQ-331]); every entry (`FileEntry`) carries a fully qualified `path` ([REQ-333]) and its materialized `file_name` ([REQ-334]). Kind-homogeneous per event: a rename publishes a `[Deleted]` event followed by a separate `[Added]` event ([REQ-404]).
-  - **`DirectoryChanged`** ([REQ-320..322]): one directory per event — a fully qualified `path` ([REQ-321]) plus `kind` (`DirectoryChangedKind::{Added, Deleted}`, [REQ-322]).
-  - Producers: the crawler (`Indexer::scan_libraries`) emits one `FileChanged[Added]` batch per enumerated parent directory and one `DirectoryChanged[Added]` per directory, at enumeration time ([REQ-320]/[REQ-330]); the watcher emits `FileChanged[Added]` for created files (`Changed` for modifications, `Deleted` for deletions; rename split as `Deleted(old)` + `Added(new)` per [REQ-404]) and `DirectoryChanged[Added/Deleted]` for directory lifecycle ([REQ-402], derived from notify's create/remove kinds; `Remove(Any)` paths without an extension are treated as folders, since workspace-tracked files always carry an extension).
-  - Producers: the crawler (`Indexer::scan_libraries`) emits one `Discovered` batch per directory plus one `DirDiscovered` batch per library ([REQ-320]/[REQ-330]: emits on enumeration); the watcher emits `Discovered` for created files (`Updated` for modifications, `Removed` for deletions, rename split as `Removed(old)` + `Discovered(new)` per [REQ-404]) and `DirDiscovered`/`DirRemoved` for directory lifecycle ([REQ-402], derived from notify's create/remove kinds; `Remove(Any)` paths without an extension are treated as folders, since workspace-tracked files always carry an extension).
+- **`FileChanged`** (`bus/events/file.rs`, `Bus<FileChanged>`, [REQ-330..334]): one event-level `Kind` (`FileChangedKind::{Added, Deleted, Changed}`) describes the whole `[Files]` list ([REQ-331]); every entry (`FileEntry`) carries a fully qualified `path` ([REQ-333]) and its materialized `file_name` ([REQ-334]). A rename publishes `[Deleted]` then `[Added]` ([REQ-404]). `FileEventProducer` only publishes this file payload.
+- **`DirectoryChanged`** (`bus/events/directory.rs`, `Bus<DirectoryChanged>`, [REQ-320..322]): one directory per event — fully qualified `path` ([REQ-321]) and `kind` (`DirectoryChangedKind::{Added, Deleted}`, [REQ-322]). A directory rename publishes `[Deleted]` then `[Added]` ([REQ-404]). `DirectoryEventProducer` only publishes this directory payload.
+- **Producers:** `Indexer::scan_libraries` publishes file additions and directory additions as it enumerates entries ([REQ-320]/[REQ-330]); `FileWatcher` publishes file changes and directory lifecycle changes on their distinct buses ([REQ-402]); filesystem commands and agent tools publish file changes through the file producer.
 - **`BackgroundEvent`** (`bus/events/typed.rs`): Top-level enum carrying domain-specific asynchronous updates to the UI loop:
-  - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`. `DirParsed` is dormant: the crawler now publishes directory events on `Bus<FileEvent>` instead ([REQ-320]); the variant is retained for the test routing harness.
+  - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`. `DirParsed` has no current crawler producer; directory lifecycle is carried by `Bus<DirectoryChanged>`, while the legacy typed variant and handler remain for compatibility/tests.
   - **`ProcessEvent`**: `LogEntry(BackgroundLogEntry)`, `FileLoaded { path, content }`.
   - **`McpAuthEvent`**: `Completed { server_name, error }`.
 - **`AgentEvent`** (`agent/events.rs`): Agent→UI `Bus<AgentEvent>` broadcast (tokio, capacity 8192). 11 session-tagged variants: `SessionStarted`, `SessionFinished{history}`, `Status(status: AgentStatus)`, `Thinking`, `ContentDelta`, `ToolCallStarted{id,name,args}`, `ToolResult{id,name,result}`, `ToolSideEffect`, `DebugEntry`, `TokenUsage`, `Failed`. Every variant carries `session_id: Uuid`.
@@ -358,22 +358,23 @@ C4Component
 ### Event Routing & Dispatch
 
 1. **`BusRouter` (`bus/router/bus_router.rs`)**:
-   - Subscribes to `Bus<FileEvent>`.
-   - Filters for `Discovered` and `Updated` events.
+   - Subscribes to `Bus<FileChanged>` only; directory lifecycle events do not enter the conversion router.
+   - Filters for `[FileChanged][Added]` and `[FileChanged][Changed]` events.
    - Inspects file extensions:
      - `.pdf` paths -> forwarded to `tx_pdf: Sender<PathBuf>` (`PdfConverterWorker`).
      - Image paths (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.avif`) -> forwarded to `tx_img: Sender<PathBuf>` (`ImageVisionWorker`).
 2. **UI Inbound Bridge (`ui_iced/subscription.rs` + `ui_iced/update.rs`)**:
-   - The bus→`Subscription` bridge owns one stream per producer (`Bus<ConfigArrived>`, `Bus<FileEvent>`, `Bus<AgentEvent>` and the `std::sync::mpsc<BackgroundEvent>` channel, the last one behind a dedicated forwarding thread because iced's executor is the futures thread-pool, not tokio). Each stream maps its payload to `Message::Inbound(InboundMessage::…)` through the pure `bus_event_to_message` mapper. They are merged with `Subscription::batch` alongside the winit **window lane** (`iced::window::close_requests` / `resize_events`, mapped by the pure `close_request_to_message` / `resize_event_to_message` helpers onto `Message::Window`). With `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction and the resize lane keeps `AppState::viewport` in step with real resizes.
+   - The bus→`Subscription` bridge owns one stream per bus (`Bus<ConfigArrived>`, `Bus<FileChanged>`, `Bus<DirectoryChanged>`, `Bus<AgentEvent>`) and one for the `std::sync::mpsc<BackgroundEvent>` channel, the last one behind a dedicated forwarding thread because iced's executor is the futures thread-pool, not tokio. Each stream maps its payload to `Message::Inbound(InboundMessage::…)` through the pure `bus_event_to_message` mapper. They are merged with `Subscription::batch` alongside the winit **window lane** (`iced::window::close_requests` / `resize_events`, mapped by the pure `close_request_to_message` / `resize_event_to_message` helpers onto `Message::Window`). With `exit_on_close_request: false` the close lane is the only path to the DEC-006 save-and-close reduction and the resize lane keeps `AppState::viewport` in step with real resizes.
    - A `Lagged(n)` error on any bus is not a disconnect: the stream logs the count and forwards `InboundMessage::EventsDropped { source, count }` so the reducer can surface the loss and re-synchronise on the next valid event ([FMD-067], [FMD-072]).
-   - `reduce_inbound` in `ui_iced/update.rs` then runs the same orchestrator routine the old per-frame drains ran, keyed by the bus the message names: `apply_file_event` + `process_file_events` for `FileChanged`, `drain_agent_event_bus` for `Agent`, `handle_fs_event` / `handle_process_event` / `handle_mcp_auth_event` for `Background`, and the config projection for `ConfigArrived`. The orchestrator's own readers for those buses are left inert in this build — the bridge is the single inbound path ([FMD-065]).
+   - `reduce_inbound` in `ui_iced/update.rs` applies `FileChanged` and `DirectoryChanged` messages to the orchestrator's `Workspace` projection, then runs `process_file_events` to drain any legacy/catch-up readers; it also calls `drain_agent_event_bus` for `Agent`, `handle_fs_event` / `handle_process_event` / `handle_mcp_auth_event` for `Background`, and the config projection for `ConfigArrived`. The subscription bridge is the live inbound path in the iced build ([FMD-065]).
    - UI widget state lives in `AgentPanelState` (`ui/agent/panel_state.rs`) plus the reducer-held `OverlayState` / `ViewModels` (`ui_iced/app.rs`): `show_results`, `show_debug_window`, `debug_search_text`, `debug_auto_scroll`, `command_input`, `scroll_to_id`, `active_session_id`.
 
 ### Messaging Actors & Recipients Summary
 
 | Channel / Bus | Transport Primitive | Payload Type | Producers (Actors) | Consumers (Recipients) |
 |---|---|---|---|---|
-| `Bus<FileEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileEvent` | `FileWatcher`, `Indexer`, UI Dialogs (`FileEventProducer`), Tool Executors | `DirectoryTracker`, `FileEventProcessor`, `Indexer`, `BusRouter` |
+| `Bus<FileChanged>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileChanged` | `FileWatcher`, `Indexer`, filesystem commands, agent/tool file operations | `Workspace` / `AppOrchestrator`, PDF-backing tracker, `BusRouter`, vector search |
+| `Bus<DirectoryChanged>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `DirectoryChanged` | `FileWatcher`, `Indexer`, directory commands | `Workspace` / `AppOrchestrator` |
 | `BackgroundEvent` | `std::sync::mpsc::channel` | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`) | Agent Thread, Indexer Pool, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop) |
 | `Bus<ConfigArrived>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `ConfigArrived` | `ui_iced::app::build_state` (synchronous, DEC-009) | background `Task` thread, MCP config subscriber, subscription bridge → UI reducer |
 | `Bus<AgentEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `AgentEvent` (11 variants) | Agent driver thread (`run_agent`) | `FastMdApp` (UI frame drain → `AgentTranscript` + `AgentSessionManager`) |
@@ -391,9 +392,9 @@ C4Component
   title FastMD — Supporting Modules
 
   Component(cfg, "config", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) published synchronously by ui_iced::app::build_state to fan the loaded config out to the background Task thread and the MCP config subscriber on startup. VFS types re-exported from app::vfs for backwards compat.")
-  Component(ev, "file_events", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent union {FileChanged{kind, files[{path,file_name}]}, DirectoryChanged{path, kind}}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
-  Component(fp, "file_processor", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
-  Component(dt, "directory_tracker", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
+  Component(ev, "file_events", "Bus<FileChanged> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileChanged and FileEventProducer; file-only payload")
+  Component(dev, "directory_events", "Bus<DirectoryChanged> (tokio::sync::broadcast, BUS_CAPACITY=8192); DirectoryChanged and DirectoryEventProducer; directory-only payload")
+  Component(ws, "watcher/workspace", "Workspace{file_reader, dir_reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}; unified file/directory projection")
   Component(tm, "tag_manager", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
   Component(msg, "messages", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
   Component(doc, "document", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
@@ -405,9 +406,9 @@ C4Component
   Component(err, "error", "AgentError")
 
   Rel(cfg, ev, "ContentLibrary data flows into file events")
-  Rel(ev, fp, "feeds")
-  Rel(ev, dt, "feeds")
-  Rel(fp, tm, "file list -> tags")
+  Rel(ev, ws, "feeds file projection")
+  Rel(dev, ws, "feeds directory projection")
+  Rel(ws, tm, "workspace file changes inform tags")
   Rel(msg, ev, "background messages")
 ```
 
@@ -432,4 +433,3 @@ C4Component
   Tiers 3 and 4 are harness-complete but their artifacts await a human
   recording pass. Dev-deps also include `iced_test 0.14`, `proptest`,
   `filetime`, `tempfile`, `tokio` and `wiremock`.
-

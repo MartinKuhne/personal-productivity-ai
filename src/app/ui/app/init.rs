@@ -19,7 +19,7 @@ use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::Tags;
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use crate::workspace::watcher::Workspace;
 use fastmd_agent::AgentSession;
 
 use super::FastMdApp;
@@ -76,7 +76,6 @@ impl FastMdApp {
         // `RecommendedWatcher` into the slot the UI knows about, so
         // we point the slot at a fresh empty one.
         let finished_watcher_slot = background_task.finished_watcher.clone();
-        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
         let test_browser_session = std::sync::Arc::new(crate::agent::BrowserSession::new(
             &crate::config::AppConfig::default(),
@@ -135,7 +134,12 @@ impl FastMdApp {
         let rx_std = background_task.rx_std();
         let tx = background_task.tx;
         let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+        let dir_event_bus = background_task.dir_event_bus;
+        // The single source of truth for file/directory state. File events
+        // are applied from the orchestrator's own file reader
+        // (`apply_file_changed`); the projection keeps a live directory
+        // reader as the drain for legacy wiring.
+        let workspace = Workspace::new(None, Some(dir_event_bus.subscribe()));
 
         let selection = FileSelection::new();
         let mut dialogs = Dialogs::new();
@@ -161,8 +165,9 @@ impl FastMdApp {
                 rx: rx_std,
                 tx,
                 file_event_bus: event_bus.clone(),
+                dir_event_bus: dir_event_bus.clone(),
                 file_event_reader: Some(event_bus.subscribe()),
-                file_processor,
+                workspace,
                 pdf_backing_tracker,
                 tags: Tags::new(),
                 selection,
@@ -173,7 +178,6 @@ impl FastMdApp {
                 text_buffer: TextBuffer::new(),
                 inline_editor_enabled,
                 background_manager,
-                directory_tracker: dir_tracker,
                 config,
                 config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
                 config_reader: None,

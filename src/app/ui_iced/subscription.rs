@@ -52,7 +52,8 @@
 //! | Bus | Event | `Message` |
 //! | --- | --- | --- |
 //! | `Bus<ConfigArrived>` | `ConfigArrived { config }` | `Message::Inbound(InboundMessage::ConfigArrived(Arc<AppConfig>))` |
-//! | `Bus<FileEvent>` | `FileEvent { kind, paths }` (all five `FileEventKind`s) | `Message::Inbound(InboundMessage::FileChanged(event))` |
+//! | `Bus<FileChanged>` | `[FileChanged] { kind, files }` (all three `FileChangedKind`s) | `Message::Inbound(InboundMessage::FileChanged(event))` |
+//! | `Bus<DirectoryChanged>` | `[DirectoryChanged] { path, kind }` | `Message::Inbound(InboundMessage::DirectoryChanged(event))` |
 //! | `Bus<AgentEvent>` | all 11 `AgentEvent` variants | `Message::Inbound(InboundMessage::Agent(Arc<AgentEvent>))` |
 //! | `Bus<AgentEvent>` | coalesced burst | `Message::Inbound(InboundMessage::AgentBatch(Vec<Arc<AgentEvent>>))` |
 //! | `std::sync::mpsc<BackgroundEvent>` | `Fs(..)` / `Process(..)` / `McpAuth(..)` | `Message::Inbound(InboundMessage::Background(Arc<BackgroundEvent>))` |
@@ -91,13 +92,15 @@ use std::sync::Arc;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use crate::bus::core::Bus;
-use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived, FileEvent};
+use crate::bus::events::directory::DirectoryChanged;
+use crate::bus::events::file::FileChanged;
+use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived};
 use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage, WindowMessage};
 
 /// A bus event handed to the pure mapper [`bus_event_to_message`].
 ///
 /// The union of every payload type that reaches the iced layer, so the
-/// mapping is one testable function instead of four parallel ones. The
+/// mapping is one testable function instead of five parallel ones. The
 /// `Dropped` arm is not a bus payload: it is the lag report the streams
 /// synthesise from `RecvError::Lagged(n)`.
 #[derive(Debug, Clone)]
@@ -106,12 +109,18 @@ pub enum InboundBusEvent {
     /// (`src/app/bus/events/config.rs:10`). Boxed: `AppConfig`
     /// is ~800 bytes and would otherwise dominate the enum's layout.
     Config(Box<ConfigArrived>),
-    /// A filesystem mutation on `Bus<FileEvent>`
-    /// (`src/app/bus/events/file.rs:28`).
-    File(FileEvent),
-    /// A coalesced burst of filesystem mutations drained off
-    /// `Bus<FileEvent>` in one wake-up.
-    FileBatch(Vec<FileEvent>),
+    /// A file change on `Bus<FileChanged>`
+    /// (`src/app/bus/events/file.rs`).
+    File(FileChanged),
+    /// A coalesced burst of file changes drained off
+    /// `Bus<FileChanged>` in one wake-up.
+    FileBatch(Vec<FileChanged>),
+    /// A directory lifecycle change on `Bus<DirectoryChanged>`
+    /// (`src/app/bus/events/directory.rs`). One directory per event.
+    Directory(DirectoryChanged),
+    /// A coalesced burst of directory changes drained off
+    /// `Bus<DirectoryChanged>` in one wake-up.
+    DirectoryBatch(Vec<DirectoryChanged>),
     /// An agent turn event on `Bus<AgentEvent>`
     /// (`src/app/bus/events/agent.rs:21`).
     Agent(AgentEvent),
@@ -137,7 +146,7 @@ pub enum InboundBusEvent {
 /// bridge, testable without a live stream.
 ///
 /// Returns `None` when an event must not reach the UI. Every payload
-/// currently published on the four buses *is* UI-observable, so the mapping
+/// currently published on the five buses *is* UI-observable, so the mapping
 /// is total today and `None` is never produced. The `Option` is kept
 /// deliberately: it is the seam where
 /// a future filter (throttling a chatty producer, suppressing another
@@ -153,6 +162,12 @@ pub fn bus_event_to_message(event: InboundBusEvent) -> Option<Message> {
         InboundBusEvent::FileBatch(events) => {
             Some(Message::Inbound(InboundMessage::FileChangedBatch(events)))
         }
+        InboundBusEvent::Directory(event) => {
+            Some(Message::Inbound(InboundMessage::DirectoryChanged(event)))
+        }
+        InboundBusEvent::DirectoryBatch(events) => Some(Message::Inbound(
+            InboundMessage::DirectoryChangedBatch(events),
+        )),
         InboundBusEvent::Agent(event) => {
             Some(Message::Inbound(InboundMessage::Agent(Arc::new(event))))
         }
@@ -269,8 +284,10 @@ impl Hash for BackgroundReceiver {
 pub struct BusReceivers {
     /// `Bus<ConfigArrived>` — the configuration handoff.
     pub config: SharedReceiver<ConfigArrived>,
-    /// `Bus<FileEvent>` — watcher / scan / tool / agent file mutations.
-    pub file: SharedReceiver<FileEvent>,
+    /// `Bus<FileChanged>` — watcher / scan / tool / agent file mutations.
+    pub file: SharedReceiver<FileChanged>,
+    /// `Bus<DirectoryChanged>` — watcher / scan directory lifecycle events.
+    pub dir: SharedReceiver<DirectoryChanged>,
     /// `Bus<AgentEvent>` — the agent's streaming turn events.
     pub agent: SharedReceiver<AgentEvent>,
     /// The `futures::channel::mpsc<BackgroundEvent>` channel.
@@ -278,16 +295,18 @@ pub struct BusReceivers {
 }
 
 impl BusReceivers {
-    /// Subscribes to all four producer channels eagerly.
+    /// Subscribes to all five producer channels eagerly.
     pub fn new(
         config_bus: &Bus<ConfigArrived>,
-        file_bus: &Bus<FileEvent>,
+        file_bus: &Bus<FileChanged>,
+        dir_bus: &Bus<DirectoryChanged>,
         agent_bus: &Bus<AgentEvent>,
         background_rx: UnboundedReceiver<BackgroundEvent>,
     ) -> Self {
         Self {
             config: SharedReceiver::from_bus(config_bus),
             file: SharedReceiver::from_bus(file_bus),
+            dir: SharedReceiver::from_bus(dir_bus),
             agent: SharedReceiver::from_bus(agent_bus),
             background: BackgroundReceiver::from_futures(background_rx),
         }
@@ -319,6 +338,7 @@ pub fn subscription(receivers: &BusReceivers) -> iced::Subscription<Message> {
     iced::Subscription::batch([
         iced::Subscription::run_with(receivers.config.clone(), config_stream),
         iced::Subscription::run_with(receivers.file.clone(), file_stream),
+        iced::Subscription::run_with(receivers.dir.clone(), dir_stream),
         iced::Subscription::run_with(receivers.agent.clone(), agent_stream),
         iced::Subscription::run_with(receivers.background.clone(), background_stream),
         // The winit window lane — the subscriptions the window reducers
@@ -519,7 +539,7 @@ fn config_stream(
     .boxed()
 }
 
-/// The `Bus<FileEvent>` lane.
+/// The `Bus<FileChanged>` lane.
 ///
 /// Every event already queued when the stream wakes is coalesced into one
 /// [`InboundMessage::FileChangedBatch`]: a watcher storm then
@@ -527,47 +547,27 @@ fn config_stream(
 /// rebuild — instead of one per event. A lone event still rides the plain
 /// [`InboundMessage::FileChanged`] arm, so the common case is unchanged.
 fn file_stream(
-    handle: &SharedReceiver<FileEvent>,
+    handle: &SharedReceiver<FileChanged>,
 ) -> iced::futures::stream::BoxStream<'static, Message> {
-    let inner = Arc::clone(&handle.inner);
-    iced::futures::stream::unfold(inner, |inner| async move {
-        let received = {
-            let mut receiver = inner.lock().await;
-            receiver.recv().await.map(|first| {
-                let mut batch = vec![first];
-                while let Ok(extra) = receiver.try_recv() {
-                    batch.push(extra);
-                }
-                batch
-            })
-        };
-        match received {
-            Ok(mut batch) => {
-                let event = if batch.len() == 1 {
-                    InboundBusEvent::File(batch.remove(0))
-                } else {
-                    InboundBusEvent::FileBatch(batch)
-                };
-                Some((bus_event_to_message(event), inner))
-            }
-            Err(broadcast::error::RecvError::Closed) => None,
-            Err(broadcast::error::RecvError::Lagged(count)) => {
-                warn_dropped(BusSource::File, count);
-                Some((
-                    bus_event_to_message(InboundBusEvent::Dropped {
-                        source: BusSource::File,
-                        count,
-                    }),
-                    inner,
-                ))
-            }
-        }
-    })
-    .filter_map(iced::futures::future::ready)
-    .boxed()
+    coalesced_bus_lane(Arc::clone(&handle.inner), BusSource::File, map_file_batch)
 }
 
-/// The `Bus<AgentEvent>` lane — the highest-volume channel of the four.
+/// The `Bus<DirectoryChanged>` lane.
+///
+/// Same coalescing behaviour as the file lane: a directory-event storm is
+/// coalesced into one [`InboundMessage::DirectoryChangedBatch`] per
+/// wake-up.
+fn dir_stream(
+    handle: &SharedReceiver<DirectoryChanged>,
+) -> iced::futures::stream::BoxStream<'static, Message> {
+    coalesced_bus_lane(
+        Arc::clone(&handle.inner),
+        BusSource::Directory,
+        map_directory_batch,
+    )
+}
+
+/// The `Bus<AgentEvent>` lane — the highest-volume channel of the buses.
 ///
 /// Every event already queued when the stream wakes is coalesced into one
 /// [`InboundMessage::AgentBatch`]: a burst of thinking deltas,
@@ -577,8 +577,67 @@ fn file_stream(
 fn agent_stream(
     handle: &SharedReceiver<AgentEvent>,
 ) -> iced::futures::stream::BoxStream<'static, Message> {
-    let inner = Arc::clone(&handle.inner);
-    iced::futures::stream::unfold(inner, |inner| async move {
+    coalesced_bus_lane(Arc::clone(&handle.inner), BusSource::Agent, map_agent_batch)
+}
+
+/// Pure batch → message mapping for the file lane, fed to
+/// [`coalesced_bus_lane`]: a one-element batch rides the plain
+/// [`InboundMessage::FileChanged`] arm so the common case keeps its shape.
+#[must_use]
+fn map_file_batch(mut batch: Vec<FileChanged>) -> Message {
+    let event = if batch.len() == 1 {
+        InboundBusEvent::File(batch.remove(0))
+    } else {
+        InboundBusEvent::FileBatch(batch)
+    };
+    bus_event_to_message(event).expect("file mapping is total")
+}
+
+/// Pure batch → message mapping for the directory lane, fed to
+/// [`coalesced_bus_lane`].
+#[must_use]
+fn map_directory_batch(mut batch: Vec<DirectoryChanged>) -> Message {
+    let event = if batch.len() == 1 {
+        InboundBusEvent::Directory(batch.remove(0))
+    } else {
+        InboundBusEvent::DirectoryBatch(batch)
+    };
+    bus_event_to_message(event).expect("directory mapping is total")
+}
+
+/// Pure batch → message mapping for the agent lane, fed to
+/// [`coalesced_bus_lane`].
+#[must_use]
+fn map_agent_batch(mut batch: Vec<AgentEvent>) -> Message {
+    let event = if batch.len() == 1 {
+        InboundBusEvent::Agent(batch.remove(0))
+    } else {
+        InboundBusEvent::AgentBatch(batch)
+    };
+    bus_event_to_message(event).expect("agent mapping is total")
+}
+
+/// The one streaming loop shared by every broadcast-bus lane: reads one
+/// event, drains everything already queued behind it into a
+/// batch, and maps the batch through `map` (which collapses a
+/// single-element batch back to the plain per-event message).
+///
+/// A `Lagged(n)` from the broadcast receiver is surfaced as
+/// [`InboundBusEvent::Dropped`] for the lane's `source` ([FMD-072]) and the
+/// stream keeps running — a lag is not a disconnect.
+///
+/// The concrete lane fns above pass **`fn` pointers** for `map` because
+/// `Subscription::run_with` needs a non-capturing builder; this helper can
+/// still by generic because the pointer carries no per-lane state.
+fn coalesced_bus_lane<T>(
+    inner: Arc<AsyncMutex<broadcast::Receiver<T>>>,
+    source: BusSource,
+    map: fn(Vec<T>) -> Message,
+) -> iced::futures::stream::BoxStream<'static, Message>
+where
+    T: Send + Clone + 'static,
+{
+    iced::futures::stream::unfold(inner, move |inner| async move {
         let received = {
             let mut receiver = inner.lock().await;
             receiver.recv().await.map(|first| {
@@ -590,28 +649,18 @@ fn agent_stream(
             })
         };
         match received {
-            Ok(mut batch) => {
-                let event = if batch.len() == 1 {
-                    InboundBusEvent::Agent(batch.remove(0))
-                } else {
-                    InboundBusEvent::AgentBatch(batch)
-                };
-                Some((bus_event_to_message(event), inner))
-            }
+            Ok(batch) => Some((map(batch), inner)),
             Err(broadcast::error::RecvError::Closed) => None,
             Err(broadcast::error::RecvError::Lagged(count)) => {
-                warn_dropped(BusSource::Agent, count);
+                warn_dropped(source, count);
                 Some((
-                    bus_event_to_message(InboundBusEvent::Dropped {
-                        source: BusSource::Agent,
-                        count,
-                    }),
+                    bus_event_to_message(InboundBusEvent::Dropped { source, count })
+                        .expect("dropped mapping is total"),
                     inner,
                 ))
             }
         }
     })
-    .filter_map(iced::futures::future::ready)
     .boxed()
 }
 

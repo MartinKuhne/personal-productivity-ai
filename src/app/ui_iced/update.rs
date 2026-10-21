@@ -23,7 +23,7 @@
 //! [`Message::Inbound`] reducer, because the only inbound path is the
 //! [`subscription::BusReceivers`](crate::ui_iced::subscription::BusReceivers)
 //! bridge. `Inbound(FileChanged)` therefore applies the event the message
-//! **carries** through `AppOrchestrator::apply_file_event` rather than
+//! **carries** through `AppOrchestrator::apply_file_changed` rather than
 //! re-reading a second bus subscriber — the orchestrator's own
 //! `file_event_reader` is left inert for exactly that reason.
 //!
@@ -55,7 +55,7 @@ use std::sync::Arc;
 use iced::Task;
 use iced::widget::operation;
 
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::file::FileChanged;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
@@ -870,7 +870,7 @@ fn save_editor(state: &mut AppState, path: &PathBuf) {
         .app
         .orchestrator
         .file_event_bus
-        .publish(FileEvent::updated_one(path.clone()));
+        .publish(FileChanged::updated_one(path.clone()));
     close_editor(state);
 }
 
@@ -950,7 +950,7 @@ fn reduce_search(state: &mut AppState, message: SearchMessage) -> Vec<Task<Messa
 ///
 /// The scan scope is the currently visible tree directories.
 fn content_scan_task(state: &AppState, term: String) -> Task<Message> {
-    let all_files = state.app.orchestrator.file_processor.all_files.clone();
+    let all_files = state.app.orchestrator.workspace.all_files.clone();
     let libraries = state.app.content_libraries().to_vec();
     let allowed: std::collections::HashSet<PathBuf> =
         visible_directories(state).into_iter().collect();
@@ -1077,7 +1077,7 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
     let action = crate::ui::resolve_link(
         link,
         current_file.as_deref(),
-        &state.app.orchestrator.file_processor.all_files,
+        &state.app.orchestrator.workspace.all_files,
         &content_roots,
     );
 
@@ -1238,16 +1238,29 @@ fn reduce_inbound(state: &mut AppState, message: InboundMessage) {
             // The bridge is the single inbound path, so the event the message
             // carries is applied here rather than re-read off a second
             // subscriber. The extra `process_file_events` call keeps the
-            // `DirectoryTracker` drain running.
-            state.app.orchestrator.apply_file_event(event);
+            // `Workspace` drains (both buses) running.
+            state.app.orchestrator.apply_file_changed(event);
             state.app.orchestrator.process_file_events();
         }
         InboundMessage::FileChangedBatch(events) => {
-            // Same semantics as the single-event arm, with the tracker drain
-            // hoisted out of the loop: the whole burst lands in one tree
-            // rebuild.
+            // Same semantics as the single-event arm, with the workspace
+            // drain hoisted out of the loop: the whole burst lands in one
+            // tree rebuild.
             for event in events {
-                state.app.orchestrator.apply_file_event(event);
+                state.app.orchestrator.apply_file_changed(event);
+            }
+            state.app.orchestrator.process_file_events();
+        }
+        InboundMessage::DirectoryChanged(event) => {
+            state.app.orchestrator.apply_directory_changed(event);
+            state.app.orchestrator.process_file_events();
+        }
+        InboundMessage::DirectoryChangedBatch(events) => {
+            // Same semantics as the single-event arm, with the workspace
+            // drain hoisted out of the loop: the whole burst lands in one
+            // tree rebuild.
+            for event in events {
+                state.app.orchestrator.apply_directory_changed(event);
             }
             state.app.orchestrator.process_file_events();
         }

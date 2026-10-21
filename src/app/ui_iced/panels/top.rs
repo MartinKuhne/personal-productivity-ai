@@ -798,7 +798,7 @@ impl TopBarViewModel {
     /// Snapshots the top bar's inputs off `app`.
     ///
     /// Reads only these accessors:
-    /// `file_processor()`, `tags()`, `config()` and
+    /// `workspace()`, `tags()`, `config()` and
     /// `orchestrator.{background_manager, agent_panel_state}`. Chat models
     /// follow this selection rule: prefer models declaring the `chat`
     /// use case, fall back to every configured model when none do, then
@@ -836,8 +836,8 @@ impl TopBarViewModel {
         chat_models.sort_by(|a, b| a.name.cmp(&b.name));
 
         Self {
-            indexing_finished: app.file_processor().indexing_finished,
-            file_count: app.file_processor().all_files.len(),
+            indexing_finished: app.workspace().indexing_finished,
+            file_count: app.workspace().all_files.len(),
             tag_options,
             selected_tag: app.tags().selected_tag.clone(),
             chat_models,

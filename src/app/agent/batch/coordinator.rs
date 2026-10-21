@@ -4,7 +4,7 @@ use super::discoverer::Discoverer;
 use super::executor::BatchJobExecutor;
 use super::types::{BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::file::FileChanged;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub struct BatchCoordinator {
     config: BatchConfig,
     app_config: AppConfig,
     tx_gui: crate::bus::events::typed::BackgroundEventSender,
-    file_event_bus: Bus<FileEvent>,
+    file_event_bus: Bus<FileChanged>,
     prompt_text: String,
     cancel_flag: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
@@ -26,7 +26,7 @@ impl BatchCoordinator {
         config: BatchConfig,
         app_config: AppConfig,
         tx_gui: crate::bus::events::typed::BackgroundEventSender,
-        file_event_bus: Bus<FileEvent>,
+        file_event_bus: Bus<FileChanged>,
         prompt_text: String,
         clock: Arc<dyn Clock>,
     ) -> (Self, Arc<AtomicBool>) {
@@ -155,7 +155,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),
@@ -188,7 +188,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),
@@ -224,7 +224,7 @@ mod tests {
 
         let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),

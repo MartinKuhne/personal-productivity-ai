@@ -1,7 +1,7 @@
 //! Tests for `background/vision_processor.rs`.
 
 use super::*;
-use crate::bus::events::file::{FileChangedKind, FileEvent};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::config::{AppConfig, LlmConfig};
 use std::path::PathBuf;
 
@@ -106,7 +106,7 @@ async fn test_process_image_success() {
     // produced `.md` once the file is on disk. The bus is
     // owned (no leak needed since `FileEventProducer` is now
     // lifetime-free).
-    let bus: Bus<FileEvent> = Bus::new();
+    let bus: Bus<FileChanged> = Bus::new();
     let reader = bus.subscribe();
     let producer = FileEventProducer::new(bus);
 
@@ -126,7 +126,7 @@ async fn test_process_image_success() {
         .expect("process_image should publish an Added file event for the output .md");
     assert!(matches!(
         &event,
-        FileEvent::FileChanged(changed)
+        changed
             if changed.kind == FileChangedKind::Added
                 && changed.files.len() == 1
                 && changed.files[0].path == md_path

@@ -8,7 +8,8 @@ use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
 use crate::bus::events::typed::{
     BackgroundEvent, BackgroundEventSender, FsEvent, McpAuthEvent, ProcessEvent,
 };
@@ -18,7 +19,7 @@ use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, Tabs, TextBuffer};
 use crate::workspace::Tags;
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use crate::workspace::watcher::Workspace;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
@@ -32,12 +33,20 @@ pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundEvent>,
     pub tx: BackgroundEventSender,
-    pub file_event_bus: Bus<FileEvent>,
-    pub file_event_reader: Option<BusReader<FileEvent>>,
-    pub file_processor: FileEventProcessor,
+    /// File-event bus (`[FileChanged]`) — the file-change transport shared
+    /// with the background workers ([REQ-330..334]).
+    pub file_event_bus: Bus<FileChanged>,
+    /// Directory-event bus (`[DirectoryChanged]`) — the directory-lifecycle
+    /// transport shared with the background workers ([REQ-320..322]).
+    pub dir_event_bus: Bus<DirectoryChanged>,
+    /// Inert catch-up reader for the file bus: `Some` only on legacy init
+    /// paths, `None` under the iced subscription bridge ([REQ-330..334]).
+    pub file_event_reader: Option<BusReader<FileChanged>>,
+    /// `Workspace` projection — the single source of truth for file and
+    /// directory state, fed by both event buses.
+    pub workspace: Workspace,
     pub pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
     pub tags: Tags,
-    pub directory_tracker: DirectoryTracker,
     pub selection: FileSelection,
     pub tabs: Tabs,
     pub _watcher: Option<notify::RecommendedWatcher>,
@@ -108,12 +117,25 @@ impl AppOrchestrator {
         }
     }
 
-    #[tracing::instrument(skip_all, name = "orchestrator.process_file_events", level = "debug")]
+    #[tracing::instrument(
+        skip_all,
+        name = "orchestrator.process_workspace_events",
+        level = "debug"
+    )]
     pub fn process_file_events(&mut self) -> bool {
         let mut changed = false;
 
-        // Let DirectoryTracker consume directory events from its own subscriber.
-        if self.directory_tracker.process_events() {
+        // The `Workspace` projection drains the directory bus from its own
+        // subscriber and keeps the file/directory sets in sync.
+        if self.workspace.process_directory_changed() {
+            changed = true;
+            self.selection.tree_dirty = true;
+        }
+        // The workspace's own file-drain applies the reduced file state
+        // (added/removed files + parent-directory safety net); full
+        // application (tabs/tags/PDF backing) happens in `apply_file_changed`
+        // for events carried by the subscription bridge.
+        if self.workspace.process_file_changed() {
             changed = true;
             self.selection.tree_dirty = true;
         }
@@ -121,23 +143,23 @@ impl AppOrchestrator {
         // Collect the backlog before applying it (the same shape
         // `drain_user_command_bus` uses) so the reader borrow ends before the
         // events touch `self`.
-        let mut events: Vec<crate::bus::events::file::FileEvent> = Vec::new();
+        let mut events: Vec<FileChanged> = Vec::new();
         if let Some(reader) = self.file_event_reader.as_mut() {
             while let Ok(event) = reader.try_recv() {
                 events.push(event);
             }
         }
         for event in events {
-            self.apply_file_event(event);
+            self.apply_file_changed(event);
             changed = true;
         }
 
         changed
     }
 
-    /// Applies ONE file event to the workspace projections: the file/directory
-    /// index, the PDF-backing tracker, the tag manager, the open tabs and the
-    /// tree-dirty flag.
+    /// Applies ONE `[FileChanged]` event to the workspace projections: the
+    /// file/directory index, the PDF-backing tracker, the tag manager, the
+    /// open tabs and the tree-dirty flag.
     ///
     /// The reducer applies the event carried by
     /// [`InboundMessage::FileChanged`](crate::ui_iced::message::InboundMessage::FileChanged)
@@ -145,62 +167,70 @@ impl AppOrchestrator {
     /// path — background work notifies the UI instead of invoking it
     /// synchronously — so the orchestrator's own `file_event_reader` is left
     /// inert and this is the only applier: no event is applied twice.
-    pub fn apply_file_event(&mut self, event: crate::bus::events::file::FileEvent) {
-        use crate::bus::events::file::{DirectoryChangedKind, FileChangedKind};
-
-        match event {
-            crate::bus::events::file::FileEvent::FileChanged(changed) => {
-                let paths = changed.paths();
-                match changed.kind {
-                    FileChangedKind::Added => {
-                        self.pdf_backing_tracker.process_discovered(&paths);
-                        for p in &paths {
-                            if Self::is_workspace_file(p) {
-                                self.file_processor.add_file(p.clone());
-                                if let Some(parent) = p.parent() {
-                                    let parent = parent.to_path_buf();
-                                    self.file_processor.add_dir(parent);
-                                }
-                            }
+    pub fn apply_file_changed(&mut self, changed: FileChanged) {
+        let paths = changed.paths();
+        match changed.kind {
+            FileChangedKind::Added => {
+                self.pdf_backing_tracker.process_discovered(&paths);
+                for p in &paths {
+                    if Self::is_workspace_file(p) {
+                        self.workspace.add_file(p.clone());
+                        if let Some(parent) = p.parent() {
+                            let parent = parent.to_path_buf();
+                            self.workspace.add_dir(parent);
                         }
-                        self.selection.tree_dirty = true;
-                    }
-                    FileChangedKind::Changed => {
-                        for p in &paths {
-                            if self.tabs.loaded_path.as_ref() == Some(p)
-                                && !self.text_buffer.is_open
-                            {
-                                self.tabs.loaded_path = None;
-                            }
-                        }
-                    }
-                    FileChangedKind::Deleted => {
-                        self.pdf_backing_tracker.process_removed(&paths);
-                        for p in &paths {
-                            self.file_processor.remove_file(p);
-                            if self.tabs.loaded_path.as_ref() == Some(p) {
-                                self.tabs.loaded_path = None;
-                            }
-                            self.tags.remove_file(p);
-                        }
-                        self.close_tabs_for_removed_files(&paths);
-                        self.tags.rebuild();
-                        self.selection.tree_dirty = true;
-                    }
-                }
-            }
-            crate::bus::events::file::FileEvent::DirectoryChanged(dir_changed) => {
-                match dir_changed.kind {
-                    DirectoryChangedKind::Added => {
-                        self.file_processor.add_dir(dir_changed.path.clone());
-                    }
-                    DirectoryChangedKind::Deleted => {
-                        self.file_processor.remove_dir(&dir_changed.path);
                     }
                 }
                 self.selection.tree_dirty = true;
             }
+            FileChangedKind::Changed => {
+                for p in &paths {
+                    if self.tabs.loaded_path.as_ref() == Some(p) && !self.text_buffer.is_open {
+                        self.tabs.loaded_path = None;
+                    }
+                }
+            }
+            FileChangedKind::Deleted => {
+                self.apply_removed_files(&paths);
+            }
         }
+    }
+
+    /// Applies ONE `[DirectoryChanged]` event to the workspace projection
+    /// ([REQ-320..322]). A `[DirectoryChanged][Deleted]` cascades to all
+    /// descendant directories.
+    pub fn apply_directory_changed(&mut self, dir_changed: DirectoryChanged) {
+        match dir_changed.kind {
+            DirectoryChangedKind::Added => {
+                self.workspace.add_dir(dir_changed.path);
+            }
+            DirectoryChangedKind::Deleted => {
+                let removed_files: Vec<PathBuf> = self
+                    .workspace
+                    .all_files
+                    .iter()
+                    .filter(|path| path.starts_with(&dir_changed.path))
+                    .cloned()
+                    .collect();
+                self.workspace.remove_dir_and_descendants(&dir_changed.path);
+                self.apply_removed_files(&removed_files);
+            }
+        }
+        self.selection.tree_dirty = true;
+    }
+
+    fn apply_removed_files(&mut self, paths: &[PathBuf]) {
+        self.pdf_backing_tracker.process_removed(paths);
+        for path in paths {
+            self.workspace.remove_file(path);
+            if self.tabs.loaded_path.as_ref() == Some(path) {
+                self.tabs.loaded_path = None;
+            }
+            self.tags.remove_file(path);
+        }
+        self.close_tabs_for_removed_files(paths);
+        self.tags.rebuild();
+        self.selection.tree_dirty = true;
     }
 
     pub fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
@@ -464,29 +494,29 @@ impl AppOrchestrator {
         match ev {
             FsEvent::FileParsed { path, tags } => {
                 self.tags.add_tags(path.clone(), tags);
-                self.file_processor.add_file(path);
+                self.workspace.add_file(path);
                 self.selection.tree_dirty = true;
             }
             FsEvent::DirParsed { path } => {
-                self.file_processor.add_dir(path);
+                self.workspace.add_dir(path);
                 self.selection.tree_dirty = true;
             }
             FsEvent::Finished => {
                 if let Some(watcher) = self.task_take_finished_watcher() {
                     self._watcher = Some(watcher);
                 }
-                self.file_processor.indexing_finished = true;
+                self.workspace.indexing_finished = true;
                 self.tags.rebuild();
                 self.selection.tree_dirty = true;
             }
             FsEvent::FinishedWithoutWatcher => {
-                self.file_processor.indexing_finished = true;
+                self.workspace.indexing_finished = true;
                 self.tags.rebuild();
                 self.selection.tree_dirty = true;
             }
             FsEvent::FileModified { path, tags } => {
                 self.tags.add_tags(path.clone(), tags);
-                self.file_processor.add_file(path.clone());
+                self.workspace.add_file(path.clone());
                 self.tags.rebuild();
                 if self.tabs.loaded_path.as_ref() == Some(&path) {
                     self.tabs.loaded_path = None;
@@ -494,7 +524,7 @@ impl AppOrchestrator {
                 self.selection.tree_dirty = true;
             }
             FsEvent::FileDeleted { path } => {
-                self.file_processor.remove_file(&path);
+                self.workspace.remove_file(&path);
                 self.tags.remove_file(&path);
                 self.tags.rebuild();
                 self.close_tabs_for_removed_files(std::slice::from_ref(&path));

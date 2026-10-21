@@ -3,7 +3,8 @@
 use crate::background::PdfConversionJob;
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
+use crate::bus::events::file::FileChanged;
 use crate::bus::events::typed::FsEvent;
 use crate::config::AppConfig;
 use notify::Watcher;
@@ -14,7 +15,10 @@ use std::sync::{Arc, Mutex};
 pub struct FileWatcher {
     config: AppConfig,
     tx: crate::bus::events::typed::BackgroundEventSender,
-    bus: Bus<FileEvent>,
+    /// File-event bus: `[FileChanged]` events are published here.
+    file_bus: Bus<FileChanged>,
+    /// Directory-event bus: `[DirectoryChanged]` events are published here.
+    dir_bus: Bus<DirectoryChanged>,
     tx_pdf: Sender<PathBuf>,
     /// Image-vision sender. Only present when the `image-library`
     /// Cargo feature is enabled; the `is_img` detection below
@@ -35,7 +39,8 @@ impl FileWatcher {
     pub fn new(
         config: AppConfig,
         tx: crate::bus::events::typed::BackgroundEventSender,
-        bus: Bus<FileEvent>,
+        file_bus: Bus<FileChanged>,
+        dir_bus: Bus<DirectoryChanged>,
         tx_pdf: Sender<PathBuf>,
         #[cfg(feature = "image-library")] tx_img: Sender<PathBuf>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
@@ -43,7 +48,8 @@ impl FileWatcher {
         Self {
             config,
             tx,
-            bus,
+            file_bus,
+            dir_bus,
             tx_pdf,
             #[cfg(feature = "image-library")]
             tx_img,
@@ -58,7 +64,8 @@ impl FileWatcher {
         let tx_pdf_watcher = self.tx_pdf.clone();
         #[cfg(feature = "image-library")]
         let tx_img_watcher = self.tx_img.clone();
-        let bus_watcher = self.bus.clone();
+        let file_bus_watcher = self.file_bus.clone();
+        let dir_bus_watcher = self.dir_bus.clone();
         let watcher_slot = self.finished_watcher.clone();
 
         let watcher_result =
@@ -89,8 +96,10 @@ impl FileWatcher {
                                         )
                                         .into(),
                                     );
-                                    bus_watcher
-                                        .publish(FileEvent::dir_discovered_one(path.clone()));
+                                    dir_bus_watcher.publish(DirectoryChanged {
+                                        path: path.clone(),
+                                        kind: DirectoryChangedKind::Added,
+                                    });
                                 }
                                 // [REQ-407] The library roots are watched with
                                 // `RecursiveMode::Recursive` (see `start`), so
@@ -130,7 +139,10 @@ impl FileWatcher {
                                         )
                                         .into(),
                                     );
-                                    bus_watcher.publish(FileEvent::dir_removed_one(path.clone()));
+                                    dir_bus_watcher.publish(DirectoryChanged {
+                                        path: path.clone(),
+                                        kind: DirectoryChangedKind::Deleted,
+                                    });
                                 }
                                 return;
                             }
@@ -151,8 +163,14 @@ impl FileWatcher {
                         let old = event.paths[0].clone();
                         let new = event.paths[1].clone();
                         if new.is_dir() {
-                            bus_watcher.publish(FileEvent::dir_removed_one(old.clone()));
-                            bus_watcher.publish(FileEvent::dir_discovered_one(new.clone()));
+                            dir_bus_watcher.publish(DirectoryChanged {
+                                path: old.clone(),
+                                kind: DirectoryChangedKind::Deleted,
+                            });
+                            dir_bus_watcher.publish(DirectoryChanged {
+                                path: new.clone(),
+                                kind: DirectoryChangedKind::Added,
+                            });
                         } else if let Some(ext) = new.extension() {
                             let ext_str = ext.to_string_lossy().to_lowercase();
                             if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
@@ -164,9 +182,9 @@ impl FileWatcher {
                                     }
                                     .into(),
                                 );
-                                bus_watcher.publish(FileEvent::discovered_one(new.clone()));
+                                file_bus_watcher.publish(FileChanged::discovered_one(new.clone()));
                             } else if ext_str == "pdf" {
-                                bus_watcher.publish(FileEvent::discovered_one(new.clone()));
+                                file_bus_watcher.publish(FileChanged::discovered_one(new.clone()));
                                 let job = PdfConversionJob::new(new.clone());
                                 if job.should_convert() {
                                     let _ = tx_pdf_watcher.send(new.clone());
@@ -299,11 +317,11 @@ impl FileWatcher {
                                         // `[FileChanged][Added]`; modifying an
                                         // existing one is `[FileChanged][Changed]`.
                                         if is_added {
-                                            bus_watcher
-                                                .publish(FileEvent::discovered_one(path.clone()));
+                                            file_bus_watcher
+                                                .publish(FileChanged::discovered_one(path.clone()));
                                         } else {
-                                            bus_watcher
-                                                .publish(FileEvent::updated_one(path.clone()));
+                                            file_bus_watcher
+                                                .publish(FileChanged::updated_one(path.clone()));
                                         }
                                     } else if !path.exists() {
                                         // Rename delivered as a separate event:
@@ -312,13 +330,15 @@ impl FileWatcher {
                                         let _ = tx_notify.send(
                                             FsEvent::FileDeleted { path: path.clone() }.into(),
                                         );
-                                        bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                                        file_bus_watcher
+                                            .publish(FileChanged::removed_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
                                     let _ = tx_notify
                                         .send(FsEvent::FileDeleted { path: path.clone() }.into());
-                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                                    file_bus_watcher
+                                        .publish(FileChanged::removed_one(path.clone()));
                                 }
                                 _ => {}
                             }
@@ -340,10 +360,11 @@ impl FileWatcher {
                                             )
                                     );
                                     if is_added {
-                                        bus_watcher
-                                            .publish(FileEvent::discovered_one(path.clone()));
+                                        file_bus_watcher
+                                            .publish(FileChanged::discovered_one(path.clone()));
                                     } else {
-                                        bus_watcher.publish(FileEvent::updated_one(path.clone()));
+                                        file_bus_watcher
+                                            .publish(FileChanged::updated_one(path.clone()));
                                     }
                                     let job = PdfConversionJob::new(path.clone());
                                     if job.should_convert() {
@@ -356,7 +377,7 @@ impl FileWatcher {
                             // Image-vision dispatch. Only compiled
                             // when the `image-library` Cargo feature
                             // is enabled; without it, image files
-                            // still reach the FileEvent bus (above)
+                            // still reach the file bus (above)
                             // but never wake the (absent) vision
                             // worker.
                             #[cfg(feature = "image-library")]
@@ -377,7 +398,8 @@ impl FileWatcher {
                                 } else if !path.exists() {
                                     let _ = tx_notify
                                         .send(FsEvent::FileDeleted { path: path.clone() }.into());
-                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                                    file_bus_watcher
+                                        .publish(FileChanged::removed_one(path.clone()));
                                 }
                             }
                             #[cfg(not(feature = "image-library"))]
@@ -385,7 +407,8 @@ impl FileWatcher {
                                 if !path.exists() {
                                     let _ = tx_notify
                                         .send(FsEvent::FileDeleted { path: path.clone() }.into());
-                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                                    file_bus_watcher
+                                        .publish(FileChanged::removed_one(path.clone()));
                                 }
                             }
                         }
@@ -426,284 +449,5 @@ impl FileWatcher {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::bus::events::file::{DirectoryChangedKind, FileChangedKind, FileEvent};
-    use crate::bus::events::typed::BackgroundEvent;
-    use crate::bus::events::typed::BackgroundEventSender;
-    use crate::config::{AppConfig, ContentLibrary};
-    use tempfile::tempdir;
-
-    /// Predicate helper: does `ev` carry `[FileChanged]` with `kind` and `path`?
-    fn is_file_event_of_kind(
-        ev: &FileEvent,
-        kind: FileChangedKind,
-        path: &std::path::Path,
-    ) -> bool {
-        matches!(ev, FileEvent::FileChanged(changed) if changed.kind == kind
-            && changed.files.iter().any(|f| f.path == path))
-    }
-
-    /// Predicate helper: does `ev` carry `[DirectoryChanged]` with `kind` and `path`?
-    fn is_dir_event_of_kind(
-        ev: &FileEvent,
-        kind: DirectoryChangedKind,
-        path: &std::path::Path,
-    ) -> bool {
-        matches!(ev, FileEvent::DirectoryChanged(dir) if dir.kind == kind && dir.path == path)
-    }
-
-    #[test]
-    fn test_watcher_new_creates_struct() {
-        let config = AppConfig::default();
-        let (tx, _rx) = tokio::sync::broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = Bus::new();
-        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
-        #[cfg(feature = "image-library")]
-        let (tx_img, _rx_img) = std::sync::mpsc::channel();
-        let slot = Arc::new(Mutex::new(None));
-
-        #[cfg(feature = "image-library")]
-        let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot);
-        #[cfg(not(feature = "image-library"))]
-        let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot);
-    }
-
-    #[tokio::test]
-    async fn test_watcher_start_sends_finished() {
-        let mut config = AppConfig::default();
-        let dir = tempdir().unwrap();
-        config.content_libraries.push(ContentLibrary {
-            name: "test".to_string(),
-            kind: "text".to_string(),
-            root_folder: dir.path().to_string_lossy().to_string(),
-            readonly: true,
-            priority: 0,
-        });
-
-        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = Bus::new();
-        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
-        #[cfg(feature = "image-library")]
-        let (tx_img, _rx_img) = std::sync::mpsc::channel();
-        let slot = Arc::new(Mutex::new(None));
-
-        #[cfg(feature = "image-library")]
-        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot.clone());
-        #[cfg(not(feature = "image-library"))]
-        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot.clone());
-        watcher.start();
-
-        let event = rx.recv().await;
-        assert!(event.is_ok());
-        match event.unwrap() {
-            BackgroundEvent::Fs(FsEvent::Finished) => {
-                // The watcher handle should now be in the slot.
-                assert!(slot.lock().unwrap().is_some());
-            }
-            BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher) => {
-                // Slot stays empty when watcher init failed.
-                assert!(slot.lock().unwrap().is_none());
-            }
-            other => panic!(
-                "Expected Finished or FinishedWithoutWatcher, got {:?}",
-                other
-            ),
-        }
-    }
-
-    fn spawn_watcher_on(dir: &std::path::Path) -> (FileWatcher, Bus<FileEvent>) {
-        let mut config = AppConfig::default();
-        config.content_libraries.push(ContentLibrary {
-            name: "test".to_string(),
-            kind: "text".to_string(),
-            root_folder: dir.to_string_lossy().to_string(),
-            readonly: true,
-            priority: 0,
-        });
-        let (tx, _rx) = tokio::sync::broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = Bus::new();
-        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
-        #[cfg(feature = "image-library")]
-        let (tx_img, _rx_img) = std::sync::mpsc::channel();
-        let slot = Arc::new(Mutex::new(None));
-
-        #[cfg(feature = "image-library")]
-        let watcher = FileWatcher::new(config, tx, bus.clone(), tx_pdf, tx_img, slot);
-        #[cfg(not(feature = "image-library"))]
-        let watcher = FileWatcher::new(config, tx, bus.clone(), tx_pdf, slot);
-        (watcher, bus)
-    }
-
-    fn wait_for_bus_event(
-        reader: &crate::bus::core::BusReader<FileEvent>,
-        pred: impl Fn(&FileEvent) -> bool,
-        timeout: std::time::Duration,
-    ) -> FileEvent {
-        let start = std::time::Instant::now();
-        while start.elapsed() < timeout {
-            match reader.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(ev) if pred(&ev) => return ev,
-                Ok(_) | Err(_) => continue,
-            }
-        }
-        panic!("no matching FileEvent observed within timeout");
-    }
-
-    #[test]
-    fn test_watcher_routes_md_create_modify_remove() {
-        let dir = tempdir().unwrap();
-        let (mut watcher, bus) = spawn_watcher_on(dir.path());
-        let reader = bus.subscribe();
-        watcher.start();
-
-        let file = dir.path().join("notes.md");
-        std::fs::write(&file, "hello").unwrap();
-
-        // Create -> `[FileChanged][Added]` on the bus (REQ-332).
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Added, &file),
-            std::time::Duration::from_secs(5),
-        );
-
-        // Modify the file -> another FileModified.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        std::fs::write(&file, "hello world").unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Changed, &file),
-            std::time::Duration::from_secs(5),
-        );
-
-        // Remove -> `[FileChanged][Deleted]`.
-        std::fs::remove_file(&file).unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Deleted, &file),
-            std::time::Duration::from_secs(5),
-        );
-    }
-
-    #[test]
-    fn test_watcher_publishes_directory_events() {
-        // [REQ-402]/[REQ-322] Directory create/remove emit kind-homogeneous
-        // DirectoryChanged events with the fully qualified path ([REQ-321]).
-        let dir = tempdir().unwrap();
-        let (mut watcher, bus) = spawn_watcher_on(dir.path());
-        let reader = bus.subscribe();
-        watcher.start();
-
-        let subdir = dir.path().join("newdocs");
-        std::fs::create_dir_all(&subdir).unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_dir_event_of_kind(e, DirectoryChangedKind::Added, &subdir),
-            std::time::Duration::from_secs(5),
-        );
-
-        std::fs::remove_dir(&subdir).unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_dir_event_of_kind(e, DirectoryChangedKind::Deleted, &subdir),
-            std::time::Duration::from_secs(5),
-        );
-    }
-
-    #[test]
-    fn test_watcher_rename_is_delete_then_create() {
-        // [REQ-404] A rename must surface as a Removed(old) followed by an
-        // Added(new), regardless of how the backend delivers the notification.
-        let dir = tempdir().unwrap();
-        let (mut watcher, bus) = spawn_watcher_on(dir.path());
-        let reader = bus.subscribe();
-        watcher.start();
-
-        let old = dir.path().join("before.md");
-        let new = dir.path().join("after.md");
-        std::fs::write(&old, "hello").unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Added, &old),
-            std::time::Duration::from_secs(5),
-        );
-
-        std::fs::rename(&old, &new).unwrap();
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Deleted, &old),
-            std::time::Duration::from_secs(5),
-        );
-        wait_for_bus_event(
-            &reader,
-            |e| is_file_event_of_kind(e, FileChangedKind::Added, &new),
-            std::time::Duration::from_secs(5),
-        );
-    }
-
-    #[test]
-    fn test_watcher_ignores_git_directory_and_non_workspace_files() {
-        let dir = tempdir().unwrap();
-        let (mut watcher, bus) = spawn_watcher_on(dir.path());
-        let reader = bus.subscribe();
-        watcher.start();
-
-        let git_dir = dir.path().join(".git");
-        std::fs::create_dir_all(&git_dir).unwrap();
-        std::fs::write(git_dir.join("config"), "x").unwrap();
-
-        let bin = dir.path().join("program.exe");
-        std::fs::write(&bin, "not text").unwrap();
-
-        // The watcher must not surface .git or non-workspace extensions on
-        // the file-event bus.
-        std::thread::sleep(std::time::Duration::from_millis(700));
-        let mut got = 0;
-        while reader.try_recv().is_ok() {
-            got += 1;
-        }
-        assert_eq!(got, 0, "unexpected FileEvents published");
-    }
-
-    #[test]
-    fn test_watcher_routes_pdf_to_converter_queue() {
-        let dir = tempdir().unwrap();
-        let mut config = AppConfig::default();
-        config.content_libraries.push(ContentLibrary {
-            name: "test".to_string(),
-            kind: "text".to_string(),
-            root_folder: dir.path().to_string_lossy().to_string(),
-            readonly: true,
-            priority: 0,
-        });
-        let (tx, _rx) = tokio::sync::broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = Bus::new();
-        let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
-        #[cfg(feature = "image-library")]
-        let (tx_img, _rx_img) = std::sync::mpsc::channel();
-        let slot = Arc::new(Mutex::new(None));
-
-        #[cfg(feature = "image-library")]
-        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot);
-        #[cfg(not(feature = "image-library"))]
-        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot);
-        watcher.start();
-
-        // Minimal valid PDF so `should_convert` does not depend on metadata.
-        let pdf = dir.path().join("doc.pdf");
-        std::fs::write(&pdf, b"%PDF-1.4\n%%EOF\n").unwrap();
-
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(5) {
-            match rx_pdf.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(p) if p == pdf => return,
-                Ok(_) | Err(_) => continue,
-            }
-        }
-        panic!("PDF path never reached the converter queue");
-    }
-}
+#[path = "file_watcher_tests.rs"]
+mod tests;

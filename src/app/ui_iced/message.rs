@@ -40,7 +40,8 @@
 mod tests;
 
 use crate::bus::events::AgentEvent;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::directory::DirectoryChanged;
+use crate::bus::events::file::FileChanged;
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
@@ -895,7 +896,7 @@ pub enum OverlayMessage {
 }
 
 /// Which inbound bus a notification arrived from.
-/// Names the four producer channels the bridge in
+/// Names the five producer channels the bridge in
 /// [`crate::ui_iced::subscription`] reads. The source travels with the
 /// lag report so a warning says *which* bus dropped events, as the drain
 /// loops name them in their `tracing::warn!` calls
@@ -904,9 +905,12 @@ pub enum OverlayMessage {
 pub enum BusSource {
     /// `Bus<ConfigArrived>` — the one-shot configuration handoff.
     Config,
-    /// `Bus<FileEvent>` — filesystem mutations from the watcher, the
+    /// `Bus<FileChanged>` — file mutations from the watcher, the
     /// initial scan, tools and the agent.
     File,
+    /// `Bus<DirectoryChanged>` — directory lifecycle events from the
+    /// watcher and the initial scan.
+    Directory,
     /// `Bus<AgentEvent>` — the agent's streaming turn events.
     Agent,
     /// The `std::sync::mpsc` background-event channel carrying
@@ -941,8 +945,8 @@ pub enum BusSource {
 /// `PartialEq` is hand-written (see the impl) because the opaque payloads
 /// cannot be compared by value:
 ///
-/// * [`FileEvent`] and the lag report compare by **value** — both support
-///   `PartialEq` natively.
+/// * [`FileChanged`], [`DirectoryChanged`] and the lag report compare by
+///   **value** — all support `PartialEq` natively.
 /// * `AppConfig`, `AgentEvent` and `BackgroundEvent` compare by
 ///   **delivery identity** (`Arc::ptr_eq`): two messages are equal iff they
 ///   carry the same shared notification instance. Cloning a [`Message`]
@@ -958,9 +962,9 @@ pub enum InboundMessage {
     /// `AppOrchestrator::drain_config_bus` does
     /// (`src/app/orchestrator.rs:287-331`).
     ConfigArrived(Arc<AppConfig>),
-    /// A filesystem mutation arrived on `Bus<FileEvent>`.
-    FileChanged(FileEvent),
-    /// A burst of filesystem mutations drained off `Bus<FileEvent>` in one
+    /// A file change arrived on `Bus<FileChanged>`.
+    FileChanged(FileChanged),
+    /// A burst of file changes drained off `Bus<FileChanged>` in one
     /// go.
     ///
     /// The bridge coalesces every event already queued when it wakes, so a
@@ -968,7 +972,13 @@ pub enum InboundMessage {
     /// instead of one per event. Semantics are exactly the single-event
     /// arm applied in order, with the trailing `process_file_events()`
     /// call hoisted out of the loop.
-    FileChangedBatch(Vec<FileEvent>),
+    FileChangedBatch(Vec<FileChanged>),
+    /// A directory lifecycle change arrived on `Bus<DirectoryChanged>`.
+    DirectoryChanged(DirectoryChanged),
+    /// A burst of directory lifecycle changes drained off
+    /// `Bus<DirectoryChanged>` in one go — same semantics as the
+    /// [`InboundMessage::DirectoryChanged`] arm applied in order.
+    DirectoryChangedBatch(Vec<DirectoryChanged>),
     /// An agent lifecycle or streaming event arrived on
     /// `Bus<AgentEvent>`.
     Agent(Arc<AgentEvent>),
@@ -1007,6 +1017,8 @@ impl PartialEq for InboundMessage {
             (Self::ConfigArrived(a), Self::ConfigArrived(b)) => Arc::ptr_eq(a, b),
             (Self::FileChanged(a), Self::FileChanged(b)) => a == b,
             (Self::FileChangedBatch(a), Self::FileChangedBatch(b)) => a == b,
+            (Self::DirectoryChanged(a), Self::DirectoryChanged(b)) => a == b,
+            (Self::DirectoryChangedBatch(a), Self::DirectoryChangedBatch(b)) => a == b,
             (Self::Agent(a), Self::Agent(b)) => Arc::ptr_eq(a, b),
             (Self::Background(a), Self::Background(b)) => Arc::ptr_eq(a, b),
             (Self::BackgroundBatch(a), Self::BackgroundBatch(b)) => {

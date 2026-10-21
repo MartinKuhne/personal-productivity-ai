@@ -1,7 +1,8 @@
 //! Tests for `background/indexer.rs`.
 
 use super::*;
-use crate::bus::events::file::{DirectoryChanged, FileEvent};
+use crate::bus::events::directory::DirectoryChangedKind;
+use crate::bus::events::file::FileChangedKind;
 use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
@@ -23,10 +24,11 @@ fn test_scan_libraries_discovers_md() {
 
     let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
-    let bus = Bus::new();
-    let reader = bus.subscribe();
+    let file_bus = Bus::new();
+    let dir_bus = Bus::new();
+    let file_reader = file_bus.subscribe();
     let cancel = Arc::new(AtomicBool::new(false));
-    let indexer = Indexer::new(config, tx, bus.clone(), cancel);
+    let indexer = Indexer::new(config, tx, file_bus.clone(), dir_bus.clone(), cancel);
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -39,18 +41,20 @@ fn test_scan_libraries_discovers_md() {
     indexer.scan_libraries(&tx_work, &tx_pdf);
 
     let mut discovered = Vec::new();
-    while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        // `[DirectoryChanged]` events contribute no file paths.
-        discovered.extend(ev.file_paths());
+    while let Ok(ev) = file_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        // Every file-bus event is a `[FileChanged]` batch; index-aligned
+        // `[Files]` paths make the batch countable.
+        assert_eq!(ev.kind, FileChangedKind::Added);
+        discovered.extend(ev.paths());
     }
     assert_eq!(discovered.len(), 2);
 }
 
 #[test]
-fn test_scan_libraries_publishes_dir_discovered_on_bus() {
+fn test_scan_libraries_publishes_dir_events_on_dir_bus() {
     // [REQ-320..322] The crawler emits one `[DirectoryChanged]` event
     // (kind `Added`, one directory per event) per enumerated directory on
-    // the file-event bus, and no longer sends the redundant
+    // the **directory bus**, and no longer sends the redundant
     // `FsEvent::DirParsed` on the background channel.
     let mut config = AppConfig::default();
     let dir = tempdir().unwrap();
@@ -68,10 +72,11 @@ fn test_scan_libraries_publishes_dir_discovered_on_bus() {
 
     let (tx, mut rx) = tokio::sync::broadcast::channel(64);
     let tx = BackgroundEventSender::new(tx);
-    let bus = Bus::new();
-    let reader = bus.subscribe();
+    let file_bus = Bus::new();
+    let dir_bus = Bus::new();
+    let dir_reader = dir_bus.subscribe();
     let cancel = Arc::new(AtomicBool::new(false));
-    let indexer = Indexer::new(config, tx, bus.clone(), cancel);
+    let indexer = Indexer::new(config, tx, file_bus, dir_bus, cancel);
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -88,15 +93,13 @@ fn test_scan_libraries_publishes_dir_discovered_on_bus() {
     let mut dir_events = 0;
     let mut seen_root = false;
     let mut seen_subdir = false;
-    while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        let FileEvent::DirectoryChanged(DirectoryChanged { path, .. }) = &ev else {
-            continue;
-        };
+    while let Ok(ev) = dir_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        assert_eq!(ev.kind, DirectoryChangedKind::Added);
         dir_events += 1;
-        if path == &dir.path().to_path_buf() {
+        if ev.path == dir.path().to_path_buf() {
             seen_root = true;
         }
-        if path == &subdir {
+        if ev.path == subdir {
             seen_subdir = true;
         }
     }
@@ -138,10 +141,11 @@ fn test_scan_libraries_skips_git() {
 
     let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
-    let bus = Bus::new();
-    let reader = bus.subscribe();
+    let file_bus = Bus::new();
+    let file_reader = file_bus.subscribe();
     let cancel = Arc::new(AtomicBool::new(false));
-    let indexer = Indexer::new(config, tx, bus, cancel);
+    let dir_bus = Bus::new();
+    let indexer = Indexer::new(config, tx, file_bus, dir_bus, cancel);
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
@@ -154,9 +158,8 @@ fn test_scan_libraries_skips_git() {
     indexer.scan_libraries(&tx_work, &tx_pdf);
 
     let mut discovered = Vec::new();
-    while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-        // Directory events contribute no file paths.
-        discovered.extend(ev.file_paths());
+    while let Ok(ev) = file_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        discovered.extend(ev.paths());
     }
     assert_eq!(discovered.len(), 1);
     assert!(discovered[0].ends_with("visible.md"));
@@ -178,9 +181,10 @@ fn test_scan_libraries_queues_pdf() {
 
     let (tx, _rx) = tokio::sync::broadcast::channel(16);
     let tx = BackgroundEventSender::new(tx);
-    let bus = Bus::new();
+    let file_bus = Bus::new();
+    let dir_bus = Bus::new();
     let cancel = Arc::new(AtomicBool::new(false));
-    let indexer = Indexer::new(config, tx, bus, cancel);
+    let indexer = Indexer::new(config, tx, file_bus, dir_bus, cancel);
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
