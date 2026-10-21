@@ -103,7 +103,7 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 - [x] **INC-03** Typography scale: `token/typography.rs` (`UIF-TOK-004`) —
       size, line height, weight, tracking per rung; 12px absolute floor.
       **Commit:** `feat(iced-pro): add typography scale tokens`
-- [ ] **INC-04** Semantic colour tokens: `token/color.rs` (`UIF-TOK-005`) —
+- [x] **INC-04** Semantic colour tokens: `token/color.rs` (`UIF-TOK-005`) —
       surfaces incl. `scrim` alpha, borders, accents, text roles, status colours,
       and the `editor.inverted.*` set.
       **Commit:** `feat(iced-pro): add semantic colour tokens`
@@ -206,9 +206,37 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 Recorded as they are found; none resolved yet.
 
-- **G-1** `UIF-TOK-005` lists `color.accent.primary` contrast as `4.45:1` in the
-  table but the `color.text.strong` row cites `4.46:1` for the same pairing.
-  INC-05 must compute the actual ratio and record which figure is authoritative.
+- **G-1 — RESOLVED (INC-04).** Not a conflict: the two figures describe
+  different pairings. `4.45:1` is `accent.primary` **vs `surface.base`**
+  (computed `4.4540`); `4.46:1` is `text.strong` **on `accent.primary`**
+  (computed `4.4669`, which rounds to **4.47** — the spec truncates).
+  INC-05 must record both pairings separately and cite `4.47:1` for the
+  foreground-lock rule.
+- **G-5 — The spec's contrast column is not trustworthy.** INC-04 recomputed every
+  row of §2.5 with WCAG 2.1 relative luminance. Most rows match within rounding,
+  but several are materially wrong:
+
+  | Token | Spec | Computed | Error |
+  |---|---|---|---|
+  | `surface.sunken` | `0.98:1` | `1.0176:1` | impossible — no WCAG ratio is < 1; the darker surface was put in the numerator |
+  | `border.strong` | `3.92:1` | `4.5062:1` | `3.92` corresponds to grey ≈110, not 120 |
+  | `accent.text` | `10.12:1` | `10.6559:1` | `+0.54` |
+  | `text.primary` | `12.63:1` | `13.1590:1` | `+0.53` |
+  | `status.warning` | `5.50:1` | `6.8555:1` | `+1.36` — largest error in the table |
+  | `status.success` | `15.40:1` | `15.1867:1` | `-0.21` |
+  | `border.subtle` | `1.36:1` | `1.3495:1` | rounds to `1.35` |
+  | `text.disabled` | `5.86:1` | `5.9165:1` | `+0.06` |
+
+  No single base luminance reproduces the column (`text.primary` implies
+  `L_base ≈ 0.00499`, `accent.text` implies `≈ 0.00557`, `text.strong` implies
+  `≈ 0.00287`), so the figures were hand-collected from mixed sources rather than
+  generated. **INC-05 must recompute all rows and treat the computed values as
+  authoritative**, and must not transcribe the spec's printed ratios into code.
+- **G-6 — Live accessibility defect in `fastmd` (out of scope, must not be lost).**
+  The app's current editor error colour `RGB(255, 0, 0)` on white measures
+  **`3.9985:1`**, which fails the `UIF-TOK-006` 4.5:1 normal-text rule. The
+  spec's `RGB(180, 0, 0)` measures `7.14:1`. `iced-pro` follows the spec per D-4;
+  the app's value needs fixing when `fastmd` is wired onto this framework.
 - **G-2** The spec defines `size.hit_target.min` as `24 × 24` but navbar icon
   buttons are given a `28 × 28` floor in `UIF-ATOM-001`. Both hold; the atom rule
   is the stricter one and should win for navbar-class controls.
