@@ -1,5 +1,5 @@
-//! Reusable overlay primitives for the iced UI: a cursor-anchored context
-//! menu and a blocking modal dialog, built from iced built-ins only.
+//! Low-level iced overlay chrome and modal primitives, including flat-menu
+//! helpers; application menus use the reducer-driven widget in [`crate::ui_iced::menu`].
 //!
 //! iced has no single call that produces either shape, so this module
 //! supplies them as **pure view functions over plain state structs** — no
@@ -35,14 +35,11 @@
 //!    is non-zero (`float.rs:226`); a full-viewport scrim sits at its natural
 //!    origin, so its translation is `Vector::ZERO` and it would silently stop
 //!    floating. `Stack` has no such condition.
-//! 2. **`overlay::menu::Menu` is not reusable here.** It is built *as* the
-//!    overlay, so it takes caller-held `&mut menu::State` and
-//!    `&mut Option<usize>` (`menu.rs:57-79`) — that forces `&mut` into every
-//!    view function, against the pure-view pattern the panels already use
-//!    (`panels/top.rs:544-553`). It also renders each row as one plain
-//!    `ToString` row with no per-row handler and never closes itself. A
-//!    [`Column`] of [`iced::widget::Button`]s gives per-row `Message`s,
-//!    native hover styling, keyboard focus, and needs no external state.
+//! 2. **The built-in `overlay::menu::Menu` is not the application menu.** It
+//!    takes caller-held mutable state and renders plain `ToString` rows, so
+//!    it does not fit the pure-view pattern or the nested row types FastMD
+//!    needs. The reducer-driven [`crate::ui_iced::menu::menu_overlay`] owns
+//!    placement and rendering from immutable menu data plus reducer state.
 //! 3. **Event precedence is already what we want.** `Stack::update` walks
 //!    children top-down and returns as soon as one captures the event
 //!    (`stack.rs:262-264`), so the dialog card gets the click and the scrim
@@ -50,11 +47,11 @@
 //!
 //! ## What positioning IS achievable
 //!
-//! * Cursor-anchored menus, anywhere in the mount element's coordinate space
-//!   ([`with_context_menu`]).
-//! * Exact viewport clamping — the menu's size is **deterministic**
-//!   ([`menu_size`]) because rows are uniform-height buttons, so
-//!   [`clamp_anchor`] cannot drift out of sync with the real layout.
+//! * Flat cursor-anchored cards through [`with_context_menu`], or directional
+//!   point/rectangle anchoring and nested surfaces through
+//!   [`crate::ui_iced::menu::menu_overlay`].
+//! * Exact viewport clamping — legacy card size is deterministic through
+//!   [`menu_size`], while the reusable widget measures from its row model.
 //! * Centred, blocking modals with a dimmed scrim ([`modal`]), and the
 //!   same modal placed at an explicit clamped top-left position
 //!   ([`modal_at`] — the cursor-anchored small dialogs).
@@ -63,18 +60,19 @@
 //!
 //! * **The right-press point cannot travel with the message.**
 //!   `MouseArea::on_right_press` takes a fixed `Message` and no closure
-//!   (`mouse_area.rs:68-71`), unlike `on_move`. The anchor therefore has to
-//!   be *state the caller holds*: track the cursor with `on_move`, then read
-//!   it back when the right-press message is handled.
-//!   [`context_menu_trigger`] wires exactly that pair.
+//!   (`mouse_area.rs:68-71`), unlike `on_move`. The app therefore tracks the
+//!   cursor on the full-window root and reads that root-space point when the
+//!   right-press message is handled. [`context_menu_trigger`] emits only the
+//!   row/tab open request.
 //! * **`on_move` positions are widget-relative** (`mouse_area.rs:358-360`),
-//!   not window-absolute. To get a window-absolute anchor, wrap the
-//!   full-window root in the trigger (its bounds *are* the viewport), or add
-//!   the wrapped widget's known offset. A menu mounted on the same element
-//!   that produced the anchor needs no conversion at all.
-//! * **No submenu nesting.** `Menu` is single-level and `iced_aw` is not a
-//!   dependency; the same flattening the hamburger menu already uses
-//!   (`panels/top.rs:584-626`) applies to context menus.
+//!   not window-absolute. The app tracks pointer movement on its full-window
+//!   content root so the shared menu's point anchor and overlay viewport use
+//!   the same coordinate space. Individual row/tab triggers only request
+//!   opening; they do not report local coordinates.
+//! * **The built-in `Menu` has no submenu nesting.** FastMD's reusable
+//!   [`crate::ui_iced::menu`] module supplies nested parent/child surfaces
+//!   without adding `iced_aw`; the flat helpers in this module remain
+//!   intentionally single-level.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
 //!   (`menu.rs:244-270`), but we are not using `Menu`. [`clamp_anchor`]
 //!   clamps rather than flips; a caller wanting flip-above can compare
@@ -82,19 +80,19 @@
 //!
 //! # Expected call shapes
 //!
-//! *Tree* and *tabs* — the panel builds `Vec<MenuItem<Message>>` from its
-//! own action list and the app root mounts it:
+//! *Tree* and *tabs* — the reducer snapshots the selected rows and the root
+//! overlay host routes the shared widget's events back into the message loop:
 //!
 //! ```text
 //! // row widget (tree row / tab strip):
-//! context_menu_trigger(row, Message::CursorMoved, Message::Tree(TreeMessage::ContextMenuOpened { path }))
+//! context_menu_trigger(row, Message::Tree(TreeMessage::ContextMenuOpened { path }))
 //!
-//! // app root view:
-//! match slot {
-//!     OverlaySlot::ContextMenu { anchor } =>
-//!         with_context_menu(root, *anchor, &tree_menu_items, window_size, Message::Tree(TreeMessage::ContextMenuClosed)),
-//!     _ => root,
-//! }
+//! // app root view (simplified):
+//! menu_overlay(
+//!     root.map(MenuEvent::Action), &context_menu.items, &context_menu.state,
+//!     MenuPosition::Point { point: context_menu.anchor, .. }, viewport,
+//!     MenuStyle::default(),
+//! )
 //! ```
 //!
 //! *Editor* — the blocking save/cancel dialog:
@@ -489,11 +487,9 @@ fn scrim_style(_theme: &iced::Theme) -> container::Style {
     }
 }
 
-/// The card chrome shared by the context menu and the modal dialog.
+/// The card chrome shared by the reusable menu widget and modal surfaces.
 ///
-/// `pub(crate)` so the hamburger menu card ([`crate::ui_iced::panels::top`])
-/// reuses the exact same chrome instead of inventing a second dark card
-/// style; the style's colours come from the app palette.
+/// The style's colours come from the app palette.
 pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     let palette = crate::ui::theme::Palette::fastmd_dark();
 
@@ -508,10 +504,11 @@ pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     }
 }
 
-/// The context-menu card: one button per item.
+/// A legacy flat context-menu card: one button per item.
 ///
-/// Each row emits its own [`MenuItem::message`] on press, so no external
-/// hover state is needed.
+/// Application context menus use [`crate::ui_iced::menu::menu_overlay`]; this
+/// helper remains for callers that need a flat card. Each row emits its own
+/// [`MenuItem::message`] on press.
 #[must_use]
 pub fn context_menu_card<'a, Message>(items: &'a [MenuItem<Message>]) -> Element<'a, Message>
 where
@@ -537,11 +534,11 @@ where
 
 /// Mounts a **prebuilt card** over `base`, anchored at `anchor`.
 ///
-/// The generic half of [`with_context_menu`] for callers that render the
-/// card themselves (the hamburger menu, whose rows mix non-selectable
-/// section headers with buttons). Same layering — base, transparent
-/// [`input_blocker`], card pushed to the `clamp_anchor`ed position — and
-/// the same close semantics: a click that misses the card emits `on_close`.
+/// A low-level flat-card mounting helper for callers that render the card
+/// themselves. Application menus use [`crate::ui_iced::menu::menu_overlay`]
+/// instead. This helper layers `base`, a transparent [`input_blocker`], and
+/// the card pushed to the [`clamp_anchor`]ed position; a click outside emits
+/// `on_close`.
 ///
 /// `viewport` is the size of the area `base` fills; `size` is the card's
 /// rendered size (deterministic per [`menu_size`] when rows are
@@ -698,25 +695,17 @@ where
 /// Wraps `content` as a context-menu trigger.
 ///
 /// `MouseArea::on_right_press` cannot carry the cursor position
-/// (`mouse_area.rs:68-71`), so the two halves are wired together here:
-/// `on_move` keeps the caller's cursor state current, and `on_right_press`
-/// asks for the menu. The reducer reads the tracked point when it handles the
-/// press and stores it in [`OverlaySlot::ContextMenu { anchor }`].
-///
-/// Note the coordinate space: `on_move` reports the position **relative to
-/// `content`'s bounds** (`mouse_area.rs:358-360`), not the window. Mount
-/// the menu against the same element this wraps and no conversion is needed;
-/// for a window-absolute anchor, wrap the full-window root.
+/// (`mouse_area.rs:68-71`), so the full-window content root tracks movement
+/// separately and reports a root-space point. The reducer reads that point
+/// when it handles this right-press request and stores it in
+/// [`OverlaySlot::ContextMenu { anchor }`].
 #[must_use]
 pub fn context_menu_trigger<'a, Message>(
     content: impl Into<Element<'a, Message>>,
-    on_move: impl Fn(Point) -> Message + 'a,
     on_right_press: Message,
 ) -> MouseArea<'a, Message>
 where
     Message: 'a,
 {
-    mouse_area(content)
-        .on_move(on_move)
-        .on_right_press(on_right_press)
+    mouse_area(content).on_right_press(on_right_press)
 }

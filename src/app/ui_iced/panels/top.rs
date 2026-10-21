@@ -26,7 +26,7 @@
 //!   [`Message::Menu`] [`MenuMessage::Opened`];
 //!   the reducer flips
 //!   [`crate::ui_iced::app::OverlayState::hamburger_open`] and the
-//!   overlay host mounts [`hamburger_menu_card`] anchored at
+//!   overlay host mounts the shared menu widget anchored at
 //!   [`hamburger_menu_anchor`]. A button that opens a real menu is what
 //!   UI-061..UI-066 needs: a [`pick_list()`] would be a *dropdown*, not a
 //!   menu — it has no open/closed state, its closed title bar leaks the
@@ -42,9 +42,9 @@
 //! child menus, and `iced_aw` is not a dependency. The full hierarchy is
 //! therefore kept in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state.
-//! The card renders one level at a time: top-level submenu buttons carry a
-//! `>` cue, while submenu contents are selectable rows carrying
-//! [`hamburger_row_message`].
+//! [`hamburger_menu_items`] projects that model into nested reusable menu
+//! rows, keeping parent surfaces mounted as a child opens and preserving
+//! each selectable row's [`hamburger_row_message`].
 //!
 //! # Feature-gated widgets
 //!
@@ -88,7 +88,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use iced::widget::{Column, Row, button, container, pick_list, rule, text};
+use iced::widget::{Row, button, container, pick_list, rule, text};
 use iced::{Alignment, Color, Element, Font, Length, Padding, Point, Size};
 
 use crate::bus::events::user_command::UserCommand;
@@ -98,8 +98,8 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
 use crate::ui_iced::logo::logo_mark;
+use crate::ui_iced::menu::{MenuItem as WidgetMenuItem, MenuItemId};
 use crate::ui_iced::message::{MenuMessage, Message};
-use crate::ui_iced::overlay::{MENU_PADDING, MENU_ROW_SPACING, MENU_WIDTH, card_style};
 
 // The framework-free helpers this panel owns, **relocated into this
 // module**. Each is framework-free — pure `UserCommand` constructors and
@@ -257,10 +257,9 @@ pub const PICK_LIST_PADDING: Padding = Padding {
 /// Width of the vertical rule drawn between top-bar groups.
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
-/// Minimum width of the hamburger menu card, in logical points. The shared
-/// context-menu card width
-/// ([`MENU_WIDTH`], 200 pt) already satisfies it, so the menu card reuses
-/// that constant; [`MENU_MIN_WIDTH`] stays as the documented lower bound.
+/// Minimum width of the hamburger menu surface, in logical points. The
+/// reusable menu's default width
+/// ([`crate::ui_iced::menu::MENU_SURFACE_WIDTH`]) exceeds this bound.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
 
 /// Height of the ☰ glyph the hamburger button renders.
@@ -270,38 +269,26 @@ pub const MENU_MIN_WIDTH: f32 = 180.0;
 /// the same height inside the fixed bar band.
 pub const MENU_BUTTON_GLYPH_SIZE: f32 = 16.0;
 
-/// Text size of a selectable hamburger-menu row.
-pub const MENU_ROW_TEXT_SIZE: f32 = 14.0;
-
-/// Text size of a hamburger-menu section header (visually quieter than a
-/// row — the same "group heading" treatment the menu gives its
-/// submenus).
-pub const MENU_HEADER_TEXT_SIZE: f32 = 13.0;
-
-/// Right inset between the hamburger menu card and the window's right edge;
+/// Right inset between the hamburger menu surface and the window's right edge;
 /// the menu opens out from the right-aligned ☰ button.
 pub const MENU_ANCHOR_RIGHT_MARGIN: f32 = 12.0;
 
-/// Gap between the top bar's bottom edge and the hamburger menu card.
+/// Gap between the top bar's bottom edge and the hamburger menu surface.
 pub const MENU_ANCHOR_BELOW_BAR: f32 = 4.0;
 
-/// Where the overlay host mounts the hamburger menu card.
+/// Root-space point beside the right-aligned hamburger button.
 ///
-/// The ☰ button is right-aligned in the fixed [`BAR_HEIGHT_POINTS`] band,
-/// so the anchor is its top-left corner as seen from the window geometry:
-/// one [`MENU_ANCHOR_BELOW_BAR`] below the bar, one
-/// [`MENU_ANCHOR_RIGHT_MARGIN`] in from the right edge, both clamped to
-/// non-negative coordinates by the window-independent `max` guards.
-///
-/// The overlay host adds its own `MENU_ANCHOR_GAP` before clamping
-/// against `viewport`, so a tiny window pushes the card onto the screen.
+/// The shared menu widget opens to the left and below this point, using the
+/// configured anchor gap and viewport clamping. Returning the button-side
+/// edge rather than a precomputed card origin keeps placement independent of
+/// the widget's surface width.
 ///
 /// Purity: pure function of `viewport`.
 #[must_use]
 pub fn hamburger_menu_anchor(viewport: Size) -> Point {
     Point::new(
-        (viewport.width - MENU_WIDTH - MENU_ANCHOR_RIGHT_MARGIN).max(0.0),
-        BAR_HEIGHT_POINTS + MENU_ANCHOR_BELOW_BAR,
+        (viewport.width - MENU_ANCHOR_RIGHT_MARGIN + MENU_ANCHOR_BELOW_BAR).max(0.0),
+        BAR_HEIGHT_POINTS,
     )
 }
 
@@ -472,6 +459,13 @@ pub enum MenuSection {
     TableWrap,
 }
 
+const MENU_WINDOWS_ID: MenuItemId = MenuItemId::new("hamburger.windows");
+const MENU_CHAT_MODELS_ID: MenuItemId = MenuItemId::new("hamburger.chat_models");
+const MENU_TABLE_WRAP_ID: MenuItemId = MenuItemId::new("hamburger.table_wrap");
+const MENU_BACKGROUND_OPERATIONS_ID: MenuItemId =
+    MenuItemId::new("hamburger.background_operations");
+const MENU_AGENT_DEBUG_ID: MenuItemId = MenuItemId::new("hamburger.agent_debug");
+
 impl MenuSection {
     /// The submenu name rendered in front of the row label, `None` for
     /// top-level rows.
@@ -481,6 +475,31 @@ impl MenuSection {
             MenuSection::Windows => Some(strings::MENU_WINDOWS_TITLE),
             MenuSection::ChatModels => Some(strings::MENU_CHAT_MODELS),
             MenuSection::TableWrap => Some(strings::MENU_TABLE_WRAP_ALGORITHM),
+        }
+    }
+
+    /// Stable widget identifier for this section, or `None` for direct rows.
+    #[must_use]
+    pub const fn menu_item_id(self) -> Option<MenuItemId> {
+        match self {
+            MenuSection::Direct => None,
+            MenuSection::Windows => Some(MENU_WINDOWS_ID),
+            MenuSection::ChatModels => Some(MENU_CHAT_MODELS_ID),
+            MenuSection::TableWrap => Some(MENU_TABLE_WRAP_ID),
+        }
+    }
+
+    /// Resolves a stable widget identifier to its section.
+    #[must_use]
+    pub fn from_menu_item_id(id: MenuItemId) -> Option<Self> {
+        if id == MENU_WINDOWS_ID {
+            Some(Self::Windows)
+        } else if id == MENU_CHAT_MODELS_ID {
+            Some(Self::ChatModels)
+        } else if id == MENU_TABLE_WRAP_ID {
+            Some(Self::TableWrap)
+        } else {
+            None
         }
     }
 }
@@ -663,107 +682,62 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     entries
 }
 
-/// Number of visible rows used by the anchored menu's viewport clamp.
+/// Projects the hamburger hierarchy into the reusable menu-widget model.
 ///
-/// The root shows direct actions and submenu buttons. A submenu shows its
-/// title, a back action and the submenu's entries.
+/// Direct entries remain at the root; section entries become child rows of
+/// their matching submenu, preserving checked labels and the command carried
+/// by each selectable item.
 #[must_use]
-pub fn hamburger_menu_row_count(
-    entries: &[MenuEntry],
-    active_submenu: Option<MenuSection>,
-) -> usize {
-    match active_submenu {
-        Some(section) => {
-            entries
-                .iter()
-                .filter(|entry| entry.section == section)
-                .count()
-                + 2
+pub fn hamburger_menu_items(entries: &[MenuEntry]) -> Vec<WidgetMenuItem<Message>> {
+    entries
+        .iter()
+        .filter(|entry| entry.section == MenuSection::Direct)
+        .filter_map(|entry| match &entry.kind {
+            MenuEntryKind::Submenu(section) => {
+                let id = section.menu_item_id()?;
+                let children = entries
+                    .iter()
+                    .filter(|child| child.section == *section)
+                    .filter_map(hamburger_child_item)
+                    .collect();
+                Some(WidgetMenuItem::submenu(id, entry.label.clone(), children))
+            }
+            _ => hamburger_child_item(entry),
+        })
+        .collect()
+}
+
+fn hamburger_child_item(entry: &MenuEntry) -> Option<WidgetMenuItem<Message>> {
+    match &entry.kind {
+        MenuEntryKind::Action(UserCommand::ToggleBackgroundLogs(_)) => {
+            Some(WidgetMenuItem::toggle(
+                MENU_BACKGROUND_OPERATIONS_ID,
+                entry.label.clone(),
+                entry.checked,
+            ))
         }
-        None => entries
-            .iter()
-            .filter(|entry| entry.section == MenuSection::Direct)
-            .count(),
+        MenuEntryKind::Action(UserCommand::ToggleAgentDebugWindow(_)) => Some(
+            WidgetMenuItem::toggle(MENU_AGENT_DEBUG_ID, entry.label.clone(), entry.checked),
+        ),
+        MenuEntryKind::Action(command) => Some(WidgetMenuItem::action(
+            hamburger_row_label(&entry.label, entry.checked),
+            hamburger_row_message(command),
+        )),
+        MenuEntryKind::Placeholder => Some(WidgetMenuItem::disabled(entry.label.clone())),
+        MenuEntryKind::Submenu(_) => None,
     }
 }
 
-/// Renders the visible level of the hamburger menu over the app palette
-/// (UI-061..UI-066).
-///
-/// Row shapes:
-///
-/// * [`MenuEntryKind::Submenu`] — a clickable row with a trailing `>` cue.
-/// * [`MenuEntryKind::Placeholder`] — muted, non-interactive text (the
-///   UI-064 no-chat-models placeholder).
-/// * [`MenuEntryKind::Action`] — a button whose label is
-///   [`hamburger_row_label`] and whose press emits [`hamburger_row_message`]
-///   (the row's own [`UserCommand`]).
-///
-/// The card uses the shared context-menu chrome and regular iced button
-/// styling, keeping it on the application's foreground and background
-/// palette.
-///
-/// Purity: pure view function; clones every label into the element so the
-/// returned [`Element`] is `'static` and can be folded into the overlay
-/// host's base without tying the whole view tree to the entries' lifetime.
-/// Emits [`Message::Menu`] only.
-pub fn hamburger_menu_card(
-    entries: &[MenuEntry],
-    active_submenu: Option<MenuSection>,
-) -> Element<'static, Message> {
-    let palette = Palette::fastmd_dark();
-
-    let mut rows = Column::<Message>::new().spacing(MENU_ROW_SPACING);
-    if let Some(section) = active_submenu {
-        rows = rows
-            .push(
-                container(
-                    text(section.title().unwrap_or_default())
-                        .size(MENU_HEADER_TEXT_SIZE)
-                        .color(palette.text_muted),
-                )
-                .width(Length::Fill),
-            )
-            .push(
-                button(text(strings::MENU_BACK_TO_MAIN))
-                    .width(Length::Fill)
-                    .on_press(Message::Menu(MenuMessage::SubmenuClosed)),
-            );
+/// Resolves a hamburger toggle event to the self-contained application intent.
+#[must_use]
+pub fn hamburger_toggle_command(id: MenuItemId, checked: bool) -> Option<UserCommand> {
+    if id == MENU_BACKGROUND_OPERATIONS_ID {
+        Some(apply_background_logs_toggle(checked))
+    } else if id == MENU_AGENT_DEBUG_ID {
+        Some(apply_agent_debug_toggle(checked))
+    } else {
+        None
     }
-
-    for entry in entries.iter().filter(|entry| match active_submenu {
-        Some(section) => entry.section == section,
-        None => entry.section == MenuSection::Direct,
-    }) {
-        let row: Element<'static, Message> = match &entry.kind {
-            MenuEntryKind::Action(command) => button(
-                text(hamburger_row_label(&entry.label, entry.checked)).size(MENU_ROW_TEXT_SIZE),
-            )
-            .width(Length::Fill)
-            .on_press(hamburger_row_message(command))
-            .into(),
-            MenuEntryKind::Submenu(section) => button(
-                text(strings::format_menu_submenu_label(&entry.label)).size(MENU_ROW_TEXT_SIZE),
-            )
-            .width(Length::Fill)
-            .on_press(Message::Menu(MenuMessage::SubmenuOpened(*section)))
-            .into(),
-            MenuEntryKind::Placeholder => container(
-                text(entry.label.clone())
-                    .size(MENU_HEADER_TEXT_SIZE)
-                    .color(palette.text_muted),
-            )
-            .width(Length::Fill)
-            .into(),
-        };
-        rows = rows.push(row);
-    }
-
-    container(rows)
-        .width(Length::Fixed(MENU_WIDTH))
-        .padding(MENU_PADDING)
-        .style(card_style)
-        .into()
 }
 
 /// Creates a top-level menu entry that opens `section`.

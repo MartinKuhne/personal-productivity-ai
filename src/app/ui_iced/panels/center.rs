@@ -29,7 +29,7 @@
 //! | middle-click tab | `Command(CloseTab(index))` |
 //! | `×` button | `Command(CloseTab(index))` |
 //! | right-click tab | `Tab(ContextMenuOpened { index })` |
-//! | pointer motion over tab | `Layout(CursorMoved { point })` (the menu anchor) |
+//! | pointer motion over the app | `Layout(CursorMoved { point })` (root-space menu anchor) |
 //!
 //! **Tab selection is a command, not view state.** The panel keeps no active
 //! tab index of its own — the active tab *is* `selection().selected_file()`,
@@ -122,7 +122,7 @@ use crate::config::SkillFile;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::message::{LayoutMessage, Message, TabMessage, TreeMessage};
+use crate::ui_iced::message::{Message, TabMessage, TreeMessage};
 use crate::ui_iced::overlay::MenuItem;
 
 use super::left::note_skill_files;
@@ -670,14 +670,10 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         ..container::Style::default()
     });
 
-    crate::ui_iced::overlay::context_menu_trigger(
-        surface,
-        |point| Message::Layout(LayoutMessage::CursorMoved { point }),
-        tab_context_menu_open_message(index),
-    )
-    .on_press(Message::Command(tab_select_command(&tab.path)))
-    .on_middle_press(tab_close_message(index))
-    .into()
+    crate::ui_iced::overlay::context_menu_trigger(surface, tab_context_menu_open_message(index))
+        .on_press(Message::Command(tab_select_command(&tab.path)))
+        .on_middle_press(tab_close_message(index))
+        .into()
 }
 
 /// The document-viewer area below the strip.

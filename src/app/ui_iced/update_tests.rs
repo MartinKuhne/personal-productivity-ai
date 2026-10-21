@@ -920,11 +920,17 @@ fn test_tab_context_menu_for_a_missing_tab_mounts_nothing() {
 #[test]
 fn test_menu_opened_flips_the_flag() {
     let (mut state, _storage) = fresh_state();
-    state.overlay.hamburger_submenu = Some(crate::ui_iced::panels::top::MenuSection::Windows);
+    let windows_id = crate::ui_iced::panels::top::MenuSection::Windows
+        .menu_item_id()
+        .expect("submenu id");
+    state
+        .overlay
+        .hamburger_menu_state
+        .open_child(&[], windows_id);
     assert!(!state.overlay.hamburger_open);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     assert!(state.overlay.hamburger_open, "Opened must show the card");
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
 }
 
 #[test]
@@ -942,35 +948,42 @@ fn test_menu_closed_clears_the_flag() {
         !state.overlay.hamburger_open,
         "Closed must unmount the card"
     );
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
 }
 
 #[test]
 fn test_menu_submenu_navigation_requires_an_open_menu() {
     use crate::ui_iced::panels::top::MenuSection;
+    let windows_id = MenuSection::Windows.menu_item_id().expect("submenu id");
 
     let (mut state, _storage) = fresh_state();
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
 
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
-    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
+    assert_eq!(
+        state.overlay.hamburger_menu_state.open_path(),
+        &[windows_id]
+    );
 
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Direct)),
     );
-    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
+    assert_eq!(
+        state.overlay.hamburger_menu_state.open_path(),
+        &[windows_id]
+    );
 
     let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
 }
 
 #[test]
@@ -992,11 +1005,65 @@ fn test_menu_row_activation_routes_the_command_and_closes() {
         !state.overlay.hamburger_open,
         "a row pick must close the menu in the same reduction"
     );
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
     assert!(
         drained(&spy).contains(&UserCommand::OpenAboutDialog),
         "the row's own command must be routed"
     );
+}
+
+#[test]
+fn test_menu_toggle_routes_its_new_value_and_stays_open() {
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let entries = crate::ui_iced::panels::top::build_menu_entries(&state.models.top);
+    let menu_items = crate::ui_iced::panels::top::hamburger_menu_items(&entries);
+    let windows_id = crate::ui_iced::panels::top::MenuSection::Windows
+        .menu_item_id()
+        .expect("submenu id");
+    let toggle_id = menu_items
+        .iter()
+        .find_map(|item| match item {
+            crate::ui_iced::menu::MenuItem::Submenu { id, children, .. } if *id == windows_id => {
+                children.iter().find_map(|child| match child {
+                    crate::ui_iced::menu::MenuItem::Toggle {
+                        id,
+                        label,
+                        checked: false,
+                        ..
+                    } if label == crate::ui::strings::MENU_BACKGROUND_OPERATIONS => Some(*id),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .expect("background-operations toggle");
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::SubmenuOpened(
+            crate::ui_iced::panels::top::MenuSection::Windows,
+        )),
+    );
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::ToggleChanged {
+            id: toggle_id,
+            checked: true,
+        }),
+    );
+
+    assert!(
+        state.overlay.hamburger_open,
+        "toggle selection keeps the menu open"
+    );
+    assert_eq!(
+        state.overlay.hamburger_menu_state.open_path(),
+        &[windows_id],
+        "toggle selection keeps the active submenu open"
+    );
+    assert!(drained(&spy).contains(&UserCommand::ToggleBackgroundLogs(true)));
 }
 
 #[test]
@@ -1046,7 +1113,7 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
         !state.overlay.hamburger_open,
         "opening a context menu must dismiss the hamburger"
     );
-    assert_eq!(state.overlay.hamburger_submenu, None);
+    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
 }
 
 // ───────────────────────────── Editor ─────────────────────────────

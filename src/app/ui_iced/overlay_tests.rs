@@ -18,7 +18,6 @@ enum TestMessage {
     Confirm,
     Cancel,
     Close,
-    CursorMoved(Point),
 }
 
 /// A caller-defined modal vocabulary — the primitive must stay generic over
@@ -510,8 +509,7 @@ fn context_menu_trigger_inherits_the_wrapped_content_size() {
     let row: Element<'_, TestMessage> = text("row").into();
     let row_size = row.as_widget().size();
 
-    let trigger: Element<'_, TestMessage> =
-        context_menu_trigger(row, TestMessage::CursorMoved, TestMessage::Close).into();
+    let trigger: Element<'_, TestMessage> = context_menu_trigger(row, TestMessage::Close).into();
 
     assert_eq!(
         trigger.as_widget().size(),

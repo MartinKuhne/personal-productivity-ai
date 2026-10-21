@@ -46,6 +46,7 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::ui::tree_search::SearchResultEntry;
+use crate::ui_iced::menu::MenuItemId;
 use crate::ui_iced::panels::top::MenuSection;
 use iced::widget::pane_grid;
 use std::path::PathBuf;
@@ -185,16 +186,15 @@ pub struct WindowSnapshot {
     pub position: Option<iced::Point>,
 }
 
-/// Pane-geometry channel.
+/// Pane and pointer geometry channel.
 ///
 /// The three-band `PaneGrid` geometry lives in [`crate::ui_iced::layout`];
-/// this channel is how its widget events and its re-fit requests reach
-/// `update`.
+/// this channel is how its widget events, re-fit requests and root-space
+/// pointer position reach `update`.
 ///
 /// It also owns the **pointer position** ([`Self::CursorMoved`]). That is
 /// the honest home for it: like a split drag and the tree auto-fit, a cursor
-/// report is a statement about *where in the pane geometry something is*,
-/// not about what the user asked the application to do — so it is neither
+/// report is geometry, not what the user asked the application to do — so it is neither
 /// [`Message::Command`] nor any panel's private view state. It has to live
 /// somewhere the reducer reads before it opens an overlay, because iced's
 /// `MouseArea::on_right_press` takes a fixed `Message` and cannot carry the
@@ -220,12 +220,11 @@ pub enum LayoutMessage {
     /// `iced::Point` is `Copy` (`iced_core-0.14.0/src/point.rs:7`), so this
     /// variant does not cost the channel its `Copy`.
     ///
-    /// Coordinates are **widget-relative** to the element whose
-    /// `MouseArea::on_move` produced them
-    /// (`mouse_area.rs:358-360`); the overlay must be mounted against that
-    /// same element, or the offset added, for the anchor to land correctly.
+    /// Coordinates are **root-space logical pixels** from the full-window
+    /// content `MouseArea`, matching the coordinate system used by the menu
+    /// overlay and viewport clamp.
     CursorMoved {
-        /// Pointer position in the reporting widget's coordinate space.
+        /// Pointer position relative to the full-window content root.
         point: iced::Point,
     },
 }
@@ -797,7 +796,7 @@ pub enum AgentDebugMessage {
     },
 }
 
-/// Top-bar hamburger menu channel.
+/// Shared floating-menu interaction channel.
 ///
 /// Opening the menu is a **view-local transition** — the menu is floating
 /// widget state, not application state — so it must not ride
@@ -808,10 +807,14 @@ pub enum AgentDebugMessage {
 /// * [`Self::Opened`] / [`Self::Closed`] — the menu's open ⇄ closed bookends.
 /// * [`Self::SubmenuOpened`] / [`Self::SubmenuClosed`] — view-local
 ///   navigation between the top-level menu and one submenu.
+/// * [`Self::ToggleChanged`] — a controlled toggle requested a new value;
+///   the reducer converts it to the corresponding application command.
 /// * [`Self::RowActivated`] — a selectable row was picked. The wrapped
 ///   [`UserCommand`] IS the row's user intent; the reducer executes it
 ///   through `route_command` and closes the menu in the same reduction,
 ///   which is what a menu selection does.
+/// * Context-submenu variants update a tree/tab menu's reducer-owned path;
+///   ignored interactions consume disabled-row hits without dismissing it.
 ///
 /// The menu rows themselves are built from
 /// [`crate::ui_iced::panels::top::build_menu_entries`], the full
@@ -830,6 +833,24 @@ pub enum MenuMessage {
     /// A selectable menu row was picked. The wrapped command executes via
     /// `route_command` and the menu closes.
     RowActivated(UserCommand),
+    /// A controlled toggle row requested a new checked value.
+    ToggleChanged {
+        /// Identifier of the toggle row.
+        id: MenuItemId,
+        /// Requested checked value after the click.
+        checked: bool,
+    },
+    /// A submenu in the tree or tab context menu was opened.
+    ContextSubmenuOpened {
+        /// Path to the parent menu, from the root.
+        parent_path: Vec<MenuItemId>,
+        /// Identifier of the child submenu to open.
+        id: MenuItemId,
+    },
+    /// The deepest submenu in the tree or tab context menu was closed.
+    ContextSubmenuClosed,
+    /// A disabled or informational row consumed input without changing state.
+    InteractionIgnored,
 }
 
 /// Floating-overlay / keyboard-modifier channel ([UI-056], [UI-022]).

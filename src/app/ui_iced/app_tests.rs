@@ -370,13 +370,13 @@ fn open_editor(overlay: &mut OverlayState) {
 
 /// Open a floating context menu with one row.
 fn open_context_menu(overlay: &mut OverlayState) {
-    overlay.context_menu = Some(ContextMenu {
-        anchor: iced::Point::new(12.0, 34.0),
-        items: vec![MenuItem::new(
+    overlay.context_menu = Some(ContextMenu::new(
+        iced::Point::new(12.0, 34.0),
+        vec![MenuItem::action(
             crate::ui::strings::OPEN_IN_EDITOR_ACTION,
             Message::Command(UserCommand::OpenInEditor(PathBuf::from("M:\\lib\\note.md"))),
         )],
-    });
+    ));
 }
 
 /// Open the batch dialog over an empty candidate set.
@@ -441,7 +441,12 @@ fn test_close_topmost_closes_each_layer_in_turn() {
             CLOSED_LAYER_HAMBURGER,
             |o| {
                 o.hamburger_open = true;
-                o.hamburger_submenu = Some(crate::ui_iced::panels::top::MenuSection::Windows);
+                o.hamburger_menu_state.open_child(
+                    &[],
+                    crate::ui_iced::panels::top::MenuSection::Windows
+                        .menu_item_id()
+                        .unwrap(),
+                );
             },
             |o| o.hamburger_open,
         ),
@@ -461,7 +466,7 @@ fn test_close_topmost_closes_each_layer_in_turn() {
             !is_open(&overlay),
             "{name} must be closed after close_topmost"
         );
-        assert_eq!(overlay.hamburger_submenu, None);
+        assert!(overlay.hamburger_menu_state.open_path().is_empty());
         assert_eq!(
             overlay.close_topmost(),
             None,

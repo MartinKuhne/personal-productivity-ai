@@ -44,19 +44,22 @@ use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::background_logs_view;
+use crate::ui_iced::menu::{
+    HorizontalPreference, MenuEvent, MenuPosition, MenuStyle, VerticalPreference, menu_overlay,
+};
 use crate::ui_iced::message::{LayoutMessage, MenuMessage, Message, TreeMessage};
-use crate::ui_iced::overlay::{menu_size, modal, with_card_at, with_context_menu};
+use crate::ui_iced::overlay::modal;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
 use crate::ui_iced::panels::right::toc_indent_pixels;
 use crate::ui_iced::panels::top::{
-    build_menu_entries, hamburger_menu_anchor, hamburger_menu_card, hamburger_menu_row_count,
-    top_bar,
+    MENU_ANCHOR_BELOW_BAR, MenuSection, build_menu_entries, hamburger_menu_anchor,
+    hamburger_menu_items, top_bar,
 };
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
-use iced::widget::{button, column, container, scrollable, stack, text};
+use iced::widget::{button, column, container, mouse_area, scrollable, stack, text};
 
 /// Vertical gap between the three bands, in logical pixels.
 const BAND_SPACING_PIXELS: f32 = 8.0;
@@ -80,7 +83,7 @@ fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
     let has_selected_file = state.app.selection().selected_file.is_some();
     let has_toc = !state.app.orchestrator.tabs.toc.is_empty();
 
-    column![
+    let bands = column![
         container(top_bar(&state.models.top)).width(Length::Fill),
         container(layout::middle_band(
             &state.panes,
@@ -95,8 +98,14 @@ fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
         .height(Length::Fill),
         container(bottom_panel(&state.models.bottom)).width(Length::Fill),
     ]
-    .spacing(BAND_SPACING_PIXELS)
-    .into()
+    .spacing(BAND_SPACING_PIXELS);
+
+    // MouseArea positions are relative to their own bounds. Tracking here,
+    // around the full-window content, gives context menus the same root-space
+    // coordinates that menu_overlay uses, regardless of pane or scroll offsets.
+    mouse_area(bands)
+        .on_move(|point| Message::Layout(LayoutMessage::CursorMoved { point }))
+        .into()
 }
 
 /// The center pane body, in routing order: agent session first, then the open
@@ -194,40 +203,52 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// The overlay host: the bands with every mounted floating window stacked
 /// above them, bottom-most first.
 ///
-/// The context menu and the hamburger menu are both folded into the base
-/// with [`with_context_menu`] / [`with_card_at`] rather than stacked as
-/// their own layer because those helpers own the click-away blocker +
-/// anchored-card composition the tree, tab and top-bar menus need; every
-/// higher window is a full-screen modal. The reducer keeps the two menus
-/// mutually exclusive, so at most one of the two folds is live per frame.
+/// The tree/tab context menu and top-bar hamburger are mounted here through
+/// [`menu_overlay`], which owns their click-away blocker, directional
+/// placement and nested surfaces. Higher windows are stacked above them as
+/// full-screen overlays. The reducer keeps the two menus mutually exclusive,
+/// so at most one menu surface is live per frame.
 fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
     let mut base = base_bands(state);
 
     if let Some(menu) = state.overlay.context_menu.as_ref()
         && !menu.items.is_empty()
     {
-        base = with_context_menu(
-            base,
-            menu.anchor,
+        base = menu_overlay(
+            base.map(MenuEvent::Action),
             &menu.items,
+            &menu.state,
+            MenuPosition::Point {
+                point: menu.anchor,
+                horizontal: HorizontalPreference::Auto,
+                vertical: VerticalPreference::Auto,
+            },
             state.viewport,
-            Message::Tree(TreeMessage::ContextMenuClosed),
-        );
+            MenuStyle::default(),
+        )
+        .map(context_menu_event_to_message);
     }
 
     if state.overlay.hamburger_open {
         let entries = build_menu_entries(&state.models.top);
-        base = with_card_at(
-            base,
-            hamburger_menu_anchor(state.viewport),
-            hamburger_menu_card(&entries, state.overlay.hamburger_submenu),
-            menu_size(hamburger_menu_row_count(
-                &entries,
-                state.overlay.hamburger_submenu,
-            )),
+        let items = hamburger_menu_items(&entries);
+        let style = MenuStyle {
+            anchor_gap: MENU_ANCHOR_BELOW_BAR,
+            ..MenuStyle::default()
+        };
+        base = menu_overlay(
+            base.map(MenuEvent::Action),
+            &items,
+            &state.overlay.hamburger_menu_state,
+            MenuPosition::Point {
+                point: hamburger_menu_anchor(state.viewport),
+                horizontal: HorizontalPreference::Left,
+                vertical: VerticalPreference::Below,
+            },
             state.viewport,
-            Message::Menu(MenuMessage::Closed),
-        );
+            style,
+        )
+        .map(hamburger_menu_event_to_message);
     }
 
     let layers: Vec<iced::Element<'_, Message>> = state
@@ -243,6 +264,37 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
         let mut all = vec![base];
         all.extend(layers);
         stack(all).into()
+    }
+}
+
+fn context_menu_event_to_message(event: MenuEvent<Message>) -> Message {
+    match event {
+        MenuEvent::Action(message) => message,
+        MenuEvent::Toggle { .. } | MenuEvent::RadioSelected { .. } | MenuEvent::Ignored => {
+            Message::Menu(MenuMessage::InteractionIgnored)
+        }
+        MenuEvent::OpenSubmenu { parent_path, id } => {
+            Message::Menu(MenuMessage::ContextSubmenuOpened { parent_path, id })
+        }
+        MenuEvent::CloseSubmenu => Message::Menu(MenuMessage::ContextSubmenuClosed),
+        MenuEvent::Dismissed => Message::Tree(TreeMessage::ContextMenuClosed),
+    }
+}
+
+fn hamburger_menu_event_to_message(event: MenuEvent<Message>) -> Message {
+    match event {
+        MenuEvent::Action(message) => message,
+        MenuEvent::Toggle { id, checked } => {
+            Message::Menu(MenuMessage::ToggleChanged { id, checked })
+        }
+        MenuEvent::RadioSelected { .. } | MenuEvent::Ignored => {
+            Message::Menu(MenuMessage::InteractionIgnored)
+        }
+        MenuEvent::OpenSubmenu { id, .. } => MenuSection::from_menu_item_id(id)
+            .map(|section| Message::Menu(MenuMessage::SubmenuOpened(section)))
+            .unwrap_or(Message::Menu(MenuMessage::InteractionIgnored)),
+        MenuEvent::CloseSubmenu => Message::Menu(MenuMessage::SubmenuClosed),
+        MenuEvent::Dismissed => Message::Menu(MenuMessage::Closed),
     }
 }
 

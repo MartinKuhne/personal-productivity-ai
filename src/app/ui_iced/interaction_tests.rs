@@ -43,12 +43,11 @@
 //! so it is not a FastMD composition problem.
 //!
 //! The tag filter is still a `pick_list` and stays covered as far as the
-//! tool allows. The hamburger is **not affected**: it is a ☰ button
-//! plus a real card mounted by the overlay host, so its rows are ordinary
-//! `Text`/`Button` widgets. [`test_top_bar_hamburger_consumes_the_open_click`]
+//! tool allows. The hamburger is a ☰ button plus the shared nested menu
+//! widget mounted by the overlay host. [`test_top_bar_hamburger_consumes_the_open_click`]
 //! proves the ☰ captures the open click, and
 //! [`test_hamburger_menu_opens_and_routes_a_row_through_the_reducer`]
-//! drives the whole loop — reducer opens, real `view()` mounts the card,
+//! drives the whole loop — reducer opens, real `view()` mounts the menu,
 //! a row click publishes its own `UserCommand`, the reducer closes it.
 //!
 //! # Test-environment safety ([RUST-006])
@@ -69,16 +68,16 @@ use crate::ui::strings;
 use crate::ui_iced::app::AppState;
 use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::{EditorViewModel, editor_card};
+use crate::ui_iced::menu::{MenuItem as WidgetMenuItem, MenuItemId};
 use crate::ui_iced::message::{
     AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, TreeMessage,
 };
-use crate::ui_iced::overlay::menu_labels;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
 use crate::ui_iced::panels::left::{left_panel, row_icon};
 use crate::ui_iced::panels::top::{
     MenuEntry, MenuEntryKind, MenuSection, apply_about_button_click, build_menu_entries,
-    hamburger_menu_card, hamburger_row_label, hamburger_row_message, top_bar,
+    hamburger_row_label, hamburger_row_message, top_bar,
 };
 use crate::ui_iced::test_helpers::test_app_state;
 use crate::ui_iced::update::update;
@@ -264,14 +263,17 @@ fn test_tree_row_right_click_mounts_a_live_context_menu() {
     let label = alpha_row_label();
     let path = state.models.left.rows[1].path.clone();
 
-    // 1. right-click the row in the real left panel.
-    let mut ui = sim(left_panel(&state.models.left));
+    // 1. Right-click the row in the full app view so pointer tracking and the
+    // menu overlay share the same root-space coordinate system.
+    let mut ui = sim(view(&state));
     let bounds = ui
         .find(label.as_str())
         .expect("row")
         .visible_bounds()
         .expect("visible row");
-    ui.point_at(bounds.center());
+    let click_point = bounds.center();
+    ui.point_at(click_point);
+    let _ = ui.simulate([cursor_moved(click_point)]);
     let _ = ui.simulate(right_click());
     let emitted = messages(ui);
 
@@ -287,13 +289,26 @@ fn test_tree_row_right_click_mounts_a_live_context_menu() {
         let _ = update(&mut state, message);
     }
     state.rebuild_view_models();
-    assert!(
-        state.overlay.context_menu.is_some(),
-        "the reducer must mount the context menu"
+    let menu = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .expect("the reducer must mount the context menu");
+    assert_eq!(
+        menu.anchor, click_point,
+        "anchor is in full-window coordinates"
     );
 
     // 3. rebuild the full app view and assert the menu rows are on screen.
-    let expected = menu_labels(&state.overlay.context_menu.as_ref().unwrap().items);
+    let expected: Vec<String> = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .filter_map(|item| item.label().map(str::to_owned))
+        .collect();
     assert!(!expected.is_empty(), "the file menu must have rows");
 
     let mut view_ui = sim(view(&state));
@@ -306,14 +321,130 @@ fn test_tree_row_right_click_mounts_a_live_context_menu() {
 
     // 4. clicking a menu row publishes that row's own message.
     let first = expected[0].clone();
-    let first_message = state.overlay.context_menu.as_ref().unwrap().items[0]
-        .message
-        .clone();
+    let first_message = match &state.overlay.context_menu.as_ref().unwrap().items[0] {
+        WidgetMenuItem::Action { message, .. } => message.clone(),
+        item => panic!("expected an action row, got {item:?}"),
+    };
     let _ = view_ui.click(first.as_str());
     assert_eq!(
         messages(view_ui),
         vec![first_message],
         "the clicked menu row must publish its own command",
+    );
+}
+
+/// Right-clicking a tab mounts its shared-widget context menu in the full
+/// application view and keeps the tab row's command attached to its action.
+#[test]
+fn test_tab_right_click_mounts_a_live_context_menu() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("tab.md");
+    let mut state = test_app_state();
+    state.app.orchestrator.tabs.tabs.push(path.clone());
+    state.rebuild_view_models();
+
+    let mut ui = sim(view(&state));
+    let bounds = ui
+        .find("tab.md")
+        .expect("tab title")
+        .visible_bounds()
+        .expect("visible tab");
+    let click_point = bounds.center();
+    ui.point_at(click_point);
+    let _ = ui.simulate([cursor_moved(click_point)]);
+    let _ = ui.simulate(right_click());
+    let emitted = messages(ui);
+    let anchor = emitted
+        .iter()
+        .find_map(|message| match message {
+            Message::Layout(LayoutMessage::CursorMoved { point }) => Some(*point),
+            _ => None,
+        })
+        .expect("right-click reports the root-space cursor position");
+    assert_eq!(
+        anchor, click_point,
+        "tab anchor is in full-window coordinates"
+    );
+    assert_emitted(
+        &emitted,
+        &Message::Tab(crate::ui_iced::message::TabMessage::ContextMenuOpened { index: 0 }),
+        "right-clicking the tab opens its context menu",
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved { point: anchor }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tab(crate::ui_iced::message::TabMessage::ContextMenuOpened { index: 0 }),
+    );
+    let menu = state.overlay.context_menu.as_ref().expect("tab menu opens");
+    assert_eq!(menu.anchor, click_point);
+    assert!(!menu.items.is_empty());
+    let first_message = match &menu.items[0] {
+        WidgetMenuItem::Action { message, .. } => message.clone(),
+        item => panic!("expected an action row, got {item:?}"),
+    };
+
+    let mut ui = sim(view(&state));
+    assert!(ui.find(strings::EDIT_BUTTON).is_ok());
+    let _ = ui.click(strings::EDIT_BUTTON);
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &first_message,
+        "the tab menu row emits the action snapshot by the reducer",
+    );
+}
+
+/// A context-menu submenu event updates reducer-owned path state while the
+/// parent row stays visible beside its child surface.
+#[test]
+fn test_context_menu_nested_surface_keeps_its_parent_mounted() {
+    let mut state = test_app_state();
+    let submenu_id = MenuItemId::new("test.context.submenu");
+    let path = PathBuf::from("notes/nested.md");
+    state.overlay.context_menu = Some(crate::ui_iced::app::ContextMenu::new(
+        iced::Point::new(420.0, 220.0),
+        vec![WidgetMenuItem::submenu(
+            submenu_id,
+            strings::MENU_WINDOWS,
+            vec![WidgetMenuItem::action(
+                strings::OPEN_IN_EDITOR_ACTION,
+                Message::Command(crate::bus::events::user_command::UserCommand::OpenInEditor(
+                    path.clone(),
+                )),
+            )],
+        )],
+    ));
+
+    let submenu_label = format!("{} >", strings::MENU_WINDOWS);
+    let mut ui = sim(view(&state));
+    let _ = ui.click(submenu_label.as_str());
+    let emitted = messages(ui);
+    let opened = Message::Menu(MenuMessage::ContextSubmenuOpened {
+        parent_path: Vec::new(),
+        id: submenu_id,
+    });
+    assert_emitted(
+        &emitted,
+        &opened,
+        "context menu submenu rows emit a controlled open event",
+    );
+    let _ = update(&mut state, opened);
+
+    let mut ui = sim(view(&state));
+    assert!(ui.find(submenu_label.as_str()).is_ok());
+    assert!(ui.find(strings::OPEN_IN_EDITOR_ACTION).is_ok());
+    let _ = ui.click(strings::OPEN_IN_EDITOR_ACTION);
+    let emitted = messages(ui);
+    assert_emitted(
+        &emitted,
+        &Message::Command(crate::bus::events::user_command::UserCommand::OpenInEditor(
+            path,
+        )),
+        "the child action emits its original application command",
     );
 }
 
@@ -728,7 +859,7 @@ fn test_top_bar_hamburger_is_at_the_far_right_edge() {
     );
 }
 
-/// The full loop: `Opened` mounts the card in the real `view()`, a row pick
+/// The full loop: `Opened` mounts the shared menu in the real `view()`, a row pick
 /// publishes that row's own [`UserCommand`] on the menu channel, and the
 /// reducer closes the menu in the same reduction.
 #[test]
@@ -767,16 +898,15 @@ fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
     );
 }
 
-/// Clicking a submenu button changes the mounted card to that submenu, and
-/// the back row returns to the root menu without executing an application
-/// command.
+/// Clicking submenu buttons replaces the controlled child path while keeping
+/// the parent menu surface mounted.
 #[test]
-fn test_hamburger_submenu_navigation_round_trips_through_the_reducer() {
+fn test_hamburger_submenu_path_is_controlled_by_the_reducer() {
     let mut state = test_app_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
 
     let mut ui = sim(view(&state));
-    let submenu_label = strings::format_menu_submenu_label(strings::MENU_WINDOWS);
+    let submenu_label = format!("{} >", strings::MENU_WINDOWS);
     let _ = ui.click(submenu_label.as_str());
     let emitted = messages(ui);
     assert_emitted(
@@ -789,27 +919,23 @@ fn test_hamburger_submenu_navigation_round_trips_through_the_reducer() {
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
-    assert_eq!(state.overlay.hamburger_submenu, Some(MenuSection::Windows));
-
-    let mut ui = sim(view(&state));
-    let background_label = hamburger_row_label(strings::MENU_BACKGROUND_OPERATIONS, false);
-    let debug_label = hamburger_row_label(strings::MENU_AGENT_DEBUG, false);
-    assert!(ui.find(background_label.as_str()).is_ok());
-    assert!(ui.find(debug_label.as_str()).is_ok());
-    assert!(ui.find(strings::MENU_CHAT_MODELS).is_err());
-
-    let _ = ui.click(strings::MENU_BACK_TO_MAIN);
-    let emitted = messages(ui);
-    assert_emitted(
-        &emitted,
-        &Message::Menu(MenuMessage::SubmenuClosed),
-        "the back row must return to the top-level menu",
+    let windows_id = MenuSection::Windows.menu_item_id().expect("submenu id");
+    assert_eq!(
+        state.overlay.hamburger_menu_state.open_path(),
+        &[windows_id]
     );
-    let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
-    assert_eq!(state.overlay.hamburger_submenu, None);
 
     let mut ui = sim(view(&state));
-    let chat_models = strings::format_menu_submenu_label(strings::MENU_CHAT_MODELS);
+    let background_label = strings::MENU_BACKGROUND_OPERATIONS;
+    let debug_label = strings::MENU_AGENT_DEBUG;
+    assert!(ui.find(background_label).is_ok());
+    assert!(ui.find(debug_label).is_ok());
+    assert!(
+        ui.find(format!("{} >", strings::MENU_CHAT_MODELS).as_str())
+            .is_ok()
+    );
+
+    let chat_models = format!("{} >", strings::MENU_CHAT_MODELS);
     let _ = ui.click(chat_models.as_str());
     assert!(
         messages(ui).contains(&Message::Menu(MenuMessage::SubmenuOpened(
@@ -820,34 +946,35 @@ fn test_hamburger_submenu_navigation_round_trips_through_the_reducer() {
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::ChatModels)),
     );
+    let chat_models_id = MenuSection::ChatModels.menu_item_id().expect("submenu id");
+    assert_eq!(
+        state.overlay.hamburger_menu_state.open_path(),
+        &[chat_models_id]
+    );
     let mut ui = sim(view(&state));
     assert!(ui.find(strings::NO_CHAT_MODELS_CONFIGURED).is_ok());
 }
 
-/// A click that misses the mounted card lands on the blocker and closes it.
+/// A click that misses the mounted menu lands on the blocker and closes it.
 #[test]
-fn test_hamburger_menu_click_away_closes_the_card() {
+fn test_hamburger_menu_click_away_closes_the_menu() {
     let mut state = test_app_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     state.rebuild_view_models();
 
     let mut ui = sim(view(&state));
-    // Far bottom-left corner: outside the right-anchored card.
+    // Far bottom-left corner: outside the right-anchored menu.
     click_at(&mut ui, iced::Point::new(4.0, 760.0));
     let emitted = messages(ui);
     assert_emitted(
         &emitted,
         &Message::Menu(MenuMessage::Closed),
-        "a click outside the card must close it",
+        "a click outside the menu must close it",
     );
 }
 
-/// Every selectable row of the production [`hamburger_menu_card`] publishes
-/// its own `UserCommand` on the menu channel when clicked.
-///
-/// The card is rendered standalone here; the full-view loop (reducer open →
-/// mounted card → row pick) is covered by
-/// [`test_hamburger_menu_opens_and_routes_a_row_through_the_reducer`].
+/// Every selectable row of the production shared hamburger menu publishes
+/// its own `UserCommand` on the menu channel when clicked in the full view.
 #[test]
 fn test_hamburger_rows_emit_their_commands() {
     let state = test_app_state();
@@ -861,23 +988,54 @@ fn test_hamburger_rows_emit_their_commands() {
         "the hamburger must offer the full UI-061..UI-066 row set"
     );
 
-    // `Element` is neither `Clone` nor `Debug`, so the card is rebuilt for
-    // each click rather than shared.
     for entry in actions {
         let command = match &entry.kind {
             MenuEntryKind::Action(command) => command,
             other => unreachable!("filtered to Action rows, got {other:?}"),
         };
-        let label = hamburger_row_label(&entry.label, entry.checked);
-        let active_submenu = (entry.section != MenuSection::Direct).then_some(entry.section);
-        let mut ui = sim(hamburger_menu_card(&entries, active_submenu));
-        let _ = ui.click(label.as_str());
-        assert_eq!(
-            messages(ui),
-            vec![hamburger_row_message(command)],
-            "hamburger row {:?} must publish its own command",
-            entry.label,
+        let is_toggle = matches!(
+            command,
+            crate::bus::events::user_command::UserCommand::ToggleBackgroundLogs(_)
+                | crate::bus::events::user_command::UserCommand::ToggleAgentDebugWindow(_)
         );
+        let label = if is_toggle {
+            entry.label.clone()
+        } else {
+            hamburger_row_label(&entry.label, entry.checked)
+        };
+        let mut state = test_app_state();
+        let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+        if entry.section != MenuSection::Direct {
+            let _ = update(
+                &mut state,
+                Message::Menu(MenuMessage::SubmenuOpened(entry.section)),
+            );
+        }
+        let mut ui = sim(view(&state));
+        let _ = ui.click(label.as_str());
+        let emitted = messages(ui);
+        if matches!(
+            command,
+            crate::bus::events::user_command::UserCommand::ToggleBackgroundLogs(_)
+                | crate::bus::events::user_command::UserCommand::ToggleAgentDebugWindow(_)
+        ) {
+            assert!(
+                matches!(
+                    emitted.as_slice(),
+                    [Message::Menu(MenuMessage::ToggleChanged { checked, .. })]
+                        if *checked == !entry.checked
+                ),
+                "hamburger toggle {:?} must request its inverse checked state, got {emitted:?}",
+                entry.label,
+            );
+        } else {
+            assert_eq!(
+                emitted,
+                vec![hamburger_row_message(command)],
+                "hamburger row {:?} must publish its own command",
+                entry.label,
+            );
+        }
     }
 }
 
@@ -906,30 +1064,23 @@ fn test_full_app_view_is_simulatable_with_an_overlay() {
     );
 }
 
-/// The `Layout(CursorMoved)` anchor the tree emits for menu positioning is
-/// synthesised by the row's `mouse_area` as soon as the cursor position
-/// changes (verified: `Simulator::point_at` alone emits no
-/// event, so a following event is what surfaces the move).
+/// The full-app content root reports the pointer position in window space;
+/// row-local bounds and the scrollable's translation do not affect the menu
+/// origin. (`Simulator::point_at` alone emits no move event.)
 #[test]
 fn test_tree_pointer_motion_emits_the_cursor_anchor() {
     let (state, _dir) = state_with_one_file();
     let label = alpha_row_label();
 
-    let mut ui = sim(left_panel(&state.models.left));
+    let mut ui = sim(view(&state));
     let bounds = ui
         .find(label.as_str())
         .expect("row")
         .visible_bounds()
         .expect("visible row");
-    ui.point_at(bounds.center());
-    let _ = ui.simulate(left_click());
-
-    let viewport = ui
-        .find(|candidate: Candidate<'_>| match candidate {
-            Candidate::Scrollable { bounds, .. } => Some(bounds),
-            _ => None,
-        })
-        .expect("the tree body is a scrollable");
+    let pointer = bounds.center();
+    ui.point_at(pointer);
+    let _ = ui.simulate([cursor_moved(pointer)]);
 
     let emitted = messages(ui);
     let anchor = emitted
@@ -940,16 +1091,8 @@ fn test_tree_pointer_motion_emits_the_cursor_anchor() {
         })
         .unwrap_or_else(|| panic!("pointer motion must report the menu anchor, got {emitted:?}"));
 
-    // The anchor is reported in the scrollable's translated space, which is
-    // the viewport-relative frame the context menu clamps against. Confirm
-    // that relationship against the scrollable's own bounds rather than
-    // asserting a bare coordinate.
     assert!(
-        anchor.x >= viewport.x && anchor.y >= 0.0 && anchor.x < viewport.x + viewport.width,
-        "anchor {anchor:?} must sit inside the viewport frame {viewport:?}"
-    );
-    assert!(
-        anchor != bounds.center(),
-        "the anchor is viewport-relative, not the row's absolute centre"
+        anchor == pointer,
+        "root-space pointer {anchor:?} should equal full-view point {pointer:?}"
     );
 }

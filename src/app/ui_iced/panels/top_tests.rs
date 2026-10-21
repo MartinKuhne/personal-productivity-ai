@@ -295,6 +295,23 @@ fn menu_section_titles_use_the_submenu_strings() {
     );
 }
 
+#[test]
+fn menu_section_ids_round_trip_only_for_submenus() {
+    assert_eq!(MenuSection::Direct.menu_item_id(), None);
+    for section in [
+        MenuSection::Windows,
+        MenuSection::ChatModels,
+        MenuSection::TableWrap,
+    ] {
+        let id = section.menu_item_id().expect("submenu sections have ids");
+        assert_eq!(MenuSection::from_menu_item_id(id), Some(section));
+    }
+    assert_eq!(
+        MenuSection::from_menu_item_id(MenuItemId::new("hamburger.unknown")),
+        None
+    );
+}
+
 // --- hamburger menu structure (UI-061..UI-066) ---------------------------
 
 #[test]
@@ -732,27 +749,26 @@ fn pick_list_content_fits_inside_the_fixed_band() {
     );
 }
 
-// --- hamburger menu card ----------------------------------------------------
+// --- hamburger menu widget model -------------------------------------------
 
-/// The card anchor sits one bar-height plus the below-bar gap down, and one
-/// right-margin in from the window's right edge.
+/// The root-space anchor sits at the right edge of the hamburger button.
 #[test]
 fn hamburger_anchor_hangs_below_the_bar_at_the_right_edge() {
     let wide = Size::new(1600.0, 900.0);
     let anchor = hamburger_menu_anchor(wide);
-    assert_eq!(anchor.y, BAR_HEIGHT_POINTS + MENU_ANCHOR_BELOW_BAR);
+    assert_eq!(anchor.y, BAR_HEIGHT_POINTS);
     assert_eq!(
         anchor.x,
-        1600.0 - MENU_WIDTH - MENU_ANCHOR_RIGHT_MARGIN,
-        "the card must right-align under the ☰ button"
+        1600.0 - MENU_ANCHOR_RIGHT_MARGIN + MENU_ANCHOR_BELOW_BAR,
+        "the widget gap preserves the configured menu-to-window inset"
     );
 }
 
-/// A viewport narrower than the card must not push the anchor off-screen to
-/// the left — the `max(0.0)` guard clamps it.
+/// A narrow viewport keeps the anchor non-negative; the shared widget clamps
+/// the surface itself to the available viewport.
 #[test]
 fn hamburger_anchor_clamps_to_non_negative_x_on_a_narrow_viewport() {
-    let narrow = Size::new(MENU_WIDTH * 0.5, 400.0);
+    let narrow = Size::new(MENU_ANCHOR_RIGHT_MARGIN * 0.5, 400.0);
     assert_eq!(hamburger_menu_anchor(narrow).x, 0.0);
 }
 
@@ -794,41 +810,87 @@ fn submenu_label_uses_the_required_right_arrow_cue() {
     );
 }
 
-/// The card builds for the full production entry set — headers, the
-/// no-models placeholder and every action row — without panicking, and
-/// keeps the `'static` lifetime the overlay host needs.
+/// The production entry model becomes one root action set with nested
+/// sections, including the no-models placeholder.
 #[test]
-fn hamburger_menu_card_builds_for_the_full_entry_set() {
+fn hamburger_menu_items_preserve_the_nested_production_hierarchy() {
     let app = test_app();
     let view_model = TopBarViewModel::from_app(&app);
     let entries = build_menu_entries(&view_model);
-    let card: Element<'static, Message> = hamburger_menu_card(&entries, None);
-    let _ = card;
-    let submenu: Element<'static, Message> =
-        hamburger_menu_card(&entries, Some(MenuSection::ChatModels));
-    let _ = submenu;
-}
+    let items = hamburger_menu_items(&entries);
 
-/// An empty entry list still builds a (header-less) card rather than
-/// panicking — the overlay host clamps the size, never the shape.
-#[test]
-fn hamburger_menu_card_builds_for_an_empty_entry_list() {
-    let card: Element<'static, Message> = hamburger_menu_card(&[], None);
-    let _ = card;
-}
-
-#[test]
-fn hamburger_menu_row_count_matches_the_visible_level() {
-    let entries = build_menu_entries(&view_model_with_models());
-    assert_eq!(hamburger_menu_row_count(&entries, None), 6);
-    assert_eq!(
-        hamburger_menu_row_count(&entries, Some(MenuSection::Windows)),
-        4,
-        "submenu rows include title and back navigation"
+    assert_eq!(items.len(), 6, "three direct actions and three submenus");
+    let submenu = |section: MenuSection| {
+        let id = section.menu_item_id().expect("submenu section id");
+        items
+            .iter()
+            .find_map(|item| match item {
+                WidgetMenuItem::Submenu {
+                    id: item_id,
+                    children,
+                    ..
+                } if *item_id == id => Some(children),
+                _ => None,
+            })
+            .expect("submenu is present")
+    };
+    assert_eq!(submenu(MenuSection::Windows).len(), 2);
+    assert!(
+        submenu(MenuSection::Windows)
+            .iter()
+            .all(|item| matches!(item, WidgetMenuItem::Toggle { .. }))
     );
     assert_eq!(
-        hamburger_menu_row_count(&entries, Some(MenuSection::TableWrap)),
-        7,
-        "all five strategies remain visible in their submenu"
+        submenu(MenuSection::ChatModels).len(),
+        1,
+        "an empty model list is represented by its disabled placeholder"
     );
+    assert_eq!(submenu(MenuSection::TableWrap).len(), 5);
+}
+
+#[test]
+fn hamburger_toggle_ids_resolve_to_the_requested_commands() {
+    let entries = build_menu_entries(&TopBarViewModel::from_app(&test_app()));
+    let items = hamburger_menu_items(&entries);
+    let windows = MenuSection::Windows.menu_item_id().expect("submenu id");
+    let toggles = items
+        .iter()
+        .find_map(|item| match item {
+            WidgetMenuItem::Submenu { id, children, .. } if *id == windows => Some(children),
+            _ => None,
+        })
+        .expect("windows submenu");
+    let actual: Vec<_> = toggles
+        .iter()
+        .filter_map(|item| match item {
+            WidgetMenuItem::Toggle { id, label, .. } => Some((label.as_str(), *id)),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        actual.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+        vec![
+            strings::MENU_BACKGROUND_OPERATIONS,
+            strings::MENU_AGENT_DEBUG
+        ]
+    );
+    assert_eq!(
+        hamburger_toggle_command(actual[0].1, true),
+        Some(apply_background_logs_toggle(true))
+    );
+    assert_eq!(
+        hamburger_toggle_command(actual[1].1, false),
+        Some(apply_agent_debug_toggle(false))
+    );
+    assert_eq!(
+        hamburger_toggle_command(MenuItemId::new("hamburger.unknown"), true),
+        None
+    );
+}
+
+/// Empty menu models remain empty and therefore do not create an overlay.
+#[test]
+fn hamburger_menu_items_for_empty_entries_are_empty() {
+    assert!(hamburger_menu_items(&[]).is_empty());
 }

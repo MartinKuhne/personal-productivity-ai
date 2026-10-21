@@ -657,8 +657,8 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
         .map(|row| state.models.left.menu_items_for(row))
         .unwrap_or_default();
     state.overlay.hamburger_open = false;
-    state.overlay.hamburger_submenu = None;
-    state.overlay.context_menu = Some(ContextMenu { anchor, items });
+    state.overlay.hamburger_menu_state.close_all();
+    state.overlay.context_menu = Some(ContextMenu::from_legacy_items(anchor, items));
 }
 
 /// Read the file, take the body as the prompt and run it against that file.
@@ -745,8 +745,8 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
             let anchor = state.overlay.cursor.unwrap_or_default();
             let items = state.models.center.menu_items_for(index);
             state.overlay.hamburger_open = false;
-            state.overlay.hamburger_submenu = None;
-            state.overlay.context_menu = Some(ContextMenu { anchor, items });
+            state.overlay.hamburger_menu_state.close_all();
+            state.overlay.context_menu = Some(ContextMenu::from_legacy_items(anchor, items));
         }
         TabMessage::ContextMenuClosed => {
             state.overlay.context_menu = None;
@@ -757,7 +757,7 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
 /// Top-bar hamburger-menu reductions.
 ///
 /// Opened / Closed only flip [`OverlayState::hamburger_open`]; the view
-/// mounts the card from the [`TopBarViewModel`] snapshot
+/// mounts the shared menu widget from the [`TopBarViewModel`] snapshot
 /// ([`crate::ui_iced::panels::top::build_menu_entries`]) anchored under the
 /// ☰ button. A row pick publishes the row's own [`UserCommand`] through
 /// [`route_command`] and closes the menu in the same reduction — the row's
@@ -770,29 +770,52 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
             // dismisses any live tree/tab context menu.
             state.overlay.context_menu = None;
             state.overlay.hamburger_open = true;
-            state.overlay.hamburger_submenu = None;
+            state.overlay.hamburger_menu_state.close_all();
             Vec::new()
         }
         MenuMessage::Closed => {
             state.overlay.hamburger_open = false;
-            state.overlay.hamburger_submenu = None;
+            state.overlay.hamburger_menu_state.close_all();
             Vec::new()
         }
         MenuMessage::SubmenuOpened(section) => {
             if state.overlay.hamburger_open
-                && section != crate::ui_iced::panels::top::MenuSection::Direct
+                && let Some(id) = section.menu_item_id()
             {
-                state.overlay.hamburger_submenu = Some(section);
+                state.overlay.hamburger_menu_state.open_child(&[], id);
             }
             Vec::new()
         }
         MenuMessage::SubmenuClosed => {
-            state.overlay.hamburger_submenu = None;
+            state.overlay.hamburger_menu_state.close_deepest();
             Vec::new()
         }
+        MenuMessage::ToggleChanged { id, checked } => {
+            if state.overlay.hamburger_open
+                && let Some(command) =
+                    crate::ui_iced::panels::top::hamburger_toggle_command(id, checked)
+            {
+                route_command(state, command)
+            } else {
+                Vec::new()
+            }
+        }
+        MenuMessage::ContextSubmenuOpened { parent_path, id } => {
+            if let Some(menu) = state.overlay.context_menu.as_mut() {
+                menu.state.open_child(&parent_path, id);
+            }
+            Vec::new()
+        }
+        MenuMessage::ContextSubmenuClosed => {
+            if let Some(menu) = state.overlay.context_menu.as_mut() {
+                menu.state.close_deepest();
+            }
+            Vec::new()
+        }
+        MenuMessage::InteractionIgnored => Vec::new(),
         MenuMessage::RowActivated(command) => {
             state.overlay.hamburger_open = false;
-            state.overlay.hamburger_submenu = None;
+            state.overlay.hamburger_menu_state.close_all();
             route_command(state, command)
         }
     }

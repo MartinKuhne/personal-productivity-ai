@@ -109,7 +109,7 @@ use crate::ui::theme::Palette;
 use crate::ui::tree::{FlatRow, flatten_tree};
 use crate::ui::tree_search::SearchResultEntry;
 use crate::ui_iced::layout::clamped_width;
-use crate::ui_iced::message::{LayoutMessage, Message, SearchMessage, TreeMessage};
+use crate::ui_iced::message::{Message, SearchMessage, TreeMessage};
 use crate::ui_iced::overlay::MenuItem;
 
 use super::top::phosphor_font;
@@ -936,7 +936,6 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
 
     let trigger = crate::ui_iced::overlay::context_menu_trigger(
         row_surface,
-        |point| Message::Layout(LayoutMessage::CursorMoved { point }),
         Message::Tree(TreeMessage::ContextMenuOpened {
             path: row.path.clone(),
         }),

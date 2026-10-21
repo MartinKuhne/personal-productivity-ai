@@ -461,7 +461,7 @@ pub fn resolve_menu_position(
 #[must_use]
 pub fn menu_overlay<'a, Message>(
     base: Element<'a, MenuEvent<Message>>,
-    items: &'a [MenuItem<Message>],
+    items: &[MenuItem<Message>],
     state: &MenuState,
     position: MenuPosition,
     viewport: Size,
@@ -528,7 +528,7 @@ where
 }
 
 fn render_menu<'a, Message>(
-    items: &'a [MenuItem<Message>],
+    items: &[MenuItem<Message>],
     parent_path: &[MenuItemId],
     state: &MenuState,
     style: MenuStyle,
@@ -550,7 +550,7 @@ where
 }
 
 fn render_row<'a, Message>(
-    item: &'a MenuItem<Message>,
+    item: &MenuItem<Message>,
     parent_path: &[MenuItemId],
     state: &MenuState,
     style: MenuStyle,

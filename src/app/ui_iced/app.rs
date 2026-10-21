@@ -80,12 +80,13 @@ use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::fonts;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::{BackgroundLogsViewModel, ScrollSnapshot};
+use crate::ui_iced::menu::{MenuItem, MenuState};
 use crate::ui_iced::message::{BootMessage, Message, WindowMessage};
-use crate::ui_iced::overlay::MenuItem;
+use crate::ui_iced::overlay::MenuItem as LegacyMenuItem;
 use crate::ui_iced::panels::bottom::BottomPanelViewModel;
 use crate::ui_iced::panels::center::CenterPanelViewModel;
 use crate::ui_iced::panels::left::LeftPanelViewModel;
-use crate::ui_iced::panels::top::{MenuSection, TopBarViewModel};
+use crate::ui_iced::panels::top::TopBarViewModel;
 use crate::ui_iced::persisted::{self, UiStateStorage};
 use crate::ui_iced::search::SearchViewModel;
 use crate::ui_iced::subscription::{self, BusReceivers};
@@ -216,12 +217,41 @@ impl AppState {
 /// projection and never reads the domain model to decide menu contents.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContextMenu {
-    /// Top-left anchor in window coordinates, taken from the
+    /// Root-space point in window coordinates, taken from the
     /// [`LayoutMessage::CursorMoved`](crate::ui_iced::message::LayoutMessage::CursorMoved)
     /// that preceded the open request.
     pub anchor: iced::Point,
     /// The rows to render, in display order.
     pub items: Vec<MenuItem<Message>>,
+    /// Reducer-owned nested-menu path for this surface.
+    pub state: MenuState,
+}
+
+impl ContextMenu {
+    /// Creates a context menu with its submenu path closed.
+    #[must_use]
+    pub fn new(anchor: iced::Point, items: Vec<MenuItem<Message>>) -> Self {
+        Self {
+            anchor,
+            items,
+            state: MenuState::default(),
+        }
+    }
+
+    /// Converts legacy flat rows into the reusable menu model.
+    #[must_use]
+    pub(crate) fn from_legacy_items(
+        anchor: iced::Point,
+        items: Vec<LegacyMenuItem<Message>>,
+    ) -> Self {
+        Self::new(
+            anchor,
+            items
+                .into_iter()
+                .map(|item| MenuItem::action(item.label, item.message))
+                .collect(),
+        )
+    }
 }
 
 /// Reducer-owned floating-window state.
@@ -239,12 +269,11 @@ pub struct OverlayState {
     /// The floating tree / tab context menu.
     pub context_menu: Option<ContextMenu>,
     /// Whether the top-bar hamburger menu is open. A reducer-held bool because
-    /// the menu card is mounted by the shared overlay host, which rebuilds
-    /// from state every frame.
+    /// the shared menu surface is mounted by the overlay host from state every
+    /// frame.
     pub hamburger_open: bool,
-    /// The currently open hamburger submenu, or `None` while showing the
-    /// top-level menu.
-    pub hamburger_submenu: Option<MenuSection>,
+    /// Reducer-owned submenu path for the hamburger surface.
+    pub hamburger_menu_state: MenuState,
     /// The inline editor buffer (owns the live `text_editor::Content`, so
     /// the overlay as a whole is not `Clone`).
     pub editor: Option<EditorViewModel>,
@@ -297,7 +326,7 @@ impl Default for OverlayState {
             dialog_anchor: None,
             context_menu: None,
             hamburger_open: false,
-            hamburger_submenu: None,
+            hamburger_menu_state: MenuState::default(),
             editor: None,
             debug: AgentDebugWindowState::new(),
             tools: ToolsDialogState::new(),
@@ -388,7 +417,7 @@ impl OverlayState {
             return Some(CLOSED_LAYER_CONTEXT_MENU);
         }
         if std::mem::take(&mut self.hamburger_open) {
-            self.hamburger_submenu = None;
+            self.hamburger_menu_state.close_all();
             return Some(CLOSED_LAYER_HAMBURGER);
         }
         None
