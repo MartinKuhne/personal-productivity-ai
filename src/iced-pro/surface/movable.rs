@@ -35,10 +35,10 @@
 //! │ ├─ Filter & control bar ──────────────────── 36px = size.control.lg ─┤│
 //! │ │ 4/12px pad · surface.raised · gap 8px = space.sm                  ││
 //! │ │ [Category ▾] [Search filter] [☑ Auto-scroll]  ←fill→  [Copy][Clear]││
-//! │ ├─ Scrollable content viewport ─────────────────── fill (350px @440) ┤│
+//! │ ├─ Scrollable content viewport ─────────────────── fill (348px @440) ┤│
 //! │ │ surface.sunken · monospace 12px / 13px                             ││
 //! │ │ timestamp text.muted · [Category] tag accent.text · payload         ││
-//! │ └─ Footer status & resize bar ────────────────────────────── 22px ───┘│
+//! │ └─ Footer status & resize bar ────────────────────────────── 24px ───┘│
 //! │   0/12px pad · surface.raised ·                    [◢ grip 16px]     │
 //! └──────────────────────────────────────────────────────────────────────┘
 //! ```
@@ -325,13 +325,21 @@ pub const CONTENT_FONT_SMALL: f32 = typography::CAPTION.size;
 /// nothing.
 pub const CONTENT_FONT_LARGE: f32 = typography::UI_COMPACT.size;
 
-/// §4.7.1 — the footer status & resize bar is `22px`.
+/// §4.7.1 — the footer status & resize bar is `24px`: **token**,
+/// [`size::BAR_STATUS`], the rung `size.bar.status` defines for a compact
+/// status and footer bar and names this footer for.
 ///
-/// **Named constant, not a token.** The control rungs are 24 / 28 / 32 /
-/// 36 and there is nothing at 22; `HIT_TARGET_MIN` is a *rule* a control
-/// is measured against, not a height to pick, and a status bar is not a
-/// control. Same class of gap **G-12** recorded for the menu row padding.
-pub const FOOTER_HEIGHT: f32 = 22.0;
+/// This used to be a `22.0` literal, recorded as a gap the token ladder
+/// left behind — "the control rungs are 24 / 28 / 32 / 36 and there is
+/// nothing at 22". The 2026-10-22 revision closed that gap by adding the
+/// rung, so the footer reads it instead of inventing a height.
+///
+/// The card's total chrome is *derived* from this constant
+/// ([`CHROME_HEIGHT`]), so the overlay stands 2px taller than it did
+/// before the rung existed, and the content viewport — which is whatever
+/// the card has left over — is 2px shorter. Both are recomputed, never
+/// restated.
+pub const FOOTER_HEIGHT: f32 = size::BAR_STATUS;
 
 /// §4.7.1 — the footer's vertical padding is `0`. See
 /// [`TITLE_BAR_PADDING_VERTICAL`] for why zero is named.

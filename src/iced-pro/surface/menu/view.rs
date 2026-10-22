@@ -26,17 +26,22 @@
 //! [`RowBase::Hovered`] with the ring on, and the bases compose into cells
 //! the matrix never drew — a destructive row that also holds the ring, a
 //! submenu parent under the cursor *and* focused. [`RowBase`] carries the
-//! mutually exclusive bases the matrix implies plus the destructive
-//! counterpart of `Pressed`, and [`RowState`] pairs a base with the
-//! additive ring. Every resulting cell resolves through the same function,
-//! so a cell the spec never printed cannot be accidentally undefined and
-//! cannot disagree with its neighbours.
+//! mutually exclusive bases the matrix implies plus
+//! [`DestructivePressed`](RowBase::DestructivePressed), the destructive
+//! row held down, and [`RowState`] pairs a base with the additive ring.
+//! Every resulting cell resolves through the same function, so a cell the
+//! spec never printed cannot be accidentally undefined and cannot disagree
+//! with its neighbours.
 //!
-//! [`RowState::SPEC_ROWS`] is the eight the spec prints;
-//! [`RowState::DERIVED_ROWS`] is the three it does not but that a real
-//! menu reaches. [`RowState::matrix_row`] names whichever row a cell
-//! answers to, so a test asserts against the spec's own wording rather
-//! than a re-labelled guess.
+//! [`RowState::SPEC_ROWS`] is the eight the matrix has always printed;
+//! [`RowState::DERIVED_ROWS`] is the three a real menu reaches that the
+//! original matrix left out. One of those three is no longer an omission:
+//! the 2026-10-22 revision prints *Destructive Row (Pressed)* outright,
+//! and this file paints the token it names. The list split itself is left
+//! to the coverage pass that owns it — see [`RowBase`]'s docs.
+//! [`RowState::matrix_row`] names whichever row a cell answers to, so a
+//! test asserts against the spec's own wording rather than a re-labelled
+//! guess.
 //!
 //! # The six traps of G-11, and where each is defused
 //!
@@ -86,8 +91,28 @@
 //! separator are the two exceptions the grid itself specifies: a heading
 //! has no leading box, and a separator has no slots at all.
 //!
+//! # No state fill is synthesised from opacity
+//!
+//! Every fill this resolver emits is either fully opaque or the literal
+//! `transparent` of a row that paints nothing. The destructive pressed
+//! row used to break that: with no pressed token in existence it painted
+//! `status.danger.fill` at 85% alpha, which made the label's contrast a
+//! function of whatever the card happened to be rather than of the fill —
+//! two defensible numbers for one row, and only one of them the screen.
+//! §4.9 now supplies [`status_danger_fill_active`](Palette::status_danger_fill_active),
+//! the constant that carried the opacity is deleted rather than parked,
+//! and the sidecar asserts the opaque-or-nothing invariant across every
+//! cell of every resolver in this crate so a future "just dim it a
+//! little" cannot put the hack back.
+//!
 //! # What is deliberately not here
 //!
+//! * **The destructive focused row's inset outline.** §4.9.2's
+//!   *Destructive Row (Focused)* wants `status.danger.fill` plus a `1px`
+//!   `text.strong` **inset** outline. This crate can draw a `2px`
+//!   **outward** ring and nothing else, so the cell keeps the ordinary
+//!   ring and is left wrong rather than wrong-and-plausible. **INC-27**
+//!   owns the inset-outline capability and that cell.
 //! * **The card.** No perimeter, no 6px card padding, no 224–320px width
 //!   policy. This module renders a row and knows nothing about the surface
 //!   it is stacked into.
@@ -150,8 +175,13 @@ pub const LEADING_SLOT: f32 = size::ICON_MD;
 /// §4.8.1 — the trailing slot's type size, 12px (`type.caption`).
 pub const TRAILING_TYPE: f32 = typography::CAPTION.size;
 
-/// §4.8.1 — a section heading row is 24px tall (`size.hit_target.min`).
-pub const HEADING_HEIGHT: f32 = size::HIT_TARGET_MIN;
+/// §4.8.1 — a section heading row is 24px tall (`size.bar.status`).
+///
+/// The spec assigns this row to the status-bar token, not to the hit-target
+/// floor. The two are the same number but different kinds of thing: a
+/// heading row is not an interactive control and is not *measured against*
+/// a minimum, it is simply built to the height a bar is built to.
+pub const HEADING_HEIGHT: f32 = size::BAR_STATUS;
 
 /// §4.8.1 — a heading's `[4px, 10px]` vertical padding (`space.xs`).
 pub const HEADING_PADDING_Y: f32 = space::XS;
@@ -197,21 +227,6 @@ const NO_RING_WIDTH: f32 = 0.0;
 /// own padding.
 const NO_SPACE: f32 = 0.0;
 
-/// The opacity this file synthesises a destructive row's pressed fill at.
-///
-/// **INC-25 deliberately leaves this here and changes no behaviour.** The
-/// button atom no longer synthesises pressed fills at all: the
-/// 2026-10-22 revision of §3.1 made `accent.fill_active` and
-/// `status.danger.fill_active` real tokens, and
-/// `widget::button::PRESSED_FILL_ALPHA` was deleted along with the hack
-/// it fed. A menu row is not a button and its pressed cell is not §3.1's
-/// — it is the cell §4.9.2 does not print, and moving it onto the real
-/// pressed token means re-measuring this surface's whole G-11 ledger.
-/// That is its own increment. Until then the row paints exactly what it
-/// painted before, with the constant's home moved here so the button atom
-/// could be cleaned up.
-const PRESSED_FILL_ALPHA: f32 = 0.85;
-
 // ---------------------------------------------------------------------------
 // The row state
 // ---------------------------------------------------------------------------
@@ -219,16 +234,19 @@ const PRESSED_FILL_ALPHA: f32 = 0.85;
 /// The mutually exclusive half of a menu row's visual state.
 ///
 /// Seven of these are the §4.9.2 rows that are not the keyboard-focus
-/// cell. The eighth, [`RowBase::DestructivePressed`](Self::DestructivePressed), is
-/// the matrix's blind spot: it prints *Destructive Row (Hovered)* and
-/// nothing for the same row held down, but a real user presses destructive
-/// rows and the cell has to resolve to something. It follows the *shape*
-/// of §3.1's destructive button rule — the danger fill, dimmed while
-/// held — which is the pairing G-11 records at **6.8258**. It does not
-/// yet follow that rule's *token*: §3.1 now names
-/// `status.danger_fill_active` there, and this row keeps its own
-/// `PRESSED_FILL_ALPHA` synthesis until the increment that moves this
-/// surface's G-11 ledger with it.
+/// cell. The eighth, [`RowBase::DestructivePressed`](Self::DestructivePressed),
+/// is the destructive row held down. §4.9.2 as revised on 2026-10-22
+/// prints that row outright against `status.danger.fill_active`, so this
+/// base resolves to the token itself. What stood here before the token
+/// existed — the danger fill painted at 85% opacity — is deleted rather
+/// than kept as a fallback, because a synthesis with no caller is a
+/// synthesis that comes back.
+///
+/// The crate's own [`RowState::SPEC_ROWS`] / [`RowState::DERIVED_ROWS`]
+/// split still files this cell under *derived*, and
+/// [`RowState::matrix_row`] still labels it that way. The revision made
+/// that classification stale; re-classifying it belongs to the coverage
+/// pass, not here, and the paint is correct either way.
 ///
 /// *Keyboard Focused* is absent by design. [`state`] makes focus a ring
 /// drawn *over* a base rather than a competitor with one, so the focused
@@ -247,8 +265,12 @@ pub enum RowBase {
     /// §4.9.2 *Destructive Row (Hovered)* — the danger **fill**, not
     /// the danger text (trap 1, decision **D-5**).
     DestructiveHovered,
-    /// The destructive counterpart of [`RowBase::Pressed`](Self::Pressed), which
-    /// §4.9.2 does not print. See the [enum docs](Self).
+    /// §4.9.2 *Destructive Row (Pressed)* — `status.danger_fill_active`,
+    /// the real pressed token, everything `text.strong`.
+    ///
+    /// The destructive counterpart of [`RowBase::Pressed`](Self::Pressed);
+    /// see the [enum docs](Self) for why it is a base at all, and for the
+    /// classification still filed as derived.
     DestructivePressed,
     /// §4.9.2 *Disabled / Placeholder* — transparent, `text.disabled`.
     Disabled,
@@ -309,7 +331,12 @@ impl RowState {
         focused: false,
     };
 
-    /// The destructive row held down — derived, not printed by the matrix.
+    /// §4.9.2 *Destructive Row (Pressed)* — the destructive row held
+    /// down, on the real `status.danger_fill_active` token.
+    ///
+    /// Filed in [`DERIVED_ROWS`](Self::DERIVED_ROWS) rather than
+    /// [`SPEC_ROWS`](Self::SPEC_ROWS), which the 2026-10-22 revision made
+    /// a stale label. See [`RowBase`] for why it is left that way.
     pub const DESTRUCTIVE_PRESSED: Self = Self {
         base: RowBase::DestructivePressed,
         focused: false,
@@ -317,6 +344,16 @@ impl RowState {
 
     /// A destructive row that is attended *and* holds the ring — the
     /// cell G-11 trap 2 is about.
+    ///
+    /// **Still wrong, and knowingly so.** §4.9.2's *Destructive Row
+    /// (Focused)* asks for `status.danger.fill` plus a **1px
+    /// `text.strong` inset outline**. This crate has no inset-outline
+    /// capability: the only focus affordance it can draw is the 2px
+    /// outward ring [`focus_ring_layer`] produces, which is a different
+    /// shape on a different edge. Rather than pass an outer ring off as
+    /// the inset one the spec asks for, the cell is left exactly as it was
+    /// and recorded here as unimplemented. **INC-27** owns the capability
+    /// and this cell.
     pub const DESTRUCTIVE_FOCUSED: Self = Self {
         base: RowBase::DestructiveHovered,
         focused: true,
@@ -551,13 +588,18 @@ fn base_paint(row: &Row, state: RowState, palette: &Palette) -> BasePaint {
             label: palette.text_strong,
             trailing: palette.text_strong,
         },
-        // Not printed by §4.9.2. Follows the shape of §3.1's destructive
-        // button rule — the danger fill, dimmed while held, same white
-        // label — but keeps this surface's own opacity synthesis rather
-        // than §3.1's `status.danger_fill_active`. See the note on
-        // `PRESSED_FILL_ALPHA` above for why that is a later increment.
+        // §4.9.2 — Destructive Row (Pressed). The real pressed token,
+        // `status.danger.fill_active`, exactly as the 2026-10-22 revision
+        // prints it. This cell used to paint `status.danger.fill` at 85%
+        // opacity because no token existed to paint; that synthesis is
+        // gone, and with it the measurement hazard it carried — a
+        // translucent fill's contrast depends on what it is composited
+        // over, so the same row had two defensible numbers depending on
+        // whether the reader composited or not. Opaque settles it:
+        // `text.strong` on `status.danger_fill_active` is 5.7543 here, as
+        // it is on the button atom.
         RowBase::DestructivePressed => BasePaint {
-            background: with_alpha(palette.status_danger_fill, PRESSED_FILL_ALPHA),
+            background: palette.status_danger_fill_active,
             leading: palette.text_strong,
             label: palette.text_strong,
             trailing: palette.text_strong,
@@ -617,11 +659,6 @@ const fn cursor_for(row: &Row, base: RowBase) -> mouse::Interaction {
     } else {
         mouse::Interaction::None
     }
-}
-
-/// A copy of `fill` with its alpha replaced.
-const fn with_alpha(fill: Color, alpha: f32) -> Color {
-    Color { a: alpha, ..fill }
 }
 
 /// Fold a resolved [`VisualState`] into the [`RowState`] a menu row paints.

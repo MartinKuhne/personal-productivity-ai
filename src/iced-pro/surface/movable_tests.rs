@@ -270,13 +270,26 @@ fn test_the_title_weight_is_permitted_by_the_rung_its_size_comes_from() {
 
 #[test]
 fn test_the_untokenised_numbers_are_declared_constants() {
-    // These four are the token gaps §4.7.1 leaves behind. They are named
+    // These three are the token gaps §4.7.1 leaves behind. They are named
     // here so that a future tokenisation has something to point at rather
-    // than a literal buried in a layout function.
+    // than a literal buried in a layout function. The footer is no longer
+    // one of them — see the test below.
     assert_eq!(CARD_DEFAULT_WIDTH, 680.0);
     assert_eq!(CARD_DEFAULT_HEIGHT, 440.0);
-    assert_eq!(FOOTER_HEIGHT, 22.0);
     assert_eq!(RESIZE_HANDLE_SIZE, 16.0);
+}
+
+/// The footer stopped being a token gap when the 2026-10-22 revision of
+/// §2.2 added `size.bar.status` for exactly this bar. It reads the rung
+/// now, and the rung is 24 — two pixels taller than the literal this
+/// module used to carry.
+#[test]
+fn test_the_footer_height_is_the_status_bar_token_not_a_literal() {
+    assert_eq!(FOOTER_HEIGHT, size::BAR_STATUS);
+    assert_eq!(
+        FOOTER_HEIGHT, 24.0,
+        "the footer is size.bar.status (24px), not the 22px literal it was"
+    );
 }
 
 #[test]
@@ -293,13 +306,18 @@ fn test_chrome_and_viewport_floor_are_derived_from_the_bars() {
         CHROME_HEIGHT,
         TITLE_BAR_HEIGHT + FILTER_BAR_HEIGHT + FOOTER_HEIGHT
     );
-    assert_eq!(CHROME_HEIGHT, 90.0);
+    // 32 + 36 + 24. The 2px over the 90 this test used to pin is the
+    // footer moving off its old 22px literal onto size.bar.status; the
+    // chrome is derived, so it moved by itself and this line is the proof
+    // that it moved by exactly 2 and nothing else did.
+    assert_eq!(CHROME_HEIGHT, 92.0);
     assert_eq!(
         CONTENT_VIEWPORT_MIN,
         CARD_MIN_HEIGHT - CHROME_HEIGHT,
         "the viewport floor is the smallest card minus its chrome"
     );
-    assert_eq!(CONTENT_VIEWPORT_MIN, 170.0);
+    // 260 - 92: the same 2px, arriving on the other side of the ledger.
+    assert_eq!(CONTENT_VIEWPORT_MIN, 168.0);
     assert_eq!(AT_BOTTOM_TOLERANCE, space::XXS);
 }
 

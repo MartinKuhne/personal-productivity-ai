@@ -20,6 +20,8 @@ use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, composite_over, contrast_ratio,
 };
 use crate::token::{shape, size, space, typography};
+use crate::widget::button::{ButtonVariant, resolve_style};
+use crate::widget::text_input::{InputKind, resolve_input_style};
 use iced::mouse;
 use iced::{Color, Rectangle};
 use iced_test::renderer::Renderer as HeadlessRenderer;
@@ -680,20 +682,55 @@ fn test_trap_2_the_ring_on_a_destructive_fill_is_never_the_literal_accent() {
 }
 
 #[test]
-fn test_trap_2_the_destructive_pressed_fill_still_carries_every_slot() {
+fn test_the_destructive_pressed_row_paints_the_real_pressed_token() {
     let p = palette();
     let style = resolve_row_style(&destructive(), RowState::DESTRUCTIVE_PRESSED, &p);
 
-    // The pressed fill is translucent; the audit composites it onto the
-    // card before measuring, because that is the colour that reaches the
-    // screen.
-    let composited = composite_over(style.background, card_surface());
-
-    assert!(
-        contrast_ratio(p.text_strong, composited) >= MIN_TEXT_CONTRAST,
-        "destructive pressed label over the card measures {}",
-        contrast_ratio(p.text_strong, composited)
+    // §4.9.2 (revised 2026-10-22) prints this cell against
+    // `status.danger.fill_active`, and the resolver paints that token
+    // outright. The 85% synthesis this cell used to own is gone, so the
+    // fill is opaque and is not a dim of the hover fill.
+    assert_eq!(style.background, p.status_danger_fill_active);
+    assert_eq!(
+        style.background.a, 1.0,
+        "the pressed fill must be fully opaque — a synthesised alpha makes \
+         this cell's contrast a function of the card underneath it"
     );
+    assert_ne!(
+        style.background, p.status_danger_fill,
+        "pressed must remain distinguishable from hovered"
+    );
+    assert_ne!(
+        style.background, p.status_danger_text,
+        "G-11 trap 1 still applies: the fill token is not the text token"
+    );
+
+    // The pairing the revision buys: 5.7543 under `text.strong`, against
+    // the hover cell's 5.1270.
+    assert!(
+        (contrast_ratio(p.text_strong, style.background) - 5.7543).abs() < 1e-3,
+        "text.strong on status.danger_fill_active drifted off the 5.7543 pairing"
+    );
+    assert!(
+        contrast_ratio(p.text_strong, style.background) >= MIN_TEXT_CONTRAST,
+        "the destructive pressed label must clear the text floor"
+    );
+
+    // Compositing the fill over the card is now a no-op: what reaches the
+    // screen *is* the token. Under the old 85% synthesis these two
+    // differed, and only one of them described the row the user saw.
+    let composited = composite_over(style.background, card_surface());
+    for (channel, got, want) in [
+        ("r", composited.r, style.background.r),
+        ("g", composited.g, style.background.g),
+        ("b", composited.b, style.background.b),
+    ] {
+        assert!(
+            (got - want).abs() < 1e-6,
+            "an opaque fill composites to itself on {channel}: {got} vs {want}"
+        );
+    }
+    assert_eq!(composited.a, 1.0);
 
     // Every slot goes to `text.strong` here — none of them may keep an
     // accent colour that would sit on the danger fill.
@@ -905,6 +942,128 @@ fn test_every_audit_row_recomputes_from_the_pair_it_reports() {
 // ---------------------------------------------------------------------------
 // Geometry comes from the tokens, not from numbers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The crate-wide "no synthesised opacity" gate
+// ---------------------------------------------------------------------------
+
+/// Every [`VisualState`] the state machine can actually produce, derived
+/// by running all 32 [`InteractionInput`] combinations through
+/// [`resolve`] rather than written out by hand.
+///
+/// Deriving it keeps the gate honest: if the state machine gains or loses
+/// a reachable cell, the walk changes with it instead of quietly auditing
+/// a list that no longer matches.
+fn reachable_visual_states() -> Vec<VisualState> {
+    let mut out: Vec<VisualState> = Vec::new();
+    for enabled in [false, true] {
+        for hovered in [false, true] {
+            for pressed in [false, true] {
+                for focused in [false, true] {
+                    for invalid in [false, true] {
+                        let state = resolve(InteractionInput {
+                            enabled,
+                            hovered,
+                            pressed,
+                            focused,
+                            invalid,
+                        });
+                        if !out.contains(&state) {
+                            out.push(state);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// **No state fill anywhere in this crate is synthesised from opacity.**
+///
+/// Before the 2026-10-22 revision there was no token for a pressed CTA or
+/// a pressed destructive row, so both were made by hand: paint the rest
+/// fill at 85% alpha. The revision supplied `accent.fill_active` and
+/// `status.danger.fill_active`; `INC-25` deleted the button atom's copy
+/// of the hack and this increment deleted the menu row's — the last one
+/// in the crate.
+///
+/// This walks every state fill every resolver in the crate can emit and
+/// asserts each is either fully opaque or fully transparent. A fill in
+/// between makes a label's contrast a function of the container it
+/// happens to sit on rather than of the fill, which is exactly how the
+/// old hack came to have two "correct" measurements and only one of them
+/// described the screen.
+///
+/// The modal scrim is deliberately **not** in this set. `color.surface.scrim`
+/// *is* `surface.base` at 55% alpha as a token (§5): the alpha is the
+/// specified rule rather than a synthesised state fill, and
+/// [`crate::surface::zorder`] pins it in its own tests.
+#[test]
+fn test_no_state_fill_anywhere_in_the_crate_is_synthesised_from_opacity() {
+    let p = palette();
+    let states = reachable_visual_states();
+    let mut walked = 0usize;
+    let mut offenders: Vec<String> = Vec::new();
+
+    let mut check = |at: String, fill: Color| {
+        walked += 1;
+        if fill.a != 0.0 && fill.a != 1.0 {
+            offenders.push(format!("{at} emits alpha {:.2}", fill.a));
+        }
+    };
+
+    for cell in RowState::ALL {
+        check(
+            format!("menu row {}", cell.matrix_row()),
+            resolve_row_style(&action(), cell, &p).background,
+        );
+    }
+
+    for variant in [
+        ButtonVariant::Primary,
+        ButtonVariant::Secondary,
+        ButtonVariant::Ghost,
+        ButtonVariant::Danger,
+    ] {
+        for state in &states {
+            check(
+                format!("button {variant:?} / {state:?}"),
+                resolve_style(variant, *state, &p).background,
+            );
+        }
+    }
+
+    for kind in [
+        InputKind::TextEntry,
+        InputKind::Search,
+        InputKind::DropdownTrigger,
+    ] {
+        for state in &states {
+            check(
+                format!("input {kind:?} / {state:?}"),
+                resolve_input_style(kind, *state, &p).background,
+            );
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "opacity-synthesised state fills are banned; found: {offenders:?}"
+    );
+
+    let expected = RowState::ALL.len() + 4 * states.len() + 3 * states.len();
+    assert_eq!(
+        walked, expected,
+        "the gate must walk every cell of every resolver it claims to cover"
+    );
+    assert!(
+        states.len() >= 4,
+        "the walk is only meaningful if the state machine contributes \
+         more than a token few states; got {}",
+        states.len()
+    );
+}
 
 #[test]
 fn test_a_normal_row_is_the_control_height_token() {
