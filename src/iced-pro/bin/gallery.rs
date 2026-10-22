@@ -36,6 +36,15 @@ const FORBIDDEN_ROOT_VARS: [&str; 3] = ["APPDATA", "LOCALAPPDATA", "USERPROFILE"
 /// The filename fragment that marks a FastMD application directory.
 const FASTMD_MARKER: &str = ".fastmd";
 
+/// Is `child` the same path as `root`, or nested beneath it?
+///
+/// Component-wise, not string-wise: `/tmp/iced-pro-gallery-evil` is not
+/// below `/tmp/iced-pro-gallery` even though one string prefixes the
+/// other. Both sides are expected to be normalised already.
+fn at_or_below(child: &str, root: &str) -> bool {
+    child == root || child.starts_with(&format!("{root}/"))
+}
+
 /// Why a path was refused, if it was.
 ///
 /// Case-insensitive and separator-normalised, because the caller may pass
@@ -53,16 +62,39 @@ fn refusal(path: &Path) -> Option<String> {
         ));
     }
 
+    // The temp tree is carved out before the roots are consulted, because
+    // on Windows it lives *inside* `%LOCALAPPDATA%` — refusing everything
+    // below that root would refuse the gallery's own default output. The
+    // carve-out is the temp tree only, not its parent: `%LOCALAPPDATA%`
+    // itself and everything else under it stay refused.
+    let temp = std::env::temp_dir()
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase();
+    if !temp.is_empty() && at_or_below(&normalised, &temp) {
+        return None;
+    }
+
     for variable in FORBIDDEN_ROOT_VARS {
         let Ok(value) = std::env::var(variable) else {
             continue;
         };
-        let root = value.replace('\\', "/").to_lowercase();
+        let root = value
+            .replace('\\', "/")
+            .trim_end_matches('/')
+            .to_lowercase();
         if root.is_empty() {
             continue;
         }
-        if normalised == root {
-            return Some(format!("path is the ${variable} root ({value})"));
+        // Containment, not equality. Refusing only the exact root would let a
+        // subdirectory through, and a subdirectory of `%APPDATA%` is exactly
+        // the case the rule exists to stop — `%APPDATA%\fastmd-snapshot` is
+        // no less the user's config tree than `%APPDATA%` itself.
+        if at_or_below(&normalised, &root) {
+            return Some(format!(
+                "path is at or below the ${variable} root ({value})"
+            ));
         }
     }
 
@@ -176,3 +208,7 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+#[path = "gallery_tests.rs"]
+mod tests;
