@@ -1142,15 +1142,17 @@ const SPEC_COVERAGE: &[Coverage] = &[
         section: "§6.4",
         evidence: &["gallery.rs", "bin/gallery.rs"],
         reason: Some(
-            "91 cells cover the atoms across (Variant x State), the menu row matrix, \
-             the modal, the input dialog, the movable overlay and one z-band frame, \
-             asserting resolved style values plus the ordered quad list. Not cells: \
-             only `Palette::dark()` is snapshotted (no inverted editor palette); only \
-             the standard control height (no compact rung); modal internals carry no \
-             header, banner or footer sub-rectangles; menu separator and glyph \
-             placement, input-dialog per-row bodies, movable trailing actions and the \
-             iced caret are all uncovered. Navbar, Panes and Tabs appear only as \
-             `NotOwned` cells.",
+            "175 cells cover the atoms across (Variant x State) at both the standard \
+             and compact control rungs, in both the dark and the inverted editor \
+             palette, plus the menu row matrix with separator and glyph placement, \
+             the modal with its header, banner and footer sub-rectangles, the input \
+             dialog with its per-row bodies, the movable overlay with its trailing \
+             actions, and one z-band frame — each asserting resolved style values \
+             and the ordered quad list. Missing: Navbar, Panes and Tabs are still \
+             `NotOwned` placeholders rather than real cells, because D-2 leaves their \
+             geometry app-owned. The iced text caret is permanently outside the \
+             recorder's surface rather than deferred: no bounds, fill or token for it \
+             ever crosses the renderer protocol, so this crate cannot snapshot it.",
         ),
         note: None,
     },
