@@ -94,7 +94,7 @@
 //! * **The cascade.** Whether a submenu parent's child is *open* is
 //!   `INC-16`'s state, not the row's. [`MenuRow::submenu_open`] is the
 //!   seam that lets the cascade tell this row to wear the
-//!   [`RowBase::ActiveSubmenuParent`](RowBase::ActiveSubmenuParent) skin; nothing
+//!   [`RowBase::ActiveSubmenuParent`] skin; nothing
 //!   here reads or sets it.
 //! * **Cross-row keyboard navigation.** `Up`/`Down`/`Left`/`Right` are
 //!   `INC-16` (`UIF-CMENU-003`). This row registers with the focus router

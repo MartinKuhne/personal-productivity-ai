@@ -447,11 +447,58 @@ future increments down a dead end.
       compositions (`space::SM + space::XXS`, `space::SM + shape::BORDER_HAIRLINE`).
       Tests: 64 new (515 total).
       **Commit:** `feat(iced-pro): add menu card and row renderer`
-- [ ] **INC-16** `surface/menu/tree.rs` — cascade controller: single-tree mutual
-      exclusion, sibling replacement, parent stays open, keyboard navigation
-      (`Up`/`Down` skip non-interactive rows, `Right` opens + focuses first child,
-      `Left`/`Escape` unwinds to parent) (`UIF-CMENU-002/003`).
-      Tests: full keyboard walk, deep nesting, disabled-row skipping, dismissal.
+- [x] **INC-16** `surface/menu/cascade.rs` — the controller that owns
+      **openness**, the one thing INC-14 deliberately refused.
+      An ordered stack of `OpenCard`s, root first. Each card carries its `Menu`,
+      the `SubmenuTrigger` (parent card + row index it hangs from — exactly what
+      the anchor solver needs) and the row focus sits on. The stack **is** the
+      open path, which buys return-focus for free: each card's `FocusState` trap
+      recorded the focus held when it opened — the parent's submenu row — so
+      `pop_trap` lands the keyboard back on exactly where the user came from at
+      every level.
+      Three spec rules cannot be stated from inside a row, which is why the model
+      was right to refuse `is_open`: mutual exclusion spans trees, sibling
+      replacement is a rule across siblings, and dismissal is tree-wide.
+      **Trap scoping:** each open card registers its navigable rows as its own
+      group and pushes one trap; only the topmost governs, so `Tab` cycles inside
+      the deepest card and cannot reach the background. Teardown order is **pop
+      trap, then unregister group**, so recorded focus is restored while the
+      card's own members can no longer be landed on. `stabilise` re-asserts the
+      invariant after every input.
+      `Tab` is deliberately absent from `MenuKey` — the host drives it through
+      `bridge::tab_task` and the trap confines it. Iced's `focus_next` is never
+      used.
+      **Deviation worth recording:** the cascade owns **cloned** models.
+      `model.rs` exposes no `row_mut`/`kind_mut`, so no consumer can get
+      `&mut Menu` for a nested card — and `Enter` on a checkable three levels
+      down requires exactly that. Rather than edit the forbidden file or leave
+      the rule unreachable, the cascade clones the opened tree in. Contract is
+      documented: `sync()` re-adopts the caller's tree and **overwrites** local
+      changes, so the reported `Activation` must be applied to caller state
+      first. The report is the durable record; the cascade's copy is the display.
+      Edge cases decided (each tested):
+      * a card with **nothing focusable does not open** — its trap would confine an
+        empty scope while focus sat outside on a live control, painting a menu
+        over a focus ring that is no longer theirs;
+      * `Right` on a non-submenu row does nothing; onto an all-disabled submenu
+        is refused **before anything closes**, leaving the parent branch intact;
+      * interacting with an ancestor card collapses the branch below it — the
+        pointer left that branch and the trap stack cannot focus two cards at
+        once. Exception: the row that is the open branch's own trigger is left
+        alone rather than closed and reopened under the cursor;
+      * a row disabled while focused moves focus forward **in place** via
+        slot-preserving fall-forward; nothing focusable left closes the card to
+        its trigger;
+      * closing the whole tree restores the focus the menu took; if nothing was
+        focused before, focus clears rather than being invented;
+      * re-opening the same tree is refused (`AlreadyOpen`) so a caller that
+        re-issues `open` every frame cannot make the menu flicker.
+      **Seam to INC-17:** `Escape` on the deepest card closes that card; on the
+      root it closes the tree and leaves `is_open() == false`. A second `Escape`
+      reports `IgnoredReason::NotOpen` — the cascade has consumed the menu level
+      and is telling the band model its turn has passed. The cascade never
+      reaches into a modal; the refusal is how the key propagates upward.
+      Tests: 76 new (591 crate / 3752 workspace, 6 skipped).
       **Commit:** `feat(iced-pro): add menu cascade and keyboard navigation`
 
 ### M6 — Layered surface hosts (UIF-ZORD-*)

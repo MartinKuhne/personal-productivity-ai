@@ -9,12 +9,22 @@
 //! * [`view`] — the §4.9.2 row state matrix and the focusable menu row on
 //!   the §4.8.1 shared row grid (`INC-15`). The card chrome, the cascade
 //!   and cross-row keyboard navigation are not here — see the module docs.
-//! * `tree` — the cascade controller: mutual exclusion and keyboard
-//!   navigation (`INC-16`).
+//! * [`cascade`] — the cascade controller: which cards are open, mutual
+//!   exclusion, sibling replacement and keyboard navigation (`INC-16`).
+//!   Openness lives there, never in the model.
 
+pub mod cascade;
 pub mod model;
 pub mod view;
 
+pub use cascade::CascadeOutcome;
+pub use cascade::FocusTransition;
+pub use cascade::IgnoredReason;
+pub use cascade::MenuCascade;
+pub use cascade::MenuKey;
+pub use cascade::MenuTreeKind;
+pub use cascade::OpenCard;
+pub use cascade::SubmenuTrigger;
 pub use model::Activation;
 pub use model::ActivationEffect;
 pub use model::ClosePolicy;
