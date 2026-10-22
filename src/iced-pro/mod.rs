@@ -24,6 +24,7 @@ pub mod spec_coverage;
 pub mod state;
 pub mod surface;
 pub mod token;
+pub mod token_lint;
 pub mod widget;
 
 #[cfg(test)]

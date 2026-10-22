@@ -349,12 +349,17 @@ pub const FOOTER_PADDING_VERTICAL: f32 = 0.0;
 /// [`space::MD`].
 pub const FOOTER_PADDING_HORIZONTAL: f32 = space::MD;
 
-/// §4.7.1 — the ◢ resize grip in the bottom-right corner is `16px`.
+/// §4.7.1 — the ◢ resize grip in the bottom-right corner is `16px`, and
+/// §2.2 already assigns that figure to a token: `size.icon.md` is defined
+/// as the optical size for the "standard button, menu leading slot,
+/// **resize grip glyph**, and tree item icon".
 ///
-/// **Named constant, not a token.** `size::ICON_MD` is also 16 but it
-/// documents glyph sizes, and borrowing it would make a drag affordance
-/// read as an icon.
-pub const RESIZE_HANDLE_SIZE: f32 = 16.0;
+/// The re-point changes no rendered value — `size::ICON_MD` *is* `16.0` —
+/// only where the number is permitted to come from. `UIF-PRIN-001` admits
+/// a visual measurement through a token or a registered Surface Geometry
+/// Constant and nothing else, and §2.2 admits this one, so borrowing the
+/// rung is the spec's own answer rather than a loan against it.
+pub const RESIZE_HANDLE_SIZE: f32 = size::ICON_MD;
 
 /// The three bars every card height has to pay for before any content fits:
 /// the title bar, the filter bar and the footer.

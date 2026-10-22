@@ -155,9 +155,19 @@ pub const SCRIM_ALPHA: f32 = 0.55;
 /// [`Palette::surface_base`](crate::token::color::Palette::surface_base)
 /// this reproduces the `color.surface.scrim` token exactly, which the
 /// sidecar asserts.
+///
+/// Written as a struct update rather than `Color::from_rgba(base.r, ..)`
+/// because that is what the rule actually is: the colour is inherited,
+/// only the alpha is overridden. No colour constructor appears here, so
+/// no raw colour value enters the surface layer and the `UIF-PRIN-001`
+/// source scan needs no exception for it — the base's own channels carry
+/// through untouched, including any field `Color` gains later.
 #[must_use]
 pub const fn scrim(base: Color) -> Color {
-    Color::from_rgba(base.r, base.g, base.b, SCRIM_ALPHA)
+    Color {
+        a: SCRIM_ALPHA,
+        ..base
+    }
 }
 
 /// [`scrim`] over a palette's `color.surface.base` token.

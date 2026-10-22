@@ -451,17 +451,21 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-PRIN-001",
         status: Status::Partial,
         section: "§1.1",
-        evidence: &["token/", "gallery::unmapped_colours"],
+        evidence: &["token/", "token_lint.rs", "gallery::unmapped_colours"],
         reason: Some(
             "Token discipline holds by construction — every visual number is declared \
              under `token/` and nothing else — and the gallery gate proves every colour \
-             an audited cell emits names a `Palette` token. Missing: no source-level \
-             check forbids a raw spacing, size, radius or stroke literal in a widget or \
-             surface file; the gate inspects emitted colours, not the crate's text. \
-             G-12 also records values (10px menu-row padding, 9px separator, \
-             16px grip) that exist only as compositions, not named rungs. The footer is \
-              no longer one of them — the revision supplied `size.bar.status` and it \
-              now reads that token.",
+             an audited cell emits names a `Palette` token. The rule is now \
+             machine-checked at the source level: `token_lint` bans colour \
+             constructors and hex literals outside `token/color.rs`, and bans a bare \
+             numeric literal bound to a visually-named `pub const` in a widget or \
+             surface file, excepting zero, ratios, and the fifteen Surface Geometry \
+             Constants §1.1 explicitly carves out. Missing: the scan reads named \
+             constants, so a literal typed inline into a layout expression is still \
+             invisible. Of the G-12 compositions the 16px grip now reads \
+             `size.icon.md`, which the spec's own token table names for the resize \
+             grip glyph; the 10px menu-row padding and 9px separator remain \
+             deliberate token compositions rather than named rungs.",
         ),
         note: None,
     },
@@ -1077,15 +1081,18 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-VER-001",
         status: Status::Partial,
         section: "§6.1",
-        evidence: &["token/contrast.rs", "gallery.rs"],
+        evidence: &["token/contrast.rs", "gallery.rs", "token_lint.rs"],
         reason: Some(
-            "The contrast half is automated: the WCAG 2.1 solver plus the gallery's \
-             four-class judgement (Judged / UnpaintedBackground / CoincidentWithFill / \
-             RestingDivider) over every emitted pair, with worst-case compositing of \
-             translucent fills. Missing: the 'zero raw RGB or hex literals, inline \
-             string literals or magic spacing numbers outside the token definitions' \
-             half has no source-level enforcement — the token-mapping gate inspects the \
-             colours gallery cells emit, not the crate's source text.",
+            "Both halves are now automated. The contrast half is the WCAG 2.1 solver \
+             plus the gallery's four-class judgement (Judged / UnpaintedBackground / \
+             CoincidentWithFill / RestingDivider) over every emitted pair, with \
+             worst-case compositing of translucent fills. The literal half is now a \
+             source-level scan: no colour constructor or hex literal outside \
+             `token/color.rs`, and no bare numeric literal bound to a visually-named \
+             `pub const` in a widget or surface file unless it is zero, a ratio, or a \
+             registered Surface Geometry Constant. Missing: the scan reads named \
+             constants, so a literal typed inline into a layout expression, a private \
+             const, or a struct field is still invisible to it.",
         ),
         note: None,
     },
