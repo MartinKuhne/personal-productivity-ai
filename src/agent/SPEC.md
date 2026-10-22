@@ -6,13 +6,7 @@
 
 ## Scope
 
-This module owns the Local LLM Interface, Tool-Call Agent Loop, and Agent Behaviour. It covers the OpenAI-compatible endpoint client, configuration-driven model routing (chat/embeddings/vision), the agent session manager, prompt builder with context injection (active file, active directory, USER.md), the tool executor with safe/unsafe parallelism, and the quick-tasks menu. The code lives in `src/desktop/src/agent/`.
-
-The agent communicates with the UI exclusively through:
-- **Input**: `std::sync::mpsc::Sender<AgentPrompt>` — the UI submits prompts via `AgentSessionManager::submit_prompt`; a long-lived driver thread receives them on a `Receiver<AgentPrompt>`.
-- **Output**: `Bus<AgentEvent>` (tokio broadcast, cap 8192, `agent/events.rs`) — structured per-session events (`SessionStarted`, `ContentDelta`, `ToolCallStarted`, `ToolResult`, `SessionFinished`, etc.), all tagged with `session_id: Uuid`.
-
-The agent has zero `ui::render` imports. Display formatting (tool-call messages, thinking-split, delegate trace) lives in `ui/render/agent_render.rs`. The UI accumulates content events into an `AgentTranscript` view model (`ui/agent/transcript.rs`).
+This module owns the Local LLM Interface, Tool-Call Agent Loop, and Agent Behaviour
 
 ## Requirements
 
@@ -26,14 +20,14 @@ The agent has zero `ui::render` imports. Display formatting (tool-call messages,
 * [AGENT-030] When the system executes an LLM prompt, shall select the lowest cost model for use_case=chat.
 * [AGENT-007] The configuration shall support a `max_tokens` field (default: 32768) in `config.yaml`. The system shall include this value in all LLM API requests as the `max_tokens` parameter.
 * [AGENT-008] When the bottom panel command entry field is submitted, the system shall process and execute the command through the Local LLM asynchronously without stalling the user interface.
-* [AGENT-009] The LLM Agent shall pffer the LLM tool calls as per `src/tools/SPEC.md`.
+* [AGENT-009] The LLM Agent shall pffer the LLM tool calls as per `src/agent/tools/SPEC.md`.
 * [AGENT-010] The system shall display the LLM's active thinking sequence and render the final Markdown response in real-time inside the Central Panel.
-* [AGENT-011] The system shall print tool call invocations with their significant parameters to the response window. Tool arguments shall be formatted as pretty-printed JSON. **⚠ DRIFT (feature 003): Tool-call display formatting now lives in `ui/render/agent_render.rs` + `ui/agent/transcript.rs`. The agent publishes `ToolCallStarted`/`ToolResult` events; the UI formats them.**
+* [AGENT-011] The system shall print tool call invocations with their significant parameters to the response window. Tool arguments shall be formatted as pretty-printed JSON. 
 * [AGENT-012] Agent Loop: The agent shall execute a tool-use loop: (1) call LLM with tools, (2) execute safe tools in parallel, (3) execute unsafe tools sequentially, (4) append results to conversation, (5) repeat until LLM returns no tool calls or max 10 iterations. Safe tools: search_notes, read_tags, list_notes_by_tag, list_notes, read_note, window_note, web_fetch, web_search, read_yaml_header, search_calendar, get_calendar, get_calendar_item, search_email, get_email_by_id, get_email, search_contact, get_contact, list_csv, query.
 * [AGENT-013] When the user sends an AI prompt and there is a file being displayed in the middle pane, the system shall send the full virtual path of that file (see [`src/app/vfs/SPEC.md`](../app/vfs/SPEC.md)) with the system prompt.
 * [AGENT-014] The directory context for the AI prompt shall be the parent directory of the file selected in the tabs panel when one is selected, otherwise the last directory the user selected from the directory tree. The system shall send the full virtual path of the directory context (see [`src/app/vfs/SPEC.md`](../app/vfs/SPEC.md)) with the system prompt.
 * [AGENT-015] The AI prompt shall display the directory context, relative to the base directory, with the prompt. Example: 'Users\Martin >'
-* [AGENT-016] When displaying tool call arguments, format the JSON. **⚠ DRIFT (feature 003): Tool-call argument formatting is now performed by `ui/render/agent_render.rs` (UI layer), not the agent.**
+* [AGENT-016] When displaying tool call arguments, format the JSON. 
 * [AGENT-017] While an AI prompt is being executed, the system shall display a stop button. When the user clicks the stop button, the system shall abort the prompt processing.
 * [AGENT-018] - duplicate -
 
@@ -42,14 +36,19 @@ The agent has zero `ui::render` imports. Display formatting (tool-call messages,
 * [AGENT-019] On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
 * [AGENT-020] For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
 * [AGENT-021] The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
-* [AGENT-022] Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response. **⚠ DRIFT (feature 003): The agent emits raw `ContentDelta` events; `split_thinking_and_content` (now in `ui/render/agent_render.rs`) is called by `AgentTranscript` (UI layer) to split thinking from content.**
+* [AGENT-022] Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
 * [AGENT-023] The system shall provide a "Format Markdown" quick action that injects a structured prompt with YAML front-matter template. The quick action shall be available from the file context menu in the directory tree (UI-019) and the tab context menu (UI-033); the bottom panel shall not host a separate "Quick Tasks" menu button.
-* [AGENT-024] The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
+* [AGENT-024] - removed -
 * [AGENT-025] The agent loop's parallel/sequential dispatch (per AGENT-012) shall source tool safety classification uniformly from the centralized tool safety manager for all registered tool names.
 * [AGENT-026] When the user closes all open tabs and then sends an AI prompt, the system shall pass the file selected in the directory tree pane (if one is selected) as file-level context to the LLM system prompt. The system shall select the file's parent directory as the directory context. If a directory is selected, only the directory context is sent.
 * [AGENT-031] The system shall provide an optional background worker that indexes Markdown content into a vector collection and answers semantic search queries against it. When enabled, the `vector_search` tool SHALL return chunks from the current index, and the index SHALL stay in sync with file create, update, and delete events.
 * [AGENT-032] When the vector-search feature is enabled, the system SHALL produce vector embeddings for indexing and queries through the configured model with the `embeddings` use case (AGENT-005), preferring the lowest `cost` when multiple models are configured.
 * [AGENT-033] Where no model with the `embeddings` use case is configured, the system SHALL disable vector indexing and SHALL report the reason in the background log.
 
+### Agent sessions
 
-
+* [AGENT-100] When the user first enters an agent prompt, the system SHALL start a new agent session.
+* [AGENT-100] 
+* [AGENT-100] 
+* [AGENT-100] 
+* [AGENT-100] 

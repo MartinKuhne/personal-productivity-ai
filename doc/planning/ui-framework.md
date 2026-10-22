@@ -1,8 +1,8 @@
 # UI Framework & Widget Library — Design Specification
 
 > **Status:** Draft — design specification for review.
-> **Date:** 2026-10-21
-> **Scope:** Visual design language, design token hierarchy, ergonomic geometry, interaction state machines, and accessibility contracts for the desktop widget library and its nine core surfaces: Main Window, Navbar, Multiple Panes, Tabbed Windows, Input Dialogs, Modal Dialogs, Movable Overlay Dialogs, Fixed Menus, and Context Menus.
+> **Date:** 2026-10-22
+> **Scope:** Visual design language, design token hierarchy, ergonomic geometry, interaction state machines, controlled data models, responsive callback contracts, atomic widgets (`UIF-ATOM-*`), composite widget patterns (`UIF-COMP-*`), and the nine core application surfaces: Main Window, Navbar, Multiple Panes, Tabbed Windows, Input Dialogs, Modal Dialogs, Movable Overlay Dialogs, Fixed Menus, and Context Menus.
 
 Statements in this specification that express pattern-based conclusions or broad design principles are prefixed with `[INFERENCE]` or `[GENERALIZATION]` in accordance with the Anti-Hallucination Protocol.
 
@@ -53,8 +53,16 @@ All padding, gaps, margins, and alignment offsets adhere to a base-4px spatial g
 | `size.control.sm` | `28` | Compact controls: navbar buttons, dropdown triggers, inline search action buttons, folder list rows |
 | `size.control.md` | `32` | Standard controls: dialog CTA buttons, single-line text inputs, selectable menu rows, movable overlay title bar |
 | `size.control.lg` | `36` | Primary structural bars: Top Navbar height, Tab Strip height, movable overlay filter bar |
-| `size.indicator.dot` | `6` | Unsaved state dot (`●`) diameter |
+| `size.indicator.dot` | `6` | Unsaved state dot (`●`) and status badge dot diameter |
 | `size.splitter.grab` | `10` | Interactive pointer grab width centered over a `1px` pane split divider (`5px` each side) |
+| `size.checkbox.box` | `16 × 16` | Visual glyph box for `Checkbox` and `Radio` controls (centered inside a `24 × 24` minimum hit target) |
+| `size.switch.track` | `36 × 20` | Outer pill track dimensions for `ToggleSwitch` controls |
+| `size.switch.thumb` | `14 × 14` | Inner sliding thumb diameter for `ToggleSwitch` controls (`3px` inset from track edges) |
+| `size.slider.track_height` | `4` | Horizontal rail thickness for `Slider` controls |
+| `size.slider.thumb` | `16 × 16` | Visual thumb diameter for `Slider` controls (`24 × 24` pointer hit target) |
+| `size.progress.bar_height` | `4` | Linear `ProgressBar` track thickness |
+| `size.spinner.sm` | `14` | Inline button/input busy `Spinner` diameter |
+| `size.spinner.md` | `20` | Panel or dialog loading `Spinner` diameter |
 | `size.icon.sm` | `14` | Inline status, badge, and close `×` glyph optical size |
 | `size.icon.md` | `16` | Standard button, menu leading slot, resize grip glyph, and tree item icon optical size |
 | `size.icon.lg` | `20` | Brand mark and empty-state illustration icon size |
@@ -147,7 +155,24 @@ The color system uses a dark-first elevation model where higher z-layers use pro
 3. **Press-and-Release Activation:**
    * Pointer press inside an enabled control enters the `Pressed` visual state; the command fires **only** when the pointer is released while still inside the control's hit bounds. Releasing outside cancels activation.
 
-### 3.1 Button Variants (`UIF-ATOM-001`)
+#### 3.0.4 Data Binding, Controlled State & Responsive Callback Architecture (`UIF-ATOM-000b`)
+
+[GENERALIZATION] Declarative desktop UI frameworks prevent main-thread stalls and state desynchronization by strictly separating **Controlled Domain Data Models**, **Ephemeral Interaction State**, and **Typed Lifecycle Callbacks**.
+
+1. **Controlled vs. Ephemeral State Separation:**
+   * **Controlled Data Model (`Model`):** Owned by application state and projected into the widget each frame (`value`, `checked`, `selected_ids`, `validation`, `busy`, `disabled`).
+   * **Ephemeral Interaction State (`TransientState`):** Owned by the widget/framework layer (`VisualState`, hover timers, active drag anchor, IME composition buffer, scroll velocity, open flyout state) so pointer and keyboard feedback renders within `< 1 frame` without round-tripping through background subsystems.
+2. **Three-Tier Callback Lifecycle (`Live` vs. `Commit` vs. `Cancel`):**
+   * **`on_change(T)` (Live / Frame-Immediate):** Emitted on every keystroke, thumb scrub pixel, or hover highlight. Used for live validation or previewing; MUST never block or trigger synchronous disk/network I/O.
+   * **`on_commit(T)` (Settled / Intentional):** Emitted **exactly once** when an interaction settles—`Enter` key, focus loss (`blur`), pointer release at the end of a slider/splitter/overlay drag (`on_drag_settle`), or dropdown option selection. Drives persistence, command dispatch, and expensive queries.
+   * **`on_cancel()` (Revert):** Emitted on `Escape` or pointer release outside hit bounds, restoring the pre-gesture snapshot.
+3. **Async & Long-Running Action State (`ActionPending`):**
+   * Action controls (`Button`, `ToggleSwitch`, `MenuRow`, `Modal Primary CTA`) accept an optional `busy: bool` / `progress: Option<f32>` field in their data model. When `busy == true`, the control locks its outer bounding box (`UIF-PRIN-003`), renders an inline `14px` (`size.spinner.sm`) indeterminate spinner, suppresses duplicate `on_activate` emissions, and optionally exposes `on_cancel_request()`.
+4. **Container-Query Responsive Adaptation (`ResponsiveBreakpoint`):**
+   * Widgets adapt layout based on **allocated parent container width** rather than global window dimensions alone:
+     * `Expanded` $\rightarrow$ `Compact`: Secondary labels collapse to icon-only with mandatory hover tooltips (`UIF-ATOM-007`), segmented controls compress horizontal padding from `space.md` (`12px`) to `space.sm` (`8px`), and secondary toolbar items move into an overflow `⋯` menu (`UIF-COMP-008`) with `0px` vertical layout shift.
+
+### 3.1 Action Controls: Buttons, Segmented Controls, Split Buttons & Hyperlinks (`UIF-ATOM-001`)
 
 Geometry: Height `size.control.sm` (`28px`, compact/navbar) or `size.control.md` (`32px`, dialogs/forms); horizontal padding `space.md` (`12px`); icon-to-label gap `space.sm` (`8px`); corner radius `radius.widget` (`4px`). Icon-only buttons enforce `min_width: 28px`, `min_height: 28px` and MUST display a hover tooltip.
 
@@ -158,7 +183,23 @@ Geometry: Height `size.control.sm` (`28px`, compact/navbar) or `size.control.md`
 | **Ghost / Quiet** | BG: `transparent`<br>FG: `text.primary`<br>Border: `1px transparent` | BG: `surface.hover`<br>FG: `text.strong` (`16.24:1`)<br>Border: `1px border.subtle` | BG: `surface.active`<br>FG: `text.strong` (`14.29:1`)<br>Border: `1px border.strong` (`3.24:1`) | Base (`Rest`/`Hovered`/`Pressed`) + `2px accent.border` outer focus ring | BG: `transparent`<br>FG: `text.disabled`<br>Border: `1px transparent` |
 | **Danger** | BG: `surface.raised`<br>FG: `status.danger.text` (`6.18:1`)<br>Border: `1px status.danger.text` (`6.18:1`) | BG: `status.danger.fill`<br>FG: `text.strong` (`5.13:1`)<br>Border: `1px text.strong` (`5.13:1`) | BG: `status.danger.fill_active`<br>FG: `text.strong` (`5.75:1`)<br>Border: `1px status.danger.fill_active` | At `Rest`: + `2px accent.border` ring (`6.26:1`);<br>When `Hovered`/`Pressed`: + `2px text.strong` ring (`5.13:1`–`5.75:1`) | BG: `surface.base`<br>FG: `text.disabled`<br>Border: `1px border.subtle` |
 
-### 3.2 Text Inputs, Search Fields & Dropdown Triggers (`UIF-ATOM-002`)
+* **`UIF-ATOM-001a` — Standard Button Data Model & Callbacks:**
+  * **Data Model:** `ButtonModel { label: Option<String>, leading_icon: Option<Icon>, trailing_icon: Option<Icon>, variant: Primary | Secondary | Ghost | Danger, density: Compact | Standard, busy: bool, disabled: bool, tooltip: Option<String> }`.
+  * **Callbacks:** `on_activate()` (emitted on pointer press-and-release inside hit bounds or `Enter`/`Space` when `disabled == false && busy == false`), `on_cancel_request()` (when `busy == true`).
+* **`UIF-ATOM-001b` — `ToggleButton` & `SegmentedButton` (Single / Multi-Select):**
+  * **Geometry & Visuals:** Joined horizontal strip (`height: 28px` or `32px`, outer radius `radius.widget = 4px`, `1px border.strong` perimeter). Unselected segments render as `Secondary (Rest)`; selected segments render with `BG: surface.active`, `FG: text.strong` (`14.29:1`), `Border: 1px accent.border` (`4.79:1`), and a reserved `14px` leading `✓` icon (`accent.text`, `7.66:1`) for non-color cueing (`UIF-PRIN-005`).
+  * **Data Model:** `SegmentedModel<Id> { segments: Vec<SegmentItem<Id>>, selected: BTreeSet<Id>, mode: SingleSelect | MultiSelect, density: Compact | Standard, disabled: bool }`.
+  * **Callbacks:** `on_selection_change(BTreeSet<Id>)` (`Left`/`Right` arrow keys rove focus across segments; `Space`/`Enter` toggles or selects).
+* **`UIF-ATOM-001c` — `SplitButton` & `DropDownButton`:**
+  * **Geometry & Visuals:** Two-zone control (`height: 28px` or `32px`) combining a primary action zone (`padding: [0, 12px]`) and a `28px`-wide trailing menu chevron zone (`▾`) separated by a `1px border.strong` vertical divider.
+  * **Data Model:** `SplitButtonModel<ActionId> { label: String, leading_icon: Option<Icon>, variant: Primary | Secondary, menu_rows: Vec<MenuRow<ActionId>>, menu_open: bool, busy: bool, disabled: bool }`.
+  * **Callbacks:** `on_primary_activate()` (`Enter`/`Space` on primary zone), `on_menu_toggle(bool)` (chevron click or `Alt+Down`/`Down`), `on_menu_select(ActionId)` (mounts flyout in `Z-Band 2`).
+* **`UIF-ATOM-001d` — `Hyperlink` Control:**
+  * **Geometry & Visuals:** Inline or standalone interactive text control (`min_height: 24px` hit target, `radius.widget = 4px` focus ring). Rest: `FG: accent.text` (`10.66:1` on `base`, `9.49:1` on `overlay`) with `1px` underline; Hovered: `FG: text.strong` with `surface.hover` pill fill; Pressed: `FG: accent.text` on `surface.active`; Disabled: `FG: text.disabled` without underline.
+  * **Data Model:** `HyperlinkModel { label: String, uri: String, external: bool, disabled: bool }`.
+  * **Callbacks:** `on_open(String)`, `on_hover_uri(Option<String>)` (surfaces target URI preview in status bar).
+
+### 3.2 Text Inputs, Search Fields, AutoSuggest & Multi-Line Editors (`UIF-ATOM-002`)
 
 Geometry: Height `size.control.md` (`32px`, or `28px` in compact toolbars); horizontal padding `space.md` (`12px`); radius `radius.widget` (`4px`).
 * **Zero-Shift Trailing Slot Partition (`UIF-ATOM-002b`):** Text inputs, dropdown triggers, and search fields partition their inner width into a text-area rectangle and a fixed trailing slot (`24×24px` for inputs/dropdowns; `28×28px` for search fields; slot priority `invalid > clear > idle`) derived purely from outer control bounds. Changing or hiding the trailing glyph (`🔍` $\leftrightarrow$ `×` $\leftrightarrow$ `⚠`) MUST NOT shift or resize the text layout rectangle by even `1px`.
@@ -171,6 +212,170 @@ Geometry: Height `size.control.md` (`32px`, or `28px` in compact toolbars); hori
 | **Invalid (Unfocused)** | `surface.base` | Text: `text.strong` (`19.90:1`) · Placeholder: `text.muted` · Trailing icon: `status.danger.text` (`6.57:1`) | Border: `2px solid status.danger.text` (`6.57:1`) |
 | **Invalid + Focused** | `surface.base` | Text: `text.strong` (`19.90:1`) · Placeholder: `text.muted` · Trailing icon: `status.danger.text` (`6.57:1`) | Border: `2px solid status.danger.text` (`6.57:1`) + Outer Ring: `2px accent.border` (`6.67:1`) |
 | **Disabled** | `surface.raised` | Text: `text.disabled` · Placeholder: `text.disabled` · Icon: `text.disabled` | Border: `1px solid border.subtle` |
+
+* **`UIF-ATOM-002a` — Single-Line Text Input & Search Field Data Model & Callbacks:**
+  * **Data Model:** `TextInputModel { value: String, placeholder: String, selection: Option<TextRange>, validation: Option<String>, read_only: bool, disabled: bool, clearable: bool }`.
+  * **Callbacks:** `on_change(String)` (every edit/keystroke), `on_commit(String)` (`Enter` or focus loss), `on_clear()` (clicking trailing `×` or pressing `Escape` when non-empty), `on_focus_change(bool)`.
+* **`UIF-ATOM-002c` — `PasswordInput` (Secret Entry):**
+  * **Anatomy & Security Contract:** Masks characters with `•` (`U+2022`) by default, disables clipboard `Copy`/`Cut` while masked, and reserves a `24×24px` trailing reveal toggle button (`👁` / `👁‍🗨`).
+  * **Data Model:** `PasswordInputModel { masked_len: usize, revealed_value: Option<String>, validation: Option<String>, disabled: bool }`.
+  * **Callbacks:** `on_change(SecretInput)`, `on_commit()`, `on_reveal_toggle(bool)` (automatically resets `revealed_value` to masked on focus loss).
+* **`UIF-ATOM-002d` — `AutoSuggestBox` (Search & Command Completion):**
+  * **Anatomy:** Combines a `TextInput` with a `Z-Band 2` completion flyout (`max_height: 240px`, `32px` rows, anchored `4px` below input).
+  * **Data Model:** `AutoSuggestModel<Id> { query: String, suggestions: Vec<SuggestionItem<Id>>, highlighted_index: Option<usize>, busy: bool, disabled: bool }`.
+  * **Callbacks:** `on_query_change(String)`, `on_suggestion_highlight(usize)` (`Down`/`Up` wraps through suggestions without losing input caret), `on_suggestion_commit(Id, CommitSource::{Enter, Click, Tab})`, `on_dismiss()` (`Escape` closes flyout first; second `Escape` clears query per `Escape Rank`).
+* **`UIF-ATOM-002e` — `MultiLineTextArea`:**
+  * **Anatomy:** Scrollable multi-line text well (`min_height: 72px` / 3 lines of `type.body`, padding `space.sm = 8px` vertical, `space.md = 12px` horizontal, `font.family.sans` for prompts or `font.family.mono` for code/markdown). Supports auto-grow between `min_rows` and `max_rows` (such as the Bottom Command Bar `44px..120px` prompt box).
+  * **Data Model:** `TextAreaModel { text: String, cursor: LineCol, selection: Option<TextRange>, min_rows: u16, max_rows: Option<u16>, dirty: bool, validation: Option<ParseDiagnostic>, disabled: bool }`.
+  * **Callbacks:** `on_change(String)`, `on_cursor_change(LineCol)`, `on_submit(String)` (`Ctrl+Enter` / `Cmd+Enter`), `on_undo()`, `on_redo()`.
+
+### 3.3 Boolean & Choice Controls: Checkbox, Radio & ToggleSwitch (`UIF-ATOM-003`)
+
+Geometry: All boolean and choice controls enforce a minimum `24px × 24px` (`size.hit_target.min`) pointer hit target extending across their inline label (`space.sm = 8px` gap between indicator and `13px`/`14px` label).
+* **`Checkbox`:** `16×16px` (`size.checkbox.box`) visual box, `radius.widget` (`4px`), supporting binary (`Unchecked`, `Checked`) and tri-state (`Indeterminate` `−` dash) selection.
+* **`Radio`:** `16×16px` (`size.checkbox.box`) circular indicator (`radius.pill = 999px`) with an `8×8px` centered inner dot (`color.text.strong`) when selected.
+* **`ToggleSwitch`:** `36×20px` (`size.switch.track`) pill track (`radius.pill`) with a `14×14px` (`size.switch.thumb`) sliding thumb (`3px` inset).
+
+| Control & Polarity | Rest (`base = Rest`) | Hovered (`base = Hovered`) | Pressed (`base = Pressed`) | Keyboard Focused (`focused = true`) | Disabled (`base = Disabled`) |
+|---|---|---|---|---|---|
+| **Unchecked / Off** (`Checkbox`, `Radio`, `Switch`) | BG: `surface.code`<br>Border: `1px border.strong` (`4.17:1`)<br>Switch thumb: `text.muted` (`7.04:1`)<br>Label: `text.primary` | BG: `surface.hover`<br>Border: `1px accent.border` (`5.35:1`)<br>Switch thumb: `text.strong` (`16.24:1`)<br>Label: `text.strong` | BG: `surface.active`<br>Border: `1px accent.border` (`4.79:1`)<br>Switch thumb: `text.strong` (`14.29:1`)<br>Label: `text.strong` | Base + `2px accent.border` outer focus ring (`4.79:1`–`6.67:1`) | BG: `surface.raised`<br>Border: `1px border.subtle`<br>Thumb/Label: `text.disabled` |
+| **Checked / Indeterminate / On** (`Checkbox`, `Radio`, `Switch`) | BG: `accent.fill`<br>Border: `1px accent.fill` (`CoincidentWithFill`)<br>Glyph/Thumb: `text.strong` (`4.80:1`)<br>Label: `text.primary` | BG: `accent.fill`<br>Border: `1px text.strong` (`4.80:1`)<br>Glyph/Thumb: `text.strong` (`4.80:1`)<br>Label: `text.strong` | BG: `accent.fill_active`<br>Border: `1px accent.fill_active` (`CoincidentWithFill`)<br>Glyph/Thumb: `text.strong` (`5.66:1`)<br>Label: `text.strong` | Base + `2px text.strong` outer focus ring (`4.80:1`–`5.66:1` vs fill) | BG: `surface.raised`<br>Border: `1px border.subtle`<br>Glyph/Thumb/Label: `text.disabled` |
+
+* **Data Models & Callbacks:**
+  * **`CheckboxModel`:** `{ state: Unchecked | Checked | Indeterminate, label: String, description: Option<String>, disabled: bool }` $\rightarrow$ **`on_toggle(CheckState)`** (`Space` or click; clicking an `Indeterminate` parent checkbox transitions deterministically to `Checked`, or `Unchecked` if all enabled children are already checked).
+  * **`RadioGroupModel<Id>`:** `{ options: Vec<RadioOption<Id>>, selected: Option<Id>, orientation: Vertical | HorizontalWrap, disabled: bool }` $\rightarrow$ **`on_select(Id)`** (`Up`/`Down`/`Left`/`Right` roves focus and selects within the group; re-clicking the already-selected option is a no-op).
+  * **`SwitchModel`:** `{ on: bool, label: String, on_text: Option<String>, off_text: Option<String>, busy: bool, disabled: bool }` $\rightarrow$ **`on_toggle(bool)`** (`Space` or click; immediate live toggle).
+
+### 3.4 Selection Pickers: `ComboBox` / `Select` (`UIF-ATOM-004`)
+
+* **Geometry & Visuals:** Trigger height `size.control.sm` (`28px`, toolbars) or `size.control.md` (`32px`, forms/dialogs); horizontal padding `space.md` (`12px`); trailing `24×24px` slot containing a `14px` `▾` chevron (`text.muted` at rest, `text.strong` on hover/open). Trigger states follow `UIF-ATOM-002`.
+* **Flyout Surface:** Opening the `ComboBox` mounts a `Z-Band 2` (`Escape Rank 3`) menu card (`UIF-FMENU-001`) anchored `4px` (`space.xs`) below (or flipped above per `UIF-CMENU-001`) with `min_width = trigger.width`, `max_height = 280px`, and a `✓` (`accent.text`) in the `16×16px` leading slot of the selected row.
+* **Data Model:** `ComboBoxModel<Id> { items: Vec<SelectOption<Id>>, selected: Option<Id>, placeholder: String, filter_query: Option<String>, open: bool, validation: Option<String>, disabled: bool }`.
+* **Callbacks:** `on_open_change(bool)`, `on_filter_change(String)` (when searchable), `on_commit(Id)` (`Enter`, `Space`, or click on an option row closes the popup, commits `Id`, and restores focus to the trigger).
+
+### 3.5 Continuous & Stepped Range Controls: `Slider` & `NumberBox` (`UIF-ATOM-005`)
+
+* **`Slider` Anatomy & Visual States:**
+  * Track height `size.slider.track_height` (`4px`, `radius.pill`); unfilled rail `surface.active` with `1px border.subtle`; filled active rail `accent.fill` (`3.69:1` vs `overlay`, `4.14:1` vs `base`); thumb `16×16px` (`size.slider.thumb`, `24×24px` hit target) in `text.strong` with `2px accent.border` border (`Hovered`/`Pressed` thumb scales optical ring to `2px text.strong` on `accent.fill`). Optional stepped tick marks (`2×4px` in `border.strong`).
+* **`NumberBox` Anatomy:**
+  * `32px`-high numeric text input (`font.family.mono`, `14px`) with a trailing `28×32px` dual stepper (`▲` / `▼`, each `28×16px` compact button or side-by-side `24×24px` `[−]` `[+]` buttons).
+* **Data Model:** `RangeModel { value: f64, min: f64, max: f64, step: Option<f64>, precision: u8, unit_suffix: Option<String>, validation: Option<String>, disabled: bool }`.
+* **Callbacks:**
+  * **`on_change(f64)` (Live Scrub):** Emitted continuously during pointer thumb drag or stepper hold.
+  * **`on_commit(f64)` (Settled):** Emitted **once** on pointer release, stepper click release, `Enter`, focus loss, or keyboard step (`Left`/`Down` = `-step`, `Right`/`Up` = `+step`, `PageDown`/`PageUp` = `±10 × step`, `Home` = `min`, `End` = `max`).
+  * **`on_cancel()`:** Emitted on `Escape` during an active drag, reverting `value` to the pre-drag value.
+
+### 3.6 Interactive Chips & Filter Pills (`UIF-ATOM-006`)
+
+* **Geometry:** Height `24px` (`size.bar.status`, compact inline) or `28px` (`size.control.sm`, interactive filter bar); horizontal padding `space.sm` (`8px`); gap `space.xs` (`4px`); radius `radius.pill` (`999px`) for status/count pills or `radius.widget` (`4px`) for filter/input chips. Removable chips reserve a `24×24px` trailing `×` hit target.
+* **Visual States:**
+  * **Unselected (`Assist` / `Filter` / `Input`):** `BG: surface.raised`, `FG: text.primary` (`12.38:1`), `Border: 1px border.strong` (`4.24:1`). Hover: `BG: surface.hover`, `FG: text.strong`.
+  * **Selected (`Filter`):** `BG: accent.fill`, `FG: text.strong` (`4.80:1`), `Border: 1px accent.border`, plus a leading `14px` `✓` glyph (`text.strong`).
+* **Data Model:** `ChipModel<Id> { id: Id, label: String, variant: Assist | Filter { selected: bool } | Input { removable: bool }, leading_icon: Option<Icon>, disabled: bool }`.
+* **Callbacks:** `on_activate(Id)`, `on_toggle(Id, bool)` (`Space`/`Enter`/click), `on_remove(Id)` (trailing `×` click or `Delete`/`Backspace` when focused).
+
+### 3.7 Tooltips & Teaching Popovers (`UIF-ATOM-007`)
+
+* **`Tooltip` (Non-Interactive Hover/Focus Hint):**
+  * **Geometry & Visuals:** Max width `280px`; padding `4px 8px` (`space.xs`, `space.sm`); `BG: surface.overlay`; `Border: 1px border.strong` (`4.01:1`); `Radius: radius.widget` (`4px`); text `12px Regular` (`type.caption`, `text.primary` `11.72:1`) with optional trailing shortcut pill (`font.family.mono`, `text.muted` `6.78:1`).
+  * **Behavioral Contract:** Opens after `400ms` hover delay or `0ms` keyboard focus delay, offset `4px` (`space.xs`) from the trigger rect (flipped into viewport via `UIF-CMENU-001`). Pointer-transparent (`HitTest::Ignore`); dismisses immediately on pointer leave, any key press, or `Escape`.
+* **`TeachingPopover` (Interactive Callout / Flyout):**
+  * **Geometry & Visuals:** Width `280px..360px`; padding `12px` (`space.md`); `BG: surface.overlay`; `Border: 1px accent.border` (`5.94:1`); `Radius: radius.card` (`6px`). Contains title (`13px SemiBold`, `text.strong`), body (`13px Regular`, `text.primary`), and optional footer action/dismiss buttons. Mounts in `Z-Band 2` (`Escape Rank 3`).
+* **Data Model & Callbacks:** `PopoverModel<ActionId> { title: String, body: String, primary_action: Option<(String, ActionId)>, placement: PreferredSide, open: bool }` $\rightarrow$ `on_action(ActionId)`, `on_dismiss()`.
+
+### 3.8 Badges & Status Indicators (`UIF-ATOM-008`)
+
+* **Variants & Polarity Rules (per `UIF-TOK-006`):**
+  1. **Dot Badge (`size.indicator.dot = 6×6px`, `radius.pill`):** `accent.border` (unread/active), `status.warning` (unsaved/modified `●`), `status.success` (online/ready), `status.danger.text` (error).
+  2. **Numeric Count Pill (`height: 18px`, `min_width: 18px`, padding `[0, 4px]`, `radius.pill`, `12px SemiBold`):** Counts $> 99$ format as `99+`. Solid emphasis uses `BG: accent.fill` or `status.danger.fill` with `FG: text.strong` (`4.80:1` / `5.13:1`); subtle count uses `BG: surface.active` with `FG: text.strong` (`14.29:1`) and `1px border.subtle`.
+  3. **Semantic Status Chip (`height: 24px`, padding `[0, 8px]`, `radius.pill`, `12px Medium`):** Pairs a mandatory leading glyph (`✓`, `⚠`, `✕`, `●`) with text on `BG: surface.raised` + `1px` border (`status.success` `13.52:1`, `status.warning` `6.10:1`, `status.danger.text` `6.18:1`, `accent.text` `9.96:1`).
+* **Data Model:** `BadgeModel { kind: Dot | Count(u32) | Status { icon: Icon, label: String }, tone: Neutral | Accent | Success | Warning | Danger }`.
+
+### 3.9 Progress Indicators: `ProgressBar` & `Spinner` (`UIF-ATOM-009`)
+
+* **`ProgressBar` (Linear):**
+  * **Geometry & Visuals:** Track height `size.progress.bar_height` (`4px`, `radius.pill`), `BG: surface.active`. Fill bar uses `accent.border` (`4.79:1` vs `surface.active`) when `Active`, `status.warning` (`4.93:1`) when `Paused`, and `status.danger.text` (`4.72:1`) when `Error`. Indeterminate mode animates a `35%`-width sliding segment (or renders a static striped segment when OS `reduced_motion` is enabled).
+* **`Spinner` (Circular Indeterminate / Determinate Ring):**
+  * **Geometry & Visuals:** Diameter `size.spinner.sm` (`14px`, `2px` stroke, inline inside buttons/inputs/navbar) or `size.spinner.md` (`20px`, `2px` stroke, panel/dialog loading); track `border.subtle`, active arc `accent.text` (`9.49:1` on `overlay`) or `text.strong` when inside a solid `Primary`/`Danger` button.
+* **Data Model & Callbacks:** `ProgressModel { mode: Indeterminate | Determinate { completed: u64, total: u64 }, status: Active | Paused | Error, label: Option<String>, cancellable: bool }` $\rightarrow$ `on_cancel()` (via trailing `24×24px` `[×]` stop button when `cancellable == true`).
+
+---
+
+## 3B. Reusable Composite Widget Patterns (`UIF-COMP-*`)
+
+Composite widgets combine atomic controls (`§3`) into standardized layout, data-binding, and keyboard-navigation patterns shared across the nine application surfaces (`§4`).
+
+### 3B.1 `FormField` & Settings Row Pattern (`UIF-COMP-001`)
+
+* **Stacked Form Layout (Dialogs & Forms):**
+  * Header row (`height: 20px`): Field label (`13px Medium`, `text.primary`) + optional required indicator (`*` in `status.danger.text` + tooltip `"Required"`) + optional right-aligned helper hint (`12px Regular`, `text.muted`).
+  * Gap `space.xs` (`4px`) $\rightarrow$ Control slot (`32px`) $\rightarrow$ Gap `space.xs` (`4px`) $\rightarrow$ Reserved caption/validation slot (`height: 16px`, `type.caption`: renders `helper_text` in `text.muted` when valid, or `validation_error` in `status.danger.text` with leading `⚠` glyph when invalid). Total vertical rhythm is fixed so validation transitions cause `0px` layout shift (`UIF-PRIN-003`).
+* **Horizontal Settings Card Row (`SettingsRow`):**
+  * Min height `48px`, padding `12px 16px`, `BG: surface.raised`, `Border: 1px border.subtle`, `Radius: radius.widget` (`4px`). Left column (`Fill`): title (`14px Medium`, `text.strong`) + description (`12px Regular`, `text.muted`). Right column (`Shrink`, min gap `16px`): interactive control (`ToggleSwitch`, `ComboBox`, `NumberBox`, or `Button`).
+* **Data Model:** `FormFieldModel<ControlModel> { id: FieldId, label: String, required: bool, helper_text: Option<String>, error_text: Option<String>, layout: Stacked | HorizontalSplit, control: ControlModel }`.
+
+### 3B.2 `InfoBar` (Inline Banner) & `Toast` / `SnackBar` (Transient Notification) (`UIF-COMP-002`)
+
+* **Geometry & Visuals:**
+  * **`InfoBar` (Docked Inline inside Modals or Panes):** Full container width, min height `36px`, padding `8px 12px`, `BG: surface.raised` (or `surface.overlay`), `Radius: radius.widget` (`4px`), `1px` perimeter border in `border.strong`, plus a `4px` solid left accent stripe and `16px` leading icon colored by severity (`accent.text` for `Info`, `status.success` for `Success`, `status.warning` for `Warning`, `status.danger.text` for `Danger`).
+  * **`Toast` / `SnackBar` (Floating in `Z-Band 1`):** Width `360px` (`size.toast.width`, clamped to `viewport.width - 32px`), anchored bottom-right (`16px` from right edge, `16px` above Bottom Command Bar), stacking upward with `8px` (`space.sm`) gap (max 3 visible).
+* **Usability & Data-Safety Contract:**
+  * `Info` and `Success` toasts may auto-dismiss after `5000ms`; hovering or focusing inside a toast pauses its countdown timer.
+  * `Warning` and `Danger` notifications MUST NEVER auto-dismiss (`auto_dismiss_ms = None`); they require explicit user acknowledgment (`[Dismiss ×]` or action button).
+* **Data Model & Callbacks:** `NotificationModel<ActionId> { id: NotificationId, severity: Info | Success | Warning | Danger, title: String, message: String, action: Option<(String, ActionId)>, dismissible: bool, auto_dismiss_ms: Option<u32> }` $\rightarrow$ `on_action(NotificationId, ActionId)`, `on_dismiss(NotificationId, DismissReason)`.
+
+### 3B.3 `Expander` / Collapsible Disclosure Container (`UIF-COMP-003`)
+
+* **Anatomy:** Header bar (`height: 32px` standard or `28px` compact inside tree/JSON views, padding `[0, 12px]`, `BG: surface.raised`, `Border: 1px border.subtle`, `Radius: radius.widget = 4px`) with a `16×16px` leading chevron (`▸` collapsed / `▾` expanded), title (`13px SemiBold`, `text.primary`), optional summary badge (`BadgeModel`), and optional trailing action button. When `expanded == true`, the body container (`BG: surface.base` or `surface.sunken`, padding `12px`, `1px border.subtle` bottom/side border) mounts immediately below.
+* **Data Model & Callbacks:** `ExpanderModel { id: SectionId, title: String, badge: Option<BadgeModel>, expanded: bool, disabled: bool }` $\rightarrow$ `on_toggle(SectionId, bool)` (`Enter`/`Space` or click toggles; `Right` arrow expands; `Left` arrow collapses).
+
+### 3B.4 `ScrollView` & Annotated Scrollbar Contract (`UIF-COMP-004`)
+
+* **Geometry & Visuals:** Scrollbar track width `8px` (`space.sm`) at rest, expanding to `10px` (`size.splitter.grab`) on track hover/drag; thumb `radius.pill`, min length `24px` (`size.hit_target.min`), colored `border.strong` at rest/hover (`4.01:1`–`4.51:1`) and `accent.border` while dragging. Optional `2px` (`space.2xs`) tick annotations along the vertical track mark search hits, headings, or diagnostic errors.
+* **Data Model:** `ScrollViewModel { content_size: Size, viewport_size: Size, offset: Point, follow_tail: bool, annotations: Vec<ScrollTick> }`.
+* **Callbacks:**
+  * **`on_scroll(ScrollMetrics)`:** Emitted on wheel, trackpad pan, scrollbar drag, or keyboard scroll (`Up`/`Down`/`PageUp`/`PageDown`/`Home`/`End`), including `at_bottom_within_2px: bool` for `UIF-MOV-004` stream auto-scroll.
+  * **`on_reach_end()`:** Emitted when scroll offset enters the final `64px` of content to trigger non-blocking lazy pagination.
+
+### 3B.5 `Card` & `ListTile` (`UIF-COMP-005`)
+
+* **`Card` Container:** Grouping surface (`BG: surface.raised`, `Border: 1px border.subtle` at rest or `1px border.strong` when interactive/elevated, `Radius: radius.card = 6px`, inner padding `space.lg = 16px`).
+* **`ListTile` (3-Slot Row):** Single-line (`height: 32px`, `size.control.md`) or two-line (`height: 44px`, padding `[4px, 12px]`, gap `8px`):
+  * **Leading Slot (`16×16px` or `24×24px`):** Icon, `Checkbox`, or `Radio`.
+  * **Center Slot (`Fill`):** Primary title (`13px Regular`/`Medium`, `text.primary`, single-line truncated with `…`) + optional subtitle (`12px Regular`, `text.muted`).
+  * **Trailing Slot (`Shrink`):** Metadata badge, shortcut hint, or action icon buttons (`24×24px` hit targets).
+* **Data Model & Callbacks:** `ListTileModel<Id> { id: Id, title: String, subtitle: Option<String>, leading: Option<LeadingSlot>, trailing: Option<TrailingSlot>, selected: bool, disabled: bool }` $\rightarrow$ `on_select(Id)`, `on_activate(Id)`, `on_context_menu(Id, Point)`.
+
+### 3B.6 `VirtualList` & `TreeView` (`UIF-COMP-006`)
+
+* **Geometry & Visuals:** Virtualized row viewport rendering only visible rows (`height: 24px` compact or `28px` standard, `indentation: depth × 16px` / `space.lg`). Expandable folder/parent nodes reserve a `24×24px` leading disclosure chevron (`▸` / `▾`). Selection visual states obey `UIF-PANE-003` (`BG: accent.fill`, `FG: text.strong` `4.80:1`, `3px accent.border` left bar).
+* **Data Model:**
+  * `TreeNodeModel<Id> { id: Id, parent_id: Option<Id>, depth: u16, label: String, icon: Icon, expandable: bool, expanded: bool, special_warning: bool, disabled: bool }`.
+  * `TreeViewModel<Id> { visible_nodes: Vec<TreeNodeModel<Id>>, selected_ids: BTreeSet<Id>, anchor_id: Option<Id>, focused_id: Option<Id>, selection_mode: Single | ExtendedMulti, filter_query: String }`.
+* **Responsive Callbacks & Keyboard Choreography:**
+  * **`on_selection_change(BTreeSet<Id>)`:** `Click` selects single; `Ctrl+Click` (or `Space`) toggles item in `ExtendedMulti`; `Shift+Click` (or `Shift+Up`/`Shift+Down`) selects contiguous range from `anchor_id`.
+  * **`on_activate(Id)`:** Emitted on double-click or `Enter` on focused row.
+  * **`on_expand_toggle(Id, bool)`:** Chevron click, `Right` arrow (expands collapsed node, or moves focus to first child if already expanded), `Left` arrow (collapses expanded node, or moves focus to parent node if already collapsed).
+  * **`on_context_menu(BTreeSet<Id>, Point)`:** Right-click or `Shift+F10` / `ContextMenu` key (if right-clicked row is outside `selected_ids`, selection resets to that single row before opening the `Z-Band 2` menu; if inside `selected_ids`, preserves multi-selection).
+
+### 3B.7 `DataTable` / Structured Grid (`UIF-COMP-007`)
+
+* **Geometry & Visuals:**
+  * **Sticky Header Row (`height: 32px`, `BG: surface.raised`, bottom border `1px border.strong`):** Column titles (`12px SemiBold`, `text.strong`) with optional sort indicator (`▲` / `▼` in `accent.text`) and a `10px` (`size.splitter.grab`) column-resize handle centered on each `1px border.subtle` vertical column divider.
+  * **Body Rows (`min_height: 32px`, padding `[4px, 12px]`, bottom border `1px border.subtle`):** Alternating or uniform `surface.base` / `surface.raised` rows; `Hovered` row uses `surface.hover`; `Selected` row uses `surface.active` + `1px accent.border`.
+* **Data Model:** `DataTableModel<RowId, ColId> { columns: Vec<ColumnDef<ColId>>, rows: Vec<TableRow<RowId>>, sort: Option<(ColId, SortDirection)>, selected_rows: BTreeSet<RowId>, focused_cell: Option<(RowId, ColId)> }`.
+* **Callbacks:**
+  * **`on_sort_change(ColId, SortDirection)`:** Clicking a sortable header or pressing `Enter`/`Space` when header cell is focused cycles `Ascending -> Descending -> None`.
+  * **`on_column_resize_change(ColId, f32)`** (live drag) and **`on_column_resize_commit(ColId, f32)`** (settle on release, respecting `col.min_width`).
+  * **`on_row_select(BTreeSet<RowId>)`**, **`on_cell_action(RowId, ColId, CellAction)`** (Arrow keys navigate across cells; `Tab` traverses interactive controls embedded inside cells).
+
+### 3B.8 `BreadcrumbBar` & Responsive Overflow Toolbar (`UIF-COMP-008`)
+
+* **`BreadcrumbBar`:**
+  * **Geometry & Responsive Elision:** Horizontal path bar (`height: 28px`, gap `4px`, separator `/` or `›` in `text.muted`). Each segment is a `Ghost` button (`height: 24px`, padding `[0, 6px]`, `13px Regular text.muted` for ancestors, `13px SemiBold text.strong` for the terminal active item). When total segment width exceeds allocated container width, leading/middle ancestor segments collapse into a single `[…]` (`28×24px`) trigger button that opens a `Z-Band 2` dropdown menu of elided ancestors while keeping the root and terminal segments visible.
+  * **Data Model & Callbacks:** `BreadcrumbModel<Id> { segments: Vec<BreadcrumbSegment<Id>>, elided_Popup_open: bool }` $\rightarrow$ `on_segment_activate(Id)`, `on_overflow_toggle(bool)`.
+* **`OverflowToolbar` (`CommandBar` Pattern):**
+  * **Container-Query Overflow:** Primary action controls measure against available toolbar width; any secondary control whose right edge would exceed `available_width - 36px` moves deterministically into a trailing `[⋯]` (`28×28px`) overflow menu button (`Z-Band 2`) without wrapping to a second line or shifting toolbar height.
 
 ---
 
@@ -493,21 +698,21 @@ To prevent cognitive overload in long action lists, context menus organize items
 
 ## 5. Unified Z-Order & Layering Architecture (`UIF-ZORD-*`)
 
-To guarantee predictable hit-testing, visual elevation, and keyboard routing across all nine surfaces, the window separates **Visual Elevation (`Z-Band`, 0..3)** from **Keyboard `Escape` Unwind Priority (`Escape Rank`, 3..0)**:
+To guarantee predictable hit-testing, visual elevation, and keyboard routing across all atomic popups, composite patterns, and the nine core surfaces, the window separates **Visual Elevation (`Z-Band`, 0..3)** from **Keyboard `Escape` Unwind Priority (`Escape Rank`, 3..0)**:
 
 ```text
-Z-Band 3 (Top Visual) : Blocking Modal & Input Dialogs  ──► Dimmed Scrim (0.55 alpha) + Focus Trap (Escape Rank 2)
-Z-Band 2              : Fixed & Context Menu Trees      ──► Transparent Click-Away Blocker + Roving Focus (Escape Rank 3 — unwinds first!)
-Z-Band 1              : Movable Utility Overlays        ──► Modeless Pass-Through Outside Card + Z-Promotion (Escape Rank 1 when focused)
-Z-Band 0 (Base)       : Main Window 3-Band Workspace    ──► Top Navbar + Middle Multi-Panes (with Tabs) + Bottom Bar (Escape Rank 0)
+Z-Band 3 (Top Visual) : Blocking Modal & Input Dialogs + Non-Interactive Tooltips ──► Dimmed Scrim (0.55 alpha) + Focus Trap (Escape Rank 2)
+Z-Band 2              : Menus, ComboBoxes, AutoSuggest & Teaching Popovers       ──► Transparent Click-Away Blocker + Roving Focus (Escape Rank 3 — unwinds first!)
+Z-Band 1              : Movable Utility Overlays & Floating Toast Stack          ──► Modeless Pass-Through Outside Card + Z-Promotion (Escape Rank 1 when focused)
+Z-Band 0 (Base)       : Main Window 3-Band Workspace                             ──► Top Navbar + Middle Multi-Panes (with Tabs) + Bottom Bar (Escape Rank 0)
 ```
 
-| Z-Band | Escape Rank | Surface Types | Backdrop Behaviour | Pointer Routing | Keyboard Routing |
+| Z-Band | Escape Rank | Surface & Widget Types | Backdrop Behaviour | Pointer Routing | Keyboard Routing |
 |---|---|---|---|---|---|
-| **Band 0: Workspace** | `Rank 0` (Last) | Main Window, Navbar, Multiple Panes, Tabbed Windows | None (`surface.base`) | Direct interaction with panes, splitters, tabs, and trees | Standard wrapping `Tab` / `Shift+Tab` traversal across enabled workspace controls |
-| **Band 1: Utility Overlays** | `Rank 1` (If focused) | Movable Overlay Dialogs (`Logs`, `Agent Debug`) | None (pass-through) | Captures events inside card bounds; promotes clicked card to top of Band 1; passes outside clicks to Band 0 | Focuses card inputs when clicked; `Escape` unwinds **only** when focus is inside the overlay |
-| **Band 2: Menus** | `Rank 3` (First) | Fixed Menus (`☰`), Context Menus + Nested Submenus | Full-window transparent click-away catcher | Captures clicks inside any open parent/child menu card; outside clicks dismiss all Band 2 menus | Captures `Up`/`Down`/`Left`/`Right`/`Enter`/`Space`/`Tab` and **always consumes `Escape` first** (deepest submenu $\rightarrow$ root menu) |
-| **Band 3: Modals** | `Rank 2` (Second) | Input Dialogs, Modal Dialogs (`Editor`, `Tools`, `Batch`, `About`) | Full-window dimmed scrim (`RGBA(9,9,11,0.55)`) | Blocks lower bands completely; absorbs clicks inside card; scrim click dismisses only if `dirty == false` | Traps `Tab`/`Shift+Tab`, `Enter`, and `Escape` strictly inside topmost modal (after any open Band 2 menu is unwound) |
+| **Band 0: Workspace** | `Rank 0` (Last) | Main Window, Navbar, Multiple Panes, Tabbed Windows, `TreeView`, `DataTable`, `FormField`, `InfoBar`, `Expander` | None (`surface.base`) | Direct interaction with panes, splitters, tabs, trees, and tables | Standard wrapping `Tab` / `Shift+Tab` and roving arrow traversal across enabled workspace controls |
+| **Band 1: Utility Overlays & Toasts** | `Rank 1` (If focused) | Movable Overlay Dialogs (`Logs`, `Agent Debug`), `Toast` / `SnackBar` notification stack | None (pass-through) | Captures events inside card/toast bounds; promotes clicked overlay card to top of Band 1; passes outside clicks to Band 0 | Focuses card/toast controls when clicked; hovering/focusing a Toast pauses auto-dismiss; `Escape` unwinds **only** when focus is inside the overlay |
+| **Band 2: Menus & Flyouts** | `Rank 3` (First) | Fixed Menus (`☰`), Context Menus + Nested Submenus, `ComboBox` flyouts, `SplitButton` menus, `AutoSuggestBox` completion lists, `BreadcrumbBar` / `OverflowToolbar` menus, `TeachingPopover` | Full-window transparent click-away catcher | Single-flyout mutual exclusion; captures clicks inside open card(s); outside clicks dismiss Band 2 flyouts | Captures `Up`/`Down`/`Left`/`Right`/`Enter`/`Space`/`Tab` and **always consumes `Escape` first** (deepest submenu/flyout $\rightarrow$ root menu) |
+| **Band 3: Modals & Tooltips** | `Rank 2` (Second) | Input Dialogs, Modal Dialogs (`Editor`, `Tools`, `Batch`, `About`), plus non-interactive hover `Tooltip` overlay (`HitTest::Ignore`) | Full-window dimmed scrim (`RGBA(9,9,11,0.55)`) for modals | Modals block lower bands completely and absorb interior clicks; scrim click dismisses only if `dirty == false`; `Tooltip` never intercepts pointer events | Traps `Tab`/`Shift+Tab`, `Enter`, and `Escape` strictly inside topmost modal (after any open Band 2 menu/flyout mounted inside or above the modal is unwound) |
 
 ---
 
@@ -517,12 +722,15 @@ An AI coding agent implementing or auditing widgets against this specification M
 
 1. **Token & Contrast Gate (`UIF-VER-001`):**
    * Zero raw RGB/hex color literals, inline string literals, or magic spacing numbers outside the central token definitions (`§2`) and named surface geometry constants (`§4`).
-   * Automated WCAG 2.1 luminance contrast assertions verify every reachable `(Variant × VisualState)` pairing across the four stroke/fill categories (`Judged`, `CoincidentWithFill`, `UnpaintedBackground`, `RestingDivider`), confirming $\ge 4.50:1$ for all active text pairings (including `text.strong` on `accent.fill` and `status.danger.fill`), `[4.00:1, 6.00:1]` for `text.disabled`, and $\ge 3.00:1$ for all `Judged` active borders, solid fills, and adaptive focus rings.
-2. **Geometry & Hit-Target Gate (`UIF-VER-002`):**
-   * Every interactive element measures at least `24px × 24px` in hit bounds; all text measures at least `12px`; splitters provide a `10px` grab zone; text inputs and input dialogs guarantee `0px` layout shift across trailing-slot and validation-error state changes.
-   * Pure boundary solver property tests verify menu quadrant flipping, tie-breaking, input dialog cursor clamping, tab strip overflow scrolling, and movable overlay incremental title-bar clamping (with zero drag-overshoot dead zone) across extreme viewport sizes (down to `640 × 480px`) and non-finite inputs.
-3. **Interaction & State-Machine Gate (`UIF-VER-003`):**
-   * Headless state and interaction tests verify the full 32-combination `InteractionInput` truth table (resolving to the 9 reachable `VisualState`s with total `Disabled` dominance), press-and-release activation, card-interior click absorption on Input/Modal dialogs, dirty-state close guards (`dirty` vs. `error`), focus trap containment and restoration, and `Escape` unwinding in strict `Escape Rank` order (`Menu [Rank 3] -> Modal [Rank 2] -> Focused Movable Overlay [Rank 1] -> Workspace [Rank 0]`).
+   * Automated WCAG 2.1 luminance contrast assertions verify every reachable `(Variant × VisualState)` pairing across the four stroke/fill categories (`Judged`, `CoincidentWithFill`, `UnpaintedBackground`, `RestingDivider`), confirming $\ge 4.50:1$ for all active text pairings (including `text.strong` on `accent.fill` and `status.danger.fill`), `[4.00:1, 6.00:1]` for `text.disabled`, and $\ge 3.00:1$ for all `Judged` active borders, solid fills, `Checkbox`/`Radio`/`Switch` states, `Slider` tracks/thumbs, and adaptive focus rings.
+2. **Geometry, Hit-Target & Responsive Container Gate (`UIF-VER-002`):**
+   * Every interactive element measures at least `24px × 24px` in hit bounds; all text measures at least `12px`; splitters and table column dividers provide a `10px` grab zone; text inputs, `FormField` wrappers, and input dialogs guarantee `0px` layout shift across trailing-slot, `ActionPending` (`busy`), and validation-error state changes.
+   * Pure boundary solver property tests verify menu/flyout quadrant flipping, tie-breaking, input dialog cursor clamping, tab strip overflow scrolling, `BreadcrumbBar` middle-ancestor elision (`[…]`), `OverflowToolbar` (`[⋯]`) container-width collapse, and movable overlay incremental title-bar clamping (with zero drag-overshoot dead zone) across extreme viewport sizes (down to `640 × 480px`) and non-finite inputs.
+3. **Interaction, State-Machine & Callback Lifecycle Gate (`UIF-VER-003`):**
+   * Headless state and interaction tests verify:
+     * The full 32-combination `InteractionInput` truth table (resolving to the 9 reachable `VisualState`s with total `Disabled` dominance) and press-and-release activation.
+     * Strict **`on_change` (live) vs. `on_commit` (settled) vs. `on_cancel` (revert)** separation across `TextInput`, `PasswordInput`, `AutoSuggestBox`, `ComboBox`, `Slider`, `NumberBox`, `DataTable` column resize, and `MovableOverlay` drag/resize (verifying `on_commit` fires **exactly once** on settle/submit).
+     * Keyboard navigation contracts for `SegmentedButton`, `Checkbox` (including tri-state `Indeterminate`), roving `RadioGroup`, `TreeView` (`Up`/`Down`/`Left`/`Right` + `Ctrl`/`Shift` multi-select), `DataTable` sort/cell traversal, `Toast` hover-pause and non-auto-dismissing `Warning`/`Danger` severity rules, card-interior click absorption, dirty-state close guards (`dirty` vs. `error`), focus trap containment/restoration, and `Escape Rank` unwinding (`Menu/Flyout [Rank 3] -> Modal [Rank 2] -> Focused Movable Overlay [Rank 1] -> Workspace [Rank 0]`).
 4. **Visual & Layer Snapshot Gate (`UIF-VER-004`):**
-   * Deterministic headless snapshots verify both **resolved semantic token assignments** and **ordered draw-layer quad lists (`Layer { bounds, fill, border }`)** across all 9 reachable states for every atomic widget (`Button`, `Text Input / Search / Dropdown`) and every composite surface (`Navbar`, `Panes`, `Tabs`, `Input Dialog`, `Modal Dialog`, `Movable Overlay`, `Fixed Menu`, `Context Menu`).
+   * Deterministic headless snapshots verify both **resolved semantic token assignments** and **ordered draw-layer quad lists (`Layer { bounds, fill, border }`)** across all 9 reachable states for every atomic widget (`§3.1–§3.9`), every composite widget pattern (`§3B.1–§3B.8`), and every core surface (`§4.1–§4.9`).
 
