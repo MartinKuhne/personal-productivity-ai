@@ -1,6 +1,5 @@
 //! Orchestrator unit tests — error and corner-case paths for the
-//! app-level orchestrator dispatchers that previously had zero direct
-//! coverage (close-test-gaps P2).
+//! app-level orchestrator dispatchers.
 
 use super::*;
 use crate::background::LogCategory;
@@ -8,31 +7,52 @@ use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+use crate::bus::events::directory::{DirectoryChanged, DirectoryChangedKind};
+use crate::bus::events::file::{FileChanged, FileChangedKind};
+use crate::bus::events::typed::{FsEvent, McpAuthEvent, ProcessEvent};
 use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, Tabs, TextBuffer};
 use crate::workspace::Tags;
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
+use crate::workspace::watcher::Workspace;
 use arc_swap::ArcSwap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Build an isolated `AppOrchestrator` with fresh buses and a real
 /// (idle) `AgentSession` driver thread.
 fn harness() -> AppOrchestrator {
-    let file_event_bus: Bus<FileEvent> = Bus::new();
+    let file_event_bus: Bus<FileChanged> = Bus::new();
+    let dir_event_bus: Bus<DirectoryChanged> = Bus::new();
     let agent_event_bus: Bus<SeamAgentEvent> = Bus::new();
-    let (bg_tx_raw, bg_rx): (_, Receiver<BackgroundEvent>) = channel();
-    let tx = BackgroundEventSender::new(bg_tx_raw);
+    // Use broadcast channel for tx (matching production BackgroundEventSender)
+    let (bg_tx, bg_rx_broadcast) = tokio::sync::broadcast::channel(16);
+    let tx = BackgroundEventSender::new(bg_tx);
+    // Use std mpsc for rx (orchestrator expects this type)
+    // Bridge: forward from broadcast receiver to std mpsc sender
+    let (bg_tx_std, bg_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime for bridge");
+        rt.block_on(async move {
+            let mut rx = bg_rx_broadcast;
+            while let Ok(event) = rx.recv().await {
+                if bg_tx_std.send(event).is_err() {
+                    break;
+                }
+            }
+        });
+    });
 
     let file_event_reader = file_event_bus.subscribe();
-    let file_processor = FileEventProcessor::new(file_event_bus.subscribe());
-    let directory_tracker = DirectoryTracker::new(file_event_bus.subscribe());
+    // The projection's file state is applied through the orchestrator's own
+    // reader (`apply_file_changed`), matching the production wiring; the
+    // directory reader is the drain for the dir bus.
+    let workspace = Workspace::new(None, Some(dir_event_bus.subscribe()));
     let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
 
     let tool_context = Arc::new(ArcSwap::from_pointee(crate::agent::AgentToolContext::new(
@@ -55,13 +75,14 @@ fn harness() -> AppOrchestrator {
     AppOrchestrator {
         content_libraries: Vec::new(),
         rx: bg_rx,
+        user_file_operation_worker: crate::background::UserFileOperationWorker::spawn(tx.clone()),
         tx,
         file_event_bus,
+        dir_event_bus,
         file_event_reader: Some(file_event_reader),
-        file_processor,
+        workspace,
         pdf_backing_tracker,
         tags: Tags::new(),
-        directory_tracker,
         selection: FileSelection::new(),
         tabs: Tabs::new(),
         _watcher: None,
@@ -74,6 +95,7 @@ fn harness() -> AppOrchestrator {
         config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
         config_reader: None,
         pending_file_load: None,
+        pending_editor_open: None,
         finished_watcher_slot: Arc::new(Mutex::new(None)),
         tool_context,
         agent_event_bus,
@@ -83,6 +105,32 @@ fn harness() -> AppOrchestrator {
         agent_panel_state: AgentPanelState::new(),
         user_command_bus: crate::bus::core::Bus::new(),
         user_command_reader: None,
+    }
+}
+
+fn finish_user_file_operation(orch: &mut AppOrchestrator) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(!timeout.is_zero(), "file operation completion timed out");
+        match orch.rx.recv_timeout(timeout) {
+            Ok(crate::bus::events::typed::BackgroundEvent::Process(
+                event @ crate::bus::events::typed::ProcessEvent::UserFileOperationCompleted(_),
+            )) => {
+                orch.handle_process_event(event);
+                return;
+            }
+            Ok(crate::bus::events::typed::BackgroundEvent::Process(event)) => {
+                orch.handle_process_event(event);
+            }
+            Ok(_) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("file operation completion timed out")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("background channel disconnected before file operation completed")
+            }
+        }
     }
 }
 
@@ -106,16 +154,246 @@ fn process_file_events_discovered_filters_workspace_files() {
     let png = PathBuf::from("/lib/img.png");
     let parent = PathBuf::from("/lib");
     orch.file_event_bus
-        .publish(FileEvent::discovered(vec![md.clone(), png.clone()]));
+        .publish(FileChanged::discovered(vec![md.clone(), png.clone()]));
 
     let changed = orch.process_file_events();
 
     assert!(changed, "process_file_events should report change");
-    assert!(orch.file_processor.contains_file(&md));
-    assert!(!orch.file_processor.contains_file(&png));
+    assert!(orch.workspace.contains_file(&md));
+    assert!(!orch.workspace.contains_file(&png));
     assert!(orch.selection.tree_dirty);
     // Parent directory of the discovered workspace file is tracked.
-    assert!(orch.directory_tracker.contains(&parent));
+    assert!(orch.workspace.contains_dir(&parent));
+}
+
+#[test]
+fn apply_directory_changed_cascades_delete_to_descendants() {
+    // [REQ-320..322] A `[DirectoryChanged][Deleted]` must remove the
+    // directory **and all descendants** from the workspace projection,
+    // leaving sibling directories untouched.
+    let mut orch = harness();
+    let root = PathBuf::from("/lib/docs");
+    let child = root.join("sub");
+    let other = PathBuf::from("/lib/other");
+    let descendant_file = child.join("note.md");
+    orch.workspace.add_dir(root.clone());
+    orch.workspace.add_dir(child.clone());
+    orch.workspace.add_dir(other.clone());
+    orch.workspace.add_file(descendant_file.clone());
+    orch.tabs.open_tab(descendant_file.clone());
+    orch.tags
+        .add_tags(descendant_file.clone(), vec!["temporary".to_string()]);
+    orch.selection.tree_dirty = false;
+
+    let removed = DirectoryChanged {
+        path: root.clone(),
+        kind: DirectoryChangedKind::Deleted,
+    };
+    orch.apply_directory_changed(removed.clone());
+    // Applying the same event again (a duplicate delivery, e.g. from a
+    // second subscriber) must be a no-op, not a double cascade error.
+    orch.apply_directory_changed(removed);
+
+    assert!(!orch.workspace.contains_dir(&root));
+    assert!(!orch.workspace.contains_dir(&child));
+    assert!(orch.workspace.contains_dir(&other));
+    assert!(!orch.workspace.contains_file(&descendant_file));
+    assert!(!orch.tabs.tabs.contains(&descendant_file));
+    assert!(!orch.tags.file_tags().contains_key(&descendant_file));
+    assert!(!orch.tags.all_tags().contains("temporary"));
+    assert!(orch.selection.tree_dirty);
+}
+
+#[test]
+fn renaming_directory_publishes_only_directory_events() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let old_path = temp.path().join("old-name");
+    let new_path = temp.path().join("new-name");
+    std::fs::create_dir(&old_path).unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ConfirmRename {
+            path: old_path.clone(),
+            new_name: "new-name".to_string(),
+        },
+    );
+
+    assert!(std::fs::metadata(&new_path).unwrap().is_dir());
+    assert!(file_reader.try_recv().is_err());
+    let deleted = dir_reader.try_recv().unwrap();
+    let added = dir_reader.try_recv().unwrap();
+    assert_eq!(deleted.path, old_path);
+    assert_eq!(deleted.kind, DirectoryChangedKind::Deleted);
+    assert_eq!(added.path, new_path);
+    assert_eq!(added.kind, DirectoryChangedKind::Added);
+}
+
+#[test]
+fn moving_directory_publishes_only_directory_events() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let old_path = temp.path().join("old-name");
+    let destination = temp.path().join("destination");
+    let new_path = destination.join("old-name");
+    std::fs::create_dir(&old_path).unwrap();
+    std::fs::create_dir(&destination).unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::ConfirmMove {
+        file: old_path.clone(),
+        destination,
+    });
+    finish_user_file_operation(&mut orch);
+
+    assert!(std::fs::metadata(&new_path).unwrap().is_dir());
+    assert!(file_reader.try_recv().is_err());
+    let deleted = dir_reader.try_recv().unwrap();
+    let added = dir_reader.try_recv().unwrap();
+    assert_eq!(deleted.path, old_path);
+    assert_eq!(deleted.kind, DirectoryChangedKind::Deleted);
+    assert_eq!(added.path, new_path);
+    assert_eq!(added.kind, DirectoryChangedKind::Added);
+}
+
+#[test]
+fn moving_file_publishes_only_file_events() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let old_path = temp.path().join("old-name.md");
+    let destination = temp.path().join("destination");
+    let new_path = destination.join("old-name.md");
+    std::fs::write(&old_path, "content").unwrap();
+    std::fs::create_dir(&destination).unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::ConfirmMove {
+        file: old_path.clone(),
+        destination,
+    });
+    finish_user_file_operation(&mut orch);
+
+    let deleted = file_reader.try_recv().unwrap();
+    let added = file_reader.try_recv().unwrap();
+    assert_eq!(deleted.kind, FileChangedKind::Deleted);
+    assert_eq!(deleted.files[0].path, old_path);
+    assert_eq!(added.kind, FileChangedKind::Added);
+    assert_eq!(added.files[0].path, new_path);
+    assert!(dir_reader.try_recv().is_err());
+}
+
+#[test]
+fn deleting_directory_publishes_only_directory_event() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("directory");
+    std::fs::create_dir(&path).unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
+        path.clone(),
+    ));
+    finish_user_file_operation(&mut orch);
+
+    assert!(file_reader.try_recv().is_err());
+    let deleted = dir_reader.try_recv().unwrap();
+    assert_eq!(deleted.path, path);
+    assert_eq!(deleted.kind, DirectoryChangedKind::Deleted);
+}
+
+#[test]
+fn deleting_file_publishes_only_file_event() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("note.md");
+    std::fs::write(&path, "content").unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::Delete(
+        path.clone(),
+    ));
+    finish_user_file_operation(&mut orch);
+
+    let deleted = file_reader.try_recv().unwrap();
+    assert_eq!(deleted.kind, FileChangedKind::Deleted);
+    assert_eq!(deleted.files[0].path, path);
+    assert!(dir_reader.try_recv().is_err());
+}
+
+#[test]
+fn creating_directory_publishes_only_directory_event() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("created");
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ConfirmCreateDirectory {
+            parent: temp.path().to_path_buf(),
+            name: "created".to_string(),
+        },
+    );
+    finish_user_file_operation(&mut orch);
+
+    assert!(std::fs::metadata(&path).unwrap().is_dir());
+    let added = dir_reader.try_recv().unwrap();
+    assert_eq!(added.path, path);
+    assert_eq!(added.kind, DirectoryChangedKind::Added);
+    assert!(file_reader.try_recv().is_err());
+}
+
+#[test]
+fn creating_document_publishes_only_file_event() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("created.md");
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ConfirmCreateDocument {
+            parent: temp.path().to_path_buf(),
+            name: "created".to_string(),
+        },
+    );
+    finish_user_file_operation(&mut orch);
+
+    assert!(path.exists());
+    let added = file_reader.try_recv().unwrap();
+    assert_eq!(added.kind, FileChangedKind::Added);
+    assert_eq!(added.files[0].path, path);
+    assert!(dir_reader.try_recv().is_err());
+}
+
+#[test]
+fn renaming_file_publishes_only_file_events() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    let old_path = temp.path().join("old-name.md");
+    let new_path = temp.path().join("new-name.md");
+    std::fs::write(&old_path, "content").unwrap();
+    let file_reader = orch.file_event_bus.subscribe();
+    let dir_reader = orch.dir_event_bus.subscribe();
+
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ConfirmRename {
+            path: old_path.clone(),
+            new_name: "new-name".to_string(),
+        },
+    );
+
+    let deleted = file_reader.try_recv().unwrap();
+    let added = file_reader.try_recv().unwrap();
+    assert_eq!(deleted.kind, FileChangedKind::Deleted);
+    assert_eq!(deleted.files[0].path, old_path);
+    assert_eq!(added.kind, FileChangedKind::Added);
+    assert_eq!(added.files[0].path, new_path);
+    assert!(dir_reader.try_recv().is_err());
 }
 
 #[test]
@@ -126,7 +404,7 @@ fn process_file_events_removed_closes_tab_and_rebuilds_tags() {
     orch.selection.select_file(path.clone());
 
     orch.file_event_bus
-        .publish(FileEvent::removed_one(path.clone()));
+        .publish(FileChanged::removed_one(path.clone()));
     let changed = orch.process_file_events();
 
     assert!(changed);
@@ -143,7 +421,7 @@ fn process_file_events_updated_unloads_loaded_path_when_editor_closed() {
     // text_buffer.is_open defaults to false.
 
     orch.file_event_bus
-        .publish(FileEvent::updated_one(path.clone()));
+        .publish(FileChanged::updated_one(path.clone()));
     orch.process_file_events();
 
     assert!(orch.tabs.loaded_path.is_none());
@@ -237,9 +515,12 @@ fn drain_background_channel_routes_all_variants() {
         )
         .unwrap();
 
+    // Give the bridge thread time to forward events from broadcast to std mpsc
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
     orch.drain_background_channel();
 
-    assert!(orch.file_processor.indexing_finished);
+    assert!(orch.workspace.indexing_finished);
     {
         let logs = orch.background_manager.lock().unwrap();
         assert!(logs.get_logs().iter().any(|l| l.message == "hello"));
@@ -262,16 +543,61 @@ fn handle_fs_event_file_modified_clears_stale_loaded_path() {
 }
 
 #[test]
+fn tag_results_for_pdf_paths_do_not_add_them_to_the_workspace() {
+    let mut orch = harness();
+    let path = PathBuf::from("report.pdf");
+
+    orch.handle_fs_event(FsEvent::FileParsed {
+        path: path.clone(),
+        tags: Vec::new(),
+    });
+    orch.handle_fs_event(FsEvent::FileModified {
+        path: path.clone(),
+        tags: vec!["from-header".into()],
+    });
+
+    assert!(!orch.workspace.contains_file(&path));
+    assert_eq!(
+        orch.tags.file_tags().get(&path),
+        Some(&vec!["from-header".into()])
+    );
+}
+
+#[test]
+fn tag_resynchronization_replaces_stale_file_and_unique_tag_state() {
+    let mut orch = harness();
+    let stale_path = PathBuf::from("stale.md");
+    let current_path = PathBuf::from("current.md");
+    orch.tags
+        .add_tags(stale_path.clone(), vec!["stale-only".into()]);
+
+    orch.handle_fs_event(FsEvent::TagsResynchronized {
+        files: vec![(current_path.clone(), vec!["current-only".into()])],
+    });
+
+    assert!(!orch.tags.file_tags().contains_key(&stale_path));
+    assert_eq!(
+        orch.tags.file_tags().get(&current_path),
+        Some(&vec!["current-only".into()])
+    );
+    assert!(!orch.tags.all_tags().contains("stale-only"));
+    assert!(orch.tags.all_tags().contains("current-only"));
+}
+
+#[test]
 fn handle_fs_event_finished_marks_indexing() {
     let mut orch = harness();
     orch.handle_fs_event(FsEvent::FinishedWithoutWatcher);
-    assert!(orch.file_processor.indexing_finished);
+    assert!(orch.workspace.indexing_finished);
 }
 
 #[test]
 fn handle_process_event_file_loaded_ok_populates_tabs() {
     let mut orch = harness();
     let path = PathBuf::from("/tmp/notes.md");
+    // The real flow only ever spawns a read for a file that IS selected
+    // (`handle_file_selection`), so the projection precondition is a selection.
+    orch.selection.select_file(path.clone());
 
     orch.handle_process_event(ProcessEvent::FileLoaded {
         path: path.clone(),
@@ -280,6 +606,90 @@ fn handle_process_event_file_loaded_ok_populates_tabs() {
 
     assert_eq!(orch.tabs.loaded_path, Some(path));
     assert!(orch.tabs.current_markdown.contains("Body"));
+}
+
+/// Regression: a read that was still in flight when the user moved on must not
+/// overwrite the document. Landing it must not repoint `loaded_path` or rebuild
+/// `toc` from the abandoned file, which would flip the ToC pane between two
+/// files' heading sets with no user action.
+#[test]
+fn handle_process_event_drops_file_loaded_for_a_deslected_file() {
+    let mut orch = harness();
+    let abandoned = PathBuf::from("/tmp/abandoned.md");
+    let current = PathBuf::from("/tmp/current.md");
+
+    // The user moved from `abandoned` to `current`; the read for `current` is in
+    // flight and `pending_file_load` names it.
+    orch.tabs.open_tab(current.clone());
+    orch.selection.select_file(current.clone());
+    orch.pending_file_load = Some(current.clone());
+
+    // The abandoned read lands first.
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: abandoned,
+        content: Ok("# Abandoned\n\nShould never be shown".to_string()),
+    });
+
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "a stale landing must not repoint the open document"
+    );
+    assert!(
+        orch.tabs.current_markdown.is_empty(),
+        "a stale landing must not overwrite the rendered body"
+    );
+    assert!(
+        orch.tabs.toc.is_empty(),
+        "a stale landing must not populate the ToC"
+    );
+    assert_eq!(
+        orch.pending_file_load,
+        Some(current),
+        "the load still pending for the current selection must survive"
+    );
+}
+
+/// Regression: release the pending marker for the landing path even when it is
+/// not currently selected. Leaving it set would block re-selecting the same
+/// file behind a load that has already returned.
+#[test]
+fn handle_process_event_releases_pending_marker_for_its_own_path() {
+    let mut orch = harness();
+    let path = PathBuf::from("/tmp/notes.md");
+    orch.pending_file_load = Some(path.clone());
+    // The harness starts with nothing selected, which is the precondition here.
+
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: path.clone(),
+        content: Ok("# Title\n\nBody".to_string()),
+    });
+
+    assert_eq!(
+        orch.pending_file_load, None,
+        "the marker for the returned path must be released so a later re-select can load"
+    );
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "nothing is selected, so nothing may be projected"
+    );
+}
+
+#[test]
+fn handle_process_event_drops_editor_open_superseded_by_another_path() {
+    let mut orch = harness();
+    let old_path = PathBuf::from("/tmp/old-editor.md");
+    let current_path = PathBuf::from("/tmp/current-editor.md");
+    orch.pending_editor_open = Some(current_path.clone());
+
+    orch.handle_process_event(ProcessEvent::UserFileOperationCompleted(
+        crate::background::UserFileOperationResult::EditorOpened {
+            path: old_path,
+            content: Ok(Some("stale contents".to_string())),
+        },
+    ));
+
+    assert_eq!(orch.pending_editor_open, Some(current_path));
+    assert_eq!(orch.tabs.loaded_path, None);
 }
 
 #[test]
@@ -396,16 +806,16 @@ fn orchestrator_user_commands_persist_via_injected_config_storage() {
     // Table width strategy change
     orch.apply_user_command(
         crate::bus::events::user_command::UserCommand::ChangeTableWidthStrategy(
-            crate::ui::table_width::DeficitStrategy::WaterFillRatio,
+            crate::markdown::table_width::DeficitStrategy::WaterFillRatio,
         ),
     );
     assert_eq!(
         orch.config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+        crate::markdown::table_width::DeficitStrategy::WaterFillRatio
     );
     assert_eq!(
         storage.latest_config().unwrap().deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+        crate::markdown::table_width::DeficitStrategy::WaterFillRatio
     );
 
     // Tool group enable/disable
@@ -440,7 +850,8 @@ fn test_select_file_command_loads_markdown_content() {
         "loaded_path must remain None until file content is actually read into memory"
     );
 
-    // Drive handle_file_selection() as update_ui does each frame
+    // Drive handle_file_selection() the way the application drives it each
+    // frame
     orch.handle_file_selection();
 
     // Drain background channel to receive ProcessEvent::FileLoaded

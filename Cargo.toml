@@ -48,8 +48,32 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 tracing-appender = "0.2"
 base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
-eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "persistence"] }
-egui_extras = { version = "0.36", default-features = false }
+# UI framework migration (TASK-003, `doc/planning/iced.md`): iced ships as a
+# REGULAR (non-optional) dependency per DEC-011 — no feature flag exists.
+# The `markdown` feature gates iced's built-in Markdown widget
+# (`iced-0.14.0/Cargo.toml:93` `markdown = ["iced_widget/markdown"]`,
+# `iced_widget-0.14.2/Cargo.toml:51` `markdown = ["dep:pulldown-cmark"]`).
+# The agent transcript renders assistant output through it ([TASK-018]).
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tiny-skia",
+    "fira-sans",
+    "advanced-shaping",
+    "markdown",
+] }
+# `cosmic-text` and `iced_graphics` are DIRECT dependencies so the text
+# measurer can shape strings with the same Fira Sans bytes iced paints with
+# (`iced_graphics::text::FIRA_SANS_REGULAR`) instead of the flat
+# character-count heuristic ([GAP-06], `src/app/ui_iced/table_width.rs`).
+# Both are ALREADY in the dependency graph through `iced`
+# (`iced` -> `iced_renderer` -> `iced_graphics` -> `cosmic-text` 0.15, and
+# `iced_graphics` requests `cosmic-text` with its default features), so
+# naming them here pulls in no additional compilation — it only makes the
+# two items reachable by path. `fira-sans` on `iced_graphics` is the
+# `cfg` gate for the `FIRA_SANS_REGULAR` const and mirrors the feature
+# already enabled on `iced` above.
+cosmic-text = "0.15.0"
+iced_graphics = { version = "0.14.0", features = ["fira-sans"] }
 notify = "8"
 playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
@@ -57,6 +81,7 @@ rustls = { version = "0.23", features = ["ring"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9"
+futures = "0.3"
 futures-util = { version = "0.3", optional = true }
 tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"], optional = true }
@@ -98,9 +123,6 @@ windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] 
 [target."cfg(not(windows))".dependencies]
 trash = "5.2.6"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-eframe = { version = "0.36", features = ["wayland", "x11"] }
-
 [dev-dependencies]
 tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
@@ -109,13 +131,15 @@ proptest = "1.4"
 rayon = "1.10"
 # `criterion` is the project-wide micro-benchmark harness.
 criterion = { version = "0.5", features = ["html_reports"] }
-egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
-accesskit = "0.24"
 log = "0.4"
-# `image` is used by `egui_kittest::snapshot`
 image = { version = "0.25", default-features = false, features = ["png"] }
 wiremock = "0.6"
 typst-syntax = "0.15"
+# `iced_test` — headless iced interface driver ([TASK-025], DEC-011).
+# Tests widgets and whole applications without opening a window
+# (`doc/iced.md` "iced_test"). Used by the tier-2 simulator tests in
+# `src/app/ui_iced/interaction_tests.rs`.
+iced_test = "0.14.0"
 
 [[bin]]
 name = "fastmd"

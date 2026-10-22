@@ -1,18 +1,19 @@
 //! Background subsystem data types — `ImageJob` and `PdfConversionJob`.
 //!
-//! `LogCategory` and `BackgroundLogEntry` moved to
-//! [`crate::bus::events::messages`] in the layering-inversion fix so the
-//! `bus` module no longer depends on `app`. They are re-exported here
-//! for backwards compatibility with existing in-tree call sites.
+//! `LogCategory` and `BackgroundLogEntry` are defined in
+//! [`crate::bus::events::messages`] so the `bus` module does not depend on
+//! the application layer. They are re-exported here so the canonical
+//! accessor `crate::background::LogCategory` keeps resolving for in-tree
+//! call sites.
 //!
 //! ## `image-library` feature
 //!
 //! `ImageJob` is gated behind the `image-library` Cargo feature so
 //! builds that opt out of the image-vision worker don't pull in the
 //! type. The image-vision worker itself lives in
-//! `crate::app::background::vision_processor`. `LogCategory`
+//! `crate::background::vision_processor`. `LogCategory`
 //! (including the `ImageVision` variant) and
-//! `crate::app::background::PdfConversionJob`
+//! `crate::background::PdfConversionJob`
 //! stay always compiled — the log filter chip for `Image Vision`
 //! still renders in the UI even when no worker is emitting into it.
 
@@ -86,8 +87,8 @@ mod tests {
 
     #[test]
     fn test_log_category_display_still_works_via_reexport() {
-        // After the move, the type lives in `bus::events::messages` but the
-        // canonical accessor `crate::app::background::LogCategory` must keep
+        // The type lives in `bus::events::messages`, but the canonical
+        // accessor `crate::background::LogCategory` must keep
         // resolving. This test guards the re-export.
         let cat: LogCategory = LogCategory::Indexer;
         assert_eq!(cat.to_string(), "Indexer");

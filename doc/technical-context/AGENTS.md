@@ -1,12 +1,12 @@
 # AI Agent Instructions — `doc/technical-context/`
 
-This directory holds the **authoritative** technical reference 
+This directory holds the **authoritative** technical reference
 
 ## 1. Docs reflect reality, not aspiration
 - `ARCHITECTURE_C4.md` MUST describe the **current** code.
 - When module boundaries, public API, or container shape change in
-  `src/desktop/`, update `ARCHITECTURE_C4.md` in the same PR.
-- Every container/component in the C4 diagrams must map to real directories or modules under `src/desktop/src/`.
+  `src/app/`, update `ARCHITECTURE_C4.md` in the same PR.
+- Every container/component in the C4 diagrams must map to real directories or modules under `src/app/`.
 
 ## 3. RUST.md
 - Captures Rust-specific design notes (memory model, async runtime, error
@@ -22,5 +22,5 @@ This directory holds the **authoritative** technical reference
 
 ## 5. Quality gate
 - Markdown renders cleanly on GitHub (no broken tables, no dangling links).
-- `ARCHITECTURE_C4.md`'s "Folder Layout" block matches the output of
-  `Get-ChildItem -Recurse src/desktop/src`.
+- `ARCHITECTURE_C4.md`'s UI sections match the live `src/app/ui_iced/`
+  subsystem tree — check with `Get-ChildItem -Recurse src/app/ui_iced`.

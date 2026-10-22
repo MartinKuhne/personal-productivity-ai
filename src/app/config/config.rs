@@ -1,6 +1,6 @@
 //! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
 //!
-//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008; CONFIG-009 superseded by VFS-004/009) for the full specification.
+//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008, plus VFS-004/VFS-009 for virtual path resolution) for the full specification.
 //!
 //! The VFS domain types ([`VirtualPath`], [`VirtualPathError`], and the
 //! behaviour on [`ContentLibrary`]) now live under
@@ -232,8 +232,8 @@ impl AppConfig {
     /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
     /// Unknown values fall back to `DeficitStrategy::HybridMinPenaltyWaterFill`
     /// (the default set by `default_table_width_strategy` in `config.rs`).
-    pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
-        crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
+    pub fn deficit_strategy(&self) -> crate::markdown::table_width::DeficitStrategy {
+        crate::markdown::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
     }
 
     /// Project the global `AppConfig` into the agent's domain slice.

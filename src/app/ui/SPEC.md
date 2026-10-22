@@ -107,11 +107,16 @@ This module owns the user interface layer: pane layout and styling, directory tr
 
 ### Top Toolbar Hamburger Menu
 
-* [UI-061] Hamburger Menu: The top toolbar shall display a hamburger menu button (`☰`) aligned to the far right. Clicking the button opens a dropdown menu containing submenus for application windows, chat models, and table wrap algorithm options.
-* [UI-062] Windows Submenu: The top toolbar hamburger menu shall contain a "Windows" submenu offering toggles for supplementary application windows.
+* [UI-061] The top toolbar shall display a [hamburger menu] button with a three line icon (`☰`) aligned to the far right. 
+* [UI-061b] Clicking the [hamburger menu] button opens a dropdown menu containing clickable optins and submenus
+* [UI-061c] The [hamburger menu] shall be rendered using the regular application foreground and background colors.
+* [UI-061d] An submenu in the [hamburger menu] shall display a right arrow '>' symbol to indicate clicking the menu opens a submenu.
+* [UI-061e] A menu item in the [hamburger menu] that opens a dialog shall display three dots '...' at the end of the menu text.
+* [UI-062] Windows Submenu: The top toolbar hamburger menu shall contain a "Windows..." submenu offering toggles for supplementary application windows.
 * [UI-063] Window Toggles: The "Windows" submenu shall contain "Background operations" and "Agent debug" items that toggle the visibility of the Background Processes and Agent Debug windows respectively.
-* [UI-064] Chat Models Submenu: The top toolbar hamburger menu shall contain a "Chat models" submenu listing all configured chat models by name followed by their cost in the format `<name> (Cost: <cost>)`. When no models are configured, an informational placeholder is displayed.
-* [UI-065] Chat Model Selection: The "Chat models" submenu shall display a checkmark indicator (`✓`) next to the currently selected active chat model. When the user clicks any model from the list, the system shall set that model as the active chat model and persist the selection to configuration.
+* [UI-064] Chat Models Submenu: The top toolbar hamburger menu shall contain a "Chat models" submenu listing all configured chat models by name followed by their cost in the format `<name> (Cost: <cost>)`. 
+* [UI-064b] Chat Models Submenu: When no models are configured, an informational placeholder is displayed.
+* [UI-065] Chat Model Selection: The "Chat models" submenu shall display a checkmark indicator (`✓`) next to the currently selected active chat model. When the user clicks any model from the list, the system shall set that model as the active chat model while the program operates.
 * [UI-066] Table Wrap Algorithm Submenu: The top toolbar hamburger menu shall contain a "Table wrap algorithm" submenu listing all deficit strategies with a checkmark (`✓`) next to the active choice. Selecting an algorithm updates the active table formatting strategy and persists it to configuration.
 
 ---

@@ -8,7 +8,7 @@
 //! came from disk; a malformed-YAML panic in the parser would
 //! land a user in a crashed editor.
 //!
-//! Per AGENTS.md RUST-058 the markdown parser is egui-free, so
+//! Per AGENTS.md RUST-058 the markdown parser is framework-free, so
 //! the proptest can live as a sidecar of `yaml_header.rs` (the
 //! parser itself is in `crate::markdown`).
 //!

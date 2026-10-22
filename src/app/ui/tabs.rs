@@ -35,8 +35,8 @@ pub struct Tabs {
     pub toc: Vec<ToCEntry>,
     /// Pending scroll target as a stable string id (matches
     /// `ToCEntry::id`). The center panel converts it to an
-    /// `egui::Id` at render time. Stored as a string so the
-    /// manager is egui-independent.
+    /// `Id` at render time. Stored as a string so the
+    /// manager is framework-independent.
     pub scroll_to_header_id: Option<String>,
     /// Pending search jump target query. The center panel scrolls
     /// to the first occurrence of this query within the document,
@@ -74,18 +74,92 @@ impl Tabs {
         }
     }
 
+    /// Opens the tab for `path` unless it is already open.
+    ///
+    /// `tabs_set` is the change detector, and mutations may push into
+    /// [`Tabs::tabs`](Self::tabs) directly without touching it, so a `path`
+    /// **already present in [`Tabs::tabs`](Self::tabs) is treated as open
+    /// even when the shadow set has drifted** — the vector is the authority
+    /// and the set is healed from it. Without that healing, a `CloseTab`
+    /// mutation that left the path in the set (but not the vector) would
+    /// silently block every subsequent re-open of the same file.
+    ///
+    /// Purity: pure — mutates only this manager.
     pub fn open_tab(&mut self, path: PathBuf) {
-        if self.tabs_set.insert(path.clone()) {
-            self.tabs.push(path);
+        if self.tabs.contains(&path) {
+            self.tabs_set.insert(path);
+            return;
+        }
+        self.tabs_set.insert(path.clone());
+        self.tabs.push(path);
+        self.invalidate_tab_strip_cache();
+    }
+
+    /// Closes the tab for `path`. The vector is the authority — a path
+    /// open in [`Tabs::tabs`](Self::tabs) is removed even if the shadow set
+    /// has drifted, and the cache is invalidated only when something
+    /// changed.
+    pub fn close_tab(&mut self, path: &PathBuf) {
+        self.tabs_set.remove(path);
+        let len_before = self.tabs.len();
+        self.tabs.retain(|p| p != path);
+        if self.tabs.len() != len_before {
             self.invalidate_tab_strip_cache();
         }
     }
 
-    pub fn close_tab(&mut self, path: &PathBuf) {
-        if self.tabs_set.remove(path) {
+    /// Closes the tab at `index` (the order in [`Tabs::tabs`]), returning
+    /// the closed path, or `None` when the index is out of range. Keeps the
+    /// shadow set in sync (UI-049: `CloseTab`).
+    #[must_use]
+    pub fn close_tab_at(&mut self, index: usize) -> Option<PathBuf> {
+        if index >= self.tabs.len() {
+            return None;
+        }
+        let closed = self.tabs.remove(index);
+        self.tabs_set.remove(&closed);
+        self.invalidate_tab_strip_cache();
+        Some(closed)
+    }
+
+    /// Closes the tab at `index`'s left, or `None` — every other tab
+    /// (UI-049: `CloseOtherTabs`), keeping the set in sync.
+    #[must_use]
+    pub fn keep_only(&mut self, index: usize) -> Option<PathBuf> {
+        let keep = self.tabs.get(index)?.clone();
+        self.tabs.clear();
+        self.tabs_set.clear();
+        self.tabs.push(keep.clone());
+        self.tabs_set.insert(keep.clone());
+        self.invalidate_tab_strip_cache();
+        Some(keep)
+    }
+
+    /// Closes every one of `paths` that is open, returning whether any tab
+    /// was removed. Keeps the set in sync (UI-049: the file-removal
+    /// close-out in `AppOrchestrator::close_tabs_for_removed_files`).
+    pub fn close_tabs(&mut self, paths: &[PathBuf]) -> bool {
+        let mut closed_any = false;
+        for path in paths {
+            self.tabs_set.remove(path);
+            let len_before = self.tabs.len();
             self.tabs.retain(|p| p != path);
+            closed_any |= self.tabs.len() != len_before;
+        }
+        if closed_any {
             self.invalidate_tab_strip_cache();
         }
+        closed_any
+    }
+
+    /// Closes every tab (UI-049: `CloseAllTabs`), keeping the set in sync.
+    pub fn close_all(&mut self) {
+        if self.tabs.is_empty() && self.tabs_set.is_empty() {
+            return;
+        }
+        self.tabs.clear();
+        self.tabs_set.clear();
+        self.invalidate_tab_strip_cache();
     }
 
     /// Invalidate the tab strip cache so it rebuilds on next frame.
@@ -294,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_toc_entry_id_is_stable_string() {
-        // The manager itself never touches egui::Id. Verify
+        // The manager itself never touches Id. Verify
         // the contract: ToCEntry.id is a plain String.
         let e = ToCEntry::new("Intro", 1, "Intro");
         assert_eq!(e.id, "Intro");
@@ -308,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_scroll_to_header_id_is_optional_string() {
-        // Confirm the field is an egui-free Option<String>.
+        // Confirm the field is an framework-free Option<String>.
         let mut m = Tabs::new();
         assert_eq!(m.scroll_to_header_id, None);
         m.scroll_to_header_id = Some("Intro".to_string());
@@ -386,6 +460,132 @@ mod tests {
         let (paths3, _) = manager.tab_strip();
         assert!(!Arc::ptr_eq(&paths, &paths3));
         assert_eq!(paths3.len(), 3);
+    }
+
+    /// Regression: a removed-opened-close cycle must re-open the tab. The
+    /// pre-fix `close_tab_at` mutation left the path in `tabs_set` while
+    /// dropping it from `tabs`, so `open_tab`'s set guard silently refused
+    /// to re-push it — "the markdown tab does not open".
+    #[test]
+    fn open_after_close_tab_at_reopens() {
+        let mut manager = Tabs::new();
+        let a = PathBuf::from("a.md");
+        let b = PathBuf::from("b.md");
+        manager.open_tab(a.clone());
+        manager.open_tab(b.clone());
+
+        assert_eq!(manager.close_tab_at(0), Some(a.clone()));
+        assert!(!manager.tabs.contains(&a));
+
+        // The set must not block the re-open.
+        manager.open_tab(a.clone());
+        assert!(manager.tabs.contains(&a));
+        assert_eq!(manager.tabs.len(), 2);
+    }
+
+    /// Regression: `CloseOtherTabs` must keep the kept tab openable and drop
+    /// the closed ones from the shadow set.
+    #[test]
+    fn keep_only_syncs_set_and_selection_order() {
+        let mut manager = Tabs::new();
+        let a = PathBuf::from("a.md");
+        let b = PathBuf::from("b.md");
+        let c = PathBuf::from("c.md");
+        manager.open_tab(a.clone());
+        manager.open_tab(b.clone());
+        manager.open_tab(c.clone());
+
+        assert_eq!(manager.keep_only(1), Some(b.clone()));
+        assert_eq!(manager.tabs, vec![b.clone()]);
+        assert!(manager.tabs_set.contains(&b));
+
+        // The closed paths can be re-opened immediately.
+        manager.open_tab(a.clone());
+        assert_eq!(manager.tabs, vec![b.clone(), a.clone()]);
+    }
+
+    /// Regression: out-of-range indices are no-ops, not panics.
+    #[test]
+    fn keep_only_and_close_tab_at_out_of_range_are_noops() {
+        let mut manager = Tabs::new();
+        manager.open_tab(PathBuf::from("a.md"));
+        assert_eq!(manager.keep_only(5), None);
+        assert_eq!(manager.close_tab_at(5), None);
+        assert_eq!(manager.tabs.len(), 1);
+    }
+
+    /// Regression: `CloseAllTabs` must clear the shadow set too, otherwise a
+    /// whole workspace becomes permanently un-openable until restart.
+    #[test]
+    fn close_all_and_reopen() {
+        let mut manager = Tabs::new();
+        let a = PathBuf::from("a.md");
+        manager.open_tab(a.clone());
+        manager.close_all();
+        assert!(manager.tabs.is_empty());
+        manager.open_tab(a.clone());
+        assert_eq!(manager.tabs, vec![a.clone()]);
+        // A second open is still a no-op duplicate guard.
+        manager.open_tab(a.clone());
+        assert_eq!(manager.tabs.len(), 1);
+    }
+
+    /// Regression: `close_tabs` reports whether anything was closed so the
+    /// orchestrator's selection retarget only runs on real removals.
+    #[test]
+    fn close_tabs_reports_closed_any_and_reopens() {
+        let mut manager = Tabs::new();
+        let a = PathBuf::from("a.md");
+        let b = PathBuf::from("b.md");
+        manager.open_tab(a.clone());
+        manager.open_tab(b.clone());
+
+        // Paths that are not open must not count as closed.
+        let never_opened = PathBuf::from("never-opened.md");
+        assert!(!manager.close_tabs(&[never_opened, PathBuf::from("/")]));
+        assert_eq!(manager.tabs.len(), 2);
+
+        assert!(manager.close_tabs(std::slice::from_ref(&a)));
+        assert_eq!(manager.tabs, vec![b.clone()]);
+        manager.open_tab(a.clone());
+        assert_eq!(manager.tabs, vec![b.clone(), a.clone()]);
+    }
+
+    /// Healing: a manager whose set/vector disagree after a direct mutation
+    /// still opens (no duplicate) and closes (vector and set in
+    /// step again).
+    #[test]
+    fn open_and_close_heal_set_desync() {
+        let mut manager = Tabs::new();
+        let a = PathBuf::from("a.md");
+        let b = PathBuf::from("b.md");
+        manager.open_tab(a.clone());
+        manager.open_tab(b.clone());
+
+        // Desync half 1: the set lost `a` but the vector still has it —
+        // re-opening must not create a duplicate.
+        assert!(manager.tabs_set.remove(&a));
+        manager.open_tab(a.clone());
+        assert_eq!(
+            manager.tabs.iter().position(|p| p == &a),
+            Some(0),
+            "open must not duplicate"
+        );
+        assert_eq!(manager.tabs.len(), 2);
+
+        // Desync half 2: closing by index removes the row from *both*
+        // bookkeeping sides, so re-opening pushes it again instead of being
+        // swallowed by a stale set guard.
+        assert_eq!(manager.close_tab_at(0), Some(a.clone()));
+        assert!(!manager.tabs_set.contains(&a));
+        manager.open_tab(a.clone());
+        assert_eq!(manager.tabs, vec![b.clone(), a.clone()]);
+
+        // Closing once removes both bookkeeping sides.
+        manager.close_tab(&a);
+        assert!(!manager.tabs.contains(&a));
+        assert!(!manager.tabs_set.contains(&a));
+        assert_eq!(manager.tabs, vec![b.clone()]);
     }
 
     #[test]

@@ -276,18 +276,12 @@ fn test_debug_impls() {
     assert!(s2.contains("AppConfig"));
 }
 
-/// Regression: previously the three `test_load_config_*` tests mutated
-/// the process-wide `APPDATA` env var, and `load_config()` read it
-/// back. Under the parallel test runner, another test could overwrite
-/// `APPDATA` between the `set_var` and the `load_config` call, so
-/// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see another test's value instead of
-/// the expected `None`.
-///
-/// The refactor that moved the file I/O behind a path parameter
-/// removed the shared state; this test pins that property by loading
-/// N independent config files from N threads simultaneously and
-/// asserting every thread sees its own data.
+/// Regression: `load_config_from_path` takes the path as an argument
+/// and never reads the process-wide `APPDATA` env var, so tests cannot
+/// interfere with one another through shared environment state. This
+/// test pins that isolation by loading N independent config files
+/// from N threads simultaneously and asserting every thread sees its
+/// own data.
 #[test]
 fn test_load_config_from_path_is_isolated() {
     use std::sync::{Arc, Barrier};
@@ -424,16 +418,16 @@ fn deficit_strategy_default_is_hybrid() {
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
     // Round-trip: to_config and from_config compose back to the same
     // variant, so a persisted config with the default value
     // deserialises to the same strategy.
-    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    let s = crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
     assert_eq!(s, "hybrid");
     assert_eq!(
-        crate::ui::table_width::DeficitStrategy::from_config(s),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::from_config(s),
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -529,7 +523,7 @@ fn deficit_strategy_respects_config_value() {
     };
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        crate::markdown::table_width::DeficitStrategy::ProportionalToSlack
     );
 }
 
@@ -538,7 +532,7 @@ fn deficit_strategy_parses_survey_algorithm_strings() {
     // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
     // must parse from its canonical config string. This guards the
     // round-trip with the top-bar combobox.
-    use crate::ui::table_width::DeficitStrategy;
+    use crate::markdown::table_width::DeficitStrategy;
     for (raw, expected) in [
         ("ratio", DeficitStrategy::WaterFillRatio),
         ("lagrange", DeficitStrategy::LagrangePenalty),
@@ -1387,8 +1381,10 @@ fn test_file_config_storage_saves_to_path() {
     let storage = FileConfigStorage::new(path.clone());
     assert_eq!(storage.path(), path.as_path());
 
-    let mut cfg = AppConfig::default();
-    cfg.table_width_strategy = "waterfill".to_string();
+    let cfg = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     let written = storage.save_config(&cfg).unwrap();
     assert_eq!(written, path);
     assert!(path.exists());
@@ -1411,12 +1407,16 @@ fn test_in_memory_config_storage_records_history() {
     assert!(storage.saved_configs().is_empty());
     assert!(storage.latest_config().is_none());
 
-    let mut cfg1 = AppConfig::default();
-    cfg1.table_width_strategy = "waterfill".to_string();
+    let cfg1 = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg1).unwrap();
 
-    let mut cfg2 = AppConfig::default();
-    cfg2.table_width_strategy = "lagrange".to_string();
+    let cfg2 = AppConfig {
+        table_width_strategy: "lagrange".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg2).unwrap();
 
     let history = storage.saved_configs();

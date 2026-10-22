@@ -201,9 +201,7 @@ mod tests {
         let libs = test_config();
         let result = resolve("TestLib/sub/file.md", false, &libs);
         assert!(result.is_ok());
-        let (path, readonly) = match result.unwrap().unwrap() {
-            ResolvedVirtualPath { path, readonly } => (path, readonly),
-        };
+        let ResolvedVirtualPath { path, readonly } = result.unwrap().unwrap();
         assert_eq!(path, PathBuf::from("/tmp/testlib/sub/file.md"));
         assert!(!readonly);
     }
@@ -241,9 +239,7 @@ mod tests {
         let libs = test_config();
         let result = resolve("ReadOnlyLib/file.md", false, &libs);
         assert!(result.is_ok());
-        let (path, readonly) = match result.unwrap().unwrap() {
-            ResolvedVirtualPath { path, readonly } => (path, readonly),
-        };
+        let ResolvedVirtualPath { path, readonly } = result.unwrap().unwrap();
         assert_eq!(path, PathBuf::from("/tmp/readonly/file.md"));
         assert!(readonly);
     }
@@ -277,9 +273,7 @@ mod tests {
             "leading slash must resolve; got {:?}",
             result.err()
         );
-        let (path, readonly) = match result.unwrap().unwrap() {
-            ResolvedVirtualPath { path, readonly } => (path, readonly),
-        };
+        let ResolvedVirtualPath { path, readonly } = result.unwrap().unwrap();
         assert_eq!(path, PathBuf::from("/tmp/wiki/Career/SQA.md"));
         assert!(!readonly);
 

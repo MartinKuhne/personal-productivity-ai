@@ -4,7 +4,7 @@ use crate::agent::events::{AgentEventObserver, AgentStatus, ToolSideEffect};
 use crate::agent::tools::observer::OnFileChanged;
 use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::file::{FileChanged, FileEventProducer};
 use crate::bus::events::messages::TokenUsageInfo;
 use serde::Serialize;
 use serde_json::Value;
@@ -96,7 +96,7 @@ impl AgentEvent {
 
 /// An observer that serializes observer calls back into `AgentEvent` variants
 /// and forwards them to a `Bus<AgentEvent>`, and publishes file mutations
-/// to a `Bus<FileEvent>`.
+/// to a `Bus<FileChanged>`.
 pub struct BusAgentEventObserver {
     session_id: Uuid,
     bus: Bus<AgentEvent>,
@@ -114,7 +114,11 @@ impl BusAgentEventObserver {
     }
 
     /// Create a new observer scoped to `session_id` that also publishes file changes to `file_bus`.
-    pub fn with_file_bus(session_id: Uuid, bus: Bus<AgentEvent>, file_bus: Bus<FileEvent>) -> Self {
+    pub fn with_file_bus(
+        session_id: Uuid,
+        bus: Bus<AgentEvent>,
+        file_bus: Bus<FileChanged>,
+    ) -> Self {
         Self {
             session_id,
             bus,
@@ -307,7 +311,7 @@ impl AgentEventObserver for CompositeAgentEventObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bus::events::file::FileEventKind;
+    use crate::bus::events::file::{FileChanged, FileChangedKind};
     use std::path::PathBuf;
 
     #[test]
@@ -315,7 +319,7 @@ mod tests {
         let session_id = Uuid::new_v4();
         let agent_bus = Bus::new();
         let agent_reader = agent_bus.subscribe();
-        let file_bus: Bus<FileEvent> = Bus::new();
+        let file_bus: Bus<FileChanged> = Bus::new();
         let file_reader = file_bus.subscribe();
 
         let observer = BusAgentEventObserver::with_file_bus(session_id, agent_bus, file_bus);
@@ -328,8 +332,16 @@ mod tests {
         let ev = file_reader
             .try_recv()
             .expect("file event must be published");
-        assert_eq!(ev.kind, FileEventKind::Updated);
-        assert_eq!(ev.paths, vec![test_path.clone()]);
+        assert!(
+            matches!(
+                &ev,
+                changed
+                    if changed.kind == FileChangedKind::Changed
+                        && changed.files.len() == 1
+                        && changed.files[0].path == test_path
+            ),
+            "tool side effect publishes [FileChanged][Changed] for the path"
+        );
 
         let agent_ev = agent_reader
             .try_recv()

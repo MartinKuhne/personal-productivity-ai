@@ -1,30 +1,42 @@
 //! Tests for `app/background_task.rs`.
 
 use super::*;
-use crate::bus::events::file::FileEventKind;
-use crate::bus::events::typed::FsEvent;
-#[cfg(feature = "image-library")]
-use crate::bus::events::typed::ProcessEvent;
+use crate::bus::events::file::{FileChanged, FileChangedKind};
+use crate::bus::events::typed::{FsEvent, ProcessEvent};
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
+
+/// True when `ev` is a `[FileChanged]` event with the given kind.
+fn is_file_changed_of_kind(ev: &FileChanged, kind: FileChangedKind) -> bool {
+    ev.kind == kind
+}
 
 /// Helper: pump the typed channel until the file watcher signals
 /// completion (either with or without a real `RecommendedWatcher`
 /// handle), or the deadline elapses. Returns the matched event so
 /// callers can also assert on the variant.
 fn wait_for_finished(task: &Task, timeout_secs: u64) -> Option<BackgroundEvent> {
-    let start = std::time::Instant::now();
-    while start.elapsed().as_secs() < timeout_secs {
-        if let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-            && matches!(
-                ev,
-                BackgroundEvent::Fs(FsEvent::Finished | FsEvent::FinishedWithoutWatcher)
-            )
-        {
-            return Some(ev);
+    let mut rx = task.tx.subscribe();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    rt.block_on(async move {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+        while tokio::time::Instant::now() < deadline {
+            let timeout = deadline - tokio::time::Instant::now();
+            if let Ok(ev) = tokio::time::timeout(timeout, rx.recv()).await
+                && let Ok(event) = ev
+                && matches!(
+                    event,
+                    BackgroundEvent::Fs(FsEvent::Finished | FsEvent::FinishedWithoutWatcher)
+                )
+            {
+                return Some(event);
+            }
         }
-    }
-    None
+        None
+    })
 }
 
 #[test]
@@ -34,6 +46,38 @@ fn test_background_task_new_no_libraries() {
 
     let got = wait_for_finished(&task, 5);
     assert!(got.is_some(), "Should complete initialization");
+}
+
+#[test]
+fn indexing_completion_continues_when_the_initial_tag_flush_fails() {
+    let (event_tx, _) = broadcast::channel(8);
+    let tx = BackgroundEventSender::new(event_tx);
+    let mut events = tx.subscribe();
+    let mut watcher_started = false;
+
+    let tags_flushed = finish_initial_indexing(
+        || false,
+        &tx,
+        || {
+            watcher_started = true;
+            tx.send(FsEvent::FinishedWithoutWatcher.into())
+                .expect("completion event should be delivered");
+        },
+    );
+
+    assert!(!tags_flushed, "the flush failure remains observable");
+    assert!(watcher_started, "watcher startup must not be skipped");
+    let report = events.try_recv().expect("degraded indexing report");
+    assert!(matches!(
+        report,
+        BackgroundEvent::Process(ProcessEvent::LogEntry(entry))
+            if entry.category == crate::background::LogCategory::Indexer
+                && entry.message == TAG_FLUSH_FAILURE_MESSAGE
+    ));
+    assert!(matches!(
+        events.try_recv().expect("indexing completion event"),
+        BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher)
+    ));
 }
 
 #[test]
@@ -111,8 +155,10 @@ fn test_initial_scan_publishes_discovered_events() {
         priority: 0,
     });
 
-    let task = Task::new_for_test(config);
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
     let reader = task.file_event_bus.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
 
     let got = wait_for_finished(&task, 5);
     assert!(got.is_some(), "Should complete initialization");
@@ -124,20 +170,67 @@ fn test_initial_scan_publishes_discovered_events() {
 
     let discovered: Vec<_> = events
         .iter()
-        .filter(|e| e.kind == FileEventKind::Discovered)
+        .filter(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
         .collect();
-    let total: usize = discovered.iter().map(|e| e.paths.len()).sum();
+    let total: usize = discovered.iter().map(|e| e.paths().len()).sum();
     assert_eq!(total, 3);
     let mut names: Vec<String> = discovered
         .iter()
-        .flat_map(|e| {
-            e.paths
-                .iter()
-                .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
-        })
+        .flat_map(|e| e.paths())
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
         .collect();
     names.sort();
     assert_eq!(names, vec!["a.md", "b.md", "c.txt"]);
+}
+
+#[test]
+fn test_initial_scan_routes_pdf_to_converter_through_file_events() {
+    use crate::background::LogCategory;
+    use crate::bus::events::typed::ProcessEvent;
+
+    let directory = tempdir().unwrap();
+    std::fs::write(directory.path().join("scan.pdf"), b"pdf").unwrap();
+    let mut config = AppConfig::default();
+    #[cfg(windows)]
+    let command = vec!["cmd".to_string(), "/C".to_string(), "echo done".to_string()];
+    #[cfg(not(windows))]
+    let command = vec!["true".to_string()];
+    config.pdf_converter_command = Some(command);
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: directory.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let converted = runtime.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(BackgroundEvent::Process(ProcessEvent::LogEntry(entry))) =
+                    events.recv().await
+                    && entry.category == LogCategory::PdfConverter
+                    && entry.message.contains("Successfully converted")
+                {
+                    break true;
+                }
+            }
+        })
+        .await
+    });
+    assert!(
+        converted.is_ok(),
+        "initial scan PDF must reach the converter"
+    );
 }
 
 #[test]
@@ -157,6 +250,8 @@ fn test_bus_subscribers_see_discovered_events() {
     let task = Task::new_for_test(config);
     let tag_reader = task.file_event_bus.subscribe();
     let tree_reader = task.file_event_bus.subscribe();
+    let tag_dir_reader = task.dir_event_bus.subscribe();
+    let tree_dir_reader = task.dir_event_bus.subscribe();
 
     let _ = wait_for_finished(&task, 5);
 
@@ -168,11 +263,45 @@ fn test_bus_subscribers_see_discovered_events() {
     while let Ok(ev) = tree_reader.recv_timeout(std::time::Duration::from_millis(100)) {
         tree_events.push(ev);
     }
+    let mut tag_dir_events = Vec::new();
+    while let Ok(ev) = tag_dir_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        tag_dir_events.push(ev);
+    }
+    let mut tree_dir_events = Vec::new();
+    while let Ok(ev) = tree_dir_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+        tree_dir_events.push(ev);
+    }
 
+    // One bus per event: the scan emits exactly one
+    // `[FileChanged][Added]` file batch on the file bus and — with the
+    // library root enumerated — exactly one `[DirectoryChanged][Added]`
+    // event on the directory bus ([REQ-320..334]).
     assert_eq!(tag_events.len(), 1);
     assert_eq!(tree_events.len(), 1);
-    assert_eq!(tag_events[0].paths[0], tree_events[0].paths[0]);
-    assert_eq!(tag_events[0].kind, FileEventKind::Discovered);
+    assert_eq!(tag_dir_events.len(), 1);
+    assert_eq!(tree_dir_events.len(), 1);
+    let file_event = tag_events
+        .iter()
+        .find(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
+        .expect("file event");
+    let dir_changed = &tag_dir_events[0];
+    let tree_file_event = tree_events
+        .iter()
+        .find(|e| is_file_changed_of_kind(e, FileChangedKind::Added))
+        .expect("file event for tree reader");
+    let tree_dir_changed = &tree_dir_events[0];
+    // Both subscribers observe the same file payloads.
+    assert_eq!(file_event.paths(), tree_file_event.paths());
+    assert_eq!(file_event.paths(), vec![dir.path().join("a.md")]);
+    // The directory event carries the enumerated library root ([REQ-321]),
+    // kind-homogeneous `Added` ([REQ-322]).
+    assert_eq!(dir_changed.path, dir.path());
+    assert_eq!(
+        dir_changed.kind,
+        crate::bus::events::DirectoryChangedKind::Added
+    );
+    assert_eq!(tree_dir_changed.path, dir.path());
+    assert_eq!(tree_dir_changed.kind, dir_changed.kind);
 }
 
 #[test]
@@ -189,8 +318,10 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
         priority: 0,
     });
 
-    let task = Task::new_for_test(config);
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
     let reader = task.file_event_bus.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
 
     let _ = wait_for_finished(&task, 5);
 
@@ -202,11 +333,146 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
     let pdf_discovered = events
         .iter()
         .find(|e| {
-            e.kind == FileEventKind::Discovered
-                && e.paths[0].extension().and_then(|x| x.to_str()) == Some("pdf")
+            is_file_changed_of_kind(e, FileChangedKind::Added)
+                && e.paths()
+                    .first()
+                    .map(|p| p.extension().and_then(|x| x.to_str()) == Some("pdf"))
+                    .unwrap_or(false)
         })
-        .expect("initial scan should publish Discovered for PDFs");
-    assert_eq!(pdf_discovered.paths[0], dir.path().join("report.pdf"));
+        .expect("initial scan should publish [FileChanged][Added] for PDFs");
+    assert_eq!(pdf_discovered.paths()[0], dir.path().join("report.pdf"));
+}
+
+#[test]
+fn test_tag_processor_reads_tags_from_live_file_bus_events() {
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(AppConfig::default()));
+    assert!(wait_for_finished(&task, 5).is_some());
+
+    let dir = tempdir().unwrap();
+    let added_path = dir.path().join("added.md");
+    std::fs::write(&added_path, "---\ntags: [added-tag]\n---\nbody").unwrap();
+    task.file_event_bus
+        .publish(FileChanged::discovered_one(added_path.clone()));
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let added = rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) =
+                    events.recv().await
+                    && path == added_path
+                {
+                    break tags;
+                }
+            }
+        })
+        .await
+        .expect("tag manager should parse FileChanged[Added]")
+    });
+    assert_eq!(added, vec!["added-tag"]);
+
+    let changed_path = dir.path().join("changed.md");
+    std::fs::write(&changed_path, "---\ntags: [changed-tag]\n---\nbody").unwrap();
+    task.file_event_bus
+        .publish(FileChanged::updated_one(changed_path.clone()));
+
+    let changed = rt.block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Ok(BackgroundEvent::Fs(FsEvent::FileModified { path, tags })) =
+                    events.recv().await
+                    && path == changed_path
+                {
+                    break tags;
+                }
+            }
+        })
+        .await
+        .expect("tag manager should parse FileChanged[Changed]")
+    });
+    assert_eq!(changed, vec!["changed-tag"]);
+}
+
+#[test]
+fn initial_indexing_delivers_all_tag_results_before_finished() {
+    let directory = tempdir().unwrap();
+    let paths = ["first.md", "second.markdown", "third.txt"].map(|name| {
+        let path = directory.path().join(name);
+        std::fs::write(&path, "---\ntags: [indexed]\n---\nbody").unwrap();
+        path
+    });
+    let mut config = AppConfig::default();
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: directory.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let config_bus = Bus::new();
+    let task = Task::new(config_bus.clone());
+    let mut events = task.tx.subscribe();
+    config_bus.publish(ConfigArrived::new(config));
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let parsed_before_finished = runtime.block_on(async {
+        let mut parsed = std::collections::HashSet::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(!timeout.is_zero(), "indexing completion deadline elapsed");
+            match tokio::time::timeout(timeout, events.recv()).await {
+                Ok(Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags }))) => {
+                    assert_eq!(tags, vec!["indexed"]);
+                    parsed.insert(path);
+                }
+                Ok(Ok(BackgroundEvent::Fs(
+                    FsEvent::Finished | FsEvent::FinishedWithoutWatcher,
+                ))) => break parsed,
+                Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                    panic!("background event channel closed before indexing finished")
+                }
+                Err(_) => panic!("indexing completion deadline elapsed"),
+            }
+        }
+    });
+
+    assert_eq!(parsed_before_finished, paths.into_iter().collect());
+}
+
+#[test]
+fn test_pdf_router_subscribes_before_initial_scan_events() {
+    let bus = Bus::new();
+    let (tx_pdf, rx_pdf) = channel();
+    #[cfg(feature = "image-library")]
+    let (tx_img, _rx_img) = channel();
+
+    #[cfg(feature = "image-library")]
+    let router = BusRouter::new_pdf_only(bus.clone(), tx_pdf, true, tx_img);
+    #[cfg(not(feature = "image-library"))]
+    let router = BusRouter::new_pdf_only(bus.clone(), tx_pdf, true);
+
+    router.spawn();
+    assert_eq!(bus.subscriber_count(), 1);
+    let pdf = PathBuf::from("scan-time.pdf");
+    bus.publish(FileChanged::discovered_one(pdf.clone()));
+    assert_eq!(
+        rx_pdf
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap(),
+        pdf
+    );
 }
 
 #[test]
@@ -244,30 +510,40 @@ fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
     let pdf_path = dir.path().join("dropped.pdf");
     std::fs::write(&pdf_path, b"dummy").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(pdf_path.clone()));
+        .publish(FileChanged::discovered_one(pdf_path.clone()));
 
-    let mut saw_success = false;
-    let start = std::time::Instant::now();
-    let mut all_messages: Vec<String> = Vec::new();
-    while start.elapsed().as_secs() < 5 {
-        let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) else {
-            continue;
-        };
-        match ev {
-            BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
-                all_messages.push(format!("{:?}: {}", entry.category, entry.message));
-                if entry.category == LogCategory::PdfConverter
-                    && entry.message.contains("Successfully converted")
-                {
-                    saw_success = true;
-                    break;
+    let mut rx = task.tx.subscribe();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for test");
+    let (saw_success, all_messages) = rt.block_on(async move {
+        let mut saw_success = false;
+        let mut all_messages: Vec<String> = Vec::new();
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            let timeout = deadline - tokio::time::Instant::now();
+            let ev = match tokio::time::timeout(timeout, rx.recv()).await {
+                Ok(Ok(ev)) => ev,
+                _ => continue,
+            };
+            match ev {
+                BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
+                    all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                    if entry.category == LogCategory::PdfConverter
+                        && entry.message.contains("Successfully converted")
+                    {
+                        saw_success = true;
+                        break;
+                    }
+                }
+                other => {
+                    all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
                 }
             }
-            other => {
-                all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
-            }
         }
-    }
+        (saw_success, all_messages)
+    });
     if !saw_success {
         eprintln!("Test saw messages: {:?}", all_messages);
     }
@@ -310,7 +586,7 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
     let pdf_path = dir.path().join("dropped.pdf");
     std::fs::write(&pdf_path, b"dummy").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(pdf_path.clone()));
+        .publish(FileChanged::discovered_one(pdf_path.clone()));
 
     let expected_md = {
         let mut p = pdf_path.clone();
@@ -323,7 +599,9 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
     while start.elapsed().as_secs() < 5 {
         match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(event) => {
-                if event.kind == FileEventKind::Discovered && event.paths.contains(&expected_md) {
+                if is_file_changed_of_kind(&event, FileChangedKind::Added)
+                    && event.paths().contains(&expected_md)
+                {
                     saw_discovered = true;
                     break;
                 }
@@ -374,13 +652,14 @@ fn test_bus_published_image_triggers_vision_via_subscriber() {
     let img_path = dir.path().join("dropped.png");
     std::fs::write(&img_path, b"dummy image data").unwrap();
     task.file_event_bus
-        .publish(FileEvent::discovered_one(img_path.clone()));
+        .publish(FileChanged::discovered_one(img_path.clone()));
 
+    let rx = task.rx_std();
     let start = std::time::Instant::now();
     let mut all_messages: Vec<String> = Vec::new();
     let mut saw_analyzing = false;
     while start.elapsed().as_secs() < 10 {
-        if let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+        if let Ok(ev) = rx.recv_timeout(std::time::Duration::from_millis(100))
             && let BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) = ev
         {
             all_messages.push(format!("{:?}: {}", entry.category, entry.message));

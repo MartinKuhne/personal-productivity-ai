@@ -130,7 +130,7 @@ fn test_filter_category_none_shows_all() {
 /// entries of two categories, set a filter, verify only the
 /// matching entries are visible.
 ///
-/// The filter is consumed by [`crate::ui::background_logs::is_log_visible`],
+/// The filter is consumed by [`crate::ui_iced::logs::is_log_visible`],
 /// which we exercise here indirectly by re-implementing the
 /// same predicate; if the two diverge, that test will catch it.
 #[test]

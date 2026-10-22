@@ -282,11 +282,11 @@ mod tests {
     use super::*;
     use crate::bus::events::typed::BackgroundEventSender;
     use std::sync::atomic::AtomicBool;
-    use std::sync::mpsc;
+    use tokio::sync::broadcast;
 
     #[test]
     fn test_execute_concurrent_empty() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_execute_concurrent_cancellation() {
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(true));

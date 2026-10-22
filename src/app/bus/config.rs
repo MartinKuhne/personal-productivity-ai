@@ -23,7 +23,22 @@ pub fn config_bus() -> Bus<ConfigArrived> {
 /// the UI thread. If the event is not observed within this window the
 /// subscriber falls back to [`crate::config::AppConfig::default`] and
 /// emits a `config.arrived.timeout` tracing event.
-pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_millis(100);
+///
+/// The window is deliberately generous. Boot warm-up (font load, first
+/// frame, wgpu initialisation) runs before the `Task::perform` that
+/// publishes `ConfigArrived`, so arrival can be more than 1 s
+/// wall-clock after a subscriber starts waiting. The publish itself is
+/// synchronous inside [`crate::ui_iced::app::build_state`] once every
+/// subscriber has registered, but the generous window is kept as
+/// defense-in-depth: a future asynchronous publisher must not silently
+/// degrade the initial scan. The fallback also keeps scanning legal
+/// after a genuine mis-ordering instead of wedging the workers forever.
+///
+/// The timeout is only ever waited on by worker/init *threads* and the
+/// agent config-subscriber thread — never on the UI thread — so the
+/// generous window cannot block user input: a user action must be
+/// accepted within one frame regardless of background load.
+pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(test)]
 mod tests {
@@ -95,6 +110,22 @@ mod tests {
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert!(event.config.inline_editor_enabled);
         assert_eq!(event.config.csv_db_path, cfg.csv_db_path);
+    }
+
+    /// Regression guard: the arrival window must comfortably exceed the
+    /// boot publish's scheduler delay (font load, first frame, and
+    /// wgpu warm-up all run before the `Task::perform` that publishes
+    /// `ConfigArrived`). A window shorter than that warm-up times out
+    /// on every launch, so the indexer would scan
+    /// `AppConfig::default()` and the workspace would never be scanned
+    /// ("Scanned 0 files").
+    #[test]
+    fn test_arrival_timeout_exceeds_boot_publish_delay() {
+        assert!(
+            CONFIG_ARRIVAL_TIMEOUT >= Duration::from_secs(10),
+            "CONFIG_ARRIVAL_TIMEOUT must exceed the iced boot publish delay \
+             (observed > 1 s); the 100 ms value left the library unscanned"
+        );
     }
 
     #[test]

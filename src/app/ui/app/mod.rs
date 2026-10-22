@@ -1,71 +1,26 @@
-//! Root egui `App` struct — owns all application state and wires together
-//! background tasks, panels, agent, and dialogs.
+//! Root application state struct — owns all application state and wires
+//! together background tasks, panels, agent, and dialogs.
 //!
-//! The lifecycle is split across three sibling files (one phase each):
+//! `FastMdApp` is the framework-free domain object the iced UI
+//! ([`crate::ui_iced`]) wraps: the orchestrator handle, the pane layout,
+//! the persisted-UI snapshot and the pass-through accessors every panel
+//! and modal reads. Construction lives in the sibling `init` module
+//! (`FastMdApp::from_parts`, [`FastMdApp::empty_state`]).
 //!
-//! - `init`   — `FastMdApp::new`, `FastMdApp::empty_state`, and the
-//!   dark-theme pinning. Runs once at app start (or once per test).
-//! - `update` — `FastMdApp::update_ui` and the helpers it drives
-//!   (`process_file_events_and_repaint`, `handle_deferred_actions`,
-//!   `update_persisted_ui_state`). Runs every frame before paint.
-//! - `render` — `show_editor_overlay`, `show_modals`, `render_panels`.
-//!   Runs every frame to paint the editor window, dialogs, and the
-//!   five top-level panels in the order top → bottom → right → left
-//!   → center.
-//!
-//! This file holds the data definitions (`FastMdApp`, `TreeNode`, the
-//! persisted-UI-state key) plus the cross-cutting concerns that don't
-//! fit a single phase: the pass-through accessors used by every panel
-//! and modal, the `eframe::App` trait impl (`on_exit` / `save` / `ui`),
-//! the `generate_format_prompt` helper, and the test module.
-//!
-//! This is the same split the `tools/manager/` directory uses:
-//! `mod.rs` is a thin facade that re-exports the public types and
-//! declares the submodules; each submodule owns a single concern.
+//! The iced reducer in [`crate::ui_iced::update`] drives this state.
 //!
 //! Unit tests live in the sibling `tests.rs` sidecar.
 
 mod init;
-mod render;
-mod update;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use eframe::egui;
-
 use crate::agent::AgentSession;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::Tags;
-use crate::workspace::watcher::FileEventProcessor;
-
-/// The key used to persist the eframe UI state.
-const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
-
-/// Sanity bounds for the user-chosen font scale multiplier.
-///
-/// The persisted `font_size_scale` is meant to be a multiplier on
-/// top of the OS-reported `pixels_per_point` (e.g. `1.2` for "20%
-/// larger than the system default"). Values outside this range are
-/// almost certainly the residue of the historical compounding bug
-/// (where the absolute ppp was saved as a "scale" and re-applied on
-/// top of the OS baseline, multiplying by 1.25×/1.5×/... every
-/// launch) or outright corruption. We clamp them on apply and
-/// self-heal them to `None` on the next save.
-const FONT_SCALE_MIN: f32 = 0.5;
-/// The maximum font scaling factor allowed.
-const FONT_SCALE_MAX: f32 = 3.0;
-
-/// Validate that a candidate font scale is a finite, in-range
-/// multiplier. Returns `Some(scale)` when valid, `None` otherwise.
-fn sanitise_font_scale(scale: f32) -> Option<f32> {
-    if !scale.is_finite() || !(FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
-        None
-    } else {
-        Some(scale)
-    }
-}
+use crate::workspace::watcher::Workspace;
 
 #[derive(Clone)]
 pub struct TreeNode {
@@ -103,29 +58,6 @@ pub struct FastMdApp {
     /// Invalidated when selection.tree_dirty is true.
     pub cached_tree_rows: Option<Arc<Vec<crate::ui::tree::FlatRow>>>,
     pub persisted_ui_state: PersistedUiState,
-    /// Track whether we've applied persisted font scale on first frame.
-    persisted_font_applied: bool,
-    /// The OS-reported `pixels_per_point` at the start of the
-    /// session, captured on the first frame **before** any
-    /// persisted scale is applied. Used as the baseline for
-    /// computing the user-chosen scale multiplier on save and is
-    /// deliberately not persisted — the OS re-reports it on every
-    /// launch (and may change if the window moves between monitors
-    /// with different DPI).
-    os_baseline_ppp: Option<f32>,
-    /// The font scale that was applied to the OS baseline on the
-    /// first frame. `1.0` means "no user-chosen scale was
-    /// applied" (either because `persisted_ui_state.font_size_scale`
-    /// was `None` or because it was rejected by
-    /// [`sanitise_font_scale`]). This is the value the persist
-    /// helper writes back to storage — **not** a fresh
-    /// `current_ppp / baseline_ppp` computation — so the persisted
-    /// state is stable across frames and across sessions even
-    /// though egui 0.35 defers `set_pixels_per_point` until the
-    /// next `begin_pass` (so within a single frame
-    /// `ctx.pixels_per_point()` still returns the pre-apply
-    /// value).
-    applied_font_scale: f32,
     /// Workspace content search state (UI-050).
     pub search: crate::ui::TreeSearch,
 }
@@ -139,12 +71,15 @@ impl FastMdApp {
         &mut self.orchestrator.content_libraries
     }
 
-    pub fn file_processor(&self) -> &FileEventProcessor {
-        &self.orchestrator.file_processor
+    /// Access the workspace projection (single source of truth on file and
+    /// directory state).
+    pub fn workspace(&self) -> &Workspace {
+        &self.orchestrator.workspace
     }
 
-    pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
-        &mut self.orchestrator.file_processor
+    /// Mutable access to the workspace projection.
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.orchestrator.workspace
     }
 
     pub fn pdf_backing_tracker(&self) -> &crate::agent::session::PdfBackingTracker {
@@ -239,38 +174,6 @@ pub fn generate_format_prompt(date_str: &str) -> String {
         "Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_notes or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```",
         date_str
     )
-}
-
-impl eframe::App for FastMdApp {
-    fn on_exit(&mut self) {
-        crate::export::print::cleanup_temp_files();
-        crate::background::logs::unregister_ui_logs();
-    }
-
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
-        self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
-
-        // Window size/position are persisted by eframe's built-in
-        // `persistence` feature (enabled on the `eframe` dep in
-        // `Cargo.toml`) — we do not duplicate that here.
-
-        let all_dirs: HashSet<PathBuf> = self
-            .orchestrator
-            .selection
-            .expanded_dirs
-            .iter()
-            .cloned()
-            .collect();
-        self.persisted_ui_state.expanded_dirs = all_dirs;
-        if let Ok(json) = serde_json::to_string(&self.persisted_ui_state) {
-            storage.set_string(PERSISTED_UI_STATE_KEY, json);
-        }
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.update_ui(ui);
-    }
 }
 
 // ---------------------------------------------------------------------------

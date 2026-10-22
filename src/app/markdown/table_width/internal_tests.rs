@@ -131,7 +131,7 @@ fn greedy_line_count_two_lines() {
     assert_eq!(greedy_line_count(&tokens, 10.0, 70.0), 2);
 }
 
-/// US1 (TBL-009): wrapping must break at whitespace (between tokens),
+/// Wrapping must break at whitespace (between tokens),
 /// never inside a token. `greedy_line_count` only advances a line at the
 /// inter-token boundary check (`line_w + token_w > col_width`), so every
 /// line break falls on a whitespace position. With tokens `[20, 30, 25]`
