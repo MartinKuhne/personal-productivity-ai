@@ -38,14 +38,14 @@
 //!
 //! | Pair | Cell | Was | Now | Rule |
 //! |---|---|---|---|---|
-//! | `text.strong` on `status.danger` | Danger `Hovered` | `3.8753:1` | `5.5185:1` on `status.danger_fill` | `4.5:1` |
-//! | `accent.primary` ring on `status.danger` | Danger `Hovered + ring` | `1.1779:1` | `5.5185:1` — `text.strong` ring | `3.0:1` |
-//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `6.6216:1` — `text.strong` ring | `3.0:1` |
+//! | `text.strong` on `status.danger` | Danger `Hovered` | `3.8753:1` | `5.1270:1` on `status.danger.fill` | `4.5:1` |
+//! | `accent.primary` ring on `status.danger` | Danger `Hovered + ring` | `1.1779:1` | `5.1270:1` — `text.strong` ring | `3.0:1` |
+//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `6.2008:1` — `text.strong` ring | `3.0:1` |
 //!
 //! The first was the pair the increment brief predicted: white on the
 //! `G-7`-retuned `RGB(255, 28, 2)` is `3.8753:1`, the brief's
 //! `~3.88:1` to two decimals. It is fixed by the **D-5** token split —
-//! the Danger fill is now `status_danger_fill`, `RGB(208, 23, 2)`, and
+//! the Danger fill is now `status_danger_fill`, `RGB(216, 28, 20)`, and
 //! the error-text red is no longer asked to be a background.
 //!
 //! The other two were the finding the brief did not predict, and they are
@@ -54,10 +54,10 @@
 //! button *also* be hovered or pressed — combinations §3.1 never
 //! snapshots, because it spells its Focused cell as "Rest + ring".
 //! Inheriting the hover fill instead of Rest, as `Hovered + focused`
-//! must, dropped the `accent.primary` ring onto a red fill at roughly
-//! `1.18:1`: an invisible focus indicator precisely when the user is
-//! doing the thing it exists to report. Resolving the ring against the
-//! actual background makes it `text.strong` there.
+//! must, dropped the accent ring onto a red fill at roughly `1.18:1`: an
+//! invisible focus indicator precisely when the user is doing the thing
+//! it exists to report. Resolving the ring against the actual background
+//! makes it `text.strong` there.
 //!
 //! Note that the second and third rows changed *foreground*, not just
 //! value — the pair that is now measured is not the pair that failed.
@@ -68,10 +68,10 @@
 //!
 //! Primary and Danger press at 85% alpha. [`contrast_ratio`] ignores
 //! alpha by design, so a naive reading of a pressed label is the
-//! *opaque* pairing — `4.5648:1` for Primary, `5.5185:1` for Danger.
+//! *opaque* pairing — `4.8020:1` for Primary, `5.1270:1` for Danger.
 //! Laid over the surfaces a button can actually be mounted to, the 85%
 //! fill lands darker and both labels read better than the naive figure:
-//! `5.3967:1` and `6.6216:1` at their worst, both over `surface.active`.
+//! `5.6683:1` and `6.2008:1` at their worst, both over `surface.active`.
 //! The audit measures the painted colour and reports the naive figure
 //! alongside it, because the gap between the two is exactly the kind of
 //! mistake this gate exists to catch.
@@ -162,7 +162,7 @@ fn token_name(color: Color) -> String {
         return "transparent".to_string();
     }
     let p = palette();
-    let table: [(&str, Color); 20] = [
+    let table: [(&str, Color); 23] = [
         ("surface.base", p.surface_base),
         ("surface.sunken", p.surface_sunken),
         ("surface.raised", p.surface_raised),
@@ -170,9 +170,12 @@ fn token_name(color: Color) -> String {
         ("surface.overlay", p.surface_overlay),
         ("surface.hover", p.surface_hover),
         ("surface.active", p.surface_active),
+        ("surface.scrim", p.surface_scrim),
         ("border.subtle", p.border_subtle),
         ("border.strong", p.border_strong),
-        ("accent.primary", p.accent_primary),
+        ("accent.fill", p.accent_fill),
+        ("accent.fill_active", p.accent_fill_active),
+        ("accent.border", p.accent_border),
         ("accent.text", p.accent_text),
         ("text.primary", p.text_primary),
         ("text.strong", p.text_strong),
@@ -180,9 +183,9 @@ fn token_name(color: Color) -> String {
         ("text.disabled", p.text_disabled),
         ("status.success", p.status_success),
         ("status.warning", p.status_warning),
-        ("status.danger", p.status_danger),
+        ("status.danger_text", p.status_danger_text),
         ("status.danger_fill", p.status_danger_fill),
-        ("surface.scrim", p.surface_scrim),
+        ("status.danger_fill_active", p.status_danger_fill_active),
     ];
     for (name, token) in table {
         if same_channels(color, token) {
@@ -283,7 +286,7 @@ fn matrix_cells() -> Vec<Cell> {
     let p = palette();
     let pressed_accent = Color {
         a: PRESSED_FILL_ALPHA,
-        ..p.accent_primary
+        ..p.accent_fill
     };
     let pressed_danger = Color {
         a: PRESSED_FILL_ALPHA,
@@ -297,16 +300,16 @@ fn matrix_cells() -> Vec<Cell> {
             ButtonVariant::Primary,
             BaseState::Rest,
             false,
-            p.accent_primary,
+            p.accent_fill,
             p.text_strong,
-            p.accent_primary,
+            p.accent_fill,
             none,
         ),
         cell(
             ButtonVariant::Primary,
             BaseState::Hovered,
             false,
-            p.accent_primary,
+            p.accent_fill,
             p.text_strong,
             p.text_strong,
             none,
@@ -317,16 +320,16 @@ fn matrix_cells() -> Vec<Cell> {
             false,
             pressed_accent,
             p.text_strong,
-            p.accent_primary,
+            p.accent_fill,
             none,
         ),
         cell(
             ButtonVariant::Primary,
             BaseState::Rest,
             true,
-            p.accent_primary,
+            p.accent_fill,
             p.text_strong,
-            p.accent_primary,
+            p.accent_fill,
             p.text_strong,
         ),
         cell(
@@ -342,9 +345,9 @@ fn matrix_cells() -> Vec<Cell> {
             ButtonVariant::Primary,
             BaseState::Invalid,
             false,
-            p.accent_primary,
+            p.accent_fill,
             p.text_strong,
-            p.accent_primary,
+            p.accent_fill,
             none,
         ),
         // ---- Secondary ----
@@ -372,7 +375,7 @@ fn matrix_cells() -> Vec<Cell> {
             false,
             p.surface_active,
             p.text_strong,
-            p.accent_primary,
+            p.accent_border,
             none,
         ),
         cell(
@@ -382,7 +385,7 @@ fn matrix_cells() -> Vec<Cell> {
             p.surface_raised,
             p.text_primary,
             p.border_strong,
-            p.accent_primary,
+            p.accent_border,
         ),
         cell(
             ButtonVariant::Secondary,
@@ -437,7 +440,7 @@ fn matrix_cells() -> Vec<Cell> {
             none,
             p.text_primary,
             none,
-            p.accent_primary,
+            p.accent_border,
         ),
         cell(
             ButtonVariant::Ghost,
@@ -463,8 +466,8 @@ fn matrix_cells() -> Vec<Cell> {
             BaseState::Rest,
             false,
             p.surface_raised,
-            p.status_danger,
-            p.status_danger,
+            p.status_danger_text,
+            p.status_danger_text,
             none,
         ),
         cell(
@@ -490,9 +493,9 @@ fn matrix_cells() -> Vec<Cell> {
             BaseState::Rest,
             true,
             p.surface_raised,
-            p.status_danger,
-            p.status_danger,
-            p.accent_primary,
+            p.status_danger_text,
+            p.status_danger_text,
+            p.accent_border,
         ),
         cell(
             ButtonVariant::Danger,
@@ -508,8 +511,8 @@ fn matrix_cells() -> Vec<Cell> {
             BaseState::Invalid,
             false,
             p.surface_raised,
-            p.status_danger,
-            p.status_danger,
+            p.status_danger_text,
+            p.status_danger_text,
             none,
         ),
     ]
@@ -637,12 +640,12 @@ fn test_danger_hovered_and_pressed_share_the_split_fill_and_resting_stays_on_sur
         "D-5: only Hovered and Pressed change — the Danger resting surface is untouched"
     );
     assert_eq!(
-        resting.foreground, p.status_danger,
-        "D-5: the Danger resting label stays status.danger, the tinted signal"
+        resting.foreground, p.status_danger_text,
+        "D-5: the Danger resting label stays status.danger.text, the tinted signal"
     );
     assert_eq!(
-        resting.border_color, p.status_danger,
-        "D-5: the Danger resting border stays status.danger"
+        resting.border_color, p.status_danger_text,
+        "D-5: the Danger resting border stays status.danger.text"
     );
     assert_eq!(
         hovered.border_color, p.text_strong,
@@ -671,13 +674,13 @@ fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
         rgb8(pressed.border_color)
     );
     assert!(
-        !same_channels(pressed.border_color, p.status_danger),
+        !same_channels(pressed.border_color, p.status_danger_text),
         "D-5: the bright error red must not edge the darker fill"
     );
 
     for (name, surface) in all_surfaces() {
         let mounted = composite_over(pressed.background, surface);
-        let would_be = contrast_ratio(p.status_danger, mounted);
+        let would_be = contrast_ratio(p.status_danger_text, mounted);
         assert!(
             would_be < MIN_CHROME_CONTRAST,
             "the pre-D-5 `status.danger` border over the pressed fill on {name} \
@@ -695,9 +698,12 @@ fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
 }
 
 #[test]
-fn test_the_danger_fill_is_the_only_new_token_and_nothing_else_moved() {
-    // The split must be paid for by adding a token, not by nudging an existing
-    // one. Every value below is the literal `Palette::dark()` carries.
+fn test_every_token_is_pinned_to_the_revised_spec_value() {
+    // The polarity split must be paid for by naming new tokens, not by
+    // nudging an existing one into a second role. Every value below is
+    // the literal `Palette::dark()` carries, transcribed from the
+    // 2026-10-22 revision of §2.5 — so this test fails the moment a
+    // value drifts from the spec in either direction.
     let now = palette();
 
     assert_eq!(rgb8(now.surface_base), "RGB(9, 9, 11)");
@@ -705,11 +711,13 @@ fn test_the_danger_fill_is_the_only_new_token_and_nothing_else_moved() {
     assert_eq!(rgb8(now.surface_raised), "RGB(18, 18, 20)");
     assert_eq!(rgb8(now.surface_code), "RGB(20, 20, 22)");
     assert_eq!(rgb8(now.surface_overlay), "RGB(24, 24, 27)");
-    assert_eq!(rgb8(now.surface_hover), "RGB(38, 38, 44)");
-    assert_eq!(rgb8(now.surface_active), "RGB(43, 43, 51)");
+    assert_eq!(rgb8(now.surface_hover), "RGB(32, 32, 36)");
+    assert_eq!(rgb8(now.surface_active), "RGB(42, 42, 46)");
     assert_eq!(rgb8(now.border_subtle), "RGB(40, 40, 40)");
     assert_eq!(rgb8(now.border_strong), "RGB(120, 120, 120)");
-    assert_eq!(rgb8(now.accent_primary), "RGB(98, 100, 240)");
+    assert_eq!(rgb8(now.accent_fill), "RGB(93, 96, 238)");
+    assert_eq!(rgb8(now.accent_fill_active), "RGB(82, 85, 222)");
+    assert_eq!(rgb8(now.accent_border), "RGB(129, 140, 248)");
     assert_eq!(rgb8(now.accent_text), "RGB(100, 200, 255)");
     assert_eq!(rgb8(now.text_primary), "RGB(210, 210, 210)");
     assert_eq!(rgb8(now.text_strong), "RGB(255, 255, 255)");
@@ -717,11 +725,26 @@ fn test_the_danger_fill_is_the_only_new_token_and_nothing_else_moved() {
     assert_eq!(rgb8(now.text_disabled), "RGB(140, 140, 140)");
     assert_eq!(rgb8(now.status_success), "RGB(100, 255, 100)");
     assert_eq!(rgb8(now.status_warning), "RGB(220, 130, 0)");
-    assert_eq!(rgb8(now.status_danger), "RGB(255, 28, 2)");
+    assert_eq!(rgb8(now.status_danger_text), "RGB(255, 92, 92)");
+    assert_eq!(rgb8(now.status_danger_fill), "RGB(216, 28, 20)");
+    assert_eq!(rgb8(now.status_danger_fill_active), "RGB(202, 24, 16)");
+
+    // The split is what this increment bought; assert the shape, not just
+    // the values. Six tokens carry the two three-way splits.
+    let split = [
+        now.accent_fill,
+        now.accent_fill_active,
+        now.accent_border,
+        now.status_danger_text,
+        now.status_danger_fill,
+        now.status_danger_fill_active,
+    ];
+    let mut distinct = split.to_vec();
+    distinct.dedup();
     assert_eq!(
-        rgb8(now.status_danger_fill),
-        "RGB(208, 23, 2)",
-        "status.danger_fill is the single token INC-08 adds"
+        distinct.len(),
+        6,
+        "the six polarity-split tokens must be six different colours"
     );
 }
 
@@ -818,7 +841,7 @@ fn test_the_ring_at_rest_reproduces_the_per_variant_colour_spec_3_1_gives() {
     ] {
         assert_eq!(
             resolve_style(variant, focused, &p).focus_ring_color,
-            p.accent_primary,
+            p.accent_border,
             "{variant:?} takes the accent focus border §3.1 specifies"
         );
     }
@@ -879,7 +902,7 @@ fn test_pressed_fill_uses_the_spec_opacity_and_keeps_its_channels() {
             primary.background.g,
             primary.background.b
         ),
-        (p.accent_primary.r, p.accent_primary.g, p.accent_primary.b),
+        (p.accent_fill.r, p.accent_fill.g, p.accent_fill.b),
         "the pressed fill is the token at 85% alpha, not a different colour"
     );
 
@@ -1470,11 +1493,11 @@ fn resolved_pairs() -> Vec<ResolvedPair> {
             was_measured: 3.8753,
             now_fg: "text.strong",
             now_bg: "status.danger_fill",
-            now_measured: 5.5185,
+            now_measured: 5.1270,
             fix: "D-5 split the destructive red in two. The Danger hover \
-                 fill is now status_danger_fill, RGB(208, 23, 2), and the \
+                 fill is now status_danger_fill, RGB(216, 28, 20), and the \
                  error-text red is no longer asked to be a background. The \
-                 label moved from 0.6247 under the rule to 1.0185 over it.",
+                 label moved from 0.6247 under the rule to 0.6270 over it.",
         },
         ResolvedPair {
             channel: "ring",
@@ -1485,11 +1508,11 @@ fn resolved_pairs() -> Vec<ResolvedPair> {
             was_measured: 1.1779,
             now_fg: "text.strong",
             now_bg: "status.danger_fill",
-            now_measured: 5.5185,
+            now_measured: 5.1270,
             fix: "D-6 resolves the ring against the actual resolved fill. \
                  The accent cannot clear 3.0 against the danger fill, so \
                  the ring degrades to text.strong — indigo on red at \
-                 1.18:1 became white on dark red at 5.52:1.",
+                 1.72:1 became white on dark red at 5.13:1.",
         },
         ResolvedPair {
             channel: "ring",
@@ -1500,10 +1523,10 @@ fn resolved_pairs() -> Vec<ResolvedPair> {
             was_measured: 1.0609,
             now_fg: "text.strong",
             now_bg: "status.danger_fill @ 85%",
-            now_measured: 6.6216,
+            now_measured: 6.2008,
             fix: "D-5 and D-6 together, judged against the worst container \
                  in the ladder. The worst case moved from within 6% of the \
-                 accent's own luminance to a clear 6.62:1.",
+                 accent's own luminance to a clear 6.20:1.",
         },
     ]
 }
@@ -1630,13 +1653,13 @@ fn test_the_danger_hovered_label_now_clears_the_text_rule() {
     );
     let ratio = contrast_ratio(style.foreground, style.background);
 
-    // `INC-07` measured this cell at 3.8753:1 against the error-text red,
-    // 0.6247 short of the 4.5:1 normal-text rule. The D-5 split put a
-    // background red under the label instead, and the same cell now reads
-    // 5.5185:1 — 1.0185 above the rule rather than below it.
+    // `INC-07` measured this cell against the error-text red and found it
+    // short of the 4.5:1 normal-text rule. The D-5 split put a
+    // background red under the label instead, and at the revised §2.5
+    // values the same cell reads 5.1270:1 — 0.6270 above the rule.
     assert_eq!(style.background, p.status_danger_fill);
     assert!(
-        (ratio - 5.5185).abs() < RATIO_EPS,
+        (ratio - 5.1270).abs() < RATIO_EPS,
         "text.strong on status.danger_fill measures {ratio:.4}:1"
     );
     assert!(
@@ -1649,22 +1672,23 @@ fn test_the_danger_hovered_label_now_clears_the_text_rule() {
          3.0:1 chrome rule it always did"
     );
     assert!(
-        (ratio - MIN_TEXT_CONTRAST - 1.0185).abs() < RATIO_EPS,
+        (ratio - MIN_TEXT_CONTRAST - 0.6270).abs() < RATIO_EPS,
         "headroom against rule 1 is {:.4}",
         ratio - MIN_TEXT_CONTRAST,
     );
 
-    // The old pairing is what the split exists to remove: white on the
-    // error-text red is still unreadable, which is why that token must not
-    // be used as a fill.
-    let old = contrast_ratio(p.text_strong, p.status_danger);
+    // The pairing the split exists to remove: white on the error-text red
+    // is unreadable, which is why that token must never be used as a
+    // fill. At the revised values it is worse than the old pin recorded,
+    // because status.danger.text is a lighter red than its predecessor.
+    let old = contrast_ratio(p.text_strong, p.status_danger_text);
     assert!(
-        (old - 3.8753).abs() < RATIO_EPS,
-        "text.strong on status.danger still measures {old:.4}:1 — the value is \
-         unchanged, as D-5 requires"
+        (old - 3.0271).abs() < RATIO_EPS,
+        "text.strong on status.danger.text measures {old:.4}:1 — still under the \
+         text rule, which is the whole reason status_danger_fill exists"
     );
     assert!(
-        !meets_text_contrast(p.text_strong, p.status_danger),
+        !meets_text_contrast(p.text_strong, p.status_danger_text),
         "and it still fails, which is the whole reason status_danger_fill exists"
     );
 }
@@ -1841,124 +1865,117 @@ fn test_every_focus_ring_clears_the_chrome_rule() {
 fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
     let p = palette();
     let expected: &[(&str, ButtonVariant, BaseState, &str, f32)] = &[
-        // Primary's fill *is* the accent, so an accent ring is invisible
-        // against it in every state and the rule falls to text.strong.
         (
             "Primary",
             ButtonVariant::Primary,
             BaseState::Rest,
             "text.strong",
-            4.5648,
+            4.802,
         ),
         (
             "Primary",
             ButtonVariant::Primary,
             BaseState::Hovered,
             "text.strong",
-            4.5648,
+            4.802,
         ),
         (
             "Primary",
             ButtonVariant::Primary,
             BaseState::Pressed,
             "text.strong",
-            4.5648,
+            4.802,
         ),
         (
             "Primary",
             ButtonVariant::Primary,
             BaseState::Invalid,
             "text.strong",
-            4.5648,
+            4.802,
         ),
-        // Secondary rests and works on surfaces the accent clears.
         (
             "Secondary",
             ButtonVariant::Secondary,
             BaseState::Rest,
-            "accent.primary",
-            4.0990,
+            "accent.border",
+            6.273,
         ),
         (
             "Secondary",
             ButtonVariant::Secondary,
             BaseState::Hovered,
-            "accent.primary",
-            3.2954,
+            "accent.border",
+            5.443,
         ),
         (
             "Secondary",
             ButtonVariant::Secondary,
             BaseState::Pressed,
-            "accent.primary",
-            3.0750,
+            "accent.border",
+            4.792,
         ),
         (
             "Secondary",
             ButtonVariant::Secondary,
             BaseState::Invalid,
-            "accent.primary",
-            4.0990,
+            "accent.border",
+            6.273,
         ),
-        // Ghost's resting ring is measured against the container, not a
-        // fill — see `resolve_ring_color_for_background`.
         (
             "Ghost",
             ButtonVariant::Ghost,
             BaseState::Rest,
-            "accent.primary",
-            4.3583,
+            "accent.border",
+            6.67,
         ),
         (
             "Ghost",
             ButtonVariant::Ghost,
             BaseState::Hovered,
-            "accent.primary",
-            3.2954,
+            "accent.border",
+            5.443,
         ),
         (
             "Ghost",
             ButtonVariant::Ghost,
             BaseState::Pressed,
-            "accent.primary",
-            3.0750,
+            "accent.border",
+            4.792,
         ),
         (
             "Ghost",
             ButtonVariant::Ghost,
             BaseState::Invalid,
-            "accent.primary",
-            4.3583,
+            "accent.border",
+            6.67,
         ),
-        // Danger rests on surface.raised like Secondary, but its hover and
-        // press fills swallow the accent.
         (
             "Danger",
             ButtonVariant::Danger,
             BaseState::Rest,
-            "accent.primary",
-            4.0990,
+            "accent.border",
+            6.273,
         ),
         (
             "Danger",
             ButtonVariant::Danger,
             BaseState::Hovered,
             "text.strong",
-            5.5185,
+            5.127,
         ),
         (
             "Danger",
             ButtonVariant::Danger,
             BaseState::Pressed,
             "text.strong",
-            5.5185,
+            5.127,
         ),
         (
             "Danger",
             ButtonVariant::Danger,
             BaseState::Invalid,
-            "accent.primary",
-            4.0990,
+            "accent.border",
+            6.273,
         ),
     ];
 

@@ -10,12 +10,12 @@
 //! # Why the rule is not a per-variant constant
 //!
 //! §3.1 spells each variant's focused cell as a fixed colour — Primary a
-//! `text.strong` ring, the other three an `accent.primary` one. That
+//! `text.strong` ring, the other three an `accent.border` one. That
 //! works for the cell the spec snapshots, which is always `Rest + ring`.
 //! [`crate::state`] makes focus *additive*, so a focused control can
 //! also be hovered or pressed, and the ring then lands on a fill the
-//! spec never drew it against. On a Danger button that is `accent.primary`
-//! indigo over a red fill at `1.1779:1` — an invisible ring at the
+//! spec never drew it against. On a Danger button that is `accent.border`
+//! indigo over a red fill at `1.7188:1` — an invisible ring at the
 //! moment the user most needs one (gap **G-9**).
 //!
 //! Hardcoding the answer per variant cannot fix that, because the right
@@ -27,9 +27,9 @@
 //!
 //! Two candidates, tried in a fixed order against the fill:
 //!
-//! 1. [`accent_primary`](crate::token::color::Palette::accent_primary) —
-//!    the spec's ring colour. Used whenever it clears
-//!    [`MIN_CHROME_CONTRAST`] (`3.0:1`) against the fill.
+//! 1. [`accent_border`](crate::token::color::Palette::accent_border) —
+//!    the spec's ring colour (`UIF-ATOM-000` §2). Used whenever it
+//!    clears [`MIN_CHROME_CONTRAST`] (`3.0:1`) against the fill.
 //! 2. [`text_strong`](crate::token::color::Palette::text_strong) — the
 //!    fallback, tried when the accent cannot clear the floor.
 //!
@@ -37,9 +37,35 @@
 //! designated focus colour, so it wins whenever it is visible, and
 //! `text.strong` is what a ring degrades to. That keeps every ring this
 //! framework draws on a dark surface identical to the one the spec asks
-//! for. Only a fill that swallows the accent changes colour, and the
-//! atom's own audit shows that is the Danger hover/press fill and nothing
-//! else.
+//! for. Only a fill that swallows the accent changes colour.
+//!
+//! # What the polarity split did to this rule
+//!
+//! Before the 2026-10-22 revision of §2.5 there was no
+//! `accent.border` — the ring candidate was `accent.primary`, the same
+//! token that painted the CTA fill, and the rule had to fall back from a
+//! *fill* token to white. The revision split the accent into
+//! `accent.fill` / `accent.fill_active` / `accent.border`, which gives
+//! the rule a stroke token purpose-built for the job: `accent.border` is
+//! `L = 0.3020` against the fill's `0.1687`, so it clears `3.0:1`
+//! against every surface in the elevation ladder (worst case
+//! `4.7922:1` on `surface.active`) and the fallback only fires where it
+//! genuinely must.
+//!
+//! The fallback now fires on **all four** saturated fills, and never on
+//! a surface:
+//!
+//! ```text
+//!   on accent.fill                 border 1.6098  strong 4.8020  -> text.strong
+//!   on accent.fill_active          border 1.8961  strong 5.6559  -> text.strong
+//!   on status.danger.fill          border 1.7188  strong 5.1270  -> text.strong
+//!   on status.danger.fill_active   border 1.9291  strong 5.7543  -> text.strong
+//! ```
+//!
+//! That is the D-6 rule working exactly as intended: a ring on a
+//! saturated fill is white, because no indigo stroke can be made out
+//! against a saturated fill, and the fill's own foreground is already
+//! white so the ring reads as a continuation of the label.
 //!
 //! # When neither candidate clears the floor
 //!
@@ -71,10 +97,20 @@
 //! [`resolve_ring_color_for_background`] is therefore the entry point a
 //! widget should call with its resolved background: a transparent
 //! background short-circuits to the spec's own ring colour,
-//! [`accent_primary`](crate::token::color::Palette::accent_primary),
-//! which clears the chrome floor against every surface in the ladder and
-//! against white. A Ghost button's ring sits on the container's surface,
-//! and that is what it is measured against — not on `transparent`.
+//! [`accent_border`](crate::token::color::Palette::accent_border),
+//! which clears the chrome floor against every surface in the ladder. A
+//! Ghost button's ring sits on the container's surface, and that is what
+//! it is measured against — not on `transparent`.
+//!
+//! It is worth stating plainly that the ring token does **not** clear
+//! `3.0:1` against white: `accent.border` against `text.strong` is
+//! `2.9829:1`, which §2.5 itself prints. A ring drawn on the inverted
+//! editor surface therefore has no candidate that satisfies the chrome
+//! floor, and the resolver returns `accent.border` as the higher of the
+//! two rather than the white that would be invisible. That is a limit of
+//! the token set on a light background, not of the rule, and the sidecar
+//! pins it rather than letting the short-circuit imply the ring always
+//! clears.
 //!
 //! Unit tests live in the sibling `focus_tests.rs` sidecar.
 
@@ -85,10 +121,9 @@ use iced::Color;
 /// Resolve a focus ring against the fill it has to be visible on
 /// (`UIF-TOK-006` rule 2, decision **D-6**).
 ///
-/// Returns [`accent_primary`](Palette::accent_primary) when
-/// `contrast_ratio(accent_primary, fill)` reaches
-/// [`MIN_CHROME_CONTRAST`] (`3.0:1`), otherwise
-/// [`text_strong`](Palette::text_strong).
+/// Returns [`accent_border`](Palette::accent_border) when
+/// `contrast_ratio(accent_border, fill)` reaches [`MIN_CHROME_CONTRAST`]
+/// (`3.0:1`), otherwise [`text_strong`](Palette::text_strong).
 ///
 /// When **neither** candidate clears `3.0:1` the resolver returns the
 /// higher-contrast of the two rather than giving up — see the [module
@@ -101,9 +136,9 @@ use iced::Color;
 /// [`resolve_ring_color_for_background`] instead of passing one here.
 #[must_use]
 pub fn resolve_ring_color(fill: Color, palette: &Palette) -> Color {
-    let accent_contrast = contrast_ratio(palette.accent_primary, fill);
+    let accent_contrast = contrast_ratio(palette.accent_border, fill);
     if accent_contrast >= MIN_CHROME_CONTRAST {
-        return palette.accent_primary;
+        return palette.accent_border;
     }
 
     let strong_contrast = contrast_ratio(palette.text_strong, fill);
@@ -118,7 +153,7 @@ pub fn resolve_ring_color(fill: Color, palette: &Palette) -> Color {
     if strong_contrast >= accent_contrast {
         palette.text_strong
     } else {
-        palette.accent_primary
+        palette.accent_border
     }
 }
 
@@ -129,9 +164,9 @@ pub fn resolve_ring_color(fill: Color, palette: &Palette) -> Color {
 /// paints nothing behind the ring, so the ring sits on the container's
 /// surface rather than on a fill and there is nothing in the style to
 /// resolve against. That case short-circuits to
-/// [`accent_primary`](Palette::accent_primary) — the spec's own ring
+/// [`accent_border`](Palette::accent_border) — the spec's own ring
 /// colour, which clears `3.0:1` against every surface in the elevation
-/// ladder and against white — instead of measuring the ring against
+/// ladder — instead of measuring the ring against
 /// `transparent`, which would report the contrast of a colour that is
 /// never painted.
 ///
@@ -144,7 +179,7 @@ pub fn resolve_ring_color(fill: Color, palette: &Palette) -> Color {
 #[must_use]
 pub fn resolve_ring_color_for_background(background: Color, palette: &Palette) -> Color {
     if background.a == 0.0 {
-        return palette.accent_primary;
+        return palette.accent_border;
     }
     resolve_ring_color(background, palette)
 }

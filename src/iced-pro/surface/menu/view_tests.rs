@@ -633,19 +633,19 @@ fn test_trap_1_destructive_hover_uses_the_fill_not_the_text_red() {
     let style = resolve_row_style(&destructive(), RowState::DESTRUCTIVE_HOVERED, &p);
 
     assert_eq!(style.background, p.status_danger_fill);
-    assert_ne!(style.background, p.status_danger);
+    assert_ne!(style.background, p.status_danger_text);
     assert!(
         contrast_ratio(style.label, style.background) >= MIN_TEXT_CONTRAST,
         "the destructive label must clear the text floor on the fill it paints"
     );
     // The pairing G-11 records, pinned so a token move is noticed.
     assert!(
-        (contrast_ratio(p.text_strong, p.status_danger) - 3.8753).abs() < 1e-3,
-        "text.strong on status.danger drifted off the 3.8753 G-11 measured"
+        (contrast_ratio(p.text_strong, p.status_danger_text) - 3.0271).abs() < 1e-3,
+        "text.strong on status.danger.text drifted off the 3.0271 G-11 pairing"
     );
     assert!(
-        (contrast_ratio(p.text_strong, p.status_danger_fill) - 5.5185).abs() < 1e-3,
-        "text.strong on status.danger_fill drifted off the 5.5185 D-5 target"
+        (contrast_ratio(p.text_strong, p.status_danger_fill) - 5.1270).abs() < 1e-3,
+        "text.strong on status.danger_fill drifted off the 5.1270 D-5 target"
     );
 }
 
@@ -659,10 +659,10 @@ fn test_trap_2_the_ring_on_a_destructive_fill_is_never_the_literal_accent() {
         if cell.focused {
             assert_ne!(
                 style.focus_ring_color,
-                p.accent_primary,
-                "accent.primary on the destructive fill is {} — the ring must \
+                p.accent_border,
+                "accent.border on the destructive fill is {} — the ring must \
                  have been resolved, not copied from the matrix",
-                contrast_ratio(p.accent_primary, style.background)
+                contrast_ratio(p.accent_border, style.background)
             );
             assert_eq!(style.focus_ring_color, p.text_strong);
             assert!(
@@ -674,8 +674,8 @@ fn test_trap_2_the_ring_on_a_destructive_fill_is_never_the_literal_accent() {
 
     // The measurements G-11 records, pinned.
     assert!(
-        (contrast_ratio(p.accent_primary, p.status_danger_fill) - 1.2089).abs() < 1e-3,
-        "accent.primary on danger_fill drifted off 1.2089"
+        (contrast_ratio(p.accent_border, p.status_danger_fill) - 1.7188).abs() < 1e-3,
+        "accent.border on danger_fill drifted off 1.7188"
     );
 }
 
@@ -718,11 +718,14 @@ fn test_trap_3_a_disabled_row_paints_no_fill_and_reads_on_the_card() {
         contrast_ratio(style.label, card_surface())
     );
 
-    // The two pairings that make the transparency load-bearing.
+    // The pairing that makes the transparency load-bearing. On the revised
+    // palette `surface.hover` clears the text floor at 4.8280, so the
+    // load now rests on `surface.active` alone: a disabled row that picked
+    // up an active ancestor's fill would read at 4.2510, under 4.5.
     assert!(
-        contrast_ratio(p.text_disabled, p.surface_hover) < MIN_TEXT_CONTRAST,
-        "if this ever clears 4.5 the transparency stopped being load-bearing \
-         and this test should say so"
+        contrast_ratio(p.text_disabled, p.surface_hover) >= MIN_TEXT_CONTRAST,
+        "surface.hover used to be load-bearing at 4.4734; if it now fails the \
+         floor the ladder changed under this test and the doc needs revisiting"
     );
     assert!(
         contrast_ratio(p.text_disabled, p.surface_active) < MIN_TEXT_CONTRAST,
@@ -771,11 +774,11 @@ fn test_trap_5_the_keyboard_ring_on_a_normal_row_keeps_its_headroom() {
     let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
     let measured = contrast_ratio(style.focus_ring_color, style.background);
 
-    assert_eq!(style.focus_ring_color, p.accent_primary);
+    assert_eq!(style.focus_ring_color, p.accent_border);
     assert!(
-        measured >= 3.2954 - 1e-3,
+        measured >= 5.4427 - 1e-3,
         "the keyboard ring on surface.hover has only {:.4} of headroom over \
-         the 3.0 floor; it measured {}, expected 3.2954",
+         the 3.0 floor; it measured {}, expected 5.4427",
         measured - MIN_CHROME_CONTRAST,
         measured
     );
@@ -794,12 +797,14 @@ fn test_trap_6_the_row_lift_delta_is_measured_and_recorded() {
     assert_eq!(hover.background, p.surface_hover);
     let delta = (contrast_ratio(p.surface_hover, card_surface()) - 1.0).abs();
     assert!(
-        (delta - 0.1778).abs() < 1e-3,
-        "surface.hover over surface.overlay drifted off the 1.1778 G-11 measured"
+        (delta - 0.0913).abs() < 1e-3,
+        "surface.hover over surface.overlay drifted off the 1.0913 measured on \
+         the revised palette"
     );
     assert!(
-        (contrast_ratio(p.status_danger_fill, p.surface_hover) - 2.7259).abs() < 1e-3,
-        "danger_fill over surface.hover drifted off the 2.7259 G-11 measured"
+        (contrast_ratio(p.status_danger_fill, p.surface_hover) - 3.1666).abs() < 1e-3,
+        "danger_fill over surface.hover drifted off the 3.1666 measured on the \
+         revised palette"
     );
 }
 
@@ -1324,7 +1329,7 @@ fn test_a_destructive_row_paints_the_danger_fill_and_never_the_text_red() {
     assert_eq!(layers.len(), 1);
     assert_eq!(layers[0].fill, p.status_danger_fill);
     assert_ne!(
-        layers[0].fill, p.status_danger,
+        layers[0].fill, p.status_danger_text,
         "G-11 trap 1: the fill token is not the text token"
     );
 }

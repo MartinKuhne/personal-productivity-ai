@@ -250,6 +250,24 @@ fn test_the_two_zero_paddings_are_named_rather_than_bare() {
     assert_eq!(FOOTER_PADDING_VERTICAL, 0.0);
 }
 
+/// §4.7.1's title is `13px Bold`, and both halves now come from the
+/// scale: the size is `type.ui_compact`'s, and `Bold` is a member of
+/// that rung's allowed-weight set. What G-12 recorded as a hand-composed
+/// pairing is legal by token, and the rendered size is exactly what it
+/// was before — a provenance change, not a visual one.
+#[test]
+fn test_the_title_weight_is_permitted_by_the_rung_its_size_comes_from() {
+    assert_eq!(TITLE_FONT_SIZE, typography::UI_COMPACT.size);
+    assert_eq!(TITLE_FONT_SIZE, 13.0, "the title size must not have moved");
+    assert_eq!(TITLE_FONT_WEIGHT, typography::Weight::Bold);
+    assert!(
+        typography::UI_COMPACT.allows(TITLE_FONT_WEIGHT),
+        "type.ui_compact must permit the Bold the §4.7.1 overlay title wears; \
+         its allowed set is {:?}",
+        typography::UI_COMPACT.allowed_weights
+    );
+}
+
 #[test]
 fn test_the_untokenised_numbers_are_declared_constants() {
     // These four are the token gaps §4.7.1 leaves behind. They are named

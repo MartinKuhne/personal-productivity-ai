@@ -57,7 +57,7 @@
 //! The hardest cell of §3.1 is a focused Danger button under the cursor.
 //! Its hover fill is [`status_danger_fill`](Palette::status_danger_fill),
 //! and the ring §3.1 names for that variant is
-//! [`accent_primary`](Palette::accent_primary) — indigo on red, `1.1779:1`,
+//! [`accent_border`](Palette::accent_border) — indigo on red, `1.7188:1`,
 //! an invisible focus indicator at the moment a keyboard user most needs
 //! one (gap **G-9**).
 //!
@@ -70,7 +70,7 @@
 //! 2. [`button::resolve_style`] paints the base triple from the Danger
 //!    column and then asks [`crate::widget::focus`] for a ring *against
 //!    the background it just resolved*, not against the variant.
-//!    `accent_primary` cannot clear the `3.0:1` chrome floor on that red,
+//!    `accent_border` cannot clear the `3.0:1` chrome floor on that red,
 //!    so the resolver returns [`text_strong`](Palette::text_strong).
 //! 3. [`focus_ring_layer`] turns that returned colour into geometry.
 //!

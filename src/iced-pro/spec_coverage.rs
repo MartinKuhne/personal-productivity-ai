@@ -54,7 +54,7 @@ use std::fmt::Write as _;
 /// count is of *numbered* IDs only: a family wildcard such as
 /// `UIF-ZORD-*` in a section heading is not a requirement and is not
 /// counted (see [`extract_spec_ids`]).
-pub const EXPECTED_SPEC_ID_COUNT: usize = 46;
+pub const EXPECTED_SPEC_ID_COUNT: usize = 47;
 
 /// Where one `UIF-*` requirement stands against this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -576,20 +576,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TOK-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§2.5",
         evidence: &["token/color.rs"],
-        reason: Some(
-            "Nothing is missing from the set: every §2.5 token exists, split across \
-             `Palette` and the separate `EditorPalette`. The gap is a recorded value \
-             deviation — `accent.primary` RGB(98,100,240), `surface.active` \
-             RGB(43,43,51) and `status.danger` RGB(255,28,2) are retuned away from \
-             the figures the spec prints (G-7, decision A), and the set carries one \
-             token the spec does not print, `status.danger_fill` (D-5, G-8). The spec \
-             has not yet been revised to match, so code and spec disagree here on \
-             purpose.",
+        reason: None,
+        note: Some(
+            "The 2026-10-22 revision adopted the polarity split this crate argued for \
+             at D-5 and D-6, so the earlier value deviation is closed: every token in \
+             §2.5 now exists with the exact sRGB the spec prints, across `Palette` and \
+             the separate `EditorPalette`. The set is the six-token polarity model — \
+             `accent.{fill,fill_active,border}` and \
+             `status.danger.{text,fill,fill_active}`. One printed figure in the spec \
+             is wrong and the crate deliberately carries the true value instead: \
+             `status.danger.fill_active` luminance is `0.1325`, not the `0.1309` the \
+             table prints. Every other figure in this crate was independently \
+             recomputed rather than transcribed.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-TOK-006",
@@ -597,19 +599,45 @@ const SPEC_COVERAGE: &[Coverage] = &[
         section: "§2.5 rules",
         evidence: &["token/contrast.rs"],
         reason: Some(
-            "Rules 1 and 2 are implemented as thresholds (4.5 / 3.0) over a WCAG 2.1 \
+            "Rules 1 and 3 are implemented as thresholds (4.5 / 3.0) over a WCAG 2.1 \
              luminance and ratio solver that composites translucent layers before \
-             measuring, and every contract-mandated pairing is asserted with headroom. \
-             Missing: rule 3's Selection Foreground Lock is honoured by construction \
-             in every resolver but is not *enforced* — nothing forbids a \
-             non-`text.strong` foreground, or a `status.*` colour, on an \
-             `accent.primary` fill. `border.subtle` is also deliberately excluded from \
-             rule 2 as a resting divider, which is a reading of the word 'active' \
-             rather than a mechanical rule.",
+             measuring, and both pass the full matrix against the revised palette. \
+             Rule 3's four-class chrome classification (`Judged`, `CoincidentWithFill`, \
+             `UnpaintedBackground`, `RestingDivider`) is modelled, which settles the \
+             old reading problem around `border.subtle` — it is a `RestingDivider` and \
+             exempt by class, not by an informal reading of the word 'active'. \
+             Missing: rule 4's Selection Foreground Lock is honoured by construction in \
+             every resolver but is not *enforced* — nothing forbids a non-`text.strong` \
+             foreground, or a foreground-only `status.*`/`accent.text` colour, on a \
+             solid `*.fill`. Two further cells fail the spec's own thresholds and are \
+             pinned as known conflicts rather than patched: rule 2's `[4.00, 6.00]` \
+             band is breached by `text.disabled` on `surface.sunken` (6.0205), and \
+             rule 3's `CoincidentWithFill` floor of 3.08 is missed by \
+             `status.danger.fill_active` on `surface.overlay` (3.0789).",
         ),
         note: None,
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
+    Coverage {
+        id: "UIF-ATOM-000",
+        status: Status::Partial,
+        section: "§3.0",
+        evidence: &["state.rs", "widget/focus.rs", "widget/button_widget.rs"],
+        reason: Some(
+            "The two-part orthogonal model is the crate's foundation: `VisualState \
+             { base, focused }`, base precedence `Disabled > Invalid > Pressed > \
+             Hovered > Rest`, and total disabled dominance — a disabled control \
+             forces `focused` false and focus advances to the next enabled control. \
+             The nine reachable states are the gallery's nine columns. Press-and-release \
+             activation is implemented: the button fires only on release still inside \
+             its bounds and a drag-out cancels. The dynamic ring contrast rule is the \
+             D-6 adaptive resolver, now measured against `accent.border`. Missing: the \
+             1px **inset** focus outline §3.0.2 requires for menu and tree rows, so \
+             dense lists do not clip the ring. Only the 2px outer ring exists today, \
+             which is the wrong placement for a dense row.",
+        ),
+        note: None,
+    },
     Coverage {
         id: "UIF-ATOM-001",
         status: Status::Partial,

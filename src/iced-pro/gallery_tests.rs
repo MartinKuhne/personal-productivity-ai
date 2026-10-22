@@ -327,7 +327,7 @@ fn the_snapshot_names_the_token_behind_a_primary_resting_fill() {
 
     assert_eq!(
         resolved_line(&cell, "background"),
-        format!("accent.primary ({})", rgb8(palette.accent_primary)),
+        format!("accent.fill ({})", rgb8(palette.accent_fill)),
         "the primary resting fill must be named by its token, not by a literal"
     );
     assert!(cell.snapshot().contains("button/primary/rest"));
@@ -639,7 +639,7 @@ fn the_delete_confirmation_carries_the_danger_intent_and_the_button_follows_it()
     );
     assert_eq!(
         token_name(danger.border_color),
-        token_name(palette.status_danger),
+        token_name(palette.status_danger_text),
         "the destructive signal is the error red on the border"
     );
 }

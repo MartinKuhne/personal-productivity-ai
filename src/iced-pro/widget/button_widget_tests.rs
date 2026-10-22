@@ -777,8 +777,8 @@ fn a_focused_button_wears_a_ring_outside_its_own_box() {
 
 #[test]
 fn the_ring_on_a_danger_hot_fill_is_adaptive_not_the_accent() {
-    // G-9: §3.1 names `accent.primary` for Danger's ring, and indigo on
-    // the hot red fill measures 1.1779:1 — an invisible focus indicator
+    // G-9: §3.1 names `accent.border` for Danger's ring, and indigo on
+    // the hot red fill measures 1.7188:1 — an invisible focus indicator
     // at the moment a keyboard user most needs one. The widget must end up
     // painting the adaptive colour without ever mentioning Danger's ring.
     let mut harness = recorder_button(ButtonVariant::Danger, "btn", |b| b);
@@ -810,7 +810,7 @@ fn the_ring_on_a_danger_hot_fill_is_adaptive_not_the_accent() {
          against the fill it actually painted"
     );
     assert_ne!(
-        ring, palette.accent_primary,
+        ring, palette.accent_border,
         "the spec's literal ring colour is invisible on the Danger hot fill \
          and must not be what gets painted"
     );
@@ -836,7 +836,7 @@ fn a_ghost_ring_is_judged_against_its_container_not_against_transparent() {
             .expect("a focused ghost must wear a ring")
             .border
             .color,
-        Palette::dark().accent_primary,
+        Palette::dark().accent_border,
         "a transparent background short-circuits to the spec's own ring colour"
     );
 }

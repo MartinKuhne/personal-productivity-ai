@@ -1,5 +1,5 @@
 //! Tests for [`focus`] — the adaptive focus-ring rule (`UIF-TOK-006`
-//! rule 2, decision **D-6** / gap **G-9**).
+//! rule 3, decision **D-6** / gap **G-9**).
 //!
 //! The rule has four branches and each is pinned separately: the accent
 //! wins while it clears `3.0:1`, `text.strong` takes over when it does
@@ -8,6 +8,11 @@
 //! the branches the tests pin the *ordering* — the accent is preferred
 //! whenever it is visible, so the rule reproduces the spec's own ring
 //! colour everywhere the spec's ring actually shows — and purity.
+//!
+//! Since the 2026-10-22 revision of §2.5 the candidate is
+//! `accent.border` rather than `accent.primary`: the split gave the rule
+//! a stroke token built for the job, so the fallback now fires on all
+//! four saturated fills and on no surface at all.
 
 use super::{resolve_ring_color, resolve_ring_color_for_background};
 use crate::token::color::Palette;
@@ -15,7 +20,7 @@ use crate::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 use iced::Color;
 
 /// Tolerance on a pinned contrast ratio — three decimals, enough to tell
-/// `1.2089` from `3.0000`.
+/// `1.7188` from `3.0000`.
 const RATIO_EPS: f32 = 1e-3;
 
 /// The dark palette, taken once so every table reads as token names.
@@ -33,9 +38,15 @@ fn rgb8(color: Color) -> String {
     )
 }
 
-/// Every surface in the elevation ladder, plus white — the full set of
-/// backgrounds a ring can legitimately be asked to stand out from.
-fn ring_backdrops() -> [(&'static str, Color); 8] {
+/// Every surface in the elevation ladder — the backgrounds a ring is
+/// actually asked to stand out from inside the dark chrome.
+///
+/// White is deliberately not here. `accent.border` measures `2.9829:1`
+/// against it, under the chrome floor, so the "accent wins everywhere"
+/// sweep cannot include it; the light-background case is pinned on its
+/// own by
+/// [`test_a_white_backdrop_has_no_candidate_that_clears_the_floor`].
+fn ring_backdrops() -> [(&'static str, Color); 7] {
     let p = palette();
     [
         ("surface.sunken", p.surface_sunken),
@@ -45,36 +56,41 @@ fn ring_backdrops() -> [(&'static str, Color); 8] {
         ("surface.overlay", p.surface_overlay),
         ("surface.hover", p.surface_hover),
         ("surface.active", p.surface_active),
-        ("text.strong", p.text_strong),
     ]
 }
 
-/// A mid grey whose luminance sits close enough to `accent.primary` to
+/// A mid grey whose luminance sits close enough to `accent.border` to
 /// swallow it, and close enough to white to swallow that too — so
 /// *neither* candidate clears `3.0:1`.
 ///
-/// `L = 0.4019`. Against the accent: `1.9646:1`. Against white:
-/// `2.3236:1`. Both under the chrome floor, which is the case the rule
+/// `L = 0.4020`. Against the accent: `1.2840:1`. Against white:
+/// `2.3231:1`. Both under the chrome floor, which is the case the rule
 /// has to decide rather than leave undefined.
 fn grey_neither_candidate_clears() -> Color {
     Color::from_rgb8(170, 170, 170)
 }
 
 /// A lighter mid grey that also defeats both candidates, but by more on
-/// the accent side — the accent ends up the *higher*-contrast candidate
+/// the white side — the accent ends up the *higher*-contrast candidate
 /// even though neither passes.
 ///
-/// `L = 0.5029`. Against the accent: `2.4037:1`. Against white:
-/// `1.8991:1`.
+/// `L = 0.5841`. Against the accent: `1.8013:1`. Against white:
+/// `1.6559:1`.
+///
+/// The grey had to move up from `188` for this split. Against
+/// `accent.border`, `RGB(188, 188, 188)` still leaves white ahead
+/// (`1.8991:1` against `1.5707:1`), so it exercises the same branch as
+/// the darker grey; `201` is the point where the ordering actually
+/// flips, which is the only thing this test is for.
 fn grey_accent_is_the_higher_loser() -> Color {
-    Color::from_rgb8(188, 188, 188)
+    Color::from_rgb8(201, 201, 201)
 }
 
 #[test]
 fn test_accent_wins_against_every_surface_it_clears() {
     let p = palette();
     for (name, backdrop) in ring_backdrops() {
-        let accent = contrast_ratio(p.accent_primary, backdrop);
+        let accent = contrast_ratio(p.accent_border, backdrop);
         let ring = resolve_ring_color(backdrop, &p);
         assert!(
             accent >= MIN_CHROME_CONTRAST,
@@ -82,7 +98,7 @@ fn test_accent_wins_against_every_surface_it_clears() {
              got {accent:.4}:1"
         );
         assert_eq!(
-            ring, p.accent_primary,
+            ring, p.accent_border,
             "{name}: the accent clears {:.1}:1 at {accent:.4}:1, so it must be \
              the ring — the spec's own ring colour is not displaced where it is \
              already visible",
@@ -95,12 +111,12 @@ fn test_accent_wins_against_every_surface_it_clears() {
 fn test_text_strong_wins_when_the_accent_cannot_be_seen() {
     let p = palette();
     let fill = p.status_danger_fill;
-    let accent = contrast_ratio(p.accent_primary, fill);
+    let accent = contrast_ratio(p.accent_border, fill);
     let strong = contrast_ratio(p.text_strong, fill);
 
     assert!(
-        (accent - 1.2089).abs() < RATIO_EPS,
-        "accent.primary on status.danger_fill measures {accent:.4}:1"
+        (accent - 1.7188).abs() < RATIO_EPS,
+        "accent.border on status.danger_fill measures {accent:.4}:1"
     );
     assert!(
         accent < MIN_CHROME_CONTRAST,
@@ -119,6 +135,45 @@ fn test_text_strong_wins_when_the_accent_cannot_be_seen() {
     );
 }
 
+/// The fallback fires on **all four** saturated fills and on none of
+/// them partially: `accent.border` cannot be made out against a
+/// saturated fill at all, so every one of them resolves to white.
+#[test]
+fn test_the_fallback_fires_on_every_saturated_fill() {
+    let p = palette();
+    let fills = [
+        ("accent.fill", p.accent_fill, 1.6098),
+        ("accent.fill_active", p.accent_fill_active, 1.8961),
+        ("status.danger.fill", p.status_danger_fill, 1.7188),
+        (
+            "status.danger.fill_active",
+            p.status_danger_fill_active,
+            1.9291,
+        ),
+    ];
+    for (name, fill, pinned) in fills {
+        let accent = contrast_ratio(p.accent_border, fill);
+        assert!(
+            (accent - pinned).abs() < RATIO_EPS,
+            "accent.border on {name} must measure {pinned:.4}:1, got {accent:.4}:1"
+        );
+        assert!(
+            accent < MIN_CHROME_CONTRAST,
+            "{name}: the accent cannot clear the floor against the fill, got {accent:.4}:1"
+        );
+        assert_eq!(
+            resolve_ring_color(fill, &p),
+            p.text_strong,
+            "{name}: must resolve to the text.strong fallback"
+        );
+        assert!(
+            contrast_ratio(p.text_strong, fill) >= MIN_CHROME_CONTRAST,
+            "{name}: the fallback must clear the floor at {}",
+            contrast_ratio(p.text_strong, fill)
+        );
+    }
+}
+
 #[test]
 fn test_the_rule_finds_a_visible_ring_whenever_one_exists() {
     let p = palette();
@@ -130,15 +185,17 @@ fn test_the_rule_finds_a_visible_ring_whenever_one_exists() {
         p.surface_overlay,
         p.surface_hover,
         p.surface_active,
-        p.status_danger,
+        p.status_danger_text,
         p.status_danger_fill,
-        p.accent_primary,
+        p.status_danger_fill_active,
+        p.accent_fill,
+        p.accent_fill_active,
         p.text_strong,
     ];
     for fill in fills {
         let ring = resolve_ring_color(fill, &p);
         let ratio = contrast_ratio(ring, fill);
-        let best = contrast_ratio(p.accent_primary, fill).max(contrast_ratio(p.text_strong, fill));
+        let best = contrast_ratio(p.accent_border, fill).max(contrast_ratio(p.text_strong, fill));
         assert!(
             ratio >= MIN_CHROME_CONTRAST || best < MIN_CHROME_CONTRAST,
             "a fill at {} had a visible candidate at {best:.4}:1 but got a ring \
@@ -152,7 +209,7 @@ fn test_the_rule_finds_a_visible_ring_whenever_one_exists() {
 fn test_when_neither_candidate_clears_the_higher_contrast_one_is_returned() {
     let p = palette();
     let fill = grey_neither_candidate_clears();
-    let accent = contrast_ratio(p.accent_primary, fill);
+    let accent = contrast_ratio(p.accent_border, fill);
     let strong = contrast_ratio(p.text_strong, fill);
 
     assert!(
@@ -177,7 +234,7 @@ fn test_when_neither_candidate_clears_the_higher_contrast_one_is_returned() {
 fn test_the_failing_branch_can_pick_the_accent_when_it_is_the_higher_contrast_one() {
     let p = palette();
     let fill = grey_accent_is_the_higher_loser();
-    let accent = contrast_ratio(p.accent_primary, fill);
+    let accent = contrast_ratio(p.accent_border, fill);
     let strong = contrast_ratio(p.text_strong, fill);
 
     assert!(
@@ -191,9 +248,44 @@ fn test_the_failing_branch_can_pick_the_accent_when_it_is_the_higher_contrast_on
     );
     assert_eq!(
         resolve_ring_color(fill, &p),
-        p.accent_primary,
+        p.accent_border,
         "the tie-break is by contrast, not by token identity — the accent wins \
          whenever it is the better of the two"
+    );
+}
+
+/// White is the one backdrop in the set where the rule has no good
+/// answer, and it is pinned rather than glossed.
+///
+/// `accent.border` against white is `2.9829:1` — the spec's own table
+/// prints `2.98:1` — and white against itself is `1.0000:1`. Neither
+/// candidate reaches the chrome floor, so the resolver returns the
+/// higher of the two, which is the accent. On the inverted editor
+/// surface that means a focus ring that is technically the best available
+/// and still under threshold; the shortfall belongs to the token set on a
+/// light background, not to the rule.
+#[test]
+fn test_a_white_backdrop_has_no_candidate_that_clears_the_floor() {
+    let p = palette();
+    let accent = contrast_ratio(p.accent_border, Color::WHITE);
+    let strong = contrast_ratio(p.text_strong, Color::WHITE);
+
+    assert!(
+        (accent - 2.982903).abs() < RATIO_EPS,
+        "accent.border on white measures 2.9829, got {accent:.6}"
+    );
+    assert!(
+        accent < MIN_CHROME_CONTRAST,
+        "precondition: the accent must fall short on white, got {accent:.6}:1"
+    );
+    assert!(
+        strong < MIN_CHROME_CONTRAST,
+        "precondition: white on white cannot clear anything, got {strong:.6}:1"
+    );
+    assert_eq!(
+        resolve_ring_color(Color::WHITE, &p),
+        p.accent_border,
+        "the resolver must still return the less invisible candidate"
     );
 }
 
@@ -202,11 +294,11 @@ fn test_an_exact_tie_resolves_to_text_strong() {
     let mut p = palette();
     // Collapse the two candidates onto one colour so their contrasts are
     // bit-identical, then pick a fill that leaves both under the floor.
-    p.accent_primary = p.text_strong;
+    p.accent_border = p.text_strong;
     let fill = grey_neither_candidate_clears();
 
     assert_eq!(
-        contrast_ratio(p.accent_primary, fill),
+        contrast_ratio(p.accent_border, fill),
         contrast_ratio(p.text_strong, fill),
         "precondition: the two candidates must tie exactly"
     );
@@ -230,7 +322,7 @@ fn test_a_transparent_background_is_never_resolved_as_a_fill() {
     // colour instead, and never consults the fill rule.
     assert_eq!(
         resolve_ring_color_for_background(Color::TRANSPARENT, &p),
-        p.accent_primary,
+        p.accent_border,
         "a Ghost button's ring sits on the container's surface, so it must get \
          the spec's accent ring rather than a measurement against `transparent`"
     );
@@ -264,7 +356,7 @@ fn test_a_painted_background_delegates_to_the_fill_rule() {
         },
         Color {
             a: 0.85,
-            ..p.accent_primary
+            ..p.accent_fill
         },
     ];
     for background in painted {
@@ -301,8 +393,9 @@ fn test_resolve_ring_color_is_pure_and_total() {
     let p = palette();
     let fills = [
         p.surface_base,
-        p.status_danger,
+        p.status_danger_text,
         p.status_danger_fill,
+        p.accent_fill,
         grey_neither_candidate_clears(),
         grey_accent_is_the_higher_loser(),
         Color::TRANSPARENT,
@@ -336,13 +429,13 @@ fn test_the_accent_is_preferred_over_an_equal_or_worse_fallback() {
     // interface's designated focus colour; degrading to white is a
     // concession, not a preference.
     let fill = p.surface_active;
-    let accent = contrast_ratio(p.accent_primary, fill);
+    let accent = contrast_ratio(p.accent_border, fill);
     let strong = contrast_ratio(p.text_strong, fill);
     assert!(accent >= MIN_CHROME_CONTRAST);
     assert!(strong > accent);
     assert_eq!(
         resolve_ring_color(fill, &p),
-        p.accent_primary,
+        p.accent_border,
         "the accent must win at {accent:.4}:1 even though text.strong clears by \
          more at {strong:.4}:1"
     );

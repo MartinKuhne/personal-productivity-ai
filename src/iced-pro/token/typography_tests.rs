@@ -6,6 +6,17 @@
 //! that strictly increase, tracking that tightens as type grows, resting
 //! weights that never get lighter going up the scale, and emphasis that
 //! is never weaker than the weight it emphasises.
+//!
+//! The `Allowed Weights` column gets the same treatment as a set rather
+//! than a pair: each rung's set is compared to the transcription exactly,
+//! the full rung × weight matrix is swept in both directions, and the
+//! resting and emphasis weights are held inside the set they belong to.
+//! The two `font.family.*` tokens are checked against iced's own
+//! constants — including that `font.family.mono` really is monospace.
+//! Two of the composition tests are no-visual-change proofs for the
+//! call sites that used to compose weights by hand, and the last group
+//! pins what the bundled-font limitation does and does not let the crate
+//! claim.
 
 // Every assertion here targets compile-time token values on purpose: pinning a
 // constant is the whole point, so a retuned rung must fail the suite rather
@@ -53,6 +64,9 @@ struct SpecRow {
     /// The emphasis half of the `Weight` column — the same weight where
     /// the spec lists only one.
     emphasis_weight: Weight,
+    /// The `Allowed Weights` column, verbatim and in the order the spec
+    /// prints it (lightest first).
+    allowed: &'static [Weight],
     /// The `Tracking` column, in em.
     tracking: f32,
     /// The multiplier the spec prints next to the line height, rounded
@@ -73,6 +87,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 16.0,
             weight: Weight::Regular,
             emphasis_weight: Weight::Medium,
+            allowed: &[Weight::Regular, Weight::Medium, Weight::SemiBold],
             tracking: 0.01,
             stated_ratio: 1.33,
         },
@@ -83,6 +98,12 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 18.0,
             weight: Weight::Regular,
             emphasis_weight: Weight::Medium,
+            allowed: &[
+                Weight::Regular,
+                Weight::Medium,
+                Weight::SemiBold,
+                Weight::Bold,
+            ],
             tracking: 0.0,
             stated_ratio: 1.38,
         },
@@ -93,6 +114,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 20.0,
             weight: Weight::Regular,
             emphasis_weight: Weight::Regular,
+            allowed: &[Weight::Regular, Weight::Medium],
             tracking: 0.0,
             stated_ratio: 1.43,
         },
@@ -103,6 +125,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 24.0,
             weight: Weight::SemiBold,
             emphasis_weight: Weight::Bold,
+            allowed: &[Weight::SemiBold, Weight::Bold],
             tracking: -0.01,
             stated_ratio: 1.50,
         },
@@ -113,6 +136,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 28.0,
             weight: Weight::Bold,
             emphasis_weight: Weight::Bold,
+            allowed: &[Weight::Bold],
             tracking: -0.015,
             stated_ratio: 1.40,
         },
@@ -123,6 +147,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 32.0,
             weight: Weight::Bold,
             emphasis_weight: Weight::Bold,
+            allowed: &[Weight::Bold],
             tracking: -0.02,
             stated_ratio: 1.33,
         },
@@ -137,6 +162,7 @@ fn rung(size: f32, line_height: f32) -> TypeRung {
         line_height,
         weight: Weight::Regular,
         emphasis_weight: Weight::Regular,
+        allowed_weights: &[Weight::Regular],
         tracking: 0.0,
     }
 }
@@ -524,4 +550,473 @@ fn test_guard_value_is_unreachable_from_real_rungs() {
 fn test_min_size_is_twelve_pixels() {
     assert_eq!(MIN_SIZE, 12.0, "the absolute text floor must be 12px");
     assert!(MIN_SIZE > 0.0, "the text floor must be strictly positive");
+}
+
+// ---------------------------------------------------------------------------
+// Allowed-weight sets — the `Allowed Weights` column
+// ---------------------------------------------------------------------------
+
+/// The four weights the scale draws on, for matrix-style sweeps.
+const ALL_WEIGHTS: [Weight; 4] = [
+    Weight::Regular,
+    Weight::Medium,
+    Weight::SemiBold,
+    Weight::Bold,
+];
+
+/// Every rung's permitted set is exactly the `Allowed Weights` column of
+/// the §2.4 table — same members, same order, nothing extra.
+#[test]
+fn test_allowed_weight_set_matches_the_spec_column_exactly() {
+    for row in spec_rows() {
+        assert_eq!(
+            row.rung.allowed_weights, row.allowed,
+            "{} permits {:?}, but the spec's `Allowed Weights` column is {:?}",
+            row.token, row.rung.allowed_weights, row.allowed
+        );
+    }
+}
+
+/// The full rung × weight matrix: `allows` agrees with the spec column
+/// for all twenty-four pairs. Sweeping the refusals as well as the
+/// permissions is the point — a rung that quietly widened its own set
+/// still passes every positive case, so only the negative half catches
+/// it.
+#[test]
+fn test_allows_agrees_with_the_spec_for_every_rung_and_weight() {
+    for row in spec_rows() {
+        for weight in ALL_WEIGHTS {
+            let expected = row.allowed.contains(&weight);
+            assert_eq!(
+                row.rung.allows(weight),
+                expected,
+                "{} must {} {:?} — the spec column is {:?}",
+                row.token,
+                if expected { "permit" } else { "refuse" },
+                weight,
+                row.allowed
+            );
+        }
+    }
+}
+
+/// The four named cases the gap is stated in, spelled out individually so
+/// a regression names the rung that broke rather than a matrix cell.
+#[test]
+fn test_the_four_weight_predicates_the_gap_named() {
+    assert!(
+        CAPTION.allows(Weight::SemiBold),
+        "type.caption must permit SemiBold — it is what §4.8.1's menu \
+         section heading wears"
+    );
+    assert!(
+        !BODY.allows(Weight::Bold),
+        "type.body permits Regular and Medium only; Bold must be refused"
+    );
+    for weight in ALL_WEIGHTS {
+        assert!(
+            UI_COMPACT.allows(weight),
+            "type.ui_compact permits all four weights, {:?} included",
+            weight
+        );
+    }
+    assert!(
+        !TITLE_MD.allows(Weight::Regular),
+        "type.title_md permits Bold alone; Regular must be refused"
+    );
+}
+
+/// The pair cannot escape the set: both the resting weight and the
+/// emphasis weight are members of their own rung's permitted set, for
+/// every rung. This is what makes the set the authority rather than a
+/// comment beside two independently chosen numbers.
+#[test]
+fn test_resting_and_emphasis_are_members_of_their_own_permitted_set() {
+    for row in spec_rows() {
+        assert!(
+            row.rung.allows(row.rung.weight),
+            "{} rests at {:?}, which its own permitted set {:?} does not contain",
+            row.token,
+            row.rung.weight,
+            row.rung.allowed_weights
+        );
+        assert!(
+            row.rung.allows(row.rung.emphasis_weight),
+            "{} emphasises to {:?}, which its own permitted set {:?} does not \
+             contain — a rung cannot advertise an emphasis the spec forbids",
+            row.token,
+            row.rung.emphasis_weight,
+            row.rung.allowed_weights
+        );
+    }
+}
+
+/// The resting weight is the *lightest* permitted one, so a rung's
+/// default voice is never heavier than it has to be and every other
+/// permitted weight reads as emphasis against it.
+#[test]
+fn test_resting_weight_is_the_lightest_permitted() {
+    for row in spec_rows() {
+        for weight in row.rung.allowed_weights {
+            assert!(
+                row.rung.weight.rank() <= weight.rank(),
+                "{} rests at {:?} (rank {}) but permits {:?} (rank {}), which is \
+                 lighter than its resting weight",
+                row.token,
+                row.rung.weight,
+                row.rung.weight.rank(),
+                weight,
+                weight.rank()
+            );
+        }
+    }
+}
+
+/// Emphasis stops at the top of the set: the heaviest thing a rung can
+/// emphasise to is the heaviest thing it may carry.
+#[test]
+fn test_emphasis_never_exceeds_the_heaviest_permitted() {
+    for row in spec_rows() {
+        let heaviest = row
+            .rung
+            .allowed_weights
+            .iter()
+            .map(Weight::rank)
+            .max()
+            .unwrap_or(u8::MAX);
+        assert!(
+            row.rung.emphasis_weight.rank() <= heaviest,
+            "{} emphasises to {:?} (rank {}), above the heaviest weight its \
+             set permits (rank {})",
+            row.token,
+            row.rung.emphasis_weight,
+            row.rung.emphasis_weight.rank(),
+            heaviest
+        );
+    }
+}
+
+/// Each permitted set is ordered lightest-first and carries no duplicate,
+/// which is what lets the set be read straight off the spec table.
+#[test]
+fn test_permitted_sets_are_ordered_lightest_first_and_deduplicated() {
+    for row in spec_rows() {
+        assert!(
+            !row.rung.allowed_weights.is_empty(),
+            "{} must permit at least one weight",
+            row.token
+        );
+        for pair in row.rung.allowed_weights.windows(2) {
+            assert!(
+                pair[0].rank() < pair[1].rank(),
+                "{}'s permitted set must ascend lightest-first, but {:?} precedes {:?}",
+                row.token,
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+}
+
+/// The sets are genuinely wider than the pairs somewhere: `type.caption`
+/// permits a weight that is neither its resting nor its emphasis weight.
+/// Without that, the set would be redundant with the pair and this
+/// increment would have added nothing.
+#[test]
+fn test_caption_permits_a_weight_that_is_neither_resting_nor_emphasis() {
+    let neither = CAPTION
+        .allowed_weights
+        .iter()
+        .filter(|w| **w != CAPTION.weight && **w != CAPTION.emphasis_weight)
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        neither,
+        vec![Weight::SemiBold],
+        "type.caption's only weight beyond the resting/emphasis pair must be \
+         SemiBold — the pairing G-12 could not express"
+    );
+}
+
+/// A hand-built rung with an empty permitted set refuses everything,
+/// including its own resting weight: `allows` is a lookup into the set,
+/// not a fallback to whatever the rung happens to rest at.
+#[test]
+fn test_empty_permitted_set_refuses_everything() {
+    let orphan = TypeRung {
+        size: 14.0,
+        line_height: 20.0,
+        weight: Weight::Regular,
+        emphasis_weight: Weight::Regular,
+        allowed_weights: &[],
+        tracking: 0.0,
+    };
+    for weight in ALL_WEIGHTS {
+        assert!(
+            !orphan.allows(weight),
+            "an empty permitted set must refuse {:?}, not fall back to the \
+             resting weight",
+            weight
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Weight → iced mapping
+// ---------------------------------------------------------------------------
+
+/// The numeric weight classes are the four the spec names beside the
+/// `weight.*` token names.
+#[test]
+fn test_weight_css_classes_match_the_spec() {
+    assert_eq!(Weight::Regular.css(), 400);
+    assert_eq!(Weight::Medium.css(), 500);
+    assert_eq!(Weight::SemiBold.css(), 600);
+    assert_eq!(Weight::Bold.css(), 700);
+}
+
+/// iced spells the 400 class `Normal` and the 600 class `Semibold`. The
+/// mapping is total, exact, and injective — four distinct tokens, four
+/// distinct iced weights, nothing collapsed.
+#[test]
+fn test_weight_iced_mapping_is_exact_and_injective() {
+    assert_eq!(Weight::Regular.iced(), iced::font::Weight::Normal);
+    assert_eq!(Weight::Medium.iced(), iced::font::Weight::Medium);
+    assert_eq!(Weight::SemiBold.iced(), iced::font::Weight::Semibold);
+    assert_eq!(Weight::Bold.iced(), iced::font::Weight::Bold);
+
+    let mapped = ALL_WEIGHTS.map(|weight| weight.iced());
+    for (i, a) in mapped.iter().enumerate() {
+        for (j, b) in mapped.iter().enumerate() {
+            if i != j {
+                assert_ne!(
+                    a, b,
+                    "two distinct weight tokens must not collapse \
+                                  onto the same iced weight"
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Font family tokens
+// ---------------------------------------------------------------------------
+
+/// The two family tokens are the two §2.4 names, and each carries its own
+/// dotted spec name.
+#[test]
+fn test_family_tokens_are_the_two_the_spec_names() {
+    assert_eq!(FAMILY_SANS, Family::Sans);
+    assert_eq!(FAMILY_MONO, Family::Mono);
+    assert_eq!(FAMILY_SANS.token_name(), "font.family.sans");
+    assert_eq!(FAMILY_MONO.token_name(), "font.family.mono");
+    assert_ne!(
+        FAMILY_SANS, FAMILY_MONO,
+        "the two family tokens must be distinguishable"
+    );
+}
+
+/// Each family resolves to the expected iced family.
+#[test]
+fn test_families_resolve_to_the_expected_iced_families() {
+    assert_eq!(FAMILY_SANS.iced(), iced::font::Family::SansSerif);
+    assert_eq!(FAMILY_MONO.iced(), iced::font::Family::Monospace);
+}
+
+/// The mono token really is fixed-pitch: it resolves to the very `Font`
+/// iced itself names `MONOSPACE`, and the sans token is not it.
+#[test]
+fn test_mono_family_is_actually_monospace() {
+    assert!(FAMILY_MONO.is_monospace());
+    assert!(!FAMILY_SANS.is_monospace());
+    assert_eq!(
+        FAMILY_MONO.regular(),
+        iced::Font::MONOSPACE,
+        "font.family.mono at rest must be iced's own MONOSPACE font"
+    );
+    assert_ne!(FAMILY_SANS.regular(), iced::Font::MONOSPACE);
+}
+
+/// The sans family at rest is iced's default font — `SansSerif` at
+/// `Normal` — which is why a widget that never sets a family keeps
+/// rendering exactly as it did before the token existed.
+#[test]
+fn test_sans_family_at_rest_is_iced_default() {
+    assert_eq!(
+        FAMILY_SANS.regular(),
+        iced::Font::DEFAULT,
+        "font.family.sans at Regular is iced's DEFAULT font, so introducing \
+         the token cannot shift any existing rendering"
+    );
+}
+
+/// A family-plus-weight `Font` carries exactly those two things. Stretch
+/// and style stay `Normal` because the scale specifies neither, and
+/// inventing an italic or a condensed face in the token layer would be a
+/// decision the spec has not made.
+#[test]
+fn test_family_font_carries_the_family_and_weight_and_nothing_else() {
+    for family in [FAMILY_SANS, FAMILY_MONO] {
+        for weight in ALL_WEIGHTS {
+            let font = family.font(weight);
+            assert_eq!(font.family, family.iced(), "{family:?} font family");
+            assert_eq!(font.weight, weight.iced(), "{weight:?} weight");
+            assert_eq!(
+                font.stretch,
+                iced::font::Stretch::Normal,
+                "the scale specifies no stretch, so it must stay Normal"
+            );
+            assert_eq!(
+                font.style,
+                iced::font::Style::Normal,
+                "the scale specifies no style, so it must stay Normal"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rung-carried compositions
+// ---------------------------------------------------------------------------
+
+/// A rung-carried font adds no fields of its own: `TypeRung::font` is the
+/// rung's *permission* over the family's construction, so for every rung
+/// and every weight it permits the result is identical to asking the
+/// family directly.
+#[test]
+fn test_rung_font_delegates_to_the_family_it_is_handed() {
+    for row in spec_rows() {
+        for family in [FAMILY_SANS, FAMILY_MONO] {
+            for weight in row.allowed {
+                assert_eq!(
+                    row.rung.font(family, *weight),
+                    family.font(*weight),
+                    "{} on {:?} at {:?} must be the family's own font",
+                    row.token,
+                    family,
+                    weight
+                );
+            }
+        }
+    }
+}
+
+/// **No-visual-change proof for `surface/menu/view.rs`.** The 12px
+/// SemiBold section heading used to build its font by hand as
+/// `iced::Font { weight: Semibold, ..Font::DEFAULT }`. Resolved through
+/// the scale instead — `CAPTION` on `font.family.sans` at SemiBold — it
+/// produces the identical `iced::Font`, at the identical size and line
+/// height. The composition moved into the token layer; the rendering did
+/// not move.
+#[test]
+fn test_caption_semi_bold_composition_renders_exactly_as_before() {
+    let before = iced::Font {
+        weight: iced::font::Weight::Semibold,
+        ..iced::Font::DEFAULT
+    };
+    let after = CAPTION.font(FAMILY_SANS, Weight::SemiBold);
+
+    assert_eq!(
+        after, before,
+        "the tokenised heading must render the same font the hand-composed one did"
+    );
+    assert_eq!(CAPTION.size, 12.0, "the heading size must not have moved");
+    assert_eq!(
+        CAPTION.line_height, 16.0,
+        "the heading line height must not have moved"
+    );
+    assert_eq!(
+        after.family,
+        iced::font::Family::SansSerif,
+        "the old literal used `..Font::DEFAULT`, which is SansSerif"
+    );
+    assert_eq!(after.weight, iced::font::Weight::Semibold);
+}
+
+/// **No-visual-change proof for `surface/movable.rs`.** The overlay
+/// title is `type.ui_compact` at Bold: 13px on an 18px line, on the
+/// sans family, at iced's `Bold`. That is exactly what the module drew
+/// when the pairing was an undocumented composition, so tokenising it
+/// changed the provenance and nothing else.
+#[test]
+fn test_ui_compact_bold_composition_renders_exactly_as_before() {
+    let before = iced::Font {
+        weight: iced::font::Weight::Bold,
+        ..iced::Font::DEFAULT
+    };
+    let after = UI_COMPACT.font(FAMILY_SANS, Weight::Bold);
+
+    assert_eq!(
+        after, before,
+        "the tokenised overlay title must render the same font the composed one did"
+    );
+    assert_eq!(UI_COMPACT.size, 13.0, "the title size must not have moved");
+    assert_eq!(
+        UI_COMPACT.line_height, 18.0,
+        "the title line height must not have moved"
+    );
+    assert_eq!(after.weight, iced::font::Weight::Bold);
+}
+
+// ---------------------------------------------------------------------------
+// The bundled-font limitation
+// ---------------------------------------------------------------------------
+
+/// What *is* verifiable about the limitation: neither family token names
+/// a concrete face. Both resolve to iced's generic families, so the
+/// token layer never claims a TTF it does not ship. Naming `"Fira Sans"`
+/// would promise a four-weight family while `fira-sans` bundles
+/// `FiraSans-Regular.ttf` alone.
+#[test]
+fn test_no_family_token_claims_a_named_face() {
+    for family in [FAMILY_SANS, FAMILY_MONO] {
+        assert!(
+            !matches!(family.iced(), iced::font::Family::Name(_)),
+            "{:?} must resolve to a generic iced family rather than a named \
+             face: naming a face would claim weights the crate does not bundle",
+            family
+        );
+    }
+}
+
+/// What is explicitly **not** claimed: that a Medium, SemiBold or Bold
+/// face, or any monospace face, exists at render time. iced's `fira-sans`
+/// feature ships `FiraSans-Regular.ttf` plus `Iced-Icons.ttf` — one text
+/// face, and it is the Regular one — so every weight above Regular and
+/// the whole mono family are answered by the host's system font
+/// fallback, per machine.
+///
+/// The crate's promise is that all eight family × weight pairs are
+/// expressible and distinct *as requests*. That is where its knowledge
+/// ends, so this test asserts nothing about which face is rendered: no
+/// assertion in the token layer could be evidence about that.
+#[test]
+fn test_glyph_availability_is_expressible_but_never_claimed() {
+    let mut requests = Vec::new();
+    for family in [FAMILY_SANS, FAMILY_MONO] {
+        for weight in ALL_WEIGHTS {
+            let font = family.font(weight);
+            assert_eq!(font.family, family.iced());
+            assert_eq!(font.weight, weight.iced());
+            requests.push(font);
+        }
+    }
+
+    assert_eq!(
+        requests.len(),
+        8,
+        "both families must express all four weights"
+    );
+    for (i, a) in requests.iter().enumerate() {
+        for (j, b) in requests.iter().enumerate() {
+            if i != j {
+                assert_ne!(
+                    a, b,
+                    "distinct family × weight pairs must be distinct requests, \
+                     whether or not the host can honour them"
+                );
+            }
+        }
+    }
 }

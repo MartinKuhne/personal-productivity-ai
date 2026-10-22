@@ -17,43 +17,44 @@
 //!
 //! | Variant | Rest | Hovered | Pressed | Disabled |
 //! |---|---|---|---|---|
-//! | Primary | `accent.primary` / `text.strong` / `accent.primary` | `accent.primary` / `text.strong` / `text.strong` | `accent.primary` @ 85% / `text.strong` / `accent.primary` | `surface.raised` / `text.disabled` / `border.subtle` |
-//! | Secondary | `surface.raised` / `text.primary` / `border.strong` | `surface.hover` / `text.strong` / `border.strong` | `surface.active` / `text.strong` / `accent.primary` | `surface.base` / `text.disabled` / `border.subtle` |
+//! | Primary | `accent.fill` / `text.strong` / `accent.fill` | `accent.fill` / `text.strong` / `text.strong` | `accent.fill` @ 85% / `text.strong` / `accent.fill` | `surface.raised` / `text.disabled` / `border.subtle` |
+//! | Secondary | `surface.raised` / `text.primary` / `border.strong` | `surface.hover` / `text.strong` / `border.strong` | `surface.active` / `text.strong` / `accent.border` | `surface.base` / `text.disabled` / `border.subtle` |
 //! | Ghost | *transparent* / `text.primary` / *transparent* | `surface.hover` / `text.strong` / `border.subtle` | `surface.active` / `text.strong` / `border.strong` | *transparent* / `text.disabled` / *transparent* |
-//! | Danger | `surface.raised` / `status.danger` / `status.danger` | `status.danger_fill` / `text.strong` / `text.strong` | `status_danger_fill` @ 85% / `text.strong` / `status_danger_fill` | `surface.base` / `text.disabled` / `border.subtle` |
+//! | Danger | `surface.raised` / `status.danger.text` / `status.danger.text` | `status.danger.fill` / `text.strong` / `text.strong` | `status.danger.fill` @ 85% / `text.strong` / `status.danger.fill` | `surface.base` / `text.disabled` / `border.subtle` |
 //!
 //! The Danger row is not what §3.1 prints. The spec paints that variant's
 //! hover and pressed fill with `status.danger`, the same red it uses for
-//! error *text*, and white body text on that red measures `3.8753:1` —
+//! error *text*, and white body text on that red measures `3.0271:1` —
 //! under the 4.5:1 rule, with no value of the token able to serve both
 //! roles. Decision **D-5** splits the roles across
-//! [`status_danger`](Palette::status_danger) and
+//! [`status_danger_text`](Palette::status_danger_text) and
 //! [`status_danger_fill`](Palette::status_danger_fill); this row uses
 //! each for the job it can actually do. The resting foreground and border
-//! stay `status.danger`, which is the text/icon role and already clears
-//! at `4.8283:1`.
+//! stay `status.danger.text`, which is the text/icon role and clears the
+//! raised card at `6.1812:1`, while the dedicated fill carries white to
+//! `5.1270:1`.
 //!
 //! # The ring is adaptive, not a per-variant constant
 //!
 //! §3.1 gives each variant one fixed ring colour — Primary `text.strong`,
-//! the other three `accent.primary` — but it only ever snapshots
+//! the other three `accent.border` — but it only ever snapshots
 //! `Rest + ring`. Focus is additive here, so the ring also lands on the
-//! hover and press fills, and `accent.primary` indigo on a red fill
-//! measures `1.1779:1`: an invisible focus indicator at the moment a
+//! hover and press fills, and `accent.border` indigo on a red fill
+//! measures `1.7188:1`: an invisible focus indicator at the moment a
 //! keyboard user needs one most (gap **G-9**).
 //!
 //! The fix is not a longer `match`. The right ring depends on the
 //! *resolved fill*, not on the variant, so the same variant needs
 //! different answers in different states. [`resolve_style`] therefore
 //! asks [`focus::resolve_ring_color_for_background`] for the ring
-//! against the background it just resolved: `accent.primary` while that
+//! against the background it just resolved: `accent.border` while that
 //! clears the `3.0:1` chrome floor, `text.strong` when it cannot. On
 //! every dark surface the accent clears, so the ring is exactly the one
 //! §3.1 asks for; only the Danger hover and press fills displace it.
 //!
 //! A transparent background is not a fill and is not measured as one.
 //! A Ghost button's ring sits on whatever the button is mounted to, so
-//! it short-circuits to the spec's `accent.primary`, which clears the
+//! it short-circuits to the spec's `accent.border`, which clears the
 //! chrome floor against every surface in the ladder — rather than being
 //! resolved against `transparent`, which would measure a colour that is
 //! never painted.
@@ -152,8 +153,8 @@ pub const ICON_ONLY_MIN_HEIGHT: f32 = size::CONTROL_SM;
 ///
 /// This is the one non-token magnitude in the widget layer, and it is a
 /// number the spec itself prints rather than a magic constant: §3.1
-/// writes the pressed fill as "`accent.primary` (85% opacity)" and
-/// "`status.danger` (85% opacity)". It is named rather than written
+/// writes the pressed fill as "`accent.fill` (85% opacity)" and
+/// "`status.danger.fill` (85% opacity)". It is named rather than written
 /// inline at the two sites because `RUST-021` forbids repeating a bare
 /// literal, and because a pressed fill that drifted to a different
 /// opacity in one variant and not the other would be a silent spec break
@@ -183,7 +184,7 @@ const TRANSPARENT: Color = Color::TRANSPARENT;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ButtonVariant {
     /// The primary call to action — filled with
-    /// [`accent_primary`](Palette::accent_primary) and carrying the
+    /// [`accent_fill`](Palette::accent_fill) and carrying the
     /// `UIF-TOK-006` Selection Foreground Lock.
     Primary,
     /// A bordered, surface-filled control for secondary actions.
@@ -192,7 +193,7 @@ pub enum ButtonVariant {
     /// actions.
     Ghost,
     /// A destructive action, resting quiet in
-    /// [`status_danger`](Palette::status_danger) text and escalating to
+    /// [`status_danger_text`](Palette::status_danger_text) text and escalating to
     /// a filled [`status_danger_fill`](Palette::status_danger_fill) on
     /// hover — the background red, because the label is painted *on* the
     /// danger here rather than written in it (decision **D-5**).
@@ -303,19 +304,19 @@ const fn primary_paint(base: BaseState, palette: &Palette) -> BasePaint {
         // `Invalid` shares the `Rest` cell: §3.1 gives a button no
         // invalid skin. See the module doc.
         BaseState::Rest | BaseState::Invalid => BasePaint {
-            background: palette.accent_primary,
+            background: palette.accent_fill,
             foreground: palette.text_strong,
-            border_color: palette.accent_primary,
+            border_color: palette.accent_fill,
         },
         BaseState::Hovered => BasePaint {
-            background: palette.accent_primary,
+            background: palette.accent_fill,
             foreground: palette.text_strong,
             border_color: palette.text_strong,
         },
         BaseState::Pressed => BasePaint {
-            background: with_pressed_alpha(palette.accent_primary),
+            background: with_pressed_alpha(palette.accent_fill),
             foreground: palette.text_strong,
-            border_color: palette.accent_primary,
+            border_color: palette.accent_fill,
         },
         BaseState::Disabled => BasePaint {
             background: palette.surface_raised,
@@ -341,7 +342,7 @@ const fn secondary_paint(base: BaseState, palette: &Palette) -> BasePaint {
         BaseState::Pressed => BasePaint {
             background: palette.surface_active,
             foreground: palette.text_strong,
-            border_color: palette.accent_primary,
+            border_color: palette.accent_border,
         },
         BaseState::Disabled => BasePaint {
             background: palette.surface_base,
@@ -380,25 +381,25 @@ const fn ghost_paint(base: BaseState, palette: &Palette) -> BasePaint {
 /// §3.1 — Danger.
 ///
 /// The fill is [`status_danger_fill`](Palette::status_danger_fill), not
-/// the [`status_danger`](Palette::status_danger) §3.1 names here. That
-/// token is the error *text* red, and white body text on it measures
-/// `3.8753:1` — the two roles need opposite luminance, so decision
-/// **D-5** split them (gap **G-8**). The resting foreground and border
-/// keep `status.danger`, which is the text/icon role and clears at
-/// `4.8283:1`.
+/// the [`status_danger_text`](Palette::status_danger_text) §3.1 names
+/// here. That token is the error *text* red, and white body text on it
+/// measures `3.0271:1` — the two roles need opposite luminance, so
+/// decision **D-5** split them (gap **G-8**). The resting foreground
+/// and border keep `status.danger.text`, which is the text/icon role and
+/// clears at `6.1812:1` on `surface.raised`.
 ///
 /// The pressed border tracks the pressed fill rather than staying
-/// `status.danger`, exactly as it tracked the fill before the split: §3.1
-/// gives that cell a border of the fill's own colour at full opacity, so
-/// it is a geometry holder, not a state signal. Left on `status.danger`
-/// it would sit `1.7087:1` from the fill it outlines — a border that
-/// reads as a mistake rather than as an edge.
+/// `status.danger.text`, exactly as it tracked the fill before the
+/// split: §3.1 gives that cell a border of the fill's own colour at full
+/// opacity, so it is a geometry holder, not a state signal. Left on
+/// `status.danger.text` it would sit `1.6937:1` from the fill it
+/// outlines — a border that reads as a mistake rather than as an edge.
 const fn danger_paint(base: BaseState, palette: &Palette) -> BasePaint {
     match base {
         BaseState::Rest | BaseState::Invalid => BasePaint {
             background: palette.surface_raised,
-            foreground: palette.status_danger,
-            border_color: palette.status_danger,
+            foreground: palette.status_danger_text,
+            border_color: palette.status_danger_text,
         },
         BaseState::Hovered => BasePaint {
             background: palette.status_danger_fill,

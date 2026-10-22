@@ -30,7 +30,7 @@
 //!
 //! Unlike `INC-07`'s button audit, this one finds nothing to pin. Every
 //! judged pair clears its rule on the `G-7`-retuned palette — the widest
-//! margin is the selection lock at `4.5648:1` over its `4.5:1` floor,
+//! margin is the selection lock at `4.8020:1` over its `4.5:1` floor,
 //! the tightest chrome pair is `border.strong` on `surface.code` at
 //! `4.1672:1` over `3.0:1`. The two `border.subtle` rows are reported
 //! as resting dividers, which `UIF-TOK-006` rule 2 does not govern.
@@ -52,7 +52,7 @@ use iced::widget::column;
 use iced_test::renderer::Renderer as HeadlessRenderer;
 
 /// Tolerance on a pinned contrast ratio — three decimals, enough to tell
-/// `4.5648` from `4.5000`.
+/// `4.8020` from `4.5000`.
 const RATIO_EPS: f32 = 1e-3;
 
 /// Tolerance on a colour-channel comparison used to name a token.
@@ -116,7 +116,7 @@ fn token_name(color: Color) -> String {
         return "transparent".to_string();
     }
     let p = palette();
-    let table: [(&str, Color); 20] = [
+    let table: [(&str, Color); 23] = [
         ("surface.base", p.surface_base),
         ("surface.sunken", p.surface_sunken),
         ("surface.raised", p.surface_raised),
@@ -126,7 +126,9 @@ fn token_name(color: Color) -> String {
         ("surface.active", p.surface_active),
         ("border.subtle", p.border_subtle),
         ("border.strong", p.border_strong),
-        ("accent.primary", p.accent_primary),
+        ("accent.fill", p.accent_fill),
+        ("accent.fill_active", p.accent_fill_active),
+        ("accent.border", p.accent_border),
         ("accent.text", p.accent_text),
         ("text.primary", p.text_primary),
         ("text.strong", p.text_strong),
@@ -134,8 +136,9 @@ fn token_name(color: Color) -> String {
         ("text.disabled", p.text_disabled),
         ("status.success", p.status_success),
         ("status.warning", p.status_warning),
-        ("status.danger", p.status_danger),
+        ("status.danger_text", p.status_danger_text),
         ("status.danger_fill", p.status_danger_fill),
+        ("status.danger_fill_active", p.status_danger_fill_active),
         ("surface.scrim", p.surface_scrim),
     ];
     for (name, token) in table {
@@ -321,7 +324,7 @@ fn test_focused_cell_is_the_spec_row() {
             text: p.text_strong,
             placeholder: p.text_muted,
             icon: p.text_primary,
-            border: p.accent_primary,
+            border: p.accent_border,
             border_width: shape::BORDER_FOCUS,
         },
     );
@@ -337,8 +340,8 @@ fn test_invalid_cell_is_the_spec_row() {
             background: p.surface_base,
             text: p.text_strong,
             placeholder: p.text_muted,
-            icon: p.status_danger,
-            border: p.status_danger,
+            icon: p.status_danger_text,
+            border: p.status_danger_text,
             border_width: shape::BORDER_FOCUS,
         },
     );
@@ -452,7 +455,7 @@ fn test_focus_is_a_replacement_here_not_an_addition() {
     );
     assert_eq!(token_name(rest.background), "surface.code");
     assert_eq!(token_name(focused.background), "surface.base");
-    assert_eq!(token_name(focused.border_color), "accent.primary");
+    assert_eq!(token_name(focused.border_color), "accent.border");
     assert_eq!(focused.border_width, shape::BORDER_FOCUS);
     assert_eq!(rest.border_width, shape::BORDER_HAIRLINE);
     assert_eq!(
@@ -488,7 +491,7 @@ fn test_all_three_kinds_resolve_identically_for_every_reachable_state() {
 #[test]
 fn test_the_selection_pair_is_the_lock_in_every_state() {
     // `UIF-TOK-006` rule 3: the selection foreground is `text.strong`
-    // over `accent.primary`, in every state a selection can exist in.
+    // over `accent.fill`, in every state a selection can exist in.
     let p = palette();
 
     for state in reachable_states() {
@@ -496,7 +499,7 @@ fn test_the_selection_pair_is_the_lock_in_every_state() {
             let style = resolve_input_style(kind, state, &p);
             assert_eq!(
                 token_name(style.selection_background),
-                "accent.primary",
+                "accent.fill",
                 "{} x {kind:?} selection background",
                 state_name(state),
             );
@@ -564,7 +567,7 @@ fn test_invalid_and_focused_keeps_the_error_border() {
 
     assert_eq!(
         token_name(style.border_color),
-        "status.danger",
+        "status.danger_text",
         "focus must not take the perimeter from the error"
     );
     assert_eq!(style.border_width, shape::BORDER_FOCUS);
@@ -586,8 +589,8 @@ fn test_invalid_and_focused_relocates_focus_to_an_outside_ring() {
     );
     assert_eq!(
         token_name(style.focus_ring_color),
-        "accent.primary",
-        "accent clears surface.base at 4.3585:1, so it wins the ring"
+        "accent.border",
+        "accent.border clears surface.base at 6.6698:1, so it wins the ring"
     );
 }
 
@@ -636,12 +639,12 @@ fn test_the_error_border_is_never_cleared_by_any_pointer_or_focus_state() {
             let style = style_for(kind, BaseState::Invalid, focused);
             assert_eq!(
                 token_name(style.border_color),
-                "status.danger",
+                "status.danger_text",
                 "invalid + focused:{focused} x {kind:?} lost the error border"
             );
             assert_eq!(
                 token_name(style.icon),
-                "status.danger",
+                "status.danger_text",
                 "invalid + focused:{focused} x {kind:?} lost the error glyph colour"
             );
         }
@@ -1713,7 +1716,7 @@ struct AcceptedFailure {
 /// **`INC-08b` found none.** Every pair §3.2 can paint clears its rule on
 /// the `G-7`-retuned palette; the tightest is `border.strong` on
 /// `surface.code` at `4.1672:1` against a `3.0:1` chrome floor, and the
-/// tightest text pair is the selection lock at `4.5648:1` over `4.5:1`.
+/// tightest text pair is the selection lock at `4.8020:1` over `4.5:1`.
 ///
 /// The type and the guard that reads it are kept rather than deleted on
 /// purpose. An unreadable pairing should still fail into a named, argued
@@ -1767,19 +1770,19 @@ fn test_the_accepted_failure_ledger_is_empty_and_fully_specified() {
 
 #[test]
 fn test_the_selection_lock_clears_the_text_rule() {
-    // `UIF-TOK-006` rule 3, measured rather than trusted: `text.strong`
-    // on `accent.primary` is the tightest text pair this atom produces,
-    // and the `G-7` retune is what brought it over the floor.
+    // `UIF-TOK-006` rule 4, measured rather than trusted: `text.strong`
+    // on `accent.fill` is the tightest text pair this atom produces, and
+    // the revised §2.5 values put it at 4.8020:1.
     let p = palette();
-    let ratio = contrast_ratio(p.text_strong, p.accent_primary);
+    let ratio = contrast_ratio(p.text_strong, p.accent_fill);
 
     assert!(
-        (ratio - 4.5648).abs() < RATIO_EPS,
-        "the selection lock measures {ratio:.4}:1, not the 4.5648:1 the \
-         G-7 retune pinned — a token moved"
+        (ratio - 4.8020).abs() < RATIO_EPS,
+        "the selection lock measures {ratio:.4}:1, not the 4.8020:1 the revised \
+         spec pins — a token moved"
     );
     assert!(
-        meets_text_contrast(p.text_strong, p.accent_primary),
+        meets_text_contrast(p.text_strong, p.accent_fill),
         "the selection lock must clear 4.5:1; it measures {ratio:.4}:1"
     );
 }
@@ -1815,12 +1818,12 @@ fn test_the_error_border_clears_the_chrome_rule_on_its_own_cell() {
 
     assert!(
         meets_chrome_contrast(style.border_color, style.background),
-        "status.danger on surface.base measures {:.4}:1",
+        "status.danger.text on surface.base measures {:.4}:1",
         contrast_ratio(style.border_color, style.background),
     );
     assert!(
-        (contrast_ratio(p.status_danger, p.surface_base) - 5.1339).abs() < RATIO_EPS,
-        "the error border's measured ratio moved off 5.1339:1"
+        (contrast_ratio(p.status_danger_text, p.surface_base) - 6.5725).abs() < RATIO_EPS,
+        "the error border's measured ratio moved off 6.5725:1"
     );
 }
 

@@ -18,34 +18,62 @@
 //! separate, self-contained value rather than a flag on the dark palette:
 //! it is a different colour world, not a variant of this one.
 //!
-//! Values are transcribed from `doc/planning/ui-framework.md` §2.5, and
-//! that transcription is authoritative. Where the app's existing
-//! `src/app/ui/theme.rs` disagrees with the spec — the editor error red
-//! is the standing example — the spec's number wins (decision **D-4**
-//! in `doc/planning/iced-pro-tasks.md`).
+//! # The polarity split
 //!
-//! Three tokens deliberately depart from the spec's *printed* value:
-//! [`accent_primary`](Palette::accent_primary),
-//! [`surface_active`](Palette::surface_active) and
-//! [`status_danger`](Palette::status_danger). At the literal figures the
-//! spec prints, five pairings its own usage contracts mandate cannot
-//! clear the contrast thresholds `UIF-TOK-006` sets for them. Decision
-//! **A** of the ledger's open question retunes those three minimally; the
-//! deviation is recorded as gap **G-7** in
-//! `doc/planning/iced-pro-tasks.md`, and each affected field's own doc
-//! says so. Every other token is still the spec's number verbatim.
+//! Values are transcribed from `doc/planning/ui-framework.md` §2.5 as
+//! revised on 2026-10-22, and that transcription is authoritative. The
+//! revision re-baselines the vocabulary around a **polarity split**: a
+//! chromatic signal is no longer one token every context reuses, but a
+//! set of role-scoped tokens — the colour you fill *with*, the colour
+//! you press *to*, and the colour you stroke *with*.
 //!
-//! One token exists because the spec's set could not:
-//! [`status_danger_fill`](Palette::status_danger_fill). The spec asks a
-//! single red to be both the error *text* colour on dark surfaces and the
-//! *background* behind `text.strong` on a Danger button, and those two
-//! roles require opposite luminance — the bounds are disjoint, so no
-//! value satisfies both (ledger gap **G-8**). Decision **D-5** splits
-//! the role across two tokens:
-//! [`status_danger`](Palette::status_danger) keeps the text/icon job and
-//! `status_danger_fill` takes the background job. The set is therefore
-//! one token larger than §2.5 prints, and the two reds are not
-//! interchangeable.
+//! `color.accent.*` carries three of them:
+//! [`accent_fill`](Self::accent_fill) (the solid CTA / selected-row
+//! fill), [`accent_fill_active`](Self::accent_fill_active) (the same
+//! fill under a press) and [`accent_border`](Self::accent_border) (the
+//! focus ring, the active tab indicator, the accent stroke).
+//! `color.status.danger.*` carries the mirror-image three:
+//! [`status_danger_text`](Self::status_danger_text) (the red you write
+//! errors *in*), [`status_danger_fill`](Self::status_danger_fill) (the
+//! red a destructive label sits *on*) and
+//! [`status_danger_fill_active`](Self::status_danger_fill_active) (that
+//! background under a press).
+//!
+//! That shape is not new to this crate — it is what two ledger decisions
+//! argued for, and the revised spec has now adopted both outright:
+//!
+//! * **D-5** (gap **G-8**) split `status.danger` into a text red and a
+//!   background red because the two roles demand opposite luminance and
+//!   no single value can serve them. §2.5 now prints the split as
+//!   structure rather than leaving it a crate-local addition, and goes
+//!   further: the pressed step this crate had to synthesise as
+//!   "`status.danger_fill` at 85% opacity" is its own
+//!   `status.danger.fill_active`.
+//! * **D-6** (gap **G-9**) made the focus ring adaptive because a fixed
+//!   accent ring vanished on a saturated fill. §3.0.2 now states that
+//!   rule directly — resolve to `accent.border`, fall back to
+//!   `text.strong` — and, crucially, gives it a token to resolve *from*.
+//!   Before the split there was no `accent.border` to try; the ring had
+//!   to fall back from the fill token itself.
+//!
+//! The five pairings that decision **A** of the **G-7** ledger retuned
+//! are no longer deviations either. The revised §2.5 prints the values
+//! that clear the rules, so **every token in this module is the spec's
+//! number verbatim** — there is no crate-local value left to reconcile.
+//!
+//! # One printed luminance is wrong, and it is recorded here
+//!
+//! §2.5 gives `color.status.danger.fill_active` a relative luminance of
+//! `0.1309`. Recomputed from that row's own printed `RGB(202, 24, 16)`
+//! through the WCAG 2.1 transfer function the true figure is `0.1325`.
+//! The colour is right and the printed `L` is not; the gap is recorded
+//! against **G-5**, whose standing finding is that §2.5's numeric
+//! columns were hand-collected. Two of that row's contrast columns
+//! inherit the error and are likewise off: `vs surface.base` prints
+//! `3.43` where the colour measures `3.4575`, and `vs surface.active`
+//! prints `2.46` against a measured `2.4842`. Per **G-5** the values
+//! `token/contrast.rs` computes are authoritative and nothing in this
+//! crate transcribes the printed figures.
 //!
 //! What this module deliberately does *not* do is arithmetic on
 //! contrast. The luminance and WCAG-ratio figures the spec's table
@@ -85,6 +113,11 @@ pub struct Palette {
     /// The one surface *below* base. It reads as a hole cut into whatever
     /// contains it, which is why it is reserved for content the user
     /// looks *into* rather than chrome the user looks *at*.
+    ///
+    /// It is also the darkest place a disabled placeholder can appear,
+    /// which matters to `UIF-TOK-006` rule 2: `text.disabled` measures
+    /// `6.0205:1` here and breaches that rule's `6.00:1` ceiling. See
+    /// the rule-2 known-conflict test in `token/contrast_tests.rs`.
     pub surface_sunken: Color,
 
     /// `color.surface.raised` — navbar, bottom bar, inactive tabs and
@@ -105,30 +138,18 @@ pub struct Palette {
     pub surface_overlay: Color,
 
     /// `color.surface.hover` — interactive control hover fill, hovered
-    /// menu item, active submenu parent. `RGB(38, 38, 44)`.
+    /// menu item, active submenu parent. `RGB(32, 32, 36)`.
     pub surface_hover: Color,
 
-    /// `color.surface.active` — pressed control fill and the movable
-    /// overlay title bar header. `RGB(43, 43, 51)`.
-    ///
-    /// **Retuned from the spec's printed `RGB(50, 50, 58)`** to satisfy
-    /// `UIF-TOK-006` (ledger gap **G-7**, decision **A**). At the
-    /// literal value this fill swallowed both of the borders the spec
-    /// places on it: [`accent_primary`](Self::accent_primary) measured
-    /// `2.8441:1` (the Secondary pressed border, §3.1) and
-    /// [`border_strong`](Self::border_strong) measured `2.8775:1` (the
-    /// Ghost pressed border and the latched navbar trigger, §4.2.2),
-    /// both under the 3.0:1 chrome floor. Darkening to `RGB(43, 43, 51)`
-    /// lifts them to `3.0750:1` and `3.1793:1`. The blue lean is held at
-    /// `+8` so the token stays the same cool grey, only darker.
+    /// `color.surface.active` — pressed quiet/secondary control fill and
+    /// the movable overlay title bar header. `RGB(42, 42, 46)`.
     ///
     /// The lightest surface in the set, so the gap between it and the
     /// surface it sits on is the widest the elevation model ever gets.
-    /// That gap is narrower than it was — `0.0050` of relative luminance
-    /// above [`surface_hover`](Self::surface_hover) against `0.0128` —
-    /// because the same darkening that fixes the borders also pulls this
-    /// token down toward hover. It is still strictly above hover, and
-    /// still the brightest surface there is.
+    /// The revised §2.5 pulled hover up and this down relative to the
+    /// pre-revision ladder, narrowing the `hover → active` luminance step
+    /// to `0.0088` — still strictly increasing, and still enough that a
+    /// pressed control reads as a step rather than a repaint.
     pub surface_active: Color,
 
     /// `color.surface.scrim` — the dimmed backdrop behind blocking
@@ -148,7 +169,10 @@ pub struct Palette {
     /// resting input borders and inactive tab borders. `RGB(40, 40, 40)`.
     ///
     /// The resting stroke: present so structure is never implied by
-    /// alignment alone, quiet enough that it disappears once read.
+    /// alignment alone, quiet enough that it disappears once read. Under
+    /// `UIF-TOK-006` rule 3's four-class chrome model it is a
+    /// `RestingDivider`, which is why the `3.00:1` active-chrome floor
+    /// is not asserted against it.
     pub border_subtle: Color,
 
     /// `color.border.strong` — floating card perimeters (modals, menus,
@@ -159,30 +183,51 @@ pub struct Palette {
     /// why it is the border a detached card gets on every side.
     pub border_strong: Color,
 
-    /// `color.accent.primary` — primary CTA fill, selected row
-    /// background, keyboard focus ring and the active tab's top
-    /// indicator. `RGB(98, 100, 240)`.
+    /// `color.accent.fill` — solid primary CTA button fill and selected
+    /// tree-row background, always under [`text_strong`](Self::text_strong).
+    /// `RGB(93, 96, 238)`.
     ///
-    /// **Retuned from the spec's printed `RGB(99, 102, 241)`** to
-    /// satisfy `UIF-TOK-006` (ledger gap **G-7**, decision **A**). The
-    /// Selection Foreground Lock pins [`text_strong`](Self::text_strong)
-    /// on this fill, and at the literal value that mandated pairing
-    /// measured `4.4669:1` — `0.0331` short of the 4.5:1 normal-text
-    /// rule. Three units of darkening bring it to `4.5648:1`.
+    /// The fill half of the accent's polarity split. It is *only* ever a
+    /// background: the `UIF-TOK-006` rule 4 foreground lock pins
+    /// [`text_strong`](Self::text_strong) on it (`4.8020:1`) and forbids
+    /// every foreground-only accent/status token from rendering on it.
+    /// When this colour is needed as a *stroke*, reach for
+    /// [`accent_border`](Self::accent_border) rather than reusing the
+    /// fill — that is the whole reason the split exists.
+    pub accent_fill: Color,
+
+    /// `color.accent.fill_active` — the pressed primary CTA button fill,
+    /// under [`text_strong`](Self::text_strong). `RGB(82, 85, 222)`.
     ///
-    /// The retune is deliberately a *lightness* move, not a hue move:
-    /// HSL hue shifts `+0.42°` and saturation `-0.0097`, so the token
-    /// is still the same indigo. It cannot go lighter, because the same
-    /// token has to clear 3.0:1 as a focus ring against
-    /// [`surface_active`](Self::surface_active) while white clears 4.5:1
-    /// on top of it — the two bounds are only jointly satisfiable by
-    /// darkening the accent and darkening that surface alongside it.
+    /// The step the pre-split palette had to fake with opacity. Because a
+    /// primary CTA is the most-pressed control in the interface and its
+    /// fill cannot change hue, the pressed depth had to become its own
+    /// token rather than a modifier on the resting one.
     ///
-    /// The only colour the interface uses to say "act here". Because it
-    /// is a fill, the `UIF-TOK-006` foreground lock applies: text on
-    /// it is always [`text_strong`](Self::text_strong), never a status
-    /// colour.
-    pub accent_primary: Color,
+    /// It is darker than [`accent_fill`](Self::accent_fill) rather than
+    /// lighter, which is why the label it carries gains contrast instead
+    /// of losing it: `text.strong` reads `5.6559:1` here against
+    /// `4.8020:1` on the resting fill.
+    pub accent_fill_active: Color,
+
+    /// `color.accent.border` — keyboard focus rings, the active tab's
+    /// top indicator, and pressed/focused accent strokes.
+    /// `RGB(129, 140, 248)`.
+    ///
+    /// The stroke half of the accent's polarity split, and the token
+    /// `UIF-ATOM-000` §2's dynamic ring rule resolves *from*: the ring
+    /// is this colour wherever it clears `MIN_CHROME_CONTRAST`
+    /// (`3.00:1`), and falls back to [`text_strong`](Self::text_strong)
+    /// where it cannot.
+    ///
+    /// It is much lighter than [`accent_fill`](Self::accent_fill) —
+    /// `L = 0.3020` against `0.1687` — which is what lets one token
+    /// clear `3.00:1` against every surface in the ladder (worst case
+    /// `4.7922:1` on `surface.active`) while still reading as the same
+    /// indigo. The cost is that it cannot clear `3.00:1` against a
+    /// *saturated* fill, which is exactly the case the adaptive fallback
+    /// in `widget::focus` exists to handle.
+    pub accent_border: Color,
 
     /// `color.accent.text` — headings, active links, menu checkmarks
     /// (`✓`) and submenu indicators (`>`). `RGB(100, 200, 255)`.
@@ -198,11 +243,15 @@ pub struct Palette {
     /// `color.text.strong` — emphasised text, hovered and focused control
     /// labels. `RGB(255, 255, 255)`.
     ///
-    /// Also the **mandatory** foreground on
-    /// [`accent_primary`](Self::accent_primary): the selection
-    /// foreground lock (`UIF-TOK-006`) pins this token there so a
-    /// selected row or primary button can never be re-skinned into an
-    /// unreadable pairing.
+    /// Also the **mandatory** foreground on all four saturated fills —
+    /// [`accent_fill`](Self::accent_fill),
+    /// [`accent_fill_active`](Self::accent_fill_active),
+    /// [`status_danger_fill`](Self::status_danger_fill) and
+    /// [`status_danger_fill_active`](Self::status_danger_fill_active) —
+    /// under the `UIF-TOK-006` rule 4 foreground lock, which pins a
+    /// selected row or primary button so it can never be re-skinned into
+    /// an unreadable pairing. Across those four fills the pairing spans
+    /// `4.8020:1` to `5.7543:1`.
     pub text_strong: Color,
 
     /// `color.text.muted` — secondary descriptions, inactive tab
@@ -216,6 +265,15 @@ pub struct Palette {
     /// The dimmest text role, and still the brightest thing on the
     /// darkest surface: disabled means *present but inert*
     /// (`UIF-PRIN-004`), not gone.
+    ///
+    /// `UIF-TOK-006` rule 2 exempts it from the `4.50:1` active-text
+    /// floor and holds it inside a `[4.00:1, 6.00:1]` muted-legibility
+    /// band instead, so a disabled control stays readable without
+    /// competing with the active ones. It clears that band on six of the
+    /// seven surfaces; `surface.sunken` measures `6.0205:1` and breaches
+    /// the ceiling by `0.0205`. That is a defect in the band, not in
+    /// this token, and is pinned as a known conflict rather than tuned
+    /// away — see `token/contrast_tests.rs`.
     pub text_disabled: Color,
 
     /// `color.status.success` — completion states and positive status
@@ -227,9 +285,9 @@ pub struct Palette {
     /// `RGB(220, 130, 0)`.
     pub status_warning: Color,
 
-    /// `color.status.danger` — validation error **text and icons**, and
-    /// the resting foreground/border of a destructive control.
-    /// `RGB(255, 28, 2)`.
+    /// `color.status.danger.text` — validation error **text and icons**,
+    /// invalid input borders, and the resting `Danger` button
+    /// label/border. `RGB(255, 92, 92)`.
     ///
     /// **This is the text/icon red. Reach for it when the danger is
     /// *written* — an error message, a validation glyph, a resting
@@ -237,81 +295,82 @@ pub struct Palette {
     /// surface a label sits *on*, use
     /// [`status_danger_fill`](Self::status_danger_fill) instead.
     ///
-    /// **Retuned from the spec's printed `RGB(244, 15, 2)`** to satisfy
-    /// `UIF-TOK-006` (ledger gap **G-7**, decision **A**). This colour
-    /// is specified as body-size error text on two of the lightest
-    /// surfaces in the set and cleared neither: `4.1473:1` on
-    /// [`surface_overlay`](Self::surface_overlay) (the input-dialog
-    /// validation slot, §4.5.1, and the modal error banner, §4.6.1) and
-    /// `4.3800:1` on [`surface_raised`](Self::surface_raised) (the
-    /// Danger button's resting foreground, §3.1). Lightening it lifts
-    /// both to `4.5718:1` and `4.8283:1`.
+    /// It is the foreground half of the danger polarity split **D-5**
+    /// argued for, and the reason the split cannot collapse back into one
+    /// token is arithmetic rather than taste: a red bright enough to read
+    /// as body text on `surface.overlay` (`5.8528:1`) is far too bright
+    /// to carry `text.strong` on top of it — the pairing measures
+    /// `3.0271:1`, well under the `4.50:1` rule. The two roles pull
+    /// luminance in opposite directions, which is why there are three
+    /// danger tokens and not one.
     ///
-    /// It has to go *lighter* because its backgrounds cannot go darker:
-    /// `surface.overlay` and `surface.raised` are pinned into the middle
-    /// of the elevation ladder. The move stays inside the red band — HSL
-    /// hue `3.22° → 6.17°`, well short of orange at 30° — with red
-    /// still dominant by more than 200 units and blue untouched, so it
-    /// reads as a brighter red rather than a shifted one.
-    ///
-    /// The lightening is exactly what disqualifies it as a background.
-    /// A red bright enough to read as type on a dark surface is too
-    /// bright to carry white body text on top of it: `text.strong` on
-    /// this token measures `3.8753:1`, under the 4.5:1 rule. That is
-    /// not a rounding artefact and cannot be retuned away — the two
-    /// roles pull luminance in opposite directions, which is why the
-    /// split in **D-5** exists rather than another nudge here.
-    pub status_danger: Color,
+    /// It is also one of the three *active* border tokens rule 3a judges
+    /// against the `3.00:1` chrome floor, and it clears it across the
+    /// whole ladder — worst case `4.7223:1` on `surface.active`.
+    pub status_danger_text: Color,
 
-    /// `color.status.danger_fill` — the darker destructive red, used
-    /// **as a background behind [`text_strong`](Self::text_strong)**:
-    /// the Danger button's hover fill, and by extension its pressed fill.
-    /// `RGB(208, 23, 2)`.
+    /// `color.status.danger.fill` — the destructive red used **as a
+    /// background behind [`text_strong`](Self::text_strong)**: the
+    /// hovered `Danger` button fill and the hovered destructive menu row.
+    /// `RGB(216, 28, 20)`.
     ///
-    /// **This is the background red. Reach for it when a label is
-    /// painted *on* the danger — a filled destructive button. It is
-    /// not a text colour**; for written errors use
-    /// [`status_danger`](Self::status_danger).
+    /// **This is a background red. Reach for it when a label is painted
+    /// *on* the danger — a filled destructive button or row. It is not
+    /// a text colour**; for written errors use
+    /// [`status_danger_text`](Self::status_danger_text).
     ///
-    /// It exists because the spec conflated two roles that need opposite
-    /// luminance (ledger gap **G-8**, decision **D-5**). Solving
-    /// `white-on-red >= 4.5` for the red's luminance caps it at
-    /// `L <= 0.183333`, while solving `red-on-overlay >= 4.5` floors it
-    /// at `L >= 0.216697`. The bounds do not overlap, so one red
-    /// cannot be both. This token takes the low side of the split:
-    /// `L = 0.140271`, which carries `text.strong` at `5.5185:1` —
-    /// deliberately past the `5.0` target rather than sat on the bare
-    /// `4.5`, because the whole reason this token was added is that the
-    /// old pairing was `0.6247` short.
-    ///
-    /// It stays unmistakably the same red as
-    /// [`status_danger`](Self::status_danger), only darker: HSL hue
-    /// `6.12°` against that token's `6.17°` (orange does not start
-    /// until `30°`), red dominant over green by 185 units and over blue
-    /// by 206, and blue held at the same `2`. The step down is
-    /// `0.080678` of relative luminance — a third darker, not a
-    /// nudge — so hover reads as an escalation rather than a repaint.
+    /// It sits on the low side of the disjoint luminance bounds **G-8**
+    /// records: `L = 0.1548`, under the `0.183333` ceiling the
+    /// white-on-red rule imposes, and below the `0.216697` floor the
+    /// red-on-overlay text rule imposes. That is the whole argument for
+    /// the split — no value satisfies both, so the roles are separated
+    /// instead.
     ///
     /// It is not a surface and must never be mistaken for one. Every
-    /// `surface.*` token is a near-neutral grey spanning at most `8`
-    /// units of channel spread; this one spans `206`, and it clears
-    /// every surface by at least `2.5436:1` on luminance, so it never
-    /// luminance-matches the layer it is meant to stand out from.
-    /// (The `3.0:1` chrome floor of `UIF-TOK-006` rule 2 is not the
-    /// rule for a *fill* — it governs borders and rings — and no value
-    /// that also carries white text at `5.0:1` could reach it against
-    /// `surface.active` anyway.)
+    /// `surface.*` token is a near-neutral grey spanning at most `4`
+    /// units of channel spread; this one spans `196`, and it clears every
+    /// surface by at least `2.7881:1`, so it never luminance-matches
+    /// the layer it is meant to stand out from.
     pub status_danger_fill: Color,
+
+    /// `color.status.danger.fill_active` — the **pressed** destructive
+    /// red, behind [`text_strong`](Self::text_strong).
+    /// `RGB(202, 24, 16)`.
+    ///
+    /// The pressed step of the danger fill, mirroring
+    /// [`accent_fill_active`](Self::accent_fill_active). Before the
+    /// split this crate synthesised the same step as
+    /// "`status_danger_fill` at 85% opacity"; the revised spec makes it
+    /// a real token, which is better because an opacity fill inherits
+    /// whatever is behind it and a token does not.
+    ///
+    /// Two things about this token are worth pinning:
+    ///
+    /// * Its printed luminance in §2.5 (`0.1309`) is wrong. The true
+    ///   value for `RGB(202, 24, 16)` is `0.1325`. Recorded against
+    ///   **G-5**; see this module's doc comment.
+    /// * It is the token that breaks the `CoincidentWithFill` rule. A
+    ///   `1px` stroke set to this same token takes its boundary contrast
+    ///   from the fill, which must therefore reach `3.08:1` against the
+    ///   surrounding surface — and against `surface.overlay` it measures
+    ///   `3.0789:1`, short by `0.0011`. A pressed destructive row on a
+    ///   floating menu is a real, ordinary case. This is a defect in the
+    ///   rule's threshold, not in the colour, and it is pinned as a
+    ///   known conflict in `token/contrast_tests.rs` rather than tuned
+    ///   away.
+    pub status_danger_fill_active: Color,
 }
 
 impl Palette {
-    /// The dark palette as `UIF-TOK-005` specifies it, with the three
-    /// `G-7` contrast retunes applied — see
-    /// [`accent_primary`](Self::accent_primary),
-    /// [`surface_active`](Self::surface_active) and
-    /// [`status_danger`](Self::status_danger) — plus the
-    /// [`status_danger_fill`](Self::status_danger_fill) that decision
-    /// **D-5** adds to the set the spec's §2.5 table does not print.
+    /// The dark palette exactly as `UIF-TOK-005`'s revised §2.5
+    /// (2026-10-22) specifies it, including the six-token polarity split
+    /// that decision **D-5** and decision **D-6** anticipated.
+    ///
+    /// Every value here is the spec's own number. The three tokens the
+    /// earlier **G-7** retune moved — `accent.primary`, `surface.active`
+    /// and `status.danger` — have been renamed and revalued to the
+    /// figures the revised table prints, so there is no longer a
+    /// crate-local deviation to track.
     ///
     /// A `const fn` rather than a `static`: the palette is a value, and
     /// call sites are expected to take it by copy and read fields off it
@@ -324,12 +383,14 @@ impl Palette {
             surface_raised: Color::from_rgb8(18, 18, 20),
             surface_code: Color::from_rgb8(20, 20, 22),
             surface_overlay: Color::from_rgb8(24, 24, 27),
-            surface_hover: Color::from_rgb8(38, 38, 44),
-            surface_active: Color::from_rgb8(43, 43, 51),
+            surface_hover: Color::from_rgb8(32, 32, 36),
+            surface_active: Color::from_rgb8(42, 42, 46),
             surface_scrim: Color::from_rgba8(9, 9, 11, 0.55),
             border_subtle: Color::from_rgb8(40, 40, 40),
             border_strong: Color::from_rgb8(120, 120, 120),
-            accent_primary: Color::from_rgb8(98, 100, 240),
+            accent_fill: Color::from_rgb8(93, 96, 238),
+            accent_fill_active: Color::from_rgb8(82, 85, 222),
+            accent_border: Color::from_rgb8(129, 140, 248),
             accent_text: Color::from_rgb8(100, 200, 255),
             text_primary: Color::from_rgb8(210, 210, 210),
             text_strong: Color::from_rgb8(255, 255, 255),
@@ -337,8 +398,9 @@ impl Palette {
             text_disabled: Color::from_rgb8(140, 140, 140),
             status_success: Color::from_rgb8(100, 255, 100),
             status_warning: Color::from_rgb8(220, 130, 0),
-            status_danger: Color::from_rgb8(255, 28, 2),
-            status_danger_fill: Color::from_rgb8(208, 23, 2),
+            status_danger_text: Color::from_rgb8(255, 92, 92),
+            status_danger_fill: Color::from_rgb8(216, 28, 20),
+            status_danger_fill_active: Color::from_rgb8(202, 24, 16),
         }
     }
 }

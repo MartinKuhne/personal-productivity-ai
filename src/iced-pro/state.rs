@@ -12,7 +12,7 @@
 //! atoms' job from `INC-07` onward. That separation is what keeps the state
 //! rules independent of the palette: when the `G-7` retune moved
 //! [`token::color`](crate::token::color) — `surface.active`,
-//! `accent.primary`, `status.danger` — nothing here had to change, because
+//! `accent.fill`, `status.danger.fill` — nothing here had to change, because
 //! this module never named those colours in the first place.
 //!
 //! # Why the resolved state is two parts, not one six-value enum
@@ -27,7 +27,7 @@
 //!   "Rest + 2px … focus ring". The ring is spelled as an addition to a base
 //!   state, not as the base state itself.
 //! * **§4.9.2** — the menu row's *Keyboard Focused* row is `surface.hover`
-//!   plus a `1px accent.primary` inset outline: the **hover background** and
+//!   plus a `1px accent.border` inset outline: the **hover background** and
 //!   a **focus outline**, at the same time.
 //!
 //! A flat six-value enum must choose between the hover fill and the focus ring

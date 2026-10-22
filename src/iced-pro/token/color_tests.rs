@@ -1,27 +1,30 @@
 //! Tests for [`color`] — the semantic colour tokens (`UIF-TOK-005`).
 //!
-//! Every token is pinned channel-by-channel to the sRGB value the spec's
-//! §2.5 table gives it, so a silent retune fails loudly and names the
-//! token that moved. On top of the pins, the tests enforce the structural
-//! promises the table makes: the dark-first elevation ladder, the
-//! neutrality of the surface and border greys, the strict prominence
-//! order of the text roles, mutual distinguishability of the status
-//! colours, the inverted shape of the editor surface, and the rule that
-//! no two distinct tokens collapse onto the same colour.
+//! Every token is pinned channel-by-channel to the sRGB value the
+//! revised §2.5 table (2026-10-22) gives it, so a silent retune fails
+//! loudly and names the token that moved. On top of the pins, the tests
+//! enforce the structural promises the table makes: the dark-first
+//! elevation ladder, the neutrality of the surface and border greys, the
+//! strict prominence order of the text roles, mutual distinguishability
+//! of the status colours, the inverted shape of the editor surface, and
+//! the rule that no two distinct tokens collapse onto the same colour.
+//!
+//! The last two groups cover the **polarity split** the revised table is
+//! built on. `color.accent.*` and `color.status.danger.*` are each three
+//! tokens rather than one — a fill, a pressed fill and a stroke (or, for
+//! danger, a text colour, a fill and a pressed fill) — which is the
+//! shape decision **D-5** argued for and decision **D-6** made
+//! necessary. Those tests pin each half of each split against the role it
+//! exists to do, pin the two halves of a split against each other so
+//! they cannot be collapsed back into one token, and pin the
+//! within-family hue so a revalue cannot quietly turn the danger reds
+//! brown or the accent indigos blue.
 //!
 //! The luminance maths here is deliberately private to this file. The
 //! production solver — relative luminance, WCAG ratios and the mandated
 //! pairing table — is `token/contrast.rs` (`UIF-TOK-006` /
-//! `UIF-VER-001`) and arrives in a later increment; duplicating it in
-//! production now would pre-empt that module's API.
-//!
-//! The last group of tests covers the `status.danger` split: decision
-//! **D-5** added `color.status.danger_fill` because §2.5's single red
-//! cannot be both the error-text colour on dark surfaces and the
-//! background behind `text.strong` (gap **G-8**). Those tests pin the
-//! new token's contrast margin, its hue, its distance from every surface,
-//! and the disjointness of the two roles' luminance bounds — so the
-//! split cannot quietly collapse back into one token.
+//! `UIF-VER-001`); duplicating its *public* API here would let a change
+//! to one side go unnoticed by the other.
 
 use super::*;
 
@@ -34,10 +37,12 @@ const EPS: f32 = 1e-6;
 ///
 /// The dark surfaces are not perfectly neutral: each carries a slight
 /// blue lean that grows with elevation — `+2` at `base` and `sunken`,
-/// `+3` at `overlay`, `+6` at `hover`, `+8` at `active`. Eight units is
-/// 3.1% of a channel's range, which reads as a cool cast rather than a
-/// hue, and is exactly the spread of the widest offending token. Anything
-/// past this ceiling has stopped being grey and started being a colour.
+/// `+3` at `overlay`, `+4` at `hover` and `active`. Four units is 1.6%
+/// of a channel's range, which reads as a cool cast rather than a hue.
+/// The ceiling is held at eight — twice the widest surface actually
+/// spans — so the rule stays a statement about neutrality rather than a
+/// restatement of the current values, and a surface that drifted to a
+/// visibly blue-grey would still fail it.
 const NEUTRAL_SPREAD_MAX: f32 = 8.0;
 
 /// Minimum Euclidean RGB distance (0–255 scale) between two status
@@ -46,23 +51,20 @@ const NEUTRAL_SPREAD_MAX: f32 = 8.0;
 /// A third of a channel's range has to separate them: the three statuses
 /// carry meaning on colour alone in chips and dots, so they must survive
 /// a quick glance, a cheap display and colour-blind-adjacent viewing.
-/// The tightest pair on the spec is `warning` ↔ `danger` at ≈117.5, so
-/// 100 leaves real headroom without being so loose that a retune could
-/// slide two statuses together.
+/// The tightest pair on the revised table is `warning` ↔ `danger.text`
+/// at ≈105.5, so 100 leaves real headroom without being so loose that a
+/// retune could slide two statuses together.
 const STATUS_MIN_DISTANCE: f32 = 100.0;
 
 /// A row of the `UIF-TOK-005` table paired with the token that
 /// implements it.
 ///
-/// Keeping the transcription next to the value means retuning either
-/// side shows up as a failing assertion that names its own token. Three
-/// rows deliberately do *not* carry the spec's printed value —
-/// `surface.active`, `accent.primary` and `status.danger` are the
-/// `G-7` contrast retunes (decision **A** in
-/// `doc/planning/iced-pro-tasks.md`), so the numbers below are the
-/// retuned ones, not the ones §2.5 prints. One further row,
-/// `color.status.danger_fill`, carries a value §2.5 does not print at
-/// all: the token decision **D-5** adds to the set.
+/// Keeping the transcription next to the value means retuning either side
+/// shows up as a failing assertion that names its own token. Every row
+/// below carries the value the revised §2.5 prints: the pre-revision
+/// `G-7` retune of `accent.primary`, `surface.active` and
+/// `status.danger` is gone, because the revision renamed and revalued
+/// those three to figures that clear the rules on their own.
 #[derive(Clone, Copy)]
 struct SpecRow {
     /// The spec token, e.g. `color.surface.base`.
@@ -91,19 +93,15 @@ fn row(token: &'static str, color: Color, r: u8, g: u8, b: u8, a: f32) -> SpecRo
     }
 }
 
-/// The twenty dark-palette tokens against the spec table, in the
+/// The twenty-three dark-palette tokens against the spec table, in the
 /// table's own order.
 ///
 /// Every table-driven test walks this list, so no token can be skipped by
-/// a test that checks a hand-picked subset.
-///
-/// Nineteen rows transcribe §2.5. The last one does not:
-/// `color.status.danger_fill` is not in the spec's printed table at all.
-/// It is the token decision **D-5** adds to the set because §2.5's
-/// single `status.danger` cannot serve both the error-text role and the
-/// background-behind-`text.strong` role (gap **G-8**), so this row's
-/// pinned value is the ledger's, not the spec's.
-fn spec_rows() -> [SpecRow; 20] {
+/// a test that checks a hand-picked subset. All twenty-three rows
+/// transcribe §2.5 as revised on 2026-10-22 — including the three
+/// `accent.*` and three `status.danger.*` rows that make up the
+/// polarity split, which the pre-revision table did not print at all.
+fn spec_rows() -> [SpecRow; 23] {
     let p = Palette::dark();
     [
         row("color.surface.base", p.surface_base, 9, 9, 11, 1.0),
@@ -111,12 +109,21 @@ fn spec_rows() -> [SpecRow; 20] {
         row("color.surface.raised", p.surface_raised, 18, 18, 20, 1.0),
         row("color.surface.code", p.surface_code, 20, 20, 22, 1.0),
         row("color.surface.overlay", p.surface_overlay, 24, 24, 27, 1.0),
-        row("color.surface.hover", p.surface_hover, 38, 38, 44, 1.0),
-        row("color.surface.active", p.surface_active, 43, 43, 51, 1.0),
+        row("color.surface.hover", p.surface_hover, 32, 32, 36, 1.0),
+        row("color.surface.active", p.surface_active, 42, 42, 46, 1.0),
         row("color.surface.scrim", p.surface_scrim, 9, 9, 11, 0.55),
         row("color.border.subtle", p.border_subtle, 40, 40, 40, 1.0),
         row("color.border.strong", p.border_strong, 120, 120, 120, 1.0),
-        row("color.accent.primary", p.accent_primary, 98, 100, 240, 1.0),
+        row("color.accent.fill", p.accent_fill, 93, 96, 238, 1.0),
+        row(
+            "color.accent.fill_active",
+            p.accent_fill_active,
+            82,
+            85,
+            222,
+            1.0,
+        ),
+        row("color.accent.border", p.accent_border, 129, 140, 248, 1.0),
         row("color.accent.text", p.accent_text, 100, 200, 255, 1.0),
         row("color.text.primary", p.text_primary, 210, 210, 210, 1.0),
         row("color.text.strong", p.text_strong, 255, 255, 255, 1.0),
@@ -124,13 +131,28 @@ fn spec_rows() -> [SpecRow; 20] {
         row("color.text.disabled", p.text_disabled, 140, 140, 140, 1.0),
         row("color.status.success", p.status_success, 100, 255, 100, 1.0),
         row("color.status.warning", p.status_warning, 220, 130, 0, 1.0),
-        row("color.status.danger", p.status_danger, 255, 28, 2, 1.0),
         row(
-            "color.status.danger_fill",
+            "color.status.danger.text",
+            p.status_danger_text,
+            255,
+            92,
+            92,
+            1.0,
+        ),
+        row(
+            "color.status.danger.fill",
             p.status_danger_fill,
-            208,
-            23,
-            2,
+            216,
+            28,
+            20,
+            1.0,
+        ),
+        row(
+            "color.status.danger.fill_active",
+            p.status_danger_fill_active,
+            202,
+            24,
+            16,
             1.0,
         ),
     ]
@@ -173,7 +195,9 @@ fn assert_rgba(token: &str, color: Color, r: u8, g: u8, b: u8, a: f32) {
 /// WCAG 2.1 relative luminance of an sRGB colour.
 ///
 /// Test-local on purpose: the production solver is `token/contrast.rs`
-/// (`UIF-TOK-006`), which is a later increment.
+/// (`UIF-TOK-006`), and keeping this copy independent means a change to
+/// the production transfer function cannot silently re-label every pin
+/// in this file as still-correct.
 fn luminance(color: Color) -> f32 {
     fn linearize(v: f32) -> f32 {
         if v <= 0.039_28 {
@@ -184,6 +208,16 @@ fn luminance(color: Color) -> f32 {
     }
 
     0.2126 * linearize(color.r) + 0.7152 * linearize(color.g) + 0.0722 * linearize(color.b)
+}
+
+/// WCAG 2.1 contrast ratio between two colours.
+///
+/// Test-local, matching the file's existing [`luminance`] helper.
+fn contrast(a: Color, b: Color) -> f32 {
+    let la = luminance(a);
+    let lb = luminance(b);
+    let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
+    (lighter + 0.05) / (darker + 0.05)
 }
 
 /// Widest gap between any two RGB channels of a colour, on the 0–255
@@ -201,6 +235,55 @@ fn distance(a: Color, b: Color) -> f32 {
     let dg = ch8(a.g) - ch8(b.g);
     let db = ch8(a.b) - ch8(b.b);
     (dr * dr + dg * dg + db * db).sqrt()
+}
+
+/// HSL hue in degrees, `0..360`. Undefined for a grey, which never
+/// reaches this file's red-band checks.
+fn hue_deg(color: Color) -> f32 {
+    let r = ch8(color.r);
+    let g = ch8(color.g);
+    let b = ch8(color.b);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    if delta == 0.0 {
+        return 0.0;
+    }
+    let hue = if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+    if hue < 0.0 { hue + 360.0 } else { hue }
+}
+
+/// Every surface token in the elevation ladder, darkest to lightest.
+fn all_surfaces(p: &Palette) -> [(&'static str, Color); 7] {
+    [
+        ("color.surface.sunken", p.surface_sunken),
+        ("color.surface.base", p.surface_base),
+        ("color.surface.raised", p.surface_raised),
+        ("color.surface.code", p.surface_code),
+        ("color.surface.overlay", p.surface_overlay),
+        ("color.surface.hover", p.surface_hover),
+        ("color.surface.active", p.surface_active),
+    ]
+}
+
+/// The four saturated fills `UIF-TOK-006` rule 4 locks to
+/// `text.strong`.
+fn saturated_fills(p: &Palette) -> [(&'static str, Color); 4] {
+    [
+        ("color.accent.fill", p.accent_fill),
+        ("color.accent.fill_active", p.accent_fill_active),
+        ("color.status.danger.fill", p.status_danger_fill),
+        (
+            "color.status.danger.fill_active",
+            p.status_danger_fill_active,
+        ),
+    ]
 }
 
 /// Every token carries the exact sRGB value the `UIF-TOK-005` table
@@ -268,15 +351,7 @@ fn test_scrim_is_the_base_surface_at_fifty_five_percent_alpha() {
 #[test]
 fn test_surface_ladder_gets_lighter_as_elevation_rises() {
     let p = Palette::dark();
-    let ladder = [
-        ("color.surface.sunken", p.surface_sunken),
-        ("color.surface.base", p.surface_base),
-        ("color.surface.raised", p.surface_raised),
-        ("color.surface.code", p.surface_code),
-        ("color.surface.overlay", p.surface_overlay),
-        ("color.surface.hover", p.surface_hover),
-        ("color.surface.active", p.surface_active),
-    ];
+    let ladder = all_surfaces(&p);
 
     for pair in ladder.windows(2) {
         let (lower_name, lower) = pair[0];
@@ -290,22 +365,61 @@ fn test_surface_ladder_gets_lighter_as_elevation_rises() {
     }
 }
 
+/// The top of the ladder — the rung the 2026-10-22 revision actually
+/// moved — is a visible step, and the bottom rungs are recorded as
+/// inherently tight rather than held to a floor they cannot meet.
+///
+/// Relative luminance is a *nonlinear* scale: near black, a whole RGB
+/// step barely moves `L` at all. `sunken → base` is `0.000911` and
+/// `raised → code` is `0.000952`, which is not a design failure but a
+/// property of the sRGB toe — those rungs are separated by channel
+/// distance the eye reads fine at the bottom of the curve. Asserting a
+/// uniform luminance floor across the whole ladder would fail on rungs
+/// that are correct.
+///
+/// The rung worth pinning is `hover → active`, because that is the one
+/// the revision compressed by pulling `hover` up to `RGB(32, 32, 36)`
+/// while `active` came down to `RGB(42, 42, 46)`. At `0.008780` it is
+/// the *widest* step on the ladder in absolute terms, so the top of the
+/// elevation model is not at risk of reading flat — but a future nudge
+/// that closed it further would be, hence the floor.
+#[test]
+fn test_the_top_of_the_ladder_is_a_visible_step() {
+    let p = Palette::dark();
+    let step = luminance(p.surface_active) - luminance(p.surface_hover);
+
+    assert!(
+        step >= 0.008,
+        "the hover → active step is {step:.6} of relative luminance; the top of \
+         the elevation ladder must stay at or above 0.008 or a pressed control \
+         reads as a repaint of a hovered one",
+    );
+    // And it is genuinely the widest rung, which is what makes the top of
+    // the ladder the safest place to be pressed rather than the riskiest.
+    let ladder = all_surfaces(&p);
+    for pair in ladder.windows(2) {
+        let (lower_name, lower) = pair[0];
+        let (upper_name, upper) = pair[1];
+        let other = luminance(upper) - luminance(lower);
+        assert!(
+            other <= step + 1e-6,
+            "{lower_name} → {upper_name} is {other:.6}, wider than the \
+             hover → active step of {step:.6} — this test's premise is stale",
+        );
+    }
+}
+
 /// `sunken` is the only surface below base — the ladder has exactly one
 /// step downwards, and it is the one the spec names.
 #[test]
 fn test_sunken_is_the_only_surface_darker_than_base() {
     let p = Palette::dark();
-    let surfaces = [
-        ("color.surface.sunken", p.surface_sunken),
-        ("color.surface.raised", p.surface_raised),
-        ("color.surface.code", p.surface_code),
-        ("color.surface.overlay", p.surface_overlay),
-        ("color.surface.hover", p.surface_hover),
-        ("color.surface.active", p.surface_active),
-    ];
     let base = luminance(p.surface_base);
 
-    for (name, surface) in surfaces {
+    for (name, surface) in all_surfaces(&p) {
+        if name == "color.surface.base" {
+            continue;
+        }
         if name == "color.surface.sunken" {
             assert!(
                 luminance(surface) < base,
@@ -330,23 +444,15 @@ fn test_sunken_is_the_only_surface_darker_than_base() {
 /// The rule covers the ten `surface.*` and `border.*` tokens only. The
 /// accents and statuses are deliberately chromatic and are checked by
 /// [`test_accents_and_statuses_are_deliberately_non_neutral`] instead —
-/// a failure here on `color.accent.primary` would mean the neutrality
-/// list was widened by mistake, not that the accent changed.
+/// a failure here on `color.accent.fill` would mean the neutrality list
+/// was widened by mistake, not that the accent changed.
 #[test]
 fn test_surfaces_and_borders_are_neutral_greys() {
     let p = Palette::dark();
-    let neutrals = [
-        ("color.surface.base", p.surface_base),
-        ("color.surface.sunken", p.surface_sunken),
-        ("color.surface.raised", p.surface_raised),
-        ("color.surface.code", p.surface_code),
-        ("color.surface.overlay", p.surface_overlay),
-        ("color.surface.hover", p.surface_hover),
-        ("color.surface.active", p.surface_active),
-        ("color.surface.scrim", p.surface_scrim),
-        ("color.border.subtle", p.border_subtle),
-        ("color.border.strong", p.border_strong),
-    ];
+    let mut neutrals: Vec<(&'static str, Color)> = all_surfaces(&p).to_vec();
+    neutrals.push(("color.surface.scrim", p.surface_scrim));
+    neutrals.push(("color.border.subtle", p.border_subtle));
+    neutrals.push(("color.border.strong", p.border_strong));
 
     for (name, color) in neutrals {
         assert!(
@@ -372,19 +478,30 @@ fn test_surfaces_and_borders_are_neutral_greys() {
     );
 }
 
-/// The five chromatic tokens are outside the neutrality rule: each leads
-/// a channel by far more than a grey ever does, which is what makes them
-/// carry meaning rather than structure.
+/// The seven chromatic tokens are outside the neutrality rule: each
+/// leads a channel by far more than a grey ever does, which is what
+/// makes them carry meaning rather than structure.
+///
+/// All three members of each polarity split are listed, because the split
+/// is a *chromatic* split — a fill, a pressed fill and a stroke are all
+/// the same hue at different depths, and every one of them has to clear
+/// the neutrality floor.
 #[test]
 fn test_accents_and_statuses_are_deliberately_non_neutral() {
     let p = Palette::dark();
     let chromatic = [
-        ("color.accent.primary", p.accent_primary),
+        ("color.accent.fill", p.accent_fill),
+        ("color.accent.fill_active", p.accent_fill_active),
+        ("color.accent.border", p.accent_border),
         ("color.accent.text", p.accent_text),
         ("color.status.success", p.status_success),
         ("color.status.warning", p.status_warning),
-        ("color.status.danger", p.status_danger),
-        ("color.status.danger_fill", p.status_danger_fill),
+        ("color.status.danger.text", p.status_danger_text),
+        ("color.status.danger.fill", p.status_danger_fill),
+        (
+            "color.status.danger.fill_active",
+            p.status_danger_fill_active,
+        ),
     ];
 
     for (name, color) in chromatic {
@@ -425,14 +542,14 @@ fn test_text_roles_are_strictly_ordered_by_prominence() {
 /// so no colour-blind-adjacent viewing or cheap display can collapse two
 /// of them into one signal.
 ///
-/// `color.status.danger_fill` is deliberately **not** a fourth entry. It
-/// is the same danger signal in a different *role* — a background rather
-/// than a text colour — and it sits only ~47 units from `color.status.danger`
-/// on purpose, so the two read as one colour at two depths. Requiring the
-/// 100-unit signal separation here would demand the fill be a different
-/// colour rather than a darker red, which defeats the point of **D-5**.
-/// Its own distinctness requirements are the ones that matter for a fill:
-/// [`test_status_danger_fill_is_not_a_surface`] and
+/// The two danger *fills* are deliberately **not** entries. They are the
+/// same danger signal in a different *role* — a background rather than a
+/// text colour — and they sit close to `color.status.danger.text` on
+/// purpose, so the family reads as one colour at three depths. Requiring
+/// the 100-unit signal separation here would demand the fills be a
+/// different colour rather than darker reds, which defeats the point of
+/// the split. Their own distinctness requirements are
+/// [`test_danger_fills_are_not_surfaces`] and
 /// [`test_the_two_danger_roles_have_disjoint_luminance_bounds`].
 #[test]
 fn test_status_colors_are_mutually_distinguishable() {
@@ -440,7 +557,7 @@ fn test_status_colors_are_mutually_distinguishable() {
     let statuses = [
         ("color.status.success", p.status_success),
         ("color.status.warning", p.status_warning),
-        ("color.status.danger", p.status_danger),
+        ("color.status.danger.text", p.status_danger_text),
     ];
 
     for (i, (a_name, a)) in statuses.iter().enumerate() {
@@ -472,22 +589,13 @@ fn test_status_colors_are_mutually_distinguishable() {
 #[test]
 fn test_surfaces_stay_below_text_and_borders_cut_through() {
     let p = Palette::dark();
-    let surfaces = [
-        p.surface_sunken,
-        p.surface_base,
-        p.surface_raised,
-        p.surface_code,
-        p.surface_overlay,
-        p.surface_hover,
-        p.surface_active,
-    ];
     let dimmest_text = luminance(p.text_disabled);
-    let brightest_surface = surfaces
+    let brightest_surface = all_surfaces(&p)
         .iter()
-        .map(|s| luminance(*s))
+        .map(|(_, s)| luminance(*s))
         .fold(f32::NEG_INFINITY, f32::max);
 
-    for surface in surfaces {
+    for (_, surface) in all_surfaces(&p) {
         assert!(
             luminance(surface) < dimmest_text,
             "a surface at {} is too light to sit under the dimmest text role at {dimmest_text}",
@@ -635,22 +743,25 @@ fn test_palette_equality_is_field_wise() {
 }
 
 // ---------------------------------------------------------------------------
-// The `status.danger` split — decision D-5, gap G-8
+// The polarity split — decision D-5, gap G-8, and the accent's mirror
 // ---------------------------------------------------------------------------
 
 /// The `UIF-TOK-006` rule 1 threshold the disjoint-bounds test solves with.
 const MIN_TEXT_RULE: f32 = 4.5;
 
 /// Tolerance on a pinned contrast ratio — three decimals, enough to tell
-/// `4.9990` from `5.5185`.
+/// `4.9990` from `5.1270`.
 const RATIO_EPS: f32 = 1e-3;
 
-/// The margin `status.danger_fill` is held to against `text.strong`.
+/// The floor a saturated fill must reach under `text.strong`
+/// (`UIF-TOK-006` rule 4).
 ///
-/// Deliberately above the bare `4.5:1` text rule: the reason this token
-/// exists at all is that the old pairing was `0.6247` short, so the
-/// replacement is pinned with room rather than sat on the line.
-const DANGER_FILL_MIN_CONTRAST: f32 = 5.0;
+/// This is the rule's own lower edge, not a locally chosen margin: the
+/// lock guarantees `4.80:1` to `5.75:1`, and `accent.fill` sits on that
+/// lower edge at `4.8020:1`. Pinning the rule rather than a rounder
+/// number keeps the assertion true for the spec as written instead of
+/// for one fill's luck.
+const FILL_MIN_CONTRAST: f32 = 4.80;
 
 /// Upper edge of the red hue band, in degrees. Orange starts at `30°`;
 /// fifteen is well inside red and far from any colour that could be read
@@ -662,132 +773,285 @@ const RED_BAND_MAX_DEG: f32 = 15.0;
 /// `surface.active`.
 const MIN_VISIBLE_LUMINANCE_STEP: f32 = 0.05;
 
-/// How far the danger fill must stand from every surface on luminance, so
-/// it is never mistaken for the layer it is meant to stand out from.
+/// How far a saturated fill must stand from every surface on luminance,
+/// so it is never mistaken for the layer it is meant to stand out from.
 const FILL_VS_SURFACE_MIN_RATIO: f32 = 2.0;
 
-/// WCAG 2.1 contrast ratio between two colours.
-///
-/// Test-local, matching the file's existing [`luminance`] helper.
-fn contrast(a: Color, b: Color) -> f32 {
-    let la = luminance(a);
-    let lb = luminance(b);
-    let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
-    (lighter + 0.05) / (darker + 0.05)
-}
+/// The lower edge of the indigo band the accent family lives in, and the
+/// upper edge of it. Blue-dominant, but with enough red present that it
+/// reads as indigo rather than plain blue — cyan starts around `180°`
+/// and pure blue is `240°`, so a band of `225°..255°` brackets the
+/// family and excludes both.
+const INDIGO_BAND_MIN_DEG: f32 = 225.0;
+const INDIGO_BAND_MAX_DEG: f32 = 255.0;
 
-/// HSL hue in degrees, `0..360`. Undefined for a grey, which never
-/// reaches this file's red-band checks.
-fn hue_deg(color: Color) -> f32 {
-    let r = ch8(color.r);
-    let g = ch8(color.g);
-    let b = ch8(color.b);
-    let max = r.max(g).max(b);
-    let min = r.min(g).min(b);
-    let delta = max - min;
-    if delta == 0.0 {
-        return 0.0;
+/// Each of the four rule-4 fills carries `text.strong` with real margin,
+/// not a knife-edge pass, and each is pinned to its measured value.
+#[test]
+fn test_every_saturated_fill_carries_text_strong_with_margin() {
+    let p = Palette::dark();
+    let pinned: [(&str, f32); 4] = [
+        ("color.accent.fill", 4.8020),
+        ("color.accent.fill_active", 5.6559),
+        ("color.status.danger.fill", 5.1270),
+        ("color.status.danger.fill_active", 5.7543),
+    ];
+    let fills = saturated_fills(&p);
+
+    for ((name, expected), (fill_name, fill)) in pinned.iter().zip(fills.iter()) {
+        assert_eq!(
+            *name, *fill_name,
+            "the pinned-value table and the fill table drifted apart"
+        );
+        let ratio = contrast(p.text_strong, *fill);
+        assert!(
+            (ratio - expected).abs() < RATIO_EPS,
+            "{fill_name} vs text.strong is pinned at {expected:.4}:1, got {ratio:.4}:1",
+        );
+        assert!(
+            ratio >= FILL_MIN_CONTRAST,
+            "text.strong on {fill_name} measures {ratio:.4}:1, under the \
+             {FILL_MIN_CONTRAST}:1 this token exists to clear",
+        );
     }
-    let hue = if max == r {
-        60.0 * (((g - b) / delta) % 6.0)
-    } else if max == g {
-        60.0 * (((b - r) / delta) + 2.0)
-    } else {
-        60.0 * (((r - g) / delta) + 4.0)
-    };
-    if hue < 0.0 { hue + 360.0 } else { hue }
 }
 
-/// The background red carries `text.strong` with real margin, not a
-/// knife-edge pass.
+/// Rule 4's lock band is exactly what the spec claims: the four fills
+/// span `4.80:1` to `5.75:1` under `text.strong`, no wider.
+///
+/// The band is the point. A spread that widened meant a fill had drifted
+/// far enough that the lock no longer described a single consistent
+/// reading experience; a spread that narrowed below the four fills' own
+/// measured range meant the band had been fitted to the data rather than
+/// held against the claim.
 #[test]
-fn test_status_danger_fill_carries_text_strong_with_margin() {
+fn test_rule_four_lock_band_is_4_80_to_5_75() {
     let p = Palette::dark();
-    let ratio = contrast(p.text_strong, p.status_danger_fill);
+    let ratios: Vec<f32> = saturated_fills(&p)
+        .iter()
+        .map(|(_, fill)| contrast(p.text_strong, *fill))
+        .collect();
+    let low = ratios.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    let high = ratios.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
     assert!(
-        ratio >= DANGER_FILL_MIN_CONTRAST,
-        "text.strong on color.status.danger_fill measures {ratio:.4}:1, under \
-         the {DANGER_FILL_MIN_CONTRAST}:1 this token exists to clear",
+        (low - 4.8020).abs() < RATIO_EPS,
+        "the weakest rule-4 pairing measures {low:.4}:1, not the 4.8020:1 the \
+         spec's `4.80:1` lower edge describes",
     );
     assert!(
-        (ratio - 5.5185).abs() < RATIO_EPS,
-        "color.status.danger_fill vs text.strong is pinned at 5.5185:1, got \
-         {ratio:.4}:1",
+        (high - 5.7543).abs() < RATIO_EPS,
+        "the strongest rule-4 pairing measures {high:.4}:1, not the 5.7543:1 \
+         the spec's `5.75:1` upper edge describes",
     );
     assert!(
-        ratio - DANGER_FILL_MIN_CONTRAST > 0.5,
-        "headroom above the target is {:.4} — the point of the token is margin, \
-         so a drift that eats it must fail loudly",
-        ratio - DANGER_FILL_MIN_CONTRAST,
-    );
-}
-
-/// The fill is still a red, not a brown or an amber: red dominant, green
-/// and blue low, hue inside the red band.
-#[test]
-fn test_status_danger_fill_stays_recognisably_red() {
-    let p = Palette::dark();
-    let fill = p.status_danger_fill;
-
-    assert!(
-        ch8(fill.r) > 150.0,
-        "the fill must stay a strong red, red is {}",
-        ch8(fill.r)
-    );
-    assert!(
-        ch8(fill.g) < 60.0,
-        "green must stay low or the red goes brown, green is {}",
-        ch8(fill.g)
-    );
-    assert!(
-        ch8(fill.b) < 60.0,
-        "blue must stay low or the red goes purple, blue is {}",
-        ch8(fill.b)
-    );
-    assert!(
-        ch8(fill.r) - ch8(fill.g) > 150.0,
-        "red must dominate green by a wide margin, got {}",
-        ch8(fill.r) - ch8(fill.g)
-    );
-    assert!(
-        ch8(fill.r) - ch8(fill.b) > 150.0,
-        "red must dominate blue by a wide margin, got {}",
-        ch8(fill.r) - ch8(fill.b)
-    );
-
-    let hue = hue_deg(fill);
-    assert!(
-        (0.0..RED_BAND_MAX_DEG).contains(&hue),
-        "color.status.danger_fill hue is {hue:.2}°, outside the red band \
-         [0, {RED_BAND_MAX_DEG})",
-    );
-    assert!(
-        (hue - hue_deg(p.status_danger)).abs() < 1.0,
-        "the two danger reds must read as the same red: fill {hue:.2}° vs \
-         status.danger {:.2}°",
-        hue_deg(p.status_danger),
+        high - low > 0.9 && high - low < 1.0,
+        "the lock band spans {:.4}:1 — outside the 4.80–5.75 band the spec states",
+        high - low,
     );
 }
 
-/// The step down from `status.danger` is visible, and `status.danger`
-/// itself is untouched by the split.
+/// The accent family is one indigo at three depths: fill, pressed fill
+/// and stroke all sit inside the indigo band and within a few degrees of
+/// each other.
+///
+/// This is what makes the polarity split read as *one colour doing three
+/// jobs* rather than three unrelated tokens that happen to be blue-ish.
+/// A revalue that pushed `accent.border` toward pure blue, or
+/// `accent.fill_active` toward violet, would break the family while still
+/// passing every contrast rule — and this is the assertion that stops it.
 #[test]
-fn test_status_danger_fill_is_a_visible_step_darker_and_danger_is_unchanged() {
+fn test_the_accent_split_is_one_indigo_at_three_depths() {
     let p = Palette::dark();
+    let family = [
+        ("color.accent.fill", p.accent_fill),
+        ("color.accent.fill_active", p.accent_fill_active),
+        ("color.accent.border", p.accent_border),
+    ];
+
+    for (name, color) in family {
+        let hue = hue_deg(color);
+        assert!(
+            (INDIGO_BAND_MIN_DEG..=INDIGO_BAND_MAX_DEG).contains(&hue),
+            "{name} hue is {hue:.2}°, outside the indigo band \
+             [{INDIGO_BAND_MIN_DEG}, {INDIGO_BAND_MAX_DEG}] — it has stopped \
+             being the accent colour",
+        );
+        assert!(
+            ch8(color.b) > ch8(color.r) && ch8(color.b) > ch8(color.g),
+            "{name} must stay blue-dominant, got RGB({}, {}, {})",
+            ch8(color.r),
+            ch8(color.g),
+            ch8(color.b)
+        );
+        // Red must still be present in real quantity: with red near zero
+        // the token is plain blue, not indigo.
+        assert!(
+            ch8(color.r) > 60.0,
+            "{name} must carry real red or it reads as blue rather than indigo, \
+             red is {}",
+            ch8(color.r)
+        );
+    }
+
+    let hues: Vec<f32> = family.iter().map(|(_, c)| hue_deg(*c)).collect();
+    let low = hues.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    let high = hues.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    assert!(
+        high - low < 10.0,
+        "the accent family's hues span {:.2}° ({} → {}); the three tokens must \
+         read as one colour, not three",
+        high - low,
+        low,
+        high,
+    );
+}
+
+/// The pressed accent fill is a visible step *down* from the resting
+/// fill, and the stroke is a visible step *up* from both.
+///
+/// The direction matters: the pressed state deepens (the control goes
+/// away from the user) and the border lightens (the outline has to read
+/// against the fill it surrounds). A split that inverted either would
+/// still pass every contrast rule and would still be wrong.
+///
+/// The press step itself is `0.033012` — deliberately *not* held to
+/// [`MIN_VISIBLE_LUMINANCE_STEP`]. That `0.05` floor was set for the
+/// danger text→fill relationship, where the two tokens sit in different
+/// roles and must not be mistakable for one another. A press step is a
+/// different kind of distinction: it is transient, it is seen only
+/// against the resting state the user just looked at, and the accent is
+/// already the most saturated thing on screen, so a smaller luminance
+/// move carries proportionally more meaning. The floor used here is
+/// `0.03`, which the step clears with `0.003` to spare.
+#[test]
+fn test_the_accent_split_orders_fill_darker_than_border_and_press_deeper() {
+    let p = Palette::dark();
+    let fill = luminance(p.accent_fill);
+    let pressed = luminance(p.accent_fill_active);
+    let border = luminance(p.accent_border);
+
+    assert!(
+        pressed < fill,
+        "the pressed fill must be deeper than the resting fill: \
+         {pressed:.6} vs {fill:.6}",
+    );
+    assert!(
+        fill - pressed >= 0.03,
+        "the press step is only {:.6} of relative luminance — too small for a \
+         press to read at all",
+        fill - pressed,
+    );
+    assert!(
+        border > fill,
+        "the border must be lighter than the fill it outlines: \
+         {border:.6} vs {fill:.6}",
+    );
+    assert!(
+        border - fill >= MIN_VISIBLE_LUMINANCE_STEP,
+        "the border is only {:.6} above the fill — it would not read as a \
+         separate stroke on top of it",
+        border - fill,
+    );
+}
+
+/// The danger family is one red at three depths.
+///
+/// Same argument as the accent family, opposite hue: the text red, the
+/// fill and the pressed fill must all read as *the same red*, or the
+/// three tokens stop being one signal.
+#[test]
+fn test_the_danger_split_is_one_red_at_three_depths() {
+    let p = Palette::dark();
+    let family = [
+        ("color.status.danger.text", p.status_danger_text),
+        ("color.status.danger.fill", p.status_danger_fill),
+        (
+            "color.status.danger.fill_active",
+            p.status_danger_fill_active,
+        ),
+    ];
+
+    for (name, color) in family {
+        let hue = hue_deg(color);
+        assert!(
+            (0.0..RED_BAND_MAX_DEG).contains(&hue),
+            "{name} hue is {hue:.2}°, outside the red band \
+             [0, {RED_BAND_MAX_DEG}) — it has gone brown or amber",
+        );
+        assert!(
+            ch8(color.r) > 150.0,
+            "{name} must stay a strong red, red is {}",
+            ch8(color.r)
+        );
+        assert!(
+            ch8(color.g) < 100.0,
+            "{name} must keep green low or the red goes brown, green is {}",
+            ch8(color.g)
+        );
+        assert!(
+            ch8(color.b) < 100.0,
+            "{name} must keep blue low or the red goes purple, blue is {}",
+            ch8(color.b)
+        );
+        assert!(
+            ch8(color.r) - ch8(color.g) > 100.0,
+            "{name} must dominate green by a wide margin, got {}",
+            ch8(color.r) - ch8(color.g)
+        );
+        assert!(
+            ch8(color.r) - ch8(color.b) > 100.0,
+            "{name} must dominate blue by a wide margin, got {}",
+            ch8(color.r) - ch8(color.b)
+        );
+    }
+
+    let hues: Vec<f32> = family.iter().map(|(_, c)| hue_deg(*c)).collect();
+    let low = hues.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    let high = hues.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    assert!(
+        high - low < 5.0,
+        "the danger family's hues span {:.2}° ({} → {}); the three tokens must \
+         read as one red, not three",
+        high - low,
+        low,
+        high,
+    );
+}
+
+/// The danger family's luminance order is text > fill > pressed fill, and
+/// each step is visible.
+///
+/// The text red is the brightest thing it can be while still being red —
+/// it has to read as body copy on dark surfaces. The fill is a third
+/// darker so a label sits *on* it rather than bleeding into it. The
+/// pressed fill is darker still, which is what makes a pressed
+/// destructive control read as deeper rather than merely dimmer.
+#[test]
+fn test_the_danger_split_is_ordered_by_luminance_with_visible_steps() {
+    let p = Palette::dark();
+    let text_l = luminance(p.status_danger_text);
     let fill_l = luminance(p.status_danger_fill);
-    let text_l = luminance(p.status_danger);
+    let pressed_l = luminance(p.status_danger_fill_active);
 
     assert!(
-        fill_l < text_l,
-        "the fill must be darker than the text red: fill {fill_l:.6} vs \
-         status.danger {text_l:.6}",
+        text_l > fill_l,
+        "the text red must be brighter than the fill: {text_l:.6} vs {fill_l:.6}"
+    );
+    assert!(
+        fill_l > pressed_l,
+        "the fill must be brighter than the pressed fill: {fill_l:.6} vs {pressed_l:.6}"
     );
     assert!(
         text_l - fill_l >= MIN_VISIBLE_LUMINANCE_STEP,
-        "the step down is only {:.6} of relative luminance — that is a nudge, \
-         not the visible escalation D-5 asks for",
+        "the text → fill step is only {:.6} — not the visible escalation D-5 asks for",
         text_l - fill_l,
+    );
+    assert!(
+        fill_l - pressed_l >= 0.02,
+        "the fill → pressed step is only {:.6} — a press must read as a step, \
+         not a dimmer repaint",
+        fill_l - pressed_l,
     );
     assert!(
         fill_l / text_l < 0.7,
@@ -795,55 +1059,52 @@ fn test_status_danger_fill_is_a_visible_step_darker_and_danger_is_unchanged() {
          third darker, not slightly darker",
         100.0 * fill_l / text_l,
     );
-
-    // The split adds a token; it does not move the existing one.
-    assert_rgba("color.status.danger", p.status_danger, 255, 28, 2, 1.0);
 }
 
-/// The fill is not a surface and must never read as one: it is far more
-/// chromatic than any grey in the ladder, and it stands clear of every
-/// surface on luminance too.
+/// The fills are not surfaces and must never read as one: each is far
+/// more chromatic than any grey in the ladder, and each stands clear of
+/// every surface on luminance too.
 #[test]
-fn test_status_danger_fill_is_not_a_surface() {
+fn test_danger_fills_are_not_surfaces() {
     let p = Palette::dark();
-    let fill = p.status_danger_fill;
-    let surfaces = [
-        ("color.surface.sunken", p.surface_sunken),
-        ("color.surface.base", p.surface_base),
-        ("color.surface.raised", p.surface_raised),
-        ("color.surface.code", p.surface_code),
-        ("color.surface.overlay", p.surface_overlay),
-        ("color.surface.hover", p.surface_hover),
-        ("color.surface.active", p.surface_active),
+    let fills = [
+        ("color.status.danger.fill", p.status_danger_fill),
+        (
+            "color.status.danger.fill_active",
+            p.status_danger_fill_active,
+        ),
     ];
 
-    for (name, surface) in surfaces {
-        assert!(
-            spread(fill) > NEUTRAL_SPREAD_MAX * 10.0,
-            "the fill's channel spread is {}, which is not chromatic enough to \
-             be unmistakably not a grey",
-            spread(fill)
-        );
-        assert!(
-            spread(surface) <= NEUTRAL_SPREAD_MAX,
-            "{name} must stay a neutral grey, but spans {}",
-            spread(surface)
-        );
-        let ratio = contrast(fill, surface);
-        assert!(
-            ratio >= FILL_VS_SURFACE_MIN_RATIO,
-            "color.status.danger_fill vs {name} is only {ratio:.4}:1 — close \
-             enough to the surface to be mistaken for one",
-        );
+    for (fill_name, fill) in fills {
+        for (name, surface) in all_surfaces(&p) {
+            assert!(
+                spread(fill) > NEUTRAL_SPREAD_MAX * 10.0,
+                "{fill_name}'s channel spread is {}, which is not chromatic \
+                 enough to be unmistakably not a grey",
+                spread(fill)
+            );
+            assert!(
+                spread(surface) <= NEUTRAL_SPREAD_MAX,
+                "{name} must stay a neutral grey, but spans {}",
+                spread(surface)
+            );
+            let ratio = contrast(fill, surface);
+            assert!(
+                ratio >= FILL_VS_SURFACE_MIN_RATIO,
+                "{fill_name} vs {name} is only {ratio:.4}:1 — close enough to \
+                 the surface to be mistaken for one",
+            );
+        }
     }
 }
 
-/// The two roles cannot share one token, and each token sits on its own
-/// side of the divide.
+/// The two danger roles cannot share one token, and each token sits on
+/// its own side of the divide.
 ///
 /// Solving each role for the red's luminance gives two bounds that do not
 /// overlap. That is the arithmetic behind gap **G-8** and the reason
-/// **D-5** split the token rather than retuning it.
+/// **D-5** split the token rather than retuning it — and it is why the
+/// revised spec's polarity split is structure rather than decoration.
 #[test]
 fn test_the_two_danger_roles_have_disjoint_luminance_bounds() {
     let p = Palette::dark();
@@ -867,22 +1128,112 @@ fn test_the_two_danger_roles_have_disjoint_luminance_bounds() {
         luminance(p.status_danger_fill),
     );
     assert!(
-        luminance(p.status_danger) >= min_for_text,
+        luminance(p.status_danger_fill_active) <= max_for_background,
+        "the pressed fill sits above the background role's ceiling: {} > \
+         {max_for_background:.6}",
+        luminance(p.status_danger_fill_active),
+    );
+    assert!(
+        luminance(p.status_danger_text) >= min_for_text,
         "the text red sits below the text role's floor and would fail as text: \
          {} < {min_for_text:.6}",
-        luminance(p.status_danger),
+        luminance(p.status_danger_text),
     );
 
     // And each token fails in the other's role, which is what makes them
     // non-interchangeable rather than merely different.
     assert!(
-        contrast(p.text_strong, p.status_danger) < MIN_TEXT_RULE,
-        "status.danger must still fail as a background — otherwise the split \
-         was unnecessary"
+        contrast(p.text_strong, p.status_danger_text) < MIN_TEXT_RULE,
+        "status.danger.text must still fail as a background — otherwise the \
+         split was unnecessary"
     );
     assert!(
         contrast(p.status_danger_fill, p.surface_overlay) < MIN_TEXT_RULE,
-        "status.danger_fill must still fail as error text on the overlay — it \
+        "status.danger.fill must still fail as error text on the overlay — it \
          is too dark to be the written-error colour"
+    );
+    assert!(
+        contrast(p.status_danger_fill_active, p.surface_overlay) < MIN_TEXT_RULE,
+        "status.danger.fill_active must still fail as error text on the overlay \
+         for the same reason"
+    );
+}
+
+/// The polarity split cannot collapse: for each family, no member can do
+/// another member's job.
+///
+/// This is the general form of the danger disjoint-bounds result, stated
+/// across both families. The accent's three tokens are pinned so that the
+/// fill cannot serve as the border, the border cannot serve as the fill's
+/// text, and the pressed fill cannot substitute for either — which is
+/// precisely the property that makes a six-token split worth its size
+/// over a single-token palette with opacity modifiers.
+#[test]
+fn test_no_polarity_member_can_do_another_members_job() {
+    let p = Palette::dark();
+
+    // The accent border cannot be the CTA fill: text.strong on it is
+    // 1.87:1, unreadable as body text.
+    assert!(
+        contrast(p.text_strong, p.accent_border) < MIN_TEXT_RULE,
+        "accent.border must fail as a text background — it is a stroke, not a \
+         fill: {:.4}:1",
+        contrast(p.text_strong, p.accent_border),
+    );
+    // The accent fill cannot be the focus stroke against its own pressed
+    // sibling: 1.18:1 is not a visible ring.
+    assert!(
+        contrast(p.accent_fill, p.accent_fill_active) < 3.0,
+        "accent.fill must fail as a ring on the pressed fill — it is too close \
+         in luminance: {:.4}:1",
+        contrast(p.accent_fill, p.accent_fill_active),
+    );
+    // The pressed accent fill cannot carry the resting fill's job of
+    // sitting on base at the resting token's contrast — it is darker, so
+    // it reads deeper, and the two are not interchangeable.
+    assert_ne!(
+        p.accent_fill, p.accent_fill_active,
+        "the pressed accent must be its own value, not an alias of the resting fill"
+    );
+
+    // Danger mirrors the accent exactly.
+    assert!(
+        contrast(p.text_strong, p.status_danger_text) < MIN_TEXT_RULE,
+        "status.danger.text must fail as a text background — it is the written-\
+         error colour, not a fill: {:.4}:1",
+        contrast(p.text_strong, p.status_danger_text),
+    );
+    assert!(
+        contrast(p.status_danger_fill, p.status_danger_fill_active) < 3.0,
+        "status.danger.fill must fail as a ring on the pressed fill: {:.4}:1",
+        contrast(p.status_danger_fill, p.status_danger_fill_active),
+    );
+    assert_ne!(
+        p.status_danger_fill, p.status_danger_fill_active,
+        "the pressed danger fill must be its own value, not an alias"
+    );
+}
+
+/// The two families' *fills* are not interchangeable with each other's
+/// either, which is what keeps a primary CTA from being painted with the
+/// danger red by a copy-paste mistake that still passes contrast.
+#[test]
+fn test_the_two_families_are_not_interchangeable() {
+    let p = Palette::dark();
+    assert_ne!(
+        p.accent_fill, p.status_danger_fill,
+        "the accent and danger fills must be different colours"
+    );
+    assert!(
+        distance(p.accent_fill, p.status_danger_fill) > 200.0,
+        "the two resting fills are only {:.1} apart in the RGB cube — a \
+         copy-paste between them would not be visible",
+        distance(p.accent_fill, p.status_danger_fill)
+    );
+    assert!(
+        distance(p.accent_border, p.status_danger_text) > 150.0,
+        "the accent stroke and the danger text colour are only {:.1} apart — \
+         they must not be confusable",
+        distance(p.accent_border, p.status_danger_text)
     );
 }

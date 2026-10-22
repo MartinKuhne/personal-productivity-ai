@@ -411,7 +411,9 @@ fn palette_table() -> Vec<(&'static str, Color)> {
         ("surface.scrim", p.surface_scrim),
         ("border.subtle", p.border_subtle),
         ("border.strong", p.border_strong),
-        ("accent.primary", p.accent_primary),
+        ("accent.fill", p.accent_fill),
+        ("accent.fill_active", p.accent_fill_active),
+        ("accent.border", p.accent_border),
         ("accent.text", p.accent_text),
         ("text.primary", p.text_primary),
         ("text.strong", p.text_strong),
@@ -419,8 +421,9 @@ fn palette_table() -> Vec<(&'static str, Color)> {
         ("text.disabled", p.text_disabled),
         ("status.success", p.status_success),
         ("status.warning", p.status_warning),
-        ("status.danger", p.status_danger),
+        ("status.danger_text", p.status_danger_text),
         ("status.danger_fill", p.status_danger_fill),
+        ("status.danger_fill_active", p.status_danger_fill_active),
     ]
 }
 
@@ -1194,7 +1197,7 @@ fn modal_cell(name: &str, dirty: bool, error: Option<ModalError>) -> Cell {
         ));
         audit.push(AuditPair {
             channel: "error.text",
-            foreground: palette.status_danger,
+            foreground: palette.status_danger_text,
             background: frame.surface,
             role: ContrastRole::Text,
         });
@@ -1425,7 +1428,10 @@ fn input_dialog_cell(name: &str, spec: input_dialog::InputDialogSpec, value: Opt
         StyleEntry::text("band", format!("{:?}", ZBand::Modal)),
     ];
     if invalid {
-        resolved.push(StyleEntry::colour("status.danger", palette.status_danger));
+        resolved.push(StyleEntry::colour(
+            "status.danger_text",
+            palette.status_danger_text,
+        ));
     }
 
     Cell {

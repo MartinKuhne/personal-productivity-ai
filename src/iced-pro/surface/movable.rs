@@ -256,12 +256,26 @@ pub const TITLE_GRIP_WIDTH: f32 = size::ICON_MD;
 /// §4.7.1 — the title's font size is `13px`: **token**,
 /// [`typography::UI_COMPACT`]'s size.
 ///
-/// The weight is `Bold`, and the scale has no 13px Bold rung —
-/// [`typography::UI_COMPACT`] rests at Regular and emphasises to Medium.
-/// This is the same gap **G-12** recorded for the menu heading: the size is
-/// a token read, the weight is a composition. It is called out here rather
-/// than hidden so the pairing is visible if the scale is ever revised.
+/// The other half of the pairing is [`TITLE_FONT_WEIGHT`]. What **G-12**
+/// recorded as a composition — size read from the token, `Bold` bolted
+/// on because `UI_COMPACT` rests at Regular and emphasises only to
+/// Medium — is now legal by token: `type.ui_compact`'s `Allowed Weights`
+/// column is Regular / Medium / SemiBold / **Bold**, so `Bold` sits
+/// inside the set the rung permits. The sidecar asserts both halves
+/// resolve through the scale and that the rendered size is unchanged.
 pub const TITLE_FONT_SIZE: f32 = typography::UI_COMPACT.size;
+
+/// §4.7.1 — the title's weight is `Bold`: **token-sanctioned**, a member
+/// of [`typography::UI_COMPACT`]'s allowed-weight set.
+///
+/// Stated as its own constant so the overlay title's typography is two
+/// token reads rather than a token plus an untracked assumption, and so
+/// the pairing is checked against the scale instead of against habit.
+///
+/// This module is the host, not the renderer: it draws no text. The
+/// weight travels here as the token value a view layer applies alongside
+/// [`TITLE_FONT_SIZE`].
+pub const TITLE_FONT_WEIGHT: typography::Weight = typography::Weight::Bold;
 
 /// §4.7.1 — a trailing action control (`Dock`, `Close ×`) is `24px` wide:
 /// **token**, [`size::HIT_TARGET_MIN`], the floor every interactive control
@@ -304,9 +318,11 @@ pub const CONTENT_FONT_SMALL: f32 = typography::CAPTION.size;
 /// §4.7.1 — the content viewport's large monospace size is `13px`:
 /// **token**, [`typography::UI_COMPACT`]'s size.
 ///
-/// The monospace *family* itself has no token: the type scale carries size,
-/// line height, weight and tracking, and stops short of font families. The
-/// view layer picks the family; this module can only vouch for the sizes.
+/// The monospace *family* is a token now too —
+/// [`typography::FAMILY_MONO`] (`font.family.mono`) — so a view layer
+/// pairs that family with this size rather than picking a family out of
+/// thin air. This module still vouches for the size only: it draws
+/// nothing.
 pub const CONTENT_FONT_LARGE: f32 = typography::UI_COMPACT.size;
 
 /// §4.7.1 — the footer status & resize bar is `22px`.

@@ -50,33 +50,59 @@
 //! [`crate::token::typography::MIN_SIZE`] floor and is therefore the
 //! smallest, most contrast-hungry text there is.
 //!
-//! [`MIN_CHROME_CONTRAST`] is `UIF-TOK-006` rule 2, whose wording is
-//! the scope: "UI chrome, active borders, and focus rings MUST maintain
-//! at least 3.0:1 contrast against adjacent surfaces." Measured against
-//! the token set, that reads as follows.
+//! Rule 2 is not a floor at all. It takes
+//! [`text_disabled`](crate::token::color::Palette::text_disabled) out
+//! from under the `4.50:1` rule and puts it inside a *band*,
+//! [`DISABLED_TEXT_MIN_CONTRAST`] to [`DISABLED_TEXT_MAX_CONTRAST`]:
+//! dim enough not to compete with live text, bright enough still to be
+//! read. A band needs both bounds asserted, and asserting only the floor
+//! would let a disabled label drift up into the active range unnoticed.
 //!
-//! * **In scope** — things that signal a *change* of state:
-//!   [`accent_primary`](crate::token::color::Palette::accent_primary) as
-//!   a keyboard focus ring, active tab top indicator, selected-row
-//!   outline or splitter drag stroke;
-//!   [`border_strong`](crate::token::color::Palette::border_strong) as
-//!   the perimeter of a floating card, and as the outline a latched
-//!   navbar trigger wears. Both clear 3.0 against every surface they are
-//!   actually specified to sit on.
-//! * **Out of scope** —
-//!   [`border_subtle`](crate::token::color::Palette::border_subtle).
-//!   It is a **resting** divider: pane split lines at rest, menu
-//!   separators, resting input borders, inactive tab borders. It never
-//!   signals a state change; the moment a divider becomes active the spec
-//!   swaps it for `accent.primary` (`UIF-PANE-001`). Measured, it tops
-//!   out at `1.3732:1` against `surface.sunken` and sits at `1.0203:1`
-//!   against `surface.hover`, so no reading of rule 2 can rescue it.
-//!   Applying the 3.0 floor to it would fail every divider in the
-//!   interface for a token that was never meant to be an indicator, so
-//!   rule 2 is **not** asserted against it. That exclusion is a reading
-//!   of the word "active" in the rule, not an exemption granted to a
-//!   failing token, and the tests name it explicitly rather than quietly
-//!   dropping the token from the table.
+//! [`MIN_CHROME_CONTRAST`] is rule 3: active control borders and solid
+//! control fills against their adjacent surface. The revised rule does
+//! not treat every stroke as the same kind of thing. It classifies each
+//! one into one of four categories, and they are not held to the same
+//! number — see [`ChromeClass`], which makes that classification an
+//! executable part of this module rather than prose:
+//!
+//! | Class | What it is | Threshold |
+//! |---|---|---|
+//! | [`Judged`](ChromeClass::Judged) | Active perimeter borders and focus rings | `>= 3.00:1` |
+//! | [`CoincidentWithFill`](ChromeClass::CoincidentWithFill) | A `1px` stroke set to the *same* token as the solid fill it surrounds | `>= 3.08:1`, carried by the fill |
+//! | [`UnpaintedBackground`](ChromeClass::UnpaintedBackground) | A `transparent` stroke at rest (Ghost) | judged against the parent surface, and only once focused or hovered |
+//! | [`RestingDivider`](ChromeClass::RestingDivider) | Passive structural hairlines (`border.subtle`) | exempt |
+//!
+//! The `Judged` set is [`border_strong`](crate::token::color::Palette::border_strong),
+//! [`accent_border`](crate::token::color::Palette::accent_border) and
+//! [`status_danger_text`](crate::token::color::Palette::status_danger_text)
+//! measured over `surface.base` through `surface.active`. The
+//! `CoincidentWithFill` set is
+//! [`accent_fill`](crate::token::color::Palette::accent_fill),
+//! [`accent_fill_active`](crate::token::color::Palette::accent_fill_active)
+//! and
+//! [`status_danger_fill_active`](crate::token::color::Palette::status_danger_fill_active)
+//! measured over `surface.base` through `surface.overlay`.
+//!
+//! `CoincidentWithFill` needs a threshold of its own because the stroke
+//! carries no information that the fill does not. When a button's border
+//! *is* its fill, nothing at the perimeter separates the control from
+//! the surface behind it, so the fill has to do the whole job on its
+//! own — and the rule asks it for slightly more than the chrome floor,
+//! [`MIN_COINCIDENT_FILL_CONTRAST`] (`3.08:1`).
+//!
+//! [`border_subtle`](crate::token::color::Palette::border_subtle) is a
+//! `RestingDivider`: pane split lines at rest, menu separators,
+//! resting input borders, inactive tab borders. It never signals a
+//! *change* of state, and the moment a divider becomes active the spec
+//! swaps it for a `Judged` token (`UIF-PANE-001`). Measured, it tops
+//! out at `1.3732:1` against `surface.sunken` and falls to `1.0314:1`
+//! against `surface.active`, so no reading of rule 3 can rescue it.
+//! Holding a resting hairline to an active-indicator threshold would
+//! fail every divider in the interface over a token that was never meant
+//! to indicate anything. That exemption is a reading of the word
+//! "active" in the rule, not a waiver granted to a failing token, and
+//! the tests name the class explicitly rather than quietly dropping the
+//! token from the table.
 //!
 //! # Translucent tokens must be composited before they are measured
 //!
@@ -92,48 +118,50 @@
 //! and over white it lands on `RGB(119.7, 119.7, 120.8)`, where
 //! `text.strong` measures a sane `4.4289:1`.
 //!
-//! # The spec's printed contrast column is not authoritative
+//! # The spec's printed numeric columns are not authoritative
 //!
 //! Ledger gap **G-5** (`doc/planning/iced-pro-tasks.md`) establishes
-//! that the `Luminance Contrast vs color.surface.base` column in
-//! `doc/planning/ui-framework.md` §2.5 was hand-collected from mixed
-//! sources and is materially wrong in several rows — `surface.sunken`
-//! is printed as `0.98:1`, which no WCAG ratio can be, and
-//! `status.warning` is off by `+1.36`. **The values this module
+//! that the numeric columns of `doc/planning/ui-framework.md` §2.5 were
+//! hand-collected and are wrong in places. **The values this module
 //! computes are authoritative.** Nothing here transcribes a printed
-//! ratio; the reconciliation lives in the test sidecar, which recomputes
-//! every row and asserts the *role* threshold rather than the printed
-//! figure.
+//! figure; the reconciliation lives in the test sidecar, which
+//! recomputes every cell of the revised table and asserts the *role*
+//! threshold rather than the printed number.
 //!
-//! # Retuned token values
+//! Recomputing all `110` numeric cells of the revised §2.5 (22 rows ×
+//! `L` + four contrast columns) leaves `4` cells that do not match, all
+//! of them transcription rather than colour error:
 //!
-//! Five pairings the spec mandates could not clear the threshold the spec
-//! itself sets at the spec's literal token values. They were fixed by
-//! retuning three tokens rather than by weakening the rules — see the
-//! sidecar's `RETUNE_HEADROOM` assertions for the measured value of each:
+//! * `status.danger.fill_active` prints `L = 0.1309`; `RGB(202, 24, 16)`
+//!   measures `0.132472`.
+//! * That row's `vs surface.base` prints `3.43` against a measured
+//!   `3.457478`, and `vs surface.active` prints `2.46` against
+//!   `2.484163` — both inherit the bad `L`.
+//! * `accent.fill_active`'s `vs surface.active` prints `2.52` where the
+//!   colour measures `2.527391`, which rounds to `2.53`.
 //!
-//! * `text.strong` on `accent.primary` — the Selection Foreground Lock
-//!   (`UIF-TOK-006` rule 3) — measured `4.4669:1`, `0.0331` short of
-//!   the 4.5:1 normal-text rule. `accent.primary` is darkened to
-//!   `RGB(98, 100, 240)`, giving `4.5648:1`.
-//! * `status.danger` on `surface.overlay` (`4.1473:1`) and on
-//!   `surface.raised` (`4.3800:1`) — the input-dialog validation slot
-//!   and the Danger button's resting foreground. `status.danger` is
-//!   lightened to `RGB(255, 28, 2)`, giving `4.5718:1` and `4.8283:1`.
-//! * `accent.primary` on `surface.active` (`2.8441:1`) and
-//!   `border.strong` on `surface.active` (`2.8775:1`) — both under the
-//!   3.0:1 chrome floor. `surface.active` is darkened to
-//!   `RGB(43, 43, 51)`, giving `3.0750:1` and `3.1793:1`.
+//! The first three are one mistake propagating; the fourth is
+//! independent. None changes a pass into a fail or the reverse.
 //!
-//! `accent.primary` could not absorb both the first and the last failure:
-//! the lock caps its luminance at `0.183333` while the chrome floor
-//! demands at least `0.197944` against an unretuned `surface.active`.
-//! That contradiction is why the fix is spread over three tokens instead
-//! of one.
+//! # The retunes the spec has now absorbed
 //!
-//! The spec has not yet been revised to match. Until it is, the retuned
-//! values in [`crate::token::color`] are authoritative and the deviation
-//! is tracked as `G-7` in `doc/planning/iced-pro-tasks.md`.
+//! An earlier revision of this crate carried three crate-local value
+//! changes — `accent.primary`, `status.danger` and `surface.active`
+//! retuned to clear thresholds the spec's own numbers missed (ledger
+//! **G-7**). The 2026-10-22 revision of §2.5 makes those unnecessary
+//! rather than merely superseded: it splits each affected colour by
+//! polarity role, and each role-scoped token is bright or dark enough to
+//! clear the threshold its role demands. There is no crate-local value
+//! left to reconcile, and [`crate::token::color`] is the spec's number
+//! verbatim.
+//!
+//! What the revision does *not* settle is two places where the rules and
+//! the printed values disagree with each other. Both are recorded,
+//! value-pinned and left unfixed in
+//! [`crate::token::color::Palette::dark`], because tuning a colour to
+//! satisfy a rule the spec's own table contradicts would replace a known
+//! defect with an undocumented one. The sidecar carries them as
+//! `known_conflict_*` tests.
 //!
 //! Unit tests live in the sibling `contrast_tests.rs` sidecar.
 
@@ -148,12 +176,96 @@ use iced::Color;
 /// label in the interface is measured against.
 pub const MIN_TEXT_CONTRAST: f32 = 4.5;
 
-/// Minimum contrast UI chrome — active borders and focus rings — must
-/// hold against adjacent surfaces (`UIF-TOK-006` rule 2).
+/// Minimum contrast UI chrome — active borders and solid control fills —
+/// must hold against adjacent surfaces (`UIF-TOK-006` rule 3).
 ///
-/// Read the rule as covering *active* indicators only. See the module
-/// doc for why [`crate::token::color::Palette::border_subtle`] is not one of them.
+/// Read the rule as covering *active* indicators only. See
+/// [`ChromeClass`] for which strokes are held to this number and which
+/// are not.
 pub const MIN_CHROME_CONTRAST: f32 = 3.0;
+
+/// Minimum contrast a solid fill must reach against the surface it sits
+/// on when its perimeter stroke is the *same token* as the fill
+/// (`UIF-TOK-006` rule 3, `CoincidentWithFill`).
+///
+/// A stroke coincident with its own fill draws no boundary of its own, so
+/// the fill alone has to separate the control from what is behind it.
+/// The rule asks for marginally more than [`MIN_CHROME_CONTRAST`] in
+/// that case.
+pub const MIN_COINCIDENT_FILL_CONTRAST: f32 = 3.08;
+
+/// Lower bound of the disabled-text legibility band (`UIF-TOK-006`
+/// rule 2).
+///
+/// Below this a disabled control stops being readable, which the rule
+/// forbids: disabled means *present but inert* (`UIF-PRIN-004`), not
+/// gone.
+pub const DISABLED_TEXT_MIN_CONTRAST: f32 = 4.0;
+
+/// Upper bound of the disabled-text legibility band (`UIF-TOK-006`
+/// rule 2).
+///
+/// Above this a disabled label reads as live text and the rule's purpose
+/// — keeping inert controls from competing with active ones — is lost.
+pub const DISABLED_TEXT_MAX_CONTRAST: f32 = 6.0;
+
+/// How a perimeter stroke or fill boundary is evaluated under
+/// `UIF-TOK-006` rule 3.
+///
+/// Rule 3 does not apply one threshold to every stroke. A focus ring, a
+/// border that *is* the button's fill, a transparent resting stroke and
+/// a decorative hairline are four different things, and the rule says so.
+/// Modelling them as a class rather than as a comment keeps the exemption
+/// honest: a token cannot quietly stop being a `RestingDivider` to dodge
+/// a measurement, and a test can assert the whole classification at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChromeClass {
+    /// An active perimeter border or focus ring — the ordinary case,
+    /// measured directly against the adjacent surface at
+    /// [`MIN_CHROME_CONTRAST`].
+    Judged,
+
+    /// A `1px` perimeter stroke set to the exact same token as the
+    /// solid fill it surrounds (`accent.fill`, `accent.fill_active`,
+    /// `status.danger.fill_active`). Boundary contrast is carried by the
+    /// solid fill against the surrounding surface, which must therefore
+    /// reach [`MIN_COINCIDENT_FILL_CONTRAST`].
+    CoincidentWithFill,
+
+    /// A `transparent` stroke on a rest-state Ghost button. There is
+    /// nothing at the perimeter to measure at rest; the class is
+    /// evaluated against the parent container's surface only once the
+    /// control is focused or hovered and something is actually painted.
+    UnpaintedBackground,
+
+    /// A passive structural hairline (`border.subtle`). Decorative at
+    /// rest, never an indicator, and exempt from the active-chrome floor.
+    RestingDivider,
+}
+
+impl ChromeClass {
+    /// The contrast this class must reach, or `None` when the class is
+    /// exempt from the measurement entirely.
+    ///
+    /// `UnpaintedBackground` returns the chrome floor rather than `None`
+    /// because it is not exempt — it is merely unevaluable at rest. Once
+    /// the control is focused or hovered there is a painted stroke and a
+    /// parent surface, and the ordinary `3.00:1` applies to them.
+    #[must_use]
+    pub const fn minimum_contrast(self) -> Option<f32> {
+        match self {
+            Self::Judged | Self::UnpaintedBackground => Some(MIN_CHROME_CONTRAST),
+            Self::CoincidentWithFill => Some(MIN_COINCIDENT_FILL_CONTRAST),
+            Self::RestingDivider => None,
+        }
+    }
+
+    /// Is this class exempt from rule 3's active-chrome threshold?
+    #[must_use]
+    pub const fn is_exempt(self) -> bool {
+        self.minimum_contrast().is_none()
+    }
+}
 
 /// sRGB transfer-function knee: below this a channel is linear, above it
 /// the power curve takes over.
@@ -311,18 +423,54 @@ pub fn meets_text_contrast(fg: Color, bg: Color) -> bool {
 }
 
 /// Do these two chrome colours read against each other
-/// (`UIF-TOK-006` rule 2)?
+/// (`UIF-TOK-006` rule 3, [`ChromeClass::Judged`])?
 ///
 /// True when [`contrast_ratio`] reaches [`MIN_CHROME_CONTRAST`]
 /// (`3.0:1`). The comparison is inclusive.
 ///
 /// Applies to *active* chrome — focus rings, active borders, selected
-/// outlines. It does not apply to resting dividers such as
-/// [`border_subtle`](crate::token::color::Palette::border_subtle); see the module doc
-/// for that scope call.
+/// outlines. For a stroke coincident with its own fill use
+/// [`meets_coincident_fill_contrast`] instead, which holds the higher
+/// `3.08:1`; for a resting divider use
+/// [`meets_chrome_contrast_as`] so the class is stated.
 #[must_use]
 pub fn meets_chrome_contrast(a: Color, b: Color) -> bool {
     contrast_ratio(a, b) >= MIN_CHROME_CONTRAST
+}
+
+/// Does a solid fill separate a coincident-perimeter control from the
+/// surface it sits on (`UIF-TOK-006` rule 3, [`ChromeClass::CoincidentWithFill`])?
+///
+/// True when [`contrast_ratio`] reaches [`MIN_COINCIDENT_FILL_CONTRAST`]
+/// (`3.08:1`). The comparison is inclusive.
+#[must_use]
+pub fn meets_coincident_fill_contrast(fill: Color, surface: Color) -> bool {
+    contrast_ratio(fill, surface) >= MIN_COINCIDENT_FILL_CONTRAST
+}
+
+/// Does `a` clear the threshold that `class` demands of it against `b`?
+///
+/// An exempt class returns `true` unconditionally: exempt means the
+/// measurement is not made, not that it failed. Callers that need to
+/// distinguish "passed" from "not judged" should read
+/// [`ChromeClass::minimum_contrast`] directly.
+#[must_use]
+pub fn meets_chrome_contrast_as(class: ChromeClass, a: Color, b: Color) -> bool {
+    match class.minimum_contrast() {
+        Some(minimum) => contrast_ratio(a, b) >= minimum,
+        None => true,
+    }
+}
+
+/// Does `fg` against `bg` fall inside the disabled-text legibility band
+/// (`UIF-TOK-006` rule 2)?
+///
+/// True when [`contrast_ratio`] is at least [`DISABLED_TEXT_MIN_CONTRAST`]
+/// and at most [`DISABLED_TEXT_MAX_CONTRAST`]. Both bounds are inclusive.
+#[must_use]
+pub fn meets_disabled_text_band(fg: Color, bg: Color) -> bool {
+    let ratio = contrast_ratio(fg, bg);
+    (DISABLED_TEXT_MIN_CONTRAST..=DISABLED_TEXT_MAX_CONTRAST).contains(&ratio)
 }
 
 #[cfg(test)]

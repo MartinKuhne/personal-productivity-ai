@@ -47,28 +47,28 @@
 //! 1. **Destructive hover.** The matrix prints `status.danger` behind
 //!    `text.strong` at **3.8753** against the 4.5 text floor. The
 //!    resolver paints [`status_danger_fill`](Palette::status_danger_fill)
-//!    instead — **5.5185** (decision **D-5**).
-//! 2. **The ring on a destructive row.** `accent.primary` on that fill
-//!    measures **1.2089**, worse than G-9 ever was for a button. The
+//!    instead — **5.1270** (decision **D-5**).
+//! 2. **The ring on a destructive row.** `accent.border` on that fill
+//!    measures **1.7188**, worse than G-9 ever was for a button. The
 //!    resolver never reads the matrix's ring column; it asks
 //!    [`resolve_ring_color_for_background`] against the background it
 //!    *just resolved*, so the ring on a hot destructive fill comes back
 //!    [`text_strong`](Palette::text_strong).
-//! 3. **A disabled row inheriting a hovered ancestor's fill.**
-//!    `text.disabled` clears 5.2686 on `surface.overlay` but only
-//!    **4.4734** on `surface.hover` and **4.1743** on `surface.active`.
+//! 3. **A disabled row inheriting an active ancestor's fill.**
+//!    `text.disabled` clears 5.2686 on `surface.overlay` and 4.8280 on
+//!    `surface.hover`, but only **4.2510** on `surface.active`.
 //!    The spec's "Disabled → `transparent`" is load-bearing, so
 //!    [`RowBase::Disabled`] paints no fill at all and the row's own
 //!    background never picks up what was painted behind it.
-//! 4. **`accent.text` carrying a `✓` on a destructive fill** — **2.9557**.
+//! 4. **`accent.text` carrying a `✓` on a destructive fill** — **2.7460**.
 //!    The destructive cells set every slot to `text.strong`, including the
 //!    leading glyph, so the checkmark cannot keep the Rest row's accent.
-//! 5. **The keyboard ring on a normal row passes thinly** — `accent.primary`
-//!    on `surface.hover` is **3.2954**, headroom 0.2954. Nothing here
+//! 5. **The keyboard ring on a normal row passes thinly** — `accent.border`
+//!    on `surface.hover` is **5.4427**, headroom 2.4427. Nothing here
 //!    lightens that fill; the sidecar pins the pairing so a future retune
 //!    that eats the headroom fails a test.
 //! 6. **Fill-vs-fill deltas are ungated.** `surface.hover` against
-//!    `surface.overlay` is 1.1778. The row-lift affordance rests on a
+//!    `surface.overlay` is 1.0913. The row-lift affordance rests on a
 //!    delta no WCAG rule protects, so it is asserted as a *delta* in the
 //!    sidecar rather than assumed.
 //!
@@ -452,7 +452,7 @@ struct BasePaint {
 /// The ring is not read from the matrix. It is resolved against the
 /// background this function just resolved, through
 /// [`resolve_ring_color_for_background`], which is the only way trap 2
-/// stays defused: the matrix's printed `accent.primary` measures 1.2089
+/// stays defused: the matrix's printed `accent.border` measures 1.7188
 /// on a destructive fill, and the resolver returns `text.strong` there
 /// without any caller having to know why.
 ///
@@ -940,20 +940,6 @@ impl RowTreeState {
 // Text construction
 // ---------------------------------------------------------------------------
 
-/// Map a token weight onto iced's font weight enum.
-///
-/// A total mapping between two closed sets, so no numeric weight class
-/// appears in this file and the token ladder stays the only place the
-/// heaviness of a rung is decided.
-const fn iced_weight(weight: typography::Weight) -> iced::font::Weight {
-    match weight {
-        typography::Weight::Regular => iced::font::Weight::Normal,
-        typography::Weight::Medium => iced::font::Weight::Medium,
-        typography::Weight::SemiBold => iced::font::Weight::Semibold,
-        typography::Weight::Bold => iced::font::Weight::Bold,
-    }
-}
-
 /// Text on the row's primary-label rung — 13px Regular (`type.ui_compact`).
 fn label_text<'a, Message, Theme, Renderer>(
     content: String,
@@ -984,14 +970,18 @@ where
         .into()
 }
 
-/// The section-heading rung: `type.caption`'s 12px at SemiBold.
+/// The section-heading rung: `type.caption` on the sans family at
+/// SemiBold — §4.8.1's "12px SemiBold".
 ///
-/// **Spec gap.** §4.8.1 specifies the heading as "12px SemiBold", and the
-/// `UIF-TOK-004` ladder has no 12px SemiBold rung — `CAPTION` is 12px
-/// Regular emphasising to Medium. The size is the token; the weight is
-/// the token rung's own `Weight::SemiBold` applied at that size, which is
-/// the closest the closed set comes without inventing a rung. Recorded so
-/// a future `type.heading_menu` rung replaces both halves together.
+/// **Legal by token.** `type.caption`'s `Allowed Weights` column is
+/// Regular / Medium / SemiBold, so [`typography::Weight::SemiBold`] is a
+/// member of the set [`CAPTION`](typography::CAPTION) permits. Size,
+/// line height and font all come from the scale, and
+/// [`TypeRung::font`](typography::TypeRung::font) asserts the rung
+/// permits the weight it is asked to carry. What G-12 recorded as a
+/// hand-composed pairing — size read from the token, weight bolted on —
+/// is now a rung-carried composition, and the `iced::Font` literal this
+/// function used to assemble is gone with it.
 fn heading_text<'a, Message, Theme, Renderer>(
     content: String,
 ) -> Element<'a, Message, Theme, Renderer>
@@ -1002,10 +992,7 @@ where
     text(content)
         .size(TRAILING_TYPE)
         .line_height(typography::CAPTION.line_height)
-        .font(iced::Font {
-            weight: iced_weight(typography::Weight::SemiBold),
-            ..iced::Font::DEFAULT
-        })
+        .font(typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::SemiBold))
         .align_y(iced::alignment::Vertical::Center)
         .into()
 }

@@ -13,8 +13,8 @@
 //! |---|---|---|---|---|---|
 //! | Rest | `surface.code` | `text.primary` | `text.disabled` | `text.muted` | `1px border.subtle` |
 //! | Hovered | `surface.code` | `text.primary` | `text.muted` | `text.primary` | `1px border.strong` |
-//! | Focused | `surface.base` | `text.strong` | `text.muted` | `text.primary` | `2px accent.primary` |
-//! | Invalid | `surface.base` | `text.strong` | `text.muted` | `status.danger` | `2px status.danger` |
+//! | Focused | `surface.base` | `text.strong` | `text.muted` | `text.primary` | `2px accent.border` |
+//! | Invalid | `surface.base` | `text.strong` | `text.muted` | `status.danger.text` | `2px status.danger.text` |
 //! | Disabled | `surface.raised` | `text.disabled` | `text.disabled` | `text.disabled` | `1px border.subtle` |
 //!
 //! Three cells are derived rather than transcribed, because §3.2 leaves them
@@ -45,7 +45,7 @@
 //! §3.1 writes every focused button cell as "Rest **+** 2px … ring": the
 //! base cell survives and a ring is added. §3.2 writes its Focused cell as
 //! a **replacement** — the background moves from `surface.code` to
-//! `surface.base` and the border becomes `2px accent.primary`. An input
+//! `surface.base` and the border becomes `2px accent.border`. An input
 //! that kept its resting background under the focus ring would not match
 //! the row it is specified by.
 //!
@@ -68,8 +68,8 @@
 //!    that a field is invalid cannot fix it; a user who cannot see which
 //!    of two invalid fields is theirs can still tab.
 //! 3. Neither signal is actually lost. [`focus::resolve_ring_color_for_background`]
-//!    puts an accent ring around the danger border — `accent.primary`
-//!    clears `surface.base` at `4.3585:1`, well over the 3.0:1 chrome
+//!    puts an accent ring around the danger border — `accent.border`
+//!    clears `surface.base` at `6.6698:1`, well over the 3.0:1 chrome
 //!    floor — so the keyboard user still sees exactly which control is
 //!    theirs, and the error still owns the perimeter.
 //!
@@ -104,12 +104,13 @@
 //!
 //! [`InputStyle::selection_foreground`] is pinned to
 //! [`text_strong`](Palette::text_strong) over
-//! [`accent_primary`](Palette::accent_primary) — the `UIF-TOK-006` rule 3
-//! lock the `G-7` retune brought to `4.5648:1`. Iced renders a selection
-//! as a filled rectangle under the value colour, so the lock holds
-//! because the value colour *is* `text.strong` in every state a selection
-//! can exist in (focused, and invalid-and-focused). The sidecar asserts
-//! the ratio rather than trusting the pairing.
+//! [`accent_fill`](Palette::accent_fill) — the `UIF-TOK-006` rule 4
+//! foreground lock, which measures `4.8020:1` at the revised token
+//! values. Iced renders a selection as a filled rectangle under the
+//! value colour, so the lock holds because the value colour *is*
+//! `text.strong` in every state a selection can exist in (focused, and
+//! invalid-and-focused). The sidecar asserts the ratio rather than
+//! trusting the pairing.
 //!
 //! # What the widget borrows and what it wraps
 //!
@@ -435,14 +436,14 @@ const fn cell_paint(cell: PaintedCell, palette: &Palette) -> CellPaint {
             background: palette.surface_base,
             text: palette.text_strong,
             placeholder: palette.text_muted,
-            border_color: palette.accent_primary,
+            border_color: palette.accent_border,
             border_width: shape::BORDER_FOCUS,
         },
         PaintedCell::Invalid | PaintedCell::InvalidFocused => CellPaint {
             background: palette.surface_base,
             text: palette.text_strong,
             placeholder: palette.text_muted,
-            border_color: palette.status_danger,
+            border_color: palette.status_danger_text,
             border_width: shape::BORDER_FOCUS,
         },
         PaintedCell::Disabled => CellPaint {
@@ -481,7 +482,7 @@ const fn cell_icon_color(cell: PaintedCell, palette: &Palette) -> Color {
     match cell {
         PaintedCell::Rest => palette.text_muted,
         PaintedCell::Hovered | PaintedCell::Focused => palette.text_primary,
-        PaintedCell::Invalid | PaintedCell::InvalidFocused => palette.status_danger,
+        PaintedCell::Invalid | PaintedCell::InvalidFocused => palette.status_danger_text,
         PaintedCell::Disabled => palette.text_disabled,
     }
 }
@@ -500,7 +501,7 @@ pub struct InputStyle {
     pub placeholder: Color,
     /// The trailing-slot glyph colour.
     pub icon: Color,
-    /// The selection highlight fill — `accent.primary` in every state.
+    /// The selection highlight fill — `accent.fill` in every state.
     pub selection_background: Color,
     /// The text colour over a selection: the `UIF-TOK-006` rule 3
     /// Selection Foreground Lock, pinned to
@@ -522,7 +523,7 @@ impl InputStyle {
     /// a resting edge or a focus indicator.
     #[must_use]
     pub fn is_error_border(&self, palette: &Palette) -> bool {
-        self.border_width == shape::BORDER_FOCUS && self.border_color == palette.status_danger
+        self.border_width == shape::BORDER_FOCUS && self.border_color == palette.status_danger_text
     }
 }
 
@@ -558,7 +559,7 @@ pub fn resolve_input_style(kind: InputKind, state: VisualState, palette: &Palett
         text: base.text,
         placeholder: base.placeholder,
         icon: icon_color(kind, cell, palette),
-        selection_background: palette.accent_primary,
+        selection_background: palette.accent_fill,
         selection_foreground: palette.text_strong,
         border_color: base.border_color,
         border_width: base.border_width,
