@@ -43,12 +43,16 @@ const NEUTRAL_SPREAD_MAX: f32 = 8.0;
 /// slide two statuses together.
 const STATUS_MIN_DISTANCE: f32 = 100.0;
 
-/// A row of the `UIF-TOK-005` table transcribed verbatim from
-/// `doc/planning/ui-framework.md` §2.5, paired with the token that
+/// A row of the `UIF-TOK-005` table paired with the token that
 /// implements it.
 ///
-/// Keeping the transcription next to the value means retuning either side
-/// shows up as a failing assertion that names its own token.
+/// Keeping the transcription next to the value means retuning either
+/// side shows up as a failing assertion that names its own token. Three
+/// rows deliberately do *not* carry the spec's printed value —
+/// `surface.active`, `accent.primary` and `status.danger` are the
+/// `G-7` contrast retunes (decision **A** in
+/// `doc/planning/iced-pro-tasks.md`), so the numbers below are the
+/// retuned ones, not the ones §2.5 prints.
 #[derive(Clone, Copy)]
 struct SpecRow {
     /// The spec token, e.g. `color.surface.base`.
@@ -91,11 +95,11 @@ fn spec_rows() -> [SpecRow; 19] {
         row("color.surface.code", p.surface_code, 20, 20, 22, 1.0),
         row("color.surface.overlay", p.surface_overlay, 24, 24, 27, 1.0),
         row("color.surface.hover", p.surface_hover, 38, 38, 44, 1.0),
-        row("color.surface.active", p.surface_active, 50, 50, 58, 1.0),
+        row("color.surface.active", p.surface_active, 43, 43, 51, 1.0),
         row("color.surface.scrim", p.surface_scrim, 9, 9, 11, 0.55),
         row("color.border.subtle", p.border_subtle, 40, 40, 40, 1.0),
         row("color.border.strong", p.border_strong, 120, 120, 120, 1.0),
-        row("color.accent.primary", p.accent_primary, 99, 102, 241, 1.0),
+        row("color.accent.primary", p.accent_primary, 98, 100, 240, 1.0),
         row("color.accent.text", p.accent_text, 100, 200, 255, 1.0),
         row("color.text.primary", p.text_primary, 210, 210, 210, 1.0),
         row("color.text.strong", p.text_strong, 255, 255, 255, 1.0),
@@ -103,7 +107,7 @@ fn spec_rows() -> [SpecRow; 19] {
         row("color.text.disabled", p.text_disabled, 140, 140, 140, 1.0),
         row("color.status.success", p.status_success, 100, 255, 100, 1.0),
         row("color.status.warning", p.status_warning, 220, 130, 0, 1.0),
-        row("color.status.danger", p.status_danger, 244, 15, 2, 1.0),
+        row("color.status.danger", p.status_danger, 255, 28, 2, 1.0),
     ]
 }
 

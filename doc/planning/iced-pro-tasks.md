@@ -261,8 +261,22 @@ Recorded as they are found; none resolved yet.
   and `surface.active` (3.7781); `status.warning` on `surface.active` (4.3777);
   `status.danger` on `surface.active` (2.9740).
 
-  **Resolution is a design decision and is pending user input.** Options are
-  recorded in §5.
+  **RESOLVED by INC-05b.** Retuned per the §5 decision. All five now clear
+  their rule with at least `0.05` headroom:
+
+  | # | Pairing | Was | Now | Rule |
+  |---|---|---|---|---|
+  | 1 | `text.strong` on `accent.primary` | 4.4669 | **4.5648** | 4.5 |
+  | 2 | `status.danger` on `surface.overlay` | 4.1473 | **4.5718** | 4.5 |
+  | 3 | `status.danger` on `surface.raised` | 4.3800 | **4.8283** | 4.5 |
+  | 4 | `accent.primary` on `surface.active` | 2.8441 | **3.0750** | 3.0 |
+  | 5 | `border.strong` on `surface.active` | 2.8775 | **3.1793** | 3.0 |
+
+  New values: `accent_primary` `RGB(98, 100, 240)`, `surface_active`
+  `RGB(43, 43, 51)`, `status_danger` `RGB(255, 28, 2)`. Total channel
+  movement 49 units across three tokens; accent hue moves `+0.42°`.
+  The elevation ladder survives, but the `hover → active` gap narrows from
+  `0.0128` to `0.0050` — that is forced by the constraint set, not chosen.
 
 ---
 
@@ -278,8 +292,36 @@ choice must be made before M3.
 | **B — Keep the literal values, record accepted deviations** | Tokens stay exactly as the spec prints them. Each shortfall becomes a named, test-pinned documented exception. | The `UIF-VER-001` gate ships knowingly below WCAG AA. Honest, but the accessibility rule is soft. |
 | **C — Escalate the spec for redesign** | Stop at M2 and send the five conflicts back to the spec author. | Blocks the plan on an external dependency. |
 
-**Supervisor recommendation: A.** The shortfalls are all under 0.36 of a ratio
-point and the fixes are one- or two-unit channel changes. Option A keeps
+**Decision (user, 2026-10-21): Option A — retune minimally, fix only the five
+active failures.** The spec will be revised to match at a later date; until then
+the retuned values are authoritative in code and the deviation is recorded here.
+Latent pairings are deliberately left alone — pre-emptively darkening
+`surface.active` further would flatten the elevation ladder.
+
+### Constraint analysis driving the retune
+
+`accent.primary` **cannot** absorb both failure 1 and failure 4. Solving each for
+`L(accent.primary)`:
+
+- Failure 1 (white on accent ≥ 4.5) requires `L(acc) <= 0.183333` — the accent
+  must get **darker**.
+- Failure 4 (accent on `surface.active` ≥ 3.0, with `surface.active` at its
+  literal value) requires `L(acc) >= 0.197944` — the accent must get
+  **lighter**.
+
+The lower bound exceeds the upper bound, so no value of `accent.primary`
+satisfies both. The retune therefore splits across three tokens:
+
+| Token | Direction | Fixes |
+|---|---|---|
+| `accent.primary` | darken until white-on-accent clears 4.5 | #1 |
+| `surface.active` | darken until accent-on-active and `border.strong`-on-active clear 3.0 | #4, #5 |
+| `status.danger` | lighten until it clears 4.5 on `surface.overlay` (the worst of its two backgrounds) | #2, #3 |
+
+Hard guardrails on the retune: the elevation ladder must survive (`sunken < base <
+raised < code < overlay < hover < active`), surfaces and borders must stay
+neutral greys, and total channel movement must be minimal with headroom above
+each threshold rather than sitting knife-edge on it. Option A keeps
 `UIF-VER-001` a real gate rather than a documented exception, and the visual
 difference is not perceptible.
 - **G-2** The spec defines `size.hit_target.min` as `24 × 24` but navbar icon

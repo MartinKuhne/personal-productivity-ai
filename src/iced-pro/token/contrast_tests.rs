@@ -26,38 +26,47 @@
 //! classifies every row as exact-or-rounded versus materially wrong, so
 //! the wrongness is recorded rather than inherited.
 //!
-//! Materially wrong rows (recomputed − printed):
+//! Materially wrong rows (recomputed − printed), after the `G-7`
+//! retune of `accent.primary`, `surface.active` and `status.danger`:
 //!
 //! | Token | Printed | Recomputed | Delta |
 //! |---|---|---|---|
 //! | `surface.sunken` | `0.98` | `1.0176` | `+0.0376` — impossible, no WCAG ratio is `< 1` |
-//! | `surface.active` | `1.56` | `1.5660` | `+0.0060` — truncated; rounds to `1.57` |
+//! | `surface.active` | `1.56` | `1.4174` | `-0.1426` — was `1.5660` before the retune darkened it |
 //! | `border.subtle` | `1.36` | `1.3495` | `-0.0105` — rounds to `1.35` |
 //! | `border.strong` | `3.92` | `4.5062` | `+0.5862` — `3.92` is grey ≈110, not 120 |
+//! | `accent.primary` | `4.45` | `4.3585` | `-0.0915` — was `4.4540` before the retune darkened it |
 //! | `accent.text` | `10.12` | `10.6559` | `+0.5359` |
 //! | `text.primary` | `12.63` | `13.1590` | `+0.5290` |
 //! | `text.strong` | `19.86` | `19.8954` | `+0.0354` — truncated; rounds to `19.90` |
 //! | `text.disabled` | `5.86` | `5.9165` | `+0.0565` |
 //! | `status.success` | `15.40` | `15.1867` | `-0.2133` |
 //! | `status.warning` | `5.50` | `6.8555` | `+1.3555` — largest error in the table |
+//! | `status.danger` | `4.66` | `5.1339` | `+0.4739` — was `4.6570` before the retune lightened it |
 //!
 //! `text.strong` and `surface.active` are additions to G-5's list: both
 //! are truncations rather than roundings, and both are still inside the
 //! rounding band a two-decimal figure should occupy, but neither matches
-//! the printed digits.
+//! the printed digits. `accent.primary` and `status.danger` moved into
+//! this table only when the `G-7` retune moved the tokens; against the
+//! spec's literal values they had been exact-or-rounded.
 //!
-//! # Pairings the spec mandates that cannot pass, and by how much
+//! # The five pairings that used to fail, and now clear
 //!
-//! `test_contract_mandated_pairings_cannot_clear_their_rule` asserts the
-//! measured shortfall of each. They are recorded, not waived:
+//! Under the spec's literal token values five contract-mandated pairings
+//! could not clear the threshold their own role carries. Ledger gap
+//! **G-7** was resolved as decision **A** — retune the three offending
+//! tokens minimally — so those five now pass, and
+//! `test_the_five_pairings_that_used_to_fail_now_clear_their_rule`
+//! pins each at its new measured value:
 //!
-//! | Pairing | Measured | Rule | Short by |
-//! |---|---|---|---|
-//! | `text.strong` on `accent.primary` (Selection Foreground Lock) | `4.4669` | `4.5` | `0.0331` |
-//! | `status.danger` on `surface.overlay` (validation slot, error banner) | `4.1473` | `4.5` | `0.3527` |
-//! | `status.danger` on `surface.raised` (Danger button rest) | `4.3800` | `4.5` | `0.1200` |
-//! | `accent.primary` on `surface.active` (pressed border) | `2.8441` | `3.0` | `0.1559` |
-//! | `border.strong` on `surface.active` (Ghost pressed / latched trigger) | `2.8775` | `3.0` | `0.1225` |
+//! | Pairing | Was | Now | Rule | Headroom |
+//! |---|---|---|---|---|
+//! | `text.strong` on `accent.primary` (Selection Foreground Lock) | `4.4669` | `4.5648` | `4.5` | `+0.0648` |
+//! | `status.danger` on `surface.overlay` (validation slot, error banner) | `4.1473` | `4.5718` | `4.5` | `+0.0718` |
+//! | `status.danger` on `surface.raised` (Danger button rest) | `4.3800` | `4.8283` | `4.5` | `+0.3283` |
+//! | `accent.primary` on `surface.active` (pressed border) | `2.8441` | `3.0750` | `3.0` | `+0.0750` |
+//! | `border.strong` on `surface.active` (Ghost pressed / latched trigger) | `2.8775` | `3.1793` | `3.0` | `+0.1793` |
 
 use super::*;
 use crate::token::color::{EditorPalette, Palette};
@@ -693,11 +702,12 @@ fn test_a_translucent_token_is_meaningless_until_it_is_composited() {
 /// * §4.9.2 — the shared menu row state matrix
 ///
 /// A surface is treated as a legitimate background for a text role
-/// wherever any of those matrices puts that role on it. Pairings the
-/// contracts place together but which *fail* are deliberately kept out
-/// of this table and asserted separately in
-/// [`test_contract_mandated_pairings_cannot_clear_their_rule`], so a
-/// regression in either direction is visible.
+/// wherever any of those matrices puts that role on it. The five
+/// pairings that used to fail under the spec's literal token values are
+/// now in this table too, and are additionally pinned to their measured
+/// values by
+/// [`test_the_five_pairings_that_used_to_fail_now_clear_their_rule`],
+/// so a regression in either direction is visible.
 fn mandated_pairings() -> Vec<Pairing> {
     let p = palette();
     let e = EditorPalette::inverted();
@@ -826,12 +836,10 @@ fn mandated_pairings() -> Vec<Pairing> {
     // accent.primary as focus ring / active border (§3.1 Focused for
     // Secondary, Ghost and Danger; §4.4.2 active tab top bar;
     // §4.9.2 keyboard-focused row inset outline; §4.3.2 UIF-PANE-001
-    // active splitter stroke) against every surface it can land on.
+    // active splitter stroke) against every surface it can land on —
+    // including surface.active, which the G-7 retune made possible by
+    // darkening both the accent and that surface.
     for (name, bg) in all_surfaces(&p) {
-        if name == "surface.active" {
-            // Fails — asserted in the failing table below.
-            continue;
-        }
         v.push(pairing(
             format!("accent.primary as focus ring / active border on {name} (§3.1, §4.4.2, §4.9.2, §4.3.2)"),
             p.accent_primary,
@@ -842,7 +850,9 @@ fn mandated_pairings() -> Vec<Pairing> {
 
     // border.strong as the floating-card perimeter (§4.5.1, §4.6.1,
     // §4.7.1, §4.8.1) and the §3.1 Secondary rest border, against the
-    // surfaces a card or control can present it over.
+    // surfaces a card or control can present it over — surface.active
+    // included, which is the Ghost pressed border and the latched
+    // navbar trigger's outline (§4.2.2) and one of the five G-7 fixes.
     for (name, bg) in [
         ("surface.sunken", p.surface_sunken),
         ("surface.base", p.surface_base),
@@ -850,6 +860,7 @@ fn mandated_pairings() -> Vec<Pairing> {
         ("surface.code", p.surface_code),
         ("surface.overlay", p.surface_overlay),
         ("surface.hover", p.surface_hover),
+        ("surface.active", p.surface_active),
     ] {
         v.push(pairing(
             format!("border.strong perimeter on {name} — floating card / secondary border (§3.1, §4.5.1, §4.6.1, §4.8.1)"),
@@ -891,99 +902,142 @@ fn test_every_mandated_pairing_clears_its_threshold() {
     }
 }
 // ---------------------------------------------------------------------------
-// Pairings the spec mandates that cannot pass, recorded with their shortfall
+// G-7 — the five pairings that used to fail, and now clear
 // ---------------------------------------------------------------------------
 
-/// A pairing the spec's contracts place together and which *fails* the
-/// rule that pairing's role carries.
-struct Shortfall {
+/// A contract-mandated pairing that could **not** clear the rule its role
+/// carries under the spec's literal token values, and does now.
+struct RetunedPairing {
     /// The contract that mandates the pairing.
     contract: &'static str,
     fg: Color,
     bg: Color,
     /// The rule the role carries.
     min: f32,
-    /// The measured ratio, pinned to three decimals.
-    measured: f32,
+    /// What the pairing measured before the retune — the shortfall
+    /// **G-7** recorded, kept so the size of the fix stays visible.
+    was: f32,
+    /// What it measures now, pinned to three decimals.
+    now: f32,
 }
 
-/// The five contract-mandated pairings that cannot clear their rule under
-/// the spec's literal token values.
+/// The five contract-mandated pairings **G-7** recorded as unable to
+/// clear their rule, and the values that fixed them.
 ///
-/// These are recorded, not waived. Each entry pins the measured value so
-/// that a future token retune which closes the gap fails this test and
-/// forces the row to be moved into the passing table deliberately, with
-/// the spec reconciliation updated alongside it.
-fn contract_mandated_shortfalls() -> Vec<Shortfall> {
+/// The fix is decision **A** in `doc/planning/iced-pro-tasks.md`: nudge
+/// exactly three tokens — [`accent_primary`](Palette::accent_primary)
+/// darker, [`surface_active`](Palette::surface_active) darker and
+/// [`status_danger`](Palette::status_danger) lighter — because no single
+/// token can absorb all five. `accent.primary` in particular is boxed in
+/// from both sides: pairing 1 wants its luminance at or below `0.183333`
+/// while pairing 4, taken alone, wants it at or above `0.197944`. The
+/// lower bound exceeds the upper one, so the surface has to move too.
+///
+/// Each row is pinned rather than merely asserted to pass, so a later
+/// drift that pushes one of these back under its threshold fails here
+/// and names the pairing.
+fn retuned_pairings() -> Vec<RetunedPairing> {
     let p = palette();
     let t = MIN_TEXT_CONTRAST;
     let c = MIN_CHROME_CONTRAST;
     vec![
-        Shortfall {
+        RetunedPairing {
             contract: "Selection Foreground Lock — text.strong on accent.primary (§2.5 rule 3, §3.1 Primary, §4.3.2 selected tree row)",
             fg: p.text_strong,
             bg: p.accent_primary,
             min: t,
-            measured: 4.4669,
+            was: 4.4669,
+            now: 4.5648,
         },
-        Shortfall {
+        RetunedPairing {
             contract: "status.danger on surface.overlay — input-dialog validation slot (§4.5.1) and modal error banner (§4.6.1)",
             fg: p.status_danger,
             bg: p.surface_overlay,
             min: t,
-            measured: 4.1473,
+            was: 4.1473,
+            now: 4.5718,
         },
-        Shortfall {
+        RetunedPairing {
             contract: "status.danger on surface.raised — Danger button resting foreground (§3.1 Danger Rest)",
             fg: p.status_danger,
             bg: p.surface_raised,
             min: t,
-            measured: 4.3800,
+            was: 4.3800,
+            now: 4.8283,
         },
-        Shortfall {
+        RetunedPairing {
             contract: "accent.primary on surface.active — Secondary pressed 1px accent border (§3.1 Pressed)",
             fg: p.accent_primary,
             bg: p.surface_active,
             min: c,
-            measured: 2.8441,
+            was: 2.8441,
+            now: 3.0750,
         },
-        Shortfall {
+        RetunedPairing {
             contract: "border.strong on surface.active — Ghost pressed border (§3.1) and latched navbar trigger outline (§4.2.2 UIF-NAV-001)",
             fg: p.border_strong,
             bg: p.surface_active,
             min: c,
-            measured: 2.8775,
+            was: 2.8775,
+            now: 3.1793,
         },
     ]
 }
 
+/// The retune's required headroom above each threshold, so nothing sits
+/// knife-edge on the rule it just cleared.
+const RETUNE_HEADROOM: f32 = 0.05;
+
 #[test]
-fn test_contract_mandated_pairings_cannot_clear_their_rule() {
-    let shortfalls = contract_mandated_shortfalls();
+fn test_the_five_pairings_that_used_to_fail_now_clear_their_rule() {
+    let retuned = retuned_pairings();
     assert_eq!(
-        shortfalls.len(),
+        retuned.len(),
         5,
-        "the recorded-failure ledger changed size"
+        "the G-7 retuned-pairing ledger changed size"
     );
 
-    for s in &shortfalls {
-        let ratio = contrast_ratio(s.fg, s.bg);
+    for r in &retuned {
+        let ratio = contrast_ratio(r.fg, r.bg);
         assert!(
-            (ratio - s.measured).abs() < RATIO_EPS,
-            "{}: measured {ratio:.4} no longer matches the pinned {} — re-derive the shortfall",
-            s.contract,
-            s.measured,
+            (ratio - r.now).abs() < RATIO_EPS,
+            "{}: measures {ratio:.4}, not the pinned {:.4} — re-derive the retune record",
+            r.contract,
+            r.now,
         );
         assert!(
-            ratio < s.min,
-            "{}: {ratio:.4}:1 now clears the {:.1}:1 rule; move this pairing into the mandated table",
-            s.contract,
-            s.min,
+            ratio >= r.min,
+            "{}: {ratio:.4}:1 has fallen back below the {:.1}:1 its role requires \
+             ({} before the retune) — the retune has been undone",
+            r.contract,
+            r.min,
+            r.was,
         );
         assert!(
-            !meets_text_contrast(s.fg, s.bg) || s.min < MIN_TEXT_CONTRAST,
-            "{}: meets_text_contrast disagrees with the recorded shortfall",
-            s.contract,
+            ratio - r.min >= RETUNE_HEADROOM,
+            "{}: only {:.4} of headroom over the {:.1}:1 rule, below the {:.2} the \
+             retune promised — nothing may sit knife-edge",
+            r.contract,
+            ratio - r.min,
+            r.min,
+            RETUNE_HEADROOM,
+        );
+        assert!(
+            ratio > r.was,
+            "{}: {ratio:.4} is not an improvement on the pre-retune {}",
+            r.contract,
+            r.was,
+        );
+
+        let predicate_holds = if r.min >= MIN_TEXT_CONTRAST {
+            meets_text_contrast(r.fg, r.bg)
+        } else {
+            meets_chrome_contrast(r.fg, r.bg)
+        };
+        assert!(
+            predicate_holds,
+            "{}: the role's own predicate disagrees with the measured {ratio:.4}:1",
+            r.contract,
         );
     }
 }
@@ -992,56 +1046,70 @@ fn test_contract_mandated_pairings_cannot_clear_their_rule() {
 fn test_pairings_the_spec_never_places_on_hot_fills_are_recorded_not_assumed() {
     // Nothing in §3.1, §3.2, §4.4.2 or §4.9.2 puts `text.disabled` or
     // `status.warning` on `surface.hover` or `surface.active`, so these
-    // are NOT contract violations today. They are recorded because they
-    // sit under the text threshold, and a future contract that placed
-    // them there would be a real accessibility defect.
+    // are NOT contract violations today. They are recorded because some
+    // of them sit under the text threshold, and a future contract that
+    // placed them there would be a real accessibility defect.
+    //
+    // `clears_text_rule` records which side of 4.5:1 each lands on now.
+    // The G-7 retune darkened `surface.active`, which pushed
+    // `status.warning` on it from `4.3777` to `4.8368` — over the line.
+    // That is not a regression and it is not avoidable: holding that
+    // pairing under 4.5:1 needs `L(surface.active) > 0.030402`, while
+    // pairings 4 and 5 cap it at `0.025662`. The two requirements are
+    // mutually unsatisfiable, so the honest record is the classification
+    // rather than a blanket "must stay under".
     let p = palette();
-    let cases: [(&str, Color, Color, f32); 4] = [
+    let cases: [(&str, Color, Color, f32, bool); 4] = [
         (
             "text.disabled on surface.hover",
             p.text_disabled,
             p.surface_hover,
             4.4734,
+            false,
         ),
         (
             "text.disabled on surface.active",
             p.text_disabled,
             p.surface_active,
-            3.7781,
+            4.1743,
+            false,
         ),
         (
             "status.warning on surface.active",
             p.status_warning,
             p.surface_active,
-            4.3777,
+            4.8368,
+            true,
         ),
         (
             "status.danger on surface.active",
             p.status_danger,
             p.surface_active,
-            2.9740,
+            3.6221,
+            false,
         ),
     ];
 
-    for (name, fg, bg, expected) in cases {
+    for (name, fg, bg, expected, clears) in cases {
         let ratio = contrast_ratio(fg, bg);
         assert!(
             (ratio - expected).abs() < RATIO_EPS,
             "{name}: measured {ratio:.4}, expected {expected:.4}"
         );
-        assert!(
-            ratio < MIN_TEXT_CONTRAST,
-            "{name}: {ratio:.4}:1 is under the 4.5:1 text rule — it must stay unmandated"
+        assert_eq!(
+            meets_text_contrast(fg, bg),
+            clears,
+            "{name}: {ratio:.4}:1 is on the wrong side of the 4.5:1 text rule for how it is recorded"
         );
     }
 
     // The tab close glyph goes `status.danger` over `surface.hover`
     // (§4.4.2). As a glyph rather than body text it is chrome, and as
-    // chrome it clears 3.0 — which is why it is not in the shortfall
-    // ledger even though it fails the text threshold.
+    // chrome it clears 3.0 — which is why it is not in the G-7 ledger
+    // even though it fails the text threshold.
     let glyph = contrast_ratio(p.status_danger, p.surface_hover);
     assert!(
-        (glyph - 3.5213).abs() < RATIO_EPS,
+        (glyph - 3.8817).abs() < RATIO_EPS,
         "status.danger glyph on surface.hover measures {glyph:.4}"
     );
     assert!(
@@ -1101,7 +1169,7 @@ fn test_border_subtle_is_a_resting_divider_and_rule_two_does_not_reach_it() {
 }
 
 // ---------------------------------------------------------------------------
-// UIF-TOK-006 rule 3 — the Selection Foreground Lock, negative half
+// UIF-TOK-006 rule 3 — the Selection Foreground Lock
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1112,9 +1180,9 @@ fn test_no_semantic_status_colour_may_render_on_accent_primary() {
     // accent.primary outright. The measured ratios are shown so a future
     // reader can see *why* the rule exists rather than taking it on faith.
     let forbidden: [(&str, Color, f32); 3] = [
-        ("status.danger", p.status_danger, 1.0456),
-        ("status.warning", p.status_warning, 1.5392),
-        ("status.success", p.status_success, 3.4097),
+        ("status.danger", p.status_danger, 1.1779),
+        ("status.warning", p.status_warning, 1.5729),
+        ("status.success", p.status_success, 3.4844),
     ];
 
     for (name, fg, expected) in forbidden {
@@ -1147,7 +1215,7 @@ fn test_no_semantic_status_colour_may_render_on_accent_primary() {
     );
     assert!(
         !meets_text_contrast(p.text_primary, p.accent_primary),
-        "text.primary on accent.primary is 2.9544:1 — the lock exists because the *default* text role fails here"
+        "text.primary on accent.primary is 3.0192:1 — the lock exists because the *default* text role fails here"
     );
 }
 #[test]
@@ -1155,16 +1223,18 @@ fn test_selection_foreground_lock_is_recorded_at_its_measured_value() {
     let p = palette();
     let locked = contrast_ratio(p.text_strong, p.accent_primary);
 
-    // The value the lock pins. G-1 resolves the spec's two near-identical
-    // figures: 4.45:1 is accent.primary vs surface.base, 4.46:1 is
-    // text.strong on accent.primary — the latter recomputes to 4.4669,
-    // which the spec truncates.
+    // The value the lock pins now. G-1 resolved the spec's two
+    // near-identical printed figures — 4.45:1 is accent.primary vs
+    // surface.base, 4.46:1 is text.strong on accent.primary — but both
+    // described the *literal* token values. The G-7 retune darkened the
+    // accent, so neither printed figure describes this code any more;
+    // the lock measures 4.5648 and the accent-vs-base pairing 4.3585.
     assert!(
-        (locked - 4.4669).abs() < RATIO_EPS,
-        "text.strong on accent.primary measures {locked:.4}, expected 4.4669"
+        (locked - 4.5648).abs() < RATIO_EPS,
+        "text.strong on accent.primary measures {locked:.4}, expected 4.5648"
     );
     assert!(
-        (contrast_ratio(p.accent_primary, p.surface_base) - 4.4540).abs() < RATIO_EPS,
+        (contrast_ratio(p.accent_primary, p.surface_base) - 4.3585).abs() < RATIO_EPS,
         "the *other* 4.4x figure is accent.primary vs surface.base, not the lock"
     );
 
@@ -1182,18 +1252,21 @@ fn test_selection_foreground_lock_is_recorded_at_its_measured_value() {
         "text.strong is the strongest text-role foreground available on the accent fill"
     );
 
-    // What it does not achieve: rule 1 asks for 4.5:1 of normal text and
-    // a selected tree row is 13px (§4.3.2, type.ui_compact), so the
-    // mandated pairing is 0.0331 short. Stated plainly rather than
-    // rounded away.
+    // What the retune achieved: before it, the lock was 4.4669:1 — a
+    // selected tree row is 13px (§4.3.2, type.ui_compact), so the
+    // mandated pairing sat 0.0331 under rule 1 and rule 1 was
+    // unsatisfiable at the literal token values. It now clears with
+    // 0.0648 to spare, which is what makes rule 3 a lock worth having
+    // rather than a mandate to ship unreadable text.
     assert!(
-        locked < MIN_TEXT_CONTRAST,
-        "the Selection Foreground Lock is {locked:.4}:1 against a 4.5:1 rule"
+        locked >= MIN_TEXT_CONTRAST,
+        "the Selection Foreground Lock is {locked:.4}:1 against a {:.1}:1 rule",
+        MIN_TEXT_CONTRAST,
     );
     assert!(
-        (MIN_TEXT_CONTRAST - locked - 0.0331).abs() < RATIO_EPS,
-        "the shortfall is 0.0331, got {:.4}",
-        MIN_TEXT_CONTRAST - locked
+        (locked - MIN_TEXT_CONTRAST - 0.0648).abs() < RATIO_EPS,
+        "the headroom over rule 1 is 0.0648, got {:.4}",
+        locked - MIN_TEXT_CONTRAST,
     );
 }
 
@@ -1311,7 +1384,7 @@ fn spec_rows() -> Vec<SpecRow> {
             color: p.accent_primary,
             printed: 4.45,
             role: Role::ActiveChrome,
-            printed_is_wrong: false,
+            printed_is_wrong: true,
         },
         SpecRow {
             token: "color.accent.text",
@@ -1367,7 +1440,7 @@ fn spec_rows() -> Vec<SpecRow> {
             color: p.status_danger,
             printed: 4.66,
             role: Role::Status,
-            printed_is_wrong: false,
+            printed_is_wrong: true,
         },
     ]
 }
@@ -1427,19 +1500,21 @@ fn test_spec_printed_figures_split_into_rounded_and_materially_wrong() {
         );
     }
 
-    // G-5 lists eight materially wrong rows; this increment adds
-    // `surface.active` and `text.strong` as truncations that still miss
-    // the printed digits, making ten of eighteen.
+    // G-5 listed eight materially wrong rows; INC-05 added `surface.active`
+    // and `text.strong` as truncations that still miss the printed digits,
+    // making ten. The G-7 retune moves `accent.primary` and `status.danger`
+    // away from the figures the spec printed for their literal values, so
+    // twelve of eighteen are now wrong against this code.
     assert_eq!(
         wrong.len(),
-        10,
-        "expected ten materially wrong §2.5 figures, got: {:?}",
+        12,
+        "expected twelve materially wrong §2.5 figures, got: {:?}",
         wrong.iter().map(|r| r.token).collect::<Vec<_>>()
     );
     assert_eq!(
         rows.len() - wrong.len(),
-        8,
-        "expected eight exact-or-rounded §2.5 figures"
+        6,
+        "expected six exact-or-rounded §2.5 figures"
     );
 }
 

@@ -24,6 +24,17 @@
 //! is the standing example — the spec's number wins (decision **D-4**
 //! in `doc/planning/iced-pro-tasks.md`).
 //!
+//! Three tokens deliberately depart from the spec's *printed* value:
+//! [`accent_primary`](Palette::accent_primary),
+//! [`surface_active`](Palette::surface_active) and
+//! [`status_danger`](Palette::status_danger). At the literal figures the
+//! spec prints, five pairings its own usage contracts mandate cannot
+//! clear the contrast thresholds `UIF-TOK-006` sets for them. Decision
+//! **A** of the ledger's open question retunes those three minimally; the
+//! deviation is recorded as gap **G-7** in
+//! `doc/planning/iced-pro-tasks.md`, and each affected field's own doc
+//! says so. Every other token is still the spec's number verbatim.
+//!
 //! What this module deliberately does *not* do is arithmetic on
 //! contrast. The luminance and WCAG-ratio figures the spec's table
 //! carries belong to `token/contrast.rs` (`UIF-TOK-006` /
@@ -86,10 +97,26 @@ pub struct Palette {
     pub surface_hover: Color,
 
     /// `color.surface.active` — pressed control fill and the movable
-    /// overlay title bar header. `RGB(50, 50, 58)`.
+    /// overlay title bar header. `RGB(43, 43, 51)`.
+    ///
+    /// **Retuned from the spec's printed `RGB(50, 50, 58)`** to satisfy
+    /// `UIF-TOK-006` (ledger gap **G-7**, decision **A**). At the
+    /// literal value this fill swallowed both of the borders the spec
+    /// places on it: [`accent_primary`](Self::accent_primary) measured
+    /// `2.8441:1` (the Secondary pressed border, §3.1) and
+    /// [`border_strong`](Self::border_strong) measured `2.8775:1` (the
+    /// Ghost pressed border and the latched navbar trigger, §4.2.2),
+    /// both under the 3.0:1 chrome floor. Darkening to `RGB(43, 43, 51)`
+    /// lifts them to `3.0750:1` and `3.1793:1`. The blue lean is held at
+    /// `+8` so the token stays the same cool grey, only darker.
     ///
     /// The lightest surface in the set, so the gap between it and the
     /// surface it sits on is the widest the elevation model ever gets.
+    /// That gap is narrower than it was — `0.0050` of relative luminance
+    /// above [`surface_hover`](Self::surface_hover) against `0.0128` —
+    /// because the same darkening that fixes the borders also pulls this
+    /// token down toward hover. It is still strictly above hover, and
+    /// still the brightest surface there is.
     pub surface_active: Color,
 
     /// `color.surface.scrim` — the dimmed backdrop behind blocking
@@ -122,7 +149,22 @@ pub struct Palette {
 
     /// `color.accent.primary` — primary CTA fill, selected row
     /// background, keyboard focus ring and the active tab's top
-    /// indicator. `RGB(99, 102, 241)`.
+    /// indicator. `RGB(98, 100, 240)`.
+    ///
+    /// **Retuned from the spec's printed `RGB(99, 102, 241)`** to
+    /// satisfy `UIF-TOK-006` (ledger gap **G-7**, decision **A**). The
+    /// Selection Foreground Lock pins [`text_strong`](Self::text_strong)
+    /// on this fill, and at the literal value that mandated pairing
+    /// measured `4.4669:1` — `0.0331` short of the 4.5:1 normal-text
+    /// rule. Three units of darkening bring it to `4.5648:1`.
+    ///
+    /// The retune is deliberately a *lightness* move, not a hue move:
+    /// HSL hue shifts `+0.42°` and saturation `-0.0097`, so the token
+    /// is still the same indigo. It cannot go lighter, because the same
+    /// token has to clear 3.0:1 as a focus ring against
+    /// [`surface_active`](Self::surface_active) while white clears 4.5:1
+    /// on top of it — the two bounds are only jointly satisfiable by
+    /// darkening the accent and darkening that surface alongside it.
     ///
     /// The only colour the interface uses to say "act here". Because it
     /// is a fill, the `UIF-TOK-006` foreground lock applies: text on
@@ -174,12 +216,33 @@ pub struct Palette {
     pub status_warning: Color,
 
     /// `color.status.danger` — validation error text and borders, and
-    /// the destructive-action hover/CTA. `RGB(244, 15, 2)`.
+    /// the destructive-action hover/CTA. `RGB(255, 28, 2)`.
+    ///
+    /// **Retuned from the spec's printed `RGB(244, 15, 2)`** to satisfy
+    /// `UIF-TOK-006` (ledger gap **G-7**, decision **A**). This colour
+    /// is specified as body-size error text on two of the lightest
+    /// surfaces in the set and cleared neither: `4.1473:1` on
+    /// [`surface_overlay`](Self::surface_overlay) (the input-dialog
+    /// validation slot, §4.5.1, and the modal error banner, §4.6.1) and
+    /// `4.3800:1` on [`surface_raised`](Self::surface_raised) (the
+    /// Danger button's resting foreground, §3.1). Lightening it lifts
+    /// both to `4.5718:1` and `4.8283:1`.
+    ///
+    /// It has to go *lighter* because its backgrounds cannot go darker:
+    /// `surface.overlay` and `surface.raised` are pinned into the middle
+    /// of the elevation ladder. The move stays inside the red band — HSL
+    /// hue `3.22° → 6.17°`, well short of orange at 30° — with red
+    /// still dominant by more than 200 units and blue untouched, so it
+    /// reads as a brighter red rather than a shifted one.
     pub status_danger: Color,
 }
 
 impl Palette {
-    /// The dark palette exactly as `UIF-TOK-005` specifies it.
+    /// The dark palette as `UIF-TOK-005` specifies it, with the three
+    /// `G-7` contrast retunes applied — see
+    /// [`accent_primary`](Self::accent_primary),
+    /// [`surface_active`](Self::surface_active) and
+    /// [`status_danger`](Self::status_danger).
     ///
     /// A `const fn` rather than a `static`: the palette is a value, and
     /// call sites are expected to take it by copy and read fields off it
@@ -193,11 +256,11 @@ impl Palette {
             surface_code: Color::from_rgb8(20, 20, 22),
             surface_overlay: Color::from_rgb8(24, 24, 27),
             surface_hover: Color::from_rgb8(38, 38, 44),
-            surface_active: Color::from_rgb8(50, 50, 58),
+            surface_active: Color::from_rgb8(43, 43, 51),
             surface_scrim: Color::from_rgba8(9, 9, 11, 0.55),
             border_subtle: Color::from_rgb8(40, 40, 40),
             border_strong: Color::from_rgb8(120, 120, 120),
-            accent_primary: Color::from_rgb8(99, 102, 241),
+            accent_primary: Color::from_rgb8(98, 100, 240),
             accent_text: Color::from_rgb8(100, 200, 255),
             text_primary: Color::from_rgb8(210, 210, 210),
             text_strong: Color::from_rgb8(255, 255, 255),
@@ -205,7 +268,7 @@ impl Palette {
             text_disabled: Color::from_rgb8(140, 140, 140),
             status_success: Color::from_rgb8(100, 255, 100),
             status_warning: Color::from_rgb8(220, 130, 0),
-            status_danger: Color::from_rgb8(244, 15, 2),
+            status_danger: Color::from_rgb8(255, 28, 2),
         }
     }
 }

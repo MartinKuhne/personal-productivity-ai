@@ -105,22 +105,35 @@
 //! every row and asserts the *role* threshold rather than the printed
 //! figure.
 //!
-//! # Known failures under the literal token values
+//! # Retuned token values
 //!
-//! Several pairings the spec mandates cannot clear the threshold the
-//! spec itself sets. They are recorded, not waived — see
-//! `test_contract_mandated_pairings_cannot_clear_their_rule` in the
-//! sidecar for the measured shortfall of each:
+//! Five pairings the spec mandates could not clear the threshold the spec
+//! itself sets at the spec's literal token values. They were fixed by
+//! retuning three tokens rather than by weakening the rules — see the
+//! sidecar's `RETUNE_HEADROOM` assertions for the measured value of each:
 //!
 //! * `text.strong` on `accent.primary` — the Selection Foreground Lock
-//!   (`UIF-TOK-006` rule 3) — measures `4.4669:1`, `0.0331` short of
-//!   the 4.5:1 normal-text rule.
+//!   (`UIF-TOK-006` rule 3) — measured `4.4669:1`, `0.0331` short of
+//!   the 4.5:1 normal-text rule. `accent.primary` is darkened to
+//!   `RGB(98, 100, 240)`, giving `4.5648:1`.
 //! * `status.danger` on `surface.overlay` (`4.1473:1`) and on
 //!   `surface.raised` (`4.3800:1`) — the input-dialog validation slot
-//!   and the Danger button's resting foreground.
+//!   and the Danger button's resting foreground. `status.danger` is
+//!   lightened to `RGB(255, 28, 2)`, giving `4.5718:1` and `4.8283:1`.
 //! * `accent.primary` on `surface.active` (`2.8441:1`) and
 //!   `border.strong` on `surface.active` (`2.8775:1`) — both under the
-//!   3.0:1 chrome floor.
+//!   3.0:1 chrome floor. `surface.active` is darkened to
+//!   `RGB(43, 43, 51)`, giving `3.0750:1` and `3.1793:1`.
+//!
+//! `accent.primary` could not absorb both the first and the last failure:
+//! the lock caps its luminance at `0.183333` while the chrome floor
+//! demands at least `0.197944` against an unretuned `surface.active`.
+//! That contradiction is why the fix is spread over three tokens instead
+//! of one.
+//!
+//! The spec has not yet been revised to match. Until it is, the retuned
+//! values in [`crate::token::color`] are authoritative and the deviation
+//! is tracked as `G-7` in `doc/planning/iced-pro-tasks.md`.
 //!
 //! Unit tests live in the sibling `contrast_tests.rs` sidecar.
 
