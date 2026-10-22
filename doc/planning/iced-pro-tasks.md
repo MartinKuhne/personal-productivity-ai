@@ -503,10 +503,52 @@ future increments down a dead end.
 
 ### M6 — Layered surface hosts (UIF-ZORD-*)
 
-- [ ] **INC-17** `surface/zorder.rs` — four z-band model and the strict top-down
-      Escape unwinding order (`UIF-WIN-003`): deepest submenu → root menu →
-      topmost dialog → search/filter.
-      Tests: unwind sequence across mixed open layers, empty-stack no-op.
+- [x] **INC-17** `surface/zorder.rs` — the §5 band table turned into queryable
+      data. Nothing renders, nothing knows what a widget is.
+      `ZBand` answers the four §5 questions about itself so no host re-derives
+      the table: `backdrop()`, `pointer_rule()`, `blocks_lower_bands()`,
+      `promotes_on_click()`, `escape_rank()`.
+      `SurfaceRegistry` keeps open surfaces sorted by band (highest last) and
+      within a band bottom-first, which makes `topmost()` a last-element lookup.
+      Re-registration refreshes geometry but **keeps stacking position** — a card
+      that rebuilds every frame must not silently restack, and a Band 1 card the
+      user promoted stays promoted.
+      `route_pointer(point)` is pure and walks bands top-down, stopping at the
+      first band with something open. The three bands genuinely differ on a
+      **miss**: Band 3 returns `Scrim` and the walk stops (that is what "blocks
+      completely" means operationally); Band 2 returns `DismissBand` — the
+      workspace underneath does **not** get the click; Band 1 records
+      `passed_through()` and keeps walking down.
+      **Escape is delegation, not orchestration.** `escape(closure)` walks
+      surfaces in `escape_rank` order and asks each through the caller's
+      closure; the first that accepts ends the walk, refusals are recorded, and
+      the model never reaches into a menu or a modal. The refusal vocabulary is
+      the cascade's own, adapted not paralleled: `NotOpen` → "my level is
+      spent, the key keeps travelling"; any other refusal → `CannotUnwind`.
+      Registering **each open menu card as its own Band 2 surface** is what makes
+      `UIF-WIN-003`'s "deepest submenu → root menu" fall out of the generic
+      reverse walk rather than needing menu-specific code.
+      **Escape rank is deliberately NOT band rank** — see **G-13**.
+      Edge cases decided:
+      * a surface with **no regions is never hit by the pointer** — it still
+        registers, stacks and takes part in Escape, so a full-window modal must
+        be given the viewport rect or every click lands on its own scrim;
+      * hit testing follows iced's convention: right and bottom edges are
+        *outside*, so two abutting cards do not overlap; NaN hits nothing;
+      * **the Band 3 scrim covers Band 2 as well as Bands 0/1** — the spec names
+        only 0/1, but the scrim is full-window, so a menu open under a modal is
+        pointer-unreachable while Escape still unwinds it first;
+      * Band 1 promotion is the **only** automatic reordering — clicking a lower
+        modal does not raise it, because inventing stacked-modal promotion would
+        change what "topmost dialog" means without the host choosing it;
+      * Band 1's "Escape does not close unless focused" is not special-cased —
+        the surface answers `Declined(NotFocused)` and the key moves on, with
+        `key_disposition` telling the host the condition exists;
+      * `SCRIM_ALPHA` is a named constant and `scrim_for()` is the only place it
+        meets the token, asserted equal to `Palette::surface_scrim` exactly.
+      Tests: 82 new (673 total), including three grid sweeps across click
+      positions and a real `MenuCascade` drive through the `from_cascade_close`
+      seam.
       **Commit:** `feat(iced-pro): add z-band model and escape unwinding`
 - [ ] **INC-18** `surface/modal.rs` (`UIF-MOD-*`) — scrim, focus trap, card-level
       click absorption, dirty-dismiss guard (`UIF-MOD-002`), structured error
@@ -707,6 +749,20 @@ Recorded as they are found; none resolved yet.
      `space::SM + shape::BORDER_HAIRLINE`. They are honest compositions of
      existing tokens, not magic numbers, but the spec names them as if they were
      primitives. Worth reconciling when the spec is next revised.
+- **G-13 — §4.1 and §5 give two different orderings and both are correct.**
+  `UIF-WIN-003` unwinds **menus before dialogs** (deepest submenu → root menu →
+  topmost dialog → search/filter), while §5's band table elevates **Modal (3)
+  above Menu (2)**. These are not in conflict — they answer different questions:
+  *"what is painted in front"* versus *"what is the user unwinding"*. A menu
+  opened from inside a dialog sits under the dialog's scrim in z, but the first
+  `Escape` closes the menu, not the dialog.
+  `iced-pro` models them apart rather than deriving one from the other and then
+  contradicting it: `escape_rank` is `Menu(3) > Modal(2) > UtilityOverlay(1) >
+  Workspace(0)`, independent of band rank. The spec should state both orderings
+  explicitly when revised.
+  A consequence worth naming: **the topmost-painted surface is not the first
+  asked to handle `Escape`.** Any host wiring this must not assume
+  "topmost = first to receive keys".
 
 ---
 
