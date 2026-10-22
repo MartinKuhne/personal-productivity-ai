@@ -18,6 +18,7 @@
 
 pub mod bridge;
 pub mod focus;
+pub mod gallery;
 pub mod geometry;
 pub mod state;
 pub mod surface;

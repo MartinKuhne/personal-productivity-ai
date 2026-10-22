@@ -11,6 +11,14 @@ keywords = ["iced", "ui", "widgets", "design-tokens"]
 [lib]
 path = "mod.rs"
 
+# The runnable UIF-VER-004 gallery. Declared explicitly because the crate's
+# library path is `mod.rs`, not `src/lib.rs`, so cargo's default
+# `src/bin/` discovery does not apply and `bin/gallery.rs` would otherwise
+# be invisible to the build.
+[[bin]]
+name = "gallery"
+path = "bin/gallery.rs"
+
 [dependencies]
 # Same feature set `fastmd` uses, minus `markdown` — this crate does not
 # render markdown, only framework widgets driven by semantic design tokens.

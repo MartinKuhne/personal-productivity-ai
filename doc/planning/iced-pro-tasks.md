@@ -755,9 +755,66 @@ future increments down a dead end.
 
 ### M7 — Verification and closeout
 
-- [ ] **INC-21** `bin/gallery.rs` (`UIF-VER-004`) — deterministic gallery that
-      renders every atom across `(Variant × State)` and every composite surface,
-      plus snapshot-style assertions on resolved styles.
+- [x] **INC-21** `gallery.rs` + `bin/gallery.rs` (`UIF-VER-004`) — the full
+      `(Variant × State)` matrix, enumerable and asserted. **91 cells.**
+      | Subject | Cells | Shape |
+      |---|---|---|
+      | button | 36 | 4 variants × 9 reachable states |
+      | input | 27 | 3 kinds × the same 9 states |
+      | menu | 12 | `RowState::ALL` |
+      | modal | 3 | clean / dirty / error |
+      | input-dialog | 5 | rename-valid / rename-invalid / create-valid / move-folder-list / delete-danger |
+      | movable | 4 | idle / dragging / resizing / auto-scroll-paused |
+      | z-band | 1 | overlay-menu-modal (G-13 visible in one frame) |
+      | NotOwned | 3 | navbar / panes / tabs |
+      The 9 states are **derived**, not listed — all 32 `InteractionInput`
+      combinations swept through `state::resolve`; `disabled+focused` is absent
+      because `resolve` zeroes the ring on a dead control.
+      **`NotOwned` is the honest answer to D-2.** Navbar, panes and tabs are
+      app-owned and have no framework-owned frame. Each cell carries its
+      justification in a `note`, draws **zero** quads and resolves **zero**
+      channels, so the audit can read "out of scope under D-2" straight off the
+      manifest instead of inferring it from a missing row. Notably: **a tab is
+      not a variant of the §3.1 button** — snapshotting a button there would
+      misrepresent coverage rather than provide it.
+      **Snapshots assert resolved style values plus the ordered quad list, not
+      pixels.** The resolved values are what compliance is made of — every
+      `UIF-TOK-006` rule and every matrix cell is a statement about a resolved
+      colour or rectangle. They diff **by token name** (`background:
+      accent.primary → accent.primary @ 85%`) rather than as an undifferentiated
+      pixel delta, and they don't pin every glyph, antialiasing kernel and
+      rasteriser version to the repo. The frame is still a real draw pass:
+      `Layer`s go through `renderer::Renderer::fill_quad` on `FrameRecorder`,
+      the same call a widget's `draw` issues, so the recorded quads are the ones
+      a renderer actually received and in the order it received them.
+      `FrameRecorder` is library code, not `cfg(test)`, so the binary and the
+      asserted tests draw the same frames.
+      **The contrast gate needed the audit's classification, not a threshold.**
+      A naive `3.0:1` on every non-zero border produced 32 "failures" that were
+      all gate bugs, not design bugs — a Primary border deliberately sharing its
+      fill's channels, a Ghost stroke over transparency, `border.subtle`
+      hairlines. Adopted INC-08's four-class model (`Judged` /
+      `UnpaintedBackground` / `CoincidentWithFill` / `RestingDivider`) with
+      worst-case compositing of translucent fills over the surface ladder.
+      `RestingDivider` matches on the token's **channels** rather than the
+      channel name, because the gallery meets `border.subtle` as `border`,
+      `control.border` and `divider`; every `border_subtle` use in the crate
+      was verified to be a resting border, so the exemption covers the token
+      completely and cannot hide a real failure.
+      **Binary guard verified by execution:** `cargo run -p iced-pro --bin
+      gallery` exits **0** with 91 cells and both gates PASS; pointed at
+      `%APPDATA%` it exits **2** (likewise `%USERPROFILE%` and any `.fastmd*`
+      component) — RUST-024 enforced, not just documented.
+      **Scope deviation, accepted:** `Cargo.toml` gained an explicit `[[bin]]`
+      target. The crate's lib path is `mod.rs`, not `src/lib.rs`, so cargo's
+      default `src/bin/` discovery does not apply and the gallery would be
+      invisible to the build otherwise.
+      **Known uncovered cells (recorded, not silent):** only `Palette::dark()`
+      is snapshotted (no inverted palette); only the standard control height (no
+      compact rung); modal internals carry no header/banner/footer sub-rects by
+      design; menu separator/glyph placement, input-dialog per-row bodies,
+      movable trailing actions and the iced caret are not cells.
+      Tests: 47 new (1249 total).
       **Commit:** `feat(iced-pro): add widget gallery and snapshot harness`
 - [ ] **INC-22** Spec-compliance audit + docs: cross-check every `UIF-*` ID in the
       spec against the crate, record gaps here, update
