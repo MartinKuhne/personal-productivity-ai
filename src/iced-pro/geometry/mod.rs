@@ -14,6 +14,10 @@
 //!   top-left origin *and* the reasons it landed there — quadrant flips,
 //!   the roomier-side scrollable fallback and viewport clamping
 //!   (`UIF-CMENU-001`, `UIF-FMENU-001`, `UIF-INP-001`).
+//! * [`clamp`] — the movable-overlay reachability solver: a dragged or
+//!   resized card is clamped so its **title bar**, not its body, can never
+//!   be lost off-screen, plus the min/max size policy a resize is clamped
+//!   against (`UIF-MOV-002`).
 //!
 //! All values are `f32` logical pixels in the single root viewport
 //! coordinate space of `UIF-WIN-002`: origin `(0, 0)` at the top-left of
@@ -24,3 +28,4 @@
 //! value.
 
 pub mod anchor;
+pub mod clamp;

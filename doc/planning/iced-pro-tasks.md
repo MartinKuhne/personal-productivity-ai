@@ -406,10 +406,43 @@ future increments down a dead end.
       and a property sweep across 8 viewports × 5 cards × ~214 anchors × 8 anchor
       kinds asserting the inside-the-margin invariant never fails.
       **Commit:** `feat(iced-pro): add menu anchor and viewport flip solver`
-- [ ] **INC-13** `geometry/clamp.rs` (`UIF-MOV-002`) — movable-overlay title-bar
-      reachability clamps (≥120px title visible, y within
-      [navbar, viewport − titlebar]) and resize clamps against min/max card size.
-      Tests: boundary and out-of-range inputs, drag deltas that would lose the card.
+- [x] **INC-13** `geometry/clamp.rs` (`UIF-MOV-002`) — pure reachability solver.
+      **The clamp protects the title bar, not the card.** The title bar is the
+      only grip the user has to bring a card back; a card whose 32px bar is
+      off-screen cannot be grabbed, resized or closed and is functionally gone.
+      The card *body* may legitimately hang off the right or bottom — content
+      scrolls. A fit-the-card rule would also be arithmetically impossible (a
+      680×440 card cannot exist in a 640×480 window) and backwards: it would
+      let the card's bottom edge decide where its top edge goes.
+      Boundaries verified to the pixel: `x ∈ [viewport.x + 120 − w, viewport.x +
+      width − 120]`, `y ∈ [viewport.y + 36, viewport.y + height − 32]` — card
+      height never enters the vertical bound.
+      **The same `required_visible = min(120, card_width, viewport_width)` feeds
+      both the clamp and `is_reachable`**, so the invariant degrades identically
+      from both sides rather than the clamp and the assertion disagreeing.
+      Inverted ranges pin to the **lower** bound — the maximal-visibility choice.
+      **Overshoot is a contract on the caller, made un-avoidable:** clamp from
+      the last clamped position, never from drag-start plus a running total.
+      `drag_position(current, delta, …)` implements exactly that step and
+      clamps its `current` input on the way in, so the guarantee holds even if
+      the caller lost track. A blocked frame is detectable — `returned !=
+      requested` means that axis absorbed the delta.
+      Priority when constraints collide: **invariant > size-policy floor > held
+      edge.** The held edge shifts only when the other two forbid holding it.
+      `resize` applies the size policy only to the axis being dragged; the
+      untouched axis is left alone — clamping it too would resize an edge nobody
+      is holding.
+      Token mapping: 36 → `size::CONTROL_LG`, 32 → `size::CONTROL_MD` (both
+      existing); 120 / 420 / 260 are new named constants — `token::size`
+      describes control and icon rungs, not a reachability floor or a whole
+      surface size, and each constant's doc says so.
+      Degenerate cases all defined: narrow card → clamped fully visible; tiny
+      viewport → pinned to cover it; viewport shorter than navbar + title bar →
+      pinned to the top bound ("never above the navbar" is the harder half, so
+      it is the one kept); non-finite max treated as unbounded not zero; NaN/∞
+      sanitised because iced would propagate it into collapsed layout.
+      Tests: 68 new (1086 total), including an invariant sweep across card
+      sizes × viewports down to 640×480 and all eight resize handles.
       **Commit:** `feat(iced-pro): add movable overlay clamp solver`
 
 ### M5 — Menu engine (UIF-FMENU-*, UIF-CMENU-*)
