@@ -6,11 +6,14 @@
 //!
 //! * [`model`] — the menu tree as pure data: rows, groups, selection and
 //!   close policy (`INC-14`).
-//! * `view` — the menu card and the §4.9.2 row state matrix (`INC-15`).
+//! * [`view`] — the §4.9.2 row state matrix and the focusable menu row on
+//!   the §4.8.1 shared row grid (`INC-15`). The card chrome, the cascade
+//!   and cross-row keyboard navigation are not here — see the module docs.
 //! * `tree` — the cascade controller: mutual exclusion and keyboard
 //!   navigation (`INC-16`).
 
 pub mod model;
+pub mod view;
 
 pub use model::Activation;
 pub use model::ActivationEffect;
@@ -26,3 +29,11 @@ pub use model::RowGroup;
 pub use model::RowKind;
 pub use model::TrailingSlot;
 pub use model::submenu_id;
+pub use view::MenuRow;
+pub use view::RowBase;
+pub use view::RowEvent;
+pub use view::RowState;
+pub use view::RowStyle;
+pub use view::SlotKind;
+pub use view::derive_row_state;
+pub use view::resolve_row_style;

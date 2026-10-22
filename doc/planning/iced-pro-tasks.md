@@ -408,10 +408,44 @@ future increments down a dead end.
       navigable index vectors and a `FocusState` walk-agreement pin so the model
       and the focus model cannot drift.
       **Commit:** `feat(iced-pro): add menu tree data model`
-- [ ] **INC-15** `surface/menu/view.rs` — menu card + row renderer implementing the
-      §4.9.2 state matrix (rest / hovered / pressed / focused / submenu-parent /
-      destructive-hover / disabled / heading) on the shared row grid.
-      Tests: every row state resolves to the specified token triple.
+- [x] **INC-15** `surface/menu/view.rs` — row style resolver + rendering,
+      focusable row widget.
+      `RowBase` covers the eight printed rows of §4.9.2 **plus
+      `DestructivePressed`**, the matrix's one blind spot, filled from §3.1's
+      destructive-button rule. `RowState { base, focused }` mirrors
+      `state::VisualState` so focus stays additive: 8 spec cells + 3 derived
+      combinations = 12.
+      `derive_row_state` precedence: `!interactive` → Heading · `!activatable` →
+      Disabled · Pressed → (Destructive)Pressed · `!attended` → Rest ·
+      destructive → DestructiveHovered · open submenu parent →
+      ActiveSubmenuParent · else Hovered, where `attended = hovered || focused`.
+      **A focused row is never `Rest`.**
+      **All six G-11 traps defused and measured**, with a 36-pair contrast audit
+      and an **empty** accepted-failure ledger — nothing waived:
+      destructive fill is `status_danger_fill` (the literal `status_danger`
+      would sit at 1.4240); the ring always goes through
+      `resolve_ring_color_for_background` (5.5185 on danger, 3.2954 on a normal
+      row); disabled rows paint **no layer at all**, so there is nothing to
+      inherit a hovered ancestor's fill; destructive cells carry no accent
+      glyph (`accent.text` on the fill would be 2.9557).
+      `Layer` from `button_widget.rs` was **reusable as-is** — no move, no churn.
+      Behaviour decisions:
+      * **Activation moved to release** — press captures the event and paints the
+        pressed skin; the release must still land inside the row to fire.
+        Walking off cancels. Heading/separator/disabled release as `Absorbed`
+        only, which is what makes `UIF-CMENU-002`'s "absorbed without dismissing"
+        true.
+      * `rest_leading` follows the **glyph, not the slot type** — an unchecked box
+        draws no glyph so it resolves `text_muted`, matching the spec's
+        "`accent.text` (`✓`/`•`) **or** `text.muted`".
+      * `cursor_for` consults the base as well as `activatable()`, so a row
+        resolved `Disabled`/`SectionHeading` can never light a pointer cursor.
+      **Two token gaps surfaced (G-12):** `token::typography` has no 12px
+      **SemiBold** rung (`CAPTION` is Regular/Medium), so the heading is
+      `CAPTION.size` + `Weight::Semibold`; and there is no token for the spec's
+      10px row padding or 9px separator height — both are expressed as token
+      compositions (`space::SM + space::XXS`, `space::SM + shape::BORDER_HAIRLINE`).
+      Tests: 64 new (515 total).
       **Commit:** `feat(iced-pro): add menu card and row renderer`
 - [ ] **INC-16** `surface/menu/tree.rs` — cascade controller: single-tree mutual
       exclusion, sibling replacement, parent stays open, keyboard navigation
@@ -615,6 +649,17 @@ Recorded as they are found; none resolved yet.
   Everything else in the matrix clears comfortably (Rest label 11.7180, trailing
   6.7751, check glyph 9.4891, hovered 15.0427, pressed 14.0368, submenu
   chevron 8.0568, card edge 4.0128, destructive pressed 6.8258).
+- **G-12 — Two token gaps surfaced by the menu renderer.**
+  1. `token::typography` has no **12px SemiBold** rung. `CAPTION` is
+     Regular/Medium, but §4.9.2's section heading is `12px SemiBold`. The
+     renderer composes `CAPTION.size` + `Weight::Semibold` rather than inventing
+     a rung. If more surfaces need that pairing it should become a real rung
+     rather than staying a composition.
+  2. No token exists for the spec's **10px menu row padding** or **9px separator
+     height**. Both are expressed as compositions — `space::SM + space::XXS` and
+     `space::SM + shape::BORDER_HAIRLINE`. They are honest compositions of
+     existing tokens, not magic numbers, but the spec names them as if they were
+     primitives. Worth reconciling when the spec is next revised.
 
 ---
 
