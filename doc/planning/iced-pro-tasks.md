@@ -875,6 +875,208 @@ future increments down a dead end.
 
 ---
 
+### M8 — Spec revision 2026-10-22: re-baseline and gap closure
+
+The spec was revised mid-project (308 lines). The revision **adopted
+decisions D-5 and D-6 outright** and re-baselined the colour vocabulary,
+which turned several recorded "deviations" into conformance and created new
+work. Increments INC-23…INC-30 plus one defect fix.
+
+**Every contrast figure in this milestone was independently recomputed from
+raw sRGB. Nothing was transcribed from the spec's printed columns.** That
+discipline paid for itself repeatedly — see the spec-error list below.
+
+#### INC-23 — type scale families and allowed-weight sets (`UIF-TOK-004`, G-12)
+
+Two defects. First, no font-family tokens existed at all. Second, the
+`TypeRung` model was the wrong *shape*: it carried a resting/emphasis
+**pair** where the spec's "Allowed Weights" column describes a **set**.
+The pair cannot express that `caption` may legally carry SemiBold, or that
+`ui_compact` may carry all four — which is exactly why `menu/view.rs` and
+`movable.rs` were hand-composing weights.
+
+Added `Family::{Sans, Mono}` mapped onto iced's *generic* families. Naming
+`"Fira Sans"` would have claimed a four-weight family the crate does not
+ship: iced's `fira-sans` feature bundles **only** `FiraSans-Regular.ttf`
+(plus `Iced-Icons.ttf`). `Font::MONOSPACE` resolves through cosmic-text's
+system fallback, so mono needs no bundled TTF — but the four-weight model's
+glyph availability depends on the **host machine**, not this crate. That
+limitation is documented rather than papered over.
+
+#### INC-24 — palette re-baseline (`UIF-TOK-005`, `UIF-TOK-006`)
+
+Rename `accent_primary` → `accent_fill`, `status_danger` →
+`status_danger_text`; add `accent_fill_active`, `accent_border`,
+`status_danger_fill_active`; revalue `surface_hover` (38,38,44)→(32,32,36)
+and `surface_active` (43,43,51)→(42,42,46). ~400 references across 18
+files. The new model is a six-token polarity split that validates D-5 and
+D-6. `TOK-005` → **Implemented**: every token now matches the spec's sRGB
+exactly.
+
+Rules 1, 3a and 3b pass the full matrix; rule 4's strong-on-fill span is
+4.8020–5.7543 as claimed.
+
+**Two spec-internal conflicts pinned rather than patched** — neither is
+fixable in code without breaking surfaces that currently pass:
+
+| Conflict | Measured | Spec says |
+|---|---|---|
+| rule 2 `[4.00, 6.00]` band, `text.disabled` on `surface.sunken` | **6.0205** | must be ≤ 6.00 |
+| rule 3 `CoincidentWithFill` floor, `status.danger.fill_active` on `overlay` | **3.0789** | must be ≥ 3.08 |
+
+The second is self-referential: the spec derived its own floor from that
+cell and then rounded the floor above the value.
+
+#### INC-25 — real pressed-fill tokens in the button resolver
+
+`PRESSED_FILL_ALPHA = 0.85` synthesised what §3.1 now supplies as tokens.
+Deleted, along with `with_pressed_alpha`. Primary pressed →
+`accent_fill_active`; Danger hovered → `status_danger_fill`, pressed →
+`status_danger_fill_active`. Primary hover repaints the **border only**,
+never the fill.
+
+The conditional Danger ring (accent.border at Rest, text.strong when
+Hovered/Pressed) is **computed from the resolved fill** by the existing
+D-6 resolver, not hard-coded. Two tests lock the mechanism rather than the
+outcome, so a hard-coded ring that happened to match the colours would still
+fail.
+
+**Correction to my own brief:** I supplied `accent_border/surface_raised =
+6.2745` and `status_danger_text/surface_raised = 6.1836`, derived from
+the spec's 4dp-rounded luminances. Raw sRGB gives **6.2727** and **6.1812**.
+The subagent kept the crate's raw-RGB solver and flagged mine. Lesson:
+rounded intermediate values are not a source of truth.
+
+#### INC-26 — new size tokens; last opacity hack removed
+
+Added `size.bar.status` (24), `size.indicator.dot` (6),
+`size.splitter.grab` (10). The splitter grab band is declared with **no
+consumer** — D-2 leaves splitters app-owned, so the alternative is the app
+inventing its own number for the same measurement, which holes through
+`PRIN-001`.
+
+Movable footer: raw `22.0` → `size::BAR_STATUS` (24). Derived values
+recomputed: `CHROME_HEIGHT` 90→92, `CONTENT_VIEWPORT_MIN` 170→168.
+Destructive menu row pressed → `status_danger_fill_active`;
+`PRESSED_FILL_ALPHA` and `with_alpha` deleted. A crate-wide gate walks 75
+state fills and asserts each is alpha 0.0 or 1.0, with the walk count
+itself asserted so the gate cannot go vacuous.
+
+#### INC-27 — 1px inset focus outline (`UIF-ATOM-000` → Implemented)
+
+Colour, stroke width and placement travel as one `FocusIndicator`, because
+a bare `Color` pushes width and placement back onto the call site — which
+is how an inset outline drifts back to 2px and outward.
+
+**Iced strokes a quad inward from its bounds**
+(`iced_wgpu-0.14.0/src/shader/quad/solid.wgsl:82`). So `Outer` expands
+the control by the ring width and grows the radius to stay concentric;
+`Inset` keeps bounds *and* radius unchanged, putting the whole 1px inside
+with its outer edge on the row's own edge. An earlier draft used
+`shrink(width)`, which left a 1px band of fill at the perimeter — a third
+placement the spec does not describe.
+
+Both placements share one adaptive colour rule. The two focused menu cells
+fall out of arithmetic rather than naming a colour: normal focused resolves
+to `accent.border` (5.4427:1 vs `surface.hover`); destructive focused
+resolves to `text.strong` because accent measures 1.7188:1 against the red
+fill and loses.
+
+#### INC-28 — source-level token enforcement (`PRIN-001`, `VER-001`)
+
+`token_lint` makes the "no raw literals" rule machine-enforced. Previously
+the only automated gate was the gallery's unmapped-colours check, which
+sees a hard-coded colour only if the gallery renders that cell, and sees
+hard-coded padding, radius, stroke and size **not at all**.
+
+Rule A bans colour constructors and hex literals outside `token/color.rs`.
+Comments, strings and char literals are redacted to spaces with line/column
+preserved, so documentation *quoting* a constructor is never reported.
+Rule B bans a bare numeric literal bound to a visually-named `pub const` in
+`widget/`/`surface/`, excepting `TokenBound`, `Zero`, `Ratio`, and
+`SurfaceBound` — the §1.1 carve-out being an enumerated registry of 15
+entries each carrying its authorising section, not a regex.
+
+Three violations found before any allow-listing; two fixed rather than
+excused (resize grip → `size.icon.md`, which the spec's own table names for
+the resize grip glyph, value-identical; scrim → struct update instead of a
+constructor). One allow-list entry, pinned at length one, with a written
+reason.
+
+#### INC-29 — solid-fill foreground lock enforced (`TOK-006` → Implemented)
+
+A pure predicate plus a guard the resolvers call. A newtype would ripple
+through every `Color` consumer; a `Result` constructor cannot thread the
+pure/`const fn` paint paths. The guard checks and never rewrites, so **zero
+rendered colour changed** — the hard constraint, and it held.
+
+**The lock is role-based, not threshold-based, and that is load-bearing.**
+Of twelve foreground-only × locked-fill pairings, ten fall below the 3.00
+chrome floor but **two clear it** — `accent.text` on `accent.fill_active`
+at **3.0293** and on `status.danger.fill_active` at **3.0820**. Rule 4
+forbids both regardless. A threshold-based implementation would have
+permitted them.
+
+#### INC-30 — gallery coverage (`VER-004`)
+
+91 → **175 cells**. Added a palette-world dimension (Standard /
+InvertedEditor) because value-based naming is genuinely ambiguous — the
+editor canvas `RGB(255,255,255)` *is* `text.strong`'s channels. Added a
+control-rung geometry dimension (32 / 28), modal header/banner/footer
+sub-rectangles, menu separator and glyph placement as ink boxes (glyphs
+come from a text pass, not `fill_quad`), input-dialog row bodies, and
+movable trailing actions.
+
+Two behaviours corrected rather than assumed: a resting menu row paints no
+fill, so its glyph is judged against `surface.overlay` rather than waved
+through as `UnpaintedBackground`; the submenu chevron is `text.muted`
+closed and `accent.text` only while the branch is open.
+
+#### Defect fix — the gallery path guard only refused the exact root
+
+**Found by running the binary rather than trusting a report.** The guard
+compared the candidate path to each forbidden root for *equality*.
+Refusing `%APPDATA%` while accepting `%APPDATA%\fastmd-snapshot` protects
+nothing. Combined with the `.fastmd` marker requiring a leading dot, a full
+175-cell snapshot landed in `%APPDATA%` while the guard was believed to be
+working. The stray output was removed.
+
+Now refuses containment, component-wise rather than string-wise. **The
+first containment fix broke the default**, because on Windows the temp tree
+lives *inside* `%LOCALAPPDATA%` — the carve-out has to be the temp tree
+specifically, not its parent. Verified end to end: APPDATA / USERPROFILE /
+LOCALAPPDATA subdirs all exit 2; default temp exits 0; nothing left behind.
+
+The guard had **no tests at all**, which is how the hole survived while a
+working guard was being reported. Eight added, testing the pure predicate
+only so no test can touch a real user path.
+
+#### Spec errors found by recomputation
+
+| Cell | Spec prints | True |
+|---|---|---|
+| `status.danger.fill_active` luminance | `0.1309` | **0.1325** |
+| `status.danger.fill_active` vs `base` | `3.43` | 3.4575 |
+| `status.danger.fill_active` vs `active` | `2.46` | 2.4842 |
+| `accent.fill_active` vs `active` | `2.52` | 2.5274 |
+| `Secondary` hover border vs hover | `3.66` | 3.6772 |
+| normal focused menu outline | `5.35` | 5.4427 |
+| `editor.inverted.err` on white | `7.00` | 7.1413 |
+
+None of these break a floor. They confirm the standing rule: never
+transcribe the spec's contrast column.
+
+#### Milestone result
+
+- **1406** crate tests, **4567** workspace tests (6 skipped). All six gates
+  green at every step.
+- Coverage: **28 Implemented · 12 Partial · 7 NotOwned = 47** (was
+  25/14/7 across 46).
+- `TOK-005`, `TOK-006` and `ATOM-000` moved to Implemented.
+- Zero opacity-synthesised state fills remain in the crate.
+
+---
+
 ## 4. Known spec gaps / open questions
 
 Recorded as they are found; none resolved yet.
