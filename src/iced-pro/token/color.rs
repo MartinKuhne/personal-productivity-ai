@@ -35,6 +35,18 @@
 //! `doc/planning/iced-pro-tasks.md`, and each affected field's own doc
 //! says so. Every other token is still the spec's number verbatim.
 //!
+//! One token exists because the spec's set could not:
+//! [`status_danger_fill`](Palette::status_danger_fill). The spec asks a
+//! single red to be both the error *text* colour on dark surfaces and the
+//! *background* behind `text.strong` on a Danger button, and those two
+//! roles require opposite luminance — the bounds are disjoint, so no
+//! value satisfies both (ledger gap **G-8**). Decision **D-5** splits
+//! the role across two tokens:
+//! [`status_danger`](Palette::status_danger) keeps the text/icon job and
+//! `status_danger_fill` takes the background job. The set is therefore
+//! one token larger than §2.5 prints, and the two reds are not
+//! interchangeable.
+//!
 //! What this module deliberately does *not* do is arithmetic on
 //! contrast. The luminance and WCAG-ratio figures the spec's table
 //! carries belong to `token/contrast.rs` (`UIF-TOK-006` /
@@ -215,8 +227,15 @@ pub struct Palette {
     /// `RGB(220, 130, 0)`.
     pub status_warning: Color,
 
-    /// `color.status.danger` — validation error text and borders, and
-    /// the destructive-action hover/CTA. `RGB(255, 28, 2)`.
+    /// `color.status.danger` — validation error **text and icons**, and
+    /// the resting foreground/border of a destructive control.
+    /// `RGB(255, 28, 2)`.
+    ///
+    /// **This is the text/icon red. Reach for it when the danger is
+    /// *written* — an error message, a validation glyph, a resting
+    /// Danger label. It is not a background.** When the danger is the
+    /// surface a label sits *on*, use
+    /// [`status_danger_fill`](Self::status_danger_fill) instead.
     ///
     /// **Retuned from the spec's printed `RGB(244, 15, 2)`** to satisfy
     /// `UIF-TOK-006` (ledger gap **G-7**, decision **A**). This colour
@@ -234,7 +253,55 @@ pub struct Palette {
     /// hue `3.22° → 6.17°`, well short of orange at 30° — with red
     /// still dominant by more than 200 units and blue untouched, so it
     /// reads as a brighter red rather than a shifted one.
+    ///
+    /// The lightening is exactly what disqualifies it as a background.
+    /// A red bright enough to read as type on a dark surface is too
+    /// bright to carry white body text on top of it: `text.strong` on
+    /// this token measures `3.8753:1`, under the 4.5:1 rule. That is
+    /// not a rounding artefact and cannot be retuned away — the two
+    /// roles pull luminance in opposite directions, which is why the
+    /// split in **D-5** exists rather than another nudge here.
     pub status_danger: Color,
+
+    /// `color.status.danger_fill` — the darker destructive red, used
+    /// **as a background behind [`text_strong`](Self::text_strong)**:
+    /// the Danger button's hover fill, and by extension its pressed fill.
+    /// `RGB(208, 23, 2)`.
+    ///
+    /// **This is the background red. Reach for it when a label is
+    /// painted *on* the danger — a filled destructive button. It is
+    /// not a text colour**; for written errors use
+    /// [`status_danger`](Self::status_danger).
+    ///
+    /// It exists because the spec conflated two roles that need opposite
+    /// luminance (ledger gap **G-8**, decision **D-5**). Solving
+    /// `white-on-red >= 4.5` for the red's luminance caps it at
+    /// `L <= 0.183333`, while solving `red-on-overlay >= 4.5` floors it
+    /// at `L >= 0.216697`. The bounds do not overlap, so one red
+    /// cannot be both. This token takes the low side of the split:
+    /// `L = 0.140271`, which carries `text.strong` at `5.5185:1` —
+    /// deliberately past the `5.0` target rather than sat on the bare
+    /// `4.5`, because the whole reason this token was added is that the
+    /// old pairing was `0.6247` short.
+    ///
+    /// It stays unmistakably the same red as
+    /// [`status_danger`](Self::status_danger), only darker: HSL hue
+    /// `6.12°` against that token's `6.17°` (orange does not start
+    /// until `30°`), red dominant over green by 185 units and over blue
+    /// by 206, and blue held at the same `2`. The step down is
+    /// `0.080678` of relative luminance — a third darker, not a
+    /// nudge — so hover reads as an escalation rather than a repaint.
+    ///
+    /// It is not a surface and must never be mistaken for one. Every
+    /// `surface.*` token is a near-neutral grey spanning at most `8`
+    /// units of channel spread; this one spans `206`, and it clears
+    /// every surface by at least `2.5436:1` on luminance, so it never
+    /// luminance-matches the layer it is meant to stand out from.
+    /// (The `3.0:1` chrome floor of `UIF-TOK-006` rule 2 is not the
+    /// rule for a *fill* — it governs borders and rings — and no value
+    /// that also carries white text at `5.0:1` could reach it against
+    /// `surface.active` anyway.)
+    pub status_danger_fill: Color,
 }
 
 impl Palette {
@@ -242,7 +309,9 @@ impl Palette {
     /// `G-7` contrast retunes applied — see
     /// [`accent_primary`](Self::accent_primary),
     /// [`surface_active`](Self::surface_active) and
-    /// [`status_danger`](Self::status_danger).
+    /// [`status_danger`](Self::status_danger) — plus the
+    /// [`status_danger_fill`](Self::status_danger_fill) that decision
+    /// **D-5** adds to the set the spec's §2.5 table does not print.
     ///
     /// A `const fn` rather than a `static`: the palette is a value, and
     /// call sites are expected to take it by copy and read fields off it
@@ -269,6 +338,7 @@ impl Palette {
             status_success: Color::from_rgb8(100, 255, 100),
             status_warning: Color::from_rgb8(220, 130, 0),
             status_danger: Color::from_rgb8(255, 28, 2),
+            status_danger_fill: Color::from_rgb8(208, 23, 2),
         }
     }
 }

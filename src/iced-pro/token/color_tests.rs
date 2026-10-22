@@ -14,6 +14,14 @@
 //! pairing table — is `token/contrast.rs` (`UIF-TOK-006` /
 //! `UIF-VER-001`) and arrives in a later increment; duplicating it in
 //! production now would pre-empt that module's API.
+//!
+//! The last group of tests covers the `status.danger` split: decision
+//! **D-5** added `color.status.danger_fill` because §2.5's single red
+//! cannot be both the error-text colour on dark surfaces and the
+//! background behind `text.strong` (gap **G-8**). Those tests pin the
+//! new token's contrast margin, its hue, its distance from every surface,
+//! and the disjointness of the two roles' luminance bounds — so the
+//! split cannot quietly collapse back into one token.
 
 use super::*;
 
@@ -52,7 +60,9 @@ const STATUS_MIN_DISTANCE: f32 = 100.0;
 /// `surface.active`, `accent.primary` and `status.danger` are the
 /// `G-7` contrast retunes (decision **A** in
 /// `doc/planning/iced-pro-tasks.md`), so the numbers below are the
-/// retuned ones, not the ones §2.5 prints.
+/// retuned ones, not the ones §2.5 prints. One further row,
+/// `color.status.danger_fill`, carries a value §2.5 does not print at
+/// all: the token decision **D-5** adds to the set.
 #[derive(Clone, Copy)]
 struct SpecRow {
     /// The spec token, e.g. `color.surface.base`.
@@ -81,12 +91,19 @@ fn row(token: &'static str, color: Color, r: u8, g: u8, b: u8, a: f32) -> SpecRo
     }
 }
 
-/// The nineteen dark-palette tokens against the spec table, in the
+/// The twenty dark-palette tokens against the spec table, in the
 /// table's own order.
 ///
 /// Every table-driven test walks this list, so no token can be skipped by
 /// a test that checks a hand-picked subset.
-fn spec_rows() -> [SpecRow; 19] {
+///
+/// Nineteen rows transcribe §2.5. The last one does not:
+/// `color.status.danger_fill` is not in the spec's printed table at all.
+/// It is the token decision **D-5** adds to the set because §2.5's
+/// single `status.danger` cannot serve both the error-text role and the
+/// background-behind-`text.strong` role (gap **G-8**), so this row's
+/// pinned value is the ledger's, not the spec's.
+fn spec_rows() -> [SpecRow; 20] {
     let p = Palette::dark();
     [
         row("color.surface.base", p.surface_base, 9, 9, 11, 1.0),
@@ -108,6 +125,14 @@ fn spec_rows() -> [SpecRow; 19] {
         row("color.status.success", p.status_success, 100, 255, 100, 1.0),
         row("color.status.warning", p.status_warning, 220, 130, 0, 1.0),
         row("color.status.danger", p.status_danger, 255, 28, 2, 1.0),
+        row(
+            "color.status.danger_fill",
+            p.status_danger_fill,
+            208,
+            23,
+            2,
+            1.0,
+        ),
     ]
 }
 
@@ -359,6 +384,7 @@ fn test_accents_and_statuses_are_deliberately_non_neutral() {
         ("color.status.success", p.status_success),
         ("color.status.warning", p.status_warning),
         ("color.status.danger", p.status_danger),
+        ("color.status.danger_fill", p.status_danger_fill),
     ];
 
     for (name, color) in chromatic {
@@ -398,6 +424,16 @@ fn test_text_roles_are_strictly_ordered_by_prominence() {
 /// far apart in the RGB cube, and each differs on at least two channels,
 /// so no colour-blind-adjacent viewing or cheap display can collapse two
 /// of them into one signal.
+///
+/// `color.status.danger_fill` is deliberately **not** a fourth entry. It
+/// is the same danger signal in a different *role* — a background rather
+/// than a text colour — and it sits only ~47 units from `color.status.danger`
+/// on purpose, so the two read as one colour at two depths. Requiring the
+/// 100-unit signal separation here would demand the fill be a different
+/// colour rather than a darker red, which defeats the point of **D-5**.
+/// Its own distinctness requirements are the ones that matter for a fill:
+/// [`test_status_danger_fill_is_not_a_surface`] and
+/// [`test_the_two_danger_roles_have_disjoint_luminance_bounds`].
 #[test]
 fn test_status_colors_are_mutually_distinguishable() {
     let p = Palette::dark();
@@ -595,5 +631,258 @@ fn test_palette_equality_is_field_wise() {
     assert_eq!(
         a.surface_base, b.surface_base,
         "the untouched fields must still compare equal"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The `status.danger` split — decision D-5, gap G-8
+// ---------------------------------------------------------------------------
+
+/// The `UIF-TOK-006` rule 1 threshold the disjoint-bounds test solves with.
+const MIN_TEXT_RULE: f32 = 4.5;
+
+/// Tolerance on a pinned contrast ratio — three decimals, enough to tell
+/// `4.9990` from `5.5185`.
+const RATIO_EPS: f32 = 1e-3;
+
+/// The margin `status.danger_fill` is held to against `text.strong`.
+///
+/// Deliberately above the bare `4.5:1` text rule: the reason this token
+/// exists at all is that the old pairing was `0.6247` short, so the
+/// replacement is pinned with room rather than sat on the line.
+const DANGER_FILL_MIN_CONTRAST: f32 = 5.0;
+
+/// Upper edge of the red hue band, in degrees. Orange starts at `30°`;
+/// fifteen is well inside red and far from any colour that could be read
+/// as a warm brown or amber.
+const RED_BAND_MAX_DEG: f32 = 15.0;
+
+/// The smallest luminance step that reads as "clearly darker" rather
+/// than a nudge — a quarter of the way from `surface.base` to
+/// `surface.active`.
+const MIN_VISIBLE_LUMINANCE_STEP: f32 = 0.05;
+
+/// How far the danger fill must stand from every surface on luminance, so
+/// it is never mistaken for the layer it is meant to stand out from.
+const FILL_VS_SURFACE_MIN_RATIO: f32 = 2.0;
+
+/// WCAG 2.1 contrast ratio between two colours.
+///
+/// Test-local, matching the file's existing [`luminance`] helper.
+fn contrast(a: Color, b: Color) -> f32 {
+    let la = luminance(a);
+    let lb = luminance(b);
+    let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+/// HSL hue in degrees, `0..360`. Undefined for a grey, which never
+/// reaches this file's red-band checks.
+fn hue_deg(color: Color) -> f32 {
+    let r = ch8(color.r);
+    let g = ch8(color.g);
+    let b = ch8(color.b);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    if delta == 0.0 {
+        return 0.0;
+    }
+    let hue = if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+    if hue < 0.0 { hue + 360.0 } else { hue }
+}
+
+/// The background red carries `text.strong` with real margin, not a
+/// knife-edge pass.
+#[test]
+fn test_status_danger_fill_carries_text_strong_with_margin() {
+    let p = Palette::dark();
+    let ratio = contrast(p.text_strong, p.status_danger_fill);
+
+    assert!(
+        ratio >= DANGER_FILL_MIN_CONTRAST,
+        "text.strong on color.status.danger_fill measures {ratio:.4}:1, under \
+         the {DANGER_FILL_MIN_CONTRAST}:1 this token exists to clear",
+    );
+    assert!(
+        (ratio - 5.5185).abs() < RATIO_EPS,
+        "color.status.danger_fill vs text.strong is pinned at 5.5185:1, got \
+         {ratio:.4}:1",
+    );
+    assert!(
+        ratio - DANGER_FILL_MIN_CONTRAST > 0.5,
+        "headroom above the target is {:.4} — the point of the token is margin, \
+         so a drift that eats it must fail loudly",
+        ratio - DANGER_FILL_MIN_CONTRAST,
+    );
+}
+
+/// The fill is still a red, not a brown or an amber: red dominant, green
+/// and blue low, hue inside the red band.
+#[test]
+fn test_status_danger_fill_stays_recognisably_red() {
+    let p = Palette::dark();
+    let fill = p.status_danger_fill;
+
+    assert!(
+        ch8(fill.r) > 150.0,
+        "the fill must stay a strong red, red is {}",
+        ch8(fill.r)
+    );
+    assert!(
+        ch8(fill.g) < 60.0,
+        "green must stay low or the red goes brown, green is {}",
+        ch8(fill.g)
+    );
+    assert!(
+        ch8(fill.b) < 60.0,
+        "blue must stay low or the red goes purple, blue is {}",
+        ch8(fill.b)
+    );
+    assert!(
+        ch8(fill.r) - ch8(fill.g) > 150.0,
+        "red must dominate green by a wide margin, got {}",
+        ch8(fill.r) - ch8(fill.g)
+    );
+    assert!(
+        ch8(fill.r) - ch8(fill.b) > 150.0,
+        "red must dominate blue by a wide margin, got {}",
+        ch8(fill.r) - ch8(fill.b)
+    );
+
+    let hue = hue_deg(fill);
+    assert!(
+        (0.0..RED_BAND_MAX_DEG).contains(&hue),
+        "color.status.danger_fill hue is {hue:.2}°, outside the red band \
+         [0, {RED_BAND_MAX_DEG})",
+    );
+    assert!(
+        (hue - hue_deg(p.status_danger)).abs() < 1.0,
+        "the two danger reds must read as the same red: fill {hue:.2}° vs \
+         status.danger {:.2}°",
+        hue_deg(p.status_danger),
+    );
+}
+
+/// The step down from `status.danger` is visible, and `status.danger`
+/// itself is untouched by the split.
+#[test]
+fn test_status_danger_fill_is_a_visible_step_darker_and_danger_is_unchanged() {
+    let p = Palette::dark();
+    let fill_l = luminance(p.status_danger_fill);
+    let text_l = luminance(p.status_danger);
+
+    assert!(
+        fill_l < text_l,
+        "the fill must be darker than the text red: fill {fill_l:.6} vs \
+         status.danger {text_l:.6}",
+    );
+    assert!(
+        text_l - fill_l >= MIN_VISIBLE_LUMINANCE_STEP,
+        "the step down is only {:.6} of relative luminance — that is a nudge, \
+         not the visible escalation D-5 asks for",
+        text_l - fill_l,
+    );
+    assert!(
+        fill_l / text_l < 0.7,
+        "the fill is at {:.1}% of the text red's luminance; it must read as a \
+         third darker, not slightly darker",
+        100.0 * fill_l / text_l,
+    );
+
+    // The split adds a token; it does not move the existing one.
+    assert_rgba("color.status.danger", p.status_danger, 255, 28, 2, 1.0);
+}
+
+/// The fill is not a surface and must never read as one: it is far more
+/// chromatic than any grey in the ladder, and it stands clear of every
+/// surface on luminance too.
+#[test]
+fn test_status_danger_fill_is_not_a_surface() {
+    let p = Palette::dark();
+    let fill = p.status_danger_fill;
+    let surfaces = [
+        ("color.surface.sunken", p.surface_sunken),
+        ("color.surface.base", p.surface_base),
+        ("color.surface.raised", p.surface_raised),
+        ("color.surface.code", p.surface_code),
+        ("color.surface.overlay", p.surface_overlay),
+        ("color.surface.hover", p.surface_hover),
+        ("color.surface.active", p.surface_active),
+    ];
+
+    for (name, surface) in surfaces {
+        assert!(
+            spread(fill) > NEUTRAL_SPREAD_MAX * 10.0,
+            "the fill's channel spread is {}, which is not chromatic enough to \
+             be unmistakably not a grey",
+            spread(fill)
+        );
+        assert!(
+            spread(surface) <= NEUTRAL_SPREAD_MAX,
+            "{name} must stay a neutral grey, but spans {}",
+            spread(surface)
+        );
+        let ratio = contrast(fill, surface);
+        assert!(
+            ratio >= FILL_VS_SURFACE_MIN_RATIO,
+            "color.status.danger_fill vs {name} is only {ratio:.4}:1 — close \
+             enough to the surface to be mistaken for one",
+        );
+    }
+}
+
+/// The two roles cannot share one token, and each token sits on its own
+/// side of the divide.
+///
+/// Solving each role for the red's luminance gives two bounds that do not
+/// overlap. That is the arithmetic behind gap **G-8** and the reason
+/// **D-5** split the token rather than retuning it.
+#[test]
+fn test_the_two_danger_roles_have_disjoint_luminance_bounds() {
+    let p = Palette::dark();
+    let white_l = luminance(p.text_strong);
+    let overlay_l = luminance(p.surface_overlay);
+
+    // white-on-red >= 4.5  =>  L_red <= (L_white + 0.05) / 4.5 - 0.05
+    let max_for_background = (white_l + 0.05) / MIN_TEXT_RULE - 0.05;
+    // red-on-overlay >= 4.5  =>  L_red >= 4.5 * (L_overlay + 0.05) - 0.05
+    let min_for_text = MIN_TEXT_RULE * (overlay_l + 0.05) - 0.05;
+
+    assert!(
+        max_for_background < min_for_text,
+        "the two roles' bounds must be disjoint — that is the whole argument \
+         for the split: max {max_for_background:.6} vs min {min_for_text:.6}",
+    );
+    assert!(
+        luminance(p.status_danger_fill) <= max_for_background,
+        "the fill sits above the background role's ceiling and would fail as a \
+         background: {} > {max_for_background:.6}",
+        luminance(p.status_danger_fill),
+    );
+    assert!(
+        luminance(p.status_danger) >= min_for_text,
+        "the text red sits below the text role's floor and would fail as text: \
+         {} < {min_for_text:.6}",
+        luminance(p.status_danger),
+    );
+
+    // And each token fails in the other's role, which is what makes them
+    // non-interchangeable rather than merely different.
+    assert!(
+        contrast(p.text_strong, p.status_danger) < MIN_TEXT_RULE,
+        "status.danger must still fail as a background — otherwise the split \
+         was unnecessary"
+    );
+    assert!(
+        contrast(p.status_danger_fill, p.surface_overlay) < MIN_TEXT_RULE,
+        "status.danger_fill must still fail as error text on the overlay — it \
+         is too dark to be the written-error colour"
     );
 }

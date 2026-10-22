@@ -27,42 +27,54 @@
 //! them. This sidecar measures all of them before a widget gets the chance
 //! to ship an unreadable label.
 //!
-//! # The audit's failures
+//! # The audit's history — three failures, cleared in INC-08
 //!
-//! Three judged pairs do not clear the rule their role carries. All three
-//! are pinned at their measured value rather than waived, and no token was
-//! retuned to make them pass — that is a supervisor decision, not an
-//! increment-owning one.
+//! `INC-07` found three judged pairs that did not clear the rule their
+//! role carries. They were pinned rather than waived, pending a supervisor
+//! decision. Decisions **D-5** and **D-6** resolved both root causes, and
+//! all three now pass. The old measurements are kept here and in
+//! [`resolved_pairs`] so the history stays visible next to the numbers
+//! that replaced them.
 //!
-//! | Pair | Cell | Measured | Rule | Short by |
+//! | Pair | Cell | Was | Now | Rule |
 //! |---|---|---|---|---|
-//! | `text.strong` on `status.danger` | Danger `Hovered` | `3.8753:1` | `4.5:1` | `0.6247` |
-//! | `accent.primary` ring on `status.danger` | Danger `Hovered + ring` | `1.1779:1` | `3.0:1` | `1.8221` |
-//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `3.0:1` | `1.9391` |
+//! | `text.strong` on `status.danger` | Danger `Hovered` | `3.8753:1` | `5.5185:1` on `status.danger_fill` | `4.5:1` |
+//! | `accent.primary` ring on `status.danger` | Danger `Hovered + ring` | `1.1779:1` | `5.5185:1` — `text.strong` ring | `3.0:1` |
+//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `6.6216:1` — `text.strong` ring | `3.0:1` |
 //!
-//! The first is the pair the increment brief predicted. Measured, white on
-//! the retuned `RGB(255, 28, 2)` is `3.8753:1` — the brief's `~3.88:1`
-//! estimate, to two decimals.
+//! The first was the pair the increment brief predicted: white on the
+//! `G-7`-retuned `RGB(255, 28, 2)` is `3.8753:1`, the brief's
+//! `~3.88:1` to two decimals. It is fixed by the **D-5** token split —
+//! the Danger fill is now `status_danger_fill`, `RGB(208, 23, 2)`, and
+//! the error-text red is no longer asked to be a background.
 //!
-//! The other two are the finding the brief did not predict, and they are
-//! worse. They exist only because the two-part state model lets a
-//! keyboard-focused button *also* be hovered or pressed — combinations
-//! §3.1 never snapshots, because it spells its Focused cell as "Rest +
-//! ring". Inherit the hover fill instead of Rest, as `Hovered + focused`
-//! must, and the `accent.primary` ring lands on a red fill at roughly
-//! `1.18:1`. The focus indicator is invisible precisely when the user is
-//! doing the thing it exists to report.
+//! The other two were the finding the brief did not predict, and they are
+//! fixed by the **D-6** adaptive ring rather than by the new token. They
+//! existed only because the two-part state model lets a keyboard-focused
+//! button *also* be hovered or pressed — combinations §3.1 never
+//! snapshots, because it spells its Focused cell as "Rest + ring".
+//! Inheriting the hover fill instead of Rest, as `Hovered + focused`
+//! must, dropped the `accent.primary` ring onto a red fill at roughly
+//! `1.18:1`: an invisible focus indicator precisely when the user is
+//! doing the thing it exists to report. Resolving the ring against the
+//! actual background makes it `text.strong` there.
+//!
+//! Note that the second and third rows changed *foreground*, not just
+//! value — the pair that is now measured is not the pair that failed.
+//! [`resolved_pairs`] records both halves so the substitution is
+//! auditable rather than hidden behind a matching row name.
 //!
 //! # Why the pressed fills are measured composited
 //!
 //! Primary and Danger press at 85% alpha. [`contrast_ratio`] ignores
-//! alpha by design, so a naive reading of the Danger pressed label is
-//! the *opaque* pairing — `3.8753:1`, a failure that never appears on
-//! screen. Laid over the surfaces a button can actually be mounted to,
-//! the 85% fill lands darker and the same label reads `4.8427:1` at its
-//! worst. The audit measures the painted colour and reports the naive
-//! figure alongside it, because the gap between the two is exactly the
-//! kind of mistake this gate exists to catch.
+//! alpha by design, so a naive reading of a pressed label is the
+//! *opaque* pairing — `4.5648:1` for Primary, `5.5185:1` for Danger.
+//! Laid over the surfaces a button can actually be mounted to, the 85%
+//! fill lands darker and both labels read better than the naive figure:
+//! `5.3967:1` and `6.6216:1` at their worst, both over `surface.active`.
+//! The audit measures the painted colour and reports the naive figure
+//! alongside it, because the gap between the two is exactly the kind of
+//! mistake this gate exists to catch.
 
 use super::*;
 use crate::state::{BaseState, InteractionInput, VisualState, resolve};
@@ -91,6 +103,18 @@ const VARIANTS: [ButtonVariant; 4] = [
 /// The dark palette, taken once so every table reads as token names.
 fn palette() -> Palette {
     Palette::dark()
+}
+
+/// A button's resolved style at a base state, with no focus ring drawn.
+fn style_for(variant: ButtonVariant, base: BaseState) -> ButtonStyle {
+    resolve_style(
+        variant,
+        VisualState {
+            base,
+            focused: false,
+        },
+        &palette(),
+    )
 }
 
 /// Every surface token in the elevation ladder, darkest to lightest.
@@ -138,7 +162,7 @@ fn token_name(color: Color) -> String {
         return "transparent".to_string();
     }
     let p = palette();
-    let table: [(&str, Color); 19] = [
+    let table: [(&str, Color); 20] = [
         ("surface.base", p.surface_base),
         ("surface.sunken", p.surface_sunken),
         ("surface.raised", p.surface_raised),
@@ -157,6 +181,7 @@ fn token_name(color: Color) -> String {
         ("status.success", p.status_success),
         ("status.warning", p.status_warning),
         ("status.danger", p.status_danger),
+        ("status.danger_fill", p.status_danger_fill),
         ("surface.scrim", p.surface_scrim),
     ];
     for (name, token) in table {
@@ -262,7 +287,7 @@ fn matrix_cells() -> Vec<Cell> {
     };
     let pressed_danger = Color {
         a: PRESSED_FILL_ALPHA,
-        ..p.status_danger
+        ..p.status_danger_fill
     };
     let none = Color::TRANSPARENT;
 
@@ -446,7 +471,7 @@ fn matrix_cells() -> Vec<Cell> {
             ButtonVariant::Danger,
             BaseState::Hovered,
             false,
-            p.status_danger,
+            p.status_danger_fill,
             p.text_strong,
             p.text_strong,
             none,
@@ -457,7 +482,7 @@ fn matrix_cells() -> Vec<Cell> {
             false,
             pressed_danger,
             p.text_strong,
-            p.status_danger,
+            p.status_danger_fill,
             none,
         ),
         cell(
@@ -577,7 +602,131 @@ fn test_every_matrix_cell_resolves_to_the_specified_paint() {
 }
 
 // ---------------------------------------------------------------------------
-// 2 — focus, opacity, the unpainted fill
+// 2 — D-5: the Danger fill split
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_danger_hovered_and_pressed_share_the_split_fill_and_resting_stays_on_surface() {
+    let p = palette();
+    let fill = p.status_danger_fill;
+
+    let hovered = style_for(ButtonVariant::Danger, BaseState::Hovered);
+    let pressed = style_for(ButtonVariant::Danger, BaseState::Pressed);
+    let resting = style_for(ButtonVariant::Danger, BaseState::Rest);
+
+    assert_eq!(
+        hovered.background, fill,
+        "D-5: Danger Hovered must fill with status.danger_fill, not the error-text red"
+    );
+    assert_eq!(
+        hovered.background.a, 1.0,
+        "D-5: the Hovered fill is opaque — only Pressed carries the spec's alpha"
+    );
+    assert!(
+        same_channels(pressed.background, fill),
+        "D-5: Danger Pressed fills with the same status.danger_fill channels, got {}",
+        rgb8(pressed.background)
+    );
+    assert_eq!(
+        pressed.background.a, PRESSED_FILL_ALPHA,
+        "D-5: the Pressed fill keeps the §3.1 press opacity"
+    );
+
+    assert_eq!(
+        resting.background, p.surface_raised,
+        "D-5: only Hovered and Pressed change — the Danger resting surface is untouched"
+    );
+    assert_eq!(
+        resting.foreground, p.status_danger,
+        "D-5: the Danger resting label stays status.danger, the tinted signal"
+    );
+    assert_eq!(
+        resting.border_color, p.status_danger,
+        "D-5: the Danger resting border stays status.danger"
+    );
+    assert_eq!(
+        hovered.border_color, p.text_strong,
+        "D-5: the Danger Hovered border stays text.strong — the fill carries the weight"
+    );
+}
+
+#[test]
+fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
+    // The spec writes the Danger Pressed border as `status.danger`. Against the
+    // darker pressed fill that is a bright edge rather than a signal: measured
+    // below, the pairing lands under 2:1 on every surface in the ladder, well
+    // short of the 3.0:1 chrome rule — so keeping it would have traded one audit
+    // failure for another.
+    //
+    // Primary already follows the same rule (its pressed border shares its
+    // fill's channels). Secondary and Ghost are the deliberate exceptions: they
+    // press on a neutral surface, so their border is a real signal rather than
+    // an edge on a coloured fill.
+    let p = palette();
+    let pressed = style_for(ButtonVariant::Danger, BaseState::Pressed);
+
+    assert!(
+        same_channels(pressed.border_color, p.status_danger_fill),
+        "D-5: the Danger pressed border must share the fill, got {}",
+        rgb8(pressed.border_color)
+    );
+    assert!(
+        !same_channels(pressed.border_color, p.status_danger),
+        "D-5: the bright error red must not edge the darker fill"
+    );
+
+    for (name, surface) in all_surfaces() {
+        let mounted = composite_over(pressed.background, surface);
+        let would_be = contrast_ratio(p.status_danger, mounted);
+        assert!(
+            would_be < MIN_CHROME_CONTRAST,
+            "the pre-D-5 `status.danger` border over the pressed fill on {name} \
+             measures {would_be:.4}:1 — it must not come back"
+        );
+    }
+
+    let primary = style_for(ButtonVariant::Primary, BaseState::Pressed);
+    assert!(
+        same_channels(primary.border_color, primary.background),
+        "Primary Pressed border {} shares its fill {}",
+        rgb8(primary.border_color),
+        rgb8(primary.background),
+    );
+}
+
+#[test]
+fn test_the_danger_fill_is_the_only_new_token_and_nothing_else_moved() {
+    // The split must be paid for by adding a token, not by nudging an existing
+    // one. Every value below is the literal `Palette::dark()` carries.
+    let now = palette();
+
+    assert_eq!(rgb8(now.surface_base), "RGB(9, 9, 11)");
+    assert_eq!(rgb8(now.surface_sunken), "RGB(6, 6, 8)");
+    assert_eq!(rgb8(now.surface_raised), "RGB(18, 18, 20)");
+    assert_eq!(rgb8(now.surface_code), "RGB(20, 20, 22)");
+    assert_eq!(rgb8(now.surface_overlay), "RGB(24, 24, 27)");
+    assert_eq!(rgb8(now.surface_hover), "RGB(38, 38, 44)");
+    assert_eq!(rgb8(now.surface_active), "RGB(43, 43, 51)");
+    assert_eq!(rgb8(now.border_subtle), "RGB(40, 40, 40)");
+    assert_eq!(rgb8(now.border_strong), "RGB(120, 120, 120)");
+    assert_eq!(rgb8(now.accent_primary), "RGB(98, 100, 240)");
+    assert_eq!(rgb8(now.accent_text), "RGB(100, 200, 255)");
+    assert_eq!(rgb8(now.text_primary), "RGB(210, 210, 210)");
+    assert_eq!(rgb8(now.text_strong), "RGB(255, 255, 255)");
+    assert_eq!(rgb8(now.text_muted), "RGB(160, 160, 160)");
+    assert_eq!(rgb8(now.text_disabled), "RGB(140, 140, 140)");
+    assert_eq!(rgb8(now.status_success), "RGB(100, 255, 100)");
+    assert_eq!(rgb8(now.status_warning), "RGB(220, 130, 0)");
+    assert_eq!(rgb8(now.status_danger), "RGB(255, 28, 2)");
+    assert_eq!(
+        rgb8(now.status_danger_fill),
+        "RGB(208, 23, 2)",
+        "status.danger_fill is the single token INC-08 adds"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 3 — focus, opacity, the unpainted fill
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -637,19 +786,27 @@ fn test_focus_ring_is_additive_and_never_replaces_the_base_paint() {
         pressed_focused.background.a, PRESSED_FILL_ALPHA,
         "a pressed Danger button keeps its 85% fill even while focused"
     );
-    assert_eq!(pressed_focused.focus_ring_color, p.accent_primary);
+    // The ring rides on top of that fill, and the adaptive rule is what
+    // makes it visible: the accent cannot clear the chrome floor against
+    // the danger fill, so the ring degrades to `text.strong` rather than
+    // disappearing. See `test_every_focus_ring_clears_the_chrome_rule`.
+    assert_eq!(pressed_focused.focus_ring_color, p.text_strong);
 }
 
 #[test]
-fn test_focus_ring_colour_is_variant_specific() {
+fn test_the_ring_at_rest_reproduces_the_per_variant_colour_spec_3_1_gives() {
     let p = palette();
     let focused = VisualState {
         base: BaseState::Rest,
         focused: true,
     };
 
-    // Primary's fill is already the accent, so an accent ring on it would
-    // be invisible — §3.1 gives it a text.strong ring instead.
+    // The adaptive rule is not a licence to repaint the spec's ring. At
+    // Rest it lands on exactly the colour §3.1 names for each variant:
+    // Primary's fill is the accent itself, so the accent cannot clear the
+    // floor against it and the rule falls to `text.strong` — which is the
+    // reason §3.1 gives Primary a white ring in the first place. The
+    // other three rest on a surface the accent clears, so they keep it.
     assert_eq!(
         resolve_style(ButtonVariant::Primary, focused, &p).focus_ring_color,
         p.text_strong
@@ -734,7 +891,11 @@ fn test_pressed_fill_uses_the_spec_opacity_and_keeps_its_channels() {
             danger.background.g,
             danger.background.b
         ),
-        (p.status_danger.r, p.status_danger.g, p.status_danger.b),
+        (
+            p.status_danger_fill.r,
+            p.status_danger_fill.g,
+            p.status_danger_fill.b
+        ),
         "the pressed fill is the token at 85% alpha, not a different colour"
     );
 
@@ -1174,9 +1335,10 @@ fn test_contrast_audit_reports_every_produced_pair() {
             r.bg,
         );
         if !r.passes() {
-            // Failures are allowed only when pinned; see the next test.
+            // Failures are allowed only when recorded; see
+            // `accepted_failures`, which `INC-08` emptied.
             assert!(
-                pinned_failures()
+                accepted_failures()
                     .iter()
                     .any(|p| p.channel == r.channel && p.fg == r.fg && p.bg == r.bg),
                 "UNPINNED FAILURE: {} {} on {} measures {:.4}:1 against a \
@@ -1192,8 +1354,8 @@ fn test_contrast_audit_reports_every_produced_pair() {
 }
 
 /// A judged pairing that does **not** clear the threshold its role
-/// carries, pinned at its measured value.
-struct PinnedFailure {
+/// carries, recorded at its measured value rather than waived.
+struct AcceptedFailure {
     channel: &'static str,
     fg: &'static str,
     bg: &'static str,
@@ -1203,120 +1365,206 @@ struct PinnedFailure {
     why: &'static str,
 }
 
-/// The judged pairs that fail, and what they measure.
+/// Judged pairings the audit is allowed to leave failing.
 ///
-/// **These are not waived and the tokens are not retuned.** `INC-07` is a
-/// resolver and an audit, not a palette decision. Every row here is
-/// pending a supervisor decision on whether the token moves, the cell is
-/// repainted, or the shortfall is accepted and recorded against
-/// `UIF-VER-001`.
+/// **`INC-08` emptied this list.** The three rows `INC-07` recorded here
+/// were two root causes, and decisions **D-5** (the `status.danger`
+/// split) and **D-6** (the adaptive focus ring) cleared both. They are
+/// carried in [`resolved_pairs`] with their old and new measurements so
+/// the history stays next to the code that fixed it.
 ///
-/// Note that two of the three are the *focus ring*, not the label. They
-/// exist only because the two-part state model lets a keyboard-focused
-/// button also be hovered or pressed — combinations §3.1 never snapshots,
-/// because it spells its Focused cell as "Rest + ring". The ring those
-/// cells inherit is `accent.primary`, and indigo on red is not a focus
-/// indicator.
-fn pinned_failures() -> Vec<PinnedFailure> {
+/// The type and the guard that reads it are kept rather than deleted on
+/// purpose. An unreadable pairing should still fail into a named, argued
+/// record that a human has to add by hand — not into a bare assertion
+/// someone can satisfy by deleting the threshold.
+fn accepted_failures() -> Vec<AcceptedFailure> {
+    Vec::new()
+}
+
+/// The accepted-failure ledger is empty, and every record it could hold is
+/// a fully argued gap rather than a bare colour pair.
+///
+/// The second half of this test runs over nothing today. It is there so
+/// the record's shape stays honest: adding an `AcceptedFailure` later
+/// requires naming the cell, the rule, the measurement and the argument,
+/// not just the two colours that happen to clash.
+#[test]
+fn test_the_accepted_failure_ledger_is_empty_and_fully_specified() {
+    let accepted = accepted_failures();
+    assert!(
+        accepted.is_empty(),
+        "INC-08 cleared every accepted failure with D-5 and D-6; a new entry \
+         must be a supervisor decision, not a convenience — found {:?}",
+        accepted
+            .iter()
+            .map(|f| format!("{} {} on {}", f.channel, f.fg, f.bg))
+            .collect::<Vec<_>>(),
+    );
+
+    for f in &accepted {
+        assert!(!f.cell.is_empty(), "an accepted failure must name its cell");
+        assert!(
+            f.min > 0.0,
+            "{} {} on {}: an accepted failure must carry the rule it misses",
+            f.channel,
+            f.fg,
+            f.bg,
+        );
+        assert!(
+            f.measured > 0.0 && f.measured < f.min,
+            "{} {} on {}: the measured {:.4} must sit under the {:.1} it is \
+             accepted against",
+            f.channel,
+            f.fg,
+            f.bg,
+            f.measured,
+            f.min,
+        );
+        assert!(
+            !f.why.is_empty(),
+            "{} {} on {}: an accepted failure needs an argument, not just a number",
+            f.channel,
+            f.fg,
+            f.bg,
+        );
+    }
+}
+
+/// A judged pairing that failed in `INC-07` and now clears its rule.
+///
+/// Both halves are recorded. Two of the three rows changed *foreground*
+/// as well as value — the ring moved from `accent.primary` to
+/// `text.strong` — so the pairing being measured today is not the pairing
+/// that failed. Recording only the new row would hide that substitution.
+struct ResolvedPair {
+    channel: &'static str,
+    /// The foreground that failed.
+    was_fg: &'static str,
+    /// The background that failed.
+    was_bg: &'static str,
+    /// The cell that produced the failing pairing.
+    cell: &'static str,
+    /// The threshold the role carries.
+    min: f32,
+    /// What the failing pairing measured.
+    was_measured: f32,
+    /// The foreground that replaced it.
+    now_fg: &'static str,
+    /// The background that replaced it.
+    now_bg: &'static str,
+    /// What the replacement measures, to four decimals.
+    now_measured: f32,
+    /// The decision that cleared it.
+    fix: &'static str,
+}
+
+/// The three `INC-07` failures and what each one measures now.
+fn resolved_pairs() -> Vec<ResolvedPair> {
     vec![
-        PinnedFailure {
+        ResolvedPair {
             channel: "label",
-            fg: "text.strong",
-            bg: "status.danger",
+            was_fg: "text.strong",
+            was_bg: "status.danger",
             cell: "Danger x Hovered",
             min: MIN_TEXT_CONTRAST,
-            measured: 3.8753,
-            why: "§3.1's Danger Hovered cell paints the label in text.strong on \
-                 an opaque status.danger fill; the G-7-retuned RGB(255, 28, 2) \
-                 is too light to carry white body-size text",
+            was_measured: 3.8753,
+            now_fg: "text.strong",
+            now_bg: "status.danger_fill",
+            now_measured: 5.5185,
+            fix: "D-5 split the destructive red in two. The Danger hover \
+                 fill is now status_danger_fill, RGB(208, 23, 2), and the \
+                 error-text red is no longer asked to be a background. The \
+                 label moved from 0.6247 under the rule to 1.0185 over it.",
         },
-        PinnedFailure {
+        ResolvedPair {
             channel: "ring",
-            fg: "accent.primary",
-            bg: "status.danger",
+            was_fg: "accent.primary",
+            was_bg: "status.danger",
             cell: "Danger x Hovered + ring",
             min: MIN_CHROME_CONTRAST,
-            measured: 1.1779,
-            why: "a keyboard-focused Danger button the pointer is also over \
-                 paints the accent focus ring directly on the danger fill. \
-                 Indigo on red at 1.18:1 is not a visible focus indicator by \
-                 any reading — the ring is effectively absent exactly when the \
-                 user needs it",
+            was_measured: 1.1779,
+            now_fg: "text.strong",
+            now_bg: "status.danger_fill",
+            now_measured: 5.5185,
+            fix: "D-6 resolves the ring against the actual resolved fill. \
+                 The accent cannot clear 3.0 against the danger fill, so \
+                 the ring degrades to text.strong — indigo on red at \
+                 1.18:1 became white on dark red at 5.52:1.",
         },
-        PinnedFailure {
+        ResolvedPair {
             channel: "ring",
-            fg: "accent.primary",
-            bg: "status.danger @ 85%",
+            was_fg: "accent.primary",
+            was_bg: "status.danger @ 85%",
             cell: "Danger x Pressed + ring",
             min: MIN_CHROME_CONTRAST,
-            measured: 1.0609,
-            why: "same pairing at the pressed 85% opacity, judged against the \
-                 worst container in the ladder. Worse than the hovered case: \
-                 the translucent red lands within 6% of the accent's own \
-                 luminance",
+            was_measured: 1.0609,
+            now_fg: "text.strong",
+            now_bg: "status.danger_fill @ 85%",
+            now_measured: 6.6216,
+            fix: "D-5 and D-6 together, judged against the worst container \
+                 in the ladder. The worst case moved from within 6% of the \
+                 accent's own luminance to a clear 6.62:1.",
         },
     ]
 }
 
 #[test]
-fn test_the_failing_pairs_are_pinned_pending_a_supervisor_decision() {
+fn test_the_previously_failing_pairs_now_clear_their_thresholds() {
     let rows = audit_rows();
-    let failures: Vec<&AuditRow> = rows
+
+    // Nothing is left outstanding: the audit is clean, so nothing may be
+    // recorded in `accepted_failures` either.
+    let still_failing: Vec<String> = rows
         .iter()
         .filter(|r| r.verdict == Verdict::Judged && !r.passes())
+        .map(|r| {
+            format!(
+                "{} {} on {} at {:.4}:1 (rule {:.1}:1)",
+                r.channel, r.fg, r.bg, r.ratio, r.min
+            )
+        })
         .collect();
-    let pinned = pinned_failures();
-
-    assert_eq!(
-        failures.len(),
-        pinned.len(),
-        "the set of failing judged pairs changed size. Now failing: {:?} \
-         (pinned: {})",
-        failures
-            .iter()
-            .map(|r| format!("{} {} on {}", r.channel, r.fg, r.bg))
-            .collect::<Vec<_>>(),
-        pinned.len(),
+    assert!(
+        still_failing.is_empty(),
+        "the audit still has failing judged pairs: {still_failing:?}",
+    );
+    assert!(
+        accepted_failures().is_empty(),
+        "accepted_failures is not empty while the audit is clean — a row was \
+         added that no longer describes a real failure",
     );
 
-    for p in &pinned {
-        let row = failures
+    for p in resolved_pairs() {
+        // The pairing that used to fail must no longer be produced at all.
+        let old_still_there = rows
             .iter()
-            .find(|r| r.channel == p.channel && r.fg == p.fg && r.bg == p.bg)
+            .any(|r| r.channel == p.channel && r.fg == p.was_fg && r.bg == p.was_bg);
+        assert!(
+            !old_still_there,
+            "the failing pairing {} {} on {} is still being produced — the fix \
+             was reverted or the resolver changed shape",
+            p.channel, p.was_fg, p.was_bg,
+        );
+
+        // The replacement must be produced, judged, and passing.
+        let row = rows
+            .iter()
+            .find(|r| r.channel == p.channel && r.fg == p.now_fg && r.bg == p.now_bg)
             .unwrap_or_else(|| {
                 panic!(
-                    "pinned failure {} {} on {} is no longer failing — \
-                     either it was fixed or the resolver changed",
-                    p.channel, p.fg, p.bg
+                    "the replacement pair {} {} on {} is not in the audit at all \
+                     — the resolver no longer paints what D-5/D-6 decided",
+                    p.channel, p.now_fg, p.now_bg,
                 )
             });
 
-        assert!(
-            (row.ratio - p.measured).abs() < RATIO_EPS,
-            "{} {} on {}: measures {:.4}, pinned at {:.4}",
+        assert_eq!(
+            row.verdict,
+            Verdict::Judged,
+            "{} {} on {} must be a judged pair, not exempted",
             p.channel,
-            p.fg,
-            p.bg,
-            row.ratio,
-            p.measured,
-        );
-        assert!(
-            row.ratio < p.min,
-            "{} {} on {} must still be below its {:.1}:1 rule to stay pinned",
-            p.channel,
-            p.fg,
-            p.bg,
-            p.min,
-        );
-        let shortfall = p.min - row.ratio;
-        assert!(
-            shortfall > 0.5,
-            "{} {} on {}: shortfall {} — the pinned record says the gap is \
-             material, and it must stay that way to be worth a decision",
-            p.channel,
-            p.fg,
-            p.bg,
-            shortfall,
+            p.now_fg,
+            p.now_bg,
         );
         assert!(
             row.cells.contains(&p.cell.to_string()),
@@ -1324,16 +1572,53 @@ fn test_the_failing_pairs_are_pinned_pending_a_supervisor_decision() {
             p.cell,
             row.cells,
         );
+        assert!(
+            (row.ratio - p.now_measured).abs() < RATIO_EPS,
+            "{} {} on {}: measures {:.4}, recorded at {:.4}",
+            p.channel,
+            p.now_fg,
+            p.now_bg,
+            row.ratio,
+            p.now_measured,
+        );
+        assert!(
+            row.ratio >= p.min,
+            "{} {} on {} measures {:.4}:1, still under its {:.1}:1 rule",
+            p.channel,
+            p.now_fg,
+            p.now_bg,
+            row.ratio,
+            p.min,
+        );
+        assert!(
+            row.ratio > p.was_measured,
+            "{} {} on {} must be an improvement on the {:.4}:1 it replaces, got \
+             {:.4}:1",
+            p.channel,
+            p.now_fg,
+            p.now_bg,
+            p.was_measured,
+            row.ratio,
+        );
         println!(
-            "\nPINNED (pending supervisor decision): {} {} on {} at {} — \
-             {:.4}:1 against a {:.1}:1 rule, short by {:.4}. {}",
-            p.channel, p.fg, p.bg, p.cell, row.ratio, p.min, shortfall, p.why,
+            "\nRESOLVED: {} {} on {} at {} — was {:.4}:1 (short by {:.4}), now \
+             {:.4}:1 against a {:.1}:1 rule, {:.4} of headroom. {}",
+            p.channel,
+            p.now_fg,
+            p.now_bg,
+            p.cell,
+            p.was_measured,
+            p.min - p.was_measured,
+            row.ratio,
+            p.min,
+            row.ratio - p.min,
+            p.fix,
         );
     }
 }
 
 #[test]
-fn test_the_danger_hovered_failure_measures_what_the_brief_predicted() {
+fn test_the_danger_hovered_label_now_clears_the_text_rule() {
     let p = palette();
     let style = resolve_style(
         ButtonVariant::Danger,
@@ -1345,26 +1630,42 @@ fn test_the_danger_hovered_failure_measures_what_the_brief_predicted() {
     );
     let ratio = contrast_ratio(style.foreground, style.background);
 
-    // The brief's estimate was "~3.88:1". Measured: 3.8753:1. Same to
-    // two decimals, so the suspicion was right — and the shortfall is
-    // 0.6247 of a ratio point, not a rounding artefact.
+    // `INC-07` measured this cell at 3.8753:1 against the error-text red,
+    // 0.6247 short of the 4.5:1 normal-text rule. The D-5 split put a
+    // background red under the label instead, and the same cell now reads
+    // 5.5185:1 — 1.0185 above the rule rather than below it.
+    assert_eq!(style.background, p.status_danger_fill);
     assert!(
-        (ratio - 3.8753).abs() < RATIO_EPS,
-        "text.strong on the retuned status.danger measures {ratio:.4}:1"
+        (ratio - 5.5185).abs() < RATIO_EPS,
+        "text.strong on status.danger_fill measures {ratio:.4}:1"
     );
     assert!(
-        !meets_text_contrast(style.foreground, style.background),
-        "and it fails the 4.5:1 normal-text rule"
+        meets_text_contrast(style.foreground, style.background),
+        "the Danger hover label must clear the 4.5:1 normal-text rule"
     );
     assert!(
         meets_chrome_contrast(style.foreground, style.background),
-        "the same pairing clears the 3.0:1 chrome rule, which is why the \
-         Danger Hovered *border* (also text.strong on status.danger) passes"
+        "and the Danger Hovered *border*, the same pairing, clears the \
+         3.0:1 chrome rule it always did"
     );
     assert!(
-        (MIN_TEXT_CONTRAST - ratio - 0.6247).abs() < RATIO_EPS,
-        "shortfall against rule 1 is {:.4}",
-        MIN_TEXT_CONTRAST - ratio,
+        (ratio - MIN_TEXT_CONTRAST - 1.0185).abs() < RATIO_EPS,
+        "headroom against rule 1 is {:.4}",
+        ratio - MIN_TEXT_CONTRAST,
+    );
+
+    // The old pairing is what the split exists to remove: white on the
+    // error-text red is still unreadable, which is why that token must not
+    // be used as a fill.
+    let old = contrast_ratio(p.text_strong, p.status_danger);
+    assert!(
+        (old - 3.8753).abs() < RATIO_EPS,
+        "text.strong on status.danger still measures {old:.4}:1 — the value is \
+         unchanged, as D-5 requires"
+    );
+    assert!(
+        !meets_text_contrast(p.text_strong, p.status_danger),
+        "and it still fails, which is the whole reason status_danger_fill exists"
     );
 }
 
@@ -1465,10 +1766,10 @@ fn test_resting_dividers_and_coincident_borders_are_reported_not_gated() {
 }
 
 #[test]
-fn test_focus_rings_clear_the_chrome_rule_except_where_pinned() {
+fn test_every_focus_ring_clears_the_chrome_rule() {
     let p = palette();
-    let pinned = pinned_failures();
     let mut checked = 0;
+    let mut report: Vec<String> = Vec::new();
 
     for variant in VARIANTS {
         for state in reachable_states() {
@@ -1491,6 +1792,11 @@ fn test_focus_rings_clear_the_chrome_rule_except_where_pinned() {
                         contrast_ratio(style.focus_ring_color, surface),
                     );
                 }
+                report.push(format!(
+                    "  {at:<34} ring={} — sits on the container, clears every \
+                     surface in the ladder",
+                    token_name(style.focus_ring_color),
+                ));
                 checked += 1;
                 continue;
             }
@@ -1498,21 +1804,19 @@ fn test_focus_rings_clear_the_chrome_rule_except_where_pinned() {
             let (_, painted, verdict) = classify("ring", style.focus_ring_color, style.background);
             assert_eq!(verdict, Verdict::Judged);
             let ratio = contrast_ratio(style.focus_ring_color, painted);
-
-            if pinned.iter().any(|f| f.channel == "ring" && f.cell == at) {
-                assert!(
-                    ratio < MIN_CHROME_CONTRAST,
-                    "{at}: pinned as a failure but now measures {ratio:.4}:1, \
-                     which clears the chrome rule — un-pin it deliberately"
-                );
-            } else {
-                assert!(
-                    ratio >= MIN_CHROME_CONTRAST,
-                    "{at} ring reads {ratio:.4}:1 against its own fill, below \
-                     the {:.1}:1 chrome rule and not pinned",
-                    MIN_CHROME_CONTRAST,
-                );
-            }
+            assert!(
+                ratio >= MIN_CHROME_CONTRAST,
+                "{at} ring reads {ratio:.4}:1 against its own fill, below the \
+                 {:.1}:1 chrome rule — the adaptive resolver picked a ring \
+                 that cannot be seen",
+                MIN_CHROME_CONTRAST,
+            );
+            report.push(format!(
+                "  {at:<34} ring={} @ {:.4}:1 vs {}",
+                token_name(style.focus_ring_color),
+                ratio,
+                token_name(style.background),
+            ));
             checked += 1;
         }
     }
@@ -1522,4 +1826,179 @@ fn test_focus_rings_clear_the_chrome_rule_except_where_pinned() {
         checked, 16,
         "the ring audit stopped covering every focused reachable state"
     );
+    println!("\nADAPTIVE RING OUTCOMES\n{}", report.join("\n"));
+}
+
+/// The ring colour each `(variant, base state)` combination is expected to
+/// draw, and the ratio it clears by.
+///
+/// This is the **D-6** rule written out as a table, so a change in the
+/// resolver shows up as a named row rather than a shifted number nobody
+/// noticed. Every entry is the accent except the two Danger fills, where
+/// the accent cannot clear the floor against a red background and the
+/// ring degrades to `text.strong`.
+#[test]
+fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
+    let p = palette();
+    let expected: &[(&str, ButtonVariant, BaseState, &str, f32)] = &[
+        // Primary's fill *is* the accent, so an accent ring is invisible
+        // against it in every state and the rule falls to text.strong.
+        (
+            "Primary",
+            ButtonVariant::Primary,
+            BaseState::Rest,
+            "text.strong",
+            4.5648,
+        ),
+        (
+            "Primary",
+            ButtonVariant::Primary,
+            BaseState::Hovered,
+            "text.strong",
+            4.5648,
+        ),
+        (
+            "Primary",
+            ButtonVariant::Primary,
+            BaseState::Pressed,
+            "text.strong",
+            4.5648,
+        ),
+        (
+            "Primary",
+            ButtonVariant::Primary,
+            BaseState::Invalid,
+            "text.strong",
+            4.5648,
+        ),
+        // Secondary rests and works on surfaces the accent clears.
+        (
+            "Secondary",
+            ButtonVariant::Secondary,
+            BaseState::Rest,
+            "accent.primary",
+            4.0990,
+        ),
+        (
+            "Secondary",
+            ButtonVariant::Secondary,
+            BaseState::Hovered,
+            "accent.primary",
+            3.2954,
+        ),
+        (
+            "Secondary",
+            ButtonVariant::Secondary,
+            BaseState::Pressed,
+            "accent.primary",
+            3.0750,
+        ),
+        (
+            "Secondary",
+            ButtonVariant::Secondary,
+            BaseState::Invalid,
+            "accent.primary",
+            4.0990,
+        ),
+        // Ghost's resting ring is measured against the container, not a
+        // fill — see `resolve_ring_color_for_background`.
+        (
+            "Ghost",
+            ButtonVariant::Ghost,
+            BaseState::Rest,
+            "accent.primary",
+            4.3583,
+        ),
+        (
+            "Ghost",
+            ButtonVariant::Ghost,
+            BaseState::Hovered,
+            "accent.primary",
+            3.2954,
+        ),
+        (
+            "Ghost",
+            ButtonVariant::Ghost,
+            BaseState::Pressed,
+            "accent.primary",
+            3.0750,
+        ),
+        (
+            "Ghost",
+            ButtonVariant::Ghost,
+            BaseState::Invalid,
+            "accent.primary",
+            4.3583,
+        ),
+        // Danger rests on surface.raised like Secondary, but its hover and
+        // press fills swallow the accent.
+        (
+            "Danger",
+            ButtonVariant::Danger,
+            BaseState::Rest,
+            "accent.primary",
+            4.0990,
+        ),
+        (
+            "Danger",
+            ButtonVariant::Danger,
+            BaseState::Hovered,
+            "text.strong",
+            5.5185,
+        ),
+        (
+            "Danger",
+            ButtonVariant::Danger,
+            BaseState::Pressed,
+            "text.strong",
+            5.5185,
+        ),
+        (
+            "Danger",
+            ButtonVariant::Danger,
+            BaseState::Invalid,
+            "accent.primary",
+            4.0990,
+        ),
+    ];
+
+    for (label, variant, base, want_token, want_ratio) in expected {
+        let style = resolve_style(
+            *variant,
+            VisualState {
+                base: *base,
+                focused: true,
+            },
+            &p,
+        );
+        assert_eq!(
+            token_name(style.focus_ring_color),
+            *want_token,
+            "{label} x {base:?} + ring: the resolver picked {}, expected \
+             {want_token}",
+            token_name(style.focus_ring_color),
+        );
+        let measured = if style.background.a == 0.0 {
+            // The Ghost resting ring sits on the container, not on a
+            // fill. Measure it against `surface.base`, the root canvas a
+            // Ghost button is normally mounted to; the full sweep across
+            // every surface lives in
+            // `test_every_focus_ring_clears_the_chrome_rule`, where the
+            // tightest case is `surface.active` at 3.0750:1.
+            contrast_ratio(style.focus_ring_color, p.surface_base)
+        } else {
+            contrast_ratio(style.focus_ring_color, style.background)
+        };
+        assert!(
+            (measured - want_ratio).abs() < RATIO_EPS,
+            "{label} x {base:?} + ring: {} measures {measured:.4}:1, expected \
+             {want_ratio:.4}:1",
+            *want_token,
+        );
+        assert!(
+            measured >= MIN_CHROME_CONTRAST,
+            "{label} x {base:?} + ring must clear the chrome floor, got \
+             {measured:.4}:1",
+        );
+    }
 }

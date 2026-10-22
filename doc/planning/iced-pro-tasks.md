@@ -143,11 +143,45 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       Tests: 21 new (122 total), including a 34-row contrast audit of every pair
       the resolver can produce. Three pairs fail; see G-8 and G-9.
       **Commit:** `feat(iced-pro): add button style resolver and contrast audit`
-- [ ] **INC-08** `widget/text_input.rs` (`UIF-ATOM-002`) — rest / hovered / focused /
-      invalid / disabled styling for text entry, search field and dropdown trigger;
-      reserved trailing-icon slot so validation never shifts geometry.
+- [x] **INC-08** `status.danger` split + adaptive focus ring (clears **G-8**, **G-9**
+      per decisions **D-5**, **D-6**).
+      - New token `status_danger_fill = RGB(208, 23, 2)` — `L = 0.140271`,
+        a `0.080678` step (≈36%) darker than `status_danger`, hue `6.12°` vs
+        `6.17°` so it stays the same red. White-on-fill measures **5.5185:1**.
+        `status_danger` is untouched and keeps the error text/icon role.
+      - New `widget/focus.rs` — `resolve_ring_color(fill, palette)` returns
+        `accent_primary` when it clears `MIN_CHROME_CONTRAST`, else `text_strong`;
+        when neither clears, the higher-contrast one wins. A zero-alpha background
+        short-circuits to the accent, so a Ghost ring is judged against its
+        container rather than against `transparent`.
+      - Button Danger Hovered/Pressed now fill with `status_danger_fill`, and the
+        ring resolves against the actual background instead of per variant.
+      - **Deviation from §3.1, deliberate:** the Danger *pressed border* also moves
+        to `status_danger_fill`. Keeping the spec's `status_danger` edge over the
+        85% fill measures **1.4240:1** — well under the 3.0 chrome floor — so
+        honouring the literal value would have created a new violation. Measured
+        across all seven surfaces so it cannot silently return.
+
+      The three previously-failing pairs now clear: `3.8753 → 5.5185`,
+      `1.1779 → 5.5185`, `1.0609 → 6.6216`. `accepted_failures()` is empty.
+      Tests: 21 new (143 total).
+      **Commit:** `feat(iced-pro): split danger fill and adapt focus ring`
+- [ ] **INC-08b** `widget/text_input.rs` (`UIF-ATOM-002`) — rest / hovered /
+      focused / invalid / disabled styling for text entry, search field and
+      dropdown trigger; reserved trailing-icon slot so validation never shifts
+      geometry.
       Tests: all 5 states, placeholder vs value colour rules, zero-shift invariant.
       **Commit:** `feat(iced-pro): add text input atom with validation states`
+
+> **Plan revision R1 (post-G-10).** Decision **D-7** (custom focusable widgets)
+> inserts three increments that the original plan did not have, because stock iced
+> cannot give anything except text inputs a keyboard focus path:
+> **INC-09** focus model (traversal order, roving focus, modal trap — pure state),
+> **INC-10** the `operation::Focusable` widget plumbing,
+> **INC-11** the iced button wrapper built on both.
+> The original M4 onward shifts by three: anchor solver → **INC-12**,
+> clamp solver → **INC-13**, and so on. The titles below are unchanged; only the
+> numbers move.
 
 ### M4 — Geometry solvers (UIF-VER-002)
 
@@ -345,7 +379,29 @@ Recorded as they are found; none resolved yet.
 
 ---
 
-## 5. Open decision — resolving the G-7 contrast conflicts
+## 5. Resolved decisions
+
+### D-5 — `status.danger` split into two tokens (resolves G-8)
+User decision 2026-10-21. `status.danger` stays the light red used for error
+**text and icons** on dark surfaces. A new `status.danger_fill` is the darker red
+used **as a background behind `text.strong`**. Each clears 4.5:1 in its own role.
+The disjointness is a property of the colour, not of the implementation — one red
+cannot serve both.
+
+### D-6 — Adaptive focus ring (resolves G-9)
+The ring colour is resolved against the **actual resolved fill** with the contrast
+solver: `accent.primary` if it clears `MIN_CHROME_CONTRAST`, otherwise
+`text.strong`. A ring that cannot be seen is not an accessibility feature, so the
+ring adapts rather than the spec's colour being honoured into invisibility.
+
+### D-7 — Custom focusable widgets (resolves G-10)
+`iced-pro` implements `operation::Focusable` on its own widgets and owns
+`Tab` / `Shift+Tab` traversal, roving focus for menus and the modal focus trap.
+Stock iced widgets are not used for anything that must be keyboard-reachable.
+
+---
+
+## 5b. Original decision record — the G-7 retune
 
 The spec's literal token values cannot satisfy the spec's own contrast rules in
 five places. Every downstream widget increment builds on these values, so the

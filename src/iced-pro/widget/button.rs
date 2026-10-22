@@ -20,7 +20,43 @@
 //! | Primary | `accent.primary` / `text.strong` / `accent.primary` | `accent.primary` / `text.strong` / `text.strong` | `accent.primary` @ 85% / `text.strong` / `accent.primary` | `surface.raised` / `text.disabled` / `border.subtle` |
 //! | Secondary | `surface.raised` / `text.primary` / `border.strong` | `surface.hover` / `text.strong` / `border.strong` | `surface.active` / `text.strong` / `accent.primary` | `surface.base` / `text.disabled` / `border.subtle` |
 //! | Ghost | *transparent* / `text.primary` / *transparent* | `surface.hover` / `text.strong` / `border.subtle` | `surface.active` / `text.strong` / `border.strong` | *transparent* / `text.disabled` / *transparent* |
-//! | Danger | `surface.raised` / `status.danger` / `status.danger` | `status.danger` / `text.strong` / `text.strong` | `status.danger` @ 85% / `text.strong` / `status.danger` | `surface.base` / `text.disabled` / `border.subtle` |
+//! | Danger | `surface.raised` / `status.danger` / `status.danger` | `status.danger_fill` / `text.strong` / `text.strong` | `status_danger_fill` @ 85% / `text.strong` / `status_danger_fill` | `surface.base` / `text.disabled` / `border.subtle` |
+//!
+//! The Danger row is not what §3.1 prints. The spec paints that variant's
+//! hover and pressed fill with `status.danger`, the same red it uses for
+//! error *text*, and white body text on that red measures `3.8753:1` —
+//! under the 4.5:1 rule, with no value of the token able to serve both
+//! roles. Decision **D-5** splits the roles across
+//! [`status_danger`](Palette::status_danger) and
+//! [`status_danger_fill`](Palette::status_danger_fill); this row uses
+//! each for the job it can actually do. The resting foreground and border
+//! stay `status.danger`, which is the text/icon role and already clears
+//! at `4.8283:1`.
+//!
+//! # The ring is adaptive, not a per-variant constant
+//!
+//! §3.1 gives each variant one fixed ring colour — Primary `text.strong`,
+//! the other three `accent.primary` — but it only ever snapshots
+//! `Rest + ring`. Focus is additive here, so the ring also lands on the
+//! hover and press fills, and `accent.primary` indigo on a red fill
+//! measures `1.1779:1`: an invisible focus indicator at the moment a
+//! keyboard user needs one most (gap **G-9**).
+//!
+//! The fix is not a longer `match`. The right ring depends on the
+//! *resolved fill*, not on the variant, so the same variant needs
+//! different answers in different states. [`resolve_style`] therefore
+//! asks [`focus::resolve_ring_color_for_background`] for the ring
+//! against the background it just resolved: `accent.primary` while that
+//! clears the `3.0:1` chrome floor, `text.strong` when it cannot. On
+//! every dark surface the accent clears, so the ring is exactly the one
+//! §3.1 asks for; only the Danger hover and press fills displace it.
+//!
+//! A transparent background is not a fill and is not measured as one.
+//! A Ghost button's ring sits on whatever the button is mounted to, so
+//! it short-circuits to the spec's `accent.primary`, which clears the
+//! chrome floor against every surface in the ladder — rather than being
+//! resolved against `transparent`, which would measure a colour that is
+//! never painted.
 //!
 //! # Focus is added, never substituted
 //!
@@ -32,9 +68,6 @@
 //! *and* gains a ring rather than being pulled back to `Rest` — which is
 //! what the spec's own wording demands, and what a flat six-value state
 //! enum could not express without contradicting §4.9.2.
-//!
-//! The ring colour is variant-specific: Primary wears a `text.strong`
-//! ring, the other three an `accent.primary` one.
 //!
 //! # The pressed fill is translucent, and that changes what is measured
 //!
@@ -68,6 +101,7 @@
 
 use crate::state::{BaseState, VisualState};
 use crate::token::{color::Palette, shape, size, space};
+use crate::widget::focus;
 use iced::Color;
 
 /// The compact button height — `size.control.sm`, for the navbar and
@@ -157,8 +191,11 @@ pub enum ButtonVariant {
     /// A quiet control with no fill at rest, for toolbar and inline
     /// actions.
     Ghost,
-    /// A destructive action, resting quiet and escalating to a
-    /// [`status_danger`](Palette::status_danger) fill on hover.
+    /// A destructive action, resting quiet in
+    /// [`status_danger`](Palette::status_danger) text and escalating to
+    /// a filled [`status_danger_fill`](Palette::status_danger_fill) on
+    /// hover — the background red, because the label is painted *on* the
+    /// danger here rather than written in it (decision **D-5**).
     Danger,
 }
 
@@ -210,16 +247,21 @@ impl ButtonStyle {
 /// `state` selects the background, foreground and border from §3.1; the
 /// `focused` half adds the ring on top without touching them. See the
 /// [module docs](self) for the matrix and for why focus is additive.
+///
+/// The ring is not chosen by variant. It is resolved against the
+/// background this function just resolved, through
+/// [`focus::resolve_ring_color_for_background`], so a focused control
+/// always wears a ring that can actually be seen against whatever it is
+/// sitting on (`UIF-TOK-006` rule 2, decision **D-6**).
 #[must_use]
-pub const fn resolve_style(
-    variant: ButtonVariant,
-    state: VisualState,
-    palette: &Palette,
-) -> ButtonStyle {
+pub fn resolve_style(variant: ButtonVariant, state: VisualState, palette: &Palette) -> ButtonStyle {
     let base = base_paint(variant, state.base, palette);
 
     let (focus_ring_color, focus_ring_width) = if state.ring_visible() {
-        (focus_ring_color(variant, palette), FOCUS_RING_WIDTH)
+        (
+            focus::resolve_ring_color_for_background(base.background, palette),
+            FOCUS_RING_WIDTH,
+        )
     } else {
         (NO_RING_COLOR, NO_RING_WIDTH)
     };
@@ -336,6 +378,21 @@ const fn ghost_paint(base: BaseState, palette: &Palette) -> BasePaint {
 }
 
 /// §3.1 — Danger.
+///
+/// The fill is [`status_danger_fill`](Palette::status_danger_fill), not
+/// the [`status_danger`](Palette::status_danger) §3.1 names here. That
+/// token is the error *text* red, and white body text on it measures
+/// `3.8753:1` — the two roles need opposite luminance, so decision
+/// **D-5** split them (gap **G-8**). The resting foreground and border
+/// keep `status.danger`, which is the text/icon role and clears at
+/// `4.8283:1`.
+///
+/// The pressed border tracks the pressed fill rather than staying
+/// `status.danger`, exactly as it tracked the fill before the split: §3.1
+/// gives that cell a border of the fill's own colour at full opacity, so
+/// it is a geometry holder, not a state signal. Left on `status.danger`
+/// it would sit `1.7087:1` from the fill it outlines — a border that
+/// reads as a mistake rather than as an edge.
 const fn danger_paint(base: BaseState, palette: &Palette) -> BasePaint {
     match base {
         BaseState::Rest | BaseState::Invalid => BasePaint {
@@ -344,34 +401,20 @@ const fn danger_paint(base: BaseState, palette: &Palette) -> BasePaint {
             border_color: palette.status_danger,
         },
         BaseState::Hovered => BasePaint {
-            background: palette.status_danger,
+            background: palette.status_danger_fill,
             foreground: palette.text_strong,
             border_color: palette.text_strong,
         },
         BaseState::Pressed => BasePaint {
-            background: with_pressed_alpha(palette.status_danger),
+            background: with_pressed_alpha(palette.status_danger_fill),
             foreground: palette.text_strong,
-            border_color: palette.status_danger,
+            border_color: palette.status_danger_fill,
         },
         BaseState::Disabled => BasePaint {
             background: palette.surface_base,
             foreground: palette.text_disabled,
             border_color: palette.border_subtle,
         },
-    }
-}
-
-/// The colour of a variant's keyboard focus ring (§3.1).
-///
-/// Primary's ring is `text.strong` because its fill is already the
-/// accent — an accent ring on an accent fill would be invisible. The
-/// other three take the accent ring the spec gives them.
-const fn focus_ring_color(variant: ButtonVariant, palette: &Palette) -> Color {
-    match variant {
-        ButtonVariant::Primary => palette.text_strong,
-        ButtonVariant::Secondary | ButtonVariant::Ghost | ButtonVariant::Danger => {
-            palette.accent_primary
-        }
     }
 }
 
