@@ -208,6 +208,45 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       Tests: 83 new.
       **Commit:** `feat(iced-pro): add focus model with trap and roving traversal`
 
+- [x] **INC-10** `widget/focusable.rs` — **spike: D-7 is unblocked.** A custom
+      widget can hold keyboard focus in iced 0.14.
+      `FocusableState` implements `operation::Focusable`; `Widget::operate` calls
+      `operation.focusable(id, bounds, state)`; `tag`/`state` pin the state into
+      the `Tree` slot so focus survives a `view` rebuild. `focusable(content, id,
+      enabled)` is the ergonomic entry point. The wrapper adds no layout level
+      (nesting two reports identical bounds, proven).
+      Disabled gating is **absence-based**: the router has no concept of
+      "disabled", so a disabled wrapper is not registered and self-unfocuses each
+      pass — otherwise it would keep a lit ring on a control the router can no
+      longer see.
+      **Four constraints that bind every later increment:**
+      1. **`iced`'s `focus_next` does not wrap — it *loses* focus** at the ends.
+         `FocusState::focus_next` wraps, as `UIF-CMENU-003` requires. So the
+         bridge must compute the next id from the model and push it with
+         `focus(id)`. **Never hand `Tab` to `operation::focus_next`.**
+      2. **The bridge runs one way: model → router.** The router has nowhere to
+         hold groups, traps or slot-preserving fall-forward, and reading focus
+         *up* from the router would let anything registering itself outside the
+         policy (a `text_input` inside a modal) move focus against a trap.
+      3. **`UserInterface::operate` is single-pass.** `focus_next` is built as
+         `then(count(), …)` whose `finish()` returns `Outcome::Chain`; a harness
+         that does not loop on `Chain` runs only the `count` half and reports
+         focus broken when the harness was.
+      4. **`iced_test` cannot drive focus at all.** The harness is: headless
+         renderer + real `UserInterface::build` + a carried
+         `user_interface::Cache` (which owns the `Tree` where the state lives) +
+         the operation chain loop + a `RecordFocusables` operation to read back
+         ids and bounds. Later widget tests reuse this.
+      **Feature deviation, accepted:** `iced` now carries the `advanced` feature.
+      It is the only way to reach `Widget` / `Tree` / `operation::Focusable`
+      through `iced` at all — without it `iced::advanced` is cfg'd out and
+      `iced::widget::{core, renderer, graphics}` are empty shadow modules.
+      Verified `advanced = []` in both `iced_core` and `iced_widget`, so it
+      compiles in no code and no dependencies; it is a pure re-export switch.
+      Tests: 28 new (254 total). Slowest tests in the crate (~4s, headless
+      renderer per test) — acceptable.
+      **Commit:** `feat(iced-pro): add focusable wrapper for custom widgets`
+
 ### Process incidents recorded during INC-09
 
 Two things went wrong that are worth carrying forward as supervision rules:

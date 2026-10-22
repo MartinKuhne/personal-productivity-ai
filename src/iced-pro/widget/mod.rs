@@ -25,6 +25,10 @@
 //! * [`focus`] — the adaptive keyboard focus-ring rule every widget with
 //!   a ring resolves through, rather than re-deriving it per variant
 //!   (`UIF-TOK-006` rule 2, decision **D-6**)
+//! * [`focusable`] — the wrapper that registers a widget with iced's
+//!   focus router, the mechanism decision **D-7** rests on and the
+//!   reason a custom widget can hold keyboard focus at all
+//!   (`UIF-PRIN-005`, gap **G-10**)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -35,3 +39,4 @@
 
 pub mod button;
 pub mod focus;
+pub mod focusable;

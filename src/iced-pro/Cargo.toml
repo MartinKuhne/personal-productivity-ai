@@ -14,11 +14,23 @@ path = "mod.rs"
 [dependencies]
 # Same feature set `fastmd` uses, minus `markdown` — this crate does not
 # render markdown, only framework widgets driven by semantic design tokens.
+#
+# `advanced` is added because it is the ONLY way a custom widget can
+# reach `iced_core`'s widget-author surface through `iced`. Without it
+# `iced::advanced` is cfg'd out (`iced-0.14.0/src/lib.rs:524`) and
+# `iced::widget::{core, renderer, graphics}` are deliberately hidden by
+# empty shadow modules (`iced-0.14.0/src/lib.rs:646-649`), so
+# `Widget`, `Tree`, `layout`, `operation::Focusable` and friends are
+# unreachable — a custom widget cannot be written at all. The feature
+# itself is `advanced = []` in both `iced_core` and `iced_widget`, so it
+# compiles in nothing new: it unlocks the re-export module and nothing
+# else. See INC-10 in `doc/planning/iced-pro-tasks.md`.
 iced = { version = "0.14.0", features = [
     "wgpu",
     "tiny-skia",
     "fira-sans",
     "advanced-shaping",
+    "advanced",
 ] }
 
 [dev-dependencies]
