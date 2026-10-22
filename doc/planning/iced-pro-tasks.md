@@ -136,11 +136,13 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 ### M3 — Atoms (UIF-ATOM-*)
 
-- [ ] **INC-07** `widget/button.rs` (`UIF-ATOM-001`) — pure `ButtonStyle` resolver
-      over `(Variant × InteractionState)` returning fill/fg/border/ring, plus the
-      iced widget wrapper. Tests: all 24 cells of the matrix, icon-only 28×28 floor,
-      selection foreground lock on `accent.primary`.
-      **Commit:** `feat(iced-pro): add button atom with full state matrix`
+- [x] **INC-07** `widget/button.rs` (`UIF-ATOM-001`) — pure `ButtonStyle` resolver
+      over `(Variant × VisualState)` returning fill/fg/border/ring, plus the
+      geometry constants INC-07b consumes. **Wrapper deferred to INC-07b** — see
+      G-10, which changes what a wrapper even means.
+      Tests: 21 new (122 total), including a 34-row contrast audit of every pair
+      the resolver can produce. Three pairs fail; see G-8 and G-9.
+      **Commit:** `feat(iced-pro): add button style resolver and contrast audit`
 - [ ] **INC-08** `widget/text_input.rs` (`UIF-ATOM-002`) — rest / hovered / focused /
       invalid / disabled styling for text entry, search field and dropdown trigger;
       reserved trailing-icon slot so validation never shifts geometry.
@@ -291,6 +293,55 @@ Recorded as they are found; none resolved yet.
   movement 49 units across three tokens; accent hue moves `+0.42°`.
   The elevation ladder survives, but the `hover → active` gap narrows from
   `0.0128` to `0.0050` — that is forced by the constraint set, not chosen.
+- **G-8 — `status.danger` is one token asked to do two mutually exclusive jobs.**
+  Found by the INC-07 audit and independently re-derived. The spec uses a single
+  red for both:
+
+  | Role | Requirement | Implied luminance |
+  |---|---|---|
+  | Background behind `text.strong` (Danger button hover, §3.1) | white-on-red ≥ 4.5 | `L <= 0.183333` |
+  | Text/icon colour on dark surfaces (validation errors, §3.2, §4.5.1) | red-on-overlay ≥ 4.5 | `L >= 0.216697` |
+
+  The bounds are **disjoint** — no value of `status.danger` satisfies both. This
+  is not a rounding problem and cannot be retuned away; the spec conflates two
+  roles that need opposite luminance. Measured at the current retuned
+  `RGB(255, 28, 2)`: white-on-danger is **3.8753:1**, short by `0.6247`.
+- **G-9 — The keyboard focus ring is invisible on hot fills.**
+  Also from the INC-07 audit. Because INC-06 made focus additive, a focused
+  button can also be hovered or pressed, which drops the `accent.primary` ring
+  onto the button's own fill:
+
+  | Combination | Ring vs fill | Needs 3.0 | Short by |
+  |---|---|---|---|
+  | Danger hovered + focused | `accent.primary` on `status.danger` | 3.0 | **1.8221** |
+  | Danger pressed + focused | `accent.primary` on `status.danger` @85% | 3.0 | **1.9391** |
+
+  A keyboard user tabbing onto a destructive button gets a ring they cannot see,
+  at the moment they most need to know what is selected. Note the same colour pair
+  *passes* as a border (3.8753 ≥ 3.0) and *fails* as a ring — the ring fails for
+  its own reason. Ghost escapes entirely because its ring sits on the surface,
+  never on a fill.
+- **G-10 — BLOCKING: stock iced 0.14 widgets cannot receive keyboard focus.**
+  Verified against the vendored `iced_widget-0.14.2` source. Across the entire
+  crate, **only `text_input` and `text_editor` implement `operation::Focusable`**
+  (`text_input.rs:691,1554`, `text_editor.rs:571,1097`). `Button`'s `State` is
+  just `{ is_pressed: bool }` and its `operate` never calls
+  `operation.focusable(...)`, so a button is never registered with the focus
+  router. Same for checkbox, radio, scrollable, menu rows — nothing.
+
+  Three further constraints confirmed:
+  * **No automatic Tab traversal exists.** `focus_next` / `focus_previous` appear
+    only as runtime definitions; nothing in `iced_widget` calls them.
+  * **No widget-level focus event** — only window-scoped
+    `window::Event::Focused` / `Unfocused`.
+  * **`iced_test` 0.14 has zero focus support**, so focus cannot be driven in
+    the tier-2 simulator.
+
+  This collides head-on with `UIF-PRIN-005` ("every interactive operation
+  reachable by pointer MUST have a deterministic keyboard path") and with
+  `UIF-MOD-001` (strict focus trap) and `UIF-CMENU-003` (arrow-key menu
+  navigation). None of those are achievable with stock iced widgets.
+  **Resolution is a fork in the plan and is pending user input.**
 
 ---
 
