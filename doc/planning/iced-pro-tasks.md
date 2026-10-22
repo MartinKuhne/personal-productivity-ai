@@ -703,10 +703,54 @@ future increments down a dead end.
       distinct from current) ships as a named validator.
       Tests: 160 new (1018 crate / 4179 workspace, 6 skipped).
       **Commit:** `feat(iced-pro): add input dialog surface`
-- [ ] **INC-20** `surface/movable.rs` (`UIF-MOV-*`) — title-bar drag state,
-      clamp integration, z-promotion on click, non-blocking pass-through outside the
-      card, respectful auto-scroll rule (`UIF-MOV-004`).
-      Tests: drag deltas, promotion ordering, auto-scroll pause/resume matrix.
+- [x] **INC-20** `surface/movable.rs` — Band-1 movable, non-blocking overlay host.
+      **Each `UIF-MOV` invariant is structural, not a check:**
+      * `UIF-MOV-001` — `zone_at` returns `Zone::TitleDrag` **only** for the
+        title bar *minus* the trailing action cluster, and that exclusion is
+        exactly as wide as the controls that must not start a drag — no wider.
+        A `TitleBar` report on the Close rectangle does **not** drag, and a
+        `Close` report on the title text does **not** close: geometry outranks
+        the caller's report in both directions, mirroring `modal.rs`. Every
+        drag frame goes through `clamp::drag_position`, so no-accumulation
+        lives in the solver — this module holds no clamp of its own and could
+        not bypass it.
+      * `UIF-MOV-002` — **unreachable geometry is unrepresentable.** Exactly
+        one private route to a new geometry (`apply_geometry`), which clamps
+        through `clamp::clamp_rect` and `debug_assert!(is_reachable)`. Every
+        public mutator funnels through it, so an unreachable card cannot be
+        constructed, only *requested* — and the request comes back adjusted as
+        `Reclamped { adjusted }`. `CARD_MIN_*` are **read from**
+        `clamp::SizePolicy::MOVABLE.min` rather than restated, so host and
+        solver cannot disagree about the floor.
+      * `UIF-MOV-003` — routing is decided **first** by `registry.route_pointer`;
+        only a route naming this surface reaches zone classification, so a click
+        outside the card can never be classified "inside" by a mistaken caller.
+        Promotion is gated on `ZBand::promotes_on_click()`. Mid-gesture the
+        routing check is deliberately skipped so a fast pointer leaving the card
+        does not drop the drag — **capture, not containment**, owns the gesture.
+      * `UIF-MOV-004` — **following is a state machine, not a checkbox.**
+        `FollowState::resolve(setting, at_bottom)` is a pure `const` function of
+        exactly the two inputs the invariant names; only `Enabled × at_bottom`
+        follows. The host's stored state is only ever that function's output, so
+        the pause/resume matrix is the whole behaviour. `AT_BOTTOM_TOLERANCE` =
+        `space::XXS` so a view settling 0.4px short does not pause a live stream
+        over sub-pixel rounding. Entries arriving while paused are counted in
+        `behind` with a `HoldReason` — `Disabled` wants a checkbox, `Inspecting`
+        wants a "jump to latest" button, and those are different affordances.
+      **Persistence honours D-2 / RUST-024:** the host never names a filesystem
+      path. A source scan for `std::fs`, `std::env`, `APPDATA`, `USERPROFILE`,
+      `dirs::`, `home_dir`, `File::`, `PathBuf` returns **zero hits**; writes go
+      exclusively through the injected `&mut dyn GeometryStorage`. Writes happen
+      only at *settled* geometry — drag release, resize release, close,
+      programmatic set, viewport re-clamp — never per frame, asserted by counting
+      sink writes across a multi-frame drag.
+      **API reduction found by test-writing:** `MovableNoOp::KeyConsumedElsewhere`
+      was removed as unproducible — `escape_via` answers `Declined(NotOpen)` for
+      every other surface, so nothing above the card can consume the key *on the
+      card's behalf*. Replaced by a `debug_assert!` documenting the
+      broken-contract case rather than shipping a variant no test can reach.
+      Tests: 116 new (1202 total), grouped by invariant, including the full
+      auto-scroll matrix, all eight resize handles, and the G-13 Escape ordering.
       **Commit:** `feat(iced-pro): add movable overlay surface`
 
 ### M7 — Verification and closeout
@@ -892,6 +936,19 @@ Recorded as they are found; none resolved yet.
      `space::SM + shape::BORDER_HAIRLINE`. They are honest compositions of
      existing tokens, not magic numbers, but the spec names them as if they were
      primitives. Worth reconciling when the spec is next revised.
+  3. **Extended by INC-20**, which needed four more things the type/space scales
+     do not carry: a **22px** footer height (control rungs are 24/28/32/36, and
+     `HIT_TARGET_MIN` is a *rule*, not a height to pick); a **16px drag
+     affordance** (`size::ICON_MD` is also 16 but documents glyphs, so borrowing
+     it would make a resize grip read as an icon); **13px Bold** for the overlay
+     title — the same missing-Bold-rung problem as item 1, since `UI_COMPACT`
+     rests at Regular and emphasises to Medium; and the **monospace family
+     itself**, which the type scale does not model at all — it carries
+     size/line-height/weight/tracking and stops short of families. The movable
+     surface can vouch for the monospace *sizes* only.
+     Taken together these say the token scale is complete for *controls* and
+     incomplete for *surfaces and type families* — a real gap to close before a
+     second app builds on this crate.
 - **G-13 — §4.1 and §5 give two different orderings and both are correct.**
   `UIF-WIN-003` unwinds **menus before dialogs** (deepest submenu → root menu →
   topmost dialog → search/filter), while §5's band table elevates **Modal (3)
