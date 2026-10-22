@@ -20,6 +20,10 @@
 //!    state rather than a token pair.
 //! 4. **Spec reconciliation.** Every numeric cell of the revised §2.5
 //!    recomputed and compared with the figure the spec prints.
+//! 5. **The crate-wide rule 4 audit.** Every `(background, foreground)`
+//!    pair every resolver in the crate can emit — 228 of them — walked
+//!    through [`fill_lock`], with the walk count pinned so the gate
+//!    cannot go vacuous and a doctored fixture proving it fires.
 //!
 //! # The two places the revised spec contradicts itself
 //!
@@ -72,8 +76,15 @@
 //! inherited.
 
 use super::*;
+use crate::state::{InteractionInput, VisualState};
+use crate::surface::menu::model::Row;
+use crate::surface::menu::view::{RowState, resolve_row_style};
+use crate::surface::modal::ModalFrame;
+use crate::surface::movable::MovableAnatomy;
 use crate::token::color::{EditorPalette, Palette};
 use crate::token::typography;
+use crate::widget::button::{ButtonVariant, resolve_style as resolve_button_style};
+use crate::widget::text_input::{InputKind, resolve_input_style};
 
 /// Tolerance on relative-luminance comparisons.
 ///
@@ -2047,5 +2058,608 @@ fn test_rule_one_governs_every_rung_below_eighteen_pixels() {
     assert!(
         smallest >= typography::MIN_SIZE,
         "the absolute text floor keeps every rung inside a size band rule 1 measures"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The crate-wide rule 4 audit — every pair every resolver can emit
+// ---------------------------------------------------------------------------
+//
+// The rule matrices above prove a *token* can never fail against a
+// *surface*. They say nothing about what the resolvers actually pair up.
+// This section closes that: it walks every `(background, foreground)`
+// pair every resolver in the crate can emit, across every reachable
+// state, and asserts each one satisfies the lock.
+//
+// It mirrors the crate-wide opacity gate in `surface/menu/view_tests.rs`
+// (`test_no_state_fill_anywhere_in_the_crate_is_synthesised_from_opacity`,
+// 75 fills) in shape: a pure audit function, a pinned walk count so the
+// walk cannot go vacuous, and a fixture fed through the *same* function
+// that proves the gate is alive.
+
+/// One `(where, background, foreground)` triple the audit walks.
+type WalkedPair = (String, Color, Color);
+
+/// What a walk produced.
+#[derive(Debug, Default)]
+struct FillLockAudit {
+    /// Every breach, in walk order, already described.
+    violations: Vec<String>,
+    /// Triples walked.
+    walked: usize,
+    /// Triples whose background was a locked solid fill — the ones the rule
+    /// actually governed.
+    governed: usize,
+    /// Triples that resolved to [`FillLock::Locked`].
+    locked: usize,
+}
+
+impl FillLockAudit {
+    /// Whether the walk found nothing.
+    fn is_clean(&self) -> bool {
+        self.violations.is_empty()
+    }
+}
+
+/// Walk a set of triples through [`fill_lock`] and report every breach.
+///
+/// A pure function over its input, in the style of
+/// [`crate::token_lint::scan_source`]: the same triples produce the same
+/// audit whether they came out of a resolver or out of a hand-written
+/// fixture, which is what makes the injection test below exercise the
+/// real gate rather than a copy of it.
+fn audit_fill_lock(pairs: &[WalkedPair], p: &Palette) -> FillLockAudit {
+    let mut audit = FillLockAudit {
+        walked: pairs.len(),
+        ..FillLockAudit::default()
+    };
+
+    for (at, background, foreground) in pairs {
+        let verdict = fill_lock(*background, *foreground, p);
+        if verdict.governed() {
+            audit.governed += 1;
+        }
+        if verdict == FillLock::Locked {
+            audit.locked += 1;
+        }
+        if !verdict.is_compliant() {
+            audit.violations.push(format!(
+                "{at}: {} — {} under {} measures {:.4}:1",
+                verdict.label(),
+                rgb8(*foreground),
+                rgb8(*background),
+                contrast_ratio(*foreground, *background),
+            ));
+        }
+    }
+
+    audit
+}
+
+/// Every [`VisualState`] the state machine can actually produce, derived
+/// by running all 32 [`InteractionInput`] combinations through
+/// [`crate::state::resolve`] rather than written out by hand.
+///
+/// Same derivation as the opacity gate's helper of the same name, which
+/// lives in another sidecar and is not reachable from here. Deriving it
+/// keeps this walk honest: if the state machine gains or loses a reachable
+/// cell, the audit changes with it instead of quietly auditing a list that
+/// no longer matches anything.
+fn reachable_visual_states() -> Vec<VisualState> {
+    let mut out: Vec<VisualState> = Vec::new();
+    for enabled in [false, true] {
+        for hovered in [false, true] {
+            for pressed in [false, true] {
+                for focused in [false, true] {
+                    for invalid in [false, true] {
+                        let state = crate::state::resolve(InteractionInput {
+                            enabled,
+                            hovered,
+                            pressed,
+                            focused,
+                            invalid,
+                        });
+                        if !out.contains(&state) {
+                            out.push(state);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The row shapes the menu walk covers.
+///
+/// Two, not one, because the Rest row's leading slot is the only cell in
+/// §4.9.2 whose colour depends on what is *in* it — a checked row carries
+/// `accent.text`, a plain one carries `text.muted` — and `accent.text` is
+/// one of the three foreground-only tokens rule 4 forbids on a fill.
+/// Walking only the plain row would leave that token unwalked against the
+/// destructive cells entirely.
+fn audit_row_shapes() -> Vec<(&'static str, Row)> {
+    vec![
+        ("plain", Row::action("audit.plain", "Plain")),
+        ("checked", Row::checkable("audit.checked", "Checked", true)),
+    ]
+}
+
+/// Every `(background, foreground)` pair the crate's resolvers can emit.
+///
+/// The composition is pinned by count in the test below, so a resolver
+/// that gained a channel, a kind or a variant without this walk growing to
+/// meet it would fail rather than go unaudited:
+///
+/// | Source | Count |
+/// |---|---|
+/// | §4.9.2 menu rows — 2 row shapes × 12 cells × 3 slots | 72 |
+/// | §3.1 buttons — 4 variants × 9 reachable states × 1 foreground | 36 |
+/// | §3.2 inputs — 3 kinds × 9 states × 4 foregrounds (value, placeholder, glyph, selection) | 108 |
+/// | §4.7.1 movable overlay — 4 surfaces × 3 text roles | 12 |
+/// | **total** | **228** |
+///
+/// The §4.6.1 modal frame contributes nothing and that is not an
+/// omission: [`ModalFrame`] carries no foreground channel at all — a
+/// surface, a border, a scrim and a divider — so there is no
+/// fill-and-label pairing there for rule 4 to reach. Its surface is
+/// asserted separately in
+/// [`test_the_modal_dialog_card_is_not_a_locked_fill`].
+fn walked_fill_pairs() -> Vec<WalkedPair> {
+    let p = palette();
+    let states = reachable_visual_states();
+    let mut out: Vec<WalkedPair> = Vec::new();
+
+    for (shape_name, row) in audit_row_shapes() {
+        for cell in RowState::ALL {
+            let style = resolve_row_style(&row, cell, &p);
+            for (channel, foreground) in [
+                ("leading", style.leading),
+                ("label", style.label),
+                ("trailing", style.trailing),
+            ] {
+                out.push((
+                    format!("menu row {shape_name} {} / {channel}", cell.matrix_row()),
+                    style.background,
+                    foreground,
+                ));
+            }
+        }
+    }
+
+    for variant in [
+        ButtonVariant::Primary,
+        ButtonVariant::Secondary,
+        ButtonVariant::Ghost,
+        ButtonVariant::Danger,
+    ] {
+        for state in &states {
+            let style = resolve_button_style(variant, *state, &p);
+            out.push((
+                format!("button {variant:?} / {state:?} / foreground"),
+                style.background,
+                style.foreground,
+            ));
+        }
+    }
+
+    for kind in [
+        InputKind::TextEntry,
+        InputKind::Search,
+        InputKind::DropdownTrigger,
+    ] {
+        for state in &states {
+            let style = resolve_input_style(kind, *state, &p);
+            for (channel, background, foreground) in [
+                ("value", style.background, style.text),
+                ("placeholder", style.background, style.placeholder),
+                ("glyph", style.background, style.icon),
+                (
+                    "selection",
+                    style.selection_background,
+                    style.selection_foreground,
+                ),
+            ] {
+                out.push((
+                    format!("input {kind:?} / {state:?} / {channel}"),
+                    background,
+                    foreground,
+                ));
+            }
+        }
+    }
+
+    let anatomy = MovableAnatomy::resolve(&p);
+    for (surface_name, surface) in [
+        ("card", anatomy.card_surface),
+        ("title bar", anatomy.title_bar_surface),
+        ("bar", anatomy.bar_surface),
+        ("content", anatomy.content_surface),
+    ] {
+        for (text_name, text) in [
+            ("title", anatomy.title_text),
+            ("meta", anatomy.meta_text),
+            ("tag", anatomy.tag_text),
+        ] {
+            out.push((
+                format!("movable overlay {surface_name} surface / {text_name} text"),
+                surface,
+                text,
+            ));
+        }
+    }
+
+    out
+}
+
+/// The walk this audit must perform. Pinned so the gate cannot go vacuous:
+/// a resolver that stopped being walked, or a channel that stopped being
+/// covered, shrinks this number and fails the test.
+const EXPECTED_WALK: usize = 72 + 36 + 108 + 12;
+
+/// How many of those walked pairs the rule actually governed — a pair with
+/// a locked solid fill behind it.
+///
+/// 18 menu rows (the three destructive bases — hovered, pressed, and
+/// pressed-with-the-outline — × 3 slots × 2 row shapes), 12 button pairs
+/// (Primary's four non-disabled base cells × 2 focus states, Danger's
+/// hover and press × 2 focus states) and 27 input selections (3 kinds ×
+/// 9 states, every one of them `accent.fill` under `text.strong`).
+const EXPECTED_GOVERNED: usize = 18 + 12 + 27;
+
+/// **Every `(background, foreground)` pair this crate emits satisfies the
+/// `UIF-TOK-006` rule 4 solid-fill foreground lock.**
+///
+/// This is the enforcement the manifest said was missing: rule 4 was
+/// honoured by construction in every resolver but nothing checked it. The
+/// resolvers now call [`assert_fill_foreground_lock`] as they build a
+/// style, and this walks the same ground from the outside so the rule is
+/// gated in every build rather than only in the ones a panic shield was
+/// compiled into.
+#[test]
+fn test_every_pair_every_resolver_in_the_crate_emits_satisfies_the_fill_foreground_lock() {
+    let p = palette();
+    let pairs = walked_fill_pairs();
+    let audit = audit_fill_lock(&pairs, &p);
+
+    assert!(
+        audit.is_clean(),
+        "UIF-TOK-006 rule 4 breached somewhere in the crate: {:?}",
+        audit.violations
+    );
+
+    assert_eq!(
+        audit.walked, EXPECTED_WALK,
+        "the audit must walk every cell of every resolver it claims to cover \
+         (menu rows, buttons, inputs, the movable overlay)"
+    );
+    assert_eq!(
+        audit.governed, EXPECTED_GOVERNED,
+        "the walk must actually reach the locked fills; governing nothing would \
+         make a clean result meaningless"
+    );
+    assert_eq!(
+        audit.locked, EXPECTED_GOVERNED,
+        "every governed pair must resolve to `Locked` — a governed pair that is \
+         compliant without being locked means the foreground is not text.strong"
+    );
+}
+
+/// The injection proof: a deliberately illegal pairing fed through the
+/// same audit the crate is walked with comes back flagged.
+///
+/// Without this the walk could be green because the gate never fires on
+/// anything. Three doctored pairs cover both sentences of the rule and
+/// both shapes of breach, and the two clean triples either side of them
+/// prove the audit is not simply reporting everything.
+#[test]
+fn test_the_fill_lock_audit_catches_a_doctored_pair() {
+    let p = palette();
+    let doctored: Vec<WalkedPair> = vec![
+        (
+            "clean: label on surface.overlay".to_string(),
+            p.surface_overlay,
+            p.text_primary,
+        ),
+        (
+            "INJECTED: accent.text on accent.fill".to_string(),
+            p.accent_fill,
+            p.accent_text,
+        ),
+        (
+            "INJECTED: status.warning on status.danger.fill".to_string(),
+            p.status_danger_fill,
+            p.status_warning,
+        ),
+        (
+            "INJECTED: text.primary on accent.fill_active".to_string(),
+            p.accent_fill_active,
+            p.text_primary,
+        ),
+        (
+            "clean: unpainted slot on status.danger.fill_active".to_string(),
+            p.status_danger_fill_active,
+            Color::TRANSPARENT,
+        ),
+    ];
+
+    let audit = audit_fill_lock(&doctored, &p);
+
+    assert_eq!(audit.walked, 5, "every fixture is walked");
+    assert_eq!(audit.governed, 4, "four of the five sit on a locked fill");
+    assert_eq!(
+        audit.violations.len(),
+        3,
+        "exactly the three injected pairs breach the lock; got {:?}",
+        audit.violations
+    );
+    assert!(
+        audit
+            .violations
+            .iter()
+            .any(|v| v.contains("foreground-only-on-fill") && v.contains("INJECTED: accent.text")),
+        "the accent.text injection must be classified as a foreground-only token \
+         on a fill: {:?}",
+        audit.violations
+    );
+    assert!(
+        audit
+            .violations
+            .iter()
+            .any(|v| v.contains("wrong-foreground-on-fill") && v.contains("text.primary")),
+        "the text.primary injection must be classified as the wrong foreground on \
+         a fill: {:?}",
+        audit.violations
+    );
+}
+
+/// The shield a resolver calls really fires — the audit is not the only
+/// thing standing between a bad edit and a shipped frame.
+#[test]
+#[should_panic(expected = "UIF-TOK-006 rule 4")]
+fn test_the_construction_shield_panics_on_an_illegal_pair() {
+    let p = palette();
+    assert_fill_foreground_lock(p.status_danger_fill, p.accent_text, &p);
+}
+
+/// The shield stays silent on the pairings the rule asks for.
+#[test]
+fn test_the_construction_shield_passes_every_locked_fill_under_text_strong() {
+    let p = palette();
+    for fill in [
+        p.accent_fill,
+        p.accent_fill_active,
+        p.status_danger_fill,
+        p.status_danger_fill_active,
+    ] {
+        assert_fill_foreground_lock(fill, p.text_strong, &p);
+        assert_eq!(fill_lock(fill, p.text_strong, &p), FillLock::Locked);
+    }
+}
+
+/// A `transparent` background is not a fill, and the Ghost resting cell
+/// is legal rather than merely tolerated.
+///
+/// Rule 4 governs *solid* fills. A Ghost button at rest paints nothing
+/// behind `text.primary`, so there is no fill for the lock to pin and no
+/// pairing for it to reject — the same reading that makes
+/// [`ChromeClass::UnpaintedBackground`] unevaluable at rest rather than
+/// failing.
+#[test]
+fn test_a_transparent_background_is_not_a_solid_fill() {
+    let p = palette();
+
+    assert_eq!(
+        fill_lock_role(Color::TRANSPARENT, &p),
+        FillLockRole::Unlocked
+    );
+    for foreground in [
+        p.text_primary,
+        p.text_muted,
+        p.text_disabled,
+        p.status_danger_text,
+        p.status_warning,
+        p.accent_text,
+    ] {
+        assert_eq!(
+            fill_lock(Color::TRANSPARENT, foreground, &p),
+            FillLock::NotSolidFill,
+            "nothing is painted behind the label, so rule 4 has no fill to lock"
+        );
+        assert!(meets_fill_foreground_lock(
+            Color::TRANSPARENT,
+            foreground,
+            &p
+        ));
+    }
+}
+
+/// The scrim is excluded from the lock, and for the same reason
+/// [`contrast_ratio`] refuses to measure it: it is a translucent layer,
+/// not a solid fill a label sits on.
+///
+/// `surface.scrim` is `surface.base` at 55% alpha. What it looks like
+/// depends on what was painted underneath, so it is not a background in
+/// the sense rule 4 means — the alpha *is* the rule, and the composited
+/// result is not a token. Reading it as a locked fill would lock a
+/// foreground to a colour that never appears on its own.
+#[test]
+fn test_the_scrim_is_a_translucent_layer_and_not_a_locked_fill() {
+    let p = palette();
+
+    assert!(p.surface_scrim.a < 1.0, "the scrim is translucent by token");
+    assert_eq!(fill_lock_role(p.surface_scrim, &p), FillLockRole::Unlocked);
+    for foreground in [p.text_strong, p.text_primary, p.accent_text] {
+        assert_eq!(
+            fill_lock(p.surface_scrim, foreground, &p),
+            FillLock::NotSolidFill,
+            "a dimming layer carries no label and so governs no foreground"
+        );
+    }
+
+    // Compositing it does not turn it into a fill either: what lands on
+    // `surface.base` is base itself, and what lands on white is a mid
+    // grey that is not one of the four locked tokens.
+    assert_eq!(
+        fill_lock_role(composite_over(p.surface_scrim, p.surface_base), &p),
+        FillLockRole::Unlocked
+    );
+    assert_eq!(
+        fill_lock_role(composite_over(p.surface_scrim, Color::WHITE), &p),
+        FillLockRole::Unlocked
+    );
+}
+
+/// The dialog card is a surface, not a fill.
+///
+/// [`ModalFrame`] resolves to `surface.overlay` with no foreground
+/// channel of its own, so it contributes no pair to the walk. That is
+/// only a safe thing to say if the surface really is not one of the four
+/// locked fills — if a future frame resolved its card to `accent.fill`,
+/// every label placed on it would need the lock re-argued, and this fails
+/// first.
+#[test]
+fn test_the_modal_dialog_card_is_not_a_locked_fill() {
+    let p = palette();
+    let frame = ModalFrame::resolve(&p);
+
+    assert_eq!(fill_lock_role(frame.surface, &p), FillLockRole::Unlocked);
+    assert_eq!(frame.surface, p.surface_overlay);
+    for foreground in [p.text_strong, p.text_primary, p.status_warning] {
+        assert!(meets_fill_foreground_lock(frame.surface, foreground, &p));
+    }
+}
+
+/// The role table itself: four locked fills, three foreground-only tokens,
+/// and everything else unlocked.
+///
+/// The lock is only as good as the role read, so the read is asserted
+/// across the whole palette rather than at the handful of points the
+/// resolvers happen to use.
+#[test]
+fn test_the_lock_roles_partition_the_palette() {
+    let p = palette();
+
+    let locked = [
+        ("accent.fill", p.accent_fill),
+        ("accent.fill_active", p.accent_fill_active),
+        ("status.danger.fill", p.status_danger_fill),
+        ("status.danger.fill_active", p.status_danger_fill_active),
+    ];
+    let foreground_only = [
+        ("status.danger.text", p.status_danger_text),
+        ("status.warning", p.status_warning),
+        ("accent.text", p.accent_text),
+    ];
+    let unlocked = [
+        ("surface.base", p.surface_base),
+        ("surface.sunken", p.surface_sunken),
+        ("surface.raised", p.surface_raised),
+        ("surface.code", p.surface_code),
+        ("surface.overlay", p.surface_overlay),
+        ("surface.hover", p.surface_hover),
+        ("surface.active", p.surface_active),
+        ("border.subtle", p.border_subtle),
+        ("border.strong", p.border_strong),
+        ("accent.border", p.accent_border),
+        ("text.primary", p.text_primary),
+        ("text.strong", p.text_strong),
+        ("text.muted", p.text_muted),
+        ("text.disabled", p.text_disabled),
+        ("status.success", p.status_success),
+    ];
+
+    for (name, color) in locked {
+        assert!(
+            fill_lock_role(color, &p).is_locked_fill(),
+            "{name} must read as a locked solid fill"
+        );
+        assert!(
+            !fill_lock_role(color, &p).is_foreground_only(),
+            "{name} must not read as foreground-only"
+        );
+    }
+    for (name, color) in foreground_only {
+        assert!(
+            fill_lock_role(color, &p).is_foreground_only(),
+            "{name} must read as a foreground-only token"
+        );
+        assert!(
+            !fill_lock_role(color, &p).is_locked_fill(),
+            "{name} must not read as a locked fill"
+        );
+    }
+    for (name, color) in unlocked {
+        assert_eq!(
+            fill_lock_role(color, &p),
+            FillLockRole::Unlocked,
+            "{name} must sit outside the lock entirely"
+        );
+    }
+
+    // 4 + 3 + 15 = 22 of the palette's 23 dark tokens; the scrim is the
+    // twenty-third and is excluded on alpha, as its own test states.
+    assert_eq!(locked.len() + foreground_only.len() + unlocked.len(), 22);
+}
+
+/// Every foreground-only token is rejected on every locked fill — all
+/// twelve pairings, not the six the resting fills give.
+///
+/// Ten of the twelve are unreadable as well as forbidden: none of them
+/// clears the `3.00:1` chrome floor, and the best of the ten reaches
+/// only `2.7460:1`. The other two are the interesting ones.
+/// `accent.text` measures `3.0293:1` on `accent.fill_active` and
+/// `3.0820:1` on `status.danger.fill_active`, and the contrast solver
+/// objects to neither — yet rule 4 forbids both. Those two pairings are
+/// the proof that rule 4 is a rule about roles rather than a threshold a
+/// retune could satisfy.
+#[test]
+fn test_every_foreground_only_token_is_rejected_on_every_locked_fill() {
+    let p = palette();
+    let fills = [
+        ("accent.fill", p.accent_fill),
+        ("accent.fill_active", p.accent_fill_active),
+        ("status.danger.fill", p.status_danger_fill),
+        ("status.danger.fill_active", p.status_danger_fill_active),
+    ];
+    let forbidden = [
+        ("status.danger.text", p.status_danger_text),
+        ("status.warning", p.status_warning),
+        ("accent.text", p.accent_text),
+    ];
+
+    let mut unreadable = 0;
+    let mut clears_the_chrome_floor = Vec::new();
+
+    for (fill_name, fill) in fills {
+        for (role, color) in forbidden {
+            assert_eq!(
+                fill_lock(fill, color, &p),
+                FillLock::ForegroundOnlyOnFill,
+                "{role} on {fill_name} must be rejected by rule 4"
+            );
+            assert!(!meets_fill_foreground_lock(fill, color, &p));
+
+            let ratio = contrast_ratio(color, fill);
+            if ratio < MIN_CHROME_CONTRAST {
+                unreadable += 1;
+            } else {
+                clears_the_chrome_floor.push(format!("{role} on {fill_name}: {ratio:.4}"));
+            }
+        }
+    }
+
+    assert_eq!(
+        unreadable, 10,
+        "ten of the twelve pairings are unreadable as well as forbidden"
+    );
+    assert_eq!(
+        clears_the_chrome_floor,
+        vec![
+            "accent.text on accent.fill_active: 3.0293",
+            "accent.text on status.danger.fill_active: 3.0820",
+        ],
+        "exactly two forbidden pairings clear the chrome floor, and rule 4 still \
+         forbids both — the rule is about roles, not ratios"
     );
 }

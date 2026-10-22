@@ -135,7 +135,7 @@
 //! Unit tests live in the sibling `button_tests.rs` sidecar.
 
 use crate::state::{BaseState, VisualState};
-use crate::token::{color::Palette, shape, size, space};
+use crate::token::{color::Palette, contrast, shape, size, space};
 use crate::widget::focus;
 use iced::Color;
 
@@ -275,9 +275,21 @@ impl ButtonStyle {
 /// [`focus::resolve_ring_color_for_background`], so a focused control
 /// always wears a ring that can actually be seen against whatever it is
 /// sitting on (`UIF-TOK-006` rule 2, decision **D-6**).
+///
+/// And the `(background, foreground)` pair it is about to hand back goes
+/// through [`contrast::assert_fill_foreground_lock`] before anything else
+/// touches it — the `UIF-TOK-006` rule 4 solid-fill foreground lock,
+/// checked at the moment the style is built rather than after. Primary's
+/// two fills and Danger's two fills are exactly the four tokens that rule
+/// names, and every one of their cells carries
+/// [`text_strong`](Palette::text_strong); the shield is what makes that
+/// a checked fact at construction instead of a property of the table that
+/// a later edit could quietly break.
 #[must_use]
 pub fn resolve_style(variant: ButtonVariant, state: VisualState, palette: &Palette) -> ButtonStyle {
     let base = base_paint(variant, state.base, palette);
+
+    contrast::assert_fill_foreground_lock(base.background, base.foreground, palette);
 
     let (focus_ring_color, focus_ring_width) = if state.ring_visible() {
         (

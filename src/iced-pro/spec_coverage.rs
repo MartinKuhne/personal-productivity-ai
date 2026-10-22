@@ -601,27 +601,28 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TOK-006",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§2.5 rules",
         evidence: &["token/contrast.rs"],
-        reason: Some(
-            "Rules 1 and 3 are implemented as thresholds (4.5 / 3.0) over a WCAG 2.1 \
-             luminance and ratio solver that composites translucent layers before \
-             measuring, and both pass the full matrix against the revised palette. \
-             Rule 3's four-class chrome classification (`Judged`, `CoincidentWithFill`, \
-             `UnpaintedBackground`, `RestingDivider`) is modelled, which settles the \
-             old reading problem around `border.subtle` — it is a `RestingDivider` and \
-             exempt by class, not by an informal reading of the word 'active'. \
-             Missing: rule 4's Selection Foreground Lock is honoured by construction in \
-             every resolver but is not *enforced* — nothing forbids a non-`text.strong` \
-             foreground, or a foreground-only `status.*`/`accent.text` colour, on a \
-             solid `*.fill`. Two further cells fail the spec's own thresholds and are \
-             pinned as known conflicts rather than patched: rule 2's `[4.00, 6.00]` \
-             band is breached by `text.disabled` on `surface.sunken` (6.0205), and \
-             rule 3's `CoincidentWithFill` floor of 3.08 is missed by \
+        reason: None,
+        note: Some(
+            "All four rules are implemented and machine-checked. Rules 1 and 3 are \
+             thresholds (4.5 / 3.0) over a WCAG 2.1 solver that composites \
+             translucent layers before measuring, and both pass the full matrix \
+             against the revised palette; rule 3's four-class chrome classification \
+             (`Judged`, `CoincidentWithFill`, `UnpaintedBackground`, \
+             `RestingDivider`) makes `border.subtle`'s exemption a class rather than \
+             a reading of the word 'active'. Rule 4's foreground lock is enforced by a \
+             guard every resolver calls plus a 228-pair crate-wide audit. The lock is \
+             role-based, not threshold-based, and that distinction is load-bearing: two \
+             forbidden pairings actually clear the 3.00 chrome floor (`accent.text` on \
+             `accent.fill_active` at 3.0293 and on `status.danger.fill_active` at \
+             3.0820) yet remain banned. Two cells fail the spec's own thresholds and \
+             are pinned as known conflicts rather than patched: rule 2's \
+             `[4.00, 6.00]` band is breached by `text.disabled` on `surface.sunken` \
+             (6.0205), and rule 3's `CoincidentWithFill` floor of 3.08 is missed by \
              `status.danger.fill_active` on `surface.overlay` (3.0789).",
         ),
-        note: None,
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
     Coverage {

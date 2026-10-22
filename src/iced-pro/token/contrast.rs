@@ -6,7 +6,11 @@
 //! opinion. It resolves no styles, owns no palette and touches no I/O:
 //! [`relative_luminance`], [`contrast_ratio`] and [`composite_over`] are
 //! pure functions over `iced::Color`, which is what makes the
-//! `UIF-VER-001` gate checkable without a window.
+//! `UIF-VER-001` gate checkable without a window. The one place a
+//! [`Palette`] does arrive is [`fill_lock`], and it arrives as an
+//! argument rather than a possession: rule 4 is a rule about which
+//! *token* a colour is, so the palette is read for role identity and
+//! never stored.
 //!
 //! # The maths
 //!
@@ -118,6 +122,56 @@
 //! and over white it lands on `RGB(119.7, 119.7, 120.8)`, where
 //! `text.strong` measures a sane `4.4289:1`.
 //!
+//! # Rule 4 — the solid-fill foreground lock, made checkable
+//!
+//! Rule 4 is the one rule in §2.5 that is not a threshold. It does not ask
+//! a colour to reach a number; it asks that a *role* always be paired with
+//! one specific colour:
+//!
+//! > Whenever `color.accent.fill`, `color.accent.fill_active`,
+//! > `color.status.danger.fill`, or `color.status.danger.fill_active` is
+//! > used as a background fill, the foreground text and icon color MUST
+//! > lock to `color.text.strong`.
+//!
+//! [`fill_lock`] answers that as a verdict — [`FillLock`] — over a
+//! resolved `(background, foreground)` pair, and
+//! [`assert_fill_foreground_lock`] is the shield the resolvers call while
+//! they are building a style. Three things about the reading matter:
+//!
+//! * **The rule is about roles, not hues.** Which colour is a "locked
+//!   solid fill" is a fact about the palette, not about the RGB, so
+//!   [`fill_lock_role`] reads the role off [`Palette`] by value identity
+//!   the same way the gallery reads a colour back to its token name. A
+//!   palette that retunes `accent.fill` moves the lock with it; nothing
+//!   here carries a colour literal of its own.
+//! * **A `transparent` background is not a fill.** Rule 4 governs
+//!   *solid* fills, and a colour with zero alpha paints nothing, so it is
+//!   [`Unlocked`](FillLockRole::Unlocked) and a Ghost button's resting
+//!   cell — `transparent` under `text.primary` — is legal rather than
+//!   merely tolerated. The same is true of a foreground with zero alpha:
+//!   nothing is drawn in that slot, so there is no text or icon for the
+//!   rule to protect ([`ForegroundNotPainted`](FillLock::ForegroundNotPainted)).
+//! * **The scrim is excluded, and the reason is the same one.**
+//!   [`surface_scrim`](crate::token::color::Palette::surface_scrim) is a
+//!   *translucent* token: it is not a fill that carries a label, it is a
+//!   dimming layer that composites over something else, and its own
+//!   painted colour depends on what is underneath. Rule 4's four fills are
+//!   opaque tokens that a label sits directly on. A layer with `a < 1.0`
+//!   is therefore never a locked fill, which is why
+//!   [`fill_lock_role`] short-circuits on alpha before it compares
+//!   anything.
+//!
+//! The lock holds across the four fills at `4.8020:1` to `5.7543:1`
+//! (the spec prints `4.80:1` to `5.75:1`). The prohibition half is
+//! protective in ten of its twelve pairings — every foreground-only
+//! token lands under the `3.00:1` chrome floor on the resting fills and
+//! on both danger fills, best case `2.7460:1` — and *prohibitive rather
+//! than protective* in the other two: `accent.text` measures `3.0293:1`
+//! on `accent.fill_active` and `3.0820:1` on `status.danger.fill_active`
+//! and clears that floor both times. Rule 4 forbids them anyway, which is
+//! the point: the rule pins a role and cannot be tuned into compliance
+//! the way a threshold can.
+//!
 //! # The spec's printed numeric columns are not authoritative
 //!
 //! Ledger gap **G-5** (`doc/planning/iced-pro-tasks.md`) establishes
@@ -166,6 +220,8 @@
 //! Unit tests live in the sibling `contrast_tests.rs` sidecar.
 
 use iced::Color;
+
+use crate::token::color::Palette;
 
 /// Minimum contrast normal text (`< 18px`) must hold against its
 /// immediate background (`UIF-TOK-006` rule 1).
@@ -471,6 +527,258 @@ pub fn meets_chrome_contrast_as(class: ChromeClass, a: Color, b: Color) -> bool 
 pub fn meets_disabled_text_band(fg: Color, bg: Color) -> bool {
     let ratio = contrast_ratio(fg, bg);
     (DISABLED_TEXT_MIN_CONTRAST..=DISABLED_TEXT_MAX_CONTRAST).contains(&ratio)
+}
+
+// ---------------------------------------------------------------------------
+// UIF-TOK-006 rule 4 — the solid-fill foreground lock
+// ---------------------------------------------------------------------------
+
+/// Which side of the `UIF-TOK-006` rule 4 lock a colour sits on.
+///
+/// Rule 4 is a rule about roles rather than hues: the same RGB is a locked
+/// fill under one token name and an ordinary surface under another. The
+/// role is therefore read off the [`Palette`] by value identity, the same
+/// way [`crate::gallery`] reads a painted colour back to the token it
+/// came from — so a palette that retunes `accent.fill` moves the lock
+/// with it, and this module carries no colour of its own.
+///
+/// Alpha decides the question before any comparison is made. A colour with
+/// `a < 1.0` has not finished being painted: a `transparent` slot paints
+/// nothing, and [`surface_scrim`](crate::token::color::Palette::surface_scrim)
+/// is a dimming layer whose visible colour belongs to whatever is
+/// composited beneath it. Neither is a *solid* fill, so neither is ever
+/// [`LockedFill`](Self::LockedFill).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillLockRole {
+    /// One of the four saturated solid fills whose foreground rule 4
+    /// pins to `text.strong`: `accent.fill`, `accent.fill_active`,
+    /// `status.danger.fill`, `status.danger.fill_active`.
+    LockedFill,
+
+    /// A foreground-only token rule 4 forbids on a locked fill:
+    /// `status.danger.text`, `status.warning`, `accent.text`. These are
+    /// the colours a *label* is written in and can never be painted on.
+    ForegroundOnly,
+
+    /// Neither role — a surface, a border, or a text role rule 4 does not
+    /// name. The lock places no demand through this value.
+    Unlocked,
+}
+
+impl FillLockRole {
+    /// Is this colour one of the four solid fills the lock governs?
+    #[must_use]
+    pub const fn is_locked_fill(self) -> bool {
+        matches!(self, Self::LockedFill)
+    }
+
+    /// Is this a foreground-only token that may not sit on a locked fill?
+    #[must_use]
+    pub const fn is_foreground_only(self) -> bool {
+        matches!(self, Self::ForegroundOnly)
+    }
+
+    /// The column label for this role.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LockedFill => "locked-solid-fill",
+            Self::ForegroundOnly => "foreground-only",
+            Self::Unlocked => "unlocked",
+        }
+    }
+}
+
+/// How one resolved `(background, foreground)` pairing stands under
+/// `UIF-TOK-006` rule 4.
+///
+/// Five outcomes rather than a boolean, because a lint that can only say
+/// "no" cannot tell a caller *which* of its two sentences it breached —
+/// and the difference between "this background is not a fill, so the rule
+/// never applied" and "this fill is carrying the wrong colour" is the
+/// difference between a pass and a bug.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FillLock {
+    /// The background is not a locked solid fill, so rule 4 makes no
+    /// demand on the foreground. This covers every surface, every border,
+    /// and every `transparent` cell — a Ghost button at rest is legal
+    /// here, not excused.
+    NotSolidFill,
+
+    /// The background is a locked solid fill and the foreground is
+    /// `text.strong` — the pairing the rule requires.
+    Locked,
+
+    /// The background is a locked solid fill and nothing is painted in the
+    /// foreground slot. There is no text or icon to read, so there is
+    /// nothing for the rule to protect.
+    ForegroundNotPainted,
+
+    /// A foreground-only token painted on a locked solid fill — the
+    /// pairing rule 4's second sentence forbids outright, and the one
+    /// this lock exists to catch. Ten of the twelve such pairings are
+    /// unreadable as well as forbidden — `accent.text` on `accent.fill`
+    /// is `2.5719:1`, `status.warning` on `status.danger.fill` is
+    /// `1.7667:1`, and the best of the ten reaches only `2.7460:1`.
+    /// The other two are `accent.text` on the pressed fills: `3.0293:1`
+    /// on `accent.fill_active` and `3.0820:1` on `status.danger.fill_active`,
+    /// both of which clear the chrome floor outright. Rule 4 forbids them
+    /// anyway, which is the clearest evidence that it pins a role rather
+    /// than a threshold that could be tuned into compliance.
+    ForegroundOnlyOnFill,
+
+    /// A locked solid fill carrying a foreground that is neither
+    /// `text.strong` nor unpainted.
+    WrongForegroundOnFill,
+}
+
+impl FillLock {
+    /// Does this verdict satisfy rule 4 rather than breach it?
+    #[must_use]
+    pub const fn is_compliant(self) -> bool {
+        matches!(
+            self,
+            Self::NotSolidFill | Self::Locked | Self::ForegroundNotPainted
+        )
+    }
+
+    /// Did the lock actually apply — i.e. was the background a locked
+    /// solid fill?
+    ///
+    /// An audit that only counted compliant pairs could reach that number
+    /// by walking nothing but surfaces. This is the counter that says the
+    /// rule was exercised.
+    #[must_use]
+    pub const fn governed(self) -> bool {
+        !matches!(self, Self::NotSolidFill)
+    }
+
+    /// The column label for this verdict.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NotSolidFill => "not-a-solid-fill",
+            Self::Locked => "locked",
+            Self::ForegroundNotPainted => "foreground-not-painted",
+            Self::ForegroundOnlyOnFill => "foreground-only-on-fill",
+            Self::WrongForegroundOnFill => "wrong-foreground-on-fill",
+        }
+    }
+}
+
+/// The role a colour plays in the `UIF-TOK-006` rule 4 lock, read off
+/// `palette` by value identity.
+///
+/// Alpha is decided first: anything below fully opaque is
+/// [`Unlocked`](FillLockRole::Unlocked), because rule 4 governs *solid*
+/// fills and a translucent colour has not finished being painted. That
+/// is what keeps `surface.scrim` — base at 55%, a dimming layer rather
+/// than a surface a label sits on — out of the locked set for the same
+/// reason [`contrast_ratio`] refuses to measure it directly.
+///
+/// The fills are matched before the foreground-only tokens, so a palette
+/// that aliased a fill and a foreground token to the same RGB would be
+/// read as the fill: the stricter of the two readings wins.
+#[must_use]
+pub fn fill_lock_role(color: Color, palette: &Palette) -> FillLockRole {
+    if color.a < 1.0 {
+        return FillLockRole::Unlocked;
+    }
+
+    if color == palette.accent_fill
+        || color == palette.accent_fill_active
+        || color == palette.status_danger_fill
+        || color == palette.status_danger_fill_active
+    {
+        return FillLockRole::LockedFill;
+    }
+
+    if color == palette.status_danger_text
+        || color == palette.status_warning
+        || color == palette.accent_text
+    {
+        return FillLockRole::ForegroundOnly;
+    }
+
+    FillLockRole::Unlocked
+}
+
+/// Does `(background, foreground)` satisfy the `UIF-TOK-006` rule 4
+/// solid-fill foreground lock?
+///
+/// The whole rule, as one verdict:
+///
+/// * a background outside the four locked fills is not the rule's
+///   business ([`NotSolidFill`](FillLock::NotSolidFill));
+/// * a locked fill under `text.strong` is what the rule asks for
+///   ([`Locked`](FillLock::Locked));
+/// * a locked fill under an unpainted slot has nothing to read
+///   ([`ForegroundNotPainted`](FillLock::ForegroundNotPainted));
+/// * a locked fill under anything else breaches the rule, split by whether
+///   the intruder was a foreground-only token.
+///
+/// Both inputs must be colours that will actually be painted. A
+/// translucent layer should be composited with [`composite_over`] first —
+/// but note that a composited scrim is still not a *fill*, so it resolves
+/// to [`NotSolidFill`](FillLock::NotSolidFill) by alpha rather than by
+/// any comparison.
+#[must_use]
+pub fn fill_lock(background: Color, foreground: Color, palette: &Palette) -> FillLock {
+    if !fill_lock_role(background, palette).is_locked_fill() {
+        return FillLock::NotSolidFill;
+    }
+    if foreground.a == 0.0 {
+        return FillLock::ForegroundNotPainted;
+    }
+    if foreground == palette.text_strong {
+        return FillLock::Locked;
+    }
+    if fill_lock_role(foreground, palette).is_foreground_only() {
+        return FillLock::ForegroundOnlyOnFill;
+    }
+    FillLock::WrongForegroundOnFill
+}
+
+/// Does `(background, foreground)` satisfy the `UIF-TOK-006` rule 4
+/// solid-fill foreground lock?
+///
+/// [`fill_lock`], flattened to a boolean for callers that only need the
+/// pass/fail. Prefer [`fill_lock`] when a failure has to say why.
+#[must_use]
+pub fn meets_fill_foreground_lock(background: Color, foreground: Color, palette: &Palette) -> bool {
+    fill_lock(background, foreground, palette).is_compliant()
+}
+
+/// The construction-time shield `UIF-TOK-006` rule 4 gives the resolvers.
+///
+/// A resolver calls this with the `(background, foreground)` pair it is
+/// about to paint, while it is still building the style rather than after
+/// the fact. In a debug build a breach aborts right there, at the
+/// resolver and the pairing that caused it, so an illegal pairing cannot
+/// be carried out of the function that made it.
+///
+/// It is a `debug_assert` rather than a hard panic for one reason: the
+/// lock is read from the *palette*, and a host can hand a widget a palette
+/// this crate never audited. A hard panic would turn a third-party token
+/// alias into a crashed frame; the shield turns it into a failed test.
+/// The gate that actually holds the rule in every build is the crate-wide
+/// audit in the sidecar, which walks every pair every resolver can emit
+/// across every reachable state and fails the build on any breach — so
+/// the pairing that would trip this shield cannot reach a tested build in
+/// the first place.
+///
+/// # Panics
+/// In a `debug_assertions` build, when [`fill_lock`] returns a
+/// non-compliant verdict for the pair.
+#[track_caller]
+pub fn assert_fill_foreground_lock(background: Color, foreground: Color, palette: &Palette) {
+    debug_assert!(
+        fill_lock(background, foreground, palette).is_compliant(),
+        "UIF-TOK-006 rule 4 (Selection & Solid-Fill Foreground Lock) breached: {} — a solid \
+         `*.fill` carries `color.text.strong` and nothing else (background {background:?}, \
+         foreground {foreground:?})",
+        fill_lock(background, foreground, palette).label(),
+    );
 }
 
 #[cfg(test)]

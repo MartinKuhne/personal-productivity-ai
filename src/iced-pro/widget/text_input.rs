@@ -131,6 +131,7 @@
 use crate::focus::FocusId;
 use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::token::color::Palette;
+use crate::token::contrast;
 use crate::token::{shape, size, space};
 use crate::widget::button_widget::Layer;
 use crate::widget::focus;
@@ -554,7 +555,7 @@ pub fn resolve_input_style(kind: InputKind, state: VisualState, palette: &Palett
         (NO_RING_COLOR, NO_STROKE_WIDTH)
     };
 
-    InputStyle {
+    let style = InputStyle {
         background: base.background,
         text: base.text,
         placeholder: base.placeholder,
@@ -565,7 +566,37 @@ pub fn resolve_input_style(kind: InputKind, state: VisualState, palette: &Palett
         border_width: base.border_width,
         focus_ring_color,
         focus_ring_width,
-    }
+    };
+
+    assert_fill_foreground_locks(&style, palette);
+
+    style
+}
+
+/// The `UIF-TOK-006` rule 4 shield for every foreground channel an
+/// [`InputStyle`] carries.
+///
+/// Four pairs rather than one, because an input paints more than a value
+/// over its own background: the placeholder and the trailing glyph are
+/// separate foregrounds, and the rule reaches each of them. The fourth is
+/// the selection, which is the pair this atom has always had to get right
+/// — iced draws the selection as a filled rectangle under the value
+/// colour, and that fill is [`accent_fill`](Palette::accent_fill), one of
+/// the four locked solid fills.
+///
+/// No cell of §3.2 puts a foreground-only token on a locked fill today,
+/// so every one of these four calls is a no-op on every state the atom
+/// can reach. That is the point: the check is what keeps it that way
+/// rather than the table merely happening to be correct.
+fn assert_fill_foreground_locks(style: &InputStyle, palette: &Palette) {
+    contrast::assert_fill_foreground_lock(style.background, style.text, palette);
+    contrast::assert_fill_foreground_lock(style.background, style.placeholder, palette);
+    contrast::assert_fill_foreground_lock(style.background, style.icon, palette);
+    contrast::assert_fill_foreground_lock(
+        style.selection_background,
+        style.selection_foreground,
+        palette,
+    );
 }
 
 /// The rectangle the editable text occupies inside an input's bounds.

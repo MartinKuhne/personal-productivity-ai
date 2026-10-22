@@ -160,6 +160,7 @@ use crate::focus::FocusId;
 use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::surface::menu::model::{LeadingSlot, Row, RowKind, TrailingSlot};
 use crate::token::color::Palette;
+use crate::token::contrast;
 use crate::token::{shape, size, space, typography};
 use crate::widget::button_widget::Layer;
 use crate::widget::focus::{
@@ -552,9 +553,22 @@ struct BasePaint {
 /// never overrides `state`. A row that is not enabled still resolves to
 /// [`RowBase::Disabled`] only because the caller said so through `state`;
 /// the resolver does not second-guess it.
+///
+/// Each of the three painted channels is then put through
+/// [`contrast::assert_fill_foreground_lock`] against the background this
+/// function just resolved — the `UIF-TOK-006` rule 4 solid-fill
+/// foreground lock. The two destructive bases paint the danger fills, and
+/// trap 4 is exactly the case the lock is written against: a `✓` that
+/// kept the Rest row's `accent.text` while the row went hot behind it.
+/// Checking all three slots rather than only the label is what makes that
+/// trap a checked invariant instead of a property of the current table.
 #[must_use]
 pub fn resolve_row_style(row: &Row, state: RowState, palette: &Palette) -> RowStyle {
     let base = base_paint(row, state, palette);
+
+    contrast::assert_fill_foreground_lock(base.background, base.leading, palette);
+    contrast::assert_fill_foreground_lock(base.background, base.label, palette);
+    contrast::assert_fill_foreground_lock(base.background, base.trailing, palette);
 
     let focus_outline = if state.focused {
         Some(resolve_focus_indicator_for_background(
