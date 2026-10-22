@@ -114,10 +114,24 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 ### M2 — Interaction state machine
 
-- [ ] **INC-06** `state.rs` — `InteractionState { Rest, Hovered, Pressed, Focused,
-      Disabled, Invalid }` plus a pure priority resolver (`Disabled` > `Invalid` >
-      `Pressed` > `Focused` > `Hovered` > `Rest`) and transition helpers.
-      Tests: every precedence combination, no-implicit-transition rules.
+- [x] **INC-06** `state.rs` — interaction state machine. **Design diverged from
+      this entry's original sketch, deliberately.** Rather than a flat six-value
+      enum, the resolved state is two parts: `BaseState { Rest, Hovered, Pressed,
+      Disabled, Invalid }` plus `VisualState { base, focused }`.
+      Reason: the spec does not treat focus as mutually exclusive with the
+      pointer states — §3.1 spells every Focused cell as "Rest **+** 2px focus
+      ring", and §4.9.2's Focused menu row is `surface.hover` **plus** an inset
+      outline, held simultaneously. A flat enum must pick one and contradict a row.
+      Precedence for `base`: `Disabled > Invalid > Pressed > Hovered > Rest`,
+      with `focused` resolved independently. Focus is a ring, not a rung, so the
+      "does focus beat hover?" slot disappears rather than being ordered.
+      Disabled dominance is total (it zeroes `focused` too — a dead control must
+      not advertise a ring). `pressed` without `hovered` resolves to `Pressed`.
+      `snapshot_label` maps to the spec's six names as a documented many-to-one
+      projection; `Hovered + focused` reports `"Focused"` and is flagged as a
+      seventh combination the spec never snapshots.
+      Tests: full 32-row truth table, disabled dominance across all 16
+      sub-combinations, focus orthogonality, purity.
       **Commit:** `feat(iced-pro): add interaction state machine`
 
 ### M3 — Atoms (UIF-ATOM-*)
