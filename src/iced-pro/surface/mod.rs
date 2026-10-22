@@ -8,6 +8,7 @@
 //! its own data model separately from its renderer so the rules stay
 //! testable without a window.
 
+pub mod input_dialog;
 pub mod menu;
 pub mod modal;
 pub mod zorder;

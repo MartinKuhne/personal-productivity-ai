@@ -634,10 +634,41 @@ future increments down a dead end.
       11, Escape/dirty 13, scrim 6, card absorption 12, error banner 19, nested
       modals 8, teardown/determinism 18.
       **Commit:** `feat(iced-pro): add modal dialog host`
-- [ ] **INC-19** `surface/input_dialog.rs` (`UIF-INP-*`) — 320px card anatomy,
-      permanently reserved 20px validation slot, live validation hook, card-level
-      click absorption, cursor-proximal placement + clamping, destructive parity.
-      Tests: zero-shift across error states, absorption, placement clamps.
+- [x] **INC-19** `surface/input_dialog.rs` — Band-3 surface with the §4.5.1
+      anatomy and all four `UIF-INP` invariants enforced structurally.
+      **Every dimension traced to a token**: card padding `space::LG`, title row
+      `typography::TITLE_SM.line_height`, gaps `space::SM`, text entry
+      `size::CONTROL_MD`, folder row `size::CONTROL_SM`, validation slot
+      `typography::BODY.line_height` (20px), footer `size::CONTROL_MD`, border
+      `shape::BORDER_HAIRLINE`. Card height is derived, not declared: text-entry
+      = **192px** exactly, confirmation = 160px, folder list =
+      `160 + clamp(rows×28, 28, 200)`. Row offsets asserted literally.
+      **Zero-shift is structural, same trick as INC-08b:** the footer's bounds
+      are computed from the card rect and the anatomy **without consulting
+      whether a validation message exists**. Asserted at the whole-footer level,
+      not per-button — with no error, with an error, and mid-clear, `Cancel` and
+      `Ok` are byte-identical.
+      **`Enter`-while-invalid keeps focus in the box:** the key is routed to
+      *reveal*, not *submit*. It writes the specific validation message,
+      leaves `Ok` disabled, and never calls the accept path nor moves focus —
+      so the user can fix the input without reaching for the mouse.
+      **`UIF-INP-001` is the shared solver, not a local clamp.**
+      `Anchor::CursorProximal` gives `+2,+2` from the trigger, the 8px margin
+      clamp, and viewport-centring when `keyboard_invoked`. The host *could not*
+      write its own clamp even if it wanted to — same code path the menus use.
+      **Escape composes with G-13 rather than knowing about menus.** The host
+      answers `Dismissed` (an input dialog has no unsaved-work concept, so it
+      is always clean enough to close); because `escape_rank` for the Menu band
+      is `3` against this band's `2`, a menu open above is asked **first** and
+      closes before the dialog is touched. The registry's walk order does it.
+      **Destructive parity (`UIF-INP-004`)** is a first-class variant, not a
+      string difference: single-delete names the item, multi-delete names the
+      count, both primary-styled `Danger`, both require confirmation — so the
+      plural routing §4.9.1 demands has somewhere to land.
+      Validation is an **injected rule**, so the surface carries no filesystem
+      policy; the `Rename` rule set the spec names (non-empty, legal basename,
+      distinct from current) ships as a named validator.
+      Tests: 160 new (1018 crate / 4179 workspace, 6 skipped).
       **Commit:** `feat(iced-pro): add input dialog surface`
 - [ ] **INC-20** `surface/movable.rs` (`UIF-MOV-*`) — title-bar drag state,
       clamp integration, z-promotion on click, non-blocking pass-through outside the
