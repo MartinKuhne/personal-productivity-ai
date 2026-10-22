@@ -7,10 +7,11 @@
 //!    `(background, foreground, border, ring)` quadruple and asserted
 //!    against `resolve_style`, so the resolver is checked against the
 //!    spec rather than against itself.
-//! 2. **Focus, opacity and the unpainted fill.** The rules that are not
-//!    plain table lookups: the ring is additive, the pressed fill carries
-//!    the spec's 85% alpha, and a transparent background means the
-//!    container is what the label sits on.
+//! 2. **Focus, tokens and the unpainted fill.** The rules that are not
+//!    plain table lookups: the ring is additive and *computed* from the
+//!    fill it lands on, the pressed fills are real `*.fill_active`
+//!    tokens rather than a synthesised opacity, and a transparent
+//!    background means the container is what the label sits on.
 //! 3. **Geometry.** The §3.1 geometry paragraph, asserted to be the
 //!    tokens it is sourced from rather than restated numbers.
 //! 4. **The contrast audit (`UIF-VER-001`).** Every foreground and
@@ -40,7 +41,7 @@
 //! |---|---|---|---|---|
 //! | `text.strong` on `status.danger` | Danger `Hovered` | `3.8753:1` | `5.1270:1` on `status.danger.fill` | `4.5:1` |
 //! | `accent.primary` ring on `status.danger` | Danger `Hovered + ring` | `1.1779:1` | `5.1270:1` — `text.strong` ring | `3.0:1` |
-//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `6.2008:1` — `text.strong` ring | `3.0:1` |
+//! | `accent.primary` ring on `status.danger @ 85%` | Danger `Pressed + ring` | `1.0609:1` | `5.7543:1` — `text.strong` ring on `status.danger_fill_active` | `3.0:1` |
 //!
 //! The first was the pair the increment brief predicted: white on the
 //! `G-7`-retuned `RGB(255, 28, 2)` is `3.8753:1`, the brief's
@@ -64,17 +65,23 @@
 //! [`resolved_pairs`] records both halves so the substitution is
 //! auditable rather than hidden behind a matching row name.
 //!
-//! # Why the pressed fills are measured composited
+//! # Why the pressed fills are no longer composited
 //!
-//! Primary and Danger press at 85% alpha. [`contrast_ratio`] ignores
-//! alpha by design, so a naive reading of a pressed label is the
-//! *opaque* pairing — `4.8020:1` for Primary, `5.1270:1` for Danger.
-//! Laid over the surfaces a button can actually be mounted to, the 85%
-//! fill lands darker and both labels read better than the naive figure:
-//! `5.6683:1` and `6.2008:1` at their worst, both over `surface.active`.
-//! The audit measures the painted colour and reports the naive figure
-//! alongside it, because the gap between the two is exactly the kind of
-//! mistake this gate exists to catch.
+//! Primary and Danger used to press at 85% alpha, which turned every
+//! measurement of a pressed label into a two-step question: what the
+//! token says, and what it says after being laid over a container.
+//! `INC-07` reported both — `4.8020:1` naive against `5.6683:1` painted
+//! for Primary, `5.1270:1` against `6.2008:1` for Danger — because the
+//! gap between the two is exactly the kind of mistake this gate exists
+//! to catch.
+//!
+//! The revised §3.1 closes that question by making the pressed fills
+//! real tokens. `text.strong` on `accent.fill_active` is `5.6559:1` and
+//! on `status.danger_fill_active` is `5.7543:1`, opaque, in every
+//! container. The audit keeps its translucent branch — a scrim, or any
+//! future translucent token, would need it — but no button cell reaches
+//! it any more, and `test_no_button_style_paints_a_translucent_fill`
+//! keeps it that way.
 
 use super::*;
 use crate::state::{BaseState, InteractionInput, VisualState, resolve};
@@ -284,14 +291,6 @@ fn cell(
 /// literally how §3.1 spells them ("Rest + 2px … focus ring").
 fn matrix_cells() -> Vec<Cell> {
     let p = palette();
-    let pressed_accent = Color {
-        a: PRESSED_FILL_ALPHA,
-        ..p.accent_fill
-    };
-    let pressed_danger = Color {
-        a: PRESSED_FILL_ALPHA,
-        ..p.status_danger_fill
-    };
     let none = Color::TRANSPARENT;
 
     vec![
@@ -318,9 +317,9 @@ fn matrix_cells() -> Vec<Cell> {
             ButtonVariant::Primary,
             BaseState::Pressed,
             false,
-            pressed_accent,
+            p.accent_fill_active,
             p.text_strong,
-            p.accent_fill,
+            p.accent_fill_active,
             none,
         ),
         cell(
@@ -483,9 +482,9 @@ fn matrix_cells() -> Vec<Cell> {
             ButtonVariant::Danger,
             BaseState::Pressed,
             false,
-            pressed_danger,
+            p.status_danger_fill_active,
             p.text_strong,
-            p.status_danger_fill,
+            p.status_danger_fill_active,
             none,
         ),
         cell(
@@ -609,30 +608,38 @@ fn test_every_matrix_cell_resolves_to_the_specified_paint() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_danger_hovered_and_pressed_share_the_split_fill_and_resting_stays_on_surface() {
+fn test_danger_uses_both_split_fills_and_resting_stays_on_surface() {
     let p = palette();
-    let fill = p.status_danger_fill;
 
     let hovered = style_for(ButtonVariant::Danger, BaseState::Hovered);
     let pressed = style_for(ButtonVariant::Danger, BaseState::Pressed);
     let resting = style_for(ButtonVariant::Danger, BaseState::Rest);
 
     assert_eq!(
-        hovered.background, fill,
+        hovered.background, p.status_danger_fill,
         "D-5: Danger Hovered must fill with status.danger_fill, not the error-text red"
     );
     assert_eq!(
-        hovered.background.a, 1.0,
-        "D-5: the Hovered fill is opaque — only Pressed carries the spec's alpha"
-    );
-    assert!(
-        same_channels(pressed.background, fill),
-        "D-5: Danger Pressed fills with the same status.danger_fill channels, got {}",
+        pressed.background,
+        p.status_danger_fill_active,
+        "the Danger Pressed fill is the real `status.danger_fill_active` token, \
+         not the hover fill at an opacity — got {}",
         rgb8(pressed.background)
     );
     assert_eq!(
-        pressed.background.a, PRESSED_FILL_ALPHA,
-        "D-5: the Pressed fill keeps the §3.1 press opacity"
+        pressed.background.a, 1.0,
+        "the pressed fill is opaque: the 85% synthesis is gone"
+    );
+    assert_ne!(
+        pressed.background, hovered.background,
+        "press must read as a step down from hover, and that step is a token \
+         rather than an alpha change"
+    );
+    assert!(
+        !same_channels(pressed.background, p.status_danger_fill),
+        "the pressed token must not be the hover token's own channels at a \
+         different opacity — got {}",
+        rgb8(pressed.background)
     );
 
     assert_eq!(
@@ -657,9 +664,8 @@ fn test_danger_hovered_and_pressed_share_the_split_fill_and_resting_stays_on_sur
 fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
     // The spec writes the Danger Pressed border as `status.danger`. Against the
     // darker pressed fill that is a bright edge rather than a signal: measured
-    // below, the pairing lands under 2:1 on every surface in the ladder, well
-    // short of the 3.0:1 chrome rule — so keeping it would have traded one audit
-    // failure for another.
+    // below, the pairing lands under 2:1, well short of the 3.0:1 chrome rule —
+    // so keeping it would have traded one audit failure for another.
     //
     // Primary already follows the same rule (its pressed border shares its
     // fill's channels). Secondary and Ghost are the deliberate exceptions: they
@@ -669,8 +675,8 @@ fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
     let pressed = style_for(ButtonVariant::Danger, BaseState::Pressed);
 
     assert!(
-        same_channels(pressed.border_color, p.status_danger_fill),
-        "D-5: the Danger pressed border must share the fill, got {}",
+        same_channels(pressed.border_color, p.status_danger_fill_active),
+        "D-5: the Danger pressed border must share the pressed fill, got {}",
         rgb8(pressed.border_color)
     );
     assert!(
@@ -678,15 +684,14 @@ fn test_danger_pressed_border_shares_the_fill_instead_of_the_error_red() {
         "D-5: the bright error red must not edge the darker fill"
     );
 
-    for (name, surface) in all_surfaces() {
-        let mounted = composite_over(pressed.background, surface);
-        let would_be = contrast_ratio(p.status_danger_text, mounted);
-        assert!(
-            would_be < MIN_CHROME_CONTRAST,
-            "the pre-D-5 `status.danger` border over the pressed fill on {name} \
-             measures {would_be:.4}:1 — it must not come back"
-        );
-    }
+    // The fill is opaque, so this pairing does not depend on what the button is
+    // mounted to — one measurement answers for every container.
+    let would_be = contrast_ratio(p.status_danger_text, pressed.background);
+    assert!(
+        would_be < MIN_CHROME_CONTRAST,
+        "the pre-D-5 `status.danger` border against the pressed fill measures \
+         {would_be:.4}:1 — it must not come back"
+    );
 
     let primary = style_for(ButtonVariant::Primary, BaseState::Pressed);
     assert!(
@@ -806,8 +811,8 @@ fn test_focus_ring_is_additive_and_never_replaces_the_base_paint() {
         &p,
     );
     assert_eq!(
-        pressed_focused.background.a, PRESSED_FILL_ALPHA,
-        "a pressed Danger button keeps its 85% fill even while focused"
+        pressed_focused.background, p.status_danger_fill_active,
+        "a pressed Danger button keeps its pressed token even while focused"
     );
     // The ring rides on top of that fill, and the adaptive rule is what
     // makes it visible: the accent cannot clear the chrome floor against
@@ -845,6 +850,186 @@ fn test_the_ring_at_rest_reproduces_the_per_variant_colour_spec_3_1_gives() {
             "{variant:?} takes the accent focus border §3.1 specifies"
         );
     }
+}
+
+#[test]
+fn test_the_danger_ring_is_computed_from_the_resolved_fill() {
+    let p = palette();
+    // §3.1's Danger focused cell is *conditional*: `accent.border` at
+    // Rest, `text.strong` once Hovered or Pressed. Nothing in the
+    // resolver encodes that condition. Each base state paints a different
+    // fill and the shared **D-6** rule is asked what ring that fill
+    // allows, so the assertion below is equality with the resolver — not
+    // with a colour chosen per row. A hard-coded ring would satisfy the
+    // three expected colours too, and would be wrong the moment a fill
+    // was retuned.
+    let cases: [(&str, BaseState, Color, Color, f32); 4] = [
+        (
+            "Rest",
+            BaseState::Rest,
+            p.surface_raised,
+            p.accent_border,
+            6.2727,
+        ),
+        (
+            "Hovered",
+            BaseState::Hovered,
+            p.status_danger_fill,
+            p.text_strong,
+            5.1270,
+        ),
+        (
+            "Pressed",
+            BaseState::Pressed,
+            p.status_danger_fill_active,
+            p.text_strong,
+            5.7543,
+        ),
+        (
+            "Invalid",
+            BaseState::Invalid,
+            p.surface_raised,
+            p.accent_border,
+            6.2727,
+        ),
+    ];
+
+    for (label, base, fill, ring, ratio) in cases {
+        let style = resolve_style(
+            ButtonVariant::Danger,
+            VisualState {
+                base,
+                focused: true,
+            },
+            &p,
+        );
+
+        assert_eq!(
+            style.background,
+            fill,
+            "Danger x {label} must paint the {} fill it is measured against, \
+             got {}",
+            label,
+            rgb8(style.background)
+        );
+        assert_eq!(
+            style.focus_ring_color,
+            focus::resolve_ring_color_for_background(style.background, &p),
+            "Danger x {label}: the ring must be whatever the shared D-6 rule \
+             resolves against the fill this cell actually paints"
+        );
+        assert_eq!(
+            style.focus_ring_color,
+            ring,
+            "Danger x {label}: resolver picked {}, expected {}",
+            rgb8(style.focus_ring_color),
+            rgb8(ring)
+        );
+
+        let measured = contrast_ratio(style.focus_ring_color, style.background);
+        assert!(
+            (measured - ratio).abs() < RATIO_EPS,
+            "Danger x {label}: ring on {} measures {measured:.4}:1, expected \
+             {ratio:.4}:1",
+            rgb8(style.background)
+        );
+        assert!(
+            meets_chrome_contrast(style.focus_ring_color, style.background),
+            "Danger x {label}: the ring must clear the 3.0:1 chrome floor, got \
+             {measured:.4}:1"
+        );
+    }
+}
+
+#[test]
+fn test_the_danger_ring_switches_on_the_measurement_not_on_the_variant() {
+    let p = palette();
+    // The same stroke token measured against the three fills a Danger
+    // button can wear. One clears the chrome floor, two do not, and the
+    // resolver's answer tracks the arithmetic rather than the variant's
+    // name — which is the whole reason the conditional in §3.1's Danger
+    // column needs no `match` anywhere.
+    let against: [(&str, Color, f32, bool); 3] = [
+        ("surface.raised (Rest)", p.surface_raised, 6.2727, true),
+        (
+            "status.danger_fill (Hovered)",
+            p.status_danger_fill,
+            1.7188,
+            false,
+        ),
+        (
+            "status.danger_fill_active (Pressed)",
+            p.status_danger_fill_active,
+            1.9291,
+            false,
+        ),
+    ];
+
+    for (label, fill, ratio, clears) in against {
+        let measured = contrast_ratio(p.accent_border, fill);
+        assert!(
+            (measured - ratio).abs() < RATIO_EPS,
+            "accent.border on {label} measures {measured:.4}:1, expected \
+             {ratio:.4}:1"
+        );
+        assert_eq!(
+            meets_chrome_contrast(p.accent_border, fill),
+            clears,
+            "accent.border on {label}: {measured:.4}:1 against a {} floor",
+            if clears { "cleared" } else { "uncleared" },
+        );
+
+        let expected = if clears {
+            p.accent_border
+        } else {
+            p.text_strong
+        };
+        assert_eq!(
+            focus::resolve_ring_color_for_background(fill, &p),
+            expected,
+            "{label}: the resolver must pick the candidate its own \
+             measurement supports"
+        );
+    }
+}
+
+#[test]
+fn test_primary_hover_changes_the_border_only_and_never_the_fill() {
+    let p = palette();
+    // §3.1's Primary hover cell keeps `accent.fill`. The state is carried
+    // entirely by the border going `text.strong`, and inventing a hover
+    // fill here would spend the pressed token early and repaint a cell the
+    // spec does not change.
+    let rest = style_for(ButtonVariant::Primary, BaseState::Rest);
+    let hovered = style_for(ButtonVariant::Primary, BaseState::Hovered);
+
+    assert_eq!(rest.background, p.accent_fill);
+    assert_eq!(
+        hovered.background,
+        p.accent_fill,
+        "Primary hover must NOT change the fill — it is {} and must stay \
+         accent.fill",
+        rgb8(hovered.background)
+    );
+    assert_eq!(
+        hovered.foreground, rest.foreground,
+        "the label is text.strong in both cells"
+    );
+    assert_eq!(hovered.border_color, p.text_strong);
+    assert_ne!(
+        hovered.border_color, rest.border_color,
+        "the border is the whole hover signal, so it must actually move"
+    );
+
+    let border_ratio = contrast_ratio(hovered.border_color, hovered.background);
+    assert!(
+        (border_ratio - 4.8020).abs() < RATIO_EPS,
+        "the hover border on accent.fill measures {border_ratio:.4}:1"
+    );
+    assert!(
+        meets_chrome_contrast(hovered.border_color, hovered.background),
+        "and it clears the 3.0:1 chrome rule against the unchanged fill"
+    );
 }
 
 #[test]
@@ -887,7 +1072,7 @@ fn test_disabled_control_never_gets_a_ring_through_the_state_machine() {
 }
 
 #[test]
-fn test_pressed_fill_uses_the_spec_opacity_and_keeps_its_channels() {
+fn test_pressed_fills_are_real_tokens_not_an_opacity_synthesis() {
     let p = palette();
     let pressed = VisualState {
         base: BaseState::Pressed,
@@ -895,43 +1080,72 @@ fn test_pressed_fill_uses_the_spec_opacity_and_keeps_its_channels() {
     };
 
     let primary = resolve_style(ButtonVariant::Primary, pressed, &p);
-    assert_eq!(primary.background.a, PRESSED_FILL_ALPHA);
     assert_eq!(
-        (
-            primary.background.r,
-            primary.background.g,
-            primary.background.b
-        ),
-        (p.accent_fill.r, p.accent_fill.g, p.accent_fill.b),
-        "the pressed fill is the token at 85% alpha, not a different colour"
+        primary.background,
+        p.accent_fill_active,
+        "Primary Pressed is the `accent.fill_active` token itself, got {}",
+        rgb8(primary.background)
+    );
+    assert!(
+        !same_channels(primary.background, p.accent_fill),
+        "the pressed fill is a different colour, not `accent.fill` at a \
+         different alpha: {}",
+        rgb8(primary.background)
+    );
+    let primary_label = contrast_ratio(primary.foreground, primary.background);
+    assert!(
+        (primary_label - 5.6559).abs() < RATIO_EPS,
+        "text.strong on accent.fill_active measures {primary_label:.4}:1"
+    );
+    assert!(
+        meets_text_contrast(primary.foreground, primary.background),
+        "the pressed Primary label clears the 4.5:1 text rule on its own token"
     );
 
     let danger = resolve_style(ButtonVariant::Danger, pressed, &p);
-    assert_eq!(danger.background.a, PRESSED_FILL_ALPHA);
     assert_eq!(
-        (
-            danger.background.r,
-            danger.background.g,
-            danger.background.b
-        ),
-        (
-            p.status_danger_fill.r,
-            p.status_danger_fill.g,
-            p.status_danger_fill.b
-        ),
-        "the pressed fill is the token at 85% alpha, not a different colour"
+        danger.background,
+        p.status_danger_fill_active,
+        "Danger Pressed is the `status.danger_fill_active` token itself, got {}",
+        rgb8(danger.background)
+    );
+    assert!(
+        !same_channels(danger.background, p.status_danger_fill),
+        "the pressed fill is a different colour, not the hover fill at a \
+         different alpha: {}",
+        rgb8(danger.background)
+    );
+    let danger_label = contrast_ratio(danger.foreground, danger.background);
+    assert!(
+        (danger_label - 5.7543).abs() < RATIO_EPS,
+        "text.strong on status.danger_fill_active measures {danger_label:.4}:1"
+    );
+    assert!(
+        meets_text_contrast(danger.foreground, danger.background),
+        "the pressed Danger label clears the 4.5:1 text rule on its own token"
     );
 
-    // Only those two variants press translucent; the others use opaque
-    // surfaces, because §3.1 only states an opacity for these two.
-    for variant in [ButtonVariant::Secondary, ButtonVariant::Ghost] {
+    // Pressing is a step *down* in luminance, and the token is what makes
+    // it. The old hack produced that step with alpha, which meant the step
+    // — and the label's contrast — depended on the container underneath.
+    assert!(
+        primary_label > contrast_ratio(p.text_strong, p.accent_fill),
+        "the pressed Primary fill must be darker than the resting one"
+    );
+    assert!(
+        danger_label > contrast_ratio(p.text_strong, p.status_danger_fill),
+        "the pressed Danger fill must be darker than the hover fill"
+    );
+
+    // No variant presses translucent any more, so nothing in the audit
+    // needs to composite a pressed label before judging it.
+    for variant in VARIANTS {
         assert_eq!(
             resolve_style(variant, pressed, &p).background.a,
             1.0,
-            "{variant:?} presses on an opaque surface"
+            "{variant:?} presses on an opaque token"
         );
     }
-    assert_eq!(PRESSED_FILL_ALPHA, 0.85);
 }
 
 #[test]
@@ -1522,11 +1736,14 @@ fn resolved_pairs() -> Vec<ResolvedPair> {
             min: MIN_CHROME_CONTRAST,
             was_measured: 1.0609,
             now_fg: "text.strong",
-            now_bg: "status.danger_fill @ 85%",
-            now_measured: 6.2008,
-            fix: "D-5 and D-6 together, judged against the worst container \
-                 in the ladder. The worst case moved from within 6% of the \
-                 accent's own luminance to a clear 6.20:1.",
+            now_bg: "status.danger_fill_active",
+            now_measured: 5.7543,
+            fix: "D-5 and D-6 together. The accent sat within 6% of the \
+                 pressed fill's own luminance, so the ring degrades to \
+                 text.strong — and because the pressed fill is now the real \
+                 `status.danger_fill_active` token rather than a 85% wash, \
+                 that number is the same in every container instead of \
+                 depending on what the button was mounted to.",
         },
     ]
 }
@@ -1694,50 +1911,52 @@ fn test_the_danger_hovered_label_now_clears_the_text_rule() {
 }
 
 #[test]
-fn test_the_translucent_pressed_fills_pass_once_they_are_composited() {
+fn test_no_button_style_paints_a_translucent_fill() {
     let p = palette();
-    let pressed = VisualState {
-        base: BaseState::Pressed,
-        focused: false,
-    };
+    // Every fill the resolver can produce is either fully opaque or the
+    // Ghost variant's explicit `transparent` — never a value in between.
+    // A translucent fill makes a label's contrast a function of the
+    // container it happens to sit on, which is exactly how the old 85%
+    // press hack came to have two different correct measurements. With
+    // the pressed fills as real tokens there is no such cell, and this
+    // pins that so the hack cannot return by way of a future "just dim it
+    // a little" change.
+    let mut opaque = 0;
+    let mut transparent = 0;
 
-    for variant in [ButtonVariant::Primary, ButtonVariant::Danger] {
-        let style = resolve_style(variant, pressed, &p);
-        assert!(style.background.a < 1.0);
+    for variant in VARIANTS {
+        for state in reachable_states() {
+            let style = resolve_style(variant, state, &p);
+            let at = format!("{variant:?} x {}", state_name(state));
+            assert!(
+                style.background.a == 1.0 || style.background.a == 0.0,
+                "{at} paints a fill at {:.2} alpha — only opaque fills and \
+                 the Ghost variant's transparent cells are allowed",
+                style.background.a,
+            );
 
-        // The naive, alpha-blind reading.
-        let naive = contrast_ratio(style.foreground, style.background);
-
-        // What actually gets painted, over every surface a button can sit on.
-        let mut worst = f32::MAX;
-        let mut worst_on = "";
-        for (name, surface) in all_surfaces() {
-            let painted = composite_over(style.background, surface);
-            let ratio = contrast_ratio(style.foreground, painted);
-            if ratio < worst {
-                worst = ratio;
-                worst_on = name;
+            if style.background.a == 0.0 {
+                assert_eq!(
+                    variant,
+                    ButtonVariant::Ghost,
+                    "{at} paints nothing behind the label, and only Ghost may"
+                );
+                transparent += 1;
+            } else {
+                opaque += 1;
             }
         }
-
-        println!(
-            "\n{variant:?} pressed fill: naive {:.4}:1, composited worst \
-             {:.4}:1 (on {worst_on}), rule {:.1}:1",
-            naive, worst, MIN_TEXT_CONTRAST,
-        );
-
-        assert!(
-            worst >= MIN_TEXT_CONTRAST,
-            "{variant:?} pressed label reads {worst:.4}:1 at its worst over \
-             {worst_on} — below the {:.1}:1 text rule",
-            MIN_TEXT_CONTRAST,
-        );
-        assert!(
-            worst > naive,
-            "{variant:?}: compositing must improve on the naive reading, \
-             got naive {naive:.4} vs painted {worst:.4}"
-        );
     }
+
+    // Ghost's Rest, Disabled and Invalid cells are the only unpainted
+    // ones, and focus is additive — each of Rest and Invalid shows up
+    // twice among the 4 variants x 9 reachable states the audit walks:
+    // Rest, Rest + ring, Invalid, Invalid + ring, and Disabled alone.
+    assert_eq!(
+        transparent, 5,
+        "only Ghost's quiet cells paint nothing, counted with their rings"
+    );
+    assert_eq!(opaque, 4 * 9 - 5, "every other cell paints an opaque fill");
 }
 
 #[test]
@@ -1858,9 +2077,14 @@ fn test_every_focus_ring_clears_the_chrome_rule() {
 ///
 /// This is the **D-6** rule written out as a table, so a change in the
 /// resolver shows up as a named row rather than a shifted number nobody
-/// noticed. Every entry is the accent except the two Danger fills, where
-/// the accent cannot clear the floor against a red background and the
-/// ring degrades to `text.strong`.
+/// noticed. Every entry is `accent.border` except the four saturated
+/// fills — `accent.fill` under Primary, `status.danger_fill` and
+/// `status.danger_fill_active` under Danger — where the accent cannot
+/// clear the `3.0:1` chrome floor and the ring degrades to `text.strong`.
+/// Danger's three different answers are exactly the condition §3.1 prints
+/// for that variant, and they fall out of the rule rather than being
+/// written per row: see
+/// `test_the_danger_ring_is_computed_from_the_resolved_fill`.
 #[test]
 fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
     let p = palette();
@@ -1884,7 +2108,7 @@ fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
             ButtonVariant::Primary,
             BaseState::Pressed,
             "text.strong",
-            4.802,
+            5.6559,
         ),
         (
             "Primary",
@@ -1968,7 +2192,7 @@ fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
             ButtonVariant::Danger,
             BaseState::Pressed,
             "text.strong",
-            5.127,
+            5.7543,
         ),
         (
             "Danger",
@@ -2001,7 +2225,7 @@ fn test_the_ring_winner_per_variant_and_base_state_is_the_expected_token() {
             // Ghost button is normally mounted to; the full sweep across
             // every surface lives in
             // `test_every_focus_ring_clears_the_chrome_rule`, where the
-            // tightest case is `surface.active` at 3.0750:1.
+            // tightest case is `surface.active` at 4.7922:1.
             contrast_ratio(style.focus_ring_color, p.surface_base)
         } else {
             contrast_ratio(style.focus_ring_color, style.background)

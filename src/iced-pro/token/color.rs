@@ -28,15 +28,15 @@
 //! you press *to*, and the colour you stroke *with*.
 //!
 //! `color.accent.*` carries three of them:
-//! [`accent_fill`](Self::accent_fill) (the solid CTA / selected-row
-//! fill), [`accent_fill_active`](Self::accent_fill_active) (the same
-//! fill under a press) and [`accent_border`](Self::accent_border) (the
+//! [`accent_fill`](Palette::accent_fill) (the solid CTA / selected-row
+//! fill), [`accent_fill_active`](Palette::accent_fill_active) (the same
+//! fill under a press) and [`accent_border`](Palette::accent_border) (the
 //! focus ring, the active tab indicator, the accent stroke).
 //! `color.status.danger.*` carries the mirror-image three:
-//! [`status_danger_text`](Self::status_danger_text) (the red you write
-//! errors *in*), [`status_danger_fill`](Self::status_danger_fill) (the
+//! [`status_danger_text`](Palette::status_danger_text) (the red you write
+//! errors *in*), [`status_danger_fill`](Palette::status_danger_fill) (the
 //! red a destructive label sits *on*) and
-//! [`status_danger_fill_active`](Self::status_danger_fill_active) (that
+//! [`status_danger_fill_active`](Palette::status_danger_fill_active) (that
 //! background under a press).
 //!
 //! That shape is not new to this crate — it is what two ledger decisions
@@ -155,7 +155,7 @@ pub struct Palette {
     /// `color.surface.scrim` — the dimmed backdrop behind blocking
     /// modal dialogs. `RGBA(9, 9, 11, 0.55)`.
     ///
-    /// This is [`surface_base`](Self::surface_base) at 55% alpha, on
+    /// This is [`surface_base`](Palette::surface_base) at 55% alpha, on
     /// purpose: the scrim is not a surface you paint *instead of* the
     /// canvas, it is the canvas pulled forward and dimmed so the modal
     /// card above it reads as the only thing in front. It **composites**
@@ -184,27 +184,27 @@ pub struct Palette {
     pub border_strong: Color,
 
     /// `color.accent.fill` — solid primary CTA button fill and selected
-    /// tree-row background, always under [`text_strong`](Self::text_strong).
+    /// tree-row background, always under [`text_strong`](Palette::text_strong).
     /// `RGB(93, 96, 238)`.
     ///
     /// The fill half of the accent's polarity split. It is *only* ever a
     /// background: the `UIF-TOK-006` rule 4 foreground lock pins
-    /// [`text_strong`](Self::text_strong) on it (`4.8020:1`) and forbids
+    /// [`text_strong`](Palette::text_strong) on it (`4.8020:1`) and forbids
     /// every foreground-only accent/status token from rendering on it.
     /// When this colour is needed as a *stroke*, reach for
-    /// [`accent_border`](Self::accent_border) rather than reusing the
+    /// [`accent_border`](Palette::accent_border) rather than reusing the
     /// fill — that is the whole reason the split exists.
     pub accent_fill: Color,
 
     /// `color.accent.fill_active` — the pressed primary CTA button fill,
-    /// under [`text_strong`](Self::text_strong). `RGB(82, 85, 222)`.
+    /// under [`text_strong`](Palette::text_strong). `RGB(82, 85, 222)`.
     ///
     /// The step the pre-split palette had to fake with opacity. Because a
     /// primary CTA is the most-pressed control in the interface and its
     /// fill cannot change hue, the pressed depth had to become its own
     /// token rather than a modifier on the resting one.
     ///
-    /// It is darker than [`accent_fill`](Self::accent_fill) rather than
+    /// It is darker than [`accent_fill`](Palette::accent_fill) rather than
     /// lighter, which is why the label it carries gains contrast instead
     /// of losing it: `text.strong` reads `5.6559:1` here against
     /// `4.8020:1` on the resting fill.
@@ -217,10 +217,10 @@ pub struct Palette {
     /// The stroke half of the accent's polarity split, and the token
     /// `UIF-ATOM-000` §2's dynamic ring rule resolves *from*: the ring
     /// is this colour wherever it clears `MIN_CHROME_CONTRAST`
-    /// (`3.00:1`), and falls back to [`text_strong`](Self::text_strong)
+    /// (`3.00:1`), and falls back to [`text_strong`](Palette::text_strong)
     /// where it cannot.
     ///
-    /// It is much lighter than [`accent_fill`](Self::accent_fill) —
+    /// It is much lighter than [`accent_fill`](Palette::accent_fill) —
     /// `L = 0.3020` against `0.1687` — which is what lets one token
     /// clear `3.00:1` against every surface in the ladder (worst case
     /// `4.7922:1` on `surface.active`) while still reading as the same
@@ -244,10 +244,10 @@ pub struct Palette {
     /// labels. `RGB(255, 255, 255)`.
     ///
     /// Also the **mandatory** foreground on all four saturated fills —
-    /// [`accent_fill`](Self::accent_fill),
-    /// [`accent_fill_active`](Self::accent_fill_active),
-    /// [`status_danger_fill`](Self::status_danger_fill) and
-    /// [`status_danger_fill_active`](Self::status_danger_fill_active) —
+    /// [`accent_fill`](Palette::accent_fill),
+    /// [`accent_fill_active`](Palette::accent_fill_active),
+    /// [`status_danger_fill`](Palette::status_danger_fill) and
+    /// [`status_danger_fill_active`](Palette::status_danger_fill_active) —
     /// under the `UIF-TOK-006` rule 4 foreground lock, which pins a
     /// selected row or primary button so it can never be re-skinned into
     /// an unreadable pairing. Across those four fills the pairing spans
@@ -293,7 +293,7 @@ pub struct Palette {
     /// *written* — an error message, a validation glyph, a resting
     /// Danger label. It is not a background.** When the danger is the
     /// surface a label sits *on*, use
-    /// [`status_danger_fill`](Self::status_danger_fill) instead.
+    /// [`status_danger_fill`](Palette::status_danger_fill) instead.
     ///
     /// It is the foreground half of the danger polarity split **D-5**
     /// argued for, and the reason the split cannot collapse back into one
@@ -310,14 +310,14 @@ pub struct Palette {
     pub status_danger_text: Color,
 
     /// `color.status.danger.fill` — the destructive red used **as a
-    /// background behind [`text_strong`](Self::text_strong)**: the
+    /// background behind [`text_strong`](Palette::text_strong)**: the
     /// hovered `Danger` button fill and the hovered destructive menu row.
     /// `RGB(216, 28, 20)`.
     ///
     /// **This is a background red. Reach for it when a label is painted
     /// *on* the danger — a filled destructive button or row. It is not
     /// a text colour**; for written errors use
-    /// [`status_danger_text`](Self::status_danger_text).
+    /// [`status_danger_text`](Palette::status_danger_text).
     ///
     /// It sits on the low side of the disjoint luminance bounds **G-8**
     /// records: `L = 0.1548`, under the `0.183333` ceiling the
@@ -334,11 +334,11 @@ pub struct Palette {
     pub status_danger_fill: Color,
 
     /// `color.status.danger.fill_active` — the **pressed** destructive
-    /// red, behind [`text_strong`](Self::text_strong).
+    /// red, behind [`text_strong`](Palette::text_strong).
     /// `RGB(202, 24, 16)`.
     ///
     /// The pressed step of the danger fill, mirroring
-    /// [`accent_fill_active`](Self::accent_fill_active). Before the
+    /// [`accent_fill_active`](Palette::accent_fill_active). Before the
     /// split this crate synthesised the same step as
     /// "`status_danger_fill` at 85% opacity"; the revised spec makes it
     /// a real token, which is better because an opacity fill inherits

@@ -11,16 +11,26 @@
 //! # The matrix
 //!
 //! §3.1 gives four variants across five painted cells. [`resolve_style`]
-//! *is* that table, with every colour read from a [`Palette`] token and no
-//! colour literal of its own beyond the pressed-fill opacity the spec
-//! itself states ([`PRESSED_FILL_ALPHA`]).
+//! *is* that table, and every colour in it is a [`Palette`] token read by
+//! name. There is no colour literal in this file at all: the two pressed
+//! fills the spec once wrote as "the rest fill at 85% opacity" are real
+//! tokens now — [`accent_fill_active`](Palette::accent_fill_active) and
+//! [`status_danger_fill_active`](Palette::status_danger_fill_active) —
+//! so the opacity synthesis this file used to perform has been deleted
+//! rather than left behind.
 //!
 //! | Variant | Rest | Hovered | Pressed | Disabled |
 //! |---|---|---|---|---|
-//! | Primary | `accent.fill` / `text.strong` / `accent.fill` | `accent.fill` / `text.strong` / `text.strong` | `accent.fill` @ 85% / `text.strong` / `accent.fill` | `surface.raised` / `text.disabled` / `border.subtle` |
+//! | Primary | `accent.fill` / `text.strong` / `accent.fill` | `accent.fill` / `text.strong` / `text.strong` | `accent.fill_active` / `text.strong` / `accent.fill_active` | `surface.raised` / `text.disabled` / `border.subtle` |
 //! | Secondary | `surface.raised` / `text.primary` / `border.strong` | `surface.hover` / `text.strong` / `border.strong` | `surface.active` / `text.strong` / `accent.border` | `surface.base` / `text.disabled` / `border.subtle` |
 //! | Ghost | *transparent* / `text.primary` / *transparent* | `surface.hover` / `text.strong` / `border.subtle` | `surface.active` / `text.strong` / `border.strong` | *transparent* / `text.disabled` / *transparent* |
-//! | Danger | `surface.raised` / `status.danger.text` / `status.danger.text` | `status.danger.fill` / `text.strong` / `text.strong` | `status.danger.fill` @ 85% / `text.strong` / `status.danger.fill` | `surface.base` / `text.disabled` / `border.subtle` |
+//! | Danger | `surface.raised` / `status.danger.text` / `status.danger.text` | `status.danger.fill` / `text.strong` / `text.strong` | `status.danger.fill_active` / `text.strong` / `status.danger.fill_active` | `surface.base` / `text.disabled` / `border.subtle` |
+//!
+//! Primary is the one variant whose hover does **not** repaint the fill.
+//! It stays `accent.fill` and the state is carried entirely by the border
+//! going to `text.strong` (`4.8020:1` against that fill). Adding a hover
+//! fill here would be inventing a cell the spec does not have, and there is
+//! nowhere darker to go without spending the pressed token early.
 //!
 //! The Danger row is not what §3.1 prints. The spec paints that variant's
 //! hover and pressed fill with `status.danger`, the same red it uses for
@@ -31,8 +41,8 @@
 //! [`status_danger_fill`](Palette::status_danger_fill); this row uses
 //! each for the job it can actually do. The resting foreground and border
 //! stay `status.danger.text`, which is the text/icon role and clears the
-//! raised card at `6.1812:1`, while the dedicated fill carries white to
-//! `5.1270:1`.
+//! raised card at `6.1812:1`, while the dedicated fills carry white to
+//! `5.1270:1` on hover and `5.7543:1` when pressed.
 //!
 //! # The ring is adaptive, not a per-variant constant
 //!
@@ -50,7 +60,24 @@
 //! against the background it just resolved: `accent.border` while that
 //! clears the `3.0:1` chrome floor, `text.strong` when it cannot. On
 //! every dark surface the accent clears, so the ring is exactly the one
-//! §3.1 asks for; only the Danger hover and press fills displace it.
+//! §3.1 asks for; only the saturated fills displace it.
+//!
+//! That is what makes §3.1's Danger focused cell *conditional* — and it
+//! is conditional here only because the rule is evaluated per state:
+//!
+//! ```text
+//!   Danger Rest      bg surface.raised            accent.border 6.2727 PASS -> accent.border
+//!   Danger Hovered   bg status.danger.fill        accent.border 1.7188 FAIL -> text.strong 5.1270
+//!   Danger Pressed   bg status.danger.fill_active accent.border 1.9291 FAIL -> text.strong 5.7543
+//! ```
+//!
+//! No line of this file says "Danger wears a white ring when hovered". The
+//! variant picks a *fill*, the shared resolver picks the ring that fill
+//! allows, and the conditionality is the arithmetic. Primary is the same
+//! rule with a constant answer: `accent.border` cannot clear the floor
+//! against `accent.fill` (`1.6098:1`) or `accent.fill_active`
+//! (`1.8961:1`), so its ring is `text.strong` in every base — which is
+//! precisely why §3.1 hands Primary a white ring in the first place.
 //!
 //! A transparent background is not a fill and is not measured as one.
 //! A Ghost button's ring sits on whatever the button is mounted to, so
@@ -70,22 +97,29 @@
 //! what the spec's own wording demands, and what a flat six-value state
 //! enum could not express without contradicting §4.9.2.
 //!
-//! # The pressed fill is translucent, and that changes what is measured
+//! # The pressed fills are tokens, not synthesised opacity
 //!
-//! Primary and Danger specify their pressed fill at 85% opacity.
-//! [`PRESSED_FILL_ALPHA`] is the only non-token magnitude in this file
-//! and it is a number the spec itself prints; it is applied by replacing
-//! the token's alpha while keeping its channels.
+//! Before the 2026-10-22 revision of §3.1 there was no token for a
+//! pressed CTA, so this file made one by hand: paint the rest fill at 85%
+//! opacity. That magnitude lived in `PRESSED_FILL_ALPHA`, and it was
+//! the widget layer's only non-token colour value. The revision supplies
+//! `accent.fill_active` and `status.danger.fill_active` outright, so the
+//! synthesis is deleted rather than kept as a fallback — a constant with
+//! no caller is a constant that comes back.
 //!
-//! Because that fill is translucent, the surface a pressed label actually
+//! Deleting it also removes a measurement hazard. A translucent fill's
+//! contrast is not a property of the fill: what a pressed label actually
 //! sits on is the fill composited over whatever the button is mounted to,
-//! not the token itself.
-//! [`contrast_ratio`](crate::token::contrast::contrast_ratio) deliberately
-//! ignores alpha, so measuring the raw token reports the *opaque* pairing
-//! — and for Danger the two answers straddle the readability line. The
-//! sidecar audit measures the composited colour, per the rule
-//! [`contrast`](crate::token::contrast) states: a translucent token
-//! measured before it is laid down describes a colour that never appears.
+//! and [`contrast_ratio`](crate::token::contrast::contrast_ratio) is
+//! deliberately alpha-blind, so the naive reading and the painted one
+//! were different numbers and only one of them described the screen. An
+//! opaque token closes that question: the pressed label is `5.6559:1` on
+//! `accent.fill_active` and `5.7543:1` on `status.danger_fill_active`
+//! wherever the button happens to live.
+//!
+//! Every fill this resolver produces is therefore either fully opaque or
+//! the Ghost variant's explicit `transparent`, and the sidecar pins that
+//! so an opacity hack cannot quietly return.
 //!
 //! # `Invalid` has no cell, and that is recorded rather than glossed
 //!
@@ -147,19 +181,6 @@ pub const ICON_ONLY_MIN_WIDTH: f32 = size::CONTROL_SM;
 
 /// Minimum height of an icon-only button — `size.control.sm` (§3.1).
 pub const ICON_ONLY_MIN_HEIGHT: f32 = size::CONTROL_SM;
-
-/// Alpha a Primary or Danger pressed fill is painted at — the `85%`
-/// opacity §3.1 states for those two cells.
-///
-/// This is the one non-token magnitude in the widget layer, and it is a
-/// number the spec itself prints rather than a magic constant: §3.1
-/// writes the pressed fill as "`accent.fill` (85% opacity)" and
-/// "`status.danger.fill` (85% opacity)". It is named rather than written
-/// inline at the two sites because `RUST-021` forbids repeating a bare
-/// literal, and because a pressed fill that drifted to a different
-/// opacity in one variant and not the other would be a silent spec break
-/// no test would catch.
-pub const PRESSED_FILL_ALPHA: f32 = 0.85;
 
 /// The width of a focus ring that is not being drawn.
 ///
@@ -314,9 +335,9 @@ const fn primary_paint(base: BaseState, palette: &Palette) -> BasePaint {
             border_color: palette.text_strong,
         },
         BaseState::Pressed => BasePaint {
-            background: with_pressed_alpha(palette.accent_fill),
+            background: palette.accent_fill_active,
             foreground: palette.text_strong,
-            border_color: palette.accent_fill,
+            border_color: palette.accent_fill_active,
         },
         BaseState::Disabled => BasePaint {
             background: palette.surface_raised,
@@ -380,19 +401,24 @@ const fn ghost_paint(base: BaseState, palette: &Palette) -> BasePaint {
 
 /// §3.1 — Danger.
 ///
-/// The fill is [`status_danger_fill`](Palette::status_danger_fill), not
-/// the [`status_danger_text`](Palette::status_danger_text) §3.1 names
-/// here. That token is the error *text* red, and white body text on it
-/// measures `3.0271:1` — the two roles need opposite luminance, so
-/// decision **D-5** split them (gap **G-8**). The resting foreground
-/// and border keep `status.danger.text`, which is the text/icon role and
-/// clears at `6.1812:1` on `surface.raised`.
+/// The fills are the two background reds, never the
+/// [`status_danger_text`](Palette::status_danger_text) §3.1 names here.
+/// That token is the error *text* red, and white body text on it measures
+/// `3.0271:1` — the two roles need opposite luminance, so decision
+/// **D-5** split them (gap **G-8**). The resting foreground and border
+/// keep `status.danger.text`, which is the text/icon role and clears at
+/// `6.1812:1` on `surface.raised`, while hover and press take
+/// [`status_danger_fill`](Palette::status_danger_fill) (`5.1270:1` under
+/// `text.strong`) and
+/// [`status_danger_fill_active`](Palette::status_danger_fill_active)
+/// (`5.7543:1`) — the pressed one darker, the same way `accent.fill`
+/// steps down to `accent.fill_active`.
 ///
 /// The pressed border tracks the pressed fill rather than staying
 /// `status.danger.text`, exactly as it tracked the fill before the
 /// split: §3.1 gives that cell a border of the fill's own colour at full
 /// opacity, so it is a geometry holder, not a state signal. Left on
-/// `status.danger.text` it would sit `1.6937:1` from the fill it
+/// `status.danger.text` it would sit `1.9009:1` from the fill it
 /// outlines — a border that reads as a mistake rather than as an edge.
 const fn danger_paint(base: BaseState, palette: &Palette) -> BasePaint {
     match base {
@@ -407,25 +433,15 @@ const fn danger_paint(base: BaseState, palette: &Palette) -> BasePaint {
             border_color: palette.text_strong,
         },
         BaseState::Pressed => BasePaint {
-            background: with_pressed_alpha(palette.status_danger_fill),
+            background: palette.status_danger_fill_active,
             foreground: palette.text_strong,
-            border_color: palette.status_danger_fill,
+            border_color: palette.status_danger_fill_active,
         },
         BaseState::Disabled => BasePaint {
             background: palette.surface_base,
             foreground: palette.text_disabled,
             border_color: palette.border_subtle,
         },
-    }
-}
-
-/// A token at [`PRESSED_FILL_ALPHA`]: same channels, pressed alpha.
-const fn with_pressed_alpha(fill: Color) -> Color {
-    Color {
-        r: fill.r,
-        g: fill.g,
-        b: fill.b,
-        a: PRESSED_FILL_ALPHA,
     }
 }
 

@@ -112,7 +112,6 @@ use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::surface::menu::model::{LeadingSlot, Row, RowKind, TrailingSlot};
 use crate::token::color::Palette;
 use crate::token::{shape, size, space, typography};
-use crate::widget::button::PRESSED_FILL_ALPHA;
 use crate::widget::button_widget::Layer;
 use crate::widget::focus::resolve_ring_color_for_background;
 use crate::widget::focusable::FocusableState;
@@ -198,6 +197,21 @@ const NO_RING_WIDTH: f32 = 0.0;
 /// own padding.
 const NO_SPACE: f32 = 0.0;
 
+/// The opacity this file synthesises a destructive row's pressed fill at.
+///
+/// **INC-25 deliberately leaves this here and changes no behaviour.** The
+/// button atom no longer synthesises pressed fills at all: the
+/// 2026-10-22 revision of §3.1 made `accent.fill_active` and
+/// `status.danger.fill_active` real tokens, and
+/// `widget::button::PRESSED_FILL_ALPHA` was deleted along with the hack
+/// it fed. A menu row is not a button and its pressed cell is not §3.1's
+/// — it is the cell §4.9.2 does not print, and moving it onto the real
+/// pressed token means re-measuring this surface's whole G-11 ledger.
+/// That is its own increment. Until then the row paints exactly what it
+/// painted before, with the constant's home moved here so the button atom
+/// could be cleaned up.
+const PRESSED_FILL_ALPHA: f32 = 0.85;
+
 // ---------------------------------------------------------------------------
 // The row state
 // ---------------------------------------------------------------------------
@@ -208,10 +222,13 @@ const NO_SPACE: f32 = 0.0;
 /// cell. The eighth, [`RowBase::DestructivePressed`](Self::DestructivePressed), is
 /// the matrix's blind spot: it prints *Destructive Row (Hovered)* and
 /// nothing for the same row held down, but a real user presses destructive
-/// rows and the cell has to resolve to something. It follows §3.1's
-/// destructive button rule — the danger fill at
-/// [`PRESSED_FILL_ALPHA`] — which is the pairing G-11 records at
-/// **6.8258**.
+/// rows and the cell has to resolve to something. It follows the *shape*
+/// of §3.1's destructive button rule — the danger fill, dimmed while
+/// held — which is the pairing G-11 records at **6.8258**. It does not
+/// yet follow that rule's *token*: §3.1 now names
+/// `status.danger_fill_active` there, and this row keeps its own
+/// `PRESSED_FILL_ALPHA` synthesis until the increment that moves this
+/// surface's G-11 ledger with it.
 ///
 /// *Keyboard Focused* is absent by design. [`state`] makes focus a ring
 /// drawn *over* a base rather than a competitor with one, so the focused
@@ -534,8 +551,11 @@ fn base_paint(row: &Row, state: RowState, palette: &Palette) -> BasePaint {
             label: palette.text_strong,
             trailing: palette.text_strong,
         },
-        // Not printed by §4.9.2. Follows §3.1's destructive button rule:
-        // the same fill at `PRESSED_FILL_ALPHA`, the same white label.
+        // Not printed by §4.9.2. Follows the shape of §3.1's destructive
+        // button rule — the danger fill, dimmed while held, same white
+        // label — but keeps this surface's own opacity synthesis rather
+        // than §3.1's `status.danger_fill_active`. See the note on
+        // `PRESSED_FILL_ALPHA` above for why that is a later increment.
         RowBase::DestructivePressed => BasePaint {
             background: with_alpha(palette.status_danger_fill, PRESSED_FILL_ALPHA),
             leading: palette.text_strong,
