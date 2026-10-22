@@ -21,6 +21,7 @@ use crate::token::contrast::{
 };
 use crate::token::{shape, size, space, typography};
 use crate::widget::button::{ButtonVariant, resolve_style};
+use crate::widget::focus::{FocusPlacement, resolve_inset_outline_for_background};
 use crate::widget::text_input::{InputKind, resolve_input_style};
 use iced::mouse;
 use iced::{Color, Rectangle};
@@ -140,7 +141,10 @@ fn test_rest_row_is_transparent_with_primary_label() {
     assert_eq!(style.background, Color::TRANSPARENT);
     assert_eq!(style.label, palette().text_primary);
     assert_eq!(style.trailing, palette().text_muted);
-    assert_eq!(style.focus_ring_width, 0.0);
+    assert!(
+        style.focus_outline.is_none(),
+        "a resting row carries no focus indicator at all"
+    );
     assert_eq!(style.cursor, mouse::Interaction::Pointer);
 }
 
@@ -197,17 +201,27 @@ fn test_pressed_row_uses_the_active_surface() {
 }
 
 #[test]
-fn test_keyboard_focused_is_the_hover_fill_plus_a_ring() {
+fn test_keyboard_focused_is_the_hover_fill_plus_an_inset_outline() {
     let p = palette();
     let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
     let hover = resolve_row_style(&action(), RowState::HOVERED, &p);
 
-    // The ring is additive: the base paint is identical to Hovered's.
+    // The outline is additive: the base paint is identical to Hovered's.
     assert_eq!(style.background, hover.background);
     assert_eq!(style.label, hover.label);
-    assert_eq!(style.focus_ring_width, FOCUS_RING_WIDTH);
-    assert_eq!(style.focus_ring_width, shape::BORDER_FOCUS);
-    assert_ne!(style.focus_ring_color, Color::TRANSPARENT);
+
+    let outline = style
+        .focus_outline
+        .expect("a focused row carries an outline");
+    assert_eq!(outline.width, FOCUS_OUTLINE_WIDTH);
+    assert_eq!(outline.width, shape::BORDER_HAIRLINE);
+    assert_eq!(outline.placement, FocusPlacement::Inset);
+    assert_ne!(outline.color, Color::TRANSPARENT);
+    assert_ne!(
+        outline.width,
+        shape::BORDER_FOCUS,
+        "a row takes the 1px inset outline, never the 2px outer-ring stroke"
+    );
 }
 
 #[test]
@@ -521,9 +535,10 @@ impl AuditRow {
 
 /// Every pair the resolver emits, over every cell it defines.
 ///
-/// The focus ring is audited against the resolved fill (it is drawn in
-/// the annulus *outside* the fill, so the fill is its adjacent colour),
-/// and the three content channels against the effective background.
+/// The focus outline is audited against the resolved fill (it is stroked
+/// on the inside of that fill's own perimeter, so the fill is its
+/// adjacent colour), and the three content channels against the
+/// effective background.
 fn audit_rows() -> Vec<AuditRow> {
     let p = palette();
     let mut rows = Vec::new();
@@ -556,14 +571,14 @@ fn audit_rows() -> Vec<AuditRow> {
             });
         }
 
-        if cell.focused {
+        if let Some(outline) = style.focus_outline {
             rows.push(AuditRow {
                 cell: name,
-                channel: "focus_ring",
-                fg: style.focus_ring_color,
+                channel: "focus_outline",
+                fg: outline.color,
                 bg: style.background,
                 min: MIN_CHROME_CONTRAST,
-                measured: contrast_ratio(style.focus_ring_color, style.background),
+                measured: contrast_ratio(outline.color, style.background),
             });
         }
     }
@@ -616,14 +631,14 @@ fn test_the_audit_actually_covers_every_cell() {
         );
     }
 
-    // Every focused cell must contribute a ring measurement, or the
+    // Every focused cell must contribute an outline measurement, or the
     // audit would silently skip the trap it exists to catch.
     for cell in RowState::ALL.iter().filter(|c| c.focused) {
         assert!(
             audit_rows()
                 .iter()
-                .any(|r| r.cell == cell.matrix_row() && r.channel == "focus_ring"),
-            "{} has no focus_ring pair",
+                .any(|r| r.cell == cell.matrix_row() && r.channel == "focus_outline"),
+            "{} has no focus_outline pair",
             cell.matrix_row()
         );
     }
@@ -652,24 +667,39 @@ fn test_trap_1_destructive_hover_uses_the_fill_not_the_text_red() {
 }
 
 #[test]
-fn test_trap_2_the_ring_on_a_destructive_fill_is_never_the_literal_accent() {
+fn test_trap_2_the_outline_on_a_destructive_fill_is_never_the_literal_accent() {
     let p = palette();
 
     for cell in [RowState::DESTRUCTIVE_HOVERED, RowState::DESTRUCTIVE_FOCUSED] {
         let style = resolve_row_style(&destructive(), cell, &p);
 
         if cell.focused {
+            let outline = style
+                .focus_outline
+                .expect("a focused destructive row carries an outline");
+
             assert_ne!(
-                style.focus_ring_color,
+                outline.color,
                 p.accent_border,
-                "accent.border on the destructive fill is {} — the ring must \
-                 have been resolved, not copied from the matrix",
+                "accent.border on the destructive fill is {} — the outline \
+                 must have been resolved, not copied from the matrix",
                 contrast_ratio(p.accent_border, style.background)
             );
-            assert_eq!(style.focus_ring_color, p.text_strong);
+            assert_eq!(outline.color, p.text_strong);
             assert!(
-                contrast_ratio(style.focus_ring_color, style.background) >= MIN_CHROME_CONTRAST,
-                "the destructive ring must clear the 3.0 chrome floor"
+                contrast_ratio(outline.color, style.background) >= MIN_CHROME_CONTRAST,
+                "the destructive outline must clear the 3.0 chrome floor"
+            );
+            assert_eq!(
+                style.background, p.status_danger_fill,
+                "§4.9.2 keeps the destructive focused row on the hover fill, \
+                 not the pressed fill"
+            );
+        } else {
+            assert!(
+                style.focus_outline.is_none(),
+                "{} is not focused and must carry no outline",
+                cell.matrix_row()
             );
         }
     }
@@ -678,6 +708,10 @@ fn test_trap_2_the_ring_on_a_destructive_fill_is_never_the_literal_accent() {
     assert!(
         (contrast_ratio(p.accent_border, p.status_danger_fill) - 1.7188).abs() < 1e-3,
         "accent.border on danger_fill drifted off 1.7188"
+    );
+    assert!(
+        (contrast_ratio(p.text_strong, p.status_danger_fill) - 5.1270).abs() < 1e-3,
+        "text.strong on danger_fill drifted off 5.1270"
     );
 }
 
@@ -806,18 +840,30 @@ fn test_trap_4_no_slot_carries_accent_text_over_a_destructive_fill() {
 }
 
 #[test]
-fn test_trap_5_the_keyboard_ring_on_a_normal_row_keeps_its_headroom() {
+fn test_trap_5_the_keyboard_outline_on_a_normal_row_keeps_its_headroom() {
     let p = palette();
     let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
-    let measured = contrast_ratio(style.focus_ring_color, style.background);
+    let outline = style
+        .focus_outline
+        .expect("the keyboard focused row carries an outline");
+    let measured = contrast_ratio(outline.color, style.background);
 
-    assert_eq!(style.focus_ring_color, p.accent_border);
+    assert_eq!(outline.color, p.accent_border);
+    assert_eq!(outline.placement, FocusPlacement::Inset);
     assert!(
         measured >= 5.4427 - 1e-3,
-        "the keyboard ring on surface.hover has only {:.4} of headroom over \
+        "the keyboard outline on surface.hover has only {:.4} of headroom over \
          the 3.0 floor; it measured {}, expected 5.4427",
         measured - MIN_CHROME_CONTRAST,
         measured
+    );
+    // §4.9.2 prints this cell's outline as `5.35:1`. The solver says
+    // 5.4427, and the solver is the authority: the spec's column is a
+    // rounded restatement of the same pairing, not a different one.
+    assert!(
+        (measured - 5.4427).abs() < 1e-3,
+        "the normal focused row's outline drifted off the 5.4427 the solver \
+         produces (the spec prints 5.35)"
     );
 }
 
@@ -1126,6 +1172,77 @@ fn test_the_row_shape_is_the_widget_radius_token() {
     assert_eq!(ROW_RADIUS, shape::RADIUS_WIDGET);
 }
 
+#[test]
+fn test_the_outline_width_is_the_hairline_token_not_a_literal() {
+    assert_eq!(FOCUS_OUTLINE_WIDTH, shape::BORDER_HAIRLINE);
+    assert_eq!(FOCUS_OUTLINE_WIDTH, FocusPlacement::Inset.stroke());
+    assert_ne!(FOCUS_OUTLINE_WIDTH, shape::BORDER_FOCUS);
+}
+
+/// The row does not own a colour rule. Its outline is exactly what
+/// [`resolve_inset_outline_for_background`] returns for the fill the row
+/// just resolved — so a menu row and an application-owned tree row that
+/// paint the same background get the same outline, byte for byte.
+#[test]
+fn test_the_rows_outline_is_the_shared_resolver_verbatim() {
+    let p = palette();
+
+    for cell in RowState::ALL.iter().filter(|c| c.focused) {
+        let style = resolve_row_style(&action(), *cell, &p);
+        let outline = style
+            .focus_outline
+            .unwrap_or_else(|| panic!("{} carries no outline", cell.matrix_row()));
+
+        assert_eq!(
+            outline,
+            resolve_inset_outline_for_background(style.background, &p),
+            "{}'s outline is not the shared inset rule applied to its own \
+             background — the row must not carry a colour rule of its own",
+            cell.matrix_row()
+        );
+    }
+}
+
+/// The two focused cells §4.9.2 prints, end to end: fill, outline colour,
+/// stroke and placement, in the layer the renderer actually gets.
+#[test]
+fn test_the_two_focused_cells_paint_as_the_spec_matrix_states() {
+    let p = palette();
+    let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(240.0, ROW_HEIGHT));
+
+    // Normal focused: surface.hover + 1px accent.border inset.
+    let normal = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
+    let normal_layers = paint_layers(&action(), bounds, &normal, &p);
+    assert_eq!(normal_layers.len(), 2);
+    assert_eq!(normal_layers[0].fill, p.surface_hover);
+    assert_eq!(normal_layers[1].border.color, p.accent_border);
+    assert_eq!(normal_layers[1].border.width, 1.0);
+    assert_eq!(normal_layers[1].bounds, bounds);
+
+    // Destructive focused: status.danger.fill + 1px text.strong inset.
+    let danger = resolve_row_style(&destructive(), RowState::DESTRUCTIVE_FOCUSED, &p);
+    let destructive_layers = paint_layers(&destructive(), bounds, &danger, &p);
+    assert_eq!(destructive_layers.len(), 2);
+    assert_eq!(
+        destructive_layers[0].fill, p.status_danger_fill,
+        "the destructive focused row keeps the hover fill, not the pressed fill"
+    );
+    assert_eq!(destructive_layers[1].border.color, p.text_strong);
+    assert_eq!(destructive_layers[1].border.width, 1.0);
+    assert_eq!(destructive_layers[1].bounds, bounds);
+
+    // The two cells differ in fill and in outline colour, and agree on
+    // everything the placement carries.
+    assert_eq!(
+        normal_layers[1].border.width,
+        destructive_layers[1].border.width
+    );
+    assert_ne!(
+        normal_layers[1].border.color, destructive_layers[1].border.color,
+        "the outline must adapt to the fill, not be one colour for every row"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures for the widget leg
 // ---------------------------------------------------------------------------
@@ -1422,36 +1539,100 @@ fn test_a_hovered_row_paints_exactly_its_fill() {
 }
 
 #[test]
-fn test_the_background_paints_before_the_ring() {
+fn test_the_background_paints_before_the_outline() {
     let p = palette();
     let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
     let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(240.0, ROW_HEIGHT));
     let layers = paint_layers(&action(), bounds, &style, &p);
 
-    assert_eq!(layers.len(), 2, "fill, then ring");
+    assert_eq!(layers.len(), 2, "fill, then outline");
     assert_eq!(layers[0].bounds, bounds, "the fill covers the row");
     assert_ne!(
         layers[1].border.color, layers[0].fill,
-        "the ring is a distinct stroke, not the fill redrawn"
+        "the outline is a distinct stroke, not the fill redrawn"
+    );
+    assert_eq!(
+        layers[1].fill.a, 0.0,
+        "the outline layer strokes only — it must not lay a second fill over \
+         the one the state just resolved"
+    );
+}
+
+/// The geometry §3.0.2 rule 2 asks of a row: the whole `1px` outline is
+/// inside the row's own perimeter, so a dense list cannot clip it.
+#[test]
+fn test_the_outline_is_drawn_inside_the_rows_own_box() {
+    let p = palette();
+    let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
+    let bounds = Rectangle::new(Point::new(20.0, 20.0), Size::new(240.0, ROW_HEIGHT));
+    let outline = focus_outline_layer(bounds, &style).expect("a focused row draws an outline");
+
+    // iced strokes a quad inward from its bounds, so taking the row's own
+    // box puts the stroke's outer edge on the row's perimeter and the
+    // whole 1px inside it.
+    assert_eq!(
+        outline.bounds, bounds,
+        "an inset outline takes the row's own quad; shrinking it would leave \
+         a gap of fill at the perimeter the spec does not describe"
+    );
+    assert!(outline.bounds.x >= bounds.x && outline.bounds.y >= bounds.y);
+    assert!(
+        outline.bounds.x + outline.bounds.width <= bounds.x + bounds.width
+            && outline.bounds.y + outline.bounds.height <= bounds.y + bounds.height,
+        "no part of the outline may reach outside the row"
+    );
+    assert_eq!(outline.border.width, FOCUS_OUTLINE_WIDTH);
+    assert_eq!(outline.border.width, shape::BORDER_HAIRLINE);
+    assert_eq!(
+        outline.border.radius.top_left, ROW_RADIUS,
+        "the outline's outer edge IS the row's edge, so it rides the row's \
+         own corner rather than taking a ring's grown radius"
+    );
+    assert_ne!(
+        outline.border.width,
+        shape::BORDER_FOCUS,
+        "a row must never be drawn with the 2px outer-ring stroke"
+    );
+}
+
+/// The reason the placement exists at all: rows are packed edge to edge,
+/// and an indicator that stayed inside its own row cannot be cut by the
+/// neighbour above or below it.
+#[test]
+fn test_a_neighbouring_row_cannot_clip_the_outline() {
+    let p = palette();
+    let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
+    let row = Rectangle::new(Point::new(0.0, 0.0), Size::new(240.0, ROW_HEIGHT));
+    let next = Rectangle::new(Point::new(0.0, ROW_HEIGHT), Size::new(240.0, ROW_HEIGHT));
+
+    let outline = focus_outline_layer(row, &style).expect("a focused row draws an outline");
+
+    assert!(
+        outline.bounds.y + outline.bounds.height <= next.y + outline.border.width,
+        "the outline's lowest stroke must stay inside the row it belongs to"
+    );
+    assert!(
+        !outline
+            .bounds
+            .intersects(&next.shrink(outline.border.width)),
+        "the outline must not reach into the row packed below it"
+    );
+    assert!(
+        outline.bounds.x + outline.bounds.width <= row.x + row.width,
+        "and not past the right edge either"
     );
 }
 
 #[test]
-fn test_the_ring_is_drawn_outside_the_rows_own_box() {
+fn test_an_unfocused_row_has_no_outline_layer() {
     let p = palette();
-    let style = resolve_row_style(&action(), RowState::KEYBOARD_FOCUSED, &p);
-    let bounds = Rectangle::new(Point::new(20.0, 20.0), Size::new(240.0, ROW_HEIGHT));
-    let ring = focus_ring_layer(bounds, &style).expect("a focused row draws a ring");
+    let style = resolve_row_style(&action(), RowState::HOVERED, &p);
+    let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(240.0, ROW_HEIGHT));
 
     assert!(
-        ring.bounds.x < bounds.x,
-        "the ring must not be clipped by the row it rings"
+        focus_outline_layer(bounds, &style).is_none(),
+        "hover alone is not focus — no outline may be drawn"
     );
-    assert!(ring.bounds.y < bounds.y);
-    assert!(ring.bounds.x + ring.bounds.width > bounds.x + bounds.width);
-    assert!(ring.bounds.y + ring.bounds.height > bounds.y + bounds.height);
-    assert_eq!(ring.border.width, FOCUS_RING_WIDTH);
-    assert_eq!(ring.border.width, shape::BORDER_FOCUS);
 }
 
 #[test]

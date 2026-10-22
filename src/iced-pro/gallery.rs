@@ -1035,8 +1035,8 @@ pub fn menu_row_cell(state: menu_view::RowState) -> Cell {
     if let Some(layer) = menu_view::background_layer(bounds, &style) {
         layers.push(("row-background", layer));
     }
-    if let Some(layer) = menu_view::focus_ring_layer(bounds, &style) {
-        layers.push(("focus-ring", layer));
+    if let Some(layer) = menu_view::focus_outline_layer(bounds, &style) {
+        layers.push(("focus-outline", layer));
     }
 
     let mut audit = vec![
@@ -1060,34 +1060,50 @@ pub fn menu_row_cell(state: menu_view::RowState) -> Cell {
         },
     ];
 
-    if style.focus_ring_width > 0.0 {
+    if let Some(outline) = style.focus_outline {
         audit.push(AuditPair {
-            channel: "ring",
-            foreground: style.focus_ring_color,
+            channel: "focus-outline",
+            foreground: outline.color,
             background: style.background,
             role: ContrastRole::Chrome,
         });
     }
+
+    let focus_entries = match style.focus_outline {
+        Some(outline) => vec![
+            StyleEntry::colour("focus-outline.color", outline.color),
+            StyleEntry::number("focus-outline.width", outline.width),
+            StyleEntry::text(
+                "focus-outline.placement",
+                format!("{:?}", outline.placement),
+            ),
+        ],
+        None => vec![StyleEntry::colour(
+            "focus-outline.color",
+            Color::TRANSPARENT,
+        )],
+    };
+
+    let mut resolved = vec![
+        StyleEntry::colour("background", style.background),
+        StyleEntry::colour("leading", style.leading),
+        StyleEntry::colour("label", style.label),
+        StyleEntry::colour("trailing", style.trailing),
+        StyleEntry::text("cursor", format!("{:?}", style.cursor)),
+        StyleEntry::text("matrix-row", state.matrix_row()),
+        StyleEntry::text("row-kind", format!("{:?}", row.kind())),
+        StyleEntry::number("geometry.height", bounds.height),
+        StyleEntry::number("geometry.padding-x", menu_view::ROW_PADDING_X),
+        StyleEntry::number("geometry.radius", menu_view::ROW_RADIUS),
+    ];
+    resolved.extend(focus_entries);
 
     Cell {
         id: format!("menu/row/{row_slug}", row_slug = row_slug(state)),
         kind: CellKind::Composite,
         subject: "menu",
         spec: "UIF-CMENU-001",
-        resolved: vec![
-            StyleEntry::colour("background", style.background),
-            StyleEntry::colour("leading", style.leading),
-            StyleEntry::colour("label", style.label),
-            StyleEntry::colour("trailing", style.trailing),
-            StyleEntry::colour("focus-ring.color", style.focus_ring_color),
-            StyleEntry::number("focus-ring.width", style.focus_ring_width),
-            StyleEntry::text("cursor", format!("{:?}", style.cursor)),
-            StyleEntry::text("matrix-row", state.matrix_row()),
-            StyleEntry::text("row-kind", format!("{:?}", row.kind())),
-            StyleEntry::number("geometry.height", bounds.height),
-            StyleEntry::number("geometry.padding-x", menu_view::ROW_PADDING_X),
-            StyleEntry::number("geometry.radius", menu_view::ROW_RADIUS),
-        ],
+        resolved,
         frame: paint_frame(bounds, &layers),
         audit,
         note: None,

@@ -1,5 +1,6 @@
-//! Tests for [`focus`] — the adaptive focus-ring rule (`UIF-TOK-006`
-//! rule 3, decision **D-6** / gap **G-9**).
+//! Tests for [`focus`] — the adaptive focus-indicator rule
+//! (`UIF-TOK-006` rule 3, decision **D-6** / gap **G-9**) and the two
+//! placements §3.0.2 hangs off it.
 //!
 //! The rule has four branches and each is pinned separately: the accent
 //! wins while it clears `3.0:1`, `text.strong` takes over when it does
@@ -9,15 +10,28 @@
 //! whenever it is visible, so the rule reproduces the spec's own ring
 //! colour everywhere the spec's ring actually shows — and purity.
 //!
+//! The second half covers the `1px` **inset outline** §3.0.2 gives menu
+//! and tree rows: its stroke weight comes from `border.hairline`, its
+//! geometry keeps the whole stroke inside the row's own perimeter while
+//! the outer ring's grows outside the control's, and — the claim that
+//! matters most — both placements are handed the *same* colour by the
+//! *same* rule for the same background. That is what keeps a row's
+//! outline from becoming a second, independently tunable rule that
+//! quietly disagrees with the ring.
+//!
 //! Since the 2026-10-22 revision of §2.5 the candidate is
 //! `accent.border` rather than `accent.primary`: the split gave the rule
 //! a stroke token built for the job, so the fallback now fires on all
 //! four saturated fills and on no surface at all.
 
-use super::{resolve_ring_color, resolve_ring_color_for_background};
+use super::{
+    FocusIndicator, FocusPlacement, resolve_focus_indicator_for_background,
+    resolve_inset_outline_for_background, resolve_ring_color, resolve_ring_color_for_background,
+};
 use crate::token::color::Palette;
 use crate::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
-use iced::Color;
+use crate::token::shape;
+use iced::{Color, Rectangle};
 
 /// Tolerance on a pinned contrast ratio — three decimals, enough to tell
 /// `1.7188` from `3.0000`.
@@ -439,4 +453,301 @@ fn test_the_accent_is_preferred_over_an_equal_or_worse_fallback() {
         "the accent must win at {accent:.4}:1 even though text.strong clears by \
          more at {strong:.4}:1"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The inset outline — §3.0.2 rule 2's second placement
+// ---------------------------------------------------------------------------
+
+/// A row's own box, as wide and tall as a §4.8.1 menu row.
+fn row_box() -> Rectangle {
+    Rectangle::new((10.0, 40.0).into(), (240.0, 32.0).into())
+}
+
+/// The two placements, so every table below reads as placement names.
+fn placements() -> [(FocusPlacement, &'static str); 2] {
+    [
+        (FocusPlacement::Outer, "outer ring"),
+        (FocusPlacement::Inset, "inset outline"),
+    ]
+}
+
+#[test]
+fn test_each_placement_carries_its_own_stroke_weight_from_the_token_set() {
+    // The weights are the two rungs `shape` defines, not two numbers
+    // picked to look different: the ring is the attention stroke and the
+    // outline is the structural one.
+    assert_eq!(FocusPlacement::Outer.stroke(), shape::BORDER_FOCUS);
+    assert_eq!(FocusPlacement::Inset.stroke(), shape::BORDER_HAIRLINE);
+    assert_eq!(FocusPlacement::Outer.stroke(), 2.0);
+    assert_eq!(FocusPlacement::Inset.stroke(), 1.0);
+    assert_ne!(
+        FocusPlacement::Outer.stroke(),
+        FocusPlacement::Inset.stroke(),
+        "if the two placements ever weigh the same, a row's outline stops \
+         being distinguishable from a button's ring"
+    );
+}
+
+#[test]
+fn test_the_constructors_take_their_weight_from_their_placement() {
+    let color = Color::from_rgb8(11, 22, 33);
+
+    let outer = FocusIndicator::outer(color);
+    assert_eq!(outer.color, color);
+    assert_eq!(outer.width, FocusPlacement::Outer.stroke());
+    assert_eq!(outer.placement, FocusPlacement::Outer);
+
+    let inset = FocusIndicator::inset(color);
+    assert_eq!(inset.color, color);
+    assert_eq!(inset.width, FocusPlacement::Inset.stroke());
+    assert_eq!(inset.placement, FocusPlacement::Inset);
+}
+
+/// **The colour rule is shared, not duplicated.**
+///
+/// Every background in the ladder, and the saturated fills on top of it,
+/// must produce the *same colour* for both placements. The only thing
+/// `placement` is allowed to change is geometry. If a second colour rule
+/// were ever introduced for the inset case it would drift from the ring
+/// rule the first time either was retuned, and this is the test that
+/// notices.
+#[test]
+fn test_both_placements_pick_the_identical_colour_for_the_same_background() {
+    let p = palette();
+    let backgrounds = [
+        p.surface_sunken,
+        p.surface_base,
+        p.surface_raised,
+        p.surface_code,
+        p.surface_overlay,
+        p.surface_hover,
+        p.surface_active,
+        p.status_danger_fill,
+        p.status_danger_fill_active,
+        p.accent_fill,
+        p.accent_fill_active,
+        Color::TRANSPARENT,
+        grey_neither_candidate_clears(),
+        grey_accent_is_the_higher_loser(),
+    ];
+
+    for background in backgrounds {
+        let shared = resolve_ring_color_for_background(background, &p);
+
+        for (placement, name) in placements() {
+            let indicator = resolve_focus_indicator_for_background(background, &p, placement);
+            assert_eq!(
+                indicator.color,
+                shared,
+                "{name} on {} resolved to a different colour than the shared \
+                 rule produced — the placements must share one colour rule",
+                rgb8(background),
+            );
+            assert_eq!(
+                indicator.width,
+                placement.stroke(),
+                "{name} must carry its own stroke weight"
+            );
+            assert_eq!(indicator.placement, placement);
+        }
+    }
+}
+
+#[test]
+fn test_the_inset_shorthand_is_the_shared_resolver_at_the_inset_placement() {
+    let p = palette();
+    for background in [p.surface_hover, p.status_danger_fill, Color::TRANSPARENT] {
+        assert_eq!(
+            resolve_inset_outline_for_background(background, &p),
+            resolve_focus_indicator_for_background(background, &p, FocusPlacement::Inset),
+            "the shorthand must not be a second path through the rule"
+        );
+    }
+}
+
+/// The geometry that makes an inset outline an inset outline: the stroke's
+/// outer edge lands on the row's own perimeter, so the whole `1px` is
+/// inside the row and no neighbour can clip it.
+#[test]
+fn test_the_inset_outline_stays_inside_the_rows_own_perimeter() {
+    let row = row_box();
+    let outline = FocusIndicator::inset(Color::WHITE);
+    let stroked = outline.bounds(row);
+
+    assert_eq!(
+        stroked, row,
+        "iced strokes a quad inward from its bounds, so an inset outline \
+         takes the row's own box — shrinking it would push the stroke a \
+         further stroke-width inside and leave a gap of fill at the \
+         perimeter §3.0.2 does not describe"
+    );
+    assert!(
+        stroked.x >= row.x && stroked.y >= row.y,
+        "the outline must not reach outside the row"
+    );
+    assert!(
+        stroked.x + stroked.width <= row.x + row.width
+            && stroked.y + stroked.height <= row.y + row.height,
+        "the outline must not reach outside the row"
+    );
+    assert_eq!(
+        outline.radius(4.0),
+        4.0,
+        "the outline's outer edge IS the row's edge, so it rides the row's \
+         own corner radius rather than inventing one"
+    );
+}
+
+/// The outer ring is the mirror image: grown outward, with its own larger
+/// radius so it stays concentric with what it rings.
+#[test]
+fn test_the_outer_ring_grows_outside_the_control_it_rings() {
+    let control = row_box();
+    let ring = FocusIndicator::outer(Color::WHITE);
+    let stroked = ring.bounds(control);
+
+    assert_eq!(stroked, control.expand(ring.width));
+    assert!(stroked.x < control.x && stroked.y < control.y);
+    assert!(stroked.width > control.width && stroked.height > control.height);
+    assert_eq!(
+        ring.radius(4.0),
+        4.0 + ring.width,
+        "the ring's outer edge is a stroke-width further out than the \
+         control's, so its corner has to be a stroke-width rounder too"
+    );
+}
+
+#[test]
+fn test_the_two_placements_never_land_on_the_same_rectangle() {
+    let control = row_box();
+    let inset = FocusIndicator::inset(Color::WHITE).bounds(control);
+    let outer = FocusIndicator::outer(Color::WHITE).bounds(control);
+
+    assert_ne!(
+        inset, outer,
+        "one box for both placements would mean a renderer could not tell \
+         them apart from the quad alone"
+    );
+    assert!(
+        inset.area() < outer.area(),
+        "the inset outline is strictly inside the ring's footprint"
+    );
+}
+
+/// The two focused cells of §4.9.2, computed rather than configured.
+///
+/// §4.9.2 prints the normal focused row's outline as `5.35:1`. The
+/// solver says **5.4427** — the crate's solver is authoritative over the
+/// spec's rounded column, and the discrepancy is pinned here so the
+/// record shows which number is real.
+#[test]
+fn test_the_two_spec_focus_cells_fall_out_of_the_shared_rule() {
+    let p = palette();
+
+    // Normal focused row: surface.hover + accent.border.
+    let normal = resolve_inset_outline_for_background(p.surface_hover, &p);
+    let accent_on_hover = contrast_ratio(p.accent_border, p.surface_hover);
+    assert_eq!(
+        normal.color, p.accent_border,
+        "accent.border clears the chrome floor on surface.hover at \
+         {accent_on_hover:.4}:1, so it must win"
+    );
+    assert!(
+        (accent_on_hover - 5.4427).abs() < RATIO_EPS,
+        "the normal focused row's outline measures {accent_on_hover:.4}:1, \
+         expected the solver's 5.4427 — §4.9.2 prints 5.35, which is the \
+         spec's rounding and not the truth"
+    );
+    assert_eq!(normal.width, shape::BORDER_HAIRLINE);
+    assert_eq!(normal.placement, FocusPlacement::Inset);
+
+    // Destructive focused row: status.danger.fill + text.strong.
+    let destructive = resolve_inset_outline_for_background(p.status_danger_fill, &p);
+    let accent_on_danger = contrast_ratio(p.accent_border, p.status_danger_fill);
+    let strong_on_danger = contrast_ratio(p.text_strong, p.status_danger_fill);
+    assert!(
+        (accent_on_danger - 1.7188).abs() < RATIO_EPS,
+        "accent.border on the danger fill measures {accent_on_danger:.4}:1"
+    );
+    assert!(
+        (strong_on_danger - 5.1270).abs() < RATIO_EPS,
+        "text.strong on the danger fill measures {strong_on_danger:.4}:1"
+    );
+    assert_eq!(
+        destructive.color, p.text_strong,
+        "the accent cannot be seen on the danger fill, so the outline \
+         degrades to text.strong exactly as a ring would"
+    );
+    assert_eq!(destructive.width, shape::BORDER_HAIRLINE);
+    assert_eq!(destructive.placement, FocusPlacement::Inset);
+
+    // Same fill, both placements, same colour — the cells differ from a
+    // button's ring in geometry only.
+    for fill in [p.surface_hover, p.status_danger_fill] {
+        assert_eq!(
+            resolve_focus_indicator_for_background(fill, &p, FocusPlacement::Outer).color,
+            resolve_focus_indicator_for_background(fill, &p, FocusPlacement::Inset).color,
+            "{}: the row's outline and the button's ring must agree on colour",
+            rgb8(fill),
+        );
+    }
+}
+
+#[test]
+fn test_an_unpainted_row_background_short_circuits_the_outline_to_the_accent() {
+    let p = palette();
+    // A Rest row paints nothing, so its outline belongs to the card, not
+    // to `transparent` — the same short-circuit the ring already makes.
+    let outline = resolve_inset_outline_for_background(Color::TRANSPARENT, &p);
+    assert_eq!(outline.color, p.accent_border);
+    assert_eq!(outline.placement, FocusPlacement::Inset);
+    assert_eq!(outline.width, shape::BORDER_HAIRLINE);
+}
+
+#[test]
+fn test_the_inset_outline_clears_the_chrome_floor_against_every_surface() {
+    let p = palette();
+    for (name, surface) in ring_backdrops() {
+        let outline = resolve_inset_outline_for_background(surface, &p);
+        let ratio = contrast_ratio(outline.color, surface);
+        assert!(
+            ratio >= MIN_CHROME_CONTRAST,
+            "{name}: the inset outline measures {ratio:.4}:1, under the \
+             {:.1}:1 chrome floor",
+            MIN_CHROME_CONTRAST,
+        );
+        assert_ne!(
+            outline.color, surface,
+            "{name}: the outline must not be \
+                    the row's own colour"
+        );
+    }
+}
+
+#[test]
+fn test_the_indicator_resolvers_are_pure_and_total() {
+    let p = palette();
+    for fill in [
+        p.surface_base,
+        p.surface_hover,
+        p.status_danger_fill,
+        grey_neither_candidate_clears(),
+        Color::TRANSPARENT,
+        Color::WHITE,
+    ] {
+        for (placement, name) in placements() {
+            let first = resolve_focus_indicator_for_background(fill, &p, placement);
+            let second = resolve_focus_indicator_for_background(fill, &p, placement);
+            assert_eq!(first, second, "{name} on {} is not pure", rgb8(fill));
+            assert!(
+                first.width.is_finite()
+                    && first.color.r.is_finite()
+                    && first.color.g.is_finite()
+                    && first.color.b.is_finite(),
+                "{name}: no resolved channel may be NaN or infinite"
+            );
+            assert!(first.bounds(row_box()).area() > 0.0);
+        }
+    }
 }

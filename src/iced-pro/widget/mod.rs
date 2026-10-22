@@ -30,9 +30,11 @@
 //! * [`button_widget`] — the rendering, keyboard-focusable button that
 //!   composes those resolvers into a real iced widget, the first atom in
 //!   the framework to paint (`UIF-ATOM-001`, `UIF-PRIN-005`)
-//! * [`focus`] — the adaptive keyboard focus-ring rule every widget with
-//!   a ring resolves through, rather than re-deriving it per variant
-//!   (`UIF-TOK-006` rule 2, decision **D-6**)
+//! * [`focus`] — the adaptive keyboard focus rule every widget with a
+//!   focus indicator resolves through, rather than re-deriving it per
+//!   variant: one colour rule, two placements — the `2px` outer ring for
+//!   buttons and inputs and the `1px` inset outline for menu and tree
+//!   rows (`UIF-TOK-006` rule 2, `UIF-ATOM-000` §3.0.2, decision **D-6**)
 //! * [`focusable`] — the wrapper that registers a widget with iced's
 //!   focus router, the mechanism decision **D-7** rests on and the
 //!   reason a custom widget can hold keyboard focus at all

@@ -458,8 +458,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
              an audited cell emits names a `Palette` token. Missing: no source-level \
              check forbids a raw spacing, size, radius or stroke literal in a widget or \
              surface file; the gate inspects emitted colours, not the crate's text. \
-             G-12 also records values (10px menu-row padding, 9px separator, 22px \
-             footer, 16px grip) that exist only as compositions, not named rungs.",
+             G-12 also records values (10px menu-row padding, 9px separator, \
+             16px grip) that exist only as compositions, not named rungs. The footer is \
+              no longer one of them — the revision supplied `size.bar.status` and it \
+              now reads that token.",
         ),
         note: None,
     },
@@ -620,23 +622,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §3 Atomic Widget State Matrices ------------------------------------
     Coverage {
         id: "UIF-ATOM-000",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.0",
         evidence: &["state.rs", "widget/focus.rs", "widget/button_widget.rs"],
-        reason: Some(
+        reason: None,
+        note: Some(
             "The two-part orthogonal model is the crate's foundation: `VisualState \
              { base, focused }`, base precedence `Disabled > Invalid > Pressed > \
              Hovered > Rest`, and total disabled dominance — a disabled control \
              forces `focused` false and focus advances to the next enabled control. \
              The nine reachable states are the gallery's nine columns. Press-and-release \
              activation is implemented: the button fires only on release still inside \
-             its bounds and a drag-out cancels. The dynamic ring contrast rule is the \
-             D-6 adaptive resolver, now measured against `accent.border`. Missing: the \
-             1px **inset** focus outline §3.0.2 requires for menu and tree rows, so \
-             dense lists do not clip the ring. Only the 2px outer ring exists today, \
-             which is the wrong placement for a dense row.",
+             its bounds and a drag-out cancels. Both placements of the focus indicator \
+             exist and share one adaptive colour rule: the 2px outer ring for buttons \
+             and inputs, and the 1px inset outline for dense rows, whose colour is \
+             resolved against the row's actual fill rather than named per row type.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-001",

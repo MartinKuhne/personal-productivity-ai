@@ -1,11 +1,13 @@
-//! The adaptive keyboard focus ring — one rule every widget shares
-//! (`UIF-TOK-006` rule 2, ledger decision **D-6** resolving **G-9**).
+//! The adaptive keyboard focus indicator — one colour rule and two
+//! placements, shared by every widget that shows focus (`UIF-TOK-006`
+//! rule 2, ledger decision **D-6** resolving **G-9**; `UIF-ATOM-000`
+//! §3.0.2 rule 2).
 //!
-//! A focus ring has exactly one job: to tell a keyboard user which
-//! control is theirs, right now. A ring nobody can see is not an
+//! A focus indicator has exactly one job: to tell a keyboard user which
+//! control is theirs, right now. An indicator nobody can see is not an
 //! accessibility feature wearing a slightly different colour, so this
-//! module resolves the ring against the colour it actually has to stand
-//! out from rather than honouring one token into invisibility.
+//! module resolves it against the colour it actually has to stand out
+//! from rather than honouring one token into invisibility.
 //!
 //! # Why the rule is not a per-variant constant
 //!
@@ -112,11 +114,67 @@
 //! pins it rather than letting the short-circuit imply the ring always
 //! clears.
 //!
+//! # Two placements, one colour rule
+//!
+//! §3.0.2 asks for two focus indicators and the difference between them
+//! is *placement*, not colour:
+//!
+//! * an **outer ring, `2px`** — buttons and inputs, drawn outside the
+//!   control's border so it never clips content or overwrites an
+//!   `Invalid` border;
+//! * an **inset outline, `1px`** — menu and tree rows, drawn inside the
+//!   row perimeter so adjacent rows in a dense list do not clip it.
+//!
+//! Both take their colour from the rule above, unchanged. That is not
+//! convenience, it is the reason the rule lives in one file at all: a
+//! second resolver for the inset case would drift away from the first
+//! the moment either was retuned, and the two indicators would stop
+//! meaning the same thing to the same user. So placement is modelled as
+//! data — [`FocusPlacement`], which carries its own stroke weight out of
+//! [`shape`] — and [`resolve_focus_indicator_for_background`] resolves
+//! the *colour* through [`resolve_ring_color_for_background`] whichever
+//! placement it is handed.
+//!
+//! What comes back is a [`FocusIndicator`]: colour, stroke and placement
+//! travelling together, plus [`FocusIndicator::bounds`] and
+//! [`FocusIndicator::radius`] to turn whatever box the caller has into
+//! the box the stroke belongs on. A renderer never learns which rule
+//! made the colour or which edge the stroke sits on; it asks for the
+//! bounds and strokes them.
+//!
+//! # Tree rows are app-owned; the outline is not
+//!
+//! §3.0.2 names "Menu & Tree Rows" together, but decision **D-2** makes
+//! the tree view the application's own widget, so this crate cannot paint
+//! a tree row. What it can do — and what [`FocusPlacement::Inset`] exists
+//! for — is hand the app the very value its own menu rows are drawn with:
+//!
+//! ```text
+//! let outline = resolve_inset_outline_for_background(row_background, &palette);
+//!
+//! renderer.fill_quad(Quad {
+//!     bounds: outline.bounds(row_bounds),          // inside the row, not outside
+//!     border: Border::new(outline.radius(ROW_RADIUS))
+//!         .color(outline.color)                   // the shared adaptive colour
+//!         .width(outline.width),                  // border.hairline
+//!     ..Default::default()
+//! });
+//! ```
+//!
+//! A tree row that goes through that call resolves its outline against
+//! the fill it actually painted, exactly as a menu row does: a hovered
+//! row gets `accent.border`, a destructive one gets `text.strong`, and
+//! the application cannot re-derive — and so cannot contradict — the
+//! framework's rule. Handing the app a bare `Color` instead would push
+//! the width and the side back onto the caller, which is precisely where
+//! an inset outline starts drifting back to `2px` and outward.
+//!
 //! Unit tests live in the sibling `focus_tests.rs` sidecar.
 
 use crate::token::color::Palette;
 use crate::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
-use iced::Color;
+use crate::token::shape;
+use iced::{Color, Rectangle};
 
 /// Resolve a focus ring against the fill it has to be visible on
 /// (`UIF-TOK-006` rule 2, decision **D-6**).
@@ -182,6 +240,214 @@ pub fn resolve_ring_color_for_background(background: Color, palette: &Palette) -
         return palette.accent_border;
     }
     resolve_ring_color(background, palette)
+}
+
+// ---------------------------------------------------------------------------
+// Placement (§3.0.2 rule 2)
+// ---------------------------------------------------------------------------
+
+/// Which side of a control's own perimeter its focus indicator is drawn
+/// on (`UIF-ATOM-000` §3.0.2 rule 2).
+///
+/// The two placements are not stylistic variants of one another; they are
+/// answers to two different failure modes, which is why the placement is
+/// data rather than a caller-supplied number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FocusPlacement {
+    /// `2px` *outside* the control's border — buttons and inputs.
+    ///
+    /// Growing the box rather than shrinking it is what keeps the ring
+    /// from clipping a control's content or overwriting the `Invalid`
+    /// border, which shares that same perimeter (§3.2 gives an invalid
+    /// input a `2px status.danger.text` border and still wants its focus
+    /// ring).
+    Outer,
+    /// `1px` *inside* the row's perimeter — menu and tree rows.
+    ///
+    /// A dense list clips at the row boundary, so a ring grown outward
+    /// is cut by the rows above and below it — worst at the top and
+    /// bottom of the card, where there is nothing beyond the row to draw
+    /// into. Keeping the stroke inside the perimeter makes the whole
+    /// indicator visible at any row pitch.
+    Inset,
+}
+
+impl FocusPlacement {
+    /// The stroke weight §3.0.2 fixes for this placement.
+    ///
+    /// Both come from [`shape`] rather than a literal: the outer ring is
+    /// the attention weight (`border.focus`) and the inset outline is
+    /// the structural weight (`border.hairline`). The two are different
+    /// rungs on purpose, so a row's outline never reads as a button's
+    /// ring that lost a pixel.
+    #[must_use]
+    pub const fn stroke(self) -> f32 {
+        match self {
+            Self::Outer => shape::BORDER_FOCUS,
+            Self::Inset => shape::BORDER_HAIRLINE,
+        }
+    }
+
+    /// The rectangle the stroke of `width` is drawn on, given the
+    /// control's own box.
+    ///
+    /// iced strokes a quad **inward from its bounds** — `border_width`
+    /// pixels of stroke, inside the edge — so a placement is entirely a
+    /// statement about whether that rectangle was grown out of the
+    /// control's box or left on it:
+    ///
+    /// * [`Outer`](Self::Outer) grows it by `width`, which puts the
+    ///   stroke's *inner* edge exactly on the control's border and the
+    ///   whole ring outside it;
+    /// * [`Inset`](Self::Inset) leaves it where it is, which puts the
+    ///   stroke's *outer* edge exactly on the row's perimeter and the
+    ///   whole outline inside it.
+    ///
+    /// Shrinking the rectangle for an inset stroke would not move the
+    /// stroke inside the row — it would move it inside the row *and*
+    /// `width` further in, leaving a gap of fill between the perimeter
+    /// and the indicator. That is a third placement §3.0.2 does not
+    /// describe.
+    #[must_use]
+    pub fn bounds(self, control: Rectangle, width: f32) -> Rectangle {
+        match self {
+            Self::Outer => control.expand(width),
+            Self::Inset => control,
+        }
+    }
+
+    /// The corner radius to stroke with, for a control of `radius`.
+    ///
+    /// The outer ring needs its own, larger radius to stay concentric
+    /// with the control it rings: its outer edge is `width` further out
+    /// than the control's, so the corner has to be `width` rounder too
+    /// or the ring cuts the corner it is meant to follow.
+    ///
+    /// The inset outline needs no adjustment at all. Its outer edge *is*
+    /// the control's edge, so it rides the control's own radius and the
+    /// corner that gets flattened by the stroke is the corner the fill
+    /// already drew.
+    #[must_use]
+    pub const fn radius(self, radius: f32, width: f32) -> f32 {
+        match self {
+            Self::Outer => radius + width,
+            Self::Inset => radius,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The resolved indicator
+// ---------------------------------------------------------------------------
+
+/// A resolved focus indicator: the colour the adaptive rule picked, the
+/// stroke the placement calls for, and the edge it is drawn on.
+///
+/// The three travel together deliberately. A bare colour cannot be drawn
+/// without a width and a side, and letting a caller supply either by
+/// hand is exactly how an inset outline ends up `2px`, or a button's
+/// ring ends up inside its own border.
+/// [`resolve_focus_indicator_for_background`] is the one place all
+/// three are chosen together, and [`bounds`](Self::bounds) /
+/// [`radius`](Self::radius) turn whatever box the caller holds into the
+/// box the stroke belongs on — so no call site can put the two
+/// placements' geometry in the wrong order.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FocusIndicator {
+    /// The stroke colour, resolved by the shared adaptive rule
+    /// ([`resolve_ring_color_for_background`]).
+    pub color: Color,
+    /// The stroke weight, taken from [`FocusPlacement::stroke`].
+    pub width: f32,
+    /// Which side of the control's perimeter the stroke is drawn on.
+    pub placement: FocusPlacement,
+}
+
+impl FocusIndicator {
+    /// The `2px` outer ring §3.0.2 gives buttons and inputs, in `color`.
+    #[must_use]
+    pub const fn outer(color: Color) -> Self {
+        Self {
+            color,
+            width: shape::BORDER_FOCUS,
+            placement: FocusPlacement::Outer,
+        }
+    }
+
+    /// The `1px` inset outline §3.0.2 gives menu and tree rows, in
+    /// `color`.
+    #[must_use]
+    pub const fn inset(color: Color) -> Self {
+        Self {
+            color,
+            width: shape::BORDER_HAIRLINE,
+            placement: FocusPlacement::Inset,
+        }
+    }
+
+    /// The rectangle this indicator's stroke is drawn on, given the
+    /// control's own box.
+    #[must_use]
+    pub fn bounds(self, control: Rectangle) -> Rectangle {
+        self.placement.bounds(control, self.width)
+    }
+
+    /// The corner radius that keeps this indicator concentric with a
+    /// control of `radius`.
+    #[must_use]
+    pub fn radius(self, radius: f32) -> f32 {
+        self.placement.radius(radius, self.width)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The shared resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve a focus indicator for a widget's **resolved background**, for
+/// either placement (`UIF-ATOM-000` §3.0.2 rule 2, decision **D-6**).
+///
+/// The colour is [`resolve_ring_color_for_background`] — the same call,
+/// with the same candidates, the same ordering and the same transparent-
+/// background short-circuit, that produces the outer ring on a button.
+/// `placement` changes the geometry and nothing else. There is
+/// deliberately no second colour rule here: two rules tuned separately
+/// stop meaning the same thing, and §3.0.2 says so in one sentence that
+/// covers both placements.
+///
+/// So the two focused cells of §4.9.2 are arithmetic rather than
+/// policy. A normal focused row sits on `surface.hover`, where
+/// `accent.border` measures `5.4427:1` and wins; a destructive focused
+/// row sits on `status.danger_fill`, where the accent measures
+/// `1.7188:1` and loses to `text.strong` at `5.1270:1`. Neither cell
+/// names its outline colour.
+#[must_use]
+pub fn resolve_focus_indicator_for_background(
+    background: Color,
+    palette: &Palette,
+    placement: FocusPlacement,
+) -> FocusIndicator {
+    FocusIndicator {
+        color: resolve_ring_color_for_background(background, palette),
+        width: placement.stroke(),
+        placement,
+    }
+}
+
+/// The `1px` inset focus outline §3.0.2 gives a menu or tree row,
+/// resolved against the row's own background.
+///
+/// [`resolve_focus_indicator_for_background`] with
+/// [`FocusPlacement::Inset`], so a row-oriented caller never has to
+/// name a placement it has already committed to by asking for an inset
+/// outline. This is also the entry point an application-owned tree row
+/// uses — see the [module docs](self) for the call shape.
+#[must_use]
+pub fn resolve_inset_outline_for_background(
+    background: Color,
+    palette: &Palette,
+) -> FocusIndicator {
+    resolve_focus_indicator_for_background(background, palette, FocusPlacement::Inset)
 }
 
 #[cfg(test)]

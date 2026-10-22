@@ -995,6 +995,14 @@ fn the_resting_divider_class_only_covers_border_subtle() {
     }
 }
 
+/// Both focus indicators are active chrome and are judged by the same
+/// rules, whichever channel they arrive on: the 2px outward ring the
+/// button and text-input families emit, and the 1px inset outline the
+/// menu row (and any app-owned row) emits.
+fn is_focus_channel(channel: &str) -> bool {
+    channel == "ring" || channel == "focus-outline"
+}
+
 #[test]
 fn a_focus_ring_is_exempt_only_where_nothing_is_painted_behind_it() {
     // A focus ring is active chrome, so the only exemption it may ever
@@ -1010,7 +1018,7 @@ fn a_focus_ring_is_exempt_only_where_nothing_is_painted_behind_it() {
 
     for cell in matrix() {
         for pair in &cell.audit {
-            if pair.channel != "ring" {
+            if !is_focus_channel(pair.channel) {
                 continue;
             }
             assert_eq!(pair.role, ContrastRole::Chrome, "{} ring role", cell.id);
@@ -1042,7 +1050,7 @@ fn a_focus_ring_is_exempt_only_where_nothing_is_painted_behind_it() {
 fn every_ring_on_an_opaque_background_is_judged_against_the_chrome_floor() {
     for cell in matrix() {
         for pair in &cell.audit {
-            if pair.channel != "ring" || pair.background.a < 1.0 {
+            if !is_focus_channel(pair.channel) || pair.background.a < 1.0 {
                 continue;
             }
             let (ratio, _, class) = measure(pair);

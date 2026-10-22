@@ -23,12 +23,13 @@
 //!
 //! §4.9.2 prints eight rows. [`state`] makes focus *additive*, so those
 //! are not eight exclusive cases. *Keyboard Focused* is
-//! [`RowBase::Hovered`] with the ring on, and the bases compose into cells
-//! the matrix never drew — a destructive row that also holds the ring, a
+//! [`RowBase::Hovered`] with the outline on, and the bases compose into
+//! cells the matrix never drew — a destructive row that also holds the
+//! outline, a
 //! submenu parent under the cursor *and* focused. [`RowBase`] carries the
 //! mutually exclusive bases the matrix implies plus
 //! [`DestructivePressed`](RowBase::DestructivePressed), the destructive
-//! row held down, and [`RowState`] pairs a base with the additive ring.
+//! row held down, and [`RowState`] pairs a base with the additive outline.
 //! Every resulting cell resolves through the same function, so a cell the
 //! spec never printed cannot be accidentally undefined and cannot disagree
 //! with its neighbours.
@@ -53,12 +54,12 @@
 //!    `text.strong` at **3.8753** against the 4.5 text floor. The
 //!    resolver paints [`status_danger_fill`](Palette::status_danger_fill)
 //!    instead — **5.1270** (decision **D-5**).
-//! 2. **The ring on a destructive row.** `accent.border` on that fill
-//!    measures **1.7188**, worse than G-9 ever was for a button. The
-//!    resolver never reads the matrix's ring column; it asks
-//!    [`resolve_ring_color_for_background`] against the background it
-//!    *just resolved*, so the ring on a hot destructive fill comes back
-//!    [`text_strong`](Palette::text_strong).
+//! 2. **The focus outline on a destructive row.** `accent.border` on
+//!    that fill measures **1.7188**, worse than G-9 ever was for a
+//!    button. The resolver never reads the matrix's outline column; it
+//!    asks [`resolve_focus_indicator_for_background`] against the
+//!    background it *just resolved*, so the outline on a hot destructive
+//!    fill comes back [`text_strong`](Palette::text_strong).
 //! 3. **A disabled row inheriting an active ancestor's fill.**
 //!    `text.disabled` clears 5.2686 on `surface.overlay` and 4.8280 on
 //!    `surface.hover`, but only **4.2510** on `surface.active`.
@@ -68,10 +69,10 @@
 //! 4. **`accent.text` carrying a `✓` on a destructive fill** — **2.7460**.
 //!    The destructive cells set every slot to `text.strong`, including the
 //!    leading glyph, so the checkmark cannot keep the Rest row's accent.
-//! 5. **The keyboard ring on a normal row passes thinly** — `accent.border`
-//!    on `surface.hover` is **5.4427**, headroom 2.4427. Nothing here
-//!    lightens that fill; the sidecar pins the pairing so a future retune
-//!    that eats the headroom fails a test.
+//! 5. **The keyboard outline on a normal row passes thinly** —
+//!    `accent.border` on `surface.hover` is **5.4427**, headroom 2.4427.
+//!    Nothing here lightens that fill; the sidecar pins the pairing so a
+//!    future retune that eats the headroom fails a test.
 //! 6. **Fill-vs-fill deltas are ungated.** `surface.hover` against
 //!    `surface.overlay` is 1.0913. The row-lift affordance rests on a
 //!    delta no WCAG rule protects, so it is asserted as a *delta* in the
@@ -105,14 +106,37 @@
 //! cell of every resolver in this crate so a future "just dim it a
 //! little" cannot put the hack back.
 //!
+//! # The focused row is inset, not ringed
+//!
+//! §3.0.2 gives a row a **`1px` inset outline**, not the `2px` outer
+//! ring a button or an input gets, because rows are packed edge to edge
+//! and a ring grown outward is cut by its neighbours. [`focus_outline_layer`]
+//! draws the outline on the row's own quad, which iced strokes inward,
+//! so the whole `1px` sits inside the perimeter and nothing spills.
+//!
+//! What the row does *not* have is a second colour rule. Its outline is
+//! resolved by [`resolve_focus_indicator_for_background`] at
+//! [`FocusPlacement::Inset`] — the same function, the same two
+//! candidates and the same ordering that produce a button's outer ring,
+//! with the placement supplying the stroke weight and the edge. That is
+//! why the two focused cells of §4.9.2 fall out of arithmetic instead of
+//! being configured:
+//!
+//! | Focused row | Background | Outline | Why |
+//! |---|---|---|---|
+//! | Normal | `surface.hover` | `accent.border` | `5.4427:1` clears the `3.00` chrome floor |
+//! | Destructive | `status.danger.fill` | `text.strong` | the accent is `1.7188:1` there; `text.strong` is `5.1270:1` |
+//!
+//! Neither cell names its outline colour, and neither can be made to.
+//!
+//! **A note on the spec's own number:** §4.9.2 prints the normal focused
+//! row's outline at `5.35:1`. The solver says `5.4427:1` — the value
+//! trap 5 pins. The crate's solver is authoritative over the spec's
+//! rounded column, and the discrepancy is recorded here rather than
+//! smoothed over.
+//!
 //! # What is deliberately not here
 //!
-//! * **The destructive focused row's inset outline.** §4.9.2's
-//!   *Destructive Row (Focused)* wants `status.danger.fill` plus a `1px`
-//!   `text.strong` **inset** outline. This crate can draw a `2px`
-//!   **outward** ring and nothing else, so the cell keeps the ordinary
-//!   ring and is left wrong rather than wrong-and-plausible. **INC-27**
-//!   owns the inset-outline capability and that cell.
 //! * **The card.** No perimeter, no 6px card padding, no 224–320px width
 //!   policy. This module renders a row and knows nothing about the surface
 //!   it is stacked into.
@@ -138,7 +162,9 @@ use crate::surface::menu::model::{LeadingSlot, Row, RowKind, TrailingSlot};
 use crate::token::color::Palette;
 use crate::token::{shape, size, space, typography};
 use crate::widget::button_widget::Layer;
-use crate::widget::focus::resolve_ring_color_for_background;
+use crate::widget::focus::{
+    FocusIndicator, FocusPlacement, resolve_focus_indicator_for_background,
+};
 use crate::widget::focusable::FocusableState;
 
 use iced::advanced::layout::{self, Layout};
@@ -195,8 +221,14 @@ pub const SEPARATOR_HEIGHT: f32 = space::SM + shape::BORDER_HAIRLINE;
 /// §4.9.1 — the separator's own stroke (`shape.border.hairline`).
 pub const SEPARATOR_THICKNESS: f32 = shape::BORDER_HAIRLINE;
 
-/// §4.9.2 — the focus ring's width (`shape.border.focus`).
-pub const FOCUS_RING_WIDTH: f32 = shape::BORDER_FOCUS;
+/// §3.0.2 / §4.9.2 — the focused row's **inset** outline is `1px`
+/// (`shape.border.hairline`), not the `2px` attention stroke the outer
+/// ring uses.
+///
+/// The row's placement decides this, not the row: [`FocusPlacement::Inset`]
+/// carries the weight, and the constant exists so a test can name the
+/// rung the spec points at without going through the placement.
+pub const FOCUS_OUTLINE_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// The `✓` of a checked row (§4.8.1, `UIF-FMENU-003`).
 pub const GLYPH_CHECK: &str = "\u{2713}";
@@ -216,12 +248,6 @@ const NO_FILL: Color = Color::TRANSPARENT;
 
 /// A stroke that draws nothing.
 const NO_STROKE: f32 = 0.0;
-
-/// A focus ring that is not being drawn.
-const NO_RING_COLOR: Color = Color::TRANSPARENT;
-
-/// The width of a focus ring that is not being drawn.
-const NO_RING_WIDTH: f32 = 0.0;
 
 /// The absence of available space, used when a row is narrower than its
 /// own padding.
@@ -248,9 +274,10 @@ const NO_SPACE: f32 = 0.0;
 /// that classification stale; re-classifying it belongs to the coverage
 /// pass, not here, and the paint is correct either way.
 ///
-/// *Keyboard Focused* is absent by design. [`state`] makes focus a ring
-/// drawn *over* a base rather than a competitor with one, so the focused
-/// row is [`RowBase::Hovered`](Self::Hovered) plus the ring.
+/// *Keyboard Focused* is absent by design. [`state`] makes focus an
+/// indicator drawn *over* a base rather than a competitor with one, so
+/// the focused row is [`RowBase::Hovered`](Self::Hovered) plus the
+/// outline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RowBase {
     /// §4.9.2 *Rest (Enabled)* — transparent, `text.primary` label.
@@ -279,7 +306,7 @@ pub enum RowBase {
 }
 
 /// A menu row's resolved visual state: a [`RowBase`] plus the additive
-/// focus ring.
+/// focus outline.
 ///
 /// Mirrors [`state::VisualState`]. The split is what lets §4.9.2's
 /// *Keyboard Focused* row be `surface.hover` **and** an outline rather
@@ -289,7 +316,7 @@ pub enum RowBase {
 pub struct RowState {
     /// The mutually-exclusive visual to paint.
     pub base: RowBase,
-    /// Whether the keyboard focus ring is drawn on top of
+    /// Whether the keyboard focus outline is drawn on top of
     /// [`base`](Self::base).
     pub focused: bool,
 }
@@ -313,7 +340,8 @@ impl RowState {
         focused: false,
     };
 
-    /// §4.9.2 *Keyboard Focused* — the hover fill with the ring on.
+    /// §4.9.2 *Keyboard Focused* — the hover fill with the inset
+    /// outline on.
     pub const KEYBOARD_FOCUSED: Self = Self {
         base: RowBase::Hovered,
         focused: true,
@@ -342,24 +370,23 @@ impl RowState {
         focused: false,
     };
 
-    /// A destructive row that is attended *and* holds the ring — the
-    /// cell G-11 trap 2 is about.
+    /// A destructive row that is attended *and* holds the focus outline —
+    /// G-11 trap 2, and the cell §4.9.2 prints as *Destructive Row
+    /// (Focused)*.
     ///
-    /// **Still wrong, and knowingly so.** §4.9.2's *Destructive Row
-    /// (Focused)* asks for `status.danger.fill` plus a **1px
-    /// `text.strong` inset outline**. This crate has no inset-outline
-    /// capability: the only focus affordance it can draw is the 2px
-    /// outward ring [`focus_ring_layer`] produces, which is a different
-    /// shape on a different edge. Rather than pass an outer ring off as
-    /// the inset one the spec asks for, the cell is left exactly as it was
-    /// and recorded here as unimplemented. **INC-27** owns the capability
-    /// and this cell.
+    /// It paints `status.danger_fill` — the **hover** fill, not the
+    /// pressed fill, exactly as §4.9.2 writes it — under a `1px` inset
+    /// outline. That outline is `text.strong` not because this cell names
+    /// it but because `accent.border` measures `1.7188:1` against the
+    /// danger fill: the cell hands the fill it just resolved to the same
+    /// adaptive rule every other focus indicator in the crate goes
+    /// through, and the rule does the rest.
     pub const DESTRUCTIVE_FOCUSED: Self = Self {
         base: RowBase::DestructiveHovered,
         focused: true,
     };
 
-    /// A submenu parent that is attended *and* holds the ring.
+    /// A submenu parent that is attended *and* holds the focus outline.
     pub const SUBMENU_PARENT_FOCUSED: Self = Self {
         base: RowBase::ActiveSubmenuParent,
         focused: true,
@@ -440,11 +467,11 @@ impl RowState {
             (RowBase::Hovered, false) => "Hovered",
             (RowBase::Hovered, true) => "Keyboard Focused",
             (RowBase::Pressed, false) => "Pressed",
-            (RowBase::Pressed, true) => "Pressed + ring (derived)",
+            (RowBase::Pressed, true) => "Pressed + outline (derived)",
             (RowBase::ActiveSubmenuParent, false) => "Active Submenu Parent",
-            (RowBase::ActiveSubmenuParent, true) => "Active Submenu Parent + ring (derived)",
+            (RowBase::ActiveSubmenuParent, true) => "Active Submenu Parent + outline (derived)",
             (RowBase::DestructiveHovered, false) => "Destructive Row (Hovered)",
-            (RowBase::DestructiveHovered, true) => "Destructive Row + ring (derived)",
+            (RowBase::DestructiveHovered, true) => "Destructive Row + outline (derived)",
             (RowBase::DestructivePressed, _) => "Destructive Row (Pressed) (derived)",
             (RowBase::Disabled, _) => "Disabled / Placeholder",
             (RowBase::SectionHeading, _) => "Section Heading",
@@ -473,10 +500,16 @@ pub struct RowStyle {
     pub label: Color,
     /// The trailing slot's colour.
     pub trailing: Color,
-    /// The keyboard focus ring colour — transparent when no ring is drawn.
-    pub focus_ring_color: Color,
-    /// The keyboard focus ring width — `0.0` when no ring is drawn.
-    pub focus_ring_width: f32,
+    /// The row's resolved keyboard focus outline — `None` when no outline
+    /// is drawn.
+    ///
+    /// `1px`, [`FocusPlacement::Inset`], and coloured by the same
+    /// adaptive rule that picks every outer ring in the crate. It is an
+    /// `Option` rather than a transparent-colour sentinel because an
+    /// unfocused row has no indicator at all: there is no stroke whose
+    /// width and side are worth describing, and a caller cannot be handed
+    /// a zero-width inset outline and asked to guess what it meant.
+    pub focus_outline: Option<FocusIndicator>,
     /// The pointer cursor §4.9.2 fixes for this row.
     pub cursor: mouse::Interaction,
 }
@@ -489,7 +522,7 @@ impl RowStyle {
     }
 }
 
-/// The three colour channels a base state fixes, before the ring is added.
+/// The three colour channels a base state fixes, before the outline is added.
 struct BasePaint {
     background: Color,
     leading: Color,
@@ -501,14 +534,18 @@ struct BasePaint {
 ///
 /// A pure function: the same three inputs always produce the same
 /// [`RowStyle`]. The base half of `state` selects the four colour
-/// channels; the `focused` half adds the ring without touching them.
+/// channels; the `focused` half adds the outline without touching them.
 ///
-/// The ring is not read from the matrix. It is resolved against the
+/// The outline is not read from the matrix. It is resolved against the
 /// background this function just resolved, through
-/// [`resolve_ring_color_for_background`], which is the only way trap 2
-/// stays defused: the matrix's printed `accent.border` measures 1.7188
-/// on a destructive fill, and the resolver returns `text.strong` there
-/// without any caller having to know why.
+/// [`resolve_focus_indicator_for_background`] at
+/// [`FocusPlacement::Inset`] — the same call, and the same colour rule,
+/// a button's outer ring is made from. That is the only way trap 2 stays
+/// defused: the matrix's printed `accent.border` measures `1.7188:1` on
+/// a destructive fill, and the shared resolver returns `text.strong`
+/// there without any caller having to know why. The placement is what
+/// §3.0.2 changes for a row, and it changes the stroke and the edge and
+/// nothing else.
 ///
 /// `row` supplies the *slot semantics* — whether the leading slot carries
 /// a check or a radio, which is what decides the Rest row's accent — and
@@ -519,13 +556,14 @@ struct BasePaint {
 pub fn resolve_row_style(row: &Row, state: RowState, palette: &Palette) -> RowStyle {
     let base = base_paint(row, state, palette);
 
-    let (focus_ring_color, focus_ring_width) = if state.focused {
-        (
-            resolve_ring_color_for_background(base.background, palette),
-            FOCUS_RING_WIDTH,
-        )
+    let focus_outline = if state.focused {
+        Some(resolve_focus_indicator_for_background(
+            base.background,
+            palette,
+            FocusPlacement::Inset,
+        ))
     } else {
-        (NO_RING_COLOR, NO_RING_WIDTH)
+        None
     };
 
     RowStyle {
@@ -533,8 +571,7 @@ pub fn resolve_row_style(row: &Row, state: RowState, palette: &Palette) -> RowSt
         leading: base.leading,
         label: base.label,
         trailing: base.trailing,
-        focus_ring_color,
-        focus_ring_width,
+        focus_outline,
         cursor: cursor_for(row, state.base),
     }
 }
@@ -741,26 +778,31 @@ pub fn background_layer(bounds: Rectangle, style: &RowStyle) -> Option<Layer> {
     })
 }
 
-/// The focus ring drawn around a row's bounds, if one is due.
+/// The row's inset focus outline, if one is due (§3.0.2 rule 2, §4.9.2).
 ///
-/// Same concentric-annulus shape [`button_widget`](crate::widget::button_widget)
-/// established: the bounds grow by the ring width and the grown quad is
-/// stroked on its outside, so the ring never eats into the fill the state
-/// just resolved and the row's painted footprint grows without its layout
-/// moving (`UIF-PRIN-003`).
+/// The inverse of the concentric annulus
+/// [`button_widget`](crate::widget::button_widget) draws. iced strokes a
+/// quad inward from its bounds, so a ring needs a quad *grown* by its
+/// width to land outside the control, and an inset outline needs the
+/// row's *own* quad to land its `1px` stroke just inside the row's
+/// perimeter. Nothing spills into the rows packed above and below it,
+/// which is the entire reason §3.0.2 wants a row's indicator inset
+/// rather than ringed.
+///
+/// None of that geometry is decided here. [`FocusIndicator::bounds`] and
+/// [`FocusIndicator::radius`] own it, so a row cannot end up drawing its
+/// outline the way a button draws its ring.
 #[must_use]
-pub fn focus_ring_layer(bounds: Rectangle, style: &RowStyle) -> Option<Layer> {
-    if style.focus_ring_width == NO_RING_WIDTH {
-        return None;
-    }
+pub fn focus_outline_layer(bounds: Rectangle, style: &RowStyle) -> Option<Layer> {
+    let outline = style.focus_outline?;
 
     Some(Layer {
-        bounds: bounds.expand(style.focus_ring_width),
+        bounds: outline.bounds(bounds),
         fill: NO_FILL,
         border: Border::default()
-            .color(style.focus_ring_color)
-            .width(style.focus_ring_width)
-            .rounded(ROW_RADIUS + style.focus_ring_width),
+            .color(outline.color)
+            .width(outline.width)
+            .rounded(outline.radius(ROW_RADIUS)),
     })
 }
 
@@ -790,9 +832,9 @@ pub fn separator_layer(bounds: Rectangle, palette: &Palette) -> Layer {
 
 /// Every layer a row paints, in draw order.
 ///
-/// Fill, then ring, then nothing else — the slots are drawn as child
-/// widgets on top. A separator paints its rule instead of a fill, and a
-/// row that is both a separator and focused is not expressible (a
+/// Fill, then inset outline, then nothing else — the slots are drawn as
+/// child widgets on top. A separator paints its rule instead of a fill,
+/// and a row that is both a separator and focused is not expressible (a
 /// separator is never focusable), so the two branches never meet.
 #[must_use]
 pub fn paint_layers(
@@ -809,7 +851,7 @@ pub fn paint_layers(
         layers.push(layer);
     }
 
-    if let Some(layer) = focus_ring_layer(bounds, style) {
+    if let Some(layer) = focus_outline_layer(bounds, style) {
         layers.push(layer);
     }
 
@@ -1096,7 +1138,7 @@ where
 /// dismissal. [`Row`] supplies what the slots hold, [`state::resolve`]
 /// plus [`derive_row_state`] decide which matrix cell is being painted,
 /// and [`resolve_row_style`] turns that cell into the four colours and
-/// the ring the draw pass lays down.
+/// the inset outline the draw pass lays down.
 ///
 /// The row is keyboard-focusable under a [`FocusId`] and is *absent from
 /// the focus router* when it is not navigable, so "greyed out", "not a
@@ -1109,10 +1151,10 @@ where
 ///
 /// [`draw`](Widget::draw) does not cache a style. It folds the tree state
 /// through the resolver and paints the answer, which is the only way the
-/// destructive-ring rule (trap 2) can hold: the ring is resolved against
-/// the fill of *this* frame, so a row that becomes destructive between
-/// frames cannot keep a ring that was visible against the fill it no
-/// longer has.
+/// destructive-outline rule (trap 2) can hold: the outline is resolved
+/// against the fill of *this* frame, so a row that becomes destructive
+/// between frames cannot keep an indicator that was visible against the
+/// fill it no longer has.
 pub struct MenuRow<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     row: Row,
     slots: RowSlots<'a, Message, Theme, Renderer>,
@@ -1132,7 +1174,8 @@ impl<'a, Message, Theme, Renderer> MenuRow<'a, Message, Theme, Renderer> {
     /// cannot express, and the seam the tests use to drive the widget with
     /// content that needs no text renderer.
     ///
-    /// The row's own paint — fill, ring, separator rule — is unaffected:
+    /// The row's own paint — fill, inset outline, separator rule — is
+    /// unaffected:
     /// it comes from the resolver either way.
     #[must_use]
     pub fn with_body(
