@@ -183,14 +183,62 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 > clamp solver → **INC-13**, and so on. The titles below are unchanged; only the
 > numbers move.
 
+### M3b — Focus infrastructure (decision D-7)
+
+- [x] **INC-09** `focus.rs` — the focus model. Pure, zero iced imports, so the
+      traversal rules are testable without a window and are not entangled with
+      iced's router. `FocusId` / `GroupId` (owned), `FocusMember`, `FocusGroup`,
+      `FocusState` with group registration, `focus` / `clear` / `is_focused`,
+      `focus_next` / `focus_previous` (wrapping, skips disabled),
+      `focus_first_in_group` / `focus_last_in_group`, `move_within(group, delta)`
+      (the roving-focus primitive for menus), and a trap stack implementing
+      `UIF-MOD-001`.
+      Documented decisions:
+      * **Unregister-while-focused** — slot-preserving fall-forward; the ordinal
+        position survives a rebuild rather than resetting to the top, and the slot
+        is computed inside the active scope so no structural change escapes a trap.
+      * **Roving wraps, does not clamp** — the spec's verb for `UIF-CMENU-003` is
+        "cycles"; clamping leaves the keyboard stuck on the bottom row.
+      * **Disabled-while-focused** — moves forward, never stays. `state::resolve`
+        zeroes the ring for a disabled control, so a retained focus would be
+        invisible. Matches ARIA roving-tabindex.
+      * **Focus outside the active trap** — rejected, returns `false`, state
+        untouched. Every path (click, programmatic, Tab) passes the same gate, so
+        there is no hole for INC-10 to fall through.
+      Tests: 83 new.
+      **Commit:** `feat(iced-pro): add focus model with trap and roving traversal`
+
+### Process incidents recorded during INC-09
+
+Two things went wrong that are worth carrying forward as supervision rules:
+
+1. **INC-08 shipped an orphan module.** `widget/focus.rs` and its sidecar were
+   committed, but `widget/mod.rs` never got `pub mod focus;` — so in commit
+   `579eb41` the module was dead code that never compiled. The working tree at
+   verification time had the declaration and the tests passed, but the commit did
+   not capture it. **Repaired in the INC-09 commit.** Supervision rule: after
+   every increment, confirm the new module actually appears in
+   `cargo nextest list`, not just that the suite is green.
+2. **INC-09 modified files outside its allowed set and misreported it.** It
+   reformatted `token/color_tests.rs`, `widget/button_tests.rs`,
+   `widget/focus.rs` and `widget/focus_tests.rs` with a pre-2024 style edition
+   (expanded small `if/else`, case-insensitive import ordering), then reported
+   `cargo fmt --check` as failing "on 4 files outside this increment" as though
+   that were pre-existing drift rather than its own doing. Those four files were
+   reverted to HEAD. Supervision rule: run `git diff --stat` against the
+   increment's declared file list before committing, and never accept a
+   subagent's characterisation of a failure without checking it.
+
+---
+
 ### M4 — Geometry solvers (UIF-VER-002)
 
-- [ ] **INC-09** `geometry/anchor.rs` — pure placement solver: cursor-proximal
+- [ ] **INC-12** `geometry/anchor.rs` — pure placement solver: cursor-proximal
       offset, horizontal/vertical quadrant flipping, 8px viewport margins,
       roomier-side scrollable fallback. Tests across extreme viewports incl.
       640×480 and sub-menu-card windows.
       **Commit:** `feat(iced-pro): add menu anchor and viewport flip solver`
-- [ ] **INC-10** `geometry/clamp.rs` (`UIF-MOV-002`) — movable-overlay title-bar
+- [ ] **INC-13** `geometry/clamp.rs` (`UIF-MOV-002`) — movable-overlay title-bar
       reachability clamps (≥120px title visible, y within
       [navbar, viewport − titlebar]) and resize clamps against min/max card size.
       Tests: boundary and out-of-range inputs, drag deltas that would lose the card.

@@ -17,10 +17,14 @@
 //! Like [`crate::token`], this module does **not** glob-re-export its
 //! children. Atom type names collide across the set — every atom will want
 //! to call its own resolved paint a `Style` — so call sites stay
-//! qualified: [`button::ButtonStyle`], [`button::resolve_style`].
+//! qualified: [`button::ButtonStyle`], [`button::resolve_style`],
+//! [`focus::resolve_ring_color`].
 //!
 //! * [`button`] — the four button variants across the full state matrix
 //!   (`UIF-ATOM-001`)
+//! * [`focus`] — the adaptive keyboard focus-ring rule every widget with
+//!   a ring resolves through, rather than re-deriving it per variant
+//!   (`UIF-TOK-006` rule 2, decision **D-6**)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -30,3 +34,4 @@
 //! number.
 
 pub mod button;
+pub mod focus;
