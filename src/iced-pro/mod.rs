@@ -20,6 +20,7 @@ pub mod bridge;
 pub mod focus;
 pub mod geometry;
 pub mod state;
+pub mod surface;
 pub mod token;
 pub mod widget;
 

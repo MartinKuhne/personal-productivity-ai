@@ -372,13 +372,41 @@ future increments down a dead end.
 
 ### M5 — Menu engine (UIF-FMENU-*, UIF-CMENU-*)
 
-- [ ] **INC-14** `surface/menu/model.rs` — menu tree data model: action rows,
-      checkable toggles, radio choices, submenu parents, section headings,
-      separators, disabled placeholders; per-row close-on-toggle policy
-      (`UIF-FMENU-003`).
-      **Precondition:** extract the shared focus/render `test_helpers` module and
-      move the Tab bridge out of `button_widget.rs` (INC-11 tech debt).
-      Tests: model construction, semantic predicates, group ordering.
+- [x] **INC-14** `surface/menu/model.rs` — pure menu tree data model.
+      `RowKind { Action, Check{checked}, Radio{group,selected}, Submenu{child},
+      Heading, Separator }`. Two spec vocabulary items are deliberately **not**
+      kinds: *Disabled/placeholder* is `enabled = false` on an interactive kind
+      (a greyed-out `Delete…` is still a destructive action — label, slot,
+      command identity and close policy all survive), and *destructive* is an
+      orthogonal flag so a destructive checkable is expressible.
+      **Model/cascade boundary: the model owns structure and selection, never
+      openness.** No `is_open` exists. Sibling-replacement (`UIF-FMENU-002`) is a
+      rule *across* siblings that a child cannot see; opening a child must not
+      mutate a value that is cloned and rebuilt every frame; dismissal is
+      tree-wide. The cascade (INC-16) owns openness; the model hands it
+      `child_id()` handles.
+      `activate(index) -> Option<Activation { row, effect, closes_menu }>` with
+      `ActivationEffect ∈ { Command, Toggled, Selected{cleared}, OpenSubmenu,
+      Absorbed }` — the cascade never re-reads the world to learn what happened.
+      **Three nested predicates, three names:** `interactive()` (kind can carry a
+      command → pointer cursor), `activatable()` (interactive ∧ enabled → click /
+      Enter), `navigable()` (Up/Down may stop here). They coincide today and are
+      kept apart so the renderer never asks traversal's question.
+      `focus_members()` **excludes** non-navigable rows rather than registering
+      them disabled — `FocusState` keeps disabled members in the list and steps
+      over them, which would count unfocusable furniture in the group length and
+      corrupt wrap distance and slot-preserving fall-forward.
+      `ClosePolicy` is **stored per row, not derived**, because `UIF-FMENU-003`
+      itself makes the checkable configurable. Radio re-selection is a **no-op on
+      the selection** — the `•` marks a setting that always has a value, so a
+      click cannot leave the group empty.
+      `Menu::new` **rebases** submenu child ids to `<parent path>/<row key>`
+      recursively, so identity is positional and stable across rebuilds.
+      `validate()` catches `MissingKey`, `DuplicateKey`, `DestructiveNotLast`,
+      `MixedGroup`, `RadioOverSelected`.
+      Tests: 95 new (451 total), including the four §4.9.1 fixtures with exact
+      navigable index vectors and a `FocusState` walk-agreement pin so the model
+      and the focus model cannot drift.
       **Commit:** `feat(iced-pro): add menu tree data model`
 - [ ] **INC-15** `surface/menu/view.rs` — menu card + row renderer implementing the
       §4.9.2 state matrix (rest / hovered / pressed / focused / submenu-parent /
@@ -556,6 +584,37 @@ Recorded as they are found; none resolved yet.
   headlessly, and bridges cleanly to the pure `FocusState` model. The four
   constraints listed in the INC-10 ledger entry are the standing rules that
   fall out of that proof.
+- **G-11 — §4.9.2's menu row matrix contains six more contrast traps.**
+  Recomputed by INC-14 against the **retuned** palette, WCAG 2.1. Recorded here
+  so INC-15 does not rediscover them one build at a time.
+  1. **Destructive-hovered row** — `text.strong` on `status.danger` =
+     **3.8753** vs 4.5. Use `status.danger_fill` → **5.5185** (D-5).
+  2. **Focus ring on a destructive row is worse than G-9 was for buttons** —
+     `accent.primary` on `status.danger_fill` = **1.2089**, and on
+     `danger_fill@85%` over overlay = **1.4953**. The renderer must call
+     `widget::focus::resolve_ring_color(resolved_fill, palette)` (D-6), never
+     the literal `accent.primary` the matrix prints.
+  3. **A disabled row must never inherit a hovered ancestor's fill.**
+     `text.disabled` on `surface.overlay` = 5.2686 (pass), but on
+     `surface.hover` = **4.4734** and on `surface.active` = **4.1743** (both
+     fail). The spec's "Disabled → transparent background" is load-bearing, not
+     cosmetic.
+  4. **`accent.text` must not carry a `✓` on a destructive fill** —
+     **2.9557**, fails. Use `text.strong`, as the matrix already says for the
+     label.
+  5. **The keyboard-focus ring on a normal row passes thinly** —
+     `accent.primary` on `surface.hover` = **3.2954**, headroom 0.2954. Do not
+     lighten the row background without re-checking this pairing.
+  6. **Fill-vs-fill deltas are ungated and near-invisible** —
+     `surface.hover` vs `surface.overlay` = 1.1778; `status.danger_fill` vs
+     `surface.hover` = 2.7259. The row-lift affordance rests entirely on a
+     delta no rule protects.
+  The separator (`border.subtle` on `surface.overlay` = **1.2017**) is **not**
+  a violation: rule 2 governs *active* indicators, and a resting divider is
+  deliberately below the floor — already settled and asserted that way.
+  Everything else in the matrix clears comfortably (Rest label 11.7180, trailing
+  6.7751, check glyph 9.4891, hovered 15.0427, pressed 14.0368, submenu
+  chevron 8.0568, card edge 4.0128, destructive pressed 6.8258).
 
 ---
 
