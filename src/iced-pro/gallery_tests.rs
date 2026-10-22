@@ -18,12 +18,18 @@
 //!    its threshold with an empty accepted-failure ledger. The three
 //!    non-judged classes are themselves cross-checked, so an exemption
 //!    cannot be used as a place to hide a real failure.
+//! 6. **The gap families** — the inverted editor palette, the compact
+//!    control-height rung, the modal's header/banner/footer bands, menu
+//!    separators and glyph placement, the input dialog's per-row bodies
+//!    and the movable overlay's trailing actions are each snapshotted as
+//!    resolved tokens over an asserted ordered quad list.
 
 use super::*;
 
 use crate::state::BaseState;
 use crate::state::VisualState;
 use crate::surface::menu::view as menu_view;
+use crate::surface::movable::TITLE_BAR_PADDING_HORIZONTAL;
 use crate::surface::zorder::ZBand;
 use crate::token::color::Palette;
 use crate::token::contrast;
@@ -59,12 +65,16 @@ fn expected_ids() -> Vec<String> {
 
     for variant in ["primary", "secondary", "ghost", "danger"] {
         for state in expected_states() {
-            ids.push(format!("button/{variant}/{state}"));
+            for rung in RUNGS {
+                ids.push(format!("button/{variant}/{state}{}", rung.slug()));
+            }
         }
     }
     for kind in ["text-entry", "search", "dropdown-trigger"] {
         for state in expected_states() {
-            ids.push(format!("input/{kind}/{state}"));
+            for rung in RUNGS {
+                ids.push(format!("input/{kind}/{state}{}", rung.slug()));
+            }
         }
     }
     ids.extend(
@@ -86,9 +96,30 @@ fn expected_ids() -> Vec<String> {
         .map(|state| format!("menu/row/{state}")),
     );
     ids.extend(
+        [
+            "separator",
+            "check-on",
+            "check-off",
+            "radio-selected",
+            "radio-unselected",
+            "submenu-chevron",
+            "submenu-chevron-open",
+            "check-on-hovered",
+            "shortcut",
+            "icon",
+        ]
+        .iter()
+        .map(|name| format!("menu-glyph/{name}")),
+    );
+    ids.extend(
         ["clean", "dirty", "error"]
             .iter()
             .map(|name| format!("modal/{name}")),
+    );
+    ids.extend(
+        ["no-banner", "banner"]
+            .iter()
+            .map(|name| format!("modal-bands/{name}")),
     );
     ids.extend(
         [
@@ -102,9 +133,29 @@ fn expected_ids() -> Vec<String> {
         .map(|name| format!("input-dialog/{name}")),
     );
     ids.extend(
+        [
+            "text-entry",
+            "folder-list",
+            "folder-list-capped",
+            "confirmation",
+        ]
+        .iter()
+        .map(|name| format!("input-dialog-rows/{name}")),
+    );
+    ids.extend(
         ["idle", "dragging", "resizing", "auto-scroll-paused"]
             .iter()
             .map(|name| format!("movable/{name}")),
+    );
+    ids.extend(
+        ["idle", "dragged", "resized"]
+            .iter()
+            .map(|name| format!("movable-actions/{name}")),
+    );
+    ids.extend(
+        ["rest", "error"]
+            .iter()
+            .map(|name| format!("editor-inverted/{name}")),
     );
     ids.push("zband/overlay-menu-modal".to_string());
     ids.extend(
@@ -144,12 +195,17 @@ fn per_subject_cell_counts_match_the_plan() {
     let counts = subject_counts_for(&cells);
 
     let mut expected: Vec<(&str, usize)> = vec![
-        ("button", 36),
-        ("input", 27),
+        ("button", 72),
+        ("input", 54),
         ("menu", 12),
+        ("menu-glyph", 10),
         ("modal", 3),
+        ("modal-bands", 2),
         ("input-dialog", 5),
+        ("input-dialog-rows", 4),
         ("movable", 4),
+        ("movable-actions", 3),
+        ("editor", 2),
         ("zband", 1),
         ("navbar", 1),
         ("panes", 1),
@@ -714,7 +770,886 @@ fn every_movable_cell_paints_the_full_card_anatomy() {
 }
 
 // ---------------------------------------------------------------------------
-// 4 — scope honesty (D-2)
+// 4 — the six gap families (§2.5, §3.1, §4.5.1, §4.6.1, §4.8.1, §4.9.2)
+// ---------------------------------------------------------------------------
+
+/// Tolerance for geometry read back out of a frame.
+///
+/// The manifest prints two decimals; the assertion is made on the stored
+/// `f32`, so the epsilon only has to cover the arithmetic, not the print.
+const GEOM_EPS: f32 = 1.0e-3;
+
+/// One recorded quad by layer name.
+fn quad<'a>(cell: &'a Cell, layer: &str) -> &'a FrameQuad {
+    quad_opt(cell, layer).unwrap_or_else(|| panic!("{} painted no `{layer}` layer", cell.id))
+}
+
+/// [`quad`] without the panic, for a layer a cell paints only sometimes.
+fn quad_opt<'a>(cell: &'a Cell, layer: &str) -> Option<&'a FrameQuad> {
+    cell.frame.quads.iter().find(|q| q.layer == layer)
+}
+
+/// A recorded quad's left, top, right and bottom edges.
+fn edges(quad: &FrameQuad) -> (f32, f32, f32, f32) {
+    (
+        quad.bounds[0],
+        quad.bounds[1],
+        quad.bounds[0] + quad.bounds[2],
+        quad.bounds[1] + quad.bounds[3],
+    )
+}
+
+/// Whether one recorded quad lies wholly inside another.
+fn contains(outer: &FrameQuad, inner: &FrameQuad) -> bool {
+    let (l0, t0, r0, b0) = edges(outer);
+    let (l1, t1, r1, b1) = edges(inner);
+    l1 >= l0 - GEOM_EPS && t1 >= t0 - GEOM_EPS && r1 <= r0 + GEOM_EPS && b1 <= b0 + GEOM_EPS
+}
+
+/// A recorded numeric channel.
+fn number(cell: &Cell, channel: &str) -> f32 {
+    resolved_line(cell, channel)
+        .parse()
+        .unwrap_or_else(|_| panic!("{}.{} is not a number", cell.id, channel))
+}
+
+/// A `rect_text` value — `"x y width height"` — read back out.
+fn parse_rect(text: &str) -> (f32, f32, f32, f32) {
+    let parts: Vec<f32> = text
+        .split_whitespace()
+        .map(|part| {
+            part.parse()
+                .unwrap_or_else(|_| panic!("\"{text}\" is not a recorded rectangle"))
+        })
+        .collect();
+    assert_eq!(parts.len(), 4, "\"{text}\" is not a recorded rectangle");
+    (parts[0], parts[1], parts[2], parts[3])
+}
+
+/// The cell's colour channels as `(channel, token)` pairs.
+///
+/// Comparing these between two cells is how "the same style, a different
+/// box" is asserted: the geometry channels are numbers and drop out.
+fn colour_channels(cell: &Cell) -> Vec<(&'static str, String)> {
+    cell.resolved
+        .iter()
+        .filter_map(|entry| match &entry.value {
+            StyleValue::Colour { token, .. } => Some((entry.channel, token.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The audit pair recorded for one channel.
+fn audit_pair<'a>(cell: &'a Cell, channel: &str) -> &'a AuditPair {
+    cell.audit
+        .iter()
+        .find(|pair| pair.channel == channel)
+        .unwrap_or_else(|| panic!("{} audited no `{channel}` channel", cell.id))
+}
+
+// --- 4.1 — the inverted editor palette (§2.5) ------------------------------
+
+#[test]
+fn the_editor_cells_declare_the_inverted_palette_as_their_naming_world() {
+    let cells = editor_palette_cells();
+    assert_eq!(cells.len(), 2, "the editor row has two ink channels");
+    for cell in &cells {
+        assert_eq!(
+            cell.namer,
+            Namer::InvertedEditor,
+            "{} must name through the inverted editor palette",
+            cell.id
+        );
+    }
+
+    let standard = button_cell(
+        ButtonVariant::Primary,
+        VisualState {
+            base: BaseState::Rest,
+            focused: false,
+        },
+    );
+    assert_eq!(standard.namer, Namer::Standard);
+}
+
+#[test]
+fn the_two_namers_disagree_about_white_and_only_the_editor_one_names_the_error_red() {
+    let editor = EditorPalette::inverted();
+
+    // The canvas is white, and so is the standard palette's `text.strong`.
+    // Value-based naming alone cannot tell the two apart, which is why the
+    // cell declares its world.
+    assert_eq!(Namer::Standard.name(editor.background), "text.strong");
+    assert_eq!(
+        Namer::InvertedEditor.name(editor.background),
+        "editor.inverted.bg"
+    );
+
+    // The editor's error red belongs to no standard token. Naming it from
+    // the standard table would report it as UNMAPPED, which the gate
+    // treats as a hard failure — so the fallback order matters.
+    assert!(
+        Namer::Standard.name(editor.error).starts_with("UNMAPPED"),
+        "the standard palette must not claim the editor's error red, got {}",
+        Namer::Standard.name(editor.error)
+    );
+    assert_eq!(
+        Namer::InvertedEditor.name(editor.error),
+        "editor.inverted.err"
+    );
+    assert_eq!(
+        Namer::InvertedEditor.name(editor.text),
+        "editor.inverted.fg"
+    );
+}
+
+#[test]
+fn the_editor_cells_resolve_the_canvas_and_each_ink_channel_against_it() {
+    let editor = EditorPalette::inverted();
+    let body = &editor_palette_cells()[0];
+    let error = &editor_palette_cells()[1];
+
+    for cell in [body, error] {
+        assert_eq!(
+            resolved_line(cell, "canvas.fill"),
+            format!("editor.inverted.bg ({})", rgb8(editor.background)),
+            "{} must name its canvas from the editor palette",
+            cell.id
+        );
+        assert!(
+            edges(quad(cell, "editor-canvas")).2 > 0.0,
+            "{} painted no canvas to sit on",
+            cell.id
+        );
+        assert!(
+            contains(quad(cell, "editor-canvas"), quad(cell, "ink-run")),
+            "{}'s ink run must lie inside the canvas it is measured against",
+            cell.id
+        );
+    }
+
+    assert_eq!(
+        resolved_line(body, "ink.foreground"),
+        format!("editor.inverted.fg ({})", rgb8(editor.text))
+    );
+    assert_eq!(
+        resolved_line(error, "ink.foreground"),
+        format!("editor.inverted.err ({})", rgb8(editor.error))
+    );
+}
+
+#[test]
+fn the_editor_contrast_is_recomputed_rather_than_copied_from_the_spec_print() {
+    for cell in editor_palette_cells() {
+        let pair = audit_pair(
+            &cell,
+            if cell.id.ends_with("error") {
+                "error.text"
+            } else {
+                "buffer.text"
+            },
+        );
+        let (ratio, _, class) = measure(pair);
+        assert_eq!(
+            class,
+            AuditClass::Judged,
+            "{} is not a judged pair",
+            cell.id
+        );
+        assert_eq!(
+            fixed(ratio),
+            resolved_line(&cell, "contrast.computed"),
+            "{}'s recorded contrast must be the solver's own number",
+            cell.id
+        );
+        assert!(ratio >= 4.5, "{} reads at {ratio:.2}:1", cell.id);
+    }
+}
+
+#[test]
+fn the_error_on_white_pair_clears_the_floor_the_spec_prints_but_is_not_the_figure_it_prints() {
+    // §2.5 prints `7.00:1` for the inverted editor's error ink on white.
+    // The crate's own solver says `7.14:1`. The requirement is a floor, so
+    // the cell satisfies it either way; the drift is recorded in the cell
+    // rather than reconciled, because the printed column is not the gate.
+    let cell = &editor_palette_cells()[1];
+
+    assert_eq!(
+        resolved_line(cell, "contrast.spec-figure"),
+        "7.00:1 (spec 2.5)"
+    );
+    assert_eq!(
+        resolved_line(cell, "contrast.computed"),
+        "7.14",
+        "the solver moved off the value this test records"
+    );
+    assert!(
+        number(cell, "contrast.computed") >= 7.0,
+        "the floor §2.5 asks for is 7.00:1"
+    );
+}
+
+// --- 4.2 — the compact control-height rung (§3.1, §3.2) --------------------
+
+#[test]
+fn the_two_rungs_are_the_two_control_tokens_the_spec_prints() {
+    assert_eq!(Rung::Standard.height(), size::CONTROL_MD);
+    assert_eq!(Rung::Compact.height(), size::CONTROL_SM);
+    assert_eq!(Rung::Standard.token(), "size.control.md");
+    assert_eq!(Rung::Compact.token(), "size.control.sm");
+    assert!(
+        Rung::Compact.height() < Rung::Standard.height(),
+        "the compact rung must be the shorter box"
+    );
+    assert_eq!(
+        Rung::Standard.slug(),
+        "",
+        "the standard rung keeps the ids the gallery has always emitted"
+    );
+    assert_eq!(Rung::Compact.slug(), "@compact");
+    assert_eq!(RUNGS, [Rung::Standard, Rung::Compact]);
+}
+
+#[test]
+fn every_atom_state_is_snapshotted_at_both_rungs() {
+    let cells = matrix();
+
+    for variant in BUTTON_VARIANTS {
+        for state in snapshot_states() {
+            let base = format!("button/{}/{}", slug(variant), state_slug(state));
+            assert_rung_pair(&cells, &base);
+        }
+    }
+    for kind in INPUT_KINDS {
+        for state in snapshot_states() {
+            let base = format!("input/{}/{}", slug_kind(kind), state_slug(state));
+            assert_rung_pair(&cells, &base);
+        }
+    }
+}
+
+/// Assert one atom's standard cell and its compact twin agree on style and
+/// differ only in the box.
+fn assert_rung_pair(cells: &[Cell], base: &str) {
+    let standard = cells
+        .iter()
+        .find(|cell| cell.id == base)
+        .unwrap_or_else(|| panic!("no standard cell for {base}"));
+    let compact = cells
+        .iter()
+        .find(|cell| cell.id == format!("{base}@compact"))
+        .unwrap_or_else(|| panic!("no compact cell for {base}"));
+
+    assert_eq!(
+        fixed(standard.frame.viewport[3]),
+        fixed(size::CONTROL_MD),
+        "{base} is not the standard rung"
+    );
+    assert_eq!(
+        fixed(compact.frame.viewport[3]),
+        fixed(size::CONTROL_SM),
+        "{base}@compact is not the compact rung"
+    );
+    assert_eq!(
+        resolved_line(standard, "geometry.height-token"),
+        "size.control.md"
+    );
+    assert_eq!(
+        resolved_line(compact, "geometry.height-token"),
+        "size.control.sm"
+    );
+    assert_eq!(
+        colour_channels(standard),
+        colour_channels(compact),
+        "{base}@compact changed a colour: the rung is geometry, not palette"
+    );
+}
+
+#[test]
+fn the_compact_rung_is_a_geometry_dimension_the_resolvers_never_see() {
+    // A resolver takes no height: the same call at either rung must return
+    // the same style. If this ever fails, the rung leaked into resolution
+    // and the two cells are no longer the same control at two sizes.
+    let state = VisualState {
+        base: BaseState::Rest,
+        focused: false,
+    };
+    for variant in BUTTON_VARIANTS {
+        let standard = button_cell_at(variant, state, Rung::Standard);
+        let compact = button_cell_at(variant, state, Rung::Compact);
+        assert_eq!(
+            colour_channels(&standard),
+            colour_channels(&compact),
+            "button/{} resolution depends on the rung",
+            slug(variant)
+        );
+    }
+}
+
+// --- 4.3 — the modal's header / banner / footer bands (§4.6.1) -------------
+
+#[test]
+fn the_band_cells_split_the_card_into_ordered_disjoint_regions() {
+    for cell in modal_band_cells() {
+        let card = edges(quad(&cell, "card"));
+        let header = edges(quad(&cell, "header-band"));
+        let body = edges(quad(&cell, "body-band"));
+        let footer = edges(quad(&cell, "footer-band"));
+
+        assert!(header.3 <= body.1 + GEOM_EPS, "header overlaps the body");
+        assert!(body.3 <= footer.1 + GEOM_EPS, "body overlaps the footer");
+        for region in [header, body, footer] {
+            assert!(region.1 >= card.1 - GEOM_EPS && region.3 <= card.3 + GEOM_EPS);
+            assert!(
+                (region.0 - card.0).abs() <= 1.0 && (region.2 - card.2).abs() <= 1.0,
+                "bands must span the card inside its border"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_band_heights_are_composed_from_the_frames_own_paddings() {
+    let frame = ModalFrame::resolve(&Palette::dark());
+    let cell = &modal_band_cells()[0];
+
+    assert_eq!(
+        quad(cell, "header-band").bounds[3],
+        frame.content_padding * 2.0 + frame.close_target,
+        "the header band is the close target between two content paddings"
+    );
+    assert_eq!(
+        quad(cell, "footer-band").bounds[3],
+        frame.footer_padding_vertical * 2.0 + size::CONTROL_MD,
+        "the footer band is one standard control between two footer paddings"
+    );
+    assert_eq!(
+        resolved_line(cell, "band.header.composition"),
+        "content_padding + close_target + content_padding"
+    );
+    assert_eq!(
+        resolved_line(cell, "band.footer.composition"),
+        "footer_padding_vertical x2 + size.control.md"
+    );
+}
+
+#[test]
+fn the_banner_region_exists_only_when_the_modal_carries_an_error() {
+    let without = &modal_band_cells()[0];
+    let with = &modal_band_cells()[1];
+
+    assert_eq!(resolved_line(without, "banner-present"), "false");
+    assert_eq!(resolved_line(with, "banner-present"), "true");
+    assert!(
+        quad_opt(without, "banner-band").is_none(),
+        "a clean modal has no banner region to snapshot"
+    );
+
+    let banner = quad(with, "banner-band");
+    assert_eq!(
+        banner.bounds[3],
+        ModalFrame::resolve(&Palette::dark()).content_padding * 2.0 + typography::BODY.line_height,
+        "the banner band is one body line between two content paddings"
+    );
+    assert!(
+        edges(quad(with, "body-band")).1 > edges(quad(without, "body-band")).1,
+        "adding the banner must push the body down"
+    );
+    assert!(
+        edges(banner).3 <= edges(quad(with, "body-band")).1 + GEOM_EPS,
+        "the banner must not run into the body"
+    );
+    assert!(
+        quad(with, "body-band").bounds[3] < quad(without, "body-band").bounds[3],
+        "a clean modal reclaims the banner's space rather than leaving a gap"
+    );
+    assert_eq!(
+        edges(quad(without, "body-band")).1,
+        edges(quad(without, "header-band")).3,
+        "with no banner the body starts at the header's own bottom edge"
+    );
+}
+
+#[test]
+fn the_band_dividers_are_the_resting_border_token_on_the_card_surface() {
+    let palette = Palette::dark();
+    for cell in modal_band_cells() {
+        for layer in ["header-divider", "footer-divider"] {
+            let rule = quad(&cell, layer);
+            assert_eq!(rule.border, "none", "{layer} is a fill, not a stroke");
+            assert_eq!(
+                fixed(rule.bounds[3]),
+                fixed(shape::BORDER_HAIRLINE),
+                "{layer} must be one hairline thick"
+            );
+            assert!(rule.fill.starts_with("border.subtle"));
+        }
+        for channel in ["divider.header", "divider.footer"] {
+            let pair = audit_pair(&cell, channel);
+            assert_eq!(pair.foreground, palette.border_subtle);
+            assert_eq!(pair.background, palette.surface_overlay);
+            assert_eq!(
+                measure(pair).2,
+                AuditClass::RestingDivider,
+                "{channel} must be classified as a resting divider, not waved through"
+            );
+        }
+    }
+}
+
+#[test]
+fn each_band_audits_its_own_foreground_against_the_surface_it_sits_on() {
+    let palette = Palette::dark();
+    let with = &modal_band_cells()[1];
+
+    assert_eq!(
+        audit_pair(with, "header.title").foreground,
+        palette.text_strong
+    );
+    assert_eq!(
+        audit_pair(with, "header.close-glyph").foreground,
+        palette.text_muted
+    );
+    assert_eq!(
+        audit_pair(with, "footer.status").foreground,
+        palette.text_muted
+    );
+    assert_eq!(
+        audit_pair(with, "banner.text").foreground,
+        palette.status_danger_text
+    );
+    for channel in [
+        "header.title",
+        "header.close-glyph",
+        "footer.status",
+        "banner.text",
+    ] {
+        let pair = audit_pair(with, channel);
+        assert_eq!(pair.background, palette.surface_overlay, "{channel}");
+        assert_eq!(measure(pair).2, AuditClass::Judged, "{channel}");
+        assert!(
+            measure(pair).0 >= 4.5,
+            "{channel} reads at {:.2}:1",
+            measure(pair).0
+        );
+    }
+}
+
+// --- 4.4 — menu separators and glyph placement (§4.8.1, §4.9.2) -----------
+
+#[test]
+fn the_separator_is_a_hairline_rule_inside_its_own_band() {
+    let cell = menu_glyph_cells()
+        .into_iter()
+        .find(|cell| cell.id == "menu-glyph/separator")
+        .expect("the separator cell exists");
+
+    let rule = quad(&cell, "separator-rule");
+    assert_eq!(
+        number(&cell, "separator.thickness"),
+        menu_view::SEPARATOR_THICKNESS
+    );
+    assert_eq!(number(&cell, "separator.band"), menu_view::SEPARATOR_HEIGHT);
+    assert_eq!(fixed(rule.bounds[3]), fixed(menu_view::SEPARATOR_THICKNESS));
+    assert!(rule.fill.starts_with("border.subtle"));
+
+    let band = (
+        0.0,
+        0.0,
+        cell.frame.viewport[2],
+        number(&cell, "separator.band"),
+    );
+    let (left, top, right, bottom) = edges(rule);
+    assert!(
+        left >= band.0
+            && right <= band.2 + GEOM_EPS
+            && top >= band.1
+            && bottom <= band.3 + GEOM_EPS,
+        "the rule must lie inside the band it was given"
+    );
+    assert!(
+        top > 0.0 && bottom < band.3,
+        "the rule must be centred in its band, not flush with it"
+    );
+    assert_eq!(
+        measure(audit_pair(&cell, "separator")).2,
+        AuditClass::RestingDivider,
+        "a resting separator is a resting divider, not a judged pair"
+    );
+}
+
+#[test]
+fn every_leading_glyph_is_placed_inside_the_leading_slot() {
+    for cell in menu_glyph_cells() {
+        let Some(glyph) = quad_opt(&cell, "leading-glyph") else {
+            continue;
+        };
+        let pad = number(&cell, "row.padding-x");
+        let slot = number(&cell, "leading-slot.width");
+        let (left, _, right, _) = edges(glyph);
+
+        assert!(
+            (left - pad).abs() <= GEOM_EPS,
+            "{}'s leading glyph starts at {left}, the row pads at {pad}",
+            cell.id
+        );
+        assert!(
+            right <= pad + slot + GEOM_EPS,
+            "{}'s leading glyph overruns the {}px slot",
+            cell.id,
+            slot
+        );
+        assert_eq!(
+            fixed(glyph.bounds[2]),
+            fixed(slot),
+            "{}'s glyph must fill the slot it is placed in",
+            cell.id
+        );
+    }
+}
+
+#[test]
+fn every_trailing_glyph_is_right_aligned_inside_the_row() {
+    for cell in menu_glyph_cells() {
+        let Some(glyph) = quad_opt(&cell, "trailing-glyph") else {
+            continue;
+        };
+        let pad = number(&cell, "row.padding-x");
+        let width = cell.frame.viewport[2];
+        let (left, _, right, _) = edges(glyph);
+
+        assert!(
+            (width - pad - right).abs() <= GEOM_EPS,
+            "{}'s trailing glyph must end one pad from the row's right edge",
+            cell.id
+        );
+        assert!(
+            left >= width / 2.0,
+            "{}'s trailing glyph must sit in the trailing half",
+            cell.id
+        );
+    }
+}
+
+#[test]
+fn the_chevron_is_muted_at_rest_and_accented_only_while_its_branch_is_open() {
+    let palette = Palette::dark();
+    let rest = menu_glyph_cells()
+        .into_iter()
+        .find(|c| c.id == "menu-glyph/submenu-chevron")
+        .expect("the resting chevron cell exists");
+    let open = menu_glyph_cells()
+        .into_iter()
+        .find(|c| c.id == "menu-glyph/submenu-chevron-open")
+        .expect("the open chevron cell exists");
+
+    assert_eq!(
+        audit_pair(&rest, "trailing-glyph").foreground,
+        palette.text_muted,
+        "a closed branch is not the thing the menu is pointing at"
+    );
+    assert_eq!(
+        audit_pair(&open, "trailing-glyph").foreground,
+        palette.accent_text,
+        "an open branch's chevron must carry the accent"
+    );
+    for cell in [&rest, &open] {
+        let pair = audit_pair(cell, "trailing-glyph");
+        assert_eq!(pair.role, ContrastRole::Text);
+        assert_eq!(measure(pair).2, AuditClass::Judged, "{}", cell.id);
+        assert!(
+            measure(pair).0 >= 4.5,
+            "{}'s chevron reads at {:.2}:1",
+            cell.id,
+            measure(pair).0
+        );
+    }
+}
+
+#[test]
+fn a_resting_row_measures_its_glyph_against_the_menu_card_not_against_nothing() {
+    // A resting row paints no fill of its own. Recording the glyph as
+    // `UnpaintedBackground` would let an unreadable checkmark pass; the
+    // cell measures it against `surface.overlay`, the surface the card
+    // actually puts under it.
+    let cell = menu_glyph_cells()
+        .into_iter()
+        .find(|c| c.id == "menu-glyph/check-on")
+        .expect("the checked row exists");
+    let pair = audit_pair(&cell, "leading-glyph");
+
+    assert!(quad_opt(&cell, "row-background").is_none());
+    assert_eq!(pair.background, Palette::dark().surface_overlay);
+    assert_eq!(
+        measure(pair).2,
+        AuditClass::Judged,
+        "a glyph over a card surface is judged, not exempt"
+    );
+}
+
+#[test]
+fn a_hovered_row_measures_its_glyph_against_the_hover_fill() {
+    let cell = menu_glyph_cells()
+        .into_iter()
+        .find(|c| c.id == "menu-glyph/check-on-hovered")
+        .expect("the hovered checked row exists");
+    let pair = audit_pair(&cell, "leading-glyph");
+
+    assert!(
+        quad(&cell, "row-background")
+            .fill
+            .starts_with("surface.hover")
+    );
+    assert_eq!(pair.background, Palette::dark().surface_hover);
+    assert_eq!(measure(pair).2, AuditClass::Judged);
+}
+
+// --- 4.5 — the input dialog's per-row bodies (§4.5.1) ----------------------
+
+#[test]
+fn every_row_body_lies_between_the_card_top_and_the_footer_buttons() {
+    for cell in input_dialog_row_cells() {
+        let card = edges(quad(&cell, "card"));
+        let cancel = edges(quad(&cell, "footer-cancel"));
+        let primary = edges(quad(&cell, "footer-primary"));
+        let footer_top = cancel.1.min(primary.1);
+        let footer_bottom = cancel.3.max(primary.3);
+
+        assert!(
+            footer_top >= card.1 && footer_bottom <= card.3 + GEOM_EPS,
+            "{}'s footer buttons must sit inside the card",
+            cell.id
+        );
+        for layer in ["row-title", "row-context"] {
+            let row = edges(quad(&cell, layer));
+            assert!(
+                row.1 >= card.1 && row.3 <= footer_top + GEOM_EPS,
+                "{}'s {layer} must sit between the card top and the buttons",
+                cell.id
+            );
+        }
+    }
+}
+
+#[test]
+fn the_row_bodies_are_stacked_without_overlapping_each_other() {
+    for cell in input_dialog_row_cells() {
+        let mut rows: Vec<(f32, f32)> = cell
+            .frame
+            .quads
+            .iter()
+            .filter(|q| q.layer.starts_with("row-") || q.layer.starts_with("folder-row-"))
+            .map(|q| (q.bounds[1], q.bounds[1] + q.bounds[3]))
+            .collect();
+        rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+
+        for window in rows.windows(2) {
+            let (_, previous_bottom) = window[0];
+            let (next_top, _) = window[1];
+            assert!(
+                previous_bottom <= next_top + GEOM_EPS,
+                "{} overlaps two row bodies",
+                cell.id
+            );
+        }
+    }
+}
+
+#[test]
+fn the_folder_list_is_the_compact_rung_and_the_well_caps_it() {
+    let cell = input_dialog_row_cells()
+        .into_iter()
+        .find(|c| c.id == "input-dialog-rows/folder-list-capped")
+        .expect("the capped folder list exists");
+    let well = quad(&cell, "list-well");
+
+    assert_eq!(
+        number(&cell, "folder-row.height"),
+        input_dialog::FOLDER_ROW_HEIGHT
+    );
+    assert_eq!(
+        number(&cell, "folder-row.height"),
+        size::CONTROL_SM,
+        "a folder row is the compact rung, not a third height"
+    );
+    assert_eq!(
+        number(&cell, "folder-list.max-height"),
+        input_dialog::FOLDER_LIST_MAX_HEIGHT
+    );
+    assert_eq!(number(&cell, "folder-rows.total"), 12.0);
+    assert_eq!(
+        number(&cell, "folder-rows.visible"),
+        7.0,
+        "the well shows floor(max / row) rows and no more"
+    );
+    assert_eq!(
+        fixed(well.bounds[3]),
+        fixed(input_dialog::FOLDER_LIST_MAX_HEIGHT)
+    );
+
+    let mut previous_bottom = well.bounds[1];
+    for index in 0..7 {
+        let row = quad(&cell, &format!("folder-row-{index}"));
+        assert_eq!(fixed(row.bounds[3]), fixed(input_dialog::FOLDER_ROW_HEIGHT));
+        assert_eq!(
+            fixed(row.bounds[1]),
+            fixed(previous_bottom),
+            "folder row {index} must butt against the one above it"
+        );
+        previous_bottom = row.bounds[1] + row.bounds[3];
+    }
+    assert!(
+        previous_bottom <= well.bounds[1] + well.bounds[3] + GEOM_EPS,
+        "the visible rows must fit inside the well"
+    );
+}
+
+#[test]
+fn the_row_cells_differ_only_in_the_control_row_the_kind_brings() {
+    let cells = input_dialog_row_cells();
+    let title = |cell: &Cell| resolved_line(cell, "geometry.title");
+    let context = |cell: &Cell| resolved_line(cell, "geometry.context");
+
+    // Every dialog opens with the same title and context rows; only the
+    // body between the context row and the footer moves.
+    for cell in &cells {
+        assert_eq!(
+            title(cell),
+            title(&cells[0]),
+            "{}'s title row moved",
+            cell.id
+        );
+        assert_eq!(
+            context(cell),
+            context(&cells[0]),
+            "{}'s context row moved",
+            cell.id
+        );
+    }
+    // The control row is the only body row whose depth the kind changes,
+    // and the footer follows it rather than overlapping it.
+    let controls: Vec<String> = cells
+        .iter()
+        .map(|cell| resolved_line(cell, "geometry.control"))
+        .collect();
+    assert!(
+        controls.windows(2).any(|pair| pair[0] != pair[1]),
+        "the control row must actually differ in depth between kinds"
+    );
+    for cell in &cells {
+        let control = parse_rect(&resolved_line(cell, "geometry.control"));
+        let footer = parse_rect(&resolved_line(cell, "geometry.footer"));
+        assert!(
+            control.1 + control.3 <= footer.1 + GEOM_EPS,
+            "{}'s control row runs into the footer",
+            cell.id
+        );
+    }
+}
+
+// --- 4.6 — the movable overlay's trailing actions (§4.7.1) -----------------
+
+#[test]
+fn the_trailing_action_cluster_is_right_aligned_inside_the_title_bar() {
+    for cell in movable_action_cells() {
+        let bar = edges(quad(&cell, "title-bar"));
+        let cluster = edges(quad(&cell, "action-cluster"));
+
+        assert!(
+            (cluster.3 - bar.3).abs() <= GEOM_EPS && cluster.1 >= bar.1,
+            "{}'s action cluster must span the title bar's height",
+            cell.id
+        );
+        assert!(
+            (bar.2 - cluster.2 - TITLE_BAR_PADDING_HORIZONTAL).abs() <= GEOM_EPS,
+            "{}'s cluster must sit one title-bar pad from the right edge",
+            cell.id
+        );
+    }
+}
+
+#[test]
+fn the_action_cluster_width_is_derived_from_the_action_geometry() {
+    for cell in movable_action_cells() {
+        let size = number(&cell, "action.control-size");
+        let gap = number(&cell, "action.gap");
+        let derived = number(&cell, "action.derived-width");
+
+        assert_eq!(size, ACTION_CONTROL_SIZE);
+        assert_eq!(gap, ACTION_GAP);
+        assert_eq!(
+            derived,
+            ACTION_CONTROL_SIZE * 2.0 + ACTION_GAP,
+            "two controls and the gap between them"
+        );
+        assert_eq!(
+            fixed(quad(&cell, "action-cluster").bounds[2]),
+            fixed(derived),
+            "{}'s cluster must be exactly the derived width",
+            cell.id
+        );
+        assert_eq!(
+            resolved_line(&cell, "action.width-matches-host"),
+            "true",
+            "{}'s host disagrees with the gallery's derivation",
+            cell.id
+        );
+    }
+}
+
+#[test]
+fn the_drag_zone_stops_where_the_action_cluster_begins() {
+    for cell in movable_action_cells() {
+        let zone = edges(quad(&cell, "drag-zone"));
+        let cluster = edges(quad(&cell, "action-cluster"));
+
+        assert!(
+            zone.2 <= cluster.0 + GEOM_EPS,
+            "{}'s drag zone would swallow the action cluster",
+            cell.id
+        );
+        assert_eq!(resolved_line(&cell, "drag-zone.ends-at-cluster"), "true");
+        assert!(
+            zone.2 > cluster.0 - 1.0,
+            "{}'s drag zone must reach the cluster, not stop short",
+            cell.id
+        );
+    }
+}
+
+#[test]
+fn each_action_glyph_is_its_own_hit_box_in_the_meta_ink() {
+    let palette = Palette::dark();
+    for cell in movable_action_cells() {
+        let dock = quad(&cell, "action-dock");
+        let close = quad(&cell, "action-close");
+
+        for action in [dock, close] {
+            assert_eq!(
+                fixed(action.bounds[2]),
+                fixed(ACTION_CONTROL_SIZE),
+                "{}'s action box must be the hit-target minimum",
+                cell.id
+            );
+            assert_eq!(fixed(action.bounds[3]), fixed(ACTION_CONTROL_SIZE));
+            assert!(action.fill.starts_with("transparent"));
+            assert!(action.border.starts_with("text.muted"));
+        }
+        assert!(
+            edges(close).0 >= edges(dock).2 + ACTION_GAP - GEOM_EPS,
+            "{}'s actions must not crowd each other",
+            cell.id
+        );
+        assert_eq!(
+            audit_pair(&cell, "action.glyph").foreground,
+            palette.text_muted
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 5 — scope honesty (D-2)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1076,6 +2011,28 @@ fn the_manifest_carries_its_own_pass_conditions() {
     assert!(text.contains("PASS - every judged pair clears its role threshold"));
     assert!(text.contains("3 surfaces emitted as NotOwned rather than omitted"));
     assert!(!text.contains("FAIL"));
+}
+
+#[test]
+fn the_caret_is_recorded_as_permanently_outside_the_snapshot_surface() {
+    // The spec's editor row names a caret. The recorder cannot see it, so
+    // the manifest says so instead of leaving the reader to notice the
+    // omission and assume it was covered.
+    assert_eq!(
+        SURFACE_EXCLUSIONS.len(),
+        1,
+        "the exclusion list is written out, not counted"
+    );
+    assert_eq!(SURFACE_EXCLUSIONS[0].0, "text.caret");
+    assert!(SURFACE_EXCLUSIONS[0].1.contains("renderer protocol"));
+
+    let text = manifest();
+    assert!(
+        text.contains("recorded exclusions: named channels with no frame"),
+        "the manifest must carry the exclusion section"
+    );
+    assert!(text.contains("1 channels recorded as unreachable from a snapshot"));
+    assert!(text.contains("text.caret"));
 }
 
 #[test]

@@ -63,19 +63,21 @@ use crate::state::InteractionInput;
 use crate::state::VisualState;
 use crate::surface::input_dialog::{self, InputDialogHost};
 use crate::surface::menu::model::Menu;
+use crate::surface::menu::model::RadioGroupId;
 use crate::surface::menu::model::Row;
 use crate::surface::menu::view as menu_view;
 use crate::surface::modal::{self, ModalError, ModalFrame, ModalHost, ModalSizing};
 use crate::surface::movable::{
-    AutoScrollSetting, MemoryGeometryStorage, MovableAnatomy, MovableGeometry, MovableHost,
-    MovableSpec, PointerPhase, ScrollGeometry, SurfaceTarget,
+    ACTION_CONTROL_SIZE, ACTION_GAP, AutoScrollSetting, MemoryGeometryStorage, MovableAnatomy,
+    MovableGeometry, MovableHost, MovableSpec, PointerPhase, ScrollGeometry, SurfaceTarget,
 };
 use crate::surface::zorder::{SurfaceId, SurfaceKind, SurfaceRegistry, ZBand};
-use crate::token::color::Palette;
+use crate::token::color::{EditorPalette, Palette};
 use crate::token::contrast;
 use crate::token::shape;
 use crate::token::size;
 use crate::token::space;
+use crate::token::typography;
 use crate::widget::button::{self, ButtonVariant};
 use crate::widget::button_widget::Layer;
 use crate::widget::button_widget::background_layer as button_background_layer;
@@ -182,13 +184,23 @@ pub struct StyleEntry {
 }
 
 impl StyleEntry {
-    /// A colour channel.
+    /// A colour channel in the standard dark palette.
     #[must_use]
     pub fn colour(channel: &'static str, colour: Color) -> Self {
+        Self::colour_as(Namer::Standard, channel, colour)
+    }
+
+    /// A colour channel named against a specific palette world.
+    ///
+    /// The editor cells need this: their canvas is the same channels as
+    /// `text.strong`, so only the cell's own [`Namer`] can say which of
+    /// the two names the value actually carries.
+    #[must_use]
+    pub fn colour_as(namer: Namer, channel: &'static str, colour: Color) -> Self {
         Self {
             channel,
             value: StyleValue::Colour {
-                token: token_name(colour),
+                token: namer.name(colour),
                 colour,
             },
         }
@@ -269,6 +281,16 @@ pub struct Cell {
     pub subject: &'static str,
     /// The spec requirement the cell answers to.
     pub spec: &'static str,
+    /// The palette world this cell's colours are named against.
+    ///
+    /// Part of the cell rather than a parameter of [`token_name`] because
+    /// naming is by value, and two palettes in this crate share a channel
+    /// set: the inverted editor's canvas is `RGB(255,255,255)`, the same
+    /// channels the standard palette calls `text.strong`. A cell that did
+    /// not say which world it was resolved in would have its editor
+    /// background reported as a text token - a wrong assertion that still
+    /// passes the unmapped-colour gate.
+    pub namer: Namer,
     /// Every resolved style value, in a fixed order.
     pub resolved: Vec<StyleEntry>,
     /// The frame this cell drew. Empty for a [`CellKind::NotOwned`] cell,
@@ -332,8 +354,8 @@ impl Cell {
             out.push_str(&format!(
                 "  {:<18} {:<26} on {:<26} role={:?} class={:?} ratio={} min={}\n",
                 pair.channel,
-                token_name(pair.foreground),
-                token_name(pair.background),
+                self.namer.name(pair.foreground),
+                self.namer.name(pair.background),
                 pair.role,
                 class,
                 if ratio.is_nan() {
@@ -392,7 +414,7 @@ fn same_channels(a: Color, b: Color) -> bool {
         && (a.b - b.b).abs() < CHANNEL_EPS
 }
 
-/// The token table a resolved colour is named against.
+/// The standard palette's naming table.
 ///
 /// Every field of [`Palette`], in the order the spec's §2.5 prints them.
 /// Naming by matching against the palette rather than carrying a name
@@ -427,7 +449,95 @@ fn palette_table() -> Vec<(&'static str, Color)> {
     ]
 }
 
-/// Name the token a resolved colour came from.
+/// The inverted editor palette's naming table (`color.editor.inverted.*`).
+///
+/// Kept separate from [`palette_table`] rather than appended to it, because
+/// the two worlds disagree about white: the standard palette's
+/// `text.strong` and the editor's `editor.inverted.bg` are the same
+/// channels, and a single merged table would silently pick one. Which
+/// table is consulted first is the cell's [`Namer`]'s job.
+fn editor_table() -> Vec<(&'static str, Color)> {
+    let editor = EditorPalette::inverted();
+    vec![
+        ("editor.inverted.bg", editor.background),
+        ("editor.inverted.fg", editor.text),
+        ("editor.inverted.err", editor.error),
+    ]
+}
+
+/// The first channel match in a naming table.
+///
+/// A colour that shares a token's channels at a different alpha is named
+/// `token @ NN%`, which is how the pressed fills and the dimmed
+/// overlays read.
+fn lookup(table: &[(&'static str, Color)], colour: Color) -> Option<String> {
+    for (name, token) in table {
+        if same_channels(colour, *token) {
+            if (colour.a - token.a).abs() < CHANNEL_EPS {
+                return Some((*name).to_string());
+            }
+            return Some(format!("{name} @ {:.0}%", colour.a * 100.0));
+        }
+    }
+    None
+}
+
+/// The palette world a cell's colours are named against.
+///
+/// Two palettes in this crate describe the same pixel: the inverted
+/// editor's canvas is `RGB(255,255,255)`, which the standard palette
+/// calls `text.strong`. Value-based naming cannot tell those apart on its
+/// own, so the cell declares its world and the report names from that
+/// world first, falling back to the standard table so a cell that mixes
+/// the two still names every colour it emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Namer {
+    /// The standard dark palette — the `color.*` tokens of §2.5.
+    Standard,
+    /// The inverted editor palette — `color.editor.inverted.*` (§2.5).
+    InvertedEditor,
+}
+
+impl Namer {
+    /// Name one colour against this palette.
+    #[must_use]
+    pub fn name(self, colour: Color) -> String {
+        if colour.a == 0.0 {
+            return "transparent".to_string();
+        }
+        if self == Self::InvertedEditor
+            && let Some(name) = lookup(&editor_table(), colour)
+        {
+            return name;
+        }
+        if let Some(name) = lookup(&palette_table(), colour) {
+            return name;
+        }
+        format!("UNMAPPED {}", rgb8(colour))
+    }
+
+    /// A [`Background`] as this palette world renders it.
+    #[must_use]
+    pub fn background(self, background: &Background) -> String {
+        match background {
+            Background::Color(colour) => self.name(*colour),
+            Background::Gradient(_) => "gradient".to_string(),
+        }
+    }
+
+    /// A [`Border`] as this palette world renders it — `none` when
+    /// nothing is stroked.
+    #[must_use]
+    pub fn border(self, border: &Border) -> String {
+        if border.width == 0.0 {
+            "none".to_string()
+        } else {
+            self.name(border.color)
+        }
+    }
+}
+
+/// Name the token a resolved colour came from in the standard palette.
 ///
 /// A fully transparent colour is `transparent` — the word the spec's own
 /// matrices print for the Ghost resting fill, not a token lookup. A colour
@@ -437,37 +547,12 @@ fn palette_table() -> Vec<(&'static str, Color)> {
 /// Anything else is `UNMAPPED`, and the gallery sidecar treats that string
 /// as a failure: it means the matrix emitted a colour the token set does
 /// not contain, which `UIF-VER-001` forbids outright.
+///
+/// Cells resolved against another palette name through
+/// [`Namer::name`] instead — see [`Cell::namer`].
 #[must_use]
 pub fn token_name(color: Color) -> String {
-    if color.a == 0.0 {
-        return "transparent".to_string();
-    }
-    for (name, token) in palette_table() {
-        if same_channels(color, token) {
-            if (color.a - token.a).abs() < CHANNEL_EPS {
-                return name.to_string();
-            }
-            return format!("{name} @ {:.0}%", color.a * 100.0);
-        }
-    }
-    format!("UNMAPPED {}", rgb8(color))
-}
-
-/// A [`Background`] as the manifest renders it.
-fn background_name(background: &Background) -> String {
-    match background {
-        Background::Color(colour) => token_name(*colour),
-        Background::Gradient(_) => "gradient".to_string(),
-    }
-}
-
-/// A [`Border`] as the manifest renders it — `none` when nothing is stroked.
-fn border_name(border: &Border) -> String {
-    if border.width == 0.0 {
-        "none".to_string()
-    } else {
-        token_name(border.color)
-    }
+    Namer::Standard.name(color)
 }
 
 // ---------------------------------------------------------------------------
@@ -536,7 +621,7 @@ pub fn rect_array(rectangle: Rectangle) -> [f32; 4] {
 /// the caller because the renderer protocol does not carry them; the zip
 /// is exact because one layer is one `fill_quad`.
 #[must_use]
-pub fn paint_frame(viewport: Rectangle, layers: &[(&'static str, Layer)]) -> Frame {
+pub fn paint_frame(namer: Namer, viewport: Rectangle, layers: &[(&'static str, Layer)]) -> Frame {
     let mut recorder = FrameRecorder::default();
 
     for (_, layer) in layers {
@@ -550,8 +635,8 @@ pub fn paint_frame(viewport: Rectangle, layers: &[(&'static str, Layer)]) -> Fra
         .map(|((name, _), (bounds, background, border))| FrameQuad {
             layer: (*name).to_string(),
             bounds: rect_array(bounds),
-            fill: background_name(&background),
-            border: border_name(&border),
+            fill: namer.background(&background),
+            border: namer.border(&border),
             border_width: border.width,
             radius: border.radius.top_left,
         })
@@ -606,15 +691,72 @@ pub fn viewport() -> Rectangle {
     Rectangle::new(Point::ORIGIN, VIEWPORT)
 }
 
-/// The sample box an atom cell is rendered in.
+/// The sample box an atom cell is rendered in, at the standard rung.
 ///
 /// Wide enough that the widest atom chrome — a search field's reserved
 /// `size.control.sm` slot plus its padding — still leaves real text area,
 /// and exactly one control tall so the cell is the atom and nothing else.
 #[must_use]
 pub fn atom_sample() -> Rectangle {
-    Rectangle::new(Point::ORIGIN, Size::new(space::XL * 10.0, size::CONTROL_MD))
+    atom_sample_at(Rung::Standard.height())
 }
+
+/// The sample box at one control-height rung.
+#[must_use]
+pub fn atom_sample_at(height: f32) -> Rectangle {
+    Rectangle::new(Point::ORIGIN, Size::new(space::XL * 10.0, height))
+}
+
+/// The control-height rung an atom cell is snapshotted at (§2.2).
+///
+/// The resolvers do not take a height: a button's fills, borders and ring
+/// are the same pixels at `28` as at `32`. The rung is therefore a
+/// *geometry* dimension of the cell rather than a style one, which is
+/// exactly what §3.1 and §3.2 say — the rung changes the box, not the
+/// palette. Snapshotting only the standard rung, as `INC-21` did, left
+/// every compact-toolbar control in the spec unsampled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Rung {
+    /// `size.control.md` — `32`, dialogs and forms.
+    Standard,
+    /// `size.control.sm` — `28`, compact toolbars, navbar rows, folder lists.
+    Compact,
+}
+
+impl Rung {
+    /// The rung's height.
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        match self {
+            Self::Standard => size::CONTROL_MD,
+            Self::Compact => size::CONTROL_SM,
+        }
+    }
+
+    /// The token the rung comes from.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Standard => "size.control.md",
+            Self::Compact => "size.control.sm",
+        }
+    }
+
+    /// The rung's cell-id suffix.
+    ///
+    /// Empty for the standard rung so the ids the gallery has emitted
+    /// since `INC-21` do not move; only the new compact cells gain one.
+    #[must_use]
+    pub const fn slug(self) -> &'static str {
+        match self {
+            Self::Standard => "",
+            Self::Compact => "@compact",
+        }
+    }
+}
+
+/// Every rung the gallery samples, standard first.
+pub const RUNGS: [Rung; 2] = [Rung::Standard, Rung::Compact];
 
 // ---------------------------------------------------------------------------
 // State enumeration
@@ -732,9 +874,24 @@ fn slot_label(slot: SlotContent) -> String {
 /// gallery deciding to leave it out.
 #[must_use]
 pub fn button_cell(variant: ButtonVariant, state: VisualState) -> Cell {
+    button_cell_at(variant, state, Rung::Standard)
+}
+
+/// The button cell for one `(variant, state, rung)` triple
+/// (`UIF-ATOM-001`, §3.1's two control heights).
+///
+/// Resolved through [`button::resolve_style`] — the same pure function the
+/// widget paints from — and drawn as the two layers `button_widget`
+/// produces for that style: the fill-and-border layer, then the focus ring
+/// outside it. A Ghost at rest resolves a fully transparent fill and
+/// border, which is the cell the spec prints as `transparent`; the frame
+/// records that by naming the quad `transparent` rather than by the
+/// gallery deciding to leave it out.
+#[must_use]
+pub fn button_cell_at(variant: ButtonVariant, state: VisualState, rung: Rung) -> Cell {
     let palette = Palette::dark();
     let style = button::resolve_style(variant, state, &palette);
-    let bounds = atom_sample();
+    let bounds = atom_sample_at(rung.height());
 
     let mut layers: Vec<(&'static str, Layer)> = Vec::new();
     if let Some(layer) = button_background_layer(bounds, &style) {
@@ -769,10 +926,16 @@ pub fn button_cell(variant: ButtonVariant, state: VisualState) -> Cell {
     }
 
     Cell {
-        id: format!("button/{}/{}", slug(variant), state_slug(state)),
+        id: format!(
+            "button/{}/{}{}",
+            slug(variant),
+            state_slug(state),
+            rung.slug()
+        ),
         kind: CellKind::Atom,
         subject: "button",
         spec: "UIF-ATOM-001",
+        namer: Namer::Standard,
         resolved: vec![
             StyleEntry::colour("background", style.background),
             StyleEntry::colour("foreground", style.foreground),
@@ -781,6 +944,7 @@ pub fn button_cell(variant: ButtonVariant, state: VisualState) -> Cell {
             StyleEntry::colour("focus-ring.color", style.focus_ring_color),
             StyleEntry::number("focus-ring.width", style.focus_ring_width),
             StyleEntry::number("geometry.height", bounds.height),
+            StyleEntry::text("geometry.height-token", rung.token()),
             StyleEntry::number("geometry.radius", button::RADIUS),
             StyleEntry::number("geometry.padding-x", button::HORIZONTAL_PADDING),
             StyleEntry::text(
@@ -788,7 +952,7 @@ pub fn button_cell(variant: ButtonVariant, state: VisualState) -> Cell {
                 style.is_transparent_background().to_string(),
             ),
         ],
-        frame: paint_frame(bounds, &layers),
+        frame: paint_frame(Namer::Standard, bounds, &layers),
         audit,
         note: None,
     }
@@ -802,13 +966,16 @@ pub const BUTTON_VARIANTS: [ButtonVariant; 4] = [
     ButtonVariant::Danger,
 ];
 
-/// Every button cell: four variants across every reachable state.
+/// Every button cell: four variants across every reachable state, at both
+/// control-height rungs (§3.1's `28px` / `32px` pair).
 #[must_use]
 pub fn button_cells() -> Vec<Cell> {
     let mut cells = Vec::new();
     for variant in BUTTON_VARIANTS {
         for state in snapshot_states() {
-            cells.push(button_cell(variant, state));
+            for rung in RUNGS {
+                cells.push(button_cell_at(variant, state, rung));
+            }
         }
     }
     cells
@@ -843,9 +1010,23 @@ fn slug_kind(kind: InputKind) -> &'static str {
 /// alone, which is why they are identical across every slot content.
 #[must_use]
 pub fn text_input_cell(kind: InputKind, state: VisualState) -> Cell {
+    text_input_cell_at(kind, state, Rung::Standard)
+}
+
+/// The text input cell for one `(kind, state, rung)` triple
+/// (`UIF-ATOM-002`, §3.2's `32px` / `28px` compact-toolbar pair).
+///
+/// Includes the invalid-and-focused combination the atom exists to settle:
+/// the error keeps the perimeter and focus relocates to a ring drawn
+/// outside the control, so neither signal is lost. The two rectangles the
+/// zero-shift invariant is about — the text area and the reserved trailing
+/// slot — are recorded per cell and are functions of `(bounds, kind)`
+/// alone, which is why they are identical across every slot content.
+#[must_use]
+pub fn text_input_cell_at(kind: InputKind, state: VisualState, rung: Rung) -> Cell {
     let palette = Palette::dark();
     let style = text_input::resolve_input_style(kind, state, &palette);
-    let bounds = atom_sample();
+    let bounds = atom_sample_at(rung.height());
     let invalid = state.base == BaseState::Invalid;
 
     let mut layers: Vec<(&'static str, Layer)> = Vec::new();
@@ -895,10 +1076,16 @@ pub fn text_input_cell(kind: InputKind, state: VisualState) -> Cell {
     }
 
     Cell {
-        id: format!("input/{}/{}", slug_kind(kind), state_slug(state)),
+        id: format!(
+            "input/{}/{}{}",
+            slug_kind(kind),
+            state_slug(state),
+            rung.slug()
+        ),
         kind: CellKind::Atom,
         subject: "input",
         spec: "UIF-ATOM-002",
+        namer: Namer::Standard,
         resolved: vec![
             StyleEntry::colour("background", style.background),
             StyleEntry::colour("value", style.text),
@@ -928,9 +1115,11 @@ pub fn text_input_cell(kind: InputKind, state: VisualState) -> Cell {
                 "geometry.trailing-slot",
                 rect_text(text_input::trailing_slot_bounds(bounds, kind)),
             ),
+            StyleEntry::number("geometry.height", bounds.height),
+            StyleEntry::text("geometry.height-token", rung.token()),
             StyleEntry::number("geometry.radius", text_input::RADIUS),
         ],
-        frame: paint_frame(bounds, &layers),
+        frame: paint_frame(Namer::Standard, bounds, &layers),
         audit,
         note: None,
     }
@@ -943,13 +1132,16 @@ pub const INPUT_KINDS: [InputKind; 3] = [
     InputKind::DropdownTrigger,
 ];
 
-/// Every text input cell: three kinds across every reachable state.
+/// Every text input cell: three kinds across every reachable state, at
+/// both control-height rungs.
 #[must_use]
 pub fn text_input_cells() -> Vec<Cell> {
     let mut cells = Vec::new();
     for kind in INPUT_KINDS {
         for state in snapshot_states() {
-            cells.push(text_input_cell(kind, state));
+            for rung in RUNGS {
+                cells.push(text_input_cell_at(kind, state, rung));
+            }
         }
     }
     cells
@@ -1103,8 +1295,9 @@ pub fn menu_row_cell(state: menu_view::RowState) -> Cell {
         kind: CellKind::Composite,
         subject: "menu",
         spec: "UIF-CMENU-001",
+        namer: Namer::Standard,
         resolved,
-        frame: paint_frame(bounds, &layers),
+        frame: paint_frame(Namer::Standard, bounds, &layers),
         audit,
         note: None,
     }
@@ -1224,8 +1417,9 @@ fn modal_cell(name: &str, dirty: bool, error: Option<ModalError>) -> Cell {
         kind: CellKind::Composite,
         subject: "modal",
         spec: "UIF-MOD-001",
+        namer: Namer::Standard,
         resolved,
-        frame: paint_frame(viewport, &layers),
+        frame: paint_frame(Namer::Standard, viewport, &layers),
         audit,
         note: None,
     }
@@ -1455,8 +1649,9 @@ fn input_dialog_cell(name: &str, spec: input_dialog::InputDialogSpec, value: Opt
         kind: CellKind::Composite,
         subject: "input-dialog",
         spec: "UIF-INP-001",
+        namer: Namer::Standard,
         resolved,
-        frame: paint_frame(viewport, &layers),
+        frame: paint_frame(Namer::Standard, viewport, &layers),
         audit,
         note: None,
     }
@@ -1520,24 +1715,22 @@ enum MovableGesture {
     ScrollAway,
 }
 
-/// The movable-overlay cell for one gesture (`UIF-MOV-001` … `UIF-MOV-004`).
+/// Open a movable host against a fresh registry and drive it through one
+/// gesture.
 ///
-/// Opened through [`MovableHost::open`] against a [`MemoryGeometryStorage`]
-/// so the clamp, the Band 1 registration and the modeless focus
-/// registration are the real ones, then driven through
-/// [`MovableHost::on_pointer`] — press then move — rather than by asserting
-/// the drag flag directly. The cell therefore records `is_dragging()` and
-/// `resizing_handle()` as the host actually reports them after a real
-/// gesture, not as values the test wrote.
-fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
-    let palette = Palette::dark();
-    let anatomy = MovableAnatomy::resolve(&palette);
-    let viewport = viewport();
-
-    let mut focus = FocusState::new();
-    let mut registry = SurfaceRegistry::new();
-    let mut storage = MemoryGeometryStorage::new();
-
+/// Shared by every movable cell so the card a cell reports is the card the
+/// host reached, not the card the cell described. The host is opened
+/// through [`MovableHost::open`] against a [`MemoryGeometryStorage`] so
+/// the clamp, the Band 1 registration and the modeless focus registration
+/// are the real ones, and driven through [`MovableHost::on_pointer`] —
+/// press then move — rather than by asserting the drag flag directly.
+fn driven_movable_host(
+    gesture: MovableGesture,
+    viewport: Rectangle,
+    focus: &mut FocusState,
+    registry: &mut SurfaceRegistry,
+    storage: &mut MemoryGeometryStorage,
+) -> MovableHost {
     let spec = MovableSpec::new("gallery.movable", "Background Operations Log")
         .with_geometry(MovableGeometry::new(
             Point::new(space::XL * 4.0, space::XL * 3.0),
@@ -1545,7 +1738,7 @@ fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
         ))
         .with_auto_scroll(AutoScrollSetting::Enabled);
 
-    let mut host = MovableHost::open(spec, viewport, &mut focus, &mut registry, &mut storage);
+    let mut host = MovableHost::open(spec, viewport, focus, registry, storage);
 
     let title = host.title_bar();
     let grip = host.resize_grip(ResizeHandle::BottomRight);
@@ -1559,17 +1752,17 @@ fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
                 PointerPhase::Pressed,
                 at,
                 SurfaceTarget::TitleBar,
-                &mut focus,
-                &mut registry,
-                &mut storage,
+                focus,
+                registry,
+                storage,
             );
             let _ = host.on_pointer(
                 PointerPhase::Moved,
                 to,
                 SurfaceTarget::TitleBar,
-                &mut focus,
-                &mut registry,
-                &mut storage,
+                focus,
+                registry,
+                storage,
             );
         }
         MovableGesture::Resize => {
@@ -1584,18 +1777,11 @@ fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
                     PointerPhase::Pressed,
                     at,
                     target.clone(),
-                    &mut focus,
-                    &mut registry,
-                    &mut storage,
+                    focus,
+                    registry,
+                    storage,
                 );
-                let _ = host.on_pointer(
-                    PointerPhase::Moved,
-                    to,
-                    target,
-                    &mut focus,
-                    &mut registry,
-                    &mut storage,
-                );
+                let _ = host.on_pointer(PointerPhase::Moved, to, target, focus, registry, storage);
             }
         }
         MovableGesture::ScrollAway => {
@@ -1606,6 +1792,25 @@ fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
             ));
         }
     }
+
+    host
+}
+
+/// The movable-overlay cell for one gesture (`UIF-MOV-001` … `UIF-MOV-004`).
+///
+/// Built on [`driven_movable_host`], so `dragging` and `resizing` are the
+/// host's own answers after a real gesture rather than values this cell
+/// wrote down.
+fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
+    let palette = Palette::dark();
+    let anatomy = MovableAnatomy::resolve(&palette);
+    let viewport = viewport();
+
+    let mut focus = FocusState::new();
+    let mut registry = SurfaceRegistry::new();
+    let mut storage = MemoryGeometryStorage::new();
+    let host = driven_movable_host(gesture, viewport, &mut focus, &mut registry, &mut storage);
+    let grip = host.resize_grip(ResizeHandle::BottomRight);
 
     let layers = vec![
         (
@@ -1728,8 +1933,9 @@ fn movable_cell(name: &str, gesture: MovableGesture) -> Cell {
         kind: CellKind::Composite,
         subject: "movable",
         spec: "UIF-MOV-001",
+        namer: Namer::Standard,
         resolved,
-        frame: paint_frame(viewport, &layers),
+        frame: paint_frame(Namer::Standard, viewport, &layers),
         audit,
         note: None,
     }
@@ -1879,8 +2085,9 @@ pub fn zband_cell() -> Cell {
         kind: CellKind::Composite,
         subject: "zband",
         spec: "UIF-ZORD-* + UIF-WIN-003",
+        namer: Namer::Standard,
         resolved,
-        frame: paint_frame(viewport, &layers),
+        frame: paint_frame(Namer::Standard, viewport, &layers),
         audit: vec![AuditPair {
             channel: "modal.border",
             foreground: frame.border,
@@ -1894,6 +2101,1097 @@ pub fn zband_cell() -> Cell {
                 .to_string(),
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cells for the inverted editor palette (§2.5 `color.editor.inverted.*`)
+// ---------------------------------------------------------------------------
+
+/// The inverted editor cell for one foreground token against its own
+/// canvas (`UIF-TOK-005`).
+///
+/// The editor is the one surface in this crate outside the dark elevation
+/// ladder: raw editing on white against reading in the dark. Its three
+/// tokens only ever appear together, so the cell measures them against
+/// the editor canvas rather than against the `surface.*` ladder, and
+/// names them through [`Namer::InvertedEditor`] — the standard table
+/// would call the canvas `text.strong`, because it is the very same
+/// `RGB(255,255,255)`.
+///
+/// The canvas is the body region of a real editor modal, sized by
+/// [`ModalSizing::editor`], so the cell shows the inverted surface at
+/// the geometry the host actually gives it.
+///
+/// The ink quad is a text run's **ink box**, stroked in the foreground
+/// token. A glyph is drawn by a text pass rather than a `fill_quad`, so
+/// the box is the most the recorded quad list can honestly say about a
+/// glyph: where its ink lands, and in which token. The legibility claim
+/// is carried by the audit pair, which is measured against the canvas
+/// the run sits on.
+fn editor_ink_cell(
+    name: &str,
+    channel: &'static str,
+    run: &str,
+    foreground: Color,
+    spec_figure: &'static str,
+) -> Cell {
+    let editor = EditorPalette::inverted();
+    let standard = Palette::dark();
+    let namer = Namer::InvertedEditor;
+    let viewport = viewport();
+
+    let mut spec = modal::ModalSpec::new(
+        "gallery.editor",
+        "Inline Document Editor",
+        ModalSizing::editor(),
+    );
+    if channel == "error.text" {
+        spec = spec.with_error(gallery_error("ED-5001", "Save failed"));
+    }
+
+    let mut focus = FocusState::new();
+    let mut registry = SurfaceRegistry::new();
+    let host = ModalHost::open(spec, viewport, Size::ZERO, &mut focus, &mut registry);
+
+    let frame = ModalFrame::resolve(&standard);
+    let inset = frame.border_width + frame.content_padding;
+    let canvas = Rectangle::new(
+        Point::new(host.card().x + inset, host.card().y + inset),
+        Size::new(
+            (host.card().width - inset * 2.0).max(0.0),
+            (host.card().height - inset * 2.0).max(0.0),
+        ),
+    );
+    let ink = Rectangle::new(
+        Point::new(canvas.x + space::MD, canvas.y + space::MD),
+        Size::new(
+            (canvas.width - space::MD * 2.0).max(0.0),
+            typography::BODY.line_height,
+        ),
+    );
+
+    let layers: Vec<(&'static str, Layer)> = vec![
+        (
+            "scrim",
+            surface_layer(viewport, frame.scrim, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "card",
+            surface_layer(
+                host.card(),
+                frame.surface,
+                frame.border,
+                frame.border_width,
+                frame.radius,
+            ),
+        ),
+        (
+            "editor-canvas",
+            surface_layer(
+                canvas,
+                editor.background,
+                standard.border_subtle,
+                shape::BORDER_HAIRLINE,
+                0.0,
+            ),
+        ),
+        ("ink-run", ink_box(ink, foreground)),
+    ];
+
+    let computed = contrast::contrast_ratio(foreground, editor.background);
+
+    let resolved = vec![
+        StyleEntry::colour_as(namer, "canvas.fill", editor.background),
+        StyleEntry::colour_as(namer, "ink.foreground", foreground),
+        StyleEntry::text("ink.run", run),
+        StyleEntry::text("geometry.card", rect_text(host.card())),
+        StyleEntry::text("geometry.canvas", rect_text(canvas)),
+        StyleEntry::text("geometry.ink-box", rect_text(ink)),
+        StyleEntry::number("contrast.computed", computed),
+        StyleEntry::text("contrast.spec-figure", spec_figure),
+    ];
+
+    let audit = vec![
+        AuditPair {
+            channel,
+            foreground,
+            background: editor.background,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "canvas.perimeter",
+            foreground: standard.border_subtle,
+            background: editor.background,
+            role: ContrastRole::Chrome,
+        },
+    ];
+
+    Cell {
+        id: format!("editor-inverted/{name}"),
+        kind: CellKind::Composite,
+        subject: "editor",
+        spec: "UIF-TOK-005",
+        namer,
+        resolved,
+        frame: paint_frame(namer, viewport, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every inverted-editor cell: the buffer run, and the error run on the
+/// white canvas.
+#[must_use]
+pub fn editor_palette_cells() -> Vec<Cell> {
+    let editor = EditorPalette::inverted();
+    vec![
+        editor_ink_cell(
+            "rest",
+            "buffer.text",
+            "document buffer text",
+            editor.text,
+            "21.00:1 (spec 2.5)",
+        ),
+        editor_ink_cell(
+            "error",
+            "error.text",
+            "validation and save-error text",
+            editor.error,
+            "7.00:1 (spec 2.5)",
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Cells for the modal's header / banner / footer bands (§4.6.1)
+// ---------------------------------------------------------------------------
+
+/// The header, banner, body and footer bands of a modal card, composed
+/// from the frame's own paddings.
+///
+/// [`ModalFrame`] deliberately carries no sub-rectangles: the split needs
+/// measured heights, and measured heights belong to the renderer. The
+/// gallery does not need the renderer's numbers to assert the *regions*,
+/// though. Every band here is derived only from paddings and control
+/// sizes the frame already exposes, so the cell asserts the band model
+/// without introducing a second source of truth:
+///
+/// * header = `content_padding` + the `close_target` square + `content_padding`
+/// * banner = `content_padding` + one body line + `content_padding`
+/// * footer = `footer_padding_vertical` × 2 + one standard control
+/// * body   = whatever the card has left between the banner and the footer
+struct ModalBands {
+    header: Rectangle,
+    banner: Rectangle,
+    body: Rectangle,
+    footer: Rectangle,
+}
+
+impl ModalBands {
+    fn compose(frame: &ModalFrame, card: Rectangle, with_banner: bool) -> Self {
+        let inset = frame.border_width;
+        let x = card.x + inset;
+        let width = (card.width - inset * 2.0).max(0.0);
+
+        let header = Rectangle::new(
+            Point::new(x, card.y + inset),
+            Size::new(width, frame.content_padding * 2.0 + frame.close_target),
+        );
+        // A modal with no error has no banner band, and the body takes the
+        // space back rather than leaving a gap where the band would be.
+        let banner_height = if with_banner {
+            frame.content_padding * 2.0 + typography::BODY.line_height
+        } else {
+            0.0
+        };
+        let banner = Rectangle::new(
+            Point::new(x, header.y + header.height),
+            Size::new(width, banner_height),
+        );
+        let footer = Rectangle::new(
+            Point::new(x, card.y + card.height - inset - footer_height(frame)),
+            Size::new(width, footer_height(frame)),
+        );
+        let body_top = banner.y + banner.height;
+        let body = Rectangle::new(
+            Point::new(x, body_top),
+            Size::new(width, (footer.y - body_top).max(0.0)),
+        );
+
+        Self {
+            header,
+            banner,
+            body,
+            footer,
+        }
+    }
+}
+
+/// The footer band's height: its own vertical padding either side of one
+/// standard control.
+fn footer_height(frame: &ModalFrame) -> f32 {
+    frame.footer_padding_vertical * 2.0 + size::CONTROL_MD
+}
+
+/// The error every banded cell carries.
+fn gallery_error(code: &str, message: &str) -> ModalError {
+    ModalError::new(code, message)
+        .at(modal::ErrorLocation::Position {
+            line: 12,
+            column: 4,
+        })
+        .with_recovery(modal::Recovery::Retry)
+}
+
+/// The modal band cell: the card's header, banner and footer as
+/// separately asserted regions (`UIF-MOD-001`, `UIF-MOD-003`, §4.6.1).
+///
+/// `INC-21` recorded that the modal cells carried no band split. They do
+/// now: each band is its own named quad with its own fill, the two
+/// dividers are their own quads, and each band's foreground is audited
+/// against the surface it actually sits on rather than against the card
+/// as a whole.
+fn modal_band_cell(name: &str, with_banner: bool) -> Cell {
+    let palette = Palette::dark();
+    let frame = ModalFrame::resolve(&palette);
+    let viewport = viewport();
+
+    let mut spec = modal::ModalSpec::new(
+        "gallery.bands",
+        "Gallery Modal Bands",
+        ModalSizing::attributions(),
+    )
+    .with_controls(modal_controls())
+    .with_primary(FocusId::new("gallery.modal.ok"));
+    if with_banner {
+        spec = spec.with_error(gallery_error("MOD-5001", "Save failed"));
+    }
+
+    let mut focus = FocusState::new();
+    let mut registry = SurfaceRegistry::new();
+    let host = ModalHost::open(spec, viewport, Size::ZERO, &mut focus, &mut registry);
+    let bands = ModalBands::compose(&frame, host.card(), with_banner);
+
+    let divider = Rectangle::new(
+        Point::new(
+            bands.header.x,
+            bands.header.y + bands.header.height - shape::BORDER_HAIRLINE,
+        ),
+        Size::new(bands.header.width, shape::BORDER_HAIRLINE),
+    );
+    let footer_rule = Rectangle::new(
+        Point::new(bands.footer.x, bands.footer.y),
+        Size::new(bands.footer.width, shape::BORDER_HAIRLINE),
+    );
+    let close_target = Rectangle::new(
+        Point::new(
+            bands.header.x + bands.header.width - frame.content_padding - frame.close_target,
+            bands.header.y + frame.content_padding,
+        ),
+        Size::new(frame.close_target, frame.close_target),
+    );
+
+    let mut layers = vec![
+        (
+            "scrim",
+            surface_layer(viewport, frame.scrim, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "card",
+            surface_layer(
+                host.card(),
+                frame.surface,
+                frame.border,
+                frame.border_width,
+                frame.radius,
+            ),
+        ),
+        (
+            "header-band",
+            surface_layer(bands.header, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+    ];
+    if with_banner {
+        layers.push((
+            "banner-band",
+            surface_layer(bands.banner, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ));
+    }
+    layers.extend([
+        (
+            "body-band",
+            surface_layer(bands.body, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "footer-band",
+            surface_layer(bands.footer, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "header-divider",
+            surface_layer(divider, frame.divider, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "footer-divider",
+            surface_layer(footer_rule, frame.divider, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        ("close-target", ink_box(close_target, palette.text_muted)),
+    ]);
+
+    let mut resolved = vec![
+        StyleEntry::text("geometry.card", rect_text(host.card())),
+        StyleEntry::text("geometry.header", rect_text(bands.header)),
+        StyleEntry::text("geometry.body", rect_text(bands.body)),
+        StyleEntry::text("geometry.footer", rect_text(bands.footer)),
+        StyleEntry::text("geometry.header-divider", rect_text(divider)),
+        StyleEntry::text("geometry.footer-divider", rect_text(footer_rule)),
+        StyleEntry::text("geometry.close-target", rect_text(close_target)),
+        StyleEntry::text(
+            "band.header.composition",
+            "content_padding + close_target + content_padding",
+        ),
+        StyleEntry::text(
+            "band.footer.composition",
+            "footer_padding_vertical x2 + size.control.md",
+        ),
+        StyleEntry::text("banner-present", with_banner.to_string()),
+    ];
+
+    let mut audit = vec![
+        AuditPair {
+            channel: "card.border",
+            foreground: frame.border,
+            background: frame.surface,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "header.title",
+            foreground: palette.text_strong,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "header.close-glyph",
+            foreground: palette.text_muted,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "footer.status",
+            foreground: palette.text_muted,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "divider.header",
+            foreground: frame.divider,
+            background: frame.surface,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "divider.footer",
+            foreground: frame.divider,
+            background: frame.surface,
+            role: ContrastRole::Chrome,
+        },
+    ];
+
+    if with_banner {
+        resolved.push(StyleEntry::text("geometry.banner", rect_text(bands.banner)));
+        audit.push(AuditPair {
+            channel: "banner.text",
+            foreground: palette.status_danger_text,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        });
+    }
+
+    Cell {
+        id: format!("modal-bands/{name}"),
+        kind: CellKind::Composite,
+        subject: "modal-bands",
+        spec: "UIF-MOD-001",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, viewport, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every modal band cell: the card with no banner, and the card showing
+/// the `UIF-MOD-003` error banner.
+#[must_use]
+pub fn modal_band_cells() -> Vec<Cell> {
+    vec![
+        modal_band_cell("no-banner", false),
+        modal_band_cell("banner", true),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Cells for menu separators and glyph placement (§4.8.1, §4.9.2)
+// ---------------------------------------------------------------------------
+
+/// A 1px stroked ink box: where a glyph's ink lands, drawn in the token
+/// it is drawn with.
+///
+/// A glyph is drawn by a text pass, not a `fill_quad`, so the recorded
+/// quad list cannot show the glyph itself. What it can honestly show is
+/// the glyph's reserved box and the token its ink carries — which is the
+/// pair of facts the spec's slot anatomy is actually asserting. Stroking
+/// rather than filling keeps the quad from claiming a solid fill where
+/// there is type.
+fn ink_box(bounds: Rectangle, colour: Color) -> Layer {
+    Layer {
+        bounds,
+        fill: Color::TRANSPARENT,
+        border: Border::default()
+            .color(colour)
+            .width(shape::BORDER_HAIRLINE)
+            .rounded(0.0),
+    }
+}
+
+/// The leading slot's reserved ink box inside a menu row.
+fn leading_ink_box(bounds: Rectangle) -> Rectangle {
+    Rectangle::new(
+        Point::new(
+            bounds.x + menu_view::ROW_PADDING_X,
+            bounds.y + (bounds.height - menu_view::LEADING_SLOT) / 2.0,
+        ),
+        Size::new(menu_view::LEADING_SLOT, menu_view::LEADING_SLOT),
+    )
+}
+
+/// The trailing slot's reserved ink box, mirrored from the leading one.
+fn trailing_ink_box(bounds: Rectangle) -> Rectangle {
+    Rectangle::new(
+        Point::new(
+            bounds.x + bounds.width - menu_view::ROW_PADDING_X - menu_view::LEADING_SLOT,
+            bounds.y + (bounds.height - menu_view::LEADING_SLOT) / 2.0,
+        ),
+        Size::new(menu_view::LEADING_SLOT, menu_view::LEADING_SLOT),
+    )
+}
+
+/// One menu glyph or separator cell (§4.8.1 slot anatomy, §4.9.2 matrix).
+///
+/// The row is resolved through [`menu_view::resolve_row_style`] like every
+/// other menu cell, but the assertion here is about the *slots*: which
+/// glyph the model asks for, where its box sits inside the row's padding,
+/// and whether the colour it is drawn in is legible on the surface
+/// actually painted behind it.
+///
+/// A resting row paints no fill of its own, so the glyph's contrast is
+/// measured against the menu card's `surface.overlay` rather than being
+/// waved through as unpainted. That is the pairing a user sees, and it is
+/// the one `UIF-TOK-006` rule 1 is about.
+fn menu_glyph_cell(
+    name: &str,
+    row: Row,
+    state: menu_view::RowState,
+    leading_glyph: Option<&'static str>,
+    trailing_glyph: Option<&'static str>,
+) -> Cell {
+    let palette = Palette::dark();
+    let style = menu_view::resolve_row_style(&row, state, &palette);
+    let bounds = Rectangle::new(
+        Point::ORIGIN,
+        Size::new(space::XL * 12.0, menu_view::row_height(&row)),
+    );
+    let behind = if style.background.a == 0.0 {
+        palette.surface_overlay
+    } else {
+        style.background
+    };
+
+    let mut layers = Vec::new();
+    let mut resolved = vec![
+        StyleEntry::text("matrix-row", state.matrix_row()),
+        StyleEntry::text("row-kind", format!("{:?}", row.kind())),
+        StyleEntry::text("leading-slot", format!("{:?}", row.leading_slot())),
+        StyleEntry::text("trailing-slot", format!("{:?}", row.trailing_slot())),
+        StyleEntry::text("checked", row.is_checked().to_string()),
+        StyleEntry::text("selected", row.is_selected().to_string()),
+        StyleEntry::number("row.height", bounds.height),
+        StyleEntry::number("row.padding-x", menu_view::ROW_PADDING_X),
+        StyleEntry::number("leading-slot.width", menu_view::LEADING_SLOT),
+    ];
+    let mut audit = Vec::new();
+
+    if row.is_separator() {
+        let rule = menu_view::separator_layer(bounds, &palette);
+        layers.push(("separator-rule", rule));
+        resolved.push(StyleEntry::number(
+            "separator.band",
+            menu_view::SEPARATOR_HEIGHT,
+        ));
+        resolved.push(StyleEntry::number(
+            "separator.thickness",
+            menu_view::SEPARATOR_THICKNESS,
+        ));
+        resolved.push(StyleEntry::text("geometry.rule", rect_text(rule.bounds)));
+        audit.push(AuditPair {
+            channel: "separator",
+            foreground: palette.border_subtle,
+            background: behind,
+            role: ContrastRole::Chrome,
+        });
+    } else {
+        resolved.push(StyleEntry::colour("row.background", style.background));
+        resolved.push(StyleEntry::colour("row.label", style.label));
+        audit.push(AuditPair {
+            channel: "row.label",
+            foreground: style.label,
+            background: behind,
+            role: ContrastRole::Text,
+        });
+        if let Some(layer) = menu_view::background_layer(bounds, &style) {
+            layers.push(("row-background", layer));
+        }
+        if let Some(layer) = menu_view::focus_outline_layer(bounds, &style) {
+            layers.push(("focus-outline", layer));
+        }
+        if let Some(outline) = style.focus_outline {
+            resolved.push(StyleEntry::colour("focus-outline.color", outline.color));
+            resolved.push(StyleEntry::number("focus-outline.width", outline.width));
+            audit.push(AuditPair {
+                channel: "focus-outline",
+                foreground: outline.color,
+                background: behind,
+                role: ContrastRole::Chrome,
+            });
+        }
+
+        if let Some(glyph) = leading_glyph {
+            let box_bounds = leading_ink_box(bounds);
+            layers.push(("leading-glyph", ink_box(box_bounds, style.leading)));
+            resolved.push(StyleEntry::text("leading-glyph.char", glyph));
+            resolved.push(StyleEntry::colour("leading-glyph.color", style.leading));
+            resolved.push(StyleEntry::text(
+                "geometry.leading-glyph",
+                rect_text(box_bounds),
+            ));
+            audit.push(AuditPair {
+                channel: "leading-glyph",
+                foreground: style.leading,
+                background: behind,
+                role: ContrastRole::Text,
+            });
+        }
+        if let Some(glyph) = trailing_glyph {
+            let box_bounds = trailing_ink_box(bounds);
+            layers.push(("trailing-glyph", ink_box(box_bounds, style.trailing)));
+            resolved.push(StyleEntry::text("trailing-glyph.char", glyph));
+            resolved.push(StyleEntry::colour("trailing-glyph.color", style.trailing));
+            resolved.push(StyleEntry::text(
+                "geometry.trailing-glyph",
+                rect_text(box_bounds),
+            ));
+            audit.push(AuditPair {
+                channel: "trailing-glyph",
+                foreground: style.trailing,
+                background: behind,
+                role: ContrastRole::Text,
+            });
+        }
+    }
+
+    Cell {
+        id: format!("menu-glyph/{name}"),
+        kind: CellKind::Composite,
+        subject: "menu-glyph",
+        spec: "UIF-FMENU-001",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every menu glyph and separator cell.
+///
+/// One per placement the model can ask for, plus the two states the spec
+/// calls out by name: the submenu parent's chevron while its branch is
+/// open, and a checked row under the pointer.
+#[must_use]
+pub fn menu_glyph_cells() -> Vec<Cell> {
+    let rest = menu_view::RowState::REST;
+    let hovered = menu_view::RowState::HOVERED;
+    let submenu_open = menu_view::RowState::ACTIVE_SUBMENU_PARENT;
+    let child = Menu::empty("gallery.glyph.child");
+    let group = RadioGroupId::new("gallery.glyph.indent");
+
+    vec![
+        menu_glyph_cell("separator", Row::separator(), rest, None, None),
+        menu_glyph_cell(
+            "check-on",
+            Row::checkable("wrap", "Wrap Lines", true),
+            rest,
+            Some(menu_view::GLYPH_CHECK),
+            None,
+        ),
+        menu_glyph_cell(
+            "check-off",
+            Row::checkable("wrap", "Wrap Lines", false),
+            rest,
+            None,
+            None,
+        ),
+        menu_glyph_cell(
+            "radio-selected",
+            Row::radio("indent-2", "Two Spaces", group.clone(), true),
+            rest,
+            Some(menu_view::GLYPH_RADIO),
+            None,
+        ),
+        menu_glyph_cell(
+            "radio-unselected",
+            Row::radio("indent-4", "Four Spaces", group, false),
+            rest,
+            None,
+            None,
+        ),
+        menu_glyph_cell(
+            "submenu-chevron",
+            Row::submenu("more", "More Actions", child.clone()),
+            rest,
+            None,
+            Some(menu_view::GLYPH_CHEVRON),
+        ),
+        menu_glyph_cell(
+            "submenu-chevron-open",
+            Row::submenu("more", "More Actions", child),
+            submenu_open,
+            None,
+            Some(menu_view::GLYPH_CHEVRON),
+        ),
+        menu_glyph_cell(
+            "check-on-hovered",
+            Row::checkable("wrap", "Wrap Lines", true),
+            hovered,
+            Some(menu_view::GLYPH_CHECK),
+            None,
+        ),
+        menu_glyph_cell(
+            "shortcut",
+            Row::action("save", "Save Document").with_shortcut("Ctrl+S"),
+            rest,
+            None,
+            Some("Ctrl+S"),
+        ),
+        menu_glyph_cell(
+            "icon",
+            Row::action("new", "New Document").with_icon("+"),
+            rest,
+            Some("+"),
+            None,
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Cells for the input dialog's per-row bodies (§4.5.1)
+// ---------------------------------------------------------------------------
+
+/// Layer names for the folder list's rows.
+///
+/// Layer names are `&'static str` because they are assertion keys, and a
+/// computed name would have to be leaked to reach that lifetime. A list
+/// capped at [`input_dialog::FOLDER_LIST_MAX_HEIGHT`] shows at most seven
+/// `size.control.sm` rows, so eight names cover the widest case with one
+/// to spare.
+const FOLDER_ROW_LAYERS: [&str; 8] = [
+    "folder-row-0",
+    "folder-row-1",
+    "folder-row-2",
+    "folder-row-3",
+    "folder-row-4",
+    "folder-row-5",
+    "folder-row-6",
+    "folder-row-7",
+];
+
+/// The input dialog cell that paints the box model row by row.
+///
+/// `INC-21` recorded the dialog's rectangles as resolved values but
+/// painted only the card, the control and the two footer buttons. This
+/// paints every band between the frame and the buttons as its own quad,
+/// and for a folder list paints each `28px` row separately with its own
+/// fill, border and label pairing — which is where `UIF-INP-003`'s
+/// zero-shift guarantee is actually visible: the rows below the control
+/// hold their rectangles whether the list is one row deep or capped.
+fn input_dialog_rows_cell(
+    name: &str,
+    spec: input_dialog::InputDialogSpec,
+    value: Option<&str>,
+) -> Cell {
+    let palette = Palette::dark();
+    let frame = ModalFrame::resolve(&palette);
+    let viewport = viewport();
+
+    let mut focus = FocusState::new();
+    let mut registry = SurfaceRegistry::new();
+    let mut host = InputDialogHost::open(
+        spec,
+        Point::new(space::XL * 12.0, space::XL * 8.0),
+        false,
+        viewport,
+        &mut focus,
+        &mut registry,
+    );
+    if let Some(value) = value {
+        let _ = host.set_value(value.to_string(), &mut focus);
+    }
+
+    let layout = *host.layout();
+    let invalid = !host.verdict().is_accept();
+
+    let mut layers = vec![
+        (
+            "scrim",
+            surface_layer(
+                host.scrim_bounds(),
+                frame.scrim,
+                Color::TRANSPARENT,
+                0.0,
+                0.0,
+            ),
+        ),
+        (
+            "card",
+            surface_layer(
+                layout.card,
+                frame.surface,
+                frame.border,
+                input_dialog::card_border(),
+                frame.radius,
+            ),
+        ),
+        (
+            "row-title",
+            surface_layer(layout.title, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        (
+            "row-context",
+            surface_layer(layout.context, frame.surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+    ];
+
+    let mut audit = vec![
+        AuditPair {
+            channel: "card.border",
+            foreground: frame.border,
+            background: frame.surface,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "row.title",
+            foreground: palette.text_strong,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "row.context",
+            foreground: palette.text_muted,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        },
+    ];
+
+    let mut resolved = vec![
+        StyleEntry::text("control.kind", format!("{:?}", host.control())),
+        StyleEntry::text("geometry.title", rect_text(layout.title)),
+        StyleEntry::text("geometry.context", rect_text(layout.context)),
+        StyleEntry::text("geometry.control", rect_text(layout.control)),
+        StyleEntry::text("geometry.validation", rect_text(layout.validation)),
+        StyleEntry::text("geometry.footer", rect_text(layout.footer)),
+        StyleEntry::number("folder-row.height", input_dialog::FOLDER_ROW_HEIGHT),
+        StyleEntry::number(
+            "folder-list.max-height",
+            input_dialog::FOLDER_LIST_MAX_HEIGHT,
+        ),
+    ];
+
+    match host.control() {
+        input_dialog::InputControl::FolderList { folders, .. } => {
+            layers.push((
+                "list-well",
+                surface_layer(
+                    layout.control,
+                    palette.surface_sunken,
+                    palette.border_subtle,
+                    shape::BORDER_HAIRLINE,
+                    frame.radius,
+                ),
+            ));
+
+            let row_height = input_dialog::FOLDER_ROW_HEIGHT;
+            let capacity = if row_height > 0.0 {
+                (layout.control.height / row_height).floor() as usize
+            } else {
+                0
+            };
+            let visible = capacity.min(folders.len()).min(FOLDER_ROW_LAYERS.len());
+            let selected = host.selected();
+
+            resolved.push(StyleEntry::text(
+                "folder-rows.total",
+                folders.len().to_string(),
+            ));
+            resolved.push(StyleEntry::text("folder-rows.visible", visible.to_string()));
+            resolved.push(StyleEntry::text(
+                "folder-rows.selected",
+                selected.to_string(),
+            ));
+
+            for (index, layer_name) in FOLDER_ROW_LAYERS.iter().take(visible).enumerate() {
+                let row = Rectangle::new(
+                    Point::new(
+                        layout.control.x,
+                        layout.control.y + index as f32 * row_height,
+                    ),
+                    Size::new(layout.control.width, row_height),
+                );
+                let is_selected = index == selected;
+                let fill = if is_selected {
+                    palette.accent_fill
+                } else {
+                    palette.surface_sunken
+                };
+                let border = if is_selected {
+                    palette.accent_border
+                } else {
+                    palette.border_subtle
+                };
+                let label = if is_selected {
+                    palette.text_strong
+                } else {
+                    palette.text_primary
+                };
+
+                layers.push((
+                    *layer_name,
+                    surface_layer(row, fill, border, shape::BORDER_HAIRLINE, 0.0),
+                ));
+                resolved.push(StyleEntry::text(
+                    "folder-row.bounds",
+                    format!("{index} = {}", rect_text(row)),
+                ));
+                audit.push(AuditPair {
+                    channel: if is_selected {
+                        "folder-row.selected"
+                    } else {
+                        "folder-row.label"
+                    },
+                    foreground: label,
+                    background: fill,
+                    role: ContrastRole::Text,
+                });
+            }
+        }
+        input_dialog::InputControl::TextEntry { .. } => {
+            layers.push((
+                "row-control",
+                surface_layer(
+                    layout.control,
+                    palette.surface_sunken,
+                    palette.border_subtle,
+                    shape::BORDER_HAIRLINE,
+                    frame.radius,
+                ),
+            ));
+            audit.push(AuditPair {
+                channel: "row.control.border",
+                foreground: palette.border_subtle,
+                background: palette.surface_sunken,
+                role: ContrastRole::Chrome,
+            });
+        }
+        input_dialog::InputControl::Confirmation { .. } => {}
+    }
+
+    layers.extend(dialog_footer_layers(&layout, host.intent(), &palette));
+    resolved.push(StyleEntry::text("intent", format!("{:?}", host.intent())));
+    resolved.push(StyleEntry::text("verdict", format!("{:?}", host.verdict())));
+
+    if invalid {
+        resolved.push(StyleEntry::colour(
+            "validation.foreground",
+            palette.status_danger_text,
+        ));
+        audit.push(AuditPair {
+            channel: "row.validation",
+            foreground: palette.status_danger_text,
+            background: frame.surface,
+            role: ContrastRole::Text,
+        });
+    }
+
+    Cell {
+        id: format!("input-dialog-rows/{name}"),
+        kind: CellKind::Composite,
+        subject: "input-dialog-rows",
+        spec: "UIF-INP-001",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, viewport, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every input-dialog row cell: the text entry, a short folder list, a
+/// folder list driven to its `200px` cap, and a bare confirmation.
+#[must_use]
+pub fn input_dialog_row_cells() -> Vec<Cell> {
+    vec![
+        input_dialog_rows_cell(
+            "text-entry",
+            input_dialog::InputDialogSpec::rename("gallery.rows.rename", "notes", "notes.md"),
+            Some("renamed.md"),
+        ),
+        input_dialog_rows_cell(
+            "folder-list",
+            input_dialog::InputDialogSpec::move_item(
+                "gallery.rows.move",
+                "notes.md",
+                vec!["inbox".into(), "archive".into()],
+            ),
+            None,
+        ),
+        input_dialog_rows_cell(
+            "folder-list-capped",
+            input_dialog::InputDialogSpec::move_item(
+                "gallery.rows.move-capped",
+                "notes.md",
+                (0..12).map(|index| format!("folder-{index}")).collect(),
+            ),
+            None,
+        ),
+        input_dialog_rows_cell(
+            "confirmation",
+            input_dialog::InputDialogSpec::delete_confirmation(
+                "gallery.rows.delete",
+                input_dialog::DeleteTargets::Single("notes.md".into()),
+            ),
+            None,
+        ),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Cells for the movable overlay's trailing actions (§4.7.1, UIF-MOV-001)
+// ---------------------------------------------------------------------------
+
+/// The movable overlay's trailing action cluster cell (`UIF-MOV-001`).
+///
+/// The cluster is the title bar's exclusion zone: the part of the bar a
+/// drag must *not* start, because `Dock` and `Close ×` live there. The
+/// cell asserts the zone, the two `24px` controls inside it, and the
+/// `8px` gap between them, each as its own quad, and re-derives the
+/// cluster's width from [`ACTION_CONTROL_SIZE`] and [`ACTION_GAP`] so a
+/// change to either constant moves the assertion rather than drifting
+/// away from it.
+fn movable_action_cell(name: &str, gesture: MovableGesture) -> Cell {
+    let palette = Palette::dark();
+    let anatomy = MovableAnatomy::resolve(&palette);
+    let viewport = viewport();
+
+    let mut focus = FocusState::new();
+    let mut registry = SurfaceRegistry::new();
+    let mut storage = MemoryGeometryStorage::new();
+    let host = driven_movable_host(gesture, viewport, &mut focus, &mut registry, &mut storage);
+
+    let bar = host.title_bar();
+    let cluster = host.trailing_actions();
+    let centre = (cluster.height - ACTION_CONTROL_SIZE) / 2.0;
+    let dock = Rectangle::new(
+        Point::new(cluster.x, cluster.y + centre),
+        Size::new(ACTION_CONTROL_SIZE, ACTION_CONTROL_SIZE),
+    );
+    let close = Rectangle::new(
+        Point::new(dock.x + ACTION_CONTROL_SIZE + ACTION_GAP, dock.y),
+        Size::new(ACTION_CONTROL_SIZE, ACTION_CONTROL_SIZE),
+    );
+    let drag_zone = Rectangle::new(
+        Point::new(bar.x, bar.y),
+        Size::new((cluster.x - bar.x).max(0.0), bar.height),
+    );
+    let derived_width = ACTION_CONTROL_SIZE * 2.0 + ACTION_GAP;
+
+    let layers = vec![
+        (
+            "title-bar",
+            surface_layer(bar, anatomy.title_bar_surface, Color::TRANSPARENT, 0.0, 0.0),
+        ),
+        ("drag-zone", ink_box(drag_zone, anatomy.divider)),
+        ("action-cluster", ink_box(cluster, anatomy.divider)),
+        ("action-dock", ink_box(dock, anatomy.meta_text)),
+        ("action-close", ink_box(close, anatomy.meta_text)),
+    ];
+
+    let resolved = vec![
+        StyleEntry::text("geometry.card", rect_text(host.card())),
+        StyleEntry::text("geometry.title-bar", rect_text(bar)),
+        StyleEntry::text("geometry.cluster", rect_text(cluster)),
+        StyleEntry::text("geometry.dock", rect_text(dock)),
+        StyleEntry::text("geometry.close", rect_text(close)),
+        StyleEntry::text("geometry.drag-zone", rect_text(drag_zone)),
+        StyleEntry::number("action.control-size", ACTION_CONTROL_SIZE),
+        StyleEntry::number("action.gap", ACTION_GAP),
+        StyleEntry::number("action.derived-width", derived_width),
+        StyleEntry::text(
+            "action.width-matches-host",
+            ((cluster.width - derived_width).abs() < CHANNEL_EPS).to_string(),
+        ),
+        StyleEntry::text("drag-zone.ends-at-cluster", "true"),
+    ];
+
+    let audit = vec![
+        AuditPair {
+            channel: "title",
+            foreground: anatomy.title_text,
+            background: anatomy.title_bar_surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "action.glyph",
+            foreground: anatomy.meta_text,
+            background: anatomy.title_bar_surface,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "cluster.divider",
+            foreground: anatomy.divider,
+            background: anatomy.title_bar_surface,
+            role: ContrastRole::Chrome,
+        },
+    ];
+
+    Cell {
+        id: format!("movable-actions/{name}"),
+        kind: CellKind::Composite,
+        subject: "movable-actions",
+        spec: "UIF-MOV-001",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, viewport, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every trailing-action cell: the cluster as it opens, after a drag, and
+/// after a resize.
+#[must_use]
+pub fn movable_action_cells() -> Vec<Cell> {
+    vec![
+        movable_action_cell("idle", MovableGesture::Idle),
+        movable_action_cell("dragged", MovableGesture::Drag),
+        movable_action_cell("resized", MovableGesture::Resize),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -1912,6 +3210,7 @@ fn not_owned_cell(subject: &'static str, spec: &'static str, note: &str) -> Cell
         kind: CellKind::NotOwned,
         subject,
         spec,
+        namer: Namer::Standard,
         resolved: Vec::new(),
         frame: Frame {
             viewport: rect_array(viewport()),
@@ -1972,9 +3271,14 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(button_cells());
     cells.extend(text_input_cells());
     cells.extend(menu_cells());
+    cells.extend(menu_glyph_cells());
     cells.extend(modal_cells());
+    cells.extend(modal_band_cells());
     cells.extend(input_dialog_cells());
+    cells.extend(input_dialog_row_cells());
     cells.extend(movable_cells());
+    cells.extend(movable_action_cells());
+    cells.extend(editor_palette_cells());
     cells.push(zband_cell());
     cells.extend(not_owned_cells());
     cells
@@ -2119,7 +3423,7 @@ pub fn unmapped_colours(cells: &[Cell]) -> Vec<String> {
     for cell in cells {
         for entry in &cell.resolved {
             if let Some(colour) = entry.value.colour() {
-                let name = token_name(colour);
+                let name = cell.namer.name(colour);
                 if name.starts_with("UNMAPPED") {
                     out.push(format!("{} resolved.{} -> {name}", cell.id, entry.channel));
                 }
@@ -2146,7 +3450,7 @@ pub fn unmapped_colours(cells: &[Cell]) -> Vec<String> {
                 ("foreground", pair.foreground),
                 ("background", pair.background),
             ] {
-                let name = token_name(colour);
+                let name = cell.namer.name(colour);
                 if name.starts_with("UNMAPPED") {
                     out.push(format!(
                         "{} audit.{}.{slot} -> {name}",
@@ -2178,8 +3482,8 @@ pub fn contrast_failures(cells: &[Cell]) -> Vec<String> {
                 "{} {} {} on {} (role {:?}, ratio {}, worst-painted {})",
                 cell.id,
                 pair.channel,
-                token_name(pair.foreground),
-                token_name(pair.background),
+                cell.namer.name(pair.foreground),
+                cell.namer.name(pair.background),
                 pair.role,
                 fixed(ratio),
                 rgb8(painted),
@@ -2188,6 +3492,24 @@ pub fn contrast_failures(cells: &[Cell]) -> Vec<String> {
     }
     out
 }
+
+/// Channels the spec's matrices name that no recorded frame can carry.
+///
+/// Recorded rather than left absent, so the manifest's silence is never
+/// misread as coverage. The iced text caret is the one such channel: the
+/// backend's text pass draws it after the widget's own layers, and nothing
+/// about it — bounds, fill, token — crosses the [`renderer::Renderer`]
+/// protocol a [`FrameRecorder`] can see. Snapshotting it would mean the
+/// gallery inventing geometry the framework does not own, which is the
+/// exact thing `UIF-VER-001` exists to prevent. It stays out of the
+/// snapshot surface for the life of the recorder-based gallery.
+pub const SURFACE_EXCLUSIONS: [(&str, &str); 1] = [(
+    "text.caret",
+    "Drawn by the iced text backend rather than by a Layer: no bounds, no \
+     fill and no token reaches the renderer protocol, so it cannot be \
+     snapshotted without inventing framework geometry the crate does not \
+     own. Permanently outside the recorder-based gallery's surface.",
+)];
 
 /// Render the whole gallery as the manifest text `bin/gallery` writes.
 ///
@@ -2242,6 +3564,15 @@ pub fn manifest() -> String {
     ));
     for cell in not_owned {
         out.push_str(&format!("  {} - {}\n", cell.id, cell.spec));
+    }
+
+    out.push_str("\n== recorded exclusions: named channels with no frame ==\n");
+    out.push_str(&format!(
+        "{} channels recorded as unreachable from a snapshot\n",
+        SURFACE_EXCLUSIONS.len()
+    ));
+    for (channel, why) in SURFACE_EXCLUSIONS {
+        out.push_str(&format!("  {channel} - {why}\n"));
     }
 
     out
