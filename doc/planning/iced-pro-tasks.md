@@ -313,7 +313,7 @@ future increments down a dead end.
 
 ### M3c — Pay the INC-11 tech debt before it triples
 
-- [ ] **INC-11b** Extract the shared focus/render **test harness** and move the
+- [x] **INC-11b** Extract the shared focus/render **test harness** and move the
       **Tab bridge** out of `button_widget.rs` into a shared module.
       Two copies of the harness exist today (`focusable_tests.rs`,
       `button_widget_tests.rs`); the menu increment needs a third, and three
@@ -334,10 +334,35 @@ future increments down a dead end.
 
 ### M4 — Geometry solvers (UIF-VER-002)
 
-- [ ] **INC-12** `geometry/anchor.rs` — pure placement solver: cursor-proximal
-      offset, horizontal/vertical quadrant flipping, 8px viewport margins,
-      roomier-side scrollable fallback. Tests across extreme viewports incl.
-      640×480 and sub-menu-card windows.
+- [x] **INC-12** `geometry/anchor.rs` — pure placement solver covering all three
+      anchor kinds the spec defines: `Pointer` (`UIF-CMENU-001`),
+      `Control` (`UIF-FMENU-001/002`) and `CursorProximal` (`UIF-INP-001`).
+      `Placement` carries the **reasons**, not just the origin — flip flags per
+      axis, `scrollable`, per-axis clamp flags and `visible_height`. A card
+      clamped to the left margin and a card deliberately flipped left of the
+      cursor land at the same `x` and need different downstream handling;
+      throwing that away would force the submenu cascade to re-derive it.
+      Every spacing number is a token alias (`VIEWPORT_MARGIN = space::SM`,
+      `POINTER_OFFSET = space::XXS`, `TRIGGER_GAP = space::XS`,
+      `SUBMENU_GAP = space::XXS`) — no literals.
+      Viewport is a `Rectangle`, not a `Size`, so a content area that does not
+      start at `(0,0)` still solves under `UIF-WIN-002`.
+      Verified boundaries match the spec formula exactly: card 200×150 in
+      1000×700 flips at `x = 791` (last non-flip 790) and `y = 541`
+      (last non-flip 540), with the flipped origin landing at `x − w − 2`.
+      Notable decisions:
+      * **Tie on roominess → preferred side, no flip**, honouring the spec's
+        stated "Right and Below" preference.
+      * `Center`/`Middle` alignments return **no mirror** — a centred card clamps
+        rather than reporting a fake flip.
+      * `scrollable` is derived from resolved geometry, not from the decision, so
+        a card the clamp pulled fully inside correctly reports *not* scrollable.
+      * **No `NaN` or infinity ever leaves the solver** — sanitised at the
+        boundary and tested, including `f32::MAX` cards and zero/negative
+        viewports.
+      Tests: 50 new (356 total), including a 285-point grid sweep at `640×480`
+      and a property sweep across 8 viewports × 5 cards × ~214 anchors × 8 anchor
+      kinds asserting the inside-the-margin invariant never fails.
       **Commit:** `feat(iced-pro): add menu anchor and viewport flip solver`
 - [ ] **INC-13** `geometry/clamp.rs` (`UIF-MOV-002`) — movable-overlay title-bar
       reachability clamps (≥120px title visible, y within
