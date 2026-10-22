@@ -20,6 +20,7 @@ pub mod bridge;
 pub mod focus;
 pub mod gallery;
 pub mod geometry;
+pub mod spec_coverage;
 pub mod state;
 pub mod surface;
 pub mod token;

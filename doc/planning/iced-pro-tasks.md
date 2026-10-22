@@ -816,9 +816,61 @@ future increments down a dead end.
       movable trailing actions and the iced caret are not cells.
       Tests: 47 new (1249 total).
       **Commit:** `feat(iced-pro): add widget gallery and snapshot harness`
-- [ ] **INC-22** Spec-compliance audit + docs: cross-check every `UIF-*` ID in the
-      spec against the crate, record gaps here, update
-      `doc/technical-context/ARCHITECTURE_C4.md` for the new crate boundary.
+- [x] **INC-22** `spec_coverage.rs` + `ARCHITECTURE_C4.md` — the compliance audit,
+      made **self-maintaining rather than a document that decays.**
+      **Inventory: 46 unique numbered `UIF-*` IDs across 13 families**
+      (TOK 6, PRIN 5, VER 4, INP 4, MOV 4, CMENU 3, FMENU 3, MOD 3, WIN 3,
+      ATOM 2, NAV 3, PANE 3, TAB 3). 47 occurrences, 46 unique
+      (`UIF-MOD-002` is defined once and cross-referenced once in `UIF-WIN-003`).
+      **Disposition: 25 Implemented · 14 Partial · 7 NotOwned = 46**, asserted to
+      partition the set exactly.
+      **The audit bites.** A test reads `doc/planning/ui-framework.md` at test
+      time, extracts every numbered ID by regex, and asserts both directions:
+      every spec ID is classified, and every manifest entry exists in the spec.
+      Verified by injection — adding a fake `UIF-FAKE-999` to the spec produced
+      four failures naming exactly what was wrong, and the spec was restored
+      byte-exact (SHA-256 verified, `git diff` empty). Two permanent tests keep
+      firing on doctored input every run, so the guard is always observed alive.
+      **Status measures spec-conformance, not effort** — a taxonomy decision made
+      deliberately. `TOK-005` is `Partial` even though the token set is complete,
+      because `Implemented` would tell an integrator the palette matches the
+      spec and it does not (G-7 retune + D-5 split). Likewise `TOK-006`: every
+      resolver obeys the foreground lock today, but nothing *prevents* a future
+      violation, so the missing enforcement is on the record rather than hidden
+      behind a green tick.
+      **The 14 `Partial`s are the real integration backlog**, each naming what is
+      missing. The substantive ones: **no tooltip surface exists at all**
+      (NAV-003, ATOM-001 — no hover-delay, no floating card, no placement rule);
+      **no font family in the type scale** and no 12px SemiBold / 13px Bold rung
+      (TOK-004, G-12); **no source-level ban on raw literals**, so PRIN-001 and
+      half of VER-001 are enforced only where the gallery can see emitted colours;
+      the **Selection Foreground Lock is convention not code** (TOK-006);
+      tab-strip overflow and the 10px splitter grab zone are untested because no
+      framework geometry exists for them (VER-002); dirty **tab** closure is
+      uncovered (VER-003); the gallery covers dark palette and standard height
+      only (VER-004).
+      **Audit caught real citation drift — see G-14:** `gallery.rs` cited
+      `UIF-ZORD-001`, an ID the spec never assigned (§5 carries only the family
+      wildcard). Corrected to `UIF-ZORD-* + UIF-WIN-003`, matching every other
+      module. The deeper gap: the four-band layering rule is among the most
+      load-bearing requirements in the document and has **no numbered ID of its
+      own**, so it cannot be traced or gated by ID.
+      **`ARCHITECTURE_C4.md` updated (RUST-040):** `iced-pro` added as a third
+      workspace crate at Level 2 with **no `Rel` edge drawn to `fastmd`**, because
+      none exists (D-3); a new Level-3 component section mapping the twelve
+      subsystems to real paths; and the three integrator-critical decisions
+      recorded where a future integrator will hit them — **G-13** (escape rank ≠
+      band rank: topmost-painted is not first to receive keys), the **one-way
+      focus bridge** (model → router, read-back confined to `cfg(test)`), and
+      **D-7** (stock iced widgets are not keyboard-reachable; dropping a stock
+      `button` silently breaks `UIF-PRIN-005`).
+      **Aspiration kept out of technical context** as that directory's rules
+      require: the section opens by stating plainly that this is not live
+      application architecture and no module under `src/app/` imports
+      `iced_pro`; every node maps to a real file; every claim is present tense
+      about code that exists; the not-owned list points at the ledger instead of
+      describing a planned port.
+      Tests: 21 new (1270 total).
       **Commit:** `docs: record iced-pro crate boundary and spec coverage`
 
 ---
@@ -1020,6 +1072,18 @@ Recorded as they are found; none resolved yet.
   A consequence worth naming: **the topmost-painted surface is not the first
   asked to handle `Escape`.** Any host wiring this must not assume
   "topmost = first to receive keys".
+- **G-14 — the spec's §5 numbers no requirement, but the crate cited one.**
+  §5 is headed with the family wildcard `UIF-ZORD-*` and assigns **no numbered
+  IDs**, yet `gallery.rs` cited `UIF-ZORD-001` — an ID the spec never created.
+  Caught by the INC-22 audit (the extractor requires digits, so the phantom was
+  invisible to the coverage count but visible to a reader). **Corrected:** the
+  gallery now cites `UIF-ZORD-* + UIF-WIN-003`, matching how every other module
+  in the crate refers to the band family.
+  The underlying spec gap is real: the four-band layering rule is one of the most
+  load-bearing requirements in the document and has **no numbered requirement ID
+  of its own**, so it cannot be cited, traced or gated by ID. `UIF-WIN-003`
+  covers only the Escape-unwinding consequence. The spec should assign numbered
+  IDs to the band definitions themselves when revised.
 
 ---
 

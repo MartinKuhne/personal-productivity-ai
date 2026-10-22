@@ -1726,7 +1726,7 @@ pub fn movable_cells() -> Vec<Cell> {
 }
 
 // ---------------------------------------------------------------------------
-// Cell builder — the z-band stack (UIF-ZORD-001 … 003, G-13)
+// Cell builder — the z-band stack (§5 `UIF-ZORD-*`, `UIF-WIN-003`, G-13)
 // ---------------------------------------------------------------------------
 
 /// The stacked-band cell: one surface in each of Bands 1, 2 and 3 at once.
@@ -1856,7 +1856,7 @@ pub fn zband_cell() -> Cell {
         id: "zband/overlay-menu-modal".to_string(),
         kind: CellKind::Composite,
         subject: "zband",
-        spec: "UIF-ZORD-001",
+        spec: "UIF-ZORD-* + UIF-WIN-003",
         resolved,
         frame: paint_frame(viewport, &layers),
         audit: vec![AuditPair {

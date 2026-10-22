@@ -65,6 +65,7 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
+  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. No dependency from fastmd yet (D-3)")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
@@ -78,6 +79,18 @@ C4Container
   Rel(bg, bus, "publishes FileChanged / DirectoryChanged / BackgroundEvent")
   Rel(ws, bus, "consumes separate file and directory event buses")
 ```
+
+There are three crates in this workspace that matter to the picture above:
+`fastmd` (the application, `src/app/`), `fastmd-agent` (the agent engine,
+`src/agent/`) and `iced-pro` (`src/iced-pro/`). The first two are wired
+together — `AppOrchestrator` submits prompts to and observes events from
+`fastmd-agent`. **`iced-pro` is wired to nothing.** No module under
+`src/app/` depends on it, no `fastmd` type appears anywhere in its API,
+and no dependency edge is drawn to it above because none exists. It is a
+standalone crate that builds, tests and ships its own gallery binary under
+decision **D-3** (standalone-first); porting the app onto it is a separate,
+later project. See the `iced-pro` component diagram further down for what
+that crate contains and what it deliberately does not own.
 
 ## Optional Vector Search
 
@@ -431,6 +444,122 @@ C4Component
   Rel(ws, tm, "workspace file changes inform tags")
   Rel(msg, ev, "background messages")
 ```
+
+## Component Diagram (Level 3) — `iced-pro` crate (`src/iced-pro/`)
+
+`iced-pro` implements the widget-library specification
+`doc/planning/ui-framework.md`, whose requirement IDs are `UIF-*`.
+Package `iced-pro`, library name `iced_pro`, iced 0.14 with the same
+renderer features `fastmd` uses plus `advanced` — the only way a custom
+widget can reach `iced_core`'s widget-author surface. The library root is
+`mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly
+in `Cargo.toml`.
+
+**This is not live application architecture.** No module under `src/app/`
+imports `iced_pro`, and no `fastmd` type appears anywhere in its API. What
+follows describes code that exists, builds and passes its own tests — not
+behaviour the shipped application exhibits. The crate's own ledger of what
+is and is not satisfied lives in `src/iced-pro/spec_coverage.rs`.
+
+```mermaid
+C4Component
+  title iced-pro — Subsystems (standalone; not consumed by fastmd)
+
+  Component(token, "token/", "Closed design-token set: space, size, shape, typography, color, contrast (UIF-TOK-001..006)")
+  Component(st, "state.rs", "Interaction state machine: exclusive BaseState plus an orthogonal focus ring, resolved purely")
+  Component(fm, "focus.rs", "Keyboard focus policy, iced-free: ordered groups, disabled members, nested traps, traversal")
+  Component(br, "bridge.rs", "One-way focus bridge: model -> iced focus router; never reads focus back")
+  Component(geo, "geometry/", "Pure boundary solvers: anchor placement/flips, movable title-bar clamps")
+  Component(at, "widget/", "Atoms: button, text input (entry/search/trigger), adaptive ring, Focusable wrapper")
+  Component(zo, "surface/zorder.rs", "Four z-bands as data: backdrop, pointer rule, key disposition, escape rank; registry routing")
+  Component(mu, "surface/menu/", "Unified fixed + context menu engine: model, row-matrix view, cascade controller")
+  Component(ho, "surface/ hosts", "modal.rs, input_dialog.rs, movable.rs — frame hosts, not widgets")
+  Component(ga, "gallery.rs + bin/gallery.rs", "UIF-VER-004 harness: 91 cells, token-mapping gate, contrast gate")
+  Component(sc, "spec_coverage.rs", "UIF-* coverage ledger + the audit primitive")
+  Component(th, "test_helpers (cfg(test))", "Headless render/operate harness with focus read-back")
+
+  Rel(at, token, "paints only from tokens")
+  Rel(at, st, "resolves state")
+  Rel(at, fm, "registers focus members")
+  Rel(br, fm, "projects the model onto the router")
+  Rel(ho, geo, "placement and clamping")
+  Rel(ho, zo, "registers a band; answers Escape")
+  Rel(mu, geo, "card placement")
+  Rel(mu, at, "row widget")
+  Rel(ga, at, "draws the matrix")
+  Rel(ga, ho, "draws the matrix")
+```
+
+### The contract it exposes
+
+* **Tokens, not colours or numbers.** Every visual property a widget paints
+  is read from `token::*`; the set is closed and nothing outside `token/`
+  declares a visual literal.
+* **Pure resolution before paint.** Style resolvers, geometry solvers and
+  state machines are functions over values, so every spec matrix and every
+  boundary rule is checkable without a window, a renderer or a GPU.
+* **A focus model the host can drive.** `focus::FocusState` decides which
+  id holds focus; `bridge::tab_operation` / `focus_operation` push that
+  answer into iced. A host owns traversal by registering groups and
+  pushing traps.
+* **A layered-window model as data.** `ZBand::backdrop`, `pointer_rule`,
+  `key_disposition` and `escape_rank` are queries, so a host never
+  re-derives the spec's §5 table by hand.
+* **Injected persistence.** `movable::GeometryStorage` (with `Noop` and
+  `Memory` implementations) is the only persistence seam; the crate never
+  touches a storage location itself (RUST-024).
+
+### What it deliberately does not own (decision D-2)
+
+Framework layer only. These stay with `fastmd` and are recorded as
+`NotOwned` in the ledger rather than quietly skipped: the top navbar's slot
+contents and label conventions, the directory tree and its filtering, the
+pane splitters and pane width policy, the tab strip and tab contents, and
+the business logic of the app-specific dialogs (Batch, Tools &
+Integrations, About, Attributions). Window geometry, UI scale and their
+cross-session persistence are likewise host-owned.
+
+### Three decisions a future integrator has to know
+
+1. **Escape rank is not band rank (ledger gap G-13).** §4.1 unwinds menus
+   before dialogs while §5 elevates Modal (band 3) above Menu (band 2).
+   Both are correct: they answer *"what is the user unwinding"* and *"what
+   is painted in front"*. `escape_rank` is `Menu(3) > Modal(2) >
+   UtilityOverlay(1) > Workspace(0)`, independent of band rank, so a menu
+   opened from inside a dialog sits under that dialog's scrim in z but
+   closes on the first `Escape`. **The topmost-painted surface is not the
+   first to receive keys** — a host must not assume otherwise.
+2. **The focus bridge runs one way: model → router, never the reverse.**
+   The router holds a flat positional list and is structurally incapable
+   of groups, nested traps or ordinal stability across a rebuild, and any
+   widget that registered itself would become a source of truth about
+   focus that could move a host against its own trap. Focus read-back
+   exists only in the `#[cfg(test)]` harness so production code cannot
+   reach it by accident.
+3. **Stock iced widgets are not keyboard-reachable in this framework
+   (decision D-7, from gap G-10).** Across `iced_widget` 0.14 only
+   `text_input` and `text_editor` implement `operation::Focusable`, there
+   is no automatic `Tab` traversal and no widget-level focus event. Every
+   control that must be keyboard-reachable here is a custom widget built on
+   `widget::focusable::Focusable`. Dropping a stock `button` into one of
+   these surfaces silently breaks `UIF-PRIN-005`.
+
+### Coverage ledger
+
+`spec_coverage.rs` classifies all 46 numbered `UIF-*` ids: **25
+Implemented, 14 Partial, 7 NotOwned**, each with the modules that satisfy
+it and, where it is not fully satisfied, what exactly is missing. The
+sidecar test reads `doc/planning/ui-framework.md` at test time and
+asserts the two sets agree in both directions, so adding an id to the
+spec without classifying it fails the build. The shape of the remaining
+gap: the contrast half of `UIF-VER-001` is automated but nothing checks
+for raw literals outside `token/` at source level; the snapshot gate
+covers only `Palette::dark()` and the standard control height; the type
+scale carries no font family and no 12px SemiBold / 13px Bold rung; and
+there is **no tooltip surface anywhere in the crate** — `UIF-NAV-003` is
+Partial because D-2 excludes the navbar's contents, not a generic
+hover-delayed floating card, so that one is unimplemented framework work
+rather than a scope exclusion.
 
 ## Test Surface
 
