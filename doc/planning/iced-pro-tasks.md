@@ -166,11 +166,53 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       `1.1779 → 5.5185`, `1.0609 → 6.6216`. `accepted_failures()` is empty.
       Tests: 21 new (143 total).
       **Commit:** `feat(iced-pro): split danger fill and adapt focus ring`
-- [ ] **INC-08b** `widget/text_input.rs` (`UIF-ATOM-002`) — rest / hovered /
-      focused / invalid / disabled styling for text entry, search field and
-      dropdown trigger; reserved trailing-icon slot so validation never shifts
-      geometry.
-      Tests: all 5 states, placeholder vs value colour rules, zero-shift invariant.
+- [x] **INC-08b** `widget/text_input.rs` (`UIF-ATOM-002`) — resolver + widget for
+      text entry, search field and dropdown trigger.
+      **One matrix, three kinds.** `resolve_input_style` returns the identical
+      `InputStyle` for all three at every reachable state — asserted directly.
+      The kind selects **slot content only**, never colour.
+      Derived cells where §3.2 is silent: Focused placeholder `text.muted`,
+      Focused icon `text.primary`, Invalid placeholder `text.muted`, and
+      `Pressed` folds to the Hovered base.
+      Slot precedence is `invalid > clear > idle`, with reserved widths from
+      tokens (24 for entry/dropdown, 28 for search).
+      **Contrast audit: zero judged failures, empty accepted-failure ledger.**
+      Tightest margin in the atom is the Selection Foreground Lock at
+      `text.strong`/`accent.primary` = **4.5648** (+0.0648) — the G-7 retune
+      earning its keep in a second atom. Two `border.subtle` rows are classified
+      `RestingDivider` and reported rather than gated, with a test pinning that
+      classification so it cannot go stale silently.
+      **Zero-shift invariant is guaranteed by construction, not by convention:**
+      `text_area_bounds(bounds, kind)` and `trailing_slot_bounds(bounds, kind)`
+      are functions of `(outer bounds, kind)` **alone** — there is no parameter
+      for what is in the slot. That absence *is* the invariant. Iced's own
+      `text_input` icon slot cannot do this; its icon is glyph-measured, so
+      `🔍 → ×` moves the text. Hence the wrapper. Asserted at three levels:
+      pure (five slot contents, identical rect), partition (no overlap, no
+      leftover), and **real iced layout** — the editor's registered bounds are
+      read back through the headless harness for three glyphs of three different
+      widths and come out byte-identical.
+      **Invalid + focused: invalid wins the border, focus relocates to a 2px
+      `accent.primary` ring drawn outside the control.** Rationale: `state::resolve`
+      already ranks Invalid above every pointer state precisely so clicking at an
+      error does not visually clear it — letting focus take the border would undo
+      that ruling at the one place the two collide; and a user who cannot see a
+      field is invalid cannot fix it, while a user who cannot tell which of two
+      invalid fields is theirs can still tab. Neither signal is lost: the ring is
+      resolved through `resolve_ring_color_for_background` (4.3585 over
+      `surface.base`). When focused and *not* invalid no ring is drawn — the 2px
+      accent border **is** the indicator.
+      **Divergence from the INC-06 model worth naming: focus is NOT additive for
+      inputs.** §3.2 writes its Focused cell as a *replacement* (background
+      `code → base`, border `→ 2px accent`), unlike §3.1 where it is
+      "Rest **+** ring". Pinned by a test so an input cannot be quietly "fixed"
+      back into button semantics.
+      Three real defects were found and fixed during the increment, not test
+      noise: a pressed-and-focused input lost its focus cell; disabled-focus
+      eviction ran after `operation.traverse` so a read-only `is_focused`
+      recorded focus before the same pass removed it; and a fixture omitted
+      `.invalid()` so a "passive slot" was actually the actionable clear.
+      Tests: 71 new (744 total).
       **Commit:** `feat(iced-pro): add text input atom with validation states`
 
 > **Plan revision R1 (post-G-10).** Decision **D-7** (custom focusable widgets)

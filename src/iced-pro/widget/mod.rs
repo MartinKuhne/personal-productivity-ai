@@ -37,6 +37,10 @@
 //!   focus router, the mechanism decision **D-7** rests on and the
 //!   reason a custom widget can hold keyboard focus at all
 //!   (`UIF-PRIN-005`, gap **G-10**)
+//! * [`text_input`] — the text entry, search field and dropdown trigger
+//!   across the five-state matrix of §3.2, including the trailing slot
+//!   that is reserved whether or not anything is in it
+//!   (`UIF-ATOM-002`, `UIF-PRIN-003`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -49,3 +53,4 @@ pub mod button;
 pub mod button_widget;
 pub mod focus;
 pub mod focusable;
+pub mod text_input;
