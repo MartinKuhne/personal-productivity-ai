@@ -247,9 +247,40 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
       renderer per test) — acceptable.
       **Commit:** `feat(iced-pro): add focusable wrapper for custom widgets`
 
-### Process incidents recorded during INC-09
+- [x] **INC-11** `widget/button_widget.rs` — the first widget that turns resolved
+      style into pixels, composing every layer already built.
+      Each frame: `state::resolve` → `button::resolve_style` → paint. Both pure
+      layers were **sufficient for every colour and every state transition** —
+      nothing had to be re-derived, which is the point of having built them first.
+      `draw` is eight lines of composition containing no policy.
+      **One genuinely new concept: `Layer { bounds, fill, border }`.**
+      `ButtonStyle` answers *what* to paint but not *where the ring goes* — a
+      focus ring must sit **outside** the fill while iced strokes a quad on its
+      **inside**. Making "what did this state actually paint" a queryable,
+      ordered value rather than a side effect is what makes the ring auditable.
+      Menus and dialogs reuse this directly.
+      Ring on a hot fill resolved end-to-end: the widget asks
+      `widget::focus::resolve_ring_color(resolved_fill, palette)`, so a Danger
+      button that is hovered *and* focused gets the `text.strong` ring (5.5185:1)
+      rather than the invisible accent (1.1779:1) — D-6 working as intended in
+      the real renderer, not just in the resolver test.
+      **Tech debt this increment created, to be paid before the next widget:**
+      1. **Test-harness duplication.** The focus/headless-renderer harness from
+         `focusable_tests.rs` was copied into `button_widget_tests.rs` rather than
+         shared. A third copy is due when the menu lands. **Extract a
+         `test_helpers` module before INC-14** — three copies is the point where
+         drift becomes a bug source.
+      2. **The Tab bridge is inside `button_widget.rs`.** It is generic: model →
+         `operation::focus(id)`, never `focus_next`. It belongs in a shared
+         module, not in the first widget that needed it. Move it with the harness.
+      Tests: 35 new (289 total).
+      **Commit:** `feat(iced-pro): add focusable button widget`
 
-Two things went wrong that are worth carrying forward as supervision rules:
+### Process incidents — and a correction that changes the supervision rule
+
+Two things went wrong around INC-08/INC-09. The second was **misdiagnosed at the
+time and the diagnosis is corrected here**, because the wrong rule would have sent
+future increments down a dead end.
 
 1. **INC-08 shipped an orphan module.** `widget/focus.rs` and its sidecar were
    committed, but `widget/mod.rs` never got `pub mod focus;` — so in commit
@@ -258,15 +289,27 @@ Two things went wrong that are worth carrying forward as supervision rules:
    not capture it. **Repaired in the INC-09 commit.** Supervision rule: after
    every increment, confirm the new module actually appears in
    `cargo nextest list`, not just that the suite is green.
-2. **INC-09 modified files outside its allowed set and misreported it.** It
-   reformatted `token/color_tests.rs`, `widget/button_tests.rs`,
-   `widget/focus.rs` and `widget/focus_tests.rs` with a pre-2024 style edition
-   (expanded small `if/else`, case-insensitive import ordering), then reported
-   `cargo fmt --check` as failing "on 4 files outside this increment" as though
-   that were pre-existing drift rather than its own doing. Those four files were
-   reverted to HEAD. Supervision rule: run `git diff --stat` against the
-   increment's declared file list before committing, and never accept a
-   subagent's characterisation of a failure without checking it.
+2. **The "rogue subagent reformatting" diagnosis was WRONG.** INC-09 was recorded
+   as having reformatted four files outside its allowed set with a pre-2024 style
+   edition and then misreported the cause. It did not. Traced properly during
+   INC-11: **the `edit` tool's file writes flip Rust import ordering from
+   edition-2024 version-sort to the older case-insensitive sort, even for
+   comment-only edits.** HEAD holds the correct 2024 ordering; every file an
+   agent edited drifted. The subagents were reporting the symptom accurately and
+   were blamed for their own tooling.
+   * **Working rule that actually works:** after any `edit` to a Rust file, run
+     `cargo fmt` (write) before checking. `cargo fmt` write is the correct
+     normaliser and leaves HEAD's ordering intact — verified: after normalising,
+     the diff against HEAD is the intended change only.
+   * **Do not** "fix" drift by reverting files the increment legitimately
+     touched; that discards real work. Revert only files the increment had no
+     business changing.
+   * **Do not** trust a subagent's account of *why* a gate failed — but equally,
+     do not trust the supervisor's first theory either. Measure before assigning
+     blame. Three increments were spent chasing this.
+   * `cargo fmt --check` reports only the first dirty file per run in some
+     invocations, which is what made the drift look like it was "coming back":
+     fixing one file simply revealed the next.
 
 ---
 
@@ -285,18 +328,20 @@ Two things went wrong that are worth carrying forward as supervision rules:
 
 ### M5 — Menu engine (UIF-FMENU-*, UIF-CMENU-*)
 
-- [ ] **INC-11** `surface/menu/model.rs` — menu tree data model: action rows,
+- [ ] **INC-14** `surface/menu/model.rs` — menu tree data model: action rows,
       checkable toggles, radio choices, submenu parents, section headings,
       separators, disabled placeholders; per-row close-on-toggle policy
       (`UIF-FMENU-003`).
+      **Precondition:** extract the shared focus/render `test_helpers` module and
+      move the Tab bridge out of `button_widget.rs` (INC-11 tech debt).
       Tests: model construction, semantic predicates, group ordering.
       **Commit:** `feat(iced-pro): add menu tree data model`
-- [ ] **INC-12** `surface/menu/view.rs` — menu card + row renderer implementing the
+- [ ] **INC-15** `surface/menu/view.rs` — menu card + row renderer implementing the
       §4.9.2 state matrix (rest / hovered / pressed / focused / submenu-parent /
       destructive-hover / disabled / heading) on the shared row grid.
       Tests: every row state resolves to the specified token triple.
       **Commit:** `feat(iced-pro): add menu card and row renderer`
-- [ ] **INC-13** `surface/menu/tree.rs` — cascade controller: single-tree mutual
+- [ ] **INC-16** `surface/menu/tree.rs` — cascade controller: single-tree mutual
       exclusion, sibling replacement, parent stays open, keyboard navigation
       (`Up`/`Down` skip non-interactive rows, `Right` opens + focuses first child,
       `Left`/`Escape` unwinds to parent) (`UIF-CMENU-002/003`).
@@ -305,22 +350,22 @@ Two things went wrong that are worth carrying forward as supervision rules:
 
 ### M6 — Layered surface hosts (UIF-ZORD-*)
 
-- [ ] **INC-14** `surface/zorder.rs` — four z-band model and the strict top-down
+- [ ] **INC-17** `surface/zorder.rs` — four z-band model and the strict top-down
       Escape unwinding order (`UIF-WIN-003`): deepest submenu → root menu →
       topmost dialog → search/filter.
       Tests: unwind sequence across mixed open layers, empty-stack no-op.
       **Commit:** `feat(iced-pro): add z-band model and escape unwinding`
-- [ ] **INC-15** `surface/modal.rs` (`UIF-MOD-*`) — scrim, focus trap, card-level
+- [ ] **INC-18** `surface/modal.rs` (`UIF-MOD-*`) — scrim, focus trap, card-level
       click absorption, dirty-dismiss guard (`UIF-MOD-002`), structured error
       banner (`UIF-MOD-003`), width/height policy clamps from §4.6.2.
       Tests: scrim click clean-vs-dirty, tab containment, error banner retention.
       **Commit:** `feat(iced-pro): add modal dialog host`
-- [ ] **INC-16** `surface/input_dialog.rs` (`UIF-INP-*`) — 320px card anatomy,
+- [ ] **INC-19** `surface/input_dialog.rs` (`UIF-INP-*`) — 320px card anatomy,
       permanently reserved 20px validation slot, live validation hook, card-level
       click absorption, cursor-proximal placement + clamping, destructive parity.
       Tests: zero-shift across error states, absorption, placement clamps.
       **Commit:** `feat(iced-pro): add input dialog surface`
-- [ ] **INC-17** `surface/movable.rs` (`UIF-MOV-*`) — title-bar drag state,
+- [ ] **INC-20** `surface/movable.rs` (`UIF-MOV-*`) — title-bar drag state,
       clamp integration, z-promotion on click, non-blocking pass-through outside the
       card, respectful auto-scroll rule (`UIF-MOV-004`).
       Tests: drag deltas, promotion ordering, auto-scroll pause/resume matrix.
@@ -328,11 +373,11 @@ Two things went wrong that are worth carrying forward as supervision rules:
 
 ### M7 — Verification and closeout
 
-- [ ] **INC-18** `bin/gallery.rs` (`UIF-VER-004`) — deterministic gallery that
+- [ ] **INC-21** `bin/gallery.rs` (`UIF-VER-004`) — deterministic gallery that
       renders every atom across `(Variant × State)` and every composite surface,
       plus snapshot-style assertions on resolved styles.
       **Commit:** `feat(iced-pro): add widget gallery and snapshot harness`
-- [ ] **INC-19** Spec-compliance audit + docs: cross-check every `UIF-*` ID in the
+- [ ] **INC-22** Spec-compliance audit + docs: cross-check every `UIF-*` ID in the
       spec against the crate, record gaps here, update
       `doc/technical-context/ARCHITECTURE_C4.md` for the new crate boundary.
       **Commit:** `docs: record iced-pro crate boundary and spec coverage`
@@ -462,7 +507,11 @@ Recorded as they are found; none resolved yet.
   reachable by pointer MUST have a deterministic keyboard path") and with
   `UIF-MOD-001` (strict focus trap) and `UIF-CMENU-003` (arrow-key menu
   navigation). None of those are achievable with stock iced widgets.
-  **Resolution is a fork in the plan and is pending user input.**
+  **RESOLVED by decision D-7, proven by INC-10.** Custom widgets can hold
+  keyboard focus in iced 0.14; the `Focusable` wrapper works, is testable
+  headlessly, and bridges cleanly to the pure `FocusState` model. The four
+  constraints listed in the INC-10 ledger entry are the standing rules that
+  fall out of that proof.
 
 ---
 

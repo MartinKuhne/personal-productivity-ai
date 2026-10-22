@@ -6,13 +6,18 @@
 //! `doc/planning/ui-framework.md` specifies each atom as a matrix of
 //! those states, and this subsystem is where those matrices become code.
 //!
-//! What lives here is the **resolver**, not the renderer. Each atom module
-//! exposes a pure function from `(variant, state, palette)` to a resolved
-//! style value, which is what makes every cell of the spec's matrices
-//! checkable without a window, a renderer or a GPU — the `UIF-VER-001`
-//! and `UIF-VER-003` gates are assertions on those values. The iced
-//! widget wrappers that turn a resolved style into an `Element` are a
-//! separate increment (`INC-07b`) and are deliberately absent.
+//! Each atom here has two halves, kept deliberately separate. The
+//! **resolver** is a pure function from `(variant, state, palette)` to a
+//! resolved style value — that is what makes every cell of the spec's
+//! matrices checkable without a window, a renderer or a GPU, and it is
+//! what the `UIF-VER-001` and `UIF-VER-003` gates assert on. The
+//! **widget** is the iced `Element` that paints that value and drives the
+//! state from real pointer and keyboard events.
+//!
+//! Keeping them apart is not ceremony. A widget whose colour logic lives
+//! inside its `draw` cannot be audited for contrast; a resolver with no
+//! widget cannot be seen. Both halves exist so the audit and the artifact
+//! are each checkable on their own terms.
 //!
 //! Like [`crate::token`], this module does **not** glob-re-export its
 //! children. Atom type names collide across the set — every atom will want
@@ -22,6 +27,9 @@
 //!
 //! * [`button`] — the four button variants across the full state matrix
 //!   (`UIF-ATOM-001`)
+//! * [`button_widget`] — the rendering, keyboard-focusable button that
+//!   composes those resolvers into a real iced widget, the first atom in
+//!   the framework to paint (`UIF-ATOM-001`, `UIF-PRIN-005`)
 //! * [`focus`] — the adaptive keyboard focus-ring rule every widget with
 //!   a ring resolves through, rather than re-deriving it per variant
 //!   (`UIF-TOK-006` rule 2, decision **D-6**)
@@ -38,5 +46,6 @@
 //! number.
 
 pub mod button;
+pub mod button_widget;
 pub mod focus;
 pub mod focusable;

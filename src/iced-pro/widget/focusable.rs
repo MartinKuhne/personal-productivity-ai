@@ -96,7 +96,7 @@
 //! # Layout is transparent
 //!
 //! The wrapper adds no layout node: it hands the child the limits it was
-//! given and returns the child's own [`layout::Node`](layout::Node),
+//! given and returns the child's own [`layout::Node`],
 //! passing that same [`Layout`] down to the child in `operate`,
 //! `update`, `draw` and `overlay`. A focus wrapper that changed the
 //! geometry of what it wraps would be a styling bug disguised as a
