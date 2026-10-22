@@ -592,10 +592,47 @@ future increments down a dead end.
       positions and a real `MenuCascade` drive through the `from_cascade_close`
       seam.
       **Commit:** `feat(iced-pro): add z-band model and escape unwinding`
-- [ ] **INC-18** `surface/modal.rs` (`UIF-MOD-*`) — scrim, focus trap, card-level
-      click absorption, dirty-dismiss guard (`UIF-MOD-002`), structured error
-      banner (`UIF-MOD-003`), width/height policy clamps from §4.6.2.
-      Tests: scrim click clean-vs-dirty, tab containment, error banner retention.
+- [x] **INC-18** `surface/modal.rs` — the modal **host**: scrim, trap,
+      click-absorption boundary, dirty guard and error banner. Content is supplied
+      by the caller; the host is what makes the three `UIF-MOD` invariants
+      unbreakable rather than merely intended.
+      **Each invariant is structural, not a check:**
+      * `UIF-MOD-001` — `open()` calls `push_trap` on the card's own group
+        **before** moving focus. Containment is a property of `active_scope()`,
+        so `Tab`, `Shift+Tab`, click-to-focus and programmatic focus all pass the
+        same gate. The trap names the **group, not its members**, so
+        `sync_members` cannot widen it.
+      * `UIF-MOD-002` — a private `attempt_dismiss()` is the **only** path from
+        a user gesture to a close. Escape, scrim and the header Close control all
+        funnel through it, so the dirty guard exists in exactly one place.
+        `close()` is the programmatic bypass — the guard protects the user from
+        themselves, not the app from its own intent.
+      * `UIF-MOD-003` — the error slot's mutation set is `set_error`,
+        `clear_error` and the banner's own `Acknowledge`. Nothing else writes it,
+        so "clicking elsewhere must not dismiss the error" is a **non-event
+        rather than a rule**.
+      **Absorption mechanism:** `on_pointer` tests the card rectangle **first**
+      and the scrim branch is the `else`, so no interior arm can reach it. Inside
+      the card, `Padding`/`Disabled` → `Absorbed`; `Control(id)` is **validated
+      rather than trusted** — group membership is checked and `focus()` must
+      succeed, else it is downgraded to `Absorbed { Disabled }`. Geometry
+      outranks the caller's report in both directions: a point outside the card
+      takes the scrim path even if the caller claimed `Padding`, and a point
+      inside can never be reported as scrim.
+      **Dirty guard × z-order:** `unwind_answer()` returns `Dismissed` (clean) /
+      `Declined(CannotUnwind)` (dirty) / `Declined(NotOpen)` (closed) and
+      **never mutates the registry** — `SurfaceRegistry::escape` removes by index,
+      so unregistering from inside the closure would shift the list under it.
+      Teardown order is load-bearing: pop trap → unregister focus group, with the
+      surface unregister outside the closure. A dirty modal therefore holds its z
+      slot, its trap and its focus; draining the menu band above it cannot close
+      it. **An error does not block dismissal — dirt does.**
+      Sizing is a real policy model (`Desired`/`Cap`/`AxisPolicy`) with the five
+      §4.6.2 presets (`editor`, `tools_and_integrations`, `batch_processing`,
+      `about`, `attributions`) resolved against the viewport.
+      Tests: 114 new (858 total) — sizing 17, registration 10, Tab containment
+      11, Escape/dirty 13, scrim 6, card absorption 12, error banner 19, nested
+      modals 8, teardown/determinism 18.
       **Commit:** `feat(iced-pro): add modal dialog host`
 - [ ] **INC-19** `surface/input_dialog.rs` (`UIF-INP-*`) — 320px card anatomy,
       permanently reserved 20px validation slot, live validation hook, card-level

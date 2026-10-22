@@ -9,4 +9,5 @@
 //! testable without a window.
 
 pub mod menu;
+pub mod modal;
 pub mod zorder;
