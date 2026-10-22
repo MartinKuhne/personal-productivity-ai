@@ -113,27 +113,31 @@
 //!
 //! # What later widgets will find hard here
 //!
-//! * **The bridge is a push, and it stays one-way.** [`focus_operation`]
-//!   and [`focus_task`] project [`FocusState`] onto iced's router; nothing
-//!   reads focus back up. `INC-10` pinned why: iced's own `focus_next`
-//!   *loses* focus at the ends instead of wrapping, so a menu that
-//!   delegated `Tab` to the router would drop focus off the bottom of the
-//!   list. Every keyboard move computes its target from the model and
-//!   pushes it down. Menus and dialogs inherit that constraint unchanged —
-//!   they add traps, not a second direction.
-//! * **The bridge lives here by necessity, not by design.** It is generic
-//!   over the whole framework, not over buttons. A later increment with
-//!   file-creation rights should lift it into a shared `focus` bridge
-//!   module; it is in this file only because this increment may not create
-//!   one.
+//! * **The bridge is a push, and it stays one-way.** This button never
+//!   reads focus back out of iced's router; [`crate::bridge`] projects
+//!   [`FocusState`](crate::focus::FocusState) onto it and nothing runs the
+//!   other way. `INC-10` pinned why: iced's own `focus_next` *loses* focus
+//!   at the ends instead of wrapping, so a menu that delegated `Tab` to
+//!   the router would drop focus off the bottom of the list. Every keyboard
+//!   move computes its target from the model and pushes it down. Menus and
+//!   dialogs inherit that constraint unchanged — they add traps, not a
+//!   second direction.
+//! * **The bridge is not this widget's.** It was written here in `INC-11`
+//!   because this was the first widget that needed it, and lifted into
+//!   [`crate::bridge`] in `INC-11b` because it is generic over the whole
+//!   framework rather than over buttons. What this file keeps is the
+//!   *consumer* side: [`Button::widget_id`] is
+//!   [`crate::bridge::widget_id`]'s answer for this widget's [`FocusId`],
+//!   so the widget registers at exactly the address the bridge pushes to.
 //! * **A menu row is not a button.** [`Button`] owns its content box and
 //!   centres it. A menu row sits on a shared grid with an aligned trailing
 //!   column, and a submenu parent must keep its own row open while a child
 //!   card takes focus — a state this widget has no notion of. What the row
 //!   reuses is the resolver chain and the layer shape, not this widget.
 //! * **A dialog needs the trap pushed before it paints.** Confinement is
-//!   [`FocusState::push_trap`], and a dialog that paints before pushing
-//!   has one frame in which `Tab` reaches the background under the scrim.
+//!   [`FocusState::push_trap`](crate::focus::FocusState::push_trap), and a
+//!   dialog that paints before pushing has one frame in which `Tab`
+//!   reaches the background under the scrim.
 //! * **Overlay draw order is not solved here.** The ring is drawn outside
 //!   the button's bounds, which is fine inside a laid-out column and needs
 //!   rethinking once it can be clipped by a scrollable viewport or a
@@ -142,7 +146,6 @@
 //! Unit tests live in the sibling `button_widget_tests.rs` sidecar.
 
 use crate::focus::FocusId;
-use crate::focus::FocusState;
 use crate::state;
 use crate::state::InteractionInput;
 use crate::state::VisualState;
@@ -163,7 +166,6 @@ use iced::Padding;
 use iced::Rectangle;
 use iced::Shadow;
 use iced::Size;
-use iced::Task;
 use iced::advanced::Clipboard;
 use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
@@ -171,7 +173,6 @@ use iced::advanced::renderer;
 use iced::advanced::widget::Id;
 use iced::advanced::widget::Tree;
 use iced::advanced::widget::Widget;
-use iced::advanced::widget::operate;
 use iced::advanced::widget::operation::{self, Operation};
 use iced::advanced::widget::tree;
 use iced::mouse;
@@ -389,8 +390,9 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
     /// pressed and released inside its own bounds.
     ///
     /// `focus_id` is the identity the focus router knows this button by —
-    /// the same [`FocusId`] the host registers in [`FocusState``], so a
-    /// model transition and a click address the same control.
+    /// the same [`FocusId`] the host registers in
+    /// [`FocusState`](crate::focus::FocusState), so a model transition and
+    /// a click address the same control.
     #[must_use]
     pub fn new(
         variant: ButtonVariant,
@@ -743,41 +745,10 @@ where
 
 /// The iced [`Id`] a [`FocusId`] is registered under.
 ///
-/// The [`FocusId`]'s own string, so the model and the router name the same
-/// control and a rebuilt button re-claims the same slot. This is the same
-/// derivation [`focusable::Focusable`](crate::widget::focusable::Focusable) uses, and it has to be: a bridge that derived
-/// the id differently would push focus at an address no widget answers to.
-#[must_use]
-pub fn widget_id(focus_id: &FocusId) -> Id {
-    Id::from(focus_id.as_str().to_owned())
-}
-
-/// The [`Operation`] that projects the pure model's current focus onto
-/// iced's focus router.
-///
-/// One direction only. [`FocusState`] is authoritative and the router is a
-/// projection of it, pushed down after every policy transition — see the
-/// [module docs](self) and the four constraints `INC-10` recorded for why
-/// nothing may read focus back up out of the router.
-///
-/// A model with nothing focused pushes an explicit `unfocus` rather than
-/// doing nothing: "no control holds focus" is a state the router has to be
-/// told about too, or a control it was already showing stays lit.
-///
-/// Exposed as an [`Operation`] rather than only as a [`Task`] so a test can
-/// drive it against a real widget tree without a running runtime.
-pub fn focus_operation<Message: Send + 'static>(model: &FocusState) -> Box<dyn Operation<Message>> {
-    match model.current() {
-        Some(id) => Box::new(operation::focusable::focus::<Message>(widget_id(id))),
-        None => Box::new(operation::focusable::unfocus::<Message>()),
-    }
-}
-
-/// The same projection as a runtime [`Task`], for a host that moves focus
-/// from `update` and has to hand the work to iced rather than run it.
-pub fn focus_task<Message: Send + 'static>(model: &FocusState) -> Task<Message> {
-    operate(focus_operation(model))
-}
+/// A re-export of [`crate::bridge::widget_id`], which is the single
+/// derivation every focusable widget and every bridge push share. See the
+/// bridge's own docs for why both sides must agree.
+pub use crate::bridge::widget_id;
 
 #[cfg(test)]
 #[path = "button_widget_tests.rs"]

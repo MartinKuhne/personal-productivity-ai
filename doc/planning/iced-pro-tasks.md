@@ -311,6 +311,25 @@ future increments down a dead end.
      invocations, which is what made the drift look like it was "coming back":
      fixing one file simply revealed the next.
 
+### M3c — Pay the INC-11 tech debt before it triples
+
+- [ ] **INC-11b** Extract the shared focus/render **test harness** and move the
+      **Tab bridge** out of `button_widget.rs` into a shared module.
+      Two copies of the harness exist today (`focusable_tests.rs`,
+      `button_widget_tests.rs`); the menu increment needs a third, and three
+      copies of a nontrivial async render/operate loop is where drift becomes a
+      bug source rather than an annoyance.
+      Deliverables:
+      * a `#[cfg(test)]`-gated shared harness (or `test_helpers` module) exposing
+        the headless-renderer + `UserInterface::build` + carried `Cache` +
+        `Outcome::Chain` loop + focus read-back as one callable API;
+      * the Tab/Shift-Tab bridge as a named public function in a non-test module
+        (it is production code: model → `operation::focus(id)`, never
+        `focus_next`), reachable by every widget and later by `fastmd`;
+      * both existing test files rewritten against the shared API with **no
+        reduction in coverage** — the test count must not drop.
+      **Commit:** `refactor(iced-pro): share focus test harness and tab bridge`
+
 ---
 
 ### M4 — Geometry solvers (UIF-VER-002)

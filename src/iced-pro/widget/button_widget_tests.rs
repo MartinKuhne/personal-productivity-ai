@@ -1,20 +1,19 @@
 //! Proofs that the pure layers are sufficient to build a real, painting,
-//! keyboard-focusable button — and the technique for asserting what a
-//! widget actually painted without a screen.
+//! keyboard-focusable button, and the technique for asserting what a widget
+//! actually painted without a screen.
 //!
-//! # The harness is `INC-10`'s
+//! # The harness is the shared one
 //!
-//! These tests drive focus the same way `focusable_tests.rs` does, because
-//! that is the only way focus can be driven at all in iced 0.14
-//! (`INC-10` constraints 3 and 4): a headless renderer, a real
-//! [`UserInterface`], a [`user_interface::Cache`] carried from one build
-//! to the next so the widget [`Tree`] — where [`ButtonState`] lives —
-//! survives a rebuild the way it does across `view` calls, and the
-//! operation chain loop `UserInterface::operate` does not run for itself.
+//! These tests drive focus and paint through [`crate::test_helpers`], the
+//! same headless harness `INC-10`'s wrapper tests and the bridge tests use,
+//! because that is the only way focus can be driven at all in iced 0.14
+//! (`INC-10` constraints 3 and 4). What the button adds over a bare focus
+//! wrapper is nothing but fixtures: [`recorder_button`] and
+//! [`armed_button`] wrap a [`Button`] in the two renderers the harness
+//! offers, and [`drive`] spells out how a pointer gets a button into a
+//! [`BaseState`].
 //!
-//! The harness is generic over the renderer rather than fixed to one, which
-//! is what lets the *same* harness answer two different questions instead
-//! of growing a second one:
+//! Two legs, one harness:
 //!
 //! * with iced's real headless renderer and real `text` content — does the
 //!   button lay out, register, hold focus and paint through the actual
@@ -27,11 +26,9 @@
 //! *position* claim as much as a colour claim: it has to be outside the box
 //! the fill covers, by exactly the ring width, and no snapshot of a
 //! rendered pixel grid says that without also freezing every glyph in the
-//! crate. [`Recorder`] says it directly.
-//!
-//! [`Blank`] is the content that makes the recording leg possible: a
-//! widget that draws nothing and needs no text renderer, so the button's
-//! own layers are the only thing in the recording.
+//! crate. [`Recorder`] says it directly, and [`Blank`] — content that
+//! draws nothing and needs no text renderer — keeps the recording to the
+//! button's own layers.
 //!
 //! # Reading state back
 //!
@@ -42,12 +39,26 @@
 //! fact; "this frame painted the hover fill and the ring" is the behaviour
 //! the spec has to hold.
 
+use crate::bridge::focus_task;
+use crate::bridge::widget_id;
 use crate::focus::FocusId;
 use crate::focus::FocusMember;
 use crate::focus::FocusState;
 use crate::focus::GroupId;
 use crate::state::BaseState;
 use crate::state::VisualState;
+use crate::test_helpers::Blank;
+use crate::test_helpers::Harness;
+use crate::test_helpers::Recorder;
+use crate::test_helpers::assert_agree;
+use crate::test_helpers::centre;
+use crate::test_helpers::focus_one;
+use crate::test_helpers::iced_id;
+use crate::test_helpers::model_of;
+use crate::test_helpers::moved;
+use crate::test_helpers::opt_ids;
+use crate::test_helpers::pressed;
+use crate::test_helpers::released;
 use crate::token::color::Palette;
 use crate::widget::button;
 use crate::widget::button::ButtonStyle;
@@ -55,44 +66,25 @@ use crate::widget::button::ButtonVariant;
 use crate::widget::button_widget::Button;
 use crate::widget::button_widget::ButtonState;
 use crate::widget::button_widget::background_layer;
-use crate::widget::button_widget::focus_operation;
 use crate::widget::button_widget::focus_ring_layer;
-use crate::widget::button_widget::focus_task;
-use crate::widget::button_widget::widget_id;
 use crate::widget::focus::resolve_ring_color_for_background;
 use crate::widget::focusable::FocusableState;
 
+use iced::Background;
 use iced::Color;
 use iced::Element;
-use iced::Event;
-use iced::Font;
-use iced::Length;
-use iced::Pixels;
 use iced::Point;
 use iced::Rectangle;
 use iced::Size;
 use iced::Task;
-use iced::advanced::image;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
-use iced::advanced::widget::{Operation, Tree, Widget};
+use iced::advanced::widget::Tree;
+use iced::advanced::widget::Widget;
+use iced::advanced::widget::operation;
 use iced::mouse;
 use iced::widget::column;
 use iced::widget::text;
-
-use iced_test::core::Background;
-use iced_test::core::Border;
-use iced_test::core::Transformation;
-use iced_test::core::clipboard::Null;
-use iced_test::core::widget::Id;
-use iced_test::core::widget::operation::{self};
-use iced_test::core::widget::operation::{Outcome, black_box};
-use iced_test::futures::futures::executor::block_on;
-use iced_test::renderer::Renderer as HeadlessRenderer;
-use iced_test::runtime::UserInterface;
-use iced_test::runtime::user_interface;
-
-use std::cell::RefCell;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,10 +97,6 @@ enum Msg {
 }
 
 type Theme = iced::Theme;
-type El<'a, R> = Element<'a, Msg, Theme, R>;
-type Ui<'a, R> = UserInterface<'a, Msg, Theme, R>;
-
-const VIEWPORT: Size = Size::new(400.0, 300.0);
 
 /// A content size big enough that the button's own padding is visible in
 /// the resulting box, and small enough to leave room to move the cursor
@@ -141,343 +129,8 @@ const FOCUSED: VisualState = VisualState {
 };
 
 // ---------------------------------------------------------------------------
-// Harness — the INC-10 focus harness, generic over the renderer
-// ---------------------------------------------------------------------------
-
-/// A headless iced interface whose widget state is carried across
-/// rebuilds of whatever its view closure produces.
-///
-/// Identical in shape to `focusable_tests.rs`'s harness — same carried
-/// [`user_interface::Cache`], same operation chain loop, same
-/// [`RecordFocusables`] read-back — with two extra legs a button needs
-/// and a bare focus wrapper does not: [`pointer`](Self::pointer), which
-/// drives real `UserInterface::update` pointer events and hands back the
-/// messages the tree published, and [`paint`](Self::paint), which runs a
-/// real `UserInterface::draw` and hands back what the renderer was asked
-/// to draw.
-///
-/// Being generic over `R` is what keeps this from being a second focus
-/// harness: the focus protocol, the cache carrying and the chain loop are
-/// one implementation, used by both the real-renderer and the
-/// recording-renderer tests.
-struct Harness<R> {
-    renderer: R,
-    cache: user_interface::Cache,
-    view: Box<dyn FnMut() -> El<'static, R>>,
-}
-
-impl<R: renderer::Renderer> Harness<R> {
-    fn new(renderer: R, view: impl Fn() -> El<'static, R> + 'static) -> Self {
-        Self {
-            renderer,
-            cache: user_interface::Cache::default(),
-            view: Box::new(view),
-        }
-    }
-
-    /// Swap the tree the harness rebuilds on the next step.
-    fn set_view(&mut self, view: impl Fn() -> El<'static, R> + 'static) {
-        self.view = Box::new(view);
-    }
-
-    /// Rebuild the current view over the carried cache.
-    ///
-    /// Every step of this harness starts here, so every step is a rebuild:
-    /// a state that survives one survives a `view` call.
-    fn begin(&mut self) -> Ui<'static, R> {
-        let root = (self.view)();
-        let cache = std::mem::take(&mut self.cache);
-
-        UserInterface::build(root, VIEWPORT, cache, &mut self.renderer)
-    }
-
-    /// Carry a built interface's widget state back out for the next step.
-    fn commit(&mut self, ui: Ui<'static, R>) {
-        self.cache = ui.into_cache();
-    }
-
-    /// Run one operation — and its whole chain — against a freshly
-    /// rebuilt interface.
-    ///
-    /// The chain loop mirrors `iced_winit`'s `Action::Widget` handler;
-    /// without it `focus_next` would run only its `count` half.
-    fn run<T>(&mut self, mut operation: Box<dyn Operation<T>>) -> Option<T> {
-        let mut ui = self.begin();
-
-        let result = loop {
-            ui.operate(&self.renderer, &mut black_box(operation.as_mut()));
-
-            match operation.finish() {
-                Outcome::None => break None,
-                Outcome::Some(value) => break Some(value),
-                Outcome::Chain(next) => operation = next,
-            }
-        };
-
-        self.commit(ui);
-        result
-    }
-
-    /// Which id the router reports as focused, if any.
-    fn focused(&mut self) -> Option<Id> {
-        self.run(Box::new(operation::focusable::find_focused()))
-    }
-
-    /// Whether the widget with `id` reports itself focused.
-    fn is_focused(&mut self, id: &Id) -> bool {
-        self.run(Box::new(operation::focusable::is_focused(id.clone())))
-            .unwrap_or(false)
-    }
-
-    /// How many widgets the router sees, and which index holds focus.
-    fn count(&mut self) -> operation::focusable::Count {
-        self.run(Box::new(operation::focusable::count()))
-            .unwrap_or_default()
-    }
-
-    /// The ids the router sees, in traversal order.
-    fn registered(&mut self) -> Vec<Option<Id>> {
-        self.recorded()
-            .into_iter()
-            .map(|(id, _bounds)| id)
-            .collect()
-    }
-
-    /// The `(id, bounds)` pairs the router sees, in traversal order.
-    fn recorded(&mut self) -> Vec<(Option<Id>, Rectangle)> {
-        self.run(Box::<RecordFocusables>::default())
-            .unwrap_or_default()
-    }
-
-    /// Ask iced's own router to move focus to the next widget it sees.
-    ///
-    /// Only used to pin that it *loses* focus at the ends, which is why
-    /// the bridge must not use it.
-    fn iced_focus_next(&mut self) {
-        self.run(Box::new(operation::focusable::focus_next::<Msg>()));
-    }
-
-    /// Deliver pointer events with the cursor where the test says, and
-    /// report what the tree published.
-    ///
-    /// One call is one frame: the tree is rebuilt, the events delivered,
-    /// the state carried back out.
-    fn pointer(&mut self, events: &[Event], cursor: mouse::Cursor) -> Vec<Msg> {
-        let mut ui = self.begin();
-        let mut messages = Vec::new();
-        let mut clipboard = Null;
-
-        ui.update(
-            events,
-            cursor,
-            &mut self.renderer,
-            &mut clipboard,
-            &mut messages,
-        );
-
-        self.commit(ui);
-        messages
-    }
-}
-
-impl Harness<Recorder> {
-    /// Paint the current tree and report every quad the renderer was
-    /// asked to fill, in the order it was asked.
-    ///
-    /// A paint is a rebuild, so this reads the state that survived rather
-    /// than the state a previous step left in a local variable.
-    fn paint(&mut self) -> Vec<Paint> {
-        self.renderer.painted.borrow_mut().clear();
-
-        let mut ui = self.begin();
-
-        ui.draw(
-            &mut self.renderer,
-            &Theme::Dark,
-            &renderer::Style {
-                text_color: Color::BLACK,
-            },
-            mouse::Cursor::Unavailable,
-        );
-
-        self.commit(ui);
-        self.renderer.painted.borrow().clone()
-    }
-
-    /// The box the button laid out to, read from the layer that fills it.
-    ///
-    /// [`button::resolve_style`] always sets a non-zero border width, so
-    /// [`background_layer`] always produces a layer and the first recorded
-    /// quad is always the button's own box.
-    fn button_bounds(&mut self) -> Rectangle {
-        self.paint()
-            .first()
-            .copied()
-            .unwrap_or_else(|| panic!("a button must paint its own box"))
-            .bounds
-    }
-}
-
-impl Harness<HeadlessRenderer> {
-    /// A harness over iced's real headless renderer.
-    fn headless(view: impl Fn() -> El<'static, HeadlessRenderer> + 'static) -> Self {
-        let renderer = block_on(<HeadlessRenderer as renderer::Headless>::new(
-            Font::with_name("Fira Sans"),
-            Pixels(16.0),
-            None,
-        ))
-        .expect("a headless renderer should be available for button tests");
-
-        Self::new(renderer, view)
-    }
-
-    /// Run a real draw pass over the current tree.
-    ///
-    /// Nothing is asserted about pixels: this proves [`Widget::draw`] runs
-    /// to completion against a real renderer — real quads, real text,
-    /// real layer calls — in whatever state the tree is currently in.
-    fn render(&mut self) {
-        let mut ui = self.begin();
-
-        ui.draw(
-            &mut self.renderer,
-            &Theme::Dark,
-            &renderer::Style {
-                text_color: Color::BLACK,
-            },
-            mouse::Cursor::Unavailable,
-        );
-
-        self.commit(ui);
-    }
-}
-
-/// An operation that records every focusable widget the router visits.
-///
-/// `Send` holds because the recording sits behind a `RefCell`, which is
-/// `Send` for a `Send` payload, and the operation never leaves its thread.
-#[derive(Default)]
-struct RecordFocusables {
-    seen: RefCell<Vec<(Option<Id>, Rectangle)>>,
-}
-
-type Recorded = Vec<(Option<Id>, Rectangle)>;
-
-impl Operation<Recorded> for RecordFocusables {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Recorded>)) {
-        operate(self);
-    }
-
-    fn focusable(
-        &mut self,
-        id: Option<&Id>,
-        bounds: Rectangle,
-        _state: &mut dyn operation::Focusable,
-    ) {
-        self.seen.borrow_mut().push((id.cloned(), bounds));
-    }
-
-    fn finish(&self) -> Outcome<Recorded> {
-        Outcome::Some(self.seen.borrow().clone())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Recorder — a renderer that reports instead of rasterising
-// ---------------------------------------------------------------------------
-
-/// One `fill_quad` a widget asked for.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Paint {
-    bounds: Rectangle,
-    background: Background,
-    border: Border,
-}
-
-/// A renderer that records what it is told to draw.
-///
-/// Implements only the base [`renderer::Renderer`] protocol, which is all
-/// [`Button`] needs: its content is [`Blank`], so no text renderer is
-/// reachable and the recording contains nothing but the button's own
-/// layers.
-#[derive(Default)]
-struct Recorder {
-    painted: RefCell<Vec<Paint>>,
-}
-
-impl renderer::Renderer for Recorder {
-    fn start_layer(&mut self, _bounds: Rectangle) {}
-
-    fn end_layer(&mut self) {}
-
-    fn start_transformation(&mut self, _transformation: Transformation) {}
-
-    fn end_transformation(&mut self) {}
-
-    fn fill_quad(&mut self, quad: renderer::Quad, background: impl Into<Background>) {
-        self.painted.borrow_mut().push(Paint {
-            bounds: quad.bounds,
-            background: background.into(),
-            border: quad.border,
-        });
-    }
-
-    fn reset(&mut self, _new_bounds: Rectangle) {}
-
-    fn allocate_image(
-        &mut self,
-        _handle: &image::Handle,
-        _callback: impl FnOnce(Result<image::Allocation, image::Error>) + Send + 'static,
-    ) {
-    }
-}
-
-/// Content that draws nothing and needs no text renderer.
-///
-/// Lets the recording leg see only the button's own paint.
-struct Blank(Size);
-
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Blank
-where
-    Renderer: renderer::Renderer,
-{
-    fn size(&self) -> Size<Length> {
-        Size::new(Length::Fixed(self.0.width), Length::Fixed(self.0.height))
-    }
-
-    fn layout(
-        &mut self,
-        _tree: &mut Tree,
-        _renderer: &Renderer,
-        _limits: &layout::Limits,
-    ) -> layout::Node {
-        layout::Node::new(self.0)
-    }
-
-    fn draw(
-        &self,
-        _tree: &Tree,
-        _renderer: &mut Renderer,
-        _theme: &Theme,
-        _style: &renderer::Style,
-        _layout: Layout<'_>,
-        _cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-    ) {
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
-
-fn iced_id(label: &str) -> Id {
-    Id::from(label.to_owned())
-}
-
-fn opt_ids(labels: &[&'static str]) -> Vec<Option<Id>> {
-    labels.iter().map(|label| Some(iced_id(label))).collect()
-}
 
 /// A recording harness around one button with blank content.
 fn recorder_button(
@@ -485,11 +138,11 @@ fn recorder_button(
     label: &'static str,
     configure: impl Fn(Button<'static, Msg, Theme, Recorder>) -> Button<'static, Msg, Theme, Recorder>
     + 'static,
-) -> Harness<Recorder> {
-    Harness::new(Recorder::default(), move || {
+) -> Harness<Msg, Recorder> {
+    Harness::recording(move || {
         configure(Button::new(
             variant,
-            Element::new(Blank(CONTENT)),
+            Element::new(Blank::new(CONTENT)),
             Msg::Save,
             label,
         ))
@@ -500,11 +153,11 @@ fn recorder_button(
 /// A recording harness around one button that publishes a message
 /// distinguishable from the fixtures' default, so "fired" and "did not
 /// fire" cannot be confused with a fixture wiring mistake.
-fn armed_button(label: &'static str) -> Harness<Recorder> {
-    Harness::new(Recorder::default(), move || {
+fn armed_button(label: &'static str) -> Harness<Msg, Recorder> {
+    Harness::recording(move || {
         Button::new(
             ButtonVariant::Primary,
-            Element::new(Blank(CONTENT)),
+            Element::new(Blank::new(CONTENT)),
             Msg::Cancel,
             label,
         )
@@ -512,53 +165,18 @@ fn armed_button(label: &'static str) -> Harness<Recorder> {
     })
 }
 
-/// A model holding `labels` as one enabled group, in traversal order.
-fn model_of(labels: &[&'static str]) -> (GroupId, FocusState) {
-    let group = GroupId::new("panel");
-    let mut model = FocusState::new();
-    model.register_group(
-        group.clone(),
-        labels
-            .iter()
-            .map(|label| FocusMember::new(*label))
-            .collect(),
-    );
-
-    (group, model)
-}
-
-/// Push the model's current focus into the router through the bridge.
-fn sync<R: renderer::Renderer>(harness: &mut Harness<R>, model: &FocusState) {
-    harness.run(focus_operation::<Msg>(model));
-}
-
-fn assert_agree<R: renderer::Renderer>(harness: &mut Harness<R>, model: &FocusState, step: &str) {
-    let expected = model.current().map(|id| iced_id(id.as_str()));
-    assert_eq!(
-        harness.focused(),
-        expected,
-        "after {step}: the router and `FocusState` must name the same control"
-    );
-}
-
-/// Focus `label` through a one-member model, the way a host would.
-fn focus_one<R: renderer::Renderer>(harness: &mut Harness<R>, label: &'static str) {
-    let mut model = FocusState::new();
-    model.register_group(GroupId::new("panel"), vec![FocusMember::new(label)]);
-    assert!(model.focus(&FocusId::new(label)));
-    sync(harness, &model);
-}
-
-fn moved(to: Point) -> Event {
-    Event::Mouse(mouse::Event::CursorMoved { position: to })
-}
-
-fn pressed() -> Event {
-    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-}
-
-fn released() -> Event {
-    Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+/// A recording harness around one disabled button.
+fn disabled_button(label: &'static str) -> Harness<Msg, Recorder> {
+    Harness::recording(move || {
+        Button::new(
+            ButtonVariant::Primary,
+            Element::new(Blank::new(CONTENT)),
+            Msg::Cancel,
+            label,
+        )
+        .disabled()
+        .into()
+    })
 }
 
 /// The style a `(variant, state)` pair is supposed to paint, against the
@@ -567,30 +185,25 @@ fn expected_style(variant: ButtonVariant, visual: VisualState) -> ButtonStyle {
     button::resolve_style(variant, visual, &Palette::dark())
 }
 
-/// The centre of a rectangle.
-fn centre(bounds: Rectangle) -> Point {
-    Point::new(
-        bounds.x + bounds.width / 2.0,
-        bounds.y + bounds.height / 2.0,
-    )
-}
-
 /// Drive the pointer so the button lands in `base`.
 ///
 /// `Disabled` and `Invalid` are driven the same hard way as `Pressed` —
 /// cursor over, button down — because that is the only way to show the
 /// state machine overrode the pointer rather than never received it.
-fn drive<R: renderer::Renderer>(harness: &mut Harness<R>, base: BaseState, over: Point) {
+fn drive<R: renderer::Renderer>(harness: &mut Harness<Msg, R>, base: BaseState, over: Point) {
     match base {
         BaseState::Rest | BaseState::Invalid => {
+            // A move event the tree is told to ignore: the only way to get
+            // back to `Rest` after a hover is to deliver a frame in which
+            // the cursor is unavailable.
             harness.pointer(&[moved(over)], mouse::Cursor::Unavailable);
         }
         BaseState::Hovered => {
-            harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+            harness.hover(over);
         }
         BaseState::Pressed | BaseState::Disabled => {
-            harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-            harness.pointer(&[pressed()], mouse::Cursor::Available(over));
+            harness.hover(over);
+            harness.press(over);
         }
     }
 }
@@ -677,7 +290,7 @@ fn laid_out(
     let node = button.layout(
         &mut tree,
         &Recorder::default(),
-        &layout::Limits::new(Size::ZERO, VIEWPORT),
+        &layout::Limits::new(Size::ZERO, crate::test_helpers::VIEWPORT),
     );
 
     (button, tree, node)
@@ -687,7 +300,7 @@ fn save_button(
     variant: ButtonVariant,
     label: impl Into<FocusId>,
 ) -> Button<'static, Msg, Theme, Recorder> {
-    Button::new(variant, Element::new(Blank(CONTENT)), Msg::Save, label)
+    Button::new(variant, Element::new(Blank::new(CONTENT)), Msg::Save, label)
 }
 
 // ---------------------------------------------------------------------------
@@ -715,7 +328,7 @@ fn every_variant_and_state_paints_what_the_resolver_resolved() {
                     focus_one(&mut harness, "btn");
                 }
 
-                let over = centre(harness.button_bounds());
+                let over = centre(harness.first_bounds());
                 drive(&mut harness, case.base, over);
 
                 let visual = VisualState {
@@ -810,9 +423,9 @@ fn the_button_paints_through_a_real_renderer_in_every_state() {
 #[test]
 fn the_cursor_over_the_button_drives_the_hover_fill() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+    harness.hover(over);
 
     assert_eq!(
         harness.paint()[0].background,
@@ -824,9 +437,9 @@ fn the_cursor_over_the_button_drives_the_hover_fill() {
 #[test]
 fn the_cursor_leaving_the_button_clears_the_hover_fill() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+    harness.hover(over);
     assert_eq!(
         harness.paint()[0].background,
         Background::Color(expected_style(ButtonVariant::Secondary, HOVERED).background)
@@ -843,17 +456,17 @@ fn the_cursor_leaving_the_button_clears_the_hover_fill() {
 #[test]
 fn a_held_button_paints_the_pressed_fill_until_it_is_released() {
     let mut harness = recorder_button(ButtonVariant::Primary, "btn", |b| b);
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
+    harness.hover(over);
+    harness.press(over);
     assert_eq!(
         harness.paint()[0].background,
         Background::Color(expected_style(ButtonVariant::Primary, PRESSED).background),
         "button-down inside the bounds must paint the pressed fill"
     );
 
-    harness.pointer(&[released()], mouse::Cursor::Available(over));
+    harness.release(over);
     assert_eq!(
         harness.paint()[0].background,
         Background::Color(expected_style(ButtonVariant::Primary, HOVERED).background),
@@ -866,8 +479,8 @@ fn the_cursor_is_a_pointer_only_over_an_enabled_button() {
     let viewport = Rectangle {
         x: 0.0,
         y: 0.0,
-        width: VIEWPORT.width,
-        height: VIEWPORT.height,
+        width: crate::test_helpers::VIEWPORT.width,
+        height: crate::test_helpers::VIEWPORT.height,
     };
 
     let (enabled, enabled_tree, enabled_node) =
@@ -920,11 +533,11 @@ fn the_cursor_is_a_pointer_only_over_an_enabled_button() {
 #[test]
 fn a_press_released_inside_the_button_fires_once() {
     let mut harness = armed_button("btn");
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
-    let fired = harness.pointer(&[released()], mouse::Cursor::Available(over));
+    harness.hover(over);
+    harness.press(over);
+    let fired = harness.release(over);
 
     assert_eq!(fired, vec![Msg::Cancel], "release inside the box must fire");
 }
@@ -932,10 +545,10 @@ fn a_press_released_inside_the_button_fires_once() {
 #[test]
 fn a_press_dragged_outside_the_button_does_not_fire() {
     let mut harness = armed_button("btn");
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
+    harness.hover(over);
+    harness.press(over);
     assert_eq!(
         harness.paint()[0].background,
         Background::Color(expected_style(ButtonVariant::Primary, PRESSED).background),
@@ -959,10 +572,10 @@ fn a_press_dragged_outside_the_button_does_not_fire() {
 #[test]
 fn a_press_that_started_elsewhere_does_not_fire() {
     let mut harness = armed_button("btn");
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
     harness.pointer(&[pressed()], mouse::Cursor::Available(FAR_AWAY));
-    let fired = harness.pointer(&[released()], mouse::Cursor::Available(over));
+    let fired = harness.release(over);
 
     assert!(
         fired.is_empty(),
@@ -973,18 +586,13 @@ fn a_press_that_started_elsewhere_does_not_fire() {
 #[test]
 fn a_second_release_after_the_first_does_not_fire_again() {
     let mut harness = armed_button("btn");
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
-    assert_eq!(
-        harness.pointer(&[released()], mouse::Cursor::Available(over)),
-        vec![Msg::Cancel]
-    );
+    harness.hover(over);
+    harness.press(over);
+    assert_eq!(harness.release(over), vec![Msg::Cancel]);
     assert!(
-        harness
-            .pointer(&[released()], mouse::Cursor::Available(over))
-            .is_empty(),
+        harness.release(over).is_empty(),
         "one press commits exactly one message"
     );
 }
@@ -995,17 +603,8 @@ fn a_second_release_after_the_first_does_not_fire_again() {
 
 #[test]
 fn a_disabled_button_publishes_nothing_through_a_full_press_cycle() {
-    let mut harness = Harness::new(Recorder::default(), || {
-        Button::new(
-            ButtonVariant::Primary,
-            Element::new(Blank(CONTENT)),
-            Msg::Cancel,
-            "btn",
-        )
-        .disabled()
-        .into()
-    });
-    let over = centre(harness.button_bounds());
+    let mut harness = disabled_button("btn");
+    let over = centre(harness.first_bounds());
 
     for events in [
         vec![moved(over)],
@@ -1023,26 +622,17 @@ fn a_disabled_button_publishes_nothing_through_a_full_press_cycle() {
 
 #[test]
 fn a_disabled_button_never_shows_hover_or_press_feedback() {
-    let mut harness = Harness::new(Recorder::default(), || {
-        Button::new(
-            ButtonVariant::Primary,
-            Element::new(Blank(CONTENT)),
-            Msg::Cancel,
-            "btn",
-        )
-        .disabled()
-        .into()
-    });
-    let over = centre(harness.button_bounds());
+    let mut harness = disabled_button("btn");
+    let over = centre(harness.first_bounds());
     let disabled_fill =
         Background::Color(expected_style(ButtonVariant::Primary, DISABLED).background);
 
     assert_eq!(harness.paint()[0].background, disabled_fill, "at rest");
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+    harness.hover(over);
     assert_eq!(harness.paint()[0].background, disabled_fill, "hovered");
 
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
+    harness.press(over);
     assert_eq!(
         harness.paint()[0].background,
         disabled_fill,
@@ -1055,7 +645,7 @@ fn a_disabled_button_is_absent_from_the_focus_router() {
     let mut harness = recorder_button(ButtonVariant::Primary, "dead", |b| b.disabled());
 
     assert_eq!(
-        harness.count().total,
+        harness.focus_count().total,
         0,
         "a disabled button must not appear in the router at all, not merely \
          be skipped by name"
@@ -1074,7 +664,7 @@ fn a_disabled_button_cannot_be_pushed_into_focus_through_the_bridge() {
     model.register_group(GroupId::new("panel"), vec![FocusMember::new("dead")]);
     assert!(model.focus(&FocusId::new("dead")));
 
-    sync(&mut harness, &model);
+    harness.sync(&model);
 
     assert_eq!(
         harness.focused(),
@@ -1108,7 +698,7 @@ fn disabling_a_focused_button_clears_its_ring_on_the_next_pass() {
     harness.set_view(|| {
         Button::new(
             ButtonVariant::Secondary,
-            Element::new(Blank(CONTENT)),
+            Element::new(Blank::new(CONTENT)),
             Msg::Save,
             "btn",
         )
@@ -1149,7 +739,7 @@ fn an_unfocused_button_wears_no_ring() {
 #[test]
 fn a_focused_button_wears_a_ring_outside_its_own_box() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
-    let bounds = harness.button_bounds();
+    let bounds = harness.first_bounds();
 
     focus_one(&mut harness, "btn");
 
@@ -1192,7 +782,7 @@ fn the_ring_on_a_danger_hot_fill_is_adaptive_not_the_accent() {
     // at the moment a keyboard user most needs one. The widget must end up
     // painting the adaptive colour without ever mentioning Danger's ring.
     let mut harness = recorder_button(ButtonVariant::Danger, "btn", |b| b);
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
     focus_one(&mut harness, "btn");
     drive(&mut harness, BaseState::Hovered, over);
@@ -1299,7 +889,7 @@ fn no_ring_is_layered_when_no_ring_is_due() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. The Tab bridge
+// 6. The Tab bridge, driving real buttons
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1322,7 +912,7 @@ fn tab_from_the_model_focuses_the_button() {
     );
 
     model.focus_next();
-    sync(&mut harness, &model);
+    harness.sync(&model);
 
     assert!(
         harness.is_focused(&id),
@@ -1347,7 +937,7 @@ fn the_bridge_wraps_where_iced_would_have_lost_focus() {
     let (group, mut model) = model_of(&["a", "b"]);
 
     model.focus_last_in_group(&group);
-    sync(&mut harness, &model);
+    harness.sync(&model);
     assert_eq!(harness.focused(), Some(iced_id("b")));
 
     model.focus_next();
@@ -1361,7 +951,7 @@ fn the_bridge_wraps_where_iced_would_have_lost_focus() {
          push-from-the-model, never delegate-to-the-router"
     );
 
-    sync(&mut harness, &model);
+    harness.sync(&model);
     assert_eq!(
         harness.focused(),
         Some(iced_id("a")),
@@ -1385,12 +975,12 @@ fn the_bridge_walks_two_buttons_in_registration_order() {
         opt_ids(&["a", "b"]),
         "both buttons must register, in tree order"
     );
-    assert_eq!(harness.count().total, 2);
+    assert_eq!(harness.focus_count().total, 2);
 
     let (_group, mut model) = model_of(&["a", "b"]);
     for expected in ["a", "b", "a"] {
         model.focus_next();
-        sync(&mut harness, &model);
+        harness.sync(&model);
         assert_eq!(
             harness.focused(),
             Some(iced_id(expected)),
@@ -1408,11 +998,11 @@ fn the_bridge_clears_the_router_when_the_model_clears() {
     let (_group, mut model) = model_of(&["a"]);
 
     model.focus_first_in_group(&GroupId::new("panel"));
-    sync(&mut harness, &model);
+    harness.sync(&model);
     assert_eq!(harness.focused(), Some(iced_id("a")));
 
     model.clear();
-    sync(&mut harness, &model);
+    harness.sync(&model);
 
     assert_eq!(
         harness.focused(),
@@ -1464,8 +1054,8 @@ fn focus_and_hover_survive_a_view_rebuild() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
 
     focus_one(&mut harness, "btn");
-    let over = centre(harness.button_bounds());
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+    let over = centre(harness.first_bounds());
+    harness.hover(over);
 
     let hover_fill =
         Background::Color(expected_style(ButtonVariant::Secondary, HOVERED).background);
@@ -1500,10 +1090,10 @@ fn focus_and_hover_survive_a_view_rebuild() {
 #[test]
 fn a_rebuilt_button_keeps_its_pressed_state() {
     let mut harness = recorder_button(ButtonVariant::Primary, "btn", |b| b);
-    let over = centre(harness.button_bounds());
+    let over = centre(harness.first_bounds());
 
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
-    harness.pointer(&[pressed()], mouse::Cursor::Available(over));
+    harness.hover(over);
+    harness.press(over);
 
     let pressed_fill =
         Background::Color(expected_style(ButtonVariant::Primary, PRESSED).background);
@@ -1521,14 +1111,14 @@ fn a_tree_whose_root_is_no_longer_a_button_inherits_no_button_state() {
     // which is the point. A *different* widget under a different tag must
     // not inherit a button's hover.
     let mut harness = recorder_button(ButtonVariant::Primary, "btn", |b| b);
-    let over = centre(harness.button_bounds());
-    harness.pointer(&[moved(over)], mouse::Cursor::Available(over));
+    let over = centre(harness.first_bounds());
+    harness.hover(over);
     assert_eq!(
         harness.paint()[0].background,
         Background::Color(expected_style(ButtonVariant::Primary, HOVERED).background)
     );
 
-    harness.set_view(|| Element::new(Blank(CONTENT)));
+    harness.set_view(|| Element::new(Blank::new(CONTENT)));
     assert!(
         harness.paint().is_empty(),
         "a tree whose root is no longer a button must paint no button layers"
@@ -1542,7 +1132,7 @@ fn a_tree_whose_root_is_no_longer_a_button_inherits_no_button_state() {
 #[test]
 fn the_button_wraps_its_content_in_the_token_padding() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
-    let bounds = harness.button_bounds();
+    let bounds = harness.first_bounds();
 
     assert_eq!(
         bounds.width,
@@ -1558,16 +1148,16 @@ fn the_button_wraps_its_content_in_the_token_padding() {
 
 #[test]
 fn the_button_never_shrinks_below_the_icon_only_minimum() {
-    let mut harness = Harness::new(Recorder::default(), || {
+    let mut harness = Harness::recording(|| {
         Button::new(
             ButtonVariant::Ghost,
-            Element::new(Blank(Size::new(1.0, 1.0))),
+            Element::new(Blank::new(Size::new(1.0, 1.0))),
             Msg::Save,
             "btn",
         )
         .into()
     });
-    let bounds = harness.button_bounds();
+    let bounds = harness.first_bounds();
 
     assert!(
         bounds.width >= button::ICON_ONLY_MIN_WIDTH,
@@ -1585,7 +1175,7 @@ fn the_button_never_shrinks_below_the_icon_only_minimum() {
 fn the_compact_builder_uses_the_compact_control_height() {
     let mut harness = recorder_button(ButtonVariant::Secondary, "btn", |b| b.compact());
 
-    assert_eq!(harness.button_bounds().height, button::HEIGHT_COMPACT);
+    assert_eq!(harness.first_bounds().height, button::HEIGHT_COMPACT);
 }
 
 #[test]
@@ -1595,8 +1185,8 @@ fn the_standard_builder_matches_the_default_height() {
     let mut default_height = recorder_button(ButtonVariant::Secondary, "btn", |b| b);
 
     assert_eq!(
-        compact_then_standard.button_bounds().height,
-        default_height.button_bounds().height
+        compact_then_standard.first_bounds().height,
+        default_height.first_bounds().height
     );
 }
 

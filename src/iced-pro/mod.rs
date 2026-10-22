@@ -16,7 +16,11 @@
 //! Wiring the app onto this framework is a separate, later project (decision
 //! D-3 in `doc/planning/iced-pro-tasks.md`).
 
+pub mod bridge;
 pub mod focus;
 pub mod state;
 pub mod token;
 pub mod widget;
+
+#[cfg(test)]
+pub mod test_helpers;
