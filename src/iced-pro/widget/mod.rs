@@ -97,6 +97,27 @@
 //!   determinate versus indeterminate, the three statuses, and the
 //!   cancellation flag that decides whether the stop button exists at
 //!   all (`UIF-ATOM-009`)
+//! * [`range_model`] — the one interval both §3.5 controls share: the
+//!   clamp that tests finiteness before narrowing, the four edge policies
+//!   the spec leaves open, and the grid-anchored step that does not drift
+//!   (`UIF-ATOM-005`)
+//! * [`slider`] — the paint resolver and geometry for the §3.5 slider:
+//!   the `4px` pill track, the filled rail, the `16px` thumb on its
+//!   `24px` hit target, and the fill-on-fill judgement that measurement
+//!   forced rather than the one the spec printed
+//!   (`UIF-ATOM-005`, `UIF-TOK-006`)
+//! * [`slider_host`] — the drag engine: pointer capture that keeps the
+//!   thumb tracking past the end of the track, the `Live` frame per
+//!   movement, the `Commit` that fires exactly once on release, and the
+//!   `Escape` that hands back the pre-drag value (`UIF-ATOM-005`,
+//!   §3.0.4.3)
+//! * [`number_box`] — the paint resolver and geometry for the §3.5
+//!   numeric entry: the mono `32px` field, the stacked and side-by-side
+//!   stepper rungs, and the two stepper targets resolved as buttons
+//!   without being buttons (`UIF-ATOM-005`)
+//! * [`number_box_host`] — the stepper and entry engine: click, hold and
+//!   typed-text commits, with the hold cadence arriving as a value rather
+//!   than being read from a clock (`UIF-ATOM-005`, `UIF-PRIN-007`)
 //! * [`rove`] — the single-focus walk every roving group shares: skip
 //!   the disabled members, wrap at both ends, and never lose the
 //!   keyboard on a member that was disabled underneath the focus
@@ -156,11 +177,16 @@ pub mod focus;
 pub mod focusable;
 pub mod hyperlink;
 pub mod hyperlink_model;
+pub mod number_box;
+pub mod number_box_host;
 pub mod progress;
 pub mod progress_model;
+pub mod range_model;
 pub mod rove;
 pub mod segmented;
 pub mod segmented_model;
+pub mod slider;
+pub mod slider_host;
 pub mod split_button;
 pub mod split_button_host;
 pub mod split_button_model;

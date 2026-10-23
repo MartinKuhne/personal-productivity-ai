@@ -150,18 +150,21 @@ pub const SWITCH_THUMB_INSET: f32 = (SWITCH_TRACK_HEIGHT - SWITCH_THUMB) / 2.0;
 
 /// `size.slider.track_height` — horizontal rail thickness for a `Slider`.
 ///
-/// **No consumer exists in this crate yet.** Declared on the
-/// [`SPLITTER_GRAB`] precedent: `UIF-TOK-002` defines the rung, and a
-/// slider added later — here or in the app — should read this rather than
-/// invent a thickness.
+/// Consumed by [`crate::widget::slider::TRACK_HEIGHT`], which is the rail
+/// the thumb rides on. The same rung also prices the tick marks
+/// ([`crate::widget::slider::TICK_HEIGHT`]): §3.5 sells a tick as `2 × 4`,
+/// and `4` is this number, so a tick is a track-thick notch rather than a
+/// second measurement that could disagree with the rail it hangs off.
 pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
 
 /// `size.slider.thumb` — the `16 × 16` visual thumb of a `Slider`.
 ///
-/// **No consumer exists in this crate yet** — see
-/// [`SLIDER_TRACK_HEIGHT`]. Note that the visual thumb is `16` while the
-/// pointer target §2.2 asks for is [`HIT_TARGET_MIN`] (`24`): the same
-/// indicator-versus-target split [`CHECKBOX_BOX`] carries.
+/// Consumed by [`crate::widget::slider::THUMB_SIZE`]. Note that the visual
+/// thumb is `16` while the pointer target §2.2 asks for is
+/// [`HIT_TARGET_MIN`] (`24`): the same indicator-versus-target split
+/// [`CHECKBOX_BOX`] carries. The `4` left over per side is not slack — it is
+/// what the focus ring is drawn inside, which is why the ring sits `2px` off
+/// the thumb rather than touching it.
 pub const SLIDER_THUMB: f32 = 16.0;
 
 /// `size.progress.bar_height` — linear `ProgressBar` track thickness.

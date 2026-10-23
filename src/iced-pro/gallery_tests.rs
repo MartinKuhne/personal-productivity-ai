@@ -169,6 +169,38 @@ fn expected_ids() -> Vec<String> {
     for tier in ["open", "filter-live", "commit", "cancel", "no-match"] {
         ids.push(format!("combo-tier/{tier}"));
     }
+    // `UIF-ATOM-005` / `INC-42`: the slider in two tick configurations
+    // over the five state columns, then the four drag tiers, each driven
+    // through a real SliderHost. The range controls use the five-column skin
+    // vocabulary rather than the nine-state list: the spec gives a slider no
+    // invalid skin, and both hosts report focus in the same column as rest.
+    let range_states = ["rest", "hovered", "pressed", "rest+focused", "disabled"];
+    for ticks in ["plain", "ticks"] {
+        for state in range_states.iter() {
+            ids.push(format!("slider/{ticks}-{state}"));
+        }
+    }
+    for tier in ["live", "committed", "cancelled", "release-outside-track"] {
+        ids.push(format!("slider-tier/{tier}"));
+    }
+    // The number box in both stepper shapes over the same five columns,
+    // then the seven step tiers the keyboard and the hold produce.
+    for shape in ["stacked", "side-by-side"] {
+        for state in range_states.iter() {
+            ids.push(format!("number-box/{shape}-{state}"));
+        }
+    }
+    for tier in [
+        "step-up",
+        "step-down",
+        "page-up",
+        "page-down",
+        "home",
+        "end",
+        "held",
+    ] {
+        ids.push(format!("number-box-tier/{tier}"));
+    }
     // `UIF-ATOM-008` / `INC-38`: the three badge kinds over the five tones.
     // The dot is tone-only; the count pill samples five boundary values
     // (`0`, `1`, `42`, `99`, `150` — the last two straddle the `99+` cap);
@@ -406,6 +438,14 @@ fn per_subject_cell_counts_match_the_plan() {
         // flyout states, plus the five driven binding-tier cells.
         ("combo", 24),
         ("combo-tier", 5),
+        // `UIF-ATOM-005` / `INC-42`: 2 tick configurations x 5 state
+        // columns, plus the four driven drag-tier cells.
+        ("slider", 10),
+        ("slider-tier", 4),
+        // The number box: 2 stepper shapes x 5 state columns, plus the
+        // six keyboard-step cells and the one press-and-hold cell.
+        ("number-box", 10),
+        ("number-box-tier", 7),
         // `UIF-ATOM-008` / `INC-38`: 5 dots + 5 counts x 5 tones + 4 glyphs x 5 tones.
         ("badge", 50),
         // `UIF-ATOM-006` / `INC-39`: 4 shapes x 2 rungs x 5 columns.

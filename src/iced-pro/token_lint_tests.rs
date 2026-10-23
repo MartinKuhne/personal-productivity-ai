@@ -33,32 +33,37 @@ use crate::token_lint::{
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
 /// 82 as of the four `INC-41` modules joining the tree for
-/// `UIF-ATOM-004` — `widget/combo_box.rs`, `widget/combo_host.rs`,
-/// `widget/combo_model.rs` and the split-out gallery cell module
-/// `gallery_combo.rs` — on top of the 78 `INC-40` left behind.
-const PIN_FILES_SCANNED: usize = 82;
+/// `UIF-ATOM-005` — `widget/range_model.rs`, `widget/slider.rs`,
+/// `widget/slider_host.rs`, `widget/number_box.rs`,
+/// `widget/number_box_host.rs` and the split-out gallery cell module
+/// `gallery_range.rs` — on top of the 82 `INC-41` left behind.
+const PIN_FILES_SCANNED: usize = 88;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 49 as of the three `INC-41` widget modules joining `widget/`. Rule B
+/// 54 as of the five `INC-42` range modules joining `widget/`. Rule B
 /// counts scope membership, so a file with no colour literals still
 /// counts; the gallery cells sit outside `widget/` and `surface/` and so
 /// are not among them.
-const PIN_RULE_B_FILES: usize = 49;
+const PIN_RULE_B_FILES: usize = 54;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
 ///
-/// 109 as of `INC-41`, whose eight additions are the seven
-/// `combo_box::` geometry consts (`HEIGHT_STANDARD`, `HEIGHT_COMPACT`,
-/// `HORIZONTAL_PADDING`, `SLOT_GAP`, `TRAILING_SLOT`, `CHEVRON_SIZE`,
-/// `RADIUS`) and `combo_model::FLYOUT_GAP`. Every one is a `pub const`
-/// naming a `token::*` path: the increment adds no unbound visual scalar
-/// beyond the two §3.4 figures registered below.
+/// 124 as of `INC-42`, whose fifteen additions are the nine `slider::`
+/// geometry consts (`TRACK_HEIGHT`, `TRACK_RADIUS`, `THUMB_SIZE`,
+/// `THUMB_HIT_SIZE`, `THUMB_RING_WIDTH`, `RAIL_BORDER_WIDTH`,
+/// `TICK_WIDTH`, `TICK_HEIGHT`, `FOCUS_RING_WIDTH`) and the six
+/// `number_box::` ones (`ENTRY_HEIGHT`, `STEPPER_WIDTH`,
+/// `STEP_BUTTON_SIZE`, `GLYPH_SIZE`, `RADIUS`, `BORDER_WIDTH`). Every one
+/// is a `pub const` naming a `token::*` path. The one literal this
+/// increment introduces — [`slider::FILLED_ON_UNFILLED_RATIO`] — is a
+/// recorded measurement rather than a visual primitive, carries none of
+/// the name markers Rule B scans for, and so is not classified at all.
 ///
 /// [`VISUAL_NAME_MARKERS`]: crate::token_lint::VISUAL_NAME_MARKERS
-const PIN_TOKEN_BOUND: usize = 109;
+const PIN_TOKEN_BOUND: usize = 124;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

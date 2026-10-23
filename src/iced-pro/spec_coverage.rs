@@ -1247,25 +1247,41 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.5",
-        evidence: &["token/size.rs"],
-        reason: Some(
-            "Not implemented — no `Slider` and no `NumberBox`. Missing: the 4px pill track \
-             with its unfilled `surface.active` rail and `accent.fill` active rail, the \
-             16×16px thumb inside a 24×24px hit target with its hover/press ring change, \
-             the optional 2×4px stepped tick marks, the 32px numeric input with its dual \
-             stepper, `RangeModel`, and the whole scrub contract that is really the point \
-             of the requirement — `on_change(f64)` continuous during drag, `on_commit(f64)` \
-             exactly once on release / `Enter` / focus loss, `on_cancel()` reverting on \
-             `Escape` mid-drag, and the keyboard step matrix (`←`/`↓` = −step, `→`/`↑` = \
-             +step, `PageUp`/`PageDown` = ±10×step, `Home` = min, `End` = max). \
-             `size.slider.track_height` and `size.slider.thumb` exist with no consumer.",
-        ),
+        evidence: &[
+            "widget/range_model.rs",
+            "widget/slider.rs",
+            "widget/slider_host.rs",
+            "widget/number_box.rs",
+            "widget/number_box_host.rs",
+            "token/size.rs",
+            "gallery_range.rs",
+        ],
+        reason: None,
         note: Some(
-            "This is the clearest unbuilt instance of the `UIF-ATOM-000b` live/commit/cancel \
-             contract: three of the four widgets that would exercise it (§3.2, §3.4, §3.5) \
-             are missing, so the contract itself has no proving ground either.",
+            "Built. One `RangeModel` backs both controls, so the value, the bounds and the \
+             step live in exactly one place; the slider and the number box are two paints of \
+             the same model rather than two sources of truth. The scrub contract is carried \
+             by `GestureSlot`, which hands the open gesture over exactly once: the release \
+             publishes `Commit` and closes the slot, so a second settle finds nothing to \
+             commit and cannot publish a second time. `Escape` restores the value the model \
+             held before the drag began. Pointer capture keeps the thumb tracking after the \
+             pointer leaves the track, and a release outside the track still settles — the \
+             gesture cannot leak open. Keyboard steps publish `Commit`, not `Live`, because \
+             §3.5 lists them under `on_commit`. Grid alignment re-derives the index from \
+             `low` on every step instead of accumulating, so a thousand steps cannot drift. \
+             Non-finite input is rejected before clamping, an inverted range is normalised at \
+             read time, and `step == 0` reads as continuous. \
+             SPEC GAPS, recorded rather than invented: §3.5 never says what happens when a \
+             Slider and a NumberBox are bound to the same model and both are live, so no \
+             cross-control arbitration exists; §3.5 gives the slider no `invalid` skin, so \
+             the slider has no invalid column; the 2×4px tick has no token and is derived \
+             from the track; and the `28×32px` stepper block cannot physically hold two \
+             `24×24px` buttons side by side, so the side-by-side shape is priced at 48px \
+             wide. The filled rail against the unfilled rail measures 2.98:1, under the 3.0 \
+             chrome floor; both are interior to one control rather than a perimeter, so the \
+             pair is reported but not judged.",
         ),
     },
     Coverage {
