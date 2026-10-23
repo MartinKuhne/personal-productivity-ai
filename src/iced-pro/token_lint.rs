@@ -361,6 +361,16 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "WIDTH_MAX",
         spec: "§3.7 — Teaching popover width range, upper bound 360px",
     },
+    SurfaceGeometryConstant {
+        file: "widget/combo_model.rs",
+        name: "FLYOUT_MAX_HEIGHT",
+        spec: "§3.4 — ComboBox / Select flyout max height 280px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/combo_box.rs",
+        name: "MIN_WIDTH",
+        spec: "§3.4 — ComboBox / Select trigger min width 120px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

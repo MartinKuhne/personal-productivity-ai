@@ -1193,25 +1193,57 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.4",
         evidence: &[
-            "widget/text_input.rs",
+            "widget/combo_model.rs",
+            "widget/combo_box.rs",
+            "widget/combo_host.rs",
             "surface/menu/",
             "geometry/anchor.rs",
+            "gallery_combo.rs",
         ],
-        reason: Some(
-            "Not implemented — there is no `ComboBox`/`Select`. Missing: the \
-             trigger-plus-flyout pairing (`min_width = trigger.width`, `max_height = \
-             280px`, 4px below or flipped above per `UIF-CMENU-001`), the `✓` in the \
-             selected row's 16×16px leading slot, `ComboBoxModel<Id>`, \
-             `on_open_change(bool)`, `on_filter_change(String)` for the searchable form, \
-             and `on_commit(Id)` closing the popup and restoring focus to the trigger. The \
-             pieces exist separately — `InputKind::DropdownTrigger` already paints the \
-             chevron and the menu engine already supplies the card, the roving focus and \
-             the Z-Band 2 registration — but nothing joins them into a picker.",
+        reason: None,
+        note: Some(
+            "Built on the existing menu engine rather than a second flyout: \
+             `ComboHost` owns exactly one `MenuCascade` and one `GestureSlot`, opens \
+             through `MenuTreeKind::Fixed`, and inherits `UIF-CMENU-002`'s mutual \
+             exclusion, the roving focus, the escape-rank behaviour and the Z-Band 2 \
+             registration from the reuse. The trigger resolves through \
+             `InputKind::DropdownTrigger`, so its fill, border and value are the \
+             §3.2 dropdown row; §3.4 overrides one channel, the chevron, to \
+             `text.strong` on hover/open. `ComboBoxModel<Id>` carries every field \
+             §3.4 prints plus four it does not: `editable` (the unnamed \"when \
+             searchable\" mode, default off, making the closed select the base \
+             case), `read_only` (imported from the text input's meaning — browsable, \
+             never commits), `filter_policy` and `menu_id` (derived from the control, \
+             never the filter, so `MenuCascade::sync` keeps resolving the open card \
+             across keystrokes). The `✓` is the engine's own `Check` kind, painted \
+             `accent.text` as §3.4 requires. `Up` from a closed control opens onto \
+             the last row and `Home`/`End` jump the roster, both as wrapping \
+             arithmetic against `Menu::navigable_indices` — no new engine primitive. \
+             **Four §3.4 silences, recorded rather than silently resolved.** \
+             (1) The section gives `filter_query` and `on_filter_change(String)` and \
+             never says how a query matches; the defaults are case-insensitive \
+             substring with the selected row kept, each overridable through \
+             `FilterPolicy` so the choice is visible rather than a hidden \
+             `str::contains`. (2) What shows when nothing matches is forced by the \
+             engine, not chosen: a card with no focusable row is refused \
+             (`IgnoredReason::NoFocusableRows`), so the flyout cannot be shown and \
+             the keystroke is still reported live. (3) The snapshot `Escape` \
+             restores covers the filter as well as the selection, because reverting \
+             only the selection would hand the user back a value the surviving \
+             filter is hiding. (4) Closing by the trigger is not a cancellation and \
+             reverts nothing; only `Escape` reverts. **Two things §3.4 does not \
+             reach.** Type-ahead on the closed select is not implemented and cannot \
+             be — the control owns no text buffer, so printable keys are outside \
+             its vocabulary; the editable variant owns them through a different \
+             door, which is also what stops the two variants contending for one \
+             keystroke. `ActionPending` is unsupported: §3.4 carries no `busy` or \
+             `progress` and §3.0.4.3 does not name the combobox among the \
+             pending-capable controls, so a long-running option load is \
+             unspecified.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-005",

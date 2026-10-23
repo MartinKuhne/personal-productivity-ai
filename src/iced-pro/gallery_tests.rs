@@ -146,6 +146,29 @@ fn expected_ids() -> Vec<String> {
             }
         }
     }
+    // `UIF-ATOM-004` / `INC-41`: the combobox trigger, sampled with the
+    // flyout shut and open, because §3.4 states its chevron rule against
+    // the open axis. Six columns rather than the usual five: §3.4 gives
+    // the control a `validation` field, so `invalid` is a state the
+    // trigger paints differently.
+    for rung in ["std", "cmp"] {
+        for column in [
+            "rest",
+            "hovered",
+            "pressed",
+            "rest+focused",
+            "invalid",
+            "disabled",
+        ] {
+            for flyout in ["closed", "open"] {
+                ids.push(format!("combo/{rung}-{column}-{flyout}"));
+            }
+        }
+    }
+    // The five binding tiers, each driven through a real ComboHost.
+    for tier in ["open", "filter-live", "commit", "cancel", "no-match"] {
+        ids.push(format!("combo-tier/{tier}"));
+    }
     // `UIF-ATOM-008` / `INC-38`: the three badge kinds over the five tones.
     // The dot is tone-only; the count pill samples five boundary values
     // (`0`, `1`, `42`, `99`, `150` — the last two straddle the `99+` cap);
@@ -379,6 +402,10 @@ fn per_subject_cell_counts_match_the_plan() {
         ("checkbox", 10),
         ("radio", 10),
         ("switch", 10),
+        // `UIF-ATOM-004` / `INC-41`: 2 rungs x 6 state columns x 2
+        // flyout states, plus the five driven binding-tier cells.
+        ("combo", 24),
+        ("combo-tier", 5),
         // `UIF-ATOM-008` / `INC-38`: 5 dots + 5 counts x 5 tones + 4 glyphs x 5 tones.
         ("badge", 50),
         // `UIF-ATOM-006` / `INC-39`: 4 shapes x 2 rungs x 5 columns.

@@ -32,54 +32,44 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 59 as of `widget/badge.rs`, `widget/badge_model.rs`,
-/// `widget/chip.rs` and `widget/chip_model.rs` for `UIF-ATOM-006`, the
-/// four production modules of `surface/popover/` (`mod.rs`, `model.rs`,
-/// `place.rs`, `host.rs`) for `UIF-ATOM-007`, the two split-out
-/// gallery cell modules (`gallery_chip.rs`, `gallery_popover.rs`), and
-/// the eight `INC-40` modules (`rove`, `segmented`, `segmented_model`,
-/// `split_button`, `split_button_model`, `split_button_host`,
-/// `hyperlink`, `hyperlink_model`) joining the tree for `INC-40`, and
-/// the three `INC-40` gallery cell modules (`gallery_segmented.rs`,
-/// `gallery_split_button.rs`, `gallery_hyperlink.rs`) — 78 in all.
-const PIN_FILES_SCANNED: usize = 78;
+/// 82 as of the four `INC-41` modules joining the tree for
+/// `UIF-ATOM-004` — `widget/combo_box.rs`, `widget/combo_host.rs`,
+/// `widget/combo_model.rs` and the split-out gallery cell module
+/// `gallery_combo.rs` — on top of the 78 `INC-40` left behind.
+const PIN_FILES_SCANNED: usize = 82;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 46 as of the eight `INC-40` modules joining `widget/`. Rule B counts
-/// scope membership, so a file with no colour literals still counts;
-/// the gallery cells sit outside `widget/` and `surface/` and so are not
-/// among them.
-const PIN_RULE_B_FILES: usize = 46;
+/// 49 as of the three `INC-41` widget modules joining `widget/`. Rule B
+/// counts scope membership, so a file with no colour literals still
+/// counts; the gallery cells sit outside `widget/` and `surface/` and so
+/// are not among them.
+const PIN_RULE_B_FILES: usize = 49;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
 ///
-/// 101 as of `INC-40`, whose twenty-one additions are the nine
-/// `segmented::` geometry consts (`RADIUS`, `PERIMETER_WIDTH`,
-/// `FOCUS_RING_WIDTH`, `SEGMENT_PADDING`, `CHECK_GLYPH`, `CHECK_GAP`,
-/// `CHECK_SLOT_WIDTH`, `HEIGHT_COMPACT`, `HEIGHT_STANDARD`), the eight
-/// `split_button::` ones (`CHEVRON_ZONE_WIDTH`, `DIVIDER_WIDTH`,
-/// `PRIMARY_PADDING`, `RADIUS`, `PERIMETER_WIDTH`, `FOCUS_RING_WIDTH`,
-/// `HEIGHT_COMPACT`, `HEIGHT_STANDARD`) and the five `hyperlink::` ones
-/// (`MIN_HEIGHT`, `RADIUS`, `FOCUS_RING_WIDTH`, `UNDERLINE_WIDTH`,
-/// `PADDING_X`). Every one is a `pub const` naming a `token::*` path:
-/// the increment adds no unbound visual scalar, and the scan still
-/// reports zero violations.
+/// 109 as of `INC-41`, whose eight additions are the seven
+/// `combo_box::` geometry consts (`HEIGHT_STANDARD`, `HEIGHT_COMPACT`,
+/// `HORIZONTAL_PADDING`, `SLOT_GAP`, `TRAILING_SLOT`, `CHEVRON_SIZE`,
+/// `RADIUS`) and `combo_model::FLYOUT_GAP`. Every one is a `pub const`
+/// naming a `token::*` path: the increment adds no unbound visual scalar
+/// beyond the two §3.4 figures registered below.
 ///
 /// [`VISUAL_NAME_MARKERS`]: crate::token_lint::VISUAL_NAME_MARKERS
-const PIN_TOKEN_BOUND: usize = 101;
+const PIN_TOKEN_BOUND: usize = 109;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
 const PIN_RATIO: usize = 1;
 /// Visual scalars covered by the §1.1 registry.
 ///
-/// 18 as of `popover::WIDTH_MIN` and `popover::WIDTH_MAX`, the 280–360px
-/// width range §3.7 fixes outright for a teaching popover, and which
-/// therefore need a registered authority rather than a token.
-const PIN_SURFACE_BOUND: usize = 18;
+/// 20 as of the two figures §3.4 fixes outright for a ComboBox /
+/// Select: `combo_model::FLYOUT_MAX_HEIGHT` (280px) and
+/// `combo_box::MIN_WIDTH` (120px), which therefore need a registered
+/// authority rather than a token.
+const PIN_SURFACE_BOUND: usize = 20;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

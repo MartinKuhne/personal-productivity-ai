@@ -4414,6 +4414,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(text_input_cells());
     cells.extend(text_input_tier_cells());
     cells.extend(crate::gallery_toggle::toggle_cells());
+    cells.extend(crate::gallery_combo::combo_cells());
     cells.extend(crate::gallery_badge::badge_cells());
     cells.extend(crate::gallery_chip::chip_cells());
     cells.extend(crate::gallery_progress::progress_cells());

@@ -22,6 +22,7 @@ pub mod focus;
 pub mod gallery;
 pub mod gallery_badge;
 pub mod gallery_chip;
+pub mod gallery_combo;
 pub mod gallery_hyperlink;
 pub mod gallery_popover;
 pub mod gallery_progress;
