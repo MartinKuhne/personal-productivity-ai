@@ -30,6 +30,13 @@
 //! * [`button_widget`] — the rendering, keyboard-focusable button that
 //!   composes those resolvers into a real iced widget, the first atom in
 //!   the framework to paint (`UIF-ATOM-001`, `UIF-PRIN-005`)
+//! * [`button_model`] — the declarative `ButtonModel` a host owns and hands
+//!   to the button each frame: label, icons, variant, declared density, busy
+//!   and cancellation, and the tooltip a collapsed rung owes
+//!   (`UIF-ATOM-001a`)
+//! * [`button_controller`] — the button's activation engine: the linear
+//!   gesture slot, the busy / double-activation gate and the three emission
+//!   tiers a button can put on the wire (`UIF-ATOM-001a`, §3.0.4.3)
 //! * [`focus`] — the adaptive keyboard focus rule every widget with a
 //!   focus indicator resolves through, rather than re-deriving it per
 //!   variant: one colour rule, two placements — the `2px` outer ring for
@@ -52,6 +59,8 @@
 //! number.
 
 pub mod button;
+pub mod button_controller;
+pub mod button_model;
 pub mod button_widget;
 pub mod focus;
 pub mod focusable;

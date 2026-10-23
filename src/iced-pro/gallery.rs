@@ -79,6 +79,12 @@ use crate::token::size;
 use crate::token::space;
 use crate::token::typography;
 use crate::widget::button::{self, ButtonVariant};
+use crate::widget::button_controller::ActivationSource;
+use crate::widget::button_controller::ButtonController;
+use crate::widget::button_controller::ButtonEmission;
+use crate::widget::button_model::ButtonDensity;
+use crate::widget::button_model::ButtonModel;
+use crate::widget::button_model::SPINNER_SLOT;
 use crate::widget::button_widget::Layer;
 use crate::widget::button_widget::background_layer as button_background_layer;
 use crate::widget::button_widget::focus_ring_layer as button_focus_ring_layer;
@@ -989,6 +995,194 @@ fn slug(variant: ButtonVariant) -> &'static str {
         ButtonVariant::Ghost => "ghost",
         ButtonVariant::Danger => "danger",
     }
+}
+
+// ---------------------------------------------------------------------------
+// `UIF-ATOM-001a` — the controlled button's busy, collapse and tier cells
+// ---------------------------------------------------------------------------
+//
+// The cells above snapshot what a button *looks like*. These snapshot what it
+// *does*: the busy projection a host puts on the model, the rung a declared
+// density collapses to and the tooltip that collapse then owes, and the three
+// tiers the activation engine actually emits. The tier cells are produced by
+// driving a real [`ButtonController`] rather than by writing the tier name
+// down, so a gallery frame cannot claim a behaviour the engine does not have.
+
+/// The gesture outcome a tier cell records, and how a user produces it.
+pub const BUTTON_TIERS: [(&str, &str); 3] = [
+    ("activated", "release inside the bounds"),
+    ("cancelled", "release outside, or Escape"),
+    ("cancel-requested", "press while the host reports busy"),
+];
+
+/// The `UIF-ATOM-001a` busy cell for one variant.
+///
+/// The paint is deliberately identical to that variant's `rest` cell.
+/// §3.0.4.3 forbids a busy control from resizing or re-skinning itself, so
+/// the only thing a busy button gains is the **reserved spinner slot** — and
+/// the slot is empty, because the glyph is `UIF-ATOM-009`'s deliverable and
+/// this increment reserves space rather than inventing a paint.
+#[must_use]
+pub fn button_busy_cell(variant: ButtonVariant) -> Cell {
+    let model = ButtonModel::new("Saving").busy().cancellable();
+    let mut cell = button_cell_at(variant, REST_STATE, Rung::Standard);
+
+    cell.id = format!("button/busy/{}", slug(variant));
+    cell.spec = "UIF-ATOM-001a";
+    cell.resolved.extend([
+        StyleEntry::text("busy", model.busy.to_string()),
+        StyleEntry::text("cancellable", model.cancellable.to_string()),
+        StyleEntry::text("pending", "indeterminate"),
+        StyleEntry::text("spinner.reserved", "true"),
+        StyleEntry::number("spinner.slot-width", SPINNER_SLOT),
+        StyleEntry::text("spinner.slot-token", "size.icon.sm"),
+        StyleEntry::number("bounds.height", cell_height(&cell)),
+    ]);
+    cell.note = Some(
+        "busy holds the outer bounds and reserves the spinner slot; the glyph itself is \
+         UIF-ATOM-009, so the slot renders empty"
+            .to_string(),
+    );
+    cell
+}
+
+/// The `UIF-ATOM-001a` density-collapse cell for one variant.
+///
+/// Records the rung a declared `Compact` density resolves to, the label mode
+/// that rung forces, the tooltip that mode therefore makes mandatory, and
+/// the zero vertical shift §3.0.4.4 fixes.
+#[must_use]
+pub fn button_collapsed_cell(variant: ButtonVariant) -> Cell {
+    let model = ButtonModel::new("Save")
+        .with_variant(variant)
+        .with_density(ButtonDensity::Compact)
+        .with_tooltip("Save this document");
+    let layout = model.responsive();
+    let mut cell = button_cell_at(variant, REST_STATE, Rung::Compact);
+
+    cell.id = format!("button/collapsed/{}", slug(variant));
+    cell.spec = "UIF-ATOM-001a";
+    cell.resolved.extend([
+        StyleEntry::text("density", "compact"),
+        StyleEntry::text("breakpoint", format!("{:?}", layout.breakpoint())),
+        StyleEntry::text("label-mode", format!("{:?}", layout.label_mode())),
+        StyleEntry::text(
+            "icon-only",
+            model.is_icon_only(layout.label_mode()).to_string(),
+        ),
+        StyleEntry::text("tooltip.required", "true"),
+        StyleEntry::text(
+            "tooltip.present",
+            model
+                .tooltip_for(layout.label_mode())
+                .unwrap_or("<MISSING>")
+                .to_string(),
+        ),
+        StyleEntry::number("padding-x", layout.horizontal_padding()),
+        StyleEntry::number("vertical-shift", layout.vertical_shift()),
+    ]);
+    cell.note = Some(
+        "the collapsed rung drops the label and therefore owes a tooltip (UIF-ATOM-007); \
+         the rung shift is 0px by construction"
+            .to_string(),
+    );
+    cell
+}
+
+/// The `UIF-ATOM-001a` tier cell for one gesture outcome.
+///
+/// Drives a real [`ButtonController`] and records the tier it actually
+/// emitted, so the cell is a transcript rather than a caption.
+#[must_use]
+pub fn button_tier_cell(tier: &'static str) -> Cell {
+    let idle = ButtonModel::new("Save").cancellable();
+    let busy = ButtonModel::new("Saving").busy().cancellable();
+
+    let mut controller = ButtonController::new();
+    let emission = match tier {
+        "activated" => {
+            controller.begin(&idle, ActivationSource::Pointer);
+            controller
+                .commit(&idle, ActivationSource::Pointer)
+                .expect("a live button commits")
+        }
+        "cancelled" => {
+            controller.begin(&idle, ActivationSource::Pointer);
+            controller.cancel(&idle).expect("an open gesture cancels")
+        }
+        "cancel-requested" => controller
+            .begin(&busy, ActivationSource::Pointer)
+            .expect("a busy cancellable button requests"),
+        other => panic!("unknown tier {other}"),
+    };
+
+    let mut cell = button_cell_at(ButtonVariant::Primary, REST_STATE, Rung::Standard);
+    cell.id = format!("button/tier/{tier}");
+    cell.spec = "UIF-ATOM-001a";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text(
+            "dispatched",
+            matches!(emission, ButtonEmission::Activated(_)).to_string(),
+        ),
+        StyleEntry::text(
+            "restores-activation",
+            match emission.settlement() {
+                Some(settlement) => format!("{:?}", settlement.activated),
+                None => "n/a".to_string(),
+            },
+        ),
+        StyleEntry::text(
+            "pending-at-settle",
+            format!("{:?}", emission.settlement().map(|s| s.pending)),
+        ),
+        StyleEntry::text("fired-count", controller.fired().to_string()),
+        StyleEntry::text("suppressed-count", controller.suppressed().to_string()),
+    ]);
+    cell.note = Some(format!("produced by: {}", how(tier)));
+    cell
+}
+
+/// How a user produces one of the [`BUTTON_TIERS`] outcomes.
+fn how(tier: &'static str) -> &'static str {
+    BUTTON_TIERS
+        .iter()
+        .find(|(name, _)| *name == tier)
+        .map(|(_, how)| *how)
+        .unwrap_or("unknown")
+}
+
+/// The `rest` visual state, for cells that snapshot a control at rest.
+const REST_STATE: VisualState = VisualState {
+    base: BaseState::Rest,
+    focused: false,
+};
+
+/// The height a cell recorded, so a busy cell can assert it did not change.
+fn cell_height(cell: &Cell) -> f32 {
+    cell.resolved
+        .iter()
+        .find(|entry| entry.channel == "geometry.height")
+        .and_then(|entry| match entry.value {
+            StyleValue::Number(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0.0)
+}
+
+/// Every `UIF-ATOM-001a` button cell: busy and collapsed per variant, plus
+/// the three activation tiers.
+#[must_use]
+pub fn button_controlled_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for variant in BUTTON_VARIANTS {
+        cells.push(button_busy_cell(variant));
+        cells.push(button_collapsed_cell(variant));
+    }
+    for (tier, _) in BUTTON_TIERS {
+        cells.push(button_tier_cell(tier));
+    }
+    cells
 }
 
 /// An [`InputKind`] as a cell-id slug.
@@ -3652,6 +3846,7 @@ pub fn tooltip_cells() -> Vec<Cell> {
 pub fn matrix() -> Vec<Cell> {
     let mut cells = Vec::new();
     cells.extend(button_cells());
+    cells.extend(button_controlled_cells());
     cells.extend(text_input_cells());
     cells.extend(menu_cells());
     cells.extend(menu_glyph_cells());

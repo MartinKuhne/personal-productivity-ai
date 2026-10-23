@@ -70,6 +70,21 @@ fn expected_ids() -> Vec<String> {
             }
         }
     }
+    // `UIF-ATOM-001a`: the controlled button's busy and density-collapse
+    // cells, per variant, then the three activation tiers.
+    for variant in ["primary", "secondary", "ghost", "danger"] {
+        ids.push(format!("button/busy/{variant}"));
+        ids.push(format!("button/collapsed/{variant}"));
+    }
+    ids.extend(
+        [
+            "button/tier/activated",
+            "button/tier/cancelled",
+            "button/tier/cancel-requested",
+        ]
+        .iter()
+        .map(|id| (*id).to_string()),
+    );
     for kind in ["text-entry", "search", "dropdown-trigger"] {
         for state in expected_states() {
             for rung in RUNGS {
@@ -208,7 +223,7 @@ fn per_subject_cell_counts_match_the_plan() {
     let counts = subject_counts_for(&cells);
 
     let mut expected: Vec<(&str, usize)> = vec![
-        ("button", 72),
+        ("button", 83),
         ("input", 54),
         ("menu", 12),
         ("menu-glyph", 10),

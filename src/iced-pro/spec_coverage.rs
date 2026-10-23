@@ -758,30 +758,33 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/responsive.rs",
         ],
         reason: Some(
-            "Foundation built; **no widget is wired to it**. `binding/` now carries the \
-             four pieces §3.0.4 names: `Controlled<'a, M>` against `Ephemeral<S>` for the \
+            "Foundation built **and now adopted by the Button**. `binding/` carries the four \
+             pieces §3.0.4 names — `Controlled<'a, M>` against `Ephemeral<S>` for the \
              ownership split, `Live<T>` / `Commit<T>` / `Cancel<T>` as three tiers that \
              deliberately share no trait, with a `Gesture<T>` guard whose consuming \
              `commit`/`cancel` make a double-settle a compile error; `ActionPending` with \
              an `ActivationGate` that closes the double-click window before the app's \
              `busy` projection arrives; and a pure breakpoint solver that takes no \
              window-width parameter at all, making a global-window query unrepresentable. \
-             Missing: **adoption** — not one widget reads any of it. `button_widget.rs`, \
-             `text_input.rs`, the menu rows and the dialog hosts still emit a single iced \
-             `Message` on activation, so no user can today observe a live-vs-commit \
-             distinction, a busy box lock, or a container-query collapse. Missing: the \
-             **spinner** — `reserves_spinner` answers whether the 14px slot is held but \
-             nothing paints it, and `size.spinner.sm` / `.md` are still absent from \
-             `token/size.rs` pending `UIF-ATOM-009`. Missing: the **overflow selection** \
-             — the solver decides `Expanded` versus `Compact`, not *which* toolbar items \
-             move into the `⋯` menu, which is `UIF-COMP-008`'s work.",
+             `widget/button_model.rs` and `widget/button_controller.rs` put that \
+             vocabulary under a real control: the model is taken as `Controlled`, the \
+             interaction half is tagged `Ephemeral<ButtonState>`, and every press settles \
+             through a linear gesture into one of the three tiers. Missing: **adoption by \
+             every other control** — `text_input.rs`, the menu rows and the dialog hosts \
+             still emit a single iced `Message`, so the tier vocabulary is proven on one \
+             atom rather than across the set. Missing: the **spinner** — the 14px slot is \
+             reserved and reported but nothing paints it, and `size.spinner.sm` / `.md` \
+             are still absent from `token/size.rs` pending `UIF-ATOM-009`. Missing: the \
+             **overflow selection** — the solver decides `Expanded` versus `Compact`, not \
+             *which* toolbar items move into the `⋯` menu, which is `UIF-COMP-008`'s work.",
         ),
         note: Some(
             "This requirement was invisible to the ledger until the 2026-10-22 revision: \
              the extractor could not see a letter-suffixed id, so `000b` was never \
              classified and `UIF-ATOM-000` reported `Implemented` over it. The \
-             `Partial` here is deliberate and will stay `Partial` until a widget actually \
-             consumes the vocabulary — a foundation nothing uses is not coverage.",
+             `Partial` here is deliberate and will stay `Partial` until every control \
+             consumes the vocabulary — a foundation one widget uses is coverage of one \
+             widget.",
         ),
     },
     Coverage {
@@ -791,6 +794,8 @@ const SPEC_COVERAGE: &[Coverage] = &[
         evidence: &[
             "widget/button.rs",
             "widget/button_widget.rs",
+            "widget/button_model.rs",
+            "widget/button_controller.rs",
             "widget/focus.rs",
             "state.rs",
             "surface/tooltip/",
@@ -801,11 +806,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
              tooltip rule is now *enforced* rather than hoped for: `Button::icon_only` \
              cannot be reached without naming the label, `tooltip_violation` reports the \
              forbidden shape without panicking, and a debug shield fires at the moment the \
-             box becomes icon-only. Missing: the tooltip is **available** to a host, not \
-             **attached** by the framework at paint time — nothing in this crate drives a \
-             `HoverController` from the button widget's own hover event, so connecting \
-             the card to the control is still host code (see `UIF-ATOM-007`). Also \
-             missing: `busy` / `ActionPending` on the button itself (`UIF-ATOM-001a`).",
+             box becomes icon-only. The controlled path (`Button::controlled`) now drives \
+             the same paint off a host-owned `ButtonModel` and is pinned to produce \
+             pixel-identical layers to the legacy builder. Missing: the tooltip is \
+             **available** to a host, not **attached** by the framework at paint time — \
+             nothing in this crate drives a `HoverController` from the button widget's \
+             own hover event, so connecting the card to the control is still host code \
+             (see `UIF-ATOM-007`).",
         ),
         note: None,
     },
@@ -813,21 +820,48 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-001a",
         status: Status::Partial,
         section: "§3.1",
-        evidence: &["widget/button_widget.rs", "widget/button.rs"],
+        evidence: &[
+            "widget/button_model.rs",
+            "widget/button_controller.rs",
+            "widget/button_widget.rs",
+            "widget/button.rs",
+            "binding/controlled.rs",
+            "binding/pending.rs",
+            "binding/snapshot.rs",
+            "binding/responsive.rs",
+        ],
         reason: Some(
-            "The activation half of the contract is real: press-and-release inside the hit \
-             bounds, `Enter`/`Space` on the focused control, an `enabled` flag that \
-             suppresses both, and a `tooltip` field carried on the widget. Missing: the \
-             data model is a builder, not `ButtonModel` — there is no `busy` field, so no \
-             inline `size.spinner.sm` indicator, no box-lock against a busy label and no \
-             suppression of duplicate `on_activate` emissions; no `on_cancel_request()` \
-             for a caller that wants to abort a running action; no typed \
-             `leading_icon`/`trailing_icon` (content is an opaque `Element`, so the \
-             framework cannot reason about what it is wrapping); and `density` is a \
-             `compact()`/`standard()` builder pair rather than a model field a host can \
-             read back off the control.",
+            "The model and the engine are both real now. `ButtonModel` carries `label`, \
+             typed `leading_icon`/`trailing_icon`, `variant`, `density`, `busy`, \
+             `disabled`, `cancellable` and `tooltip`, is handed over as \
+             `Controlled<'_, ButtonModel>` and never copied, and the widget's own half is \
+             tagged `Ephemeral<ButtonState>`. Activation routes through a linear gesture: \
+             release inside and `Enter`/`Space` on the focused control emit \
+             `Commit<ButtonSettlement>`, release outside and `Escape` emit \
+             `Cancel<ButtonSettlement>` carrying the pre-gesture snapshot, and a press or \
+             `Escape` while the host reports busy emits `Cancel<CancelRequest>` — \
+             `on_cancel_request()` — granted only when the model declared \
+             `cancellable`. `ActivationGate` suppresses a second activation before the \
+             host's `busy` projection lands, and the collapsed rung resolves through \
+             `ResponsiveLayout` so the label drop and the tooltip obligation are the same \
+             event and the vertical shift is zero by construction. Missing: the **live \
+             container query** — the rung comes from a density the *host declares*, not \
+             from a width the widget observed; `ButtonModel::responsive_to(allocated)` is \
+             there for a host that has one, but `Widget::layout` does not swap its content \
+             element mid-frame, so no button today collapses on its own. Missing: the \
+             **spinner glyph** — `SPINNER_SLOT` reserves `size::ICON_SM` and nothing \
+             paints it (`UIF-ATOM-009`). Missing: **`size.spinner.sm` / `.md`** are still \
+             absent from `token/size.rs`. Deviation: the model carries a `cancellable` \
+             flag the spec's field list does not name, because `ActionPending::try_cancel` \
+             cannot grant a cancellation the host never offered — without it \
+             `on_cancel_request()` would be unreachable for a running action.",
         ),
-        note: None,
+        note: Some(
+            "The previous entry for this id claimed `Enter`/`Space` on the focused control \
+             was implemented. It was not — `button_widget.rs` handled no keyboard event \
+             at all before this increment, and the claim was ledger drift rather than \
+             behaviour (RUST-041). It is now actually implemented and tested.",
+        ),
     },
     Coverage {
         id: "UIF-ATOM-001b",

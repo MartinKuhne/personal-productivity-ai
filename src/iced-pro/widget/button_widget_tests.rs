@@ -73,6 +73,7 @@ use crate::widget::focusable::FocusableState;
 use iced::Background;
 use iced::Color;
 use iced::Element;
+use iced::Event;
 use iced::Point;
 use iced::Rectangle;
 use iced::Size;
@@ -190,7 +191,11 @@ fn expected_style(variant: ButtonVariant, visual: VisualState) -> ButtonStyle {
 /// `Disabled` and `Invalid` are driven the same hard way as `Pressed` —
 /// cursor over, button down — because that is the only way to show the
 /// state machine overrode the pointer rather than never received it.
-fn drive<R: renderer::Renderer>(harness: &mut Harness<Msg, R>, base: BaseState, over: Point) {
+fn drive<M: Send + 'static, R: renderer::Renderer>(
+    harness: &mut Harness<M, R>,
+    base: BaseState,
+    over: Point,
+) {
     match base {
         BaseState::Rest | BaseState::Invalid => {
             // A move event the tree is told to ignore: the only way to get
@@ -1366,4 +1371,343 @@ fn the_violation_names_the_offending_control() {
             content: Size::new(8.0, 8.0),
         }
     );
+}
+
+// ---------------------------------------------------------------------------
+// 10. The controlled path — `UIF-ATOM-001a`
+// ---------------------------------------------------------------------------
+//
+// Everything above drives the legacy `Button::new`, which publishes one
+// message on release-inside and nothing else. Everything below drives
+// `Button::controlled`, where a host-owned `ButtonModel` decides what the
+// button is and the `ButtonController` decides which of the three tiers each
+// user action becomes.
+
+use crate::binding::Controlled;
+use crate::binding::Ephemeral;
+use crate::widget::button_controller::ButtonEmission;
+use crate::widget::button_model::ButtonDensity;
+use crate::widget::button_model::ButtonModel;
+use iced::advanced::widget::tree;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::Location;
+use iced::keyboard::Modifiers;
+use iced::keyboard::key;
+
+/// The three tiers, as three distinct messages — so a test can tell which
+/// tier fired rather than only that something did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Ctl {
+    Activated,
+    Cancelled,
+    StopRequested,
+}
+
+/// A controlled-button harness.
+///
+/// The model is leaked deliberately: the harness's view closure must return
+/// an `Element<'static, ..>`, and `Controlled<'a, ButtonModel>` borrows the
+/// model for `'a`. One leaked struct per test stands in for the long-lived,
+/// application-owned model a real host hands the button every frame — which
+/// is exactly the ownership shape `UIF-ATOM-001a` requires, and the reason
+/// the button takes a `Controlled` rather than a `ButtonModel`.
+fn controlled(model: &'static ButtonModel, label: &'static str) -> Harness<Ctl, Recorder> {
+    Harness::recording(move || {
+        Button::controlled(
+            Controlled::new(model),
+            Element::new(Blank::new(CONTENT)),
+            label,
+            |emission| match emission {
+                ButtonEmission::Activated(_) => Some(Ctl::Activated),
+                ButtonEmission::Cancelled(_) => Some(Ctl::Cancelled),
+                ButtonEmission::CancelRequested(_) => Some(Ctl::StopRequested),
+            },
+        )
+        .into()
+    })
+}
+
+fn leaked(model: ButtonModel) -> &'static ButtonModel {
+    Box::leak(Box::new(model))
+}
+
+/// A `KeyPressed` for a named key, every other field at its neutral value.
+fn key_press(name: key::Named) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(name),
+        modified_key: Key::Named(name),
+        physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+        location: Location::Standard,
+        modifiers: Modifiers::NONE,
+        text: None,
+        repeat: false,
+    })
+}
+
+#[test]
+fn releasing_inside_a_controlled_button_publishes_the_activated_tier() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    let messages = harness.release(over);
+
+    assert_eq!(messages, vec![Ctl::Activated]);
+}
+
+#[test]
+fn releasing_outside_publishes_the_cancelled_tier_and_no_activation() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    let messages = harness.release(FAR_AWAY);
+
+    assert_eq!(
+        messages,
+        vec![Ctl::Cancelled],
+        "a drag-out is a cancel, not a silent nothing — the host has to be able to see it"
+    );
+}
+
+#[test]
+fn pressing_a_busy_cancellable_button_asks_to_stop_instead_of_activating() {
+    let mut harness = controlled(
+        leaked(ButtonModel::new("Saving").busy().cancellable()),
+        "btn",
+    );
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    let messages = harness.press(over);
+
+    assert_eq!(messages, vec![Ctl::StopRequested]);
+    assert_eq!(
+        harness.release(over),
+        Vec::new(),
+        "and the release does not turn around and dispatch — the action was never let through"
+    );
+}
+
+#[test]
+fn a_busy_fire_and_forget_button_offers_no_stop_affordance() {
+    let mut harness = controlled(leaked(ButtonModel::new("Saving").busy()), "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    assert_eq!(harness.press(over), Vec::new());
+    assert_eq!(harness.release(over), Vec::new());
+}
+
+#[test]
+fn enter_on_a_focused_controlled_button_activates() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    focus_one(&mut harness, "btn");
+
+    let messages = harness.pointer(&[key_press(key::Named::Enter)], mouse::Cursor::Unavailable);
+
+    assert_eq!(
+        messages,
+        vec![Ctl::Activated],
+        "`Enter` on the focused control is an activation — the keyboard path the spec \
+         names and this widget previously did not have at all"
+    );
+}
+
+#[test]
+fn space_on_a_focused_controlled_button_activates() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    focus_one(&mut harness, "btn");
+
+    let messages = harness.pointer(&[key_press(key::Named::Space)], mouse::Cursor::Unavailable);
+
+    assert_eq!(messages, vec![Ctl::Activated]);
+}
+
+#[test]
+fn keys_do_nothing_on_a_button_that_does_not_hold_focus() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+
+    for name in [key::Named::Enter, key::Named::Space, key::Named::Escape] {
+        assert_eq!(
+            harness.pointer(&[key_press(name)], mouse::Cursor::Unavailable),
+            Vec::new(),
+            "an unfocused button must not swallow {name:?}"
+        );
+    }
+}
+
+#[test]
+fn escape_cancels_a_gesture_the_pointer_still_holds_open() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    focus_one(&mut harness, "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    let messages = harness.pointer(
+        &[key_press(key::Named::Escape)],
+        mouse::Cursor::Available(over),
+    );
+
+    assert_eq!(messages, vec![Ctl::Cancelled]);
+    assert_eq!(
+        harness.release(over),
+        Vec::new(),
+        "the gesture was settled by Escape, so releasing inside must not fire it again"
+    );
+}
+
+#[test]
+fn escape_with_an_action_already_running_asks_to_stop() {
+    let mut harness = controlled(
+        leaked(ButtonModel::new("Saving").busy().cancellable()),
+        "btn",
+    );
+    focus_one(&mut harness, "btn");
+
+    // No press: the action was already running before the user pressed Escape.
+    let messages = harness.pointer(&[key_press(key::Named::Escape)], mouse::Cursor::Unavailable);
+
+    assert_eq!(
+        messages,
+        vec![Ctl::StopRequested],
+        "with no snapshot to revert to, the honest tier is the request"
+    );
+}
+
+#[test]
+fn the_double_click_window_is_closed_through_the_widget() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save").cancellable()), "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    assert_eq!(harness.release(over), vec![Ctl::Activated]);
+
+    // Same model, same frame: the host has not reported busy yet.
+    harness.hover(over);
+    harness.press(over);
+    assert_eq!(
+        harness.release(over),
+        Vec::new(),
+        "the second click of a double-click never reaches the host"
+    );
+}
+
+#[test]
+fn a_controlled_button_takes_its_variant_from_the_model() {
+    let mut harness = controlled(
+        leaked(
+            ButtonModel::new("Delete")
+                .with_variant(ButtonVariant::Danger)
+                .with_tooltip("Delete this permanently"),
+        ),
+        "btn",
+    );
+
+    assert_eq!(
+        harness.paint()[0].background,
+        Background::Color(expected_style(ButtonVariant::Danger, REST).background),
+        "the variant came from the model, not from a second declaration that could drift"
+    );
+}
+
+#[test]
+fn a_disabled_model_makes_the_button_inert_and_absent_from_the_router() {
+    let mut harness = controlled(leaked(ButtonModel::new("Save").disabled()), "btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    assert_eq!(harness.release(over), Vec::new());
+    assert_eq!(
+        harness.registered(),
+        vec![],
+        "a disabled model is not registered, so the router cannot see it at all"
+    );
+    assert_eq!(
+        harness.paint()[0].background,
+        Background::Color(expected_style(ButtonVariant::Secondary, DISABLED).background)
+    );
+}
+
+#[test]
+fn the_button_state_is_tagged_ephemeral() {
+    // `UIF-ATOM-001a`: the interaction half is the ephemeral half, and the
+    // tag is where that is recorded. A rebuild under a different widget
+    // cannot inherit it, and a rebuild under this one starts fresh.
+    let model = ButtonModel::new("Save");
+    let button: Button<'_, Ctl, Theme, Recorder> = Button::controlled(
+        Controlled::new(&model),
+        Element::new(Blank::new(CONTENT)),
+        "btn",
+        |_| None,
+    );
+
+    assert_eq!(
+        Widget::tag(&button),
+        tree::Tag::of::<Ephemeral<ButtonState>>(),
+        "the tag names `Ephemeral<ButtonState>`, not a bare `ButtonState`"
+    );
+}
+
+#[test]
+fn collapsing_the_density_does_not_move_the_button_vertically() {
+    // §3.0.4.4's "0px vertical layout shift", proven at the widget: the
+    // compact rung changes the rung the layout resolves through, and nothing
+    // about where the box sits.
+    let mut standard = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let mut compact = controlled(
+        leaked(ButtonModel::new("Save").with_density(ButtonDensity::Compact)),
+        "btn",
+    );
+
+    let a = standard.first_bounds();
+    let b = compact.first_bounds();
+
+    assert_eq!(a.y, b.y, "a neighbour that moves is a layout jump");
+    assert_eq!(a.height, b.height);
+    assert_eq!(a.x, b.x);
+}
+
+#[test]
+fn a_controlled_button_paints_the_same_layers_a_legacy_one_of_the_same_variant_paints() {
+    // The colour-unchanged guarantee: routing through the model changes which
+    // *tier* is emitted, never what is painted. Same variant, same pointer
+    // script, identical paint.
+    for base in [BaseState::Rest, BaseState::Hovered, BaseState::Pressed] {
+        let mut legacy = recorder_button(ButtonVariant::Primary, "btn", |b| b);
+        let mut ctl = controlled(
+            leaked(ButtonModel::new("Save").with_variant(ButtonVariant::Primary)),
+            "btn",
+        );
+        let over = centre(legacy.first_bounds());
+        drive(&mut legacy, base, over);
+        drive(&mut ctl, base, over);
+
+        assert_eq!(
+            legacy.paint(),
+            ctl.paint(),
+            "the controlled path repainted differently from the legacy path in {base:?}"
+        );
+    }
+}
+
+#[test]
+fn a_legacy_button_still_publishes_only_on_release_inside() {
+    // The regression guard on the untouched path: `Button::new` behaves
+    // exactly as it did before the binding foundation existed.
+    let mut harness = armed_button("btn");
+    let over = centre(harness.first_bounds());
+
+    harness.hover(over);
+    harness.press(over);
+    assert_eq!(harness.release(FAR_AWAY), Vec::new());
+
+    harness.press(over);
+    assert_eq!(harness.release(over), vec![Msg::Cancel]);
 }

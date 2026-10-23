@@ -145,6 +145,8 @@
 //!
 //! Unit tests live in the sibling `button_widget_tests.rs` sidecar.
 
+use crate::binding::Controlled;
+use crate::binding::Ephemeral;
 use crate::focus::FocusId;
 use crate::state;
 use crate::state::InteractionInput;
@@ -153,6 +155,10 @@ use crate::token::color::Palette;
 use crate::widget::button;
 use crate::widget::button::ButtonStyle;
 use crate::widget::button::ButtonVariant;
+use crate::widget::button_controller::ActivationSource;
+use crate::widget::button_controller::ButtonController;
+use crate::widget::button_controller::ButtonEmission;
+use crate::widget::button_model::ButtonModel;
 use crate::widget::focusable::FocusableState;
 
 use iced::Alignment;
@@ -175,6 +181,9 @@ use iced::advanced::widget::Tree;
 use iced::advanced::widget::Widget;
 use iced::advanced::widget::operation::{self, Operation};
 use iced::advanced::widget::tree;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
 use iced::mouse;
 
 /// A stroke width that draws no stroke at all.
@@ -293,7 +302,8 @@ pub fn focus_ring_layer(bounds: Rectangle, style: &ButtonStyle) -> Option<Layer>
     })
 }
 
-/// What the button has observed about itself, before any judgement.
+/// The **ephemeral** half of a button — everything that happened to it rather
+/// than what it is.
 ///
 /// Every field is a raw signal from a different source — the pointer, the
 /// focus router — and none of them is reconciled here.
@@ -306,21 +316,32 @@ pub fn focus_ring_layer(bounds: Rectangle, style: &ButtonStyle) -> Option<Layer>
 /// [`FocusableState`] `INC-10` proved, so the router's protocol is the
 /// only way in and out of focus here as well, and a button cannot be
 /// focused by a path the framework has not gated.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// [`interaction`](Self::interaction) is the [`ButtonController`] that
+/// carries the open gesture, the activation gate and the outstanding stop
+/// request. It is why this type is no longer `Copy`: a snapshot of a
+/// controller would be a snapshot of a *promise* — a copy of `in_flight`
+/// that the original could never clear. The whole point of the gate is that
+/// there is exactly one of them per control, so the type refuses to be
+/// duplicated. The tree holds it under [`Ephemeral`], which is the tag that
+/// says "this is interaction state, and a rebuild is allowed to drop it".
+#[derive(Debug, Default, PartialEq)]
 pub struct ButtonState {
     focusable: FocusableState,
     hovered: bool,
     pressed: bool,
+    interaction: ButtonController,
 }
 
 impl ButtonState {
     /// A resting, unfocused, unpressed button state.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             focusable: FocusableState::new(),
             hovered: false,
             pressed: false,
+            interaction: ButtonController::new(),
         }
     }
 
@@ -340,6 +361,12 @@ impl ButtonState {
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
         self.pressed
+    }
+
+    /// The activation engine riding with this state (`UIF-ATOM-001a`).
+    #[must_use]
+    pub const fn interaction(&self) -> &ButtonController {
+        &self.interaction
     }
 
     /// Resolve the raw observations into the state this button paints.
@@ -375,7 +402,7 @@ impl ButtonState {
 pub struct Button<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     variant: ButtonVariant,
     content: Element<'a, Message, Theme, Renderer>,
-    on_press: Message,
+    on_press: Option<Message>,
     focus_id: FocusId,
     widget_id: Id,
     palette: Palette,
@@ -384,7 +411,18 @@ pub struct Button<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     enabled: bool,
     invalid: bool,
     tooltip: Option<String>,
+    model: Option<Controlled<'a, ButtonModel>>,
+    emit: Option<Emit<'a, Message>>,
 }
+
+/// Where a [`Button`] sends the tiers its activation engine produces.
+///
+/// A sum-returning closure rather than three separate callbacks: one call site
+/// in the widget, and the host decides per tier what — if anything — becomes a
+/// [`Message`]. Returning `None` is how a host says "I have no `on_cancel` for
+/// this button" without the widget having to know which tiers it was told
+/// about.
+type Emit<'a, Message> = Box<dyn Fn(ButtonEmission) -> Option<Message> + 'a>;
 
 impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
     /// Build a button for `variant` that publishes `on_press` when it is
@@ -407,7 +445,7 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
         Self {
             variant,
             content: content.into(),
-            on_press,
+            on_press: Some(on_press),
             focus_id,
             widget_id,
             palette: Palette::dark(),
@@ -416,7 +454,76 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
             enabled: true,
             invalid: false,
             tooltip: None,
+            model: None,
+            emit: None,
         }
+    }
+
+    /// The shared shape every constructor starts from: default palette,
+    /// standard height, token padding, live, valid, no model.
+    fn base(
+        variant: ButtonVariant,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        focus_id: impl Into<FocusId>,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = widget_id(&focus_id);
+
+        Self {
+            variant,
+            content: content.into(),
+            on_press: None,
+            focus_id,
+            widget_id,
+            palette: Palette::dark(),
+            height: button::HEIGHT_STANDARD,
+            padding: Padding::ZERO.horizontal(button::HORIZONTAL_PADDING),
+            enabled: true,
+            invalid: false,
+            tooltip: None,
+            model: None,
+            emit: None,
+        }
+    }
+
+    /// Build a **controlled** button over a host-owned [`ButtonModel`]
+    /// (`UIF-ATOM-001a`).
+    ///
+    /// Unlike [`new`](Self::new), this button owns no opinion about what it
+    /// does. The model says what it is called, how busy it is, whether the
+    /// host can settle what it dispatches and how much room it was given;
+    /// the widget's [`ButtonController`] decides which of the three tiers
+    /// each user action produces, and hands every one of them to `emit`.
+    ///
+    /// | User action | Emitted tier |
+    /// |---|---|
+    /// | release inside / `Enter` / `Space` | `ButtonEmission::Activated` |
+    /// | release outside / `Escape` | `ButtonEmission::Cancelled` |
+    /// | press or `Escape` while `busy` and cancellable | `ButtonEmission::CancelRequested` |
+    ///
+    /// `emit` returns `Option<Message>`: `None` is how a host says it has no
+    /// handler for that tier. A host that only cares about activation writes
+    /// `|e| matches!(e, ButtonEmission::Activated(_)).then_some(MyMsg::Save)`
+    /// and is *provably* not handling cancel — which is a thing worth being
+    /// able to see, and is exactly what three optional callbacks hide.
+    ///
+    /// The `Controlled<'a, ButtonModel>` is a shared borrow, not a copy: the
+    /// host keeps the model and mutates it, and the button reads the current
+    /// value every frame. That is the §3.0.4.1 rule — the model is the truth,
+    /// so the widget must not have its own.
+    #[must_use]
+    pub fn controlled(
+        model: Controlled<'a, ButtonModel>,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        focus_id: impl Into<FocusId>,
+        emit: impl Fn(ButtonEmission) -> Option<Message> + 'a,
+    ) -> Self {
+        let mut button = Self::base(model.get().variant, content, focus_id);
+        button.enabled = !model.get().disabled;
+        button.tooltip = model.get().tooltip.clone();
+        button.model = Some(model);
+        button.emit = Some(Box::new(emit));
+        button
     }
 
     /// Build an **icon-only** button, supplying the tooltip its label must be.
@@ -646,6 +753,48 @@ fn content_layout(layout: Layout<'_>) -> Layout<'_> {
         .expect("a button lays out exactly one content node")
 }
 
+/// The [`ButtonState`] carried by a button's tree node.
+///
+/// Reached through the [`Ephemeral`] wrapper the tag declares, so there is one
+/// obvious way to get at the ephemeral half and no silent `downcast` of a bare
+/// `ButtonState` that would panic against a tree built under the old tag.
+///
+/// # Panics
+/// Never in practice: [`Widget::state`] always builds the node this function
+/// reads, and no other code path builds a button's tree.
+fn button_state(tree: &mut Tree) -> &mut ButtonState {
+    tree.state
+        .downcast_mut::<Ephemeral<ButtonState>>()
+        .get_mut()
+}
+
+/// The read-only [`ButtonState`] carried by a button's tree node.
+///
+/// # Panics
+/// Never in practice — see [`button_state`].
+fn button_state_ref(tree: &Tree) -> &ButtonState {
+    tree.state.downcast_ref::<Ephemeral<ButtonState>>().get()
+}
+
+/// Send one tier of the activation engine's output to the host's sink.
+///
+/// A no-op when the button has no sink (it was built through
+/// [`Button::new`](Button::new), which publishes `on_press` directly) or when
+/// the engine produced nothing. Keeping both checks here rather than at each of
+/// the five call sites is what stops one of them forgetting.
+fn route<Message>(
+    emit: &Option<Emit<'_, Message>>,
+    emission: Option<ButtonEmission>,
+    shell: &mut Shell<'_, Message>,
+) {
+    let (Some(emit), Some(emission)) = (emit, emission) else {
+        return;
+    };
+    if let Some(message) = emit(emission) {
+        shell.publish(message);
+    }
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for Button<'_, Message, Theme, Renderer>
 where
@@ -653,11 +802,11 @@ where
     Renderer: renderer::Renderer,
 {
     fn tag(&self) -> tree::Tag {
-        tree::Tag::of::<ButtonState>()
+        tree::Tag::of::<Ephemeral<ButtonState>>()
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(ButtonState::new())
+        tree::State::new(Ephemeral::new(ButtonState::new()))
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -704,7 +853,7 @@ where
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        let state = tree.state.downcast_mut::<ButtonState>();
+        let state = button_state(tree);
 
         if self.enabled {
             operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
@@ -755,7 +904,7 @@ where
         }
 
         let is_over = cursor.is_over(layout.bounds());
-        let state = tree.state.downcast_mut::<ButtonState>();
+        let state = button_state(tree);
 
         // Where the pointer is, is recorded whether or not this button may
         // act on it. The widget reports raw observations and `resolve`
@@ -763,16 +912,34 @@ where
         // silently disagreeing with the cursor.
         state.hovered = is_over;
 
+        // The controller sees the model every frame, before any gesture is
+        // handled — the gate has to know what the host reported *before* it
+        // is asked whether an activation may fire.
+        if let Some(model) = &self.model {
+            state.interaction.observe(model.get());
+        }
+
         if !self.enabled {
             // No press, no message, no capture — a disabled button leaves
-            // the event for anything else that wants it.
+            // the event for anything else that wants it. A gesture left open
+            // from before the disable is dropped rather than carried into a
+            // control that can no longer settle it.
             state.pressed = false;
+            state.interaction.reset();
             return;
         }
+
+        let focused = state.focusable.is_focused();
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if is_over => {
                 state.pressed = true;
+                if let Some(model) = &self.model {
+                    let emission = state
+                        .interaction
+                        .begin(model.get(), ActivationSource::Pointer);
+                    route(&self.emit, emission, shell);
+                }
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.pressed => {
@@ -780,11 +947,49 @@ where
                 // cannot stick. Only a release still inside the box fires.
                 state.pressed = false;
 
-                if is_over {
-                    shell.publish(self.on_press.clone());
+                if let Some(model) = &self.model {
+                    let emission = if is_over {
+                        state
+                            .interaction
+                            .commit(model.get(), ActivationSource::Pointer)
+                    } else {
+                        state.interaction.cancel(model.get())
+                    };
+                    route(&self.emit, emission, shell);
+                } else if is_over {
+                    shell.publish(
+                        self.on_press
+                            .clone()
+                            .expect("a `Button::new` button always carries a press message"),
+                    );
                 }
 
                 shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if focused => {
+                let Some(model) = &self.model else {
+                    return;
+                };
+                match key {
+                    Key::Named(Named::Enter) | Key::Named(Named::Space) => {
+                        let emission = state
+                            .interaction
+                            .commit(model.get(), ActivationSource::Keyboard);
+                        route(&self.emit, emission, shell);
+                        shell.capture_event();
+                    }
+                    Key::Named(Named::Escape) => {
+                        // Escape abandons the press as well as the gesture.
+                        // Without this, `pressed` survives, the pointer is
+                        // still inside, and the release that follows commits
+                        // the very activation the user just cancelled.
+                        state.pressed = false;
+                        let emission = state.interaction.cancel(model.get());
+                        route(&self.emit, emission, shell);
+                        shell.capture_event();
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -815,7 +1020,7 @@ where
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_ref::<ButtonState>();
+        let state = button_state_ref(tree);
         let visual = state.visual(self.enabled, self.invalid);
         let paint = button::resolve_style(self.variant, visual, &self.palette);
         let bounds = layout.bounds();

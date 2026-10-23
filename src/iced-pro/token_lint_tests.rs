@@ -32,23 +32,23 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 42 as of the `binding/` subsystem (`mod.rs` plus `controlled`, `tier`,
-/// `snapshot`, `pending`, `responsive`) joining the tree for `UIF-ATOM-000b`.
-const PIN_FILES_SCANNED: usize = 42;
+/// 44 as of `widget/button_model.rs` and `widget/button_controller.rs`
+/// joining the tree for `UIF-ATOM-001a`.
+const PIN_FILES_SCANNED: usize = 44;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 18 as of `surface/tooltip/` joining the `surface/` scope.
-const PIN_RULE_B_FILES: usize = 18;
+/// 20 as of the two `UIF-ATOM-001a` button modules joining `widget/`.
+const PIN_RULE_B_FILES: usize = 20;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
 ///
-/// 51 as of `tooltip::place::TOOLTIP_GAP` plus `tooltip::PADDING_VERTICAL` and
-/// `tooltip::PADDING_HORIZONTAL`, all three bound to a `space::` rung rather than a
-/// literal.
-const PIN_TOKEN_BOUND: usize = 51;
+/// 52 as of `button_model::SPINNER_SLOT`, bound to `size::ICON_SM` rather
+/// than a literal — the reserved spinner slot is a token rung, not a number
+/// this file is allowed to invent (`UIF-ATOM-009` owns the glyph).
+const PIN_TOKEN_BOUND: usize = 52;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
