@@ -1571,34 +1571,56 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["surface/menu/view.rs"],
-        reason: Some(
-            "Not covered — no disclosure container exists. There is no `Expander` or \
-             accordion in the crate: nothing owns a header row with a disclosure chevron \
-             that animates a body open and closed, and nothing models expanded/collapsed \
-             state as a control. The chevron painted in `surface::menu` belongs to menu \
-             rows only. The header-chevron half of the atom family (`UIF-ATOM-003`) is \
-             likewise unbuilt, so neither half of this pattern exists.",
+        evidence: &[
+            "composite/expander.rs",
+            "composite/expander_tests.rs",
+            "gallery_composite.rs",
+        ],
+        reason: None,
+        note: Some(
+            "The header box resolves from the row width, the rung and the trailing slot \
+             only, so it cannot shift when the body mounts; the toggle is a \
+             `GestureSlot<bool>` that commits once on release and reverts on cancel; a \
+             collapsed body registers its controls as disabled focus members, so the \
+             crate's own traversal cannot tab into it. Gaps recorded against the spec: \
+             the body's surface is left as a choice between `base` and `sunken` (this \
+             takes `base`), whether opening one disclosure closes its siblings is \
+             unspecified (offered as an explicit `AccordionPolicy`), and the header's \
+             hover fill is unspecified (the crate's usual `surface.hover` is used). An \
+             animated body height is deliberately not modelled — a per-frame height is \
+             a layout shift under `UIF-PRIN-003`, so only the chevron angle is \
+             interpolable.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["widget/log_view.rs"],
-        reason: Some(
-            "Missing scrollbar styling and a scroll-position contract. iced scrolls, and \
-             `FollowState` in `widget::log_view` proves the framework can follow a tail — \
-             but that is one widget's private policy, not a `ScrollView` API. Missing: a \
-             scrollbar styled from tokens (width, track, thumb, hover / scroll-then-fade), \
-             scroll-position persistence and restore, and a scroll-to or anchor entry \
-             point. The spec leaves scrollbar styling open, which is a spec gap recorded \
-             against the spec rather than a reason to call this built.",
+        evidence: &[
+            "composite/scroll_view.rs",
+            "composite/scroll_view_tests.rs",
+            "gallery_composite.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Delivered as a testable contract rather than a widget: track and thumb \
+             geometry, the per-state thumb colours, the minimum thumb length at extreme \
+             content ratios, the keyboard steps, the at-bottom and reach-end triggers, \
+             the tick annotations, and a thumb drag that settles through the same \
+             `GestureSlot` transcript every other gesture uses. `content_bounds` takes \
+             no track phase, so the 8px-to-10px growth is paint-only and inward — the \
+             layout-shift verdict. The thumb is graded `Judged`, not `CoincidentWithFill`, \
+             and clears the 3.00:1 floor over all seven surfaces including the hovered \
+             and pressed ones the spec's printed 4.01–4.51 range never prices. Gaps \
+             recorded against the spec: timed auto-hide is not specified and is \
+             deliberately not invented (phase is a pure function of scrollability and \
+             pointer, so a host may map `TimeMs` to `Hidden` itself); the track paints \
+             no fill because only the thumb is styled; keyboard step distances, the \
+             focus-owner interaction, nested scroll views and the horizontal scrollbar's \
+             own behaviour are unspecified.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-005",

@@ -42,7 +42,10 @@ use crate::token_lint::{
 /// `gallery_composite.rs`, the composite block of the verification
 /// matrix. The gallery cell file is scanned but not visual-scoped, so it
 /// joins the count without joining Rule B.
-const PIN_FILES_SCANNED: usize = 102;
+///
+/// 104 as of `INC-46`, which added the disclosure and the scroll
+/// contract: `composite/expander.rs` and `composite/scroll_view.rs`.
+const PIN_FILES_SCANNED: usize = 104;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -54,7 +57,10 @@ const PIN_RULE_A_FILES: usize = 1;
 ///
 /// 65 as of `INC-45`, which brought `composite/` into Rule B's scope and
 /// added its four composite modules plus the subsystem `mod.rs`.
-const PIN_RULE_B_FILES: usize = 65;
+///
+/// 67 as of `INC-46`, whose two additions are `composite/expander.rs`
+/// and `composite/scroll_view.rs`.
+const PIN_RULE_B_FILES: usize = 67;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -85,7 +91,22 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// paddings, column gap, border, radius and two rungs; the card's radius,
 /// padding and border; and the tile's paddings, slot gap, leading and
 /// trailing extents, border and rungs.
-const PIN_TOKEN_BOUND: usize = 146;
+///
+/// 157 as of `INC-46`, whose eleven additions are the figures the
+/// disclosure and the scroll contract read: the expander's two header
+/// rungs, its horizontal padding, its chevron-to-title gap, its body
+/// padding and its body border; and the scroll view's resting, active and
+/// reserved track widths, its tick width and its thumb radius.
+///
+/// The rest of `INC-46`'s numbers deliberately do *not* join this count,
+/// because none of them carries a name marker Rule B scans for — and that
+/// is the honest classification rather than an oversight. The chevron's
+/// two settled angles and its sweep are rotations, not lengths. The
+/// thumb's minimum length, the arrow step, the page-keep, the at-bottom
+/// tolerance and the reach-end distance are behavioural measures: they
+/// decide *when* something happens, not how large a painted box is, and
+/// `REACH_END_DISTANCE` in particular paints nothing at all.
+const PIN_TOKEN_BOUND: usize = 157;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

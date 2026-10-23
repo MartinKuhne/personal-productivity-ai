@@ -336,6 +336,35 @@ fn expected_ids() -> Vec<String> {
     for shape in ["title-only", "with-description", "disabled"] {
         ids.push(format!("settings-row/{shape}"));
     }
+    // `UIF-COMP-003` / `INC-46`: the disclosure across both rungs and the
+    // reachable pointer states. The collapsed and open pair is the zero-shift
+    // evidence; the collapsed row is also the tab-reachability evidence.
+    for posture in [
+        "collapsed",
+        "open",
+        "hovered",
+        "pressed",
+        "disabled",
+        "compact-collapsed",
+        "compact-open",
+    ] {
+        ids.push(format!("expander/{posture}"));
+    }
+    // `UIF-COMP-004` / `INC-46`: the scroll contract in both layout modes,
+    // every track phase, the extreme content ratio, the unscrollable view and
+    // the annotated track.
+    for posture in [
+        "overlay-rest",
+        "overlay-hovered",
+        "overlay-dragged",
+        "reserved-rest",
+        "reserved-hovered",
+        "extreme-ratio",
+        "hidden-unscrollable",
+        "annotated",
+    ] {
+        ids.push(format!("scroll-view/{posture}"));
+    }
     // `UIF-COMP-005` / `INC-45`: the card at both elevations, and the
     // tile across both rungs, both selection postures, the pointer states
     // and the inert row.
@@ -582,6 +611,15 @@ fn per_subject_cell_counts_match_the_plan() {
         // and the settings row in 3 content shapes.
         ("form-field", 6),
         ("settings-row", 3),
+        // `UIF-COMP-003` / `INC-46`: the disclosure across 7 postures —
+        // collapsed, open, hovered, pressed, disabled, and the compact rung
+        // collapsed and open.
+        ("expander", 7),
+        // `UIF-COMP-004` / `INC-46`: the scroll contract across 8
+        // postures — the three overlay phases, the reserved gutter at rest
+        // and hover, the extreme content ratio, the unscrollable view, and
+        // the annotated track.
+        ("scroll-view", 8),
         // `UIF-COMP-005` / `INC-45`: the card at 2 elevations, the tile
         // across 8 postures.
         ("card", 2),

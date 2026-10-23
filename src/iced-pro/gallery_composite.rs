@@ -44,8 +44,11 @@
 //! Unit tests live in the sibling `gallery_composite_tests.rs` sidecar.
 
 use crate::composite::card::{self, CardElevation};
+use crate::composite::expander;
+
 use crate::composite::form_field::{self, CaptionKind};
 use crate::composite::list_tile::{self, Leading, TileLines};
+use crate::composite::scroll_view::{self, Axis, LayoutMode, ScrollTick, TickKind, TrackPhase};
 use crate::composite::settings_row::{self, DEFAULT_CONTROL_HEIGHT};
 use crate::gallery::{AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, paint_frame};
 use crate::state::BaseState;
@@ -514,12 +517,304 @@ pub fn list_tile_cells() -> Vec<Cell> {
     .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Expander — UIF-COMP-003
+// ---------------------------------------------------------------------------
+
+/// The disclosure in one posture (`UIF-COMP-003`).
+///
+/// The `geometry.header.*` channels are the same in every posture, open or
+/// closed, and that equality is the zero-shift evidence: it holds because
+/// [`expander::header_bounds`] cannot see the open state, not because a
+/// layout happened to come out level.
+#[must_use]
+pub fn expander_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let open =
+        state != "collapsed" && state != "hovered" && state != "pressed" && state != "disabled";
+    let compact = state.starts_with("compact");
+    let disabled = state == "disabled";
+    let rung = if compact {
+        expander::HeaderRung::Compact
+    } else {
+        expander::HeaderRung::Standard
+    };
+
+    let base = if disabled {
+        BaseState::Disabled
+    } else if state == "pressed" {
+        BaseState::Pressed
+    } else if state == "hovered" {
+        BaseState::Hovered
+    } else {
+        BaseState::Rest
+    };
+
+    let content_height = space::XL * 4.0;
+    let bounds = sample(expander::total_height_at(rung, open, content_height));
+    let header = expander::header_bounds_at(bounds, rung);
+    let chevron = expander::chevron_bounds(header);
+    let title = expander::title_bounds(header, 0.0);
+    let header_style = expander::resolve_header_style(base, &palette);
+    let body_style = expander::body_style(&palette);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("header", expander::header_layer(header, &header_style)),
+        ("chevron", marker(chevron, palette.border_strong)),
+        ("title", marker(title, palette.border_subtle)),
+    ];
+    if let Some(body) = expander::body_bounds_at(bounds, rung, open, content_height) {
+        layers.push(("body", expander::body_layer(body, &body_style)));
+    }
+
+    Cell {
+        id: format!("expander/{state}"),
+        kind: CellKind::Composite,
+        subject: "expander",
+        spec: "UIF-COMP-003",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::text("rung", if compact { "compact" } else { "standard" }),
+            StyleEntry::number("geometry.header.height", header.height),
+            StyleEntry::number("geometry.chevron.box", expander::CHEVRON_BOX),
+            StyleEntry::number(
+                "geometry.chevron.rotation",
+                expander::chevron_rotation(open),
+            ),
+            StyleEntry::number("geometry.title.width", title.width),
+            StyleEntry::number(
+                "geometry.body.height",
+                expander::body_bounds_at(bounds, rung, open, content_height)
+                    .map_or(0.0, |b| b.height),
+            ),
+            StyleEntry::text("body.mounted", if open { "yes" } else { "no" }.to_string()),
+            StyleEntry::text(
+                "body.tab-reachable",
+                if open { "yes" } else { "no" }.to_string(),
+            ),
+            StyleEntry::colour("header.fill", header_style.background),
+            StyleEntry::colour("header.title", header_style.title_colour),
+            StyleEntry::colour("header.chevron", header_style.chevron_colour),
+            StyleEntry::colour("body.fill", body_style.background),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "header.title",
+                foreground: header_style.title_colour,
+                background: header_style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "header.chevron",
+                foreground: header_style.chevron_colour,
+                background: header_style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "body.text",
+                foreground: palette.text_primary,
+                background: body_style.background,
+                role: ContrastRole::Text,
+            },
+        ],
+        note: None,
+    }
+}
+
+/// Every expander cell.
+#[must_use]
+pub fn expander_cells() -> Vec<Cell> {
+    [
+        "collapsed",
+        "open",
+        "hovered",
+        "pressed",
+        "disabled",
+        "compact-collapsed",
+        "compact-open",
+    ]
+    .iter()
+    .map(|state| expander_cell(state))
+    .collect()
+}
+
+// ---------------------------------------------------------------------------
+// ScrollView — UIF-COMP-004
+// ---------------------------------------------------------------------------
+
+/// The sample viewport a scroll cell is measured in.
+const SCROLL_VIEWPORT: f32 = space::XL * 8.0;
+
+/// The scroll view and its annotated scrollbar in one phase (`UIF-COMP-004`).
+///
+/// `content.width` is the layout-shift channel: it is the same number at
+/// every phase because [`scroll_view::content_bounds`] takes no phase.
+#[must_use]
+pub fn scroll_view_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let reserved = state.starts_with("reserved");
+    let unscrollable = state == "hidden-unscrollable";
+    let extreme = state == "extreme-ratio";
+
+    let mode = if reserved {
+        LayoutMode::Reserved
+    } else {
+        LayoutMode::Overlay
+    };
+    let content_len = if unscrollable {
+        SCROLL_VIEWPORT
+    } else if extreme {
+        SCROLL_VIEWPORT * 40.0
+    } else {
+        SCROLL_VIEWPORT * 3.0
+    };
+    let scrollable = scroll_view::is_scrollable(content_len, SCROLL_VIEWPORT);
+    let dragging = state.ends_with("dragged");
+    let hovering = state.ends_with("hovered");
+    let phase = scroll_view::resolve_phase(scrollable, hovering, dragging);
+
+    let bounds = sample(SCROLL_VIEWPORT);
+    let content = scroll_view::content_bounds(bounds, mode, Axis::Vertical);
+    let track = scroll_view::track_bounds(bounds, phase, mode, Axis::Vertical);
+    let thumb = scroll_view::thumb_rect(
+        track,
+        content_len * 0.25,
+        content_len,
+        SCROLL_VIEWPORT,
+        Axis::Vertical,
+    );
+    let thumb_colour = scroll_view::thumb_color(phase, &palette);
+    let surface = if reserved {
+        palette.surface_base
+    } else {
+        palette.surface_raised
+    };
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("content", marker(content, palette.border_subtle)),
+        ("track", marker(track, palette.border_strong)),
+    ];
+    let mut audit = vec![AuditPair {
+        channel: "track.boundary",
+        foreground: palette.border_strong,
+        background: surface,
+        role: ContrastRole::Chrome,
+    }];
+    if phase != TrackPhase::Hidden {
+        layers.push((
+            "thumb",
+            Layer {
+                bounds: thumb,
+                fill: thumb_colour,
+                border: iced::Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: scroll_view::THUMB_RADIUS.into(),
+                },
+            },
+        ));
+        audit.push(AuditPair {
+            channel: "thumb.fill",
+            foreground: thumb_colour,
+            background: surface,
+            role: ContrastRole::Chrome,
+        });
+    }
+    if state == "annotated" {
+        for (index, kind) in [TickKind::SearchHit, TickKind::Heading, TickKind::Error]
+            .iter()
+            .enumerate()
+        {
+            let tick = ScrollTick {
+                position: content_len * (index as f32 + 1.0) / 5.0,
+                kind: *kind,
+            };
+            layers.push((
+                "tick",
+                Layer {
+                    bounds: scroll_view::tick_rect(track, &tick, content_len, Axis::Vertical),
+                    fill: palette.accent_border,
+                    border: iced::Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 0.0_f32.into(),
+                    },
+                },
+            ));
+        }
+    }
+
+    Cell {
+        id: format!("scroll-view/{state}"),
+        kind: CellKind::Composite,
+        subject: "scroll-view",
+        spec: "UIF-COMP-004",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::text("mode", if reserved { "reserved" } else { "overlay" }),
+            StyleEntry::text("phase", phase_slug(phase)),
+            StyleEntry::number("geometry.content.width", content.width),
+            StyleEntry::number("geometry.track.width", track.width),
+            StyleEntry::number("geometry.thumb.length", thumb.height),
+            StyleEntry::number("geometry.thumb.min-length", scroll_view::THUMB_MIN_LENGTH),
+            StyleEntry::number("geometry.tick.width", scroll_view::TICK_WIDTH),
+            StyleEntry::number("keyboard.arrow-step", scroll_view::ARROW_STEP),
+            StyleEntry::number(
+                "keyboard.page-step",
+                scroll_view::page_step(SCROLL_VIEWPORT),
+            ),
+            StyleEntry::number("trigger.reach-end", scroll_view::REACH_END_DISTANCE),
+            StyleEntry::text(
+                "scrollable",
+                if scrollable { "yes" } else { "no" }.to_string(),
+            ),
+            StyleEntry::colour("thumb.fill", thumb_colour),
+            StyleEntry::text("track.fill", "none"),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit,
+        note: None,
+    }
+}
+
+fn phase_slug(phase: TrackPhase) -> &'static str {
+    match phase {
+        TrackPhase::Hidden => "hidden",
+        TrackPhase::Rest => "rest",
+        TrackPhase::Hovered => "hovered",
+        TrackPhase::Dragged => "dragged",
+    }
+}
+
+/// Every scroll-view cell.
+#[must_use]
+pub fn scroll_view_cells() -> Vec<Cell> {
+    [
+        "overlay-rest",
+        "overlay-hovered",
+        "overlay-dragged",
+        "reserved-rest",
+        "reserved-hovered",
+        "extreme-ratio",
+        "hidden-unscrollable",
+        "annotated",
+    ]
+    .iter()
+    .map(|state| scroll_view_cell(state))
+    .collect()
+}
+
 /// Every `UIF-COMP-001` and `UIF-COMP-005` cell, in spec order.
 #[must_use]
 pub fn composite_cells() -> Vec<Cell> {
     let mut cells = Vec::new();
     cells.extend(form_field_cells());
     cells.extend(settings_row_cells());
+    cells.extend(expander_cells());
+    cells.extend(scroll_view_cells());
     cells.extend(card_cells());
     cells.extend(list_tile_cells());
     cells
