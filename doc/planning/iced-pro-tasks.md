@@ -1077,6 +1077,134 @@ transcribe the spec's contrast column.
 
 ---
 
+### M9 — Second revision `e6ecbfb`: the audit was lying
+
+The spec was revised a **second** time mid-project, by `e6ecbfb`
+("doc update", 16:44). It went from 435 lines / 47 ids to **603 lines /
+62 numbered ids**, adding seven new atoms (§3.3–§3.9) and an entire new
+composite-components chapter (§3B.1–§3B.8), plus a data-binding chapter
+(§3.0.4) and a container-query responsive model.
+
+The visible symptom was four failing `spec_coverage_tests`: the manifest
+expected 47, the spec carried 62. **The real problem was underneath.**
+
+#### The extraction was blind to suffixed requirements
+
+The extractor used `UIF-[A-Z]+-\d+`, which silently truncates every
+**letter-suffixed** id onto its parent. The new revision uses ten of them:
+
+```
+UIF-ATOM-000b  001a  001b  001c  001d
+UIF-ATOM-002a  002b  002c  002d  002e
+```
+
+Consequences, verified before any fix:
+
+| Parent | Manifest said | Actually unbuilt beneath it |
+|---|---|---|
+| `UIF-ATOM-002` | **Implemented** | `002c` PasswordInput (bullet masking, clipboard Copy/Cut suppression, reveal toggle); `002d` AutoSuggestBox (completion flyout, highlight roving, two-stage Escape); `002e` MultiLineTextArea (auto-grow, cursor/selection model, undo/redo, Ctrl+Enter submit) |
+| `UIF-ATOM-000` | **Implemented** | `000b` controlled-vs-ephemeral state split, three-tier `on_change`/`on_commit`/`on_cancel` lifecycle, `ActionPending`, container-query `ResponsiveBreakpoint` |
+
+**This is worse than a wrong number.** The count test would catch 47 vs 62.
+The extraction blindness meant *every* `Implemented` in the manifest was
+untrustworthy — a requirement could gain an entire unbuilt widget beneath
+it and still read done. That is the decorative-gate failure mode this
+project has been fighting, arriving from a direction the gate was not
+built to see.
+
+#### The fix
+
+A suffixed id is now a **distinct, independently classified requirement**.
+The rule is deliberately narrow — exactly one trailing ASCII lowercase
+letter — so `UIF-TOK-001X` and `UIF-ATOM-002ab` stay rejected, and
+lowercase prefixes still cannot forge an id.
+
+True count: **72** (62 base + 10 suffixed), cross-checked three ways —
+the Rust extractor, an independent Python reimplementation, and a
+set-difference proving the fix only *added* visibility and lost nothing.
+
+Three guards against recurrence:
+
+1. Every suffixed id must have its own entry, **and if its parent says
+   `Implemented` the child must independently say `Implemented`** —
+   otherwise the parent is covering for unbuilt work.
+2. Injection test using `UIF-ATOM-002z`, mirroring the `UIF-FAKE-999` pattern.
+3. Base and suffixed ids must be two separate ledger entries.
+
+**Proved live, not vacuous:** flipping `ATOM-002` back to `Implemented`
+makes the guard fail with *"UIF-ATOM-002 is `Implemented` while its own
+sub-requirement UIF-ATOM-002a is `Partial` — the parent is covering for
+unbuilt work"*. Flip reverted.
+
+`ATOM-000` and `ATOM-002` both dropped to `Partial`. `002b` is the one
+suffixed requirement genuinely `Implemented` — the zero-shift trailing
+slot partition really is built.
+
+#### Tooltip conformance (the revision resolved invented values)
+
+INC-31 built the tooltip when §3.7 specified almost nothing and had to
+invent. The revision pinned them, and **three guesses were wrong**:
+
+| | invented | spec now says |
+|---|---|---|
+| hover delay | 500 ms | **400 ms** |
+| keyboard-focus delay | absent | **0 ms** (new second arrival channel) |
+| corner radius | `RADIUS_CARD` (6) | **`radius.widget` (4)** |
+| max width | "host's problem" | **280 px** |
+
+Keyboard focus is a second arrival channel, not a retimed hover: first
+arrival owns the channel and is idempotent, so a pointer wandering onto a
+keyboard-focused control cannot restart the timer.
+
+Recomputed rather than transcribed — `border.strong`/`overlay` = **4.0128**
+and `text.primary`/`overlay` = **11.718**, both agreeing with the spec's
+printed 4.01 / 11.72.
+
+**Palette finding:** `surface.overlay` vs `surface.base` = **1.1230:1**.
+The tooltip card is essentially indistinguishable from the base surface by
+fill alone; the `border.strong` hairline is the only thing making it read
+as floating. The spec assumes its overlay is visually distinct from its
+base and is wrong about its own palette.
+
+Z-order: deliberately **not** a new `ZBand`. The band model's
+`UnwindAnswer` has no vocabulary for *dismiss-but-do-not-consume*;
+registering a band would move `topmost()`/`keyboard_owner()` for existing
+hosts, and a tooltip answers "none" to everything a band is asked. It is a
+presentation layer above all bands, outside `SurfaceRegistry`, dismissed
+as a pre-pass so the owner underneath still sees `Escape`.
+
+#### Manifest after M9
+
+**72 entries, 72 distinct, no duplicates: 27 Implemented / 38 Partial /
+7 NotOwned.** 1501 crate tests, 4662 workspace tests, 182 gallery cells.
+
+#### What the second revision implies for scope
+
+The new chapters are not small. Framework-owned and unbuilt:
+
+- **Atoms** — Checkbox/Radio/ToggleSwitch (tri-state), ComboBox/Select,
+  Slider/NumberBox, Chips/Filter Pills, TeachingPopover, Badges,
+  ProgressBar/Spinner
+- **Composites** — FormField, InfoBar/Toast, Expander, ScrollView +
+  scrollbar contract, Card/ListTile, VirtualList/TreeView, DataTable,
+  BreadcrumbBar/overflow toolbar
+- **Cross-cutting** — `000b`'s controlled/ephemeral split, three-tier
+  callbacks and `ActionPending` cut across *every* existing widget, so they
+  are a refactor of the whole atom layer, not an addition to it
+- **New size tokens** — `checkbox.box`, `switch.track`, `switch.thumb`,
+  `slider.track_height`, `slider.thumb`, `progress.bar_height`,
+  `spinner.sm`, `spinner.md`
+
+`COMP-006` and `COMP-007` sit on the **D-2 boundary** and were called
+`Partial`, not `NotOwned`: D-2 excludes what the app draws *inside* these
+surfaces, not the surfaces themselves. The framework owes the virtualised
+viewport, row height, indent step, disclosure chevron and selection
+choreography for the tree; the sticky header, row height, 10px resize
+grab and cell traversal for the table. The app owns the node model,
+filtering, column definitions and cell rendering.
+
+---
+
 ## 4. Known spec gaps / open questions
 
 Recorded as they are found; none resolved yet.
