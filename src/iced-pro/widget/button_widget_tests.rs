@@ -1711,3 +1711,133 @@ fn a_legacy_button_still_publishes_only_on_release_inside() {
     harness.press(over);
     assert_eq!(harness.release(over), vec![Msg::Cancel]);
 }
+
+#[test]
+fn a_button_with_nothing_in_flight_paints_no_spinner_layer() {
+    let palette = crate::token::color::Palette::dark();
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 120.0,
+        height: 32.0,
+    };
+    let padding = iced::Padding::from(8.0);
+
+    for variant in crate::gallery::BUTTON_VARIANTS {
+        for state in [REST, HOVERED, PRESSED, FOCUSED, DISABLED] {
+            let style = expected_style(variant, state);
+            assert_eq!(
+                crate::widget::button_widget::busy_spinner_layer(
+                    bounds, padding, &style, false, &palette
+                ),
+                None,
+                "{variant:?} / {state:?} must not gain a spinner quad while idle"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_busy_button_paints_the_spinner_in_the_reserved_slot() {
+    let palette = crate::token::color::Palette::dark();
+    let bounds = Rectangle {
+        x: 10.0,
+        y: 20.0,
+        width: 120.0,
+        height: 32.0,
+    };
+    let padding = iced::Padding::from(8.0);
+    let style = expected_style(ButtonVariant::Primary, REST);
+
+    let layer =
+        crate::widget::button_widget::busy_spinner_layer(bounds, padding, &style, true, &palette)
+            .expect("a busy button paints its spinner");
+
+    assert_eq!(
+        layer.bounds.width,
+        crate::widget::button_model::SPINNER_SLOT
+    );
+    assert_eq!(
+        layer.bounds.height,
+        crate::widget::button_model::SPINNER_SLOT
+    );
+    assert_eq!(
+        crate::widget::button_model::SPINNER_SLOT,
+        crate::token::size::SPINNER_SM
+    );
+    assert_eq!(layer.bounds.x, bounds.x + padding.left);
+    assert_eq!(
+        layer.bounds.y,
+        bounds.y + (bounds.height - crate::widget::button_model::SPINNER_SLOT) / 2.0,
+        "the ring is centred on the row it was given"
+    );
+    assert_eq!(
+        layer.fill,
+        iced::Color::TRANSPARENT,
+        "a ring carries no fill"
+    );
+    assert_eq!(layer.border.width, 2.0);
+    assert_eq!(
+        layer.border.radius.top_left,
+        crate::widget::button_model::SPINNER_SLOT / 2.0
+    );
+}
+
+#[test]
+fn the_busy_arc_is_text_strong_on_a_locked_fill_and_accent_text_elsewhere() {
+    let palette = crate::token::color::Palette::dark();
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 120.0,
+        height: 32.0,
+    };
+    let padding = iced::Padding::from(8.0);
+
+    let arc_of = |variant, state| {
+        crate::widget::button_widget::busy_spinner_layer(
+            bounds,
+            padding,
+            &expected_style(variant, state),
+            true,
+            &palette,
+        )
+        .expect("busy paints a layer")
+        .border
+        .color
+    };
+
+    assert_eq!(arc_of(ButtonVariant::Primary, REST), palette.text_strong);
+    assert_eq!(
+        arc_of(ButtonVariant::Danger, HOVERED),
+        palette.text_strong,
+        "a Danger button on its hot fill takes the locked foreground too"
+    );
+    assert_eq!(arc_of(ButtonVariant::Secondary, REST), palette.accent_text);
+    assert_eq!(arc_of(ButtonVariant::Ghost, REST), palette.accent_text);
+}
+
+#[test]
+fn the_spinner_never_widens_the_box_it_is_painted_in() {
+    let palette = crate::token::color::Palette::dark();
+    let bounds = Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 40.0,
+        height: 32.0,
+    };
+    let padding = iced::Padding::from(8.0);
+    let style = expected_style(ButtonVariant::Primary, REST);
+
+    let layer =
+        crate::widget::button_widget::busy_spinner_layer(bounds, padding, &style, true, &palette)
+            .expect("busy paints a layer");
+
+    assert!(
+        layer.bounds.x >= bounds.x
+            && layer.bounds.y >= bounds.y
+            && layer.bounds.x + layer.bounds.width <= bounds.x + bounds.width
+            && layer.bounds.y + layer.bounds.height <= bounds.y + bounds.height,
+        "the spinner must sit inside the button's own bounds (`UIF-PRIN-003`)"
+    );
+}

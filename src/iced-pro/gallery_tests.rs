@@ -115,6 +115,39 @@ fn expected_ids() -> Vec<String> {
             }
         }
     }
+    // `UIF-ATOM-008` / `INC-38`: the three badge kinds over the five tones.
+    // The dot is tone-only; the count pill samples five boundary values
+    // (`0`, `1`, `42`, `99`, `150` — the last two straddle the `99+` cap);
+    // the chip pairs each of the four mandatory glyphs with each tone.
+    for tone in ["neutral", "accent", "success", "warning", "danger"] {
+        ids.push(format!("badge/dot/{tone}"));
+    }
+    for value in [0, 1, 42, 99, 150] {
+        for tone in ["neutral", "accent", "success", "warning", "danger"] {
+            ids.push(format!("badge/count/{value}/{tone}"));
+        }
+    }
+    for icon in ["ok", "warn", "fail", "info"] {
+        for tone in ["neutral", "accent", "success", "warning", "danger"] {
+            ids.push(format!("badge/chip/{icon}-status/{tone}"));
+        }
+    }
+    // `UIF-ATOM-009` / `INC-38`: the bar in three statuses at five fill
+    // conditions, the spinner at both sizes on both mounts, and the
+    // cancellable stop in each status.
+    for status in ["active", "paused", "error"] {
+        for condition in ["quarter", "half", "full", "indeterminate", "reduced-static"] {
+            ids.push(format!("progress/bar/{status}/{condition}"));
+        }
+    }
+    for size in ["sm", "md"] {
+        for mount in ["plain", "solid"] {
+            ids.push(format!("progress/spinner/{size}/{mount}"));
+        }
+    }
+    for status in ["active", "paused", "error"] {
+        ids.push(format!("progress/stop/{status}"));
+    }
     ids.extend(
         [
             "rest",
@@ -289,6 +322,10 @@ fn per_subject_cell_counts_match_the_plan() {
         ("checkbox", 10),
         ("radio", 10),
         ("switch", 10),
+        // `UIF-ATOM-008` / `INC-38`: 5 dots + 5 counts x 5 tones + 4 glyphs x 5 tones.
+        ("badge", 50),
+        // `UIF-ATOM-009` / `INC-38`: 3 statuses x 5 fills + 4 spinners + 3 stops.
+        ("progress", 22),
         ("menu", 12),
         ("menu-glyph", 10),
         // `INC-36`: the `000b` tiers on the four surface hosts.
@@ -1798,8 +1835,25 @@ fn every_rendered_cell_resolves_channels_and_audit_pairs() {
             continue;
         }
         assert!(!cell.resolved.is_empty(), "{} resolved nothing", cell.id);
+        if paints_nothing(&cell) {
+            continue;
+        }
         assert!(!cell.audit.is_empty(), "{} audited nothing", cell.id);
     }
+}
+
+/// Whether a cell's own resolver declared that it paints nothing.
+///
+/// A `Count(0)` badge is invisible by design, and an invisible thing has no
+/// contrast to measure. The exemption is keyed on the resolver's own
+/// `painted` declaration rather than on a list of cell ids so that a cell
+/// cannot opt out of the audit by being renamed, and so the opt-out is
+/// visible in the manifest next to the cell that claims it.
+fn paints_nothing(cell: &Cell) -> bool {
+    cell.resolved.iter().any(|entry| {
+        entry.channel == "painted"
+            && matches!(&entry.value, StyleValue::Text(text) if text == "false")
+    })
 }
 
 /// A cell may legitimately draw zero quads, and that is not the same thing

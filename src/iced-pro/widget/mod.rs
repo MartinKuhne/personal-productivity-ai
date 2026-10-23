@@ -69,6 +69,24 @@
 //!   transitions: the deterministic tri-state rule, the roving
 //!   radio group, and the switch's busy refusal
 //!   (`UIF-ATOM-003`, §3.0.4.1)
+//! * [`badge`] — the paint resolver and geometry for the three §3.8
+//!   badges: the `6px` dot, the count pill that folds at `99+`, and the
+//!   status chip whose leading glyph is mandatory. None of the three is
+//!   interactive, so the resolver has no hover, pressed or focus arm to
+//!   invent one for (`UIF-ATOM-008`)
+//! * [`badge_model`] — the declarative `BadgeModel` a host owns: the
+//!   `Dot` / `Count` / `Status` sum and the four tones, with the tone
+//!   vocabulary resolved against §3.8 rather than guessed from the
+//!   status palette's names (`UIF-ATOM-008`)
+//! * [`progress`] — the paint resolver and geometry for the §3.9
+//!   `ProgressBar` and `Spinner`: the `4px` track, the status-coloured
+//!   fill, the `35%` indeterminate segment whose position arrives as an
+//!   injected phase, and the static stripe that replaces it under
+//!   injected reduced motion (`UIF-ATOM-009`)
+//! * [`progress_model`] — the declarative `ProgressModel` a host owns:
+//!   determinate versus indeterminate, the three statuses, and the
+//!   cancellation flag that decides whether the stop button exists at
+//!   all (`UIF-ATOM-009`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -77,12 +95,16 @@
 //! and in both cases the value is a named constant rather than an inline
 //! number.
 
+pub mod badge;
+pub mod badge_model;
 pub mod button;
 pub mod button_controller;
 pub mod button_model;
 pub mod button_widget;
 pub mod focus;
 pub mod focusable;
+pub mod progress;
+pub mod progress_model;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;

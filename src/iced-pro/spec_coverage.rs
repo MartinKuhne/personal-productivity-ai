@@ -772,9 +772,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
              through a linear gesture into one of the three tiers. Missing: **adoption by \
              every other control** — `text_input.rs`, the menu rows and the dialog hosts \
              still emit a single iced `Message`, so the tier vocabulary is proven on one \
-             atom rather than across the set. Missing: the **spinner** — the 14px slot is \
-             reserved and reported but nothing paints it, and `size.spinner.sm` / `.md` \
-             are still absent from `token/size.rs` pending `UIF-ATOM-009`. Missing: the \
+             atom rather than across the set. The **spinner** is now painted (`UIF-ATOM-009`): the 14px slot is \
+             reserved by `SPINNER_SLOT` and painted by `busy_spinner_layer`, and `size.spinner.sm` / `.md` \
+             are now consumed there — `SPINNER_SM` by the slot, `SPINNER_MD` by the standalone
+              spinner. Missing: the \
              **overflow selection** — the solver decides `Expanded` versus `Compact`, not \
              *which* toolbar items move into the `⋯` menu, which is `UIF-COMP-008`'s work.",
         ),
@@ -849,9 +850,9 @@ const SPEC_COVERAGE: &[Coverage] = &[
              from a width the widget observed; `ButtonModel::responsive_to(allocated)` is \
              there for a host that has one, but `Widget::layout` does not swap its content \
              element mid-frame, so no button today collapses on its own. Missing: the \
-             **spinner glyph** — `SPINNER_SLOT` reserves `size::SPINNER_SM` and nothing \
-             paints it (`UIF-ATOM-009`). \
-             `size.spinner.sm` / `.md` now exist in `token/size.rs`; `.md` still has no consumer. Deviation: the model \
+             **spinner glyph** is now painted - `busy_spinner_layer` draws the 14px arc in \
+             the slot `SPINNER_SLOT` reserves (`UIF-ATOM-009`). \
+             `size.spinner.sm` / `.md` now exist in `token/size.rs`, both consumed. Deviation: the model \
              carries a `cancellable` \
              flag the spec's field list does not name, because `ActionPending::try_cancel` \
              cannot grant a cancellation the host never offered — without it \
@@ -1222,38 +1223,56 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-008",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.8",
-        evidence: &["token/size.rs", "token/color.rs"],
-        reason: Some(
-            "Not implemented — no badge or status-indicator control exists. Missing: the \
-             6×6px `radius.pill` dot badge in its four tones (`accent.border` unread, \
-             `status.warning` unsaved, `status.success` ready, `status.danger.text` error), \
-             the 18px numeric count pill with `[0, 4px]` padding, 12px SemiBold text, \
-             `99+` formatting above 99 and both solid and subtle variants, the 24px \
-             semantic status chip pairing a mandatory leading glyph with text, and \
-             `BadgeModel { kind, tone }`. `size.indicator.dot` exists with no consumer, \
-             and the unsaved `●` the tab strip needs (§4.4.1) is app-owned content this \
-             crate does not render.",
+        evidence: &[
+            "widget/badge.rs",
+            "widget/badge_model.rs",
+            "gallery_badge.rs",
+            "token/size.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Three of §3.8's printed contrast figures do not describe the pairs they sit on, \
+             and were resolved by measurement rather than transcription: `13.52` is \
+             `status.success` on `surface.overlay` (13.5237), not on `surface.raised` \
+             (14.2825); `6.10` is `status.warning` on `surface.overlay` (6.1048), not on \
+             `surface.raised` (6.4474); and `9.96` is reproduced by no surface at all \
+             (`surface.code` gives 9.8543). The Solid count pill is governed by the §2.3 \
+             rule-4 lock, which fixes its foreground at `text.strong` regardless — 4.80:1 \
+             on `accent.fill`, 5.13:1 on `status.danger.fill` — so the mis-transcription \
+             could not have hidden a failing pair. The Neutral chip's 9.96 is judged against \
+             `surface.raised` (14.28:1), the surface the row names."
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-009",
         status: Status::Partial,
         section: "§3.9",
-        evidence: &["token/size.rs", "token/color.rs"],
+        evidence: &[
+            "widget/progress.rs",
+            "widget/progress_model.rs",
+            "widget/button_widget.rs",
+            "gallery_progress.rs",
+        ],
         reason: Some(
-            "Not implemented — no `ProgressBar` and no `Spinner`. Missing: the 4px linear \
-             track on `surface.active` with `accent.border` / `status.warning` / \
-             `status.danger.text` fills for Active / Paused / Error, the 35%-width \
-             indeterminate segment and its static-striped fallback under OS \
-             `reduced_motion`, the 14px and 20px circular spinners with `border.subtle` \
-             track and `accent.text` (or `text.strong` inside a solid button) active arc, \
-             `ProgressModel` over `Indeterminate` / `Determinate { completed, total }`, and \
-             the `cancellable` trailing 24×24px stop button. `size.progress.bar_height` \
-             and `size.spinner.sm` / `.md` exist with no consumer, which also leaves \
-             `UIF-ATOM-000b`'s `ActionPending` indicator with nothing to draw.",
+            "Two deviations from the section as written, both deliberate. (1) The section \
+             says the indeterminate bar falls back to a static striped fill \"under OS \
+             `reduced_motion`\"; this crate never reads an OS setting — `reduced_motion` \
+             arrives as an injected `bool` on the resolve call, because a wall-clock or \
+             platform read inside a resolver would make the frame non-reproducible and the \
+             gallery unauditable. The host owns reading the OS preference and passing it \
+             in. (2) The 2px spinner stroke has no rung in §2.3's closed width set \
+             (`hairline` 0.5 / `border` 1.0 / `border_focus` 2.0 is the closest), so \
+             `SPINNER_STROKE` is pinned to `shape::BORDER_FOCUS` and the token gap is \
+             recorded here rather than invented silently. Everything the section specifies \
+             is otherwise implemented: the 4px pill track on `surface.active`, the \
+             `accent.border` / `status.warning` / `status.danger.text` fills for Active / \
+             Paused / Error, the 35%-width indeterminate segment with its static-striped \
+             fallback, the 14px and 20px spinners on a `border.subtle` track with an \
+             `accent.text` (or `text.strong` inside a solid button) arc, `ProgressModel` \
+             over `Indeterminate` / `Determinate { completed, total }`, and the \
+             `cancellable` trailing 24×24px stop control.",
         ),
         note: None,
     },

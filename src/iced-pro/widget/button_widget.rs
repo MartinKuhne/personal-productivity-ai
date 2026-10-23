@@ -152,6 +152,7 @@ use crate::state;
 use crate::state::InteractionInput;
 use crate::state::VisualState;
 use crate::token::color::Palette;
+use crate::token::contrast;
 use crate::widget::button;
 use crate::widget::button::ButtonStyle;
 use crate::widget::button::ButtonVariant;
@@ -159,7 +160,9 @@ use crate::widget::button_controller::ActivationSource;
 use crate::widget::button_controller::ButtonController;
 use crate::widget::button_controller::ButtonEmission;
 use crate::widget::button_model::ButtonModel;
+use crate::widget::button_model::SPINNER_SLOT;
 use crate::widget::focusable::FocusableState;
+use crate::widget::progress;
 
 use iced::Alignment;
 use iced::Background;
@@ -302,6 +305,73 @@ pub fn focus_ring_layer(bounds: Rectangle, style: &ButtonStyle) -> Option<Layer>
     })
 }
 
+/// The busy indicator's layer, or `None` when nothing is in flight.
+///
+/// Returning `None` rather than a transparent quad is what keeps a
+/// non-busy frame byte-identical to the frame this widget painted before
+/// `UIF-ATOM-009` landed: the layer list gains an entry that is
+/// **absent**, not an entry that paints nothing. The
+/// [`SPINNER_SLOT`] a non-busy button reserves stays empty space, exactly
+/// as `INC-37` left it, and the snapshot of a resting button does not
+/// change by a single quad.
+///
+/// The arc colour follows §3.9's rule for a spinner inside a solid
+/// button, read off the *resolved fill* rather than off the variant
+/// name: a background that `UIF-TOK-006` rule 4 recognises as a locked
+/// solid fill takes `text.strong`, because `accent.text` on `accent.fill`
+/// is `2.5719:1` — an arc that is there and not there at the same time.
+/// Reading the fill rather than the variant means a future variant that
+/// resolves to a solid fill gets the right arc without this function
+/// being edited.
+///
+/// The spinner is the small rung (`size.spinner.sm`), because §3.0.4.3
+/// fixes the busy button's indicator at `14px` and the slot was sized by
+/// that same rung.
+#[must_use]
+pub fn busy_spinner_layer(
+    bounds: Rectangle,
+    padding: Padding,
+    style: &ButtonStyle,
+    busy: bool,
+    palette: &Palette,
+) -> Option<Layer> {
+    if !busy {
+        return None;
+    }
+
+    let spinner = progress::spinner_style(false, false, palette);
+    let arc = if contrast::fill_lock_role(style.background, palette).is_locked_fill() {
+        palette.text_strong
+    } else {
+        spinner.arc
+    };
+
+    Some(Layer {
+        bounds: spinner_slot(bounds, padding),
+        fill: NO_FILL,
+        border: Border::default()
+            .color(arc)
+            .width(spinner.stroke)
+            .rounded(spinner.diameter / 2.0),
+    })
+}
+
+/// The rectangle the busy spinner occupies.
+///
+/// The leading edge of the content box, vertically centred — where a
+/// leading icon would sit, which is what the reserved slot was sized to
+/// be. The widget paints no icons of its own, so the spinner is placed
+/// against the padding rather than against an icon run it does not own.
+fn spinner_slot(bounds: Rectangle, padding: Padding) -> Rectangle {
+    Rectangle::new(
+        iced::Point::new(
+            bounds.x + padding.left,
+            bounds.y + (bounds.height - SPINNER_SLOT) / 2.0,
+        ),
+        Size::new(SPINNER_SLOT, SPINNER_SLOT),
+    )
+}
+
 /// The **ephemeral** half of a button — everything that happened to it rather
 /// than what it is.
 ///
@@ -425,6 +495,17 @@ pub struct Button<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
 type Emit<'a, Message> = Box<dyn Fn(ButtonEmission) -> Option<Message> + 'a>;
 
 impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
+    /// Whether the model driving this button reports an action in flight.
+    ///
+    /// A button with no model is never busy: nothing has told it
+    /// otherwise. The flag comes straight off [`ButtonModel::busy`] rather
+    /// than from the controller, because the controller tracks *its own*
+    /// dispatch, and a host that started an action by some other route is
+    /// still busy as far as §3.0.4.3's spinner is concerned.
+    fn busy(&self) -> bool {
+        self.model.as_ref().is_some_and(|model| model.get().busy)
+    }
+
     /// Build a button for `variant` that publishes `on_press` when it is
     /// pressed and released inside its own bounds.
     ///
@@ -1028,6 +1109,7 @@ where
         for layer in [
             background_layer(bounds, &paint),
             focus_ring_layer(bounds, &paint),
+            busy_spinner_layer(bounds, self.padding, &paint, self.busy(), &self.palette),
         ]
         .into_iter()
         .flatten()

@@ -188,6 +188,27 @@ pub const SPINNER_SM: f32 = 14.0;
 /// [`SLIDER_TRACK_HEIGHT`].
 pub const SPINNER_MD: f32 = 20.0;
 
+/// Count badge height — §3.8's `18px h` pill.
+///
+/// A separate rung from [`SPINNER_SM`] even though both are small-circle
+/// sized, because they answer different requirements: one is a control's
+/// busy glyph, the other is a count's container. Binding them together
+/// would let a change to the spinner silently resize a badge.
+///
+/// The `18.0` is the *whole* pill height. The `12px` label §3.8 puts
+/// inside it is what makes the pill read as a badge rather than as a
+/// `12`-pixel box with padding, so the height is not derived from the
+/// type rung — it is the number the spec prints.
+pub const BADGE_COUNT_HEIGHT: f32 = 18.0;
+
+/// Status chip height — §3.8's `24px h` pill.
+///
+/// The chip is the only badge that carries a *word*, so it is the only
+/// one sized for a reading line rather than a mark. It happens to equal
+/// [`HIT_TARGET_MIN`], but not by rule: the chip is **non-interactive**
+/// (§3.8), so it owes nothing to the hit-target floor.
+pub const BADGE_CHIP_HEIGHT: f32 = 24.0;
+
 #[cfg(test)]
 #[path = "size_tests.rs"]
 mod size_tests;
