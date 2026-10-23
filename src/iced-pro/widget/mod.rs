@@ -59,6 +59,21 @@
 //!   session and its snapshot, the coalesced live tier, and the four
 //!   `002a` callbacks as sum-type arms rather than four loose closures
 //!   (`UIF-ATOM-002a`, §3.0.4.2)
+//! * [`password_model`] — the secret-entry model: a `SecretInput` whose
+//!   `Debug` prints the mask rather than the password, and the reveal
+//!   policy that keeps a shown secret inside the focused control
+//!   (`UIF-ATOM-002c`)
+//! * [`password_host`] — the reveal transcript and the tier translation
+//!   that make a password field the `002a` atom with masking on, rather
+//!   than a second text field (`UIF-ATOM-002c`)
+//! * [`text_area_model`] — the multi-line model: `LineCol`, the
+//!   `min_rows`/`max_rows` growth solver, the scroll extent and the
+//!   undo/redo ledger §3.2 asks for and iced does not provide
+//!   (`UIF-ATOM-002e`)
+//! * [`text_area_host`] — the multi-line editing host: the atom's slot
+//!   partition and tier engine applied to a wrapping editor, with
+//!   `Enter` inserting a newline and `Ctrl+Enter` submitting
+//!   (`UIF-ATOM-002e`)
 //! * [`toggle`] — the paint resolver and geometry for the three
 //!   boolean/choice atoms: one two-row polarity matrix shared by
 //!   `Checkbox`, `Radio` and `ToggleSwitch`, the adaptive ring that
@@ -179,6 +194,8 @@ pub mod hyperlink;
 pub mod hyperlink_model;
 pub mod number_box;
 pub mod number_box_host;
+pub mod password_host;
+pub mod password_model;
 pub mod progress;
 pub mod progress_model;
 pub mod range_model;
@@ -190,6 +207,8 @@ pub mod slider_host;
 pub mod split_button;
 pub mod split_button_host;
 pub mod split_button_model;
+pub mod text_area_host;
+pub mod text_area_model;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;

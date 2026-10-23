@@ -2491,3 +2491,230 @@ fn test_a_host_pushing_a_new_value_while_focused_is_mirrored_not_reverted() {
         "the restore is the tier's value, not the host's newer one"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 6 — the secret-entry and multi-line kinds (`UIF-ATOM-002c`, `002e`)
+// ---------------------------------------------------------------------------
+
+/// The message set a host drives a reveal-capable field with.
+///
+/// A separate type rather than extra variants on [`Msg`] so a dispatch test
+/// can only pass by naming the right message: if the reveal toggle shared
+/// a type with the clear button, `vec![Msg::Trailing]` would be true of
+/// both and the test would assert nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SecretMsg {
+    Edit(String),
+    Clear,
+    Reveal,
+}
+
+/// The concrete widget type this group builds, spelled once.
+type SecretWidget = TextInput<'static, SecretMsg, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// A password field built the way a host builds one — with **both**
+/// trailing-slot messages wired, so the slot has to choose.
+fn secret_field(
+    value: &str,
+    masked: bool,
+    width: f32,
+) -> Element<'static, SecretMsg, crate::test_helpers::Theme, HeadlessRenderer> {
+    TextInput::new(
+        InputKind::Password,
+        "hint",
+        value.to_owned(),
+        SecretMsg::Edit,
+        "field",
+    )
+    .width(Length::Fixed(width))
+    .masked(masked)
+    .on_clear(SecretMsg::Clear)
+    .on_reveal(SecretMsg::Reveal)
+    .into()
+}
+
+/// The editor node's registered bounds for a [`secret_field`].
+fn secret_editor_bounds(value: &str, masked: bool, width: f32) -> Rectangle {
+    let value = value.to_owned();
+    let mut harness = Harness::headless(move || secret_field(&value, masked, width));
+    let recorded = harness.recorded();
+
+    assert_eq!(
+        recorded.len(),
+        1,
+        "a password field registers exactly one focusable node, got {recorded:?}"
+    );
+    recorded[0].1
+}
+
+#[test]
+fn test_the_two_new_kinds_reserve_the_hit_target_floor() {
+    assert_eq!(
+        InputKind::Password.trailing_slot_width(),
+        size::HIT_TARGET_MIN
+    );
+    assert_eq!(
+        InputKind::TextArea.trailing_slot_width(),
+        size::HIT_TARGET_MIN
+    );
+}
+
+#[test]
+fn test_a_password_field_offers_the_reveal_toggle_whatever_it_holds() {
+    for (has_value, invalid) in [(false, false), (true, false), (false, true), (true, true)] {
+        assert_eq!(
+            slot_content(InputKind::Password, has_value, invalid),
+            SlotContent::Toggle(GLYPH_REVEAL),
+            "value={has_value} invalid={invalid}: a password field must offer \
+             the reveal toggle in every combination"
+        );
+        assert_ne!(
+            slot_content(InputKind::Password, has_value, invalid),
+            SlotContent::Passive(GLYPH_ERROR),
+            "value={has_value} invalid={invalid}: the toggle outranks the \
+             invalid mark — invalidity is carried by the 2px danger border, \
+             not by stealing the slot the user needs to read what they typed"
+        );
+    }
+}
+
+#[test]
+fn test_a_multi_line_well_shows_nothing_until_it_is_invalid() {
+    assert_eq!(
+        slot_content(InputKind::TextArea, false, false),
+        SlotContent::Empty,
+        "an empty, valid well has no business painting a mark"
+    );
+    assert_eq!(
+        slot_content(InputKind::TextArea, true, false),
+        SlotContent::Empty,
+        "a filled, valid well has no clear button: §3.2 gives the multi-line \
+         field no on_clear, and a one-keystroke wipe of a paragraph is not a \
+         control anyone asked for"
+    );
+    assert_eq!(
+        slot_content(InputKind::TextArea, false, true),
+        SlotContent::Passive(GLYPH_ERROR)
+    );
+    assert_eq!(
+        slot_content(InputKind::TextArea, true, true),
+        SlotContent::Passive(GLYPH_ERROR)
+    );
+}
+
+#[test]
+fn test_only_an_actionable_or_toggle_slot_captures_the_press() {
+    assert!(
+        slot_content(InputKind::Password, true, true).captures_press(),
+        "the reveal toggle must take the press, or the click falls through to \
+         the editor and the user is left typing into a field they were trying \
+         to read"
+    );
+    assert!(slot_content(InputKind::Search, true, false).captures_press());
+    assert!(
+        !slot_content(InputKind::TextArea, true, true).captures_press(),
+        "a passive error mark must not swallow clicks inside the well"
+    );
+    assert!(!slot_content(InputKind::TextArea, false, false).captures_press());
+}
+
+#[test]
+fn test_the_new_slots_reserve_exactly_what_the_plain_entry_reserved() {
+    // `002b`'s zero-shift slot re-proved against the new kinds: the
+    // reveal toggle and the well's error mark take the *same* width the
+    // plain entry's slot already occupied, so adding either control to a
+    // form cannot move a pixel of anything already on it.
+    let bounds = outer(240.0, HEIGHT_STANDARD);
+
+    for kind in [InputKind::Password, InputKind::TextArea] {
+        assert_eq!(
+            text_area_bounds(bounds, kind),
+            text_area_bounds(bounds, InputKind::TextEntry),
+            "{kind:?}: the text area is not the plain entry's"
+        );
+        assert_eq!(
+            trailing_slot_bounds(bounds, kind),
+            trailing_slot_bounds(bounds, InputKind::TextEntry),
+            "{kind:?}: the trailing slot is not where the plain entry's slot was"
+        );
+    }
+}
+
+#[test]
+fn test_masking_moves_the_editor_not_a_single_point() {
+    // The width-invariance claim, at real-layout level. Iced masks by
+    // substituting one bullet per grapheme, so the *glyph run* genuinely
+    // changes width when a secret is shown — which is why the invariant
+    // is stated against the laid-out editor rectangle, not the run.
+    let width = 240.0;
+    let masked = secret_editor_bounds("hunter2-supersecret", true, width);
+    let shown = secret_editor_bounds("hunter2-supersecret", false, width);
+
+    assert_eq!(
+        masked, shown,
+        "revealing the secret moved the editor: {masked:?} -> {shown:?}"
+    );
+}
+
+#[test]
+fn test_a_release_in_the_reveal_slot_publishes_reveal_and_never_clear() {
+    let width = 240.0;
+    let mut harness = Harness::headless(move || secret_field("hunter2", true, width));
+    let slot = trailing_slot_bounds(outer(width, HEIGHT_STANDARD), InputKind::Password);
+    let on_glyph = Point::new(slot.x + slot.width / 2.0, slot.y + slot.height / 2.0);
+
+    harness.hover(on_glyph);
+    harness.press(on_glyph);
+    let fired = harness.release(on_glyph);
+
+    assert_eq!(
+        fired,
+        vec![SecretMsg::Reveal],
+        "the slot published the wrong message — a reveal that also cleared \
+         would empty the very field the user asked to see"
+    );
+}
+
+#[test]
+fn test_a_release_outside_the_reveal_slot_publishes_nothing() {
+    let width = 240.0;
+    let mut harness = Harness::headless(move || secret_field("hunter2", true, width));
+    let far = Point::new(width + 40.0, HEIGHT_STANDARD / 2.0);
+
+    harness.hover(far);
+    harness.press(far);
+
+    assert_eq!(
+        harness.release(far),
+        Vec::new(),
+        "a press that never touched the slot must not reveal anything"
+    );
+}
+
+#[test]
+fn test_a_password_field_masks_by_default_and_a_well_does_not() {
+    let password: SecretWidget =
+        TextInput::new(InputKind::Password, "hint", "v", SecretMsg::Edit, "field");
+    assert!(
+        password.is_masked(),
+        "a password field that starts unmasked has already leaked before the \
+         user touched it"
+    );
+
+    let well: SecretWidget =
+        TextInput::new(InputKind::TextArea, "hint", "v", SecretMsg::Edit, "field");
+    assert!(
+        !well.is_masked(),
+        "a multi-line well is not a secret; masking it would make it useless"
+    );
+}
+
+#[test]
+fn test_reveal_and_clear_are_separate_messages_on_the_same_widget() {
+    let input: SecretWidget =
+        TextInput::new(InputKind::Password, "hint", "v", SecretMsg::Edit, "field")
+            .on_clear(SecretMsg::Clear)
+            .on_reveal(SecretMsg::Reveal);
+
+    assert_eq!(input.reveal_message(), Some(&SecretMsg::Reveal));
+}

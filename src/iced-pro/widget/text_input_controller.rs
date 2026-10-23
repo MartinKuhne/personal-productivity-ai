@@ -254,8 +254,21 @@ impl TextInputController {
     /// model mid-session would make a later `Escape` restore a value the
     /// user never typed over, and would report the wrong thing on `Enter`.
     pub fn observe(&mut self, model: &TextInputModel) {
+        self.sync_value(&model.value);
+    }
+
+    /// Record the host's value directly, without a [`TextInputModel`].
+    ///
+    /// The same guarded write [`observe`](Self::observe) performs — the
+    /// engine's `current` follows the host **only while no session is
+    /// open** — exposed so a control that owns a different model can
+    /// drive the engine without minting a `TextInputModel` per frame to
+    /// carry a string it already has. `observe` is this method with a
+    /// projection in front of it, which keeps the one rule about when the
+    /// host may overwrite the engine in one place rather than two.
+    pub fn sync_value(&mut self, value: &str) {
         if !self.gesture.is_open() {
-            self.current = model.value.clone();
+            self.current = value.to_string();
         }
     }
 

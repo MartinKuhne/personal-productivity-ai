@@ -880,6 +880,7 @@ fn slot_label(slot: SlotContent) -> String {
         SlotContent::Empty => "empty".to_string(),
         SlotContent::Passive(glyph) => format!("passive {glyph}"),
         SlotContent::Actionable(glyph) => format!("actionable {glyph}"),
+        SlotContent::Toggle(glyph) => format!("toggle {glyph}"),
     }
 }
 
@@ -1205,6 +1206,8 @@ fn slug_kind(kind: InputKind) -> &'static str {
         InputKind::TextEntry => "text-entry",
         InputKind::Search => "search",
         InputKind::DropdownTrigger => "dropdown-trigger",
+        InputKind::Password => "password",
+        InputKind::TextArea => "text-area",
     }
 }
 
@@ -4413,6 +4416,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(crate::gallery_hyperlink::hyperlink_cells());
     cells.extend(text_input_cells());
     cells.extend(text_input_tier_cells());
+    cells.extend(crate::gallery_secret::secret_cells());
     cells.extend(crate::gallery_toggle::toggle_cells());
     cells.extend(crate::gallery_combo::combo_cells());
     cells.extend(crate::gallery_range::range_cells());

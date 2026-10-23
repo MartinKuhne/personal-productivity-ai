@@ -136,6 +136,57 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|id| (*id).to_string()),
     );
+    // `UIF-ATOM-002c` / `INC-43`: the password field's own cells. The
+    // state columns are the atom's own list, because a password field
+    // that sampled a different set of states would be a second control.
+    for rung in RUNGS {
+        for state in snapshot_states() {
+            ids.push(format!("password/{}{}", state_slug(state), rung.slug()));
+        }
+    }
+    for posture in [
+        "masked-unfocused",
+        "reveal-refused-unfocused",
+        "masked-focused",
+        "revealed-focused",
+        "reveal-refused-disabled",
+        "reveal-refused-readonly",
+    ] {
+        ids.push(format!("password/reveal/{posture}"));
+    }
+    for tier in [
+        "changed",
+        "committed",
+        "cancelled",
+        "revealed",
+        "reveal-refused",
+        "focus-changed",
+    ] {
+        ids.push(format!("password/tier/{tier}"));
+    }
+    // `UIF-ATOM-002e` / `INC-43`: the multi-line well - same state
+    // columns, plus the growth ladder and the driven tiers.
+    for rung in RUNGS {
+        for state in snapshot_states() {
+            ids.push(format!("text-area/{}{}", state_slug(state), rung.slug()));
+        }
+    }
+    for band in ["1-3", "3-inf", "2-6"] {
+        for lines in [1u32, 2, 3, 4, 6, 9] {
+            ids.push(format!("text-area/growth/{band}-{lines}-lines"));
+        }
+    }
+    for tier in [
+        "changed",
+        "submitted",
+        "committed-blur",
+        "cancelled",
+        "undone",
+        "redone",
+        "cursor-changed",
+    ] {
+        ids.push(format!("text-area/tier/{tier}"));
+    }
     // `UIF-ATOM-003`: the three toggle atoms, both polarities, the five
     // columns §3.3 prints. "Focused" is `Rest + ring`, so it reads
     // `rest+focused` the way every other subject spells it.
@@ -430,6 +481,17 @@ fn per_subject_cell_counts_match_the_plan() {
         // `UIF-ATOM-001d` / `INC-40`: 5 state columns x 2 mounts.
         ("hyperlink", 10),
         ("input", 60),
+        // `UIF-ATOM-002c` / `INC-43`: the password field's own cells —
+        // 2 rungs x 9 reachable states plus the six reveal-policy
+        // postures, plus the six driven tier cells.
+        ("password", 24),
+        ("password-tier", 6),
+        // `UIF-ATOM-002e` / `INC-43`: 2 rungs x 9 reachable states,
+        // the 3 growth bands x 6 content sizes, and the seven driven
+        // tier cells.
+        ("text-area", 18),
+        ("text-area-growth", 18),
+        ("text-area-tier", 7),
         // `UIF-ATOM-003`: 3 controls x 2 polarities x 5 columns each.
         ("checkbox", 10),
         ("radio", 10),

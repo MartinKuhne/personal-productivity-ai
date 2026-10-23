@@ -32,21 +32,21 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 82 as of the four `INC-41` modules joining the tree for
-/// `UIF-ATOM-005` — `widget/range_model.rs`, `widget/slider.rs`,
-/// `widget/slider_host.rs`, `widget/number_box.rs`,
-/// `widget/number_box_host.rs` and the split-out gallery cell module
-/// `gallery_range.rs` — on top of the 82 `INC-41` left behind.
-const PIN_FILES_SCANNED: usize = 88;
+/// 93 as of the five `INC-43` modules joining the tree for
+/// `UIF-ATOM-002c` and `UIF-ATOM-002e` — `widget/password_model.rs`,
+/// `widget/password_host.rs`, `widget/text_area_model.rs`,
+/// `widget/text_area_host.rs` and `gallery_secret.rs` — on top of the 88
+/// `INC-42` left behind.
+const PIN_FILES_SCANNED: usize = 93;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 54 as of the five `INC-42` range modules joining `widget/`. Rule B
-/// counts scope membership, so a file with no colour literals still
-/// counts; the gallery cells sit outside `widget/` and `surface/` and so
-/// are not among them.
-const PIN_RULE_B_FILES: usize = 54;
+/// 58 as of the four `INC-43` secret and multi-line modules joining
+/// `widget/`. Rule B counts scope membership, so a file with no colour
+/// literals still counts; the gallery cells sit outside `widget/` and
+/// `surface/` and so are not among them.
+const PIN_RULE_B_FILES: usize = 58;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

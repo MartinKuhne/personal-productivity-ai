@@ -1088,21 +1088,47 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-002c",
         status: Status::Partial,
         section: "§3.2",
-        evidence: &["widget/text_input.rs"],
+        evidence: &[
+            "widget/password_model.rs",
+            "widget/password_host.rs",
+            "widget/text_input.rs",
+            "gallery_secret.rs",
+        ],
         reason: Some(
-            "Not implemented — there is no `PasswordInput`. Missing: `•` (U+2022) masking \
-             of the entered value, the clipboard `Copy`/`Cut` suppression that must hold \
-             while masked, the reserved 24×24px trailing reveal toggle (`👁` / `👁‍🗨`), \
-             `PasswordInputModel { masked_len, revealed_value, validation, disabled }`, \
-             `on_change(SecretInput)`, `on_commit()` and `on_reveal_toggle(bool)` with its \
-             automatic reset to masked on focus loss. The trailing-slot geometry the toggle \
-             would sit in already exists and is proven under `UIF-ATOM-002b`, so the slot \
-             is not the gap — the secret-handling widget is.",
+            "Built as a variant of the `002a` atom rather than a second widget. \
+             `InputKind::Password` gives the field a reveal slot instead of a \
+             clear button; `SecretInput` wraps the plaintext behind a redacting \
+             `Debug`/`Display`; `PasswordInputModel` owns the reveal and \
+             enforces `revealed ⇒ focused` on both the rise (`toggle_revealed` \
+             refuses while unfocused, disabled or read-only, and a refused press \
+             emits nothing rather than reporting a change that did not happen) \
+             and the fall (`note_focus(false)` resets to masked). \
+             `PasswordController` translates the atom's tiers so the value \
+             leaving the editor is a `SecretInput`, never a bare `String`. \
+             Masking is iced's own `Value::secure`, which substitutes one \
+             U+2022 per grapheme and suppresses `Ctrl+C`/`Ctrl+X` while set. \
+             Recorded as deviations from the spec's literal text: the spec's \
+             `👁‍🗨` is a three-scalar ZWJ sequence and `SlotContent` carries a \
+             single `char`, so the toggle is bare U+1F441; the spec's \
+             `PasswordInputModel` names no `value` field, so this model owns \
+             `value: SecretInput` and derives `masked_len` and `revealed_value` \
+             from it rather than keeping a second copy of the secret; \
+             `on_commit()` is `Commit<SecretInput>`, because a commit that \
+             carries no value cannot be persisted by the host that receives it. \
+             One gap is iced's rather than a choice: the input method's \
+             `Purpose::Secure` is derived from the same flag as masking, so \
+             revealing the secret also drops the secure-IME hint for as long as \
+             it is shown.",
         ),
         note: Some(
-            "Framework-owned under D-2. A secret entry is a generic control, not app \
-             content, so this is unimplemented framework work the host would otherwise \
-             have to write itself.",
+            "Framework-owned under D-2. Width invariance is proved against the \
+             partition rather than the glyph run, because the run genuinely \
+             changes width when a secret is shown: `text_area_bounds` and \
+             `trailing_slot_bounds` take no mask parameter, and the laid-out \
+             editor rectangle is asserted identical masked and revealed. The \
+             reveal toggle outranks the invalid mark — invalidity is carried by \
+             the 2px danger border, so a rejected password never loses the \
+             control needed to read it back.",
         ),
     },
     Coverage {
@@ -1128,24 +1154,41 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-002e",
         status: Status::Partial,
         section: "§3.2",
-        evidence: &["widget/text_input.rs"],
+        evidence: &[
+            "widget/text_area_model.rs",
+            "widget/text_area_host.rs",
+            "widget/text_input.rs",
+            "gallery_secret.rs",
+        ],
         reason: Some(
-            "Not implemented — there is no `MultiLineTextArea`. Missing: the scrollable \
-             multi-line well (min height 72px, `space.sm` vertical and `space.md` \
-             horizontal padding, `font.family.sans` for prompts or `font.family.mono` for \
-             code), auto-grow between `min_rows` and `max_rows` (the Bottom Command Bar's \
-             44px..120px prompt box is the named case), the `LineCol` cursor and \
-             `TextRange` selection model, `dirty` tracking and a \
-             `Option<ParseDiagnostic>` validation slot, `on_cursor_change(LineCol)`, \
-             `on_submit(String)` on `Ctrl+Enter`/`Cmd+Enter`, and `on_undo()`/`on_redo()`. \
-             Every widget in this crate's input layer is single-line; there is no \
-             multi-line primitive to extend.",
+            "Built on the atom rather than beside it. `InputKind::TextArea` reuses \
+             the zero-shift slot partition and the §3.2 cell matrix unchanged, \
+             and `TextAreaController` composes `TextInputController` outright, \
+             so the snapshot-at-first-edit rule, the coalesced `Live` tick and \
+             the `Escape` revert are the same code that drives the single-line \
+             field. `Enter` inserts a newline and never settles; the settle \
+             moves to focus loss, and `Ctrl+Enter`/`Cmd+Enter` is a distinct \
+             `Submitted` arm that deliberately does not settle, so the `Escape` \
+             after a send still reverts what was typed. `LineCol`, the `Growth` \
+             min/max-row solver, `dirty` tracking and `ParseDiagnostic` are \
+             carried by the model, and `EditHistory` fills the undo hole iced \
+             leaves — `text_editor`'s `Action` enum covers insert, delete and \
+             movement and stops there. Two deviations from the spec's literal \
+             text: the item names no `on_commit`/`on_cancel`, yet §3.0.4.2's \
+             tier discipline requires a settle and a revert to exist at all, so \
+             `Committed` (focus loss with an open session) and `Cancelled` \
+             (`Escape`) were added; and the printed `min_height: 72px / 3 lines \
+             of type.body` does not compute — `typography::BODY` is 14px on a \
+             20px line height, so three lines plus two `space.sm` gaps is 76px, \
+             and the Bottom Command Bar's `44px..120px` is off the body grid by \
+             the same arithmetic (44−16 = 28 → 1.4 lines; 120−16 = 104 → 5.2). \
+             The solver is built from the tokens, not from the printed pixels.",
         ),
         note: Some(
-            "The `font.family.mono` requirement inside this one cannot be met either — \
-             `UIF-TOK-004` models no font family at all, so a mono text area has no rung \
-             to ask for it. That gap is recorded against `UIF-TOK-004`, not papered over \
-             here.",
+            "The `font.family.mono` requirement inside this one still cannot be \
+             met: `UIF-TOK-004` models no font family at all, so a mono text \
+             area has no rung to ask for it. That gap stays recorded against \
+             `UIF-TOK-004` rather than being papered over here.",
         ),
     },
     Coverage {

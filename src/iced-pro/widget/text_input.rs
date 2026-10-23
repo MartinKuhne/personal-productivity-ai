@@ -258,6 +258,15 @@ pub const GLYPH_ERROR: char = '⚠';
 /// sibling card rather than at a list this control owns.
 pub const GLYPH_CHEVRON: char = '▾';
 
+/// The reveal toggle of a password field (`UIF-ATOM-002c`).
+///
+/// Same shape as the [`GLYPH_ERROR`] / [`GLYPH_CHEVRON`] gap: §3.2 names
+/// `👁‍🗨`, which is a **three-scalar** ZWJ sequence (eye + ZWJ + speech
+/// balloon) and [`SlotContent`] carries its glyph as one `char`. The bare
+/// eye is used — the same pictograph without the speech-balloon join.
+/// Recorded as a token gap in the style of ledger **G-12**.
+pub const GLYPH_REVEAL: char = '\u{1F441}';
+
 /// A stroke width that draws no stroke at all.
 ///
 /// The *absence* of a property rather than a visual magnitude, which is
@@ -295,6 +304,15 @@ pub enum InputKind {
     /// — the affordance *is* the content, so there is no empty state for
     /// it even at rest.
     DropdownTrigger,
+    /// A secret field (`UIF-ATOM-002c`). Its slot permanently carries the
+    /// reveal toggle [`GLYPH_REVEAL`], which **outranks** [`GLYPH_ERROR`]:
+    /// a masked field must always be able to show itself, and the invalid
+    /// state is still carried by the 2px danger border.
+    Password,
+    /// A multi-line field (`UIF-ATOM-002e`). Same horizontal partition as
+    /// the single-line kinds, a taller row, and a slot reserved for
+    /// [`GLYPH_ERROR`] — empty while the value is valid.
+    TextArea,
 }
 
 impl InputKind {
@@ -306,7 +324,7 @@ impl InputKind {
     ///
     /// * [`Search`](Self::Search) reserves `size.control.sm` because
     ///   §4.3.1 puts a `28 × 28` action button in that slot.
-    /// * The other two reserve `size.hit_target.min`, the floor
+    /// * Every other kind reserves `size.hit_target.min`, the floor
     ///   [`size`] states for "a close `×`, a clear `×`, an icon button".
     ///   Their glyphs are `size.icon.md`, but reserving only the glyph
     ///   would leave no room to make either of them actionable later
@@ -320,6 +338,8 @@ impl InputKind {
             InputKind::TextEntry => size::HIT_TARGET_MIN,
             InputKind::Search => size::CONTROL_SM,
             InputKind::DropdownTrigger => size::HIT_TARGET_MIN,
+            InputKind::Password => size::HIT_TARGET_MIN,
+            InputKind::TextArea => size::HIT_TARGET_MIN,
         }
     }
 }
@@ -342,6 +362,14 @@ pub enum SlotContent {
     /// A glyph that publishes the widget's clear message when pressed and
     /// released inside the slot.
     Actionable(char),
+    /// A glyph that publishes the widget's **toggle** message rather than
+    /// the clear message (`UIF-ATOM-002c`'s reveal control).
+    ///
+    /// A third arm rather than a second `Actionable` because the two press
+    /// differently *and* differently: a clear settles the field empty, a
+    /// reveal changes nothing about the value and must not open an editing
+    /// session. Same hit target, different contract.
+    Toggle(char),
 }
 
 impl SlotContent {
@@ -350,7 +378,9 @@ impl SlotContent {
     pub const fn glyph(self) -> Option<char> {
         match self {
             SlotContent::Empty => None,
-            SlotContent::Passive(glyph) | SlotContent::Actionable(glyph) => Some(glyph),
+            SlotContent::Passive(glyph)
+            | SlotContent::Actionable(glyph)
+            | SlotContent::Toggle(glyph) => Some(glyph),
         }
     }
 
@@ -359,18 +389,41 @@ impl SlotContent {
     pub const fn is_actionable(self) -> bool {
         matches!(self, SlotContent::Actionable(_))
     }
+
+    /// Whether a press inside the slot publishes the toggle message
+    /// (`UIF-ATOM-002c`).
+    #[must_use]
+    pub const fn is_toggle(self) -> bool {
+        matches!(self, SlotContent::Toggle(_))
+    }
+
+    /// Whether the slot owns the pointer over its rectangle — i.e. whether
+    /// a press there is the slot's rather than the editor's.
+    ///
+    /// A [`Passive`](SlotContent::Passive) glyph is decoration: pressing
+    /// the idle search mark must still put the caret in the field. Only a
+    /// glyph that *answers* something takes the press.
+    #[must_use]
+    pub const fn captures_press(self) -> bool {
+        matches!(self, SlotContent::Actionable(_) | SlotContent::Toggle(_))
+    }
 }
 
 /// Decide the trailing slot's content for a kind, a value and a verdict
-/// (`UIF-ATOM-002`, §4.3.1).
+/// (`UIF-ATOM-002`, `-002c`, `-002e`, §4.3.1).
 ///
-/// Validation outranks everything: an invalid field shows the error mark
-/// even when it also holds a value that could be cleared, because the
-/// error is why the user cannot proceed. Below that the kinds differ, and
-/// that is the *only* place the three kinds differ at all.
+/// Validation outranks everything *except a secret's own affordance*: an
+/// invalid field shows the error mark even when it also holds a value
+/// that could be cleared, because the error is why the user cannot
+/// proceed. A password field is the one exception — taking its reveal
+/// toggle away at the exact moment the user most wants to check what they
+/// typed would be a worse failure than losing the glyph, and §3.2's
+/// Invalid row still carries the 2px danger border, so the verdict is
+/// not lost. Below that the kinds differ, and that is the *only* place
+/// the kinds differ at all.
 #[must_use]
 pub const fn slot_content(kind: InputKind, has_value: bool, invalid: bool) -> SlotContent {
-    if invalid {
+    if invalid && !matches!(kind, InputKind::Password) {
         return SlotContent::Passive(GLYPH_ERROR);
     }
 
@@ -384,6 +437,8 @@ pub const fn slot_content(kind: InputKind, has_value: bool, invalid: bool) -> Sl
             }
         }
         InputKind::DropdownTrigger => SlotContent::Passive(GLYPH_CHEVRON),
+        InputKind::Password => SlotContent::Toggle(GLYPH_REVEAL),
+        InputKind::TextArea => SlotContent::Empty,
     }
 }
 
@@ -509,12 +564,19 @@ const fn cell_paint(cell: PaintedCell, palette: &Palette) -> CellPaint {
 /// separately anyway is what pins that claim in code rather than leaving
 /// it to a sentence — a future kind-specific rule changes exactly one arm
 /// here instead of turning the resolver into a string comparison, and the
-/// sidecar asserts the three arms still agree.
+/// sidecar asserts every arm still agrees.
+///
+/// `UIF-ATOM-002c` is the rule's one visible consequence: because the
+/// reveal toggle takes the cell's own icon colour, an invalid password
+/// field paints its eye in `status.danger.text` even though the error
+/// *glyph* was displaced by it.
 const fn icon_color(kind: InputKind, cell: PaintedCell, palette: &Palette) -> Color {
     match kind {
         InputKind::TextEntry => cell_icon_color(cell, palette),
         InputKind::Search => cell_icon_color(cell, palette),
         InputKind::DropdownTrigger => cell_icon_color(cell, palette),
+        InputKind::Password => cell_icon_color(cell, palette),
+        InputKind::TextArea => cell_icon_color(cell, palette),
     }
 }
 
@@ -799,10 +861,24 @@ pub struct TextInput<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer
     input: Element<'a, Option<Message>, Theme, Renderer>,
     on_input: Option<Rc<dyn Fn(String) -> Message + 'a>>,
     on_clear: Option<Message>,
+    /// What a press-and-release in the trailing slot publishes when the
+    /// slot carries a [`Toggle`](SlotContent::Toggle) — the reveal
+    /// control of `UIF-ATOM-002c`.
+    ///
+    /// A separate route from `on_clear` because the two settle different
+    /// things: a clear empties the field, a reveal changes no value at
+    /// all and must not open an editing session.
+    on_toggle: Option<Message>,
     focus_id: FocusId,
     widget_id: Id,
     placeholder: String,
     value: String,
+    /// Whether the editor masks what it holds (`UIF-ATOM-002c`).
+    ///
+    /// Seeded from the kind — a [`Password`](InputKind::Password) field
+    /// starts masked — and driven from outside by the host's reveal
+    /// state. The atom does not own the policy; it draws what it is told.
+    masked: bool,
     palette: Palette,
     width: Length,
     height: f32,
@@ -910,10 +986,12 @@ where
             input: Element::new(EmptyEditor),
             on_input: None,
             on_clear: None,
+            on_toggle: None,
             focus_id,
             widget_id,
             placeholder: placeholder.into(),
             value: value.into(),
+            masked: matches!(kind, InputKind::Password),
             palette: Palette::dark(),
             width: Length::Fill,
             height: HEIGHT_STANDARD,
@@ -969,6 +1047,14 @@ where
             .id(self.widget_id.clone())
             .width(Length::Fill)
             .padding(Padding::ZERO)
+            // `UIF-ATOM-002c`: masking is iced's own `Value::secure`, which
+            // substitutes `•` (U+2022) for **each grapheme** rather than
+            // collapsing the string. Two consequences the wrapper does not
+            // get to choose: a masked run is *not* the same pixel width as
+            // the revealed run it stands for, and iced couples the mask to
+            // `input_method::Purpose::Secure`, so revealing a field drops
+            // the platform's "do not autocorrect" hint with it.
+            .secure(self.masked)
             .style(move |_theme: &Theme, status: EditorStatus| -> EditorStyle {
                 let resolved = resolve_input_style(
                     kind,
@@ -1116,6 +1202,46 @@ where
         self
     }
 
+    /// The message published when the trailing **toggle** — the reveal
+    /// control of `UIF-ATOM-002c` — is pressed and released inside the
+    /// slot.
+    ///
+    /// Only consulted while [`slot`](Self::slot) is a
+    /// [`Toggle`](SlotContent::Toggle); a field whose slot is a clear
+    /// button keeps publishing [`on_clear`](Self::on_clear). The two are
+    /// separate messages because the host does separate things with them,
+    /// and folding them together would make "the user cleared the field"
+    /// and "the user looked at the field" the same event.
+    #[must_use]
+    pub fn on_reveal(mut self, message: Message) -> Self {
+        self.on_toggle = Some(message);
+        self
+    }
+
+    /// Mask the field's contents, or show them (`UIF-ATOM-002c`).
+    ///
+    /// The atom holds no reveal policy: it masks exactly what it is told
+    /// to. What it does guarantee is that this changes **no geometry** —
+    /// the slot reservation, the text area and the row height are all
+    /// functions of `(bounds, kind)`, never of the mask.
+    #[must_use]
+    pub fn masked(mut self, masked: bool) -> Self {
+        self.masked = masked;
+        self
+    }
+
+    /// Whether the editor is currently masking its contents.
+    #[must_use]
+    pub const fn is_masked(&self) -> bool {
+        self.masked
+    }
+
+    /// The message a trailing toggle publishes, if one is wired.
+    #[must_use]
+    pub const fn reveal_message(&self) -> Option<&Message> {
+        self.on_toggle.as_ref()
+    }
+
     /// Paint from a palette other than [`Palette::dark`].
     #[must_use]
     pub fn palette(mut self, palette: Palette) -> Self {
@@ -1188,6 +1314,26 @@ where
     Message: Clone,
     Renderer: text_core::Renderer,
 {
+    /// A press-and-release in the trailing slot, dispatched to whichever
+    /// action the slot's content owns.
+    ///
+    /// A [`Toggle`](SlotContent::Toggle) publishes its message and stops:
+    /// revealing a secret settles no value, opens no editing session and
+    /// routes no tier, so routing it through the clear path would tell
+    /// the host the field was emptied when all that happened is that the
+    /// host was asked to show it. Everything else keeps the clear
+    /// contract it has always had.
+    fn release_slot(&self, tree: &mut Tree, shell: &mut Shell<'_, Message>) {
+        if self.slot.is_toggle() {
+            if let Some(message) = self.on_toggle.clone() {
+                shell.publish(message);
+            }
+            return;
+        }
+
+        self.release_clear(tree, shell);
+    }
+
     /// The trailing `×` released inside the slot.
     ///
     /// A bound field routes [`TextInputController::clear`] — a tier, like
@@ -1572,7 +1718,7 @@ where
 
         let slot = trailing_slot_bounds(layout.bounds(), self.kind);
 
-        if self.slot.is_actionable() && cursor.is_over(slot) {
+        if self.slot.captures_press() && cursor.is_over(slot) {
             // The clear affordance is the wrapper's own hit target, so
             // pressing it never falls through to the editor and moves the
             // caret or steals focus. Press and release both belong to the
@@ -1583,7 +1729,7 @@ where
                     shell.capture_event();
                 }
                 Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    self.release_clear(tree, shell);
+                    self.release_slot(tree, shell);
                     shell.capture_event();
                 }
                 _ => {}
@@ -1665,7 +1811,7 @@ where
 
         let bounds = layout.bounds();
 
-        if self.slot.is_actionable() && cursor.is_over(trailing_slot_bounds(bounds, self.kind)) {
+        if self.slot.captures_press() && cursor.is_over(trailing_slot_bounds(bounds, self.kind)) {
             mouse::Interaction::Pointer
         } else if cursor.is_over(text_area_bounds(bounds, self.kind)) {
             mouse::Interaction::Text

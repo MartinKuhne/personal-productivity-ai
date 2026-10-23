@@ -27,6 +27,7 @@ pub mod gallery_hyperlink;
 pub mod gallery_popover;
 pub mod gallery_progress;
 pub mod gallery_range;
+pub mod gallery_secret;
 pub mod gallery_segmented;
 pub mod gallery_split_button;
 pub mod gallery_toggle;
