@@ -32,21 +32,20 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 93 as of the five `INC-43` modules joining the tree for
-/// `UIF-ATOM-002c` and `UIF-ATOM-002e` — `widget/password_model.rs`,
-/// `widget/password_host.rs`, `widget/text_area_model.rs`,
-/// `widget/text_area_host.rs` and `gallery_secret.rs` — on top of the 88
-/// `INC-42` left behind.
-const PIN_FILES_SCANNED: usize = 93;
+/// 96 as of the three `INC-44` modules joining the tree for
+/// `UIF-ATOM-002d` — `widget/auto_suggest_model.rs`,
+/// `widget/auto_suggest_host.rs` and `gallery_suggest.rs` — on top of the
+/// 93 `INC-43` left behind.
+const PIN_FILES_SCANNED: usize = 96;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 58 as of the four `INC-43` secret and multi-line modules joining
-/// `widget/`. Rule B counts scope membership, so a file with no colour
-/// literals still counts; the gallery cells sit outside `widget/` and
-/// `surface/` and so are not among them.
-const PIN_RULE_B_FILES: usize = 58;
+/// 60 as of the two `INC-44` autosuggest modules joining `widget/`. Rule
+/// B counts scope membership, so a file with no colour literals still
+/// counts; the gallery cells sit outside `widget/` and `surface/` and so
+/// are not among them.
+const PIN_RULE_B_FILES: usize = 60;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -63,18 +62,27 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// the name markers Rule B scans for, and so is not classified at all.
 ///
 /// [`VISUAL_NAME_MARKERS`]: crate::token_lint::VISUAL_NAME_MARKERS
-const PIN_TOKEN_BOUND: usize = 124;
+///
+/// 127 as of `INC-44`, whose three additions are the autosuggest
+/// flyout's token-bound figures — `FLYOUT_ROW_HEIGHT` (`size.control.md`),
+/// `FLYOUT_GAP` (`space.xs`) and `FLYOUT_RADIUS` (`shape.radius.widget`).
+/// The fourth figure that increment introduces, `FLYOUT_MAX_HEIGHT`, is a
+/// bare `240.0` and is registered as a Surface Geometry Constant rather
+/// than token-bound, because §3.2 fixes the number outright.
+const PIN_TOKEN_BOUND: usize = 127;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
 const PIN_RATIO: usize = 1;
 /// Visual scalars covered by the §1.1 registry.
 ///
-/// 20 as of the two figures §3.4 fixes outright for a ComboBox /
-/// Select: `combo_model::FLYOUT_MAX_HEIGHT` (280px) and
-/// `combo_box::MIN_WIDTH` (120px), which therefore need a registered
-/// authority rather than a token.
-const PIN_SURFACE_BOUND: usize = 20;
+/// 21 as of the three figures §3.2 and §3.4 fix outright for a
+/// completion flyout and a Select trigger:
+/// `auto_suggest_model::FLYOUT_MAX_HEIGHT` (240px),
+/// `combo_model::FLYOUT_MAX_HEIGHT` (280px) and `combo_box::MIN_WIDTH`
+/// (120px), which therefore need a registered authority rather than a
+/// token.
+const PIN_SURFACE_BOUND: usize = 21;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

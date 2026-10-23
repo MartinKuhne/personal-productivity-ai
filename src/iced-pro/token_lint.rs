@@ -362,6 +362,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         spec: "§3.7 — Teaching popover width range, upper bound 360px",
     },
     SurfaceGeometryConstant {
+        file: "widget/auto_suggest_model.rs",
+        name: "FLYOUT_MAX_HEIGHT",
+        spec: "§3.2 — AutoSuggest completion flyout max height 240px",
+    },
+    SurfaceGeometryConstant {
         file: "widget/combo_model.rs",
         name: "FLYOUT_MAX_HEIGHT",
         spec: "§3.4 — ComboBox / Select flyout max height 280px",

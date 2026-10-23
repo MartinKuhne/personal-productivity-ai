@@ -187,6 +187,36 @@ fn expected_ids() -> Vec<String> {
     ] {
         ids.push(format!("text-area/tier/{tier}"));
     }
+    // `UIF-ATOM-002d` / `INC-44`: the autosuggest field - same state
+    // columns and rungs as the plain input, sampled with the completion
+    // flyout shut and open - plus the eleven driven tier cells.
+    for state in snapshot_states() {
+        for rung in RUNGS {
+            for open in ["closed", "open"] {
+                ids.push(format!(
+                    "suggest/{}-{}{}",
+                    state_slug(state),
+                    open,
+                    rung.slug()
+                ));
+            }
+        }
+    }
+    for tier in [
+        "debounce-live",
+        "request",
+        "highlight",
+        "commit-enter",
+        "commit-click",
+        "commit-tab",
+        "dismiss",
+        "clear",
+        "no-match",
+        "stale-answer",
+        "focus-loss",
+    ] {
+        ids.push(format!("suggest-tier/{tier}"));
+    }
     // `UIF-ATOM-003`: the three toggle atoms, both polarities, the five
     // columns §3.3 prints. "Focused" is `Rest + ring`, so it reads
     // `rest+focused` the way every other subject spells it.
@@ -492,6 +522,10 @@ fn per_subject_cell_counts_match_the_plan() {
         ("text-area", 18),
         ("text-area-growth", 18),
         ("text-area-tier", 7),
+        // `UIF-ATOM-002d` / `INC-44`: 9 reachable states x 2 rungs x 2
+        // flyout states, plus the eleven driven tier cells.
+        ("suggest", 36),
+        ("suggest-tier", 11),
         // `UIF-ATOM-003`: 3 controls x 2 polarities x 5 columns each.
         ("checkbox", 10),
         ("radio", 10),

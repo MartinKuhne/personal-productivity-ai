@@ -1133,22 +1133,56 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-002d",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.2",
-        evidence: &["widget/text_input.rs", "surface/menu/", "surface/zorder.rs"],
-        reason: Some(
-            "Not implemented — there is no `AutoSuggestBox`. Missing: the Z-Band 2 \
-             completion flyout (max height 240px, 32px rows, anchored 4px below the \
-             input), `AutoSuggestModel<Id>`, `on_query_change(String)`, \
-             `on_suggestion_highlight(usize)` with `Down`/`Up` wrapping that does not lose \
-             the input caret, `on_suggestion_commit(Id, CommitSource::{Enter, Click, Tab})` \
-             and the two-stage `Escape` — flyout closes first, a second `Escape` clears \
-             the query per `Escape Rank`. Both halves the widget joins already exist and \
-             are separately proven: the input is here, and the menu engine plus the \
-             escape-rank registry supply the flyout. What is missing is the binding \
-             between them.",
+        evidence: &[
+            "widget/auto_suggest_model.rs",
+            "widget/auto_suggest_host.rs",
+            "widget/text_input.rs",
+            "surface/menu/",
+            "surface/zorder.rs",
+            "gallery_suggest.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Framework-owned under D-2. Built as the binding the atom is: \
+             `AutoSuggestModel<Id>` is the spec's five fields exactly \
+             (`query`, `suggestions`, `highlighted_index`, `busy`, \
+             `disabled`), and `AutoSuggestHost` joins the already-proven \
+             `TextInputController` to the already-proven menu engine without \
+             either one knowing the other exists. The flyout is Z-Band 2 at the \
+             spec's 240px max height, 32px rows and a 4px gap, every figure \
+             read from tokens where tokens own the number. \
+             `on_query_change` is the coalesced `Live` tick, \
+             `on_suggestion_highlight` is the roving walk, and \
+             `on_suggestion_commit` carries `CommitSource::{Enter, Click, \
+             Tab}`. The two-stage `Escape` is the whole transition table, \
+             including the third row where the key is not consumed and travels \
+             on. Recorded deviations: the second `Escape` **clears** the query \
+             rather than reverting to the pre-edit snapshot `002a` uses — a \
+             search term is disposable text whose useful reset is empty, and \
+             the revert tier remains available on the inner controller; the \
+             commit carries the settled `label` beside the id, because a \
+             commit naming only a candidate cannot settle the field text in the \
+             host that receives it; and the debounce window is a \
+             framework-chosen named constant (`DEBOUNCE_MS = 200`, \
+             trailing-edge, restarted by every keystroke) because §3.2 names \
+             no window at all. The flyout's identity is minted once from the \
+             **control** (`menu_id_for`), never from the query, so \
+             `MenuCascade::sync` keeps resolving the open card across every \
+             keystroke instead of orphaning it on the first character. Roving \
+             issues no iced focus operation, so the caret stays where the user \
+             left it while the highlight moves — the two live in different \
+             systems. A query that matches nothing opens nothing: the engine \
+             will not host a card with no focusable row, and no empty-state row \
+             is invented to work around it. Out-of-order answers are refused \
+             by a monotonic generation token echoed through \
+             `apply_suggestions` and counted in `stale_dropped` rather than \
+             silently discarded. A dismissed query stays dismissed against its \
+             own text, so a response still in flight cannot resurrect the list \
+             the user just closed. Time enters only as `TimeMs`; nothing in \
+             the machine reads a clock.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-002e",

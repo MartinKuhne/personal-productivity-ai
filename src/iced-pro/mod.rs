@@ -30,6 +30,7 @@ pub mod gallery_range;
 pub mod gallery_secret;
 pub mod gallery_segmented;
 pub mod gallery_split_button;
+pub mod gallery_suggest;
 pub mod gallery_toggle;
 pub mod geometry;
 pub mod spec_coverage;

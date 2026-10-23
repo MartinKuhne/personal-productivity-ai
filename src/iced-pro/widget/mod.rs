@@ -66,6 +66,14 @@
 //! * [`password_host`] — the reveal transcript and the tier translation
 //!   that make a password field the `002a` atom with masking on, rather
 //!   than a second text field (`UIF-ATOM-002c`)
+//! * [`auto_suggest_model`] — the completion model: the query, the
+//!   candidates, the highlight, the busy flag, and the flyout geometry
+//!   §3.2 fixes at `240px` / `32px` rows / `4px` anchor
+//!   (`UIF-ATOM-002d`)
+//! * [`auto_suggest_host`] — the request lifecycle neither the field nor
+//!   the menu engine can own: the clock-as-value debounce, the generation
+//!   token that refuses late answers, the two-stage `Escape`, and the
+//!   three commit sources (`UIF-ATOM-002d`)
 //! * [`text_area_model`] — the multi-line model: `LineCol`, the
 //!   `min_rows`/`max_rows` growth solver, the scroll extent and the
 //!   undo/redo ledger §3.2 asks for and iced does not provide
@@ -177,6 +185,8 @@
 //! and in both cases the value is a named constant rather than an inline
 //! number.
 
+pub mod auto_suggest_host;
+pub mod auto_suggest_model;
 pub mod badge;
 pub mod badge_model;
 pub mod button;
