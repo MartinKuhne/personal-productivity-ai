@@ -34,6 +34,7 @@ pub mod gallery_segmented;
 pub mod gallery_split_button;
 pub mod gallery_suggest;
 pub mod gallery_toggle;
+pub mod gallery_tree;
 pub mod geometry;
 pub mod spec_coverage;
 pub mod state;

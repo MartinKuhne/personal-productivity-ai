@@ -42,6 +42,16 @@
 //! * [`list_tile`] � the three-slot row: leading mark, filling text,
 //!   shrinking trailing targets, with the hit target resolved separately
 //!   for the interactive and the inert tile (`UIF-COMP-005`)
+//! * [`virtual_list`] - the recycling primitive: fixed-height row metrics that
+//!   bound realized rows independently of the total row count, so a
+//!   1 000 000-row list realises exactly what a 100 000-row one does, and
+//!   never a prefix sum (`UIF-COMP-006`)
+//! * [`tree_row`] - the framework-owned tree row: the depth-indent policy, the
+//!   row slot layout, and the D-6 contrast adaptation behind every mark a row
+//!   paints, including the ones `fastmd` never drew (decision **D-8**)
+//! * [`tree_view`] - the tree model: visible-row flattening, single and multi
+//!   selection keyed by node id, the keyboard contract, and the
+//!   scroll-into-view handoff to [`virtual_list`]
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures �3B prints that no rung carries � the `20px` field header, the
@@ -58,3 +68,6 @@ pub mod notification;
 pub mod scroll_view;
 pub mod settings_row;
 pub mod toast;
+pub mod tree_row;
+pub mod tree_view;
+pub mod virtual_list;

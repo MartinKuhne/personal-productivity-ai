@@ -229,6 +229,39 @@ pub struct TileSlots {
     pub trailing: Rectangle,
 }
 
+/// The insets and inter-slot gap a three-slot row is laid out inside.
+///
+/// **The generalisation `UIF-COMP-006` needs from `UIF-COMP-005`.** The
+/// tile's own padding is symmetric — `12px` either side — but a tree row
+/// spends its left inset on indentation and a disclosure chevron before
+/// the leading mark ever starts, and §4's `UIF-PANE-003` gives that row a
+/// `4px` inset rather than the tile's `12px`. Recomputing the partition
+/// for the tree would mean two implementations of the gap-charging rule
+/// drifting apart, so the partition is written once against this struct
+/// and the tile's numbers become one value of it ([`TILE_PADDING`]).
+///
+/// Nothing about the *rule* changed; only the constants became arguments.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowPadding {
+    /// The inset before the leading slot.
+    pub left: f32,
+    /// The inset after the trailing slot.
+    pub right: f32,
+    /// The inset above and below the row's content.
+    pub vertical: f32,
+    /// The gap charged between slots that exist.
+    pub gap: f32,
+}
+
+/// The padding [`slots`] has always applied — the tile's own `12px` /
+/// `4px` / `8px` from §3B.5.
+pub const TILE_PADDING: RowPadding = RowPadding {
+    left: PADDING_HORIZONTAL,
+    right: PADDING_HORIZONTAL,
+    vertical: PADDING_VERTICAL,
+    gap: SLOT_GAP,
+};
+
 /// Divide a tile's bounds into its three slots.
 ///
 /// The leading slot is reserved from the mark's *hit* extent rather than
@@ -243,10 +276,29 @@ pub fn slots(
     interactive: bool,
     trailing_width: f32,
 ) -> TileSlots {
-    let interior_x = bounds.x + PADDING_HORIZONTAL;
-    let interior_width = (bounds.width - PADDING_HORIZONTAL - PADDING_HORIZONTAL).max(0.0);
-    let interior_y = bounds.y + PADDING_VERTICAL;
-    let interior_height = (bounds.height - PADDING_VERTICAL - PADDING_VERTICAL).max(0.0);
+    slots_in(bounds, &TILE_PADDING, leading, interactive, trailing_width)
+}
+
+/// [`slots`], with the row's insets supplied rather than fixed.
+///
+/// The whole three-slot partition — leading reserved from the hit extent,
+/// the centre taking the remainder, the trailing shrinking, and a gap
+/// charged only between slots that exist — is identical to
+/// [`slots`]'s. This is the entry point a row whose left inset is not the
+/// tile's `12px` (a tree row, a table cell) goes through, and it is why
+/// those rows get the *same* grid rather than a look-alike.
+#[must_use]
+pub fn slots_in(
+    bounds: Rectangle,
+    padding: &RowPadding,
+    leading: Leading,
+    interactive: bool,
+    trailing_width: f32,
+) -> TileSlots {
+    let interior_x = bounds.x + padding.left;
+    let interior_width = (bounds.width - padding.left - padding.right).max(0.0);
+    let interior_y = bounds.y + padding.vertical;
+    let interior_height = (bounds.height - padding.vertical - padding.vertical).max(0.0);
 
     let leading_width = leading.hit_extent(interactive);
     let available_for_trailing = (interior_width - leading_width).max(0.0);
@@ -259,9 +311,9 @@ pub fn slots(
     // of the box.
     let gaps = usize::from(leading_width > 0.0) + usize::from(reserved_trailing > 0.0);
     let center_width =
-        (interior_width - leading_width - reserved_trailing - SLOT_GAP * gaps as f32).max(0.0);
+        (interior_width - leading_width - reserved_trailing - padding.gap * gaps as f32).max(0.0);
     let center_x = if leading_width > 0.0 {
-        interior_x + leading_width + SLOT_GAP
+        interior_x + leading_width + padding.gap
     } else {
         interior_x
     };

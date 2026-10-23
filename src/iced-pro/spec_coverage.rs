@@ -1672,20 +1672,45 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-006",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["surface/menu/view.rs"],
-        reason: Some(
-            "Container unbuilt; content is app-owned per D-2. Missing: the tree's \
-             container and chrome — a virtualised viewport, row height and indent \
-             step, the disclosure chevron, and the selection model with its keyboard \
-             choreography (the spec explicitly leaves tree keyboard navigation \
-             unspecified, so that choreography is a framework decision, not app content). \
-             None of it exists as a reusable type. What the app owns, and this entry \
-             deliberately does not claim, is the filesystem node model, filtering, and the \
-             `[PDF]` badge.",
+        evidence: &[
+            "composite/virtual_list.rs",
+            "composite/tree_row.rs",
+            "composite/tree_view.rs",
+            "gallery_tree.rs",
+        ],
+        reason: None,
+        note: Some(
+            "`virtual_list` owns the recycling arithmetic and `tree_view` owns the row \
+             model; `tree_row` owns the paint, per decision D-8. Row height is fixed at \
+             exactly two rungs — 24px compact, 28px standard — because a variable-height \
+             tree needs prefix-sum offsets, and accumulating float heights drifts: a \
+             thousand 0.1px rows sum to 99.9990463257, so every position here is \
+             `index × height` recomputed in `f64` and narrowed once. The spec's printed \
+             4px-vs-12px guide inset conflict is resolved width-relative instead of \
+             picked: 16px per level nominal, proportional compression while every level \
+             still keeps a guide, then collapse onto the last drawn guide below a 4px \
+             floor step, reporting `collapsed_levels` so the host can see the loss. The \
+             96px label floor is depth-independent — the indent saturates there and stops \
+             eroding, so a 20-deep and a 200-deep tree render the same label box. Guide \
+             lines are graded `Judged`, not the spec's `border.subtle`, which measures \
+             1.2691:1 against `surface.raised` and cannot be seen; on the selection fill \
+             the chevron, guide and left bar all promote to `text.strong` on the same \
+             D-6 rule, because `accent.border` on `accent.fill` is 1.6098:1 and \
+             `text.muted` is 1.8363:1. Tree keyboard navigation clamps at the ends where \
+             menus wrap — wrapping would teleport a 100k-row viewport across the corpus. \
+             The selection anchor is an id, never an index: collapsed away it resolves to \
+             its nearest visible ancestor, removed entirely the range degenerates to the \
+             target row, and focus collapsed away falls back slot-preservingly. \
+             Auto-scroll returns `None` while a thumb drag is open, because the drag owns \
+             the offset. Gaps recorded against the spec: `Ctrl`+arrow is focus-move-only \
+             here since no extend-selection semantics are specified; variable row heights, \
+             row drag-and-drop, horizontal scrolling, lazy child loading and the tree's \
+             own type-to-jump are unspecified and deliberately not invented. `fastmd`'s \
+             current 15px tree rows sit below the 24px hit floor and are a migration \
+             gap, not a third rung.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-007",

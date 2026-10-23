@@ -49,7 +49,7 @@ use crate::token_lint::{
 /// 107 as of `INC-47`, which added the notification subsystem:
 /// `composite/notification.rs` (the shared severity and model),
 /// `composite/info_bar.rs` and `composite/toast.rs`.
-const PIN_FILES_SCANNED: usize = 107;
+const PIN_FILES_SCANNED: usize = 111;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -68,7 +68,7 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 70 as of `INC-47`, whose three additions are the notification
 /// subsystem's modules — `composite/notification.rs`,
 /// `composite/info_bar.rs` and `composite/toast.rs`.
-const PIN_RULE_B_FILES: usize = 70;
+const PIN_RULE_B_FILES: usize = 73;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -125,7 +125,7 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `*_GUTTER` (no marker), `MAX_VISIBLE` is a `usize`, and `WIDTH` is a
 /// bare `360.0` registered as a Surface Geometry Constant because §2.3
 /// has no `size.toast.width` rung for it to read.
-const PIN_TOKEN_BOUND: usize = 167;
+const PIN_TOKEN_BOUND: usize = 175;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

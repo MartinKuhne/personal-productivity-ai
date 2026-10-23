@@ -409,6 +409,33 @@ fn expected_ids() -> Vec<String> {
     ] {
         ids.push(format!("list-tile/{state}"));
     }
+    // `UIF-COMP-006` / `INC-48`: the tree row across its indent tiers and
+    // adaptive marks, then the recycling primitive across both rungs and
+    // both corpus sizes.
+    for posture in [
+        "rest/depth-0",
+        "rest/depth-3",
+        "hovered/depth-2",
+        "pressed/depth-2",
+        "selected/depth-1",
+        "selected/depth-4",
+        "selected-warning/depth-2",
+        "warning/depth-2",
+        "disabled/depth-2",
+        "narrow/depth-9-compressed",
+        "narrow/depth-20-collapsed",
+    ] {
+        ids.push(format!("tree-row/{posture}"));
+    }
+    for sample in [
+        "compact/1k",
+        "standard/1k",
+        "compact/100k",
+        "compact/1m",
+        "standard/1m",
+    ] {
+        ids.push(format!("virtual-list/{sample}"));
+    }
     ids.extend(
         [
             "rest",
@@ -657,6 +684,12 @@ fn per_subject_cell_counts_match_the_plan() {
         // across 8 postures.
         ("card", 2),
         ("list-tile", 8),
+        // `UIF-COMP-006` / `INC-48`: the recycling primitive across 5
+        // postures, and the tree row across 11 — the three indent tiers,
+        // the adaptive chevron and guide marks, the fill-locked warning
+        // dot, the disabled rung and the narrow-viewport floor.
+        ("virtual-list", 5),
+        ("tree-row", 11),
         ("menu", 12),
         ("menu-glyph", 10),
         // `INC-36`: the `000b` tiers on the four surface hosts.
