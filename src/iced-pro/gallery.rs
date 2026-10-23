@@ -4408,6 +4408,9 @@ pub fn matrix() -> Vec<Cell> {
     let mut cells = Vec::new();
     cells.extend(button_cells());
     cells.extend(button_controlled_cells());
+    cells.extend(crate::gallery_segmented::segmented_cells());
+    cells.extend(crate::gallery_split_button::split_button_cells());
+    cells.extend(crate::gallery_hyperlink::hyperlink_cells());
     cells.extend(text_input_cells());
     cells.extend(text_input_tier_cells());
     cells.extend(crate::gallery_toggle::toggle_cells());

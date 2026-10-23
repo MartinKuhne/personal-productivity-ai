@@ -97,6 +97,42 @@
 //!   determinate versus indeterminate, the three statuses, and the
 //!   cancellation flag that decides whether the stop button exists at
 //!   all (`UIF-ATOM-009`)
+//! * [`rove`] — the single-focus walk every roving group shares: skip
+//!   the disabled members, wrap at both ends, and never lose the
+//!   keyboard on a member that was disabled underneath the focus
+//!   (`UIF-ATOM-003`, `UIF-ATOM-001b`)
+//! * [`segmented`] — the paint resolver and geometry for the §3.1b
+//!   joined strip: every unselected segment is the `Secondary` button
+//!   resolver passed straight through, the selected segment *is* its
+//!   `Pressed` cell, and the `✓` slot is reserved on every segment so
+//!   selection moves no label (`UIF-ATOM-001b`)
+//! * [`segmented_model`] — the declarative `SegmentedModel<Id>` a host
+//!   owns: the single/multi-select set transition, the shared rove, and
+//!   the one-segment strip a `ToggleButton` is built from
+//!   (`UIF-ATOM-001b`)
+//! * [`split_button`] — the geometry and paint resolver for the §3.1c
+//!   two-zone control: which half a point fell in, the `28px` chevron
+//!   zone, and both halves resolved through the button atom so a Primary
+//!   split button carries the fill/foreground lock the button already
+//!   asserted (`UIF-ATOM-001c`)
+//! * [`split_button_model`] — the declarative `SplitButtonModel<ActionId>`
+//!   a host owns: a contained `ButtonModel` as the primary half, and
+//!   flyout rows that build the engine's own `Menu` on demand
+//!   (`UIF-ATOM-001c`)
+//! * [`split_button_host`] — the composition: one `MenuCascade`, one
+//!   `ButtonController`, and the emission set that keeps the primary
+//!   half's three tiers and the menu's open/select events distinguishable
+//!   (`UIF-ATOM-001c`)
+//! * [`hyperlink`] — the paint resolver, geometry and focus state for
+//!   the §3.1d inline text control: no border and no resting fill, the
+//!   underline as the non-colour cue, and a ring resolved against the
+//!   mount because the control paints nothing under itself
+//!   (`UIF-ATOM-001d`)
+//! * [`hyperlink_model`] — the declarative `HyperlinkModel` a host owns,
+//!   and the two tiers it emits: an activation carrying a
+//!   [`HyperlinkTarget`](crate::widget::hyperlink_model::HyperlinkTarget)
+//!   rather than a bare string, and a status-bar preview that clears to
+//!   `None` (`UIF-ATOM-001d`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -115,8 +151,16 @@ pub mod chip;
 pub mod chip_model;
 pub mod focus;
 pub mod focusable;
+pub mod hyperlink;
+pub mod hyperlink_model;
 pub mod progress;
 pub mod progress_model;
+pub mod rove;
+pub mod segmented;
+pub mod segmented_model;
+pub mod split_button;
+pub mod split_button_host;
+pub mod split_button_model;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;

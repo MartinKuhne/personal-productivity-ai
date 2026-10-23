@@ -85,6 +85,37 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|id| (*id).to_string()),
     );
+    // `UIF-ATOM-001b` / `INC-40`: the segmented strip. Two subjects (the
+    // one-segment ToggleButton and a three-segment strip sampled at its
+    // middle), two polarities, two height rungs, five state columns.
+    let strip_states = ["rest", "hovered", "pressed", "rest+focused", "disabled"];
+    for subject in ["toggle", "strip"] {
+        for polarity in ["off", "on"] {
+            for rung in ["compact", "standard"] {
+                for state in strip_states {
+                    ids.push(format!("{subject}/{polarity}/{rung}-{state}"));
+                }
+            }
+        }
+    }
+    // `UIF-ATOM-001c` / `INC-40`: the split button, sampled per zone so
+    // the two independent hit targets each get their own cell.
+    for variant in ["primary", "secondary"] {
+        for zone in ["label", "chevron"] {
+            for rung in ["compact", "standard"] {
+                for state in strip_states {
+                    ids.push(format!("split-button/{variant}/{zone}-{rung}-{state}"));
+                }
+            }
+        }
+    }
+    // `UIF-ATOM-001d` / `INC-40`: the hyperlink against both mounts the
+    // spec quotes figures for.
+    for state in strip_states {
+        for mount in ["base", "overlay"] {
+            ids.push(format!("hyperlink/{mount}-{state}"));
+        }
+    }
     for kind in ["text-entry", "search", "dropdown-trigger"] {
         for state in expected_states() {
             for rung in RUNGS {
@@ -333,6 +364,16 @@ fn per_subject_cell_counts_match_the_plan() {
 
     let mut expected: Vec<(&str, usize)> = vec![
         ("button", 83),
+        // `UIF-ATOM-001b` / `INC-40`: the one-segment ToggleButton strip
+        // and a three-segment strip, each 2 polarities x 2 rungs x 5
+        // state columns.
+        ("toggle-button", 20),
+        ("segmented-button", 20),
+        // `UIF-ATOM-001c` / `INC-40`: 2 variants x 2 zones x 2 rungs x
+        // 5 state columns.
+        ("split-button", 40),
+        // `UIF-ATOM-001d` / `INC-40`: 5 state columns x 2 mounts.
+        ("hyperlink", 10),
         ("input", 60),
         // `UIF-ATOM-003`: 3 controls x 2 polarities x 5 columns each.
         ("checkbox", 10),

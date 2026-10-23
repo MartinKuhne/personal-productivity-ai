@@ -869,59 +869,128 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-001b",
         status: Status::Partial,
         section: "§3.1",
-        evidence: &["token/shape.rs", "token/color.rs"],
+        evidence: &[
+            "widget/segmented.rs",
+            "widget/segmented_model.rs",
+            "widget/rove.rs",
+            "widget/button.rs",
+            "token/color.rs",
+            "token/shape.rs",
+            "gallery_segmented.rs",
+        ],
         reason: Some(
-            "Not implemented — no `ToggleButton`, `SegmentedButton` or any joined-segment \
-             control exists in this crate. Missing: the strip geometry (28px or 32px \
-             height, 4px outer radius, `1px border.strong` perimeter), the \
-             selected-segment skin (`surface.active` fill, `text.strong`, `1px \
-             accent.border`), the reserved 14px leading `✓` in `accent.text` that carries \
-             the selection without relying on colour (`UIF-PRIN-005`), \
-             `SegmentedModel<Id>` with `SingleSelect`/`MultiSelect` over a \
-             `BTreeSet<Id>`, `on_selection_change`, and the `Left`/`Right` roving that \
-             moves focus across segments with `Space`/`Enter` toggling. The tokens it \
-             would be built from all exist and are named; the widget does not.",
+            "Built by composing the `001a` button rather than copying it. The resolver \
+             routes an unselected segment straight through \
+             `button::resolve_style(Secondary, ..)` and paints a selected one as the \
+             **Secondary Pressed** cell, so the selected fill is held through hover and \
+             press (`surface.active` is already lighter than `surface.hover`) and no new \
+             colour is introduced. Strip geometry is 28px/32px tall, 4px outer radius, \
+             `1px border.strong` perimeter; every segment charges the reserved \
+             `CHECK_SLOT` leading tick whether or not it is selected, so selecting never \
+             moves a label (`UIF-PRIN-003`), and a disabled selected segment keeps its \
+             tick in disabled ink (`UIF-PRIN-005`). `SegmentedModel<Id>` carries \
+             `SingleSelect`/`MultiSelect` over a `BTreeSet<Id>`, emits \
+             `on_selection_change`, and `Left`/`Right` roving moves focus across segments \
+             with `Space`/`Enter` toggling — the walk is shared with the radio group \
+             through `widget/rove.rs`. A ToggleButton is one segment under \
+             **MultiSelect**: `SingleSelect::toggle` treats re-picking the held member as \
+             a no-op, so a one-segment `SingleSelect` strip could be switched on and \
+             never off. Missing: the **live `iced::Widget`** — the resolver, geometry and \
+             model are pure and proven, but nothing in this crate yet paints the strip or \
+             routes real iced events into it, so the control is host-drivable rather \
+             than rendered.",
         ),
         note: Some(
             "Framework-owned under D-2: a segmented control is a generic atom, not navbar \
              or tab content, so this is unimplemented framework work rather than a scope \
-             exclusion.",
+             exclusion. Collision found and pinned: a **pressed unselected** segment \
+             resolves to the same fill as a **selected** one, so colour alone cannot tell \
+             them apart — the reserved tick is the only disambiguator, which is exactly \
+             why `UIF-PRIN-005` requires it.",
         ),
     },
     Coverage {
         id: "UIF-ATOM-001c",
         status: Status::Partial,
         section: "§3.1",
-        evidence: &["surface/menu/", "token/shape.rs"],
+        evidence: &[
+            "widget/split_button.rs",
+            "widget/split_button_model.rs",
+            "widget/split_button_host.rs",
+            "widget/button_controller.rs",
+            "surface/menu/",
+            "gallery_split_button.rs",
+        ],
         reason: Some(
-            "Not implemented — no `SplitButton` or `DropDownButton` exists. Missing: the \
-             two-zone control geometry (a primary action zone at `[0, 12px]` padding plus \
-             a 28px trailing chevron zone behind a `1px border.strong` vertical \
-             divider), `SplitButtonModel<ActionId>`, `on_primary_activate()`, \
-             `on_menu_toggle(bool)` on chevron click or `Alt+Down`/`Down`, \
-             `on_menu_select(ActionId)`, and the Z-Band 2 flyout mount. The menu engine \
-             the flyout would be built from is present and proven — card, cascade, roving \
-             focus, `Escape Rank` — so the gap is the control and its binding, not the \
-             popup machinery behind it.",
+            "Built at maximum composition: the primary half contains a real `ButtonModel` \
+             driven by a real `ButtonController`, so `ActionPending` arrives through \
+             `model.pending()` rather than a parallel mechanism, and the flyout is the \
+             **existing** menu engine — `SplitButtonHost` owns exactly one `MenuCascade` \
+             and returns `SplitButtonOutcome { cascade, emissions }`. No second menu was \
+             added; escape-rank **G-13** and roving menu focus **D-7** are the engine's \
+             own. The two zones are independent hit targets with independent hover and \
+             activation, pinned negatively: hovering the label does not light the chevron \
+             and pressing the label does not open the menu. The menu opens on chevron \
+             **release** — §3.1c says a chevron click, which under §3.0.3.3 is \
+             press-and-release. `Escape` after the menu is open calls `close_tree()`, and \
+             `FocusState::pop_trap()` restores the focus recorded before the trap was \
+             pushed, so focus returns to the control without firing the primary action. \
+             `SplitButtonModel<ActionId>` carries the rows and emits \
+             `on_primary_activate()` / `on_menu_toggle(bool)` / `on_menu_select(ActionId)`. \
+             Missing: the **live `iced::Widget`** that paints both halves and routes real \
+             events into the host.",
         ),
-        note: None,
+        note: Some(
+            "Spec gap (§3.1c): the divider is given as one token — `1px border.strong` — \
+             for both variants. On a Primary control's `accent.fill` that stroke measures \
+             **1.0876:1**, i.e. physically invisible, while on a Secondary control it \
+             reads clearly. The spec needs a per-variant stroke or a gap between the \
+             halves. The figure is carried in the gallery's `resolved` set rather than \
+             judged, so the finding stays visible without reporting a failure against a \
+             floor the spec never asked that stroke to meet. Related: §3.4 gives the \
+             combobox chevron `text.muted`, unusable here at 1.84:1 on `accent.fill`, so \
+             the chevron takes the menu half's own resolved ink (`text.strong`, \
+             4.8020:1).",
+        ),
     },
     Coverage {
         id: "UIF-ATOM-001d",
         status: Status::Partial,
         section: "§3.1",
-        evidence: &["token/color.rs", "token/shape.rs"],
+        evidence: &[
+            "widget/hyperlink.rs",
+            "widget/hyperlink_model.rs",
+            "widget/focusable.rs",
+            "token/color.rs",
+            "gallery_hyperlink.rs",
+        ],
         reason: Some(
-            "Not implemented — there is no `Hyperlink` control anywhere in the crate. \
-             Missing: the inline-or-standalone interactive-text control with its 24px hit \
-             target and `radius.widget` focus ring; the four painted states (`accent.text` \
-             with a 1px underline at rest, `text.strong` on a `surface.hover` pill on \
-             hover, `accent.text` on `surface.active` pressed, `text.disabled` with the \
-             underline removed when disabled); `HyperlinkModel { label, uri, external, \
-             disabled }`; `on_open(String)`; and `on_hover_uri(Option<String>)`, which \
-             is what would surface a target in the status bar.",
+            "Built as the inline-or-standalone interactive-text atom: 24px hit target, \
+             `radius.widget` focus ring, and the four painted states §3.1d names — \
+             `accent.text` with a 1px underline at rest, `text.strong` on a \
+             `surface.hover` pill on hover, `accent.text` on `surface.active` pressed, \
+             `text.disabled` with the underline removed when disabled. `HyperlinkState` \
+             implements `operation::Focusable` by delegating to a `FocusableState`, so a \
+             link joins the framework's focus order rather than carrying a private one. \
+             `HyperlinkModel { label, uri, external, disabled }` emits \
+             `Commit<HyperlinkTarget { uri, external }>` — a typed value, not a raw \
+             message — and `HoverUri(Option<String>)` is a separate tier, so a status-bar \
+             target never arrives as a commit. A disabled link emits neither. The focus \
+             ring is resolved against the **mount**, not the pill, because the control \
+             paints nothing at rest; the label is audited against whatever it actually \
+             sits on (the pill where one is painted, the mount otherwise) so the \
+             transparent-fill exemption cannot silently drop the figures §3.1d quotes. \
+             Missing: the **live `iced::Widget`** that draws the text, underline and pill \
+             and routes real events into `HyperlinkState`.",
         ),
-        note: None,
+        note: Some(
+            "Every ratio §3.1d prints was recomputed from raw sRGB through \
+             `token/contrast.rs` and matched — including the disabled polarity. The \
+             segmented/split fill is deliberately **not** audited against the mount: no \
+             surface rung in this palette clears 3.0 against `surface.raised` \
+             (`surface.active` measures 1.3089), so selection is signalled by \
+             `accent.border` plus the tick rather than by fill contrast.",
+        ),
     },
     Coverage {
         id: "UIF-ATOM-002",

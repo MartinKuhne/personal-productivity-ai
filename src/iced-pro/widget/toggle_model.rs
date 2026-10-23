@@ -86,6 +86,7 @@
 //! Unit tests live in the sibling `toggle_model_tests.rs` sidecar.
 
 use crate::binding::{ActionPending, Commit};
+use crate::widget::rove::rove_index;
 use crate::widget::toggle::TogglePolarity;
 
 /// What a tri-state checkbox has underneath it, as the transition rule
@@ -189,16 +190,12 @@ impl CheckState {
 
 /// Which way the roving focus moves through a radio group.
 ///
-/// `Down`/`Right` are `Forward` and `Up`/`Left` are `Backward`, for
-/// every orientation — see the [module docs](self) for why the axes are
-/// not split by layout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RoveDirection {
-    /// Toward higher indices.
-    Forward,
-    /// Toward lower indices.
-    Backward,
-}
+/// The type lives in [`crate::widget::rove`], the shared home of the
+/// single-focus walk: the radio group here and the `SegmentedModel` of
+/// §3.1 walk the same ring, and one walk means one rule that cannot
+/// drift between them. Re-exported so `toggle_model::RoveDirection`
+/// keeps naming it.
+pub use crate::widget::rove::RoveDirection;
 
 /// The three kinds of key press a toggle-family control routes.
 ///
@@ -440,38 +437,13 @@ impl<Id> RadioGroupModel<Id> {
     /// coincide after a rove but not after a click on an already-focused
     /// group, and conflating them would make the first arrow key jump
     /// back to the selected row.
+    ///
+    /// The walk itself is [`rove_index`], shared with every other
+    /// single-focus group in the crate; this method only supplies the
+    /// roster.
     #[must_use]
     pub fn rove(&self, from: Option<usize>, direction: RoveDirection) -> Option<usize> {
-        let enabled = self.enabled_indices();
-        if enabled.is_empty() {
-            return None;
-        }
-
-        let Some(from) = from else {
-            return match direction {
-                RoveDirection::Forward => enabled.first().copied(),
-                RoveDirection::Backward => enabled.last().copied(),
-            };
-        };
-
-        // Walk the enabled ring rather than the raw index space, so a
-        // disabled run between two live options is stepped over in one
-        // move and wrapping is a position lookup rather than a special
-        // case at each end.
-        let position = match enabled.binary_search(&from) {
-            Ok(position) => position,
-            // `from` is on a disabled option (or off the end): land on
-            // the next live one in the direction of travel, which is the
-            // insertion point wrapped.
-            Err(position) => position % enabled.len(),
-        };
-
-        let next = match direction {
-            RoveDirection::Forward => (position + 1) % enabled.len(),
-            RoveDirection::Backward => (position + enabled.len() - 1) % enabled.len(),
-        };
-
-        enabled.get(next).copied()
+        rove_index(&self.enabled_indices(), from, direction)
     }
 
     /// The rove-and-select a directional key produces (§3.3).
