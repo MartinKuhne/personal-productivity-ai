@@ -32,8 +32,9 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 36 as of the `surface/tooltip/` subsystem (`mod.rs`, `hover.rs`, `place.rs`).
-const PIN_FILES_SCANNED: usize = 36;
+/// 42 as of the `binding/` subsystem (`mod.rs` plus `controlled`, `tier`,
+/// `snapshot`, `pending`, `responsive`) joining the tree for `UIF-ATOM-000b`.
+const PIN_FILES_SCANNED: usize = 42;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

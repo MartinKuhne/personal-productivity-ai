@@ -748,30 +748,40 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-000b",
         status: Status::Partial,
         section: "§3.0.4",
-        evidence: &["state.rs", "surface/movable.rs"],
+        evidence: &[
+            "state.rs",
+            "surface/movable.rs",
+            "binding/controlled.rs",
+            "binding/tier.rs",
+            "binding/snapshot.rs",
+            "binding/pending.rs",
+            "binding/responsive.rs",
+        ],
         reason: Some(
-            "Not implemented. Missing: the **Controlled / Ephemeral split** — there is no \
-             `Model` versus `TransientState` boundary anywhere; hover timers, drag anchors \
-             and open-flyout state live wherever each surface happened to put them rather \
-             than in one named ephemeral layer the controlled data never round-trips \
-             through. Missing: the **three-tier callback lifecycle** — a widget emits one \
-             iced `Message` on activation, so there is no `on_change` live stream, no \
-             `on_commit` that fires exactly once on settle (`Enter`, blur, drag release, \
-             option selection) and no `on_cancel` restoring a pre-gesture snapshot. \
-             Missing: **`ActionPending`** — no action control takes `busy` or \
-             `progress: Option<f32>`, so nothing renders the 14px inline spinner, locks \
-             its box against a busy label, or suppresses duplicate activations. Missing: \
-             **`ResponsiveBreakpoint`** — no widget adapts to allocated container width, \
-             so secondary labels never collapse to icon-only and toolbar items never move \
-             into an overflow menu. The nearest thing to a settle-vs-live separation in \
-             the crate is `FollowState::resolve` in the movable overlay, and that is a \
-             pure pause/resume decision for stream following, not a contract any widget \
-             implements.",
+            "Foundation built; **no widget is wired to it**. `binding/` now carries the \
+             four pieces §3.0.4 names: `Controlled<'a, M>` against `Ephemeral<S>` for the \
+             ownership split, `Live<T>` / `Commit<T>` / `Cancel<T>` as three tiers that \
+             deliberately share no trait, with a `Gesture<T>` guard whose consuming \
+             `commit`/`cancel` make a double-settle a compile error; `ActionPending` with \
+             an `ActivationGate` that closes the double-click window before the app's \
+             `busy` projection arrives; and a pure breakpoint solver that takes no \
+             window-width parameter at all, making a global-window query unrepresentable. \
+             Missing: **adoption** — not one widget reads any of it. `button_widget.rs`, \
+             `text_input.rs`, the menu rows and the dialog hosts still emit a single iced \
+             `Message` on activation, so no user can today observe a live-vs-commit \
+             distinction, a busy box lock, or a container-query collapse. Missing: the \
+             **spinner** — `reserves_spinner` answers whether the 14px slot is held but \
+             nothing paints it, and `size.spinner.sm` / `.md` are still absent from \
+             `token/size.rs` pending `UIF-ATOM-009`. Missing: the **overflow selection** \
+             — the solver decides `Expanded` versus `Compact`, not *which* toolbar items \
+             move into the `⋯` menu, which is `UIF-COMP-008`'s work.",
         ),
         note: Some(
             "This requirement was invisible to the ledger until the 2026-10-22 revision: \
              the extractor could not see a letter-suffixed id, so `000b` was never \
-             classified and `UIF-ATOM-000` reported `Implemented` over it.",
+             classified and `UIF-ATOM-000` reported `Implemented` over it. The \
+             `Partial` here is deliberate and will stay `Partial` until a widget actually \
+             consumes the vocabulary — a foundation nothing uses is not coverage.",
         ),
     },
     Coverage {
