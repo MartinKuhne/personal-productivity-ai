@@ -1533,20 +1533,26 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // and these entries say so rather than claiming it.
     Coverage {
         id: "UIF-COMP-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["widget/text_input.rs", "widget/settings_row.rs"],
-        reason: Some(
-            "Zero-shift required — no reusable field wrapper exists. `widget::text_input` \
-             carries the whole label + helper + error + required stack with its own \
-             `FieldGeometry`, and `widget::SettingsRow` is the settings-specific variant \
-             of the same shape; `UIF-INP-003` pins the zero-shift behaviour *inside* the \
-             input. Missing: the extractable `FormField`/`SettingsRow` the spec names — a \
-             wrapper any control (not only the text input) can be placed in, with the \
-             reserved label/helper/error band and the required marker exposed as its own \
-             API rather than as text-input internals.",
+        evidence: &[
+            "composite/form_field.rs",
+            "composite/settings_row.rs",
+            "gallery_composite.rs",
+        ],
+        reason: None,
+        note: Some(
+            "The wrapper the spec names now exists as `composite::form_field`. \
+             `bands` takes the field's bounds and nothing else - no label, no helper, \
+             no error and no validity flag - so a validation transition cannot move \
+             the control: the zero-shift requirement is structural, not asserted. \
+             The 32px control slot hosts a button, a text input and a focusable \
+             row without special-casing any of them, and the 16px caption band is \
+             reserved whether it carries a helper, an error or nothing. \
+             `composite::settings_row` is the horizontal variant; the printed 48px \
+             is a floor, not a height, because a title plus a description composes \
+             to 60px.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-002",
@@ -1596,19 +1602,27 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["surface/menu/view.rs"],
-        reason: Some(
-            "Not covered as a reusable pattern. The row shape the spec describes — leading \
-             slot, title, secondary text, trailing slot, full-row hit target — exists \
-             exactly once, as the menu row in `surface::menu::view`, and it is \
-             menu-specific: it is driven by `MenuEntry`, its slots are that module's \
-             `LeadingSlot`/`TrailingSlot`, and it is not exported as a `Card` or \
-             `ListTile` other code can compose. Missing: a card container with token \
-             padding, radius and elevation.",
+        evidence: &[
+            "composite/card.rs",
+            "composite/list_tile.rs",
+            "gallery_composite.rs",
+        ],
+        reason: None,
+        note: Some(
+            "`composite::card` and `composite::list_tile` own the two shapes. The \
+             tile's slot grid is computed here rather than left to the host \
+             (decision D-8): leading, centre and trailing slots, a 24px minimum hit \
+             extent for a 16px mark on an interactive tile, and the whole row as \
+             the target. A selected tile promotes its subtitle to `text.strong` \
+             because `text.muted` on `accent.fill` measures 1.8363:1, and it wears \
+             no perimeter stroke because `accent.border` on `accent.fill` measures \
+             1.6098:1 - a border that cannot be seen cannot carry the selection. \
+             The two-line tile's printed 44px is kept as authoritative; its parts \
+             compose to 42px, and the 2px difference is exposed as \
+             `TWO_LINE_UNACCOUNTED` rather than rounded away.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-006",

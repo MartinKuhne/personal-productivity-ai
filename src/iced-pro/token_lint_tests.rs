@@ -36,16 +36,25 @@ use crate::token_lint::{
 /// `UIF-ATOM-002d` — `widget/auto_suggest_model.rs`,
 /// `widget/auto_suggest_host.rs` and `gallery_suggest.rs` — on top of the
 /// 93 `INC-43` left behind.
-const PIN_FILES_SCANNED: usize = 96;
+///
+/// 102 as of `INC-45`: the five additions of the `composite/` subsystem
+/// — `mod.rs` and the four §3B composite modules — plus
+/// `gallery_composite.rs`, the composite block of the verification
+/// matrix. The gallery cell file is scanned but not visual-scoped, so it
+/// joins the count without joining Rule B.
+const PIN_FILES_SCANNED: usize = 102;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
 /// 60 as of the two `INC-44` autosuggest modules joining `widget/`. Rule
 /// B counts scope membership, so a file with no colour literals still
-/// counts; the gallery cells sit outside `widget/` and `surface/` and so
-/// are not among them.
-const PIN_RULE_B_FILES: usize = 60;
+/// counts; the gallery cells sit outside `widget/`, `surface/` and
+/// `composite/` and so are not among them.
+///
+/// 65 as of `INC-45`, which brought `composite/` into Rule B's scope and
+/// added its four composite modules plus the subsystem `mod.rs`.
+const PIN_RULE_B_FILES: usize = 65;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -69,7 +78,14 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// The fourth figure that increment introduces, `FLYOUT_MAX_HEIGHT`, is a
 /// bare `240.0` and is registered as a Surface Geometry Constant rather
 /// than token-bound, because §3.2 fixes the number outright.
-const PIN_TOKEN_BOUND: usize = 127;
+///
+/// 146 as of `INC-45`, whose nineteen additions are the token-bound
+/// figures the four §3B composites read: the field's `BAND_GAP`,
+/// `CONTROL_SLOT_HEIGHT` and `CAPTION_SLOT_HEIGHT`; the settings row's
+/// paddings, column gap, border, radius and two rungs; the card's radius,
+/// padding and border; and the tile's paddings, slot gap, leading and
+/// trailing extents, border and rungs.
+const PIN_TOKEN_BOUND: usize = 146;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -82,7 +98,11 @@ const PIN_RATIO: usize = 1;
 /// `combo_model::FLYOUT_MAX_HEIGHT` (280px) and `combo_box::MIN_WIDTH`
 /// (120px), which therefore need a registered authority rather than a
 /// token.
-const PIN_SURFACE_BOUND: usize = 21;
+///
+/// 24 as of `INC-45`, which registered the three §3B figures no rung
+/// carries: `form_field::HEADER_HEIGHT` (20px), `settings_row::MIN_HEIGHT`
+/// (48px) and `list_tile::TWO_LINE_HEIGHT` (44px).
+const PIN_SURFACE_BOUND: usize = 24;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 
@@ -227,7 +247,7 @@ fn the_rule_scopes_are_what_they_claim_to_be() {
     let audit = audit_crate();
     assert_eq!(audit.stats.rule_a_files, PIN_RULE_A_FILES);
     assert_eq!(audit.stats.rule_b_files, PIN_RULE_B_FILES);
-    assert_eq!(VISUAL_SCOPE_DIRS, ["widget/", "surface/"]);
+    assert_eq!(VISUAL_SCOPE_DIRS, ["widget/", "surface/", "composite/"]);
     assert_eq!(COLOUR_DEFINITION_FILE, "token/color.rs");
     assert!(in_visual_scope("widget/button.rs"));
     assert!(in_visual_scope("surface/movable.rs"));

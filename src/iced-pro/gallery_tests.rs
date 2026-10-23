@@ -324,6 +324,36 @@ fn expected_ids() -> Vec<String> {
     for status in ["active", "paused", "error"] {
         ids.push(format!("progress/stop/{status}"));
     }
+    // `UIF-COMP-001` / `INC-45`: the stacked field's three caption
+    // postures, then the same control slot hosting three atom kinds; the
+    // settings row in three content shapes.
+    for posture in ["empty", "helper", "error"] {
+        ids.push(format!("form-field/{posture}"));
+    }
+    for host in ["button", "input", "row"] {
+        ids.push(format!("form-field/host/{host}"));
+    }
+    for shape in ["title-only", "with-description", "disabled"] {
+        ids.push(format!("settings-row/{shape}"));
+    }
+    // `UIF-COMP-005` / `INC-45`: the card at both elevations, and the
+    // tile across both rungs, both selection postures, the pointer states
+    // and the inert row.
+    for elevation in ["rest", "elevated"] {
+        ids.push(format!("card/{elevation}"));
+    }
+    for state in [
+        "single",
+        "two-line",
+        "single-selected",
+        "two-line-selected",
+        "hovered",
+        "pressed",
+        "disabled",
+        "non-interactive",
+    ] {
+        ids.push(format!("list-tile/{state}"));
+    }
     ids.extend(
         [
             "rest",
@@ -548,6 +578,14 @@ fn per_subject_cell_counts_match_the_plan() {
         ("chip", 40),
         // `UIF-ATOM-009` / `INC-38`: 3 statuses x 5 fills + 4 spinners + 3 stops.
         ("progress", 22),
+        // `UIF-COMP-001` / `INC-45`: 3 caption postures + 3 hosted kinds,
+        // and the settings row in 3 content shapes.
+        ("form-field", 6),
+        ("settings-row", 3),
+        // `UIF-COMP-005` / `INC-45`: the card at 2 elevations, the tile
+        // across 8 postures.
+        ("card", 2),
+        ("list-tile", 8),
         ("menu", 12),
         ("menu-glyph", 10),
         // `INC-36`: the `000b` tiers on the four surface hosts.

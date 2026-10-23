@@ -233,7 +233,12 @@ pub struct SourceScan {
 pub const COLOUR_DEFINITION_FILE: &str = "token/color.rs";
 
 /// Directories whose `pub const` measurements Rule B inspects.
-pub const VISUAL_SCOPE_DIRS: [&str; 2] = ["widget/", "surface/"];
+///
+/// `composite/` is in scope alongside the atoms and the surfaces: the
+/// composites of §3B carry the same kind of spec-fixed visual bound, and a
+/// subsystem that fell outside Rule B would be a hole rather than a
+/// narrower audit.
+pub const VISUAL_SCOPE_DIRS: [&str; 3] = ["widget/", "surface/", "composite/"];
 
 /// Name fragments that mark a constant as a visual measurement.
 ///
@@ -375,6 +380,21 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         file: "widget/combo_box.rs",
         name: "MIN_WIDTH",
         spec: "§3.4 — ComboBox / Select trigger min width 120px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/form_field.rs",
+        name: "HEADER_HEIGHT",
+        spec: "§3B.1 — Stacked form field header row height 20px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/settings_row.rs",
+        name: "MIN_HEIGHT",
+        spec: "§3B.1 — Settings Row minimum height 48px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/list_tile.rs",
+        name: "TWO_LINE_HEIGHT",
+        spec: "§3B.5 — ListTile two-line row height 44px",
     },
 ];
 
