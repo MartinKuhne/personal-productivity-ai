@@ -383,6 +383,7 @@ pub struct Button<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     padding: Padding,
     enabled: bool,
     invalid: bool,
+    tooltip: Option<String>,
 }
 
 impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
@@ -414,7 +415,40 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
             padding: Padding::ZERO.horizontal(button::HORIZONTAL_PADDING),
             enabled: true,
             invalid: false,
+            tooltip: None,
         }
+    }
+
+    /// Build an **icon-only** button, supplying the tooltip its label must be.
+    ///
+    /// A button whose content is an icon carries no readable text, so the pointer has no
+    /// way to find out what the control does. `UIF-ATOM-001`'s icon-only cell therefore
+    /// depends on `UIF-NAV-003`/`UIF-TAB-003`: the label lives in the tooltip. This
+    /// constructor makes that dependency a **parameter** rather than a convention — there
+    /// is no way to reach an icon-only button through this path without naming the label,
+    /// which is the enforcement the requirement needs and a comment cannot provide.
+    ///
+    /// For a labelled button use [`new`](Self::new); a tooltip there is optional, and
+    /// [`tooltip_violation`](Self::tooltip_violation) will say so.
+    #[must_use]
+    pub fn icon_only(
+        variant: ButtonVariant,
+        icon: impl Into<Element<'a, Message, Theme, Renderer>>,
+        on_press: Message,
+        focus_id: impl Into<FocusId>,
+        tooltip: impl Into<String>,
+    ) -> Self {
+        Self::new(variant, icon, on_press, focus_id).with_tooltip(tooltip)
+    }
+
+    /// Attach the tooltip text this control shows when the pointer rests on it.
+    ///
+    /// The framework owns *when* and *where* it appears — see
+    /// [`surface::tooltip`](crate::surface::tooltip); the host owns the words.
+    #[must_use]
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
     }
 
     /// Use the compact control height — navbar and dense toolbars
@@ -494,6 +528,49 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
         self.enabled
     }
 
+    /// The tooltip text this control carries, if any.
+    #[must_use]
+    pub fn tooltip_text(&self) -> Option<&str> {
+        self.tooltip.as_deref()
+    }
+
+    /// Whether content of `content` size leaves the button icon-only.
+    ///
+    /// The test is the one the layout already applies: content small enough that
+    /// [`button::ICON_ONLY_MIN_WIDTH`] and [`button::ICON_ONLY_MIN_HEIGHT`] are what
+    /// determine the box, rather than the content itself. That is the moment a button
+    /// stops being "a box around a label" and becomes an icon with no readable text — so
+    /// it is exactly the moment a tooltip stops being optional.
+    ///
+    /// Pure, and deliberately measured against the *content* rather than a flag: the host
+    /// never declares "this is an icon", the geometry says so.
+    #[must_use]
+    pub fn is_icon_only(&self, content: Size) -> bool {
+        content.width <= button::ICON_ONLY_MIN_WIDTH
+            && content.height <= button::ICON_ONLY_MIN_HEIGHT
+    }
+
+    /// Why this button breaks the icon-only tooltip rule for `content` size, if it does.
+    ///
+    /// `None` means the button is legal: either it carries a tooltip, or its content is
+    /// large enough to be its own label. Returns
+    /// [`TooltipViolation::MissingTooltip`] for the case the rule forbids.
+    ///
+    /// A pure predicate rather than a panic so the check can be run by a lint pass, a test,
+    /// or a host's own validation — and so `outer_size` can assert it without that being
+    /// the only way to discover the rule.
+    #[must_use]
+    pub fn tooltip_violation(&self, content: Size) -> Option<TooltipViolation> {
+        if self.is_icon_only(content) && self.tooltip.is_none() {
+            Some(TooltipViolation::MissingTooltip {
+                focus_id: self.focus_id.as_str().to_owned(),
+                content,
+            })
+        } else {
+            None
+        }
+    }
+
     /// The box the button occupies around a content size: the content plus
     /// padding, floored at the icon-only minimum of §3.1 and capped by
     /// the space the parent offered.
@@ -504,6 +581,17 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
     /// (gap **G-2**), and the cap is the viewport because a minimum that
     /// cannot fit is a scroll bar, not a spec requirement.
     fn outer_size(&self, content: Size, limits: &layout::Limits) -> Size {
+        // The icon-only tooltip rule, asserted at the moment the box is computed — which is
+        // the moment the button becomes icon-only. A debug-only shield: shipping a release
+        // build must not panic over a missing label, and `tooltip_violation` is the
+        // non-panicking form for hosts that want to check without risking a crash.
+        debug_assert!(
+            self.tooltip_violation(content).is_none(),
+            "an icon-only button must carry a tooltip (`UIF-ATOM-001` icon-only cell depends on \
+             `UIF-NAV-003`/`UIF-TAB-003`). Build it with `Button::icon_only(.., tooltip)` or \
+             attach one with `.with_tooltip(..)`. See the module docs."
+        );
+
         let max = limits.max();
 
         Size::new(
@@ -515,6 +603,34 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
                 .max(button::ICON_ONLY_MIN_HEIGHT)
                 .min(max.height),
         )
+    }
+}
+
+/// A button built in a way the icon-only tooltip rule forbids.
+///
+/// Produced by [`Button::tooltip_violation`]. Carries enough to name the offender — the
+/// focus identity and the content size that made the button icon-only — so a host running
+/// this over a whole screen can report *which* control is missing its label rather than
+/// that one of them is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TooltipViolation {
+    /// The content is small enough that the icon-only minimum determines the box, and no
+    /// tooltip was supplied. The control renders as an icon with nothing to read.
+    MissingTooltip {
+        /// The [`FocusId`] the offending button answers to.
+        focus_id: String,
+        /// The content size that made the button icon-only.
+        content: Size,
+    },
+}
+
+impl TooltipViolation {
+    /// The focus identity of the button that broke the rule.
+    #[must_use]
+    pub fn focus_id(&self) -> &str {
+        match self {
+            Self::MissingTooltip { focus_id, .. } => focus_id,
+        }
     }
 }
 

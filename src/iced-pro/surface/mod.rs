@@ -12,4 +12,5 @@ pub mod input_dialog;
 pub mod menu;
 pub mod modal;
 pub mod movable;
+pub mod tooltip;
 pub mod zorder;

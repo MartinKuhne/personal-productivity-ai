@@ -159,6 +159,19 @@ fn expected_ids() -> Vec<String> {
     );
     ids.push("zband/overlay-menu-modal".to_string());
     ids.extend(
+        [
+            "card",
+            "state-hidden",
+            "state-pending",
+            "state-shown",
+            "state-keyboard",
+            "place-flip-above",
+            "place-clamped",
+        ]
+        .iter()
+        .map(|name| format!("tooltip/{name}")),
+    );
+    ids.extend(
         ["navbar", "panes", "tabs"]
             .iter()
             .map(|subject| format!("{subject}/not-owned")),
@@ -207,6 +220,7 @@ fn per_subject_cell_counts_match_the_plan() {
         ("movable-actions", 3),
         ("editor", 2),
         ("zband", 1),
+        ("tooltip", 7),
         ("navbar", 1),
         ("panes", 1),
         ("tabs", 1),

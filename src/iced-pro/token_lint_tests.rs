@@ -31,21 +31,32 @@ use crate::token_lint::{
 // ---------------------------------------------------------------------------
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
-const PIN_FILES_SCANNED: usize = 33;
+///
+/// 36 as of the `surface/tooltip/` subsystem (`mod.rs`, `hover.rs`, `place.rs`).
+const PIN_FILES_SCANNED: usize = 36;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
-const PIN_RULE_B_FILES: usize = 15;
+///
+/// 18 as of `surface/tooltip/` joining the `surface/` scope.
+const PIN_RULE_B_FILES: usize = 18;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
-const PIN_TOKEN_BOUND: usize = 48;
+///
+/// 51 as of `tooltip::place::TOOLTIP_GAP` plus `tooltip::PADDING_VERTICAL` and
+/// `tooltip::PADDING_HORIZONTAL`, all three bound to a `space::` rung rather than a
+/// literal.
+const PIN_TOKEN_BOUND: usize = 51;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
 const PIN_RATIO: usize = 1;
 /// Visual scalars covered by the §1.1 registry.
-const PIN_SURFACE_BOUND: usize = 15;
+///
+/// 16 as of `tooltip::MAX_WIDTH`, whose 280px §3.7 fixes outright and which therefore
+/// needs a registered authority rather than a token.
+const PIN_SURFACE_BOUND: usize = 16;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

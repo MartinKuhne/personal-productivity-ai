@@ -346,6 +346,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "CARD_DEFAULT_HEIGHT",
         spec: "§4.7.1 — Movable Overlay Card default 680x440px",
     },
+    SurfaceGeometryConstant {
+        file: "surface/tooltip/mod.rs",
+        name: "MAX_WIDTH",
+        spec: "§3.7 — Tooltip max width 280px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

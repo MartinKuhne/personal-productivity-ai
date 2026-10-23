@@ -1149,11 +1149,15 @@ fn the_button_wraps_its_content_in_the_token_padding() {
 #[test]
 fn the_button_never_shrinks_below_the_icon_only_minimum() {
     let mut harness = Harness::recording(|| {
-        Button::new(
+        // Built through `icon_only` because a 1×1 content box *is* an icon-only button,
+        // and the framework will not let one exist without a label for the tooltip
+        // (`UIF-NAV-003`/`UIF-TAB-003`). The floor being tested here is unchanged.
+        Button::icon_only(
             ButtonVariant::Ghost,
             Element::new(Blank::new(Size::new(1.0, 1.0))),
             Msg::Save,
             "btn",
+            "Close",
         )
         .into()
     });
@@ -1241,5 +1245,125 @@ fn the_state_resolves_from_its_own_observations_and_nothing_else() {
         expected_style(ButtonVariant::Primary, state.visual(true, true)),
         expected_style(ButtonVariant::Primary, rest),
         "no invalid button skin in §3.1: the flag must not move the paint"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The icon-only tooltip rule (UIF-ATOM-001 icon-only cell -> UIF-NAV-003 / UIF-TAB-003)
+// ---------------------------------------------------------------------------
+
+use crate::widget::button_widget::TooltipViolation;
+
+/// An icon-only button built the sanctioned way carries its label.
+#[test]
+fn icon_only_builder_requires_and_stores_the_tooltip() {
+    let b = Button::<Msg>::icon_only(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(16.0, 16.0))),
+        Msg::Save,
+        "btn",
+        "Close the tab",
+    );
+    assert_eq!(b.tooltip_text(), Some("Close the tab"));
+    assert_eq!(b.tooltip_violation(Size::new(16.0, 16.0)), None);
+}
+
+/// A labelled button needs no tooltip: the label is already readable.
+#[test]
+fn a_labelled_button_without_a_tooltip_is_legal() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Primary,
+        Element::new(Blank::new(Size::new(120.0, 20.0))),
+        Msg::Save,
+        "btn",
+    );
+    assert_eq!(b.tooltip_text(), None);
+    assert!(!b.is_icon_only(Size::new(120.0, 20.0)));
+    assert_eq!(b.tooltip_violation(Size::new(120.0, 20.0)), None);
+}
+
+/// The forbidden case, caught by the pure validator rather than only by the debug shield.
+#[test]
+fn an_icon_only_button_without_a_tooltip_is_a_violation() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(16.0, 16.0))),
+        Msg::Save,
+        "btn",
+    );
+    let v = b.tooltip_violation(Size::new(16.0, 16.0));
+    assert!(
+        matches!(v, Some(TooltipViolation::MissingTooltip { .. })),
+        "icon-only content and no tooltip must be reported, got {v:?}"
+    );
+    assert_eq!(v.unwrap().focus_id(), "btn");
+}
+
+/// Attaching a tooltip to a button built with `new` clears the violation, so the rule does
+/// not force every host through `icon_only`.
+#[test]
+fn with_tooltip_clears_the_violation() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(16.0, 16.0))),
+        Msg::Save,
+        "btn",
+    )
+    .with_tooltip("Close");
+    assert_eq!(b.tooltip_violation(Size::new(16.0, 16.0)), None);
+}
+
+/// The predicate is the layout floor, so its boundary must sit exactly on the minimum.
+#[test]
+fn is_icon_only_is_true_up_to_the_minimum_and_false_above_it() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(1.0, 1.0))),
+        Msg::Save,
+        "btn",
+    );
+    let min = button::ICON_ONLY_MIN_WIDTH;
+    assert!(b.is_icon_only(Size::new(0.0, 0.0)));
+    assert!(
+        b.is_icon_only(Size::new(min, min)),
+        "exactly at the minimum"
+    );
+    assert!(!b.is_icon_only(Size::new(min + 0.5, min)));
+    assert!(!b.is_icon_only(Size::new(min, min + 0.5)));
+    assert!(!b.is_icon_only(Size::new(120.0, 20.0)));
+}
+
+/// Both axes matter: a wide-but-short content is a label, not an icon.
+#[test]
+fn a_wide_short_content_is_a_label_not_an_icon() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(200.0, 16.0))),
+        Msg::Save,
+        "btn",
+    );
+    assert!(!b.is_icon_only(Size::new(200.0, 16.0)));
+    assert_eq!(b.tooltip_violation(Size::new(200.0, 16.0)), None);
+}
+
+/// The violation must name which control is at fault, so a whole-screen sweep can report it.
+#[test]
+fn the_violation_names_the_offending_control() {
+    let b = Button::<Msg>::new(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(8.0, 8.0))),
+        Msg::Save,
+        "save-button",
+    );
+    let v = b
+        .tooltip_violation(Size::new(8.0, 8.0))
+        .expect("must violate");
+    assert_eq!(v.focus_id(), "save-button");
+    assert_eq!(
+        v,
+        TooltipViolation::MissingTooltip {
+            focus_id: "save-button".to_string(),
+            content: Size::new(8.0, 8.0),
+        }
     );
 }
