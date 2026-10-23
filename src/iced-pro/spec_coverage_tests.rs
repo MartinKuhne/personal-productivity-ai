@@ -19,9 +19,10 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::spec_coverage::SPEC_COVERAGE;
 use crate::spec_coverage::{
-    Coverage, EXPECTED_SPEC_ID_COUNT, Status, audit, extract_spec_ids, implemented, manifest,
-    not_owned, partial, render, render_table, status_of, unimplemented,
+    Coverage, EXPECTED_SPEC_ID_COUNT, Status, audit, extract_spec_ids, implemented, is_suffixed_id,
+    manifest, not_owned, parent_id, partial, render, render_table, status_of, unimplemented,
 };
 
 /// The spec file, resolved from the crate directory.
@@ -265,19 +266,161 @@ fn test_rendered_table_lists_every_entry_with_its_status() {
 #[test]
 fn test_extract_accepts_numbered_ids_and_rejects_family_wildcards() {
     let text = "heads: `UIF-TOK-*` and `UIF-ZORD-*`; ids: `UIF-TOK-001`, \
-               `UIF-CMENU-003`, UIF-FAKE-999; noise: UIF-, UIF-TOK-, uif-tok-001, \
-               UIF-TOK-001X, preUIF-TOK-002";
+               `UIF-CMENU-003`, `UIF-ATOM-002c`, UIF-FAKE-999; noise: UIF-, \
+               UIF-TOK-, uif-tok-001, UIF-TOK-001X, UIF-ATOM-002ab, preUIF-TOK-002";
     let ids = extract_spec_ids(text);
     assert_eq!(
         ids,
         vec![
             "UIF-TOK-001".to_string(),
             "UIF-CMENU-003".to_string(),
+            "UIF-ATOM-002c".to_string(),
             "UIF-FAKE-999".to_string(),
         ],
         "wildcards, bare prefixes, lowercase, trailing junk and prefixed runs must all \
-         be rejected",
+         be rejected, while a single lowercase letter suffix is a real id",
     );
+}
+
+#[test]
+fn test_a_letter_suffix_extends_an_id_and_is_its_own_requirement() {
+    // The whole point of the 2026-10-22 extractor fix: `002c` is a requirement
+    // in its own right, distinct from `002`, and both must come out of one run.
+    let text = "`UIF-ATOM-002` is the matrix; `UIF-ATOM-002c` is one row of it.";
+    let ids = extract_spec_ids(text);
+    assert_eq!(
+        ids,
+        vec!["UIF-ATOM-002".to_string(), "UIF-ATOM-002c".to_string()],
+        "a suffixed id must extract alongside its parent, never be swallowed by it",
+    );
+    assert_ne!(ids[0], ids[1], "the suffix must not be normalised away",);
+}
+
+#[test]
+fn test_only_a_single_trailing_lowercase_letter_is_a_suffix() {
+    // Uppercase trailing junk and multi-letter runs are still noise, exactly as
+    // before the fix — the suffix rule is narrow on purpose.
+    for rejected in [
+        "UIF-TOK-001X",
+        "UIF-TOK-001XY",
+        "UIF-ATOM-002ab",
+        "UIF-ATOM-002cd",
+    ] {
+        let ids = extract_spec_ids(&format!("noise: {rejected} tail"));
+        assert!(
+            ids.is_empty(),
+            "{rejected} must not extract as a requirement id, got {ids:?}",
+        );
+    }
+    for accepted in ["UIF-ATOM-002a", "UIF-ATOM-002e", "UIF-COMP-007z"] {
+        let ids = extract_spec_ids(&format!("real: `{accepted}` tail"));
+        assert_eq!(
+            ids,
+            vec![accepted.to_string()],
+            "{accepted} must extract as a requirement id",
+        );
+    }
+}
+
+#[test]
+fn test_parent_id_and_is_suffixed_id_agree() {
+    assert_eq!(parent_id("UIF-ATOM-002c"), Some("UIF-ATOM-002"));
+    assert_eq!(parent_id("UIF-ATOM-000b"), Some("UIF-ATOM-000"));
+    assert_eq!(parent_id("UIF-ATOM-002"), None);
+    assert_eq!(parent_id("UIF-COMP-008"), None);
+    assert!(is_suffixed_id("UIF-ATOM-002c"));
+    assert!(is_suffixed_id("UIF-ATOM-000b"));
+    assert!(!is_suffixed_id("UIF-ATOM-002"));
+    assert!(!is_suffixed_id("UIF-TOK-001X"));
+}
+
+#[test]
+fn test_a_suffixed_id_in_the_spec_must_be_classified_on_its_own() {
+    // Mirrors the UIF-FAKE-999 pattern: an unclassified suffixed id has to fire
+    // the audit by name, and must not be excused by its parent being classified.
+    let mut ids = extract_spec_ids(&spec_text());
+    assert!(
+        !ids.iter().any(|id| id == "UIF-ATOM-002z"),
+        "UIF-ATOM-002z must not already be a real requirement",
+    );
+    ids.push("UIF-ATOM-002z".to_string());
+    let report = audit(&ids);
+    assert_eq!(
+        report.missing_in_manifest,
+        vec!["UIF-ATOM-002z".to_string()],
+        "a suffixed id with no entry of its own must be reported missing",
+    );
+    assert!(
+        report.describe().contains("UIF-ATOM-002z"),
+        "the report must name the suffixed id it could not classify",
+    );
+    assert_eq!(status_of("UIF-ATOM-002z"), None);
+}
+
+#[test]
+fn test_no_suffixed_requirement_collapses_onto_its_parent_entry() {
+    // The regression this guards: the extractor used to be blind to suffixes, so
+    // `UIF-ATOM-002` was reported `Implemented` while `002c`, `002d` and `002e`
+    // went unbuilt and unclassified. Every suffixed id the spec carries must have
+    // its own entry, distinct from whatever its parent says.
+    let spec_ids = extract_spec_ids(&spec_text());
+    let suffixed: Vec<&str> = spec_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| is_suffixed_id(id))
+        .collect();
+    assert!(
+        suffixed.len() >= 10,
+        "expected at least ten letter-suffixed requirements in the spec, got \
+         {suffixed:?}",
+    );
+
+    for id in suffixed {
+        let parent = parent_id(id).expect("a suffixed id has a parent");
+        let own = status_of(id).unwrap_or_else(|| panic!("{id} is unclassified"));
+        let parent_status = status_of(parent);
+
+        assert_ne!(
+            id, parent,
+            "a suffixed id must never resolve to its parent's id",
+        );
+        assert!(
+            !parent.eq(id),
+            "{id} must not be its own parent — the suffix has been normalised away",
+        );
+        // A parent may be Implemented only if the child independently is too;
+        // anything else means the child's gap is being hidden behind it.
+        if let Some(Status::Implemented) = parent_status {
+            assert_eq!(
+                own,
+                Status::Implemented,
+                "{parent} is `Implemented` while its own sub-requirement {id} is \
+                 {own:?} — the parent is covering for unbuilt work",
+            );
+        }
+    }
+}
+
+#[test]
+fn test_base_and_suffixed_ids_are_two_separate_ledger_entries() {
+    // `UIF-ATOM-002` and `UIF-ATOM-002c` must both appear in the manifest, as
+    // two entries, never as one.
+    let ids = ids_of(SPEC_COVERAGE);
+    for (base, child) in [
+        ("UIF-ATOM-000", "UIF-ATOM-000b"),
+        ("UIF-ATOM-002", "UIF-ATOM-002c"),
+    ] {
+        assert!(ids.contains(&base), "{base} must be in the manifest",);
+        assert!(
+            ids.contains(&child),
+            "{child} must be in the manifest in its own right",
+        );
+        assert_eq!(
+            ids.iter().filter(|id| **id == child).count(),
+            1,
+            "{child} must appear exactly once",
+        );
+    }
 }
 
 #[test]
