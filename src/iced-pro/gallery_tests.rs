@@ -105,6 +105,16 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|id| (*id).to_string()),
     );
+    // `UIF-ATOM-003`: the three toggle atoms, both polarities, the five
+    // columns §3.3 prints. "Focused" is `Rest + ring`, so it reads
+    // `rest+focused` the way every other subject spells it.
+    for control in ["checkbox", "radio", "switch"] {
+        for polarity in ["off", "on"] {
+            for column in ["rest", "hovered", "pressed", "rest+focused", "disabled"] {
+                ids.push(format!("{control}/{polarity}/{column}"));
+            }
+        }
+    }
     ids.extend(
         [
             "rest",
@@ -275,6 +285,10 @@ fn per_subject_cell_counts_match_the_plan() {
     let mut expected: Vec<(&str, usize)> = vec![
         ("button", 83),
         ("input", 60),
+        // `UIF-ATOM-003`: 3 controls x 2 polarities x 5 columns each.
+        ("checkbox", 10),
+        ("radio", 10),
+        ("switch", 10),
         ("menu", 12),
         ("menu-glyph", 10),
         // `INC-36`: the `000b` tiers on the four surface hosts.

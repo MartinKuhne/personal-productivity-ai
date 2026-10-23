@@ -59,6 +59,16 @@
 //!   session and its snapshot, the coalesced live tier, and the four
 //!   `002a` callbacks as sum-type arms rather than four loose closures
 //!   (`UIF-ATOM-002a`, §3.0.4.2)
+//! * [`toggle`] — the paint resolver and geometry for the three
+//!   boolean/choice atoms: one two-row polarity matrix shared by
+//!   `Checkbox`, `Radio` and `ToggleSwitch`, the adaptive ring that
+//!   reproduces both of §3.3's printed ring colours by arithmetic, and
+//!   the hit target that extends across the inline label
+//!   (`UIF-ATOM-003`)
+//! * [`toggle_model`] — the three §3.3 data models and their pure
+//!   transitions: the deterministic tri-state rule, the roving
+//!   radio group, and the switch's busy refusal
+//!   (`UIF-ATOM-003`, §3.0.4.1)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -76,3 +86,5 @@ pub mod focusable;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;
+pub mod toggle;
+pub mod toggle_model;

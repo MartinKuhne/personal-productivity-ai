@@ -213,12 +213,18 @@ fn a_collapsed_rung_with_no_tooltip_returns_none_so_the_caller_can_see_the_viola
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_spinner_slot_is_the_small_icon_rung() {
+fn the_spinner_slot_is_the_small_spinner_rung() {
     assert_eq!(
         SPINNER_SLOT,
+        size::SPINNER_SM,
+        "the reserved slot is `size.spinner.sm`, the rung §2.2 gives the inline busy \
+         indicator — not the `size.icon.sm` it used to borrow"
+    );
+    assert_eq!(
+        size::SPINNER_SM,
         size::ICON_SM,
-        "the reserved slot is `size.icon.sm`; `size.spinner.sm` is the same rung and the \
-         glyph that fills it is `UIF-ATOM-009`'s deliverable, not this increment's"
+        "the re-point is a no-op precisely because the two rungs are the same `14`; if \
+         either moves, the button's reserved width moves with it and this pin says so"
     );
     assert_eq!(ButtonIcon::Glyph("X").width(), SPINNER_SLOT);
     assert_eq!(ButtonIcon::Reserved.width(), SPINNER_SLOT);

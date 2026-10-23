@@ -33,12 +33,20 @@ use crate::token::size;
 use crate::token::space;
 use crate::widget::button::ButtonVariant;
 
-/// The reserved spinner slot ([`size::ICON_SM`]).
+/// The reserved spinner slot ([`size::SPINNER_SM`]).
 ///
 /// The slot is **reserved, not painted**: the spinner glyph itself is
 /// `UIF-ATOM-009`'s deliverable. Until that lands the slot is empty space, which
 /// is the honest rendering of "an action is in flight and we have no glyph yet".
-pub const SPINNER_SLOT: f32 = size::ICON_SM;
+///
+/// The rung is `size.spinner.sm`, not the `size.icon.sm` this constant used to
+/// borrow. The two are the same `14` — the busy indicator occupies exactly the
+/// small-icon box — so re-pointing it changes no painted pixel and no measured
+/// width; what it changes is *which question the name answers*. A slot sized by
+/// an icon constant says "as wide as a glyph"; one sized by `SPINNER_SM` says
+/// "as wide as the spinner that will fill it", which is what §2.2 actually
+/// specifies and what `UIF-ATOM-009` will be held to.
+pub const SPINNER_SLOT: f32 = size::SPINNER_SM;
 
 /// What a button can put in the leading or trailing icon slot.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -20,6 +20,7 @@ pub mod binding;
 pub mod bridge;
 pub mod focus;
 pub mod gallery;
+pub mod gallery_toggle;
 pub mod geometry;
 pub mod spec_coverage;
 pub mod state;

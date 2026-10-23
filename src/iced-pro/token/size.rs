@@ -16,6 +16,23 @@
 //! names instead of borrowing a rung from a scale that was never about
 //! them.
 //!
+//! The fourth group is **part geometry**: the checkbox box
+//! ([`CHECKBOX_BOX`]), the switch track ([`SWITCH_TRACK_WIDTH`],
+//! [`SWITCH_TRACK_HEIGHT`]) and thumb ([`SWITCH_THUMB`]), the slider rail
+//! ([`SLIDER_TRACK_HEIGHT`]) and thumb ([`SLIDER_THUMB`]) and the progress
+//! bar ([`PROGRESS_BAR_HEIGHT`]) each size a thing that is *inside* a
+//! control rather than the control's own height, which comes from the
+//! control rungs. [`SPINNER_SM`] and [`SPINNER_MD`] are the spinner
+//! rungs; the small one is the slot a busy button reserves, which is why
+//! [`crate::widget::button_model::SPINNER_SLOT`] names it.
+//!
+//! Several of these have no consumer in this crate yet — the slider and
+//! progress rungs and [`SPINNER_MD`]. They are declared anyway, on the
+//! [`SPLITTER_GRAB`] precedent: `UIF-TOK-002` defines them, and the
+//! alternative to declaring a defined token is an application inventing
+//! its own number for the same measurement, which puts a hole straight
+//! through **UIF-PRIN-001**. Each such constant says so in its own doc.
+//!
 //! Values are logical pixels.
 //!
 //! Unit tests live in the sibling `size_tests.rs` sidecar.
@@ -93,6 +110,83 @@ pub const ICON_MD: f32 = 16.0;
 
 /// `size.icon.lg` — brand mark and empty-state illustration icon size.
 pub const ICON_LG: f32 = 20.0;
+
+// ---------------------------------------------------------------------------
+//  Part geometry (§2.2) — the box inside a control, not the control's height
+// ---------------------------------------------------------------------------
+
+/// `size.checkbox.box` — the `16 × 16` visual glyph box for a `Checkbox`
+/// or `Radio` indicator.
+///
+/// This sizes the *indicator*, not the control: the box sits centred
+/// inside a [`HIT_TARGET_MIN`] target that extends across the inline
+/// label, so a `16` glyph never means a `16` click area
+/// (`UIF-ATOM-003`, §3.3). Both atoms use the same box — the `Radio` is
+/// the same square drawn as a circle, which is what lets the two share
+/// one geometry function and one hit test.
+pub const CHECKBOX_BOX: f32 = 16.0;
+
+/// `size.switch.track` — outer width of a `ToggleSwitch` pill track.
+pub const SWITCH_TRACK_WIDTH: f32 = 36.0;
+
+/// `size.switch.track` — outer height of a `ToggleSwitch` pill track.
+pub const SWITCH_TRACK_HEIGHT: f32 = 20.0;
+
+/// `size.switch.thumb` — the `14 × 14` sliding thumb of a `ToggleSwitch`.
+///
+/// The spec fixes the thumb's inset in prose rather than as a token of its
+/// own; [`SWITCH_THUMB_INSET`] is that sentence made arithmetic.
+pub const SWITCH_THUMB: f32 = 14.0;
+
+/// The gap between a `ToggleSwitch` thumb and the track edge — `3px`, per
+/// the "`3px` inset from track edges" note on `size.switch.thumb`.
+///
+/// **Derived, not declared.** §2.2 gives no `size.switch.inset`; it gives
+/// the track and the thumb and states the inset in the thumb's own row.
+/// Deriving it here rather than writing `3.0` means the three numbers
+/// cannot drift apart: retune the track or the thumb and the inset moves
+/// with them, instead of leaving a `3` that no longer fits.
+pub const SWITCH_THUMB_INSET: f32 = (SWITCH_TRACK_HEIGHT - SWITCH_THUMB) / 2.0;
+
+/// `size.slider.track_height` — horizontal rail thickness for a `Slider`.
+///
+/// **No consumer exists in this crate yet.** Declared on the
+/// [`SPLITTER_GRAB`] precedent: `UIF-TOK-002` defines the rung, and a
+/// slider added later — here or in the app — should read this rather than
+/// invent a thickness.
+pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
+
+/// `size.slider.thumb` — the `16 × 16` visual thumb of a `Slider`.
+///
+/// **No consumer exists in this crate yet** — see
+/// [`SLIDER_TRACK_HEIGHT`]. Note that the visual thumb is `16` while the
+/// pointer target §2.2 asks for is [`HIT_TARGET_MIN`] (`24`): the same
+/// indicator-versus-target split [`CHECKBOX_BOX`] carries.
+pub const SLIDER_THUMB: f32 = 16.0;
+
+/// `size.progress.bar_height` — linear `ProgressBar` track thickness.
+///
+/// **No consumer exists in this crate yet** — see
+/// [`SLIDER_TRACK_HEIGHT`].
+pub const PROGRESS_BAR_HEIGHT: f32 = 4.0;
+
+/// `size.spinner.sm` — inline busy `Spinner` diameter, for the slot a
+/// button or input reserves while its action is in flight.
+///
+/// The value is the same as [`ICON_SM`], and that is the point: the busy
+/// indicator occupies exactly the small-icon box, which is why
+/// [`crate::widget::button_model::SPINNER_SLOT`] is this rung rather
+/// than a borrowed icon constant. The two names are kept apart because
+/// they answer different questions — "how big is a glyph" and "how big
+/// is the spinner" — and a spinner that later needed a different diameter
+/// must not have to take the glyph scale with it.
+pub const SPINNER_SM: f32 = 14.0;
+
+/// `size.spinner.md` — panel or dialog loading `Spinner` diameter.
+///
+/// **No consumer exists in this crate yet** — see
+/// [`SLIDER_TRACK_HEIGHT`].
+pub const SPINNER_MD: f32 = 20.0;
 
 #[cfg(test)]
 #[path = "size_tests.rs"]

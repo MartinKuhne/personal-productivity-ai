@@ -849,9 +849,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
              from a width the widget observed; `ButtonModel::responsive_to(allocated)` is \
              there for a host that has one, but `Widget::layout` does not swap its content \
              element mid-frame, so no button today collapses on its own. Missing: the \
-             **spinner glyph** — `SPINNER_SLOT` reserves `size::ICON_SM` and nothing \
-             paints it (`UIF-ATOM-009`). Missing: **`size.spinner.sm` / `.md`** are still \
-             absent from `token/size.rs`. Deviation: the model carries a `cancellable` \
+             **spinner glyph** — `SPINNER_SLOT` reserves `size::SPINNER_SM` and nothing \
+             paints it (`UIF-ATOM-009`). \
+             `size.spinner.sm` / `.md` now exist in `token/size.rs`; `.md` still has no consumer. Deviation: the model \
+             carries a `cancellable` \
              flag the spec's field list does not name, because `ActionPending::try_cancel` \
              cannot grant a cancellation the host never offered — without it \
              `on_cancel_request()` would be unreachable for a running action.",
@@ -1081,22 +1082,44 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-003",
         status: Status::Partial,
         section: "§3.3",
-        evidence: &["token/size.rs", "surface/menu/view.rs"],
+        evidence: &[
+            "widget/toggle.rs",
+            "widget/toggle_model.rs",
+            "token/size.rs",
+            "gallery_toggle.rs",
+        ],
         reason: Some(
-            "Not implemented — no standalone `Checkbox`, `Radio` or `ToggleSwitch` \
-             exists. Missing: the 16×16px box at `radius.widget` with its tri-state \
-             `Indeterminate` dash, the circular radio indicator with its 8×8px centred \
-             `text.strong` dot, the 36×20px switch track with its 14×14px thumb at a 3px \
-             inset, the 24px hit target spanning the inline label across an 8px gap, the \
-             full two-row polarity state matrix for unchecked and checked, and all three \
-             models and callbacks — `on_toggle(CheckState)` with the deterministic \
-             indeterminate→checked transition, `RadioGroupModel<Id>` with arrow-key roving \
-             and no-op re-selection, and `SwitchModel` with `on_toggle(bool)`. The `✓` and \
-             `•` in `surface/menu/view.rs` are menu-row slot paint, not controls, and are \
-             not offered as widgets. `size.checkbox.box`, `size.switch.track` and \
-             `size.switch.thumb` exist with no consumer.",
+            "Resolver, models and geometry are built; the widget is not. `widget/toggle.rs` \
+             resolves the two-row polarity matrix for all three atoms (`resolve_style` keyed \
+             on `TogglePolarity`, one matrix shared by every control), classifies the \
+             indicator's chrome (§3.5's four classes: `CoincidentWithFill` when the fill \
+             meets the 3.08 floor, `RestingDivider` at Rest, `Judged` otherwise), derives \
+             the focus ring adaptively rather than storing two constants, and supplies the \
+             pure geometry — the 16×16px box at `radius.widget`, the circle with its \
+             centred `size.checkbox.box / 2` dot, the 36×20px track with the 14×14px thumb \
+             at a derived 3px inset, and the 24px hit target spanning the label across an \
+             8px gap. `widget/toggle_model.rs` holds `CheckState` with the deterministic \
+             `Indeterminate`→`Unchecked` rule (advance only when every enabled child is \
+             already checked; a leaf goes to `Checked`), `RadioGroupModel<Id>` with \
+             arrow-key roving that skips disabled options and wraps both ends, and \
+             `SwitchModel` that refuses `toggle()` while `busy` or `disabled`. All of it is \
+             audited across 30 gallery cells. Missing: the `iced` `Element` wrapper itself — \
+             `toggle.rs` paints layers and routes `ToggleKey`, but nothing here implements \
+             `Widget`, so no `on_toggle(CheckState)` / `on_toggle(bool)` callback reaches \
+             an application, and the `✓` is carried as a colour in `resolved.mark` rather \
+             than drawn as a glyph.",
         ),
-        note: None,
+        note: Some(
+            "Two figures in §3.3's printed ratio column do not reproduce from the palette \
+             under the §1.1 maths: `accent.border` on `surface.hover` is 5.44:1, not the \
+             5.35:1 printed, and `accent.border` on `surface.code` — the off-polarity \
+             focus-ring upper bound — is 6.17:1, not 6.67:1. Neither breaks a floor, so \
+             nothing is blocked; the discrepancy is recorded rather than propagated. The \
+             `CoincidentWithFill` 3.08 floor also fails on `surface.active` (2.98 for \
+             `accent.fill`, 2.53 for `accent.fill_active`), a limitation the Primary \
+             button already carries; that class is exempt from the build-time gate, so the \
+             gallery cell is the only place it is visible.",
+        ),
     },
     Coverage {
         id: "UIF-ATOM-004",

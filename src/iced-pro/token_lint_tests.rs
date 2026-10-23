@@ -32,27 +32,29 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 50 as of the four `UIF-ATOM-000b` surface binding modules
-/// (`surface/menu/row_action.rs`, `surface/dialog_button.rs`,
-/// `surface/modal_tier.rs`, `surface/drag_tier.rs`) joining the tree for
-/// `INC-36`. They add no colour and no visual scalar — the count moves
-/// because the scan reads them, not because they contain anything to find.
-const PIN_FILES_SCANNED: usize = 50;
+/// 53 as of `widget/toggle.rs`, `widget/toggle_model.rs` and
+/// `gallery_toggle.rs` joining the tree for `UIF-ATOM-003` (`INC-37`).
+const PIN_FILES_SCANNED: usize = 53;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 26 as of the four `INC-36` binding modules joining `surface/`. Rule B
-/// counts scope membership, so a file with no colour literals still counts.
-const PIN_RULE_B_FILES: usize = 26;
+/// 28 as of the two toggle modules joining `widget/`. Rule B counts scope
+/// membership, so a file with no colour literals still counts;
+/// `gallery_toggle.rs` sits outside `widget/` and `surface/` and so is not
+/// one of them.
+const PIN_RULE_B_FILES: usize = 28;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
 ///
-/// 52 as of `button_model::SPINNER_SLOT`, bound to `size::ICON_SM` rather
-/// than a literal — the reserved spinner slot is a token rung, not a number
-/// this file is allowed to invent (`UIF-ATOM-009` owns the glyph).
-const PIN_TOKEN_BOUND: usize = 52;
+/// 55 as of `widget/toggle.rs`, whose `BORDER_WIDTH`, `FOCUS_RING_WIDTH`
+/// and `LABEL_GAP` each read a `shape::`/`space::` token rather than a
+/// number this file is allowed to invent. `button_model::SPINNER_SLOT` is
+/// now bound to `size::SPINNER_SM`, which is the same 14px it always
+/// rendered — the rung was renamed, not the value (`UIF-ATOM-009` owns the
+/// glyph).
+const PIN_TOKEN_BOUND: usize = 55;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
