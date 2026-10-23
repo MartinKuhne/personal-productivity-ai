@@ -1437,6 +1437,39 @@ ring adapts rather than the spec's colour being honoured into invisibility.
 `Tab` / `Shift+Tab` traversal, roving focus for menus and the modal focus trap.
 Stock iced widgets are not used for anything that must be keyboard-reachable.
 
+### D-8 — Framework owns list/table **row and cell rendering** (revises D-2)
+
+**Made 2026-10-22 after the second revision.** D-2 originally left the
+tree, tab strip and Batch/Tools dialogs to the app. The `e6ecbfb` revision
+added `COMP-006` (`VirtualList`/`TreeView`) and `COMP-007` (`DataTable`),
+which sit directly on that boundary, and the decision taken is that the
+framework owns **more** than D-2 allowed:
+
+| Layer | Owner |
+|---|---|
+| Virtualised viewport, row height, indent step, disclosure chevron, selection model and keyboard choreography | **Framework** |
+| **Tree row rendering** | **Framework** |
+| Sticky header, row height, 10px column-resize grab, cell focus and traversal, live-then-commit resize | **Framework** |
+| **Table cell rendering** | **Framework** |
+| Node model, filtering, `[PDF]` badge semantics, column definitions, sort comparators | App |
+
+**Consequences to carry:**
+
+1. `COMP-006` and `COMP-007` are `Partial`, **not** `NotOwned`. The
+   framework owes real, reusable code for both.
+2. **This implies eventually migrating `fastmd`'s existing directory
+   tree** out of `src/app/ui/tree/` onto the framework's row renderer.
+   That is a cross-crate change and is *not* part of the current
+   standalone-first constraint (D-3) — it is a follow-on project that
+   D-8 creates.
+3. The row/cell renderer must be generic enough to serve the navbar filter
+   dropdown, the tree, the Tools dialog's six-column table and the
+   autosuggest flyout, because those are four places the same shape recurs.
+   Designing it for one of them alone will force a second renderer later.
+4. Row rendering in the framework still draws **only** token-resolved
+   paint. It takes content as data (label, icon, badge state) and never
+   reaches into application domain types.
+
 ---
 
 ## 5b. Original decision record — the G-7 retune
