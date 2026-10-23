@@ -947,21 +947,49 @@ const SPEC_COVERAGE: &[Coverage] = &[
         id: "UIF-ATOM-002a",
         status: Status::Partial,
         section: "§3.2",
-        evidence: &["widget/text_input.rs"],
+        evidence: &[
+            "widget/text_input.rs",
+            "widget/text_input_model.rs",
+            "widget/text_input_controller.rs",
+            "binding/controlled.rs",
+            "binding/tier.rs",
+        ],
         reason: Some(
-            "The live-edit and clear halves are wired: `on_input` fires on every keystroke, \
-             `on_clear` publishes on a press-and-release inside the trailing slot, and \
-             `disabled` / `invalid` are readable flags on the widget. Missing: \
-             `on_commit(String)` — neither `Enter` nor focus loss settles the value, so \
-             the settled-vs-live separation this requirement is mostly made of does not \
-             exist; `on_focus_change(bool)`; the `selection: Option<TextRange>` field, so \
-             a host can neither read nor set the caret or selection (which is also what \
-             `UIF-INP-004`'s rename-stem selection has to reach around); and `read_only`.",
+            "All four callbacks are routed through real tiers by \
+             `TextInput::controlled(kind, Controlled<'_, TextInputModel>, focus_id, emit)`. \
+             `on_change` is `Live<String>`, coalesced so an unchanged value produces no \
+             tick and however many keystrokes land in one pass at most one does. \
+             `on_commit` is `Commit<String>`, settled by `Enter` or by focus loss, and a \
+             settled tier discards the pending live tick as superseded rather than \
+             trailing it. `on_clear` is its own arm — `Cleared(Commit<String>)` of the \
+             empty value — so a clear is not a commit that merely looks the same. \
+             `on_focus_change` is the non-value edge in the same sum type, emitted when \
+             the boundary moves rather than on every pass. The editing session *is* the \
+             gesture, and its snapshot is taken at the **first edit after focus** rather \
+             than at focus itself: focus arrives on every `Tab`, and a snapshot taken \
+             there goes stale the moment the host syncs while the field is open. `Escape` \
+             reverts while a session is open; with none open it clears only where \
+             `clear_affordance(kind)` holds — the same predicate that makes the `×` \
+             actionable — so a plain entry is never `Escape`-cleared. `read_only` is a \
+             real third state: the callback iced gates edits on is withheld, the field \
+             still paints as an enabled control, and the focus half of the cell is \
+             dropped so it never claims a caret it cannot take. Missing: \
+             `selection: Option<TextRange>` is carried and resolved by the model \
+             (`selection_in_value`) but never applied to the editor's caret, which needs \
+             `operation::TextInput`; and the sibling widgets `002c`–`002e` remain \
+             unbuilt, so the parent cannot close either.",
         ),
         note: Some(
-            "The value itself is controlled — iced owns the buffer and the host projects it \
-             in each frame — so the *controlled* half of the model is genuinely there. It \
-             is the callback tiers that are missing, not the ownership.",
+            "The widget intercepts `Escape` before the inner editor sees it. Iced's own \
+             handler blurs the editor on `Escape`, which would drop the revert on the \
+             floor — the focus gate would find no keyboard left to attribute the gesture \
+             to — and throw the keyboard away with the edit it had just restored. A bound \
+             field therefore keeps the keyboard after a cancel, which is also what \
+             `002d`'s two-`Escape` sequence assumes; the legacy unbound path is untouched \
+             and still blurs. Because iced publishes the instant a keystroke lands and \
+             `Shell::publish` cannot be declined, the inner editor's message type is \
+             `Option<Message>` and the wrapper drives it through a shell it owns, \
+             republishing only what it chooses.",
         ),
     },
     Coverage {

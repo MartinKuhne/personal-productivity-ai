@@ -54,6 +54,7 @@
 //!
 //! Unit tests live in the sibling `gallery_tests.rs` sidecar.
 
+use crate::binding::Live;
 use crate::focus::FocusId;
 use crate::focus::FocusMember;
 use crate::focus::FocusState;
@@ -89,6 +90,9 @@ use crate::widget::button_widget::Layer;
 use crate::widget::button_widget::background_layer as button_background_layer;
 use crate::widget::button_widget::focus_ring_layer as button_focus_ring_layer;
 use crate::widget::text_input::{self, InputKind, SlotContent};
+use crate::widget::text_input_controller::TextInputController;
+use crate::widget::text_input_controller::TextInputEmission;
+use crate::widget::text_input_model::TextInputModel;
 
 use iced::Background;
 use iced::Border;
@@ -1339,6 +1343,109 @@ pub fn text_input_cells() -> Vec<Cell> {
         }
     }
     cells
+}
+
+/// The editing outcome a `002a` tier cell records, and how a user produces
+/// it.
+pub const TEXT_INPUT_TIERS: [(&str, &str); 6] = [
+    ("changed", "type a character"),
+    ("committed-enter", "press Enter"),
+    ("committed-blur", "leave the field with an open session"),
+    ("cleared", "press the trailing clear glyph"),
+    ("cancelled", "press Escape inside an open session"),
+    ("focus-changed", "focus the field"),
+];
+
+/// The `UIF-ATOM-002a` tier cell for one editing outcome.
+///
+/// Drives a real [`TextInputController`] and records the tiers it
+/// actually emitted, so the cell is a transcript rather than a caption —
+/// the discipline `button_tier_cell` sets. The paint underneath is the
+/// search field's own `rest` cell, deliberately unchanged: a tier is a
+/// fact about the wire, not a visual state, and nothing here may suggest
+/// otherwise.
+#[must_use]
+pub fn text_input_tier_cell(tier: &'static str) -> Cell {
+    let mut controller = TextInputController::new();
+    controller.observe(&TextInputModel::new("report").with_placeholder("Search reports…"));
+
+    let emissions: Vec<TextInputEmission> = match tier {
+        "changed" => {
+            controller.note_edit("report 2".to_owned());
+            controller
+                .take_live()
+                .map(|value| vec![TextInputEmission::Changed(Live::new(value))])
+                .unwrap_or_default()
+        }
+        "committed-enter" => {
+            controller.note_edit("report 2026".to_owned());
+            controller.take_live();
+            vec![controller.commit().expect("Enter settles what it holds")]
+        }
+        "committed-blur" => {
+            controller.note_focus(true);
+            controller.note_edit("report 2026".to_owned());
+            controller.take_live();
+            controller.note_focus(false)
+        }
+        "cleared" => vec![controller.clear().expect("a non-empty field clears")],
+        "cancelled" => {
+            controller.note_edit("report 2026".to_owned());
+            vec![controller.revert().expect("an open session reverts")]
+        }
+        "focus-changed" => controller.note_focus(true),
+        other => panic!("unknown tier {other}"),
+    };
+
+    let primary = emissions
+        .first()
+        .unwrap_or_else(|| panic!("tier {tier} emitted nothing"));
+    let rest: Vec<String> = emissions
+        .iter()
+        .skip(1)
+        .map(|emission| format!("{}({})", emission.tier(), emission.value().unwrap_or("")))
+        .collect();
+
+    let mut cell = text_input_cell(InputKind::Search, REST_STATE);
+    cell.id = format!("input/tier/{tier}");
+    cell.spec = "UIF-ATOM-002a";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text("tier-class", primary.tier()),
+        StyleEntry::text(
+            "emitted-value",
+            primary.value().unwrap_or("<no value>").to_string(),
+        ),
+        StyleEntry::text("settles-session", primary.settles().to_string()),
+        StyleEntry::text(
+            "also-emitted",
+            if rest.is_empty() {
+                "none".to_string()
+            } else {
+                rest.join(",")
+            },
+        ),
+        StyleEntry::text("session-open", controller.session_open().to_string()),
+        StyleEntry::text(
+            "snapshot",
+            controller.snapshot().unwrap_or("<none>").to_string(),
+        ),
+        StyleEntry::text("engine-value", controller.value().to_string()),
+        StyleEntry::text("coalesced", controller.coalesced().to_string()),
+        StyleEntry::text("superseded", controller.superseded().to_string()),
+        StyleEntry::text("clears", controller.clears().to_string()),
+    ]);
+    cell.note = Some(format!("produced by: {}", how(tier)));
+    cell
+}
+
+/// Every `UIF-ATOM-002a` tier cell.
+#[must_use]
+pub fn text_input_tier_cells() -> Vec<Cell> {
+    TEXT_INPUT_TIERS
+        .iter()
+        .map(|(tier, _)| text_input_tier_cell(tier))
+        .collect()
 }
 
 /// A rectangle rendered compactly for a resolved-value entry.
@@ -3848,6 +3955,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(button_cells());
     cells.extend(button_controlled_cells());
     cells.extend(text_input_cells());
+    cells.extend(text_input_tier_cells());
     cells.extend(menu_cells());
     cells.extend(menu_glyph_cells());
     cells.extend(modal_cells());

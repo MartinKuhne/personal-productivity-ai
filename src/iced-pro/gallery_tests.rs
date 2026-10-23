@@ -92,6 +92,19 @@ fn expected_ids() -> Vec<String> {
             }
         }
     }
+    // `UIF-ATOM-002a`: the six tiers the editing engine puts on the wire.
+    ids.extend(
+        [
+            "input/tier/changed",
+            "input/tier/committed-enter",
+            "input/tier/committed-blur",
+            "input/tier/cleared",
+            "input/tier/cancelled",
+            "input/tier/focus-changed",
+        ]
+        .iter()
+        .map(|id| (*id).to_string()),
+    );
     ids.extend(
         [
             "rest",
@@ -224,7 +237,7 @@ fn per_subject_cell_counts_match_the_plan() {
 
     let mut expected: Vec<(&str, usize)> = vec![
         ("button", 83),
-        ("input", 54),
+        ("input", 60),
         ("menu", 12),
         ("menu-glyph", 10),
         ("modal", 3),

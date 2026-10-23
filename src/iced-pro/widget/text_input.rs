@@ -126,8 +126,45 @@
 //! exactly as [`button_widget`](super::button_widget) does. Wrap, not
 //! fork.
 //!
+//! # On the binding foundation (`UIF-ATOM-002a`)
+//!
+//! [`TextInput::controlled`] puts a field on [`TextInputModel`] the way
+//! [`Button::controlled`](super::button_widget::Button::controlled) put
+//! the button on its model: the model is the truth, the widget reads it
+//! every frame, and every edit travels back out as a
+//! [`TextInputEmission`] tier rather than as a raw string the host
+//! happens to be listening for. The legacy [`TextInput::new`] →
+//! `on_input` path is untouched and still works, and the two paths paint
+//! identically — which is what the sidecar's equality test pins rather
+//! than what this comment asserts.
+//!
+//! Two problems the button never had to solve show up here.
+//!
+//! **The editor publishes the instant a keystroke lands, and
+//! [`Shell::publish`] cannot be declined.** So the inner editor's
+//! message type is `Option<Message>`: the wrapper drives it through a
+//! shell over a buffer it owns and republishes only what it chooses. A
+//! legacy cell forwards `Some(message)` one-for-one; a bound cell
+//! records the edit and returns `None`, so the raw string never reaches
+//! the host and the host hears only tiers.
+//!
+//! **`Escape` needs a snapshot, and where that snapshot is taken decides
+//! whether `Escape` is useful or destructive.** The gesture is the
+//! *editing session*, and the snapshot is taken at the **first edit
+//! after focus**, not at focus itself. The controller's module doc
+//! argues the two failure modes this avoids; the short version is that a
+//! focus-gain snapshot reverts sessions nobody opened and goes stale the
+//! moment the host syncs a field while it is focused, which turns
+//! `Escape` into a way to destroy a value the user was already shown.
+//!
+//! [`TextInputEmission`]: super::text_input_controller::TextInputEmission
+//! [`TextInput::new`]: crate::widget::text_input::TextInput::new
+//!
 //! Unit tests live in the sibling `text_input_tests.rs` sidecar.
 
+use crate::binding::Controlled;
+use crate::binding::Ephemeral;
+use crate::binding::Live;
 use crate::focus::FocusId;
 use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::token::color::Palette;
@@ -135,6 +172,9 @@ use crate::token::contrast;
 use crate::token::{shape, size, space};
 use crate::widget::button_widget::Layer;
 use crate::widget::focus;
+use crate::widget::text_input_controller::TextInputController;
+use crate::widget::text_input_controller::TextInputEmission;
+use crate::widget::text_input_model::TextInputModel;
 
 use iced::Alignment;
 use iced::Background;
@@ -156,12 +196,17 @@ use iced::advanced::widget::Id;
 use iced::advanced::widget::Tree;
 use iced::advanced::widget::Widget;
 use iced::advanced::widget::operation::{self, Operation};
+use iced::advanced::widget::tree;
 use iced::alignment;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
 use iced::mouse;
 use iced::widget::text_input::{
     self, State as EditorState, Status as EditorStatus, Style as EditorStyle,
 };
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// The standard input height — `size.control.md`, for dialog and form
@@ -715,6 +760,18 @@ pub fn visual_from_status(status: EditorStatus, enabled: bool, invalid: bool) ->
     })
 }
 
+/// Host sink for a bound field: turns one routed [`TextInputEmission`]
+/// into the app's message, or returns `None` when that tier needs no
+/// round-trip.
+///
+/// A single sum-returning closure rather than four separate callbacks,
+/// for the reason the button gives: one call site in the widget, and a
+/// host that wires three of the four `002a` callbacks still has to
+/// *look* at the fourth rather than silently forget it.
+///
+/// [`TextInputEmission`]: super::text_input_controller::TextInputEmission
+type Emit<'a, Message> = Box<dyn Fn(TextInputEmission) -> Option<Message> + 'a>;
+
 /// A themed text entry, search field or dropdown trigger
 /// (`UIF-ATOM-002`).
 ///
@@ -739,7 +796,7 @@ pub fn visual_from_status(status: EditorStatus, enabled: bool, invalid: bool) ->
 /// a second validator invented in the view layer.
 pub struct TextInput<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     kind: InputKind,
-    input: Element<'a, Message, Theme, Renderer>,
+    input: Element<'a, Option<Message>, Theme, Renderer>,
     on_input: Option<Rc<dyn Fn(String) -> Message + 'a>>,
     on_clear: Option<Message>,
     focus_id: FocusId,
@@ -752,6 +809,17 @@ pub struct TextInput<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer
     enabled: bool,
     invalid: bool,
     slot: SlotContent,
+    /// The legacy path's own read-only flag; a bound field answers from
+    /// the model instead. See [`is_read_only`](Self::is_read_only).
+    read_only: bool,
+    /// The binding, when this field is driven by a [`TextInputModel`].
+    model: Option<Controlled<'a, TextInputModel>>,
+    /// Where routed tiers go. `None` on the legacy path, which has no
+    /// tiers — it has `on_input`.
+    emit: Option<Emit<'a, Message>>,
+    /// Edits the inner editor published during this pass, captured by
+    /// the wrapper's own shell instead of reaching the host.
+    edits: Rc<RefCell<Vec<String>>>,
 }
 
 impl<'a, Message, Theme, Renderer> TextInput<'a, Message, Theme, Renderer>
@@ -776,30 +844,87 @@ where
         on_input: impl Fn(String) -> Message + 'a,
         focus_id: impl Into<FocusId>,
     ) -> Self {
+        let mut widget = Self::base(kind, placeholder, value, focus_id);
+        widget.on_input = Some(Rc::new(on_input));
+        widget.sync();
+        widget
+    }
+
+    /// Build a field whose state comes from `model` and whose edits leave
+    /// as tiers through `emit` (`UIF-ATOM-002a`).
+    ///
+    /// The `Controlled<'_, TextInputModel>` is a shared borrow, not a
+    /// copy: the host keeps the model and mutates it, and the field reads
+    /// the current value every frame. That is the §3.0.4.1 rule — the
+    /// model is the truth, so the widget must not have its own.
+    ///
+    /// There is no `on_input` here, and that is the point. A host that
+    /// adopts the model cannot also keep receiving the raw string on a
+    /// separate channel: the tiers exist precisely because the raw string
+    /// is not the event. `emit` sees every tier the field produces —
+    /// [`Changed`](TextInputEmission::Changed),
+    /// [`Committed`](TextInputEmission::Committed),
+    /// [`Cleared`](TextInputEmission::Cleared),
+    /// [`Cancelled`](TextInputEmission::Cancelled) and
+    /// [`FocusChanged`](TextInputEmission::FocusChanged) — and returns
+    /// `None` for the ones the app does not want a message for.
+    ///
+    /// [`on_clear`](Self::on_clear) is the legacy route and is ignored on
+    /// this path: a bound field clears by routing
+    /// [`clear`](TextInputController::clear), which is a tier, not a
+    /// message the widget holds.
+    #[must_use]
+    pub fn controlled(
+        kind: InputKind,
+        model: Controlled<'a, TextInputModel>,
+        focus_id: impl Into<FocusId>,
+        emit: impl Fn(TextInputEmission) -> Option<Message> + 'a,
+    ) -> Self {
+        let mut widget = Self::base(
+            kind,
+            model.get().placeholder.clone(),
+            model.get().value.clone(),
+            focus_id,
+        );
+        widget.enabled = !model.get().disabled;
+        widget.invalid = model.get().is_invalid();
+        widget.model = Some(model);
+        widget.emit = Some(Box::new(emit));
+        widget.sync();
+        widget
+    }
+
+    /// The shared construction both paths start from: identity, chrome and
+    /// geometry, with no callback and no binding.
+    fn base(
+        kind: InputKind,
+        placeholder: impl Into<String>,
+        value: impl Into<String>,
+        focus_id: impl Into<FocusId>,
+    ) -> Self {
         let focus_id = focus_id.into();
         let widget_id = crate::bridge::widget_id(&focus_id);
-        let placeholder = placeholder.into();
-        let value = value.into();
 
-        let mut widget = Self {
+        Self {
             kind,
             input: Element::new(EmptyEditor),
-            on_input: Some(Rc::new(on_input)),
+            on_input: None,
             on_clear: None,
             focus_id,
             widget_id,
-            placeholder,
-            value,
+            placeholder: placeholder.into(),
+            value: value.into(),
             palette: Palette::dark(),
             width: Length::Fill,
             height: HEIGHT_STANDARD,
             enabled: true,
             invalid: false,
             slot: SlotContent::Empty,
-        };
-
-        widget.sync();
-        widget
+            read_only: false,
+            model: None,
+            emit: None,
+            edits: Rc::new(RefCell::new(Vec::new())),
+        }
     }
 
     /// Rebuild the inner editor and re-derive the slot from the current
@@ -809,19 +934,36 @@ where
     /// style closure always captures the truth. The slot is recomputed
     /// here too, so `value` and the glyph shown for it cannot drift apart
     /// inside one frame.
+    ///
+    /// A bound field derives its slot from the model rather than from the
+    /// widget's own copy of the value, which is the whole point of the
+    /// binding: `slot_for` and `slot_content` agree today, and the model
+    /// is where the disagreement would start if `clearable` ever made the
+    /// glyph inert.
     fn sync(&mut self) {
-        self.slot = slot_content(self.kind, !self.value.is_empty(), self.invalid);
+        self.slot = match self.model {
+            Some(model) => model.get().slot_for(self.kind),
+            None => slot_content(self.kind, !self.value.is_empty(), self.invalid),
+        };
         self.input = self.build_editor();
     }
 
     /// Construct the inner iced editor with this atom's chrome stripped off
     /// it.
-    fn build_editor(&self) -> Element<'a, Message, Theme, Renderer> {
+    ///
+    /// The editor's message type is `Option<Message>` because a bound
+    /// field must be able to *not* answer it: iced publishes the instant
+    /// a keystroke lands and there is no way to decline. `None` is the
+    /// editor's own "nothing for the host", and the wrapper decides what
+    /// happens instead.
+    fn build_editor(&self) -> Element<'a, Option<Message>, Theme, Renderer> {
         let kind = self.kind;
         let palette = self.palette;
         let enabled = self.enabled;
         let invalid = self.invalid;
         let on_input = self.on_input.clone();
+        let edits = self.edits.clone();
+        let bound = self.model.is_some();
 
         let editor = text_input::TextInput::new(&self.placeholder, &self.value)
             .id(self.widget_id.clone())
@@ -851,13 +993,33 @@ where
                 }
             });
 
-        // A disabled input gets no callback at all, so iced's own
-        // `Status::Disabled` is what the style closure sees. The wrapper
-        // additionally refuses to forward events; both gates are needed,
-        // because the first fixes the colours and the second fixes the
-        // behaviour.
-        if let Some(callback) = on_input.filter(|_| enabled) {
-            return editor.on_input(move |text| (callback)(text)).into();
+        // A field that cannot accept edits gets no callback at all, so
+        // iced's own `Status::Disabled` is what the style closure sees.
+        // The wrapper additionally refuses to forward events; both gates
+        // are needed, because the first fixes the colours and the second
+        // fixes the behaviour. Read-only takes the same *behavioural*
+        // gate as disabled — no edit can reach the host either way —
+        // while the wrapper keeps painting it as the enabled control it
+        // still is.
+        if !enabled || self.is_read_only() {
+            return editor.into();
+        }
+
+        if bound {
+            // A bound field never lets the raw string through. The edit
+            // is recorded here and re-emitted as whichever tier the
+            // controller says it is, so `None` is the honest answer to
+            // "what should the host see right now".
+            return editor
+                .on_input(move |text| {
+                    edits.borrow_mut().push(text);
+                    None
+                })
+                .into();
+        }
+
+        if let Some(callback) = on_input {
+            return editor.on_input(move |text| Some((callback)(text))).into();
         }
 
         editor.into()
@@ -922,6 +1084,29 @@ where
         self
     }
 
+    /// Make the field readable and selectable but not editable.
+    ///
+    /// This is *not* [`disabled`](Self::disabled), and the difference is
+    /// the point: a disabled field is one the host has taken away, and it
+    /// paints the Disabled cell. A read-only field is one the user can
+    /// still look at, select and copy from, and it paints the same Rest,
+    /// Hovered or Invalid cell it would paint if it were live.
+    ///
+    /// What changes is that no edit can reach the host. Iced's editor
+    /// gets no `on_input` at all, which is the only gate the editor
+    /// actually respects — it has no `read_only` of its own, and every
+    /// edit path returns early when the callback is absent.
+    ///
+    /// A bound field answers from [`TextInputModel::read_only`] instead;
+    /// this builder is the legacy path's equivalent.
+    /// [`TextInputModel::read_only`]: super::text_input_model::TextInputModel::read_only
+    #[must_use]
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self.sync();
+        self
+    }
+
     /// The message published when the actionable trailing glyph — the
     /// search field's clear `×` — is pressed and released inside the
     /// slot.
@@ -969,10 +1154,142 @@ where
         self.invalid
     }
 
+    /// The binding this field reads, if it has one.
+    #[must_use]
+    pub fn model(&self) -> Option<Controlled<'a, TextInputModel>> {
+        self.model
+    }
+
+    /// Whether this field is driven by a [`TextInputModel`] rather than
+    /// by the legacy `on_input` callback.
+    #[must_use]
+    pub fn is_controlled(&self) -> bool {
+        self.model.is_some()
+    }
+
     /// What the reserved trailing slot carries right now.
     #[must_use]
     pub fn slot(&self) -> SlotContent {
         self.slot
+    }
+}
+
+/// The tier-routing half of the widget, in its own impl block on purpose.
+///
+/// Neither method builds the inner editor, so neither needs
+/// `Theme::Class<'a>: From<text_input::StyleFn<'a, Theme>>` — and the
+/// `'a` in that bound is exactly what makes it impossible to satisfy from
+/// [`Widget::update`], which is instantiated at an anonymous lifetime.
+/// Keeping the routing in the *minimal* block, the same reason
+/// [`visual`](Self::visual) lives in one, is what lets the widget trait
+/// call it at all.
+impl<Message, Theme, Renderer> TextInput<'_, Message, Theme, Renderer>
+where
+    Message: Clone,
+    Renderer: text_core::Renderer,
+{
+    /// The trailing `×` released inside the slot.
+    ///
+    /// A bound field routes [`TextInputController::clear`] — a tier, like
+    /// everything else that leaves a bound control. A legacy field
+    /// publishes the [`on_clear`](Self::on_clear) message it was given.
+    /// The two never both fire: a field is on one path or the other.
+    ///
+    /// [`TextInputController::clear`]: super::text_input_controller::TextInputController::clear
+    fn release_clear(&self, tree: &mut Tree, shell: &mut Shell<'_, Message>) {
+        let Some(model) = self.model else {
+            if let Some(message) = self.on_clear.clone() {
+                shell.publish(message);
+            }
+            return;
+        };
+
+        // The slot is the wrapper's own hit target, so this path never
+        // passes through `route_tiers` — which is where the model is
+        // normally observed. Observe it here: a clear of a value nobody
+        // has been told about yet is a clear of nothing, and the `x`
+        // would silently do nothing on the very field that shows it.
+        let controller = controller_mut(tree);
+        controller.observe(model.get());
+
+        route(&self.emit, controller.clear(), shell);
+    }
+
+    /// Fold this pass's raw signals into tiers and hand them to the host.
+    ///
+    /// The order is the order the events actually happen in: the model is
+    /// observed, edits are recorded, the gesture key settles whatever is
+    /// open, the focus edge closes the session, and the surviving live
+    /// tick is delivered last. A settled tier discards the pending tick
+    /// as it goes, so a host handed `Committed` is never woken afterwards
+    /// with a `Live` describing the same string.
+    ///
+    /// Only ever called for a bound field; the `None` model case returns
+    /// rather than panicking so the function stays honest about its
+    /// preconditions.
+    ///
+    /// `holds_keyboard` is the focus state captured *before* the event
+    /// was forwarded, not the one read here. The two differ exactly when
+    /// the event moved the keyboard — and `Escape` is one of them, which
+    /// is why the caller has to hand it over rather than recompute it.
+    fn route_tiers(
+        &self,
+        tree: &mut Tree,
+        event: &Event,
+        holds_keyboard: bool,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let Some(model) = self.model else {
+            return;
+        };
+
+        let focused = editor_focused::<Renderer>(tree) && !self.is_read_only();
+        let controller = controller_mut(tree);
+
+        controller.observe(model.get());
+
+        // Every edit the editor made since the last pass, folded into the
+        // coalescer. However many keystrokes landed, at most one live tick
+        // comes out of `take_live` below.
+        for edit in self.edits.borrow_mut().drain(..) {
+            controller.note_edit(edit);
+        }
+
+        // Gesture keys belong to the field that holds the keyboard. The
+        // wrapper is handed every event while its subtree is on screen;
+        // acting on `Escape` without this gate would revert or clear a
+        // field the user was never in.
+        if holds_keyboard {
+            if is_named_key(event, Named::Enter) {
+                route(&self.emit, controller.commit(), shell);
+            } else if is_named_key(event, Named::Escape) {
+                // Revert if a session is open. Otherwise clear — but only
+                // where the model says the clear affordance can act,
+                // which is the same predicate that makes the `×`
+                // actionable. A plain text entry is never `Escape`-cleared,
+                // because a key that silently deletes what the user typed
+                // and never lets them undo it is worse than no key at all.
+                if controller.session_open() {
+                    route(&self.emit, controller.revert(), shell);
+                } else if model.get().clear_affordance(self.kind) {
+                    route(&self.emit, controller.clear(), shell);
+                }
+            }
+        }
+
+        // The focus edge is recorded last so the host sees whatever the
+        // gesture settled before it sees the session boundary move.
+        for edge in controller.note_focus(focused) {
+            route(&self.emit, Some(edge), shell);
+        }
+
+        if let Some(value) = controller.take_live() {
+            route(
+                &self.emit,
+                Some(TextInputEmission::Changed(Live::new(value))),
+                shell,
+            );
+        }
     }
 }
 
@@ -989,6 +1306,21 @@ impl<Message, Theme, Renderer> TextInput<'_, Message, Theme, Renderer>
 where
     Renderer: text_core::Renderer,
 {
+    /// Whether the field can be read but not edited.
+    ///
+    /// A bound field answers from the model, so the model stays the truth
+    /// even if both a builder and a model flag are somehow in play; the
+    /// legacy [`read_only`](Self::read_only) builder is the only way a
+    /// field with no binding can report this.
+    ///
+    /// Deliberately in the minimal block: the read path needs nothing of
+    /// styling, and both [`visual`](Self::visual) and the tier router call
+    /// it from places that cannot name `Theme::Class<'a>`.
+    #[must_use]
+    pub fn is_read_only(&self) -> bool {
+        self.read_only || self.model.is_some_and(|model| model.get().read_only)
+    }
+
     /// The resolved state this input paints, given its laid-out bounds,
     /// what the router is doing and where the cursor is.
     ///
@@ -996,6 +1328,13 @@ where
     /// invented here, so the chrome cannot claim focus the editor does not
     /// have — and, with [`operate`](Widget::operate)'s eviction, cannot
     /// claim it for a disabled control either.
+    ///
+    /// A read-only field never claims it either. Iced still lets the
+    /// router focus the inner editor, but a field that cannot take a
+    /// caret must not paint the cell that says it can, so the focus half
+    /// is dropped for it. The rest of the cell is untouched, which is
+    /// what keeps read-only a *different* state from disabled rather
+    /// than a synonym for it.
     ///
     /// `bounds` is the wrapper's own box rather than the editor's, which
     /// is why it is a parameter: the hover test has to cover the reserved
@@ -1006,7 +1345,7 @@ where
             enabled: self.enabled,
             hovered: cursor.is_over(bounds),
             pressed: false,
-            focused: editor_focused::<Renderer>(tree),
+            focused: editor_focused::<Renderer>(tree) && !self.is_read_only(),
             invalid: self.invalid,
         })
     }
@@ -1027,6 +1366,84 @@ fn editor_focused<Renderer: text_core::Renderer>(tree: &Tree) -> bool {
     })
 }
 
+/// The [`TextInputController`] carried by a field's tree node.
+///
+/// Reached through the [`Ephemeral`] wrapper the tag declares, so there is
+/// one obvious way to get at the ephemeral half and no silent `downcast`
+/// of a bare controller that would panic against a tree built under some
+/// other tag.
+///
+/// # Panics
+/// Never in practice: [`Widget::state`] always builds the node this
+/// function reads, and no other code path builds a text input's tree.
+fn controller_mut(tree: &mut Tree) -> &mut TextInputController {
+    tree.state
+        .downcast_mut::<Ephemeral<TextInputController>>()
+        .get_mut()
+}
+
+/// Send one tier of the editing engine's output to the host's sink.
+///
+/// A no-op when the field has no sink (it was built through
+/// [`new`](TextInput::new), which publishes `on_input` directly) or when
+/// the engine produced nothing. Keeping both checks here rather than at
+/// each of the five call sites is what stops one of them forgetting.
+fn route<Message>(
+    emit: &Option<Emit<'_, Message>>,
+    emission: Option<TextInputEmission>,
+    shell: &mut Shell<'_, Message>,
+) {
+    let (Some(emit), Some(emission)) = (emit, emission) else {
+        return;
+    };
+
+    if let Some(message) = (emit)(emission) {
+        shell.publish(message);
+    }
+}
+
+/// Whether `event` is a fresh press of the named key `name`.
+///
+/// `Press` only, never `Repeat`: a held `Enter` would otherwise settle
+/// the same value once per autorepeat tick, and a held `Escape` would
+/// settle a session that closed on the first one.
+fn is_named_key(event: &Event, name: Named) -> bool {
+    matches!(
+        event,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(key),
+            repeat: false,
+            ..
+        }) if *key == name
+    )
+}
+
+/// Copy the side effects a nested shell picked up onto the host's shell.
+///
+/// [`Shell::merge`] cannot be used here: it moves *every* message it
+/// carries, mapping each one, and the whole point of the nested shell is
+/// that some messages are dropped rather than forwarded. Everything that
+/// is not a message still has to travel — event capture, layout and
+/// widget invalidation, the redraw request, the IME strategy — or
+/// suppressing a message would also suppress the frame the editor asked
+/// for.
+fn carry_over<Message>(from: &Shell<'_, Option<Message>>, to: &mut Shell<'_, Message>) {
+    if from.is_event_captured() {
+        to.capture_event();
+    }
+
+    if from.is_layout_invalid() {
+        to.invalidate_layout();
+    }
+
+    if from.are_widgets_invalid() {
+        to.invalidate_widgets();
+    }
+
+    to.request_redraw_at(from.redraw_request());
+    to.request_input_method(from.input_method());
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for TextInput<'_, Message, Theme, Renderer>
 where
@@ -1036,6 +1453,14 @@ where
 {
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.input)]
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Ephemeral<TextInputController>>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Ephemeral::new(TextInputController::new()))
     }
 
     fn diff(&self, tree: &mut Tree) {
@@ -1132,6 +1557,16 @@ where
             // Nothing is forwarded: a disabled input emits no message,
             // edits nothing and captures nothing. The event is left for
             // anything else that wants it.
+            //
+            // A bound field also loses its editing session here. A
+            // snapshot carried across the stretch in which the control
+            // could not act would let a later `Escape` restore a value
+            // from before the field stopped existing, and neither a
+            // commit nor a revert is owed for a control that was turned
+            // off mid-keystroke.
+            if self.model.is_some() {
+                controller_mut(tree).reset();
+            }
             return;
         }
 
@@ -1148,9 +1583,7 @@ where
                     shell.capture_event();
                 }
                 Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    if let Some(message) = self.on_clear.clone() {
-                        shell.publish(message);
-                    }
+                    self.release_clear(tree, shell);
                     shell.capture_event();
                 }
                 _ => {}
@@ -1163,16 +1596,59 @@ where
             .next()
             .expect("a text input lays out exactly one editor node");
 
-        self.input.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            editor_layout,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        );
+        // Whether this field held the keyboard *before* the event ran,
+        // which is the only honest moment to ask. Iced's own `Escape`
+        // handler blurs the inner editor, so a gate read after the
+        // editor has had its turn would find no keyboard to attribute the
+        // gesture to and drop it.
+        let holds_keyboard = editor_focused::<Renderer>(tree) && !self.is_read_only();
+
+        // A bound field takes `Escape` for itself and never lets the
+        // editor see it, for the same reason. `Cancel` restores the text
+        // you were in the middle of; it would be a poor joke to restore
+        // it and throw the keyboard away with it, and the spec's own
+        // two-`Escape` patterns (`002d`) assume the field is still there
+        // to take the second one.
+        let swallow_escape =
+            self.model.is_some() && holds_keyboard && is_named_key(event, Named::Escape);
+
+        // The inner editor publishes the moment a keystroke lands, and
+        // `Shell::publish` cannot be declined. So the editor is driven
+        // through a shell this widget owns, over a buffer of
+        // `Option<Message>`: `Some` is a legacy message to republish,
+        // `None` is an edit that belongs to the tiers instead.
+        let mut buffer: Vec<Option<Message>> = Vec::new();
+
+        if !swallow_escape {
+            let mut inner = Shell::new(&mut buffer);
+
+            self.input.as_widget_mut().update(
+                &mut tree.children[0],
+                event,
+                editor_layout,
+                cursor,
+                renderer,
+                clipboard,
+                &mut inner,
+                viewport,
+            );
+
+            carry_over(&inner, shell);
+        }
+
+        if self.model.is_none() {
+            // Legacy: what the editor said, one for one, in order.
+            for message in buffer.into_iter().flatten() {
+                shell.publish(message);
+            }
+            return;
+        }
+
+        if swallow_escape {
+            shell.capture_event();
+        }
+
+        self.route_tiers(tree, event, holds_keyboard, shell);
     }
 
     fn mouse_interaction(

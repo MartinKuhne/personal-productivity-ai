@@ -32,15 +32,15 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 44 as of `widget/button_model.rs` and `widget/button_controller.rs`
-/// joining the tree for `UIF-ATOM-001a`.
-const PIN_FILES_SCANNED: usize = 44;
+/// 46 as of `widget/text_input_model.rs` and `widget/text_input_controller.rs`
+/// joining the tree for `UIF-ATOM-002a`.
+const PIN_FILES_SCANNED: usize = 46;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 20 as of the two `UIF-ATOM-001a` button modules joining `widget/`.
-const PIN_RULE_B_FILES: usize = 20;
+/// 22 as of the two `UIF-ATOM-002a` text field modules joining `widget/`.
+const PIN_RULE_B_FILES: usize = 22;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

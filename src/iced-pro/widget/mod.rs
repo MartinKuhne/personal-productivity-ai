@@ -50,6 +50,15 @@
 //!   across the five-state matrix of §3.2, including the trailing slot
 //!   that is reserved whether or not anything is in it
 //!   (`UIF-ATOM-002`, `UIF-PRIN-003`)
+//! * [`text_input_model`] — the declarative `TextInputModel` a host owns
+//!   and hands to the field each frame: value, placeholder, selection,
+//!   the host's own validation words, and the read-only / disabled /
+//!   clearable flags that decide what the trailing slot may do
+//!   (`UIF-ATOM-002a`)
+//! * [`text_input_controller`] — the field's editing engine: the editing
+//!   session and its snapshot, the coalesced live tier, and the four
+//!   `002a` callbacks as sum-type arms rather than four loose closures
+//!   (`UIF-ATOM-002a`, §3.0.4.2)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -65,3 +74,5 @@ pub mod button_widget;
 pub mod focus;
 pub mod focusable;
 pub mod text_input;
+pub mod text_input_controller;
+pub mod text_input_model;

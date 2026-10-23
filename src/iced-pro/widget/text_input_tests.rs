@@ -1985,3 +1985,509 @@ fn test_the_inner_editor_style_is_transparent_so_the_wrapper_owns_the_chrome() {
         "the editor spills into the reserved slot"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 7 — the controlled field, wired (`UIF-ATOM-002a`)
+// ---------------------------------------------------------------------------
+//
+// Everything above audits what a field *looks* like. This section drives
+// what it *says*: a gesture goes in, a tier comes out. The host's message
+// type is the controller's own emission, so what the harness collects is
+// exactly what a host would receive — there is no shim in the middle to
+// disagree with about what got routed.
+//
+// The order each assertion expects is the order the signals actually happen
+// in (`route_tiers`): a gesture settles whatever is open, then the focus
+// edge moves, then the surviving live tick is delivered.
+
+use crate::binding::Cancel;
+use crate::binding::Commit;
+use crate::binding::Live;
+use crate::widget::text_input_controller::TextInputEmission;
+use crate::widget::text_input_model::ControlledModel;
+use crate::widget::text_input_model::TextInputModel;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::Location;
+use iced::keyboard::Modifiers;
+use iced::keyboard::key;
+use iced::mouse;
+use std::cell::RefCell;
+use std::ptr::NonNull;
+use std::rc::Rc;
+
+/// A bound field's host message type is the emission itself.
+type Tiered = Element<'static, TextInputEmission, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// The same field before it is turned into an `Element`.
+type BoundField =
+    TextInput<'static, TextInputEmission, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// A host that owns the model a field borrows.
+///
+/// A controlled field re-seeds its editor from its model on every pass,
+/// which is iced's own contract: the host owns the text and the control
+/// only reports what happened to it. A test that types more than one
+/// character therefore has to play its half, and the only way to hand
+/// the same `TextInputModel` out as `'static` while still writing to it
+/// is a leaked allocation behind a pointer. Nothing here is ever freed,
+/// and nothing here outlives the process.
+struct Host {
+    model: NonNull<TextInputModel>,
+}
+
+impl Host {
+    /// A host holding `model`, shared between the view and the test.
+    fn new(model: TextInputModel) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
+            model: NonNull::from(Box::leak(Box::new(model))),
+        }))
+    }
+
+    /// The projection a field is built from.
+    fn view(&self) -> ControlledModel<'static> {
+        // SAFETY: the allocation is leaked, never moved and never freed.
+        unsafe { self.model.as_ref() }.controlled()
+    }
+
+    /// The value the host holds right now.
+    fn value(&self) -> String {
+        // SAFETY: as above.
+        unsafe { self.model.as_ref() }.value.clone()
+    }
+
+    /// The host changing its own mind — a sync landing, a paste made
+    /// somewhere else, a background refresh writing into the same field.
+    fn push(&mut self, value: &str) {
+        // SAFETY: as above.
+        unsafe { self.model.as_mut() }.value = value.to_owned();
+    }
+
+    /// Apply a tier the way the app does: every tier that carries a
+    /// value becomes the host's value, and `Cancel` restores the one it
+    /// carried rather than the one the field happened to end on.
+    fn apply(&mut self, emission: &TextInputEmission) {
+        // SAFETY: as above.
+        let model = unsafe { self.model.as_mut() };
+
+        match emission {
+            TextInputEmission::Changed(live) => model.value = live.value().to_owned(),
+            TextInputEmission::Committed(commit) => model.value = commit.value().to_owned(),
+            TextInputEmission::Cleared(_) => model.value = String::new(),
+            TextInputEmission::Cancelled(cancel) => model.value = cancel.restored().to_owned(),
+            TextInputEmission::FocusChanged(_) => {}
+        }
+    }
+}
+
+/// A search field carrying the app's own placeholder.
+fn search(value: &str) -> TextInputModel {
+    TextInputModel::new(value).with_placeholder("Search notes")
+}
+
+/// One bound field at a fixed width, wired to the tiers through a host
+/// that writes every tier straight back into its own model.
+fn bound(host: Rc<RefCell<Host>>, kind: InputKind) -> Tiered {
+    let mirror = host.clone();
+
+    TextInput::controlled(kind, host.borrow().view(), "bound", move |emission| {
+        mirror.borrow_mut().apply(&emission);
+        Some(emission)
+    })
+    .width(Length::Fixed(240.0))
+    .into()
+}
+
+/// A harness around one bound field of `kind`, driven by `host`.
+fn bound_harness(
+    host: Rc<RefCell<Host>>,
+    kind: InputKind,
+) -> Harness<TextInputEmission, HeadlessRenderer> {
+    Harness::headless(move || bound(host.clone(), kind))
+}
+
+/// A bound search field that holds the keyboard.
+///
+/// The focus edge is drained here rather than in every test: it only
+/// becomes observable once an event arrives to carry it, and what each
+/// test below wants to assert about is its *own* gesture.
+fn focused_search(host: Rc<RefCell<Host>>) -> Harness<TextInputEmission, HeadlessRenderer> {
+    let mut harness = bound_harness(host, InputKind::Search);
+    harness.focus(&iced_id("bound"));
+
+    assert_eq!(
+        drift(&mut harness),
+        vec![focus(true)],
+        "taking the keyboard reports exactly one edge"
+    );
+    harness
+}
+
+fn changed(value: &str) -> TextInputEmission {
+    TextInputEmission::Changed(Live::new(value.to_owned()))
+}
+
+fn committed(value: &str) -> TextInputEmission {
+    TextInputEmission::Committed(Commit::new(value.to_owned()))
+}
+
+fn cleared() -> TextInputEmission {
+    TextInputEmission::Cleared(Commit::new(String::new()))
+}
+
+fn cancelled(restored: &str) -> TextInputEmission {
+    TextInputEmission::Cancelled(Cancel::new(restored.to_owned()))
+}
+
+fn focus(on: bool) -> TextInputEmission {
+    TextInputEmission::FocusChanged(on)
+}
+
+/// A key press carrying no text — Enter, Escape, Backspace.
+fn key_event(key: Key, text: Option<&str>) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+        location: Location::Standard,
+        modifiers: Modifiers::NONE,
+        text: text.map(str::to_owned).map(Into::into),
+        repeat: false,
+    })
+}
+
+/// Nowhere near the field, so a cursor position never enters the result.
+fn away() -> Point {
+    Point::new(-4000.0, -4000.0)
+}
+
+/// Push one event at the field and collect what it published.
+fn send(
+    harness: &mut Harness<TextInputEmission, HeadlessRenderer>,
+    event: Event,
+) -> Vec<TextInputEmission> {
+    harness.pointer(&[event], mouse::Cursor::Available(away()))
+}
+
+/// A mouse move with no gesture in it. The widget still runs a pass,
+/// which is when a focus edge becomes observable.
+fn drift(harness: &mut Harness<TextInputEmission, HeadlessRenderer>) -> Vec<TextInputEmission> {
+    harness.pointer(&[moved(away())], mouse::Cursor::Available(away()))
+}
+
+/// A printable character. Iced inserts from `text`, not from the key
+/// code, so a faithful keystroke has to carry it.
+fn typed(
+    harness: &mut Harness<TextInputEmission, HeadlessRenderer>,
+    c: char,
+) -> Vec<TextInputEmission> {
+    let text = c.to_string();
+    send(
+        harness,
+        key_event(Key::Character(text.as_str().into()), Some(&text)),
+    )
+}
+
+fn named(
+    harness: &mut Harness<TextInputEmission, HeadlessRenderer>,
+    name: key::Named,
+) -> Vec<TextInputEmission> {
+    send(harness, key_event(Key::Named(name), None))
+}
+
+#[test]
+fn test_a_typed_character_becomes_one_live_tick() {
+    let mut harness = focused_search(Host::new(search("")));
+
+    assert_eq!(typed(&mut harness, 'a'), vec![changed("a")]);
+    assert_eq!(typed(&mut harness, 'b'), vec![changed("ab")]);
+}
+
+#[test]
+fn test_a_key_that_changes_nothing_emits_no_live_tick() {
+    let mut harness = focused_search(Host::new(search("")));
+
+    assert_eq!(
+        named(&mut harness, key::Named::Backspace),
+        vec![],
+        "backspace on an empty field changes nothing, so the coalescer \
+         must not wake the host with the string it already had"
+    );
+}
+
+#[test]
+fn test_enter_settles_the_edit_as_a_commit() {
+    let mut harness = focused_search(Host::new(search("")));
+
+    typed(&mut harness, 'h');
+    typed(&mut harness, 'i');
+
+    assert_eq!(
+        named(&mut harness, key::Named::Enter),
+        vec![committed("hi")],
+        "Enter settles the session and supersedes the pending live tick, \
+         so the host must not also be handed `Changed(\"hi\")`"
+    );
+}
+
+#[test]
+fn test_losing_focus_settles_the_edit_and_reports_the_edge() {
+    let mut harness = focused_search(Host::new(search("")));
+
+    typed(&mut harness, 'h');
+    typed(&mut harness, 'i');
+    harness.unfocus();
+
+    assert_eq!(
+        drift(&mut harness),
+        vec![committed("hi"), focus(false)],
+        "a blur commits before it closes the boundary, never after"
+    );
+}
+
+#[test]
+fn test_enter_settles_a_field_that_never_opened_a_session() {
+    let mut harness = focused_search(Host::new(search("hello")));
+
+    assert_eq!(
+        named(&mut harness, key::Named::Enter),
+        vec![committed("hello")],
+        "Enter on an untouched field still settles: the host asked for a \
+         value and is owed one"
+    );
+}
+
+#[test]
+fn test_releasing_the_clear_slot_settles_the_empty_value_as_a_clear() {
+    let host = Host::new(search("hello"));
+    let mut harness = bound_harness(host.clone(), InputKind::Search);
+    let slot = centre(trailing_slot_bounds(
+        outer(240.0, HEIGHT_STANDARD),
+        InputKind::Search,
+    ));
+
+    harness.hover(slot);
+    harness.press(slot);
+
+    assert_eq!(
+        harness.release(slot),
+        vec![cleared()],
+        "the `x` is a tier like every other settled signal, not a \
+         `Commit` of an empty string that merely looks the same"
+    );
+    assert_eq!(
+        host.borrow().value(),
+        "",
+        "the host took the clear as its own value, which is what the \
+         next frame paints"
+    );
+}
+
+#[test]
+fn test_escape_reverts_to_the_snapshot_taken_at_the_first_edit() {
+    let host = Host::new(search("hello"));
+    let mut harness = focused_search(host.clone());
+
+    typed(&mut harness, '!');
+    assert_eq!(
+        host.borrow().value(),
+        "hello!",
+        "the live tick moved the host on, as it does in the app"
+    );
+
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![cancelled("hello")],
+        "the snapshot is what the field held when the gesture started, \
+         not what it holds now"
+    );
+    assert_eq!(
+        host.borrow().value(),
+        "hello",
+        "the host restored the value the `Cancel` tier carried, and the \
+         field keeps the keyboard to retype into"
+    );
+}
+
+#[test]
+fn test_escape_with_no_session_clears_a_clearable_search() {
+    let host = Host::new(search("hello"));
+    let mut harness = focused_search(host.clone());
+
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![cleared()],
+        "with nothing to revert, Escape on a search field that can be \
+         cleared clears it — the same affordance the `x` paints"
+    );
+    assert_eq!(host.borrow().value(), "");
+}
+
+#[test]
+fn test_escape_never_clears_a_plain_text_entry() {
+    let host = Host::new(search("hello"));
+    let mut harness = bound_harness(host.clone(), InputKind::TextEntry);
+    harness.focus(&iced_id("bound"));
+    let _ = drift(&mut harness);
+
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![],
+        "a key that silently deletes what the user typed, with no `x` \
+         ever having offered to, is a key that should not exist"
+    );
+    assert_eq!(host.borrow().value(), "hello", "left alone");
+}
+
+#[test]
+fn test_escape_respects_a_field_that_cannot_be_cleared() {
+    let host = Host::new(search("hello").with_clearable(false));
+    let mut harness = bound_harness(host.clone(), InputKind::Search);
+    harness.focus(&iced_id("bound"));
+    let _ = drift(&mut harness);
+
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![],
+        "Escape acts on exactly the predicate that makes the `x` \
+         actionable; a field with no affordance has no clear"
+    );
+}
+
+#[test]
+fn test_escape_does_not_revert_a_field_that_does_not_hold_the_keyboard() {
+    let mut harness = focused_search(Host::new(search("")));
+    let bounds = harness.recorded()[0].1;
+
+    typed(&mut harness, 'x');
+    harness.unfocus();
+    assert_eq!(drift(&mut harness), vec![committed("x"), focus(false)]);
+
+    // Hovered again, but the keyboard is long gone.
+    harness.hover(centre(bounds));
+
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![],
+        "the wrapper is handed every event while its subtree is on \
+         screen; acting on Escape without the focus gate would revert a \
+         field the user was never inside"
+    );
+}
+
+#[test]
+fn test_a_disabled_bound_field_says_nothing_and_holds_no_focus() {
+    let host = Host::new(search("hello").disabled());
+    let mut harness = bound_harness(host.clone(), InputKind::Search);
+
+    harness.focus(&iced_id("bound"));
+    let _ = drift(&mut harness);
+
+    assert_eq!(typed(&mut harness, 'z'), vec![]);
+    assert_eq!(named(&mut harness, key::Named::Enter), vec![]);
+    assert!(
+        !harness.is_focused(&iced_id("bound")),
+        "a disabled control must not keep a focus nothing can see or leave"
+    );
+}
+
+#[test]
+fn test_a_read_only_bound_field_says_nothing_but_says_so() {
+    let host = Host::new(search("hello").read_only());
+    let field: BoundField =
+        TextInput::controlled(InputKind::Search, host.borrow().view(), "bound", |e| {
+            Some(e)
+        });
+
+    assert!(
+        field.is_read_only(),
+        "a bound field answers read-only from its model"
+    );
+
+    let mut harness = bound_harness(host.clone(), InputKind::Search);
+    harness.focus(&iced_id("bound"));
+    let _ = drift(&mut harness);
+
+    assert_eq!(
+        typed(&mut harness, 'z'),
+        vec![],
+        "read-only withholds the callback iced gates edits on, so no \
+         edit can reach the tiers"
+    );
+    assert_eq!(named(&mut harness, key::Named::Enter), vec![]);
+}
+
+#[test]
+fn test_a_bound_field_reports_its_model_and_says_it_is_bound() {
+    let host = Host::new(search("hello"));
+    let field: BoundField =
+        TextInput::controlled(InputKind::Search, host.borrow().view(), "bound", |e| {
+            Some(e)
+        });
+
+    assert!(field.is_controlled());
+    assert_eq!(
+        field.model().map(|bound| bound.get().value.clone()),
+        Some("hello".to_owned())
+    );
+
+    let legacy: TextInput<'static, Msg, crate::test_helpers::Theme, HeadlessRenderer> =
+        TextInput::new(
+            InputKind::Search,
+            "Search notes",
+            "hello",
+            Msg::Edit,
+            "legacy",
+        );
+    assert!(
+        !legacy.is_controlled(),
+        "the legacy path must not claim a binding it does not have"
+    );
+}
+
+#[test]
+fn test_binding_a_field_moves_no_geometry() {
+    let width = 240.0;
+
+    for kind in KINDS {
+        let mut legacy = Harness::headless(move || {
+            TextInput::new(kind, "Search notes", "hello", Msg::Edit, "legacy")
+                .width(Length::Fixed(width))
+                .into()
+        });
+        let host = Host::new(search("hello"));
+        let mut bound_field = bound_harness(host.clone(), kind);
+
+        assert_eq!(
+            bound_field.recorded()[0].1,
+            legacy.recorded()[0].1,
+            "{kind:?}: putting a field on the binding foundation must \
+             not shift a single pixel — `002b`'s zero-shift slot is \
+             already shipped and paid for"
+        );
+    }
+}
+
+#[test]
+fn test_a_host_pushing_a_new_value_while_focused_is_mirrored_not_reverted() {
+    let host = Host::new(search(""));
+    let mut harness = focused_search(host.clone());
+
+    typed(&mut harness, 'x');
+    host.borrow_mut().push("xy");
+
+    // The host's newer value is observed; the session's snapshot is not
+    // overwritten by it, because the snapshot belongs to the gesture.
+    assert_eq!(
+        named(&mut harness, key::Named::Escape),
+        vec![cancelled("")],
+        "the snapshot is taken at the first edit of the gesture, not \
+         refreshed from the host mid-flight — a revert to a value the \
+         user never typed is worse than no revert at all"
+    );
+    assert_eq!(
+        host.borrow().value(),
+        "",
+        "the restore is the tier's value, not the host's newer one"
+    );
+}
