@@ -116,6 +116,11 @@
 //!
 //! Unit tests live in the sibling `input_dialog_tests.rs` sidecar.
 
+use crate::binding::ActionPending;
+use crate::binding::Cancel;
+use crate::binding::CancelRequest;
+use crate::binding::Commit;
+use crate::binding::Ephemeral;
 use crate::focus::FocusId;
 use crate::focus::FocusMember;
 use crate::focus::FocusState;
@@ -123,6 +128,8 @@ use crate::focus::GroupId;
 use crate::geometry::anchor;
 use crate::geometry::anchor::Anchor;
 use crate::geometry::anchor::Placement;
+use crate::surface::dialog_button::DialogButtonController;
+use crate::surface::dialog_button::DialogButtonRole;
 use crate::surface::zorder::DeclineReason;
 use crate::surface::zorder::EscapeOutcome;
 use crate::surface::zorder::KeyClass;
@@ -1073,6 +1080,10 @@ pub struct InputDialogHost {
     layout: InputLayout,
     placement: Placement,
     viewport: Rectangle,
+    /// The `Ephemeral` half: the `Ok` button's activation engine, holding
+    /// the gate that suppresses a second accept while the first is still
+    /// running (`UIF-ATOM-000b`, §3.0.4.3).
+    primary_cta: DialogButtonController,
     open: bool,
 }
 
@@ -1146,6 +1157,7 @@ impl InputDialogHost {
             layout,
             placement,
             viewport,
+            primary_cta: DialogButtonController::new(DialogButtonRole::Primary),
             open: true,
         }
     }
@@ -1315,21 +1327,29 @@ impl InputDialogHost {
         self.selected
     }
 
-    // -- submission --------------------------------------------------------
+    // -- submission (§3.0.4.2 tiers) ---------------------------------------
 
-    /// Try to accept the dialog.
+    /// Try to accept the dialog, on the `Commit` tier.
     ///
-    /// Accepted: tear down and hand back the value. Rejected: reveal the
-    /// message, pull focus back to the text entry, and **stay open** —
-    /// the invalid branch contains no teardown call at all, which is why
-    /// `UIF-INP-003`'s "keeps focus inside the text box" cannot regress
-    /// into a close.
+    /// Accepted: tear down and hand the value back inside a [`Commit`] —
+    /// the tier that says *this is the settled answer, persist it*.
+    /// Rejected: reveal the message, pull focus back to the text entry,
+    /// and **stay open** — the invalid branch contains no teardown call at
+    /// all, which is why `UIF-INP-003`'s "keeps focus inside the text
+    /// box" cannot regress into a close.
+    ///
+    /// The activation gate runs *after* the rule and *before* the
+    /// teardown. That order matters twice over: a rejected value must not
+    /// put an action in flight, and a second accept while the first is
+    /// still running is withheld without re-validating and without
+    /// revealing anything — §3.0.4.3's duplicate-activation suppression
+    /// for a dialog's primary call to action.
     #[must_use]
-    pub fn submit(
+    pub fn commit_answer(
         &mut self,
         focus: &mut FocusState,
         registry: &mut SurfaceRegistry,
-    ) -> Option<InputAnswer> {
+    ) -> Option<Commit<InputAnswer>> {
         if !self.open {
             return None;
         }
@@ -1339,10 +1359,13 @@ impl InputDialogHost {
 
         match verdict {
             Verdict::Accept => {
+                if !self.primary_cta.try_dispatch() {
+                    return None;
+                }
                 let value = std::mem::take(&mut self.value);
                 self.teardown(focus);
                 registry.unregister(&self.id);
-                Some(InputAnswer::Accepted { value })
+                Some(Commit::new(InputAnswer::Accepted { value }))
             }
             Verdict::Reject(message) => {
                 self.revealed = Some(message);
@@ -1354,19 +1377,86 @@ impl InputDialogHost {
         }
     }
 
+    /// Discard the dialog, on the `Cancel` tier.
+    ///
+    /// The value the revert hands back is [`InputAnswer::Cancelled`] — the
+    /// dialog's answer *is* "nothing was accepted" — and carrying it on
+    /// the `Cancel` tier rather than as a bare message is what tells the
+    /// host this is the discard path, not the persist path.
+    #[must_use]
+    pub fn cancel_answer(
+        &mut self,
+        focus: &mut FocusState,
+        registry: &mut SurfaceRegistry,
+    ) -> Option<Cancel<InputAnswer>> {
+        if !self.open {
+            return None;
+        }
+        self.teardown(focus);
+        registry.unregister(&self.id);
+        Some(Cancel::new(InputAnswer::Cancelled))
+    }
+
+    /// Try to accept the dialog.
+    ///
+    /// The pre-tier shape of [`commit_answer`](Self::commit_answer), kept so
+    /// existing callers are unaffected: the tier is unwrapped and the
+    /// answer is exactly what it always was.
+    #[must_use]
+    pub fn submit(
+        &mut self,
+        focus: &mut FocusState,
+        registry: &mut SurfaceRegistry,
+    ) -> Option<InputAnswer> {
+        self.commit_answer(focus, registry).map(Commit::into_value)
+    }
+
     /// Cancel the dialog at the caller's request.
+    ///
+    /// The pre-tier shape of [`cancel_answer`](Self::cancel_answer).
     #[must_use]
     pub fn cancel(
         &mut self,
         focus: &mut FocusState,
         registry: &mut SurfaceRegistry,
     ) -> Option<InputAnswer> {
-        if !self.open {
-            return None;
-        }
-        self.teardown(focus);
-        registry.unregister(&self.id);
-        Some(InputAnswer::Cancelled)
+        self.cancel_answer(focus, registry)
+            .map(Cancel::into_restored)
+    }
+
+    // -- pending action (§3.0.4.3) -----------------------------------------
+
+    /// Record the host's current [`ActionPending`] projection for the
+    /// dialog's `Ok` button.
+    ///
+    /// Call once per frame, before any press is handled. Busy-ness enters
+    /// only as a value; the host never reads a clock.
+    pub fn set_pending(&mut self, pending: ActionPending) {
+        self.primary_cta.observe(pending);
+    }
+
+    /// The pending-action projection currently in force.
+    #[must_use]
+    pub fn pending(&self) -> ActionPending {
+        self.primary_cta.pending()
+    }
+
+    /// Whether the dialog's accept action is still running.
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        self.primary_cta.pending().is_busy()
+    }
+
+    /// Ask the running accept action to stop — the `on_cancel_request()`
+    /// path, surfaced once per busy period.
+    pub fn request_cancel(&mut self) -> Option<CancelRequest> {
+        self.primary_cta.take_cancel_request()
+    }
+
+    /// The `Ephemeral` view of the dialog's interaction half (§3.0.4.1).
+    #[must_use]
+    pub fn ephemeral(&self) -> Ephemeral<&DialogButtonController> {
+        Ephemeral::new(&self.primary_cta)
     }
 
     // -- keyboard ----------------------------------------------------------
@@ -1563,6 +1653,7 @@ impl InputDialogHost {
         focus.pop_trap();
         focus.unregister_group(&self.group);
         self.open = false;
+        self.primary_cta.reset();
     }
 
     // -- z-order integration -----------------------------------------------

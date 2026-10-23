@@ -224,6 +224,21 @@ impl<T> Default for GestureSlot<T> {
     }
 }
 
+/// A cloned slot owns its own copy of the open gesture.
+///
+/// Hosts that are themselves `Clone` — every surface host in this crate is —
+/// need to carry a slot through with them. This adds no linearity weakening
+/// that [`Gesture<T>`] had not already accepted by being `Clone`: the guard is
+/// per-value, and a cloned slot settles exactly once through its own binding
+/// exactly as a cloned gesture does.
+impl<T: Clone> Clone for GestureSlot<T> {
+    fn clone(&self) -> Self {
+        Self {
+            open: self.open.clone(),
+        }
+    }
+}
+
 impl<T> GestureSlot<T> {
     /// An empty slot with no gesture open.
     #[must_use]

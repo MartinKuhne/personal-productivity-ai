@@ -169,10 +169,16 @@
 //!
 //! Unit tests live in the sibling `modal_tests.rs` sidecar.
 
+use crate::binding::ActionPending;
+use crate::binding::Activation;
+use crate::binding::CancelRequest;
+use crate::binding::Controlled;
+use crate::binding::Ephemeral;
 use crate::focus::FocusId;
 use crate::focus::FocusMember;
 use crate::focus::FocusState;
 use crate::focus::GroupId;
+use crate::surface::modal_tier::ModalAction;
 use crate::surface::zorder::DeclineReason;
 use crate::surface::zorder::EscapeOutcome;
 use crate::surface::zorder::KeyClass;
@@ -882,6 +888,9 @@ pub struct ModalHost {
     dirty: bool,
     error: Option<ModalError>,
     retry_pending: bool,
+    /// The `Ephemeral` half: what the frame knows about the action the user
+    /// has under way inside the card (`UIF-ATOM-000b`).
+    action: ModalAction,
     open: bool,
 }
 
@@ -942,6 +951,7 @@ impl ModalHost {
             dirty: spec.dirty,
             error: spec.error,
             retry_pending: false,
+            action: ModalAction::new(),
             open: true,
         }
     }
@@ -1098,6 +1108,72 @@ impl ModalHost {
         }
         self.retry_pending = false;
         self.error.clone()
+    }
+
+    // -- pending action (§3.0.4.1, §3.0.4.3) --------------------------------
+
+    /// Record the host's current [`ActionPending`] projection for the card's
+    /// primary call to action.
+    ///
+    /// Call once per frame, before any key or pointer handling. This is the
+    /// only way busy-ness enters the host: the value arrives as data and the
+    /// host never reads a clock, so the same host drives correctly under a
+    /// test harness with no time at all.
+    pub fn set_pending(&mut self, pending: ActionPending) {
+        self.action.observe(pending);
+    }
+
+    /// The pending-action projection currently in force.
+    #[must_use]
+    pub fn pending(&self) -> ActionPending {
+        self.action.pending()
+    }
+
+    /// Whether the card's primary command is still running.
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        self.action.is_busy()
+    }
+
+    /// Ask whether the primary call to action may dispatch.
+    ///
+    /// The gate behind this is what makes §3.0.4.3's "suppress duplicate
+    /// `on_activate`" real for a modal: a second press inside the
+    /// round-trip window is withheld even before the host's projection has
+    /// caught up with the first.
+    pub fn try_activate_primary(&mut self) -> Activation {
+        self.action.try_activate()
+    }
+
+    /// Ask the running action to stop — the `on_cancel_request()` path.
+    ///
+    /// `None` when nothing is running, or when the running action was never
+    /// offered a stop path, so the card shows no dead stop affordance.
+    pub fn request_cancel(&mut self) -> Option<CancelRequest> {
+        self.action.request_cancel()
+    }
+
+    /// The `Controlled` half of the modal (§3.0.4.1).
+    ///
+    /// Whether the card is open, dirty, or carrying an error belongs to the
+    /// application; the host holds a read-only view of its own frame state
+    /// and hands that view out rather than a mutable one. There is
+    /// deliberately no `get_mut` on [`Controlled`] — that absence *is* the
+    /// guarantee that the widget layer cannot quietly disagree with the app.
+    #[must_use]
+    pub fn controlled(&self) -> Controlled<'_, Self> {
+        Controlled::new(self)
+    }
+
+    /// The `Ephemeral` half of the modal (§3.0.4.1).
+    ///
+    /// What the frame knows about the action under way is framework-side
+    /// interaction state: written and read in the same frame, never
+    /// round-tripped through the application, and legitimately droppable
+    /// when the card is rebuilt.
+    #[must_use]
+    pub fn ephemeral(&self) -> Ephemeral<&ModalAction> {
+        Ephemeral::new(&self.action)
     }
 
     // -- content roster ----------------------------------------------------
@@ -1317,6 +1393,7 @@ impl ModalHost {
         focus.pop_trap();
         focus.unregister_group(&self.group);
         self.open = false;
+        self.action.reset();
     }
 
     // -- z-order integration -----------------------------------------------
@@ -1324,7 +1401,18 @@ impl ModalHost {
     /// The modal's own answer when the escape chain asks it to unwind.
     ///
     /// `Dismissed` when clean, `Declined(CannotUnwind)` when the dirty
-    /// guard blocks it, `Declined(NotOpen)` once closed.
+    /// guard blocks it **or** when the card's primary command is still
+    /// running, `Declined(NotOpen)` once closed.
+    ///
+    /// The two refusals are different in kind, which is why they are two
+    /// checks rather than one merged flag: `UIF-MOD-002` protects the
+    /// user's unsaved *edits*, while the pending-action refusal protects the
+    /// application from being left holding a half-finished operation with
+    /// no card left to report it in. A user who wants out of a running
+    /// command has [`request_cancel`](Self::request_cancel), not `Escape`.
+    ///
+    /// Both refusals keep the existing escape contract: a declined key keeps
+    /// travelling down the bands rather than being swallowed here.
     ///
     /// **Must not mutate the registry** — the caller is normally
     /// [`SurfaceRegistry::escape`], which indexes the surface list and
@@ -1334,6 +1422,9 @@ impl ModalHost {
             return UnwindAnswer::Declined(DeclineReason::NotOpen);
         }
         if self.dirty {
+            return UnwindAnswer::Declined(DeclineReason::CannotUnwind);
+        }
+        if self.action.blocks_dismiss() {
             return UnwindAnswer::Declined(DeclineReason::CannotUnwind);
         }
 

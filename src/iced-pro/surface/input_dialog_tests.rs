@@ -1596,6 +1596,193 @@ fn test_enter_after_close_is_a_no_op() {
 }
 
 // ---------------------------------------------------------------------------
+// 6b. The answer tiers (§3.0.4.2, `INC-36`)
+// ---------------------------------------------------------------------------
+//
+// The dialog's answer used to be a bare enum. It is now carried on a tier,
+// which says what the caller is supposed to *do* with it: a `Commit` is
+// persist-this, a `Cancel` is throw-it-away. `submit` and `cancel` remain
+// as the unwrapped shapes so no existing caller had to change.
+
+#[test]
+fn test_a_valid_answer_arrives_on_the_commit_tier() {
+    let mut scenario = Scenario::open(rename_spec());
+    scenario
+        .host
+        .set_value("renamed.md".into(), &mut scenario.focus);
+
+    let answer = scenario
+        .host
+        .commit_answer(&mut scenario.focus, &mut scenario.registry)
+        .expect("a valid value commits");
+
+    assert_eq!(
+        answer.value(),
+        &InputAnswer::Accepted {
+            value: "renamed.md".into()
+        }
+    );
+    assert!(
+        !scenario.host.is_open(),
+        "the `Commit` tier is the terminal answer: the card is gone"
+    );
+}
+
+#[test]
+fn test_an_invalid_answer_emits_no_tier_at_all() {
+    let mut scenario = Scenario::open(rename_spec());
+    scenario.host.set_value(String::new(), &mut scenario.focus);
+
+    assert!(
+        scenario
+            .host
+            .commit_answer(&mut scenario.focus, &mut scenario.registry)
+            .is_none(),
+        "a rejected value must not put anything on the wire, let alone a `Commit`"
+    );
+    assert!(
+        scenario.host.is_open(),
+        "the card stays open on the invalid branch"
+    );
+    assert!(
+        scenario.host.revealed().is_some(),
+        "and the reason is shown where the user just tried to confirm"
+    );
+}
+
+#[test]
+fn test_a_discard_arrives_on_the_cancel_tier() {
+    let mut scenario = Scenario::open(rename_spec());
+    scenario
+        .host
+        .set_value("half-typed.md".into(), &mut scenario.focus);
+
+    let answer = scenario
+        .host
+        .cancel_answer(&mut scenario.focus, &mut scenario.registry)
+        .expect("a discard always settles");
+
+    assert_eq!(answer.restored(), &InputAnswer::Cancelled);
+    assert!(!scenario.host.is_open());
+}
+
+#[test]
+fn test_submit_and_cancel_are_the_unwrapped_shapes_of_the_tiers() {
+    let mut committing = Scenario::open(rename_spec());
+    committing
+        .host
+        .set_value("same.md".into(), &mut committing.focus);
+    let tiered = committing
+        .host
+        .commit_answer(&mut committing.focus, &mut committing.registry)
+        .map(Commit::into_value);
+
+    let mut legacy = Scenario::open(rename_spec());
+    legacy.host.set_value("same.md".into(), &mut legacy.focus);
+    let plain = legacy.host.submit(&mut legacy.focus, &mut legacy.registry);
+
+    assert_eq!(
+        tiered, plain,
+        "`submit` is `commit_answer` unwrapped, unchanged"
+    );
+
+    let mut cancelling = Scenario::open(rename_spec());
+    let tiered_cancel = cancelling
+        .host
+        .cancel_answer(&mut cancelling.focus, &mut cancelling.registry)
+        .map(Cancel::into_restored);
+
+    let mut legacy_cancel = Scenario::open(rename_spec());
+    let plain_cancel = legacy_cancel
+        .host
+        .cancel(&mut legacy_cancel.focus, &mut legacy_cancel.registry);
+
+    assert_eq!(
+        tiered_cancel, plain_cancel,
+        "`cancel` is `cancel_answer` unwrapped, unchanged"
+    );
+}
+
+#[test]
+fn test_the_pending_projection_drives_the_primary_cta() {
+    let mut scenario = Scenario::open(rename_spec());
+    assert_eq!(scenario.host.pending(), ActionPending::idle());
+    assert!(!scenario.host.is_busy());
+
+    scenario
+        .host
+        .set_pending(ActionPending::indeterminate().with_cancellable(true));
+    assert!(scenario.host.is_busy());
+    assert!(scenario.host.request_cancel().is_some());
+    assert!(
+        scenario.host.request_cancel().is_none(),
+        "one stop request per busy period"
+    );
+
+    scenario.host.set_pending(ActionPending::idle());
+    assert!(!scenario.host.is_busy());
+    assert!(
+        scenario.host.request_cancel().is_none(),
+        "nothing running, nothing to stop"
+    );
+}
+
+#[test]
+fn test_the_first_valid_accept_closes_the_card_so_it_cannot_double_fire() {
+    // The `Ok` control carries the same activation gate every other action
+    // control has, and that gate is what suppresses a duplicate press
+    // (`dialog_button_tests`). Through *this* host the suppression branch
+    // is unreachable by construction: the first valid accept tears the
+    // card down, so there is no second press inside the window to
+    // withhold. This test pins the reason rather than pretending otherwise.
+    let mut scenario = Scenario::open(rename_spec());
+    scenario
+        .host
+        .set_pending(ActionPending::idle().with_cancellable(true));
+    scenario
+        .host
+        .set_value("once.md".into(), &mut scenario.focus);
+
+    assert!(
+        scenario
+            .host
+            .commit_answer(&mut scenario.focus, &mut scenario.registry)
+            .is_some(),
+        "the first accept dispatches"
+    );
+    assert!(!scenario.host.is_open(), "and closes the card with it");
+    assert!(
+        scenario
+            .host
+            .commit_answer(&mut scenario.focus, &mut scenario.registry)
+            .is_none(),
+        "a closed card has nothing left to dispatch"
+    );
+}
+
+#[test]
+fn test_teardown_releases_the_cta_gate() {
+    let mut scenario = Scenario::open(rename_spec());
+    scenario
+        .host
+        .set_pending(ActionPending::idle().with_cancellable(true));
+    scenario
+        .host
+        .set_value("done.md".into(), &mut scenario.focus);
+    scenario
+        .host
+        .commit_answer(&mut scenario.focus, &mut scenario.registry)
+        .expect("the accept dispatches");
+
+    let ephemeral = scenario.host.ephemeral();
+    assert!(
+        !ephemeral.get().is_pending(),
+        "the gate is released on teardown, so nothing is left wedged"
+    );
+    assert!(!ephemeral.get().cancel_requested());
+}
+
+// ---------------------------------------------------------------------------
 // 7. Card-level absorption — UIF-INP-002
 // ---------------------------------------------------------------------------
 

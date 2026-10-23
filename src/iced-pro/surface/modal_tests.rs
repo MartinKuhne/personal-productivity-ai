@@ -14,7 +14,10 @@
 //!    router with the shared harness.
 //! 4. **Escape and the dirty guard** — `UIF-MOD-002` alone, and then
 //!    through the `UIF-WIN-003` chain with a real menu tree open above the
-//!    modal.
+//!    modal. Group 4b, immediately after it, adds the pending-action
+//!    refusal: a running command refuses the unwind on a card that is
+//!    *not* dirty, so the two refusals stay provably independent
+//!    (§3.0.4.3, `INC-36`).
 //! 5. **The scrim** — clean dismisses, dirty does not, and the workspace
 //!    never gets the click either way.
 //! 6. **Card-level absorption** — the `UIF-VER-003` verbatim cases, plus
@@ -1170,6 +1173,149 @@ fn test_after_the_menu_drains_the_modal_is_reached() {
     assert!(last.is_consumed());
     assert_eq!(last.consumed_by(), Some(&sid("editor")));
     assert!(!scenario.host.is_open());
+}
+
+// ---------------------------------------------------------------------------
+// 4b. The pending action (§3.0.4.3, `INC-36`)
+// ---------------------------------------------------------------------------
+//
+// `UIF-MOD-002`'s dirty guard protects the user's unsaved *edits*. The
+// pending-action guard protects the application from being left holding a
+// half-finished operation with no card to report it in. Both refuse
+// `Escape`, and this group keeps them visibly separate: every test here
+// runs against a **clean** card, so nothing but the action can be the
+// thing that refuses.
+
+#[test]
+fn test_a_modal_opens_with_nothing_under_way() {
+    let mut scenario = Scenario::clean_focused();
+
+    assert_eq!(scenario.host.pending(), ActionPending::idle());
+    assert!(!scenario.host.is_busy());
+    assert_eq!(
+        scenario.host.unwind_answer(&mut scenario.focus),
+        UnwindAnswer::Dismissed,
+        "with no action open the ordinary clean-card answer stands"
+    );
+}
+
+#[test]
+fn test_a_running_command_refuses_the_unwind() {
+    let mut scenario = Scenario::clean_focused();
+    scenario.host.set_pending(ActionPending::indeterminate());
+
+    assert!(scenario.host.is_busy());
+    assert_eq!(
+        scenario.host.unwind_answer(&mut scenario.focus),
+        UnwindAnswer::Declined(DeclineReason::CannotUnwind),
+        "walking away mid-operation would strand the result"
+    );
+    assert!(
+        scenario.host.is_open(),
+        "a refusal leaves the card where it is: the user still has somewhere to watch the job"
+    );
+}
+
+#[test]
+fn test_the_action_guard_is_independent_of_the_dirty_guard() {
+    // Clean card, busy action: only the action can be refusing.
+    let mut busy_clean = Scenario::clean_focused();
+    busy_clean.host.set_pending(ActionPending::indeterminate());
+    assert!(!busy_clean.host.is_dirty());
+    assert_eq!(
+        busy_clean.host.unwind_answer(&mut busy_clean.focus),
+        UnwindAnswer::Declined(DeclineReason::CannotUnwind)
+    );
+
+    // The action settles; the same clean card closes normally.
+    busy_clean.host.set_pending(ActionPending::idle());
+    assert_eq!(
+        busy_clean.host.unwind_answer(&mut busy_clean.focus),
+        UnwindAnswer::Dismissed,
+        "the refusal was the action's, and it is gone with the action"
+    );
+}
+
+#[test]
+fn test_a_second_primary_press_is_suppressed_inside_the_window() {
+    let mut scenario = Scenario::clean_focused();
+    scenario
+        .host
+        .set_pending(ActionPending::idle().with_cancellable(true));
+
+    assert_eq!(
+        scenario.host.try_activate_primary(),
+        Activation::Fired,
+        "the first press goes through"
+    );
+    assert!(
+        scenario.host.try_activate_primary().is_suppressed(),
+        "§3.0.4.3: a second press inside the round-trip window is withheld even before the projection catches up"
+    );
+}
+
+#[test]
+fn test_a_stop_request_is_surfaced_once_and_only_for_a_cancellable_action() {
+    let mut cancellable = Scenario::clean_focused();
+    cancellable
+        .host
+        .set_pending(ActionPending::indeterminate().with_cancellable(true));
+    assert!(cancellable.host.request_cancel().is_some());
+    assert!(
+        cancellable.host.request_cancel().is_none(),
+        "one request per busy period: the stop is already in flight"
+    );
+
+    let mut unstoppable = Scenario::clean_focused();
+    unstoppable.host.set_pending(ActionPending::indeterminate());
+    assert!(
+        unstoppable.host.request_cancel().is_none(),
+        "an action with no stop path shows no dead stop affordance"
+    );
+}
+
+#[test]
+fn test_teardown_drops_the_latches_but_not_the_app_projection() {
+    let mut scenario = Scenario::clean_focused();
+    scenario.host.set_pending(ActionPending::indeterminate());
+    assert!(scenario.host.is_busy());
+
+    scenario
+        .host
+        .close(&mut scenario.focus, &mut scenario.registry);
+
+    assert!(!scenario.host.is_open());
+    // The latches are what teardown owns. A host that kept an in-flight
+    // gate could never fire again, and one that kept a stop request would
+    // hold a stop affordance for a card that no longer exists.
+    assert!(
+        !scenario.host.ephemeral().get().is_pending(),
+        "the gate is released, so nothing can be wedged by a torn-down card"
+    );
+    assert!(
+        !scenario.host.ephemeral().get().cancel_requested(),
+        "no stop request survives the card it was asked of"
+    );
+    // The projection itself belongs to the application. The host does not
+    // write a new one on the way out, because whatever value it picked
+    // would be a guess about whether the caller's job actually finished.
+    assert_eq!(scenario.host.pending(), ActionPending::indeterminate());
+}
+
+#[test]
+fn test_the_controlled_and_ephemeral_views_split_the_frame() {
+    let mut scenario = Scenario::clean_focused();
+    scenario.host.set_pending(ActionPending::indeterminate());
+
+    // The application's half: readable through `Controlled`, and there is
+    // deliberately no mutable path through it.
+    let controlled = scenario.host.controlled();
+    assert!(controlled.get().is_open());
+    assert!(!controlled.get().is_dirty());
+
+    // The framework's half: what the frame knows about the job.
+    let ephemeral = scenario.host.ephemeral();
+    assert!(ephemeral.get().is_busy());
 }
 
 // ---------------------------------------------------------------------------

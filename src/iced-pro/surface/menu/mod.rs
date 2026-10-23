@@ -12,9 +12,17 @@
 //! * [`cascade`] — the cascade controller: which cards are open, mutual
 //!   exclusion, sibling replacement and keyboard navigation (`INC-16`).
 //!   Openness lives there, never in the model.
+//! * [`row_action`] — the row's action engine: `ActionPending`, duplicate
+//!   activation suppression, `on_cancel_request()`, and which row kinds can
+//!   genuinely be reverted (`INC-36`).
+//!
+//! [`row_action`] lives beside the model rather than inside it, because the
+//! cascade clones models and `sync` overwrites local changes — a busy flag on
+//! a row would be erased by the next refresh.
 
 pub mod cascade;
 pub mod model;
+pub mod row_action;
 pub mod view;
 
 pub use cascade::CascadeOutcome;
@@ -39,6 +47,12 @@ pub use model::RowGroup;
 pub use model::RowKind;
 pub use model::TrailingSlot;
 pub use model::submenu_id;
+pub use row_action::RevertKind;
+pub use row_action::RowActionEngine;
+pub use row_action::RowEmission;
+pub use row_action::RowSettlement;
+pub use row_action::row_revert;
+pub use row_action::row_tracks_action;
 pub use view::MenuRow;
 pub use view::RowBase;
 pub use view::RowEvent;

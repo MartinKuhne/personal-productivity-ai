@@ -13,7 +13,11 @@
 //! 3. **Injected persistence** — the `D-2` / `RUST-024` contract, closed
 //!    with a source scan proving this module cannot name a filesystem.
 //! 4. **`UIF-MOV-001`** — the drag, the trailing-action exclusion,
-//!    real-time deltas and the no-accumulation overshoot contract.
+//!    real-time deltas and the no-accumulation overshoot contract. The
+//!    `on_drag_settle` tier discipline around it — the revert target is
+//!    the grab, one `Commit` per drag, and `Escape` spends itself on the
+//!    revert rather than closing the card (§3.0.4.2, `INC-36`) — is
+//!    group 8b, immediately after the keyboard group.
 //! 5. **`UIF-MOV-002`** — all eight resize handles, the size floor, the
 //!    untouched axis, and a sweep proving no requested geometry can
 //!    produce an unreachable card.
@@ -2292,6 +2296,213 @@ fn test_an_unfocused_escape_reports_the_decline_it_received() {
         response.action,
         MovableAction::NoOp(MovableNoOp::NotFocused)
     );
+}
+
+// ---------------------------------------------------------------------------
+// 8b. The drag tiers on the host (§3.0.4.2, `INC-36`)
+// ---------------------------------------------------------------------------
+//
+// `§3.0.4.2` names this interaction `on_drag_settle`: many `Live` frames,
+// exactly one `Commit`, and a `Cancel` that puts the card back where the
+// user grabbed it. Group 4 already proves the *geometry* of the drag; what
+// this group pins is the *tier discipline* around it — that the revert
+// target is the grab, that the commit cannot happen twice, and that
+// `Escape` spends itself on the revert instead of closing the card.
+
+#[test]
+fn test_escape_during_a_drag_restores_the_grab_geometry_and_keeps_the_card_open() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.focus_card();
+    let grabbed = scenario.host.geometry();
+    let saved_before = scenario.saved();
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(200.0, 100.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+    assert_ne!(
+        scenario.host.geometry(),
+        grabbed,
+        "the drag must actually have moved the card or this proves nothing"
+    );
+
+    let answer = scenario
+        .host
+        .unwind_answer(&mut scenario.focus, &mut scenario.storage);
+
+    assert_eq!(
+        answer,
+        UnwindAnswer::Unwound,
+        "a drag answers Escape by handing the rectangle back, not by closing"
+    );
+    assert_eq!(
+        scenario.host.geometry(),
+        grabbed,
+        "the card is back where it was grabbed, not where the last frame left it"
+    );
+    assert!(
+        scenario.host.is_open(),
+        "the key was spent on the revert; the card is still here"
+    );
+    assert_eq!(
+        scenario.saved(),
+        saved_before,
+        "a revert persists nothing — the sink already holds this geometry"
+    );
+}
+
+#[test]
+fn test_escape_during_a_drag_needs_no_keyboard_focus() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    let grabbed = scenario.host.geometry();
+
+    // Deliberately no `focus_card()`: the drag is held by pointer capture,
+    // so a card the user never focused still owns the gesture and still
+    // owes the revert.
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(200.0, 100.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(360.0, 240.0),
+        SurfaceTarget::TitleBar,
+    );
+
+    let answer = scenario
+        .host
+        .unwind_answer(&mut scenario.focus, &mut scenario.storage);
+
+    assert_eq!(answer, UnwindAnswer::Unwound, "the drag answers first");
+    assert_eq!(scenario.host.geometry(), grabbed);
+    assert!(scenario.host.is_open());
+}
+
+#[test]
+fn test_a_drag_releases_exactly_one_commit_and_a_second_release_is_a_no_op() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(200.0, 100.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+
+    let first = scenario.pointer(
+        PointerPhase::Released,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+    assert!(
+        matches!(first.action, MovableAction::DragEnded { .. }),
+        "the release settles the drag"
+    );
+
+    let second = scenario.pointer(
+        PointerPhase::Released,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+    assert_eq!(
+        second.action,
+        MovableAction::NoOp(MovableNoOp::Idle),
+        "there is no second `Commit` to spend: one settle per drag"
+    );
+}
+
+#[test]
+fn test_a_settled_drag_leaves_no_revert_target_behind() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.focus_card();
+    scenario.drag_gesture(pt(200.0, 100.0), &[pt(400.0, 300.0)]);
+    let settled = scenario.host.geometry();
+
+    let answer = scenario
+        .host
+        .unwind_answer(&mut scenario.focus, &mut scenario.storage);
+
+    assert_eq!(
+        answer,
+        UnwindAnswer::Dismissed,
+        "with the drag committed, Escape is the ordinary close again"
+    );
+    assert_eq!(
+        scenario.host.geometry(),
+        settled,
+        "the settled position stands: a `Commit` cannot be reverted afterwards"
+    );
+}
+
+#[test]
+fn test_drag_by_without_a_press_still_owns_a_revert_target() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.focus_card();
+    let before = scenario.host.geometry();
+
+    // A host that drives its own pointer events may call `drag_by` with no
+    // press having gone through `on_pointer`. The gesture opens on the
+    // first frame, snapshot taken before the delta is applied.
+    let frame = scenario.host.drag_by(Vector::new(80.0, 60.0));
+    assert!(
+        matches!(frame, MovableAction::Dragged { .. }),
+        "the direct call still produces the frame the caller expects"
+    );
+    assert_ne!(scenario.host.geometry(), before);
+
+    let answer = scenario
+        .host
+        .unwind_answer(&mut scenario.focus, &mut scenario.storage);
+
+    assert_eq!(answer, UnwindAnswer::Unwound);
+    assert_eq!(
+        scenario.host.geometry(),
+        before,
+        "the snapshot was taken before the first delta, so the revert is exact"
+    );
+}
+
+#[test]
+fn test_closing_mid_drag_aborts_the_gesture_without_restoring() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(200.0, 100.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+    let mid_drag = scenario.host.geometry();
+
+    let response = scenario.host.close(
+        &mut scenario.focus,
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
+    assert!(
+        matches!(response.action, MovableAction::Closed { .. }),
+        "the close still reports itself as a close"
+    );
+
+    assert_eq!(
+        scenario.saved(),
+        Some(mid_drag),
+        "a card going away mid-drag persists where it stands; nobody owed a `Commit`"
+    );
+    assert!(!scenario.host.is_open());
 }
 
 // ---------------------------------------------------------------------------

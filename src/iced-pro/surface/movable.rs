@@ -182,6 +182,7 @@ use crate::focus::GroupId;
 use crate::geometry::clamp;
 use crate::geometry::clamp::ClampRule;
 use crate::geometry::clamp::ResizeHandle;
+use crate::surface::drag_tier::DragGesture;
 use crate::surface::zorder::DeclineReason;
 use crate::surface::zorder::EscapeOutcome;
 use crate::surface::zorder::KeyClass;
@@ -1269,15 +1270,8 @@ impl MovableSpec {
 }
 
 // ---------------------------------------------------------------------------
-// The drag and resize captures
+// The resize capture
 // ---------------------------------------------------------------------------
-
-/// An in-progress title-bar drag (`UIF-MOV-001`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct DragCapture {
-    /// Where the pointer was when the drag started.
-    grabbed_at: Point,
-}
 
 /// An in-progress resize (`UIF-MOV-002`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1293,12 +1287,17 @@ struct ResizeCapture {
 /// The movable overlay host — the frame that makes `UIF-MOV-001` …
 /// `UIF-MOV-004` hold.
 ///
-/// The host owns the card's geometry, its drag and resize captures, its
-/// scroll and auto-scroll state, and the fact that it is open. The z-order
-/// surface and the persistence sink are collaborators the caller passes
-/// in, because both are shared with the rest of the window — and, in the
-/// sink's case, because the framework must not own a storage location at
-/// all (`RUST-024`).
+/// The host owns the card's geometry, its drag gesture and resize capture,
+/// its scroll and auto-scroll state, and the fact that it is open. The
+/// z-order surface and the persistence sink are collaborators the caller
+/// passes in, because both are shared with the rest of the window — and, in
+/// the sink's case, because the framework must not own a storage location
+/// at all (`RUST-024`).
+///
+/// The drag is a [`DragGesture`] rather than a bare capture record because
+/// §3.0.4.2 names this interaction as the `on_drag_settle` case: the drag
+/// owes a `Live` tick per frame, **one** `Commit` at the release, and a
+/// `Cancel` that puts the card back where the user grabbed it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MovableHost {
     id: SurfaceId,
@@ -1308,7 +1307,9 @@ pub struct MovableHost {
     viewport: Rectangle,
     geometry: MovableGeometry,
     pointer: Point,
-    drag: Option<DragCapture>,
+    /// The one drag gesture the host can have open, holding the pre-drag
+    /// geometry its `Commit` and `Cancel` are about (`UIF-ATOM-000b`).
+    drag: DragGesture,
     resize: Option<ResizeCapture>,
     auto_scroll: AutoScrollSetting,
     follow: FollowState,
@@ -1362,7 +1363,7 @@ impl MovableHost {
             viewport,
             geometry: MovableGeometry::new(rect.position(), rect.size()),
             pointer: rect.position(),
-            drag: None,
+            drag: DragGesture::new(),
             resize: None,
             auto_scroll: spec.auto_scroll,
             follow: FollowState::Paused,
@@ -1621,7 +1622,7 @@ impl MovableHost {
     /// The cursor the window should show for the host's current state.
     #[must_use]
     pub fn cursor(&self) -> mouse::Interaction {
-        if self.drag.is_some() {
+        if self.drag.is_open() {
             mouse::Interaction::Grabbing
         } else if let Some(capture) = &self.resize {
             resize_interaction(capture.handle)
@@ -1635,7 +1636,7 @@ impl MovableHost {
     pub fn cursor_at(&self, at: Point) -> mouse::Interaction {
         match self.zone_at(at) {
             Zone::TitleDrag => {
-                if self.drag.is_some() {
+                if self.drag.is_open() {
                     mouse::Interaction::Grabbing
                 } else {
                     mouse::Interaction::Grab
@@ -1651,7 +1652,7 @@ impl MovableHost {
     /// Whether a title-bar drag is in progress (`UIF-MOV-001`).
     #[must_use]
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_open()
     }
 
     /// The handle currently being dragged, if a resize is in progress.
@@ -1664,7 +1665,7 @@ impl MovableHost {
     /// keeps receiving moves even when the pointer leaves the card.
     #[must_use]
     pub fn is_capturing(&self) -> bool {
-        self.drag.is_some() || self.resize.is_some()
+        self.drag.is_open() || self.resize.is_some()
     }
 
     // -- pointer -----------------------------------------------------------
@@ -1755,7 +1756,10 @@ impl MovableHost {
                 MovableAction::ResizeStarted { handle }
             }
             Zone::TitleDrag => {
-                self.drag = Some(DragCapture { grabbed_at: at });
+                // The snapshot is captured here, before any delta is applied,
+                // so the `Cancel` tier restores the rectangle the user
+                // actually grabbed (§3.0.4.2).
+                self.drag.begin(self.geometry);
                 self.pointer = at;
                 MovableAction::DragStarted {
                     geometry: self.geometry,
@@ -1813,7 +1817,7 @@ impl MovableHost {
         let delta = at - self.pointer;
         self.pointer = at;
 
-        if self.drag.is_some() {
+        if self.drag.is_open() {
             return self.drag_by(delta);
         }
         if let Some(capture) = self.resize {
@@ -1827,7 +1831,11 @@ impl MovableHost {
     fn on_release(&mut self, at: Point, storage: &mut dyn GeometryStorage) -> MovableAction {
         self.pointer = at;
 
-        if self.drag.take().is_some() {
+        // `commit` *takes* the open gesture, so this branch can run at most
+        // once per drag: the `Commit` tier — the spec's `on_drag_settle` —
+        // is the only thing that persists, and a second release has nothing
+        // left to settle.
+        if self.drag.commit(self.geometry).is_some() {
             self.persist(storage);
             return MovableAction::DragEnded {
                 geometry: self.geometry,
@@ -1853,7 +1861,17 @@ impl MovableHost {
     /// that a bound absorbs is discarded at the moment it is absorbed, so
     /// dragging `500px` past the edge and `1px` back moves the card
     /// `1px`, not `0px` until the pointer has re-travelled `500px`.
+    ///
+    /// Every frame emits one `Live` tick (§3.0.4.2). A host that drives its
+    /// own pointer events may reach this without a press having gone
+    /// through [`on_pointer`](Self::on_pointer), so the gesture is opened
+    /// here when it is not already open — the snapshot is still captured
+    /// *before* the first delta is applied, which is the only ordering the
+    /// `Cancel` tier requires.
     pub fn drag_by(&mut self, delta: Vector) -> MovableAction {
+        if !self.drag.is_open() {
+            self.drag.begin(self.geometry);
+        }
         let position = clamp::drag_position(
             self.geometry.position,
             delta,
@@ -1862,6 +1880,11 @@ impl MovableHost {
             ClampRule::MOVABLE,
         );
         self.apply_geometry(self.geometry.with_position(position));
+        // The tick is recorded in the gesture's transcript rather than
+        // returned: the `Live` tier's contract is that the host may drop
+        // any number of them, so the host-visible action stays the single
+        // `Dragged` it always was.
+        let _ = self.drag.live(self.geometry);
         MovableAction::Dragged {
             geometry: self.geometry,
             delta,
@@ -1890,8 +1913,11 @@ impl MovableHost {
     }
 
     /// End a drag and settle its geometry.
+    ///
+    /// Settles *through* the gesture, so the `Commit` tier is what closes
+    /// the drag and the persist stays on the settle path exactly as before.
     pub fn end_drag(&mut self, storage: &mut dyn GeometryStorage) -> MovableAction {
-        self.drag = None;
+        self.drag.commit(self.geometry);
         self.persist(storage);
         MovableAction::DragEnded {
             geometry: self.geometry,
@@ -2162,9 +2188,19 @@ impl MovableHost {
     /// The card's own answer when the escape chain asks it to unwind
     /// (`UIF-WIN-003`, **G-13**).
     ///
-    /// `Dismissed` when the card is open and focused; `Declined(NotFocused)`
-    /// when it is open but the keyboard is elsewhere; `Declined(NotOpen)`
-    /// once it is closed.
+    /// A drag in progress answers first, with the `Cancel` tier: the card
+    /// puts back the rectangle the user grabbed and reports `Unwound` —
+    /// key consumed, card still open — so wanting its position back never
+    /// turns into being dismissed. Otherwise `Dismissed` when the card is
+    /// open and focused, `Declined(NotFocused)` when it is open but the
+    /// keyboard is elsewhere, and `Declined(NotOpen)` once it is closed.
+    ///
+    /// **Escape-rank safety (G-13):** this method is only ever reached from
+    /// [`SurfaceRegistry::escape`]'s walk, which asks every higher-ranked
+    /// band first. A `Cancel` introduced here therefore cannot consume an
+    /// `Escape` a [`ZBand::Menu`] or
+    /// a [`ZBand::Modal`] above the
+    /// card still needs — the walk order guarantees it, not a check here.
     ///
     /// **Must not mutate the registry** — the caller is normally
     /// [`SurfaceRegistry::escape`], which indexes the surface list and
@@ -2177,6 +2213,20 @@ impl MovableHost {
         if !self.open {
             return UnwindAnswer::Declined(DeclineReason::NotOpen);
         }
+
+        // Checked ahead of the focus test because the drag is held by
+        // pointer capture, not by the keyboard: a card the user is dragging
+        // without having focused it still owns the gesture, and still owes
+        // the revert.
+        if let Some(cancel) = self.drag.cancel() {
+            // Back through `apply_geometry`, so a restore cannot create a
+            // rectangle the clamp forbids. Nothing is persisted: the card
+            // has returned to what was already saved, not moved anywhere.
+            let restored = *cancel.restored();
+            let _ = self.apply_geometry(restored);
+            return UnwindAnswer::Unwound;
+        }
+
         if !self.holds_focus(focus) {
             return UnwindAnswer::Declined(DeclineReason::NotFocused);
         }
@@ -2305,8 +2355,12 @@ impl MovableHost {
     }
 
     /// Tear the card down without touching the registry.
+    ///
+    /// The open drag is **aborted**, not settled: a card going away mid-drag
+    /// owes nobody a `Commit` or a `Cancel`, and the geometry that gets
+    /// persisted below is the card's current one.
     fn teardown(&mut self, focus: &mut FocusState, storage: &mut dyn GeometryStorage) {
-        self.drag = None;
+        self.drag.abort();
         self.resize = None;
         self.open = false;
         focus.unregister_group(&self.group);

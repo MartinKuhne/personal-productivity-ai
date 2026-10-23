@@ -32,15 +32,19 @@ use crate::token_lint::{
 
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
-/// 46 as of `widget/text_input_model.rs` and `widget/text_input_controller.rs`
-/// joining the tree for `UIF-ATOM-002a`.
-const PIN_FILES_SCANNED: usize = 46;
+/// 50 as of the four `UIF-ATOM-000b` surface binding modules
+/// (`surface/menu/row_action.rs`, `surface/dialog_button.rs`,
+/// `surface/modal_tier.rs`, `surface/drag_tier.rs`) joining the tree for
+/// `INC-36`. They add no colour and no visual scalar — the count moves
+/// because the scan reads them, not because they contain anything to find.
+const PIN_FILES_SCANNED: usize = 50;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 22 as of the two `UIF-ATOM-002a` text field modules joining `widget/`.
-const PIN_RULE_B_FILES: usize = 22;
+/// 26 as of the four `INC-36` binding modules joining `surface/`. Rule B
+/// counts scope membership, so a file with no colour literals still counts.
+const PIN_RULE_B_FILES: usize = 26;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

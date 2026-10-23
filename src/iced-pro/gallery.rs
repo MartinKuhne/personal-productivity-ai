@@ -54,6 +54,7 @@
 //!
 //! Unit tests live in the sibling `gallery_tests.rs` sidecar.
 
+use crate::binding::ActionPending;
 use crate::binding::Live;
 use crate::focus::FocusId;
 use crate::focus::FocusMember;
@@ -62,12 +63,21 @@ use crate::geometry::clamp::ResizeHandle;
 use crate::state::BaseState;
 use crate::state::InteractionInput;
 use crate::state::VisualState;
+use crate::surface::dialog_button::DialogButtonController;
+use crate::surface::dialog_button::DialogButtonEmission;
+use crate::surface::dialog_button::DialogButtonRole;
+use crate::surface::drag_tier::DragGesture;
 use crate::surface::input_dialog::{self, InputDialogHost};
+use crate::surface::menu::model::ActivationEffect;
 use crate::surface::menu::model::Menu;
 use crate::surface::menu::model::RadioGroupId;
 use crate::surface::menu::model::Row;
+use crate::surface::menu::row_action::RowActionEngine;
+use crate::surface::menu::row_action::RowEmission;
 use crate::surface::menu::view as menu_view;
 use crate::surface::modal::{self, ModalError, ModalFrame, ModalHost, ModalSizing};
+use crate::surface::modal_tier::ModalAction;
+use crate::surface::modal_tier::modal_action_state;
 use crate::surface::movable::{
     ACTION_CONTROL_SIZE, ACTION_GAP, AutoScrollSetting, MemoryGeometryStorage, MovableAnatomy,
     MovableGeometry, MovableHost, MovableSpec, PointerPhase, ScrollGeometry, SurfaceTarget,
@@ -3944,6 +3954,450 @@ pub fn tooltip_cells() -> Vec<Cell> {
 // The whole gallery
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Cell builders - the `000b` binding tiers on the surface hosts (`INC-36`)
+// ---------------------------------------------------------------------------
+
+/// Look up how a user produces a tier outcome, for a cell's note line.
+fn tier_how(table: &[(&'static str, &'static str)], tier: &'static str) -> &'static str {
+    table
+        .iter()
+        .find(|(name, _)| *name == tier)
+        .map(|(_, how)| *how)
+        .unwrap_or("unknown")
+}
+
+/// The menu-row tier a cell records, and how a user produces it.
+pub const MENU_ROW_TIERS: [(&str, &str); 5] = [
+    ("committed", "release inside a stay-open check row"),
+    ("cancelled", "press a row and release outside its bounds"),
+    (
+        "cancel-requested",
+        "press a row whose action is busy and cancellable",
+    ),
+    (
+        "suppressed",
+        "activate the same row twice before the projection catches up",
+    ),
+    (
+        "fire-and-settle",
+        "activate an Action row that closes the tree",
+    ),
+];
+
+/// The `UIF-ATOM-000b` tier cell for one menu-row outcome.
+///
+/// Drives a real [`RowActionEngine`] and records the tier it actually
+/// emitted plus the [`RevertKind`](crate::surface::menu::row_action::RevertKind)
+/// the engine classified the row as, so the
+/// cell is a transcript rather than a caption — the discipline
+/// [`button_tier_cell`] sets. The paint underneath is the menu row's own
+/// `rest` cell, deliberately unchanged: the engine answers whether the
+/// spinner *slot* is occupied, it does not paint one (`UIF-ATOM-009`
+/// owns that), and nothing here may suggest a colour that §4.9.2 does not
+/// name.
+#[must_use]
+pub fn menu_row_tier_cell(tier: &'static str) -> Cell {
+    let stay_open = Row::checkable("wrap", "Wrap lines", false).stays_open();
+    let closing = Row::action("save", "Save");
+    let busy = ActionPending::indeterminate().with_cancellable(true);
+    let tracked_idle = ActionPending::idle().with_cancellable(true);
+
+    let mut engine = RowActionEngine::new();
+    let emission: Option<RowEmission> = match tier {
+        "committed" => {
+            engine.observe(ActionPending::idle());
+            engine.begin(&stay_open, ActivationSource::Pointer);
+            Some(
+                engine
+                    .commit(
+                        &stay_open,
+                        &ActivationEffect::Toggled { checked: true },
+                        ActivationSource::Pointer,
+                    )
+                    .expect("a stay-open check dispatches"),
+            )
+        }
+        "cancelled" => {
+            engine.observe(ActionPending::idle());
+            engine.begin(&closing, ActivationSource::Pointer);
+            Some(engine.cancel().expect("an open gesture cancels"))
+        }
+        "cancel-requested" => {
+            engine.observe(busy);
+            Some(
+                engine
+                    .begin(&closing, ActivationSource::Pointer)
+                    .expect("a busy cancellable row requests"),
+            )
+        }
+        "suppressed" => {
+            engine.observe(tracked_idle);
+            engine
+                .commit(
+                    &closing,
+                    &ActivationEffect::Command,
+                    ActivationSource::Pointer,
+                )
+                .expect("the first press dispatches");
+            engine.observe(tracked_idle);
+            assert!(
+                engine
+                    .commit(
+                        &closing,
+                        &ActivationEffect::Command,
+                        ActivationSource::Pointer
+                    )
+                    .is_none(),
+                "the double-activation window must withhold the second press"
+            );
+            // A withheld press emits nothing at all: that silence *is* the
+            // tier behaviour, so the cell records the gate's counter and
+            // reports the emitted tier as `none`.
+            None
+        }
+        "fire-and-settle" => {
+            engine.observe(ActionPending::idle());
+            Some(
+                engine
+                    .commit(
+                        &closing,
+                        &ActivationEffect::Command,
+                        ActivationSource::Pointer,
+                    )
+                    .expect("an Action row dispatches"),
+            )
+        }
+        other => panic!("unknown menu row tier {other}"),
+    };
+
+    let mut cell = menu_row_cell(menu_view::RowState::REST);
+    cell.id = format!("menu-tier/{tier}");
+    cell.subject = "menu-tier";
+    cell.spec = "UIF-ATOM-000b";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text(
+            "emitted",
+            emission.as_ref().map(RowEmission::tier).unwrap_or("none"),
+        ),
+        StyleEntry::text(
+            "revert",
+            emission
+                .as_ref()
+                .and_then(RowEmission::settlement)
+                .map(|settlement| settlement.revert.slug())
+                .unwrap_or("n/a"),
+        ),
+        StyleEntry::text(
+            "dispatched",
+            emission
+                .as_ref()
+                .and_then(RowEmission::settlement)
+                .map(|settlement| settlement.dispatched.to_string())
+                .unwrap_or_else(|| "n/a".to_string()),
+        ),
+        StyleEntry::text("fired-count", engine.fired().to_string()),
+        StyleEntry::text("suppressed-count", engine.suppressed().to_string()),
+    ]);
+    cell.note = Some(format!("produced by: {}", tier_how(&MENU_ROW_TIERS, tier)));
+    cell
+}
+
+/// Every menu-row tier cell, in [`MENU_ROW_TIERS`] order.
+#[must_use]
+pub fn menu_row_tier_cells() -> Vec<Cell> {
+    MENU_ROW_TIERS
+        .iter()
+        .map(|(tier, _)| menu_row_tier_cell(tier))
+        .collect()
+}
+
+/// The dialog footer tier a cell records, and how a user produces it.
+pub const DIALOG_BUTTON_TIERS: [(&str, &str); 4] = [
+    (
+        "primary-committed",
+        "press and release `Ok` with a value that validates",
+    ),
+    ("secondary-cancelled", "press `Cancel`"),
+    (
+        "primary-cancel-requested",
+        "press `Ok` while its action is busy and cancellable",
+    ),
+    (
+        "primary-suppressed",
+        "press `Ok` twice before the projection catches up",
+    ),
+];
+
+/// The `UIF-ATOM-000b` tier cell for one dialog footer outcome.
+///
+/// Drives a real [`DialogButtonController`]. The paint underneath is the
+/// rename dialog's own valid cell, unchanged: `Ok` and `Cancel` do not
+/// change colour because a tier fired.
+#[must_use]
+pub fn dialog_button_tier_cell(tier: &'static str) -> Cell {
+    let busy = ActionPending::indeterminate().with_cancellable(true);
+    let tracked_idle = ActionPending::idle().with_cancellable(true);
+
+    let mut controller = match tier {
+        "secondary-cancelled" => DialogButtonController::new(DialogButtonRole::Secondary),
+        _ => DialogButtonController::new(DialogButtonRole::Primary),
+    };
+
+    let emission: Option<DialogButtonEmission> = match tier {
+        "primary-committed" => {
+            controller.observe(ActionPending::idle());
+            controller.begin(ActivationSource::Pointer);
+            Some(
+                controller
+                    .commit(ActivationSource::Pointer)
+                    .expect("a valid `Ok` commits"),
+            )
+        }
+        "secondary-cancelled" => {
+            controller.observe(ActionPending::idle());
+            controller.begin(ActivationSource::Pointer);
+            Some(
+                controller
+                    .commit(ActivationSource::Pointer)
+                    .expect("`Cancel` always settles"),
+            )
+        }
+        "primary-cancel-requested" => {
+            controller.observe(busy);
+            Some(
+                controller
+                    .begin(ActivationSource::Pointer)
+                    .expect("a busy cancellable `Ok` requests"),
+            )
+        }
+        "primary-suppressed" => {
+            controller.observe(tracked_idle);
+            controller
+                .commit(ActivationSource::Pointer)
+                .expect("the first press dispatches");
+            controller.observe(tracked_idle);
+            assert!(
+                controller.commit(ActivationSource::Pointer).is_none(),
+                "the double-activation window must withhold the second press"
+            );
+            None
+        }
+        other => panic!("unknown dialog tier {other}"),
+    };
+
+    let mut cell = input_dialog_cell(
+        "rename-valid",
+        input_dialog::InputDialogSpec::rename("gallery.rename", "notes", "notes.md"),
+        Some("renamed.md"),
+    );
+    cell.id = format!("dialog-tier/{tier}");
+    cell.subject = "dialog-tier";
+    cell.spec = "UIF-ATOM-000b";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text(
+            "emitted",
+            emission
+                .as_ref()
+                .map(DialogButtonEmission::tier)
+                .unwrap_or("none"),
+        ),
+        StyleEntry::text("role", controller.role().slug()),
+        StyleEntry::text("settle-tier-for-role", controller.role().settle_tier()),
+        StyleEntry::text(
+            "dispatched",
+            emission
+                .as_ref()
+                .and_then(DialogButtonEmission::settlement)
+                .map(|settlement| settlement.dispatched.to_string())
+                .unwrap_or_else(|| "n/a".to_string()),
+        ),
+        StyleEntry::text("fired-count", controller.fired().to_string()),
+        StyleEntry::text("suppressed-count", controller.suppressed().to_string()),
+    ]);
+    cell.note = Some(format!(
+        "produced by: {}",
+        tier_how(&DIALOG_BUTTON_TIERS, tier)
+    ));
+    cell
+}
+
+/// Every dialog footer tier cell, in [`DIALOG_BUTTON_TIERS`] order.
+#[must_use]
+pub fn dialog_button_tier_cells() -> Vec<Cell> {
+    DIALOG_BUTTON_TIERS
+        .iter()
+        .map(|(tier, _)| dialog_button_tier_cell(tier))
+        .collect()
+}
+
+/// The modal pending-action tier a cell records, and how a user produces it.
+pub const MODAL_TIERS: [(&str, &str); 4] = [
+    ("idle", "no action under way in the card"),
+    ("pending", "the primary call to action is running"),
+    (
+        "cancel-requested",
+        "the running action has been asked to stop",
+    ),
+    (
+        "dismiss-refused",
+        "`Escape` against a card whose command is still running",
+    ),
+];
+
+/// The `UIF-ATOM-000b` tier cell for one modal pending-action state.
+///
+/// Drives a real [`ModalAction`]. The paint underneath is the modal's own
+/// clean card, unchanged: a running command does not repaint the frame, it
+/// changes whether the frame may be dismissed.
+#[must_use]
+pub fn modal_tier_cell(tier: &'static str) -> Cell {
+    let busy = ActionPending::indeterminate().with_cancellable(true);
+    let mut action = ModalAction::new();
+
+    match tier {
+        "idle" => {
+            action.observe(ActionPending::idle());
+        }
+        "pending" => {
+            action.observe(ActionPending::indeterminate());
+        }
+        "cancel-requested" => {
+            action.observe(busy);
+            action
+                .request_cancel()
+                .expect("a cancellable action can be stopped");
+        }
+        "dismiss-refused" => {
+            action.observe(busy);
+            action.request_cancel();
+        }
+        other => panic!("unknown modal tier {tier}: {other}"),
+    }
+
+    let mut cell = modal_cell("clean", false, None);
+    cell.id = format!("modal-tier/{tier}");
+    cell.subject = "modal-tier";
+    cell.spec = "UIF-ATOM-000b";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text("state", modal_action_state(&action)),
+        StyleEntry::text("busy", action.is_busy().to_string()),
+        StyleEntry::text("blocks-dismiss", action.blocks_dismiss().to_string()),
+        // The answer `ModalHost::unwind_answer` gives for this state. A
+        // running command is the only thing the pending half can refuse
+        // with, and it refuses with the same reason the dirty guard uses.
+        StyleEntry::text(
+            "unwind-answer",
+            if action.blocks_dismiss() {
+                "Declined(CannotUnwind)"
+            } else {
+                "Dismissed"
+            },
+        ),
+        StyleEntry::text("cancel-requested", action.cancel_requested().to_string()),
+    ]);
+    cell.note = Some(format!("produced by: {}", tier_how(&MODAL_TIERS, tier)));
+    cell
+}
+
+/// Every modal pending-action tier cell, in [`MODAL_TIERS`] order.
+#[must_use]
+pub fn modal_tier_cells() -> Vec<Cell> {
+    MODAL_TIERS
+        .iter()
+        .map(|(tier, _)| modal_tier_cell(tier))
+        .collect()
+}
+
+/// The movable-overlay drag tier a cell records, and how a user produces it.
+///
+/// §3.0.4.2 names this interaction `on_drag_settle`: many `Live` frames,
+/// exactly one `Commit`, and a `Cancel` that puts the card back.
+pub const DRAG_TIERS: [(&str, &str); 3] = [
+    ("live", "one frame of the card being dragged"),
+    ("committed", "the release that settles the drag"),
+    (
+        "cancelled",
+        "`Escape` puts the card back where it was grabbed",
+    ),
+];
+
+/// The `UIF-ATOM-000b` tier cell for one movable-overlay drag outcome.
+///
+/// Drives a real [`DragGesture`] over real [`MovableGeometry`]. The paint
+/// underneath is the card as it opens, unchanged: the tiers are facts
+/// about the wire, and the card's own resting rectangle is the honest
+/// picture of what the drag started from.
+#[must_use]
+pub fn drag_tier_cell(tier: &'static str) -> Cell {
+    let start = MovableGeometry::new(Point::new(120.0, 90.0), Size::new(680.0, 440.0));
+    let moved = MovableGeometry::new(Point::new(260.0, 180.0), Size::new(680.0, 440.0));
+
+    let mut drag = DragGesture::new();
+    let mut restored = None;
+    match tier {
+        "live" => {
+            drag.begin(start);
+            drag.live(moved).expect("an open drag emits a live tick");
+        }
+        "committed" => {
+            drag.begin(start);
+            drag.live(moved).expect("an open drag emits a live tick");
+            let commit = drag.commit(moved).expect("the release settles the drag");
+            assert_eq!(
+                commit.value(),
+                &moved,
+                "the commit carries where the card landed"
+            );
+            assert!(drag.commit(moved).is_none(), "exactly one commit per drag");
+        }
+        "cancelled" => {
+            drag.begin(start);
+            drag.live(moved).expect("an open drag emits a live tick");
+            let cancel = drag.cancel().expect("an open drag cancels");
+            restored = Some(*cancel.restored());
+            assert_eq!(
+                cancel.restored(),
+                &start,
+                "the revert target is the grab point, not the last live frame"
+            );
+        }
+        other => panic!("unknown drag tier {tier}: {other}"),
+    }
+
+    let mut cell = movable_cell("idle", MovableGesture::Idle);
+    cell.id = format!("drag-tier/{tier}");
+    cell.subject = "drag-tier";
+    cell.spec = "UIF-ATOM-000b";
+    cell.resolved.extend([
+        StyleEntry::text("tier", tier),
+        StyleEntry::text("last-tier", drag.last_tier()),
+        StyleEntry::text("live-ticks", drag.live_ticks().to_string()),
+        StyleEntry::text("committed", drag.committed().to_string()),
+        StyleEntry::text("cancelled", drag.cancelled().to_string()),
+        StyleEntry::text(
+            "restores",
+            restored
+                .map(|geometry| format!("{},{}", geometry.position.x, geometry.position.y))
+                .unwrap_or_else(|| "n/a".to_string()),
+        ),
+    ]);
+    cell.note = Some(format!("produced by: {}", tier_how(&DRAG_TIERS, tier)));
+    cell
+}
+
+/// Every movable-overlay drag tier cell, in [`DRAG_TIERS`] order.
+#[must_use]
+pub fn drag_tier_cells() -> Vec<Cell> {
+    DRAG_TIERS
+        .iter()
+        .map(|(tier, _)| drag_tier_cell(tier))
+        .collect()
+}
+
 /// Every cell in the `UIF-VER-004` matrix, in a fixed order.
 ///
 /// The order is the module's own, not an iteration artefact: atoms first
@@ -3958,12 +4412,16 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(text_input_tier_cells());
     cells.extend(menu_cells());
     cells.extend(menu_glyph_cells());
+    cells.extend(menu_row_tier_cells());
     cells.extend(modal_cells());
     cells.extend(modal_band_cells());
+    cells.extend(modal_tier_cells());
     cells.extend(input_dialog_cells());
     cells.extend(input_dialog_row_cells());
+    cells.extend(dialog_button_tier_cells());
     cells.extend(movable_cells());
     cells.extend(movable_action_cells());
+    cells.extend(drag_tier_cells());
     cells.extend(editor_palette_cells());
     cells.push(zband_cell());
     cells.extend(tooltip_cells());

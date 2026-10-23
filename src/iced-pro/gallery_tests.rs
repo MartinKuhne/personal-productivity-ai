@@ -139,6 +139,19 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|name| format!("menu-glyph/{name}")),
     );
+    // `UIF-ATOM-000b` / `INC-36`: the five tiers the menu-row action
+    // engine puts on the wire.
+    ids.extend(
+        [
+            "committed",
+            "cancelled",
+            "cancel-requested",
+            "suppressed",
+            "fire-and-settle",
+        ]
+        .iter()
+        .map(|tier| format!("menu-tier/{tier}")),
+    );
     ids.extend(
         ["clean", "dirty", "error"]
             .iter()
@@ -148,6 +161,12 @@ fn expected_ids() -> Vec<String> {
         ["no-banner", "banner"]
             .iter()
             .map(|name| format!("modal-bands/{name}")),
+    );
+    // `UIF-ATOM-000b` / `INC-36`: the modal's pending-action states.
+    ids.extend(
+        ["idle", "pending", "cancel-requested", "dismiss-refused"]
+            .iter()
+            .map(|tier| format!("modal-tier/{tier}")),
     );
     ids.extend(
         [
@@ -170,6 +189,17 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|name| format!("input-dialog-rows/{name}")),
     );
+    // `UIF-ATOM-000b` / `INC-36`: the dialog footer's four tier outcomes.
+    ids.extend(
+        [
+            "primary-committed",
+            "secondary-cancelled",
+            "primary-cancel-requested",
+            "primary-suppressed",
+        ]
+        .iter()
+        .map(|tier| format!("dialog-tier/{tier}")),
+    );
     ids.extend(
         ["idle", "dragging", "resizing", "auto-scroll-paused"]
             .iter()
@@ -179,6 +209,13 @@ fn expected_ids() -> Vec<String> {
         ["idle", "dragged", "resized"]
             .iter()
             .map(|name| format!("movable-actions/{name}")),
+    );
+    // `UIF-ATOM-000b` / `INC-36`: the `on_drag_settle` tiers - many
+    // `Live` frames, one `Commit`, one `Cancel` (§3.0.4.2).
+    ids.extend(
+        ["live", "committed", "cancelled"]
+            .iter()
+            .map(|tier| format!("drag-tier/{tier}")),
     );
     ids.extend(
         ["rest", "error"]
@@ -240,12 +277,17 @@ fn per_subject_cell_counts_match_the_plan() {
         ("input", 60),
         ("menu", 12),
         ("menu-glyph", 10),
+        // `INC-36`: the `000b` tiers on the four surface hosts.
+        ("menu-tier", 5),
         ("modal", 3),
         ("modal-bands", 2),
+        ("modal-tier", 4),
         ("input-dialog", 5),
         ("input-dialog-rows", 4),
+        ("dialog-tier", 4),
         ("movable", 4),
         ("movable-actions", 3),
+        ("drag-tier", 3),
         ("editor", 2),
         ("zband", 1),
         ("tooltip", 7),
