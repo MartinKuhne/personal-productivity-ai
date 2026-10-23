@@ -1,4 +1,5 @@
-//! Tests for the composite gallery subjects (`UIF-COMP-001`, `UIF-COMP-005`).
+//! Tests for the composite gallery subjects (`UIF-COMP-001`,
+//! `UIF-COMP-002`, `UIF-COMP-005`).
 
 use crate::composite::card::{self, CardElevation};
 use crate::composite::form_field::{self, CaptionKind, OverflowPolicy};
@@ -17,6 +18,14 @@ use iced::{Point, Rectangle};
 /// Tolerance for geometry read back out of a painted frame, which is
 /// rounded to sub-pixel precision by the recorder.
 const EPS: f32 = 1e-3;
+
+/// Frame layers that carry a real painted fill rather than a reservation
+/// marker.
+///
+/// A composite painting one of these owns the surface its own text is
+/// read on, so it is not required to name a mount. Every other composite
+/// band is drawn as a transparent marker and must say what it sits on.
+const PAINTED_SURFACE_LAYERS: [&str; 4] = ["card", "row", "bar", "toast"];
 
 fn by_id(id: &str) -> Cell {
     composite_cells()
@@ -94,6 +103,78 @@ fn the_composite_cells_are_in_spec_order_and_tagged() {
             "settings-row",
         ),
         ("settings-row/disabled", "UIF-COMP-001", "settings-row"),
+        ("info-bar/info/raised/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/success/raised/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/warning/raised/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/danger/raised/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/info/raised/action", "UIF-COMP-002", "info-bar"),
+        ("info-bar/success/raised/action", "UIF-COMP-002", "info-bar"),
+        ("info-bar/warning/raised/action", "UIF-COMP-002", "info-bar"),
+        ("info-bar/danger/raised/action", "UIF-COMP-002", "info-bar"),
+        (
+            "info-bar/info/raised/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/success/raised/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/warning/raised/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/danger/raised/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        ("info-bar/info/overlay/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/success/overlay/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/warning/overlay/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/danger/overlay/bare", "UIF-COMP-002", "info-bar"),
+        ("info-bar/info/overlay/action", "UIF-COMP-002", "info-bar"),
+        (
+            "info-bar/success/overlay/action",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/warning/overlay/action",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        ("info-bar/danger/overlay/action", "UIF-COMP-002", "info-bar"),
+        (
+            "info-bar/info/overlay/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/success/overlay/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/warning/overlay/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        (
+            "info-bar/danger/overlay/action-dismiss",
+            "UIF-COMP-002",
+            "info-bar",
+        ),
+        ("toast/armed", "UIF-COMP-002", "toast"),
+        ("toast/hover-held", "UIF-COMP-002", "toast"),
+        ("toast/focus-held", "UIF-COMP-002", "toast"),
+        ("toast/persistent-warning", "UIF-COMP-002", "toast"),
+        ("toast/persistent-danger", "UIF-COMP-002", "toast"),
+        ("toast/stack-three", "UIF-COMP-002", "toast"),
+        ("toast/queued", "UIF-COMP-002", "toast"),
+        ("toast/narrow-viewport", "UIF-COMP-002", "toast"),
         ("expander/collapsed", "UIF-COMP-003", "expander"),
         ("expander/open", "UIF-COMP-003", "expander"),
         ("expander/hovered", "UIF-COMP-003", "expander"),
@@ -161,7 +242,7 @@ fn every_composite_cell_declares_the_surface_its_text_is_read_on() {
             .iter()
             .any(|entry| matches!(entry.channel, "mount" | "audit.background"));
         let paints_its_own_surface = cell.frame.quads.iter().any(|quad| {
-            matches!(quad.layer.as_str(), "card" | "row") && quad.fill != "transparent"
+            PAINTED_SURFACE_LAYERS.contains(&quad.layer.as_str()) && quad.fill != "transparent"
         });
 
         assert!(

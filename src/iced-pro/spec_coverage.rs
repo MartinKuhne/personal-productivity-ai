@@ -1556,18 +1556,42 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-002",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["widget/modal.rs"],
-        reason: Some(
-            "Missing a severity-typed inline banner. `ModalError` is the nearest thing in \
-             the codebase: it is an inline banner, but it is scoped to one modal, carries \
-             no severity level (info / warning / error / success), no icon slot, no action \
-             slot and no dismiss affordance, and it is not exported as a reusable \
-             composite. Not covered outside a modal — there is no `InfoBar` and no \
-             `Toast`.",
+        evidence: &[
+            "composite/notification.rs",
+            "composite/notification_tests.rs",
+            "composite/info_bar.rs",
+            "composite/info_bar_tests.rs",
+            "composite/toast.rs",
+            "composite/toast_tests.rs",
+            "gallery_composite.rs",
+        ],
+        reason: None,
+        note: Some(
+            "The severity, model and dismissal contract are shared by both surfaces, so \
+             they live once in `composite::notification`; `effective_auto_dismiss_ms` \
+             refuses the window for `Warning` and `Danger` no matter what the model \
+             asked for, so the never-auto-dismiss rule is the framework's rather than a \
+             host convention the framework would have to trust. The countdown is driven \
+             only by host-supplied `TimeMs` and a pause banks the remaining duration \
+             instead of resetting it, so hovering at 4s leaves 1s rather than a fresh \
+             5s. Gaps recorded against the spec: §3B.2 writes \
+             \"`BG: surface.raised` (or `surface.overlay`)\" without saying which is \
+             which, so the choice is modelled as `BarSurface` rather than resolved \
+             behind the host's back; the toast's own fill is unspecified and takes \
+             `surface.overlay`; \"max 3 visible\" does not say what happens to the \
+             fourth, so the newest takes the anchor and room is made by evicting the \
+             oldest auto-dismissible toast, and if all three slots are held by \
+             `Warning`/`Danger` the newcomer queues and starts its countdown when it \
+             becomes visible rather than when it was posted. The stack reserves no \
+             layout, so a dismissal moves nothing outside it; inside it the survivors \
+             re-anchor. `Escape` is consumed only while focus is inside the stack, and \
+             the band passes clicks outside its boxes through to Band 0. Contrast is \
+             recomputed from raw sRGB for every channel against the bar's or toast's \
+             own fill, because §2.5 prints no `surface.raised` column; no disagreement \
+             with the printed base/overlay/active columns was found.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-003",

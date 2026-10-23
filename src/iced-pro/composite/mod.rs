@@ -52,6 +52,9 @@
 pub mod card;
 pub mod expander;
 pub mod form_field;
+pub mod info_bar;
 pub mod list_tile;
+pub mod notification;
 pub mod scroll_view;
 pub mod settings_row;
+pub mod toast;

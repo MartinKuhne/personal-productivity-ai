@@ -336,6 +336,32 @@ fn expected_ids() -> Vec<String> {
     for shape in ["title-only", "with-description", "disabled"] {
         ids.push(format!("settings-row/{shape}"));
     }
+    // `UIF-COMP-002` / `INC-47`: the docked banner across both permitted
+    // fills, three docked postures and all four severities. The severity
+    // axis is the recomputed-contrast evidence: the title and body keep
+    // their colours at every severity, so only the stripe and icon move.
+    for surface in ["raised", "overlay"] {
+        for posture in ["bare", "action", "action-dismiss"] {
+            for severity in ["info", "success", "warning", "danger"] {
+                ids.push(format!("info-bar/{severity}/{surface}/{posture}"));
+            }
+        }
+    }
+    // The transient in every timer posture the framework can be in,
+    // including the two severities that refuse to auto-dismiss and the
+    // overflow that queues rather than dropping an unacknowledged one.
+    for posture in [
+        "armed",
+        "hover-held",
+        "focus-held",
+        "persistent-warning",
+        "persistent-danger",
+        "stack-three",
+        "queued",
+        "narrow-viewport",
+    ] {
+        ids.push(format!("toast/{posture}"));
+    }
     // `UIF-COMP-003` / `INC-46`: the disclosure across both rungs and the
     // reachable pointer states. The collapsed and open pair is the zero-shift
     // evidence; the collapsed row is also the tab-reachability evidence.
@@ -611,6 +637,13 @@ fn per_subject_cell_counts_match_the_plan() {
         // and the settings row in 3 content shapes.
         ("form-field", 6),
         ("settings-row", 3),
+        // `UIF-COMP-002` / `INC-47`: the banner across 2 fills x 3
+        // docked postures x 4 severities, and the transient in 8 timer
+        // postures — armed, the two holds, the two severities that refuse
+        // to auto-dismiss, the full stack, the queued overflow and the
+        // clamped narrow viewport.
+        ("info-bar", 24),
+        ("toast", 8),
         // `UIF-COMP-003` / `INC-46`: the disclosure across 7 postures —
         // collapsed, open, hovered, pressed, disabled, and the compact rung
         // collapsed and open.

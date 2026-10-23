@@ -396,6 +396,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "TWO_LINE_HEIGHT",
         spec: "§3B.5 — ListTile two-line row height 44px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/toast.rs",
+        name: "WIDTH",
+        spec: "§3B.2 — Toast / SnackBar width 360px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

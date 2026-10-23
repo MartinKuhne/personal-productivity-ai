@@ -45,7 +45,11 @@ use crate::token_lint::{
 ///
 /// 104 as of `INC-46`, which added the disclosure and the scroll
 /// contract: `composite/expander.rs` and `composite/scroll_view.rs`.
-const PIN_FILES_SCANNED: usize = 104;
+///
+/// 107 as of `INC-47`, which added the notification subsystem:
+/// `composite/notification.rs` (the shared severity and model),
+/// `composite/info_bar.rs` and `composite/toast.rs`.
+const PIN_FILES_SCANNED: usize = 107;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -60,7 +64,11 @@ const PIN_RULE_A_FILES: usize = 1;
 ///
 /// 67 as of `INC-46`, whose two additions are `composite/expander.rs`
 /// and `composite/scroll_view.rs`.
-const PIN_RULE_B_FILES: usize = 67;
+///
+/// 70 as of `INC-47`, whose three additions are the notification
+/// subsystem's modules — `composite/notification.rs`,
+/// `composite/info_bar.rs` and `composite/toast.rs`.
+const PIN_RULE_B_FILES: usize = 70;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -106,7 +114,18 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// tolerance and the reach-end distance are behavioural measures: they
 /// decide *when* something happens, not how large a painted box is, and
 /// `REACH_END_DISTANCE` in particular paints nothing at all.
-const PIN_TOKEN_BOUND: usize = 157;
+///
+/// 167 as of `INC-47`, whose ten additions are the figures the banner
+/// and the transient read: the bar's minimum height, its two paddings,
+/// its stripe width, its icon-to-title gap, its action-to-dismiss gap,
+/// its border weight and its radius; plus the toast's stack gap and its
+/// width clamp. What deliberately does *not* join is equally honest — the
+/// bar's icon box and dismiss target carry no name marker, its two rungs
+/// are `&TypeRung` rather than `f32`, the toast's two gutters are named
+/// `*_GUTTER` (no marker), `MAX_VISIBLE` is a `usize`, and `WIDTH` is a
+/// bare `360.0` registered as a Surface Geometry Constant because §2.3
+/// has no `size.toast.width` rung for it to read.
+const PIN_TOKEN_BOUND: usize = 167;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -123,7 +142,10 @@ const PIN_RATIO: usize = 1;
 /// 24 as of `INC-45`, which registered the three §3B figures no rung
 /// carries: `form_field::HEADER_HEIGHT` (20px), `settings_row::MIN_HEIGHT`
 /// (48px) and `list_tile::TWO_LINE_HEIGHT` (44px).
-const PIN_SURFACE_BOUND: usize = 24;
+///
+/// 25 as of `INC-47`, which registered `toast::WIDTH` (360px) against
+/// §3B.2 — the same treatment §3.7's popover width range gets.
+const PIN_SURFACE_BOUND: usize = 25;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

@@ -499,6 +499,22 @@ pub enum SurfaceKind {
     SearchFilter,
     /// Band 1: a movable utility overlay card (`UIF-MOV-*`).
     MovableCard,
+    /// Band 1: the transient toast / snackbar notification stack
+    /// (§3B.2, `UIF-COMP-002`).
+    ///
+    /// Its own kind rather than a borrowed [`MovableCard`](Self::MovableCard)
+    /// even though the band is identical, because the two are not the
+    /// same thing to a keyboard: a movable card is a long-lived window
+    /// the user owns, and a toast is a thing that leaves. Keeping them
+    /// distinct is what lets an `Escape` trace, a pointer route and a
+    /// gallery cell say *which* Band 1 surface acted, and it costs one
+    /// variant that maps to a band that already exists.
+    ///
+    /// §5's Band 1 row already names the "Toast / SnackBar notification
+    /// stack" beside the movable overlays, so this borrows that row's
+    /// pass-through backdrop, its click-to-promote rule and its
+    /// `Escape Rank 1 when focused` unchanged.
+    ToastStack,
     /// Band 2: one open card of a menu tree.
     ///
     /// Register **each open card separately**, root first. That is what
@@ -536,7 +552,7 @@ impl SurfaceKind {
     pub const fn band(self) -> ZBand {
         match self {
             Self::Workspace | Self::SearchFilter => ZBand::Workspace,
-            Self::MovableCard => ZBand::UtilityOverlay,
+            Self::MovableCard | Self::ToastStack => ZBand::UtilityOverlay,
             Self::MenuCard | Self::TeachingPopover => ZBand::Menu,
             Self::Modal | Self::InputDialog => ZBand::Modal,
         }

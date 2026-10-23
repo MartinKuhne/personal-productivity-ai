@@ -47,11 +47,18 @@ use crate::composite::card::{self, CardElevation};
 use crate::composite::expander;
 
 use crate::composite::form_field::{self, CaptionKind};
+use crate::composite::info_bar::{self, BarSurface};
 use crate::composite::list_tile::{self, Leading, TileLines};
+use crate::composite::notification::{
+    DEFAULT_AUTO_DISMISS_MS, NotificationAction, NotificationModel, Severity,
+    effective_auto_dismiss_ms,
+};
 use crate::composite::scroll_view::{self, Axis, LayoutMode, ScrollTick, TickKind, TrackPhase};
 use crate::composite::settings_row::{self, DEFAULT_CONTROL_HEIGHT};
+use crate::composite::toast;
 use crate::gallery::{AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, paint_frame};
 use crate::state::BaseState;
+use crate::surface::tooltip::TimeMs;
 use crate::token::color::Palette;
 use crate::token::{shape, size, space};
 use crate::widget::button_widget::Layer;
@@ -807,12 +814,412 @@ pub fn scroll_view_cells() -> Vec<Cell> {
     .collect()
 }
 
-/// Every `UIF-COMP-001` and `UIF-COMP-005` cell, in spec order.
+// ---------------------------------------------------------------------------
+// InfoBar — UIF-COMP-002
+// ---------------------------------------------------------------------------
+
+/// A stand-in action label width for the docked-posture cells, composed
+/// from tokens so the harness carries no bare visual magnitude.
+const ACTION_SAMPLE_WIDTH: f32 = space::XL * 4.0;
+
+/// The docked inline banner in one severity, on one permitted fill, with
+/// one docked posture (`UIF-COMP-002`).
+///
+/// Every channel is audited against the bar's **own** background rather
+/// than a generic surface, because the stripe and the icon sit *on* the
+/// fill. §2.5 prints contrast against `surface.base`, `surface.overlay`
+/// and `surface.active` only — there is no `surface.raised` column — so a
+/// bar's ratios are recomputed here rather than looked up.
+///
+/// The title and body keep `text.strong` and `text.primary` at every
+/// severity: §3B.2 colours only the stripe and the icon, so the four
+/// severity cells must report four identical text ratios. That equality
+/// is the `UIF-PRIN-005` evidence — severity is never colour-only.
+#[must_use]
+pub fn info_bar_cell(severity: Severity, surface: BarSurface, posture: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let style = info_bar::resolve_style(severity, surface, &palette);
+    let action = NotificationAction::new("Open file", "open-file");
+    let has_action = posture != "bare";
+    let has_dismiss = posture == "action-dismiss";
+    let slots = info_bar::slots(
+        sample(info_bar::MIN_HEIGHT),
+        has_action.then_some(&action),
+        ACTION_SAMPLE_WIDTH,
+        has_dismiss,
+    );
+    let docked = info_bar::trailing_width(has_action, ACTION_SAMPLE_WIDTH, has_dismiss);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("bar", info_bar::background_layer(slots.bar, &style)),
+        ("stripe", info_bar::stripe_layer(slots.stripe, &style)),
+        ("icon", marker(slots.icon, style.icon_colour)),
+        ("text", marker(slots.text, style.title_colour)),
+    ];
+    if let Some(bounds) = slots.action {
+        layers.push(("action", marker(bounds, style.title_colour)));
+    }
+    if let Some(bounds) = slots.dismiss {
+        layers.push(("dismiss", marker(bounds, style.dismiss_colour)));
+    }
+
+    let mut resolved = vec![
+        StyleEntry::colour("background", style.background),
+        StyleEntry::colour("border.color", style.border_colour),
+        StyleEntry::number("border.width", style.border_width),
+        StyleEntry::number("radius", info_bar::RADIUS),
+        StyleEntry::colour("stripe.color", style.stripe_colour),
+        StyleEntry::number("stripe.width", info_bar::STRIPE_WIDTH),
+        StyleEntry::colour("icon.color", style.icon_colour),
+        StyleEntry::number("icon.size", info_bar::ICON_BOX),
+        StyleEntry::colour("title.color", style.title_colour),
+        StyleEntry::colour("body.color", style.body_colour),
+        StyleEntry::text("severity", severity.slug().to_string()),
+        StyleEntry::text("surface", surface.slug().to_string()),
+        StyleEntry::text("posture", posture.to_string()),
+        StyleEntry::number("geometry.bar.height", slots.bar.height),
+        StyleEntry::number("geometry.text.width", slots.text.width),
+        StyleEntry::number("geometry.trailing.width", docked),
+    ];
+    resolved.push(StyleEntry::text(
+        "geometry.action.present",
+        slots.action.is_some().to_string(),
+    ));
+    resolved.push(StyleEntry::text(
+        "geometry.dismiss.present",
+        slots.dismiss.is_some().to_string(),
+    ));
+
+    let mut audit = vec![
+        AuditPair {
+            channel: "border",
+            foreground: style.border_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "stripe",
+            foreground: style.stripe_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "icon",
+            foreground: style.icon_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "title",
+            foreground: style.title_colour,
+            background: style.background,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "body",
+            foreground: style.body_colour,
+            background: style.background,
+            role: ContrastRole::Text,
+        },
+    ];
+    if slots.dismiss.is_some() {
+        audit.push(AuditPair {
+            channel: "dismiss",
+            foreground: style.dismiss_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        });
+    }
+
+    Cell {
+        id: format!(
+            "info-bar/{}/{}/{}",
+            severity.slug(),
+            surface.slug(),
+            posture
+        ),
+        kind: CellKind::Composite,
+        subject: "info-bar",
+        spec: "UIF-COMP-002",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, slots.bar, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every InfoBar cell: four severities on two permitted fills in three
+/// docked postures (`UIF-COMP-002`).
+#[must_use]
+pub fn info_bar_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for surface in [BarSurface::Raised, BarSurface::Overlay] {
+        for posture in ["bare", "action", "action-dismiss"] {
+            for severity in Severity::ALL {
+                cells.push(info_bar_cell(severity, surface, posture));
+            }
+        }
+    }
+    cells
+}
+
+// ---------------------------------------------------------------------------
+// Toast — UIF-COMP-002
+// ---------------------------------------------------------------------------
+
+/// A toast's sample height, composed from tokens.
+const TOAST_SAMPLE_HEIGHT: f32 = space::XL * 2.0 + space::LG;
+
+/// The clock reading a toast cell samples its timer at.
+const TOAST_SAMPLE_NOW: u64 = 4_000;
+
+/// A dismissible toast that *asks* for the default window.
+///
+/// It asks even for the severities that will refuse, so the cell shows the
+/// refusal (`auto-dismiss: "refused"`) as plainly as it shows the grant.
+fn toast_model(severity: Severity, id: String) -> NotificationModel<String> {
+    NotificationModel::new(
+        id,
+        severity,
+        format!("{} title", severity.slug()),
+        "toast body text",
+    )
+    .with_action("Open file", "open-file".to_string())
+    .with_dismissible(true)
+    .with_auto_dismiss(DEFAULT_AUTO_DISMISS_MS)
+}
+
+/// The viewport a posture is laid out in.
+fn toast_viewport(posture: &str) -> Rectangle {
+    let width = if posture == "narrow-viewport" {
+        space::XL * 12.0
+    } else {
+        space::XL * 40.0
+    };
+    Rectangle::new(Point::ORIGIN, iced::Size::new(width, space::XL * 30.0))
+}
+
+/// Build and drive a real [`toast::ToastStack`] into the named posture.
+///
+/// Every hold is applied with a host-supplied [`TimeMs`]. Nothing here
+/// reads a clock, so the timer state the cell records is the stack's own
+/// answer rather than a label the gallery wrote.
+fn toast_stack_in(posture: &'static str) -> toast::ToastStack<String> {
+    let mut stack = toast::ToastStack::new();
+    match posture {
+        "persistent-warning" | "persistent-danger" => {
+            let severity = if posture.ends_with("warning") {
+                Severity::Warning
+            } else {
+                Severity::Danger
+            };
+            let _ = stack.push(toast_model(severity, "t0".into()), TimeMs::millis(0));
+        }
+        "stack-three" => {
+            for index in 0..3_u64 {
+                let _ = stack.push(
+                    toast_model(Severity::Info, format!("t{index}")),
+                    TimeMs::millis(index),
+                );
+            }
+        }
+        "queued" => {
+            // Three undismissible toasts occupy every slot, so the
+            // newcomer waits rather than replacing an unacknowledged one.
+            for index in 0..3_u64 {
+                let _ = stack.push(
+                    NotificationModel::new(
+                        format!("w{index}"),
+                        Severity::Warning,
+                        "needs you",
+                        "occupies a slot",
+                    )
+                    .with_action("Acknowledge", "ack".to_string())
+                    .with_dismissible(true),
+                    TimeMs::millis(index),
+                );
+            }
+            let _ = stack.push(
+                toast_model(Severity::Info, "queued".into()),
+                TimeMs::millis(3),
+            );
+        }
+        _ => {
+            let _ = stack.push(toast_model(Severity::Info, "t0".into()), TimeMs::millis(0));
+        }
+    }
+    if posture == "hover-held" || posture == "focus-held" {
+        let id = stack.visible()[stack.visible().len() - 1].id().clone();
+        if posture == "hover-held" {
+            stack.set_hovered(&id, true, TimeMs::millis(1_500));
+        } else {
+            stack.set_focused(&id, true, TimeMs::millis(1_000));
+        }
+    }
+    stack
+}
+
+/// The transient notification in one timer posture (`UIF-COMP-002`).
+///
+/// A toast owns no layout, so the cell records where the box *is* rather
+/// than what it pushed aside: the anchor, the width after the viewport
+/// clamp, and the timer's own reported state at a fixed clock reading.
+/// The stack is real and driven by host-supplied [`TimeMs`], so a
+/// "hover-held" cell means the stack was actually hovered at 1500ms.
+///
+/// The fill is `surface.overlay` and every channel is audited against it,
+/// which is the same recomputation the InfoBar cell does — §2.5 has no
+/// column for the surface a Band-1 toast actually paints.
+#[must_use]
+pub fn toast_cell(posture: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let viewport = toast_viewport(posture);
+    let barrier_top = viewport.y + viewport.height - space::XL;
+    let stack = toast_stack_in(posture);
+    let count = stack.visible().len().max(1);
+    let severity = stack
+        .visible()
+        .last()
+        .map(toast::ToastEntry::severity)
+        .unwrap_or(Severity::Info);
+
+    let width = toast::toast_width(viewport.width);
+    let boxes = toast::stack_bounds(viewport, barrier_top, TOAST_SAMPLE_HEIGHT, count);
+    let anchor = *boxes.last().unwrap_or(&viewport);
+    let style = info_bar::resolve_style(severity, BarSurface::Overlay, &palette);
+    let docked = info_bar::trailing_width(true, ACTION_SAMPLE_WIDTH, true);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("toast", info_bar::background_layer(anchor, &style)),
+        (
+            "stripe",
+            info_bar::stripe_layer(info_bar::stripe_bounds(anchor), &style),
+        ),
+        (
+            "icon",
+            marker(info_bar::icon_bounds(anchor), style.icon_colour),
+        ),
+        (
+            "text",
+            marker(info_bar::text_bounds(anchor, docked), style.title_colour),
+        ),
+    ];
+    for (offset, bounds) in boxes.iter().enumerate().take(count) {
+        if *bounds != anchor {
+            layers.push((
+                if offset == 0 {
+                    "stacked-1"
+                } else {
+                    "stacked-2"
+                },
+                marker(*bounds, style.border_colour),
+            ));
+        }
+    }
+
+    let timer = stack
+        .visible()
+        .last()
+        .map(|entry| entry.timer_state(TimeMs::millis(TOAST_SAMPLE_NOW)));
+    let granted = effective_auto_dismiss_ms(severity, Some(DEFAULT_AUTO_DISMISS_MS));
+
+    Cell {
+        id: format!("toast/{posture}"),
+        kind: CellKind::Composite,
+        subject: "toast",
+        spec: "UIF-COMP-002",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::colour("background", style.background),
+            StyleEntry::colour("border.color", style.border_colour),
+            StyleEntry::colour("stripe.color", style.stripe_colour),
+            StyleEntry::colour("icon.color", style.icon_colour),
+            StyleEntry::colour("title.color", style.title_colour),
+            StyleEntry::colour("body.color", style.body_colour),
+            StyleEntry::text("severity", severity.slug().to_string()),
+            StyleEntry::text("posture", posture.to_string()),
+            StyleEntry::number("geometry.width", width),
+            StyleEntry::number("geometry.height", TOAST_SAMPLE_HEIGHT),
+            StyleEntry::number("geometry.anchor.x", anchor.x),
+            StyleEntry::number("geometry.anchor.y", anchor.y),
+            StyleEntry::number("geometry.gutter.right", toast::ANCHOR_GUTTER),
+            StyleEntry::number("geometry.gutter.barrier", toast::BARRIER_GUTTER),
+            StyleEntry::number("geometry.stack.gap", toast::STACK_GAP),
+            StyleEntry::number("policy.max-visible", toast::MAX_VISIBLE as f32),
+            StyleEntry::number("policy.visible", stack.visible().len() as f32),
+            StyleEntry::number("policy.pending", stack.pending_count() as f32),
+            StyleEntry::text("timer", format!("{timer:?}")),
+            StyleEntry::text(
+                "auto-dismiss",
+                granted.map_or_else(|| "refused".to_string(), |ms| format!("{ms}ms")),
+            ),
+            StyleEntry::text(
+                "band",
+                format!(
+                    "{:?}",
+                    crate::surface::zorder::SurfaceKind::ToastStack.band()
+                ),
+            ),
+        ],
+        frame: paint_frame(Namer::Standard, viewport, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "stripe",
+                foreground: style.stripe_colour,
+                background: style.background,
+                role: ContrastRole::Chrome,
+            },
+            AuditPair {
+                channel: "icon",
+                foreground: style.icon_colour,
+                background: style.background,
+                role: ContrastRole::Chrome,
+            },
+            AuditPair {
+                channel: "title",
+                foreground: style.title_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "body",
+                foreground: style.body_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+        ],
+        note: None,
+    }
+}
+
+/// Every toast posture cell (`UIF-COMP-002`).
+#[must_use]
+pub fn toast_cells() -> Vec<Cell> {
+    [
+        "armed",
+        "hover-held",
+        "focus-held",
+        "persistent-warning",
+        "persistent-danger",
+        "stack-three",
+        "queued",
+        "narrow-viewport",
+    ]
+    .iter()
+    .map(|posture| toast_cell(posture))
+    .collect()
+}
+
+/// Every `UIF-COMP-001`, `UIF-COMP-002` and `UIF-COMP-005` cell, in
+/// spec order.
 #[must_use]
 pub fn composite_cells() -> Vec<Cell> {
     let mut cells = Vec::new();
     cells.extend(form_field_cells());
     cells.extend(settings_row_cells());
+    cells.extend(info_bar_cells());
+    cells.extend(toast_cells());
     cells.extend(expander_cells());
     cells.extend(scroll_view_cells());
     cells.extend(card_cells());
