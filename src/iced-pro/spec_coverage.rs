@@ -1169,21 +1169,46 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-006",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.6",
-        evidence: &["token/shape.rs", "token/size.rs"],
-        reason: Some(
-            "Not implemented — no chip or filter-pill control exists. Missing: the 24px \
-             compact / 28px interactive geometry with `radius.pill` for status and count \
-             pills or `radius.widget` for filter and input chips, the selected-filter skin \
-             (`accent.fill`, `text.strong`, `1px accent.border`) with its leading 14px \
-             `✓`, the reserved 24×24px trailing `×` on removable input chips, \
-             `ChipModel<Id>` across the `Assist` / `Filter { selected }` / \
-             `Input { removable }` variants, and `on_activate(Id)`, `on_toggle(Id, bool)` \
-             and `on_remove(Id)` including the `Delete`/`Backspace` removal path when the \
-             chip holds focus.",
+        evidence: &[
+            "widget/chip.rs",
+            "widget/chip_model.rs",
+            "token/shape.rs",
+            "token/size.rs",
+            "gallery_chip.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Built. The two heights §3.6 prices are a rung on the model \
+             (`ChipHeight::Compact` = `size.bar.status` 24px, `ChipHeight::Bar` = \
+             `size.control.sm` 28px) rather than variant-derived, because the section \
+             ties the choice to where the chip sits. `space.sm` padding, `space.xs` gap, \
+             `radius.pill` and `radius.widget` as §3.6 assigns them, and the reserved \
+             24×24px trailing `×` hit target on removable input chips \
+             (`size.hit_target_min`). `ChipModel<Id>` carries the `Assist` / \
+             `Filter { selected }` / `Input { removable }` variants, and `respond` maps \
+             one gesture to exactly one event: `Assist` and `Input` emit \
+             `Activated(id)` (`on_activate`), `Filter` emits `Toggled(id, !selected)` \
+             (`on_toggle`), and the trailing `×` or a `Delete`/`Backspace` while the \
+             chip holds focus emits `Removed(id)`. The resolver is keyed on \
+             `ChipPolarity` (Unselected / Selected), which is §3.6's own table key; the \
+             variant reaches paint only through the radius and the `✓` / `×` slots. \
+             **§3.6 gap, recorded rather than silently resolved.** The section's radius \
+             sentence assigns `radius.pill` to \"status/count pills\" and `radius.widget` \
+             to \"filter/input chips\", and names `Assist` in neither group. The pill \
+             branch is taken for `Assist` — the chip that is neither a filter nor an \
+             input — because the competing reading cannot hold: §3.8's *status chip* is \
+             also called a chip, and §3.6's own sentence puts it in the pill branch. A \
+             selected chip's disabled skin is a deliberate concession: the fill drops \
+             from `accent.fill` to `surface.raised` because `text_disabled` on \
+             `accent.fill` measures **1.4280:1**, but the `✓` is held at `text.strong` \
+             (**18.7108:1**), because the glyph is the state and a chip may not report a \
+             state it does not have. One mount is disallowed: `accent.fill` on \
+             `surface.active` is **2.9768:1**, under the `3.08:1` a fill carrying its own \
+             boundary owes — so a selected chip may sit on `base`, `raised` or `hover`, \
+             never on `active`.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-007",
@@ -1193,23 +1218,38 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "surface/tooltip/mod.rs",
             "surface/tooltip/hover.rs",
             "surface/tooltip/place.rs",
+            "surface/popover/mod.rs",
+            "surface/popover/model.rs",
+            "surface/popover/place.rs",
+            "surface/popover/host.rs",
             "geometry/anchor.rs",
+            "gallery_popover.rs",
         ],
         reason: Some(
-            "The `Tooltip` half is built and conformed to §3.7 as revised: 400ms hover \
-             delay, 0ms keyboard-focus delay that opens immediately through a second \
+            "Both halves built. The `Tooltip` half is conformed to §3.7 as revised: 400ms \
+             hover delay, 0ms keyboard-focus delay that opens immediately through a second \
              arrival channel rather than a retimed hover, `surface.overlay` fill, `1px \
              border.strong`, `radius.widget` (4px), 280px max width and `4px 8px` \
              padding, dismissal on pointer leave, key press or `Escape`, and pointer \
              transparency through a layer that sits above every z-band without joining the \
-             registry. Missing: the whole `TeachingPopover` half — the interactive callout \
-             at 280–360px with `1px accent.border`, `radius.card` (6px), a title, body \
-             and optional footer action, mounted in Z-Band 2 at `Escape Rank 3` — plus \
-             `PopoverModel<ActionId>` with `on_action(ActionId)` and `on_dismiss()`. Also \
-             missing: the tooltip is not wired to any widget's own hover or focus event \
-             inside this crate, so a host must drive a `HoverController` itself; and the \
-             optional trailing shortcut pill in `font.family.mono` has no rung to name, \
-             because `UIF-TOK-004` models no font family.",
+             registry. The `TeachingPopover` half is built as `surface::popover`: the \
+             interactive callout clamped to the 280–360px band with `1px accent.border`, \
+             `radius.card` (6px) and `space.md` padding, a 13px SemiBold title over a \
+             13px Regular body on `type.ui_compact`, and `PopoverModel<ActionId>` whose \
+             footer produces `on_action(ActionId)` or `on_dismiss()`. Placement reuses \
+             `geometry::anchor::solve` — `PreferredSide` maps onto the existing alignment \
+             axes, so the two side placements share the submenu's flip and clamp rather \
+             than a second solver. The card enters `SurfaceRegistry` as \
+             `SurfaceKind::TeachingPopover` over `ZBand::Menu`, which is exactly §3.7's \
+             \"Z-Band 2 / Escape Rank 3\": `ZBand::Menu` *is* band 2 and its \
+             `escape_rank()` *is* 3, so no new band was added and no rank retuned. \
+             `open` pushes its own focus trap the way `MenuCascade::mount` does, so a \
+             callout opened inside a modal nests rather than replacing, and closing \
+             restores what the modal held. Missing, unchanged from before this increment: the tooltip is not wired to any \
+             widget's own hover or focus event inside this crate, so a host must drive a \
+             `HoverController` itself; and the optional trailing shortcut pill in \
+             `font.family.mono` has no rung to name, because `UIF-TOK-004` models no font \
+             family.",
         ),
         note: Some(
             "Three of INC-31's invented values were wrong against the revision and are now \
@@ -1218,7 +1258,21 @@ const SPEC_COVERAGE: &[Coverage] = &[
              owned and clamped here. Keyboard-focus opening at 0 ms did not exist at all \
              and is now a real second arrival channel. The fill/border/text triple INC-31 \
              chose was already right — the spec's own `4.01:1` border and `11.72:1` text \
-             figures match what this crate recomputed from raw sRGB, not transcribed.",
+             figures match what this crate recomputed from raw sRGB, not transcribed. \
+             **§3.7's printed `accent.border` / `surface.overlay` figure of `5.94:1` was \
+             recomputed this increment at `5.9394:1` — the section rounds, and the \
+             measurement agrees; so does the title at `17.7168:1` and the body at \
+             `11.7180:1`. No disagreement with the printed column, unlike §3.8.** Two \
+             framework-supplied decisions are recorded here because §3.7 does not state \
+             them: the dismiss button is **always present** (`DISMISS_LABEL`), since the \
+             section's model carries only `primary_action: Option<…>` and a popover with \
+             no focusable control would trap the keyboard around an empty scope; and \
+             pointer-leave deliberately dismisses **nothing**, which is what lets the \
+             cursor travel from the trigger across the gap onto a footer button without \
+             the card vanishing under it. `Escape` on a callout dismisses *and consumes* \
+             at rank 3, so a modal underneath stays open — the opposite of the tooltip's \
+             \"dismiss but do not consume\", and the reason the callout joins the registry \
+             where the tooltip stays out.",
         ),
     },
     Coverage {

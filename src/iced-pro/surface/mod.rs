@@ -23,5 +23,6 @@ pub mod menu;
 pub mod modal;
 pub mod modal_tier;
 pub mod movable;
+pub mod popover;
 pub mod tooltip;
 pub mod zorder;

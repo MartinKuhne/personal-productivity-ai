@@ -505,6 +505,25 @@ pub enum SurfaceKind {
     /// makes "deepest submenu, then root menu" fall out of the generic
     /// escape walk rather than needing a depth parameter.
     MenuCard,
+    /// Band 2: an interactive teaching popover (§3.7, `UIF-ATOM-007`).
+    ///
+    /// §3.7 says the callout "mounts in `Z-Band 2` (`Escape Rank 3`)",
+    /// and that reconciles with this enum exactly rather than needing a
+    /// band of its own: [`ZBand::Menu`] *is* index `2` and its
+    /// [`escape_rank`](ZBand::escape_rank) *is* `3`, and §5's band
+    /// table already lists `TeachingPopover` in that row beside the
+    /// menus. So the kind borrows the `Menu` band and inherits its
+    /// `TransparentCatcher` backdrop, its `CaptureInsideDismissOutside`
+    /// pointer rule and its rank unchanged.
+    ///
+    /// This is the opposite of the tooltip's decision to stay out of the
+    /// registry, and the reason is interactivity: a pointer-transparent
+    /// label has no pointer ownership to register, and a callout with a
+    /// click-away catcher and a consumed `Escape` is nothing *but*
+    /// pointer and keyboard ownership. See the
+    /// [popover module docs](crate::surface::popover) for the three
+    /// tooltip reasons this inverts.
+    TeachingPopover,
     /// Band 3: a blocking modal dialog (`UIF-MOD-*`).
     Modal,
     /// Band 3: a cursor-anchored input dialog (`UIF-INP-*`).
@@ -518,7 +537,7 @@ impl SurfaceKind {
         match self {
             Self::Workspace | Self::SearchFilter => ZBand::Workspace,
             Self::MovableCard => ZBand::UtilityOverlay,
-            Self::MenuCard => ZBand::Menu,
+            Self::MenuCard | Self::TeachingPopover => ZBand::Menu,
             Self::Modal | Self::InputDialog => ZBand::Modal,
         }
     }

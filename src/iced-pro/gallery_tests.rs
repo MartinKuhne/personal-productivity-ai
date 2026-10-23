@@ -132,6 +132,15 @@ fn expected_ids() -> Vec<String> {
             ids.push(format!("badge/chip/{icon}-status/{tone}"));
         }
     }
+    // `UIF-ATOM-006` / `INC-39`: four chip shapes over the two height
+    // rungs and the five §3.3 state columns.
+    for shape in ["assist", "filter-off", "filter-on", "input"] {
+        for rung in ["compact", "bar"] {
+            for state in ["rest", "hovered", "pressed", "rest+focused", "disabled"] {
+                ids.push(format!("chip/{shape}/{rung}-{state}"));
+            }
+        }
+    }
     // `UIF-ATOM-009` / `INC-38`: the bar in three statuses at five fill
     // conditions, the spinner at both sizes on both mounts, and the
     // cancellable stop in each status.
@@ -279,6 +288,13 @@ fn expected_ids() -> Vec<String> {
         .iter()
         .map(|name| format!("tooltip/{name}")),
     );
+    // `UIF-ATOM-007` / `INC-39`: the teaching popover across the three
+    // width regimes and the two footer shapes.
+    for regime in ["under-min", "in-band", "over-max"] {
+        for footer in ["with-action", "dismiss-only"] {
+            ids.push(format!("popover/{regime}/{footer}"));
+        }
+    }
     ids.extend(
         ["navbar", "panes", "tabs"]
             .iter()
@@ -324,6 +340,8 @@ fn per_subject_cell_counts_match_the_plan() {
         ("switch", 10),
         // `UIF-ATOM-008` / `INC-38`: 5 dots + 5 counts x 5 tones + 4 glyphs x 5 tones.
         ("badge", 50),
+        // `UIF-ATOM-006` / `INC-39`: 4 shapes x 2 rungs x 5 columns.
+        ("chip", 40),
         // `UIF-ATOM-009` / `INC-38`: 3 statuses x 5 fills + 4 spinners + 3 stops.
         ("progress", 22),
         ("menu", 12),
@@ -342,6 +360,8 @@ fn per_subject_cell_counts_match_the_plan() {
         ("editor", 2),
         ("zband", 1),
         ("tooltip", 7),
+        // `UIF-ATOM-007` / `INC-39`: 3 width regimes x 2 footer shapes.
+        ("popover", 6),
         ("navbar", 1),
         ("panes", 1),
         ("tabs", 1),

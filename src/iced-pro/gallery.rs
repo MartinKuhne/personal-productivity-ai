@@ -4412,6 +4412,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(text_input_tier_cells());
     cells.extend(crate::gallery_toggle::toggle_cells());
     cells.extend(crate::gallery_badge::badge_cells());
+    cells.extend(crate::gallery_chip::chip_cells());
     cells.extend(crate::gallery_progress::progress_cells());
     cells.extend(menu_cells());
     cells.extend(menu_glyph_cells());
@@ -4428,6 +4429,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(editor_palette_cells());
     cells.push(zband_cell());
     cells.extend(tooltip_cells());
+    cells.extend(crate::gallery_popover::popover_cells());
     cells.extend(not_owned_cells());
     cells
 }

@@ -351,6 +351,16 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "MAX_WIDTH",
         spec: "§3.7 — Tooltip max width 280px",
     },
+    SurfaceGeometryConstant {
+        file: "surface/popover/mod.rs",
+        name: "WIDTH_MIN",
+        spec: "§3.7 — Teaching popover width range, lower bound 280px",
+    },
+    SurfaceGeometryConstant {
+        file: "surface/popover/mod.rs",
+        name: "WIDTH_MAX",
+        spec: "§3.7 — Teaching popover width range, upper bound 360px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

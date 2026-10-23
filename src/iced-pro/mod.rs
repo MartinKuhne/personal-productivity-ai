@@ -21,6 +21,8 @@ pub mod bridge;
 pub mod focus;
 pub mod gallery;
 pub mod gallery_badge;
+pub mod gallery_chip;
+pub mod gallery_popover;
 pub mod gallery_progress;
 pub mod gallery_toggle;
 pub mod geometry;

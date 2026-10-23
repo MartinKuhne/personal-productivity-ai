@@ -33,40 +33,46 @@ use crate::token_lint::{
 /// Production `.rs` files the scan reads (test fixtures excluded).
 ///
 /// 59 as of `widget/badge.rs`, `widget/badge_model.rs`,
-/// `widget/progress.rs`, `widget/progress_model.rs`, `gallery_badge.rs`
-/// and `gallery_progress.rs` joining the tree for `UIF-ATOM-008` and
-/// `UIF-ATOM-009` (`INC-38`).
-const PIN_FILES_SCANNED: usize = 59;
+/// `widget/chip.rs` and `widget/chip_model.rs` for `UIF-ATOM-006`, the
+/// four production modules of `surface/popover/` (`mod.rs`, `model.rs`,
+/// `place.rs`, `host.rs`) for `UIF-ATOM-007`, and the two split-out
+/// gallery cell modules (`gallery_chip.rs`, `gallery_popover.rs`), all
+/// joining the tree for `INC-39`.
+const PIN_FILES_SCANNED: usize = 67;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
 ///
-/// 32 as of the four badge and progress modules joining `widget/`. Rule B
-/// counts scope membership, so a file with no colour literals still counts;
-/// `gallery_badge.rs` and `gallery_progress.rs` sit outside `widget/` and
-/// `surface/` and so are not among them.
-const PIN_RULE_B_FILES: usize = 32;
+/// 38 as of the six `INC-39` modules joining `widget/` and `surface/`.
+/// Rule B counts scope membership, so a file with no colour literals
+/// still counts; the gallery cells for chips and popovers sit outside
+/// `widget/` and `surface/` and so are not among them.
+const PIN_RULE_B_FILES: usize = 38;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
 ///
-/// 67 as of `INC-38`, whose twelve additions are the eight `badge::`
-/// geometry consts (`DOT_SIZE`, `COUNT_HEIGHT`, `COUNT_MIN_WIDTH`,
-/// `COUNT_H_PADDING`, `CHIP_HEIGHT`, `CHIP_H_PADDING`,
-/// `CHIP_BORDER_WIDTH`, `GLYPH_LABEL_GAP`) and the four `progress::`
-/// ones (`TRACK_HEIGHT`, `TRACK_RADIUS`, `SPINNER_STROKE`,
-/// `STOP_BUTTON_SIZE`). The two progress fractions are not visual names,
-/// so they are not counted at all.
-const PIN_TOKEN_BOUND: usize = 67;
+/// 80 as of `INC-39`, whose thirteen additions are the nine `chip::`
+/// geometry consts (`COMPACT_HEIGHT`, `BAR_HEIGHT`, `H_PADDING`,
+/// `LABEL_GAP`, `GLYPH_SIZE`, `BORDER_WIDTH`, `FOCUS_RING_WIDTH`,
+/// `RADIUS_PILL`, `RADIUS_WIDGET`) and the four `popover::` ones
+/// (`POPOVER_GAP`, `PADDING`, `BORDER_WIDTH`, `RADIUS`). `chip::REMOVE_TARGET`
+/// is deliberately not among them: `TARGET` is not a
+/// [`VISUAL_NAME_MARKERS`] entry, so the scanner never classifies it —
+/// it reads `size::HIT_TARGET_MIN` regardless.
+///
+/// [`VISUAL_NAME_MARKERS`]: crate::token_lint::VISUAL_NAME_MARKERS
+const PIN_TOKEN_BOUND: usize = 80;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
 const PIN_RATIO: usize = 1;
 /// Visual scalars covered by the §1.1 registry.
 ///
-/// 16 as of `tooltip::MAX_WIDTH`, whose 280px §3.7 fixes outright and which therefore
-/// needs a registered authority rather than a token.
-const PIN_SURFACE_BOUND: usize = 16;
+/// 18 as of `popover::WIDTH_MIN` and `popover::WIDTH_MAX`, the 280–360px
+/// width range §3.7 fixes outright for a teaching popover, and which
+/// therefore need a registered authority rather than a token.
+const PIN_SURFACE_BOUND: usize = 18;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

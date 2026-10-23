@@ -78,6 +78,16 @@
 //!   `Dot` / `Count` / `Status` sum and the four tones, with the tone
 //!   vocabulary resolved against §3.8 rather than guessed from the
 //!   status palette's names (`UIF-ATOM-008`)
+//! * [`chip`] — the paint resolver and geometry for the §3.6 chip: the
+//!   two height rungs, the unselected/selected polarity matrix, the
+//!   reserved `24 × 24` trailing `×` target, and the `Assist` radius
+//!   gap §3.6 leaves open and this module resolves rather than guesses
+//!   through (`UIF-ATOM-006`)
+//! * [`chip_model`] — the declarative `ChipModel<Id>` a host owns: the
+//!   `Assist` / `Filter { selected }` / `Input { removable }` sum, the
+//!   height rung, and the one `ChipEvent` each gesture produces — the
+//!   variant-decides-the-callback rule §3.6 states but does not spell out
+//!   (`UIF-ATOM-006`)
 //! * [`progress`] — the paint resolver and geometry for the §3.9
 //!   `ProgressBar` and `Spinner`: the `4px` track, the status-coloured
 //!   fill, the `35%` indeterminate segment whose position arrives as an
@@ -101,6 +111,8 @@ pub mod button;
 pub mod button_controller;
 pub mod button_model;
 pub mod button_widget;
+pub mod chip;
+pub mod chip_model;
 pub mod focus;
 pub mod focusable;
 pub mod progress;
