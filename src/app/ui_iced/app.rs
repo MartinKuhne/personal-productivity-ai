@@ -96,6 +96,16 @@ use crate::ui_iced::view::view;
 use crate::workspace::Tags;
 use crate::workspace::watcher::Workspace;
 use fastmd_agent::AgentSession;
+use iced_pro::binding::pre_rank::DragCapture;
+use iced_pro::binding::pre_rank::PreRankCoordinator;
+use iced_pro::surface::zorder::DeclineReason;
+use iced_pro::surface::zorder::PreRankedEscape;
+use iced_pro::surface::zorder::Surface;
+use iced_pro::surface::zorder::SurfaceId;
+use iced_pro::surface::zorder::SurfaceKind;
+use iced_pro::surface::zorder::SurfaceRegistry;
+use iced_pro::surface::zorder::UnwindAnswer;
+use iced_pro::surface::zorder::escape_with_pre_rank;
 
 /// Default window width, in logical points, applied when the persisted state
 /// carries no window size.
@@ -260,6 +270,38 @@ impl ContextMenu {
 /// over an open About window — so each one gets its own slot rather than a
 /// single blocking overlay. [`mounted_layers`] turns the open slots back into
 /// a z-ordered stack.
+///
+/// # Framework state (integration increment INT-2)
+///
+/// [`Self::surfaces`] and [`Self::pre_rank`] are the `iced-pro` band model
+/// and Pre-Rank ledger. They are a **derived index** of the fields above,
+/// never a second source of truth: the individual window-state fields stay
+/// authoritative for *whether* a surface is open, and
+/// [`sync_surfaces`](Self::sync_surfaces) mirrors them into the registry on
+/// demand. Nothing reads the registry to decide what to draw or what is
+/// open; only [`close_topmost`](Self::close_topmost) consults it, to learn
+/// the *order* in which to unwind.
+///
+/// # Tab / focus projection is deliberately deferred
+///
+/// The app captures **only** `Escape` off the runtime keyboard stream
+/// (`ui_iced/subscription.rs:442`, `escape_to_message`); `Tab` traversal
+/// is owned exclusively by iced's built-in router today. Introducing
+/// [`iced_pro::focus::FocusState`] plus
+/// [`iced_pro::bridge::tab_task`] here would run a *second* focus model in
+/// parallel with iced's, with nothing keeping its member set synchronised
+/// against the live widget tree — the app never enumerates its focusables,
+/// so the framework's member set would be fiction. That sync problem
+/// disappears once the framework widgets of INT-3..7 self-register their
+/// focusables as they are built, so the projection belongs there and not
+/// now.
+///
+/// Note for the next reader: the original integration plan named
+/// `bridge::advance` / `bridge::sync` / `bridge::apply_transition`. **Those
+/// do not exist.** The real bridge API is
+/// [`iced_pro::bridge::tab_task`]`(model, direction)` /
+/// [`iced_pro::bridge::focus_task`] / [`iced_pro::bridge::focus_operation`]
+/// / [`iced_pro::bridge::widget_id`].
 #[derive(Debug)]
 pub struct OverlayState {
     /// The small name-entry / move / delete-confirmation dialog.
@@ -315,6 +357,28 @@ pub struct OverlayState {
     /// shift key, the system shall allow the user to select multiple
     /// documents."
     pub modifiers: iced::keyboard::Modifiers,
+    /// The `iced-pro` z-band index of the surfaces currently open
+    /// (`UIF-ZORD-*`), derived from the fields above by
+    /// [`sync_surfaces`](Self::sync_surfaces).
+    ///
+    /// It carries **no** authority over what is open: it exists so
+    /// [`close_topmost`](Self::close_topmost) can walk the `UIF-WIN-003`
+    /// escape order instead of re-deriving it from a hardcoded chain.
+    /// Every entry is registered with an empty region list, so this index
+    /// is not usable for pointer routing — see
+    /// [`sync_surfaces`](Self::sync_surfaces) for why that is deliberate
+    /// and what has to happen before it changes.
+    pub surfaces: SurfaceRegistry,
+    /// The `iced-pro` Pre-Rank ledger (`UIF-WIN-003` step 1, §3.0.4.2):
+    /// which control, if any, holds a pointer-captured drag that `Escape`
+    /// must cancel **before** any surface is asked.
+    ///
+    /// Nothing writes it yet — the app has no framework drag widget until
+    /// INT-3..7 — but [`close_topmost`](Self::close_topmost) runs the
+    /// Pre-Rank step on every `Escape` so the ordering is established and
+    /// tested now, rather than being retrofitted under a live drag in
+    /// INT-6.
+    pub pre_rank: PreRankCoordinator,
 }
 
 impl Default for OverlayState {
@@ -339,11 +403,172 @@ impl Default for OverlayState {
             agent_scroll: None,
             debug_scroll: None,
             modifiers: iced::keyboard::Modifiers::empty(),
+            surfaces: SurfaceRegistry::new(),
+            pre_rank: PreRankCoordinator::new(),
         }
     }
 }
 
+/// Refresh or remove one entry of the derived surface index so it agrees
+/// with whether `open` says the surface is showing.
+///
+/// [`SurfaceRegistry::register`] refreshes an already-registered id in
+/// place and **keeps its position** in its band, which is what makes the
+/// whole sync pass order-stable: a card rebuilt every frame is neither
+/// promoted nor demoted, and calling this twice changes nothing.
+/// `unregister` on an absent id is a no-op.
+///
+/// [RUST-021]: the id is always a `&'static str` const, never an inline
+/// literal at the call site.
+fn sync_surface(registry: &mut SurfaceRegistry, id: &str, kind: SurfaceKind, open: bool) {
+    if open {
+        registry.register(SurfaceId::new(id), kind, Vec::new());
+    } else {
+        registry.unregister(&SurfaceId::new(id));
+    }
+}
+
+/// Settle a pointer-captured drag for `UIF-WIN-003` step 1.
+///
+/// Always answers `false` — "the control had nothing to cancel" — because
+/// no framework drag widget is mounted in the app yet, so no capture can
+/// exist and this body is never reached in production.
+///
+/// **INT-6 must replace the body** with a dispatch to the capturing
+/// control's own
+/// [`GestureSlot::cancel`](iced_pro::binding::snapshot::GestureSlot::cancel),
+/// keyed on [`DragCapture::id`]. Until it does, the Pre-Rank step is a
+/// clean pass-through, which
+/// `test_close_topmost_pre_rank_is_a_clean_pass_through_with_no_capture`
+/// pins so the change cannot land unnoticed.
+///
+/// Named rather than left an inline closure so the INT-6 obligation is a
+/// greppable symbol instead of a `false` buried in an argument list.
+fn cancel_drag_capture(_capture: &DragCapture) -> bool {
+    false
+}
+
 impl OverlayState {
+    /// Reconciles the derived [`SurfaceRegistry`] against the
+    /// reducer-held window-state fields (`UIF-ZORD-*`, `UIF-WIN-003`).
+    ///
+    /// # The registry is an INDEX, not a second source of truth
+    ///
+    /// [`Self::batch`], [`Self::about`], [`Self::tools`], [`Self::debug`],
+    /// [`Self::dialog`], [`Self::editor`], [`Self::context_menu`] and
+    /// [`Self::hamburger_open`] remain the single authority for *whether*
+    /// a surface is open. This method only mirrors that into the band
+    /// model — open field → `register`, closed field → `unregister`. No
+    /// code reads the registry to decide what to draw, and no code sets a
+    /// field from a registry answer. The registry contributes exactly one
+    /// thing the fields cannot: the **order** in which surfaces unwind.
+    ///
+    /// # Idempotent and cheap
+    ///
+    /// Nine `O(n)` lookups over a list that never exceeds nine entries, and
+    /// safe to call any number of times in any order: `register` keeps an
+    /// existing id's band position, `unregister` tolerates an absent id.
+    ///
+    /// # Registration order is the overlay host's own draw order
+    ///
+    /// Surfaces are registered bottom-first within each band, matching the
+    /// overlay host's mount order (`ui_iced/view.rs`: the context menu is
+    /// mounted before the hamburger, and the batch dialog is mounted
+    /// last). Because the escape walk asks the *top* of a band first, that
+    /// makes the card actually painted on top the one that unwinds first,
+    /// with no depth parameter anywhere.
+    ///
+    /// # Regions are empty on purpose — review area
+    ///
+    /// Every surface is registered with an empty region list. Per
+    /// [`SurfaceRegistry`]'s own contract a regionless surface is never
+    /// hit by the pointer but still stacks and still takes part in
+    /// `Escape`, which is exactly the half this increment wires.
+    /// **Consequence to review before this index is ever used for pointer
+    /// routing:** [`SurfaceRegistry::route_pointer`] can never answer
+    /// `PointerTarget::Surface` here — it falls through to the band rule,
+    /// i.e. `DismissBand(Menu)` or `Scrim(..)`. Populating real viewport
+    /// rectangles belongs to the widget increments (INT-3..7), where the
+    /// overlay host actually knows each card's geometry.
+    ///
+    /// # Call site
+    ///
+    /// [`close_topmost`](Self::close_topmost) calls this on entry, which
+    /// is the only moment the index must be exact. Hooking every update
+    /// path is deliberately not attempted in this increment.
+    ///
+    /// [RUST-020]: mutates only `self`; no I/O, no bus publish.
+    pub fn sync_surfaces(&mut self) {
+        // ── Menu band (`ZBand::Menu`, escape rank 3) ────────────────────
+        // Registered bottom-first, matching `overlay_host`'s mount order.
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_CONTEXT_MENU,
+            SurfaceKind::MenuCard,
+            self.context_menu.is_some(),
+        );
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_HAMBURGER,
+            SurfaceKind::MenuCard,
+            self.hamburger_open,
+        );
+
+        // ── Modal band (`ZBand::Modal`, escape rank 2) ──────────────────
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_EDITOR,
+            SurfaceKind::Modal,
+            self.editor.is_some(),
+        );
+        // The app's small name-entry / move / delete-confirmation dialog is
+        // a cursor-anchored input dialog, not a blocking card: `InputDialog`
+        // is its own `SurfaceKind` and unwinds at the same rank 2 as a
+        // `Modal`, so the old relative order against the other cards is
+        // preserved by registration position rather than by a special case.
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_DIALOG,
+            SurfaceKind::InputDialog,
+            self.dialog.is_open(),
+        );
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_TOOLS,
+            SurfaceKind::Modal,
+            self.tools.is_open(),
+        );
+        // `AboutWindowState` holds a single `Option`, so the two identity
+        // windows are mutually exclusive and at most one of these two ids
+        // is ever registered.
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_ABOUT,
+            SurfaceKind::Modal,
+            self.about.is_about(),
+        );
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_ATTRIBUTIONS,
+            SurfaceKind::Modal,
+            self.about.is_attributions(),
+        );
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_BATCH,
+            SurfaceKind::Modal,
+            self.batch.is_open(),
+        );
+
+        // ── Utility-overlay band (`ZBand::UtilityOverlay`, rank 1) ──────
+        sync_surface(
+            &mut self.surfaces,
+            SURFACE_ID_AGENT_DEBUG,
+            SurfaceKind::MovableCard,
+            self.debug.is_open(),
+        );
+    }
+
     /// Closes the **top-most** open floating layer, one layer per call
     /// (UI-056 — "the dialog shall provide a `Close` action (button and
     /// `Esc` keypress …) that hides the dialog without persisting further
@@ -355,16 +580,49 @@ impl OverlayState {
     ///
     /// # The rule
     ///
-    /// One `Esc` dismisses exactly one surface, walking the **reverse** of
-    /// the [`mounted_layers`] z-order (bottom-most first), i.e. top-most
-    /// first here:
+    /// One `Esc` dismisses exactly one surface, walking the derived
+    /// [`SurfaceRegistry`] through
+    /// [`escape_with_pre_rank`] in `UIF-WIN-003` order: the Pre-Rank drag
+    /// ledger first, then by descending [`ZBand::escape_rank`](iced_pro::surface::zorder::ZBand::escape_rank)
+    /// — and within a rank, the top of the band first.
     ///
-    /// `Batch` → `Attributions` → `About` → `Tools` → `AgentDebug` →
-    /// `Dialog` → `Editor` → `ContextMenu` → `hamburger`.
+    /// `Menu` is rank **3**, `Modal` rank **2**, `UtilityOverlay` rank
+    /// **1** — note that band index and escape rank are *not* the same
+    /// ordering (`ZBand::Menu` is band index 2 but rank 3), which is
+    /// precisely the distinction this function used to get wrong.
+    ///
+    /// # The escape-rank bug this replaced (INT-2)
+    ///
+    /// The previous implementation was a hardcoded eight-branch `if`-chain
+    /// that unwound in this order:
+    ///
+    /// `Batch` → `Attributions` → `About` → `Tools` → **`AgentDebug`** →
+    /// `Dialog` → **`Editor`** → `ContextMenu` → `hamburger`
+    ///
+    /// Two of those steps contradict `UIF-WIN-003`, which unwinds
+    /// *menus before dialogs* and *never a modeless utility card ahead of
+    /// a blocking modal*:
+    ///
+    /// * **`Editor` (Modal, rank 2) closed ahead of `ContextMenu`
+    ///   (MenuCard, rank 3).** A menu sits above the surface it was opened
+    ///   from; the menu's owner is what the user is looking at *through*
+    ///   the menu. Dismissing the owner while its menu is still up throws
+    ///   away the context the menu was opened in. `Esc` over an open
+    ///   editor with a context menu on top destroyed the editor and left
+    ///   the orphan menu.
+    /// * **`AgentDebug` (MovableCard, rank 1) closed ahead of `Dialog` /
+    ///   `Editor` (rank 2).** A modeless utility overlay must not unwind
+    ///   ahead of a blocking modal; the modal is what is holding the user.
+    ///
+    /// The corrected order for the same fully-open stack is:
+    ///
+    /// `hamburger` → `ContextMenu` → `Batch` → `Attributions` → `About`
+    /// → `Tools` → `Dialog` → `Editor` → `AgentDebug`
     ///
     /// That is what makes `Esc` behave like a native stack: pressing it
     /// over the batch dialog does not also tear down the About window
-    /// underneath, and a second press is required to reach it.
+    /// underneath, a menu on top of a modal is dismissed *first*, and the
+    /// modeless debug card is left alone until everything blocking has gone.
     ///
     /// # What `Esc` deliberately does NOT close
     ///
@@ -384,43 +642,143 @@ impl OverlayState {
     /// menu slot that is `Some` with no rows is still reducer state worth
     /// clearing rather than leaving stranded.
     ///
+    /// # The Pre-Rank step, and why it is wired with no drag to cancel
+    ///
+    /// `UIF-WIN-003` step 1 is the pointer-captured drag the user is
+    /// still holding, and it must settle **before** the rank walk runs —
+    /// otherwise the focused surface dismisses while a slider the user is
+    /// still holding keeps tracking a pointer nobody is watching. The app
+    /// has no framework drag widget yet, so the `cancel_capture` closure
+    /// always answers `false` ("nothing to cancel"), which makes the step
+    /// a provably clean pass-through today. It is wired now, and tested as
+    /// a pass-through, so INT-6 inherits the ordering rather than
+    /// re-deriving it — and so the pass-through is not dead code that a
+    /// later reader has to trust.
+    ///
+    /// A `PreRankedEscape::DragCancelled` reports `None` here: the key was
+    /// spent on a drag, so no overlay layer closed and there is no layer
+    /// name to give. Whether a drag cancel deserves its own reported name
+    /// is an INT-6 decision.
+    ///
     /// [RUST-020]: mutates only `self`; performs no I/O and publishes no
-    /// bus event, which is what keeps the `Esc` reduction thin.
+    /// bus event, which is what keeps the `Esc` reduction thin, and
+    /// [FMD-069] keeps the state change on the UI thread that received the
+    /// key.
     pub fn close_topmost(&mut self) -> Option<&'static str> {
-        if self.batch.close() {
-            return Some(CLOSED_LAYER_BATCH);
+        self.sync_surfaces();
+
+        // Borrow the closable fields out separately from `surfaces` /
+        // `pre_rank` so the registry walk (which needs `&mut` of both)
+        // and the field writes the walk performs are disjoint borrows
+        // rather than one `&mut self` held across the call.
+        let OverlayState {
+            context_menu,
+            hamburger_open,
+            hamburger_menu_state,
+            editor,
+            dialog,
+            tools,
+            about,
+            batch,
+            debug,
+            surfaces,
+            pre_rank,
+            ..
+        } = self;
+
+        let mut closable = ClosableSurfaces {
+            context_menu,
+            hamburger_open,
+            hamburger_menu_state,
+            editor,
+            dialog,
+            tools,
+            about,
+            batch,
+            debug,
+            closed: None,
+        };
+
+        let escape = escape_with_pre_rank(
+            pre_rank,
+            surfaces,
+            // No framework drag widget is mounted yet, so there is never a
+            // capture to settle. See [`cancel_drag_capture`].
+            cancel_drag_capture,
+            |surface| closable.unwind(surface),
+        );
+
+        match escape {
+            // Step 1 spent the key on a drag; no overlay layer closed.
+            PreRankedEscape::DragCancelled { .. } => None,
+            PreRankedEscape::RankWalked { .. } => closable.closed,
         }
-        // `AboutWindowState` holds one `Option`, so the two identity
-        // windows are mutually exclusive; test the higher layer first so the
-        // returned name matches what was actually on top.
-        if self.about.is_attributions() {
-            self.about.close();
-            return Some(CLOSED_LAYER_ATTRIBUTIONS);
+    }
+}
+
+/// The app-side fields one `Escape` may close, borrowed out of
+/// [`OverlayState`] so the registry walk owns `&mut SurfaceRegistry` and
+/// `&mut PreRankCoordinator` while these are written independently.
+///
+/// Dispatch is on the [`SurfaceId`], not the [`SurfaceKind`]: several
+/// app surfaces share a kind (`MenuCard` covers both menus, `Modal`
+/// covers four cards), so the kind alone cannot say which field to clear.
+struct ClosableSurfaces<'a> {
+    context_menu: &'a mut Option<ContextMenu>,
+    hamburger_open: &'a mut bool,
+    hamburger_menu_state: &'a mut MenuState,
+    editor: &'a mut Option<EditorViewModel>,
+    dialog: &'a mut DialogState,
+    tools: &'a mut ToolsDialogState,
+    about: &'a mut AboutWindowState,
+    batch: &'a mut BatchDialogState,
+    debug: &'a mut AgentDebugWindowState,
+    /// The [`CLOSED_LAYER_*`](CLOSED_LAYER_BATCH) name of the surface that
+    /// accepted the walk, once one has.
+    closed: Option<&'static str>,
+}
+
+impl ClosableSurfaces<'_> {
+    /// Answer one `Escape` for one registered surface: close the
+    /// app-side field its [`SurfaceId`] names and report the layer
+    /// constant back.
+    ///
+    /// A surface whose field turns out not to be open answers
+    /// [`UnwindAnswer::Declined`] rather than pretending to have closed
+    /// something, so the walk keeps travelling instead of consuming the
+    /// key on a ghost.
+    fn unwind(&mut self, surface: &Surface) -> UnwindAnswer {
+        let (name, closed_something) = match surface.id().as_str() {
+            SURFACE_ID_CONTEXT_MENU => (
+                CLOSED_LAYER_CONTEXT_MENU,
+                self.context_menu.take().is_some(),
+            ),
+            SURFACE_ID_HAMBURGER => {
+                let was_open = std::mem::take(self.hamburger_open);
+                if was_open {
+                    self.hamburger_menu_state.close_all();
+                }
+                (CLOSED_LAYER_HAMBURGER, was_open)
+            }
+            SURFACE_ID_EDITOR => (CLOSED_LAYER_EDITOR, self.editor.take().is_some()),
+            SURFACE_ID_DIALOG => (CLOSED_LAYER_DIALOG, self.dialog.close()),
+            SURFACE_ID_TOOLS => (CLOSED_LAYER_TOOLS, self.tools.close()),
+            SURFACE_ID_ABOUT => (CLOSED_LAYER_ABOUT, self.about.close()),
+            SURFACE_ID_ATTRIBUTIONS => (CLOSED_LAYER_ATTRIBUTIONS, self.about.close()),
+            SURFACE_ID_BATCH => (CLOSED_LAYER_BATCH, self.batch.close()),
+            SURFACE_ID_AGENT_DEBUG => (CLOSED_LAYER_AGENT_DEBUG, self.debug.close()),
+            // `sync_surfaces` is the only writer of this index, so an
+            // unknown id means the two halves are wired wrong — not a
+            // user-facing state worth inventing a layer name for.
+            _ => return UnwindAnswer::Declined(DeclineReason::CannotUnwind),
+        };
+
+        if closed_something {
+            self.closed = Some(name);
+            UnwindAnswer::Dismissed
+        } else {
+            UnwindAnswer::Declined(DeclineReason::NotOpen)
         }
-        if self.about.is_about() {
-            self.about.close();
-            return Some(CLOSED_LAYER_ABOUT);
-        }
-        if self.tools.close() {
-            return Some(CLOSED_LAYER_TOOLS);
-        }
-        if self.debug.close() {
-            return Some(CLOSED_LAYER_AGENT_DEBUG);
-        }
-        if self.dialog.close() {
-            return Some(CLOSED_LAYER_DIALOG);
-        }
-        if self.editor.take().is_some() {
-            return Some(CLOSED_LAYER_EDITOR);
-        }
-        if self.context_menu.take().is_some() {
-            return Some(CLOSED_LAYER_CONTEXT_MENU);
-        }
-        if std::mem::take(&mut self.hamburger_open) {
-            self.hamburger_menu_state.close_all();
-            return Some(CLOSED_LAYER_HAMBURGER);
-        }
-        None
     }
 }
 
@@ -482,6 +840,46 @@ pub const CLOSED_LAYER_CONTEXT_MENU: &str = "context_menu";
 /// Layer name [`OverlayState::close_topmost`] reports for the top-bar
 /// hamburger menu ([UI-056]).
 pub const CLOSED_LAYER_HAMBURGER: &str = "hamburger";
+
+// ---------------------------------------------------------------------------
+// Framework surface identities (INT-2)
+// ---------------------------------------------------------------------------
+//
+// Registry keys for the derived [`SurfaceRegistry`] index, one per
+// closable layer. They are **diagnostic identities**, not user-facing text
+// and not `iced::widget::Id`s — the widget ids the reducer addresses live
+// in the module that owns the widget (§5 of `src/app/AGENTS.md`). Kept as
+// `&'static str` consts so no literal is repeated at a call site
+// ([RUST-021]) and so the id a surface is registered under and the id the
+// escape walk dispatches on cannot drift apart.
+
+/// Registry id for the floating tree / tab context menu (`MenuCard`).
+pub const SURFACE_ID_CONTEXT_MENU: &str = "overlay.context_menu";
+
+/// Registry id for the top-bar hamburger menu (`MenuCard`).
+pub const SURFACE_ID_HAMBURGER: &str = "overlay.hamburger";
+
+/// Registry id for the inline editor modal (`Modal`).
+pub const SURFACE_ID_EDITOR: &str = "overlay.editor";
+
+/// Registry id for the small name-entry / move / delete-confirmation
+/// dialog (`InputDialog`).
+pub const SURFACE_ID_DIALOG: &str = "overlay.dialog";
+
+/// Registry id for the tools dialog (`Modal`).
+pub const SURFACE_ID_TOOLS: &str = "overlay.tools";
+
+/// Registry id for the About window (`Modal`).
+pub const SURFACE_ID_ABOUT: &str = "overlay.about";
+
+/// Registry id for the third-party attributions window (`Modal`).
+pub const SURFACE_ID_ATTRIBUTIONS: &str = "overlay.attributions";
+
+/// Registry id for the batch prompt-processing dialog (`Modal`).
+pub const SURFACE_ID_BATCH: &str = "overlay.batch";
+
+/// Registry id for the agent debug window (`MovableCard`).
+pub const SURFACE_ID_AGENT_DEBUG: &str = "overlay.agent_debug";
 
 /// The z-ordered set of showing layers, bottom-most first.
 ///

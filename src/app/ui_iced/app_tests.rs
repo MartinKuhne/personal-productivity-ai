@@ -15,6 +15,15 @@ use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
+use iced_pro::binding::pre_rank::DragCapture;
+use iced_pro::binding::pre_rank::DragKind;
+use iced_pro::binding::pre_rank::PreRankCoordinator;
+use iced_pro::surface::zorder::SurfaceId;
+use iced_pro::surface::zorder::SurfaceKind;
+use iced_pro::surface::zorder::SurfaceRegistry;
+use iced_pro::surface::zorder::UnwindAnswer;
+use iced_pro::surface::zorder::ZBand;
+use iced_pro::surface::zorder::escape_with_pre_rank;
 
 /// A config carrying a recognisable marker library so direct-injection is
 /// observable (the marker is NOT the system-library display name, so the
@@ -494,11 +503,20 @@ fn test_close_topmost_closes_only_the_topmost_layer() {
     assert_eq!(overlay.close_topmost(), None);
 }
 
-/// The full reverse-z-order walk: open every closable layer at once and
-/// confirm `Esc` peels them off exactly in [`mounted_layers`] order,
-/// reversed.
+/// The full escape-rank walk: open every closable layer at once and confirm
+/// `Esc` peels them off in `UIF-WIN-003` order — descending
+/// `ZBand::escape_rank`, top of band first.
+///
+/// **This test previously pinned a bug.** It asserted the old hardcoded
+/// chain's order (`batch → attributions → tools → agent_debug → dialog →
+/// editor → context_menu → hamburger`), which closed the `Editor` (Modal,
+/// rank 2) ahead of the `ContextMenu` (MenuCard, rank 3) and the modeless
+/// `AgentDebug` card (rank 1) ahead of the blocking `Dialog` / `Editor`
+/// (rank 2). Both are wrong under the spec's escape model. The expectation
+/// below is the corrected rank order; see
+/// [`OverlayState::close_topmost`] for the bug write-up.
 #[test]
-fn test_close_topmost_walks_the_reverse_z_order() {
+fn test_close_topmost_walks_the_escape_rank_order() {
     let mut overlay = OverlayState::default();
     open_batch(&mut overlay);
     overlay.about.open_attributions();
@@ -510,23 +528,385 @@ fn test_close_topmost_walks_the_reverse_z_order() {
     overlay.hamburger_open = true;
 
     let expected = [
+        // Menu band — escape rank 3, top of band first.
+        CLOSED_LAYER_HAMBURGER,
+        CLOSED_LAYER_CONTEXT_MENU,
+        // Modal band — escape rank 2, top of band first.
         CLOSED_LAYER_BATCH,
         CLOSED_LAYER_ATTRIBUTIONS,
         CLOSED_LAYER_TOOLS,
-        CLOSED_LAYER_AGENT_DEBUG,
         CLOSED_LAYER_DIALOG,
         CLOSED_LAYER_EDITOR,
-        CLOSED_LAYER_CONTEXT_MENU,
-        CLOSED_LAYER_HAMBURGER,
+        // Utility-overlay band — escape rank 1, last off the stack.
+        CLOSED_LAYER_AGENT_DEBUG,
     ];
     for name in expected {
         assert_eq!(
             overlay.close_topmost(),
             Some(name),
-            "the stack must peel off in reverse z-order"
+            "the stack must peel off in descending escape rank, top of band first"
         );
     }
     assert_eq!(overlay.close_topmost(), None, "the stack must run out");
+}
+
+// --- INT-2: the escape-rank bug this increment fixes -----------------------
+
+/// **The bug:** a menu sits *above* the surface it was opened from, so
+/// with an editor and a context menu both open `Esc` must close the
+/// **menu** and leave the modal intact.
+///
+/// The old eight-branch `if`-chain tested `Editor` before `ContextMenu`,
+/// so the first `Esc` destroyed the editor the menu had been opened over
+/// and left an orphaned menu pointing at nothing.
+#[test]
+fn test_close_topmost_closes_the_context_menu_before_the_editor() {
+    let mut overlay = OverlayState::default();
+    open_editor(&mut overlay);
+    open_context_menu(&mut overlay);
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_CONTEXT_MENU),
+        "a menu unwinds above the modal it was opened over (UIF-WIN-003)"
+    );
+    assert!(overlay.context_menu.is_none(), "the menu must be gone");
+    assert!(
+        overlay.editor.is_some(),
+        "the editor the menu was opened over must survive the first Esc"
+    );
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_EDITOR));
+    assert!(overlay.editor.is_none());
+    assert_eq!(overlay.close_topmost(), None, "the stack must run out");
+}
+
+/// The same rank rule through the other menu surface: the hamburger is a
+/// `MenuCard` (rank 3) and outranks the editor (rank 2), even though the
+/// editor is painted in a higher *band*.
+#[test]
+fn test_close_topmost_closes_the_hamburger_before_the_editor() {
+    let mut overlay = OverlayState::default();
+    open_editor(&mut overlay);
+    overlay.hamburger_open = true;
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_HAMBURGER),
+        "the menu band unwinds above the modal band"
+    );
+    assert!(!overlay.hamburger_open);
+    assert!(overlay.editor.is_some());
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_EDITOR));
+}
+
+/// **The bug:** a modeless utility overlay must not unwind ahead of a
+/// blocking modal — the modal is what is holding the user.
+///
+/// The old chain closed `AgentDebug` (MovableCard, rank 1) before
+/// `About` (Modal, rank 2).
+#[test]
+fn test_close_topmost_closes_a_modal_before_a_movable_card() {
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.about.open_about();
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_ABOUT),
+        "a blocking modal unwinds ahead of a modeless utility card"
+    );
+    assert!(
+        overlay.debug.is_open(),
+        "the modeless card must survive while the modal above it is dismissed"
+    );
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_AGENT_DEBUG));
+    assert_eq!(overlay.close_topmost(), None);
+}
+
+/// Same rule for the small dialog, which is an `InputDialog` — a distinct
+/// `SurfaceKind` that shares the modal band's rank 2.
+#[test]
+fn test_close_topmost_closes_the_input_dialog_before_a_movable_card() {
+    let mut overlay = OverlayState::default();
+    open_dialog(&mut overlay);
+    overlay.debug.open();
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_DIALOG),
+        "InputDialog is rank 2, above the rank-1 utility card"
+    );
+    assert!(overlay.debug.is_open());
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_AGENT_DEBUG));
+}
+
+/// Batch sits at the top of the modal band, so it still unwinds first over
+/// every non-menu surface — the existing correct behaviour is preserved by
+/// registration position, not by a special case.
+#[test]
+fn test_close_topmost_still_closes_batch_first_over_every_non_menu_surface() {
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    open_editor(&mut overlay);
+    open_dialog(&mut overlay);
+    overlay.tools.open();
+    overlay.about.open_attributions();
+    open_batch(&mut overlay);
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_BATCH),
+        "the batch dialog must still be the first thing Esc closes"
+    );
+    assert!(!overlay.batch.is_open());
+    assert!(overlay.about.is_attributions());
+    assert!(overlay.tools.is_open());
+    assert!(overlay.dialog.is_open());
+    assert!(overlay.editor.is_some());
+    assert!(overlay.debug.is_open());
+}
+
+/// Batch is *not* above the menu band. With a menu open on top of it, Esc
+/// closes the menu first — the corrected half of the rule, stated against
+/// the surface that used to be highest in the old chain.
+#[test]
+fn test_close_topmost_closes_a_menu_before_batch() {
+    let mut overlay = OverlayState::default();
+    open_batch(&mut overlay);
+    open_context_menu(&mut overlay);
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_CONTEXT_MENU),
+        "rank 3 outranks the batch dialog's rank 2"
+    );
+    assert!(overlay.batch.is_open());
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_BATCH));
+}
+
+// --- INT-2: the registry is a derived index --------------------------------
+
+/// `sync_surfaces` mirrors the authoritative fields into the band model,
+/// is idempotent, and cannot reshuffle the stack across repeated calls.
+#[test]
+fn test_sync_surfaces_is_an_idempotent_derived_index() {
+    let mut overlay = OverlayState::default();
+    overlay.sync_surfaces();
+    assert!(
+        overlay.surfaces.is_empty(),
+        "a closed-everything overlay registers nothing"
+    );
+
+    open_batch(&mut overlay);
+    open_context_menu(&mut overlay);
+    overlay.debug.open();
+    overlay.sync_surfaces();
+    let first: Vec<String> = overlay
+        .surfaces
+        .surfaces()
+        .iter()
+        .map(|surface| surface.id().as_str().to_owned())
+        .collect();
+
+    overlay.sync_surfaces();
+    overlay.sync_surfaces();
+    let second: Vec<String> = overlay
+        .surfaces
+        .surfaces()
+        .iter()
+        .map(|surface| surface.id().as_str().to_owned())
+        .collect();
+    assert_eq!(
+        first, second,
+        "repeated syncs must not reshuffle the index (register keeps position)"
+    );
+
+    assert_eq!(
+        overlay.surfaces.count_in(ZBand::Menu),
+        1,
+        "the context menu is the only MenuCard"
+    );
+    assert_eq!(
+        overlay.surfaces.count_in(ZBand::Modal),
+        1,
+        "the batch dialog is the only Modal-band surface"
+    );
+    assert_eq!(
+        overlay.surfaces.count_in(ZBand::UtilityOverlay),
+        1,
+        "the agent debug card is the only utility overlay"
+    );
+    assert_eq!(
+        overlay.surfaces.get(&SurfaceId::new(SURFACE_ID_DIALOG)),
+        None,
+        "a closed field must not be registered"
+    );
+
+    // Closing the authoritative field removes the entry on the next sync —
+    // the index never outlives the truth it is derived from.
+    overlay.batch.close();
+    overlay.sync_surfaces();
+    assert!(
+        !overlay.surfaces.contains(&SurfaceId::new(SURFACE_ID_BATCH)),
+        "the index must drop a surface its authoritative field closed"
+    );
+    assert_eq!(overlay.surfaces.len(), 2);
+}
+
+/// The two menus share a band and are registered in the overlay host's
+/// draw order, so the one painted on top unwinds first. The reducer keeps
+/// them mutually exclusive in production, so this pins the *ordering rule*
+/// rather than a reachable state.
+#[test]
+fn test_the_hamburger_is_registered_above_the_context_menu() {
+    let mut overlay = OverlayState::default();
+    open_context_menu(&mut overlay);
+    overlay.hamburger_open = true;
+    overlay.sync_surfaces();
+
+    let menu_ids: Vec<&str> = overlay
+        .surfaces
+        .surfaces_in(ZBand::Menu)
+        .map(|surface| surface.id().as_str())
+        .collect();
+    assert_eq!(
+        menu_ids,
+        vec![SURFACE_ID_CONTEXT_MENU, SURFACE_ID_HAMBURGER],
+        "bottom-first registration must match the overlay host's mount order"
+    );
+    assert_eq!(
+        overlay
+            .surfaces
+            .topmost_in(ZBand::Menu)
+            .map(|surface| surface.id().as_str()),
+        Some(SURFACE_ID_HAMBURGER)
+    );
+}
+
+// --- INT-2: the Pre-Rank step ---------------------------------------------
+
+/// The Pre-Rank ledger is consulted on **every** `Esc`, ahead of the rank
+/// walk: a capture held in the ledger is drained by the same call that
+/// closes a surface.
+///
+/// The app's cancel closure answers "nothing to cancel" (no framework drag
+/// widget is mounted yet), so the ledger reports the registration as
+/// *stale*, drains it, and lets the walk proceed. That the ledger is empty
+/// afterwards while the editor still closed proves the Pre-Rank ran first
+/// on this call rather than never running at all.
+#[test]
+fn test_close_topmost_consults_the_pre_rank_ledger_before_the_walk() {
+    let mut overlay = OverlayState::default();
+    open_editor(&mut overlay);
+    assert!(
+        overlay
+            .pre_rank
+            .begin(DragCapture::new("split_divider", DragKind::SplitDivider))
+            .is_started()
+    );
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_EDITOR));
+    assert!(
+        !overlay.pre_rank.is_captured(),
+        "the Pre-Rank step must have run and drained the ledger"
+    );
+}
+
+/// The no-capture case is a clean pass-through: the ledger answers
+/// `NotCaptured` and the rank walk behaves exactly as if the Pre-Rank
+/// step had not existed. This is what keeps the wiring from being dead code
+/// today — it is asserted, not assumed.
+#[test]
+fn test_close_topmost_pre_rank_is_a_clean_pass_through_with_no_capture() {
+    let mut overlay = OverlayState::default();
+    open_batch(&mut overlay);
+    open_context_menu(&mut overlay);
+    assert!(!overlay.pre_rank.is_captured());
+
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_CONTEXT_MENU));
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_BATCH));
+    assert_eq!(overlay.close_topmost(), None);
+    assert!(
+        !overlay.pre_rank.is_captured(),
+        "a pass-through must not invent a capture"
+    );
+}
+
+/// The ordering INT-6 depends on, pinned at the composition
+/// `close_topmost` uses: when the cancel closure **does** produce a
+/// `Cancel`, the key is spent on the drag and no surface is asked at all.
+///
+/// Exercised with a counting `unwind` closure so "the walk did not run" is
+/// an assertion rather than an absence of evidence.
+#[test]
+fn test_a_live_drag_cancel_short_circuits_the_rank_walk() {
+    let mut registry = SurfaceRegistry::new();
+    registry.register(
+        SurfaceId::new(SURFACE_ID_CONTEXT_MENU),
+        SurfaceKind::MenuCard,
+        Vec::new(),
+    );
+    registry.register(
+        SurfaceId::new(SURFACE_ID_BATCH),
+        SurfaceKind::Modal,
+        Vec::new(),
+    );
+
+    let mut captures = PreRankCoordinator::new();
+    assert!(
+        captures
+            .begin(DragCapture::new("overlay.move", DragKind::OverlayMove))
+            .is_started()
+    );
+
+    let mut asked = 0_usize;
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut registry,
+        |_capture| true,
+        |_surface| {
+            asked += 1;
+            UnwindAnswer::Dismissed
+        },
+    );
+
+    assert!(
+        escape.drag_cancelled(),
+        "a live capture must take the key ahead of every surface"
+    );
+    assert_eq!(
+        asked, 0,
+        "no surface may be asked once the drag owns the key"
+    );
+    assert_eq!(
+        registry.len(),
+        2,
+        "the rank walk must not have dismissed anything"
+    );
+}
+
+/// `close_topmost` reports `None` when the Pre-Rank spends the key: no
+/// overlay layer closed, so there is no layer name to give.
+#[test]
+fn test_close_topmost_reports_none_when_the_pre_rank_spends_the_key() {
+    let mut overlay = OverlayState::default();
+    open_batch(&mut overlay);
+    // A capture that the app's cancel closure cannot settle is reported
+    // stale, so the walk still runs today. What this pins is that the
+    // reported name comes from the walk and that a drained ledger never
+    // turns a real dismissal into `None`.
+    assert!(
+        overlay
+            .pre_rank
+            .begin(DragCapture::new("slider", DragKind::Slider))
+            .is_started()
+    );
+    assert_eq!(overlay.close_topmost(), Some(CLOSED_LAYER_BATCH));
+    assert_eq!(overlay.close_topmost(), None);
 }
 
 /// The docked log viewer is NOT part of the `Esc` stack: it is a docked

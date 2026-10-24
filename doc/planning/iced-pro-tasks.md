@@ -1205,6 +1205,148 @@ filtering, column definitions and cell rendering.
 
 ---
 
+## 3c. App integration increments (INT-*)
+
+D-3 said "standalone first — wiring is a later, separate project". That
+later project started here. These increments **do** touch `src/app/**`;
+they are the exception to the M-series constraint, taken under a separate
+supervisor instruction on branch `feature/iced-pro`.
+
+### INT-1 — Token bridge (done; recorded in `ARCHITECTURE_C4.md`)
+
+`fastmd` depends on `iced-pro` and reads `UIF-TOK-005` from it. See
+`doc/technical-context/ARCHITECTURE_C4.md` §"Consumption status (INT-1)".
+
+### INT-2 — Escape / z-order: the overlay host walks the band model
+
+**Scope: the z-order half only.** `OverlayState::close_topmost` no longer
+decides "which layer is on top" from a hardcoded eight-branch `if`-chain;
+it drives `iced_pro::surface::zorder::escape_with_pre_rank` over a
+derived `SurfaceRegistry`.
+
+**The registry is a DERIVED INDEX, not a second source of truth.** The
+individual window-state fields (`batch`, `about`, `tools`, `debug`,
+`dialog`, `editor`, `context_menu`, `hamburger_open`) remain the single
+authority for *whether* a surface is open. `OverlayState::sync_surfaces`
+mirrors them into the band model — open → `register`, closed →
+`unregister` — and is called at the top of `close_topmost`, the only
+moment the index must be exact. Hooking every update path was deliberately
+not attempted in this increment. Idempotency comes from `register`
+keeping an existing id's band position, so a card rebuilt every frame
+cannot reshuffle the stack.
+
+#### The escape-rank bug this fixed
+
+The old chain contradicted `UIF-WIN-003` in two places. `ZBand::escape_rank`
+is **not** band index (`Menu` is band index 2 but rank 3), and the chain
+had been written as if it were.
+
+| Situation | Old (wrong) first `Esc` | New (correct) first `Esc` | Rule |
+|---|---|---|---|
+| `Editor` + `ContextMenu` | `editor` — destroyed the modal the menu was opened over, orphaning the menu | `context_menu` | `Menu` rank 3 unwinds above `Modal` rank 2 |
+| `About` (Modal) + `AgentDebug` (MovableCard) | `agent_debug` | `about` | a modeless utility card must not unwind ahead of a blocking modal |
+| `Dialog` + `AgentDebug` | `agent_debug` | `dialog` | `InputDialog` is rank 2, above rank 1 |
+| `Batch` + non-menu surfaces | `batch` | `batch` | unchanged — correct behaviour preserved |
+| `Batch` + `ContextMenu` | `batch` | `context_menu` | rank 3 outranks rank 2 |
+
+Full-stack unwind order, same seven-plus surfaces open:
+
+| # | Old chain | New rank walk |
+|---|---|---|
+| 1 | batch | **hamburger** (rank 3) |
+| 2 | attributions | **context_menu** (rank 3) |
+| 3 | about | batch (rank 2) |
+| 4 | tools | attributions (rank 2) |
+| 5 | **agent_debug** (rank 1 — too early) | tools (rank 2) |
+| 6 | dialog | dialog (rank 2) |
+| 7 | editor | editor (rank 2) |
+| 8 | context_menu (rank 3 — too late) | **agent_debug** (rank 1) |
+| 9 | hamburger | — |
+
+`test_close_topmost_walks_the_reverse_z_order` was **pinning the old wrong
+order**. It is replaced by `test_close_topmost_walks_the_escape_rank_order`
+with the corrected expectation, plus targeted tests for each row of the
+table above.
+
+#### Surface mapping
+
+| App surface | `SurfaceKind` | Band / escape rank |
+|---|---|---|
+| `ContextMenu`, `Hamburger` | `MenuCard` | 2 / **3** |
+| `Editor`, `Tools`, `About`, `Attributions`, `Batch` | `Modal` | 3 / **2** |
+| `Dialog` | `InputDialog` | 3 / **2** |
+| `AgentDebug` | `MovableCard` | 1 / **1** |
+| `Logs` (docked background viewer) | *not registered* | — |
+
+`Logs` stays out of the registry for the reason already recorded on
+`close_topmost`: its visibility is application state owned by
+`UserCommand::ToggleBackgroundLogs`, not reducer-held overlay state, and
+it is not `Esc`-closable.
+
+**Areas that did not map cleanly, recorded in code rather than forced:**
+
+* **Regions are empty on every registration.** The app has no card
+  geometry in the reducer. Per `SurfaceRegistry`'s contract a regionless
+  surface still stacks and still takes part in `Escape`, which is the half
+  wired here — but `route_pointer` can never answer
+  `PointerTarget::Surface` against this index; it falls through to the
+  band rule (`DismissBand(Menu)` / `Scrim(..)`). Recorded on
+  `sync_surfaces` as a **review area**: real viewport rectangles arrive
+  with the widget increments (INT-3..7).
+* **`About` and `Attributions` share one `AboutWindowState`** (a single
+  `Option`), so they are two `SurfaceId`s over one authoritative field and
+  are mutually exclusive by construction.
+* **The two menus are mutually exclusive in production**
+  (`update.rs`: opening one dismisses the other), so their relative
+  within-band order is an ordering *rule* pinned by test, not a reachable
+  state. It follows the overlay host's draw order (context menu mounted
+  first, hamburger on top), so the card painted on top unwinds first.
+
+#### Decision: Tab / `FocusState` projection is deliberately deferred
+
+Recorded in the `OverlayState` struct doc comment
+(`src/app/ui_iced/app.rs`). The app captures **only** `Escape` off the
+runtime keyboard stream (`ui_iced/subscription.rs:442`); `Tab` traversal
+is owned exclusively by iced's built-in router today. Introducing
+`iced_pro::focus::FocusState` + `bridge::tab_task` now would run a second
+focus model in parallel with iced's with nothing keeping its member set in
+sync against the live widget tree — the app never enumerates its
+focusables, so the framework's member set would be fiction. The sync
+problem disappears once the framework widgets of INT-3..7 self-register
+their focusables as they are built, so the projection belongs there.
+
+Also recorded there: the original integration plan named
+`bridge::advance` / `bridge::sync` / `bridge::apply_transition`. **Those
+do not exist.** The real bridge API is
+`bridge::tab_task(model, direction)` / `bridge::focus_task(model)` /
+`bridge::focus_operation` / `bridge::widget_id`.
+
+#### Decision: the Pre-Rank step is wired with a no-op cancel
+
+`close_topmost` runs `escape_with_pre_rank` on every `Esc`, but the
+`cancel_capture` closure (`cancel_drag_capture`, `app.rs`) always answers
+`false`: no framework drag widget is mounted, so no capture can exist.
+The step is a **provably clean pass-through today**, asserted by
+`test_close_topmost_pre_rank_is_a_clean_pass_through_with_no_capture` so
+it is not dead code a later reader has to trust, and
+`test_close_topmost_consults_the_pre_rank_ledger_before_the_walk` proves
+the ledger is drained by the same call that closes a surface.
+`test_a_live_drag_cancel_short_circuits_the_rank_walk` pins the ordering
+INT-6 depends on — a `Cancel` spends the key and no surface is asked — at
+the same composition the app uses. **INT-6 must replace the body of
+`cancel_drag_capture`** with a dispatch to the capturing control's own
+`GestureSlot::cancel`, keyed on `DragCapture::id`.
+
+#### Gates (INT-2)
+
+`cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **7250 passed, 6 skipped** (was 7238; +12 new) ·
+`cargo clippy --workspace --all-targets -- -D warnings` clean ·
+`cargo fmt --check` clean · `cargo doc --workspace --no-deps` after
+`cargo clean --doc`: all 5 crates re-documented, **0 warning lines**.
+
+---
+
 ## 4. Known spec gaps / open questions
 
 Recorded as they are found; none resolved yet.
