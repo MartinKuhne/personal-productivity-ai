@@ -97,7 +97,7 @@ fn spec_rows() -> [SpecRow; 6] {
             size: 13.0,
             line_height: 18.0,
             weight: Weight::Regular,
-            emphasis_weight: Weight::Medium,
+            emphasis_weight: Weight::SemiBold,
             allowed: &[
                 Weight::Regular,
                 Weight::Medium,
@@ -113,8 +113,8 @@ fn spec_rows() -> [SpecRow; 6] {
             size: 14.0,
             line_height: 20.0,
             weight: Weight::Regular,
-            emphasis_weight: Weight::Regular,
-            allowed: &[Weight::Regular, Weight::Medium],
+            emphasis_weight: Weight::Medium,
+            allowed: &[Weight::Regular, Weight::Medium, Weight::SemiBold],
             tracking: 0.0,
             stated_ratio: 1.43,
         },
@@ -136,7 +136,7 @@ fn spec_rows() -> [SpecRow; 6] {
             line_height: 28.0,
             weight: Weight::Bold,
             emphasis_weight: Weight::Bold,
-            allowed: &[Weight::Bold],
+            allowed: &[Weight::SemiBold, Weight::Bold],
             tracking: -0.015,
             stated_ratio: 1.40,
         },
@@ -405,28 +405,52 @@ fn test_emphasis_never_weaker_than_resting() {
     }
 }
 
-/// The shape of the spec's `Weight` column is preserved: the three
-/// single-weight rungs carry the same weight in both fields (emphasis is
-/// a deliberate no-op, not an undefined gap), and the three
-/// two-weight rungs step up exactly one rank.
+/// The shape of the spec's `Resting / Emphasis` column, rung by rung,
+/// as §2.4 actually prints it.
+///
+/// The model this test used to defend — three single-weight rungs, and
+/// every two-weight rung stepping exactly one rank — was an invention,
+/// and the transcription was written to match the invention rather than
+/// the document. §2.4 contradicts both halves of it. `type.body` is a
+/// one-rank rung (`Regular / Medium`), not a single-weight one, and
+/// `type.ui_compact` steps **two** ranks (`Regular / SemiBold`). Only
+/// `type.title_md` and `type.title_lg` are single-weight.
+///
+/// The step is asserted per rung rather than by a rule, because the
+/// document's column is a table of facts, not a generated pattern: if a
+/// future revision moves one rung, this fails and forces the rung and the
+/// table to be reconciled on purpose.
 #[test]
-fn test_single_weight_rungs_and_two_weight_rungs_have_the_specified_shape() {
+fn test_rung_weight_shape_matches_the_spec_column() {
+    // Emphasis step in ranks, exactly as §2.4's column reads.
+    let expected_step: [(&str, i8); 6] = [
+        ("type.caption", 1),    // Regular  -> Medium
+        ("type.ui_compact", 2), // Regular  -> SemiBold
+        ("type.body", 1),       // Regular  -> Medium
+        ("type.title_sm", 1),   // SemiBold -> Bold
+        ("type.title_md", 0),   // Bold     -> Bold
+        ("type.title_lg", 0),   // Bold     -> Bold
+    ];
     for row in spec_rows() {
         // Signed so a rung that emphasised *lighter* reports through the
         // assertion below rather than as an arithmetic underflow panic.
         let step = row.rung.emphasis_weight.rank() as i8 - row.rung.weight.rank() as i8;
-        match row.token {
-            "type.body" | "type.title_md" | "type.title_lg" => assert_eq!(
-                step, 0,
-                "{} is a single-weight rung: emphasis {:?} must equal resting {:?}",
-                row.token, row.rung.emphasis_weight, row.rung.weight
-            ),
-            _ => assert_eq!(
-                step, 1,
-                "{} is a two-weight rung: emphasis {:?} must be exactly one rank above resting {:?}",
-                row.token, row.rung.emphasis_weight, row.rung.weight
-            ),
-        }
+        let expected = expected_step
+            .iter()
+            .find(|(token, _)| *token == row.token)
+            .unwrap_or_else(|| panic!("no spec expectation for {}", row.token))
+            .1;
+        assert_eq!(
+            step,
+            expected,
+            "{} emphasises {:?} (rank {}) from resting {:?} (rank {}), a step of \
+             {step}; §2.4 prints a step of {expected}",
+            row.token,
+            row.rung.emphasis_weight,
+            row.rung.emphasis_weight.rank(),
+            row.rung.weight,
+            row.rung.weight.rank()
+        );
     }
 }
 
@@ -651,22 +675,46 @@ fn test_resting_and_emphasis_are_members_of_their_own_permitted_set() {
     }
 }
 
-/// The resting weight is the *lightest* permitted one, so a rung's
-/// default voice is never heavier than it has to be and every other
-/// permitted weight reads as emphasis against it.
+/// Every rung rests at the bottom of its own permitted set, with exactly
+/// one exception that §2.4 itself creates: `type.title_md` rests at Bold
+/// while also permitting SemiBold, so its resting voice is heavier than
+/// the lightest weight it may carry.
+///
+/// This test used to assert "resting is always the lightest permitted"
+/// across all six rungs. That was never a property of the document — it
+/// was a property of the code, which had narrowed `TITLE_MD`'s permitted
+/// set to Bold alone in order to make the invariant hold. The set is now
+/// what §2.4 prints, so the exception is named rather than designed away.
 #[test]
-fn test_resting_weight_is_the_lightest_permitted() {
+fn test_only_title_md_rests_above_the_lightest_permitted_weight() {
     for row in spec_rows() {
-        for weight in row.rung.allowed_weights {
-            assert!(
-                row.rung.weight.rank() <= weight.rank(),
-                "{} rests at {:?} (rank {}) but permits {:?} (rank {}), which is \
-                 lighter than its resting weight",
+        let lightest = row
+            .rung
+            .allowed_weights
+            .iter()
+            .map(|w| w.rank())
+            .min()
+            .unwrap_or(u8::MAX);
+        if row.token == "type.title_md" {
+            assert_eq!(
+                row.rung.weight.rank() as i16 - lightest as i16,
+                1,
+                "{} is the spec's one rung resting above its lightest permitted \
+                 weight: rests {:?} (rank {}), lightest permitted rank {lightest}",
                 row.token,
                 row.rung.weight,
+                row.rung.weight.rank()
+            );
+        } else {
+            assert_eq!(
                 row.rung.weight.rank(),
-                weight,
-                weight.rank()
+                lightest,
+                "{} rests at {:?} (rank {}) but its lightest permitted weight is \
+                 rank {lightest}; only type.title_md may rest above the bottom of \
+                 its set",
+                row.token,
+                row.rung.weight,
+                row.rung.weight.rank()
             );
         }
     }

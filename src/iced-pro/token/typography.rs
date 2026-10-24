@@ -407,14 +407,16 @@ pub const CAPTION: TypeRung = TypeRung {
 /// contents, tab labels, menu items and table cells.
 ///
 /// The widest permitted set on the scale: all four weights. The rung
-/// rests at Regular and emphasises to Medium, while an active tab label
-/// at SemiBold and a movable overlay title at Bold (§4.7.1) both sit
-/// inside what the rung allows. Four legal weights, one resting voice.
+/// rests at Regular and emphasises to SemiBold (§2.4), while an active
+/// tab label at SemiBold and a movable overlay title at Bold (§4.7.1)
+/// both sit inside what the rung allows. Four legal weights, one resting
+/// voice, and an emphasis step that is a full weight rather than a nudge
+/// — dense lists have to be able to shout without leaving the rung.
 pub const UI_COMPACT: TypeRung = TypeRung {
     size: 13.0,
     line_height: 18.0,
     weight: Weight::Regular,
-    emphasis_weight: Weight::Medium,
+    emphasis_weight: Weight::SemiBold,
     allowed_weights: &[
         Weight::Regular,
         Weight::Medium,
@@ -429,18 +431,19 @@ pub const UI_COMPACT: TypeRung = TypeRung {
 /// Primary usage: document prose, dialog prompt text, text input values
 /// and the inline editor buffer.
 ///
-/// The scale's single-weight rung: [`weight`](TypeRung::weight) and
-/// [`emphasis_weight`](TypeRung::emphasis_weight) are both
-/// [`Weight::Regular`], so emphasising body text changes nothing about
-/// its weight. Medium is nonetheless permitted alongside Regular, so
-/// prose can be given weight without leaving the rung — that is a
-/// deliberate choice a caller makes, not what emphasis does here.
+/// Per §2.4 the rung rests at Regular and emphasises to **Medium**, and
+/// permits Regular, Medium and SemiBold. It is not a single-weight rung:
+/// a body paragraph that needs a voice of its own can take one without
+/// leaving the rung, and `emphasis_font` actually moves the weight.
+/// SemiBold is permitted but is not the emphasis target — prose that
+/// wants SemiBold asks for it explicitly rather than getting it by
+/// emphasising.
 pub const BODY: TypeRung = TypeRung {
     size: 14.0,
     line_height: 20.0,
     weight: Weight::Regular,
-    emphasis_weight: Weight::Regular,
-    allowed_weights: &[Weight::Regular, Weight::Medium],
+    emphasis_weight: Weight::Medium,
+    allowed_weights: &[Weight::Regular, Weight::Medium, Weight::SemiBold],
     tracking: 0.0,
 };
 
@@ -467,15 +470,17 @@ pub const TITLE_SM: TypeRung = TypeRung {
 ///
 /// Primary usage: document H2 headings and the About dialog header.
 ///
-/// A single-weight rung with a single-weight set: Bold is the only weight
-/// the rung permits, so it has no emphasis range at all and
-/// [`allows`](TypeRung::allows) is false for the other three.
+/// Rests at Bold and emphasises to Bold, so it has no emphasis range —
+/// but per §2.4 its permitted set is SemiBold **and** Bold. The rung
+/// chooses Bold, it does not forbid SemiBold: a heading one degree
+/// quieter is legal at this size and [`allows`](TypeRung::allows) says
+/// so. Only Regular and Medium are refused outright.
 pub const TITLE_MD: TypeRung = TypeRung {
     size: 20.0,
     line_height: 28.0,
     weight: Weight::Bold,
     emphasis_weight: Weight::Bold,
-    allowed_weights: &[Weight::Bold],
+    allowed_weights: &[Weight::SemiBold, Weight::Bold],
     tracking: -0.015,
 };
 
