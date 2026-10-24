@@ -33,6 +33,7 @@ pub mod gallery_secret;
 pub mod gallery_segmented;
 pub mod gallery_split_button;
 pub mod gallery_suggest;
+pub mod gallery_table;
 pub mod gallery_toggle;
 pub mod gallery_tree;
 pub mod geometry;

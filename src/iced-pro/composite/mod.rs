@@ -52,6 +52,22 @@
 //! * [`tree_view`] - the tree model: visible-row flattening, single and multi
 //!   selection keyed by node id, the keyboard contract, and the
 //!   scroll-into-view handoff to [`virtual_list`]
+//! * [`table_column`] - the column model and the pure width resolver: every
+//!   column declares a floor, a target and a ceiling, and the layout is a
+//!   function of the specs plus the available width alone. The
+//!   over-subscribed-minimums case is reported as `needs_horizontal_scroll`
+//!   rather than silently violated (`UIF-COMP-007`)
+//! * [`table_cell`] - framework-owned cell rendering (decision **D-8**): the
+//!   band a row sits on, the cell and content boxes inside a resolved column,
+//!   and the grid-line colour promoted where `border.subtle` would fall below
+//!   the legibility floor once it sits on a tinted band
+//! * [`table_header`] - the header cell: a sort target and a resize handle
+//!   that are disjoint by construction, so a small accidental drag never
+//!   sorts and a click on the title never starts a resize
+//! * [`table_view`] - the grid model: row selection on the same anchor
+//!   semantics [`tree_view`] defines, cell-level keyboard traversal, a stable
+//!   sort that cannot change which rows are selected, the resize gesture, and
+//!   the sticky header kept out of the row-recycling cycle
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures �3B prints that no rung carries � the `20px` field header, the
@@ -67,6 +83,10 @@ pub mod list_tile;
 pub mod notification;
 pub mod scroll_view;
 pub mod settings_row;
+pub mod table_cell;
+pub mod table_column;
+pub mod table_header;
+pub mod table_view;
 pub mod toast;
 pub mod tree_row;
 pub mod tree_view;

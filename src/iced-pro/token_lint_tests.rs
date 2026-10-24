@@ -49,7 +49,7 @@ use crate::token_lint::{
 /// 107 as of `INC-47`, which added the notification subsystem:
 /// `composite/notification.rs` (the shared severity and model),
 /// `composite/info_bar.rs` and `composite/toast.rs`.
-const PIN_FILES_SCANNED: usize = 111;
+const PIN_FILES_SCANNED: usize = 116;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -68,7 +68,11 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 70 as of `INC-47`, whose three additions are the notification
 /// subsystem's modules — `composite/notification.rs`,
 /// `composite/info_bar.rs` and `composite/toast.rs`.
-const PIN_RULE_B_FILES: usize = 73;
+///
+/// 77 as of `INC-49`, whose four additions are the structured grid's
+/// resolvers — `composite/table_column.rs`, `composite/table_cell.rs`,
+/// `composite/table_header.rs` and `composite/table_view.rs`.
+const PIN_RULE_B_FILES: usize = 77;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -125,7 +129,15 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `*_GUTTER` (no marker), `MAX_VISIBLE` is a `usize`, and `WIDTH` is a
 /// bare `360.0` registered as a Surface Geometry Constant because §2.3
 /// has no `size.toast.width` rung for it to read.
-const PIN_TOKEN_BOUND: usize = 175;
+///
+/// 186 as of `INC-49`, whose eleven additions are the structured grid's
+/// token reads: `table_cell::{CELL_PADDING_X, CELL_PADDING_Y,
+/// BODY_ROW_MIN_HEIGHT, GRID_LINE_WIDTH}`, `table_header::{HEADER_HEIGHT,
+/// RESIZE_GRAB, HEADER_BORDER_WIDTH, CELL_TITLE_PADDING_X,
+/// SORT_INDICATOR_SIZE, SORT_INDICATOR_GAP}` and
+/// `table_view::ROW_HEIGHT` (which reads `BODY_ROW_MIN_HEIGHT` rather
+/// than restating 32px, so the row height has exactly one source).
+const PIN_TOKEN_BOUND: usize = 186;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -145,7 +157,13 @@ const PIN_RATIO: usize = 1;
 ///
 /// 25 as of `INC-47`, which registered `toast::WIDTH` (360px) against
 /// §3B.2 — the same treatment §3.7's popover width range gets.
-const PIN_SURFACE_BOUND: usize = 25;
+///
+/// 26 as of `INC-49`, which registered `table_header::RESIZE_REACH` —
+/// half of §3.7's 10px column-resize grab, the reach split evenly across
+/// the divider so the sort target and the handle cannot overlap. No rung
+/// carries a half-grab, so the figure needs the registry rather than a
+/// token read.
+const PIN_SURFACE_BOUND: usize = 26;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

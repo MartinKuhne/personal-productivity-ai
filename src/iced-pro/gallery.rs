@@ -4426,6 +4426,7 @@ pub fn matrix() -> Vec<Cell> {
     cells.extend(crate::gallery_progress::progress_cells());
     cells.extend(crate::gallery_composite::composite_cells());
     cells.extend(crate::gallery_tree::tree_cells());
+    cells.extend(crate::gallery_table::table_cells());
     cells.extend(menu_cells());
     cells.extend(menu_glyph_cells());
     cells.extend(menu_row_tier_cells());

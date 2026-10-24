@@ -436,6 +436,20 @@ fn expected_ids() -> Vec<String> {
     ] {
         ids.push(format!("virtual-list/{sample}"));
     }
+    for band in ["base", "raised", "hover", "selected"] {
+        ids.push(format!("table-cell/{band}"));
+    }
+    for regime in ["surplus", "at-target", "deficit", "oversubscribed"] {
+        ids.push(format!("table-column/{regime}"));
+    }
+    for posture in [
+        "sortable-resizable",
+        "sorted-ascending",
+        "sorted-descending",
+        "last-column",
+    ] {
+        ids.push(format!("table-header/{posture}"));
+    }
     ids.extend(
         [
             "rest",
@@ -689,6 +703,9 @@ fn per_subject_cell_counts_match_the_plan() {
         // the adaptive chevron and guide marks, the fill-locked warning
         // dot, the disabled rung and the narrow-viewport floor.
         ("virtual-list", 5),
+        ("table-cell", 4),
+        ("table-column", 4),
+        ("table-header", 4),
         ("tree-row", 11),
         ("menu", 12),
         ("menu-glyph", 10),

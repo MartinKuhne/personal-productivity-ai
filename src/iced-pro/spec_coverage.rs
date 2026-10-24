@@ -1714,20 +1714,72 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["surface/movable.rs"],
-        reason: Some(
-            "Container unbuilt; content is app-owned per D-2. Missing: the table's \
-             container and chrome — sticky header, row height, the column-resize \
-             handle (the 10px grab of §3.7), cell focus and traversal, and live-then-\
-             commit resize behaviour. None of it exists as a reusable type. What the app \
-             owns, and this entry deliberately does not claim, is the column definitions, \
-             cell rendering and the sort comparators. Resize handle width and sort \
-             indicators are left open by the spec, which is recorded against the spec \
-             rather than papered over here.",
+        evidence: &[
+            "composite/table_column.rs",
+            "composite/table_cell.rs",
+            "composite/table_header.rs",
+            "composite/table_view.rs",
+            "gallery_table.rs",
+        ],
+        reason: None,
+        note: Some(
+            "The structured grid, with the cell itself owned by the framework per \
+             decision **D-8**. Column widths resolve as a pure function of the specs \
+             plus the available width: each column declares a floor, a target and a \
+             ceiling, and the solver runs three regimes — surplus water-filled by \
+             weight under the ceiling, a closed-form scale when the floors hold but \
+             the targets do not, and a pinned-at-floor terminal state that reports \
+             `needs_horizontal_scroll` rather than violating a minimum. Termination \
+             is bounded at one pass per column, and the over-subscribed case is a \
+             result, not a hang. Cell rendering is resolved, not delegated: the band \
+             a row wears (selection outranks the pointer outranks the zebra stripe), \
+             the cell and content boxes inside a resolved column, and the grid line. \
+             The header's sort target and resize handle are disjoint regions by \
+             construction — the target is inset by the half-grab on every side a \
+             live handle covers — so a small accidental drag never sorts and a click \
+             on a title never opens a resize; negative tests sweep both at quarter-\
+             pixel steps. Sorting is stable (descending reverses the comparator, never \
+             the ascending result) and cannot change which rows are selected. Row \
+             selection reuses the tree view's anchor semantics rather than inventing \
+             a second set: the anchor is an id, so a sort reorders the rows under it \
+             and the range still means the same thing. Rows virtualise through \
+             `virtual_list`, and the realisation bound has no term for the column \
+             count. The sticky header is a separate band that never enters the row \
+             recycling cycle and stays column-aligned at every horizontal offset. \
+             Values the spec left open, recorded rather than papered over: the resize \
+             grab is `size::SPLITTER_GRAB` with a half-grab reach of 5px; the sort \
+             indicator is `size::ICON_SM` at `space::XS` gap, pinned to the target's \
+             trailing edge so it can never be painted inside the grab band; the \
+             header is `size::CONTROL_MD` tall; the header title is `CAPTION` at \
+             `Weight::SemiBold`, which `CAPTION.allowed_weights` permits and which \
+             answers the missing 12px SemiBold rung (G-12) without inventing a rung; \
+             cell padding is `[space::XS, space::MD]`; the last column is never \
+             resizable because its trailing edge is the container border; a `Fixed` \
+             column exposes no handle because \"never changes\" and \"the user may \
+             drag it\" contradict; a `Content` column's ceiling IS its target, so it \
+             shrinks but never grows past its content; the sort cycle is none → \
+             ascending → descending → none; keyboard movement clamps at the ends \
+             rather than wrapping, following the tree. Contrast recomputed from raw \
+             sRGB, not copied from the spec's printed column: `border.subtle` \
+             measures 1.3495:1 on `surface.base`, 1.2691:1 on `surface.raised`, \
+             1.1012:1 on `surface.hover` and 1.0314:1 on `surface.active`, so the \
+             grid line promotes to `border.strong` on the two tinted bands, where it \
+             measures 3.6772:1 and 3.2377:1. The promotion floor itself — 1.15 — is \
+             invented here: a hairline separator carries no information on its own, \
+             so `UIF-TOK-006` rule 2's 3.0:1 is not the rule it answers to, and the \
+             gallery reports the ratio as a number instead of forcing it into a role \
+             every resting band would fail. The spec prints no foreground for a \
+             selected cell; `text.strong` is chosen, 14.2946:1 on `surface.active`, \
+             matching the tree row the two views sit beside. `accent.border` on the \
+             selection fill measures 4.7922:1 and needs no promotion. Gaps: the \
+             migration onto `fastmd`'s six-column Tools dialog is cross-crate work \
+             outside this increment, though the column model is shaped against it; \
+             variable row heights, cell editing, merged cells, column reordering and \
+             frozen columns are unspecified by §3B.7 and are deliberately not \
+             invented here.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-008",

@@ -367,6 +367,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         spec: "§3.7 — Teaching popover width range, upper bound 360px",
     },
     SurfaceGeometryConstant {
+        file: "composite/table_header.rs",
+        name: "RESIZE_REACH",
+        spec: "§3.7 — column resize grab 10px, halved so the reach is split evenly across the divider",
+    },
+    SurfaceGeometryConstant {
         file: "widget/auto_suggest_model.rs",
         name: "FLYOUT_MAX_HEIGHT",
         spec: "§3.2 — AutoSuggest completion flyout max height 240px",
