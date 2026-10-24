@@ -56,7 +56,12 @@ use crate::token_lint::{
 /// 119 as of the same increment's gallery split module,
 /// `gallery_breadcrumb.rs`, which sits outside `composite/` and so joins
 /// the file count without joining Rule B.
-const PIN_FILES_SCANNED: usize = 119;
+///
+/// 120 as of `INC-57`, whose one addition is `binding/pre_rank.rs` — the
+/// Pre-Rank pointer-capture ledger. Like the rest of `binding/` it is
+/// scanned but sits outside Rule B's visual scope, so the file count moves
+/// and `PIN_RULE_B_FILES` does not.
+const PIN_FILES_SCANNED: usize = 120;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

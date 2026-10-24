@@ -1,7 +1,7 @@
 //! Tests for [`zorder`] — the four z-bands, pointer routing and strict
 //! `Escape` unwinding (`UIF-ZORD-*`, `UIF-WIN-003`, `UIF-VER-003`).
 //!
-//! Six groups, in order:
+//! Seven groups, in order:
 //!
 //! 1. **The band table.** Every column of §5 — backdrop, pointer rule,
 //!    blocking, promotion, keyboard disposition, escape rank — asserted
@@ -17,6 +17,9 @@
 //!    through a real [`MenuCascade`] so the seam `INC-16` left is
 //!    exercised rather than simulated.
 //! 6. **Scrim composition and determinism.**
+//! 7. **The Pre-Rank composition** — `UIF-WIN-003` step 1 running ahead
+//!    of the walk above, including that an uncaptured chain is identical
+//!    to the plain walk in groups 5 and 6.
 //!
 //! # Why the routing sweep is split into three scenarios
 //!
@@ -31,6 +34,8 @@
 use std::cell::Cell;
 
 use super::*;
+use crate::binding::pre_rank::CaptureId;
+use crate::binding::pre_rank::DragKind;
 use crate::focus::FocusState;
 use crate::surface::menu::cascade::MenuCascade;
 use crate::surface::menu::cascade::MenuTreeKind;
@@ -1709,4 +1714,385 @@ fn test_a_cloned_registry_can_be_mutated_independently() {
         names_in(&clone, ZBand::UtilityOverlay),
         vec!["debug", "logs"]
     );
+}
+
+// ---------------------------------------------------------------------------
+// 7. The Pre-Rank composition (`UIF-WIN-003` step 1)
+// ---------------------------------------------------------------------------
+//
+// The rule under test, §3.0.4.2: "Pressing `Escape` while any
+// pointer-captured drag … is active cancels that drag first (`Pre-Rank`),
+// even if keyboard focus resides elsewhere."
+//
+// Every test here pairs a registry with a
+// [`PreRankCoordinator`] and drives one `Escape` through
+// [`escape_with_pre_rank`]. The two things that must always be true are
+// that the rank walk did **not** also run, and that with no capture held it
+// ran exactly as it did before the rule existed.
+
+/// A workspace slider mid-scrub, with keyboard focus parked in the search
+/// filter — the configuration the rule exists for.
+///
+/// The slider is not a surface, so nothing in the registry can see it. The
+/// ledger is the only place its capture is recorded.
+fn dragging_ledger() -> PreRankCoordinator {
+    let mut captures = PreRankCoordinator::new();
+    let _ = captures.begin(DragCapture::new("volume-slider", DragKind::Slider));
+    captures
+}
+
+/// Drain the full chain — Pre-Rank first, then the ranks — until it stops
+/// consuming, reporting which subject took each key.
+fn drain_pre_ranked(
+    captures: &mut PreRankCoordinator,
+    reg: &mut SurfaceRegistry,
+    cap: usize,
+    mut cancel_capture: impl FnMut(&DragCapture) -> bool,
+    mut responder: impl FnMut(&Surface) -> UnwindAnswer,
+) -> Vec<String> {
+    let mut taken_by = Vec::new();
+    for _ in 0..cap {
+        let escape = escape_with_pre_rank(captures, reg, &mut cancel_capture, &mut responder);
+        let taken = match &escape {
+            PreRankedEscape::DragCancelled { capture } => {
+                format!("drag:{}", capture.id())
+            }
+            PreRankedEscape::RankWalked { outcome, .. } => match outcome.consumed_by() {
+                Some(id) => format!("surface:{id}"),
+                None => "none".to_owned(),
+            },
+        };
+        let stop = escape.drag_cancelled() || !escape.outcome().is_some_and(|o| o.is_consumed());
+        taken_by.push(taken);
+        if stop {
+            break;
+        }
+    }
+    taken_by
+}
+
+#[test]
+fn test_pre_rank_cancels_the_drag_and_never_walks_the_ranks() {
+    let mut reg = full_registry();
+    let before = reg.clone();
+    let mut captures = dragging_ledger();
+
+    let asked = Cell::new(0usize);
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut reg,
+        |_| true,
+        |_| {
+            asked.set(asked.get() + 1);
+            UnwindAnswer::Dismissed
+        },
+    );
+
+    assert!(
+        escape.drag_cancelled(),
+        "the drag owns the keypress, not the surface that holds focus"
+    );
+    assert_eq!(
+        escape,
+        PreRankedEscape::DragCancelled {
+            capture: DragCapture::new("volume-slider", DragKind::Slider)
+        }
+    );
+    assert_eq!(
+        asked.get(),
+        0,
+        "the rank walk must not run at all in the same keypress"
+    );
+    assert_eq!(reg, before, "no surface was dismissed or reordered");
+    assert!(
+        !captures.is_captured(),
+        "the capture is spent once cancelled"
+    );
+    assert_eq!(
+        escape.outcome(),
+        None,
+        "there is no surface outcome to report"
+    );
+}
+
+#[test]
+fn test_pre_rank_outranks_the_menu_band_and_the_modal_band_together() {
+    // The menu is Escape Rank 3 and the modal Rank 2; the drag outranks both,
+    // so neither is asked.
+    let mut reg = SurfaceRegistry::new();
+    add(&mut reg, "modal", SurfaceKind::Modal, vec![]);
+    add(&mut reg, "menu", SurfaceKind::MenuCard, vec![]);
+    let before = reg.clone();
+    let mut captures = dragging_ledger();
+
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut reg,
+        |_| true,
+        |_| UnwindAnswer::Dismissed,
+    );
+
+    assert_eq!(
+        escape,
+        PreRankedEscape::DragCancelled {
+            capture: DragCapture::new("volume-slider", DragKind::Slider)
+        },
+        "Pre-Rank runs ahead of every escape rank"
+    );
+    assert_eq!(reg, before);
+}
+
+#[test]
+fn test_pre_rank_fires_when_the_drag_and_the_focus_are_the_same_surface() {
+    // The rule is unconditional: whether focus sits on the dragging control
+    // or a hundred surfaces away changes nothing. Same registry shape, drag
+    // registered by the control inside the surface that holds focus.
+    let mut reg = SurfaceRegistry::new();
+    add(&mut reg, "settings", SurfaceKind::Modal, vec![]);
+    let before = reg.clone();
+
+    let mut captures = PreRankCoordinator::new();
+    let _ = captures.begin(DragCapture::new("settings.brightness", DragKind::Slider));
+
+    let asked = Cell::new(0usize);
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut reg,
+        |_| true,
+        |_| {
+            asked.set(asked.get() + 1);
+            UnwindAnswer::Dismissed
+        },
+    );
+
+    assert!(escape.drag_cancelled());
+    assert_eq!(asked.get(), 0, "the host modal is not asked either");
+    assert_eq!(reg, before);
+}
+
+#[test]
+fn test_a_stale_capture_lets_the_escape_reach_the_ranks() {
+    // A capture whose control had nothing to cancel must not swallow the key.
+    let mut reg = full_registry();
+    let mut captures = dragging_ledger();
+
+    let escape = escape_with_pre_rank(&mut captures, &mut reg, |_| false, dismiss_everything());
+
+    match &escape {
+        PreRankedEscape::RankWalked {
+            outcome, pre_rank, ..
+        } => {
+            assert_eq!(
+                *pre_rank,
+                PreRankOutcome::Stale {
+                    capture: DragCapture::new("volume-slider", DragKind::Slider)
+                }
+            );
+            assert_eq!(outcome.consumed_by(), Some(&sid("menu")));
+        }
+        other => panic!("a dead capture must not consume the key: {other:?}"),
+    }
+    assert!(
+        !reg.contains(&sid("volume-slider")),
+        "the drag was never a surface anyway"
+    );
+    assert!(!captures.is_captured());
+}
+
+#[test]
+fn test_the_second_escape_after_a_pre_rank_cancel_walks_the_ranks() {
+    let mut reg = full_registry();
+    let mut captures = dragging_ledger();
+
+    let first = escape_with_pre_rank(&mut captures, &mut reg, |_| true, dismiss_everything());
+    assert!(first.drag_cancelled());
+
+    let second = escape_with_pre_rank(&mut captures, &mut reg, |_| true, dismiss_everything());
+    assert!(
+        !second.drag_cancelled(),
+        "the capture was spent on the first keypress"
+    );
+    assert_eq!(
+        second.outcome().and_then(|o| o.consumed_by()),
+        Some(&sid("menu"))
+    );
+    assert_eq!(
+        second.pre_rank(),
+        PreRankOutcome::NotCaptured,
+        "the second Escape sees an empty ledger"
+    );
+}
+
+#[test]
+fn test_releasing_the_capture_restores_normal_escape_behaviour() {
+    let mut reg = full_registry();
+    let mut captures = dragging_ledger();
+
+    assert!(captures.release(&CaptureId::new("volume-slider")));
+
+    let escape = escape_with_pre_rank(&mut captures, &mut reg, |_| true, dismiss_everything());
+    assert!(!escape.drag_cancelled());
+    assert_eq!(
+        escape.outcome().and_then(|o| o.consumed_by()),
+        Some(&sid("menu"))
+    );
+    assert_eq!(escape.pre_rank(), PreRankOutcome::NotCaptured);
+}
+
+#[test]
+fn test_an_uncaptured_chain_is_identical_to_a_plain_escape_walk() {
+    // Byte-for-byte: the same registry drained one way through
+    // `SurfaceRegistry::escape` and the other through the full chain with an
+    // empty ledger must produce the same consumers, in the same order, and
+    // end in the same registry.
+    let mut plain = full_registry();
+    let mut chained = full_registry();
+    let mut captures = PreRankCoordinator::new();
+
+    let plain_sequence = drain(&mut plain, 20, dismiss_everything());
+    let chained_sequence = drain_pre_ranked(
+        &mut captures,
+        &mut chained,
+        20,
+        |_| true,
+        dismiss_everything(),
+    );
+
+    let expected: Vec<String> = FULL_ESCAPE_ORDER
+        .iter()
+        .map(|name| format!("surface:{name}"))
+        .chain(std::iter::once("none".to_owned()))
+        .collect();
+    assert_eq!(
+        chained_sequence, expected,
+        "the Pre-Rank must not disturb the documented order"
+    );
+
+    // The stronger form: tag the plain walk's own answers and compare them,
+    // element for element, rather than comparing each to a hand-written list.
+    let tagged_plain: Vec<String> = plain_sequence
+        .iter()
+        .map(|hit| match hit {
+            Some(name) => format!("surface:{name}"),
+            None => "none".to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        chained_sequence, tagged_plain,
+        "with no capture held the full chain must be the plain walk"
+    );
+    assert_eq!(plain, chained, "both walks end in the same registry");
+    assert!(!captures.is_captured());
+}
+
+#[test]
+fn test_an_uncaptured_empty_registry_still_reports_the_empty_stack() {
+    let mut reg = SurfaceRegistry::new();
+    let mut captures = PreRankCoordinator::new();
+    let asked = Cell::new(0usize);
+
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut reg,
+        |_| true,
+        |_| {
+            asked.set(asked.get() + 1);
+            UnwindAnswer::Dismissed
+        },
+    );
+
+    let PreRankedEscape::RankWalked { outcome, pre_rank } = &escape else {
+        panic!("nothing was captured, so the rank walk should have run: {escape:?}");
+    };
+    assert_eq!(*pre_rank, PreRankOutcome::NotCaptured);
+    assert!(outcome.refusal().is_some_and(EscapeRefusal::is_empty_stack));
+    assert_eq!(asked.get(), 0);
+}
+
+#[test]
+fn test_all_declined_still_accumulates_through_the_full_chain() {
+    let mut reg = full_registry();
+    let mut captures = PreRankCoordinator::new();
+
+    let escape = escape_with_pre_rank(
+        &mut captures,
+        &mut reg,
+        |_| true,
+        |_| UnwindAnswer::Declined(DeclineReason::NotFocused),
+    );
+
+    let PreRankedEscape::RankWalked { outcome, .. } = &escape else {
+        panic!("no capture was held: {escape:?}");
+    };
+    let order: Vec<&str> = outcome
+        .declined_before()
+        .iter()
+        .map(|d| d.surface.as_str())
+        .collect();
+    assert_eq!(order, FULL_ESCAPE_ORDER);
+    assert_eq!(reg.len(), 6, "a declined Escape removes nothing");
+}
+
+#[test]
+fn test_pre_ranked_escape_reports_which_step_took_the_key() {
+    let capture = DragCapture::new("volume-slider", DragKind::Slider);
+    let cancelled = PreRankedEscape::DragCancelled {
+        capture: capture.clone(),
+    };
+    assert!(cancelled.drag_cancelled());
+    assert_eq!(cancelled.outcome(), None);
+    assert_eq!(
+        cancelled.pre_rank(),
+        PreRankOutcome::Cancelled {
+            capture: capture.clone()
+        }
+    );
+
+    let walked = PreRankedEscape::RankWalked {
+        outcome: EscapeOutcome::Ignored(EscapeRefusal::EmptyStack),
+        pre_rank: PreRankOutcome::NotCaptured,
+    };
+    assert!(!walked.drag_cancelled());
+    assert!(walked.outcome().is_some());
+    assert_eq!(walked.pre_rank(), PreRankOutcome::NotCaptured);
+}
+
+#[test]
+fn test_a_drag_cancelled_escape_never_reaches_a_registered_surface() {
+    // The strongest form of the focus-independence claim: whatever the
+    // registry holds, and whatever it would have answered, a held capture
+    // means no surface is consulted.
+    for kind in [
+        SurfaceKind::Modal,
+        SurfaceKind::InputDialog,
+        SurfaceKind::MenuCard,
+        SurfaceKind::TeachingPopover,
+        SurfaceKind::MovableCard,
+        SurfaceKind::ToastStack,
+        SurfaceKind::SearchFilter,
+        SurfaceKind::Workspace,
+    ] {
+        let mut reg = SurfaceRegistry::new();
+        add(&mut reg, "focused", kind, vec![]);
+        let before = reg.clone();
+        let mut captures = dragging_ledger();
+
+        let asked = Cell::new(0usize);
+        let escape = escape_with_pre_rank(
+            &mut captures,
+            &mut reg,
+            |_| true,
+            |surface| {
+                asked.set(asked.get() + 1);
+                panic!("the rank walk must not consult {surface:?} while a drag is held")
+            },
+        );
+
+        assert!(
+            escape.drag_cancelled(),
+            "{kind:?} stole a Pre-Rank keypress"
+        );
+        assert_eq!(asked.get(), 0, "{kind:?} was consulted");
+        assert_eq!(reg, before, "{kind:?} was dismissed");
+    }
 }

@@ -90,6 +90,17 @@
 //! the band, so it is asked first, and `Dismissed` removes it so the
 //! root is next.
 //!
+//! # The Pre-Rank runs before this walk
+//!
+//! `UIF-WIN-003` step 1 is not a band and not a surface: it is the
+//! pointer-captured drag the user is still holding. [`SurfaceRegistry::escape`]
+//! is steps 2 through 5 only. A host with any drag-capable control must run
+//! the Pre-Rank first, which is what [`escape_with_pre_rank`] does — it asks
+//! [`PreRankCoordinator`] whether a drag owns the pointer, and only if that answer is "no" does it
+//! walk the ranks. Calling `escape` alone on such a host is the bug the rule
+//! exists to prevent: the focused surface dismisses while the drag keeps
+//! running.
+//!
 //! # The scrim
 //!
 //! §5 fixes the Band 3 backdrop as `surface.base` at `0.55` alpha. The
@@ -126,6 +137,9 @@
 use std::cmp::Reverse;
 use std::fmt;
 
+use crate::binding::pre_rank::DragCapture;
+use crate::binding::pre_rank::PreRankCoordinator;
+use crate::binding::pre_rank::PreRankOutcome;
 use crate::surface::menu::cascade::CascadeOutcome;
 use crate::surface::menu::cascade::IgnoredReason;
 use crate::token::color::Palette;
@@ -1202,6 +1216,12 @@ impl SurfaceRegistry {
     /// a filter. It asks. For a menu card the answer comes straight from
     /// the cascade's own refusal via
     /// [`UnwindAnswer::from_cascade_close`].
+    ///
+    /// **This is `UIF-WIN-003` steps 2 through 5, not step 1.** A
+    /// pointer-captured drag is not a registered surface, so this walk cannot
+    /// see one. A host with drag-capable controls must run the Pre-Rank
+    /// cancel first — see [`escape_with_pre_rank`], which composes the two
+    /// and is the entry point such a host should be calling.
     pub fn escape<F>(&mut self, mut unwind: F) -> EscapeOutcome
     where
         F: FnMut(&Surface) -> UnwindAnswer,
@@ -1256,6 +1276,107 @@ impl SurfaceRegistry {
             )
         });
         order
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Pre-Rank composition
+// ---------------------------------------------------------------------------
+
+/// One `Escape` driven through the whole `UIF-WIN-003` chain, Pre-Rank first.
+///
+/// The two steps have different subjects — one is a control's drag, the other
+/// is a surface — so the outcome says which of them the key went to rather
+/// than pretending both are a surface dismissal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PreRankedEscape {
+    /// Step 1 fired: the user was holding a pointer-captured drag, and it was
+    /// cancelled with the control's `Cancel` tier. The key is spent and no
+    /// surface was asked anything.
+    DragCancelled {
+        /// Which control's drag took the key.
+        capture: DragCapture,
+    },
+    /// Step 1 found nothing to cancel, so the rank walk ran.
+    RankWalked {
+        /// What the rank walk did.
+        outcome: EscapeOutcome,
+        /// Why the Pre-Rank stepped aside — no capture, or a stale one.
+        pre_rank: PreRankOutcome,
+    },
+}
+
+impl PreRankedEscape {
+    /// Whether the Pre-Rank consumed the key on a drag.
+    #[must_use]
+    pub fn drag_cancelled(&self) -> bool {
+        matches!(self, Self::DragCancelled { .. })
+    }
+
+    /// The surface outcome, if the rank walk ran. `None` when the Pre-Rank
+    /// consumed the key, because no surface was asked.
+    #[must_use]
+    pub fn outcome(&self) -> Option<&EscapeOutcome> {
+        match self {
+            Self::DragCancelled { .. } => None,
+            Self::RankWalked { outcome, .. } => Some(outcome),
+        }
+    }
+
+    /// What the Pre-Rank step answered, either way.
+    #[must_use]
+    pub fn pre_rank(&self) -> PreRankOutcome {
+        match self {
+            Self::DragCancelled { capture } => PreRankOutcome::Cancelled {
+                capture: capture.clone(),
+            },
+            Self::RankWalked { pre_rank, .. } => pre_rank.clone(),
+        }
+    }
+}
+
+/// Drive one `Escape` through `UIF-WIN-003` in full: the Pre-Rank drag
+/// cancel first, then the rank walk.
+///
+/// This is the entry point a host with **any** drag-capable control should
+/// call, and the only way to get the spec's ordering without the host having
+/// to remember the rule itself:
+///
+/// 1. **Pre-Rank (§3.0.4.2, `UIF-WIN-003` step 1).** If
+///    [`PreRankCoordinator`]
+///    holds a pointer-captured drag, `cancel_capture` is called with it and
+///    must settle that control through its own cancel path — the one that
+///    restores the pre-drag snapshot. If it reports a `Cancel` was produced,
+///    the key is spent and [`SurfaceRegistry::escape`] is **not** called.
+/// 2. **Rank walk (steps 2 through 5).** Otherwise the registry walks as it
+///    always has, unchanged.
+///
+/// The Pre-Rank is unconditional and reads no focus, which is what makes the
+/// rule work when the drag and the keyboard focus are in different places:
+/// nothing here compares them, because the drag wins regardless.
+///
+/// `cancel_capture` returns `true` when the control produced a `Cancel` tier
+/// and `false` when it had nothing open; the latter is a stale registration
+/// and lets the key continue rather than vanish.
+#[must_use]
+pub fn escape_with_pre_rank<C, U>(
+    captures: &mut PreRankCoordinator,
+    registry: &mut SurfaceRegistry,
+    cancel_capture: C,
+    unwind: U,
+) -> PreRankedEscape
+where
+    C: FnMut(&DragCapture) -> bool,
+    U: FnMut(&Surface) -> UnwindAnswer,
+{
+    match captures.pre_rank_cancel(cancel_capture) {
+        PreRankOutcome::Cancelled { capture } => PreRankedEscape::DragCancelled { capture },
+        pre_rank @ (PreRankOutcome::Stale { .. } | PreRankOutcome::NotCaptured) => {
+            PreRankedEscape::RankWalked {
+                outcome: registry.escape(unwind),
+                pre_rank,
+            }
+        }
     }
 }
 

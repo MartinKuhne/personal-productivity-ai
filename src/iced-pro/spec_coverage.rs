@@ -1003,7 +1003,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
              classified and `UIF-ATOM-000` reported `Implemented` over it. The \
              `Partial` here is deliberate and will stay `Partial` until every control \
              consumes the vocabulary — a foundation one widget uses is coverage of one \
-             widget.",
+             widget. **Ratified 2026-10-24:** the crate's sum-type emission \
+             representation — `enum XxxEmission { Changed(Live<T>), Committed(Commit<T>), \
+             Cancelled(Cancel<T>) }`, where the *variant identity* carries the tier — is \
+             the authoritative form. The spec's `on_change(Live<T>)` notation describes \
+             tier semantics, not a mandated Rust wrapper around a bare payload, so the \
+             twenty emission variants an earlier audit flagged as omitting a `Live<>` / \
+             `Commit<>` / `Cancel<>` wrapper are a ratified decision, not gaps.",
         ),
     },
     Coverage {
@@ -2063,11 +2069,11 @@ const SPEC_COVERAGE: &[Coverage] = &[
              now sum to it exactly — 4 + 18 + 2 + 16 + 4 = 44, the 2px \
              title-to-subtitle gap named as `space.2xs` — so \
              `TWO_LINE_PARTS_HEIGHT` closes against `TWO_LINE_HEIGHT` with nothing \
-             left over. The section still appends a `+ 2px TWO_LINE_UNACCOUNTED` \
-             term to that same list, which would read to 46 against its own printed \
-             44; the constant is kept as the standing drift check it is and reports \
-             0.0, so the surplus stays visible instead of being absorbed into the \
-             total.",
+             left over. The `+ 2px TWO_LINE_UNACCOUNTED` term the section used to \
+             append to that same list, which read literally composed 46 against \
+             its own printed 44, has since been removed from the spec. The \
+             constant is retained at 0.0 purely as the standing drift check: a \
+             future edit that reopens the gap makes it non-zero and fails the sidecar.",
         ),
     },
     Coverage {
@@ -2494,7 +2500,11 @@ const SPEC_COVERAGE: &[Coverage] = &[
              topmost-painted surface is not the first asked to handle Escape. Step 4 \
              (search filter / in-flight prompt) is app content — the registry's unwind \
              closure is caller-supplied, so an app-registered surface joins the same \
-             ordered chain, and an empty stack returns `EscapeOutcome::Ignored`.",
+             ordered chain, and an empty stack returns `EscapeOutcome::Ignored`. The \
+             **Pre-Rank** step ahead of all of them — an in-flight pointer-captured \
+             drag cancels first, focus-independent — is `binding/pre_rank.rs`, composed \
+             with this walk by `surface/zorder.rs::escape_with_pre_rank`. \
+             `SurfaceRegistry::escape` on its own is steps 2-5 only.",
         ),
     },
     // --- §4.2 Top Navbar ---------------------------------------------------

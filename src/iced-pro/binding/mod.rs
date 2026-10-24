@@ -17,8 +17,15 @@
 //! |---|---|---|
 //! | Controlled vs Ephemeral separation | §3.0.4.1 | [`controlled`] |
 //! | Three-tier callback lifecycle | §3.0.4.2 | [`tier`], [`snapshot`] |
+//! | Pre-Rank pointer capture | §3.0.4.2, `UIF-WIN-003` step 1 | [`pre_rank`] |
 //! | `ActionPending` | §3.0.4.3 | [`pending`] |
 //! | `ResponsiveBreakpoint` | §3.0.4.4 | [`responsive`] |
+//!
+//! [`pre_rank`] is the one piece that is not per-control. Every other type
+//! here describes a single control's own state; the Pre-Rank ledger records
+//! one fact that has to be readable from *outside* whichever control holds it
+//! — that a pointer-captured drag is in flight — because `Escape` has to
+//! reach that fact before it reaches the surface that holds keyboard focus.
 //!
 //! # Why there is no trait hierarchy here
 //!
@@ -55,6 +62,7 @@
 
 pub mod controlled;
 pub mod pending;
+pub mod pre_rank;
 pub mod responsive;
 pub mod snapshot;
 pub mod tier;
@@ -67,6 +75,12 @@ pub use pending::ActivationGate;
 pub use pending::CancelRefusal;
 pub use pending::CancelRequest;
 pub use pending::SuppressedReason;
+pub use pre_rank::CaptureId;
+pub use pre_rank::CaptureStart;
+pub use pre_rank::DragCapture;
+pub use pre_rank::DragKind;
+pub use pre_rank::PreRankCoordinator;
+pub use pre_rank::PreRankOutcome;
 pub use responsive::Breakpoint;
 pub use responsive::LabelMode;
 pub use responsive::Measurement;

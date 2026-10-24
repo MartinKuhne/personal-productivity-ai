@@ -27,18 +27,16 @@
 //! [`TITLE_SUBTITLE_GAP`] is that `2px`, [`TWO_LINE_PARTS_HEIGHT`] adds
 //! the five terms up, and the sum is the printed total exactly.
 //!
-//! What is left over is recorded rather than smoothed away. The same
-//! sentence still appends `+ 2px TWO_LINE_UNACCOUNTED` to parts that
-//! already reach `44` without it, which read literally composes `46`.
-//! The section prints `44` twice and calls it the authoritative total,
-//! so this resolver follows `44` and treats the trailing term as
-//! double-counting the gap it just named; [`TWO_LINE_UNACCOUNTED`] is
-//! `0.0`, and the surplus is reported against the spec rather than
-//! modelled into the row. Row height stays what virtualised lists, hit
-//! targets and the `UIF-PRIN-003` zero-shift invariant consume — which
-//! is why the *total* remains the load-bearing figure even now that the
-//! parts reach it: a composition that drifted would reflow every list
-//! in the app, and the constant is what makes that drift fail a test.
+//! What is left over is recorded rather than smoothed away. §3B.5 once
+//! appended a `+ 2px TWO_LINE_UNACCOUNTED` term to parts that already
+//! reached `44` without it, which read literally composed `46`; the
+//! section has since been corrected and the trailing term is gone, so
+//! [`TWO_LINE_UNACCOUNTED`] is `0.0` and the parts close on the printed
+//! total exactly. Row height stays what virtualised lists, hit targets
+//! and the `UIF-PRIN-003` zero-shift invariant consume — which is why
+//! the *total* remains the load-bearing figure even now that the parts
+//! reach it: a composition that drifted would reflow every list in the
+//! app, and the constant is what makes that drift fail a test.
 //!
 //! # The hit target is resolved separately from the mark
 //!
@@ -148,14 +146,13 @@ pub const TWO_LINE_PARTS_HEIGHT: f32 = PADDING_VERTICAL
 /// check that the printed total and the composed parts agree: a future
 /// spec edit that reopens the gap makes this non-zero and fails the
 /// sidecar that pins it, which is a louder signal than a constant that
-/// has been removed. It also carries the record of a surplus that is
-/// still in the spec's own sentence: §3B.5 appends `+ 2px
-/// TWO_LINE_UNACCOUNTED` to parts that already reach `44` without it,
-/// so read literally the composition is `46`, not `44`. The section
-/// prints `44` twice and calls it authoritative, so this resolver
-/// follows `44` and treats the trailing term as double-counting the
-/// gap. The surplus is reported against the spec rather than modelled
-/// here.
+/// has been removed.
+///
+/// The name is deliberately retained from the term §3B.5 used to carry.
+/// That term has been removed from the section, so this constant no
+/// longer mirrors a spec identifier — it mirrors the *check* the spec
+/// once failed. Reading `0.0` here means the parts and the total agree;
+/// reading anything else means they have drifted apart again.
 pub const TWO_LINE_UNACCOUNTED: f32 = TWO_LINE_HEIGHT - TWO_LINE_PARTS_HEIGHT;
 
 /// The tile's vertical padding — the `4px` of §3B.5's `[4px, 12px]`.
