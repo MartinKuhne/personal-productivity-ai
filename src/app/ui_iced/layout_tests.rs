@@ -313,3 +313,21 @@ fn test_clamped_width_min_wins_over_degenerate_cap() {
     assert_eq!(clamped_width(50.0, 180.0, 20.0), 180.0);
     assert_eq!(clamped_width(500.0, 180.0, 20.0), 180.0);
 }
+
+// ---------------------------------------------------------------------------
+// Splitter grab band (framework token binding)
+// ---------------------------------------------------------------------------
+
+/// [RUST-021] / `UIF-TOK-002`: the pane-grid resize leeway is bound to
+/// the framework's `size.splitter.grab` token rather than owning its own
+/// number, so the app and the framework cannot drift apart on the same
+/// measurement. The value is unchanged at `10.0` by INT-1.
+#[test]
+fn test_resize_leeway_is_the_framework_splitter_grab_token() {
+    assert_eq!(
+        RESIZE_LEEWAY_PIXELS,
+        iced_pro::token::size::SPLITTER_GRAB,
+        "RESIZE_LEEWAY_PIXELS must be iced_pro::token::size::SPLITTER_GRAB"
+    );
+    assert_eq!(RESIZE_LEEWAY_PIXELS, 10.0);
+}

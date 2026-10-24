@@ -106,6 +106,11 @@ tempfile = "3.8"
 # `rfd` — Rusty File Dialogs. Used by "Save as PDF..."
 rfd = "0.17"
 fastmd-pdf = { path = "src/md2pdf" }
+# `iced-pro` — the framework crate that owns the `UIF-TOK-005` design tokens.
+# Since increment INT-1 it is `fastmd`'s single source of design truth:
+# `src/app/ui/theme.rs` derives every overlapping semantic palette token
+# from `iced_pro::token::color::Palette::dark()` instead of a literal.
+iced-pro = { path = "src/iced-pro" }
 arc-swap = "1.9.2"
 async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
 text-splitter = { version = "0.32", optional = true }

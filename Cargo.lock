@@ -1537,6 +1537,7 @@ dependencies = [
  "glob",
  "html-escape",
  "iced",
+ "iced-pro",
  "iced_graphics",
  "iced_test",
  "image",

@@ -44,7 +44,11 @@ use iced::widget::pane_grid::{self, Configuration, Pane, Split};
 /// Grab-leeway (logical pixels) around each split line for resize drags,
 /// passed to `PaneGrid::on_resize` (`iced_widget-0.14.2/src/pane_grid.rs:
 /// 258-266`: the grab area length is `spacing + leeway`).
-pub const RESIZE_LEEWAY_PIXELS: f32 = 10.0;
+///
+/// Bound to the framework token `size.splitter.grab` (`UIF-TOK-002`)
+/// rather than a literal, so the app does not own a second number for the
+/// same measurement ([RUST-021]). The value is unchanged at `10.0`.
+pub const RESIZE_LEEWAY_PIXELS: f32 = iced_pro::token::size::SPLITTER_GRAB;
 
 /// Full-on-screen height of the stub top/bottom bands, in logical points.
 pub const STUB_BAND_HEIGHT_POINTS: f32 = 28.0;

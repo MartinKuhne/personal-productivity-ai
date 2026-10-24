@@ -65,12 +65,14 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
-  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. No dependency from fastmd yet (D-3)")
+  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Consumed by fastmd as the design-truth source since INT-1")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
   Rel(ui_iced, bus, "publishes UserCommand; reads buses through the subscription bridge")
   Rel(ui_iced, iced_rt, "builds Elements; the runtime paints and dispatches input")
+  Rel(ui_free, iced_pro, "derives overlapping palette tokens from UIF-TOK-005")
+  Rel(ui_iced, iced_pro, "maps iced theme roles, scrim alpha and splitter grab from tokens")
   Rel(ui_iced, orch, "reducer drives orchestrator state transitions")
   Rel(orch, ws, "file/tag/directory state")
   Rel(orch, agent_crate, "submits AgentPrompt, observes AgentEvent")
@@ -84,13 +86,29 @@ There are three crates in this workspace that matter to the picture above:
 `fastmd` (the application, `src/app/`), `fastmd-agent` (the agent engine,
 `src/agent/`) and `iced-pro` (`src/iced-pro/`). The first two are wired
 together — `AppOrchestrator` submits prompts to and observes events from
-`fastmd-agent`. **`iced-pro` is wired to nothing.** No module under
-`src/app/` depends on it, no `fastmd` type appears anywhere in its API,
-and no dependency edge is drawn to it above because none exists. It is a
-standalone crate that builds, tests and ships its own gallery binary under
-decision **D-3** (standalone-first); porting the app onto it is a separate,
-later project. See the `iced-pro` component diagram further down for what
-that crate contains and what it deliberately does not own.
+`fastmd-agent`.
+
+`iced-pro` is now consumed by the application, but only as the **design
+token source**. Since integration increment INT-1 the `fastmd` crate
+declares `iced-pro = { path = "src/iced-pro" }`, and:
+
+- `src/app/ui/theme.rs` derives every overlapping semantic palette token
+  from `iced_pro::token::color::Palette::dark()` (`UIF-TOK-005`) instead
+  of a literal, and delegates the inverted editor set to
+  `iced_pro::token::color::EditorPalette::inverted()` (decision **D-4**);
+- `src/app/ui_iced/theme.rs` maps the framework palette onto the iced
+  theme roles and takes the modal scrim from
+  `iced_pro::surface::zorder::scrim_for`;
+- `src/app/ui_iced/layout.rs` binds the pane-grid resize leeway to
+  `iced_pro::token::size::SPLITTER_GRAB` (`UIF-TOK-002`).
+
+What is **not** yet consumed: the framework's widgets, menu engine, modal
+hosts, focus model and geometry solvers. The app still renders with stock
+iced widgets, and the six FastMD document/log content tokens stay
+app-owned literals under decision **D-2**. Porting the widget layer onto
+`iced-pro` is the follow-on work decision **D-8** describes. See the
+`iced-pro` component diagram further down for what that crate contains and
+what it deliberately does not own.
 
 ## Optional Vector Search
 
@@ -455,15 +473,19 @@ widget can reach `iced_core`'s widget-author surface. The library root is
 `mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly
 in `Cargo.toml`.
 
-**This is not live application architecture.** No module under `src/app/`
-imports `iced_pro`, and no `fastmd` type appears anywhere in its API. What
-follows describes code that exists, builds and passes its own tests — not
-behaviour the shipped application exhibits. The crate's own ledger of what
-is and is not satisfied lives in `src/iced-pro/spec_coverage.rs`.
+**Consumption status (INT-1).** `fastmd` depends on this crate and reads its
+**tokens** — `token::color`, `token::size` and `surface::zorder::scrim_for`
+— from `src/app/ui/theme.rs`, `src/app/ui_iced/theme.rs` and
+`src/app/ui_iced/layout.rs`. It does **not** yet instantiate any
+framework widget, menu engine, modal host or solver; those remain
+described-but-not-consumed by the shipped application. No `fastmd` type
+appears anywhere in `iced-pro`'s API, so the dependency stays one-way.
+What the crate's own ledger says is and is not satisfied lives in
+`src/iced-pro/spec_coverage.rs`.
 
 ```mermaid
 C4Component
-  title iced-pro — Subsystems (standalone; not consumed by fastmd)
+  title iced-pro — Subsystems (tokens consumed by fastmd; widgets not yet)
 
   Component(token, "token/", "Closed design-token set: space, size, shape, typography, color, contrast (UIF-TOK-001..006)")
   Component(st, "state.rs", "Interaction state machine: exclusive BaseState plus an orthogonal focus ring, resolved purely")
