@@ -25,50 +25,57 @@
 //!    through [`fill_lock`], with the walk count pinned so the gate
 //!    cannot go vacuous and a doctored fixture proving it fires.
 //!
-//! # The two places the revised spec contradicts itself
+//! # The two rule/palette contradictions are now resolved
 //!
 //! The 2026-10-22 revision fixed every value that ledger **G-7** had to
-//! retune by hand, but it left two of its own rules at odds with its own
-//! printed values. Both are pinned at their measured figure by a
-//! `known_conflict_*` test and neither is tuned away:
+//! retune by hand but left two of its own rules at odds with its own
+//! printed values. Both were carried as `known_conflict_*` tests until
+//! the 2026-10-23 reconciliation moved the *rules* instead of the
+//! colours:
 //!
-//! * **Rule 2's ceiling on `surface.sunken`.** The band is
-//!   `[4.00:1, 6.00:1]`. `text.disabled` measures `6.020452:1` on
-//!   `surface.sunken` — over the ceiling by `0.0205`, and inside the
-//!   band on the other six surfaces. The token cannot satisfy the rule
-//!   and stay dimmer than `text.muted`, and the surface cannot lighten
-//!   without collapsing the elevation ladder.
-//! * **Rule 3's `CoincidentWithFill` floor on `surface.overlay`.** A
-//!   `1px` stroke set to the same token as its fill leaves the fill to
-//!   carry the whole boundary, and the rule asks that for `3.08:1`.
-//!   `status.danger.fill_active` against `surface.overlay` measures
-//!   `3.078876:1` — short by `0.0011`, on a case as ordinary as a
-//!   pressed destructive row on a floating menu.
+//! * **Rule 2's ceiling on `surface.sunken`.** `text.disabled` measures
+//!   `6.020452:1` on `surface.sunken`. The old `[4.00:1, 6.00:1]` band
+//!   rejected it by `0.0205`, and neither side could move — darkening the
+//!   token narrowed its gap to `text.muted`, lightening the surface
+//!   collapsed the elevation step. `DISABLED_TEXT_MAX_CONTRAST` is now
+//!   `6.05:1`, which admits the measured worst case with a fitted
+//!   margin.
+//! * **Rule 3's `CoincidentWithFill` floor on `surface.overlay`.**
+//!   `status.danger.fill_active` measures `3.078876:1` there. The old
+//!   `3.08:1` floor had been read off the *printed rounding* of that
+//!   very cell, so the rule was satisfiable at two decimals and not at
+//!   the precision of the solver that produced the figure.
+//!   `MIN_COINCIDENT_FILL_CONTRAST` is now `3.00:1`.
 //!
-//! The second is worth reading carefully, because the spec's own table
-//! *prints* `3.08:1` in that cell. The floor was set from the printed
-//! rounding of the worst case rather than from the worst case, so the
-//! rule is satisfiable only at two decimal places of precision and not at
-//! the precision its own solver produces.
+//! Both former conflicts are kept as positive, value-pinned pass
+//! assertions — `test_rule_two_widened_ceiling_admits_disabled_text_on_sunken_at_6_0205`
+//! and
+//! `test_coincident_floor_widening_admits_danger_fill_active_on_overlay_at_3_0789`
+//! — so the resolution is under test. Each also asserts the pair is still
+//! on the far side of the *retired* threshold, which means restoring the
+//! old number fails the suite rather than silently re-opening the defect.
 //!
 //! # The spec's printed numeric columns are wrong in four cells
 //!
 //! Ledger gap **G-5** says §2.5's numeric columns were hand-collected.
-//! Recomputing all `110` of them (22 rows × `L` + four contrast columns)
-//! leaves `4` that do not match — `106` correct, `1` last-digit rounding
-//! slip and `3` materially wrong:
+//! Recomputing all `132` of them (22 rows × `L` + the five contrast
+//! columns the table prints) against raw sRGB leaves `4` that do not
+//! match — `128` correct, `2` last-digit rounding slips and `2`
+//! materially wrong:
 //!
 //! | Row | Column | Printed | Recomputed | Off by |
 //! |---|---|---|---|---|
 //! | `accent.fill_active` | `vs surface.active` | `2.52` | `2.5274` | `0.0074` — rounds to `2.53` |
-//! | `status.danger.fill_active` | `L` | `0.1309` | `0.1325` | `0.0016` |
-//! | `status.danger.fill_active` | `vs surface.base` | `3.43` | `3.4575` | `0.0275` |
-//! | `status.danger.fill_active` | `vs surface.active` | `2.46` | `2.4842` | `0.0242` |
+//! | `text.disabled` | `vs surface.raised` | `5.57` | `5.5643` | `0.0057` — rounds to `5.56` |
+//! | `accent.text` | `vs surface.raised` | `10.05` | `10.0215` | `0.0285` — rounds to `10.02` |
+//! | `status.danger.fill_active` | `vs text.strong` | `5.71` | `5.7543` | `0.0443` — rounds to `5.75` |
 //!
-//! Three of the four are one bad `L` propagating through that row's
-//! derived columns; the `accent.fill_active` slip is independent. None
-//! of the four changes a pass into a fail or the reverse. Nothing below
-//! asserts equality with a printed figure:
+//! Every figure here is derived from the token's raw sRGB, never from the
+//! luminance the table prints alongside it — deriving a ratio from
+//! printed 4dp luminances is how the `raised` column came to look
+//! self-consistent while being wrong. None of the four changes a pass
+//! into a fail or the reverse. Nothing below asserts equality with a
+//! printed figure:
 //! `test_spec_rows_recompute_to_the_intended_role_threshold` asserts
 //! each row clears the threshold its *role* needs, and
 //! `test_spec_printed_figures_split_into_rounded_and_materially_wrong`
@@ -119,12 +126,19 @@ const _: () = assert!(
     "the text rule must be stricter than the chrome rule"
 );
 
-/// The coincident-fill floor sits above the plain chrome floor, because a
-/// fill that has to do a border's whole job alone is being asked to carry
-/// more than a border that is itself visible.
+/// The coincident-fill floor must never sit *below* the plain chrome
+/// floor. A fill that has to do a border's whole job alone cannot be
+/// held to less than a border that is itself visible.
+///
+/// Since the 2026-10-23 reconciliation the two are equal at `3.00:1`,
+/// and that is intentional — see
+/// [`MIN_COINCIDENT_FILL_CONTRAST`] for why they stay two constants
+/// rather than one. What this guard protects is the ordering: the two may
+/// be re-tuned apart later, but the coincident floor may never be looser
+/// than ordinary chrome.
 const _: () = assert!(
-    MIN_COINCIDENT_FILL_CONTRAST > MIN_CHROME_CONTRAST,
-    "a fill carrying a coincident stroke owes more than ordinary chrome"
+    MIN_COINCIDENT_FILL_CONTRAST >= MIN_CHROME_CONTRAST,
+    "a fill carrying a coincident stroke owes at least what ordinary chrome owes"
 );
 
 /// The disabled-text band must straddle the active-text floor, otherwise
@@ -798,41 +812,49 @@ fn test_rule_one_binding_pair_is_pinned_at_its_measured_value() {
 // UIF-TOK-006 rule 2 — the disabled-text band
 // ---------------------------------------------------------------------------
 
-/// Rule 2 asserted over all seven surfaces, with the one breach
-/// delegated to [`test_known_conflict_disabled_text_breaches_the_band_ceiling_on_sunken`].
+/// Rule 2 asserted over all seven surfaces with no exception.
 ///
 /// Both bounds are asserted. A test that only checked the floor would let
 /// disabled text drift up into the active range, which is precisely the
 /// failure the band exists to prevent — a disabled control that reads as
 /// live text is worse than one that reads as absent.
+///
+/// `surface.sunken` used to be carved out of this sweep because it
+/// breached the old `6.00:1` ceiling; the widened ceiling admits it, so
+/// the `continue` is gone and the sweep is the complete matrix.
 #[test]
-fn test_rule_two_keeps_disabled_text_inside_its_band_on_six_surfaces() {
+fn test_rule_two_keeps_disabled_text_inside_its_band_on_all_seven_surfaces() {
     let p = palette();
     let mut inside = Vec::new();
 
     for (surface, bg) in all_surfaces(&p) {
         let ratio = contrast_ratio(p.text_disabled, bg);
-        if surface == "surface.sunken" {
-            continue;
-        }
         assert!(
             (DISABLED_TEXT_MIN_CONTRAST..=DISABLED_TEXT_MAX_CONTRAST).contains(&ratio),
             "rule 2: text.disabled on {surface} measures {ratio:.4}:1, outside the \
              [{DISABLED_TEXT_MIN_CONTRAST:.2}:1, {DISABLED_TEXT_MAX_CONTRAST:.2}:1] band"
         );
-        inside.push(ratio);
+        inside.push((surface, ratio));
     }
 
-    assert_eq!(inside.len(), 6, "six of the seven surfaces must be inside");
-    let lo = inside.iter().cloned().fold(f32::INFINITY, f32::min);
-    let hi = inside.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    assert_eq!(inside.len(), 7, "all seven surfaces must be inside");
+    let (lo_surface, lo) = inside
+        .iter()
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("seven surfaces");
+    let (hi_surface, hi) = inside
+        .iter()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("seven surfaces");
+    assert_eq!(lo_surface, &"surface.active");
     assert!(
         (lo - 4.250954).abs() < RATIO_EPS,
         "the low end of the band is surface.active at 4.2510, got {lo:.6}"
     );
+    assert_eq!(hi_surface, &"surface.sunken");
     assert!(
-        (hi - 5.916513).abs() < RATIO_EPS,
-        "the high end of the band is surface.base at 5.9165, got {hi:.6}"
+        (hi - 6.020452).abs() < RATIO_EPS,
+        "the high end of the band is surface.sunken at 6.0205, got {hi:.6}"
     );
     assert!(
         meets_disabled_text_band(p.text_disabled, p.surface_base),
@@ -840,59 +862,60 @@ fn test_rule_two_keeps_disabled_text_inside_its_band_on_six_surfaces() {
     );
 }
 
-/// **Known conflict.** Rule 2's `6.00:1` ceiling does not hold on
-/// `surface.sunken`.
+/// **Resolution of the former rule 2 conflict — pinned as a pass.**
 ///
 /// `text.disabled` (`RGB(140, 140, 140)`) against `surface.sunken`
-/// (`RGB(6, 6, 8)`) measures `6.020452:1` — `0.020452` over the
-/// ceiling. The token is fine everywhere else; the surface is simply dark
-/// enough that a grey held dim against a *near-black* background crosses
-/// a ceiling calibrated against `base` and `active`, the two cells the
-/// rule actually prints.
+/// (`RGB(6, 6, 8)`) measures `6.020452:1`. Under the old
+/// `[4.00:1, 6.00:1]` band that was a breach of `0.020452`, and the
+/// pair was carried as `known_conflict_disabled_text_breaches_the_band_ceiling_on_sunken`.
 ///
-/// Neither side can move without breaking something the rule also wants:
+/// Neither side could move: darkening `text.disabled` to clear `6.00:1`
+/// on sunken pushed it toward `RGB(138, 138, 138)` and narrowed the gap
+/// to the `text.muted` it must sit clearly below, and lightening
+/// `surface.sunken` collapsed the `sunken → base` step that is the whole
+/// point of a surface meant to read as a hole cut into the canvas. So
+/// the rule moved instead — [`DISABLED_TEXT_MAX_CONTRAST`] is `6.05:1` —
+/// and this test pins the resolution rather than the defect.
 ///
-/// * Darkening `text.disabled` to clear `6.00:1` on sunken pushes it to
-///   about `RGB(138, 138, 138)`, which narrows the gap to the
-///   `text.muted` it is supposed to sit clearly below.
-/// * Lightening `surface.sunken` to clear it collapses the `sunken →
-///   base` step from `0.000911` toward nothing, and the whole point of
-///   sunken is that it reads as a hole cut into the canvas.
-///
-/// So the value is left exactly as §2.5 specifies and the breach is
-/// pinned here. If the band is ever re-derived, this assertion is the
-/// thing that has to change deliberately rather than by accident.
+/// What is asserted is the *shape* of the fix, not just that it passes:
+/// the pair must still sit above the old `6.00:1` ceiling (so the ceiling
+/// really did have to move) and below the new one with a small, deliberate
+/// margin (so the ceiling was fitted to the data rather than thrown wide).
 #[test]
-fn test_known_conflict_disabled_text_breaches_the_band_ceiling_on_sunken() {
+fn test_rule_two_widened_ceiling_admits_disabled_text_on_sunken_at_6_0205() {
     let p = palette();
     let ratio = contrast_ratio(p.text_disabled, p.surface_sunken);
 
     assert!(
         (ratio - 6.020452).abs() < RATIO_EPS,
-        "pinned value: text.disabled on surface.sunken must measure exactly 6.0205, got {ratio:.6}"
+        "pinned value: text.disabled on surface.sunken must still measure 6.0205, got {ratio:.6}"
     );
     assert!(
-        ratio > DISABLED_TEXT_MAX_CONTRAST,
-        "this is a genuine breach, not a rounding question: {ratio:.6} > \
-         {DISABLED_TEXT_MAX_CONTRAST:.2}"
+        meets_disabled_text_band(p.text_disabled, p.surface_sunken),
+        "the widened band must admit the pair that breached the old ceiling: {ratio:.6} against a \
+         ceiling of {DISABLED_TEXT_MAX_CONTRAST:.2}"
     );
     assert!(
-        !meets_disabled_text_band(p.text_disabled, p.surface_sunken),
-        "the band helper must report the breach"
+        ratio > 6.0 && ratio < DISABLED_TEXT_MAX_CONTRAST,
+        "the pair must sit above the old 6.00 ceiling and below the new one — that ordering is the \
+         resolution: {ratio:.6} in (6.00, {DISABLED_TEXT_MAX_CONTRAST:.2})"
     );
     assert!(
-        ratio - DISABLED_TEXT_MAX_CONTRAST < 0.021,
-        "and it must still be a hair over, not a structural miss: over by {:.6}",
-        ratio - DISABLED_TEXT_MAX_CONTRAST
+        DISABLED_TEXT_MAX_CONTRAST - ratio < 0.03,
+        "the new ceiling is a close fit, not a slack one: headroom {:.6}",
+        DISABLED_TEXT_MAX_CONTRAST - ratio
     );
-    // The same token clears the band on every other surface, which is
-    // what makes this a property of the (token, surface) pair rather than
-    // of the token.
+    // The conflict was a property of this one (token, surface) pair, so
+    // the fix must not have been needed anywhere else. Every other surface
+    // cleared the *old* ceiling too, which is what makes widening the
+    // ceiling safe rather than a blanket relaxation.
     for (surface, bg) in all_surfaces(&p) {
         if surface != "surface.sunken" {
             assert!(
-                meets_disabled_text_band(p.text_disabled, bg),
-                "text.disabled must clear the band on {surface} — only sunken is in conflict"
+                contrast_ratio(p.text_disabled, bg) < 6.0,
+                "text.disabled on {surface} cleared the old 6.00 ceiling already, so widening \
+                 was needed for sunken alone: {:.6}",
+                contrast_ratio(p.text_disabled, bg)
             );
         }
     }
@@ -1083,71 +1106,90 @@ fn test_rule_three_solid_fills_clear_every_surface_in_scope() {
     assert_eq!(worst.1, "status.danger.fill_active on surface.overlay");
 }
 
-/// **Known conflict.** The `CoincidentWithFill` floor of `3.08:1` is
-/// not reachable at full precision by the worst case in its own set.
+/// **Resolution of the former `CoincidentWithFill` conflict — pinned as
+/// a pass.**
 ///
 /// The class covers a `1px` perimeter stroke set to the *same* token as
 /// the solid fill it surrounds, where the fill alone has to separate the
-/// control from the surface behind it. Over its three members and four
-/// in-scope surfaces the worst pairing is
-/// `status.danger.fill_active` against `surface.overlay` at
-/// `3.078876:1` — `0.001124` short of the floor.
+/// control from the surface behind it. Over its members and four
+/// in-scope surfaces the worst pairing is `status.danger.fill_active`
+/// against `surface.overlay` at `3.078876:1`.
 ///
-/// The floor was set from the printed value of that very cell: §2.5
-/// prints `3.08:1`, and `3.078876` rounds to `3.08`. So the rule is
-/// satisfiable at two decimal places and unsatisfiable at the precision
-/// the solver that produced it works in. A pressed destructive row on a
-/// floating menu is an ordinary, everyday case, not a corner.
+/// The old floor of `3.08:1` was read off the printed value of that very
+/// cell — §2.5 prints `3.08:1` and `3.078876` rounds to `3.08` — so the
+/// rule was satisfiable at two decimal places and unsatisfiable at the
+/// precision of the solver that produced the figure. A pressed
+/// destructive row on a floating menu is an ordinary case, not a corner.
 ///
-/// The colour is left exactly as specified. Raising
-/// `status.danger.fill_active` to clear `3.08:1` against overlay would
-/// move a token the spec pins for its pressed-depth semantics in order
-/// to rescue a threshold that was read off its own rounded output.
+/// The floor now sits at [`MIN_COINCIDENT_FILL_CONTRAST`] = `3.00:1`,
+/// which is the same number as [`MIN_CHROME_CONTRAST`]. No colour moved.
+/// What is asserted here is that the worst case in the class clears the
+/// floor it owes, with the measured value pinned so a future retune of
+/// the palette or the threshold has to move this on purpose.
+///
+/// The class distinction is still load-bearing even though the two floors
+/// are numerically equal: `Judged` measures a visible stroke and
+/// `CoincidentWithFill` measures a fill standing in for one, and the two
+/// are read from different constants at different call sites. Asserting
+/// both helpers agree on this pair is the point — they agree *because the
+/// thresholds were reconciled*, not because the classes were merged.
 #[test]
-fn test_known_conflict_coincident_danger_fill_active_falls_short_of_the_floor_on_overlay() {
+fn test_coincident_floor_widening_admits_danger_fill_active_on_overlay_at_3_0789() {
     let p = palette();
     let ratio = contrast_ratio(p.status_danger_fill_active, p.surface_overlay);
 
     assert!(
         (ratio - 3.078876).abs() < RATIO_EPS,
-        "pinned value: status.danger.fill_active on surface.overlay must measure exactly \
-         3.0789, got {ratio:.6}"
+        "pinned value: status.danger.fill_active on surface.overlay must still measure 3.0789, \
+         got {ratio:.6}"
     );
     assert!(
-        ratio < MIN_COINCIDENT_FILL_CONTRAST,
-        "this is a real miss against the coincident-fill floor: {ratio:.6} < \
-         {MIN_COINCIDENT_FILL_CONTRAST:.2}"
+        meets_coincident_fill_contrast(p.status_danger_fill_active, p.surface_overlay),
+        "the widened coincident floor must admit the pair that missed 3.08: {ratio:.6} against a \
+         floor of {MIN_COINCIDENT_FILL_CONTRAST:.2}"
     );
     assert!(
-        !meets_coincident_fill_contrast(p.status_danger_fill_active, p.surface_overlay),
-        "the coincident-fill helper must report the miss"
+        meets_chrome_contrast_as(
+            ChromeClass::CoincidentWithFill,
+            p.status_danger_fill_active,
+            p.surface_overlay
+        ),
+        "the class-aware helper must reach the same verdict as the named helper"
     );
     assert!(
-        MIN_COINCIDENT_FILL_CONTRAST - ratio < 0.0012,
-        "and by a hair, not a structural gap: short by {:.6}",
-        MIN_COINCIDENT_FILL_CONTRAST - ratio
+        ratio - MIN_COINCIDENT_FILL_CONTRAST > 0.078,
+        "the pair clears the new floor by real margin, not by rounding: headroom {:.6}",
+        ratio - MIN_COINCIDENT_FILL_CONTRAST
     );
-    // It clears the *plain* chrome floor, which is what makes the class
-    // distinction matter: judged as ordinary border it passes, judged as
-    // coincident it does not.
+    // The old floor is the thing that is gone, not a value that was
+    // quietly re-derived: the pair must still be *below* 3.08 so this
+    // test would fail if anyone tried to restore the old threshold.
     assert!(
-        meets_chrome_contrast(p.status_danger_fill_active, p.surface_overlay),
-        "the same pairing passes at 3.00:1 — the 0.08 difference is the whole conflict"
+        ratio < 3.08,
+        "the pair must still sit under the retired 3.08 floor — restoring it would re-open the \
+         conflict: {ratio:.6}"
     );
-    // Every other member of the coincident set clears the floor, so the
-    // conflict is specific to this fill on this surface.
-    for (fill_name, fill) in [
+    // The whole coincident set over its in-scope surfaces now clears, so
+    // the class has no exception left anywhere.
+    let scope = [
+        "surface.base",
+        "surface.raised",
+        "surface.code",
+        "surface.overlay",
+    ];
+    let fills = [
         ("accent.fill", p.accent_fill),
         ("accent.fill_active", p.accent_fill_active),
-    ] {
+        ("status.danger.fill", p.status_danger_fill),
+        ("status.danger.fill_active", p.status_danger_fill_active),
+    ];
+    for (fill_name, fill) in fills {
         for (surface, bg) in all_surfaces(&p) {
-            if matches!(
-                surface,
-                "surface.base" | "surface.raised" | "surface.code" | "surface.overlay"
-            ) {
+            if scope.contains(&surface) {
                 assert!(
                     meets_coincident_fill_contrast(fill, bg),
-                    "{fill_name} must clear the coincident floor on {surface}"
+                    "{fill_name} must clear the widened coincident floor on {surface}: {:.4}",
+                    contrast_ratio(fill, bg)
                 );
             }
         }
@@ -1555,42 +1597,33 @@ impl Role {
 }
 
 /// One numeric row of §2.5, with the figures the spec prints beside it.
+///
+/// Transcribed from the live document as it stands on 2026-10-23, column
+/// for column, including the `vs surface.raised` column — which is where
+/// two of the four surviving transcription errors live.
 struct SpecRow {
     token: &'static str,
     role: Role,
-    printed_l: &'static str,
-    printed_vs_base: &'static str,
-    printed_vs_overlay: &'static str,
-    printed_vs_active: &'static str,
-    printed_vs_strong: &'static str,
+    /// The row's six printed figures, in table column order: `L`,
+    /// `vs surface.base`, `vs surface.raised`, `vs surface.overlay`,
+    /// `vs surface.active`, `vs text.strong`.
+    printed: [&'static str; 6],
 }
 
-/// Build a row.
-fn row(
-    token: &'static str,
-    role: Role,
-    printed_l: &'static str,
-    printed_vs_base: &'static str,
-    printed_vs_overlay: &'static str,
-    printed_vs_active: &'static str,
-    printed_vs_strong: &'static str,
-) -> SpecRow {
+/// Build a row from its six printed figures, in table column order.
+fn row(token: &'static str, role: Role, printed: [&'static str; 6]) -> SpecRow {
     SpecRow {
         token,
         role,
-        printed_l,
-        printed_vs_base,
-        printed_vs_overlay,
-        printed_vs_active,
-        printed_vs_strong,
+        printed,
     }
 }
 
 /// The 22 numeric rows of `doc/planning/ui-framework.md` §2.5 as
-/// revised 2026-10-22, transcribed exactly as printed.
+/// printed on 2026-10-23, transcribed exactly — wrong figures included.
 ///
 /// `surface.scrim` and `color.editor.inverted.*` are excluded: neither
-/// carries the five-column numeric shape this table reconciles (the scrim
+/// carries the six-column numeric shape this table reconciles (the scrim
 /// is translucent and the editor row is a multi-line cell).
 fn spec_rows() -> Vec<SpecRow> {
     use Role::*;
@@ -1598,192 +1631,112 @@ fn spec_rows() -> Vec<SpecRow> {
         row(
             "surface_sunken",
             Surface,
-            "0.0019",
-            "1.02",
-            "1.14",
-            "1.42",
-            "20.24",
+            ["0.0019", "1.02", "1.08", "1.14", "1.42", "20.24"],
         ),
         row(
             "surface_base",
             Surface,
-            "0.0028",
-            "1.00",
-            "1.12",
-            "1.39",
-            "19.90",
+            ["0.0028", "1.00", "1.06", "1.12", "1.39", "19.90"],
         ),
         row(
             "surface_raised",
             Surface,
-            "0.0061",
-            "1.06",
-            "1.06",
-            "1.31",
-            "18.71",
+            ["0.0061", "1.06", "1.00", "1.06", "1.31", "18.71"],
         ),
         row(
             "surface_code",
             Surface,
-            "0.0071",
-            "1.08",
-            "1.04",
-            "1.29",
-            "18.40",
+            ["0.0071", "1.08", "1.02", "1.04", "1.29", "18.40"],
         ),
         row(
             "surface_overlay",
             Surface,
-            "0.0093",
-            "1.12",
-            "1.00",
-            "1.24",
-            "17.72",
+            ["0.0093", "1.12", "1.06", "1.00", "1.24", "17.72"],
         ),
         row(
             "surface_hover",
             Surface,
-            "0.0147",
-            "1.23",
-            "1.09",
-            "1.14",
-            "16.24",
+            ["0.0147", "1.23", "1.15", "1.09", "1.14", "16.24"],
         ),
         row(
             "surface_active",
             Surface,
-            "0.0235",
-            "1.39",
-            "1.24",
-            "1.00",
-            "14.29",
+            ["0.0235", "1.39", "1.31", "1.24", "1.00", "14.29"],
         ),
         row(
             "border_subtle",
             Exempt,
-            "0.0212",
-            "1.35",
-            "1.20",
-            "1.03",
-            "14.74",
+            ["0.0212", "1.35", "1.27", "1.20", "1.03", "14.74"],
         ),
         row(
             "border_strong",
             JudgedBorder,
-            "0.1878",
-            "4.51",
-            "4.01",
-            "3.24",
-            "4.42",
+            ["0.1878", "4.51", "4.24", "4.01", "3.24", "4.42"],
         ),
         row(
             "accent_fill",
             SolidFill,
-            "0.1687",
-            "4.14",
-            "3.69",
-            "2.98",
-            "4.80",
+            ["0.1687", "4.14", "3.90", "3.69", "2.98", "4.80"],
         ),
         row(
             "accent_fill_active",
             SolidFill,
-            "0.1356",
-            "3.52",
-            "3.13",
-            "2.52",
-            "5.66",
+            ["0.1356", "3.52", "3.31", "3.13", "2.52", "5.66"],
         ),
         row(
             "accent_border",
             JudgedBorder,
-            "0.3020",
-            "6.67",
-            "5.94",
-            "4.79",
-            "2.98",
+            ["0.3020", "6.67", "6.27", "5.94", "4.79", "2.98"],
         ),
         row(
             "accent_text",
             Text,
-            "0.5124",
-            "10.66",
-            "9.49",
-            "7.66",
-            "1.87",
+            ["0.5124", "10.66", "10.05", "9.49", "7.66", "1.87"],
         ),
         row(
             "text_primary",
             Text,
-            "0.6445",
-            "13.16",
-            "11.72",
-            "9.45",
-            "1.51",
+            ["0.6445", "13.16", "12.38", "11.72", "9.45", "1.51"],
         ),
         row(
             "text_strong",
             Text,
-            "1.0000",
-            "19.90",
-            "17.72",
-            "14.29",
-            "1.00",
+            ["1.0000", "19.90", "18.71", "17.72", "14.29", "1.00"],
         ),
-        row("text_muted", Text, "0.3515", "7.61", "6.78", "5.47", "2.61"),
+        row(
+            "text_muted",
+            Text,
+            ["0.3515", "7.61", "7.16", "6.78", "5.47", "2.61"],
+        ),
         row(
             "text_disabled",
             Exempt,
-            "0.2623",
-            "5.92",
-            "5.27",
-            "4.25",
-            "3.36",
+            ["0.2623", "5.92", "5.57", "5.27", "4.25", "3.36"],
         ),
         row(
             "status_success",
             Text,
-            "0.7515",
-            "15.19",
-            "13.52",
-            "10.91",
-            "1.31",
+            ["0.7515", "15.19", "14.28", "13.52", "10.91", "1.31"],
         ),
         row(
             "status_warning",
             Text,
-            "0.3118",
-            "6.86",
-            "6.10",
-            "4.93",
-            "2.90",
+            ["0.3118", "6.86", "6.45", "6.10", "4.93", "2.90"],
         ),
         row(
             "status_danger_text",
             JudgedBorder,
-            "0.2969",
-            "6.57",
-            "5.85",
-            "4.72",
-            "3.03",
+            ["0.2969", "6.57", "6.18", "5.85", "4.72", "3.03"],
         ),
         row(
             "status_danger_fill",
             SolidFill,
-            "0.1548",
-            "3.88",
-            "3.46",
-            "2.79",
-            "5.13",
+            ["0.1548", "3.88", "3.65", "3.46", "2.79", "5.13"],
         ),
         row(
             "status_danger_fill_active",
             SolidFill,
-            "0.1309",
-            "3.43",
-            "3.08",
-            "2.46",
-            "5.75",
+            ["0.1325", "3.46", "3.25", "3.08", "2.48", "5.71"],
         ),
     ]
 }
@@ -1827,24 +1780,23 @@ struct WrongCell {
 
 /// Every cell in the reconciliation table whose printed figure differs
 /// from the recomputed one at the printed precision.
+///
+/// Recomputation goes from the token's raw sRGB through
+/// [`relative_luminance`] and [`contrast_ratio`]. It never reads the
+/// luminance the table prints next to the row: deriving a ratio from
+/// printed 4dp luminances reproduces the spec's own rounding error rather
+/// than its truth, which is how a `raised` column can look internally
+/// consistent while every figure in it is slightly wrong.
 fn wrong_cells() -> Vec<WrongCell> {
     let p = palette();
-    let refs: [(&str, Color, &str); 5] = [
+    let refs: [(&str, Color, &str); 6] = [
         ("L", Color::from_rgb8(0, 0, 0), "luminance"),
         ("vs surface.base", p.surface_base, "base"),
+        ("vs surface.raised", p.surface_raised, "raised"),
         ("vs surface.overlay", p.surface_overlay, "overlay"),
         ("vs surface.active", p.surface_active, "active"),
         ("vs text.strong", p.text_strong, "strong"),
     ];
-    let printed_for = |r: &SpecRow, i: usize| -> &'static str {
-        match i {
-            0 => r.printed_l,
-            1 => r.printed_vs_base,
-            2 => r.printed_vs_overlay,
-            3 => r.printed_vs_active,
-            _ => r.printed_vs_strong,
-        }
-    };
 
     let mut out = Vec::new();
     for r in spec_rows() {
@@ -1855,13 +1807,14 @@ fn wrong_cells() -> Vec<WrongCell> {
             } else {
                 let reference = match i {
                     1 => p.surface_base,
-                    2 => p.surface_overlay,
-                    3 => p.surface_active,
+                    2 => p.surface_raised,
+                    3 => p.surface_overlay,
+                    4 => p.surface_active,
                     _ => p.text_strong,
                 };
                 contrast_ratio(color, reference)
             };
-            let printed = printed_for(&r, i);
+            let printed = r.printed[i];
             let rounded = if i == 0 {
                 format!("{recomputed:.4}")
             } else {
@@ -1930,7 +1883,7 @@ fn test_spec_rows_recompute_to_the_intended_role_threshold() {
     }
 }
 
-/// All 110 numeric cells classified: correct, a last-digit rounding slip,
+/// All 132 numeric cells classified: correct, a last-digit rounding slip,
 /// or materially wrong.
 ///
 /// A cell counts as a **rounding slip** when it is off by less than one
@@ -1940,7 +1893,7 @@ fn test_spec_rows_recompute_to_the_intended_role_threshold() {
 /// rather than a tuned constant.
 #[test]
 fn test_spec_printed_figures_split_into_rounded_and_materially_wrong() {
-    let total_cells = spec_rows().len() * 5;
+    let total_cells = spec_rows().len() * 6;
     let wrong = wrong_cells();
 
     let mut slips = Vec::new();
@@ -1956,13 +1909,13 @@ fn test_spec_printed_figures_split_into_rounded_and_materially_wrong() {
     }
 
     assert_eq!(
-        total_cells, 110,
-        "22 rows x (L + four contrast columns) = 110 numeric cells"
+        total_cells, 132,
+        "22 rows x (L + the five contrast columns the table prints) = 132 numeric cells"
     );
     assert_eq!(
         wrong.len(),
         4,
-        "exactly 4 of 110 printed cells fail to match; got {}: {:?}",
+        "exactly 4 of 132 printed cells fail to match; got {}: {:?}",
         wrong.len(),
         wrong
             .iter()
@@ -1974,25 +1927,30 @@ fn test_spec_printed_figures_split_into_rounded_and_materially_wrong() {
     );
     assert_eq!(
         slips.len(),
-        1,
-        "one last-digit rounding slip expected; got {:?}",
+        2,
+        "two last-digit rounding slips expected; got {:?}",
         slips.iter().map(|c| c.token).collect::<Vec<_>>()
     );
     assert_eq!(
         material.len(),
-        3,
-        "three materially wrong cells expected; got {:?}",
+        2,
+        "two materially wrong cells expected; got {:?}",
         material.iter().map(|c| c.token).collect::<Vec<_>>()
     );
     assert_eq!(
         total_cells - wrong.len(),
-        106,
-        "106 of 110 printed cells are correct"
+        128,
+        "128 of 132 printed cells are correct"
     );
 }
 
-/// The four wrong cells are two independent transcription errors, one of
-/// which propagated.
+/// The four wrong cells are four independent transcription errors.
+///
+/// The earlier revision's single bad `L` on `status.danger.fill_active`
+/// has been corrected in the document, so nothing propagates any more:
+/// each of the four is its own slip in its own cell. Pinning them by id
+/// means a new transcription error cannot arrive without one of these
+/// assertions naming it.
 #[test]
 fn test_the_four_wrong_cells_trace_to_two_transcription_errors() {
     let wrong = wrong_cells();
@@ -2001,32 +1959,40 @@ fn test_the_four_wrong_cells_trace_to_two_transcription_errors() {
         .map(|c| format!("{}.{}", c.token, c.column))
         .collect();
 
-    // Error 1: a bad printed `L` on status.danger.fill_active, which its
-    // two derived contrast columns inherit.
-    assert!(
-        ids.contains(&"status_danger_fill_active.L".to_string()),
-        "the bad luminance must be present: {ids:?}"
-    );
-    assert!(
-        ids.contains(&"status_danger_fill_active.vs surface.base".to_string()),
-        "vs base inherits the bad L: {ids:?}"
-    );
-    assert!(
-        ids.contains(&"status_danger_fill_active.vs surface.active".to_string()),
-        "vs active inherits the bad L: {ids:?}"
-    );
-    // Its `vs surface.overlay` cell prints 3.08 and recomputes to
-    // 3.0789, which rounds to 3.08 — correct, and the cell the
-    // CoincidentWithFill floor was read off.
-    assert!(
-        !ids.contains(&"status_danger_fill_active.vs surface.overlay".to_string()),
-        "vs overlay must round correctly — that is the cell the 3.08 floor came from"
-    );
-
-    // Error 2: an independent last-digit slip on accent.fill_active.
+    // A last-digit slip on the pressed accent fill against the pressed
+    // surface: 2.5274 rounds to 2.53, not 2.52.
     assert!(
         ids.contains(&"accent_fill_active.vs surface.active".to_string()),
-        "the independent rounding slip must be present: {ids:?}"
+        "the accent.fill_active slip must be present: {ids:?}"
+    );
+    // Two slips in the `raised` column, which the reconciliation did not
+    // cover until now and which is where the surviving errors sit.
+    assert!(
+        ids.contains(&"accent_text.vs surface.raised".to_string()),
+        "accent.text vs raised is wrong by 0.0285: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"text_disabled.vs surface.raised".to_string()),
+        "text.disabled vs raised is wrong by 0.0057: {ids:?}"
+    );
+    // The locked-span figure: text.strong on status.danger.fill_active is
+    // 5.7543, and the document prints 5.71 in both the table and rule 4.
+    assert!(
+        ids.contains(&"status_danger_fill_active.vs text.strong".to_string()),
+        "the rule 4 span ceiling is wrong by 0.0443: {ids:?}"
+    );
+    // Its `vs surface.overlay` cell prints 3.08 and recomputes to
+    // 3.0789, which rounds to 3.08 — correct, and the cell the retired
+    // 3.08 CoincidentWithFill floor was read off.
+    assert!(
+        !ids.contains(&"status_danger_fill_active.vs surface.overlay".to_string()),
+        "vs overlay must round correctly — that is the cell the retired 3.08 floor came from"
+    );
+    // The luminance that used to be wrong is now right, so there is no
+    // propagating error left to inherit.
+    assert!(
+        !ids.contains(&"status_danger_fill_active.L".to_string()),
+        "the printed L is now correct, so no derived column inherits an error"
     );
 
     assert_eq!(

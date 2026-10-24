@@ -873,11 +873,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
              role-based, not threshold-based, and that distinction is load-bearing: two \
              forbidden pairings actually clear the 3.00 chrome floor (`accent.text` on \
              `accent.fill_active` at 3.0293 and on `status.danger.fill_active` at \
-             3.0820) yet remain banned. Two cells fail the spec's own thresholds and \
-             are pinned as known conflicts rather than patched: rule 2's \
-             `[4.00, 6.00]` band is breached by `text.disabled` on `surface.sunken` \
-             (6.0205), and rule 3's `CoincidentWithFill` floor of 3.08 is missed by \
-             `status.danger.fill_active` on `surface.overlay` (3.0789).",
+             3.0820) yet remain banned. The two cells that used to fail the \
+             spec's own thresholds are resolved on the rule side, not the colour \
+             side: rule 2's ceiling is now `[4.00, 6.05]`, which admits \
+             `text.disabled` on `surface.sunken` at 6.0205, and rule 3's \
+             `CoincidentWithFill` floor is now 3.00, which admits \
+             `status.danger.fill_active` on `surface.overlay` at 3.0789. Both \
+             resolutions are pinned as positive pass assertions, each also \
+             asserting the pair still sits on the far side of the retired \
+             threshold so restoring it fails the suite.",
         ),
     },
     Coverage {
@@ -1454,7 +1458,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
              resolves the two-row polarity matrix for all three atoms (`resolve_style` keyed \
              on `TogglePolarity`, one matrix shared by every control), classifies the \
              indicator's chrome (§3.5's four classes: `CoincidentWithFill` when the fill \
-             meets the 3.08 floor, `RestingDivider` at Rest, `Judged` otherwise), derives \
+             meets the 3.00 floor, `RestingDivider` at Rest, `Judged` otherwise), derives \
              the focus ring adaptively rather than storing two constants, and supplies the \
              pure geometry — the 16×16px box at `radius.widget`, the circle with its \
              centred `size.checkbox.box / 2` dot, the 36×20px track with the 14×14px thumb \
@@ -1476,7 +1480,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
              5.35:1 printed, and `accent.border` on `surface.code` — the off-polarity \
              focus-ring upper bound — is 6.17:1, not 6.67:1. Neither breaks a floor, so \
              nothing is blocked; the discrepancy is recorded rather than propagated. The \
-             `CoincidentWithFill` 3.08 floor also fails on `surface.active` (2.98 for \
+             `CoincidentWithFill` 3.00 floor also fails on `surface.active` (2.98 for \
              `accent.fill`, 2.53 for `accent.fill_active`), a limitation the Primary \
              button already carries; that class is exempt from the build-time gate, so the \
              gallery cell is the only place it is visible.",
@@ -1668,7 +1672,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
              `accent.fill` measures **1.4280:1**, but the `✓` is held at `text.strong` \
              (**18.7108:1**), because the glyph is the state and a chip may not report a \
              state it does not have. One mount is disallowed: `accent.fill` on \
-             `surface.active` is **2.9768:1**, under the `3.08:1` a fill carrying its own \
+             `surface.active` is **2.9768:1**, under the `3.00:1` a fill carrying its own \
              boundary owes — so a selected chip may sit on `base`, `raised` or `hover`, \
              never on `active`.",
         ),

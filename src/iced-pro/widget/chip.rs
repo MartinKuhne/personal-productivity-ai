@@ -65,7 +65,7 @@
 //!
 //! **One mount is not allowed.** A selected chip's fill is
 //! [`Palette::accent_fill`], and `accent.fill` against `surface.active`
-//! is **`2.9768:1`** — under the `3.08:1` a fill that carries its own
+//! is **`2.9768:1`** — under the `3.00:1` a fill that carries its own
 //! boundary owes. A selected chip may sit on `surface.base`,
 //! `surface.raised` or `surface.hover`; it may not sit on `surface.active`,
 //! which is the background a pressed row underneath it would paint. The
@@ -451,7 +451,7 @@ const fn selected_paint(base: BaseState, palette: &Palette) -> BasePaint {
 ///   would be [`ChromeClass::CoincidentWithFill`]. **No chip resolves to
 ///   it today** — §3.6 gives every chip a perimeter of its own — but the
 ///   arm is here because the classifier is shared and a caller handed a
-///   coincident edge must get the honest class and the `3.08:1` it owes.
+///   coincident edge must get the honest class and the `3.00:1` it owes.
 /// * everything else is [`ChromeClass::Judged`] against `3.0:1`:
 ///   `border.strong` on `surface.raised` at `4.2379:1`, `accent.border`
 ///   on `surface.raised` at `6.2727:1`, `accent.border` on

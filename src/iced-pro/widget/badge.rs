@@ -98,7 +98,7 @@
 //!
 //! * the dot and the solid pill are [`ChromeClass::CoincidentWithFill`]
 //!   — their stroke *is* their fill, so the fill carries the boundary
-//!   and owes `3.08:1` against the mount. `accent.fill` on
+//!   and owes `3.00:1` against the mount. `accent.fill` on
 //!   `surface.raised` is `3.8965:1` and on `surface.overlay`
 //!   `3.6895:1`; `status.danger.fill` on raised is `3.6495:1`.
 //! * the chip's tone border is [`ChromeClass::Judged`] at `3.0:1` —
@@ -404,7 +404,7 @@ pub fn chip_width(style: &BadgeStyle, glyph_width: f32, text_width: f32) -> f32 
 /// * a perimeter set to the exact same colour as the fill it surrounds
 ///   is [`ChromeClass::CoincidentWithFill`] — the dot and the solid
 ///   pill. They draw no boundary of their own, so the fill carries the
-///   separation and owes `3.08:1` against the mount.
+///   separation and owes `3.00:1` against the mount.
 /// * `border.subtle` is [`ChromeClass::RestingDivider`] and exempt.
 ///   **No badge resolves to it today** — the neutral chip deliberately
 ///   wears `border.strong` so it stays measured — but the arm is here

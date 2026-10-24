@@ -41,7 +41,7 @@
 //! can. §3.6 makes the **selected** chip's `accent.fill` the selection
 //! signal, so that fill — and only that fill, and only where it differs
 //! from the mount — owes the rule 2 threshold. It measures `3.8965:1`
-//! at rest and `3.3082:1` pressed, against a floor of `3.08:1`.
+//! at rest and `3.3082:1` pressed, against a floor of `3.00:1`.
 //!
 //! The perimeter is audited against the mount for every state. The
 //! disabled chip's `border.subtle` perimeter classifies as

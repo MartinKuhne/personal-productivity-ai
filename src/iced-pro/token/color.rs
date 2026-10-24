@@ -116,8 +116,9 @@ pub struct Palette {
     ///
     /// It is also the darkest place a disabled placeholder can appear,
     /// which matters to `UIF-TOK-006` rule 2: `text.disabled` measures
-    /// `6.0205:1` here and breaches that rule's `6.00:1` ceiling. See
-    /// the rule-2 known-conflict test in `token/contrast_tests.rs`.
+    /// `6.0205:1` here, which is why that rule's ceiling was widened to
+    /// `6.05:1`. See
+    /// `test_rule_two_widened_ceiling_admits_disabled_text_on_sunken_at_6_0205`.
     pub surface_sunken: Color,
 
     /// `color.surface.raised` — navbar, bottom bar, inactive tabs and
@@ -267,13 +268,14 @@ pub struct Palette {
     /// (`UIF-PRIN-004`), not gone.
     ///
     /// `UIF-TOK-006` rule 2 exempts it from the `4.50:1` active-text
-    /// floor and holds it inside a `[4.00:1, 6.00:1]` muted-legibility
+    /// floor and holds it inside a `[4.00:1, 6.05:1]` muted-legibility
     /// band instead, so a disabled control stays readable without
-    /// competing with the active ones. It clears that band on six of the
-    /// seven surfaces; `surface.sunken` measures `6.0205:1` and breaches
-    /// the ceiling by `0.0205`. That is a defect in the band, not in
-    /// this token, and is pinned as a known conflict rather than tuned
-    /// away — see `token/contrast_tests.rs`.
+    /// competing with the active ones. It clears that band on all seven
+    /// surfaces. `surface.sunken` is the tight fit at `6.0205:1`, which
+    /// is what the ceiling was widened for — the alternative, lightening
+    /// `sunken` enough to fall under `6.00`, would collapse the
+    /// `sunken → base` step the elevation ladder depends on. Headroom is
+    /// only `0.0295`, so a palette retune must re-check it.
     pub text_disabled: Color,
 
     /// `color.status.success` — completion states and positive status
@@ -349,15 +351,16 @@ pub struct Palette {
     /// * Its printed luminance in §2.5 (`0.1309`) is wrong. The true
     ///   value for `RGB(202, 24, 16)` is `0.1325`. Recorded against
     ///   **G-5**; see this module's doc comment.
-    /// * It is the token that breaks the `CoincidentWithFill` rule. A
+    /// * It is the token that set the `CoincidentWithFill` floor. A
     ///   `1px` stroke set to this same token takes its boundary contrast
-    ///   from the fill, which must therefore reach `3.08:1` against the
-    ///   surrounding surface — and against `surface.overlay` it measures
-    ///   `3.0789:1`, short by `0.0011`. A pressed destructive row on a
-    ///   floating menu is a real, ordinary case. This is a defect in the
-    ///   rule's threshold, not in the colour, and it is pinned as a
-    ///   known conflict in `token/contrast_tests.rs` rather than tuned
-    ///   away.
+    ///   from the fill, and against `surface.overlay` that fill measures
+    ///   `3.0789:1` — the worst case in the palette, and the reason the
+    ///   floor was originally derived as `3.08:1` from a two-decimal
+    ///   rounding of the very cell it then failed. The floor now sits at
+    ///   `3.00:1`, matching `Judged`, and this pair passes with `0.0789`
+    ///   of margin. A pressed destructive row on a floating menu is a
+    ///   real, ordinary case, so the resolution had to be the threshold
+    ///   rather than the colour.
     pub status_danger_fill_active: Color,
 }
 

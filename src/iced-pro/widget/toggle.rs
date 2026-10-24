@@ -84,7 +84,7 @@
 //!   the border *is* the fill and draws no boundary of its own. The
 //!   separation is then carried by the fill against whatever the control
 //!   is mounted to, which reaches `3.6895:1` and `3.1325:1` on
-//!   `surface.overlay` — both clear of the `3.08:1` that class owes.
+//!   `surface.overlay` — both clear of the `3.00:1` that class owes.
 //! * `RestingDivider` — the disabled border's `border.subtle`, which is
 //!   not indicator material and is exempt.
 //! * `Judged` — everything else, against the `3.0:1` chrome floor.
@@ -390,7 +390,7 @@ const fn on_paint(base: BaseState, palette: &Palette) -> BasePaint {
 ///
 /// * a border set to the exact same colour as the fill it surrounds is
 ///   [`ChromeClass::CoincidentWithFill`] — it draws no boundary, so the
-///   fill carries the separation and owes `3.08:1` against the surface
+///   fill carries the separation and owes `3.00:1` against the surface
 ///   behind it;
 /// * `border.subtle` is [`ChromeClass::RestingDivider`], a passive
 ///   hairline that is not indicator material and is exempt;

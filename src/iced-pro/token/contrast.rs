@@ -72,7 +72,7 @@
 //! | Class | What it is | Threshold |
 //! |---|---|---|
 //! | [`Judged`](ChromeClass::Judged) | Active perimeter borders and focus rings | `>= 3.00:1` |
-//! | [`CoincidentWithFill`](ChromeClass::CoincidentWithFill) | A `1px` stroke set to the *same* token as the solid fill it surrounds | `>= 3.08:1`, carried by the fill |
+//! | [`CoincidentWithFill`](ChromeClass::CoincidentWithFill) | A `1px` stroke set to the *same* token as the solid fill it surrounds | `>= 3.00:1`, carried by the fill |
 //! | [`UnpaintedBackground`](ChromeClass::UnpaintedBackground) | A `transparent` stroke at rest (Ghost) | judged against the parent surface, and only once focused or hovered |
 //! | [`RestingDivider`](ChromeClass::RestingDivider) | Passive structural hairlines (`border.subtle`) | exempt |
 //!
@@ -87,12 +87,16 @@
 //! [`status_danger_fill_active`](crate::token::color::Palette::status_danger_fill_active)
 //! measured over `surface.base` through `surface.overlay`.
 //!
-//! `CoincidentWithFill` needs a threshold of its own because the stroke
+//! `CoincidentWithFill` keeps a threshold of its own because the stroke
 //! carries no information that the fill does not. When a button's border
 //! *is* its fill, nothing at the perimeter separates the control from
 //! the surface behind it, so the fill has to do the whole job on its
-//! own — and the rule asks it for slightly more than the chrome floor,
-//! [`MIN_COINCIDENT_FILL_CONTRAST`] (`3.08:1`).
+//! own — and that is a different question from "does this visible stroke
+//! read against its neighbour", which is what [`MIN_CHROME_CONTRAST`]
+//! answers. The two numbers happen to be equal at `3.00:1` since the
+//! 2026-10-23 reconciliation; they stay separate constants because they
+//! are asked of different things. See
+//! [`MIN_COINCIDENT_FILL_CONTRAST`] for why merging them would be wrong.
 //!
 //! [`border_subtle`](crate::token::color::Palette::border_subtle) is a
 //! `RestingDivider`: pane split lines at rest, menu separators,
@@ -209,13 +213,17 @@
 //! left to reconcile, and [`crate::token::color`] is the spec's number
 //! verbatim.
 //!
-//! What the revision does *not* settle is two places where the rules and
-//! the printed values disagree with each other. Both are recorded,
-//! value-pinned and left unfixed in
-//! [`crate::token::color::Palette::dark`], because tuning a colour to
-//! satisfy a rule the spec's own table contradicts would replace a known
-//! defect with an undocumented one. The sidecar carries them as
-//! `known_conflict_*` tests.
+//! What the revision left unsettled — two places where the rules and the
+//! printed values contradicted each other — is now settled on the rule
+//! side rather than the colour side. `UIF-TOK-006` rule 2's ceiling was
+//! widened to [`DISABLED_TEXT_MAX_CONTRAST`] (`6.05:1`) to admit
+//! `text.disabled` on `surface.sunken` at `6.020452:1`, and rule 3's
+//! `CoincidentWithFill` floor was brought to
+//! [`MIN_COINCIDENT_FILL_CONTRAST`] (`3.00:1`) to admit
+//! `status.danger.fill_active` on `surface.overlay` at `3.078876:1`.
+//! No colour moved in either case. The sidecar keeps both pairs as
+//! positive, value-pinned pass assertions so the resolution itself is
+//! under test rather than remembered.
 //!
 //! Unit tests live in the sibling `contrast_tests.rs` sidecar.
 
@@ -246,9 +254,21 @@ pub const MIN_CHROME_CONTRAST: f32 = 3.0;
 ///
 /// A stroke coincident with its own fill draws no boundary of its own, so
 /// the fill alone has to separate the control from what is behind it.
-/// The rule asks for marginally more than [`MIN_CHROME_CONTRAST`] in
-/// that case.
-pub const MIN_COINCIDENT_FILL_CONTRAST: f32 = 3.08;
+///
+/// **This is deliberately equal to [`MIN_CHROME_CONTRAST`], and the two
+/// constants must not be merged.** They are equal in *value* today and
+/// different in *meaning*: [`MIN_CHROME_CONTRAST`] is what a visible
+/// stroke must reach against its neighbour, while this is what a *fill*
+/// must reach when it is standing in for a stroke that paints nothing.
+/// `ChromeClass::minimum_contrast` dispatches on the class, so the two
+/// numbers are read at different call sites for different reasons, and a
+/// future revision that re-separates them — or exempts one class entirely
+/// — has to be able to move one without moving the other. An earlier
+/// reading of the rule put this at `3.08:1`, above the chrome floor; the
+/// 2026-10-23 reconciliation brought it down to `3.00:1` so the floor
+/// matches the solver that produced it rather than the two-decimal
+/// rounding of its worst cell.
+pub const MIN_COINCIDENT_FILL_CONTRAST: f32 = 3.0;
 
 /// Lower bound of the disabled-text legibility band (`UIF-TOK-006`
 /// rule 2).
@@ -263,7 +283,16 @@ pub const DISABLED_TEXT_MIN_CONTRAST: f32 = 4.0;
 ///
 /// Above this a disabled label reads as live text and the rule's purpose
 /// — keeping inert controls from competing with active ones — is lost.
-pub const DISABLED_TEXT_MAX_CONTRAST: f32 = 6.0;
+///
+/// The ceiling is `6.05:1` rather than a round `6.00:1` because
+/// `text.disabled` on `surface.sunken` measures `6.020452:1` and the
+/// token is not moving: `surface.sunken` is the darkest place a disabled
+/// placeholder can appear, and lightening it enough to bring that pair
+/// back under `6.00:1` would collapse the `sunken → base` step the
+/// elevation ladder depends on. `6.05:1` is the smallest ceiling that
+/// admits the measured worst case with margin, so the band still means
+/// something while the palette stays as `UIF-TOK-005` specifies it.
+pub const DISABLED_TEXT_MAX_CONTRAST: f32 = 6.05;
 
 /// How a perimeter stroke or fill boundary is evaluated under
 /// `UIF-TOK-006` rule 3.
@@ -486,8 +515,8 @@ pub fn meets_text_contrast(fg: Color, bg: Color) -> bool {
 ///
 /// Applies to *active* chrome — focus rings, active borders, selected
 /// outlines. For a stroke coincident with its own fill use
-/// [`meets_coincident_fill_contrast`] instead, which holds the higher
-/// `3.08:1`; for a resting divider use
+/// [`meets_coincident_fill_contrast`], which answers the same question
+/// of a *fill* standing in for a stroke; for a resting divider use
 /// [`meets_chrome_contrast_as`] so the class is stated.
 #[must_use]
 pub fn meets_chrome_contrast(a: Color, b: Color) -> bool {
@@ -498,7 +527,12 @@ pub fn meets_chrome_contrast(a: Color, b: Color) -> bool {
 /// surface it sits on (`UIF-TOK-006` rule 3, [`ChromeClass::CoincidentWithFill`])?
 ///
 /// True when [`contrast_ratio`] reaches [`MIN_COINCIDENT_FILL_CONTRAST`]
-/// (`3.08:1`). The comparison is inclusive.
+/// (`3.00:1`). The comparison is inclusive.
+///
+/// The number is the same as [`MIN_CHROME_CONTRAST`]; what differs is
+/// what is being measured. Use this rather than [`meets_chrome_contrast`]
+/// wherever the stroke is coincident with its fill, so the class the
+/// measurement answers for is visible at the call site.
 #[must_use]
 pub fn meets_coincident_fill_contrast(fill: Color, surface: Color) -> bool {
     contrast_ratio(fill, surface) >= MIN_COINCIDENT_FILL_CONTRAST

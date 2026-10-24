@@ -550,7 +550,7 @@ fn the_coincident_fill_separation_holds_on_container_surfaces() {
     // A coincident border draws no boundary, so the fill has to separate
     // the control from what it is mounted to. On every surface a toggle
     // is actually mounted on — a card, a dialog, a code well — both
-    // checked fills clear the 3.08:1 that class owes.
+    // checked fills clear the 3.00:1 that class owes.
     let containers = [
         ("surface.sunken", p.surface_sunken, 4.2159),
         ("surface.base", p.surface_base, 4.1432),
@@ -578,7 +578,7 @@ fn the_coincident_fill_separation_holds_on_container_surfaces() {
 fn the_coincident_fill_floor_does_not_hold_on_a_pressed_container() {
     // The honest limit, and it is not this atom's: `surface.active` is a
     // *pressed control's* fill, not a container, and the accent fills do
-    // not clear 3.08:1 against it. The Primary button carries exactly the
+    // not clear 3.00:1 against it. The Primary button carries exactly the
     // same limitation, so a checked toggle pressed on a pressed row would
     // be under the coincident floor. Recorded rather than waived — the
     // class is exempt from the gate, which is why nothing catches this at
