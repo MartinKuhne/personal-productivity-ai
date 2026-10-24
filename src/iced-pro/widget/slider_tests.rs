@@ -956,6 +956,29 @@ fn tick_layers_are_2_by_4_and_sit_on_the_rail() {
 }
 
 #[test]
+fn the_tick_is_priced_off_the_spacing_scale_not_off_the_rail() {
+    // §2.1's role table names `space.xxs` for a tick's width and
+    // `space.xs` for its height, so a tick is a spacing-scale figure and
+    // not a piece of the rail it sits on. TICK_HEIGHT happens to equal
+    // TRACK_HEIGHT today — both resolve to 4px — but that is two
+    // unrelated tokens landing on the same number, not one defining the
+    // other. This pins which one the tick reads, so retuning the rail
+    // cannot drag the tick along with it.
+    assert_eq!(TICK_WIDTH, space::XXS);
+    assert_eq!(TICK_HEIGHT, space::XS);
+    assert_eq!(TICK_WIDTH, 2.0, "§3.5's 2px tick");
+    assert_eq!(TICK_HEIGHT, 4.0, "§3.5's 4px tick");
+    assert_eq!(
+        TICK_HEIGHT, TRACK_HEIGHT,
+        "equal by coincidence: space.xs and size.slider.track.height both resolve to 4px"
+    );
+    assert_ne!(
+        TICK_WIDTH, TRACK_HEIGHT,
+        "and the tick's two axes are not one figure read twice"
+    );
+}
+
+#[test]
 fn a_single_tick_produces_no_layers() {
     let p = palette();
     let s = resolve_style(state(BaseState::Rest), p.surface_overlay, &p);

@@ -11,16 +11,26 @@
 //!
 //! # The growth solver is arithmetic on tokens
 //!
-//! §3.2 says `min_height: 72px / 3 lines of type.body`. That does not
-//! compute: [`typography::BODY`] is `14px` with a `20px` line height, so
-//! three lines plus the `space.sm = 8px` vertical padding the same
-//! sentence names is `3 × 20 + 2 × 8 = 76px`. The solver here is built
-//! from the tokens rather than from the printed total, which means it
-//! produces `76` and the disagreement is visible instead of being
-//! inherited. The same sentence's worked example — the Bottom Command
-//! Bar's `44px..120px` — is off the body grid in both directions
-//! (`44 − 16 = 28` is 1.4 lines; `120 − 16 = 104` is 5.2 lines), so
-//! the solver clamps to whole rows and reports what it settled on.
+//! §3.2e states the box model as a closed form:
+//! `height = clamp(line_count, min_rows, max_rows) × line_height + 2 × space.sm`,
+//! with the vertical padding spelled out as `8px` top plus `8px` bottom
+//! and `line_height` taken from a type rung. Worked at `type.body` — a
+//! `14px` face on a `20px` line — the spec's own example is
+//! `3 × 20 + 16 = 76px`, and that is what [`Growth`] produces.
+//!
+//! The solver reads the tokens rather than the printed total, which is
+//! what keeps the total and its parts from ever disagreeing: the `76` is
+//! not a number this file knows, it is what `BODY.line_height` and
+//! `space::SM` add up to. An earlier reading of this section printed
+//! `72px`, which no combination of those two tokens reaches; the
+//! corrected section prints `76`, and the arithmetic now closes.
+//!
+//! §3.2e permits two line rungs — `20px` (`type.body`) and `18px`
+//! (`type.ui_compact`) — and this solver is built on the body rung only.
+//! That is a permitted choice rather than a gap in the arithmetic: the
+//! two rungs give `76px` and `70px` for a three-row well, and the
+//! compact alternative is recorded as unavailable here rather than
+//! silently averaged into a third figure.
 //!
 //! # Undo is ours because iced has none
 //!
@@ -169,9 +179,17 @@ impl fmt::Display for ParseDiagnostic {
 /// The `min_rows` / `max_rows` band a text area grows inside.
 ///
 /// Every height is derived, never stored: `rows × type.body.line_height +
-/// 2 × space.sm`. Deriving them means the solver cannot disagree with the
+/// 2 × space.sm`, which is §3.2e's closed form read straight off the
+/// tokens. Deriving them means the solver cannot disagree with the
 /// tokens, and that a change to `space.sm` moves the whole band instead
 /// of leaving one constant behind.
+///
+/// The band's two ends are different kinds of number and are treated
+/// differently. `min_rows` is a **floor**: the well is that tall when it
+/// is empty and never shorter. `max_rows` is a **ceiling**, and `None`
+/// means there is no ceiling at all rather than a ceiling of zero — the
+/// distinction [`Self::max_height`] makes explicit by returning
+/// [`f32::INFINITY`] for an uncapped band.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Growth {
     /// The floor, in rows.
@@ -181,6 +199,10 @@ pub struct Growth {
 }
 
 /// The vertical padding inside a text well: `space.sm` top and bottom.
+///
+/// §3.2e prints this as `2 × space.sm = 16px` and then names both
+/// halves — `8px` top, `8px` bottom — so the well is symmetric and the
+/// total is the sum of two token reads, never a literal.
 const VERTICAL_PADDING: f32 = space::SM * 2.0;
 
 impl Growth {
@@ -213,6 +235,11 @@ impl Growth {
     }
 
     /// The well's height at exactly `rows` rows.
+    ///
+    /// This is §3.2e's formula with the clamp removed, because the clamp
+    /// is the band's business rather than the row's: `height_at(3)` is
+    /// `3 × 20 + 16 = 76px` at the body rung, which is the worked
+    /// example the spec prints.
     #[must_use]
     pub const fn height_at(rows: u32) -> f32 {
         Self::text_height(rows) + VERTICAL_PADDING
@@ -258,10 +285,23 @@ impl Growth {
         (inner / Self::line_height()).floor() as u32
     }
 
-    /// A height moved inside this band.
+    /// A height moved inside this band — **both** bounds applied.
+    ///
+    /// The floor keeps an empty well from collapsing under `min_rows`.
+    /// The ceiling matters just as much: a host that hands back a
+    /// rectangle taller than `max_rows` must not get to keep it, or the
+    /// cap is a suggestion. §3.2e's closed form clamps the *row count*
+    /// between the two rungs, so the height-space equivalent has to
+    /// clamp both ways too — a helper that only enforced the floor would
+    /// let a caller step straight over the ceiling.
+    ///
+    /// Written as `max` then `min` rather than [`f32::clamp`] so a band
+    /// built by bypassing [`Self::new`] — and therefore inverted —
+    /// resolves to its ceiling instead of panicking on the
+    /// `min <= max` assertion.
     #[must_use]
     pub fn clamp_height(&self, height: f32) -> f32 {
-        height.max(self.min_height())
+        height.max(self.min_height()).min(self.max_height())
     }
 }
 

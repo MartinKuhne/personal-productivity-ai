@@ -6,9 +6,10 @@
 use crate::composite::list_tile::{
     BORDER_WIDTH, FOCUS_OUTLINE_WIDTH, LEADING_LARGE, LEADING_SMALL, Leading, LeadingExtent,
     PADDING_HORIZONTAL, PADDING_VERTICAL, SLOT_GAP, SUBTITLE_RUNG, TILE_HEIGHTS, TITLE_RUNG,
-    TRAILING_TARGET, TWO_LINE_HEIGHT, TWO_LINE_PARTS_HEIGHT, TWO_LINE_UNACCOUNTED, TileLines,
-    TileSlots, focus_outline_colour, focus_outline_layer, hit_target, meets_hit_target_floor,
-    resolve_style, row_layer, slots, subtitle_on, tile_height, trailing_targets,
+    TITLE_SUBTITLE_GAP, TRAILING_TARGET, TWO_LINE_HEIGHT, TWO_LINE_PARTS_HEIGHT,
+    TWO_LINE_UNACCOUNTED, TileLines, TileSlots, focus_outline_colour, focus_outline_layer,
+    hit_target, meets_hit_target_floor, resolve_style, row_layer, slots, subtitle_on, tile_height,
+    trailing_targets,
 };
 use crate::state::BaseState;
 use crate::token::color::Palette;
@@ -52,13 +53,18 @@ fn the_two_line_rung_is_the_printed_44() {
 }
 
 #[test]
-fn the_two_line_row_is_two_pixels_taller_than_its_own_parts_compose() {
-    assert_eq!(TWO_LINE_PARTS_HEIGHT, 42.0);
-    assert_eq!(TWO_LINE_UNACCOUNTED, 2.0);
+fn the_two_line_row_composes_exactly_from_its_printed_parts() {
+    // §3B.5 prices the two-line row as `4 + 18 + 2 + 16 + 4`. The `2`
+    // is the title-over-subtitle gap the corrected section names, and it
+    // is what makes the parts reach the printed `44` instead of falling
+    // two short of it.
+    assert_eq!(TWO_LINE_PARTS_HEIGHT, 44.0);
+    assert_eq!(TWO_LINE_UNACCOUNTED, 0.0);
+    assert_eq!(TITLE_SUBTITLE_GAP, space::XXS);
     assert_eq!(
         TWO_LINE_PARTS_HEIGHT + TWO_LINE_UNACCOUNTED,
         TWO_LINE_HEIGHT,
-        "the delta is the whole disagreement, and nothing more"
+        "the parts are the whole row, and nothing is left over"
     );
 }
 

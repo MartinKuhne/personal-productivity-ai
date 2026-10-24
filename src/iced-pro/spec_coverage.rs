@@ -1429,12 +1429,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
              text: the item names no `on_commit`/`on_cancel`, yet §3.0.4.2's \
              tier discipline requires a settle and a revert to exist at all, so \
              `Committed` (focus loss with an open session) and `Cancelled` \
-             (`Escape`) were added; and the printed `min_height: 72px / 3 lines \
-             of type.body` does not compute — `typography::BODY` is 14px on a \
-             20px line height, so three lines plus two `space.sm` gaps is 76px, \
-             and the Bottom Command Bar's `44px..120px` is off the body grid by \
-             the same arithmetic (44−16 = 28 → 1.4 lines; 120−16 = 104 → 5.2). \
-             The solver is built from the tokens, not from the printed pixels.",
+             (`Escape`) were added; and §3.2e now prints the closed form the \
+             solver already used — `clamp(line_count, min_rows, max_rows) × \
+             line_height + 2 × space.sm`, three lines of `type.body` = 76px — so \
+             the 72px-vs-76px mismatch this entry used to record is gone, and the \
+             solver and the section read the same arithmetic. What the section still \
+             does not reconcile is the figure beside it: the Bottom Command Bar's \
+             `44px..120px` is off the body grid by the same arithmetic \
+             (44 − 16 = 28 → 1.4 lines; 120 − 16 = 104 → 5.2), and that stays \
+             recorded against §4 rather than quietly adjusted here.",
         ),
         note: Some(
             "The `font.family.mono` requirement inside this one still cannot be \
@@ -2026,8 +2029,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
              deliberately not invented (phase is a pure function of scrollability and \
              pointer, so a host may map `TimeMs` to `Hidden` itself); the track paints \
              no fill because only the thumb is styled; keyboard step distances, the \
-             focus-owner interaction, nested scroll views and the horizontal scrollbar's \
-             own behaviour are unspecified.",
+             focus-owner interaction, nested scroll bubbling and the horizontal \
+             scrollbar's own behaviour are unspecified — the module resolves one \
+             view's geometry and does not arbitrate between two. What §3B.4 does \
+             now fix, the code reads from the rungs it names rather than restating: \
+             the arrow step is `size.hit_target.min` (24px, one compact tree row) \
+             and the page step is `(viewport - 24).max(24)`, with `ARROW_STEP` and \
+             `PAGE_KEEP` both pointed at that same 24px rung so the arithmetic is \
+             the section's; the reach-end window is `2 × space.2xl` (64px), \
+             derived from the spacing scale instead of written as a literal.",
         ),
     },
     Coverage {
@@ -2050,8 +2060,14 @@ const SPEC_COVERAGE: &[Coverage] = &[
              no perimeter stroke because `accent.border` on `accent.fill` measures \
              1.6098:1 - a border that cannot be seen cannot carry the selection. \
              The two-line tile's printed 44px is kept as authoritative; its parts \
-             compose to 42px, and the 2px difference is exposed as \
-             `TWO_LINE_UNACCOUNTED` rather than rounded away.",
+             now sum to it exactly — 4 + 18 + 2 + 16 + 4 = 44, the 2px \
+             title-to-subtitle gap named as `space.2xs` — so \
+             `TWO_LINE_PARTS_HEIGHT` closes against `TWO_LINE_HEIGHT` with nothing \
+             left over. The section still appends a `+ 2px TWO_LINE_UNACCOUNTED` \
+             term to that same list, which would read to 46 against its own printed \
+             44; the constant is kept as the standing drift check it is and reports \
+             0.0, so the surplus stays visible instead of being absorbed into the \
+             total.",
         ),
     },
     Coverage {
@@ -2072,10 +2088,18 @@ const SPEC_COVERAGE: &[Coverage] = &[
              tree needs prefix-sum offsets, and accumulating float heights drifts: a \
              thousand 0.1px rows sum to 99.9990463257, so every position here is \
              `index × height` recomputed in `f64` and narrowed once. The spec's printed \
-             4px-vs-12px guide inset conflict is resolved width-relative instead of \
-             picked: 16px per level nominal, proportional compression while every level \
-             still keeps a guide, then collapse onto the last drawn guide below a 4px \
-             floor step, reporting `collapsed_levels` so the host can see the loss. The \
+             4px-vs-12px guide inset conflict is gone; indentation \
+             is width-relative as §3B.6 now states — 16px per level nominal, \
+             proportional compression while every level still keeps a guide, then \
+             collapse onto the last drawn guide below a 4px floor step, reporting \
+             `collapsed_levels` so the host can see the loss. The trigger is still \
+             written as the shorthand `row_width - depth × 16px < 96px`, which \
+             omits the row's own furniture: `2 × space.xs` of horizontal inset and \
+             the 24px chevron column, 32px sitting between the row's edge and the \
+             label. Taken literally the shorthand would let the label down to 64px \
+             while the same sentence guarantees it never narrows below 96px, so \
+             `indent_allowance` subtracts the furniture too and the guarantee means \
+             what it says. The \
              96px label floor is depth-independent — the indent saturates there and stops \
              eroding, so a 20-deep and a 200-deep tree render the same label box. Guide \
              lines are graded `Judged`, not the spec's `border.subtle`, which measures \

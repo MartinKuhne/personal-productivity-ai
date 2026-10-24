@@ -151,10 +151,14 @@ pub const SWITCH_THUMB_INSET: f32 = (SWITCH_TRACK_HEIGHT - SWITCH_THUMB) / 2.0;
 /// `size.slider.track_height` — horizontal rail thickness for a `Slider`.
 ///
 /// Consumed by [`crate::widget::slider::TRACK_HEIGHT`], which is the rail
-/// the thumb rides on. The same rung also prices the tick marks
-/// ([`crate::widget::slider::TICK_HEIGHT`]): §3.5 sells a tick as `2 × 4`,
-/// and `4` is this number, so a tick is a track-thick notch rather than a
-/// second measurement that could disagree with the rail it hangs off.
+/// the thumb rides on, and by nothing else. The tick marks that hang off
+/// the same rail are **not** priced here: §2.1's role column assigns the
+/// slider tick width to `space.2xs` and the slider tick height to
+/// `space.xs`, so a tick is bought on the spacing grid
+/// ([`crate::widget::slider::TICK_WIDTH`],
+/// [`crate::widget::slider::TICK_HEIGHT`]) rather than by borrowing the
+/// rail's own thickness. The two happen to measure the same `4`, which is
+/// a coincidence the sidecar pins rather than a definition.
 pub const SLIDER_TRACK_HEIGHT: f32 = 4.0;
 
 /// `size.slider.thumb` — the `16 × 16` visual thumb of a `Slider`.

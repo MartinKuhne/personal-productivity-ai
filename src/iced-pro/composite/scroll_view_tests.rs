@@ -14,7 +14,7 @@ use crate::composite::scroll_view::{
 };
 use crate::token::color::Palette;
 use crate::token::contrast::{ChromeClass, contrast_ratio};
-use crate::token::{shape, size, space, typography};
+use crate::token::{shape, size, space};
 use iced::{Color, Point, Rectangle};
 
 /// A contrast ratio compared at the four decimal places the pinned figures are
@@ -494,15 +494,23 @@ fn reach_end_never_fires_on_an_unscrollable_view() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_arrow_step_is_one_body_line() {
-    assert_eq!(ARROW_STEP, typography::BODY.line_height);
+fn the_arrow_step_is_one_compact_tree_row() {
+    // §3B.4 now prints the distance rather than leaving it open: the
+    // arrow steps by `size.hit_target.min` (24px), which the section
+    // glosses as "1 compact tree row". The earlier `type.body` reading
+    // of 20px was an invented value and is gone.
+    assert_eq!(ARROW_STEP, size::HIT_TARGET_MIN);
+    assert_eq!(ARROW_STEP, 24.0);
     assert!(positive(ARROW_STEP));
 }
 
 #[test]
-fn a_page_keeps_a_line_of_context() {
-    assert_eq!(PAGE_KEEP, space::MD);
+fn a_page_keeps_a_row_of_context() {
+    // §3B.4 writes the page step as `(viewport_length - 24.0).max(24.0)`,
+    // and the keep is the same hit-target minimum the arrow step uses.
+    assert_eq!(PAGE_KEEP, size::HIT_TARGET_MIN);
     assert_eq!(page_step(400.0), 400.0 - PAGE_KEEP);
+    assert_eq!(page_step(400.0), 376.0);
 }
 
 #[test]

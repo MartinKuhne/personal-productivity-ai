@@ -239,24 +239,24 @@ pub fn control_rect(origin: Point, width: f32) -> Rectangle {
 
 /// The width the stepper block occupies for a given shape.
 ///
-/// §3.5 fixes the trailing block at `28 x 32px` and then offers two
-/// button forms for it: two `28 x 16px` compact buttons, or two
-/// `24 x 24px` `[-]`/`[+]` buttons "side by side". The stacked pair
-/// fills that block exactly. The side-by-side pair does not fit it — two
-/// `24px` squares abreast need `48px` of width and the block has `28`.
+/// §3.5 prices the two trailing zones separately and prints both
+/// figures: a [`Stacked`](StepperShape::Stacked) block is
+/// `size.control.sm × size.control.md` (`28 × 32px`) holding two
+/// `28 × 16px` buttons, and a [`SideBySide`](StepperShape::SideBySide)
+/// block is `2 × size.hit_target.min` wide (`48 × 32px`) holding two
+/// disjoint `24 × 24px` buttons. The widths differ because the button
+/// forms do, and the spec now says so against each shape rather than
+/// leaving one block size to cover both.
 ///
-/// **The spec never says how the two are reconciled.** It prints both
-/// forms against one block size and moves on. This resolver takes the
-/// reading under which the shape it names can actually exist: the block
-/// grows to `48 x 24` for [`SideBySide`](StepperShape::SideBySide) and
-/// keeps the control's `32px` height, centred. The alternatives are
-/// worse, and provably so. Squeezing two `24px` squares into `28px` with
-/// a zero gap overlaps them by `20px`, and [`step_at`] then answers
-/// `Decrement` at the increment button's own centre — a click on `+`
-/// that steps the value down. Shrinking each to `14px` to fit puts both
+/// The side-by-side width is not something this resolver may negotiate
+/// down. Two `24px` squares abreast need `48px` and a `28px` column
+/// cannot hold them: squeezed in with a zero gap they overlap for
+/// `20px`, and [`step_at`] — which tests decrement first — then answers
+/// `Decrement` at the increment button's own centre, a `+` click that
+/// steps the value down. Shrinking each to `14px` to fit puts both
 /// buttons under the `24px` hit-target floor
-/// [`size::HIT_TARGET_MIN`] sets. A
-/// wider block costs the entry some width and breaks nothing.
+/// [`size::HIT_TARGET_MIN`] sets. A wider block costs the entry some
+/// width and breaks nothing.
 #[must_use]
 pub const fn stepper_width(shape: StepperShape) -> f32 {
     match shape {
@@ -266,25 +266,21 @@ pub const fn stepper_width(shape: StepperShape) -> f32 {
 }
 
 /// The stepper block for a given shape, anchored to the trailing edge.
+///
+/// Both shapes take the control's **full height**: §3.5 calls the
+/// trailing zones `28 × 32` and `48 × 32`, so the block is as tall as
+/// the field beside it and the buttons are placed *inside* it. The
+/// block does not shrink to wrap the buttons — that would make the
+/// painted zone a different rectangle from the one the spec names, and
+/// leave the `32 − 24 = 8px` of the side-by-side arrangement
+/// unaccounted for.
 #[must_use]
 pub fn stepper_rect_for(shape: StepperShape, bounds: Rectangle) -> Rectangle {
     let width = stepper_width(shape).min(bounds.width);
-    match shape {
-        StepperShape::Stacked => Rectangle::new(
-            Point::new(bounds.x + bounds.width - width, bounds.y),
-            iced::Size::new(width, bounds.height),
-        ),
-        StepperShape::SideBySide => {
-            let height = STEP_BUTTON_SIZE.min(bounds.height);
-            Rectangle::new(
-                Point::new(
-                    bounds.x + bounds.width - width,
-                    bounds.y + (bounds.height - height) / 2.0,
-                ),
-                iced::Size::new(width, height),
-            )
-        }
-    }
+    Rectangle::new(
+        Point::new(bounds.x + bounds.width - width, bounds.y),
+        iced::Size::new(width, bounds.height.max(0.0)),
+    )
 }
 
 /// The stepper block in its spec-literal `28 x 32` form — the
@@ -317,9 +313,12 @@ pub fn entry_rect(bounds: Rectangle) -> Rectangle {
 /// hit-target floor. That shortfall is the spec's, is printed in the
 /// gallery cell, and is not quietly promoted here.
 ///
-/// The side-by-side pair lays two `24 x 24` squares abreast, decrement
-/// on the left and increment on the right — the order `[-]` `[+]` reads
-/// in. They cannot overlap, because [`stepper_width`] gave the block the
+/// The side-by-side pair lays two `24 x 24` squares abreast inside the
+/// `48 x 32` block, decrement on the left and increment on the right —
+/// the order `[-]` `[+]` reads in — centred vertically in the zone's
+/// full height, so the `8px` the block is taller than a button is
+/// split `4px` above and `4px` below rather than left under one edge.
+/// They cannot overlap, because [`stepper_width`] gave the block the
 /// `48px` two squares require.
 #[must_use]
 pub fn step_button_rects(bounds: Rectangle, shape: StepperShape) -> [Rectangle; 2] {
@@ -338,14 +337,12 @@ pub fn step_button_rects(bounds: Rectangle, shape: StepperShape) -> [Rectangle; 
         StepperShape::SideBySide => {
             let side = STEP_BUTTON_SIZE
                 .min(block.width / 2.0)
-                .min(block.height)
+                .min(block.height.max(0.0))
                 .max(0.0);
+            let y = block.y + (block.height - side) / 2.0;
             [
-                Rectangle::new(block.position(), iced::Size::new(side, side)),
-                Rectangle::new(
-                    Point::new(block.x + side, block.y),
-                    iced::Size::new(side, side),
-                ),
+                Rectangle::new(Point::new(block.x, y), iced::Size::new(side, side)),
+                Rectangle::new(Point::new(block.x + side, y), iced::Size::new(side, side)),
             ]
         }
     }

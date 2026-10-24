@@ -3,9 +3,10 @@
 //! (`UIF-COMP-001`).
 
 use crate::composite::settings_row::{
-    BACKGROUND_TOKEN, BORDER_WIDTH, COLUMN_GAP, DEFAULT_CONTROL_HEIGHT, DESCRIPTION_RUNG,
-    MIN_HEIGHT, PADDING_HORIZONTAL, PADDING_VERTICAL, RADIUS, SettingsBands, TITLE_RUNG, bands,
-    card_layer, description_present, horizontal, resolve_style, row_height, text_column_height,
+    BACKGROUND_TOKEN, BORDER_INSET_RESERVE, BORDER_WIDTH, COLUMN_GAP, DEFAULT_CONTROL_HEIGHT,
+    DESCRIPTION_RUNG, MIN_HEIGHT, PADDING_HORIZONTAL, PADDING_VERTICAL, RADIUS, SettingsBands,
+    TITLE_RUNG, bands, card_layer, description_present, horizontal, resolve_style, row_height,
+    text_column_height,
 };
 use crate::token::color::Palette;
 use crate::token::contrast::{
@@ -56,6 +57,32 @@ fn the_printed_floor_is_48() {
 // ---------------------------------------------------------------------------
 // 2 — the floor is a floor
 // ---------------------------------------------------------------------------
+
+#[test]
+fn the_floor_is_the_sum_of_the_parts_3b1_prints() {
+    // §3B.1 prints "Min height 48px" and, in the same block, the parts
+    // that make it: 12px top padding + 20px `type.body` title + 12px
+    // bottom padding + 4px border/inset reserve. MIN_HEIGHT is that sum
+    // rather than the printed 48 on its own, so the total is checkable
+    // against the row it describes instead of being asserted beside it.
+    assert_eq!(TITLE_RUNG.line_height, 20.0, "the title's line box");
+    assert_eq!(PADDING_VERTICAL, space::MD, "12px");
+    assert_eq!(BORDER_INSET_RESERVE, space::XS, "4px");
+    assert_eq!(
+        MIN_HEIGHT,
+        PADDING_VERTICAL + TITLE_RUNG.line_height + PADDING_VERTICAL + BORDER_INSET_RESERVE
+    );
+    assert_eq!(MIN_HEIGHT, 48.0);
+    // The reserve is slack, not content: inside the padding there is
+    // exactly the title's line box plus the reserve left over.
+    let interior = MIN_HEIGHT - PADDING_VERTICAL - PADDING_VERTICAL;
+    assert_eq!(interior, TITLE_RUNG.line_height + BORDER_INSET_RESERVE);
+    // And 48 is a floor, not a fixed height. A 32px control beside a
+    // title-only row pushes the row past the printed figure, which is
+    // the correct reading of the section.
+    assert_eq!(row_height(false, size::CONTROL_MD), 56.0);
+    assert!(row_height(false, size::CONTROL_MD) > MIN_HEIGHT);
+}
 
 #[test]
 fn a_title_only_row_without_a_control_sits_on_the_floor() {

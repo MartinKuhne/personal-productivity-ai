@@ -163,7 +163,23 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// re-priced it from `border.focus + border.hairline` to a single
 /// `border.focus`: Rule B counts the declaration, not the number of
 /// token references inside it.
-const PIN_TOKEN_BOUND: usize = 189;
+/// 192 as of `INC-54`, whose three additions are figures the corrected
+/// spec makes *summable* rather than merely printed:
+/// `settings_row::BORDER_INSET_RESERVE` — the `4px` of border/inset the
+/// §3B.1 floor carries on top of `12 + 20 + 12`, read from `space::XS`;
+/// `list_tile::TITLE_SUBTITLE_GAP` — the `2px` title-to-subtitle gap that
+/// makes §3B.5's two-line total close, read from `space::XXS`; and
+/// `settings_row::MIN_HEIGHT` itself, which left the registry below the
+/// moment it became that sum instead of a bare `48.0`. Two figures that
+/// changed in the same pass did *not* move the count, and are named here
+/// so the gap is on the record: `scroll_view::REACH_END_DISTANCE` was a
+/// literal `64.0` and is now `space::XXL * 2.0`, but "DISTANCE" carries
+/// none of Rule B's name markers, so the rule never inspected it either
+/// way; and `slider::TICK_WIDTH` / `slider::TICK_HEIGHT` were already
+/// token-bound, so re-pointing them from `shape::BORDER_FOCUS` and
+/// `size::SLIDER_TRACK_HEIGHT` at the §2.1 spacing rungs is invisible to
+/// a counter that counts declarations rather than provenance.
+const PIN_TOKEN_BOUND: usize = 192;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -202,7 +218,14 @@ const PIN_RATIO: usize = 1;
 /// and neither does it land anywhere else: it is `TRIGGER_SIZE +
 /// TRIGGER_GAP`, a derived sum whose name carries none of the markers
 /// Rule B scans for, so the rule never inspects it.
-const PIN_SURFACE_BOUND: usize = 36;
+/// 35 as of `INC-54`, which removes an entry rather than adding one:
+/// `settings_row::MIN_HEIGHT` is now §3B.1's own `12 + 20 + 12 + 4`
+/// composition rather than a literal `48.0`, so Rule B reads a token on
+/// every term and passes it with no carve-out. The registry is the
+/// authority for figures no token carries; a derived total is not one,
+/// and leaving the entry would have claimed a §-backed literal that no
+/// longer exists in the file.
+const PIN_SURFACE_BOUND: usize = 35;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

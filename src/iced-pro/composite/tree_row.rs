@@ -111,12 +111,19 @@ pub const INDENT_STEP: f32 = space::LG;
 /// a gap between two lines.
 pub const MIN_INDENT_STEP: f32 = space::XS;
 
-/// The label's guaranteed floor, whatever the depth.
+/// The label's guaranteed floor, whatever the depth — `96px`
+/// (`TREE_LABEL_MIN_W`, §2.2's closed table of Surface Geometry
+/// Constants).
 ///
-/// Four `space.xl` units — written as a sum so the constant is bound to
-/// tokens and carries no literal of its own (`UIF-PRIN-001`). At the
-/// `type.ui_compact` rung this is roughly a dozen characters, which is
-/// about where a file name stops being recognisable.
+/// Written as four `space.xl` units so the constant is bound to tokens
+/// and carries no literal of its own (`UIF-PRIN-001`). That sum is a
+/// way of *writing* `96`, not a derivation *from* the spacing scale:
+/// the spec fixes `96` as its own number, and the sidecar pins this
+/// constant to `96.0` so a retune of `space.xl` that broke the identity
+/// fails a test instead of shipping a label floor that no longer matches
+/// §2.2. At the `type.ui_compact` rung `96px` is roughly a dozen
+/// characters, which is about where a file name stops being
+/// recognisable.
 pub const MIN_LABEL_WIDTH: f32 = space::XL + space::XL + space::XL + space::XL;
 
 /// The reserved disclosure column — §3B.6's `24×24px` chevron box,
@@ -127,14 +134,16 @@ pub const MIN_LABEL_WIDTH: f32 = space::XL + space::XL + space::XL + space::XL;
 /// same defect the tile's leading-slot rule exists to prevent.
 pub const CHEVRON_COLUMN: f32 = size::HIT_TARGET_MIN;
 
-/// The row's horizontal inset — `UIF-PANE-003`'s `4px`.
+/// The row's horizontal inset — `space.xs` (`4px`).
 ///
-/// **A spec conflict, resolved toward §4.** §3B.5 gives the list tile
-/// `[4px, 12px]`, i.e. `12px` horizontally, and §3B.6 says nothing
-/// about a tree row's inset; §4's `UIF-PANE-003` gives the tree row
-/// `4px`. The tree's own requirement is the specific one and it wins,
-/// which also buys back the horizontal space the indentation policy
-/// spends.
+/// **The conflict this constant used to record is gone.** §3B.6 now
+/// prescribes the tree row's horizontal inset itself, as `space.xs =
+/// 4px`, which is the same figure §4's `UIF-PANE-003` already gave the
+/// row. The value is unchanged; what changed is that it is now a read of
+/// what the section says rather than a ruling between two sections. §3B.5's
+/// `12px` list-tile inset is not in tension with it, because a tree row
+/// is not a list tile — and the narrower inset is what buys back the
+/// horizontal room the indentation policy spends.
 pub const ROW_INSET_X: f32 = space::XS;
 
 /// The row's vertical inset — `space.xxs`.
@@ -186,6 +195,21 @@ pub struct IndentGeometry {
 
 /// The horizontal room a row's indent can consume before the label floor
 /// is breached.
+///
+/// **The complete form of §3B.6's shorthand.** The section states the
+/// compression trigger as `row_width - depth × 16px < 96px`, which
+/// accounts for the indent and the label and nothing else. It leaves out
+/// the row's own furniture: `ROW_INSET_X` on each side (`8px` together)
+/// and the [`CHEVRON_COLUMN`] every row reserves (`24px`) — `32px` that
+/// sits between the row's edge and the label and is not part of it.
+/// Subtract the shorthand alone and the label is permitted down to
+/// `64px`, which contradicts the same sentence's own guarantee that the
+/// label box "never narrows below `96px` at any tree depth".
+///
+/// This function subtracts the furniture as well, so the floor means
+/// what the guarantee says it means: the *label* keeps its `96px` and
+/// the indent absorbs the rest. Following the shorthand literally would
+/// have been the smaller diff and the wrong tree.
 #[must_use]
 pub fn indent_allowance(row_width: f32) -> f32 {
     (row_width - ROW_INSET_X - ROW_INSET_X - CHEVRON_COLUMN - MIN_LABEL_WIDTH).max(0.0)

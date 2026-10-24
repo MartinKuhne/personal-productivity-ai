@@ -8,23 +8,37 @@
 //! different list on every surface, and the misalignment shows up as
 //! ragged titles across nine screens that never met.
 //!
-//! # The printed total is authoritative; the parts are exposed anyway
+//! # The printed total and the parts now agree
 //!
 //! The single-line rung composes exactly from what §3B.5 prints: `4px`
 //! vertical padding, a `24px` mark, `4px` again — `32px`, which is also
 //! `size.control.md`, which the spec names in the same breath.
 //!
-//! The two-line rung does not. `4 + 18 + 16 + 4` is `42`, and the spec
-//! prints `44`. The `8px` gap it also prints is the *inter-slot* gap —
-//! between leading, centre and trailing — because charging it between the
-//! title and the subtitle as well would put the row at `50`, further from
-//! the printed figure rather than closer. So two pixels are unaccounted
-//! for, and this resolver treats the printed total as authoritative:
-//! row height is what virtualised lists, hit targets and the
-//! `UIF-PRIN-003` zero-shift invariant all consume, and a derived `42`
-//! would silently reflow every list in the app to satisfy arithmetic the
-//! spec never claimed. [`TWO_LINE_UNACCOUNTED`] exposes the delta rather
-//! than hiding it, so the gap stays attributable.
+//! The two-line rung used to be the broken one. Its parts read `4 + 18 +
+//! 16 + 4 = 42` against a printed total of `44`, and the `8px` gap the
+//! section also printed could not close it: that gap is the *inter-slot*
+//! gap between leading, centre and trailing, and charging it between a
+//! title and its own subtitle as well would have put the row at `50` —
+//! further from the printed figure rather than closer.
+//!
+//! §3B.5 now closes it itself, by naming a second gap: `4px` top padding
+//! `18px` `type.ui_compact` title, `2px` `space.2xs` title-over-subtitle gap,
+//! `16px` `type.caption` subtitle and `4px` bottom padding — `44px`.
+//! [`TITLE_SUBTITLE_GAP`] is that `2px`, [`TWO_LINE_PARTS_HEIGHT`] adds
+//! the five terms up, and the sum is the printed total exactly.
+//!
+//! What is left over is recorded rather than smoothed away. The same
+//! sentence still appends `+ 2px TWO_LINE_UNACCOUNTED` to parts that
+//! already reach `44` without it, which read literally composes `46`.
+//! The section prints `44` twice and calls it the authoritative total,
+//! so this resolver follows `44` and treats the trailing term as
+//! double-counting the gap it just named; [`TWO_LINE_UNACCOUNTED`] is
+//! `0.0`, and the surplus is reported against the spec rather than
+//! modelled into the row. Row height stays what virtualised lists, hit
+//! targets and the `UIF-PRIN-003` zero-shift invariant consume — which
+//! is why the *total* remains the load-bearing figure even now that the
+//! parts reach it: a composition that drifted would reflow every list
+//! in the app, and the constant is what makes that drift fail a test.
 //!
 //! # The hit target is resolved separately from the mark
 //!
@@ -90,26 +104,58 @@ pub const TILE_HEIGHTS: [f32; 2] = [SINGLE_LINE_HEIGHT, TWO_LINE_HEIGHT];
 /// A single-line tile's height — `size.control.md` (§3B.5).
 pub const SINGLE_LINE_HEIGHT: f32 = size::CONTROL_MD;
 
-/// A two-line tile's height — §3B.5's printed `44px`.
+/// A two-line tile's height — §3B.5's printed `44px` authoritative total.
 ///
 /// **A Surface Geometry Constant, not a token read.** No rung in §2.2 is
-/// `44`, and the parts §3B.5 prints for this row sum to `42` — see
-/// [`TWO_LINE_UNACCOUNTED`] and the module docs.
+/// `44`. What has changed is that the row's own parts now reach it:
+/// [`TWO_LINE_PARTS_HEIGHT`] composes to `44` exactly, so the total is
+/// no longer a figure the parts fall short of.
 pub const TWO_LINE_HEIGHT: f32 = 44.0;
+
+/// The gap between a two-line tile's title and its subtitle — §3B.5's
+/// `space.2xs` (`2px`).
+///
+/// This is the two pixels that used to be unaccounted for. §3B.5 now
+/// prices the two-line row as `4 + 18 + 2 + 16 + 4`, with the `2px`
+/// named as the tight title-over-subtitle gap — the very role §2.1
+/// reserves `space.2xs` for ("tight two-line subtitle gap"). It is
+/// *not* the [`SLOT_GAP`] between leading, centre and trailing:
+/// charging `space.sm` between a title and its own subtitle would put
+/// the row at `50`, further from the printed figure rather than closer.
+pub const TITLE_SUBTITLE_GAP: f32 = space::XXS;
 
 /// The two-line row's height as its printed parts compose it.
 ///
-/// `4 + 18 + 16 + 4`. Derived so the disagreement with
-/// [`TWO_LINE_HEIGHT`] is arithmetic rather than an assertion.
-pub const TWO_LINE_PARTS_HEIGHT: f32 =
-    PADDING_VERTICAL + PADDING_VERTICAL + TITLE_RUNG.line_height + SUBTITLE_RUNG.line_height;
+/// `4 + 18 + 2 + 16 + 4 = 44`, which is [`TWO_LINE_HEIGHT`] exactly.
+/// Derived so the agreement between the total and its parts is
+/// arithmetic rather than an assertion.
+pub const TWO_LINE_PARTS_HEIGHT: f32 = PADDING_VERTICAL
+    + TITLE_RUNG.line_height
+    + TITLE_SUBTITLE_GAP
+    + SUBTITLE_RUNG.line_height
+    + PADDING_VERTICAL;
 
-/// The two pixels §3B.5's two-line row carries that its own parts do not
-/// account for.
+/// What the two-line row carries beyond what its own parts compose —
+/// now `0.0`.
 ///
-/// Exposed rather than absorbed. The resolver uses the printed total; this
-/// constant exists so the discrepancy is a named fact in the crate rather
-/// than a rounding error nobody noticed.
+/// This constant used to be `2.0`. The row printed `44` while its parts
+/// added to `42`, and the difference was recorded rather than rounded
+/// away. §3B.5 has since accounted for those two pixels as
+/// [`TITLE_SUBTITLE_GAP`], so the residual is zero and the row
+/// composes exactly.
+///
+/// **Kept at zero rather than deleted.** It is the crate's standing
+/// check that the printed total and the composed parts agree: a future
+/// spec edit that reopens the gap makes this non-zero and fails the
+/// sidecar that pins it, which is a louder signal than a constant that
+/// has been removed. It also carries the record of a surplus that is
+/// still in the spec's own sentence: §3B.5 appends `+ 2px
+/// TWO_LINE_UNACCOUNTED` to parts that already reach `44` without it,
+/// so read literally the composition is `46`, not `44`. The section
+/// prints `44` twice and calls it authoritative, so this resolver
+/// follows `44` and treats the trailing term as double-counting the
+/// gap. The surplus is reported against the spec rather than modelled
+/// here.
 pub const TWO_LINE_UNACCOUNTED: f32 = TWO_LINE_HEIGHT - TWO_LINE_PARTS_HEIGHT;
 
 /// The tile's vertical padding — the `4px` of §3B.5's `[4px, 12px]`.

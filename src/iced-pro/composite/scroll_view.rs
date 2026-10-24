@@ -1,19 +1,26 @@
 //! ScrollView & annotated scrollbar contract (`UIF-COMP-004`).
 //!
 //! This module delivers the scrollbar as a **contract rather than a widget**: every
-//! quantity Â§3B.4 names is a pure function, so the behaviours the requirement
-//! actually asserts â€” that a growing track moves nothing, that a thumb never
-//! collapses below a hittable length, that a drag settles exactly once â€” are
+//! quantity §3B.4 names is a pure function, so the behaviours the requirement
+//! actually asserts — that a growing track moves nothing, that a thumb never
+//! collapses below a hittable length, that a drag settles exactly once — are
 //! testable facts instead of things observed in a running app.
 //!
 //! # The layout-shift verdict: overlay, and the signature that proves it
 //!
-//! [`content_bounds`] takes the viewport, the [`LayoutMode`] and the [`Axis`] â€”
+//! [`content_bounds`] takes the viewport, the [`LayoutMode`] and the [`Axis`] —
 //! and **not** the track's phase. That omission is the whole verdict. Because the
 //! content rectangle cannot see whether the track is at rest (`8px`) or expanded
 //! under hover or drag (`10px`), the `2px` growth is paint-only and inward: no
 //! hover can reflow a line of text, which is what
 //! the `UIF-PRIN-003` invariant (`Layout Stability`) forbids.
+//!
+//! §3B.4 states the reserved half of that directly: the gutter is
+//! **permanently reserved at `size.splitter.grab` (`10px`) on every scrollable
+//! axis, taking no track-phase parameter**, so the `8px`-at-rest thumb (inset
+//! `2px` inside that band) and the `10px` thumb that expands inward are the same
+//! reservation. [`TRACK_WIDTH_RESERVED`] is that token, and the arithmetic closes:
+//! `8 + 2 = 10`, and the expanded thumb fills the band it was already paid for.
 //!
 //! [`LayoutMode::Reserved`] is the classic variant, and it is priced honestly: a
 //! host that reserves space permanently reserves it at the **widest** state, so
@@ -22,32 +29,41 @@
 //! reflow the overlay mode exists to avoid, and a reservation that cannot hold its
 //! own expansion is not a reservation.
 //!
+//! [`LayoutMode::Overlay`] is the crate's own addition and is worth flagging as a
+//! scope difference rather than a contradiction: §3B.4 describes only the
+//! permanently-reserved gutter and never mentions a floating bar, so a host that
+//! picks `Overlay` is outside what the section prices. It satisfies the invariant
+//! the section is actually about — nothing moves when the phase changes — but it
+//! does so by giving the content the whole viewport and painting over it, which
+//! means the `10px` band is *not* deducted. A host that needs the spec's
+//! "content never occupies the gutter" guarantee must pick `Reserved`.
+//!
 //! # Auto-hide is a phase, not a timer
 //!
-//! Â§3B.4 does not ask the scrollbar to fade away on a countdown, and a countdown
+//! §3B.4 does not ask the scrollbar to fade away on a countdown, and a countdown
 //! would need a clock the crate does not own. [`TrackPhase`] is therefore a pure
-//! function of two things the caller already knows â€” whether the view can scroll,
+//! function of two things the caller already knows — whether the view can scroll,
 //! and where the pointer is ([`resolve_phase`]). A host that later wants a timed
 //! fade feeds [`TimeMs`](crate::surface::tooltip::TimeMs) in from outside and maps *that* to
 //! `Hidden`; nothing in this module reads a wall clock to decide what to paint.
 //!
 //! # The thumb is `Judged` chrome
 //!
-//! Under Â§2.5's four-class model the thumb is classified
-//! [`ChromeClass::Judged`] â€” measured directly at the `3.00:1` floor â€” and not
+//! Under §2.5's four-class model the thumb is classified
+//! [`ChromeClass::Judged`] — measured directly at the `3.00:1` floor — and not
 //! [`ChromeClass::CoincidentWithFill`]. The distinction is real: the thumb has no
 //! perimeter stroke set to its own fill token, it *is* the fill, drawn against
 //! whatever surface scrolls beneath it. `CoincidentWithFill`'s higher floor was
 //! derived for button fills that carry a same-token outline, and borrowing it here
 //! would price a number the thumb does not actually have to meet.
 //!
-//! The track itself paints **no fill in any state**. Â§3B.4 styles only the thumb;
+//! The track itself paints **no fill in any state**. §3B.4 styles only the thumb;
 //! a track fill would be an invented surface that then has to be contrast-graded
 //! against every surface it can appear over.
 //!
 //! # Contrast, recomputed
 //!
-//! The spec prints the thumb's rest/hover ratio as a range, `4.01:1`â€“`4.51:1`.
+//! The spec prints the thumb's rest/hover ratio as a range, `4.01:1`–`4.51:1`.
 //! Recomputing from raw sRGB shows that range only spans the thumb over
 //! `surface.base` and `surface.overlay`; it never prices the thumb over the two
 //! surfaces a scrollbar actually passes during interaction. The full set:
@@ -75,13 +91,13 @@
 use crate::binding::{self, Cancel, Commit, GestureSlot, Live};
 use crate::token::color::Palette;
 use crate::token::contrast::{ChromeClass, contrast_ratio};
-use crate::token::{shape, size, space, typography};
+use crate::token::{shape, size, space};
 use iced::{Color, Rectangle};
 
-/// Track width at rest â€” `space.sm` (Â§3B.4's `8px`).
+/// Track width at rest — `space.sm` (§3B.4's `8px`).
 pub const TRACK_WIDTH_REST: f32 = space::SM;
 
-/// Track width under hover or drag â€” `size.splitter.grab` (Â§3B.4's `10px`).
+/// Track width under hover or drag — `size.splitter.grab` (§3B.4's `10px`).
 pub const TRACK_WIDTH_ACTIVE: f32 = size::SPLITTER_GRAB;
 
 /// A reserved gutter's width.
@@ -91,37 +107,58 @@ pub const TRACK_WIDTH_ACTIVE: f32 = size::SPLITTER_GRAB;
 /// reservation is supposed to protect. See the module docs.
 pub const TRACK_WIDTH_RESERVED: f32 = TRACK_WIDTH_ACTIVE;
 
-/// The thumb's minimum length â€” `size.hit_target.min` (Â§3B.4's `24px`).
+/// The thumb's minimum length — `size.hit_target.min` (§3B.4's `24px`).
 pub const THUMB_MIN_LENGTH: f32 = size::HIT_TARGET_MIN;
 
-/// The tick annotation's width â€” `space.xxs` (Â§3B.4's `2px`).
+/// The tick annotation's width — `space.xxs` (§3B.4's `2px`).
 pub const TICK_WIDTH: f32 = space::XXS;
 
-/// The thumb's corner radius â€” `radius.pill` (Â§3B.4).
+/// The thumb's corner radius — `radius.pill` (§3B.4).
 pub const THUMB_RADIUS: f32 = shape::RADIUS_PILL;
 
-/// The keyboard's single-line scroll step â€” one body line, `type.body.line_height`.
+/// The keyboard's single-line scroll step — `size.hit_target.min`
+/// (`24px`), one compact tree row (§3B.4).
 ///
-/// **An invented value.** Â§3B.4 lists the keys but prints no distance. A line
-/// step is chosen rather than a fixed pixel count so the scroll moves by the thing
-/// the user is reading, and the body rung is the crate's own reading measure.
-pub const ARROW_STEP: f32 = typography::BODY.line_height;
+/// §3B.4 now prints the distance rather than leaving it to the
+/// implementer: `Up`/`Down` (and `Left`/`Right` on the horizontal axis)
+/// step by `size.hit_target.min = 24px`, which the section glosses as
+/// "1 compact tree row". Reading it from the hit-target token rather
+/// than a pixel literal is what keeps the step and the row it moves over
+/// as one number — the step is a row because the row's height and the
+/// step's distance are the same token, not because both were written as
+/// `24` and happen to agree today.
+///
+/// An earlier reading here stepped by `type.body`'s `20px` line, on the
+/// grounds that a scroll should move by the thing the user is reading.
+/// That was an invented value. The corrected section names the row grid
+/// instead, and `20` is not a distance on it: at the `24px` compact rung
+/// three arrow presses land `12px` short of three rows, so the view
+/// drifts off the row boundaries it is supposed to stop on.
+pub const ARROW_STEP: f32 = size::HIT_TARGET_MIN;
 
-/// The line of context kept visible when paging, so a `PageDown` never leaves the
-/// reader with no anchor to the previous page.
+/// The line of context kept visible when paging, so a `PageDown` never
+/// leaves the reader with no anchor to the previous page —
+/// `size.hit_target.min` (`24px`), the `24.0` in §3B.4's
+/// `(viewport_length - 24.0).max(24.0)`.
 ///
-/// **An invented value.** Â§3B.4 prints no page step.
-pub const PAGE_KEEP: f32 = space::MD;
+/// The spec writes the page step as a formula rather than a number, and
+/// this constant is the term that appears twice in it. With [`PAGE_KEEP`]
+/// and the floor both at the hit-target minimum, [`page_step`] *is* the
+/// spec's expression term for term.
+pub const PAGE_KEEP: f32 = size::HIT_TARGET_MIN;
 
 /// How close to the bottom counts as "at bottom" for stream auto-scroll
-/// (`at_bottom_within_2px`, `UIF-MOV-004`) â€” `space.xxs` (Â§3B.4).
+/// (`at_bottom_within_2px`, `UIF-MOV-004`) — `space.xxs` (§3B.4).
 pub const AT_BOTTOM_TOLERANCE: f32 = space::XXS;
 
-/// How far from the end of content triggers lazy pagination â€” Â§3B.4's `64px`.
+/// How far from the end of content triggers lazy pagination — §3B.4's
+/// `64px`, whose composition the same sentence names: `2 × space.2xl`.
 ///
-/// A behavioural distance rather than a visual one, so it is not a Surface
-/// Geometry Constant: nothing in the crate paints `64px`.
-pub const REACH_END_DISTANCE: f32 = 64.0;
+/// Derived from that composition rather than written as `64.0`, so the
+/// figure is the sum of two token reads and cannot drift away from the
+/// rung it is defined against. A behavioural distance rather than a
+/// visual one: nothing in the crate paints `64px`.
+pub const REACH_END_DISTANCE: f32 = space::XXL * 2.0;
 
 /// The chrome class the thumb is graded under. See the module docs for why.
 pub const THUMB_CHROME_CLASS: ChromeClass = ChromeClass::Judged;
@@ -158,7 +195,7 @@ pub enum LayoutMode {
 
 /// The scrollbar's current visual phase.
 ///
-/// A pure function of scrollability and pointer position â€” see
+/// A pure function of scrollability and pointer position — see
 /// [`resolve_phase`]. There is no timed member, because a timed member would need
 /// a clock this crate does not own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,7 +237,7 @@ pub fn resolve_phase(scrollable: bool, pointer_over: bool, dragging: bool) -> Tr
 /// The painted track width for a phase and a mode.
 ///
 /// In [`LayoutMode::Overlay`] a `Hidden` phase paints nothing, so the width is
-/// `0.0`. In [`LayoutMode::Reserved`] the width is constant across every phase â€”
+/// `0.0`. In [`LayoutMode::Reserved`] the width is constant across every phase —
 /// that constancy is the mode's entire promise.
 #[must_use]
 pub fn track_width(phase: TrackPhase, mode: LayoutMode) -> f32 {
@@ -283,7 +320,7 @@ pub fn clamp_offset(offset: f32, content_len: f32, viewport_len: f32) -> f32 {
 
 /// The thumb's length along the axis.
 ///
-/// The proportional length is `viewportÂ² / content` â€” the standard expression,
+/// The proportional length is `viewport² / content` — the standard expression,
 /// because a thumb should occupy the same fraction of the track that the viewport
 /// occupies of the content. It is then floored at [`THUMB_MIN_LENGTH`] so an
 /// extreme ratio cannot produce a thumb too small to hit, and capped at the track
@@ -292,7 +329,7 @@ pub fn clamp_offset(offset: f32, content_len: f32, viewport_len: f32) -> f32 {
 /// The floor is the interesting case: at `content = 10 000`, `viewport = 100`
 /// the proportional length is `1.0px`, which the floor lifts to `24px`. That
 /// makes the thumb *less* accurate at extreme ratios, and the trade is deliberate
-/// â€” a `1px` target is not a target, and Â§3B.4 names the floor rather than the
+/// — a `1px` target is not a target, and §3B.4 names the floor rather than the
 /// accuracy.
 #[must_use]
 pub fn thumb_length(content_len: f32, viewport_len: f32) -> f32 {
@@ -358,7 +395,7 @@ pub fn thumb_rect(
 
 /// The thumb's fill for a phase.
 ///
-/// `border.strong` at rest and hover, `accent.border` while dragged (Â§3B.4). The
+/// `border.strong` at rest and hover, `accent.border` while dragged (§3B.4). The
 /// two are identical between rest and hover because that is what the spec prints;
 /// the hover affordance is the track widening, not the thumb changing colour.
 #[must_use]
@@ -398,27 +435,33 @@ pub fn in_reach_end(offset: f32, content_len: f32, viewport_len: f32) -> bool {
     max > 0.0 && max - offset <= REACH_END_DISTANCE
 }
 
-/// The distance a page scroll travels: the viewport less the context that stays
-/// visible, never less than one line.
+/// The distance a page scroll travels — §3B.4's
+/// `(viewport_length - 24.0).max(24.0)`, term for term.
+///
+/// The viewport less the context that stays visible ([`PAGE_KEEP`]),
+/// never less than one arrow step. The floor is what keeps a viewport
+/// shorter than twice the keep from paging backwards: at `viewport_len`
+/// of `30` the subtraction would give `6`, and the page would travel
+/// less than a single `Up` press.
 #[must_use]
 pub fn page_step(viewport_len: f32) -> f32 {
     (viewport_len - PAGE_KEEP).max(ARROW_STEP)
 }
 
-/// A keyboard scroll request (Â§3B.4's `Up`/`Down`/`PageUp`/`PageDown`/`Home`/`End`).
+/// A keyboard scroll request (§3B.4's `Up`/`Down`/`PageUp`/`PageDown`/`Home`/`End`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollKey {
-    /// `Up` â€” one line toward the start.
+    /// `Up` — one line toward the start.
     Up,
-    /// `Down` â€” one line toward the end.
+    /// `Down` — one line toward the end.
     Down,
-    /// `PageUp` â€” one page toward the start.
+    /// `PageUp` — one page toward the start.
     PageUp,
-    /// `PageDown` â€” one page toward the end.
+    /// `PageDown` — one page toward the end.
     PageDown,
-    /// `Home` â€” the start of content.
+    /// `Home` — the start of content.
     Home,
-    /// `End` â€” the end of content.
+    /// `End` — the end of content.
     End,
 }
 
@@ -446,7 +489,7 @@ pub fn scroll_to_key(
     (next != current).then_some(next)
 }
 
-/// What a tick annotation marks (Â§3B.4: search hits, headings, diagnostic errors).
+/// What a tick annotation marks (§3B.4: search hits, headings, diagnostic errors).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TickKind {
     /// A search hit.

@@ -392,11 +392,6 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         spec: "§3B.1 — Stacked form field header row height 20px",
     },
     SurfaceGeometryConstant {
-        file: "composite/settings_row.rs",
-        name: "MIN_HEIGHT",
-        spec: "§3B.1 — Settings Row minimum height 48px",
-    },
-    SurfaceGeometryConstant {
         file: "composite/list_tile.rs",
         name: "TWO_LINE_HEIGHT",
         spec: "§3B.5 — ListTile two-line row height 44px",

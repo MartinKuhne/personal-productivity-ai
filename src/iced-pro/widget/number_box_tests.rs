@@ -440,6 +440,41 @@ fn the_side_by_side_pair_uses_24_square_buttons_abreast() {
 }
 
 #[test]
+fn the_side_by_side_zone_is_the_full_control_height_with_the_buttons_centred() {
+    // §3.5 names the two trailing zones `28 x 32` and `48 x 32`. Both
+    // are as tall as the field beside them, so the 48px zone is not a
+    // 24px-tall wrapper that shrinks to hold its buttons. The 8px the
+    // zone is taller than a button is split 4px above and 4px below.
+    let b = bounds();
+    let zone = stepper_rect_for(StepperShape::SideBySide, b);
+    assert_eq!(zone.width, 48.0, "two 24px squares of zone");
+    assert_eq!(zone.height, ENTRY_HEIGHT, "the full 32px, not 24px");
+    assert_eq!(zone.y, b.y, "and it starts at the control's top");
+    let [dec, inc] = step_button_rects(b, StepperShape::SideBySide);
+    let slack = (zone.height - dec.height) / 2.0;
+    assert_eq!(slack, 4.0, "32 minus 24, halved");
+    assert_eq!(dec.y - zone.y, slack, "4px of zone above the buttons");
+    assert_eq!(
+        zone.y + zone.height - (inc.y + inc.height),
+        slack,
+        "and the same 4px below"
+    );
+    assert!(
+        dec.y > zone.y,
+        "the buttons do not sit on the zone's top edge"
+    );
+    assert!(
+        inc.y + inc.height < zone.y + zone.height,
+        "nor on its bottom edge"
+    );
+    assert_eq!(
+        zone.width,
+        dec.width + inc.width,
+        "the two squares fill the zone's width exactly"
+    );
+}
+
+#[test]
 fn the_two_step_buttons_never_overlap_in_either_shape() {
     // The bug the shape-aware block width exists to prevent. With two
     // `24px` squares forced into a `28px` column the rectangles overlapped

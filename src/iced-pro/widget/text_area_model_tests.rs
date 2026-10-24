@@ -131,6 +131,35 @@ fn test_an_empty_buffer_still_holds_one_line() {
 }
 
 #[test]
+fn test_clamp_height_applies_the_ceiling_as_much_as_the_floor() {
+    // §3.2e's closed form clamps the row count between both rungs, so
+    // the height-space equivalent has to clamp both ways. A host that
+    // hands back a rectangle taller than `max_rows` must not get to
+    // keep it, or the cap is a suggestion.
+    let band = Growth::new(2, Some(4));
+    assert_eq!(band.clamp_height(1.0), band.min_height(), "floor");
+    assert_eq!(
+        band.clamp_height(Growth::height_at(3)),
+        Growth::height_at(3)
+    );
+    assert_eq!(band.clamp_height(10_000.0), band.max_height(), "ceiling");
+    // An uncapped band clamps upward only.
+    let open = Growth::new(3, None);
+    assert_eq!(open.clamp_height(1.0), open.min_height());
+    assert_eq!(open.clamp_height(5_000.0), 5_000.0, "no ceiling to stop it");
+    // A band built outside `new` can be inverted. `max` then `min`
+    // resolves to the ceiling instead of panicking the way `f32::clamp`
+    // does when handed min > max.
+    let inverted = Growth {
+        min_rows: 6,
+        max_rows: Some(2),
+    };
+    assert!(inverted.min_height() > inverted.max_height());
+    assert_eq!(inverted.clamp_height(100.0), inverted.max_height());
+    assert_eq!(inverted.clamp_height(1.0), inverted.max_height());
+}
+
+#[test]
 fn test_rows_fitting_counts_whole_rows_only() {
     assert_eq!(Growth::rows_fitting(Growth::height_at(3)), 3);
     assert_eq!(Growth::rows_fitting(Growth::height_at(3) - 1.0), 2);

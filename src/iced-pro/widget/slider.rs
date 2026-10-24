@@ -19,7 +19,8 @@
 //! ([`size::HIT_TARGET_MIN]) hit target, painted in
 //! [`text.strong`](Palette::text_strong) with a `2px`
 //! [`accent.border`](Palette::accent_border) ring. Optional stepped tick
-//! marks are `2 × 4px` in [`border.strong`](Palette::border_strong).
+//! marks are `space.2xs × space.xs` (`2 × 4px`) in
+//! [`border.strong`](Palette::border_strong).
 //!
 //! The rail and the thumb are two different kinds of thing and the audit
 //! treats them that way. The rail is the groove: its own perimeter is
@@ -166,6 +167,7 @@ use crate::token::color::Palette;
 use crate::token::contrast::{self, ChromeClass};
 use crate::token::shape;
 use crate::token::size;
+use crate::token::space;
 use crate::widget::button_widget::Layer;
 use crate::widget::focus;
 use iced::{Border, Color, Point, Rectangle};
@@ -195,26 +197,30 @@ pub const THUMB_RING_WIDTH: f32 = shape::BORDER_FOCUS;
 /// `border.hairline`.
 pub const RAIL_BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
-/// A tick mark's thickness — §3.5's `2px`.
+/// A tick mark's thickness — §3.5's `space.2xs` (`2px`).
 ///
-/// **No token of its own exists for this.** §2.3's closed stroke set has
-/// two weights, `border.hairline` (`1`) and `border.focus` (`2`), and
-/// neither is semantically a tick mark — one is a divider, the other a
-/// keyboard ring. [`TICK_WIDTH`] takes the `2` from `border.focus`
-/// because [`UIF-PRIN-001`](crate::token) forbids a raw literal and `2`
-/// is the only `2` the closed set offers. The mismatch is a spec gap, not
-/// a licence to invent a token; the same compromise
-/// [`progress::SPINNER_STROKE`](crate::widget::progress::SPINNER_STROKE)
-/// records.
-pub const TICK_WIDTH: f32 = shape::BORDER_FOCUS;
+/// **A spacing read, not a stroke weight.** §2.1's role column names
+/// `space.2xs` as the slider tick width outright, so the tick is priced
+/// on the grid like every other gap rather than borrowing a stroke. An
+/// earlier reading here took the `2` from `border.focus` on the theory
+/// that no token existed for a tick and [`UIF-PRIN-001`](crate::token)
+/// forbade a raw literal; that theory was wrong. A tick is a notch cut
+/// at a grid position, which makes it a spacing measurement — and
+/// `border.focus` means *keyboard attention*, which a tick mark is not.
+pub const TICK_WIDTH: f32 = space::XXS;
 
-/// A tick mark's height — §3.5's `4px`.
+/// A tick mark's height — §3.5's `space.xs` (`4px`).
 ///
-/// Equal to [`TRACK_HEIGHT`] because it *is* the same measurement: a
-/// tick is exactly as tall as the rail it marks, which is what makes the
-/// row of ticks read as a scale cut into the groove rather than as a
-/// separate strip drawn under it.
-pub const TICK_HEIGHT: f32 = size::SLIDER_TRACK_HEIGHT;
+/// Also named by §2.1, whose `space.xs` row lists the slider tick
+/// height alongside the tree row's horizontal inset. It still *measures*
+/// the same as [`TRACK_HEIGHT`], and the sidecar pins that so the visual
+/// relationship — a tick as tall as the rail it marks, which is what
+/// makes the row of ticks read as a scale cut into the groove rather
+/// than a separate strip drawn under it — cannot be lost silently. But
+/// the two are no longer defined as one measurement: the rail's
+/// thickness comes from `size.slider.track_height` and the tick's from
+/// the spacing scale, each following the token the spec names for it.
+pub const TICK_HEIGHT: f32 = space::XS;
 
 /// The keyboard focus ring's weight — `border.focus`, the same attention
 /// weight every other control's ring carries.

@@ -648,26 +648,42 @@ fn the_elevated_card_border_is_judged_chrome_and_the_resting_one_is_not() {
 // ListTile — UIF-COMP-005, D-8
 // ---------------------------------------------------------------------------
 
-/// Both figures are constants, so the gap between the printed two-line
-/// height and the parts that compose it is checked at compile time: a
-/// retune that closes or widens the gap fails the build instead of
-/// quietly changing what the gallery reports.
-const _: () = assert!(list_tile::TWO_LINE_PARTS_HEIGHT < list_tile::TWO_LINE_HEIGHT);
-const _: () = assert!(list_tile::TWO_LINE_UNACCOUNTED > 0.0);
+/// Both figures are constants, so the two-line row's composition is
+/// checked at compile time. §3B.5 now prices the `2px` title-over-
+/// subtitle gap, so the parts reach the printed total exactly and
+/// nothing is left unaccounted.
+///
+/// These replace the `parts < total` and `unaccounted > 0` assertions
+/// that recorded the pre-correction gap. The new pair is strictly
+/// tighter — it pins the difference to zero rather than merely requiring
+/// it to be positive — so a spec edit that reopened the gap fails the
+/// build instead of passing a looser check.
+const _: () = assert!(list_tile::TWO_LINE_PARTS_HEIGHT == list_tile::TWO_LINE_HEIGHT);
+const _: () = assert!(list_tile::TWO_LINE_UNACCOUNTED == 0.0);
 
 #[test]
-fn the_two_line_arithmetic_gap_is_recorded_not_rounded_away() {
+fn the_two_line_row_composes_exactly_from_the_printed_parts() {
     assert_eq!(list_tile::TWO_LINE_HEIGHT, 44.0);
     assert_eq!(
+        list_tile::TWO_LINE_PARTS_HEIGHT,
+        list_tile::PADDING_VERTICAL
+            + list_tile::TITLE_RUNG.line_height
+            + list_tile::TITLE_SUBTITLE_GAP
+            + list_tile::SUBTITLE_RUNG.line_height
+            + list_tile::PADDING_VERTICAL
+    );
+    assert_eq!(
+        list_tile::TWO_LINE_PARTS_HEIGHT,
+        list_tile::TWO_LINE_HEIGHT,
+        "4 + 18 + 2 + 16 + 4 must reach the printed 44 exactly"
+    );
+    assert_eq!(
         list_tile::TWO_LINE_UNACCOUNTED,
-        list_tile::TWO_LINE_HEIGHT - list_tile::TWO_LINE_PARTS_HEIGHT
+        0.0,
+        "the 2px is accounted for as the title-over-subtitle gap; nothing \
+         is left over"
     );
-    assert!(
-        (list_tile::TWO_LINE_UNACCOUNTED - 2.0).abs() < 1e-6,
-        "the printed 44 and the composed parts differ by {}, which is not \
-         the 2px recorded as unaccounted",
-        list_tile::TWO_LINE_UNACCOUNTED
-    );
+    assert_eq!(list_tile::TITLE_SUBTITLE_GAP, 2.0);
 }
 
 #[test]

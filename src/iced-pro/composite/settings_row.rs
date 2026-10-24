@@ -9,13 +9,22 @@
 //!
 //! # The floor is a floor, not a height
 //!
-//! §3B.1 prints `Min height 48px` together with `padding 12px 16px`, and
-//! the two do not pin the row to `48` — they bound it from below. A title
-//! alone is `20 + 24 = 44`, so the floor holds; a title with a
-//! description is `20 + 16 + 24 = 60`, so the content wins. [`row_height`]
-//! computes the maximum rather than returning the printed figure, because
-//! a row that clamped to `48` would clip the description it was told to
-//! show.
+//! §3B.1 prints `Min height 48px` together with `padding 12px 16px`,
+//! and the two do not pin the row to `48` — they bound it from below.
+//! The section composes the floor itself: `12px` top padding + `20px`
+//! `type.body` title + `12px` bottom padding + `4px` border/inset
+//! reserve = `48px`, and [`MIN_HEIGHT`] is that sum rather than the
+//! literal.
+//!
+//! The reserve is why the floor and the row's own content differ. A
+//! title alone is `20 + 24 = 44`, four pixels short of the floor, and
+//! the floor is what closes them; a title with a description is
+//! `20 + 16 + 24 = 60`, which is the two-line figure §3B.1 prints with
+//! `0px` slack, so the content wins outright and the reserve has
+//! already been absorbed into the taller column. [`row_height`]
+//! therefore computes the maximum of the floor and the content rather
+//! than returning the printed figure, because a row that clamped back
+//! down to `48` would clip the description it was told to show.
 //!
 //! The control participates the same way: it is a competing *content*
 //! height, not a decoration. A `32px` switch beside a title-only row makes
@@ -43,14 +52,33 @@ use crate::token::{shape, size, space, typography};
 use iced::widget::{Container, Row, text};
 use iced::{Color, Length, Rectangle};
 
+/// The `4px` border/inset reserve §3.1's settings-row floor carries on
+/// top of its padding and its title line.
+///
+/// §3B.1 composes the single-line floor as `12 + 20 + 12 + 4`, and the
+/// fourth term is this: room for the row's own perimeter stroke and the
+/// inset a control sits at inside the card, which the padding alone does
+/// not pay for. It is `space.xs`, the smallest padding rung, because
+/// that is what the reserve actually has to cover — a `1px` border plus
+/// a hair of breathing room, not a gap you read as spacing.
+pub const BORDER_INSET_RESERVE: f32 = space::XS;
+
 /// The row's minimum height — §3B.1's `Min height 48px`.
 ///
-/// **A Surface Geometry Constant, not a token read.** §2.2 carries
-/// `size.control.md = 32` and `size.control.lg = 36`; nothing on the
-/// ladder is `48`, and no combination of a rung with the printed `12px`
-/// vertical padding produces it from a single line of text. The figure is
-/// the row's own bound and is registered against §3B.1.
-pub const MIN_HEIGHT: f32 = 48.0;
+/// **A floor, not a height.** §3B.1 prints it as `Min height`, and
+/// [`row_height`] treats it as the lower bound of a maximum rather than
+/// the row's answer: a title-only row lands exactly on it, and anything
+/// taller — a description, a `32px` control — pushes past it. A row
+/// that clamped back down to `48` would clip the description it was
+/// told to show.
+///
+/// **Derived from the spec's own composition**, not printed: `12px` top
+/// padding + `20px` `type.body` title + `12px` bottom padding + `4px`
+/// [`BORDER_INSET_RESERVE`] = `48px`. Adding the parts is what makes
+/// the total checkable; a bare `48.0` could drift away from the row it
+/// claims to bound and nothing would notice.
+pub const MIN_HEIGHT: f32 =
+    PADDING_VERTICAL + TITLE_RUNG.line_height + PADDING_VERTICAL + BORDER_INSET_RESERVE;
 
 /// The row's vertical padding — the `12px` of §3B.1's `12px 16px`.
 pub const PADDING_VERTICAL: f32 = space::MD;
