@@ -1,5 +1,5 @@
-//! Tests for the split-button geometry and paint resolver �
-//! `UIF-ATOM-001c`, �3.1c.
+//! Tests for the split-button geometry and paint resolver —
+//! `UIF-ATOM-001c`, §3.1c.
 //!
 //! Six groups, in order:
 //!
@@ -8,9 +8,10 @@
 //! 2. **Composition.** Each half *is* the button resolver's answer for
 //!    its own state, for both variants.
 //! 3. **Half independence.** The resolver cannot put one half's rung on
-//!    the other � the negative cases the spec's two-zone claim rests on.
+//!    the other — the negative cases the spec's two-zone claim rests on.
 //! 4. **Chevron and divider colour.** The glyph takes the half's own
-//!    foreground; the divider is the token �3.1c names.
+//!    foreground; the divider is resolved per variant, as §3.1c now
+//!    prescribes.
 //! 5. **Geometry.** Widths, boxes, and the tiling invariant that every
 //!    x resolves to the half whose bounds contain it.
 //! 6. **Contrast.** Every ratio the module doc quotes, recomputed from
@@ -208,7 +209,7 @@ fn the_chevron_is_the_menu_halves_own_foreground() {
 
 #[test]
 fn the_chevron_is_never_the_muted_glyph_on_a_primary_fill() {
-    // �3.4's combobox trigger paints its glyph `text.muted` at rest. That
+    // §3.4's combobox trigger paints its glyph `text.muted` at rest. That
     // precedent cannot travel here: on `accent.fill` it is 1.84:1.
     let p = palette();
     let style = resolve_style(ButtonVariant::Primary, REST, REST, &p);
@@ -220,13 +221,40 @@ fn the_chevron_is_never_the_muted_glyph_on_a_primary_fill() {
 }
 
 #[test]
-fn the_divider_is_border_strong_in_every_state() {
+fn the_divider_is_resolved_per_variant() {
+    // §3.1c gives each variant its own seam token; a single border token
+    // is visible on one fill and invisible on the other.
     let p = palette();
-    for variant in VARIANTS {
-        let style = resolve_style(variant, HOVERED, PRESSED, &p);
+    for (primary, menu) in [(REST, REST), (HOVERED, PRESSED), (PRESSED, HOVERED)] {
+        let style = resolve_style(ButtonVariant::Primary, primary, menu, &p);
+        assert_eq!(style.divider, p.text_strong);
+        assert_eq!(style.divider, divider_color(ButtonVariant::Primary, &p));
+
+        let style = resolve_style(ButtonVariant::Secondary, primary, menu, &p);
         assert_eq!(style.divider, p.border_strong);
-        assert_eq!(style.divider, divider_color(&p));
+        assert_eq!(style.divider, divider_color(ButtonVariant::Secondary, &p));
     }
+}
+
+#[test]
+fn the_seam_never_falls_back_to_a_token_that_is_invisible_on_its_own_fill() {
+    // The Primary half must not wear the Secondary seam, and vice versa.
+    let p = palette();
+    assert_ne!(
+        divider_color(ButtonVariant::Primary, &p),
+        divider_color(ButtonVariant::Secondary, &p)
+    );
+    assert!(
+        contrast_ratio(divider_color(ButtonVariant::Primary, &p), p.accent_fill) >= 3.0,
+        "the Primary seam must clear the 3:1 chrome floor on accent.fill"
+    );
+    assert!(
+        contrast_ratio(
+            divider_color(ButtonVariant::Secondary, &p),
+            p.surface_raised
+        ) >= 3.0,
+        "the Secondary seam must clear the 3:1 chrome floor on surface.raised"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -297,19 +325,33 @@ fn the_divider_bounds_sit_at_the_seam_one_pixel_wide() {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Contrast � every quoted figure recomputed from raw sRGB
+// 6. Contrast — every quoted figure recomputed from raw sRGB
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_divider_is_invisible_on_a_primary_fill_and_legible_on_secondary_rungs() {
+fn each_seam_token_measures_what_the_spec_prices() {
     let p = palette();
-    // The finding �3.1c leaves unresolved: the token the spec names for
-    // the divider cannot be seen on the fill the Primary variant paints.
+    // §3.1c's two seam figures, recomputed from raw sRGB.
+    assert_ratio(
+        contrast_ratio(divider_color(ButtonVariant::Primary, &p), p.accent_fill),
+        4.8020,
+    );
+    assert_ratio(
+        contrast_ratio(
+            divider_color(ButtonVariant::Secondary, &p),
+            p.surface_raised,
+        ),
+        4.2379,
+    );
+    // …and the two tokens §3.1c explicitly rejects on the accent fill,
+    // pinned so a future palette change cannot quietly re-admit them.
     assert_ratio(contrast_ratio(p.border_strong, p.accent_fill), 1.0876);
+    assert_ratio(contrast_ratio(p.text_muted, p.accent_fill), 1.8363);
     assert!(
         contrast_ratio(p.border_strong, p.accent_fill) < 3.0,
-        "if this ever stops being true the spec gap has been closed"
+        "border.strong must stay a rejected Primary seam"
     );
+    // The Secondary seam stays legible across the Secondary rungs.
     assert_ratio(contrast_ratio(p.border_strong, p.surface_base), 4.5062);
     assert_ratio(contrast_ratio(p.border_strong, p.surface_hover), 3.6772);
 }

@@ -421,9 +421,10 @@ fn the_supporting_figures_the_resolver_leans_on_are_what_they_claim() {
 
 #[test]
 fn a_selected_chip_may_not_be_mounted_on_surface_active() {
-    // The forbidden mount. `accent.fill` against `surface.active` is
-    // 2.9768:1, under the 3.00:1 a fill that carries its own boundary
-    // owes. A selected chip may sit on base, raised or hover.
+    // §3.6 names the allowed mounts — base, raised, overlay and hover —
+    // and rules out surface.active by name: `accent.fill` against
+    // `surface.active` is 2.9768:1, under the 3.00:1 a fill that carries
+    // its own boundary owes.
     let p = palette();
     let fill = p.accent_fill;
     assert!(contrast::meets_coincident_fill_contrast(
@@ -436,8 +437,13 @@ fn a_selected_chip_may_not_be_mounted_on_surface_active() {
     ));
     assert!(contrast::meets_coincident_fill_contrast(
         fill,
+        p.surface_overlay
+    ));
+    assert!(contrast::meets_coincident_fill_contrast(
+        fill,
         p.surface_hover
     ));
+    assert!(close(ratio(fill, p.surface_overlay), 3.6895));
     assert!(
         !contrast::meets_coincident_fill_contrast(fill, p.surface_active),
         "surface.active must stay forbidden, recomputed {}",

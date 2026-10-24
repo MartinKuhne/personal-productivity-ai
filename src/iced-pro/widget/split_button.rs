@@ -25,34 +25,41 @@
 //!
 //! # The chevron takes the half's own foreground
 //!
-//! §3.1c is silent on the chevron's colour. §3.4's combobox trigger is
-//! the nearest precedent and paints its glyph `text.muted` at rest — but
-//! `text.muted` on `accent.fill` measures `1.8363:1`, which fails
-//! outright, so the precedent cannot be lifted onto a Primary split
-//! button. The rule that *does* travel is §3.1's: a button's icons are
-//! painted with its [`foreground`](ButtonStyle::foreground) channel, the
-//! same colour as its label. So the chevron is [`chevron_color`], which
-//! is the menu half's resolved foreground — `text.strong` (`4.8020:1`)
-//! on a Primary fill, `text.primary` on a Secondary one.
+//! §3.1c names the chevron per variant: `text.primary` at rest and
+//! `text.strong` on hover/open for `Secondary`, `text.strong` for
+//! `Primary`. That is exactly the [`foreground`](ButtonStyle::foreground)
+//! channel of the menu half's resolved [`ButtonStyle`], so
+//! [`chevron_color`] reads that channel rather than restating the tokens —
+//! `text.strong` (`4.8020:1`) on a Primary fill, `text.primary` at rest
+//! and `text.strong` on hover for a Secondary one.
 //!
-//! # The divider is invisible on a Primary fill — and that is a spec fact
+//! What cannot travel here is §3.4's combobox precedent of painting the
+//! glyph `text.muted` at rest: `text.muted` on `accent.fill` measures
+//! `1.8363:1`, which the spec names as a failure outright.
 //!
-//! §3.1c names the divider `1px border.strong`, and that is what
-//! [`divider_color`] returns. Against `accent.fill` (`RGB(93,96,238)`)
-//! `border.strong` (`RGB(120,120,120)`) measures **`1.0876:1`** — the
-//! divider cannot be seen on a filled primary half. It is legible on
-//! every Secondary rung (`4.5062:1` on `surface.base`, `3.6772:1` on
-//! `surface.hover`).
+//! # The seam is per variant, because one border token cannot serve both fills
 //!
-//! This is recorded rather than fixed. The spec assigns the token
-//! explicitly, the task forbids changing any rendered colour, and the
-//! alternative — resolving the divider adaptively the way the focus ring
-//! is — would invent a rule §3.1c does not contain. It is a spec gap:
-//! §3.1c needs either a per-variant divider or a gap between the halves.
-//! For the same reason the divider is deliberately **not** offered to the
-//! gallery as a judged contrast pair; the number is reported in the cell's
-//! `resolved` note instead of being scored against a floor it was never
-//! drawn to meet.
+//! §3.1c resolves the `1px` internal divider **per variant**, and
+//! [`divider_color`] follows it:
+//!
+//! - `Secondary` — `border.strong`, `4.2379:1` on `surface.raised`.
+//! - `Primary` — `text.strong`, `4.8020:1` on `accent.fill`.
+//!
+//! The reason the Primary half cannot borrow the Secondary token is arithmetic:
+//! `border.strong` (`RGB(120,120,120)`) against `accent.fill`
+//! (`RGB(93,96,238)`) measures **`1.0876:1`**, and `text.muted` is no
+//! better at **`1.8363:1`**. Both are named as failures by the spec, which
+//! routes the seam to `text.strong` under `UIF-TOK-006` rule 4 — the same
+//! rule that already fixes the Primary label's foreground. The seam, the
+//! chevron and the label therefore form one `4.80:1` family on a Primary
+//! fill instead of a visible line on one variant and an invisible one on
+//! the other.
+//!
+//! The divider is still **not** offered to the gallery as a judged
+//! contrast pair. It is a seam, not a foreground: scoring a 1px line
+//! against a text-contrast floor would be a category error even now that
+//! the token is legible, so the figure is reported in the cell's
+//! `resolved` note instead.
 //!
 //! # The divider belongs to the chevron half
 //!
@@ -79,8 +86,8 @@ use iced::{Color, Point, Rectangle, Size};
 /// number and the label zone the remainder.
 pub const CHEVRON_ZONE_WIDTH: f32 = size::CONTROL_SM;
 
-/// The vertical divider between the halves — `1px border.strong`
-/// (§3.1c).
+/// The vertical divider between the halves — `1px`, the token being
+/// per-variant (see [`divider_color`], §3.1c).
 pub const DIVIDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// Horizontal padding inside the primary action zone — the
@@ -252,14 +259,33 @@ pub fn resolve_style(
     SplitStyle {
         primary: button::resolve_style(variant, primary_state, palette),
         menu: button::resolve_style(variant, menu_state, palette),
-        divider: divider_color(palette),
+        divider: divider_color(variant, palette),
     }
 }
 
-/// The divider colour — `border.strong`, as §3.1c names it.
+/// The divider colour — resolved **per variant**, as §3.1c prescribes
+/// (`UIF-ATOM-001c`).
+///
+/// `Primary` takes `text.strong` (`4.8020:1` on `accent.fill`);
+/// `Secondary` takes `border.strong` (`4.2379:1` on `surface.raised`).
+/// See the
+/// [module docs](self#the-seam-is-per-variant-because-one-border-token-cannot-serve-both-fills)
+/// for why the Primary half may not borrow the Secondary token.
+///
+/// `Ghost` and `Danger` keep `border.strong`: §3.1c names a seam token for
+/// `Secondary` and `Primary` only, so those two variants fall back to the
+/// strongest resting border rather than an invented rule. That fallback is
+/// unverified against a Danger fill — `border.strong` on
+/// `status.danger.fill` is not a pair the spec prices — and is reported as
+/// such rather than claimed as correct.
 #[must_use]
-pub const fn divider_color(palette: &Palette) -> Color {
-    palette.border_strong
+pub const fn divider_color(variant: ButtonVariant, palette: &Palette) -> Color {
+    match variant {
+        ButtonVariant::Primary => palette.text_strong,
+        ButtonVariant::Secondary | ButtonVariant::Ghost | ButtonVariant::Danger => {
+            palette.border_strong
+        }
+    }
 }
 
 /// The `▾` glyph colour: the chevron half's own foreground.

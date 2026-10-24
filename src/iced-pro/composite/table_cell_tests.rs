@@ -108,7 +108,7 @@ fn the_zebra_only_shows_when_nothing_above_it_arrives() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_selected_row_gets_the_stronger_text() {
+fn each_band_gets_the_foreground_the_spec_prices() {
     let palette = palette();
     assert_eq!(
         foreground_colour(CellBand::Base, &palette),
@@ -120,13 +120,28 @@ fn the_selected_row_gets_the_stronger_text() {
     );
     assert_eq!(
         foreground_colour(CellBand::Hover, &palette),
-        palette.text_primary
+        palette.text_strong,
+        "§3B.7: Hovered rows use surface.hover with FG text.strong"
     );
     assert_eq!(
         foreground_colour(CellBand::Selected, &palette),
         palette.text_strong,
-        "the spec prints no foreground for a selected cell; the tree's rule applies"
+        "§3B.7: Selected rows use surface.active with FG text.strong (14.29:1)"
     );
+    // The hover promotion is real: a hovered row is louder than a
+    // resting one, which is the point of the spec's per-band foreground.
+    assert_ne!(
+        foreground_colour(CellBand::Hover, &palette),
+        foreground_colour(CellBand::Base, &palette)
+    );
+    assert!(approx(
+        contrast_ratio(palette.text_strong, palette.surface_hover),
+        16.2351
+    ));
+    assert!(approx(
+        contrast_ratio(palette.text_strong, palette.surface_active),
+        14.2946
+    ));
 }
 
 #[test]

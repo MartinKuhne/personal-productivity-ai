@@ -63,13 +63,15 @@
 //! `accent_fill_active` on `surface.raised` `3.3082:1` and
 //! `text.strong` on `accent_fill_active` `5.6559:1`.
 //!
-//! **One mount is not allowed.** A selected chip's fill is
-//! [`Palette::accent_fill`], and `accent.fill` against `surface.active`
-//! is **`2.9768:1`** — under the `3.00:1` a fill that carries its own
-//! boundary owes. A selected chip may sit on `surface.base`,
-//! `surface.raised` or `surface.hover`; it may not sit on `surface.active`,
-//! which is the background a pressed row underneath it would paint. The
-//! sidecar pins both sides of that line.
+//! **One mount is not allowed.** §3.6 lists the mounts a selected chip
+//! may wear — `surface.base`, `surface.raised`, `surface.overlay` or
+//! `surface.hover` — and rules out `surface.active` by name, because
+//! `accent.fill` against `surface.active` is **`2.9768:1`**, under the
+//! `3.00:1` a fill that carries its own boundary owes. Every allowed
+//! mount clears: `4.1432` on `base`, `3.8965` on `raised`, `3.6895` on
+//! `overlay` and `3.3809` on `hover`. `surface.active` is the background
+//! a pressed row underneath the chip would paint, and the sidecar pins
+//! both sides of that line.
 //!
 //! # The reserved `×` slot is reserved whether or not it is wanted
 //!
@@ -292,13 +294,12 @@ pub fn resolve_style(
 /// question (`RUST-023`). [`resolve_style`] returns the filter/input
 /// shape; an assist chip asks for the pill here.
 ///
-/// **The `Assist` radius is a spec gap, resolved rather than invented.**
-/// §3.6's sentence assigns `radius.pill` to "status/count pills" and
-/// `radius.widget` to "filter/input chips", and names `Assist` in
-/// neither group. The pill branch is the one for a chip that is neither a
-/// filter nor an input, which is what an assist chip is; the competing
-/// reading cannot hold because §3.8's *status chip* is also called a
-/// chip and §3.6's own sentence puts it in the pill branch.
+/// **The `Assist` radius is named by the spec.** §3.6 assigns
+/// `radius.pill` to "`Assist` chips and status/count pills" and
+/// `radius.widget` to "`Filter` and `Input` chips", so the branch below
+/// is the prescribed one rather than a reading of an ambiguous sentence.
+/// The pill is also the branch §3.8's status chip lands in, which keeps
+/// the two chip-shaped things in the framework consistent.
 #[must_use]
 pub fn with_variant(style: ChipStyle, is_assist: bool, is_removable: bool) -> ChipStyle {
     ChipStyle {

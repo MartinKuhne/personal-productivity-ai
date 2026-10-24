@@ -8,9 +8,9 @@ use crate::composite::tree_row::{
     CHEVRON_COLUMN, INDENT_STEP, LABEL_RUNG, MIN_INDENT_STEP, MIN_LABEL_WIDTH, ROW_HEIGHT_COMPACT,
     ROW_HEIGHT_STANDARD, ROW_INSET_X, ROW_INSET_Y, SELECTION_BAR_WIDTH, band_colour,
     chevron_colour, content_width, disabled_label_in_band, guide_colour, guide_layers,
-    indent_allowance, indent_geometry, label_fits_row, label_floor_holds, promoted_over,
-    resolve_style, row_layer, row_padding, row_slots, selection_bar_colour, selection_bar_layer,
-    warning_colour,
+    indent_allowance, indent_geometry, label_fits_row, label_floor_holds, locked_over,
+    promoted_over, resolve_style, row_layer, row_padding, row_slots, selection_bar_colour,
+    selection_bar_layer, warning_colour,
 };
 use crate::state::BaseState;
 use crate::token::color::Palette;
@@ -60,10 +60,8 @@ fn every_geometry_constant_reads_a_token() {
     assert_eq!(CHEVRON_COLUMN, size::HIT_TARGET_MIN);
     assert_eq!(ROW_INSET_X, space::XS);
     assert_eq!(ROW_INSET_Y, space::XXS);
-    assert_eq!(
-        SELECTION_BAR_WIDTH,
-        shape::BORDER_FOCUS + shape::BORDER_HAIRLINE
-    );
+    assert_eq!(SELECTION_BAR_WIDTH, shape::BORDER_FOCUS);
+    assert_eq!(SELECTION_BAR_WIDTH, 2.0, "§3B.6 prices the bar at 2px");
     assert_eq!(ROW_HEIGHT_COMPACT, size::HIT_TARGET_MIN);
     assert_eq!(ROW_HEIGHT_STANDARD, size::CONTROL_SM);
 }
@@ -542,6 +540,61 @@ fn promotion_is_a_function_of_measured_contrast_not_of_a_name_list() {
         promoted_over(invisible, p.accent_fill, &p),
         p.text_strong,
         "a near-identical mark is promoted rather than painted invisible"
+    );
+}
+
+#[test]
+fn the_selection_lock_is_by_role_not_by_threshold() {
+    // §3B.6 locks the label, chevron, guides and bar because of what the
+    // band IS, not because a measured ratio fell short. A candidate that
+    // would clear the floor on the locked fill is locked anyway — that is
+    // the whole difference from `promoted_over` above.
+    let p = palette();
+    assert!(
+        meets_chrome_contrast(p.text_primary, p.accent_fill),
+        "premise: text.primary clears 3:1 on accent.fill ({:.4})",
+        contrast_ratio(p.text_primary, p.accent_fill)
+    );
+    assert_eq!(
+        locked_over(p.text_primary, p.accent_fill, &p),
+        p.text_strong,
+        "a passing candidate is still locked, because the band is a locked fill"
+    );
+
+    // Off a locked fill the candidate passes through untouched, so an
+    // unselected row keeps the tokens §3B.6 prices for it.
+    assert_eq!(
+        locked_over(p.border_strong, p.surface_base, &p),
+        p.border_strong
+    );
+    assert_eq!(
+        locked_over(p.text_muted, p.surface_raised, &p),
+        p.text_muted
+    );
+    assert_eq!(
+        locked_over(p.accent_border, p.surface_hover, &p),
+        p.accent_border
+    );
+}
+
+#[test]
+fn the_locked_marks_do_not_depend_on_the_resting_tokens_contrast() {
+    // The three role-locked marks resolve to text.strong on every locked
+    // fill, whatever their resting token measures there.
+    let p = palette();
+    for fill in [p.accent_fill, p.accent_fill_active] {
+        assert_eq!(guide_colour(fill, &p), p.text_strong, "guide on {fill:?}");
+        assert_eq!(chevron_colour(fill, &p), p.text_strong);
+        assert_eq!(selection_bar_colour(fill, &p), p.text_strong);
+    }
+    // The warning mark is NOT role-locked; it keeps its hue wherever it
+    // clears, and is threshold-promoted only where it does not.
+    assert_eq!(warning_colour(p.surface_base, &p), p.status_warning);
+    assert_eq!(warning_colour(p.accent_fill, &p), p.text_strong);
+    assert!(
+        contrast_ratio(p.status_warning, p.accent_fill) < 3.0,
+        "premise: the warning is sub-floor on the selection fill ({:.4})",
+        contrast_ratio(p.status_warning, p.accent_fill)
     );
 }
 

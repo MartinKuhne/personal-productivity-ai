@@ -4,11 +4,11 @@
 //! (`UIF-COMP-005`).
 
 use crate::composite::list_tile::{
-    BORDER_WIDTH, LEADING_LARGE, LEADING_SMALL, Leading, LeadingExtent, PADDING_HORIZONTAL,
-    PADDING_VERTICAL, SLOT_GAP, SUBTITLE_RUNG, TILE_HEIGHTS, TITLE_RUNG, TRAILING_TARGET,
-    TWO_LINE_HEIGHT, TWO_LINE_PARTS_HEIGHT, TWO_LINE_UNACCOUNTED, TileLines, TileSlots, hit_target,
-    meets_hit_target_floor, resolve_style, row_layer, slots, subtitle_on, tile_height,
-    trailing_targets,
+    BORDER_WIDTH, FOCUS_OUTLINE_WIDTH, LEADING_LARGE, LEADING_SMALL, Leading, LeadingExtent,
+    PADDING_HORIZONTAL, PADDING_VERTICAL, SLOT_GAP, SUBTITLE_RUNG, TILE_HEIGHTS, TITLE_RUNG,
+    TRAILING_TARGET, TWO_LINE_HEIGHT, TWO_LINE_PARTS_HEIGHT, TWO_LINE_UNACCOUNTED, TileLines,
+    TileSlots, focus_outline_colour, focus_outline_layer, hit_target, meets_hit_target_floor,
+    resolve_style, row_layer, slots, subtitle_on, tile_height, trailing_targets,
 };
 use crate::state::BaseState;
 use crate::token::color::Palette;
@@ -492,4 +492,35 @@ fn a_disabled_tile_is_read_on_the_card_not_on_its_own_fill() {
         contrast_ratio(dead.title_colour, palette.surface_raised),
         5.5643
     ));
+}
+
+#[test]
+fn the_focus_outline_is_the_one_pixel_text_strong_inset_the_spec_names() {
+    // §3B.5: "keyboard focus uses the 1px text.strong inset outline at
+    // 4.80:1". One weight lighter than the 2px outer ring a §3.1 atom
+    // carries, and inset so a focused row costs no layout.
+    let palette = Palette::dark();
+    assert_eq!(FOCUS_OUTLINE_WIDTH, shape::BORDER_HAIRLINE);
+    assert_eq!(FOCUS_OUTLINE_WIDTH, 1.0);
+    assert_eq!(focus_outline_colour(&palette), palette.text_strong);
+
+    let bounds = Rectangle::new(iced::Point::new(0.0, 0.0), iced::Size::new(240.0, 32.0));
+    let layer = focus_outline_layer(bounds, &palette);
+    assert_eq!(layer.bounds, bounds, "the outline is inset, not grown");
+    assert_eq!(layer.border.width, FOCUS_OUTLINE_WIDTH);
+    assert_eq!(layer.border.color, palette.text_strong);
+    assert_eq!(layer.fill, Color::TRANSPARENT, "the outline paints no fill");
+}
+
+#[test]
+fn the_focus_outline_clears_both_postures_a_focused_tile_can_be_in() {
+    let palette = Palette::dark();
+    let outline = focus_outline_colour(&palette);
+    assert!(approx(contrast_ratio(outline, palette.accent_fill), 4.8020));
+    assert!(approx(
+        contrast_ratio(outline, palette.surface_raised),
+        18.7108
+    ));
+    assert!(contrast_ratio(outline, palette.accent_fill) >= MIN_TEXT_CONTRAST);
+    assert!(contrast_ratio(outline, palette.surface_raised) >= MIN_TEXT_CONTRAST);
 }

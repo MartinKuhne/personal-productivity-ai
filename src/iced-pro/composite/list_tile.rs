@@ -46,15 +46,30 @@
 //!
 //! # The selected tile's subtitle is promoted, and the measurement is why
 //!
-//! §3B.5 gives the subtitle `text.muted` and says nothing about what
-//! `selected` looks like. §3B.6 does, for the row shape nearest to this
-//! one: `accent.fill` behind `text.strong` at `4.80:1`. Adopting that
-//! pairing is the consistent choice. What it forces is the subtitle:
-//! `text.muted` on `accent.fill` measures **1.84:1**, which is not a
-//! marginal miss but a caption that cannot be read at all. The resolver
-//! promotes the subtitle to `text.strong` on a selected tile rather than
-//! shipping an unreadable line, and the sidecar pins the measurement so a
+//! §3B.5 gives the resting subtitle `text.muted` and, for the selected
+//! tile, promotes **both** title and subtitle to `text.strong` at
+//! `4.80:1` — because `text.muted` on `accent.fill` is **`1.84:1`**,
+//! which is not a marginal miss but a caption that cannot be read at all.
+//! The resolver promotes the subtitle wherever the muted caption cannot
+//! clear the fill beneath it, and the sidecar pins the measurement so a
 //! future retune of either token fails a test instead of a user.
+//!
+//! The same section omits the selected tile's perimeter stroke entirely:
+//! `accent.border` on `accent.fill` is **`1.61:1`**, so a border in that
+//! colour around that fill would be an indicator that cannot be seen
+//! against the thing it is drawn on. The fill alone carries the selection.
+//!
+//! # Keyboard focus is a 1px inset outline, not a ring
+//!
+//! §3B.5 prescribes the focused tile's outline as `1px text.strong` at
+//! `4.80:1` — **inset**, and one weight lighter than the `2px` outer
+//! focus ring every atom in §3.1 carries. [`focus_outline_layer`] builds
+//! it. Note that [`resolve_style`] has no focus axis: a tile's focus is a
+//! host concern, so the outline is exposed as a layer the host composes
+//! over the resolved row rather than as a channel on [`TileStyle`]. That
+//! is a deliberate gap in this resolver, not an oversight — wiring focus
+//! into the tile paint would need the `VisualState` the composite layer
+//! does not yet carry.
 //!
 //! [`Leading::hit_extent`]: crate::composite::list_tile::Leading::hit_extent
 //!
@@ -119,6 +134,14 @@ pub const TRAILING_TARGET: f32 = size::HIT_TARGET_MIN;
 
 /// The tile's border weight when it carries one.
 pub const BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
+/// The keyboard focus outline's weight — the `1px` of §3B.5, taken from
+/// `border.hairline`.
+///
+/// One weight lighter than the `2px` (`border.focus`) outer ring every
+/// §3.1 atom carries. §3B.5 asks for a hairline that sits *inside* the
+/// row rather than a ring outside it, so a focused tile does not grow.
+pub const FOCUS_OUTLINE_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// The title's rung — §3B.5's `13px`, `type.ui_compact`.
 pub const TITLE_RUNG: &typography::TypeRung = &typography::UI_COMPACT;
@@ -413,13 +436,13 @@ pub struct TileStyle {
 /// pointer is a fact about the moment; only an unselected interactive tile
 /// takes the hover and pressed lifts.
 ///
-/// A selected tile carries **no perimeter stroke**. §3B.5 gives the tile no
-/// border at all, and the selection marker §3B.6 does print — an
-/// `accent.border` bar — is a left bar on a tree row, not a ring. That
-/// distinction is load-bearing rather than cosmetic: `accent.border` against
-/// `accent.fill` measures **1.61:1**, so a perimeter stroke in that colour
-/// around that fill would be an indicator that cannot be seen against the
-/// thing it is drawn on. The fill alone carries the selection.
+/// A selected tile carries **no perimeter stroke**. §3B.5 omits it under
+/// `UIF-TOK-006` rule 4: `accent.border` against `accent.fill` measures
+/// **`1.6098:1`**, so a perimeter stroke in that colour around that fill
+/// would be an indicator that cannot be seen against the thing it is
+/// drawn on. The fill alone carries the selection. Keyboard focus is
+/// drawn separately, as the `1px text.strong` inset outline
+/// [`focus_outline_layer`] produces — not as a border on this style.
 #[must_use]
 pub fn resolve_style(
     selected: bool,
@@ -480,6 +503,36 @@ pub fn subtitle_on(fill: Color, palette: &Palette) -> Color {
         palette.text_muted
     } else {
         palette.text_strong
+    }
+}
+
+/// The keyboard focus outline's colour — `text.strong`, as §3B.5 names it.
+///
+/// The same token carries the outline on both postures a focused tile can
+/// be in: `4.8020:1` on the selected `accent.fill` and `18.7108:1` on
+/// the unselected `surface.raised`, so one colour is correct everywhere
+/// and no adaptive substitution is needed.
+#[must_use]
+pub const fn focus_outline_colour(palette: &Palette) -> Color {
+    palette.text_strong
+}
+
+/// The keyboard focus outline for a focused tile — `1px text.strong`,
+/// inset inside `bounds` (§3B.5).
+///
+/// Inset rather than outset because the row is a full-width strip: a ring
+/// drawn outside it would overlap the rows above and below, and §3B.5
+/// asks for an outline that costs no layout (`UIF-PRIN-003`).
+#[must_use]
+pub fn focus_outline_layer(bounds: Rectangle, palette: &Palette) -> Layer {
+    Layer {
+        bounds,
+        fill: Color::TRANSPARENT,
+        border: iced::Border {
+            color: focus_outline_colour(palette),
+            width: FOCUS_OUTLINE_WIDTH,
+            radius: shape::RADIUS_WIDGET.into(),
+        },
     }
 }
 

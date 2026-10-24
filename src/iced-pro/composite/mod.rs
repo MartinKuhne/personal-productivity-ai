@@ -3,8 +3,8 @@
 //! A composite is not an atom with more parts. An atom
 //! ([`crate::widget`]) owns an interaction state machine for one control;
 //! a composite owns the *relationship between* controls and the text that
-//! explains them � the vertical rhythm of a labelled field, the horizontal
-//! split of a settings row, the three slots of a list tile. �3B of
+//! explains them — the vertical rhythm of a labelled field, the horizontal
+//! split of a settings row, the three slots of a list tile. §3B of
 //! `doc/planning/ui-framework.md` specifies those relationships, and this
 //! subsystem is where they become code.
 //!
@@ -13,7 +13,7 @@
 //! declarative input to rectangles and resolved colours; the **widget** is
 //! the iced `Element` that lays out to those rectangles and paints them.
 //! Keeping the geometry pure is what makes the requirements checkable at
-//! all, because the two things �3B actually demands of a composite are
+//! all, because the two things §3B actually demands of a composite are
 //! facts about geometry rather than facts about pixels:
 //!
 //! * **A band that is reserved is a band that is measured.** `UIF-PRIN-003`
@@ -21,7 +21,7 @@
 //!   the caption slot must exist at its full height whether or not anything
 //!   is written in it, and the only way to *prove* that rather than observe
 //!   it is a geometry function that cannot see the caption's content. Every
-//!   reserved band in this subsystem is computed by such a function � the
+//!   reserved band in this subsystem is computed by such a function — the
 //!   absence of the parameter is the proof.
 //! * **A slot the spec fixes is a slot the host does not get to choose.**
 //!   Decision **D-8** requires the `ListTile`'s slot geometry to be
@@ -32,10 +32,10 @@
 //! Like [`crate::token`] and [`crate::widget`], this module does not
 //! glob-re-export its children; call sites stay qualified.
 //!
-//! * [`form_field`] � the stacked label / control / reserved-caption field
+//! * [`form_field`] — the stacked label / control / reserved-caption field
 //!   whose total rhythm is fixed so a validation transition moves nothing
 //!   (`UIF-COMP-001`, `UIF-PRIN-003`)
-//! * [`settings_row`] � the horizontal split: a filling text column and a
+//! * [`settings_row`] — the horizontal split: a filling text column and a
 //!   shrinking control column on one raised card row (`UIF-COMP-001`)
 //! * [`breadcrumb`] - the trail's elision solver: a pure function of
 //!   `(items, available_width)` that keeps the root and the current-location
@@ -43,9 +43,9 @@
 //!   hidden set can only shrink monotonically as the bar widens, and leaves
 //!   the separator in the gap between targets rather than as a target that
 //!   ignores clicks (`UIF-COMP-008`)
-//! * [`card`] � the grouping container: `surface.raised`, `radius.card`,
+//! * [`card`] — the grouping container: `surface.raised`, `radius.card`,
 //!   `space.lg` padding, and the resting-vs-elevated border (`UIF-COMP-005`)
-//! * [`list_tile`] � the three-slot row: leading mark, filling text,
+//! * [`list_tile`] — the three-slot row: leading mark, filling text,
 //!   shrinking trailing targets, with the hit target resolved separately
 //!   for the interactive and the inert tile (`UIF-COMP-005`)
 //! * [`virtual_list`] - the recycling primitive: fixed-height row metrics that
@@ -82,8 +82,8 @@
 //!   observed (`UIF-COMP-008`, `UIF-PRIN-003`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
-//! figures �3B prints that no rung carries � the `20px` field header, the
-//! `48px` settings-row floor and the `44px` two-line tile � are registered
+//! figures §3B prints that no rung carries — the `20px` field header, the
+//! `48px` settings-row floor and the `44px` two-line tile — are registered
 //! Surface Geometry Constants in [`crate::token_lint`] rather than passed
 //! off as token reads.
 

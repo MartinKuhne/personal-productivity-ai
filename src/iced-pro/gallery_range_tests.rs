@@ -18,9 +18,9 @@
 use super::*;
 use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
 
-/// The expected cell count: 10 slider + 4 slider-tier + 10 number box +
+/// The expected cell count: 12 slider + 4 slider-tier + 12 number box +
 /// 7 number-box-tier.
-const EXPECTED_CELLS: usize = 31;
+const EXPECTED_CELLS: usize = 35;
 
 /// Look up a resolved channel on a cell.
 fn value<'a>(cell: &'a Cell, channel: &str) -> Option<&'a StyleValue> {
@@ -59,7 +59,7 @@ fn cells_with_prefix(prefix: &str) -> Vec<Cell> {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_range_block_is_thirty_one_cells() {
+fn the_range_block_is_thirty_five_cells() {
     assert_eq!(range_cells().len(), EXPECTED_CELLS);
 }
 
@@ -91,10 +91,10 @@ fn the_range_cell_ids_are_unique() {
 }
 
 #[test]
-fn the_block_is_ten_sliders_four_tiers_ten_boxes_and_seven_box_tiers() {
-    assert_eq!(cells_with_prefix("slider/").len(), 10);
+fn the_block_is_twelve_sliders_four_tiers_twelve_boxes_and_seven_box_tiers() {
+    assert_eq!(cells_with_prefix("slider/").len(), 12);
     assert_eq!(cells_with_prefix("slider-tier/").len(), 4);
-    assert_eq!(cells_with_prefix("number-box/").len(), 10);
+    assert_eq!(cells_with_prefix("number-box/").len(), 12);
     assert_eq!(cells_with_prefix("number-box-tier/").len(), 7);
 }
 
@@ -125,7 +125,14 @@ fn the_cell_state_slugs_are_the_snapshot_names_the_matrix_iterates() {
     let slugs: Vec<&str> = CellState::ALL.iter().map(|s| s.slug()).collect();
     assert_eq!(
         slugs,
-        vec!["rest", "hovered", "pressed", "rest+focused", "disabled"]
+        vec![
+            "rest",
+            "hovered",
+            "pressed",
+            "rest+focused",
+            "invalid",
+            "disabled"
+        ]
     );
 }
 

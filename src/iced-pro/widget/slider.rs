@@ -116,27 +116,48 @@
 //! | `accent.fill` / `surface.overlay` | `3.69:1` | `3.6895:1` ✓ |
 //! | `accent.fill` / `surface.base` | `4.14:1` | `4.1432:1` ✓ |
 //!
-//! There is a third pair the spec never mentions, and it has to be
-//! decided rather than skipped: the filled rail against the **unfilled**
-//! rail it is laid beside. That measurement is
-//! [`FILLED_ON_UNFILLED_RATIO`] = `2.9768:1`, which is *below* the
-//! `3.0:1` chrome floor [`contrast::MIN_CHROME_CONTRAST`] sets.
+//! §3.5 also prices the third pair — the filled rail against the
+//! **unfilled** rail it is laid beside — and says what to do with it:
+//! "interior filled-to-unfilled seam is `2.98:1` reinforced by the thumb
+//! boundary and reported without failing perimeter judgment".
+//! [`FILLED_ON_UNFILLED_RATIO`] = `2.9768:1` reproduces that figure, and
+//! [`filled_on_unfilled`] carries it into the artifact without emitting
+//! it as an audited pair, exactly as the section directs.
 //!
-//! It is deliberately **not** emitted as an audited pair, and the reason
-//! is the rule itself. `UIF-TOK-006` rule 3 governs a control's
-//! perimeter against the surface outside it — the boundary at which the
-//! control separates from the world. The filled and unfilled rails are
-//! both *interior* to one control: neither is a boundary, and the
-//! contrast between them is not a legibility obligation the widget owes
-//! anything. What the slider owes is that the whole control separates
-//! from its mount, which is the pair §3.5 itself measures — `3.6895` on
-//! `overlay`, `4.1432` on `base` — and that pair clears.
+//! The reason the rule permits this is the rule's own scope.
+//! `UIF-TOK-006` rule 3 governs a control's perimeter against the
+//! surface outside it — the boundary at which the control separates from
+//! the world. The filled and unfilled rails are both *interior* to one
+//! control: neither is a boundary. What the slider owes is that the whole
+//! control separates from its mount, which is the pair §3.5 itself
+//! measures — `3.6895` on `overlay`, `4.1432` on `base` — and that pair
+//! clears.
 //!
 //! The value position is not carried by the fill boundary either. It is
 //! carried by the thumb, whose ring clears `4.79:1` against the unfilled
 //! rail in its resting state. So the sub-floor interior measurement is
 //! not load-bearing, and [`filled_on_unfilled`] exists so the number is
 //! in the artifact rather than missing from it.
+//!
+//! # The invalid ring is hue-only over the fill
+//!
+//! §3.5 gives a validating slider a `2px status.danger.text` thumb ring.
+//! Recomputed, that ring is **`1.5863:1`** against `accent.fill` — under
+//! the `3.0:1` chrome floor, and in fact marginally *under* the resting
+//! `accent.border` ring it replaces there (`1.6098:1`). Over the unfilled
+//! rail the same ring is fine (`4.7223:1` on `surface.active`), so the
+//! error state reads on the left of the thumb and not on the right.
+//!
+//! The thumb is still visible, because the spec evaluates it as the union
+//! of face and border and the `text.strong` face clears the fill at
+//! `4.8020:1`. What is lost is that the *error* is carried by hue alone
+//! across the filled portion: a user who cannot separate the two blues
+//! sees a normal thumb. §3.5 does not provide a luminance-separating
+//! danger ring that also clears the accent fill — no token in the palette
+//! does — so this is reported as a limitation of the prescribed token
+//! against the prescribed fill rather than as a substitution that could
+//! have been avoided. The validation message in the field's caption slot
+//! (`§3B.1`) remains the non-hue channel.
 //!
 //! Unit tests live in the sibling `slider_tests.rs` sidecar.
 
@@ -287,17 +308,32 @@ struct BasePaint {
 /// rather than a mode.
 const fn base_paint(base: BaseState, palette: &Palette) -> BasePaint {
     match base {
-        // `Invalid` shares the `Rest` cell. §3.5 gives the slider no
-        // invalid skin: `RangeModel::validation` carries words, and
-        // §3B.1 renders them in the field's reserved caption slot rather
-        // than on the control, so there is nothing for the slider to
-        // repaint.
-        BaseState::Rest | BaseState::Invalid => BasePaint {
+        BaseState::Rest => BasePaint {
             rail_unfilled: palette.surface_active,
             rail_border: palette.border_subtle,
             rail_filled: palette.accent_fill,
             thumb_fill: palette.text_strong,
             thumb_border: palette.accent_border,
+            tick: palette.border_strong,
+        },
+        // §3.5 gives the invalid thumb its own ring: "when
+        // `validation.is_some()`, thumb border uses `2px
+        // status.danger.text`". The face stays `text.strong` — the spec
+        // changes only the ring, and the union of face + border is what
+        // the thumb's contrast is evaluated against.
+        //
+        // The ring is hue-only over the filled rail: `status.danger.text`
+        // on `accent.fill` is `1.5863:1`, below the 3.0 chrome floor and
+        // marginally *below* the resting `accent.border` ring's
+        // `1.6098:1` there. Only the face carries the thumb across the
+        // fill. See the
+        // [module docs](self#the-invalid-ring-is-hue-only-over-the-fill).
+        BaseState::Invalid => BasePaint {
+            rail_unfilled: palette.surface_active,
+            rail_border: palette.border_subtle,
+            rail_filled: palette.accent_fill,
+            thumb_fill: palette.text_strong,
+            thumb_border: palette.status_danger_text,
             tick: palette.border_strong,
         },
         // The face and the ring swap. §3.5 states this as one rule for

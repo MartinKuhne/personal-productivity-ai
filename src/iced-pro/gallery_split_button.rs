@@ -14,20 +14,20 @@
 //! and the other half at `Rest`, so the hover-independence the host pins in
 //! tests is visible in the frame as well.
 //!
-//! # The divider is recorded but not audited
+//! # The seam is recorded but not audited
 //!
-//! §3.1c fixes the divider as `1px border.strong`. Against
-//! `accent.fill` — the fill the Primary variant paints — that token
-//! measures `1.0876:1`. It is a real, spec-mandated stroke that is
-//! physically invisible on that half, and the gap is §3.1c's, not this
-//! gallery's: the spec gives the divider one token for both variants
-//! rather than a per-variant stroke or a gap between the halves.
+//! §3.1c resolves the `1px` internal divider per variant: `border.strong`
+//! on `Secondary` (`4.2379:1` on `surface.raised`) and `text.strong` on
+//! `Primary` (`4.8020:1` on `accent.fill`), because `border.strong`
+//! against `accent.fill` measures `1.0876:1` and `text.muted` `1.8363:1`
+//! — both named as failures.
 //!
-//! It is therefore carried in `resolved` as `divider.color` and
-//! `divider.contrast-on-fill` and deliberately kept out of `audit`.
-//! Putting it in the judged set would report a failure against a floor
-//! the spec never asked that stroke to meet, and would bury the finding
-//! under a number that looks like an implementation error.
+//! The seam is carried in `resolved` as `divider.color` and
+//! `divider.contrast-on-fill` and deliberately kept out of `audit`. That
+//! is not because the number is bad — it is legible on both variants now —
+//! but because a 1px seam is not a foreground. Scoring it against the
+//! text-contrast floors the audit applies would judge the wrong kind of
+//! thing, so the figure is reported rather than judged.
 //!
 //! [`gallery`]: crate::gallery
 //! [`gallery::matrix`]: crate::gallery::matrix
@@ -79,13 +79,17 @@ const HEIGHTS: [f32; 2] = [split_button::HEIGHT_COMPACT, split_button::HEIGHT_ST
 /// A nominal label width for the geometry entries.
 const SAMPLE_LABEL_WIDTH: f32 = 72.0;
 
-/// What the label-half cell records about its divider.
-const NOTE_PRIMARY_ZONE: &str = "divider is border.strong; on a Primary fill \
-    it measures 1.0876:1 and is not audited \u{2014} see the module docs";
+/// What the label-half cell records about its seam.
+const NOTE_PRIMARY_ZONE_SECONDARY: &str = "seam is border.strong at 4.2379:1 on \
+    surface.raised; recorded, not audited \u{2014} a 1px seam is not a foreground";
+
+/// What the label-half cell records about its seam on a Primary fill.
+const NOTE_PRIMARY_ZONE_PRIMARY: &str = "seam is text.strong at 4.8020:1 on \
+    accent.fill, per UIF-TOK-006 rule 4; recorded, not audited";
 
 /// What the menu-half cell records about its chevron ink.
-const NOTE_MENU_ZONE: &str = "chevron takes the menu half's own foreground; the \
-    muted-glyph precedent from the combobox trigger fails on a Primary fill";
+const NOTE_MENU_ZONE: &str = "chevron takes the menu half's own foreground, as \
+    §3.1c names it; the combobox muted-glyph precedent fails on a Primary fill";
 
 /// A [`SplitZone`] as a cell-id slug.
 fn zone_slug(zone: SplitZone) -> &'static str {
@@ -145,16 +149,25 @@ fn half_layer(bounds: Rectangle, style: &crate::widget::button::ButtonStyle) -> 
     }
 }
 
-/// The divider's own layer, drawn at the seam.
-fn divider_layer(control: Rectangle) -> Layer {
+/// The divider's own layer, drawn at the seam in the variant's own token.
+fn divider_layer(control: Rectangle, variant: ButtonVariant) -> Layer {
     Layer {
         bounds: split_button::divider_bounds(control),
-        fill: split_button::divider_color(&Palette::dark()),
+        fill: split_button::divider_color(variant, &Palette::dark()),
         border: Border {
             color: Color::TRANSPARENT,
             width: 0.0,
             radius: 0.0.into(),
         },
+    }
+}
+
+/// The label-half note for one variant's seam.
+fn seam_note(variant: ButtonVariant) -> &'static str {
+    match variant {
+        ButtonVariant::Primary => NOTE_PRIMARY_ZONE_PRIMARY,
+        ButtonVariant::Secondary => NOTE_PRIMARY_ZONE_SECONDARY,
+        ButtonVariant::Ghost | ButtonVariant::Danger => NOTE_PRIMARY_ZONE_SECONDARY,
     }
 }
 
@@ -213,7 +226,7 @@ pub fn split_button_cell(
     let mut layers: Vec<(&'static str, Layer)> = vec![
         ("primary-half", half_layer(primary, &style.primary)),
         ("menu-half", half_layer(menu, &style.menu)),
-        ("divider", divider_layer(control)),
+        ("divider", divider_layer(control, variant)),
     ];
     if let Some(layer) = focus_ring_layer(
         control,
@@ -287,7 +300,7 @@ pub fn split_button_cell(
         frame: paint_frame(Namer::Standard, sample, &layers),
         audit,
         note: Some(if zone == SplitZone::Primary {
-            NOTE_PRIMARY_ZONE.to_string()
+            seam_note(variant).to_string()
         } else {
             NOTE_MENU_ZONE.to_string()
         }),

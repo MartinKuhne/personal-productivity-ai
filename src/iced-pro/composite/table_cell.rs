@@ -23,23 +23,17 @@
 //!   because centring or right-aligning a string that does not fit hides
 //!   its beginning — the wrong end to lose.
 //! * **Grid-line legibility.** §3B.7 names `border.subtle` for the
-//!   column dividers and row separators but never says what happens when
-//!   the row is painted on a band. `border.subtle` against
-//!   `surface.hover` measures **1.1012:1** and against `surface.active`
-//!   **1.0314:1** — lines that are, in the ordinary sense of the word,
-//!   not visible. Rather than honour the token into invisibility, a grid
-//!   line whose measured contrast against its own band falls below
-//!   [`MIN_GRID_LINE_CONTRAST_ON_BAND`] is promoted to `border.strong`.
-//!   This is decision **D-6**'s rule applied to the one mark §3B.7 left
-//!   unguarded, and it is measured rather than asserted: see
-//!   [`grid_line_contrast`].
+//!   column dividers and row separators and prices what happens when a
+//!   row is painted on a band: the hairline promotes to `border.strong`
+//!   whenever its contrast against the band drops below the `1.15:1`
+//!   visibility floor. Recomputed from raw sRGB, `border.subtle` against
+//!   `surface.hover` is **1.1012:1** and against `surface.active`
+//!   **1.0314:1**, so both promote; against `surface.base` (**1.3495:1**)
+//!   and `surface.raised` (**1.2691:1**) it stays. That is
+//!   [`MIN_GRID_LINE_CONTRAST_ON_BAND`], and the promotion is measured
+//!   rather than asserted: see [`grid_line_contrast`].
 //!
-//! The threshold is an invented figure — the spec gives no number for
-//! grid-line legibility — chosen to sit between the two bands the line
-//! must survive on (`surface.base` at 1.3495, `surface.raised` at
-//! 1.2691, both kept) and the two it must not be lost under
-//! (`surface.hover` at 1.1012, `surface.active` at 1.0314, both
-//! promoted). It is deliberately low: a grid line is a separator, not a
+//! The floor is deliberately low: a grid line is a separator, not a
 //! border, and promoting it to a full 3:1 chrome requirement would turn
 //! every table into a wireframe cage.
 //!
@@ -73,10 +67,19 @@ pub const GRID_LINE_WIDTH: f32 = shape::BORDER_HAIRLINE;
 /// The lowest contrast a grid line may have against the band it is
 /// painted over before it is promoted to `border.strong`.
 ///
-/// An invented figure, recorded as such: §3B.7 names a token for the
-/// grid line but no legibility floor, and the token it names disappears
-/// on two of the four bands a row can wear. See the
-/// [module docs](self) for how the value was placed.
+/// **A spec-prescribed figure.** §3B.7 states the floor directly —
+/// "automatically promote to `border.strong` … whenever the resting
+/// hairline contrast against the row band drops below the `1.15:1`
+/// visibility floor" — and §2.5's `RestingDivider` note repeats it. The
+/// value is therefore read off the spec rather than chosen here.
+///
+/// It is deliberately low because a grid line is a separator, not a
+/// border: promoting it to the full `3:1` chrome requirement would turn
+/// every table into a wireframe cage. It sits between the two bands the
+/// hairline survives on (`surface.base` at `1.3495`, `surface.raised` at
+/// `1.2691`, both kept) and the two it is lost under (`surface.hover` at
+/// `1.1012`, `surface.active` at `1.0314`, both promoted) — exactly the
+/// four figures §3B.7 prints.
 pub const MIN_GRID_LINE_CONTRAST_ON_BAND: f32 = 1.15;
 
 /// The surface a cell is painted on.
@@ -153,16 +156,17 @@ pub fn row_band(selected: bool, hovered: bool, zebra: bool) -> CellBand {
 
 /// The text colour a cell paints on a band.
 ///
-/// §3B.7 prints a foreground for the header title but none for a body
-/// cell, and prints none at all for a *selected* cell. `text.strong` is
-/// chosen for the selection because it is the same rule the tree row
-/// already applies there, and the two views sit side by side in the same
-/// pane often enough that disagreeing would read as a bug.
+/// §3B.7 prices each band's foreground directly: resting rows on
+/// `surface.base` / `surface.raised` take `text.primary`, `Hovered` rows
+/// on `surface.hover` take `text.strong`, and `Selected` rows on
+/// `surface.active` take `text.strong` (`14.29:1`). The hover promotion
+/// is the spec's own, not a carry-over — a hovered row is the one the
+/// pointer is on, and it is the loudest text in the table.
 #[must_use]
 pub fn foreground_colour(band: CellBand, palette: &Palette) -> Color {
     match band {
-        CellBand::Base | CellBand::Raised | CellBand::Hover => palette.text_primary,
-        CellBand::Selected => palette.text_strong,
+        CellBand::Base | CellBand::Raised => palette.text_primary,
+        CellBand::Hover | CellBand::Selected => palette.text_strong,
     }
 }
 

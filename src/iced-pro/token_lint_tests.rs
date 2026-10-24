@@ -155,7 +155,15 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// than it is tall. They are token-bound in Rule B's sense because the
 /// expression carries no literal at all; the ten figures that *are*
 /// literals join the §1.1 registry below instead.
-const PIN_TOKEN_BOUND: usize = 188;
+/// 189 as of `INC-53`, whose one addition is
+/// `list_tile::FOCUS_OUTLINE_WIDTH` — the `1px` inset keyboard-focus
+/// outline §3B.5 prescribes for a focused tile, read from
+/// `shape::BORDER_HAIRLINE` rather than written as a literal. Note that
+/// `tree_row::SELECTION_BAR_WIDTH` did *not* move the count when §3B.6
+/// re-priced it from `border.focus + border.hairline` to a single
+/// `border.focus`: Rule B counts the declaration, not the number of
+/// token references inside it.
+const PIN_TOKEN_BOUND: usize = 189;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

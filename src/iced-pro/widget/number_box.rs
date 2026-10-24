@@ -198,10 +198,14 @@ struct StepperPaint {
 
 /// Select the stepper's base-state cell.
 ///
-/// `Invalid` shares the `Rest` cell for the same reason the slider does:
-/// §3B.1 renders a field's validation words in the reserved caption
-/// slot below the control, not on the control, so there is nothing for
-/// the stepper to repaint.
+/// `Invalid` shares the `Rest` cell. §3.5 spends its invalid token on the
+/// **slider's thumb ring** (`2px status.danger.text`) and says nothing
+/// about the stepper, and §3B.1 renders a field's validation words in the
+/// reserved caption slot below the control. Giving the stepper a danger
+/// treatment the section does not price would invent a second invalid
+/// vocabulary, so the asymmetry is the spec's: a validating slider
+/// repaints its ring, a validating number box does not repaint its
+/// buttons.
 const fn stepper_paint(base: BaseState, palette: &Palette) -> StepperPaint {
     match base {
         BaseState::Rest | BaseState::Invalid => StepperPaint {

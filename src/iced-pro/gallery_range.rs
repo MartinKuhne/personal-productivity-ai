@@ -7,14 +7,21 @@
 //! matrix is still one list in one fixed order — the split moved the code,
 //! not the artifact.
 //!
-//! # Thirty-one cells
+//! # Thirty-five cells
 //!
-//! * the slider in two tick configurations across five states — 10 cells;
+//! * the slider in two tick configurations across six states — 12 cells;
 //! * the slider's drag tier — `Live`, `Commit`, `Cancel`, and a release
 //!   with the pointer outside the track — 4 cells;
-//! * the number box in both stepper shapes across five states — 10 cells;
+//! * the number box in both stepper shapes across six states — 12 cells;
 //! * the number box's step tier — one keyboard step each way, a page each
 //!   way, `Home`, `End`, and a press-and-hold — 7 cells.
+//!
+//! The sixth state is `invalid`, the `validation.is_some()` rung §3.5
+//! gives the slider a `2px status.danger.text` thumb ring for. The number
+//! box carries the column too, but resolves the resting stepper paint
+//! under it — §3.5 spends its invalid token on the thumb and not on the
+//! stepper, so the two subjects' invalid cells are meant to look
+//! different, and the slider's records the hue-only caveat in its note.
 //!
 //! # The tier cells record a transcript, not a picture
 //!
@@ -66,13 +73,18 @@ use crate::widget::slider::{self, SliderStyle};
 use crate::widget::slider_host::{SliderEmission, SliderHost};
 use iced::{Point, Rectangle};
 
-/// The five states every range cell is sampled at.
+/// The six states every range cell is sampled at.
 ///
 /// `RestFocused` is its own entry rather than a second axis because the
 /// focus ring is the one channel that is orthogonal to the pointer states
 /// and has to be seen together with a resting control; sampling it against
 /// `Pressed` as well would double the cell count to say one more thing
 /// §3.5 does not add.
+///
+/// `Invalid` is the `validation.is_some()` rung §3.5 gives the slider a
+/// `2px status.danger.text` thumb ring for. The NumberBox stepper has no
+/// prescribed invalid skin, so its cells resolve the resting paint under
+/// the same state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CellState {
     /// Nothing happening.
@@ -83,6 +95,8 @@ pub enum CellState {
     Pressed,
     /// Resting, with the keyboard ring on.
     RestFocused,
+    /// `validation.is_some()`.
+    Invalid,
     /// Inert.
     Disabled,
 }
@@ -108,6 +122,10 @@ impl CellState {
                 base: BaseState::Rest,
                 focused: true,
             },
+            Self::Invalid => VisualState {
+                base: BaseState::Invalid,
+                focused: false,
+            },
             Self::Disabled => VisualState {
                 base: BaseState::Disabled,
                 focused: false,
@@ -123,16 +141,18 @@ impl CellState {
             Self::Hovered => "hovered",
             Self::Pressed => "pressed",
             Self::RestFocused => "rest+focused",
+            Self::Invalid => "invalid",
             Self::Disabled => "disabled",
         }
     }
 
     /// Every state, in cell order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Rest,
         Self::Hovered,
         Self::Pressed,
         Self::RestFocused,
+        Self::Invalid,
         Self::Disabled,
     ];
 }
@@ -242,6 +262,11 @@ fn thumb_audit(style: &SliderStyle) -> AuditPair {
     }
 }
 
+/// What an invalid slider cell records about its ring.
+const NOTE_SLIDER_INVALID: &str = "thumb ring is 2px status.danger.text per §3.5; \
+    over the filled rail that ring is 1.5863:1 and hue-only — the text.strong face \
+    at 4.8020:1 is what carries the thumb there";
+
 /// One slider cell: the groove, the fill, the ticks, the thumb and the ring.
 #[must_use]
 pub fn slider_cell(ticks: bool, state: CellState) -> Cell {
@@ -296,7 +321,11 @@ pub fn slider_cell(ticks: bool, state: CellState) -> Cell {
         resolved: slider_entries(&style, SAMPLE_FRACTION, tick_count),
         frame: paint_frame(Namer::Standard, sample, &layers),
         audit,
-        note: None,
+        note: if state == CellState::Invalid {
+            Some(NOTE_SLIDER_INVALID.to_string())
+        } else {
+            None
+        },
     }
 }
 
@@ -766,8 +795,8 @@ fn committed_value(outcome: &NumberBoxOutcome) -> Option<f64> {
     }
 }
 
-/// Every range cell: ten slider cells, four slider tier cells, ten number
-/// box cells and seven number box tier cells, in that order.
+/// Every range cell: twelve slider cells, four slider tier cells, twelve
+/// number box cells and seven number box tier cells, in that order.
 #[must_use]
 pub fn range_cells() -> Vec<Cell> {
     let mut cells = Vec::new();

@@ -94,7 +94,7 @@ use crate::composite::list_tile::{self, Leading, RowPadding, TileSlots};
 use crate::composite::virtual_list::{COMPACT_ROW_HEIGHT, STANDARD_ROW_HEIGHT};
 use crate::state::BaseState;
 use crate::token::color::Palette;
-use crate::token::contrast::{meets_chrome_contrast, meets_disabled_text_band};
+use crate::token::contrast::{fill_lock_role, meets_chrome_contrast, meets_disabled_text_band};
 use crate::token::{shape, size, space, typography};
 use crate::widget::button_widget::Layer;
 use iced::{Color, Rectangle};
@@ -146,13 +146,14 @@ pub const ROW_INSET_X: f32 = space::XS;
 /// every label in the tree.
 pub const ROW_INSET_Y: f32 = space::XXS;
 
-/// The selection band's left bar — §3B.6's `3px`.
+/// The selection band's left bar — §3B.6's `2px`, `border.focus`.
 ///
-/// Composed from two stroke tokens (`border.focus + border.hairline`)
-/// rather than written as `3.0`, because no token *is* 3 and the lint
-/// rule that forbids the literal is the same rule that requires the
-/// figure to be traceable.
-pub const SELECTION_BAR_WIDTH: f32 = shape::BORDER_FOCUS + shape::BORDER_HAIRLINE;
+/// A token read rather than a literal: `border.focus` *is* the `2px`
+/// stroke weight the closed set offers, and §3B.6 names it against this
+/// bar. An earlier reading composed `border.focus + border.hairline` for
+/// a `3px` bar; the corrected §3B.6 prices the bar at `2px`, so the
+/// extra hairline is gone and the width is a single token.
+pub const SELECTION_BAR_WIDTH: f32 = shape::BORDER_FOCUS;
 
 /// The row's label rung — `type.ui_compact`, `13px` (`UIF-PANE-003`).
 pub const LABEL_RUNG: &typography::TypeRung = &typography::UI_COMPACT;
@@ -387,29 +388,67 @@ pub fn promoted_over(candidate: Color, band: Color, palette: &Palette) -> Color 
     }
 }
 
+/// A mark's colour under §3B.6's **role-based** selection lock.
+///
+/// §3B.6 locks the label, disclosure chevron, depth guides and left
+/// selection bar to `text.strong` because of *what the band is* — a
+/// solid accent fill — and says so is "strictly role-based, not
+/// threshold-based". The distinction is load-bearing: a threshold rule
+/// releases the lock the moment a palette retune lifts the resting token
+/// over `3:1`, and the spec does not permit the guide lines to come back
+/// on a selected row because of an arithmetic accident.
+///
+/// Off a locked fill the resting token is returned untouched, so an
+/// unselected row keeps the `border.strong` guides, `text.muted`
+/// chevron and `accent.border` bar §3B.6 prices for it.
+#[must_use]
+pub fn locked_over(candidate: Color, band: Color, palette: &Palette) -> Color {
+    if fill_lock_role(band, palette).is_locked_fill() {
+        palette.text_strong
+    } else {
+        candidate
+    }
+}
+
 /// The guide line's colour against a band.
+///
+/// Locked by role on a selected row (§3B.6); `border.strong` elsewhere.
 #[must_use]
 pub fn guide_colour(band: Color, palette: &Palette) -> Color {
-    promoted_over(palette.border_strong, band, palette)
+    locked_over(palette.border_strong, band, palette)
 }
 
 /// The disclosure chevron's colour against a band.
+///
+/// Locked by role on a selected row (§3B.6); `text.muted` elsewhere.
 #[must_use]
 pub fn chevron_colour(band: Color, palette: &Palette) -> Color {
-    promoted_over(palette.text_muted, band, palette)
+    locked_over(palette.text_muted, band, palette)
 }
 
 /// The selection band's left bar colour.
 ///
 /// §3B.6 prints `accent.border` for this bar. Against `accent.fill` —
 /// the band it is drawn on — that measures `1.6098:1`, so the bar is
-/// kept and the colour is promoted.
+/// locked to `text.strong` by role rather than promoted by measurement.
 #[must_use]
 pub fn selection_bar_colour(band: Color, palette: &Palette) -> Color {
-    promoted_over(palette.accent_border, band, palette)
+    locked_over(palette.accent_border, band, palette)
 }
 
 /// The `special_warning` mark's colour against a band.
+///
+/// **Deliberately still threshold-promoted, not role-locked.** §3B.6's
+/// lock list names the label, chevron, guides and selection bar — and
+/// not the warning dot. Locking it by role would replace `status.warning`
+/// with `text.strong` on every selected row, which is the safe colour
+/// but destroys the warning's meaning exactly when the row is selected.
+/// The threshold rule keeps the warning's own hue wherever it clears
+/// `3:1` and falls back to `text.strong` where it does not — including
+/// on `accent.fill`, where `status.warning` measures `1.6547:1` and so
+/// is promoted. That is the crate's decision **D-6** and it is the
+/// stricter of the two readings here; the spec simply does not cover
+/// this mark.
 #[must_use]
 pub fn warning_colour(band: Color, palette: &Palette) -> Color {
     promoted_over(palette.status_warning, band, palette)

@@ -219,16 +219,15 @@ fn the_divider_is_recorded_on_every_cell_and_never_judged() {
         );
         assert!(
             !has_channel(&cell, "divider"),
-            "{}: the divider must NOT be in the judged set — the spec gives \
-             it one token for both variants and border.strong on accent.fill \
-             is invisible by construction",
+            "{}: the divider must NOT be in the judged set — a 1px seam is \
+             not a foreground and must not be scored against a text floor",
             cell.id
         );
     }
 }
 
 #[test]
-fn the_divider_on_a_primary_fill_is_recorded_as_the_invisible_figure_it_is() {
+fn the_primary_seam_is_text_strong_at_the_figure_the_spec_prices() {
     let cells = split_button_cells();
     let cell = find(
         &cells,
@@ -237,22 +236,25 @@ fn the_divider_on_a_primary_fill_is_recorded_as_the_invisible_figure_it_is() {
         HEIGHTS[0],
         COLUMNS[0],
     );
-    let ratio = number(&cell, "divider.contrast-on-fill").expect("a divider ratio");
-    assert!(
-        ratio < 1.2,
-        "border.strong on accent.fill must be reported as roughly \
-         indistinguishable, got {ratio:.4}"
-    );
     let palette = Palette::dark();
     assert_eq!(
         colour(&cell, "divider.color"),
-        Some(palette.border_strong),
-        "the divider must be the spec's own token"
+        Some(palette.text_strong),
+        "§3.1c gives the Primary variant a text.strong seam"
+    );
+    let ratio = number(&cell, "divider.contrast-on-fill").expect("a divider ratio");
+    assert!(
+        (ratio - 4.8020).abs() < 0.001,
+        "the Primary seam must report 4.8020:1 on accent.fill, got {ratio:.4}"
+    );
+    assert!(
+        ratio >= 3.0,
+        "the Primary seam must clear the 3:1 chrome floor, got {ratio:.4}"
     );
 }
 
 #[test]
-fn the_divider_on_a_secondary_fill_is_legible() {
+fn the_secondary_seam_is_border_strong_and_legible() {
     let cells = split_button_cells();
     let cell = find(
         &cells,
@@ -261,11 +263,40 @@ fn the_divider_on_a_secondary_fill_is_legible() {
         HEIGHTS[0],
         COLUMNS[0],
     );
+    let palette = Palette::dark();
+    assert_eq!(
+        colour(&cell, "divider.color"),
+        Some(palette.border_strong),
+        "§3.1c gives the Secondary variant a border.strong seam"
+    );
     let ratio = number(&cell, "divider.contrast-on-fill").expect("a divider ratio");
     assert!(
-        ratio > 3.0,
-        "the same stroke reads clearly on the Secondary fill, which is why \
-         one token for both variants is a spec gap, got {ratio:.4}"
+        (ratio - 4.2379).abs() < 0.001,
+        "the Secondary seam must report 4.2379:1 on surface.raised, got {ratio:.4}"
+    );
+}
+
+#[test]
+fn the_two_variants_never_share_a_seam_token() {
+    let cells = split_button_cells();
+    let primary = find(
+        &cells,
+        ButtonVariant::Primary,
+        SplitZone::Primary,
+        HEIGHTS[0],
+        COLUMNS[0],
+    );
+    let secondary = find(
+        &cells,
+        ButtonVariant::Secondary,
+        SplitZone::Primary,
+        HEIGHTS[0],
+        COLUMNS[0],
+    );
+    assert_ne!(
+        colour(&primary, "divider.color"),
+        colour(&secondary, "divider.color"),
+        "one seam token cannot serve both fills"
     );
 }
 

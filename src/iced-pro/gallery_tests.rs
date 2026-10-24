@@ -251,11 +251,20 @@ fn expected_ids() -> Vec<String> {
         ids.push(format!("combo-tier/{tier}"));
     }
     // `UIF-ATOM-005` / `INC-42`: the slider in two tick configurations
-    // over the five state columns, then the four drag tiers, each driven
-    // through a real SliderHost. The range controls use the five-column skin
-    // vocabulary rather than the nine-state list: the spec gives a slider no
-    // invalid skin, and both hosts report focus in the same column as rest.
-    let range_states = ["rest", "hovered", "pressed", "rest+focused", "disabled"];
+    // over the six state columns, then the four drag tiers, each driven
+    // through a real SliderHost. The range controls use the six-column
+    // skin vocabulary rather than the nine-state list: §3.5 gives the
+    // slider one invalid skin (the `2px status.danger.text` thumb ring)
+    // and no separate focused-invalid column, and both hosts report focus
+    // in the same column as rest.
+    let range_states = [
+        "rest",
+        "hovered",
+        "pressed",
+        "rest+focused",
+        "invalid",
+        "disabled",
+    ];
     for ticks in ["plain", "ticks"] {
         for state in range_states.iter() {
             ids.push(format!("slider/{ticks}-{state}"));
@@ -683,11 +692,11 @@ fn per_subject_cell_counts_match_the_plan() {
         ("combo-tier", 5),
         // `UIF-ATOM-005` / `INC-42`: 2 tick configurations x 5 state
         // columns, plus the four driven drag-tier cells.
-        ("slider", 10),
+        ("slider", 12),
         ("slider-tier", 4),
         // The number box: 2 stepper shapes x 5 state columns, plus the
         // six keyboard-step cells and the one press-and-hold cell.
-        ("number-box", 10),
+        ("number-box", 12),
         ("number-box-tier", 7),
         // `UIF-ATOM-008` / `INC-38`: 5 dots + 5 counts x 5 tones + 4 glyphs x 5 tones.
         ("badge", 50),

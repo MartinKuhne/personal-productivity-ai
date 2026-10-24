@@ -5,9 +5,10 @@
 //! 1. **The matrix.** Each base state's resolved channels, and the two
 //!    states §3.5 deliberately collapses into one cell.
 //! 2. **Contrast.** Every pair recomputed from raw sRGB through
-//!    [`contrast::contrast_ratio`], including the fill-on-fill measurement
-//!    the spec never prints and the disabled pair that forced the rail to
-//!    lose its accent.
+//!    [`contrast::contrast_ratio`], including the interior seam §3.5
+//!    prices but waves through, the invalid ring that is hue-only over
+//!    the fill, and the disabled pair that forced the rail to lose its
+//!    accent.
 //! 3. **Geometry.** Track, thumb, hit box, and the value↔pixel mapping a
 //!    drag depends on.
 //! 4. **Layers.** What is painted, where, and what is deliberately absent.
@@ -131,14 +132,67 @@ fn the_hover_inversion_moves_the_white_from_face_to_ring() {
 }
 
 #[test]
-fn invalid_shares_the_rest_cell_because_the_spec_gives_the_slider_no_invalid_skin() {
-    // §3B.1 renders a field's validation words in the caption slot, not
-    // on the control, so there is nothing here to repaint.
+fn an_invalid_thumb_wears_the_danger_ring_the_spec_prescribes() {
+    // §3.5: "when `validation.is_some()`, thumb border uses `2px
+    // status.danger.text`". The face is untouched — the ring is the
+    // entire error signal.
     let p = palette();
+    let rest = resolve_style(state(BaseState::Rest), p.surface_overlay, &p);
+    let invalid = resolve_style(state(BaseState::Invalid), p.surface_overlay, &p);
     assert_eq!(
-        resolve_style(state(BaseState::Invalid), p.surface_overlay, &p),
-        resolve_style(state(BaseState::Rest), p.surface_overlay, &p),
-        "an invalid slider looks like a resting one"
+        invalid.thumb_border, p.status_danger_text,
+        "the invalid ring is status.danger.text"
+    );
+    assert_eq!(
+        invalid.thumb_border_width, THUMB_RING_WIDTH,
+        "and carries the same 2px weight"
+    );
+    assert_eq!(
+        invalid.thumb_fill, rest.thumb_fill,
+        "the face is not part of the error signal"
+    );
+    assert_ne!(
+        invalid.thumb_border, rest.thumb_border,
+        "the ring is provably not the resting ring"
+    );
+}
+
+#[test]
+fn the_danger_ring_is_hue_only_over_the_fill_and_carries_over_the_groove() {
+    let p = palette();
+    let rest = resolve_style(state(BaseState::Rest), p.surface_overlay, &p);
+    let invalid = resolve_style(state(BaseState::Invalid), p.surface_overlay, &p);
+
+    // Over the filled rail the danger ring does not clear the floor, and
+    // is in fact a luminance step DOWN from the ring it replaces.
+    let ring_on_fill = contrast::contrast_ratio(invalid.thumb_border, p.accent_fill);
+    assert_ratio(ring_on_fill, 1.5863, "status.danger.text on accent.fill");
+    assert!(
+        ring_on_fill < contrast::MIN_CHROME_CONTRAST,
+        "the danger ring is sub-floor over the fill at {ring_on_fill:.4}"
+    );
+    assert!(
+        ring_on_fill < contrast::contrast_ratio(rest.thumb_border, p.accent_fill),
+        "the danger ring is worse than the resting ring over the fill"
+    );
+    // The thumb is still visible there because the face carries it.
+    assert_eq!(
+        thumb_carrier(&invalid, p.accent_fill),
+        ThumbCarrier::Face,
+        "only the face separates the thumb from the fill"
+    );
+    assert!(thumb_is_distinguishable(&invalid, p.accent_fill));
+
+    // Over the unfilled rail the same ring clears comfortably.
+    assert_ratio(
+        contrast::contrast_ratio(invalid.thumb_border, p.surface_active),
+        4.7223,
+        "status.danger.text on surface.active",
+    );
+    assert_eq!(
+        thumb_carrier(&invalid, p.surface_active),
+        ThumbCarrier::Both,
+        "face and ring both separate over the groove"
     );
 }
 
@@ -472,7 +526,9 @@ fn which_channel_carries_the_thumb_is_pinned_per_state() {
             "the filled rail (rail_filled)",
             ThumbCarrier::Face,
         ),
-        // Invalid shares Rest, including where its visibility comes from.
+        // Invalid keeps Rest's face and only swaps the ring's hue, so the
+        // carrier is unchanged everywhere — the error is hue-only over the
+        // fill, and the face is what carries it there.
         (BaseState::Invalid, "the mount", ThumbCarrier::Both),
         (
             BaseState::Invalid,
@@ -558,9 +614,8 @@ fn the_disabled_thumb_face_separates_from_the_disabled_rail() {
 
 #[test]
 fn the_fill_on_fill_measurement_is_recorded_below_the_floor_and_pinned_there() {
-    // The pair §3.5 never prints. It measures below the chrome floor, and
-    // the module docs explain why that is not a failure: both rails are
-    // interior to one control, neither is a perimeter. The number is
+    // The interior seam §3.5 prices and explicitly waves through:
+    // "reported without failing perimeter judgment". The number is
     // pinned so a future palette retune that moved it further down shows
     // up here rather than silently.
     let p = palette();
