@@ -335,8 +335,9 @@ pub enum RadioOrientation {
 
 /// Where the roving focus landed and what that selects (§3.3).
 ///
-/// The two travel together because §3.3 says the arrow keys "rove focus
-/// **and** select": one key press produces both facts, and returning
+/// The two travel together because §3.3's arrow contract is that each press
+/// "roves and wraps focus across enabled options and selects" — one key press
+/// produces both facts, and returning
 /// only the index would make the caller re-derive the selection it was
 /// told to make.
 ///

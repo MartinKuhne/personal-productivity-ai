@@ -342,8 +342,8 @@ impl PasswordInputModel {
 
     /// Record a focus edge. Returns whether the reveal state changed.
     ///
-    /// Losing focus always drops the reveal — §3.2's "automatically
-    /// resets `revealed_value` to masked on focus loss". Gaining focus
+    /// Losing focus always drops the reveal — §3.2's "`note_focus(false)`
+    /// automatically resets `revealed` to `false`". Gaining focus
     /// never reveals anything by itself; showing a secret is something
     /// the user asks for.
     #[must_use]

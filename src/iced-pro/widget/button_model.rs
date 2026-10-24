@@ -72,7 +72,9 @@ impl ButtonIcon {
 ///
 /// The host declares this — normally from a real container query, or from the
 /// [`Breakpoint`] of the region the button sits in. The button itself never
-/// measures a live width to decide (spec §3.0.4.3: "the button never guesses").
+/// measures a live width to decide: §3.0.4.4 requires adaptation "based on
+/// **allocated parent container width** via a pure solver taking no global
+/// window-width parameter".
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ButtonDensity {
     /// Full rung: label plus both icon slots.
@@ -120,9 +122,10 @@ impl ButtonDensity {
 ///
 /// ## `cancellable`
 ///
-/// The spec lists `busy` but leaves cancellation implicit (§3.0.4.3: "a
-/// `CancelRequest` is surfaced, **if the action supports cancellation**"). The
-/// model makes that explicit: [`ActionPending::try_cancel`] can only grant a
+/// §3.0.4.3 states the condition outright: a busy control "emits
+/// `Cancel<CancelRequest>` (`on_cancel_request()`) on press or `Escape` if and
+/// only if `cancellable == true`". The model makes that enforceable rather than
+/// advisory: [`ActionPending::try_cancel`] can only grant a
 /// cancellation the host actually declared. A model that never sets
 /// [`cancellable`](Self::cancellable) can still be cancelled *before* it
 /// dispatches (a drag-out is always allowed), but once the action is in flight

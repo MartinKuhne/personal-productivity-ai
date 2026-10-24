@@ -133,8 +133,8 @@ pub const HEIGHT_STANDARD: f32 = size::CONTROL_MD;
 /// Which of §3.1b's two segment polarities a cell belongs to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SegmentPolarity {
-    /// §3.1b's "Unselected segments render as `Secondary (Rest)`" — and
-    /// the hover/press/disabled rungs that go with it.
+    /// §3.1b's "Unselected segments resolve through `ButtonVariant::Secondary`"
+    /// — and the hover/press/disabled rungs that go with it.
     #[default]
     Unselected,
     /// The selected cell: `surface.active` / `text.strong` /

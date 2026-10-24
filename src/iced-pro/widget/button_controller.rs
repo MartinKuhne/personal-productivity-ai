@@ -11,7 +11,7 @@
 //!
 //! | User action | Emitted | Host callback |
 //! |---|---|---|
-//! | release inside / `Enter` / `Space` | `Commit<ButtonSettlement>` | `on_activation()` |
+//! | release inside / `Enter` / `Space` | `Commit<ButtonSettlement>` | `on_activate()` |
 //! | release outside / `Escape` | `Cancel<ButtonSettlement>` | `on_cancel()` |
 //! | press or `Escape` while busy | `Cancel<CancelRequest>` | `on_cancel_request()` |
 //!
@@ -100,7 +100,7 @@ impl ButtonSettlement {
 /// One tier's worth of output from the activation engine.
 #[derive(Clone)]
 pub enum ButtonEmission {
-    /// `Commit<ButtonSettlement>` — a command was dispatched (`on_activation`).
+    /// `Commit<ButtonSettlement>` — a command was dispatched (`on_activate`).
     Activated(Commit<ButtonSettlement>),
     /// `Cancel<ButtonSettlement>` — the gesture was abandoned before dispatching
     /// (`on_cancel`), carrying what to go back to.
