@@ -889,6 +889,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
         status: Status::Partial,
         section: "§2.6",
         evidence: &[
+            "token/time.rs",
             "surface/tooltip/hover.rs",
             "surface/tooltip/mod.rs",
             "widget/auto_suggest_model.rs",
@@ -898,35 +899,46 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/mod.rs",
         ],
         reason: Some(
-            "The injection discipline is proven, and it is the harder half. `TimeMs` is a \
-             newtype that every timed controller takes as a parameter — `HoverController`, \
-             `ToastTimer`, `AutoSuggestHost` — and `TimeMs::now()` is documented and tested \
-             as the only clock read in the crate, called once per frame by the host, so no \
-             resolver reads a wall clock and a headless test drives time by handing over a \
-             value. `reduced_motion` is injected the same way: `widget/progress.rs` never \
-             queries the OS and falls back to a static striped segment on the host's \
-             `bool`, and `ToastTimer` banks its remaining duration against an injected \
-             instant rather than a deadline. Missing: the token set itself. There is no \
-             `token/time.rs`, so not one of §2.6's ten `time.*` rungs is a token — each \
-             consumer declares its own constant in its own file \
-             (`surface/tooltip/mod.rs::HOVER_DELAY = 400` and `KEYBOARD_FOCUS_DELAY = 0`, \
-             `widget/auto_suggest_model.rs::DEBOUNCE_MS = 200`, \
-             `composite/notification.rs::DEFAULT_AUTO_DISMISS_MS = 5_000`), which is \
-             precisely the outside-`token/` numeric definition that `token/mod.rs` and \
-             `UIF-PRIN-001` forbid. Four of the ten rungs are not declared anywhere at \
-             all: `time.fast` (100), `time.normal` (180), `time.slow` (240) and \
-             `time.hold.copied` (1500); `time.delay.submenu` (150) and \
-             `time.delay.tooltip_warm` (100) are absent as behaviours too, since \
-             `MenuCascade` carries no timer and no warm-handoff window exists between \
-             adjacent icon-only controls. No easing curve is modelled — `Linear`, \
-             `EaseOutCubic` and `EaseInOutCubic` are named by the table and appear nowhere \
-             in the crate, because nothing here animates a value across frames; every \
-             duration that does exist is a threshold, not a transition.",
+            "The token set exists and is complete, and the injection discipline that was \
+             already proven still holds. `token/time.rs` declares all ten §2.6 rungs as \
+             `DurationToken { name, ms, easing, alias }` — `INSTANT` 0, `FAST` 100, \
+             `NORMAL` 180, `SLOW` 240, `DEBOUNCE_LIVE` 200, `DELAY_SUBMENU` 150, \
+             `DELAY_TOOLTIP_OPEN` 400, `DELAY_TOOLTIP_WARM` 100, `HOLD_COPIED` 1500 and \
+             `TOAST_AUTO_DISMISS` 5000 — each carrying its §2.6 curve as a pure `Easing` \
+             (`Linear`, `EaseOutCubic`, `EaseInOutCubic`) whose `apply` is defined on the \
+             enum rather than left as a name. `resolve_ms(intended, reduced_motion)` is the \
+             single shared fallback the whole crate can now route through: it substitutes \
+             `time.instant` for a *transition* under injected `reduced_motion` and leaves a \
+             *timer* alone, because `easing: None` marks a countdown and zeroing a debounce \
+             or a tooltip delay would produce more motion, not less. Nothing under `token/` \
+             reads a clock — time enters only as a `TimeMs` value, and the module's sidecar \
+             asserts that by scanning its own source for any clock call or import. The four \
+             pre-existing per-widget constants now read through their rungs \
+             (`HOVER_DELAY` → `DELAY_TOOLTIP_OPEN`, `KEYBOARD_FOCUS_DELAY` → `INSTANT`, \
+             `DEBOUNCE_MS` → `DEBOUNCE_LIVE`, `DEFAULT_AUTO_DISMISS_MS` → \
+             `TOAST_AUTO_DISMISS`), so each literal lives only under `token/` while call \
+             sites keep their domain vocabulary. Missing: consumption. Six of the ten rungs \
+             have no consumer. `time.fast`, `time.normal`, `time.slow` and \
+             `time.hold.copied` wait on the Phase-C widgets that would animate them — \
+             `ToggleSwitch` thumb travel, the `ComboBox`/`DatePicker`/`TimePicker`/ \
+             `ColorPicker` flyouts, the modal scrim and `NavigationRail` width, the \
+             `CodeBlock` `[Copy]` tick — and `eased_progress` is called by nothing, because \
+             no widget here yet interpolates a value across a duration. \
+             `time.delay.submenu` and `time.delay.tooltip_warm` are missing as \
+             *behaviours*, not merely as call sites: `MenuCascade` carries no aim-grace \
+             timer and `HoverController` is per-control with no cross-control memory, so \
+             every pointer arrival pays the full 400 ms and no diagonal safe corridor \
+             exists to switch branches inside.",
         ),
         note: Some(
-            "The four constants that do exist are numerically correct against §2.6 — 400, \
-             0, 200 and 5000 all match the table. The finding is placement and coverage, \
-             not value: the numbers are right and they are not tokens.",
+            "All four constants that predate this change were already numerically correct \
+             against §2.6 — 400, 0, 200 and 5000 — so routing them through their rungs \
+             changed nothing on screen. The migration is pinned by asserting each old name \
+             equals its token, not by moving the number, which is what keeps the rendered \
+             timing provably untouched. §2.6's two aliases (`time.menu.aim_grace`, \
+             `time.tooltip.hover_delay`) are modelled as data on their rung rather than as \
+             extra constants, so one value cannot drift into two definitions. The gap that \
+             remains is consumers, not vocabulary.",
         ),
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
@@ -1857,8 +1869,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
              zero-shift trailing-slot partition, `surface::popover` supplies the banded \
              card with its escape rank, and `widget/rove.rs` supplies the skip-disabled \
              walk the column focus would use. None of it is assembled into a time \
-             control, and the `time.normal` (180ms) open transition the section assumes \
-             has no token under `UIF-TOK-007`.",
+             control. The `time.normal` (180ms) open transition the section assumes is a rung \
+             (`token::time::NORMAL`, `EaseOutCubic`), so nothing on the token side blocks \
+             a builder; what is missing is a widget that interpolates a value across a \
+             duration.",
         ),
         note: None,
     },
@@ -2265,9 +2279,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
              resize-cancelling callback set. Primitives a builder would reuse are proven — \
              `widget/rove.rs` for the wrapping single-tab-stop walk over enabled \
              destinations and `surface::tooltip` for the hover card — but the rail, its \
-             width transition and its cross-session width persistence are unbuilt, and \
-             `time.slow` (240ms), the rung the compact-to-expanded transition is priced \
-             at, has no token under `UIF-TOK-007`.",
+             width transition and its cross-session width persistence are unbuilt. `time.slow` (240ms), \
+             the rung that transition is priced at, is a token now (`token::time::SLOW`, \
+             `EaseInOutCubic`), so the token layer is not what blocks a builder: the rail \
+             itself is.",
         ),
         note: None,
     },
@@ -2448,9 +2463,9 @@ const SPEC_COVERAGE: &[Coverage] = &[
              surfacing through `FormField` validation. Two blockers are recorded against \
              other requirements rather than solved here: `UIF-TOK-004` models no font \
              family, so `FontFamily::Mono` — the type all three of these are written in — \
-             has no rung, and `time.hold.copied` has no token under `UIF-TOK-007`. The \
-             `surface.code` background the section asks for does already exist in \
-             `token/color.rs`, so the palette is not the gap.",
+             has no rung. `time.hold.copied` is a rung now (`token::time::HOLD_COPIED`). The \
+             `surface.code` background the section asks for already exists in \
+             `token/color.rs`, so neither the timing nor the palette is the gap.",
         ),
         note: None,
     },

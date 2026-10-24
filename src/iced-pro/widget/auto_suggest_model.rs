@@ -56,14 +56,18 @@
 //! engine's [`ROW_HEIGHT`](crate::surface::menu::view::ROW_HEIGHT) uses,
 //! so a completion row and a menu row are the same row.
 //!
-//! # The debounce window is not in the spec
+//! # The debounce window is a token
 //!
 //! §3.2 says the box completes; it never says how long the box waits
-//! before asking. A window is unavoidable — the alternative is one
-//! provider call per keystroke — so [`DEBOUNCE_MS`] is a module-level
-//! named constant, the same treatment `token::time`'s absence forced on
-//! [`HOVER_DELAY`](crate::surface::tooltip::HOVER_DELAY). A host that
-//! wants a different window passes its own to
+//! before asking. §2.6 does, though — `time.debounce.live` is `200ms`,
+//! and the section names this constant outright — so
+//! [`DEBOUNCE_MS`] reads through
+//! [`time.debounce.live`](crate::token::time::DEBOUNCE_LIVE) rather
+//! than declaring its own number. A window is unavoidable either way —
+//! the alternative is one provider call per keystroke — but it is no
+//! longer a framework guess resting on nothing: it is a rung, and
+//! `token::time`'s sidecar pins the two together so they cannot drift.
+//! A host that wants a different window passes its own to
 //! [`with_debounce`](crate::widget::auto_suggest_host::AutoSuggestHost::with_debounce);
 //! what it must not do is discover the default by timing the UI.
 //!
@@ -71,7 +75,7 @@
 
 use crate::focus::FocusId;
 use crate::surface::menu::model::{Menu, MenuId, Row};
-use crate::token::{shape, size, space};
+use crate::token::{shape, size, space, time};
 
 /// Maximum height of the completion flyout — `240px` (§3.2,
 /// `UIF-ATOM-002d`).
@@ -99,10 +103,22 @@ pub const FLYOUT_RADIUS: f32 = shape::RADIUS_WIDGET;
 ///
 /// Trailing-edge: every keystroke restarts the window, so a burst of ten
 /// typed characters produces **one** request carrying the final text
-/// rather than ten carrying nine dead ones. The value is a framework
-/// choice, not a spec figure — see the
-/// [module docs](self#the-debounce-window-is-not-in-the-spec).
-pub const DEBOUNCE_MS: u64 = 200;
+/// rather than ten carrying nine dead ones.
+///
+/// The value is read through
+/// [`time.debounce.live`](crate::token::time::DEBOUNCE_LIVE), the
+/// `UIF-TOK-007` rung that §2.6 binds to this exact wait — the section
+/// names the constant itself ("`DEBOUNCE_MS = 200`"), so the equality
+/// is a requirement rather than a coincidence, and
+/// `token::time`'s sidecar asserts it. The literal no longer lives here:
+/// retuning the rung retunes the box, the command palette and anything
+/// else that reads the rung, instead of leaving a `200` that no longer
+/// matches.
+///
+/// A host that wants a different window passes its own to
+/// [`with_debounce`](crate::widget::auto_suggest_host::AutoSuggestHost::with_debounce);
+/// what it must not do is discover the default by timing the UI.
+pub const DEBOUNCE_MS: u64 = time::DEBOUNCE_LIVE.ms;
 
 /// One completion candidate: a stable id the application acts on and the
 /// label the row shows (§3.2, `UIF-ATOM-002d`).

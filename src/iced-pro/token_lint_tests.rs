@@ -61,7 +61,13 @@ use crate::token_lint::{
 /// Pre-Rank pointer-capture ledger. Like the rest of `binding/` it is
 /// scanned but sits outside Rule B's visual scope, so the file count moves
 /// and `PIN_RULE_B_FILES` does not.
-const PIN_FILES_SCANNED: usize = 120;
+///
+/// 121 as of `INC-58`, whose one addition is `token/time.rs` — the
+/// `UIF-TOK-007` duration and easing scale. It lives under `token/`,
+/// which is the layer the rules exist to protect rather than police, so
+/// like every other token module it is scanned but never visual-scoped:
+/// the file count moves and `PIN_RULE_B_FILES` does not.
+const PIN_FILES_SCANNED: usize = 121;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

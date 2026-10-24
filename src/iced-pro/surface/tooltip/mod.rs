@@ -68,7 +68,7 @@
 //! | Placement beyond the navbar | **framework** | [`TOOLTIP_ALIGNMENT`] plus the solver's flip and clamp. §3.7 defers flipping to `UIF-CMENU-001` and says nothing about a tab, dialog-button or menu-row tooltip; reusing the menu's solver means one placement model with one set of provenance flags rather than three ad-hoc ones. |
 //! | Relationship to z-bands | **framework** | A presentation layer above all bands, outside the registry. See "Z-order" above. |
 //! | Text **colour** | **framework** (spec names only the type rung) | [`Palette::text_primary`] on [`Palette::surface_overlay`]. §3.7 now *does* name `text.primary`, so this is no longer a guess — the row above records it as specified. |
-//! | A `token::time` category | **framework** | **does not exist.** §2 lists `token::time` as planned-but-absent, so [`HOVER_DELAY`] and [`KEYBOARD_FOCUS_DELAY`] are module-level named constants — the precedent INC-13 set for the geometry constants in [`clamp`](crate::geometry::clamp). |
+//! | A `token::time` category | **framework** | **exists as of `UIF-TOK-007`.** [`HOVER_DELAY`] reads through [`time.tooltip.hover_delay`](crate::token::time::DELAY_TOOLTIP_OPEN) and [`KEYBOARD_FOCUS_DELAY`] through [`time.keyboard.focus`](crate::token::time::INSTANT); the literals live only under `token/`. What the token layer supplies and this subsystem still does **not** use is `time.delay.tooltip_warm` — the 100 ms warm-handoff window §2.6 defines for moving between adjacent icon-only controls. `HoverController` is per-control and holds no cross-control memory, so every arrival pays the full 400 ms. |
 //! | Whether the overlay surface reads as elevated | **framework finding; spec is silent** | Measured, not assumed: `surface.overlay` against `surface.base` is **1.1230:1**, far under the 3:1 chrome floor, so the fill carries no layer separation. The `border.strong` hairline is what makes the card read as floating. A spec that assumes the overlay is visually distinct from the base is wrong about its own palette. |
 //! | `TeachingPopover` | **§3.7 specifies, not built** | The interactive callout half of §3.7 (280–360px, `accent.border`, `radius.card`, title/body/footer, Z-Band 2) is **out of scope for this increment and unbuilt**. `UIF-ATOM-007` is therefore `Partial`, not `Implemented`. |
 //!
@@ -87,7 +87,7 @@
 pub mod hover;
 pub mod place;
 
-use crate::token::{color::Palette, contrast, shape, space, typography};
+use crate::token::{color::Palette, contrast, shape, space, time, typography};
 use iced::Color;
 
 pub use hover::{ArrivalSource, DismissReason, Dismissal, HoverController, TimeMs, Visibility};
@@ -95,39 +95,59 @@ pub use place::{TOOLTIP_ALIGNMENT, TOOLTIP_GAP, TooltipAnchor};
 
 /// How long the pointer must rest before a tooltip appears, in milliseconds.
 ///
-/// **400 ms**, the value `UIF-ATOM-007` specifies: "Opens after `400ms` hover delay or
-/// `0ms` keyboard focus delay". Short enough that a deliberate hover is answered promptly,
-/// long enough that the pointer crossing a window on its way somewhere else does not set
-/// off a chain of tooltips.
+/// **400 ms**, read through
+/// [`time.tooltip.hover_delay`](crate::token::time::DELAY_TOOLTIP_OPEN)
+/// — the rung `UIF-TOK-007` §2.6 defines for exactly this wait, and
+/// which the spec also calls `time.tooltip.hover_delay`. `UIF-ATOM-007`
+/// states the same figure: "Opens after `400ms` hover delay or `0ms`
+/// keyboard focus delay". Short enough that a deliberate hover is
+/// answered promptly, long enough that the pointer crossing a window on
+/// its way somewhere else does not set off a chain of tooltips.
 ///
-/// A duration is a **new token category** — §2 defines only colour, size, space, shape and
-/// typography, and lists `token::time` as planned-but-absent — so this is a module-level
-/// named constant rather than a token, following the precedent INC-13 set for the
-/// geometry constants in [`clamp`](crate::geometry::clamp). It is `u64` milliseconds
-/// rather than a [`std::time::Duration`] so it can be a `const`;
-/// [`HoverController::with_delay`] takes the [`std::time::Duration`] form.
+/// This is a **thin re-export of the token, not a second definition.**
+/// The literal lives only in `token/time.rs`; retuning the rung retunes
+/// the tooltip with it, which is what keeps the two from drifting into
+/// two different hover delays. The name stays here because "hover delay"
+/// is the tooltip subsystem's own vocabulary and every call site reads
+/// better for it than `token::time::DELAY_TOOLTIP_OPEN` would.
 ///
-/// The earlier revision of this module used 500 ms, the converged value across Win32's
-/// `TDT_INITIAL`, GTK's `gtk-tooltip-timeout` and Material Design. That was a guess made
-/// when the spec carried no number; §3.7 now carries one and this is it.
+/// It is `u64` milliseconds rather than a [`std::time::Duration`] so it
+/// can be a `const`; [`HoverController::with_delay`] takes the
+/// [`std::time::Duration`] form.
+///
+/// The earlier revision of this module used 500 ms, the converged value
+/// across Win32's `TDT_INITIAL`, GTK's `gtk-tooltip-timeout` and
+/// Material Design. That was a guess made when the spec carried no
+/// number; §3.7 now carries one and this is it.
 ///
 /// This is one of **two** timing values in the subsystem — see
-/// [`KEYBOARD_FOCUS_DELAY`] for the other. What is still absent is a *re-show* delay,
-/// which the spec does not give and this crate does not invent.
-pub const HOVER_DELAY: u64 = 400;
+/// [`KEYBOARD_FOCUS_DELAY`] for the other. What is still absent is a
+/// *re-show* delay, which the spec does not give and this crate does not
+/// invent. Nor is the `time.delay.tooltip_warm` handoff implemented:
+/// every arrival pays the full 400 ms today.
+pub const HOVER_DELAY: u64 = time::DELAY_TOOLTIP_OPEN.ms;
 
 /// How long a control reached by keyboard waits before its tooltip appears, in milliseconds.
 ///
-/// **0 ms** — `UIF-ATOM-007`'s "`0ms` keyboard focus delay", i.e. it opens immediately.
-/// The reason the two channels differ is that their false-positive rates differ. A pointer
-/// crosses controls constantly on its way somewhere else, so a hover tooltip needs a rest
-/// period to avoid firing on transit. Keyboard focus only lands where the user deliberately
-/// tabbed to, so the tooltip is already wanted and any delay is pure lag.
+/// **0 ms**, read through [`time.keyboard.focus`](crate::token::time::INSTANT)
+/// — `UIF-ATOM-007`'s "`0ms` keyboard focus delay", i.e. it opens
+/// immediately. The reason the two channels differ is that their
+/// false-positive rates differ. A pointer crosses controls constantly on
+/// its way somewhere else, so a hover tooltip needs a rest period to
+/// avoid firing on transit. Keyboard focus only lands where the user
+/// deliberately tabbed to, so the tooltip is already wanted and any
+/// delay is pure lag.
+///
+/// Sharing the `time.instant` rung rather than carrying a private `0` is
+/// deliberate: §2.6 puts the `0ms` keyboard exception on the
+/// `time.delay.tooltip_open` row, and `time.instant` is the rung that
+/// means "no wait at all". A second literal would be a second thing to
+/// retune.
 ///
 /// This is **behaviour, not just a constant**: [`HoverController::keyboard_focus_enter`]
 /// arms the controller through [`ArrivalSource::Keyboard`], which makes
 /// [`HoverController::tick`] `Shown` on the very first tick after focus arrives.
-pub const KEYBOARD_FOCUS_DELAY: u64 = 0;
+pub const KEYBOARD_FOCUS_DELAY: u64 = time::INSTANT.ms;
 
 /// The widest a tooltip card may get, in logical pixels (`UIF-ATOM-007`).
 ///

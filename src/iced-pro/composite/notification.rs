@@ -39,15 +39,28 @@
 //! Unit tests live in the sibling `notification_tests.rs` sidecar.
 
 use crate::token::color::Palette;
+use crate::token::time;
 use iced::Color;
 
 /// §3B.2's default auto-dismiss window for the severities that may have
 /// one — `5000ms`.
 ///
+/// Read through
+/// [`time.toast.auto_dismiss`](crate::token::time::TOAST_AUTO_DISMISS),
+/// the `UIF-TOK-007` rung §2.6 binds to this exact countdown, including
+/// the two conditions attached to it: paused and banked while the toast
+/// is hovered or focused, and forced to `None` for `Warning` and
+/// `Danger`. The literal lives only under `token/`; `token::time`'s
+/// sidecar asserts the two stay equal, and asserts the rung never grows
+/// past `u32::MAX` so this narrowing cast cannot truncate silently.
+///
 /// A `u32` rather than an `f32` because it is a duration, not a
 /// measurement: it never becomes a rectangle, so Rule B's visual-scalar
-/// rule does not reach it and it does not need a token rung behind it.
-pub const DEFAULT_AUTO_DISMISS_MS: u32 = 5_000;
+/// rule does not reach it. The width is kept because the whole
+/// auto-dismiss API — [`effective_auto_dismiss_ms`],
+/// [`NotificationModel::auto_dismiss_ms`] — is cut in `u32`; widening
+/// it would be a public-API change this increment has no reason to make.
+pub const DEFAULT_AUTO_DISMISS_MS: u32 = time::TOAST_AUTO_DISMISS.ms as u32;
 
 /// How serious a notification is, and therefore how it looks and how long
 /// it is allowed to stay (§3B.2).
