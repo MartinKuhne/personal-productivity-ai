@@ -224,17 +224,18 @@ The color system uses a dark-first elevation model where higher z-layers use pro
 [GENERALIZATION] Declarative desktop UI frameworks prevent main-thread stalls and state desynchronization by strictly separating **Controlled Domain Data Models**, **Ephemeral Interaction State**, and **Typed Lifecycle Callbacks**.
 
 1. **Controlled vs. Ephemeral State Separation:**
-   * **Controlled Data Model (`Controlled<'a, M>`):** Owned by application state and borrowed read-only by the widget each frame (`value`, `checked`, `selected_ids`, `validation`, `busy`, `cancellable`, `disabled`).
+   * **Controlled Data Model (`Controlled<'a, M>`):** Owned by application state and borrowed read-only by the widget each frame (`value`, `checked`, `selected_ids`, `validation`, `pending`, `busy`, `disabled`).
    * **Ephemeral Interaction State (`Ephemeral<S>`):** Owned by the widget/framework layer (`VisualState`, hover timers, active `GestureSlot`, pre-edit `Snapshot<T>`, `ActivationGate`, IME composition buffer, scroll velocity, open flyout state) so pointer and keyboard feedback renders within `< 1 frame` without round-tripping through background subsystems.
 2. **Three-Tier Callback Lifecycle (`Live<T>` vs. `Commit<T>` vs. `Cancel<T>`):**
    * `Live<T>`, `Commit<T>`, and `Cancel<T>` are distinct nominal wrapper types that **share no common conversion trait**, and multi-frame gestures settle through a linear `Gesture<T>` guard whose consuming `.commit(self)` and `.cancel(self)` methods make double-settlement a compile-time error.
    * **`on_change(Live<T>)` (Live / Frame-Immediate):** Emitted on every keystroke (coalesced to at most one emission per pass when the value actually changed), thumb scrub pixel, or hover highlight. Used for live validation or previewing; MUST never block or trigger synchronous disk/network I/O.
    * **`on_commit(Commit<T>)` (Settled / Intentional):** Emitted **exactly once** when an interaction settles—`Enter` key, focus loss (`blur`), pointer release at the end of a slider/splitter/column/overlay drag, or dropdown option selection, superseding any pending `Live<T>` tick from the same pass. Drives persistence, command dispatch, and expensive queries.
    * **`on_cancel(Cancel<T>)` (Revert):** Emitted on `Escape` or pointer release outside hit bounds, restoring the pre-gesture `Snapshot<T>`. Pressing `Escape` while any pointer-captured drag (`Slider`, `RangeSlider`, `SplitDivider`, `DataTable` column resize, `SideSheet` resize, `MovableOverlay` drag/resize) is active cancels that drag first (`Pre-Rank`), even if keyboard focus resides elsewhere.
+   * **Dismissal Tier Rule (`Cancel` vs. `Commit` for `on_dismiss`):** Closing a transient overlay without executing its target action emits `Cancel` (`Cancel<()>` on `PopoverModel` and `CommandPaletteModel`; `Cancel<String>` on `AutoSuggestModel`, carrying the dismissed query snapshot so the suggestion flyout remains suppressed for that string until `query` changes). Conversely, dismissing a `NotificationModel` (`§3B.2`) emits `Commit<(NotificationId, DismissReason)>` because notification dismissal is a settled lifecycle transition that permanently removes the item from the active notification queue and records acknowledgment state rather than reverting an uncommitted gesture.
 3. **Async & Long-Running Action State (`ActionPending` & `ActivationGate`):**
-   * Action controls (`Button`, `ToggleSwitch`, `MenuRow`, `Modal Primary CTA`) carry `busy: bool`, `cancellable: bool`, and optional `progress: Option<f32>` in their data model.
-   * To close the double-click race window before the host's `busy = true` projection arrives on a subsequent frame, action controllers maintain an ephemeral **`ActivationGate`** (`Armed -> AwaitingProjection -> Busy`) that suppresses duplicate `on_activate` emissions immediately upon first commit.
-   * When `busy == true`, the control locks its outer bounding box (`UIF-PRIN-003`), paints a `14px` (`size.spinner.sm`) arc spinner inside the reserved `SPINNER_SLOT`, suppresses `on_activate`, and emits `Cancel<CancelRequest>` (`on_cancel_request()`) on press or `Escape` if and only if `cancellable == true`.
+   * Command action controls (`Button`, `SplitButton` primary zone, `ToolbarItem`, `MenuRow` actions, `Modal` primary CTA) carry `pending: ActionPending { busy: bool, progress: Option<f32>, cancellable: bool }` in their data model. Binary state switches (`ToggleSwitch` / `SwitchModel`) carry `busy: bool` only—locking out re-toggles while an async state flip settles, without determinate progress or cancel sub-affordances on the `36×20px` switch track.
+   * To close the double-click race window before the host's `busy = true` projection arrives on a subsequent frame, action and switch controllers maintain an ephemeral **`ActivationGate`** (`Armed -> AwaitingProjection -> Busy`) that suppresses duplicate `on_activate` / `on_toggle` emissions immediately upon first commit.
+   * When `pending.busy == true`, a command action control locks its outer bounding box (`UIF-PRIN-003`), paints a `14px` (`size.spinner.sm`) indeterminate arc (`progress: None`) or determinate progress ring (`progress: Some(0.0..=1.0)`) inside the reserved `SPINNER_SLOT`, suppresses `on_activate`, and emits `Cancel<CancelRequest>` (`on_cancel_request`) on press or `Escape` if and only if `pending.cancellable == true`.
 4. **Container-Query Responsive Adaptation (`ResponsiveBreakpoint`):**
    * Widgets adapt layout based on **allocated parent container width** via a pure solver taking no global window-width parameter:
      * `Expanded` $\rightarrow$ `Compact`: Secondary labels collapse to icon-only while enforcing the tooltip obligation (`UIF-ATOM-007`) as the same atomic transition, segmented controls compress horizontal padding from `space.md` (`12px`) to `space.sm` (`8px`), and secondary toolbar items move into an overflow `⋯` menu (`UIF-COMP-008`) with `0px` vertical layout shift.
@@ -256,6 +257,7 @@ The color system uses a dark-first elevation model where higher z-layers use pro
      pub enum ActivationSource { Pointer, Keyboard }
      pub struct ButtonSettlement { pub source: ActivationSource }
      pub struct CancelRequest { pub reason: &'static str }
+     pub struct ActionPending { pub busy: bool, pub progress: Option<f32>, pub cancellable: bool }
      ```
 
 ### 3.1 Action Controls: Buttons, Segmented Controls, Split Buttons & Hyperlinks (`UIF-ATOM-001`)
@@ -278,13 +280,12 @@ Geometry: Height `size.control.sm` (`28px`, compact/navbar) or `size.control.md`
         pub trailing_icon: Option<Icon>,
         pub variant: ButtonVariant, // Primary | Secondary | Ghost | Danger
         pub density: ControlDensity, // Compact (28px) | Standard (32px)
-        pub busy: bool,
-        pub cancellable: bool,
+        pub pending: ActionPending,
         pub disabled: bool,
         pub tooltip: Option<String>,
     }
     ```
-  * **Callbacks:** `on_activate(Commit<ButtonSettlement>)` (emitted on pointer press-and-release inside hit bounds or `Enter`/`Space` when focused and `!disabled && !busy`, gated by `ActivationGate`), `on_cancel(Cancel<ButtonSettlement>)` (pointer release outside bounds or `Escape` while pointer-pressed, carrying pre-gesture snapshot), and `on_cancel_request(Cancel<CancelRequest>)` (press or `Escape` while `busy == true && cancellable == true`).
+  * **Callbacks:** `on_activate(Commit<ButtonSettlement>)` (emitted on pointer press-and-release inside hit bounds or `Enter`/`Space` when focused and `!disabled && !pending.busy`, gated by `ActivationGate`), `on_cancel(Cancel<ButtonSettlement>)` (pointer release outside bounds or `Escape` while pointer-pressed, carrying pre-gesture snapshot), and `on_cancel_request(Cancel<CancelRequest>)` (press or `Escape` while `pending.busy == true && pending.cancellable == true`).
 * **`UIF-ATOM-001b` — `ToggleButton` & `SegmentedButton` (Single / Multi-Select):**
   * **Geometry & Visuals:** Joined horizontal strip (`height: 28px` or `32px`, outer radius `radius.widget = 4px`, `1px border.strong` perimeter). Unselected segments resolve through `ButtonVariant::Secondary`; selected segments paint as `Secondary (Pressed)` (`BG: surface.active`, `FG: text.strong` `14.29:1`, `Border: 1px accent.border` `4.79:1`). Because a pressed unselected segment and a resting selected segment share `BG: surface.active`, **every segment—selected or unselected—permanently reserves the `14px` (`size.icon.sm`) `CHECK_SLOT` leading tick box** (`0px` label shift per `UIF-PRIN-003`), painting a `14px` `✓` glyph in `accent.text` (`7.66:1`, or `text.disabled` when disabled) when selected (`UIF-PRIN-005`). A standalone 1-segment `ToggleButton` uses `MultiSelect` mode so re-activating the segment toggles it off (whereas `SingleSelect` treats re-picking the active segment as a no-op).
   * **Data Model & Callbacks:**
@@ -384,7 +385,7 @@ Geometry: Height `size.control.md` (`32px`, or `28px` in compact toolbars); hori
         pub disabled: bool,
     }
     ```
-    Callbacks: `on_query_change(Live<String>)`, `on_suggestion_highlight(Live<usize>)`, `on_suggestion_commit(Commit<SuggestionCommit<Id>>)`, `on_dismiss(Cancel<String>)`.
+    Callbacks: `on_query_change(Live<String>)`, `on_suggestion_highlight(Live<usize>)`, `on_suggestion_commit(Commit<SuggestionCommit<Id>>)`, `on_dismiss(Cancel<String>)` (emitted on Stage-1 `Escape` flyout close, carrying the dismissed `query` snapshot so the flyout stays suppressed for that string until `query` changes).
 * **`UIF-ATOM-002e` — `MultiLineTextArea`:**
   * **Anatomy & Exact Token Box-Model Arithmetic:** Built on `InputKind::TextArea` with `EditHistory` undo/redo stack. Vertical padding is `2 × space.sm = 16px` (`8px` top + `8px` bottom), horizontal padding is `space.md = 12px`, and `line_height` is `20px` (`type.body`) or `18px` (`type.ui_compact`). Outer height is solved from tokens as `height = clamp(line_count, min_rows, max_rows) × line_height + 2 × space.sm` (so `3` lines of `type.body` = `3 × 20px + 16px = 76px`).
   * **Data Model & Callbacks:**
@@ -432,7 +433,7 @@ Geometry: All three controls share one `TogglePolarity` (`Unchecked/Off` vs `Che
   ```
   * **`CheckboxModel`:** **`on_toggle(Commit<CheckState>)`** (`Space` or click; clicking an `Indeterminate` checkbox transitions to `Unchecked` if and only if `all_enabled_children_checked == true`, and to `Checked` otherwise; a leaf `Indeterminate` with `all_enabled_children_checked == false` always transitions to `Checked`).
   * **`RadioGroupModel<Id>`:** **`on_select(Commit<Id>)`** (`Up`/`Down`/`Left`/`Right` roves and wraps focus across enabled options and selects; re-clicking the already-selected option is a no-op).
-  * **`SwitchModel`:** **`on_toggle(Commit<bool>)`** (`Space` or click; refused with zero emission while `busy == true || disabled == true`).
+  * **`SwitchModel`:** **`on_toggle(Commit<bool>)`** (`Space` or click; refused with zero emission while `busy == true || disabled == true`. Carries `busy: bool` only—no `progress` or `cancellable`—as a binary `36×20px` switch settles to `on: bool` without a secondary cancel sub-gesture).
 
 ### 3.4 Selection Pickers: `ComboBox` / `Select` (`UIF-ATOM-004`)
 
@@ -768,33 +769,43 @@ Composite widgets combine atomic controls (`§3`) into standardized layout, data
       pub auto_dismiss_ms: Option<u32>,
   }
   ```
-  Callbacks: `on_action(Commit<(NotificationId, ActionId)>)`, `on_dismiss(Commit<(NotificationId, DismissReason)>)`.
+  Callbacks: `on_action(Commit<(NotificationId, ActionId)>)`, `on_dismiss(Commit<(NotificationId, DismissReason)>)` (uses `Commit` per `§3.0.4` because notification dismissal is a settled lifecycle transition that removes the item from the active queue and records acknowledgment state).
 
 ### 3B.3 `Expander` / Collapsible Disclosure Container (`UIF-COMP-003`)
 
 * **Anatomy & Zero-Jitter Disclosure:**
-  * **Header Bar:** Height `32px` (`size.control.md`, standard) or `28px` (`size.control.sm`, compact inside tree/JSON views), padding `[0, 12px]` (`space.md`), `Radius: radius.widget` (`4px`), `Border: 1px border.subtle`. Background is `surface.raised` at `Rest`, `surface.hover` when `Hovered`, and `surface.active` when `Pressed`. Contains a `16×16px` (`size.icon.md`) leading chevron (`▸` collapsed / `▾` expanded), title (`13px SemiBold` on `type.ui_compact`, `text.primary` at rest / `text.strong` on hover), optional summary `BadgeModel`, and optional disjoint trailing action button (`24×24px` hit target separated by $\ge 2\text{px}$ from the disclosure header hit zone).
+  * **Header Bar:** Height `32px` (`size.control.md`, standard) or `28px` (`size.control.sm`, compact inside tree/JSON views), padding `[0, 12px]` (`space.md`), `Radius: radius.widget` (`4px` on all four corners when collapsed; `4px` top corners when expanded), `Border: 1px border.subtle`. Background is `surface.raised` at `Rest`, `surface.hover` when `Hovered`, and `surface.active` when `Pressed`. Contains a `16×16px` (`size.icon.md`) leading chevron (`▸` collapsed / `▾` expanded), title (`13px SemiBold` on `type.ui_compact`, `text.primary` at rest / `text.strong` on hover), optional summary `BadgeModel`, and optional disjoint trailing action button (`24×24px` hit target separated by $\ge 2\text{px}$ from the disclosure header hit zone).
   * **Invariant Header Geometry & Instant Body Mount:** Header bounds resolve from `(row_width, density_rung, has_trailing_action)` alone and never shift when the body mounts. Toggling `expanded` settles through a `GestureSlot<bool>` (`time.instant = 0ms`, zero per-frame height interpolation; only the chevron angle is interpolable).
-  * **Body Surface & Focus Exclusion:** When `expanded == true`, the body container (`ExpanderBodySurface::Base` = `surface.base` by default, or `ExpanderBodySurface::Sunken` = `surface.sunken` for embedded code/log wells; padding `space.md = 12px`; `1px border.subtle` bottom/side border) mounts immediately below the header. When `expanded == false`, all controls inside the body register as disabled focus members so `FocusCycle` (`Tab`) never lands inside a collapsed expander.
-  * **Sibling Coordination (`AccordionPolicy`):** Groups of sibling expanders declare `AccordionPolicy::Independent` (any number open simultaneously) or `AccordionPolicy::SingleOpen` (opening section `i` automatically collapses any other open sibling in the group).
+  * **Body Surface & Focus Exclusion:** When `expanded == true`, the body container (`ExpanderBodySurface::Base` = `surface.base` by default for standard forms/settings, or `ExpanderBodySurface::Sunken` = `surface.sunken` for recessed code/JSON/log wells and nested inspector trees; padding `space.md = 12px`; `1px border.subtle` horizontal top divider shared with the header plus `1px border.subtle` left/right/bottom perimeter with `4px` bottom corners) mounts immediately below the header. When `expanded == false`, all controls inside the body register as disabled focus members so `FocusCycle` (`Tab`) never lands inside a collapsed expander.
+  * **Sibling Coordination (`AccordionPolicy`):** A standalone `ExpanderModel` manages a single section without requiring a redundant section ID. Groups of sibling expanders coordinate through `AccordionModel<Id>` with `AccordionPolicy::Independent` (any number open simultaneously) or `AccordionPolicy::SingleOpen` (opening section `id` automatically collapses any other open sibling in the group).
 * **Controlled Data Model & Callbacks:**
   ```rust
-  pub struct SectionId(pub &'static str);
   #[derive(Debug, Clone, Copy, PartialEq, Eq)]
   pub enum AccordionPolicy { Independent, SingleOpen }
-  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-  pub enum ExpanderBodySurface { Base, Sunken }
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+  pub enum ExpanderBodySurface { #[default] Base, Sunken }
 
   pub struct ExpanderModel {
-      pub id: SectionId,
       pub title: String,
       pub badge: Option<BadgeModel>,
       pub body_surface: ExpanderBodySurface,
       pub expanded: bool,
       pub disabled: bool,
   }
+
+  pub struct AccordionSection<Id> {
+      pub id: Id,
+      pub expander: ExpanderModel,
+  }
+
+  pub struct AccordionModel<Id> {
+      pub sections: Vec<AccordionSection<Id>>,
+      pub policy: AccordionPolicy,
+  }
   ```
-  Callbacks: `on_toggle(Commit<(SectionId, bool)>)` (`Enter`/`Space` or pointer click release on header toggles; `Right` arrow expands; `Left` arrow collapses).
+  Callbacks:
+  * **Standalone `ExpanderModel`:** `on_toggle(Commit<bool>)` (`Enter`/`Space` or pointer click release on header toggles; `Right` arrow expands; `Left` arrow collapses).
+  * **Coordinated `AccordionModel<Id>`:** `on_section_toggle(Commit<(Id, bool)>)`.
 
 ### 3B.4 `ScrollView` & Annotated Scrollbar Contract (`UIF-COMP-004`)
 
@@ -825,7 +836,7 @@ Composite widgets combine atomic controls (`§3`) into standardized layout, data
 
 * **`Card` Container:** Grouping surface (`BG: surface.raised`, `Border: 1px border.subtle` at rest or `1px border.strong` when interactive/elevated, `Radius: radius.card = 6px`, inner padding `space.lg = 16px`).
 * **`ListTile` (3-Slot Row & Exact Two-Line Arithmetic):**
-  * **Single-Line Row (`height: 32px`, `size.control.md`)** or **Two-Line Row (`height: 44px` authoritative total = `4px` `space.xs` top padding + `18px` `type.ui_compact` title + `2px` `space.2xs` gap + `16px` `type.caption` subtitle + `4px` `space.xs` bottom padding + `2px` `TWO_LINE_UNACCOUNTED` symmetric vertical slack = `44px`)**, horizontal padding `space.md = 12px`, inter-slot gap `space.sm = 8px`:
+  * **Single-Line Row (`height: 32px`, `size.control.md`)** or **Two-Line Row (`height: 44px` authoritative total = `4px` `space.xs` top padding + `18px` `type.ui_compact` title + `2px` `space.2xs` inter-line gap + `16px` `type.caption` subtitle + `4px` `space.xs` bottom padding = `44px`)**, horizontal padding `space.md = 12px`, inter-slot gap `space.sm = 8px`:
     1. **Leading Slot (`16×16px` or `24×24px`, expanded to `24×24px` hit extent on interactive tiles):** Icon, `Avatar`, `Checkbox`, or `Radio`.
     2. **Center Slot (`Fill`):** Primary title (`13px Regular`/`Medium`, `text.primary`, single-line truncated with `…`) + optional subtitle (`12px Regular`, `text.muted` at rest).
     3. **Trailing Slot (`Shrink`):** Metadata badge, shortcut hint, or disjoint secondary action icon buttons (`24×24px` hit targets separated by $\ge 2\text{px}$ from the primary row hit zone).
@@ -851,7 +862,7 @@ Composite widgets combine atomic controls (`§3`) into standardized layout, data
 
 * **Geometry, Width-Relative Indentation Compression & Contrast:**
   * **Fixed Row Rungs & `f64` Closed-Form Virtualization:** Row height is selected from two fixed rungs—`24px` (`Compact`, `size.hit_target.min`) or `28px` (`Standard`, `size.control.sm`)—with horizontal row inset `space.xs = 4px`. Every row's vertical offset is computed as `(index as f64) * (row_height as f64)` narrowed once to `f32`, eliminating float prefix-sum drift across `100,000+` rows.
-  * **Width-Relative Indentation & Mandatory `96px` Label Floor (`TREE_LABEL_MIN_W = 96`):** Nominal indentation is `16px` (`space.lg`) per depth level. When `row_width - depth × 16px < 96px`, per-level guide spacing compresses proportionally across all active levels down to a minimum step of `4px` (`space.xs`). Once the `4px` floor step is reached and total indent reaches `row_width - 96px`, deeper levels collapse onto the innermost drawn guide line (reporting `collapsed_levels: u16` on the layout result) so the label box **never narrows below `96px`** at any tree depth (`20` or `200`).
+  * **Width-Relative Indentation & Mandatory `96px` Label Floor (`TREE_LABEL_MIN_W = 96`):** Deducting `32px` of fixed horizontal row furniture (`2 × 4px` `space.xs` row insets + `24px` disclosure chevron slot) and the mandatory `96px` (`TREE_LABEL_MIN_W`) label floor leaves a maximum total indentation budget of `indent_budget = (row_width - 32px - 96px).max(0px) = (row_width - 128px).max(0px)`. Nominal indentation is `16px` (`space.lg`) per depth level. When `depth × 16px > indent_budget` (equivalently, `row_width - 32px - depth × 16px < 96px`), per-level guide spacing compresses proportionally across all active levels down to a minimum step of `4px` (`space.xs`). Once the `4px` floor step is reached and `depth × 4px > indent_budget`, deeper levels collapse onto the innermost drawn guide line at `indent_budget` (reporting `collapsed_levels: u16` on the layout result) so the label box **never narrows below `96px`** at any tree depth (`20` or `200`).
   * **Disjoint Chevron & `Judged` Guide Contrast:** Expandable parent rows reserve a disjoint `24×24px` leading disclosure chevron (`▸` / `▾`). Vertical `1px` tree depth guides are graded `Judged` and use `border.strong` on unselected rows (`4.51:1` on `base`, `4.24:1` on `raised`, `3.68:1` on `hover`). On selected rows (`BG: accent.fill`), the label, disclosure chevron, depth guides, and `2px` (`border.focus`) left selection bar all lock to `color.text.strong` (`4.80:1` per `UIF-TOK-006` Rule 4).
 * **Clamped Keyboard Navigation & ID-Keyed Anchor Semantics:**
   * Arrow navigation (`Up`/`Down`, `PageUp`/`PageDown`, `Home`/`End`) **clamps** at index `0` and `visible_nodes.len() - 1` (never wrapping). `Ctrl+Up` / `Ctrl+Down` moves `focused_id` without altering `selected_ids`; `Space` toggles the focused row in `ExtendedMulti`.
