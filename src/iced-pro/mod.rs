@@ -22,6 +22,7 @@ pub mod composite;
 pub mod focus;
 pub mod gallery;
 pub mod gallery_badge;
+pub mod gallery_breadcrumb;
 pub mod gallery_chip;
 pub mod gallery_combo;
 pub mod gallery_composite;

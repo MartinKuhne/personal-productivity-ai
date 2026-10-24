@@ -406,6 +406,56 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "WIDTH",
         spec: "§3B.2 — Toast / SnackBar width 360px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/breadcrumb.rs",
+        name: "BAR_HEIGHT",
+        spec: "§3B.8 — BreadcrumbBar horizontal path bar height 28px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/breadcrumb.rs",
+        name: "SEGMENT_HEIGHT",
+        spec: "§3B.8 — Breadcrumb segment (Ghost button) height 24px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/breadcrumb.rs",
+        name: "SEGMENT_PADDING_X",
+        spec: "§3B.8 — Breadcrumb segment padding [0, 6px]",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/breadcrumb.rs",
+        name: "SEGMENT_GAP",
+        spec: "§3B.8 — BreadcrumbBar gap 4px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/breadcrumb.rs",
+        name: "ELLIPSIS_TRIGGER_WIDTH",
+        spec: "§3B.8 — Breadcrumb […] trigger button width 28px (28x24px box)",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/overflow_toolbar.rs",
+        name: "STRIP_HEIGHT",
+        spec: "§3B.8 — OverflowToolbar strip height 28px, fixed so eviction cannot shift it",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/overflow_toolbar.rs",
+        name: "ITEM_HEIGHT",
+        spec: "§3B.8 — OverflowToolbar inline item height 24px, matching the breadcrumb segment",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/overflow_toolbar.rs",
+        name: "ITEM_GAP",
+        spec: "§3B.8 — OverflowToolbar item gap 4px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/overflow_toolbar.rs",
+        name: "TRIGGER_SIZE",
+        spec: "§3B.8 — OverflowToolbar […] overflow menu button 28x28px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/overflow_toolbar.rs",
+        name: "TRIGGER_GAP",
+        spec: "§3B.8 — OverflowToolbar trigger clearance 8px, the remainder of the 36px reserve",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

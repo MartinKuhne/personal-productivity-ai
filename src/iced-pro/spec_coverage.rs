@@ -34,6 +34,16 @@
 //! `Partial` is not a failure state and `NotOwned` is not an apology. Both
 //! are findings, and each one is worth exactly what it can tell the reader.
 //!
+//! `Partial` also carries the case these three labels have no separate word
+//! for: **owned here, not yet built**. A widget the user deferred to Phase C
+//! — a `DatePicker`, a `NavigationRail` — is framework-owned under **D-2**,
+//! so `NotOwned` would misstate who owes it, and it is plainly not
+//! satisfied, so `Implemented` would be worse. Such an entry is `Partial`
+//! with a reason that says outright that nothing of the widget is built and
+//! then names what a builder owes. Where real adjacent machinery already
+//! exists, the reason says so too, so the entry records how far the work
+//! actually starts from rather than leaving it to be discovered.
+//!
 //! # What this module is not
 //!
 //! It asserts nothing about the code it describes. It is a ledger of
@@ -55,13 +65,19 @@ use std::fmt::Write as _;
 /// `UIF-ZORD-*` in a section heading is not a requirement and is not
 /// counted (see [`extract_spec_ids`]).
 ///
-/// **72 as of the 2026-10-22 revision** — 62 unlettered base IDs plus 10
+/// **90 as of the 2026-10-23 revision** — 79 unlettered base IDs plus 11
 /// letter-suffixed sub-requirements (`UIF-ATOM-000b`, `001a`–`001d`,
-/// `002a`–`002e`). The suffixed ones are counted **individually**, each
-/// as its own requirement: they are not decorations on their parent. See
-/// [`extract_spec_ids`], whose whole reason for existing in its current
+/// `002a`–`002e`, `005b`). The suffixed ones are counted **individually**,
+/// each as its own requirement: they are not decorations on their parent.
+/// See [`extract_spec_ids`], whose whole reason for existing in its current
 /// form is that an earlier version of this extractor could not see them.
-pub const EXPECTED_SPEC_ID_COUNT: usize = 72;
+///
+/// The 18 IDs this revision adds are five Phase-B rules and requirements
+/// (`UIF-PRIN-006`–`009`, `UIF-TOK-007`), twelve Phase-C widgets the user
+/// has explicitly deferred (`UIF-ATOM-005b`, `010`–`013`,
+/// `UIF-COMP-009`–`015`) and one new gate (`UIF-VER-005`). Every one of
+/// them is classified below; none is `Implemented`, because none is built.
+pub const EXPECTED_SPEC_ID_COUNT: usize = 90;
 
 /// Where one `UIF-*` requirement stands against this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -623,6 +639,159 @@ const SPEC_COVERAGE: &[Coverage] = &[
         ),
         note: None,
     },
+    Coverage {
+        id: "UIF-PRIN-006",
+        status: Status::Partial,
+        section: "§1.1",
+        evidence: &[
+            "widget/button.rs",
+            "surface/dialog_button.rs",
+            "token/size.rs",
+            "composite/overflow_toolbar.rs",
+            "composite/form_field.rs",
+        ],
+        reason: Some(
+            "The ladder exists; the rule does not. The four-step emphasis descent is named: \
+             `ButtonVariant::{Primary, Secondary, Ghost, Danger}` (§3.1) is exactly the \
+             step-down from a solid `accent.fill` / `status.danger.fill` CTA to a bordered \
+             `surface.raised` secondary to a quiet ghost, and `DialogButtonRole::{Primary, \
+             Secondary}` already separates the footer control that dispatches from the one \
+             that discards. Both rungs the density clause names are tokens — \
+             `size.control.sm` (28px) and `size.control.md` (32px). Missing: nothing \
+             *enforces* either half. There is no `ControlDensity` type — the two rungs are \
+             two constants, not a density a row is declared at — so no check can say \
+             'this band mixes 28px with 32px', and `OverflowToolbar`, `FormField` and a \
+             dialog footer are free to mix them today. No check counts high-emphasis fills \
+             per container scope: `DialogButtonRole` is a per-control role carrying no \
+             arity, so a host that builds two `Primary` controllers for one footer passes \
+             every test in this crate. The `[Secondary / Cancel] [Primary / Confirm]` \
+             footer order, the far-left utility pin and the destructive-confirmation rule \
+             that initial keyboard focus lands on `[Cancel]` are unmodelled — the role \
+             type says *what* a footer button is, never where it sits or who is focused \
+             first. Optical centring is likewise unasserted: the 16px and 24px glyph slots \
+             are reserved and glyphs are centred geometrically, never against optical \
+             weight, so a `▾` or a pill badge is centred by box rather than by eye.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-PRIN-007",
+        status: Status::Partial,
+        section: "§1.1",
+        evidence: &[
+            "widget/button_model.rs",
+            "widget/button_widget.rs",
+            "composite/table_cell.rs",
+            "token/typography.rs",
+        ],
+        reason: Some(
+            "One clause is partly held, and it was written for a neighbouring rule. \
+             `Button::icon_only` cannot be constructed without naming the label its tooltip \
+             shows, and `tooltip_violation` reports the forbidden shape instead of \
+             panicking — the only place in this crate where 'the user cannot see the whole \
+             string, so a tooltip must exist' is enforced at the type boundary. \
+             `composite/table_cell.rs::is_truncated` decides whether a cell's content \
+             overflows its box. Missing: the style rule itself. No sentence-case check \
+             exists on any label, and no label in the crate carries a capitalisation \
+             policy, so ALL-CAPS and Title Case on multi-word chrome are neither required \
+             nor forbidden by anything machine-checkable. Verb-first CTA naming is \
+             unmodelled — the framework never inspects a label's words, so `OK` and \
+             `Save changes` are the same string to it. `...` semantics are unmodelled in \
+             both directions: nothing knows whether an action opens a secondary prompt, so \
+             nothing can require the ellipsis on `Rename...` or forbid it on `Save`. \
+             Tabular numerals are blocked one level down and stay recorded there: \
+             `UIF-TOK-004` models no font *family*, so `FontFamily::Mono` has no rung and \
+             no readout, counter or numeric column can ask for fixed-width digits. \
+             End-truncation versus the mandatory middle-truncation for paths, URIs and git \
+             refs does not exist, and `is_truncated` hands its verdict back to the caller \
+             without registering a tooltip, so the automatic pairing the pillar mandates \
+             is not automatic.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-PRIN-008",
+        status: Status::Partial,
+        section: "§1.1",
+        evidence: &[
+            "widget/rove.rs",
+            "widget/toggle_model.rs",
+            "widget/segmented_model.rs",
+            "focus.rs",
+            "composite/table_header.rs",
+            "composite/table_view.rs",
+            "composite/tree_row.rs",
+            "composite/tree_view.rs",
+            "composite/expander.rs",
+            "widget/chip.rs",
+            "composite/breadcrumb.rs",
+        ],
+        reason: Some(
+            "Three of the four clauses are partly held and the fourth is absent. The roving \
+             walk is real and genuinely shared: `widget/rove.rs::rove_index` is the single \
+             skip-disabled, wrapping walk that `RadioGroupModel::rove` and \
+             `SegmentedModel::rove` both run, and `focus.rs` carries the traversal policy, \
+             the roving ordinals and the modal trap on the ARIA roving-tabindex convention. \
+             The wrap-versus-clamp split goes the right way: bounded groups wrap, while \
+             `composite/table_view.rs` and `composite/tree_view.rs` clamp at the ends \
+             rather than wrapping, which is what stops a held `Down` teleporting a long \
+             virtual viewport back to row zero. Disjoint hit zones are proven wherever this \
+             crate paints them — `table_header.rs` defines the sort target as the header \
+             cell *minus* the 10px resize band and asserts sort targets and handles \
+             pairwise disjoint across the whole row; `tree_row.rs` reserves a 24x24px \
+             disclosure column separate from the row body; `expander.rs` derives its title \
+             bounds by subtracting the trailing slot; `chip.rs` reserves a disjoint \
+             24x24px trailing cross; `breadcrumb.rs` keeps its trigger rectangles disjoint \
+             from every segment. Missing: the single-`Tab`-stop property is not a framework \
+             guarantee. `rove_index` supplies the walk but nothing declares a composite as \
+             *one* stop, and of the eleven collections the pillar names only \
+             `RadioGroup`, `SegmentedButton`, `Menu`, `TreeView` and `DataTable` exist at \
+             all — `TabStrip`, `GridView`, `CalendarView`, `NavigationRail`, `Stepper` \
+             and `CommandPalette` are unbuilt, so their rosters cannot be single. The \
+             150ms (`time.delay.submenu`) diagonal aiming corridor is not implemented: \
+             `MenuCascade` switches branches on entry and carries no timer of any kind. \
+             `A11yContract` does not exist in any form — no widget model exposes a pure \
+             `{role, name, value, expanded, selected, checked, busy, invalid, disabled}` \
+             descriptor, so assistive projection and headless selectors still have nothing \
+             to read and would still have to infer state from painted geometry.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-PRIN-009",
+        status: Status::Partial,
+        section: "§1.1",
+        evidence: &[
+            "state.rs",
+            "widget/text_input_model.rs",
+            "widget/text_input.rs",
+            "widget/text_area_model.rs",
+            "binding/tier.rs",
+            "composite/form_field.rs",
+        ],
+        reason: Some(
+            "The machinery for the recovery half is in place; the choreography that decides \
+             *when* to punish is not. `state.rs` makes `Invalid` a base state ranked \
+             `Disabled > Invalid > Pressed > Hovered > Rest`, `TextInputModel::validation` \
+             carries the host's own message with `is_invalid` reading it, and the `Live<T>` \
+             tier gives every keystroke a path to a repaint — so a host that clears \
+             `validation` sees the red mark gone on the very next frame, which is \
+             'Reward Early' working as specified. Missing: nothing implements 'Punish \
+             Late'. No model in this crate carries a `pristine` or `touched` flag, so the \
+             framework cannot withhold an `Invalid` border until the first `on_commit` or \
+             `blur` — invalidity arrives from the host and paints immediately whatever the \
+             field's history, and a field the user has not yet finished typing in can be \
+             red right now. The one carve-out the pillar grants (a disallowed character \
+             punished in real time, e.g. a slash in a filesystem basename) is equally \
+             unmodelled, so the framework cannot distinguish the permitted early punish \
+             from the forbidden one. Non-destructive recovery is half true: the \
+             snapshot-at-first-edit `Escape` path restores the pre-edit buffer, but \
+             `selection: Option<TextRange>` is carried by the model and never applied to \
+             the editor (already recorded against `UIF-ATOM-002a`) and no scroll offset is \
+             carried at all, so a rejected operation cannot restore either.",
+        ),
+        note: None,
+    },
     // --- §2 Foundation Design Tokens ----------------------------------------
     Coverage {
         id: "UIF-TOK-001",
@@ -709,6 +878,51 @@ const SPEC_COVERAGE: &[Coverage] = &[
              `[4.00, 6.00]` band is breached by `text.disabled` on `surface.sunken` \
              (6.0205), and rule 3's `CoincidentWithFill` floor of 3.08 is missed by \
              `status.danger.fill_active` on `surface.overlay` (3.0789).",
+        ),
+    },
+    Coverage {
+        id: "UIF-TOK-007",
+        status: Status::Partial,
+        section: "§2.6",
+        evidence: &[
+            "surface/tooltip/hover.rs",
+            "surface/tooltip/mod.rs",
+            "widget/auto_suggest_model.rs",
+            "composite/notification.rs",
+            "composite/toast.rs",
+            "widget/progress.rs",
+            "binding/mod.rs",
+        ],
+        reason: Some(
+            "The injection discipline is proven, and it is the harder half. `TimeMs` is a \
+             newtype that every timed controller takes as a parameter — `HoverController`, \
+             `ToastTimer`, `AutoSuggestHost` — and `TimeMs::now()` is documented and tested \
+             as the only clock read in the crate, called once per frame by the host, so no \
+             resolver reads a wall clock and a headless test drives time by handing over a \
+             value. `reduced_motion` is injected the same way: `widget/progress.rs` never \
+             queries the OS and falls back to a static striped segment on the host's \
+             `bool`, and `ToastTimer` banks its remaining duration against an injected \
+             instant rather than a deadline. Missing: the token set itself. There is no \
+             `token/time.rs`, so not one of §2.6's ten `time.*` rungs is a token — each \
+             consumer declares its own constant in its own file \
+             (`surface/tooltip/mod.rs::HOVER_DELAY = 400` and `KEYBOARD_FOCUS_DELAY = 0`, \
+             `widget/auto_suggest_model.rs::DEBOUNCE_MS = 200`, \
+             `composite/notification.rs::DEFAULT_AUTO_DISMISS_MS = 5_000`), which is \
+             precisely the outside-`token/` numeric definition that `token/mod.rs` and \
+             `UIF-PRIN-001` forbid. Four of the ten rungs are not declared anywhere at \
+             all: `time.fast` (100), `time.normal` (180), `time.slow` (240) and \
+             `time.hold.copied` (1500); `time.delay.submenu` (150) and \
+             `time.delay.tooltip_warm` (100) are absent as behaviours too, since \
+             `MenuCascade` carries no timer and no warm-handoff window exists between \
+             adjacent icon-only controls. No easing curve is modelled — `Linear`, \
+             `EaseOutCubic` and `EaseInOutCubic` are named by the table and appear nowhere \
+             in the crate, because nothing here animates a value across frames; every \
+             duration that does exist is a threshold, not a transition.",
+        ),
+        note: Some(
+            "The four constants that do exist are numerically correct against §2.6 — 400, \
+             0, 200 and 5000 all match the table. The finding is placement and coverage, \
+             not value: the numbers are right and they are not tokens.",
         ),
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
@@ -1324,7 +1538,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-005",
-        status: Status::Implemented,
+        status: Status::Partial,
         section: "§3.5",
         evidence: &[
             "widget/range_model.rs",
@@ -1335,7 +1549,19 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/size.rs",
             "gallery_range.rs",
         ],
-        reason: None,
+        reason: Some(
+            "The two controls this section names first are built and conform; the third one it \
+             names is not. Everything §3.5 asks of `Slider` and `NumberBox` is implemented \
+             and pinned — the shared `RangeModel`, the `GestureSlot` scrub contract, the \
+             drift-free step arithmetic, pointer capture, the full keyboard step map and \
+             both stepper shapes, as the `note` below sets out. Missing: \
+             `UIF-ATOM-005b`, the dual-thumb `RangeSlider` that appears in this section's \
+             own heading beside the other two, is unbuilt in its entirety, so the parent \
+             cannot honestly remain `Implemented` over a third of the section it heads. \
+             That is the same judgement already recorded at `UIF-ATOM-000` against `000b`, \
+             for the same reason — a parent that covers for an unbuilt sub-requirement \
+             reports coverage that does not exist. The child carries its own entry below.",
+        ),
         note: Some(
             "Built. One `RangeModel` backs both controls, so the value, the bounds and the \
              step live in exactly one place; the slider and the number box are two paints of \
@@ -1359,6 +1585,49 @@ const SPEC_COVERAGE: &[Coverage] = &[
              wide. The filled rail against the unfilled rail measures 2.98:1, under the 3.0 \
              chrome floor; both are interior to one control rather than a perimeter, so the \
              pair is reported but not judged.",
+        ),
+    },
+    Coverage {
+        id: "UIF-ATOM-005b",
+        status: Status::Partial,
+        section: "§3.5",
+        evidence: &[
+            "widget/range_model.rs",
+            "widget/slider.rs",
+            "widget/slider_host.rs",
+            "binding/pending.rs",
+            "token/size.rs",
+        ],
+        reason: Some(
+            "Deferred to Phase C by the user; the dual-thumb control itself is not built. \
+             What exists is the single-value machinery a `RangeSlider` would be built on, \
+             and it is substantial rather than token: `RangeModel` owns value, min, max, \
+             step and precision with the same re-derive-the-index-from-`min` arithmetic \
+             that keeps repeated stepping drift-free and rejects non-finite input before \
+             clamping; `widget/slider.rs` paints the 4px rail and the 16x16 thumb on a \
+             24x24 hit target from `size.slider.*`; and `GestureSlot` settles an open \
+             scrub exactly once into `Commit` with `Escape` restoring the pre-drag value. \
+             Missing: every clause that makes it a *range*. There is no \
+             `RangeSliderModel`, no `lower`/`upper` pair and no `min_span` — the model \
+             holds one `value: f64`, so an interval cannot be expressed at all. The \
+             non-crossing clamp (lower pinned to `[min, upper - min_span]`, upper to \
+             `[lower + min_span, max]`, thumb identity never swapping mid-drag) does not \
+             exist, nor does the disambiguation rule that hands the gesture to whichever \
+             thumb has room to move when the two coincide. Only the middle segment may \
+             paint `accent.fill` with `surface.active` outside it; the present slider \
+             fills from the track start and has no second boundary to stop at. The \
+             tabular-numeral readout pill above the active thumb is unbuilt and blocked \
+             twice over, because `UIF-TOK-004` models no font family and so \
+             `FontFamily::Mono` has no rung. `Tab` traversal `Lower -> Upper -> next \
+             control` is unbuilt, and the `Live` / `Commit` / `Cancel` callbacks over a \
+             `(f64, f64)` tuple are unbuilt — the existing tiers are generic but every \
+             call site carries a scalar.",
+        ),
+        note: Some(
+            "The deferral is the user's, recorded 2026-10-23 alongside the Phase-C list; it \
+             is not a finding that this increment under-delivered. The `Partial` here is \
+             the honest label rather than `NotOwned`: the widget is framework-owned under \
+             D-2, so the work is this crate's to do, merely not yet done.",
         ),
     },
     Coverage {
@@ -1524,13 +1793,124 @@ const SPEC_COVERAGE: &[Coverage] = &[
         ),
         note: None,
     },
+    Coverage {
+        id: "UIF-ATOM-010",
+        status: Status::Partial,
+        section: "§3.10",
+        evidence: &["surface/popover/mod.rs", "surface/zorder.rs", "widget/text_input.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this widget to Phase C on 2026-10-23. No `DatePickerModel`, \
+             `DateSelection`, `CivilDate`, `YearMonth`, `CalendarViewMode` or `Weekday` \
+             type exists in this crate, no segmented trigger, no calendar flyout, and no \
+             calendar arithmetic of any kind. Missing: the whole requirement — the 32px \
+             segmented `YYYY-MM-DD` trigger with per-segment focus, digit auto-advance and \
+             in-place `Up`/`Down` increment that does not open the flyout; the reserved \
+             24x24px trailing calendar button on the `002b` zero-shift slot; the 256px \
+             fixed 6x7 day grid that holds its height exactly across 28- and 31-day \
+             months; the today / selected / in-range / blackout cueing with its diagonal \
+             strikethrough on out-of-bounds days; the `Days -> Months -> Years` \
+             drill-down; the two-click range selection with hover preview; the full 2D \
+             keyboard map; and the `Live` / `Commit` / `Cancel` callback set. The card it \
+             would live in is the cheap part and is already proven: `surface::popover` and \
+             the menu engine supply a Z-Band 2 / Escape Rank 3 card with anchored \
+             placement, dismissal and a focus roster, and `surface/zorder.rs` already \
+             registers that band. The date model is the expensive part and is genuinely \
+             unbuilt: this crate carries no calendar dependency and no civil-date type, so \
+             month lengths, leap years and day-of-week derivation are new work rather than \
+             a wrapper over something existing.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-ATOM-011",
+        status: Status::Partial,
+        section: "§3.11",
+        evidence: &["widget/text_input.rs", "surface/popover/mod.rs", "widget/rove.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this widget to Phase C on 2026-10-23. No `TimePickerModel`, \
+             `CivilTime`, segmented trigger, drum flyout or time arithmetic exists. \
+             Missing: the whole requirement — the `HH : MM [: SS] [AM/PM]` monospace \
+             segmented trigger with per-segment arrow spinning and its trailing 24x24px \
+             clock button; the 200-240px drum card of parallel scrollable 32px-row \
+             columns stepped by `minute_increment` and separated by `border.subtle` \
+             hairlines; the central 32px selection band; the pinned 36px \
+             `[Cancel] / [check OK]` footer that keeps the focus trap non-empty; the \
+             12-versus-24-hour and show-seconds modes; and the `Live` / `Commit` / \
+             `Cancel` callbacks over `CivilTime`, including the pre-open snapshot the \
+             `Escape` tier restores. Reusable pieces are real and would carry a builder a \
+             long way: `widget/text_input.rs` supplies the segmented cell and the \
+             zero-shift trailing-slot partition, `surface::popover` supplies the banded \
+             card with its escape rank, and `widget/rove.rs` supplies the skip-disabled \
+             walk the column focus would use. None of it is assembled into a time \
+             control, and the `time.normal` (180ms) open transition the section assumes \
+             has no token under `UIF-TOK-007`.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-ATOM-012",
+        status: Status::Partial,
+        section: "§3.12",
+        evidence: &["token/color.rs", "token/contrast.rs", "widget/slider.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this widget to Phase C on 2026-10-23. No `ColorPickerModel`, \
+             `Rgba8`, `Hsva`, `ColorSwatchButton`, saturation/value canvas, hue or alpha \
+             slider, hex input or preset swatch grid exists. Missing: the whole \
+             requirement — the 16x16px preview well over the 4x4px neutral checkerboard \
+             with its mandatory `1px border.strong` inner frame that keeps a near-black \
+             swatch visually bounded; the 180x140px SV canvas with its dual-ring \
+             crosshair thumb; the 4px hue and optional alpha sliders; the validated \
+             `#RRGGBB[AA]` text input; the 24x24px preset theme grid; and the `Live` / \
+             `Commit` / `Cancel` callbacks over `Rgba8`. Two pieces the section leans on \
+             are already written and are load-bearing rather than incidental: \
+             `token/color.rs` is the closed semantic colour set including \
+             `surface.code`, and `token/contrast.rs` is a WCAG 2.1 luminance and \
+             contrast-ratio solver that composites translucent layers before measuring — \
+             so the picker's live `4.80:1 AA` / `2.40:1 Fail` status chip already has \
+             its arithmetic available. What is missing is the colour *type* and every \
+             pixel: no `Rgba8`/`Hsva` pair exists and no HSV-to-RGB conversion does, so \
+             even the canvas's own coordinate maths is unwritten.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-ATOM-013",
+        status: Status::Partial,
+        section: "§3.13",
+        evidence: &["widget/badge_model.rs", "token/contrast.rs", "token/size.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this widget to Phase C on 2026-10-23. No `AvatarModel`, \
+             `AvatarSize`, `RatingModel`, `RatingStep`, star row, initials fallback or \
+             presence cut-out exists. Missing: the whole requirement — the 24 / 32 / \
+             36px circular or rounded-square container with its `1px border.strong` \
+             perimeter; the deterministic `image -> one-or-two uppercase initials -> \
+             generic person glyph` fallback cascade with the 4.50:1 floor its initials \
+             must clear on `accent.fill` or `surface.active`; the 6x6px presence badge \
+             with its `1px surface.base` cut-out ring; the row of five 24x24px star slots \
+             at `space.xs` gap with `status.warning` fills and `border.strong` empties; \
+             half-step versus whole-step rating with hover preview; clear-on-reclick and \
+             `Delete`; and the `Live` / `Commit` / `Cancel` callback set. Reusable pieces \
+             exist: `BadgeTone` and the §3.8 tones the presence dot would borrow are \
+             built in `widget/badge_model.rs`, and `token/contrast.rs` can verify the \
+             initials-on-fill pairing the moment one is drawn. Neither is assembled into \
+             an avatar or a rating control, and the star glyph itself is not among the \
+             marks this crate paints.",
+        ),
+        note: None,
+    },
     // --- §3B Composite Patterns --------------------------------------------
     //
-    // None of these eight has a framework type yet, so every one is `Partial`.
-    // For the two the app already draws (006, 007) the split is the same one
-    // D-2 draws everywhere else: the container and its chrome are framework
-    // work and are recorded here as gaps; the content inside is the app's,
-    // and these entries say so rather than claiming it.
+    // None of these fifteen is out of the crate's scope, but the split is no
+    // longer uniform: 001-008 are built here, and 009-015 are the Phase-C list
+    // the user deferred on 2026-10-23 and remain unbuilt. Where a composite is
+    // only partly framework work the boundary is the same one D-2 draws
+    // everywhere else: the container and its chrome are framework work and are
+    // recorded here as gaps; the content inside is the app's, and these
+    // entries say so rather than claiming it.
     Coverage {
         id: "UIF-COMP-001",
         status: Status::Implemented,
@@ -1783,16 +2163,260 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-008",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B",
-        evidence: &["surface/menu.rs"],
+        evidence: &[
+            "composite/breadcrumb.rs",
+            "composite/overflow_toolbar.rs",
+            "gallery_breadcrumb.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Both surfaces are implemented as pure solvers over caller-supplied \
+             measurements, so neither needs a font or a frame to be tested. The \
+             trail's `collapse` is a function of `(items, available_width)` alone \
+             that always keeps the root and the terminal inline; the hidden set is \
+             a prefix of the middle run, so widening can only un-hide and never \
+             swap one arbitrary set for another. The strip's `fit` evicts by \
+             declared `OverflowRank` — lower first, rightmost-first on a tie — \
+             with the layout index as the last sort key only, so moving an item \
+             along the strip cannot change when it is evicted; the evicted set is \
+             a prefix of that order, which is what makes the strip monotone too. \
+             The 0px vertical shift is structural rather than measured: \
+             `strip_height()` takes no argument, backed by a const assertion that \
+             the item and trigger boxes fit inside the strip, so the solver has no \
+             route from an eviction count to a height. \
+             Values the spec left open, recorded rather than papered over: the \
+             collapse order drops nearest-root first (GAP_COLLAPSE_ORDER); the \
+             terminal crumb is clickable and focusable, with the role carried on \
+             the emission so the host decides its ARIA (GAP_TERMINAL_CLICKABLE); \
+             the priority mechanism is an explicit `OverflowRank(u8)` rather than \
+             a positional rule (GAP_PRIORITY_MECHANISM), tied rightmost-first \
+             (TIE_BREAK); the `⋯` trigger is a normal tab stop whose Escape \
+             closes the menu and returns focus to itself (GAP_TRIGGER_FOCUS); the \
+             trigger reserve is charged only once the strip already fails to fit, \
+             because charging it always would evict from a strip that fits. A \
+             busy overflowed item is deliberately not a disabled one: a disabled \
+             row leaves the menu's focus roster entirely, which would make an \
+             in-flight action unreachable by keyboard, so the busy row keeps the \
+             enabled row's colour and focus stop and the refusal to re-fire \
+             belongs to the action engine. Colour divergences against §2.5: §3B.8 \
+             assigns the trail separator to `text.muted` while §2.5's border rows \
+             name no token for a trail separator at all (NOTE_SEPARATOR_TOKEN), \
+             and §2.5 calls `text.primary` the resting-label token but the trail \
+             paints it only on the `[…]` trigger, using `text.muted` for every \
+             ancestor (NOTE_PRIMARY_TOKEN_UNUSED). The separator is audited as a \
+             text pairing rather than chrome because it is a glyph the user reads; \
+             it measures 7.61:1 on `surface.base`, the figure §2.5 prints for \
+             `text.muted`.",
+        ),
+    },
+    Coverage {
+        id: "UIF-COMP-009",
+        status: Status::Partial,
+        section: "§3B.9",
+        evidence: &["widget/rove.rs", "surface/tooltip/mod.rs", "token/size.rs"],
         reason: Some(
-            "Not covered — no breadcrumb and no overflow toolbar exists. There is no \
-             `BreadcrumbBar` (segment list, separator, overflow folding of the middle \
-             segments, per-segment activation) and no `OverflowToolbar` (primary items \
-             plus an overflow menu) anywhere in the crate. The overflow menu primitive \
-             such a toolbar would fold into does exist as `surface::menu`, but nothing \
-             composes it into either pattern the spec names.",
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `NavigationRailModel`, \
+             `NavDestination`, compact/expanded mode, collapse toggle or pinned-utility \
+             split exists. Missing: the whole requirement — the 48px compact icon-only rail \
+             whose every cell carries a mandatory right-aligned hover tooltip on the \
+             `time.delay.tooltip_warm` handoff; the 220px expanded rail resizable within \
+             [180px, 320px] with 36px rows, a 16px leading icon, a 13px Medium label and \
+             an optional trailing count pill; the `surface.active` fill with its 2px \
+             `accent.border` leading indicator bar for the selected destination; the \
+             28x28px collapse toggle, the scrollable middle list and the divider above \
+             the pinned bottom utilities; and the `Commit`-based select, expand-toggle and \
+             resize-cancelling callback set. Primitives a builder would reuse are proven — \
+             `widget/rove.rs` for the wrapping single-tab-stop walk over enabled \
+             destinations and `surface::tooltip` for the hover card — but the rail, its \
+             width transition and its cross-session width persistence are unbuilt, and \
+             `time.slow` (240ms), the rung the compact-to-expanded transition is priced \
+             at, has no token under `UIF-TOK-007`.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-010",
+        status: Status::Partial,
+        section: "§3B.10",
+        evidence: &[
+            "widget/auto_suggest_model.rs",
+            "widget/auto_suggest_host.rs",
+            "surface/modal.rs",
+            "surface/zorder.rs",
+        ],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built as a palette: \
+             the user deferred this composite to Phase C on 2026-10-23. No \
+             `CommandPaletteModel`, `PaletteMode`, `PaletteGroup`, prefix-mode contract or \
+             two-stage `Escape` exists in palette form. Missing: the whole requirement — \
+             the 560x380px card top-centred at a fixed 64px offset over `surface.scrim` \
+             in Z-Band 3 / Escape Rank 2 so result counts never shift the input; the 40px \
+             search field with its leading glyph, its removable `>` / `#` / `@` mode chip \
+             that `Backspace` at caret 0 resets to Files, and its trailing `Esc` hint; the \
+             virtualized grouped result list with matched-span emphasis, the active-row \
+             subtitle promoted to `text.strong` under the Rule 4 foreground lock, and \
+             right-aligned mono shortcut pills; the 24px keyboard legend footer; and the \
+             `Live` / `Commit` / `Cancel` callback set. The closest relative in this crate \
+             is genuinely close and worth naming rather than hiding: `AutoSuggestModel` and \
+             `AutoSuggestHost` already implement a trailing-edge 200ms debounce restarted \
+             per keystroke, a monotonic generation guard that drops out-of-order answers \
+             and counts them, a roving highlight that deliberately leaves the text caret \
+             alone, and a two-stage `Escape`. None of that is a palette: there is no \
+             scrim-mounted modal card at the palette's band, no mode-prefix state, no \
+             grouped-result virtualization and no `Ctrl+K` binding — and the scrim, band \
+             and escape-rank plumbing exists independently in `surface/modal.rs` and \
+             `surface/zorder.rs` without being joined to any of it.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-011",
+        status: Status::Partial,
+        section: "§3B.11",
+        evidence: &["widget/badge.rs", "state.rs", "token/size.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `StepperModel`, \
+             `StepStatus`, `StepItem`, connector line, `PipsPagerModel` or pip strip \
+             exists. Missing: the whole requirement — the 36px horizontal and the vertical \
+             step sequences; the 24x24px pill node that encodes `Completed` / `Current` / \
+             `Pending` / `Error` by glyph *and* colour together rather than by tint alone; \
+             the `border.subtle` versus `accent.border` connector lines; the non-shifting \
+             wizard footer that renders `[Previous]` as `Disabled` rather than absent on \
+             step 0 so footer button coordinates never move between steps; the linear \
+             versus free-navigation gate; the 24px pips strip with its 6x6px inactive dots \
+             and 16x6px `radius.pill` active pip between its two 24x24px arrow buttons; \
+             and both callback sets. The redundant-cue rule the stepper exists to satisfy \
+             (`UIF-PRIN-005`) is honoured elsewhere in the crate and the check and \
+             exclamation marks are already painted by `widget/badge.rs`, but no step state \
+             machine, no completion ordering and no pip geometry exists anywhere.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-012",
+        status: Status::Partial,
+        section: "§3B.12",
+        evidence: &[
+            "surface/zorder.rs",
+            "surface/modal.rs",
+            "surface/movable.rs",
+            "surface/modal_tier.rs",
+        ],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `SideSheetModel`, \
+             `SheetMode`, docked/overlay/scrim variant, resize grab or pin state exists. \
+             Missing: the whole requirement — the 360px drawer resizable across \
+             [280px, 520px] over a 10px `size.splitter.grab` edge divider; the 36px \
+             header with its 16px SemiBold title, 24x24px `[Pin/Unpin]` and 24x24px \
+             `[Close]`; the padded scrollable body and optional 48px action footer; and \
+             the three-mode band mapping, `Docked` at Z-Band 0 sharing the horizontal \
+             workspace layout without covering content, `ModelessOverlay` at Z-Band 1 / \
+             Escape Rank 1 when focused, and `ModalScrim` at Z-Band 3 / Escape Rank 2 \
+             with the `UIF-MOD-002` dirty and busy close guard. Of any Phase-C item this \
+             one has the most nearly-available plumbing: `surface/zorder.rs` already owns \
+             all four bands and their escape ranks, `surface/modal.rs` proves the scrim, \
+             the focus trap and the dirty/busy guard, and `surface/movable.rs` proves a \
+             drag-and-clamp gesture over an injected geometry seam. None of it is docked, \
+             none of it is a sheet, and no rule maps a viewport narrower than 800px onto \
+             `ModalScrim`.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-013",
+        status: Status::Partial,
+        section: "§3B.13",
+        evidence: &[
+            "composite/virtual_list.rs",
+            "composite/table_view.rs",
+            "composite/tree_view.rs",
+            "composite/scroll_view.rs",
+        ],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `GridViewModel`, \
+             `GridTile`, column-count solver or two-dimensional selection state exists. \
+             Missing: the whole requirement — the deterministic column derivation of \
+             `max(1, floor((available + gap) / (min_tile + gap)))` computed over the \
+             width left after the reserved 10px `ScrollView` gutter, at `gap = space.md` \
+             with a 160px minimum tile, and the matching tile-width division; the \
+             virtualized 2D tile window; the `surface.active` plus 2px `accent.border` \
+             selection treatment with its top-left 16x16px checkbox overlay in \
+             `ExtendedMulti`; and the clamped 2D arrow map (`Left`/`Right` of one, \
+             `Up`/`Down` of `cols`, `Home`/`End` to first and last) with `Shift` and \
+             `Ctrl` anchored range and toggle matching §3B.6. The one-dimensional \
+             relatives are built and good: `composite/virtual_list.rs` virtualizes a row \
+             window with overscan and `f64` index arithmetic, `composite/scroll_view.rs` \
+             reserves the gutter, and `composite/table_view.rs` and `tree_view.rs` already \
+             clamp at the ends rather than wrapping and carry the `SelectionMode` the grid \
+             reuses by name. Nothing multiplies those into two dimensions, and the \
+             column-count derivation `UIF-VER-002` names has no solver to test.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-014",
+        status: Status::Partial,
+        section: "§3B.14",
+        evidence: &["widget/progress.rs", "state.rs", "token/size.rs"],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `EmptyStateModel`, \
+             `EmptyStateKind`, `Skeleton` placeholder or `PaginationModel` exists — a gap \
+             this ledger has already had to record from the other direction, because \
+             `UIF-PRIN-004` is held `Partial` precisely on the words 'this crate has no \
+             empty-state or placeholder component'. Missing: the whole requirement — the \
+             centred 24px-padded, 360px-max placeholder that distinguishes `NoItems`, \
+             `NoMatches { query }` and `LoadError { code }` with its 40x40px icon badge, \
+             16px SemiBold headline, 13px explanation and optional recovery CTA; the \
+             `Skeleton` that reserves the exact target widget's dimensions and pulses \
+             `surface.raised` to `surface.hover` over 1200ms on an injected phase, going \
+             static with a `border.subtle` under injected `reduced_motion`; and the 32px \
+             pagination footer with its mono range summary, its centre page-size combobox, \
+             its five boundary-clamped navigation buttons rendered `Disabled` rather than \
+             absent at the ends, and its `on_page_change` / `on_page_size_change` \
+             callbacks. Injected-phase animation input already has a precedent — \
+             `widget/progress.rs` takes a `phase` and a `reduced_motion` bool and never \
+             reads a clock — but the 1200ms pulse has no `time.*` token under \
+             `UIF-TOK-007` and no placeholder paints anywhere in this crate.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-COMP-015",
+        status: Status::Partial,
+        section: "§3B.15",
+        evidence: &[
+            "token/color.rs",
+            "token/typography.rs",
+            "composite/form_field.rs",
+            "widget/text_input.rs",
+        ],
+        reason: Some(
+            "Specified, framework-owned under D-2, and nothing of it is built: the user \
+             deferred this composite to Phase C on 2026-10-23. No `CodeBlock`, \
+             `DiffViewerModel`, `DiffHunk`, `DiffDisplayMode`, `KeybindRecorderModel` or \
+             `KeyChord` type exists. Missing: the whole requirement — the code container \
+             with its 28px header, language badge and fixed-width `[Copy]` slot that holds \
+             the success tick for `time.hold.copied` (1500ms) at 0px shift, and its 13px \
+             mono body with a 40px right-aligned tabular line-number gutter; the diff view \
+             that pairs `+` and `-` glyphs with 2px `status.success` and \
+             `status.danger.text` left bars and distinct text roles rather than relying \
+             on background tint alone, in unified and side-by-side modes with per-hunk \
+             accept and reject buttons in the hunk header; and the keybind recorder's \
+             32px listening input, mono keycap pills, trailing clear button, raw chord \
+             interception with `Escape` cancelling without clearing, and conflict \
+             surfacing through `FormField` validation. Two blockers are recorded against \
+             other requirements rather than solved here: `UIF-TOK-004` models no font \
+             family, so `FontFamily::Mono` — the type all three of these are written in — \
+             has no rung, and `time.hold.copied` has no token under `UIF-TOK-007`. The \
+             `surface.code` background the section asks for does already exist in \
+             `token/color.rs`, so the palette is not the gap.",
         ),
         note: None,
     },
@@ -2281,6 +2905,48 @@ const SPEC_COVERAGE: &[Coverage] = &[
              geometry app-owned. The iced text caret is permanently outside the \
              recorder's surface rather than deferred: no bounds, fill or token for it \
              ever crosses the renderer protocol, so this crate cannot snapshot it.",
+        ),
+        note: None,
+    },
+    Coverage {
+        id: "UIF-VER-005",
+        status: Status::Partial,
+        section: "§6.5",
+        evidence: &[
+            "widget/button_widget.rs",
+            "widget/password_model.rs",
+            "composite/table_cell.rs",
+            "gallery_secret.rs",
+            "token_lint.rs",
+            "bin/gallery.rs",
+        ],
+        reason: Some(
+            "Two of the seven clauses are machine-checked; the gate as such does not exist. \
+             Checked: the icon-only tooltip rule, enforced at the type boundary — \
+             `Button::icon_only` cannot be built without naming the label its tooltip \
+             shows, `tooltip_violation` reports the forbidden shape without panicking, and \
+             a debug shield fires at the moment a box becomes icon-only; and the \
+             `SecretInput` redaction clause behind `NFR-009`, where \
+             `widget/password_model.rs` rewrites `Debug` and `Display` to print the mask \
+             so a secret cannot reach a log through the ordinary formatting path, with the \
+             gallery asserting `reveal.debug-redacted` on the cell. Missing: the other \
+             five, and the harness that would check them. No check reads a label for \
+             sentence case, so ALL-CAPS and Title Case on chrome fail nothing. No check \
+             compares a `...` suffix against whether the action opens a secondary prompt, \
+             so both the required and the forbidden ellipsis pass. Nothing counts \
+             high-emphasis `Primary` fills per dialog, form or toolbar scope, so a footer \
+             with two primary CTAs is not caught — `DialogButtonRole` carries a role, not \
+             an arity. No `ControlDensity` type exists, so no check can assert that a \
+             horizontal row is homogeneous at 28px or 32px. Truncation-to-tooltip \
+             registration is not automatic: `composite/table_cell.rs::is_truncated` \
+             reports overflow to its caller and stops there. And 'Reward Early, Punish \
+             Late' is ungated because it is unimplemented — there is no `pristine` flag \
+             for a gate to read (`UIF-PRIN-009`). The gates that do run belong to other \
+             requirements: `bin/gallery.rs` fails on `unmapped_colours` and \
+             `contrast_failures`, which is `UIF-VER-001` and `UIF-VER-004`, and \
+             `token_lint.rs` scans for numeric and colour literals, which is \
+             `UIF-VER-001`. Nothing in the crate fails on a microcopy, emphasis-arity or \
+             density violation today.",
         ),
         note: None,
     },

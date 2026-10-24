@@ -450,6 +450,27 @@ fn expected_ids() -> Vec<String> {
     ] {
         ids.push(format!("table-header/{posture}"));
     }
+    // `UIF-COMP-008` / `INC-50`: the trail's emphasis ladder, the
+    // separator pairing, the five elision regimes, the `...` trigger,
+    // the five eviction regimes and the three overflow-row postures.
+    for role in ["root", "middle", "terminal"] {
+        for state in ["rest", "hovered", "pressed", "disabled"] {
+            ids.push(format!("breadcrumb-crumb/{role}/{state}"));
+        }
+    }
+    ids.push("breadcrumb-separator/rest".to_string());
+    for regime in ["fits", "elide-1", "elide-2", "elide-3", "below-floor"] {
+        ids.push(format!("breadcrumb-collapse/{regime}"));
+    }
+    for state in ["rest", "hovered", "pressed", "disabled"] {
+        ids.push(format!("overflow-trigger/{state}"));
+    }
+    for regime in ["fits", "evict-1", "evict-2", "evict-3", "last-standing"] {
+        ids.push(format!("overflow-strip/{regime}"));
+    }
+    for posture in ["enabled", "disabled", "busy"] {
+        ids.push(format!("overflow-row/{posture}"));
+    }
     ids.extend(
         [
             "rest",
@@ -707,6 +728,16 @@ fn per_subject_cell_counts_match_the_plan() {
         ("table-column", 4),
         ("table-header", 4),
         ("tree-row", 11),
+        // `UIF-COMP-008` / `INC-50`: the trail's three roles across four
+        // postures, the separator pairing, the five elision regimes, the
+        // trigger's four postures, the five eviction regimes and the
+        // three overflow-row postures.
+        ("breadcrumb-crumb", 12),
+        ("breadcrumb-separator", 1),
+        ("breadcrumb-collapse", 5),
+        ("overflow-trigger", 4),
+        ("overflow-strip", 5),
+        ("overflow-row", 3),
         ("menu", 12),
         ("menu-glyph", 10),
         // `INC-36`: the `000b` tiers on the four surface hosts.

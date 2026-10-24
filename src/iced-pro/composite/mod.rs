@@ -37,6 +37,12 @@
 //!   (`UIF-COMP-001`, `UIF-PRIN-003`)
 //! * [`settings_row`] � the horizontal split: a filling text column and a
 //!   shrinking control column on one raised card row (`UIF-COMP-001`)
+//! * [`breadcrumb`] - the trail's elision solver: a pure function of
+//!   `(items, available_width)` that keeps the root and the current-location
+//!   crumb at every width, drops middle crumbs from the root end so the
+//!   hidden set can only shrink monotonically as the bar widens, and leaves
+//!   the separator in the gap between targets rather than as a target that
+//!   ignores clicks (`UIF-COMP-008`)
 //! * [`card`] � the grouping container: `surface.raised`, `radius.card`,
 //!   `space.lg` padding, and the resting-vs-elevated border (`UIF-COMP-005`)
 //! * [`list_tile`] � the three-slot row: leading mark, filling text,
@@ -68,6 +74,12 @@
 //!   semantics [`tree_view`] defines, cell-level keyboard traversal, a stable
 //!   sort that cannot change which rows are selected, the resize gesture, and
 //!   the sticky header kept out of the row-recycling cycle
+//! * [`overflow_toolbar`] - the priority-declared overflow strip: each item
+//!   declares its own overflow rank rather than learning it from its position,
+//!   eviction follows that declaration, and the strip's height function
+//!   cannot see how many items went inline versus into the menu, which is what
+//!   makes the `0px` vertical-shift requirement structural instead of
+//!   observed (`UIF-COMP-008`, `UIF-PRIN-003`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures �3B prints that no rung carries � the `20px` field header, the
@@ -75,12 +87,14 @@
 //! Surface Geometry Constants in [`crate::token_lint`] rather than passed
 //! off as token reads.
 
+pub mod breadcrumb;
 pub mod card;
 pub mod expander;
 pub mod form_field;
 pub mod info_bar;
 pub mod list_tile;
 pub mod notification;
+pub mod overflow_toolbar;
 pub mod scroll_view;
 pub mod settings_row;
 pub mod table_cell;

@@ -49,7 +49,14 @@ use crate::token_lint::{
 /// 107 as of `INC-47`, which added the notification subsystem:
 /// `composite/notification.rs` (the shared severity and model),
 /// `composite/info_bar.rs` and `composite/toast.rs`.
-const PIN_FILES_SCANNED: usize = 116;
+///
+/// 118 as of `INC-50`, whose two additions are the trail and the strip —
+/// `composite/breadcrumb.rs` and `composite/overflow_toolbar.rs`.
+///
+/// 119 as of the same increment's gallery split module,
+/// `gallery_breadcrumb.rs`, which sits outside `composite/` and so joins
+/// the file count without joining Rule B.
+const PIN_FILES_SCANNED: usize = 119;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -72,7 +79,10 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 77 as of `INC-49`, whose four additions are the structured grid's
 /// resolvers — `composite/table_column.rs`, `composite/table_cell.rs`,
 /// `composite/table_header.rs` and `composite/table_view.rs`.
-const PIN_RULE_B_FILES: usize = 77;
+///
+/// 79 as of `INC-50`, whose two additions are `composite/breadcrumb.rs`
+/// and `composite/overflow_toolbar.rs`.
+const PIN_RULE_B_FILES: usize = 79;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -137,7 +147,15 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// SORT_INDICATOR_SIZE, SORT_INDICATOR_GAP}` and
 /// `table_view::ROW_HEIGHT` (which reads `BODY_ROW_MIN_HEIGHT` rather
 /// than restating 32px, so the row height has exactly one source).
-const PIN_TOKEN_BOUND: usize = 186;
+///
+/// 188 as of `INC-50`, whose two additions are the two minimums that
+/// read a sibling rather than a number — `breadcrumb::MIN_SEGMENT_WIDTH`
+/// and `overflow_toolbar::MIN_ITEM_WIDTH`, both aliased to their own
+/// 24px segment height so a crumb or a strip item can never be narrower
+/// than it is tall. They are token-bound in Rule B's sense because the
+/// expression carries no literal at all; the ten figures that *are*
+/// literals join the §1.1 registry below instead.
+const PIN_TOKEN_BOUND: usize = 188;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -163,7 +181,20 @@ const PIN_RATIO: usize = 1;
 /// the divider so the sort target and the handle cannot overlap. No rung
 /// carries a half-grab, so the figure needs the registry rather than a
 /// token read.
-const PIN_SURFACE_BOUND: usize = 26;
+///
+/// 36 as of `INC-50`, which registers the ten §3B.8 figures no rung
+/// carries: the trail's `BAR_HEIGHT` (28px), `SEGMENT_HEIGHT` (24px),
+/// `SEGMENT_PADDING_X` (6px), `SEGMENT_GAP` (4px) and
+/// `ELLIPSIS_TRIGGER_WIDTH` (28px), plus the strip's `STRIP_HEIGHT`
+/// (28px), `ITEM_HEIGHT` (24px), `ITEM_GAP` (4px), `TRIGGER_SIZE`
+/// (28px) and `TRIGGER_GAP` (8px). §3B.8 fixes each of these outright
+/// as part of the two surfaces' geometry, and §2.3 has no rung for a
+/// 28px bar or a 24px Ghost-button row, so the registry is the only
+/// authority available. `TRIGGER_RESERVE` deliberately does *not* join,
+/// and neither does it land anywhere else: it is `TRIGGER_SIZE +
+/// TRIGGER_GAP`, a derived sum whose name carries none of the markers
+/// Rule B scans for, so the rule never inspects it.
+const PIN_SURFACE_BOUND: usize = 36;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 
