@@ -2931,7 +2931,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "Validation is injected data (`ValidationRule::{Name, Rename}`) over the \
              host's illegal-basename set; `InputLayout::solve` has no 'error showing' \
              parameter, so the reserved slot cannot shift the footer, and `Enter` on an \
-             invalid value reveals the message while focus stays in the field.",
+             invalid value reveals the message while focus stays in the field.\n\n\
+             KNOWN GAP (found during app integration, INT-4): `check_basename` rejects \
+             empty, edge-spacing, control characters and `/ \\ : * ? \" < > |`, but does \
+             NOT reject `.` or `..` as whole names. `ValidationRule::Name` therefore \
+             accepts a directory-traversal name. The framework rule is a character-class \
+             check, not a traversal guard. `fastmd` deliberately does NOT adopt \
+             `ValidationRule::Name` for its name dialogs and keeps its own stricter \
+             `is_safe_basename`, because accepting `..` in a filesystem-facing create or rename dialog is a security regression. A host that needs a traversal-safe \
+             name must layer its own check; this rule alone is not sufficient.",
         ),
     },
     Coverage {

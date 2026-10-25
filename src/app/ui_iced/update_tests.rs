@@ -473,6 +473,92 @@ fn test_create_commands_open_their_name_entry_dialogs() {
 }
 
 #[test]
+fn an_absorbed_card_press_leaves_the_dialog_open_and_unchanged() {
+    // UIF-INP-002: the card's hit-capture boundary reports the press it
+    // swallowed, and the reducer's answer is deliberately nothing. A
+    // click on a disabled `Ok`, on the padding ring, or on dead space
+    // between rows must not read as a dismissal.
+    //
+    // `CreateDirectory` is the fixture precisely because it opens with an
+    // empty field: `can_confirm()` is false, so this is the exact state
+    // in which a disabled-`Ok` click happens.
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::CreateDirectory {
+            parent: PathBuf::from("/notes"),
+        }),
+    );
+    let before = state.overlay.dialog.clone();
+    assert!(before.is_open());
+    assert!(
+        !before.can_confirm(),
+        "an empty create field must render `Ok` disabled"
+    );
+
+    let _ = update(&mut state, Message::Dialog(DialogMessage::Absorbed));
+
+    assert!(
+        state.overlay.dialog.is_open(),
+        "absorption is not dismissal"
+    );
+    assert_eq!(state.overlay.dialog, before);
+}
+
+#[test]
+fn a_blur_message_commits_the_field_through_the_reducer() {
+    // The framework field reports `FocusChanged(false)`; the reducer turns
+    // that into the commit boundary `UIF-PRIN-009` names, and the card
+    // shows what it had been withholding.
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::CreateDirectory {
+            parent: PathBuf::from("/notes"),
+        }),
+    );
+    assert!(!state.overlay.dialog.is_touched());
+    assert!(state.overlay.dialog.painted_error().is_none());
+
+    let _ = update(&mut state, Message::Dialog(DialogMessage::Blurred));
+
+    assert!(state.overlay.dialog.is_touched());
+    assert_eq!(
+        state.overlay.dialog.painted_error(),
+        Some(crate::ui::strings::DIALOG_NAME_EMPTY_ERROR),
+        "leaving the field makes the withheld invalid visible"
+    );
+}
+
+#[test]
+fn a_disallowed_character_reaches_the_card_without_a_commit() {
+    // The keystroke itself, not any commit boundary, puts the red on the
+    // screen: the reducer only stores what the framework said.
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::Rename(PathBuf::from("/notes/a.md"))),
+    );
+    let _ = update(
+        &mut state,
+        Message::Dialog(DialogMessage::NameChanged {
+            text: "a/b".to_string(),
+        }),
+    );
+
+    assert!(
+        !state.overlay.dialog.is_touched(),
+        "typing never commits the field"
+    );
+    assert_eq!(
+        state.overlay.dialog.painted_error(),
+        Some(crate::ui::strings::DIALOG_NAME_UNSAFE_ERROR),
+        "and the card still paints the disallowed-character flag"
+    );
+    assert!(!state.overlay.dialog.can_confirm());
+}
+
+#[test]
 fn test_window_opening_commands_open_their_iced_windows() {
     let (mut state, _storage) = fresh_state();
 

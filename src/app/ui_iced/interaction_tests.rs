@@ -828,10 +828,17 @@ fn test_name_entry_dialog_submit_after_reducer_accepts_the_name() {
         !inert.contains(&Message::Dialog(DialogMessage::Submitted)),
         "an empty name must leave the Ok button inert, got {inert:?}"
     );
+    // INT-4 changed what the inert click produces. Before, the disabled `Ok`
+    // captured nothing and the press fell all the way through to the modal
+    // scrim, so clicking a disabled `Ok` **dismissed the dialog** — the
+    // exact behaviour `UIF-INP-002` forbids ("Card Hit-Capture Boundary:
+    // absorbs all clicks inside card perimeter"). The card now owns a
+    // hit-capture boundary that reports the swallow instead.
     assert_eq!(
         inert,
-        vec![Message::Dialog(DialogMessage::Dismissed)],
-        "the inert Ok click must fall through to the modal scrim, which dismisses",
+        vec![Message::Dialog(DialogMessage::Absorbed)],
+        "the inert Ok click must be absorbed by the card, never reach the scrim \
+         (`UIF-INP-002`)",
     );
 
     // The reducer accepts the typed name.

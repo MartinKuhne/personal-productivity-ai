@@ -617,6 +617,24 @@ pub enum DialogMessage {
     Submitted,
     /// The Cancel button was pressed.
     Cancelled,
+    /// The name field lost focus (`UIF-PRIN-009`).
+    ///
+    /// Blur is one of the three commit boundaries the 'Punish Late' pillar
+    /// names, so the reducer routes it to
+    /// [`crate::ui_iced::dialogs::DialogState::blur`] and the field stops
+    /// being pristine from this frame on. It changes no value and closes
+    /// nothing — it only changes what the card is allowed to show.
+    Blurred,
+    /// A press landed inside the card perimeter and the card swallowed it
+    /// (`UIF-INP-002`).
+    ///
+    /// Emitted for the padding ring, a **disabled** confirm button, and
+    /// dead space between rows — every press the card's own controls did
+    /// not want. The reducer deliberately does nothing with it: the point
+    /// of the message is that it is *not* [`Self::Dismissed`], so the dialog
+    /// stays open. It exists as a discrete event so the absorption is
+    /// observable rather than merely silent ([FMD-071]).
+    Absorbed,
     /// The scrim was clicked (or Escape pressed) — the dialog is
     /// dismissed without confirming. Kept distinct from
     /// [`Self::Cancelled`] so the reducer can tell an explicit cancel

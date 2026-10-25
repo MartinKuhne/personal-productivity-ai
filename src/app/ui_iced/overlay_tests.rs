@@ -27,11 +27,6 @@ enum TestModal {
     Rename,
 }
 
-/// The viewport the geometry tests clamp against.
-fn viewport() -> Size {
-    Size::new(800.0, 600.0)
-}
-
 /// A freshly closed slot with the modal kind pinned.
 fn closed_slot() -> OverlaySlot<TestModal> {
     OverlaySlot::closed()
@@ -176,91 +171,6 @@ fn a_dismissed_slot_can_open_again() {
     assert_eq!(slot.anchor(), Some(Point::new(7.0, 8.0)));
 }
 
-// --- geometry ---------------------------------------------------------------
-
-/// A stand-in card box: 200px wide, `rows` rows of 24px inside 4px of
-/// padding.
-///
-/// These are the numbers the removed legacy flat-card model produced. They
-/// stay here, local to the tests, because [`clamp_anchor`] is generic over
-/// any box and the clamp behaviour under test does not depend on where the
-/// size came from.
-fn card(rows: usize) -> Size {
-    Size::new(200.0, 4.0 * 2.0 + 24.0 * rows as f32)
-}
-
-#[test]
-fn clamp_anchor_leaves_a_fully_visible_box_untouched() {
-    let size = card(3);
-    let anchor = Point::new(10.0, 10.0);
-
-    assert_eq!(clamp_anchor(anchor, size, viewport()), anchor);
-}
-
-#[test]
-fn clamp_anchor_pulls_the_box_back_from_the_right_edge() {
-    let size = card(3);
-
-    let clamped = clamp_anchor(Point::new(795.0, 10.0), size, viewport());
-
-    assert_eq!(clamped.x, viewport().width - size.width);
-    assert_eq!(clamped.y, 10.0);
-}
-
-#[test]
-fn clamp_anchor_pulls_the_box_back_from_the_bottom_edge() {
-    let size = card(3);
-
-    let clamped = clamp_anchor(Point::new(10.0, 599.0), size, viewport());
-
-    assert_eq!(clamped.x, 10.0);
-    assert_eq!(clamped.y, viewport().height - size.height);
-}
-
-#[test]
-fn clamp_anchor_pulls_back_on_both_axes_at_the_corner() {
-    let size = card(3);
-
-    let clamped = clamp_anchor(Point::new(4000.0, 4000.0), size, viewport());
-
-    assert_eq!(
-        clamped,
-        Point::new(
-            viewport().width - size.width,
-            viewport().height - size.height
-        )
-    );
-}
-
-#[test]
-fn clamp_anchor_never_goes_negative_when_the_viewport_is_smaller_than_the_box() {
-    let tiny = Size::new(20.0, 20.0);
-
-    let clamped = clamp_anchor(Point::new(500.0, 500.0), card(30), tiny);
-
-    assert_eq!(
-        clamped,
-        Point::new(0.0, 0.0),
-        "the lower bound must win so the card's top-left corner stays on screen"
-    );
-}
-
-#[test]
-fn clamp_anchor_clamps_a_negative_anchor_to_the_origin() {
-    let clamped = clamp_anchor(Point::new(-50.0, -25.0), card(2), viewport());
-
-    assert_eq!(clamped, Point::new(0.0, 0.0));
-}
-
-#[test]
-fn clamp_anchor_is_idempotent() {
-    let size = card(5);
-    let once = clamp_anchor(Point::new(900.0, 700.0), size, viewport());
-    let twice = clamp_anchor(once, size, viewport());
-
-    assert_eq!(once, twice);
-}
-
 // --- confirm / cancel mapping -----------------------------------------------
 
 fn pair(confirm_enabled: bool) -> (Option<TestMessage>, TestMessage) {
@@ -365,7 +275,12 @@ fn modal_at_fills_its_parent_like_modal() {
     // full-area scrim contract; only the card placement differs.
     let card: Element<'_, TestMessage> = text("anchored dialog").into();
 
-    let anchored = modal_at(card, Point::new(40.0, 60.0), TestMessage::Close);
+    let anchored = modal_at(
+        card,
+        Point::new(40.0, 60.0),
+        TestMessage::Close,
+        TestMessage::Close,
+    );
 
     assert_eq!(
         anchored.as_widget().size(),

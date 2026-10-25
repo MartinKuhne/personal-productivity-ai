@@ -50,10 +50,12 @@
 //!
 //! ## What positioning IS achievable
 //!
-//! * Exact viewport clamping through [`clamp_anchor`], which is what the
-//!   dialogs in this module use. Menu cards no longer clamp by hand:
-//!   [`anchor::solve`](iced_pro::geometry::anchor::solve) resolves the
-//!   placement, including the flip, before the card is ever laid out.
+//! * Viewport clamping is no longer this module's job. Every floating card
+//!   here is placed by [`anchor::solve`](iced_pro::geometry::anchor::solve),
+//!   which resolves the flip (menu cards) or the cursor-proximal clamp and
+//!   `8px` viewport margin (input dialogs) before the card is laid out.
+//!   The hand-rolled `clamp_anchor` this module used to own was retired in
+//!   integration increment INT-4 for exactly that reason.
 //! * Centred, blocking modals with a dimmed scrim ([`modal`]), and the
 //!   same modal placed at an explicit clamped top-left position
 //!   ([`modal_at`] — the cursor-anchored small dialogs).
@@ -76,10 +78,10 @@
 //!   supplies nested parent/child surfaces without adding `iced_aw`; the
 //!   flat helpers in this module remain intentionally single-level.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
-//!   (`menu.rs:244-270`), but we are not using `Menu`. [`clamp_anchor`]
-//!   clamps rather than flips, which is all the dialogs need. Menu cards
-//!   get their flip from [`anchor::solve`](iced_pro::geometry::anchor::solve),
-//!   which mirrors an axis when the preferred side cannot hold the card.
+//!   (`menu.rs:244-270`), but we are not using `Menu`. This module clamps
+//!   nothing at all: [`anchor::solve`](iced_pro::geometry::anchor::solve)
+//!   mirrors an axis when the preferred side cannot hold the card, and
+//!   `Anchor::CursorProximal` deliberately never flips.
 //!
 //! # Expected call shapes
 //!
@@ -124,14 +126,10 @@
 mod tests;
 
 use iced::widget::{MouseArea, Row, button, container, mouse_area, space, stack, text};
-use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Size};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 use crate::ui::strings;
 use crate::ui_iced::theme::scrim_color;
-
-/// Gap left between the anchor point and the menu card so the cursor does
-/// not sit on the first row.
-pub const MENU_ANCHOR_GAP: f32 = 2.0;
 
 /// Padding inside a modal dialog card.
 pub const MODAL_PADDING: f32 = 16.0;
@@ -254,18 +252,6 @@ impl<Kind> OverlaySlot<Kind> {
         *self = Self::Closed;
         was_open
     }
-}
-
-/// Clamps `anchor` so a `size` box placed at it stays inside `viewport`.
-///
-/// The lower bound wins when the viewport is smaller than the box, so the
-/// result is always `>= 0` and the card's top-left corner is on screen.
-#[must_use]
-pub fn clamp_anchor(anchor: Point, size: Size, viewport: Size) -> Point {
-    let max_x = (viewport.width - size.width).max(0.0);
-    let max_y = (viewport.height - size.height).max(0.0);
-
-    Point::new(anchor.x.clamp(0.0, max_x), anchor.y.clamp(0.0, max_y))
 }
 
 /// The outcome of a confirm / cancel button pair.
@@ -417,56 +403,6 @@ pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     }
 }
 
-/// Mounts a **prebuilt card** over `base`, anchored at `anchor`.
-///
-/// A low-level flat-card mounting helper for callers that render the card
-/// themselves. Framework-driven menus use
-/// [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay)
-/// instead. This helper layers `base`, a transparent [`input_blocker`], and
-/// the card pushed to the [`clamp_anchor`]ed position; a click outside emits
-/// `on_close`.
-///
-/// `viewport` is the size of the area `base` fills; `size` is the card's
-/// rendered size, which the caller must know up front — the framework's
-/// [`card_size`](crate::ui_iced::menu_surface::card_size) gives it exactly
-/// for a menu card.
-#[must_use]
-pub fn with_card_at<'a, Message>(
-    base: Element<'a, Message>,
-    anchor: Point,
-    card: Element<'a, Message>,
-    size: Size,
-    viewport: Size,
-    on_close: Message,
-) -> Element<'a, Message>
-where
-    Message: Clone + 'a,
-{
-    let position = clamp_anchor(
-        Point::new(anchor.x + MENU_ANCHOR_GAP, anchor.y + MENU_ANCHOR_GAP),
-        size,
-        viewport,
-    );
-
-    stack(vec![
-        base,
-        input_blocker(on_close).into(),
-        container(card)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: position.y,
-                right: 0.0,
-                bottom: 0.0,
-                left: position.x,
-            })
-            .into(),
-    ])
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
-}
-
 /// A blocking modal overlay: scrim + centred dialog card.
 ///
 /// The returned element fills its parent, so the caller stacks it over the
@@ -508,13 +444,31 @@ where
 ///
 /// Same scrim + card chrome as [`modal`]; only the placement differs. The
 /// card's top-left corner sits at `position`, which the caller resolves
-/// with [`clamp_anchor`] (or a centre fallback) before mounting — the
-/// shape the cursor-anchored small dialogs need. Like [`modal`], any click
-/// outside the card lands on the scrim and emits `on_dismiss`.
+/// through [`iced_pro::geometry::anchor::solve`] before mounting — the
+/// shape the cursor-anchored small dialogs need.
+///
+/// # The card's hit-capture boundary (`UIF-INP-002`)
+///
+/// The padded card is wrapped in a [`mouse_area`] that captures every
+/// press landing inside the card perimeter and publishes `on_absorb`.
+/// [`MouseArea`] updates its **content first** and only takes the event
+/// itself when nothing below consumed it (`mouse_area.rs:225-241`), so
+/// the card's live controls keep their presses exactly as before. What
+/// falls through to the boundary is the padding ring, a **disabled**
+/// button, and dead space between rows — and those presses stop there
+/// instead of reaching the scrim. Clicking a disabled `Ok` therefore
+/// cannot dismiss the dialog.
+///
+/// The wrap is layout-transparent: `MouseArea::size` and `::layout`
+/// delegate straight to their content (`mouse_area.rs:185-199`), so the
+/// capture area is exactly the visible card, padding included.
+///
+/// A click outside the card lands on the scrim and emits `on_dismiss`.
 #[must_use]
 pub fn modal_at<'a, Message>(
     content: Element<'a, Message>,
     position: Point,
+    on_absorb: Message,
     on_dismiss: Message,
 ) -> Element<'a, Message>
 where
@@ -527,7 +481,7 @@ where
 
     stack(vec![
         scrim_blocker(on_dismiss).into(),
-        container(card)
+        container(mouse_area(card).on_press(on_absorb))
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(Padding {

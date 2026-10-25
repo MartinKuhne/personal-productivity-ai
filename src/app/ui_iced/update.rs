@@ -1278,6 +1278,19 @@ fn reduce_dialog(state: &mut AppState, message: DialogMessage) -> Vec<Task<Messa
             state.overlay.dialog.cancel();
             Vec::new()
         }
+        DialogMessage::Blurred => {
+            // Blur is a commit boundary, not a value change: it decides
+            // what the card may show from here on (`UIF-PRIN-009`).
+            state.overlay.dialog.blur();
+            Vec::new()
+        }
+        DialogMessage::Absorbed => {
+            // UIF-INP-002: the card boundary took the press. Deliberately
+            // no state change — the whole contract is that a click on a
+            // disabled `Ok` or on the card's padding leaves the dialog
+            // open and the tree behind it untouched.
+            Vec::new()
+        }
         DialogMessage::DestinationSelected { path } => {
             state.overlay.dialog.select_destination(path);
             Vec::new()
