@@ -11,6 +11,13 @@
 //! "System" content library rooted in a temp dir, so the skill-folder
 //! lookup never touches the real user profile.
 
+// Several assertions in the INT-7b section target compile-time token values
+// on purpose: pinning a constant is the whole point, so a retuned rung must
+// fail the suite rather than pass silently. `clippy::assertions_on_constants`
+// cannot tell a spec pin from a tautology (same treatment as
+// `src/iced-pro/token/*_tests.rs`).
+#![allow(clippy::assertions_on_constants)]
+
 use super::*;
 use crate::ui_iced::context_menu::{ContextGroup, ContextRow};
 use crate::ui_iced::test_helpers::test_app;
@@ -819,6 +826,364 @@ fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
         row_text_color(&palette, true),
         row_text_color(&palette, false)
     );
+}
+
+// --- INT-7b: framework token bindings, the 12px floor, row geometry ---
+//
+// These pins are deliberately written against the **framework** constants
+// rather than against numbers, plus an `assert_ne!` against each literal
+// this increment retired (INT-7a precedent). A future edit that restores
+// a retired value fails a test that names the value, not a diff against a
+// constant that would have moved with it.
+
+use iced_pro::composite::tree_row;
+use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::contrast::contrast_ratio;
+use iced_pro::token::{size, space, typography};
+use iced_pro::widget::text_input as pro_text_input;
+
+/// The literal this increment retired for the tree row's label size.
+const RETIRED_ROW_TEXT_SIZE: f32 = 14.0;
+/// The literal this increment retired for the secondary search lines —
+/// the illegal sub-floor size.
+const RETIRED_SECONDARY_TEXT_SIZE: f32 = 11.0;
+/// The literal this increment retired for the per-depth indent step.
+const RETIRED_INDENT_PER_DEPTH: f32 = 18.0;
+/// The literal this increment retired for the row's horizontal inset.
+const RETIRED_ROW_PADDING_X: f32 = 6.0;
+/// The literal this increment retired for the panel body's padding.
+const RETIRED_PANEL_PADDING: f32 = 6.0;
+/// The literal this increment retired for the auto-fit slack.
+const RETIRED_ROW_WIDTH_SLACK: f32 = 40.0;
+/// The literal this increment retired for the search-result card height.
+const RETIRED_SEARCH_ROW_HEIGHT: f32 = 52.0;
+
+#[test]
+fn no_text_the_panel_renders_falls_below_the_twelve_point_floor() {
+    let floor = typography::MIN_SIZE;
+    for (site, text_size) in PANEL_TEXT_SITES {
+        assert!(
+            *text_size >= floor,
+            "`{site}` renders at {text_size}pt, below the {floor}pt \
+             UIF-TOK-004 interface floor"
+        );
+    }
+}
+
+#[test]
+fn the_floor_guard_covers_every_render_site_the_panel_draws() {
+    // Ten sites, four distinct sizes. Adding a render site without
+    // extending this list (and re-checking it against the floor) fails
+    // here rather than going unguarded. `f32` is not `Ord`, so the
+    // distinct-size set is keyed on the bit patterns.
+    assert_eq!(
+        PANEL_TEXT_SITES.len(),
+        10,
+        "the panel renders ten text sites; the guard list has changed length"
+    );
+
+    let distinct: std::collections::BTreeSet<u32> = PANEL_TEXT_SITES
+        .iter()
+        .map(|(_, text_size)| text_size.to_bits())
+        .collect();
+    let expected: std::collections::BTreeSet<u32> = [
+        HEADER_SIZE,
+        ROW_TEXT_SIZE,
+        SECONDARY_TEXT_SIZE,
+        SEARCH_GLYPH_SIZE,
+    ]
+    .into_iter()
+    .map(f32::to_bits)
+    .collect();
+    assert_eq!(
+        distinct, expected,
+        "the guard list must cover exactly the sizes the panel renders"
+    );
+}
+
+#[test]
+fn the_retired_eleven_point_secondary_size_is_gone() {
+    assert_eq!(
+        SECONDARY_TEXT_SIZE,
+        typography::CAPTION.size,
+        "the secondary lines sit on `type.caption`"
+    );
+    assert_eq!(
+        SECONDARY_TEXT_SIZE,
+        typography::MIN_SIZE,
+        "`caption` is the rung that sits exactly on the floor, which is what \
+         makes it the legal home for the smallest text in the panel"
+    );
+    assert_ne!(
+        SECONDARY_TEXT_SIZE, RETIRED_SECONDARY_TEXT_SIZE,
+        "11pt is below the UIF-TOK-004 floor and must not come back"
+    );
+}
+
+#[test]
+fn the_row_label_sits_on_the_framework_label_rung() {
+    assert_eq!(
+        ROW_TEXT_SIZE,
+        tree_row::LABEL_RUNG.size,
+        "the row's label rung is the composite's own, not a parallel number"
+    );
+    assert_eq!(ROW_TEXT_SIZE, typography::UI_COMPACT.size);
+    assert_ne!(
+        ROW_TEXT_SIZE, RETIRED_ROW_TEXT_SIZE,
+        "14pt was `type.body`; §4.3.2 puts a tree row on `ui_compact`"
+    );
+    assert!(ROW_TEXT_SIZE >= typography::MIN_SIZE);
+}
+
+#[test]
+fn row_geometry_reads_the_framework_row_constants() {
+    assert_eq!(ROW_INDENT_PER_DEPTH, tree_row::INDENT_STEP);
+    assert_eq!(ROW_INDENT_PER_DEPTH, space::LG);
+    assert_ne!(
+        ROW_INDENT_PER_DEPTH, RETIRED_INDENT_PER_DEPTH,
+        "18pt had no token behind it; the framework's step is 16"
+    );
+
+    assert_eq!(ROW_PADDING_X, tree_row::ROW_INSET_X);
+    assert_eq!(ROW_PADDING_X, space::XS);
+    assert_ne!(
+        ROW_PADDING_X, RETIRED_ROW_PADDING_X,
+        "§4.3.2 prices the tree row's horizontal inset at space.xs"
+    );
+
+    assert_eq!(ROW_PADDING_Y, tree_row::ROW_INSET_Y);
+    assert_eq!(ROW_PADDING_Y, space::XXS);
+
+    assert_eq!(
+        ROW_WIDTH_SLACK,
+        tree_row::ROW_INSET_X * 2.0 + tree_row::CHEVRON_COLUMN
+    );
+    assert_eq!(ROW_WIDTH_SLACK, 32.0);
+    assert_ne!(
+        ROW_WIDTH_SLACK, RETIRED_ROW_WIDTH_SLACK,
+        "the slack is now the framework's fixed furniture, not a guess"
+    );
+
+    assert_eq!(PANEL_PADDING, space::XS);
+    assert_ne!(
+        PANEL_PADDING, RETIRED_PANEL_PADDING,
+        "6 is not on the spacing grid — it exists only as shape.radius_card"
+    );
+}
+
+#[test]
+fn row_width_delegates_to_the_framework_content_width() {
+    for depth in [
+        0usize,
+        1,
+        3,
+        7,
+        MAX_ROW_INDENT_DEPTH,
+        MAX_ROW_INDENT_DEPTH + 25,
+    ] {
+        let row = file_row(
+            "a-long-ish-file-name.md",
+            "/lib/a-long-ish-file-name.md",
+            depth,
+        );
+        let clamped = depth.min(MAX_ROW_INDENT_DEPTH);
+        assert_eq!(
+            row_width(&row, measure),
+            tree_row::content_width(clamped, measure(&row_label(&row))),
+            "depth {depth}: the app's auto-fit term and the framework's \
+             content-width rule must be the same rule"
+        );
+    }
+}
+
+#[test]
+fn row_indent_pixels_clamps_deep_nesting_onto_the_step() {
+    assert_eq!(row_indent_pixels(0), 0.0);
+    assert_eq!(row_indent_pixels(1), tree_row::INDENT_STEP);
+    assert_eq!(row_indent_pixels(4), 4.0 * tree_row::INDENT_STEP);
+    assert_eq!(
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
+        MAX_ROW_INDENT_DEPTH as f32 * tree_row::INDENT_STEP
+    );
+    // The app allows 50 levels of drawn indent; beyond that the clamp
+    // holds and the step never changes.
+    assert_eq!(
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH + 1),
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
+        "one level past the cap must not indent further"
+    );
+    assert_eq!(
+        row_indent_pixels(10_000),
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
+        "an absurd depth must still land on the cap, not overflow"
+    );
+    assert!(row_indent_pixels(usize::MAX).is_finite());
+}
+
+#[test]
+fn a_row_meets_the_pointer_target_minimum_and_still_holds_its_label() {
+    assert_eq!(ROW_MIN_HEIGHT, tree_row::ROW_HEIGHT_COMPACT);
+    assert_eq!(ROW_MIN_HEIGHT, size::HIT_TARGET_MIN);
+    assert!(
+        ROW_MIN_HEIGHT >= size::HIT_TARGET_MIN,
+        "§4.3.2: every row has minimum height 24px"
+    );
+    assert!(
+        tree_row::label_fits_row(ROW_MIN_HEIGHT),
+        "the label's line box must fit inside the row at the compact rung"
+    );
+    // The row's own content (line box + both vertical insets) must fit
+    // inside the rung the row is fixed to, or the label is clipped.
+    assert!(
+        tree_row::LABEL_RUNG.line_height + ROW_PADDING_Y * 2.0 <= ROW_MIN_HEIGHT,
+        "18 + 2×2 must fit inside 24"
+    );
+}
+
+#[test]
+fn the_search_card_is_tall_enough_for_the_lines_it_fixes() {
+    let content = tree_row::LABEL_RUNG.line_height + typography::CAPTION.line_height * 2.0;
+    assert_eq!(
+        SEARCH_ROW_HEIGHT,
+        content + SEARCH_CARD_PADDING * 2.0,
+        "the card height is derived from its three line boxes plus padding"
+    );
+    assert!(
+        SEARCH_ROW_HEIGHT >= content + SEARCH_CARD_PADDING * 2.0,
+        "the card must never be shorter than the text it is fixed to"
+    );
+    assert_eq!(SEARCH_ROW_HEIGHT, 58.0);
+    assert_ne!(
+        SEARCH_ROW_HEIGHT, RETIRED_SEARCH_ROW_HEIGHT,
+        "52 could not hold the rung-height lines the card now renders"
+    );
+}
+
+#[test]
+fn a_selected_row_paints_the_framework_accent_band() {
+    let pro = Palette::pro();
+    let selected = row_paint(true);
+    let resting = row_paint(false);
+
+    assert_eq!(selected.background, pro.accent_fill);
+    assert_eq!(selected.band, pro.accent_fill);
+    assert_eq!(
+        resting.background,
+        iced::Color::TRANSPARENT,
+        "a resting row paints no fill"
+    );
+    assert_eq!(resting.band, pro.surface_base);
+}
+
+#[test]
+fn a_selected_pdf_backed_label_is_locked_off_the_unreadable_red() {
+    let pro = Palette::pro();
+    let app_palette = Palette::fastmd_dark();
+
+    // The defect the lock exists for: the retired red-on-accent pairing.
+    let red_on_accent = contrast_ratio(app_palette.error, pro.accent_fill);
+    assert!(
+        red_on_accent < 3.0,
+        "fixture: status_danger_text on accent_fill must be the unreadable \
+         pairing this test guards, measured {red_on_accent}:1"
+    );
+
+    assert_eq!(
+        row_label_colour(true, true),
+        pro.text_strong,
+        "§3B.6 locks the row label to text.strong on the accent fill by role"
+    );
+    assert_ne!(
+        row_label_colour(true, true),
+        app_palette.error,
+        "a selected PDF-backed row must not render red-on-indigo"
+    );
+    let locked_contrast = contrast_ratio(row_label_colour(true, true), pro.accent_fill);
+    assert!(
+        locked_contrast >= 4.5,
+        "the locked label clears the text-contrast rule at {locked_contrast}:1"
+    );
+}
+
+#[test]
+fn an_unselected_row_keeps_the_apps_own_label_rule() {
+    let app_palette = Palette::fastmd_dark();
+    assert_eq!(row_label_colour(false, true), app_palette.error);
+    assert_eq!(row_label_colour(false, false), app_palette.text);
+    assert_ne!(
+        row_label_colour(false, true),
+        row_label_colour(false, false),
+        "the PDF-backed tint must still be visible off the selection band"
+    );
+}
+
+#[test]
+fn the_search_field_paints_from_the_framework_search_input_kind() {
+    use iced::widget::text_input::Status;
+
+    let pro = Palette::pro();
+    for (status, base, focused) in [
+        (Status::Active, BaseState::Rest, false),
+        (Status::Hovered, BaseState::Hovered, false),
+        (Status::Focused { is_hovered: false }, BaseState::Rest, true),
+        (Status::Disabled, BaseState::Disabled, false),
+    ] {
+        let resolved = pro_text_input::resolve_input_style(
+            pro_text_input::InputKind::Search,
+            VisualState { base, focused },
+            &pro,
+        );
+        let style = search_field_style(status);
+        assert_eq!(
+            (style.background, style.border.color, style.border.width),
+            (
+                iced::Background::Color(resolved.background),
+                resolved.border_color,
+                resolved.border_width
+            ),
+            "search field at {status:?} must carry the framework's resolved fill"
+        );
+        assert_eq!(style.value, resolved.text);
+        assert_eq!(style.placeholder, resolved.placeholder);
+        assert_eq!(style.icon, resolved.icon);
+        assert_eq!(style.selection, resolved.selection_background);
+    }
+}
+
+#[test]
+fn the_search_field_is_not_painted_from_iced_s_own_theme() {
+    // A cheap tripwire: the focused border must be the framework's focus
+    // stroke, which is strictly heavier than iced's resting input border.
+    let focused =
+        search_field_style(iced::widget::text_input::Status::Focused { is_hovered: false });
+    let active = search_field_style(iced::widget::text_input::Status::Active);
+    assert!(
+        focused.border.width > active.border.width,
+        "focus must be drawn by the framework's focus ring, not left to iced"
+    );
+}
+
+#[test]
+fn the_search_glyphs_are_on_the_icon_rung_not_the_text_rung() {
+    assert_eq!(SEARCH_GLYPH_SIZE, pro_text_input::SLOT_GLYPH_SIZE);
+    assert_eq!(SEARCH_GLYPH_SIZE, size::ICON_MD);
+    assert_ne!(
+        SEARCH_GLYPH_SIZE, RETIRED_ROW_TEXT_SIZE,
+        "icon slots must not track the row's text rung"
+    );
+    assert_ne!(SEARCH_GLYPH_SIZE, ROW_TEXT_SIZE);
+}
+
+#[test]
+fn the_search_row_spacing_is_on_the_grid() {
+    assert_eq!(SEARCH_ROW_SPACING, space::XS);
+    assert_eq!(RESULT_LINE_SPACING, space::XXS);
+}
+
+#[test]
+fn the_header_sits_on_the_title_sm_rung() {
+    assert_eq!(HEADER_SIZE, typography::TITLE_SM.size);
+    assert!(HEADER_SIZE >= typography::MIN_SIZE);
 }
 
 // --- flatten depth guard (UI-017 robustness) --------------------------

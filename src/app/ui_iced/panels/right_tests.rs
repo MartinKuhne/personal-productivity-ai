@@ -113,6 +113,61 @@ fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
 }
 
 // ---------------------------------------------------------------------------
+// INT-7b: the two ToC indent constants are bound to spacing tokens
+//
+// Both bindings are **exact** — `4.0` *is* `space.xs` and `12.0` *is*
+// `space.md` — so unlike the other INT-7b pins there is no retired
+// literal to `assert_ne!` against: the number did not move, the *source*
+// did. What these pins hold is the binding itself, so a retune of the
+// spacing rung moves the ToC with every other `xs`/`md` inset instead of
+// leaving this pane behind, and a retune of the ToC alone cannot silently
+// take it off the grid.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_toc_base_indent_is_bound_to_space_xs() {
+    assert_eq!(
+        TOC_BASE_INDENT_PIXELS,
+        iced_pro::token::space::XS,
+        "the ToC row's base pad reads off the spacing scale"
+    );
+}
+
+#[test]
+fn the_toc_level_indent_is_bound_to_space_md() {
+    assert_eq!(
+        TOC_LEVEL_INDENT_PIXELS,
+        iced_pro::token::space::MD,
+        "one heading level of ToC indent reads off the spacing scale"
+    );
+}
+
+#[test]
+fn the_toc_level_indent_is_deliberately_not_the_tree_indent_step() {
+    // The ToC pane is the narrowest in the layout (RIGHT_PANE_MIN_W =
+    // 120px). At the tree's 16px step, six heading levels would spend
+    // 80px of that on indentation alone; at `space.md` they spend 60px.
+    // The narrower rung is the reason this constant is `md` and not
+    // `tree_row::INDENT_STEP`.
+    assert_ne!(
+        TOC_LEVEL_INDENT_PIXELS,
+        iced_pro::composite::tree_row::INDENT_STEP,
+        "the ToC indents one rung tighter than the tree on purpose: the pane \
+         is half as wide"
+    );
+    let six_levels = toc_indent_pixels(6);
+    let tree_at_six = iced_pro::composite::tree_row::INDENT_STEP * 5.0;
+    assert!(
+        six_levels < tree_at_six,
+        "six ToC levels must cost less indent than six tree levels"
+    );
+    assert!(
+        six_levels < 120.0,
+        "the deepest ordinary ToC level must stay inside the pane's minimum width"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // `toc_indent_pixels` — the per-level ToC row indent (UI-001)
 //
 // The rule is `TOC_BASE_INDENT_PIXELS + (level - 1) * TOC_LEVEL_INDENT_PIXELS`

@@ -11,7 +11,10 @@
 //!
 //! All three helpers are **framework-free by construction**: their
 //! signatures mention only `bool`, `u32`, `f32`,
-//! [`crate::markdown::ToCEntry`] and `String`.
+//! [`crate::markdown::ToCEntry`] and `String`. The two indent *constants*
+//! are not framework-free — they are bound to `iced_pro` spacing tokens,
+//! which is the point: the ToC's nesting pitch is now read off the
+//! spacing scale instead of being a pair of numbers the pane invented.
 //!
 //! [`should_show_panel`] is re-exported from [`crate::ui_iced::layout`] so
 //! [`view`](crate::ui_iced::view) and the pane-grid gate resolve through
@@ -22,6 +25,8 @@
 #[cfg(test)]
 #[path = "right_tests.rs"]
 mod tests;
+
+use iced_pro::token::space;
 
 /// Determines if the right panel should be shown based on application state.
 ///
@@ -69,12 +74,26 @@ pub fn resolve_anchor(
 }
 
 /// Left padding every ToC row gets before its level indent is applied, in
-/// logical pixels (UI-001).
-pub const TOC_BASE_INDENT_PIXELS: f32 = 4.0;
+/// logical pixels (UI-001) — `space.xs` (`UIF-TOK-001`).
+///
+/// **Movement: none.** The retired literal `4.0` *is* `space.xs`, so the
+/// constant is re-expressed against the token rather than retuned. The
+/// value is now load-bearing in the sense that matters: a retune of the
+/// spacing rung moves the ToC's base pad with every other `xs` inset in
+/// the application instead of leaving this one behind.
+pub const TOC_BASE_INDENT_PIXELS: f32 = space::XS;
 
 /// Extra left padding one heading level beyond the first costs, in logical
-/// pixels (UI-001).
-pub const TOC_LEVEL_INDENT_PIXELS: f32 = 12.0;
+/// pixels (UI-001) — `space.md` (`UIF-TOK-001`).
+///
+/// **Movement: none.** `12.0` is exactly `space.md`. Note this is
+/// deliberately *not* [`tree_row::INDENT_STEP`](iced_pro::composite::tree_row::INDENT_STEP)
+/// (`space.lg`, 16): the ToC pane is the narrowest in the layout
+/// (`RIGHT_PANE_MIN_W = 120px`) and six heading levels at 16px would
+/// spend 80px of it on indentation alone. `space.md` is the nearest rung
+/// that keeps level 6 inside the pane's minimum width, and it is the
+/// value the retired literal already used.
+pub const TOC_LEVEL_INDENT_PIXELS: f32 = space::MD;
 
 /// Left padding of the ToC row for a heading of `level` (1-based).
 ///
