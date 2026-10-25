@@ -911,14 +911,30 @@ pub fn row_padding_y(row: &Row) -> f32 {
 // What the row reports
 // ---------------------------------------------------------------------------
 
-/// The one thing a [`MenuRow`] can tell its host about a click.
+/// What a [`MenuRow`] tells its host about a click or a pointer crossing.
 ///
-/// The distinction is exactly `UIF-CMENU-002`'s: an *activated* row wants
+/// The click half is exactly `UIF-CMENU-002`'s: an *activated* row wants
 /// the host to run [`Menu::activate`](super::model::Menu::activate) and
 /// then honour the row's close policy; an *absorbed* click must leave the
 /// menu open and change nothing. Collapsing the two into "the row was
 /// clicked" would force the host to re-read the model to find out whether
 /// the menu should close, which is the fact the row already has.
+///
+/// The pointer half — [`Hovered`](Self::Hovered) and
+/// [`Unhovered`](Self::Unhovered) — exists for the submenu aiming
+/// corridor (`UIF-PRIN-008`, `UIF-FMENU-002`), which cannot be driven
+/// from a click at all: the whole point of the 150 ms grace window is
+/// that a pointer crossing a sibling row is *not* a decision.
+///
+/// # Edges, not levels
+///
+/// [`iced::advanced::widget::Widget::update`] runs for
+/// every live widget on every event, so a level-triggered report would
+/// publish for as long as the pointer sat still — re-solving the host's
+/// state each frame for a fact that has not changed, and pushing any
+/// timer keyed off it forward forever. Both variants are therefore
+/// **edge-triggered**: published once on the crossing, never again until
+/// the pointer leaves and comes back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RowEvent {
     /// An activatable row was pressed and released inside its bounds.
@@ -926,6 +942,27 @@ pub enum RowEvent {
     /// A disabled row, heading or separator took the click so the
     /// click-away layer cannot dismiss the menu (`UIF-CMENU-002`).
     Absorbed,
+    /// The pointer crossed into the row's bounds (`false` → `true`).
+    ///
+    /// Reported for **every** row kind — action, submenu parent, heading,
+    /// separator, disabled. The widget reports raw observations and the
+    /// host judges them: withholding hover from a non-submenu sibling
+    /// would leave the corridor blind to exactly the crossings it exists
+    /// to tolerate, and a row that disagreed with the cursor on purpose
+    /// is worse than a row that says nothing.
+    ///
+    /// A row that is *removed* from the tree while hovered never reports
+    /// the matching [`Unhovered`](Self::Unhovered) — there is no widget
+    /// left to report it. A host that keeps state keyed on hover must
+    /// clear it when the surface closes, not wait for this event.
+    Hovered,
+    /// The pointer crossed out of the row's bounds (`true` → `false`).
+    ///
+    /// The counterpart of [`Hovered`](Self::Hovered), and equally
+    /// kind-agnostic. It says the pointer left **this row** — nothing
+    /// about whether it left the menu, and a host must not read it as a
+    /// dismissal cue.
+    Unhovered,
 }
 
 // ---------------------------------------------------------------------------
@@ -1619,7 +1656,25 @@ where
         // act on it. The widget reports raw observations and `resolve`
         // judges them; a row that stopped recording hover would be
         // silently disagreeing with the cursor.
+        //
+        // The prior value is read **before** the write because the hover
+        // report is an edge, not a level: `Hovered` belongs to the
+        // `false` → `true` crossing and `Unhovered` to `true` → `false`,
+        // and each needs to know what the row believed before this event
+        // contradicted it. Reporting the level instead would publish on
+        // every frame the pointer sat still.
+        let was_hovered = state.hovered;
         state.hovered = is_over;
+
+        if is_over != was_hovered {
+            let crossing = if is_over {
+                RowEvent::Hovered
+            } else {
+                RowEvent::Unhovered
+            };
+
+            shell.publish((self.on_event)(crossing));
+        }
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if is_over => {

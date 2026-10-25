@@ -60,6 +60,7 @@ use iced_pro::surface::menu::model::{Menu, MenuId};
 use iced_pro::surface::modal::Recovery;
 use iced_pro::surface::movable::PointerPhase;
 use iced_pro::surface::movable::SurfaceTarget;
+use iced_pro::surface::tooltip::TimeMs;
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
@@ -75,6 +76,7 @@ use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
 use crate::ui_iced::editor::{self, EditorViewModel, LeaveGesture, apply_editor_message};
 use crate::ui_iced::hamburger::{command_for_activation, hamburger_menu};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
+use crate::ui_iced::menu_aim;
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
     DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, MenuMessage, Message,
@@ -896,6 +898,11 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                 MenuTreeKind::Fixed,
                 &mut state.overlay.menu_focus,
             );
+            // A fresh tree starts with a fresh corridor. Its trigger
+            // indices described whatever cards were up last, and a stale
+            // one landing on the same row of the new tree would answer
+            // `Preserve` and stop the branch opening on hover at all.
+            state.overlay.hamburger_aim.reset();
             settle(state, Vec::new())
         }
         MenuMessage::Closed => {
@@ -948,6 +955,72 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                 settle(state, tasks)
             } else {
                 route_context_key(state, key)
+            }
+        }
+        MenuMessage::RowEntered { card, row } => {
+            if state.overlay.hamburger_open {
+                // The clock is read once, here, in the reducer, and handed
+                // down as a value. Nothing the corridor calls reads a
+                // clock itself, which is what makes the whole path
+                // testable at a timestamp of the test's choosing
+                // (§2.6's injection rule).
+                let now = TimeMs::now();
+                let step = menu_aim::on_row_entered(
+                    &mut state.overlay.hamburger_cascade,
+                    &mut state.overlay.hamburger_aim,
+                    &card,
+                    row,
+                    now,
+                    &mut state.overlay.menu_focus,
+                );
+                settle(
+                    state,
+                    menu_aim::wake_task(&card, step.wake_after_ms)
+                        .into_iter()
+                        .collect(),
+                )
+            } else {
+                Vec::new()
+            }
+        }
+        MenuMessage::RowLeft { .. } => {
+            if state.overlay.hamburger_open {
+                // The corridor's "this branch would close" answer is
+                // dropped on purpose. Dismissal belongs to the click-away
+                // blocker `menu_surface::overlay` mounts; a hover path
+                // that also closed menus would give one surface two owners,
+                // and every menu in the app would shut when the mouse
+                // swept past it.
+                let _advisory_collapse =
+                    menu_aim::on_pointer_left(&mut state.overlay.hamburger_aim, TimeMs::now());
+                // Deliberately not `settle`: the cascade was not touched,
+                // so openness, card geometry and the focus projection are
+                // all exactly as they were.
+                Vec::new()
+            } else {
+                Vec::new()
+            }
+        }
+        MenuMessage::AimExpired { card } => {
+            if state.overlay.hamburger_open {
+                let step = menu_aim::on_deadline(
+                    &mut state.overlay.hamburger_cascade,
+                    &mut state.overlay.hamburger_aim,
+                    &card,
+                    TimeMs::now(),
+                    &mut state.overlay.menu_focus,
+                );
+                // A hold that has still not elapsed re-arms rather than
+                // being dropped, so a switch is never lost to a wake that
+                // landed early.
+                settle(
+                    state,
+                    menu_aim::wake_task(&card, step.wake_after_ms)
+                        .into_iter()
+                        .collect(),
+                )
+            } else {
+                Vec::new()
             }
         }
         MenuMessage::InteractionIgnored => Vec::new(),
@@ -1034,6 +1107,14 @@ fn route_row_message(state: &mut AppState, message: Message) -> Vec<Task<Message
 /// cannot be forgotten by one arm of the match.
 fn settle(state: &mut AppState, mut tasks: Vec<Task<Message>>) -> Vec<Task<Message>> {
     state.overlay.hamburger_open = state.overlay.hamburger_cascade.is_open();
+    if !state.overlay.hamburger_open {
+        // The corridor indexes the root card's rows, and those rows went
+        // with the card. A guard left pointing at one would hold the next
+        // menu's first hover for a grace window it never earned — or, if
+        // the new tree put a submenu on the same index, answer `Preserve`
+        // and stop that branch opening at all.
+        state.overlay.hamburger_aim.reset();
+    }
     state.refresh_hamburger_rects();
     tasks.extend(focus_projection(&state.overlay.menu_focus));
     tasks

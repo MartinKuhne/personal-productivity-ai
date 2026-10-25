@@ -100,6 +100,7 @@ use fastmd_agent::AgentSession;
 use iced_pro::binding::pre_rank::DragCapture;
 use iced_pro::binding::pre_rank::PreRankCoordinator;
 use iced_pro::focus::FocusState;
+use iced_pro::surface::menu::aim::AimCorridor;
 use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
 use iced_pro::surface::menu::model::MenuId;
 use iced_pro::surface::movable::GeometryStorage;
@@ -485,6 +486,30 @@ pub struct OverlayState {
     /// *whether* the menu shows, exactly as it does for every other
     /// surface; the cascade decides only *which cards* of the tree are up.
     pub hamburger_cascade: MenuCascade,
+    /// The diagonal submenu aiming corridor for the hamburger's root card
+    /// (`UIF-PRIN-008`, `UIF-FMENU-002`, INT-9).
+    ///
+    /// The `150ms` (`time.delay.submenu`) grace window that lets a
+    /// pointer travel diagonally from an open submenu back across its
+    /// sibling rows without retiring the branch it is aiming at. The
+    /// corridor itself is pure and clock-free; the reducer feeds it
+    /// `TimeMs::now()` and drives it through
+    /// [`menu_aim`](crate::ui_iced::menu_aim).
+    ///
+    /// It lives here, beside the cascade it describes, because it is
+    /// **not** part of openness: two cascades showing the same tree are
+    /// the same cascade regardless of where the cursor is, which is why
+    /// [`MenuCascade::hover_submenu_row`] takes the corridor as a
+    /// parameter instead of storing one.
+    ///
+    /// One corridor, for the one menu in this app with submenus. Context
+    /// menus are flat and never touch it.
+    ///
+    /// Must be reset when the hamburger closes — a stale trigger index
+    /// landing on the same row of a menu reopened later would answer
+    /// `Preserve` and stop the branch opening at all. See
+    /// [`menu_aim::guard_is_live`](crate::ui_iced::menu_aim::guard_is_live).
+    pub hamburger_aim: AimCorridor,
     /// The framework focus model scoped to the open hamburger cards.
     ///
     /// # Why this exists now, and why it is scoped to the menu
@@ -668,6 +693,7 @@ impl Default for OverlayState {
             context_menu: None,
             hamburger_open: false,
             hamburger_cascade: MenuCascade::new(),
+            hamburger_aim: AimCorridor::new(),
             menu_focus: FocusState::new(),
             hamburger_rects: Vec::new(),
             editor: None,
@@ -1067,6 +1093,7 @@ impl OverlayState {
             context_menu,
             hamburger_open,
             hamburger_cascade,
+            hamburger_aim,
             menu_focus,
             hamburger_rects,
             editor,
@@ -1085,6 +1112,7 @@ impl OverlayState {
             context_menu,
             hamburger_open,
             hamburger_cascade,
+            hamburger_aim,
             menu_focus,
             hamburger_rects,
             editor,
@@ -1125,6 +1153,7 @@ struct ClosableSurfaces<'a> {
     context_menu: &'a mut Option<ContextMenu>,
     hamburger_open: &'a mut bool,
     hamburger_cascade: &'a mut MenuCascade,
+    hamburger_aim: &'a mut AimCorridor,
     menu_focus: &'a mut FocusState,
     hamburger_rects: &'a mut Vec<Rectangle>,
     editor: &'a mut Option<EditorViewModel>,
@@ -1168,6 +1197,12 @@ impl ClosableSurfaces<'_> {
                     // `Esc` would fork that behaviour from the registry's.
                     self.hamburger_cascade.close_tree(self.menu_focus);
                     self.hamburger_rects.clear();
+                    // The corridor indexes the root card's rows, so its
+                    // trigger index dies with the card. Left behind, the
+                    // next menu that happened to put a submenu on the
+                    // same row would be answered `Preserve` and never
+                    // open on hover.
+                    self.hamburger_aim.reset();
                 }
                 (CLOSED_LAYER_HAMBURGER, was_open)
             }

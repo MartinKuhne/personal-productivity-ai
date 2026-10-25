@@ -147,6 +147,9 @@ pub mod interaction_tests;
 pub mod layout;
 pub mod logo;
 pub mod logs;
+/// Driving the submenu aiming corridor from live row hover
+/// (`UIF-PRIN-008`, `UIF-FMENU-002`).
+pub mod menu_aim;
 /// Shared card chrome and solved geometry for framework-driven menus.
 pub mod menu_surface;
 pub mod message;

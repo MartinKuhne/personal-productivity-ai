@@ -15,7 +15,7 @@ use super::*;
 
 use crate::state::{InteractionInput, VisualState, resolve};
 use crate::surface::menu::Menu;
-use crate::test_helpers::{Blank, Harness};
+use crate::test_helpers::{Blank, Harness, moved};
 use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, composite_over, contrast_ratio,
 };
@@ -1265,6 +1265,8 @@ fn headless_row(row: Row) -> (Harness<String, HeadlessRenderer>, Id) {
             |event| match event {
                 RowEvent::Activated => "activated".to_owned(),
                 RowEvent::Absorbed => "absorbed".to_owned(),
+                RowEvent::Hovered => "hovered".to_owned(),
+                RowEvent::Unhovered => "unhovered".to_owned(),
             },
         )
         .into()
@@ -1374,9 +1376,12 @@ fn test_a_press_inside_the_row_fires_nothing_until_the_release() {
     let (mut harness, _) = headless_row(row.clone());
     let at = inside(&row);
 
+    // The press event carries the cursor into the row, so the hover edge
+    // lands on this same frame. What must **not** appear is the
+    // activation — that belongs to the release alone.
     assert_eq!(
         harness.press(at),
-        Vec::<String>::new(),
+        vec!["hovered".to_owned()],
         "the press is held: firing on press would take the menu's dismissal \
          away from the release"
     );
@@ -1402,8 +1407,9 @@ fn test_a_press_walked_off_the_row_before_the_release_never_activates() {
 
     assert_eq!(
         harness.release(outside(&row)),
-        Vec::<String>::new(),
-        "walking the pointer off the row must cancel the activation"
+        vec!["unhovered".to_owned()],
+        "walking the pointer off the row must cancel the activation: the \
+         only thing this frame reports is the pointer leaving"
     );
 }
 
@@ -1416,9 +1422,9 @@ fn test_a_press_started_outside_the_row_is_never_activated_by_a_release_inside()
 
     assert_eq!(
         harness.release(inside(&row)),
-        Vec::<String>::new(),
+        vec!["hovered".to_owned()],
         "the row never saw the press, so the release inside it is not its \
-         business"
+         business — the frame reports only that the pointer has arrived"
     );
 }
 
@@ -1479,6 +1485,123 @@ fn test_a_destructive_row_activates_on_release_like_any_other() {
         harness.release(at),
         vec!["activated".to_owned()],
         "destructive is a colour, not a different activation rule"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Pointer: the hover edge (`UIF-PRIN-008` plumbing)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_entering_a_row_reports_hovered_exactly_once() {
+    let row = action();
+    let (mut harness, _) = headless_row(row.clone());
+    let at = inside(&row);
+
+    assert_eq!(harness.hover(at), vec!["hovered".to_owned()]);
+
+    // The guard is non-vacuous: three more frames with the cursor in the
+    // same place must add nothing. A level report here would publish on
+    // every frame the pointer sat still and re-solve the host forever.
+    assert_eq!(harness.hover(at), Vec::<String>::new());
+    assert_eq!(harness.hover(at), Vec::<String>::new());
+    assert_eq!(harness.hover(at), Vec::<String>::new());
+}
+
+#[test]
+fn test_leaving_the_row_reports_unhovered_exactly_once() {
+    let row = action();
+    let (mut harness, _) = headless_row(row.clone());
+
+    harness.hover(inside(&row));
+
+    assert_eq!(harness.hover(outside(&row)), vec!["unhovered".to_owned()]);
+    assert_eq!(harness.hover(outside(&row)), Vec::<String>::new());
+    assert_eq!(harness.hover(outside(&row)), Vec::<String>::new());
+}
+
+#[test]
+fn test_re_entering_the_row_reports_the_crossing_again() {
+    let row = action();
+    let (mut harness, _) = headless_row(row.clone());
+
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        seen.extend(harness.hover(inside(&row)));
+        seen.extend(harness.hover(outside(&row)));
+    }
+
+    assert_eq!(
+        seen,
+        vec![
+            "hovered".to_owned(),
+            "unhovered".to_owned(),
+            "hovered".to_owned(),
+            "unhovered".to_owned(),
+        ],
+        "each crossing reports once and the edge resets on the way out"
+    );
+}
+
+#[test]
+fn test_hover_is_reported_for_every_row_kind_not_just_the_interactive_ones() {
+    // The widget reports raw observations and the host judges them, so
+    // the corridor can see a pointer sitting on a heading or a disabled
+    // row exactly as plainly as one on a submenu trigger.
+    for (name, row) in [
+        ("action", action()),
+        ("submenu parent", submenu_parent()),
+        ("heading", heading()),
+        ("separator", separator()),
+        ("disabled", disabled_action()),
+        ("destructive", destructive()),
+    ] {
+        let (mut harness, _) = headless_row(row.clone());
+
+        assert_eq!(
+            harness.hover(inside(&row)),
+            vec!["hovered".to_owned()],
+            "a {name} must report the pointer arriving"
+        );
+        assert_eq!(
+            harness.hover(outside(&row)),
+            vec!["unhovered".to_owned()],
+            "a {name} must report the pointer leaving"
+        );
+    }
+}
+
+#[test]
+fn test_a_hover_report_does_not_disturb_the_activation_sequence() {
+    let row = action();
+    let (mut harness, _) = headless_row(row.clone());
+    let at = inside(&row);
+
+    // The pointer arrives, then the click happens inside it. The hover
+    // edge is the only thing the arrival says, and the click half is
+    // untouched: press still says nothing, release still says activated.
+    assert_eq!(harness.hover(at), vec!["hovered".to_owned()]);
+    assert_eq!(harness.press(at), Vec::<String>::new());
+    assert_eq!(harness.release(at), vec!["activated".to_owned()]);
+}
+
+#[test]
+fn test_an_unavailable_cursor_is_reported_as_leaving_the_row() {
+    let row = action();
+    let (mut harness, _) = headless_row(row.clone());
+    let at = inside(&row);
+
+    harness.hover(at);
+
+    // `Cursor::Unavailable` is `is_over == false`, so a pointer that
+    // vanishes mid-hover — window blur, capture taken elsewhere — reads
+    // as leaving on the next event through, rather than the row believing
+    // it is still hovered forever. The event itself is irrelevant; the
+    // harness passes the cursor separately precisely so a test can say
+    // "the tree must read the cursor as gone".
+    assert_eq!(
+        harness.pointer(&[moved(at)], mouse::Cursor::Unavailable),
+        vec!["unhovered".to_owned()]
     );
 }
 

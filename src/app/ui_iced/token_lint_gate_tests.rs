@@ -34,11 +34,22 @@ use crate::ui_iced::token_lint_gate::{
 // ---------------------------------------------------------------------------
 
 /// Production `.rs` files the gate reads under `src/app` (fixtures excluded).
-const PIN_APP_FILES_SCANNED: usize = 157;
+///
+/// 157 through INT-8, 158 after INT-9 added
+/// `ui_iced/menu_aim.rs` — the app-side driver for the submenu aiming
+/// corridor. The file declares no visual scalar of its own (its only
+/// number is the `u64` millisecond count it hands to the sleeper, which
+/// is a duration read from `time.delay.submenu`, not a measurement), so
+/// `PIN_APP_TOKEN_BOUND` and `PIN_APP_SURFACE_BOUND` do not move with it.
+const PIN_APP_FILES_SCANNED: usize = 158;
 /// Files treated as the app's colour-definition layer.
 const PIN_APP_RULE_A_FILES: usize = 1;
 /// Files under the app's visual scope, i.e. everything in `ui_iced/`.
-const PIN_APP_RULE_B_FILES: usize = 44;
+///
+/// 44 through INT-8, 45 after INT-9's `ui_iced/menu_aim.rs` landed in
+/// the scope. The count is files-in-scope, not files-with-findings: the
+/// new module contributes a scanned file and no violation.
+const PIN_APP_RULE_B_FILES: usize = 45;
 /// Colour constructors found inside `ui/theme.rs`.
 ///
 /// The anti-vacuity half of Rule A: without this, "zero colour literals

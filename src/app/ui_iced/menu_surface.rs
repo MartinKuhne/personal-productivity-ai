@@ -123,6 +123,13 @@ pub fn positioned<'a>(card: Element<'a, Message>, rect: Rectangle) -> Element<'a
 /// [`MenuCascade::activate_row`] and lets the
 /// row's own [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy)
 /// decide whether the menu survives the click.
+///
+/// The row's two hover reports are mapped alongside them onto
+/// [`MenuMessage::RowEntered`] / [`MenuMessage::RowLeft`], which is the
+/// only route the submenu aiming corridor (`UIF-PRIN-008`) has into the
+/// reducer. Note what that mapping does **not** do: neither report can
+/// reach the click-away `dismiss` message, so no pointer movement closes
+/// a card from here. Dismissal stays the blocker's job alone.
 pub fn card_element<'a>(
     card: &OpenCard,
     cascade: &MenuCascade,
@@ -135,8 +142,9 @@ pub fn card_element<'a>(
         let child_open = row
             .child_id()
             .is_some_and(|child| cascade.is_card_open(child));
+        let card = menu.id().clone();
         let address = MenuMessage::RowPicked {
-            card: menu.id().clone(),
+            card: card.clone(),
             row: index,
         };
 
@@ -147,6 +155,13 @@ pub fn card_element<'a>(
                 move |event| match event {
                     RowEvent::Activated => Message::Menu(address.clone()),
                     RowEvent::Absorbed => Message::Menu(MenuMessage::InteractionIgnored),
+                    RowEvent::Hovered => Message::Menu(MenuMessage::RowEntered {
+                        card: card.clone(),
+                        row: index,
+                    }),
+                    RowEvent::Unhovered => {
+                        Message::Menu(MenuMessage::RowLeft { card: card.clone() })
+                    }
                 },
             )
             .palette(Palette::pro())

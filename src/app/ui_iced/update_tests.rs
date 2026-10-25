@@ -1400,6 +1400,299 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
     );
 }
 
+// ─────────────────── Menu hover / aiming corridor (INT-9) ───────────────────
+
+/// Row index of `key` inside the open hamburger root card.
+fn root_row_of(state: &AppState, key: &str) -> usize {
+    use crate::ui_iced::hamburger::HAMBURGER_MENU_ID;
+    use iced_pro::surface::menu::model::MenuId;
+
+    state
+        .overlay
+        .hamburger_cascade
+        .card_menu(&MenuId::new(HAMBURGER_MENU_ID))
+        .expect("the root card is open")
+        .rows()
+        .iter()
+        .position(|row| row.key() == key)
+        .expect("the row lives in the root card")
+}
+
+/// Reports the pointer arriving at the root card's `key` row.
+fn hover_root(state: &mut AppState, key: &str) -> Task<Message> {
+    use iced_pro::surface::menu::model::MenuId;
+
+    let card = MenuId::new(crate::ui_iced::hamburger::HAMBURGER_MENU_ID);
+    let row = root_row_of(state, key);
+    update(state, Message::Menu(MenuMessage::RowEntered { card, row }))
+}
+
+#[test]
+fn test_hovering_a_submenu_parent_opens_its_branch_without_a_click() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS};
+    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+
+    let chat_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_CHAT_MODELS);
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert_eq!(state.overlay.hamburger_cascade.depth(), 1);
+
+    let _ = hover_root(&mut state, KEY_CHAT_MODELS);
+
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the hover must mount the branch on its own"
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &chat_card,
+        "and the branch it mounts is the one the pointer is on"
+    );
+    assert!(
+        drained(&spy).is_empty(),
+        "hovering opens a card; it never publishes a command"
+    );
+    assert_eq!(
+        state.overlay.hamburger_aim.open_trigger(),
+        Some(root_row_of(&state, KEY_CHAT_MODELS)),
+        "the corridor guards the row that was just hovered"
+    );
+}
+
+#[test]
+fn test_a_sibling_hover_is_held_and_owes_a_wake_up() {
+    use crate::ui_iced::hamburger::{KEY_CHAT_MODELS, KEY_WINDOWS};
+
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut state, KEY_WINDOWS);
+    assert_eq!(state.overlay.hamburger_cascade.depth(), 2);
+
+    let held = hover_root(&mut state, KEY_CHAT_MODELS).units();
+
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the corridor is open, so the branch must not switch yet"
+    );
+    assert_eq!(
+        state.overlay.hamburger_aim.open_trigger(),
+        Some(root_row_of(&state, KEY_WINDOWS)),
+        "the corridor still guards the branch that is showing"
+    );
+
+    // `settle` always appends the focus projection, so the raw task count
+    // is not a bare "is a wake owed". The control is the same reduction
+    // that owes nothing: the pointer lands back on the row whose branch
+    // is already open, so the corridor answers `Preserve` and schedules
+    // no wake-up. One extra unit is the wake-up.
+    let (mut control, _control_storage) = fresh_state();
+    let _ = update(&mut control, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut control, KEY_WINDOWS);
+    let owed_nothing = hover_root(&mut control, KEY_WINDOWS).units();
+
+    assert_eq!(
+        held,
+        owed_nothing + 1,
+        "a held switch must schedule its own wake-up, or it only fires \
+         when the user jiggles the mouse"
+    );
+}
+
+#[test]
+fn test_the_held_switch_completes_when_the_deadline_message_lands() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS, KEY_WINDOWS};
+    use iced_pro::surface::menu::aim::grace_ms;
+    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use std::time::Duration;
+
+    let chat_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_CHAT_MODELS);
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut state, KEY_WINDOWS);
+
+    let _ = hover_root(&mut state, KEY_CHAT_MODELS);
+    assert_eq!(
+        state.overlay.hamburger_aim.open_trigger(),
+        Some(root_row_of(&state, KEY_WINDOWS)),
+        "still guarding Windows: the switch is being held"
+    );
+
+    // This leg runs on the **real** clock, which is the point: it proves
+    // the reducer's `TimeMs::now()` and the corridor's arithmetic agree
+    // end to end, not just against a timestamp a test invented.
+    std::thread::sleep(Duration::from_millis(grace_ms() + 60));
+    let card = MenuId::new(crate::ui_iced::hamburger::HAMBURGER_MENU_ID);
+    let _ = update(&mut state, Message::Menu(MenuMessage::AimExpired { card }));
+
+    assert_eq!(
+        state.overlay.hamburger_aim.open_trigger(),
+        Some(root_row_of(&state, KEY_CHAT_MODELS)),
+        "the held switch must mature once the window has elapsed"
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &chat_card,
+        "and the card that ends up mounted is the one the pointer is on"
+    );
+}
+
+#[test]
+fn test_the_pointer_leaving_a_row_never_dismisses_the_menu() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
+    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+
+    let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut state, KEY_WINDOWS);
+    assert_eq!(state.overlay.hamburger_cascade.depth(), 2);
+
+    // Sweep the pointer out of everything without clicking.
+    let card = MenuId::new(HAMBURGER_MENU_ID);
+    let _ = update(&mut state, Message::Menu(MenuMessage::RowLeft { card }));
+
+    assert!(
+        state.overlay.hamburger_open,
+        "a pointer-out report must never dismiss the surface"
+    );
+    assert!(
+        state.overlay.hamburger_cascade.is_open(),
+        "the tree must still be mounted"
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "and the open branch must still be there"
+    );
+    assert!(
+        state.overlay.hamburger_cascade.is_card_open(&windows_card),
+        "the branch the pointer left is exactly the one that survives"
+    );
+    assert!(
+        !state.overlay.hamburger_rects.is_empty(),
+        "the registered geometry is untouched"
+    );
+}
+
+#[test]
+fn test_a_deadline_that_lands_after_the_menu_closed_does_nothing() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS, KEY_WINDOWS};
+    use iced_pro::surface::menu::model::MenuId;
+
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut state, KEY_WINDOWS);
+    let _ = hover_root(&mut state, KEY_CHAT_MODELS);
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Closed));
+    assert!(!state.overlay.hamburger_open);
+
+    let card = MenuId::new(HAMBURGER_MENU_ID);
+    let _ = update(&mut state, Message::Menu(MenuMessage::AimExpired { card }));
+
+    assert!(
+        !state.overlay.hamburger_open,
+        "a wake-up cannot resurrect a dismissed menu"
+    );
+    assert!(
+        !state.overlay.hamburger_cascade.is_open(),
+        "and it must not mount a card under a closed surface"
+    );
+}
+
+#[test]
+fn test_the_hamburger_button_is_still_click_to_open_and_hover_cannot_open_it() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
+    use iced_pro::surface::menu::model::MenuId;
+
+    let (mut state, _storage) = fresh_state();
+
+    // A stray hover report while the menu is closed must not open it.
+    // Hover drives submenu branches **inside** an open menu and nothing
+    // else; opening the ☰ menu stays a click.
+    let card = MenuId::new(HAMBURGER_MENU_ID);
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::RowEntered {
+            card: card.clone(),
+            row: 2,
+        }),
+    );
+    assert!(
+        !state.overlay.hamburger_open,
+        "hover cannot open the hamburger from a closed state"
+    );
+    assert!(!state.overlay.hamburger_cascade.is_open());
+
+    // And the click path is exactly what it was before this increment.
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert!(state.overlay.hamburger_open);
+    assert_eq!(state.overlay.hamburger_cascade.depth(), 1);
+
+    let row = root_row_of(&state, KEY_WINDOWS);
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::RowPicked { card, row }),
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "clicking a submenu parent still opens it exactly as before"
+    );
+}
+
+#[test]
+fn test_reopening_the_hamburger_clears_a_stale_aim_guard() {
+    use crate::ui_iced::hamburger::KEY_WINDOWS;
+
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    let _ = hover_root(&mut state, KEY_WINDOWS);
+    assert!(state.overlay.hamburger_aim.open_trigger().is_some());
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Closed));
+    assert!(
+        state.overlay.hamburger_aim.open_trigger().is_none(),
+        "closing the tree must drop the corridor's trigger index"
+    );
+
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert_eq!(
+        state.overlay.hamburger_aim.open_trigger(),
+        None,
+        "a reopened menu starts with a clean corridor, or its first hover \
+         would be answered Preserve and never open"
+    );
+}
+
+#[test]
+fn test_hovering_a_plain_action_row_opens_nothing() {
+    use crate::ui_iced::hamburger::KEY_ABOUT;
+
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+
+    let _ = hover_root(&mut state, KEY_ABOUT);
+
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        1,
+        "a plain action row has no branch behind it to open"
+    );
+    assert!(
+        drained(&spy).is_empty(),
+        "hovering is not activation: no command may be published"
+    );
+    assert!(
+        state.overlay.hamburger_open,
+        "and hovering an action row must not close the menu either"
+    );
+}
+
 // ───────────────────────────── Editor ─────────────────────────────
 
 /// Opens an editor over a temp file with the inline editor enabled.

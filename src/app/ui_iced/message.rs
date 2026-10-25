@@ -918,6 +918,12 @@ pub enum AgentDebugMessage {
 ///   [`TabMessage::ContextMenuOpened`]
 ///   instead, because its open carries a target the ☰ button cannot supply.
 /// * [`Self::RowPicked`] — the address of a row the user activated.
+/// * [`Self::RowEntered`] / [`Self::RowLeft`] — the pointer's arrival at
+///   a row and departure from it, the raw observations the submenu
+///   aiming corridor (`UIF-PRIN-008`, `UIF-FMENU-002`) is driven from.
+///   Neither one dismisses anything.
+/// * [`Self::AimExpired`] — the corridor's own deadline, so a held
+///   switch still matures when no further pointer event is coming.
 /// * [`Self::Key`] — a navigation key raised while a menu is mounted.
 /// * [`Self::InteractionIgnored`] — a non-navigable row consumed the hit.
 ///
@@ -927,7 +933,10 @@ pub enum AgentDebugMessage {
 /// app-side menu engine had to be told about by hand; the
 /// [`MenuCascade`](iced_pro::surface::menu::cascade::MenuCascade) now owns
 /// submenu depth, checked state and close behaviour, so there is nothing
-/// left for the view to report.
+/// left for the view to report. The pointer variants above are **not** a
+/// return of that pattern: they report where the cursor is, never what
+/// the tree should do about it, and the corridor's answer is computed in
+/// the reducer rather than asserted by the view.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuMessage {
     /// The ☰ button opened the menu.
@@ -963,6 +972,55 @@ pub enum MenuMessage {
     Key(MenuKey),
     /// A disabled or informational row consumed input without changing state.
     InteractionIgnored,
+    /// The pointer crossed **into** a row of a framework-driven menu tree
+    /// (`UIF-PRIN-008`, `UIF-FMENU-002`).
+    ///
+    /// The arrival half of [`Self::RowPicked`]: same address, no intent.
+    /// Whether that row is a submenu parent, and whether the
+    /// `150ms` (`time.delay.submenu`) aiming corridor permits a branch
+    /// switch, is the reducer's call — the view only says where the
+    /// cursor went, once, on the crossing.
+    RowEntered {
+        /// Path of the card holding the row.
+        card: MenuId,
+        /// Row index within that card, furniture rows included.
+        row: usize,
+    },
+    /// The pointer crossed **out of** a row of a framework-driven menu
+    /// tree.
+    ///
+    /// **Advisory, and never a dismissal.** Dismissing a menu belongs to
+    /// the click-away blocker that
+    /// [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay)
+    /// mounts, and [`MenuCascade::pointer_left_card`](iced_pro::surface::menu::cascade::MenuCascade::pointer_left_card)
+    /// says why in its own words: a corridor that closed surfaces on its
+    /// own would give one menu two owners. The reducer relaxes the aim
+    /// guard on this and touches nothing else, so sweeping the cursor
+    /// past an open menu cannot close it.
+    RowLeft {
+        /// Path of the card the pointer left.
+        card: MenuId,
+    },
+    /// The aiming corridor's grace window has run out — re-evaluate it.
+    ///
+    /// The corridor is time-based and iced is event-driven. With the
+    /// pointer sitting still on a sibling row no further event arrives,
+    /// so a [`Hold`](iced_pro::surface::menu::aim::AimDecision::Hold)
+    /// would never mature into a
+    /// [`Switch`](iced_pro::surface::menu::aim::AimDecision::Switch)
+    /// and the branch would only change when the user jiggled the mouse.
+    /// The reducer therefore schedules this message for exactly the
+    /// milliseconds the corridor has left and re-runs the decision when
+    /// it lands.
+    ///
+    /// It carries the parent card so the wake-up is a self-contained
+    /// command ([FMD-068]) that can be checked against the cascade
+    /// before it acts: a wake that arrives after the menu has closed
+    /// must do nothing rather than open a branch under a closed surface.
+    AimExpired {
+        /// The parent card whose corridor deadline fired.
+        card: MenuId,
+    },
 }
 
 /// Floating-overlay / keyboard-modifier channel ([UI-056], [UI-022]).
