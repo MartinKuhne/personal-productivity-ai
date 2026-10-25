@@ -715,31 +715,75 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/button_widget.rs",
             "composite/table_cell.rs",
             "token/typography.rs",
+            "microcopy/pins.rs",
+            "microcopy/case_rule.rs",
+            "microcopy/action_label.rs",
+            "microcopy/truncate.rs",
+            "microcopy/tabular.rs",
         ],
         reason: Some(
-            "One clause is partly held, and it was written for a neighbouring rule. \
-             `Button::icon_only` cannot be constructed without naming the label its tooltip \
-             shows, and `tooltip_violation` reports the forbidden shape instead of \
-             panicking — the only place in this crate where 'the user cannot see the whole \
-             string, so a tooltip must exist' is enforced at the type boundary. \
-             `composite/table_cell.rs::is_truncated` decides whether a cell's content \
-             overflows its box. Missing: the style rule itself. No sentence-case check \
-             exists on any label, and no label in the crate carries a capitalisation \
-             policy, so ALL-CAPS and Title Case on multi-word chrome are neither required \
-             nor forbidden by anything machine-checkable. Verb-first CTA naming is \
-             unmodelled — the framework never inspects a label's words, so `OK` and \
-             `Save changes` are the same string to it. `...` semantics are unmodelled in \
-             both directions: nothing knows whether an action opens a secondary prompt, so \
-             nothing can require the ellipsis on `Rename...` or forbid it on `Save`. \
-             Tabular numerals are blocked one level down and stay recorded there: \
-             `UIF-TOK-004` models no font *family*, so `FontFamily::Mono` has no rung and \
-             no readout, counter or numeric column can ask for fixed-width digits. \
-             End-truncation versus the mandatory middle-truncation for paths, URIs and git \
-             refs does not exist, and `is_truncated` hands its verdict back to the caller \
-             without registering a tooltip, so the automatic pairing the pillar mandates \
-             is not automatic.",
+            "Five of the pillar's clauses are now machine-checkable; the sixth is blocked below \
+             the framework. Closed: the sentence-case mandate classifies a label as sentence, \
+             all-caps, title case, mid-word capital, first-word-lowercase or uncasable \
+             (`microcopy/case_rule.rs`), with acronyms licensed by a named data set rather \
+             than a length heuristic, and the closed Host `SPEC.md` Literal Pin Table \
+             (`microcopy/pins.rs`) consulted before anything is called a violation — nine \
+             literals, exact-match, each carrying its own exemptions, so `'Copy Path'` is \
+             exempt and `'Copy path'` is not. Verb-first CTAs are checked by `check_verb_first`, \
+             which flags generic `ok`/`okay`/`yes`/`no` and exempts `'Ok'` by pin while leaving \
+             `'Cancel'` compliant on its own merits. The ASCII/Unicode ellipsis is a tested \
+             biconditional: `ActionLabel::behaviour` carries whether activation opens a further \
+             prompt, so all four quadrants are pinned, a spaced `...` is its own finding, \
+             `'Create Directory ...'` is exempt per `UI-015`, and `…` (U+2026) on an action \
+             label is reported as the wrong *character* because that code point is reserved for \
+             truncation, placeholders and `[…]` elision. End versus mandatory middle truncation \
+             is implemented in `microcopy/truncate.rs`, producing the spec's own \
+             `src/app/…/mod.rs` shape with the basename and extension surviving, and \
+             `check_truncation_tooltip` makes the truncation-implies-tooltip pairing a violation \
+             when the tooltip is absent or is not the full string. `TabularNums` lets a counter, \
+             percentage, timestamp, range or numeric column assert the fixed-width requirement, \
+             and `check_numeric_readout` enforces right-aligning both header and cell. \
+             Missing: an enforcement point. Every rule here is a pure function a host runs \
+             against a plan before rendering it; nothing in this crate calls them, so an unruly \
+             host stays unruly until it opts in. Missing: the tabular guarantee, and the reason \
+             recorded above for it was wrong. `UIF-TOK-004` *does* model a font family — \
+             `Family::Mono` is a declared `font.family.mono` token that resolves to an \
+             `iced::Font`. The real boundary is that `iced::Font` carries four fields (`family`, \
+             `weight`, `stretch`, `style`) and no OpenType feature selector, so the spec's \
+             *second* mechanism, `font-variant-numeric: tabular-nums`, cannot be requested \
+             through this framework at all; only the mono-family route exists, and it resolves \
+             to iced's generic `Monospace` answered from the host's font fallback, so a \
+             fixed-pitch face is not guaranteed. Missing: pixel-aware truncation. With no font \
+             loaded where these rules run, the budget is a count of Unicode scalar values, so \
+             the framework cannot decide *when* a label overflows — the host supplies the \
+             budget, which makes the tooltip pairing a checkable contract rather than the \
+             runtime registration the pillar's wording implies. Missing: open-ended proper-noun \
+             knowledge. Licensing is a closed list, so a feature renamed to a capitalised word \
+             the list has never seen reads as a violation until the host adds it.",
+         ),
+        note: Some(
+            "Invented values, all recorded here. (1) `DEFAULT_LICENSED` — §1.1 names four \
+             licensed words (`Markdown`, `PDF`, `MCP`, `JSON`, kept separately as \
+             `SPEC_NAMED_LICENSED`); the other seventeen are framework-supplied for chrome \
+             this product actually contains and are not a spec transcription. (2) \
+             `GENERIC_CTA_LABELS` — the spec names `OK` and `Yes`/`No`; `okay` was added as \
+             the same word spelled another way, and `Cancel`/`Done`/`Submit` were deliberately \
+             *not* added because widening that set would invent a style rule §1.1 did not \
+             write. (3) `SEGMENT_SEPARATORS` = `/` and `\\` — the spec does not enumerate \
+             separators. (4) The `PinExemption` partition follows the two spec blocks rather \
+             than a blanket pardon: §4.5 exempts `'Ok'`/`'Cancel'` from verb-first only, \
+             §4.8/§4.9 exempt the seven chrome rows from sentence-case and ellipsis. (5) Pin \
+             citations record `UI-009` and `UI-015` where the spec names them and the spec's \
+             own range `UI-009..UI-034, UI-062` elsewhere, rather than a guessed per-literal \
+             id. (6) `ReadoutKind::requires_tabular()` returns true for every kind, derived \
+             from §1.1's list being entirely live or aligned numerics. (7) Two \
+             anti-false-positive rules the spec does not state: a label whose first character \
+             is not alphabetic is never first-word-lowercase, and single-letter words are \
+             excluded from both the all-caps and title-case tallies, because counting a bare \
+             `A` or `I` would report correct copy as a violation. Truncation budgets are \
+             Unicode scalar values, not pixels; no contrast figure was taken from a printed \
+             number.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-008",

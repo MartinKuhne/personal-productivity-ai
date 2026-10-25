@@ -74,7 +74,13 @@ use crate::token_lint::{
 /// own: every measurement it uses is a read-through of an existing
 /// `token::` value, so widening Rule B to cover it would add no reach.
 /// The file count moves and `PIN_RULE_B_FILES` does not.
-const PIN_FILES_SCANNED: usize = 126;
+///
+/// 132 as of `B-2`, whose six additions are the `microcopy/` subsystem
+/// — `microcopy/mod.rs`, `pins.rs`, `case_rule.rs`, `action_label.rs`,
+/// `truncate.rs` and `tabular.rs` (`UIF-PRIN-007`). It carries string
+/// and character rules rather than visual measurements, so like
+/// `layout/` it is scanned but never visual-scoped.
+const PIN_FILES_SCANNED: usize = 132;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
