@@ -164,6 +164,15 @@ pub const ROW_INSET_Y: f32 = space::XXS;
 /// extra hairline is gone and the width is a single token.
 pub const SELECTION_BAR_WIDTH: f32 = shape::BORDER_FOCUS;
 
+/// The width of one depth guide line — `shape.border.hairline` (`1px`).
+///
+/// Extracted from the inline literal `row_slots` used to carry so that a host
+/// painting its own guides (a `Stack` of styled `container`s rather than a
+/// canvas painter) and the composite's own `guides` rectangles cannot
+/// disagree about how wide the line is while both claiming §3B.6's
+/// "vertical `1px` tree depth guides".
+pub const GUIDE_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
 /// The row's label rung — `type.ui_compact`, `13px` (`UIF-PANE-003`).
 pub const LABEL_RUNG: &typography::TypeRung = &typography::UI_COMPACT;
 
@@ -267,7 +276,15 @@ pub fn indent_geometry(depth: usize, row_width: f32) -> IndentGeometry {
 ///
 /// Centred in each step so the line sits under its ancestor's disclosure
 /// column rather than on the boundary between two levels.
-fn guide_positions(levels: usize, step: f32) -> Vec<f32> {
+///
+/// Public because a host that draws its own row furniture — a `Stack` of
+/// styled `container`s rather than a canvas painter — still has to place
+/// those lines where *this* module says they go. Restating the centring
+/// arithmetic host-side is exactly how an app's guides and the composite's
+/// `guides` rectangles drift apart, so the positions are exported and the
+/// host only chooses the stroke.
+#[must_use]
+pub fn guide_positions(levels: usize, step: f32) -> Vec<f32> {
     (0..levels)
         .map(|level| ROW_INSET_X + level as f32 * step + step / 2.0)
         .collect()
@@ -334,7 +351,7 @@ pub fn row_slots(
             .map(|guide| Rectangle {
                 x: row.x + guide,
                 y: row.y,
-                width: shape::BORDER_HAIRLINE,
+                width: GUIDE_WIDTH,
                 height: row.height.max(0.0),
             })
             .collect(),

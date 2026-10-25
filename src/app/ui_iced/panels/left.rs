@@ -72,11 +72,18 @@
 //!   reducer state keyed by **path**, and hands it to `resolve_style`
 //!   as a plain value. INT-9 made the identical correction for the
 //!   menu row's `Hovered` / `Unhovered` reporting.
-//! * **The 2px selection bar and the depth guide lines.** Both come out
-//!   of the composite as [`iced_pro::widget::button_widget::Layer`]
-//!   rectangles for a canvas painter. The
-//!   row is a padded `container`; drawing them means a `stack` per row
-//!   or a canvas row, i.e. a rendering rewrite rather than a token pass.
+//! * **The 2px selection bar and the depth guide lines are built** (INT-11).
+//!   The note this replaces called them a canvas-painter requirement — "both
+//!   come out of the composite as `Layer` rectangles for a canvas painter;
+//!   drawing them means a `stack` per row or a canvas row, i.e. a rendering
+//!   rewrite rather than a token pass". The first half was accurate and the
+//!   inference drawn from it was not. A `Stack` per row *is* what they need,
+//!   and a `Stack` of styled `container`s is not a rewrite: the row's
+//!   existing padded `container` stays the base layer and the bar and guides
+//!   are painted over it. Both colours already came out of
+//!   [`tree_row::resolve_style`] (`guide`, `selection_bar`) and were simply
+//!   never drawn. What the change really costs is per-row widget count, which
+//!   [`row_overlay`] states and the sidecar pins.
 //! * **The `[PDF]` badge.** §4.3.2 carries PDF-backed meaning through a
 //!   badge so it survives the selection lock. The app tints the whole
 //!   label with `error` instead; the lock now correctly overrides that
@@ -151,7 +158,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::widget::{Column, Row, button, container, mouse_area, scrollable, text, text_input};
+use iced::widget::{
+    Column, Row, Space, Stack, button, container, mouse_area, scrollable, text, text_input,
+};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use iced_pro::composite::tree_row;
@@ -1331,10 +1340,38 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
         path: row.path.clone(),
     }));
 
-    match row_double_click_command(row) {
+    let base: Element<'a, Message> = match row_double_click_command(row) {
         Some(command) => trigger.on_double_click(Message::Command(command)).into(),
         None => trigger.into(),
+    };
+
+    // The selection bar and the depth guides are painted **over** the row in
+    // a `Stack`; the row's own box is left exactly as [`row_box`] resolves it,
+    // so neither the bar nor a guide can shift the label or a neighbour. The
+    // stripes are siblings of the row's `mouse_area`, not children of it, and
+    // iced dispatches events without occlusion culling — a stripe carries no
+    // handler, so hover, click, double-click and the right-click menu all still
+    // land on the area underneath, and INT-10's path-keyed hover is untouched.
+    //
+    // A resting, unindented row has nothing to paint and returns the base
+    // directly rather than carrying an empty `Stack`.
+    let overlay = row_overlay(row.depth, selected, hovered);
+    if overlay.is_empty() {
+        return base;
     }
+
+    let mut layers = vec![base];
+    if let Some(bar) = overlay.selection_bar {
+        layers.push(stripe_element(bar, row_box.height));
+    }
+    for guide in &overlay.guides {
+        layers.push(stripe_element(*guide, row_box.height));
+    }
+
+    Stack::with_children(layers)
+        .width(Length::Fill)
+        .height(Length::Fixed(row_box.height))
+        .into()
 }
 
 /// Whether the pointer is over `row`, given the reducer's hovered path.
@@ -1438,6 +1475,151 @@ pub fn row_box(depth: usize, selected: bool, hovered: bool) -> RowBox {
             left: ROW_PADDING_X + row_indent_pixels(depth),
         },
     }
+}
+
+/// The x offset of each drawn depth-guide line, measured from the row's own
+/// left edge.
+///
+/// Delegated to [`tree_row::guide_positions`] rather than recomputed, for the
+/// same reason [`row_indent_pixels`] delegates the step: while both name the
+/// same geometry the app's tree and the framework's row cannot drift apart.
+/// The level count is the app's **clamped** depth, because a guide for a level
+/// that was never indented would hang inside the label rather than beside it.
+///
+/// Each line is centred in its step (`ROW_INSET_X + level × step + step / 2`),
+/// which is where the framework puts it so it sits under its ancestor's
+/// disclosure column rather than on the boundary between two levels.
+///
+/// Purity: pure.
+#[must_use]
+pub fn row_guide_offsets(depth: usize) -> Vec<f32> {
+    tree_row::guide_positions(depth.min(MAX_ROW_INDENT_DEPTH), ROW_INDENT_PER_DEPTH)
+}
+
+/// One painted stripe over a tree row: a full-height, fixed-width bar at a
+/// given offset from the row's left edge.
+///
+/// Held as data so the bar's width can be asserted to come from
+/// [`tree_row::SELECTION_BAR_WIDTH`] and the guides' positions to land on
+/// [`tree_row::INDENT_STEP`] multiples, without a renderer in sight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowStripe {
+    /// Offset from the row's left edge.
+    pub x: f32,
+    /// Stripe width — `SELECTION_BAR_WIDTH` for the bar, [`tree_row::GUIDE_WIDTH`]
+    /// for a guide.
+    pub width: f32,
+    /// Stripe fill, already resolved through the §3B.6 role lock.
+    pub color: Color,
+}
+
+/// Everything painted over a tree row's band.
+///
+/// Separate from [`RowBox`] because the box is what the row *occupies* and the
+/// overlay is what is painted on top of it: the two must be independently
+/// invariant, and folding them together is how a hover or a selection would
+/// get to move a row again.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowOverlay {
+    /// The `2px` left selection bar — `None` on an unselected row, so an
+    /// unselected row cannot show a leftover bar.
+    pub selection_bar: Option<RowStripe>,
+    /// One guide per drawn indent level, empty at depth 0.
+    pub guides: Vec<RowStripe>,
+}
+
+impl RowOverlay {
+    /// Whether there is anything to paint, which lets the row skip the `Stack`
+    /// entirely rather than carry an empty one.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.selection_bar.is_none() && self.guides.is_empty()
+    }
+
+    /// The widget cost of drawing this overlay over one row, in widgets.
+    ///
+    /// One `Stack`, one widget for the selection bar (it needs no wrapper at
+    /// `x = 0`), and two per guide — the bar plus the transparent full-width
+    /// wrapper that offsets it. Exposed so the sidecar can assert the cost
+    /// rather than let it be discovered in a profile.
+    #[must_use]
+    pub fn widget_cost(&self) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
+        1 + usize::from(self.selection_bar.is_some()) + self.guides.len() * 2
+    }
+}
+
+/// Resolve a row's overlay furniture for a given depth and posture.
+///
+/// Every colour here is the framework's, read off [`row_paint`]:
+/// [`tree_row::TreeRowStyle::selection_bar`] and
+/// [`tree_row::TreeRowStyle::guide`] are both already run through
+/// §3B.6's **role-based** lock, so on a selected row they come back as
+/// `text.strong` whatever the resting tokens measure, and off it they are
+/// `accent.border` and `border.strong`. Hover moves the band to
+/// `surface.hover` and the guide's contrast moves with it; nothing here
+/// re-decides that.
+///
+/// The bar's width is [`tree_row::SELECTION_BAR_WIDTH`] and the guides' is
+/// [`tree_row::GUIDE_WIDTH`] — no new literals, and the same constants the
+/// composite's own `row_slots` rectangles are built from.
+///
+/// Purity: pure function of `(depth, selected, hovered)`.
+#[must_use]
+pub fn row_overlay(depth: usize, selected: bool, hovered: bool) -> RowOverlay {
+    let paint = row_paint(selected, hovered);
+    RowOverlay {
+        selection_bar: selected.then_some(RowStripe {
+            x: 0.0,
+            width: tree_row::SELECTION_BAR_WIDTH,
+            color: paint.selection_bar,
+        }),
+        guides: row_guide_offsets(depth)
+            .into_iter()
+            .map(|x| RowStripe {
+                x,
+                width: tree_row::GUIDE_WIDTH,
+                color: paint.guide,
+            })
+            .collect(),
+    }
+}
+
+/// Draw one [`RowStripe`] as a full-height, fixed-width bar at its offset.
+///
+/// The transparent full-width wrapper is not decoration: iced 0.14's `Stack`
+/// lays every child at its own top-left origin and exposes no per-child
+/// alignment (`iced_widget-0.14.2/src/stack.rs:193-205`), and `Container` has
+/// no `margin` to offset itself with, so a stripe at `x > 0` has to be pushed
+/// by padding inside something that spans the row. A stripe at `x = 0` — the
+/// selection bar — skips the wrapper, which is why the bar costs one widget and
+/// a guide costs two.
+fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
+    let bar = container(Space::new())
+        .width(Length::Fixed(stripe.width))
+        .height(Length::Fixed(height))
+        .style(move |_theme| container::Style {
+            background: Some(Background::Color(stripe.color)),
+            ..container::Style::default()
+        });
+
+    if stripe.x == 0.0 {
+        return bar.into();
+    }
+
+    container(bar)
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .padding(Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: stripe.x,
+        })
+        .align_x(Alignment::Start)
+        .into()
 }
 
 /// The tree row's label colour, with the framework's **role-based**

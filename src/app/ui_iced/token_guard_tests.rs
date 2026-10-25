@@ -362,8 +362,15 @@ fn legal_type_sizes() -> Vec<u32> {
 fn converted_runtime_sizes() -> Vec<(String, f32)> {
     const NAMED: &[(&str, f32)] = &[
         // Center panel -- tab strip.
+        //
+        // `center::UNSAVED_DOT_SIZE` is deliberately absent (INT-11). This
+        // list is what the floor guards walk for sizes rendered *as type*, and
+        // the unsaved marker is no longer type: it is a 6px
+        // `size.indicator.dot` box, so §2.4's 12px floor does not reach it.
+        // Leaving it here would force the constant back to 12 and re-open the
+        // §4.4.1 conflict INT-7c had to record; removing it costs the guard
+        // nothing, because a 6pt *font* still cannot appear in this list.
         ("center::TAB_TEXT_SIZE", center::TAB_TEXT_SIZE),
-        ("center::UNSAVED_DOT_SIZE", center::UNSAVED_DOT_SIZE),
         ("center::TAB_CLOSE_GLYPH_SIZE", center::TAB_CLOSE_GLYPH_SIZE),
         // Center panel -- viewers.
         ("center::DOCUMENT_TITLE_SIZE", center::DOCUMENT_TITLE_SIZE),
@@ -669,22 +676,40 @@ fn the_tab_close_button_clears_the_hit_target_floor() {
     );
 }
 
-/// The unsaved marker is quieter than the label and still legal text.
+/// The unsaved marker is a shape at the spec's `6px`, and it sits **outside
+/// the type floor's domain** — which is how the §4.4.1 conflict closed.
+///
+/// INT-7c held this test the other way round: `UNSAVED_DOT_SIZE >= MIN_SIZE`
+/// plus an `assert_ne!` against `INDICATOR_DOT`, because the marker was a
+/// font glyph and taking the token literally meant either breaking §2.4's
+/// floor or exempting one call site and gutting the guard. The marker is now
+/// a `container`, so the token is honoured exactly.
+///
+/// The guard keeps its teeth by **scope** rather than by compromise:
+/// `UNSAVED_DOT_SIZE` is removed from `converted_runtime_sizes`, the list of
+/// sizes the interface can put on screen *as type*. A 6pt font still fails
+/// `nothing_in_the_converted_surfaces_renders_below_the_type_floor`; a 6px
+/// box was never in that list's business.
 #[test]
-fn the_unsaved_marker_is_quiet_and_still_legal() {
+fn the_unsaved_marker_is_a_shape_outside_the_type_floor() {
+    assert_eq!(
+        center::UNSAVED_DOT_SIZE,
+        size::INDICATOR_DOT,
+        "the marker is §4.4.1's 6px `size.indicator.dot`, honoured literally \
+         rather than rounded up to the text floor"
+    );
     assert_ne!(
         center::UNSAVED_DOT_SIZE,
         center::TAB_TEXT_SIZE,
         "the dot must not borrow the label's rung"
     );
     assert!(
-        center::UNSAVED_DOT_SIZE >= MIN_SIZE,
-        "the dot is painted with a font glyph, so the type floor applies to it"
+        center::UNSAVED_DOT_SIZE < MIN_SIZE,
+        "the dot is {}px against a {}px floor: illegal as type, legal as a \
+         shape, and it is painted as a shape",
+        center::UNSAVED_DOT_SIZE,
+        MIN_SIZE,
     );
-    // 4.4.1's 6px `size.indicator.dot` cannot be honoured through a text
-    // widget; the gap is recorded on the constant and pinned here so it is
-    // noticed if it closes by accident rather than by decision.
-    assert_ne!(center::UNSAVED_DOT_SIZE, size::INDICATOR_DOT);
     assert_eq!(center::UNSAVED_MARKER_WIDTH, space::MD);
 }
 

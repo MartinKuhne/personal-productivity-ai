@@ -251,7 +251,16 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// token-bound, so re-pointing them from `shape::BORDER_FOCUS` and
 /// `size::SLIDER_TRACK_HEIGHT` at the §2.1 spacing rungs is invisible to
 /// a counter that counts declarations rather than provenance.
-const PIN_TOKEN_BOUND: usize = 192;
+/// 193 as of `INT-11`, whose one addition is
+/// `tree_row::GUIDE_WIDTH` — the `1px` depth-guide stroke, read from
+/// `shape::BORDER_HAIRLINE`. It was previously an inline literal inside
+/// `row_slots`; lifting it to a named constant is what lets a host painting
+/// its own guides (a `Stack` of styled `container`s rather than a canvas
+/// painter) and the composite's own `guides` rectangles share one source
+/// for §3B.6's "vertical `1px` tree depth guides". The count moves by one
+/// because a declaration was added, not because a number changed — the same
+/// asymmetry `SELECTION_BAR_WIDTH` demonstrated above.
+const PIN_TOKEN_BOUND: usize = 193;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

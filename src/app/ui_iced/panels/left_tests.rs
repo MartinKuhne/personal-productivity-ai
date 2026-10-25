@@ -1538,3 +1538,303 @@ fn a_stale_hover_path_paints_no_row_at_all() {
         "a hover path naming a gone file must paint nothing, got {lit:?}"
     );
 }
+
+// --- INT-11: the selection bar and the depth guides ---------------------
+
+/// The selection bar's width is the framework's `SELECTION_BAR_WIDTH`, not a
+/// literal introduced with the painting.
+///
+/// That constant is `shape.border.focus`, the token §2's border table names
+/// against the "tree/rail selection bar" and §3B.6 prices at `2px`. Pinning
+/// the identity rather than the number means a retune of `border.focus` moves
+/// the bar with the token instead of leaving a stale `2.0` behind.
+#[test]
+fn the_selection_bar_uses_the_frameworks_bar_width_not_a_new_literal() {
+    let overlay = row_overlay(2, true, false);
+    let bar = overlay
+        .selection_bar
+        .expect("a selected row must carry a selection bar");
+
+    assert_eq!(
+        bar.width,
+        tree_row::SELECTION_BAR_WIDTH,
+        "the bar must read `tree_row::SELECTION_BAR_WIDTH`"
+    );
+    assert_eq!(
+        bar.width,
+        iced_pro::token::shape::BORDER_FOCUS,
+        "`SELECTION_BAR_WIDTH` is `border.focus`, i.e. the 2px §3B.6 draws"
+    );
+    assert_eq!(bar.x, 0.0, "the bar is the row's left edge");
+
+    assert_eq!(
+        row_overlay(2, false, false).selection_bar,
+        None,
+        "an unselected row must have no bar at all, not a transparent one"
+    );
+}
+
+/// The depth guides land on `INDENT_STEP` multiples.
+///
+/// Each line is centred in its step (`ROW_PADDING_X + level × step + step / 2`),
+/// so the pitch between consecutive lines is exactly one step and the whole
+/// set is keyed to [`tree_row::INDENT_STEP`] rather than to a spacing chosen
+/// at the paint site.
+#[test]
+fn the_depth_guides_land_on_indent_step_multiples() {
+    for depth in 1..8usize {
+        let offsets = row_guide_offsets(depth);
+        assert_eq!(
+            offsets.len(),
+            depth,
+            "one guide per indented level at depth {depth}"
+        );
+
+        for (level, x) in offsets.iter().enumerate() {
+            let expected =
+                ROW_PADDING_X + level as f32 * tree_row::INDENT_STEP + tree_row::INDENT_STEP / 2.0;
+            assert_eq!(
+                *x, expected,
+                "guide {level} at depth {depth} must sit centred in its step"
+            );
+        }
+
+        if let (Some(first), Some(second)) = (offsets.first(), offsets.get(1)) {
+            assert_eq!(
+                second - first,
+                tree_row::INDENT_STEP,
+                "the pitch between guides is exactly one indent step"
+            );
+        }
+    }
+}
+
+/// A guide never reaches the label.
+///
+/// The deepest line sits half a step short of where the label starts, so no
+/// stripe can draw through text at any depth — the property that makes the
+/// guides safe to paint over a row whose label fills the pane.
+#[test]
+fn no_depth_guide_reaches_the_label() {
+    for depth in 1..12usize {
+        let label_left = ROW_PADDING_X + row_indent_pixels(depth);
+        let overlay = row_overlay(depth, false, false);
+        let deepest = overlay
+            .guides
+            .last()
+            .unwrap_or_else(|| panic!("depth {depth} must draw guides"));
+
+        assert!(
+            deepest.x + deepest.width <= label_left,
+            "the deepest guide ends at {} and the label starts at {}; a guide \
+             under the label would draw through text",
+            deepest.x + deepest.width,
+            label_left,
+        );
+    }
+}
+
+/// The guide count clamps with the drawn indent, not with the raw depth.
+///
+/// [`MAX_ROW_INDENT_DEPTH`] caps how far a row is indented, and the guide set
+/// is clamped to the same number. A guide for a level that was never indented
+/// would hang inside the label rather than beside it.
+#[test]
+fn the_guide_count_clamps_with_the_drawn_indent() {
+    let at_cap = row_guide_offsets(MAX_ROW_INDENT_DEPTH).len();
+    let past_cap = row_guide_offsets(MAX_ROW_INDENT_DEPTH + 25).len();
+
+    assert_eq!(
+        at_cap, MAX_ROW_INDENT_DEPTH,
+        "the cap itself still draws one guide per level"
+    );
+    assert_eq!(
+        past_cap, at_cap,
+        "going past the cap must not add guides, or they would land in the label"
+    );
+    assert_eq!(
+        row_overlay(MAX_ROW_INDENT_DEPTH + 25, false, false)
+            .guides
+            .len(),
+        at_cap,
+        "the overlay reads the same clamped set"
+    );
+}
+
+/// Every stripe colour is the framework's, read off [`row_paint`] — nothing in
+/// the overlay re-decides a colour locally.
+///
+/// On a selected row §3B.6 locks the label, the chevron, the guides and the
+/// left bar to `text.strong` **by role**, so they stay locked even though
+/// `border.strong` over `accent.fill` measures `1.09:1` and `accent.border`
+/// measures `1.61:1`. Off the band the resting tokens come back.
+#[test]
+fn every_overlay_stripe_colour_is_the_frameworks_and_clears_the_chrome_floor() {
+    use iced_pro::token::contrast::MIN_CHROME_CONTRAST;
+
+    let pro = Palette::pro();
+
+    for depth in 0..6usize {
+        for hovered in [false, true] {
+            let paint = row_paint(false, hovered);
+            let overlay = row_overlay(depth, false, hovered);
+            for guide in &overlay.guides {
+                assert_eq!(
+                    guide.color, paint.guide,
+                    "the guide must carry `TreeRowStyle::guide`, nothing else"
+                );
+                assert_eq!(
+                    guide.color, pro.border_strong,
+                    "off the selection band the resting guide is `border.strong`"
+                );
+                let ratio = contrast_ratio(guide.color, paint.band);
+                assert!(
+                    ratio >= MIN_CHROME_CONTRAST,
+                    "border.strong on the band actually painted at depth {depth} \
+                     (hovered={hovered}) is {ratio:.6}:1, under the \
+                     {MIN_CHROME_CONTRAST}:1 chrome floor §2.5 prices for tree \
+                     guides"
+                );
+            }
+        }
+    }
+
+    // Selected: both stripes lock to text.strong by role.
+    for depth in 0..6usize {
+        for hovered in [false, true] {
+            let paint = row_paint(true, hovered);
+            let overlay = row_overlay(depth, true, hovered);
+
+            let bar = overlay
+                .selection_bar
+                .expect("selected rows carry a bar at every depth");
+            assert_eq!(bar.color, paint.selection_bar);
+            assert_eq!(
+                bar.color, pro.text_strong,
+                "the bar locks by role, not because a measurement happened to \
+                 clear a threshold"
+            );
+
+            let bar_ratio = contrast_ratio(bar.color, paint.band);
+            assert!(
+                bar_ratio >= MIN_CHROME_CONTRAST,
+                "the locked bar against its own band is {bar_ratio:.6}:1"
+            );
+
+            for guide in &overlay.guides {
+                assert_eq!(
+                    guide.color, pro.text_strong,
+                    "§3B.6 locks the depth guides on a selected row too"
+                );
+                let ratio = contrast_ratio(guide.color, paint.band);
+                assert!(
+                    ratio >= MIN_CHROME_CONTRAST,
+                    "locked guide on accent.fill is {ratio:.6}:1 at depth {depth}"
+                );
+            }
+        }
+    }
+
+    // The resting tokens the lock is protecting against stay unmeasurable on
+    // the band, so the lock cannot be argued away as unnecessary.
+    assert!(
+        contrast_ratio(pro.border_strong, pro.accent_fill) < 2.0,
+        "border.strong on accent.fill must stay near-invisible for the lock to \
+         be doing real work"
+    );
+    assert!(
+        contrast_ratio(pro.accent_border, pro.accent_fill) < 2.0,
+        "accent.border on accent.fill must stay near-invisible too"
+    );
+}
+
+/// Hover moves a guide's **colour** with the band and nothing else.
+///
+/// The geometry is posture-independent for the same reason [`RowBox`]'s is:
+/// a stripe that grew, shifted or appeared on hover would move a neighbour,
+/// and §2 forbids it. Only the fill changes, because the band under it moved
+/// from the pane's resting surface to `surface.hover`.
+#[test]
+fn hover_moves_guide_geometry_never_colour_only_the_band() {
+    for depth in 1..8usize {
+        let rest = row_overlay(depth, false, false);
+        let hover = row_overlay(depth, false, true);
+
+        assert_eq!(
+            rest.guides.len(),
+            hover.guides.len(),
+            "hover must not add or drop a guide"
+        );
+        for (a, b) in rest.guides.iter().zip(&hover.guides) {
+            assert_eq!(a.x, b.x, "hover moved a guide horizontally");
+            assert_eq!(a.width, b.width, "hover widened a guide");
+        }
+
+        // The band really did move, so the colour change is a consequence of
+        // the surface rather than a coincidence.
+        assert_ne!(
+            row_paint(false, false).band,
+            row_paint(false, true).band,
+            "hover must change the band the guide is measured against"
+        );
+    }
+}
+
+/// A resting, unindented row carries no overlay, so it pays no `Stack`.
+#[test]
+fn a_resting_unindented_row_carries_no_overlay_at_all() {
+    let overlay = row_overlay(0, false, false);
+    assert!(
+        overlay.is_empty(),
+        "depth 0 has no guides and an unselected row has no bar"
+    );
+    assert_eq!(
+        overlay.widget_cost(),
+        0,
+        "nothing to paint means nothing to build"
+    );
+}
+
+/// The overlay's per-row widget cost, stated rather than discovered later.
+///
+/// One `Stack`, one widget for the selection bar (it needs no offset wrapper at
+/// `x = 0`), and **two per guide** — the bar plus the transparent full-width
+/// wrapper that pushes it out, because iced 0.14's `Stack` lays every child at
+/// its own top-left origin and `Container` has no `margin`. The tree is not
+/// virtualised, so this is paid per visible row per frame; the bound is what
+/// [FMD-060] / [FMD-061] are measured against.
+#[test]
+fn the_overlay_widget_cost_is_stated_and_bounded() {
+    assert_eq!(row_overlay(0, false, false).widget_cost(), 0);
+    assert_eq!(row_overlay(0, true, false).widget_cost(), 2);
+    assert_eq!(row_overlay(1, false, false).widget_cost(), 3);
+    assert_eq!(row_overlay(1, true, false).widget_cost(), 4);
+    assert_eq!(row_overlay(3, true, true).widget_cost(), 8);
+
+    // The formula, so a future edit cannot change the shape silently. The one
+    // exception is the empty overlay, which skips the `Stack` entirely.
+    for depth in 0..8usize {
+        for selected in [false, true] {
+            let overlay = row_overlay(depth, selected, false);
+            let expected = if depth == 0 && !selected {
+                0
+            } else {
+                1 + usize::from(selected) + depth * 2
+            };
+            assert_eq!(
+                overlay.widget_cost(),
+                expected,
+                "cost at depth {depth}, selected={selected} must be \
+                 1 Stack + the bar + 2 per guide"
+            );
+        }
+    }
+
+    // A worst-case row in this app's tree, bounded.
+    let worst = row_overlay(MAX_ROW_INDENT_DEPTH, true, true);
+    assert_eq!(
+        worst.widget_cost(),
+        1 + 1 + MAX_ROW_INDENT_DEPTH * 2,
+        "the deepest selectable row is the ceiling"
+    );
+}

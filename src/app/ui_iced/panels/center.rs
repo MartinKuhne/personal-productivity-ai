@@ -128,19 +128,28 @@
 //! `STRIP_HEIGHT (36) = STRIP_PADDING (4) + HIT_TARGET_MIN (24) + 2 × TAB_PADDING_Y (2) + STRIP_PADDING (4)`,
 //! with [`TAB_HEIGHT`] = `28` = `size.control.sm` as the tab's own rung.
 //!
-//! Two §4.4.1 details are **not** implemented, both for the same structural
-//! reason — they need a layer the current widget tree cannot paint:
+//! Two §4.4.1 details sit outside the band, and an earlier note here said
+//! both were blocked because they "need a layer the current widget tree
+//! cannot paint". **That premise was wrong** — INT-10's Part C audit found a
+//! canvas painter was never required. One of the two is now built; the other
+//! is blocked by something that does exist:
 //!
-//! * **The 2 px top accent indicator** (`accent.border` active,
-//!   `border.strong` hovered) needs a `Stack` per tab or a row widget that
-//!   reports hover into its own style. Same blocker as the file tree's 2 px
-//!   selection bar (INT-7b follow-on): iced 0.14's `mouse_area` never
-//!   reports hover into a `container` style.
-//! * **The strip's 1 px `border.subtle` bottom rule** is not painted either.
-//!   iced's `Border` is a uniform perimeter, so a bottom-only hairline needs
-//!   a `rule::horizontal` sibling inside the band — which would push the
-//!   band's content box past 36 unless the height is re-derived. Left as a
-//!   stated follow-on rather than folded in here.
+//! * **The 2 px top accent indicator is built** (INT-11). A `Stack` per tab
+//!   with a [`shape::BORDER_FOCUS`]-high styled `container` laid over it is
+//!   the whole mechanism; the bar consumes no layout, so the pinned band
+//!   closure below is untouched by it. What is *still* missing is the
+//!   indicator's third state: §4.4.2 asks for `border.strong` on a hovered
+//!   inactive tab, which needs the strip to report hover into the reducer
+//!   the way the file tree does since INT-10. The active-only bar is what
+//!   ships, and an inactive tab paints nothing rather than a leftover bar.
+//! * **The strip's 1 px `border.subtle` bottom rule** is not painted, and
+//!   this one is a real budget conflict rather than a missing layer: iced's
+//!   `Border` is a uniform perimeter, so a bottom-only hairline needs a
+//!   `rule::horizontal` sibling inside the band, which pushes the band's
+//!   content box past the 36 px [`STRIP_HEIGHT`] pins. Left as a stated
+//!   follow-on rather than folded in here.
+//!
+//! [`shape::BORDER_FOCUS`]: iced_pro::token::shape::BORDER_FOCUS
 //!
 //! One further §4.4.2 deviation is recorded rather than changed: the spec
 //! gives the **active tab** a `surface.overlay` fill, while the app paints
@@ -158,12 +167,12 @@ mod tests;
 
 use std::path::{Path, PathBuf};
 
-use iced::widget::{Column, Row, button, container, scrollable, text};
+use iced::widget::{Column, Row, Space, Stack, button, container, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Padding};
 
 use iced_pro::token::contrast;
 use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::token::{size, space};
+use iced_pro::token::{shape, size, space};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::SkillFile;
@@ -304,31 +313,52 @@ pub const TAB_CLOSE_SPACING: f32 = space::XS;
 /// conditional-rendering rule: allocate, then toggle the content).
 pub const UNSAVED_MARKER_WIDTH: f32 = space::MD;
 
-/// Rendered size of the unsaved dot inside that slot — the type floor.
+/// Rendered diameter of the unsaved dot inside that slot — `size.indicator.dot`
+/// (`UIF-TOK-002`), i.e. §4.4.1's `6px` marker taken literally.
 ///
-/// **Movement: 13 → 12 (−1).** The dot used to be painted at the tab label's
-/// own point size, which made it as loud as the title.
+/// **Movement: 12 → 6 (−6), and the §4.4.1 conflict this constant carried is
+/// genuinely closed rather than re-worked-around.** INT-7c pinned it at
+/// [`typography::MIN_SIZE`] because the marker was painted with a **font
+/// glyph** (`strings::ICON_UNSAVED_DOT`) and §2.4's floor is absolute — no
+/// *text* may render under 12px. Under a glyph renderer the spec's 6px was
+/// therefore unreachable, and the recorded compromise ("the smallest size
+/// that is still legal text") was the best available answer to a real
+/// conflict.
 ///
-/// **A spec conflict, recorded rather than papered over.** §4.4.1 asks for a
-/// `6px` marker (`size.indicator.dot`), and [`size::INDICATOR_DOT`] is that
-/// token. It cannot be honoured here: this marker is painted with a **font
-/// glyph** (`strings::ICON_UNSAVED_DOT`), and §2.4's rule is absolute —
-/// *"No text anywhere in the interface may render smaller than 12px"*. A
-/// `text(..).size(6.0)` call is precisely the shape the INT-7c floor guard
-/// exists to catch, so taking the token literally would mean either breaking
-/// the floor or exempting this one call site and gutting the guard.
+/// The conflict was only real because a 6px **shape** was believed
+/// unavailable. It is not: the marker is now a `container` with a fixed
+/// width and height, so §2.4 never reaches it and the token is honoured
+/// exactly. The floor guard keeps its teeth for precisely that reason —
+/// this constant is removed from `converted_runtime_sizes`, the list of
+/// sizes the interface can put on screen *as type*, so "nothing renders
+/// below 12pt" still means what it says and no 6pt font can hide behind
+/// this call site. What remains here is a diameter, not a point size.
 ///
-/// The marker is therefore pinned at [`typography::MIN_SIZE`] — the smallest
-/// size that is still legal text, and as much quieter than the label rung as
-/// a glyph can get. Rendering a true 6 px **shape** needs a quad/canvas
-/// painter under the tab, which is the same missing layer as the 2 px accent
-/// indicator recorded in the module header; when that lands this constant
-/// should move to [`size::INDICATOR_DOT`] and the guard should keep its teeth
-/// by scoping to legible text only.
-///
-/// [`size::INDICATOR_DOT`]: iced_pro::token::size::INDICATOR_DOT
 /// [`typography::MIN_SIZE`]: iced_pro::token::typography::MIN_SIZE
-pub const UNSAVED_DOT_SIZE: f32 = typography::MIN_SIZE;
+pub const UNSAVED_DOT_SIZE: f32 = size::INDICATOR_DOT;
+
+/// Corner radius of the unsaved dot — `shape.radius.pill` (`UIF-TOK-003`).
+///
+/// A pill radius on a square box is a circle: iced clamps every corner to
+/// `min(width, height) / 2` before drawing
+/// (`iced_graphics-0.14.0/src/geometry/path/builder.rs:173`), so
+/// [`UNSAVED_DOT_SIZE`] over `RADIUS_PILL` renders the `6px` round dot §4.4.1
+/// draws. The token is read inline at the call site rather than restated as
+/// a `*_RADIUS` constant on purpose: Rule B reads visually-named `pub const`
+/// declarations, and `999.0` has no business being registered as a layout
+/// bound when the thing it means is "fully round".
+pub const UNSAVED_DOT_RADIUS: f32 = shape::RADIUS_PILL;
+
+/// Height of a tab's top accent indicator — `shape.border.focus`
+/// (`UIF-TOK-003`), the weight §2's border table names against the "active
+/// tab accent bar" and §4.4.1 slot 1 prices at `2px`.
+///
+/// **This height is not subtracted from [`TAB_HEIGHT`].** The bar is laid
+/// *over* the tab in a [`Stack`], so the band closure
+/// `STRIP_HEIGHT (36) = STRIP_PADDING (4) + TAB_HEIGHT (28) + STRIP_PADDING (4)`
+/// is arithmetically unchanged whether or not a bar is painted, and the
+/// `36 > 30` content-floor pin cannot be disturbed by it.
+pub const TAB_INDICATOR_HEIGHT: f32 = shape::BORDER_FOCUS;
 
 /// Point size of a tab's `×` close glyph — `size.icon.sm` (`UIF-TOK-002`).
 ///
@@ -583,19 +613,69 @@ pub fn thinking_section_visible(thinking: &str) -> bool {
     !thinking.is_empty()
 }
 
-/// The marker rendered in a tab's fixed-width unsaved slot: the dot glyph
-/// when the document is dirty, a blank of the same width otherwise, so the
-/// tab's shape never changes ([RUST-021]: the glyph itself is a
-/// [`strings`] constant).
+/// One tab's unsaved marker, as a paintable shape rather than a glyph.
 ///
-/// Purity: pure function of `unsaved`.
+/// Held as data so the diameter, the roundness and the fill can be asserted
+/// without a renderer, and so the render path cannot quietly fall back to a
+/// text run — which is the regression this whole type exists to make
+/// impossible.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnsavedDot {
+    /// Whether a dot is drawn at all. A clean document draws nothing.
+    pub visible: bool,
+    /// The dot's diameter — [`UNSAVED_DOT_SIZE`], i.e. `size.indicator.dot`.
+    pub diameter: f32,
+    /// Corner radius — [`UNSAVED_DOT_RADIUS`], i.e. `shape.radius.pill`.
+    pub radius: f32,
+    /// The dot's fill, already run through the locked-fill rule.
+    pub color: iced::Color,
+}
+
+/// The unsaved marker for a tab: a real `6px` (`size.indicator.dot`) round
+/// shape, filled through the same role lock [`tab_unsaved_dot_color`]
+/// applies.
+///
+/// **A shape, not a glyph.** The retired `unsaved_marker` returned
+/// `strings::ICON_UNSAVED_DOT` at the type floor, which is the only reason
+/// §4.4.1's 6px ever had to be recorded as unreachable. See
+/// [`UNSAVED_DOT_SIZE`] for how the conflict closed.
+///
+/// The dot is invisible rather than absent when the document is clean: the
+/// [`UNSAVED_MARKER_WIDTH`] slot is allocated either way, so a tab's shape
+/// never changes as it goes dirty (the conditional-rendering rule).
+///
+/// Purity: pure function of `unsaved`, and of `active` through the fill lock.
 #[must_use]
-pub fn unsaved_marker(unsaved: bool) -> &'static str {
-    if unsaved {
-        strings::ICON_UNSAVED_DOT
-    } else {
-        ""
+pub fn unsaved_dot(unsaved: bool, palette: &Palette, active: bool) -> UnsavedDot {
+    UnsavedDot {
+        visible: unsaved,
+        diameter: UNSAVED_DOT_SIZE,
+        radius: UNSAVED_DOT_RADIUS,
+        color: tab_unsaved_dot_color(palette, active),
     }
+}
+
+/// Colour of a tab's `2px` top accent indicator, or `None` when it paints
+/// nothing.
+///
+/// §4.4.1 slot 1 gives this bar three states: `accent.border` when active,
+/// `transparent` when inactive at rest, and `border.strong` on hover. **Only
+/// the first two are wired.** The hovered state needs the tab strip to report
+/// the pointer into the reducer the way the file tree has since INT-10
+/// (`left.rs`'s `RowEntered` / `RowLeft`), and that crossing has not been
+/// brought across — so it is an unbuilt interaction, not a paint gap.
+///
+/// An inactive tab resolves to `None` rather than to a transparent fill, so
+/// the render path emits no bar at all and a leftover or partial indicator
+/// on an inactive tab is not reachable from here.
+///
+/// `accent.border` is read from the framework palette; no numeric colour is
+/// introduced in this module (§4a).
+///
+/// Purity: pure function of `active`.
+#[must_use]
+pub fn tab_top_indicator(active: bool) -> Option<iced::Color> {
+    active.then(|| Palette::pro().accent_border)
 }
 
 /// Label colour for a tab: `text_strong` on the active tab, `text_muted` on
@@ -942,14 +1022,29 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
+    let dot = unsaved_dot(tab.unsaved, &palette, tab.active);
     let marker = container(
-        text(unsaved_marker(tab.unsaved))
-            .size(UNSAVED_DOT_SIZE)
-            .line_height(TAB_RUNG.iced_line_height())
-            .color(tab_unsaved_dot_color(&palette, tab.active)),
+        container(Space::new())
+            .width(Length::Fixed(dot.diameter))
+            .height(Length::Fixed(dot.diameter))
+            // iced 0.14 has no `border_radius` builder on a container; the
+            // radius lives on the style's `Border`, and `draw_background`
+            // hands that whole `Border` to the fill quad
+            // (`iced_widget-0.14.2/src/container.rs:446`), so the fill is
+            // rounded even at a zero border width.
+            .style(move |_theme| container::Style {
+                background: dot.visible.then_some(Background::Color(dot.color)),
+                border: iced::Border {
+                    width: 0.0,
+                    radius: dot.radius.into(),
+                    ..Default::default()
+                },
+                ..container::Style::default()
+            }),
     )
     .width(Length::Fixed(UNSAVED_MARKER_WIDTH))
-    .align_x(Alignment::Center);
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center);
 
     let label = text(&tab.title)
         .size(TAB_TEXT_SIZE)
@@ -994,9 +1089,36 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         ..container::Style::default()
     });
 
-    crate::ui_iced::overlay::context_menu_trigger(surface, tab_context_menu_open_message(index))
-        .on_press(Message::Command(tab_select_command(&tab.path)))
-        .on_middle_press(tab_close_message(index))
+    let tab_body = crate::ui_iced::overlay::context_menu_trigger(
+        surface,
+        tab_context_menu_open_message(index),
+    )
+    .on_press(Message::Command(tab_select_command(&tab.path)))
+    .on_middle_press(tab_close_message(index));
+
+    // The `2px` top accent indicator rides *over* the tab in a `Stack`
+    // rather than inside its padding box, and that placement is the whole
+    // reason it costs nothing: the bar takes no layout, so [`STRIP_HEIGHT`]
+    // and [`TAB_HEIGHT`] keep the exact numbers the band closure pins
+    // (`36 = 4 + 28 + 4`). It occupies `y ∈ [0, 2]` and the tab's content
+    // box does not start until `y = TAB_PADDING_Y = 2`, so the bar cannot
+    // cover the title in any posture.
+    //
+    // The bar is a *sibling* of the tab's mouse area, not a child of it,
+    // and iced dispatches events without occlusion culling: the indicator
+    // carries no handler of its own, so select, middle-close and the
+    // right-click menu still land on the area underneath.
+    let indicator = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(TAB_INDICATOR_HEIGHT))
+        .style(move |_theme| container::Style {
+            background: tab_top_indicator(tab.active).map(Background::Color),
+            ..container::Style::default()
+        });
+
+    Stack::with_children(vec![tab_body.into(), indicator.into()])
+        .width(Length::Fill)
+        .height(Length::Fixed(TAB_HEIGHT))
         .into()
 }
 

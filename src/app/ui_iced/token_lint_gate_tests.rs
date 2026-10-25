@@ -64,7 +64,14 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// `12.0` → `space::MD`, `16.0` → `space::LG`, `4.0` → `space::XS`, the
 /// two derived tab-strip heights, the off-scale `18.0` title and the
 /// hand-derived `× 1.3` JSON line height) now read a rung instead.
-const PIN_APP_TOKEN_BOUND: usize = 89;
+/// 91 after INT-11's two additions in `panels/center.rs`:
+/// `UNSAVED_DOT_RADIUS` (`shape::RADIUS_PILL`, the round-clip on the
+/// `6px` marker) and `TAB_INDICATOR_HEIGHT` (`shape::BORDER_FOCUS`, the
+/// `2px` top accent bar). `UNSAVED_DOT_SIZE` also changed — `12.0` →
+/// `size::INDICATOR_DOT` — but Rule B counts declarations, so moving a
+/// constant from the type floor onto the indicator token does not move
+/// this number.
+const PIN_APP_TOKEN_BOUND: usize = 91;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.

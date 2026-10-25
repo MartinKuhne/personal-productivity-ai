@@ -231,9 +231,16 @@ pub const ICON_ROBOT: &str = "\u{E762}";
 /// Phosphor icon: lightning (U+E2DE)
 pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 
-/// Unsaved-changes marker rendered in front of a document tab's title
-/// (UI-027). A Unicode geometric shape (U+25CF BLACK CIRCLE) rather than a
-/// Phosphor glyph, so it resolves through the system symbol font.
+/// Unsaved-changes marker glyph (U+25CF BLACK CIRCLE) — a Unicode geometric
+/// shape rather than a Phosphor glyph, so it resolves through the system
+/// symbol font.
+///
+/// **No longer what the document tab draws.** As of INT-11 the tab's unsaved
+/// marker is a real `6px` `size.indicator.dot` **shape**
+/// (`center::unsaved_dot`), because §4.4.1's 6px cannot be reached by a
+/// glyph without breaking §2.4's 12px text floor. This constant is retained
+/// for any surface that must render the same marker as text; the tab strip
+/// does not reference it.
 pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
 
 /// Disclosure glyph for an **expanded** block (the agent thinking panel).
