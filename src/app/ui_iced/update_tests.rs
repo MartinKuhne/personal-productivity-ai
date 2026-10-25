@@ -3594,3 +3594,263 @@ fn record_save_outcome_surfaces_a_refusal_and_clears_an_acceptance() {
         "a later accepted save must clear the earlier refusal"
     );
 }
+
+// ---------------------------------------------------------------------------
+// INT-10 — tree-row hover reduction (UIF-TOK-001 hover rung)
+// ---------------------------------------------------------------------------
+
+/// Rows seeded so the hover prune has something to keep.
+fn int10_rows() -> Vec<FlatRow> {
+    vec![file_row("/ws/alpha.md"), file_row("/ws/beta.md")]
+}
+
+#[test]
+fn hovering_a_tree_row_records_the_path_and_publishes_no_command() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+    let spy = command_spy(&state);
+
+    let _tasks = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "the reducer must own the pointer, since the pure view cannot"
+    );
+    // `iced::Task` carries nothing inspectable once wrapped (see
+    // `recovery_focus_control_produces_exactly_one_task`), so "no side
+    // effect" is asserted where it is observable: the command bus.
+    assert!(
+        drained(&spy).is_empty(),
+        "hovering a row must not publish anything on the user-command bus"
+    );
+}
+
+#[test]
+fn the_hovered_path_reaches_the_pure_view_model() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/beta.md"),
+        }),
+    );
+
+    // §6: the view branches on the view-model, never on widget state.
+    // This projection is the whole bridge from the pointer to the band.
+    assert_eq!(
+        state.models.left.hovered_row,
+        Some(PathBuf::from("/ws/beta.md")),
+        "the snapshot the panel renders must carry the hovered path"
+    );
+}
+
+#[test]
+fn leaving_the_hovered_row_clears_it() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowLeft {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tree_row, None,
+        "crossing out of the hovered row must clear it"
+    );
+    assert_eq!(
+        state.models.left.hovered_row, None,
+        "and the view-model must follow, or the highlight strands"
+    );
+}
+
+#[test]
+fn leaving_a_different_row_cannot_wipe_the_highlight_that_just_arrived() {
+    // The upward-move race. iced publishes both crossings in one event
+    // pass in tree order, so moving the pointer UP from beta to alpha
+    // delivers alpha's RowEntered BEFORE beta's RowLeft. A reducer that
+    // cleared unconditionally would erase alpha in the same tick.
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowLeft {
+            path: PathBuf::from("/ws/beta.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "a stale exit from the row we came from must not clear the new hover"
+    );
+}
+
+#[test]
+fn re_entering_after_leaving_records_the_row_again() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowLeft {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    assert_eq!(state.overlay.hovered_tree_row, None, "mid-check");
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "re-entry must re-report; a one-shot latch would leave the tree dead"
+    );
+}
+
+#[test]
+fn a_hover_path_naming_a_row_that_no_longer_exists_is_pruned() {
+    // The row's `mouse_area` cannot report an exit it no longer has:
+    // the file was deleted, or a filter hid it. The prune is what stops
+    // the path lingering in the reducer.
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md"))
+    );
+
+    // The tree changes underneath the hover.
+    seed_rows(&mut state, vec![file_row("/ws/beta.md")]);
+    let _ = update(&mut state, Message::Tree(TreeMessage::ContextMenuClosed));
+
+    assert_eq!(
+        state.overlay.hovered_tree_row, None,
+        "a hover path the tree cannot render must be pruned, not carried"
+    );
+}
+
+#[test]
+fn the_prune_keeps_a_hover_that_is_still_renderable() {
+    // Non-vacuity for the prune above: the same message with the row
+    // still present must leave the hover intact.
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(&mut state, Message::Tree(TreeMessage::ContextMenuClosed));
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "the prune must not be a blanket clear"
+    );
+}
+
+#[test]
+fn repeated_hover_reports_are_idempotent_and_owe_nothing() {
+    // The tree rebuilds every frame. Even if the same enter were
+    // delivered repeatedly, the state must not drift or accumulate.
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+    let spy = command_spy(&state);
+
+    for _ in 0..5 {
+        let _tasks = update(
+            &mut state,
+            Message::Tree(TreeMessage::RowEntered {
+                path: PathBuf::from("/ws/alpha.md"),
+            }),
+        );
+    }
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "five identical enters leave exactly the same state as one"
+    );
+    assert!(
+        drained(&spy).is_empty(),
+        "and still nothing reached the command bus"
+    );
+}
+
+#[test]
+fn hover_survives_a_re_select_because_it_is_not_selection_state() {
+    // Hover and selection are independent axes: the row under the
+    // cursor stays highlighted while the selection changes elsewhere,
+    // and `resolve_style` is what ranks them, not the reducer.
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, int10_rows());
+
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::RowEntered {
+            path: PathBuf::from("/ws/beta.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::SelectFile {
+            path: PathBuf::from("/ws/alpha.md"),
+            multi: false,
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tree_row,
+        Some(PathBuf::from("/ws/beta.md")),
+        "selecting another file must not steal the pointer's row"
+    );
+    assert_eq!(
+        state.models.left.selected_file,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "and the selection did land"
+    );
+}

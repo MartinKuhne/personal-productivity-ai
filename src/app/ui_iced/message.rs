@@ -276,6 +276,38 @@ pub enum TreeMessage {
     },
     /// The row context menu was dismissed (click-away or menu selection).
     ContextMenuClosed,
+    /// The pointer crossed **into** the row for `path` (INT-10).
+    ///
+    /// A view-local transition, not user intent: it selects nothing,
+    /// opens nothing and publishes nothing on the bus. It exists because
+    /// the row's hover band is resolved by the framework composite
+    /// (`tree_row::resolve_style`) against a `BaseState`, and a pure
+    /// view cannot carry the pointer into that call by itself — the
+    /// state has to live on the reducer side and come back down through
+    /// the view-model.
+    ///
+    /// Carries the **path**, never a row index. The row list is
+    /// re-flattened on every expand, collapse, filter and watcher
+    /// refresh, so an index is not a stable address and a highlight
+    /// keyed by one would land on a different file the moment the list
+    /// moved.
+    RowEntered {
+        /// The row the pointer arrived at.
+        path: PathBuf,
+    },
+    /// The pointer crossed **out of** the row for `path` (INT-10).
+    ///
+    /// The path travels with the exit so the clear is **conditional** —
+    /// only if that same row is still the hovered one. This is
+    /// load-bearing, not tidiness: both halves of a row-to-row move are
+    /// published in one iced event pass, in tree order, so when the
+    /// pointer moves *upward* the lower row's `RowEntered` arrives
+    /// **before** the upper row's `RowLeft`. A bare clear would wipe
+    /// the new row's highlight in the same tick it appeared.
+    RowLeft {
+        /// The row the pointer left.
+        path: PathBuf,
+    },
     /// "Run as prompt…" on a single file row (UI-020). The reducer reads
     /// the file and publishes `RunSkillPrompt`.
     RunAsPromptRequested {

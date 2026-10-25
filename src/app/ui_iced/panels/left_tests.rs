@@ -1062,8 +1062,8 @@ fn the_search_card_is_tall_enough_for_the_lines_it_fixes() {
 #[test]
 fn a_selected_row_paints_the_framework_accent_band() {
     let pro = Palette::pro();
-    let selected = row_paint(true);
-    let resting = row_paint(false);
+    let selected = row_paint(true, false);
+    let resting = row_paint(false, false);
 
     assert_eq!(selected.background, pro.accent_fill);
     assert_eq!(selected.band, pro.accent_fill);
@@ -1089,16 +1089,16 @@ fn a_selected_pdf_backed_label_is_locked_off_the_unreadable_red() {
     );
 
     assert_eq!(
-        row_label_colour(true, true),
+        row_label_colour(true, false, true),
         pro.text_strong,
         "§3B.6 locks the row label to text.strong on the accent fill by role"
     );
     assert_ne!(
-        row_label_colour(true, true),
+        row_label_colour(true, false, true),
         app_palette.error,
         "a selected PDF-backed row must not render red-on-indigo"
     );
-    let locked_contrast = contrast_ratio(row_label_colour(true, true), pro.accent_fill);
+    let locked_contrast = contrast_ratio(row_label_colour(true, false, true), pro.accent_fill);
     assert!(
         locked_contrast >= 4.5,
         "the locked label clears the text-contrast rule at {locked_contrast}:1"
@@ -1108,11 +1108,11 @@ fn a_selected_pdf_backed_label_is_locked_off_the_unreadable_red() {
 #[test]
 fn an_unselected_row_keeps_the_apps_own_label_rule() {
     let app_palette = Palette::fastmd_dark();
-    assert_eq!(row_label_colour(false, true), app_palette.error);
-    assert_eq!(row_label_colour(false, false), app_palette.text);
+    assert_eq!(row_label_colour(false, false, true), app_palette.error);
+    assert_eq!(row_label_colour(false, false, false), app_palette.text);
     assert_ne!(
-        row_label_colour(false, true),
-        row_label_colour(false, false),
+        row_label_colour(false, false, true),
+        row_label_colour(false, false, false),
         "the PDF-backed tint must still be visible off the selection band"
     );
 }
@@ -1290,4 +1290,251 @@ fn search_result_branch_builds_populated_and_sparse_cards() {
     ]);
 
     let _element = search_results(&view_model);
+}
+
+// ---------------------------------------------------------------------------
+// INT-10 — tree-row hover (UIF-TOK-001 hover rung, §2.5 `color.surface.hover`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_hovered_row_paints_the_hover_token_itself_not_merely_a_state() {
+    let pro = Palette::pro();
+    let hovered = row_paint(false, true);
+    let resting = row_paint(false, false);
+
+    // The requirement is the *colour*, not the enum. `surface_hover` is
+    // the only band `resolve_style` produces for `BaseState::Hovered` on
+    // an unselected row, so matching it proves the tier was actually
+    // reached rather than defaulted.
+    assert_eq!(
+        hovered.background, pro.surface_hover,
+        "a hovered row must paint color.surface.hover"
+    );
+    assert_eq!(
+        hovered.band, pro.surface_hover,
+        "the mark band must move onto the hover fill, not stay on the pane"
+    );
+    assert_eq!(
+        hovered.background,
+        iced::Color::from_rgb8(32, 32, 36),
+        "§2.5 prices color.surface.hover at RGB(32,32,36)"
+    );
+
+    // Non-vacuity: the hovered and resting paints are genuinely
+    // different, so the assertions above could not both hold if hover
+    // were still being defaulted to Rest.
+    assert_ne!(
+        hovered.background, resting.background,
+        "if hover were still resolving to Rest these two would be identical"
+    );
+    assert_eq!(
+        resting.background,
+        iced::Color::TRANSPARENT,
+        "a resting row still paints no fill"
+    );
+}
+
+#[test]
+fn selection_outranks_the_pointer_so_hover_cannot_wash_it_out() {
+    let pro = Palette::pro();
+
+    // §3B.6's contrast lock depends on this: if hover could override the
+    // selection band, a selected row under the cursor would change
+    // surface and the label rule would no longer match what is painted.
+    let selected_and_hovered = row_paint(true, true);
+    let selected_only = row_paint(true, false);
+
+    assert_eq!(
+        selected_and_hovered.band, pro.accent_fill,
+        "a selected row keeps accent.fill under the pointer"
+    );
+    assert_eq!(
+        selected_and_hovered.band, selected_only.band,
+        "hover must not change a selected row's band at all"
+    );
+    assert_ne!(
+        selected_and_hovered.band, pro.surface_hover,
+        "the hover fill must never replace the selection fill"
+    );
+}
+
+#[test]
+fn a_hovered_label_clears_the_text_contrast_floor_computed_from_raw_srgb() {
+    let pro = Palette::pro();
+    let app_palette = Palette::fastmd_dark();
+
+    // Both figures below are measured through `contrast_ratio` against
+    // the actual hover band, then pinned. They are not transcribed from
+    // any printed table: if a token is retuned, this test fails and the
+    // new number has to be re-derived.
+    let body_on_hover = contrast_ratio(app_palette.text, pro.surface_hover);
+    assert!(
+        (body_on_hover - 10.738_035).abs() < 1e-4,
+        "body label on the hover band was measured at {body_on_hover}:1 and \
+         is pinned there"
+    );
+    assert!(
+        body_on_hover >= 4.5,
+        "the ordinary hovered label clears the text floor at {body_on_hover}:1"
+    );
+
+    // The worst case on the hover band is the PDF-backed `error` tint,
+    // which the lock deliberately does NOT promote.
+    let danger_on_hover = contrast_ratio(app_palette.error, pro.surface_hover);
+    assert!(
+        (danger_on_hover - 5.363_298).abs() < 1e-4,
+        "error-tinted label on the hover band was measured at \
+         {danger_on_hover}:1 and is pinned there"
+    );
+    assert!(
+        danger_on_hover >= 4.5,
+        "even the worst hovered pairing clears the text floor at {danger_on_hover}:1"
+    );
+}
+
+#[test]
+fn hover_leaves_the_label_rule_untouched_because_the_hover_band_is_not_locked() {
+    let pro = Palette::pro();
+    let app_palette = Palette::fastmd_dark();
+
+    // The mechanism, stated and checked rather than inferred:
+    // `surface_hover` is not one of the four locked solid fills, so
+    // `locked_over` has no reason to promote anything and returns the
+    // candidate unchanged.
+    assert!(
+        !iced_pro::token::contrast::fill_lock_role(pro.surface_hover, &pro).is_locked_fill(),
+        "surface_hover must not be a locked fill, or hover would repaint \
+         every label white"
+    );
+    assert!(
+        iced_pro::token::contrast::fill_lock_role(pro.accent_fill, &pro).is_locked_fill(),
+        "while the selection band still is, so the difference between the \
+         two cases is real and not an accident of one lookup"
+    );
+
+    // Consequence: the resting label rule survives the pointer, the PDF
+    // tint included.
+    assert_eq!(
+        row_label_colour(false, true, false),
+        app_palette.text,
+        "a hovered plain row keeps the body token"
+    );
+    assert_eq!(
+        row_label_colour(false, true, true),
+        app_palette.error,
+        "a hovered PDF-backed row keeps its error tint"
+    );
+    assert_eq!(
+        row_label_colour(false, true, true),
+        row_label_colour(false, false, true),
+        "hover must not change the label colour at all, only the band under it"
+    );
+    assert_ne!(
+        row_paint(false, true).band,
+        row_paint(false, false).band,
+        "and the band really did move, so the equality above is not vacuous"
+    );
+}
+
+#[test]
+fn the_selection_lock_still_holds_on_a_selected_and_hovered_pdf_row() {
+    let pro = Palette::pro();
+
+    // The original defect was red-on-indigo. Hover adds a third input to
+    // the same row; the lock must still win.
+    let colour = row_label_colour(true, true, true);
+    assert_eq!(
+        colour, pro.text_strong,
+        "selected + hovered + PDF-backed still locks to text.strong"
+    );
+    let contrast = contrast_ratio(colour, row_paint(true, true).band);
+    assert!(
+        contrast >= 4.5,
+        "the locked label clears the floor against the band actually painted \
+         at {contrast}:1"
+    );
+}
+
+#[test]
+fn hovering_moves_no_part_of_the_row_box_at_any_depth_or_posture() {
+    // §2: a hover MUST NOT alter the outer bounding box or shift a
+    // neighbour. `row_box` takes the posture as an input precisely so
+    // this can be diffed rather than promised.
+    for depth in 0..8usize {
+        let rest = row_box(depth, false, false);
+        assert_eq!(
+            row_box(depth, false, true),
+            rest,
+            "hover moved the row box at depth {depth}"
+        );
+        assert_eq!(
+            row_box(depth, true, false),
+            rest,
+            "selection moved the row box at depth {depth}"
+        );
+        assert_eq!(
+            row_box(depth, true, true),
+            rest,
+            "selected+hover moved the row box at depth {depth}"
+        );
+        assert_eq!(
+            rest.height, ROW_MIN_HEIGHT,
+            "the row height is the compact rung at every depth"
+        );
+        assert_eq!(
+            rest.padding.left,
+            ROW_PADDING_X + row_indent_pixels(depth),
+            "the indent is the only thing that varies, and only with depth"
+        );
+    }
+}
+
+#[test]
+fn hover_is_keyed_by_path_so_a_recycled_slot_cannot_borrow_a_highlight() {
+    // The highest-risk property. iced matches widget state by position,
+    // so the only thing standing between a re-flattened list and a
+    // highlight on the wrong file is this comparison.
+    let alpha = file_row("alpha.md", "/ws/alpha.md", 0);
+    let beta = file_row("beta.md", "/ws/beta.md", 0);
+
+    assert!(
+        row_is_hovered(&alpha, Some(Path::new("/ws/alpha.md"))),
+        "the row the pointer entered reads as hovered"
+    );
+    assert!(
+        !row_is_hovered(&beta, Some(Path::new("/ws/alpha.md"))),
+        "a different file in the same slot must NOT inherit the highlight"
+    );
+    assert!(
+        !row_is_hovered(&alpha, Some(Path::new("/ws/beta.md"))),
+        "alpha must not light up because beta is hovered"
+    );
+    assert!(
+        !row_is_hovered(&alpha, None),
+        "nothing is hovered when the pointer is off the tree"
+    );
+}
+
+#[test]
+fn a_stale_hover_path_paints_no_row_at_all() {
+    // A deleted or filtered-out file leaves its path behind in the
+    // reducer until the prune runs. Because the key is the path, the
+    // worst a stale entry can do is match nothing, never light up a
+    // surviving neighbour.
+    let rows = [
+        file_row("beta.md", "/ws/beta.md", 0),
+        file_row("gamma.md", "/ws/gamma.md", 0),
+    ];
+    let ghost = PathBuf::from("/ws/deleted.md");
+
+    let lit: Vec<&str> = rows
+        .iter()
+        .filter(|row| row_is_hovered(row, Some(ghost.as_path())))
+        .map(|row| row.name.as_str())
+        .collect();
+
+    assert!(
+        lit.is_empty(),
+        "a hover path naming a gone file must paint nothing, got {lit:?}"
+    );
 }

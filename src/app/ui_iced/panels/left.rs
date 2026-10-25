@@ -46,15 +46,32 @@
 //! composite for row rendering" cannot be done from an iced widget tree
 //! without writing a new widget in the framework.
 //!
-//! What *is* adopted here: the geometry above, the selection band from
-//! [`tree_row::resolve_style`] ([`row_paint`]), and the label's
-//! role-based contrast lock from [`tree_row::locked_over`]
-//! ([`row_label_colour`]). What is **blocked**, and why:
+//! What *is* adopted here: the geometry above, the rest / hover /
+//! selected bands from [`tree_row::resolve_style`] ([`row_paint`]), and
+//! the label's role-based contrast lock from [`tree_row::locked_over`]
+//! ([`row_label_colour`]). What is **not**, and why:
 //!
-//! * **Hover / pressed tiers.** [`tree_row::resolve_style`] takes a
-//!   [`BaseState`], but iced 0.14's `mouse_area` — what the row's
-//!   context-menu trigger builds on — never reports hover into a
-//!   `container` style. The panel resolves `Rest` and `Selected` only.
+//! * **The `Pressed` tier is feasible and is not built.** It is *not*
+//!   blocked, contrary to an earlier note here: `mouse_area` pairs
+//!   `on_press` with `on_release`
+//!   (`iced_widget-0.14.2/src/mouse_area.rs:38` / `:45`), so a pressed
+//!   band can be set *and* cleared. It is left unbuilt because a
+//!   press-reactive row is an interaction change to the panel's primary
+//!   affordance rather than a token pass, and that is a design call, not
+//!   a missing primitive. Hover has no such question and **is** wired
+//!   (INT-10): the very `mouse_area` the context-menu trigger builds on
+//!   also carries `on_enter` / `on_exit`
+//!   (`iced_widget-0.14.2/src/mouse_area.rs:106` / `:120`), and those
+//!   crossings drive [`BaseState::Hovered`] into [`row_paint`].
+//!
+//!   The claim this replaces — that `mouse_area` "never reports hover
+//!   into a `container` style", therefore the hover tier was
+//!   unreachable — was true only of *automatic* style propagation,
+//!   which is not what happens here. Nothing waits for iced to rewrite
+//!   a style. The panel captures the crossing itself, holds it in
+//!   reducer state keyed by **path**, and hands it to `resolve_style`
+//!   as a plain value. INT-9 made the identical correction for the
+//!   menu row's `Hovered` / `Unhovered` reporting.
 //! * **The 2px selection bar and the depth guide lines.** Both come out
 //!   of the composite as [`iced_pro::widget::button_widget::Layer`]
 //!   rectangles for a canvas painter. The
@@ -1045,6 +1062,21 @@ pub struct LeftPanelViewModel {
     /// which the subscription bridge's keyboard lane keeps in step with the
     /// physical Shift key.
     pub multi_select: bool,
+    /// The tree row the pointer is currently over, by **path** (INT-10).
+    ///
+    /// Keyed by path rather than by row index because the row list is
+    /// re-flattened on every expand, collapse, filter and watcher-driven
+    /// refresh. An index is not a stable address: the moment the list
+    /// moves, a highlight keyed by index lands on a different file.
+    /// Keyed by path, the highlight can only ever sit on the file the
+    /// pointer actually entered.
+    ///
+    /// Like [`multi_select`](Self::multi_select), this is reported
+    /// `false`-equivalent (`None`) by [`from_app`](Self::from_app),
+    /// which has no pointer input, and overwritten by
+    /// `ViewModels::from_app` from
+    /// [`OverlayState::hovered_tree_row`](crate::ui_iced::app::OverlayState::hovered_tree_row).
+    pub hovered_row: Option<PathBuf>,
 }
 
 impl LeftPanelViewModel {
@@ -1088,6 +1120,7 @@ impl LeftPanelViewModel {
             )),
             typst_available: fastmd_pdf::is_typst_available(),
             multi_select: false,
+            hovered_row: None,
         }
     }
 
@@ -1247,12 +1280,14 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
         &view_model.selected_files,
     );
     let pdf_backed = view_model.pdf_backed.contains(&row.path);
-    let paint = row_paint(selected);
+    let hovered = row_is_hovered(row, view_model.hovered_row.as_deref());
+    let paint = row_paint(selected, hovered);
+    let row_box = row_box(row.depth, selected, hovered);
 
     let label = text(row_label(row))
         .size(ROW_TEXT_SIZE)
         .line_height(tree_row::LABEL_RUNG.iced_line_height())
-        .color(row_label_colour(selected, pdf_backed));
+        .color(row_label_colour(selected, hovered, pdf_backed));
 
     let row_surface = container(label)
         .width(Length::Fill)
@@ -1263,19 +1298,22 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
         // rung, so "fixed at the rung" and "at least the rung" are the
         // same set of layouts. `align_y` keeps the label centred in the
         // 2pt of slack instead of parked against the top edge.
-        .height(Length::Fixed(ROW_MIN_HEIGHT))
+        .height(Length::Fixed(row_box.height))
         .align_y(Alignment::Center)
-        .padding(Padding {
-            top: ROW_PADDING_Y,
-            right: ROW_PADDING_X,
-            bottom: ROW_PADDING_Y,
-            left: ROW_PADDING_X + row_indent_pixels(row.depth),
-        })
+        .padding(row_box.padding)
+        // The band is painted whenever the resolved style actually has
+        // one. A resting row's background is transparent and paints
+        // nothing, so the test is about not emitting a pointless quad,
+        // not about appearance.
         .style(move |_theme| container::Style {
-            background: selected.then_some(Background::Color(paint.background)),
+            background: (paint.background.a > 0.0).then_some(Background::Color(paint.background)),
             ..container::Style::default()
         });
 
+    // The context-menu trigger *is* a `mouse_area`, so the same area
+    // carries the hover crossings. `on_enter` / `on_exit` fire only on
+    // the transition (see [`row_paint`]'s note), which is what keeps a
+    // per-frame tree rebuild from flooding the reducer.
     let trigger = crate::ui_iced::overlay::context_menu_trigger(
         row_surface,
         Message::Tree(TreeMessage::ContextMenuOpened {
@@ -1285,7 +1323,13 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     .on_press(Message::Command(row_click_command(
         row,
         view_model.multi_select,
-    )));
+    )))
+    .on_enter(Message::Tree(TreeMessage::RowEntered {
+        path: row.path.clone(),
+    }))
+    .on_exit(Message::Tree(TreeMessage::RowLeft {
+        path: row.path.clone(),
+    }));
 
     match row_double_click_command(row) {
         Some(command) => trigger.on_double_click(Message::Command(command)).into(),
@@ -1293,31 +1337,107 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     }
 }
 
+/// Whether the pointer is over `row`, given the reducer's hovered path.
+///
+/// The whole recycling-safety argument in one comparison. iced 0.14
+/// reconciles widget `Tree`s by **position**, not by explicit `Id`
+/// (`iced_core-0.14.0/src/widget/tree.rs:86-107`), so a row's own
+/// widget state cannot be trusted to follow its file when the list is
+/// re-flattened. This function refuses to consider position at all: a
+/// row is hovered exactly when the recorded path names *its own* file,
+/// which makes it impossible for a highlight to travel onto a different
+/// file after a re-sort, a filter, an expand/collapse or a
+/// watcher-driven refresh. A stale path matches nothing and simply
+/// paints no row.
+///
+/// Purity: pure.
+#[must_use]
+pub fn row_is_hovered(row: &FlatRow, hovered: Option<&Path>) -> bool {
+    hovered == Some(row.path.as_path())
+}
+
 /// The tree row's paint, resolved through the framework's tree-row
 /// composite (`UIF-COMP-006`) against the left pane's own surface.
 ///
-/// Only the **selected** posture is asked for, with [`BaseState::Rest`]
-/// as the pointer state. The composite's `Hovered` / `Pressed` tiers need
-/// the pointer state to reach the row's style closure, and iced 0.14's
-/// `mouse_area` — what [`context_menu_trigger`](crate::ui_iced::overlay::context_menu_trigger)
-/// builds on — does not report hover into a `container` style. Rest and
-/// Selected are therefore the only two tiers this panel can honestly
-/// resolve; wiring hover would mean replacing the row's mouse handling
-/// with a widget that tracks it, which is an interaction change rather
-/// than a token alignment. Reported, not faked.
+/// `hovered` reaches [`BaseState::Hovered`], which paints
+/// `color.surface.hover` — the rung §2.5 prices for a "hovered
+/// menu/table/tree item". Selection outranks the pointer *inside*
+/// `resolve_style`, so a selected row keeps `accent.fill` under the
+/// cursor and a hover can never wash the selection out.
 ///
-/// Purity: pure function of `selected`.
+/// # The claim this function used to make
+///
+/// This used to hardcode [`BaseState::Rest`] and justify it by saying
+/// iced 0.14's `mouse_area` "does not report hover into a `container`
+/// style", so the tier could not be reached without replacing the row's
+/// mouse handling. **That reasoning was wrong.** What it describes is
+/// *automatic* style propagation: `mouse_area` will not rewrite a
+/// container's style on your behalf. It says nothing about
+/// `MouseArea::on_enter` / `MouseArea::on_exit`
+/// (`iced_widget-0.14.2/src/mouse_area.rs:106` / `:120`), which the
+/// row's existing context-menu `mouse_area` already carries and which
+/// publish a message on the crossing — so the reducer can set the very
+/// state this call reads. No widget was replaced; the same `mouse_area`
+/// gained two handlers.
+///
+/// `mouse_area` is also edge-triggered for free, which matters because
+/// this tree is rebuilt every frame: it publishes `on_enter` only on
+/// `is_hovered && !was_hovered` and `on_exit` only on the inverse, and
+/// skips the whole check when neither the cursor nor its own bounds
+/// moved (`mouse_area.rs:349-366`). A level-triggered flood of hover
+/// reports into the reducer is therefore structurally impossible.
+///
+/// Purity: pure function of `(selected, hovered)`.
 #[must_use]
-pub fn row_paint(selected: bool) -> tree_row::TreeRowStyle {
+pub fn row_paint(selected: bool, hovered: bool) -> tree_row::TreeRowStyle {
     let pro = Palette::pro();
-    tree_row::resolve_style(
-        selected,
-        false,
-        false,
-        BaseState::Rest,
-        pro.surface_base,
-        &pro,
-    )
+    let base = if hovered {
+        BaseState::Hovered
+    } else {
+        BaseState::Rest
+    };
+    tree_row::resolve_style(selected, false, false, base, pro.surface_base, &pro)
+}
+
+/// The tree row's box, resolved in one place so it can be *diffed*.
+///
+/// Hover and selection are inputs here rather than absent on purpose:
+/// that is what lets the sidecar ask "does hovering move the row?" and
+/// get a diffable answer instead of a promise. §2 forbids a hover from
+/// changing an outer bounding box or shifting a neighbour, and the way
+/// to hold that line is to route every geometry input the row uses
+/// through this function and assert the output is invariant across all
+/// four postures. If anyone later adds a hover border or a pressed inset
+/// that grows the box, a test fails rather than the layout quietly
+/// shifting by two pixels on every file in the list.
+///
+/// Purity: pure function of `(depth, selected, hovered)`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowBox {
+    /// The row's height — the compact rung, whatever the posture.
+    pub height: f32,
+    /// The row's padding, with the depth indent folded into the left edge.
+    pub padding: Padding,
+}
+
+/// Resolve a row's box for a given depth and posture.
+///
+/// See [`RowBox`] for why the posture parameters exist at all.
+#[must_use]
+pub fn row_box(depth: usize, selected: bool, hovered: bool) -> RowBox {
+    // Neither posture contributes to the box, and that is the whole
+    // point of taking them: the invariance is testable rather than
+    // merely asserted.
+    let _ = (selected, hovered);
+    RowBox {
+        height: ROW_MIN_HEIGHT,
+        padding: Padding {
+            top: ROW_PADDING_Y,
+            right: ROW_PADDING_X,
+            bottom: ROW_PADDING_Y,
+            left: ROW_PADDING_X + row_indent_pixels(depth),
+        },
+    }
 }
 
 /// The tree row's label colour, with the framework's **role-based**
@@ -1331,17 +1451,30 @@ pub fn row_paint(selected: bool) -> tree_row::TreeRowStyle {
 /// effectively unreadable, which is exactly the failure §3B.6's lock
 /// exists to prevent.
 ///
+/// # Hover and the contrast lock
+///
+/// `hovered` moves the band from the pane's resting surface to
+/// `color.surface.hover`, so the lock is re-run against the *actual*
+/// band rather than against a remembered answer. It resolves to a
+/// **no-op** on hover, and that is a computed result, not an absence of
+/// handling: `surface_hover` is not a locked fill under
+/// [`fill_lock_role`](iced_pro::token::contrast::fill_lock_role), so
+/// `locked_over` returns the candidate untouched and the resting label
+/// rule — including the `error` tint on PDF-backed rows — survives the
+/// pointer. Both pairings clear the text floor by a wide margin, and the
+/// sidecar pins the measured ratios rather than transcribing them.
+///
 /// §4.3.2 asks for a `[PDF]` badge so the *meaning* survives selection.
 /// The app has no such badge, so on a selected PDF-backed row the tint
 /// is lost and only the row's position carries the state; the tint
 /// returns the moment the row is deselected. Adding the badge is the
 /// stated follow-on.
 ///
-/// Purity: pure function of `(selected, pdf_backed)`.
+/// Purity: pure function of `(selected, hovered, pdf_backed)`.
 #[must_use]
-pub fn row_label_colour(selected: bool, pdf_backed: bool) -> Color {
+pub fn row_label_colour(selected: bool, hovered: bool, pdf_backed: bool) -> Color {
     let pro = Palette::pro();
-    let paint = row_paint(selected);
+    let paint = row_paint(selected, hovered);
     tree_row::locked_over(
         row_text_color(&Palette::fastmd_dark(), pdf_backed),
         paint.band,

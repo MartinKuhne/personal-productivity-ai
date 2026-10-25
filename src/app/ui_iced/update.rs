@@ -321,6 +321,7 @@ fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     let mut tasks = Vec::new();
 
     refresh_tree_cache(state);
+    prune_hovered_row(state);
     state.app.orchestrator.handle_file_selection();
     join_finished_batch(state);
     state.rebuild_view_models();
@@ -328,6 +329,41 @@ fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     sync_persisted_panel_widths(state);
 
     tasks
+}
+
+/// Drop a hover pointer that no longer names a row the tree can render
+/// (INT-10).
+///
+/// Two mechanisms already cover most of this: the row's own `mouse_area`
+/// publishes `RowLeft` when the pointer crosses out, and iced re-evaluates
+/// hover whenever a row's **bounds** move
+/// (`iced_widget-0.14.2/src/mouse_area.rs:342-366`), so a row that
+/// shifts under a stationary pointer still reports leaving. What neither
+/// covers is the row that simply stops existing — deleted, filtered out,
+/// or hidden because the search-result view replaced the tree. Its
+/// `mouse_area` is gone before it can say goodbye and the recorded path
+/// lingers.
+///
+/// A lingering path cannot paint a *wrong* highlight: the view compares
+/// the hovered path against each row's own file, so a stale path matches
+/// nothing. It is pruned anyway so the invariant the tests pin is the
+/// strong one — `hovered_tree_row` is `None`, or names a row that is
+/// actually renderable — rather than a weak one that only holds by
+/// accident of the comparison.
+///
+/// Runs after [`refresh_tree_cache`] so it reads the rows the panel is
+/// about to draw, and before the view-model rebuild that copies the field
+/// into the snapshot.
+///
+/// Purity: mutates only `state.overlay.hovered_tree_row`.
+fn prune_hovered_row(state: &mut AppState) {
+    let Some(hovered) = state.overlay.hovered_tree_row.as_deref() else {
+        return;
+    };
+    let rows = crate::ui_iced::panels::left::tree_rows(&state.app);
+    if !rows.iter().any(|row| row.path.as_path() == hovered) {
+        state.overlay.hovered_tree_row = None;
+    }
 }
 
 /// Tree-row cache transition: rebuild the flattened rows only while the tree
@@ -709,6 +745,21 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
         }
         TreeMessage::ContextMenuClosed => {
             state.overlay.context_menu = None;
+            Vec::new()
+        }
+        TreeMessage::RowEntered { path } => {
+            state.overlay.hovered_tree_row = Some(path);
+            Vec::new()
+        }
+        TreeMessage::RowLeft { path } => {
+            // Conditional clear. A row-to-row move publishes both halves
+            // in one iced event pass in tree order, so moving *upward*
+            // delivers the lower row's `RowEntered` before this row's
+            // `RowLeft`. Clearing unconditionally would erase the new
+            // row's highlight in the same tick it appeared.
+            if state.overlay.hovered_tree_row.as_deref() == Some(path.as_path()) {
+                state.overlay.hovered_tree_row = None;
+            }
             Vec::new()
         }
         TreeMessage::RunAsPromptRequested { path } => {

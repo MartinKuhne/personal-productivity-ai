@@ -594,6 +594,28 @@ pub struct OverlayState {
     /// shift key, the system shall allow the user to select multiple
     /// documents."
     pub modifiers: iced::keyboard::Modifiers,
+    /// The file-tree row the pointer is currently over, by **path**
+    /// (INT-10).
+    ///
+    /// Owned here rather than by the panel because the panel is a pure
+    /// view: the row's `mouse_area` reports the crossing, the reducer
+    /// records it, and it comes back down as
+    /// [`LeftPanelViewModel::hovered_row`](super::panels::left::LeftPanelViewModel::hovered_row)
+    /// for the view to branch on (§6).
+    ///
+    /// Keyed by **path**, never by row index. iced 0.14 reconciles
+    /// widget `Tree`s by *position*
+    /// (`iced_core-0.14.0/src/widget/tree.rs:86-107`), so an explicit
+    /// widget `Id` cannot make a row's hover state follow its file across
+    /// a re-flatten. Path keying is what makes a highlight unable to
+    /// migrate onto a different file: the row only paints hover when the
+    /// hovered path names *its own* file.
+    ///
+    /// Cleared on the row's own `RowLeft`, and pruned whenever the
+    /// visible row list no longer contains it — see
+    /// `prune_hovered_row` in `ui_iced/update.rs`, which runs in the
+    /// frame tail right after the tree cache is refreshed.
+    pub hovered_tree_row: Option<PathBuf>,
     /// The `iced-pro` z-band index of the surfaces currently open
     /// (`UIF-ZORD-*`), derived from the fields above by
     /// [`sync_surfaces`](Self::sync_surfaces).
@@ -712,6 +734,7 @@ impl Default for OverlayState {
             agent_scroll: None,
             debug_scroll: None,
             modifiers: iced::keyboard::Modifiers::empty(),
+            hovered_tree_row: None,
             surfaces: SurfaceRegistry::new(),
             pre_rank: PreRankCoordinator::new(),
         }
@@ -1497,7 +1520,7 @@ impl ViewModels {
     /// Snapshots every view-model off `app`, merging in the reducer-held state
     /// that the individual `from_app` constructors cannot see.
     ///
-    /// Four merges are required because each underlying `from_app` reports a
+    /// Five merges are required because each underlying `from_app` reports a
     /// default where the iced reducer owns the real value:
     ///
     /// * the left panel's search fields come from [`SearchViewModel`], because
@@ -1506,6 +1529,10 @@ impl ViewModels {
     /// * the left panel's `multi_select` comes from
     ///   [`OverlayState::modifiers`], because `LeftPanelViewModel::from_app`
     ///   has no modifier input and reports `false` (UI-022);
+    /// * the left panel's `hovered_row` comes from
+    ///   [`OverlayState::hovered_tree_row`], because the pointer crossing is
+    ///   reported by the row's `mouse_area` into the reducer and
+    ///   `LeftPanelViewModel::from_app` has no pointer input (INT-10);
     /// * the agent panel's disclosure comes from
     ///   [`OverlayState::thinking_expanded`], because
     ///   `AgentPanelViewModel::from_app` hardcodes `true`;
@@ -1546,6 +1573,7 @@ impl ViewModels {
         // to `false`; the tracked keyboard state lives on the overlay, so
         // the override happens here alongside the other search merges.
         left.multi_select = overlay.modifiers.shift();
+        left.hovered_row = overlay.hovered_tree_row.clone();
 
         let agent =
             AgentPanelViewModel::from_app(app).with_thinking_expanded(overlay.thinking_expanded);
