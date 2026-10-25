@@ -38,6 +38,7 @@ pub mod gallery_table;
 pub mod gallery_toggle;
 pub mod gallery_tree;
 pub mod geometry;
+pub mod layout;
 pub mod spec_coverage;
 pub mod state;
 pub mod surface;

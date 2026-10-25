@@ -67,7 +67,14 @@ use crate::token_lint::{
 /// which is the layer the rules exist to protect rather than police, so
 /// like every other token module it is scanned but never visual-scoped:
 /// the file count moves and `PIN_RULE_B_FILES` does not.
-const PIN_FILES_SCANNED: usize = 121;
+///
+/// 126 as of `B-1`, whose five additions are the `layout/` subsystem —
+/// `layout/mod.rs`, `density.rs`, `emphasis.rs`, `footer.rs` and
+/// `optical.rs` (`UIF-PRIN-006`). It defines no visual literal of its
+/// own: every measurement it uses is a read-through of an existing
+/// `token::` value, so widening Rule B to cover it would add no reach.
+/// The file count moves and `PIN_RULE_B_FILES` does not.
+const PIN_FILES_SCANNED: usize = 126;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

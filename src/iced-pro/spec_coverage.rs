@@ -644,6 +644,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
         status: Status::Partial,
         section: "§1.1",
         evidence: &[
+            "layout/density.rs",
+            "layout/emphasis.rs",
+            "layout/footer.rs",
+            "layout/optical.rs",
             "widget/button.rs",
             "surface/dialog_button.rs",
             "token/size.rs",
@@ -651,28 +655,56 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "composite/form_field.rs",
         ],
         reason: Some(
-            "The ladder exists; the rule does not. The four-step emphasis descent is named: \
-             `ButtonVariant::{Primary, Secondary, Ghost, Danger}` (§3.1) is exactly the \
-             step-down from a solid `accent.fill` / `status.danger.fill` CTA to a bordered \
-             `surface.raised` secondary to a quiet ghost, and `DialogButtonRole::{Primary, \
-             Secondary}` already separates the footer control that dispatches from the one \
-             that discards. Both rungs the density clause names are tokens — \
-             `size.control.sm` (28px) and `size.control.md` (32px). Missing: nothing \
-             *enforces* either half. There is no `ControlDensity` type — the two rungs are \
-             two constants, not a density a row is declared at — so no check can say \
-             'this band mixes 28px with 32px', and `OverflowToolbar`, `FormField` and a \
-             dialog footer are free to mix them today. No check counts high-emphasis fills \
-             per container scope: `DialogButtonRole` is a per-control role carrying no \
-             arity, so a host that builds two `Primary` controllers for one footer passes \
-             every test in this crate. The `[Secondary / Cancel] [Primary / Confirm]` \
-             footer order, the far-left utility pin and the destructive-confirmation rule \
-             that initial keyboard focus lands on `[Cancel]` are unmodelled — the role \
-             type says *what* a footer button is, never where it sits or who is focused \
-             first. Optical centring is likewise unasserted: the 16px and 24px glyph slots \
-             are reserved and glyphs are centred geometrically, never against optical \
-             weight, so a `▾` or a pill badge is centred by box rather than by eye.",
+            "Three clauses are now modelled and checkable; the fourth is \
+             mechanism-only. **Row density** holds as a rule: \
+             `ControlDensity::{Compact, Standard}` is derived from \
+             `size.control.sm` / `size.control.md` rather than restated, \
+             and `check_row_density` reports a band that mixes rungs, \
+             naming the control, its height and both rungs — with \
+             `off_rung` distinguished from `wrong_rung` because the two \
+             need different fixes. `OverflowToolbar` (28px strip → \
+             Compact) and `FormField` (32px slot → Standard) are wired to \
+             it, as is a dialog footer via `FooterPlan::density_report`. \
+             **Single focal point** holds: `check_focal_point` counts \
+             over the four scopes §1.1 names, and `Primary` and `Danger` \
+             both map to `High`, so a confirm-and-delete pair is two \
+             focal points rather than one-each. **Footer ordering** holds \
+             as a type: `FooterSlot::{Utility, Cancel, Confirm}` carries \
+             the layout order, the far-left pin and the `space.sm` group \
+             gap, and `FooterPlan::initial_focus` carries the \
+             destructive-confirmation rule as data `validate()` asserts \
+             against the `Cancel` action. Missing: nothing in this crate \
+             *calls* any of the three — they are pure rules a host runs \
+             against a plan before rendering it, so an unruly host stays \
+             unruly until it opts in, and no framework composite \
+             self-checks on the way out. The fourth clause is only half \
+             built: `optical_box` and `optical_shift` separate a glyph's \
+             optical box from its em box and are pinned for identity, \
+             symmetric application and the slot never being exceeded, \
+             but the per-glyph insets are host-supplied because this \
+             crate has no font and therefore no metrics, and the \
+             *baseline* half of the clause — adjacent inline text and \
+             controls sharing a typographic baseline — is not modelled \
+             at all.",
         ),
-        note: None,
+        note: Some(
+            "No value invented. `ControlDensity::height()` reads \
+             `size.control.sm` / `size.control.md`; \
+             `footer::GROUP_GAP` *is* `space.sm`; the optical slots are \
+             `size.icon.md` (16px) and `size.hit_target.min` (24px). \
+             `OverflowToolbar::ITEM_HEIGHT` (24px) is a hit-target floor \
+             rather than a control density, so a Compact strip carrying \
+             24px hit targets inside it is not a rung mixture and is not \
+             reported as one. `Emphasis::from(DialogButtonRole)` reads \
+             intent, not paint: a host that fills a `Secondary`-role \
+             control with `accent.fill` is invisible to the role type and \
+             must classify through `EmphasisSlot::high`. `Danger` is \
+             classed `High` by its peak fill — `danger_paint` rests on \
+             `surface_raised` and only reaches `status_danger.fill` on \
+             hover — because §1.1 names the variant, not the rest cell. \
+             Optical insets are host-supplied by design — the framework \
+             owns the shape of optical centring, never the measurements.",
+        ),
     },
     Coverage {
         id: "UIF-PRIN-007",
