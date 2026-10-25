@@ -847,8 +847,10 @@ fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
 
 use iced_pro::composite::tree_row;
 use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::contrast::ChromeClass;
 use iced_pro::token::contrast::contrast_ratio;
 use iced_pro::token::{size, space, typography};
+use iced_pro::widget::badge_model::BadgeModel;
 use iced_pro::widget::text_input as pro_text_input;
 
 /// The literal this increment retired for the tree row's label size.
@@ -1158,59 +1160,157 @@ fn the_badge_never_breaches_the_label_floor_wherever_it_shows() {
 
 #[test]
 fn the_pdf_badge_survives_the_selection_lock() {
-    // **THE requirement this increment exists for.** §4.3.2: "Special item
-    // states (such as PDF-backed notes) include a text/icon badge
-    // (`[PDF]`) so meaning and contrast (`4.80:1`) are preserved when
-    // selected."
+    // **THE requirement this increment exists for.** §3B.6:883: the `[PDF]`
+    // distinction "MUST NOT ride on badge text color (status.danger.text
+    // on accent.fill is 1.59:1 and the lock forbids it). Render the badge
+    // as a chip with BG: status.danger.fill and FG: text.strong (5.13:1),
+    // so the chip fill itself carries the distinction and survives the
+    // lock."
     //
     // INT-7b fixed the *contrast* of a selected PDF-backed row by
     // role-locking the label to `text.strong`, and in doing so destroyed
     // the *meaning*: once role-locked, a selected PDF-backed row was
-    // pixel-identical to a selected ordinary row, so the PDF-backed
-    // state silently vanished on selection. The badge is the second half
-    // of that fix. It survives the lock because it is a word rather than
-    // a colour, and it stays legible because [`pdf_badge_colour`] routes
-    // it through the same `tree_row::locked_over` call the label uses —
-    // so it arrives at `text.strong` exactly when the label does, rather
-    // than carrying `status.danger.text` onto the selection band.
+    // pixel-identical to a selected ordinary row. The chip is the second
+    // half of that fix, and it is built so that **no part of it is a
+    // lock-driven text colour** — the mechanism the rule forbids is
+    // structurally absent, not merely avoided.
     let pro = Palette::pro();
+    let chip = pdf_badge_chip();
     let band = row_paint(true, false).band;
-    let badge = pdf_badge_colour(true, false);
 
+    // The fill is the mandated token, and it comes from the framework's
+    // own tone resolver rather than a colour picked here (§4a).
     assert_eq!(
-        band, pro.accent_fill,
-        "a selected row's band is accent.fill"
+        chip.fill, pro.status_danger_fill,
+        "the chip fill must be status.danger.fill"
     );
     assert_eq!(
-        badge, pro.text_strong,
-        "the badge must be locked to text.strong, not left danger-red"
+        chip.fill,
+        badge::resolve_tone(BadgeTone::Danger, &pro).solid_fill,
+        "the fill must be sourced from badge::resolve_tone, not hand-picked"
     );
-    assert_ne!(
-        badge, band,
-        "a badge painted in its own background colour is not a badge"
+
+    // The foreground is the mandated token, and it is a constant — it does
+    // not vary with posture, so it cannot be routed through a lock.
+    assert_eq!(
+        chip.foreground, pro.text_strong,
+        "the chip foreground must be text.strong"
     );
+    assert_eq!(
+        chip.foreground,
+        pdf_badge_chip().foreground,
+        "the chip foreground must be posture-independent"
+    );
+
+    // The chip's own FG/BG pair is the pair the rule names, and it passes.
     assert!(
-        contrast_ratio(badge, band) >= 4.80,
-        "selected PDF-backed badge measures {:.4}:1 against the spec's 4.80:1",
-        contrast_ratio(badge, band),
+        meets_text_contrast(chip.foreground, chip.fill),
+        "the chip's own FG/BG pair must clear the AA text floor: {}",
+        contrast_ratio(chip.foreground, chip.fill),
     );
-    // The badge and the label are the same colour here, which is the
-    // point: they lock together, so neither can be left behind by the
-    // other.
+
+    // The chip never resolves to the band it sits on.
+    assert_ne!(
+        chip.fill, band,
+        "a chip filled with its own background colour is not a chip"
+    );
+
+    // The chip's ink matches the locked label, so the chip never fights the
+    // lock — but the *distinction* is the fill, not the ink. This is the
+    // difference from the retired text-badge design, which made the ink do
+    // work it could not do.
     assert_eq!(
-        badge,
+        chip.foreground,
         row_label_colour(true, false, true),
-        "the badge and a PDF-backed label must resolve identically when selected"
+        "the chip's text must match the locked label so the two cannot diverge"
+    );
+
+    // **And the honest half: on the selected band the fill does not carry
+    // it.** Pinned in its own test below rather than glossed here.
+    assert!(
+        contrast_ratio(chip.fill, band) < contrast::MIN_COINCIDENT_FILL_CONTRAST,
+        "see the_chip_fill_collapses_on_the_selected_band: the mandated fill is \
+         not visible on accent.fill ({:.6}:1)",
+        contrast_ratio(chip.fill, band),
     );
 }
 
 #[test]
-fn every_badge_posture_is_legible_computed_from_raw_srgb() {
-    // Each posture the badge can appear in, measured rather than
+fn the_chip_fill_collapses_on_the_selected_band_recorded_shortfall_not_a_pass() {
+    // **THIS TEST RECORDS A FAILURE. IT IS NOT A PASSING RESULT.**
+    //
+    // §3B.6:883 says the chip fill "carries the distinction and survives
+    // the lock". Measured from raw sRGB, it does not survive the lock:
+    // `status.danger.fill` against `color.accent.fill` — the selected row's
+    // own band — is **1.067676:1**. That is not a visible boundary. The
+    // chip is built exactly as the spec mandates; the spec's stated
+    // mechanism for why that works is simply false on the band the rule is
+    // about.
+    //
+    // The spec author was shown this measurement and ruled: "if the spec
+    // mandates it, then follow the spec." The chip therefore ships, and
+    // this test exists so the shortfall cannot later be mistaken for a
+    // resolved problem.
+    //
+    // **Read the assertions carefully: they assert the value is BELOW the
+    // floor on purpose.** If a palette retune ever makes the chip visible
+    // on the selection band, this test FAILS — and the correct response is
+    // to come and delete this test, not to flip the comparison.
+    let pro = Palette::pro();
+    let chip = pdf_badge_chip();
+    let floor = contrast::MIN_COINCIDENT_FILL_CONTRAST;
+    let measured = contrast_ratio(chip.fill, pro.accent_fill);
+
+    // The shortfall itself.
+    assert!(
+        measured < floor,
+        "RECORDED SHORTFALL: chip fill vs selected band is {measured:.6}:1, \
+         below the {floor:.2}:1 floor. If this now clears the floor, delete \
+         this test — the shortfall has genuinely gone away."
+    );
+    assert!(
+        (measured - 1.067676).abs() < 1e-5,
+        "the recorded shortfall figure has moved: {measured:.6} vs 1.067676"
+    );
+    assert!(
+        ((floor - measured) - 1.932324).abs() < 1e-5,
+        "the shortfall is no longer 1.93 points: {:.6}",
+        floor - measured
+    );
+
+    // The obligation is real and declarative: the solid pill classifies as
+    // CoincidentWithFill, and that class demands 3.00:1.
+    let pill = badge::resolve_style(&BadgeModel::count(1).with_tone(BadgeTone::Danger), &pro);
+    assert_eq!(
+        badge::badge_chrome_class(&pill, &pro),
+        ChromeClass::CoincidentWithFill,
+        "a zero-border solid pill is CoincidentWithFill, so the fill carries the boundary"
+    );
+    assert_eq!(
+        ChromeClass::CoincidentWithFill.minimum_contrast(),
+        Some(floor),
+        "the class demands 3.00:1 against the mount"
+    );
+
+    // **And nothing enforces it here.** `gallery_audit::judge` returns true
+    // unconditionally for every class except `Judged`, so the chip's
+    // boundary against a selection band is never measured by any guard.
+    // Asserted so that "the framework would catch it" is not believed.
+    assert_eq!(
+        ChromeClass::Judged.minimum_contrast(),
+        Some(contrast::MIN_CHROME_CONTRAST),
+        "only Judged pairs are gated; CoincidentWithFill is reported without a verdict"
+    );
+}
+
+#[test]
+fn every_chip_posture_is_measured_from_raw_srgb() {
+    // Each posture the chip can appear in, measured rather than
     // transcribed. Nothing here is copied from the spec's rounded figures;
     // every number is recomputed from the palette's sRGB channels by
     // `contrast_ratio`.
     let pro = Palette::pro();
+    let chip = pdf_badge_chip();
     let postures = [
         ("rest", false, false),
         ("hovered", false, true),
@@ -1220,44 +1320,65 @@ fn every_badge_posture_is_legible_computed_from_raw_srgb() {
 
     for (name, selected, hovered) in postures {
         let band = row_paint(selected, hovered).band;
-        let badge = pdf_badge_colour(selected, hovered);
-        let ratio = contrast_ratio(badge, band);
+        // The chip is posture-independent by design: the fill carries the
+        // mark, so nothing about the row changes the chip.
+        assert_eq!(chip.fill, pro.status_danger_fill, "posture {name}");
+        assert_eq!(chip.foreground, pro.text_strong, "posture {name}");
+        // The chip's own FG/BG pair clears the AA text floor in every
+        // posture, because it never changes.
         assert!(
-            meets_text_contrast(badge, band),
-            "badge in posture {name}: {ratio:.6}:1 against band {band:?} \
-             fails the 4.5:1 AA text floor"
+            meets_text_contrast(chip.foreground, chip.fill),
+            "chip FG/BG in posture {name}: {}",
+            contrast_ratio(chip.foreground, chip.fill)
         );
-        // The badge never resolves to the band it sits on.
-        assert_ne!(badge, band, "posture {name}: badge invisible on its band");
+        // The chip never paints the same colour as the band under it.
+        assert_ne!(
+            chip.fill, band,
+            "posture {name}: chip invisible on its band"
+        );
     }
 
     // Pinned figures, so a palette retune that quietly moves one of them
     // fails here instead of in a review screenshot.
-    let rest = contrast_ratio(pdf_badge_colour(false, false), row_paint(false, false).band);
-    let hovered = contrast_ratio(pdf_badge_colour(false, true), row_paint(false, true).band);
-    let selected = contrast_ratio(pdf_badge_colour(true, false), row_paint(true, false).band);
-    let selected_hovered = contrast_ratio(pdf_badge_colour(true, true), row_paint(true, true).band);
+    let fg_bg = contrast_ratio(chip.foreground, chip.fill);
+    let rest_band = contrast_ratio(chip.fill, row_paint(false, false).band);
+    let hover_band = contrast_ratio(chip.fill, row_paint(false, true).band);
+    let selected_band = contrast_ratio(chip.fill, row_paint(true, false).band);
+    let selected_hovered_band = contrast_ratio(chip.fill, row_paint(true, true).band);
 
-    assert!((rest - 6.572479).abs() < 1e-5, "rest = {rest:.6}");
-    assert!((hovered - 5.363299).abs() < 1e-5, "hovered = {hovered:.6}");
+    // The chip's own pair: the spec's 5.13:1, the atom header's 5.1270:1.
+    assert!((fg_bg - 5.126966).abs() < 1e-5, "FG/BG = {fg_bg:.6}");
+    // Visible at rest and on hover — both clear the 3.0 coincident floor.
     assert!(
-        (selected - 4.801988).abs() < 1e-5,
-        "selected = {selected:.6}"
+        (rest_band - 3.880532).abs() < 1e-5,
+        "fill vs base = {rest_band:.6}"
     );
     assert!(
-        (selected_hovered - selected).abs() < 1e-9,
+        (hover_band - 3.166606).abs() < 1e-5,
+        "fill vs hover = {hover_band:.6}"
+    );
+    assert!(rest_band >= contrast::MIN_COINCIDENT_FILL_CONTRAST);
+    assert!(hover_band >= contrast::MIN_COINCIDENT_FILL_CONTRAST);
+    // Collapsed on selection — the recorded shortfall, see
+    // `the_chip_fill_collapses_on_the_selected_band`.
+    assert!(
+        (selected_band - 1.067676).abs() < 1e-5,
+        "fill vs accent.fill = {selected_band:.6} (RECORDED SHORTFALL)"
+    );
+    assert!(
+        (selected_hovered_band - selected_band).abs() < 1e-9,
         "selection outranks hover, so the band must not move: \
-         {selected_hovered:.6} vs {selected:.6}"
+         {selected_hovered_band:.6} vs {selected_band:.6}"
     );
 
-    // **The defect this design prevents, pinned as illegal.** Had the
-    // badge carried its own `status.danger.text` through selection rather
-    // than taking the lock, it would paint this on the selection band.
-    let unlocked = contrast_ratio(pro.status_danger_text, pro.accent_fill);
+    // **The defect this design prevents, pinned as illegal.** Had the badge
+    // carried `status.danger.text` as its own text colour rather than a
+    // chip, it would paint this on the selection band.
+    let danger_text_on_band = contrast_ratio(pro.status_danger_text, pro.accent_fill);
     assert!(
-        unlocked < 2.0,
-        "status.danger.text on accent.fill is {unlocked:.6}:1 — if this ever \
-         becomes readable the lock being tested above is not what is saving it"
+        danger_text_on_band < 2.0,
+        "status.danger.text on accent.fill is {danger_text_on_band:.6}:1 — the \
+         rule forbids this pairing, which is why the chip exists"
     );
 }
 
@@ -1290,22 +1411,102 @@ fn the_badge_cannot_move_the_label_because_the_box_never_sees_it() {
 
 #[test]
 fn the_badge_is_a_shape_that_fits_the_compact_row() {
-    // The badge must not push the row past its pinned rung, and the row's
-    // interior must actually contain the badge's line box.
+    // The chip must not push the row past its pinned rung, and the row's
+    // interior must actually contain the chip's box.
     assert_eq!(ROW_MIN_HEIGHT, size::HIT_TARGET_MIN);
     let interior = ROW_MIN_HEIGHT - ROW_PADDING_Y - ROW_PADDING_Y;
+    assert_eq!(interior, 20.0, "24 − 2×2");
+
+    // The chip fits inside the row interior with 2px to spare, and its
+    // height is the framework's own pill rung rather than a number picked
+    // here.
+    assert_eq!(PDF_BADGE_CHIP_HEIGHT, badge::COUNT_HEIGHT);
     assert!(
-        interior >= PDF_BADGE_RUNG.line_height,
-        "the badge's {}px line box must fit the row's {interior}px interior",
+        PDF_BADGE_CHIP_HEIGHT <= interior,
+        "the {}px chip must fit the {interior}px row interior",
+        PDF_BADGE_CHIP_HEIGHT,
+    );
+    // The chip's own line box fits inside the chip.
+    assert!(
+        PDF_BADGE_RUNG.line_height <= PDF_BADGE_CHIP_HEIGHT,
+        "the {}px line box must fit the {}px chip",
         PDF_BADGE_RUNG.line_height,
+        PDF_BADGE_CHIP_HEIGHT,
     );
     // The badge is typed on the badge atom's own rung, not a size picked
     // here, and that rung is at or above the interface-wide type floor.
     assert_eq!(PDF_BADGE_RUNG.size, badge::TYPE_RUNG.size);
     assert!(PDF_BADGE_RUNG.size >= typography::MIN_SIZE);
-    // The slot is wide enough for the literal it declares, with slack.
-    assert!(PDF_BADGE_SLOT > PDF_BADGE_GAP);
+
+    // **The slot IS the chip's box**, composed from the chip's own metrics
+    // rather than a figure that merely happens to be large enough.
+    assert_eq!(
+        PDF_BADGE_CHIP_PADDING_TOTAL,
+        PDF_BADGE_CHIP_H_PADDING + PDF_BADGE_CHIP_H_PADDING,
+        "both side paddings, taken together"
+    );
+    assert_eq!(
+        PDF_BADGE_SLOT,
+        PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL,
+        "slot = text allowance + both side paddings"
+    );
+    assert_eq!(PDF_BADGE_SLOT, 36.0, "20 + 8 + 8");
+    assert_eq!(PDF_BADGE_CHIP_H_PADDING, badge::CHIP_H_PADDING);
+    assert_eq!(PDF_BADGE_CHIP_RADIUS, shape::RADIUS_PILL);
     assert_eq!(PDF_BADGE_CHARGE, PDF_BADGE_SLOT + PDF_BADGE_GAP);
+    // The chip is narrower than the row's full width at any pane the app
+    // allows, so it can never crowd the row out.
+    assert!(PDF_BADGE_SLOT < LEFT_PANEL_MIN_WIDTH);
+}
+
+#[test]
+fn the_badge_charge_cannot_breach_the_label_floor_at_the_minimum_pane() {
+    // The chip has a real box, so it charges the row for real width. At the
+    // spec's minimum pane the row cannot afford both the chip and the
+    // `TREE_LABEL_MIN_W = 96px` floor, and `pdf_badge_fits` must be the
+    // thing that decides — not a hope that the numbers work out.
+    //
+    // `LEFT_PANE_MIN_W = 150` is the spec's own figure (§4.3.1). The app's
+    // `LEFT_PANEL_MIN_WIDTH` is 180, i.e. 30px *wider*, so the spec's
+    // worst case is checked here and the app's own minimum is safer.
+    let spec_min_pane = 150.0;
+    let row_width = spec_min_pane - PANEL_PADDING - PANEL_PADDING;
+    assert_eq!(row_width, 142.0);
+
+    let allowance = tree_row::indent_allowance(row_width);
+    let drawn = tree_row::indent_geometry(8, row_width).width;
+    assert_eq!(allowance, 14.0, "142 − 128");
+    assert_eq!(
+        drawn, allowance,
+        "deep rows compress onto the whole allowance"
+    );
+
+    // The chip cannot be afforded here, and the gate says so.
+    assert!(
+        !pdf_badge_fits(8, row_width),
+        "allowance − drawn = {:.1}, charge = {PDF_BADGE_CHARGE}: the gate must \
+         suppress the chip at the minimum pane",
+        allowance - drawn,
+    );
+
+    // With the chip suppressed the label keeps its full compressed width.
+    let label = row_width - ROW_PADDING_X - ROW_PADDING_X - drawn;
+    assert_eq!(label, 120.0);
+    assert!(
+        label >= tree_row::MIN_LABEL_WIDTH,
+        "{label} must clear the {}px floor",
+        tree_row::MIN_LABEL_WIDTH,
+    );
+
+    // **The gate is load-bearing, not decorative.** If the charge were
+    // forced on at this width the floor would breach — which is exactly the
+    // outcome `pdf_badge_fits` exists to prevent.
+    let forced = label - PDF_BADGE_CHARGE;
+    assert!(
+        forced < tree_row::MIN_LABEL_WIDTH,
+        "forcing the chip in would leave {forced:.1}px, below the floor; the \
+         gate is what stops that"
+    );
 }
 
 #[test]

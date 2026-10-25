@@ -84,14 +84,16 @@
 //!   [`tree_row::resolve_style`] (`guide`, `selection_bar`) and were simply
 //!   never drawn. What the change really costs is per-row widget count, which
 //!   [`row_overlay`] states and the sidecar pins.
-//! * **The `[PDF]` badge.** **Landed in INT-12.** §4.3.2 carries
-//!   PDF-backed meaning through a badge so it survives the selection lock.
-//!   The app previously tinted the whole label with `error` instead; the
-//!   lock correctly overrode that tint on a selected row, so the state
-//!   vanished. [`pdf_badge_colour`] now paints the `[PDF]` mark through
-//!   the *same* role lock the label uses, which is what makes the
-//!   `4.80:1` the spec names hold by construction rather than by a
-//!   second colour decision.
+//! * **The `[PDF]` badge.** **Landed in INT-12 as a chip.** §3B.6:883
+//!   requires the PDF-backed distinction to survive the selection lock,
+//!   and forbids it riding on badge text colour. The app previously tinted
+//!   the whole label with `error` instead; the lock correctly overrode that
+//!   tint on a selected row, so the state vanished. [`pdf_badge_chip`]
+//!   now builds a `status.danger.fill` pill behind `text.strong` so the
+//!   **fill** carries the mark. The chip is assembled from framework
+//!   resolvers rather than taken from the badge atom, and it carries a
+//!   recorded contrast shortfall against the selected band that the
+//!   function's own doc states and the sidecar pins.
 //! * **Width-relative indent compression.** **Landed in INT-12.**
 //!   [`row_indent_pixels`] and [`row_guide_offsets`] both resolve through
 //!   [`tree_row::indent_geometry`], so the step compresses proportionally
@@ -170,9 +172,12 @@ use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding}
 
 use iced_pro::composite::tree_row;
 use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::contrast;
+use iced_pro::token::shape;
 use iced_pro::token::space;
 use iced_pro::token::typography::{self, FAMILY_SANS};
 use iced_pro::widget::badge;
+use iced_pro::widget::badge_model::BadgeTone;
 use iced_pro::widget::text_input as pro_text_input;
 
 use crate::bus::events::user_command::UserCommand;
@@ -358,52 +363,67 @@ pub const ROW_MIN_HEIGHT: f32 = tree_row::ROW_HEIGHT_COMPACT;
 /// [`ROW_MIN_HEIGHT`] is untouched.
 pub const PDF_BADGE_RUNG: typography::TypeRung = badge::TYPE_RUNG;
 
-/// The width the `[PDF]` badge owns on a tree row.
+/// The horizontal room the `[PDF]` glyph run is budgeted at the badge
+/// rung — `space.lg + space.xs` (`16 + 4 = 20`).
 ///
-/// **A declared slot, not a text measurement.** The badge is rendered
-/// inside a container fixed to this width, so the room the row charges
-/// for it and the room the badge actually occupies are the same number by
+/// This is the text term of the chip's box, declared rather than measured:
+/// the view cannot measure real glyphs (see the module header), so the
+/// room the mark needs is a stated budget and the chip is built around it.
+pub const PDF_BADGE_TEXT_ALLOWANCE: f32 = space::LG + space::XS;
+
+/// The `[PDF]` chip's height — `size.badge.count.height` (`18px`), read
+/// off the badge atom's own pill height.
+///
+/// **Why not the status chip's `24px`.** `badge::CHIP_HEIGHT` is the
+/// *entire* compact row height. The row's interior is
+/// `24 − 2 × ROW_PADDING_Y(2) = 20px`, so a 24px chip cannot be placed
+/// without either overflowing into the neighbouring rows or shrinking
+/// away from its own token. The count pill's height is the framework's
+/// other pill rung, it is a real token, and it sits inside the 20px
+/// interior with `2px` to spare.
+pub const PDF_BADGE_CHIP_HEIGHT: f32 = badge::COUNT_HEIGHT;
+
+/// The `[PDF]` chip's corner radius — `shape.radius.pill`, the same
+/// radius every badge kind in §3.8 wears.
+pub const PDF_BADGE_CHIP_RADIUS: f32 = shape::RADIUS_PILL;
+
+/// The `[PDF]` chip's horizontal padding — `space.sm`, the badge atom's
+/// own [`badge::CHIP_H_PADDING`].
+pub const PDF_BADGE_CHIP_H_PADDING: f32 = badge::CHIP_H_PADDING;
+
+/// Both side paddings of the chip, taken together — `space.sm` twice.
+///
+/// Named so [`PDF_BADGE_SLOT`] stays on one line: the token gate parses a
+/// declaration's expression textually, and a `pub const … =` wrapped across
+/// lines leaves it reading an empty expression, which classifies as
+/// token-bound without ever looking at what the value is made of. That is a
+/// blind spot, not a pass, so the slot is kept short enough to be seen.
+pub const PDF_BADGE_CHIP_PADDING_TOTAL: f32 = badge::CHIP_H_PADDING + badge::CHIP_H_PADDING;
+
+/// The width the `[PDF]` badge owns on a tree row — and, because the chip
+/// is drawn to fill it, the width the chip actually renders at.
+///
+/// **A declared slot, not a text measurement.** The chip is rendered in a
+/// container fixed to this width, so the room the row charges for the
+/// badge and the room the badge actually occupies are the same number by
 /// construction. A reservation *guessed* from glyph widths would be a
 /// standing risk that the guess runs short and the label floor is
 /// breached by a font change; a slot cannot.
 ///
-/// `space.xl + space.md` (`24 + 12 = 36`) is wide enough for the
-/// five-glyph `[PDF]` literal at the `12px` caption rung with slack, and
-/// is composed from the spacing scale rather than written as a literal
-/// ([RUST-021]).
+/// The slot is **composed from the chip's own box** rather than picked
+/// from the spacing scale:
 ///
-/// # The compliant chip this slot is waiting on
+/// ```text
+/// slot = text allowance + both side paddings
+///      = 20            + 8 + 8
+///      = 36
+/// ```
 ///
-/// `§3B.6:883` requires the badge to be a chip filled `status.danger.fill`
-/// behind `text.strong`. Two independent blockers stop that landing here,
-/// and neither is a matter of effort:
-///
-/// 1. **The badge atom cannot produce it.** `badge::resolve_style` reaches
-///    a solid `status.danger.fill` only through `BadgeKind::Count(u32)`,
-///    which renders a number (`count.text()` is `Some("7")`, never a
-///    word). The only text-bearing kind, `BadgeKind::Status { icon, label }`,
-///    is hardcoded to `fill: surface_raised` with the tone in the
-///    **foreground and border** — verified against the resolver's own
-///    output, which returns `status_danger_text` for both. So the pair the
-///    rule needs lives in two mutually exclusive variants, and mounting a
-///    `Status` in the Danger tone produces exactly the danger-coloured text
-///    label the rule forbids. `§3.8`'s inventory has no text-bearing solid
-///    chip to add, so this is a spec gap, not a missing constructor.
-/// 2. **The mandated fill does not survive the lock either.** Measured here
-///    from raw sRGB, `status.danger.fill` against `color.accent.fill` is
-///    **`1.0677:1`**. The rule's stated mechanism — "so the chip fill
-///    itself carries the distinction and survives the lock" — is false on
-///    the very band the rule is about. Against the *unselected* surfaces it
-///    is fine (`3.8805:1` on `surface.base`, `3.1666:1` on
-///    `surface.hover`), so the chip would be visible at rest and vanish on
-///    selection. The atom classifies a solid pill as
-///    `ChromeClass::CoincidentWithFill`, which owes `3.00:1` against its
-///    mount; on the selection band it would deliver `1.0677:1` and fail
-///    the framework's own obligation by `1.93` points.
-///
-/// A chip is therefore not a drop-in. Resolving this needs a decision about
-/// the rule, not about the code — see the INT-12 ledger note.
-pub const PDF_BADGE_SLOT: f32 = space::XL + space::MD;
+/// That is the same `36` the slot had when it was written as
+/// `space.xl + space.md`, so no fit test, floor computation or charge in
+/// this module moves — but the number is now the chip's width rather than
+/// a figure that merely happens to be large enough for it.
+pub const PDF_BADGE_SLOT: f32 = PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL;
 
 /// The horizontal gap between a row's label and its `[PDF]` badge —
 /// `space.xs`.
@@ -608,42 +628,101 @@ pub fn pdf_badge_fits(depth: usize, row_width: f32) -> bool {
     allowance - drawn >= PDF_BADGE_CHARGE
 }
 
-/// The `[PDF]` badge's colour in a given posture.
+/// The `[PDF]` chip's resolved paint and box (`§3B.6:883`).
 ///
-/// **This function is the mechanism `§3B.6:883` forbids, and it is kept
-/// only because the compliant replacement is not yet available.** It is
-/// [`row_label_colour`] called with the row marked PDF-backed, so the
-/// badge rides the same `tree_row::locked_over` role lock as the label:
-/// `status.danger.text` at rest, `color.text.strong` once selected.
+/// Every field is a value the renderer consumes as-is, mirroring the shape
+/// of [`badge::BadgeStyle`]: no token lookup and no further resolution at
+/// the paint site.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PdfBadgeChip {
+    /// The chip's fill — `status.danger.fill`, via the badge tone resolver.
+    pub fill: Color,
+    /// The chip's foreground — `color.text.strong`, in **every** posture.
+    pub foreground: Color,
+    /// The chip's corner radius — [`PDF_BADGE_CHIP_RADIUS`].
+    pub radius: f32,
+    /// The chip's height — [`PDF_BADGE_CHIP_HEIGHT`].
+    pub height: f32,
+    /// The chip's horizontal padding — [`PDF_BADGE_CHIP_H_PADDING`].
+    pub h_padding: f32,
+}
+
+/// The `[PDF]` chip's paint and box, resolved from framework resolvers.
 ///
-/// That does buy one real thing — it makes the INT-7b defect impossible
-/// to reintroduce, since a badge carrying its own `status.danger.text`
-/// through selection would paint `1.5863:1` on `color.accent.fill`
-/// (measured here from raw sRGB), which is unreadable and is the bug the
-/// role lock exists to kill.
+/// # Why the chip is assembled here rather than taken from the badge atom
 ///
-/// But the price is the badge's whole purpose. On a selected row the badge
-/// resolves to the identical ink as the label beside it, so the chip
-/// carries no distinction there at all — and "the distinction survives
-/// the selection lock" is precisely what the rule asks for. A rule that
-/// forbids the cure's side effect while requiring the cure's benefit cannot
-/// be satisfied by a text colour at any value:
+/// The rule asks for a text-bearing pill on `status.danger.fill`, and
+/// `badge::resolve_style` cannot produce that combination:
 ///
-/// * `status.danger.text` on `accent.fill` = `1.5863:1` — unreadable,
-///   and the lock forbids it anyway.
-/// * `text.strong` on `accent.fill` = `4.8020:1` — readable, and
-///   indistinguishable from the label.
+/// * The solid `status.danger.fill` behind `text.strong` is reachable only
+///   through `BadgeKind::Count(u32)`, whose text is a number —
+///   `count.text()` is `Some("7")`, never a word.
+/// * The only text-bearing kind, `BadgeKind::Status { icon, label }`, is
+///   hardcoded to `fill: surface_raised` with the tone in the
+///   **foreground and border**. Verified against the resolver's own
+///   output: `resolve_style(&Status + Danger)` returns `status_danger_text`
+///   for both `text` and `border` — exactly the danger-coloured text label
+///   the rule forbids. It also mandates a leading glyph from a fixed
+///   four-set (`✓ ⚠ ✕ ●`), none of which denotes "PDF-backed".
+/// * `§3.8` defines exactly three badge kinds, so a text-bearing solid
+///   kind cannot be added without contradicting the spec's own inventory.
 ///
-/// The rule's own answer is a chip whose **fill** carries the mark
-/// (`status.danger.fill` behind `text.strong`, `5.1270:1`). That pair is
-/// not reachable from the badge atom's public API for a text-bearing badge
-/// — see the note on [`PDF_BADGE_SLOT`] — so the rework is blocked, not
-/// merely unwritten.
+/// The two halves the rule needs live in mutually exclusive variants, so the
+/// chip is composed from the same resolvers the atom uses internally:
+/// [`badge::resolve_tone`] supplies the fill, `Palette::text_strong` the
+/// foreground and [`shape::RADIUS_PILL`] the corners. No colour is
+/// hand-picked and no numeric literal is written (§4a).
+///
+/// # The recorded shortfall — read this before believing the chip works
+///
+/// The chip is built exactly as mandated. What it measures is another
+/// matter, and the figures are pinned in the sidecar so a palette retune
+/// surfaces them rather than hiding them:
+///
+/// * **The chip's own `FG`/`BG` pair passes.** `text.strong` on
+///   `status.danger.fill` measures **`5.126966:1`** from raw sRGB — the
+///   `5.13:1` the rule prints and the `5.1270:1` the atom header reports.
+///   This is the pairing [`contrast::assert_fill_foreground_lock`] guards,
+///   and it holds.
+/// * **The chip's boundary against the selected band fails.** Against
+///   `color.accent.fill` the fill measures **`1.067676:1`**, short of the
+///   [`contrast::MIN_COINCIDENT_FILL_CONTRAST`] `3.00:1` that the atom's
+///   own `ChromeClass::CoincidentWithFill` classification demands — by
+///   `1.93` points. The rule's stated mechanism ("so the chip fill itself
+///   carries the distinction and survives the lock") does not hold on the
+///   band the rule is about.
+/// * **At rest and on hover it is fine:** `3.880532:1` on `surface.base`,
+///   `3.166606:1` on `surface.hover`. The chip is visible until the row
+///   is selected, then collapses into the band.
+///
+/// **No framework assertion fires on that shortfall, and none was
+/// bypassed.** [`badge::badge_chrome_class`] does classify the chip
+/// `CoincidentWithFill`, and `ChromeClass::minimum_contrast()` does return
+/// `Some(3.00)` — but the audit that consumes the class,
+/// `gallery_audit::judge`, returns `true` unconditionally for every class
+/// except `Judged` ("reported without a verdict because no threshold
+/// describes them"). The coincident-fill floor is declarative only:
+/// nothing in the enforcement path compares a badge fill against a
+/// selection band. The shortfall is therefore pinned in the sidecar as a
+/// measured value labelled a **recorded shortfall, not a pass**.
 ///
 /// Purity: pure.
 #[must_use]
-pub fn pdf_badge_colour(selected: bool, hovered: bool) -> Color {
-    row_label_colour(selected, hovered, true)
+pub fn pdf_badge_chip() -> PdfBadgeChip {
+    let pro = Palette::pro();
+    let fill = badge::resolve_tone(BadgeTone::Danger, &pro).solid_fill;
+    let foreground = pro.text_strong;
+    // The framework's own `UIF-TOK-006` rule 4 shield, run on the pair as
+    // actually built rather than trusted. A debug build aborts here if the
+    // pairing ever stops being compliant.
+    contrast::assert_fill_foreground_lock(fill, foreground, &pro);
+    PdfBadgeChip {
+        fill,
+        foreground,
+        radius: PDF_BADGE_CHIP_RADIUS,
+        height: PDF_BADGE_CHIP_HEIGHT,
+        h_padding: PDF_BADGE_CHIP_H_PADDING,
+    }
 }
 
 /// Width a single row needs: `indent + measured label + slack`.
@@ -1514,35 +1593,48 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
         .line_height(tree_row::LABEL_RUNG.iced_line_height())
         .color(row_label_colour(selected, hovered, pdf_backed));
 
-    // The `[PDF]` badge rides **after** the label, never before it. The
+    // The `[PDF]` chip rides **after** the label, never before it. The
     // label's left edge is the line every row in the tree aligns to; a
-    // leading badge would push it by the badge's width on PDF-backed
-    // rows alone and the column would jog. Trailing, the label starts
-    // exactly where it always did and the badge occupies its own
-    // declared slot at the end.
+    // leading chip would push it by the chip's width on PDF-backed rows
+    // alone and the column would jog. Trailing, the label starts exactly
+    // where it always did and the chip occupies its own declared slot.
     //
-    // The badge is a text mark rather than a filled pill, and that is a
-    // forced choice rather than a taste call: §3.8's only text-bearing
-    // variant is the status chip at `size.badge.chip.height = 24px`,
-    // which is the *entire* compact row height. The row's interior is
-    // `24 − 2 × 2 = 20px`, so the chip cannot be placed without either
-    // overflowing into the neighbouring rows or resizing away from its
-    // own token; and the chip mandates a leading glyph (`✓`/`⚠`/`✕`/`●`)
-    // that `[PDF]` has no meaning for. The count pill is numeric-only.
-    // What is left is the mark §4.3.2's own contrast figure describes:
-    // `4.80:1` is `text.strong` on `accent.fill`, i.e. foreground on
-    // the row's own band, not a chip against its own `surface.raised`.
+    // The chip fills [`PDF_BADGE_SLOT`] edge to edge, so the width the row
+    // charges for and the width that actually paints are the same number
+    // by construction. Its fill is `status.danger.fill` and its foreground
+    // is `text.strong` in **every** posture — the foreground is
+    // deliberately *not* routed through the selection lock, because
+    // `§3B.6:883` forbids the distinction riding on badge text colour.
+    // See [`pdf_badge_chip`] for the measured shortfall against the
+    // selected band that this rendering is nonetheless required to carry.
     let content: Element<'a, Message> =
         if pdf_backed && pdf_badge_fits(row.depth, view_model.row_width) {
+            let chip = pdf_badge_chip();
             let mark = container(
                 text(strings::TREE_PDF_BADGE)
                     .size(PDF_BADGE_RUNG.size)
                     .line_height(PDF_BADGE_RUNG.iced_line_height())
-                    .align_x(Alignment::Start)
-                    .color(pdf_badge_colour(selected, hovered)),
+                    .align_x(Alignment::Center)
+                    .color(chip.foreground),
             )
             .width(Length::Fixed(PDF_BADGE_SLOT))
+            .height(Length::Fixed(chip.height))
+            .align_x(Alignment::Center)
             .align_y(Alignment::Center)
+            // iced 0.14 has no `border_radius` builder on a container; the
+            // radius lives on the style's `Border`, and `draw_background`
+            // hands that whole `Border` to the fill quad
+            // (`iced_widget-0.14.2/src/container.rs:446`), so the fill is
+            // rounded even at a zero border width.
+            .style(move |_| container::Style {
+                background: Some(Background::Color(chip.fill)),
+                border: Border {
+                    width: 0.0,
+                    radius: chip.radius.into(),
+                    ..Default::default()
+                },
+                ..container::Style::default()
+            })
             .into();
 
             Row::with_children(vec![label.into(), mark])
@@ -1913,11 +2005,14 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 /// pointer. Both pairings clear the text floor by a wide margin, and the
 /// sidecar pins the measured ratios rather than transcribing them.
 ///
-/// §4.3.2 asks for a `[PDF]` badge so the *meaning* survives selection.
-/// The app has no such badge, so on a selected PDF-backed row the tint
-/// is lost and only the row's position carries the state; the tint
-/// returns the moment the row is deselected. Adding the badge is the
-/// stated follow-on.
+/// §4.3.2 asks for a `[PDF]` badge so the *meaning* survives selection,
+/// and INT-12 added one — see [`pdf_badge_chip`]. Note that the badge is a
+/// **separate mark**; this function still tints the whole label with
+/// `error` at rest and on hover. Read literally, `§3B.6:883`'s closing
+/// clause ("never in a danger-colored text label") reaches that tint as
+/// well as the badge, which would mean the label should not be danger-tinted
+/// at all. That is a wider change than the badge rework and is deliberately
+/// **not** taken here; it is recorded as an open deviation.
 ///
 /// Purity: pure function of `(selected, hovered, pdf_backed)`.
 #[must_use]

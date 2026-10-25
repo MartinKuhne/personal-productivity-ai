@@ -77,7 +77,17 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// `PDF_BADGE_CHARGE` is derived from those two rather than naming a token
 /// of its own, and `PDF_BADGE_RUNG` re-exports the badge atom's rung, so
 /// neither adds to this count.
-const PIN_APP_TOKEN_BOUND: usize = 93;
+/// 97 after the same increment's badge became a chip per `§3B.6:883`,
+/// which gave the mark a box of its own: `PDF_BADGE_TEXT_ALLOWANCE`
+/// (`space.lg + space.xs`), `PDF_BADGE_CHIP_HEIGHT` (`badge.COUNT_HEIGHT`,
+/// the pill rung that fits the 20px row interior), `PDF_BADGE_CHIP_RADIUS`
+/// (`shape.radius.pill`), `PDF_BADGE_CHIP_H_PADDING` (`badge.CHIP_H_PADDING`)
+/// and `PDF_BADGE_CHIP_PADDING_TOTAL` (both side paddings named together).
+/// `PDF_BADGE_SLOT` stays in the count and keeps its value at `36` — it is
+/// now composed from those chip metrics rather than from the spacing scale,
+/// so the fit tests, the label-floor arithmetic and `PDF_BADGE_CHARGE` are
+/// all unmoved.
+const PIN_APP_TOKEN_BOUND: usize = 97;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.
