@@ -169,10 +169,14 @@ use crate::bridge::focus_task;
 use crate::focus::FocusId;
 use crate::focus::FocusState;
 use crate::focus::GroupId;
+use crate::surface::menu::aim::AimCorridor;
+use crate::surface::menu::aim::AimDecision;
+use crate::surface::menu::aim::AimTarget;
 use crate::surface::menu::model::Activation;
 use crate::surface::menu::model::ActivationEffect;
 use crate::surface::menu::model::Menu;
 use crate::surface::menu::model::MenuId;
+use crate::surface::tooltip::TimeMs;
 
 use iced::Task;
 
@@ -755,6 +759,67 @@ impl MenuCascade {
     }
 
     // -- pointer -----------------------------------------------------------
+
+    /// Pointer-driven submenu hover that honours the aiming corridor
+    /// (`UIF-PRIN-008`, `UIF-FMENU-002`).
+    ///
+    /// [`open_submenu`](Self::open_submenu) is the unconditional open:
+    /// the keyboard's `Right` uses it, because a `Right` press *is* a
+    /// decision. This is the pointer path, where crossing a sibling row
+    /// on the way to an open branch is not a decision, and treating it
+    /// as one is the flicker the 150ms corridor exists to prevent.
+    ///
+    /// The corridor is passed in rather than stored on the cascade, so
+    /// `MenuCascade`'s equality keeps meaning exactly "what is open".
+    /// Where the cursor happens to be is not openness, and two cascades
+    /// showing the same tree are the same cascade regardless of pointer
+    /// position — which is what the existing cascade tests assert.
+    ///
+    /// The corridor's own state follows whatever the cascade actually
+    /// did, so the two cannot drift: an open that landed records the
+    /// new trigger, and one that did not clears the corridor rather than
+    /// leaving it guarding a row that has no branch behind it.
+    pub fn hover_submenu_row(
+        &mut self,
+        aim: &mut AimCorridor,
+        card: &MenuId,
+        row: usize,
+        now: TimeMs,
+        focus: &mut FocusState,
+    ) -> CascadeOutcome {
+        aim.pointer_enter(AimTarget::ParentRow { row }, now);
+        let target = match aim.decision(now) {
+            AimDecision::Idle => row,
+            AimDecision::Switch { row: target } => target,
+            // `Preserve` is §4.9's no-flicker clause, `Hold` is the
+            // corridor still being open, and `Collapse` is the host's
+            // dismissal cue — none of them is an open request.
+            AimDecision::Preserve | AimDecision::Hold { .. } | AimDecision::Collapse => {
+                return CascadeOutcome::noop();
+            }
+        };
+
+        let outcome = self.open_submenu(card, target, focus);
+        if outcome.opened().is_empty() {
+            aim.branch_closed();
+        } else {
+            aim.branch_opened(target, now);
+        }
+        outcome
+    }
+
+    /// Report the pointer leaving the parent card, without touching the
+    /// open tree.
+    ///
+    /// Returns whether the corridor thinks the branch should close. The
+    /// answer is advisory by design: dismissal belongs to the cascade's
+    /// own click-away path, and a corridor that closed surfaces on its
+    /// own would give one menu two owners.
+    #[must_use]
+    pub fn pointer_left_card(aim: &mut AimCorridor, now: TimeMs) -> bool {
+        aim.pointer_out(now);
+        matches!(aim.decision(now), AimDecision::Collapse)
+    }
 
     /// Activate row `row` of the open card `card` — the click path
     /// (`UIF-CMENU-002`, `UIF-FMENU-003`).

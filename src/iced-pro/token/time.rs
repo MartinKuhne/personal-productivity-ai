@@ -437,11 +437,18 @@ pub const DEBOUNCE_LIVE: DurationToken = DurationToken {
 /// letting the user aim diagonally at a submenu without the branch
 /// collapsing under the crossing pointer.
 ///
-/// **No consumer exists in this crate, and neither does the behaviour.**
-/// [`MenuCascade`](crate::surface::menu::cascade::MenuCascade) carries
-/// no timer at all: sibling submenu switching is immediate. The rung is
-/// declared so the number exists when the grace timer is built, and the
-/// gap is recorded in the ledger rather than papered over.
+/// Consumed. [`grace_ms`](crate::surface::menu::aim::grace_ms) is the
+/// only place in the crate that reads this rung, and
+/// [`MenuCascade::hover_submenu_row`](crate::surface::menu::cascade::MenuCascade::hover_submenu_row)
+/// drives the window it opens. The corridor never reads a clock: the
+/// caller supplies the instant as a `TimeMs` value, which is what
+/// makes the whole grace period testable without sleeping and what keeps
+/// the decisions reproducible.
+///
+/// Reduced motion deliberately does **not** shorten this wait. The rung
+/// is an input tolerance rather than a transition, and collapsing it to
+/// `0ms` through [`resolve_ms`] would make menus harder to use for
+/// exactly the users that setting exists to help.
 pub const DELAY_SUBMENU: DurationToken = DurationToken {
     name: "time.delay.submenu",
     ms: 150,

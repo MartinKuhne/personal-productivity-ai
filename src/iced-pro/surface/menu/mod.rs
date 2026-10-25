@@ -15,16 +15,24 @@
 //! * [`row_action`] — the row's action engine: `ActionPending`, duplicate
 //!   activation suppression, `on_cancel_request()`, and which row kinds can
 //!   genuinely be reverted (`INC-36`).
+//! * [`aim`] — the 150ms diagonal aiming corridor: the value-driven
+//!   timer that stops a pointer crossing a sibling row from collapsing
+//!   the branch the user is aiming at (`UIF-PRIN-008`, `UIF-FMENU-002`).
 //!
 //! [`row_action`] lives beside the model rather than inside it, because the
 //! cascade clones models and `sync` overwrites local changes — a busy flag on
 //! a row would be erased by the next refresh.
 
+pub mod aim;
 pub mod cascade;
 pub mod model;
 pub mod row_action;
 pub mod view;
 
+pub use aim::AimCorridor;
+pub use aim::AimDecision;
+pub use aim::AimTarget;
+pub use aim::grace_ms;
 pub use cascade::CascadeOutcome;
 pub use cascade::FocusTransition;
 pub use cascade::IgnoredReason;

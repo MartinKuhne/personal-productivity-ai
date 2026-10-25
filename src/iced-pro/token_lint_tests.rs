@@ -80,7 +80,17 @@ use crate::token_lint::{
 /// `truncate.rs` and `tabular.rs` (`UIF-PRIN-007`). It carries string
 /// and character rules rather than visual measurements, so like
 /// `layout/` it is scanned but never visual-scoped.
-const PIN_FILES_SCANNED: usize = 132;
+///
+/// 137 as of `B-3`, whose five additions are the `a11y/` subsystem —
+/// `a11y/mod.rs`, `contract.rs`, `project.rs` and `tab_stop.rs` — plus
+/// `surface/menu/aim.rs` (`UIF-PRIN-008`). The four `a11y/` files are
+/// semantic projections that define no visual literal, so they join the
+/// scanned set without joining Rule B's scope. `aim.rs` is different: it
+/// sits under `surface/`, which is scoped by directory rather than by
+/// content, so it is counted by Rule B even though its only number is a
+/// read-through of `token::time::DELAY_SUBMENU`. That is why
+/// `PIN_RULE_B_FILES` moves for the first time since `INC-50`.
+const PIN_FILES_SCANNED: usize = 137;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -106,7 +116,13 @@ const PIN_RULE_A_FILES: usize = 1;
 ///
 /// 79 as of `INC-50`, whose two additions are `composite/breadcrumb.rs`
 /// and `composite/overflow_toolbar.rs`.
-const PIN_RULE_B_FILES: usize = 79;
+///
+/// 80 as of `B-3`, the one addition being `surface/menu/aim.rs`. Rule B
+/// scopes by directory, not by content, so a file under `surface/` is
+/// counted whether or not it carries a colour literal — and `aim.rs`
+/// carries none, taking its only number from
+/// `token::time::DELAY_SUBMENU`.
+const PIN_RULE_B_FILES: usize = 80;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

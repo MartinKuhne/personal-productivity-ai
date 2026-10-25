@@ -16,6 +16,7 @@
 //! Wiring the app onto this framework is a separate, later project (decision
 //! D-3 in `doc/planning/iced-pro-tasks.md`).
 
+pub mod a11y;
 pub mod binding;
 pub mod bridge;
 pub mod composite;

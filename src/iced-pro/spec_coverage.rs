@@ -801,10 +801,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "composite/expander.rs",
             "widget/chip.rs",
             "composite/breadcrumb.rs",
+            "a11y/contract.rs",
+            "a11y/project.rs",
+            "a11y/tab_stop.rs",
+            "surface/menu/aim.rs",
         ],
         reason: Some(
-            "Three of the four clauses are partly held and the fourth is absent. The roving \
-             walk is real and genuinely shared: `widget/rove.rs::rove_index` is the single \
+            "Three of the pillar's four clauses are now machine-checkable; the fourth \
+             cannot close because six of the eleven collections it names are unbuilt \
+             Phase C. The roving walk is real and genuinely shared: \
+             `widget/rove.rs::rove_index` is the single \
              skip-disabled, wrapping walk that `RadioGroupModel::rove` and \
              `SegmentedModel::rove` both run, and `focus.rs` carries the traversal policy, \
              the roving ordinals and the modal trap on the ARIA roving-tabindex convention. \
@@ -818,20 +824,61 @@ const SPEC_COVERAGE: &[Coverage] = &[
              disclosure column separate from the row body; `expander.rs` derives its title \
              bounds by subtracting the trailing slot; `chip.rs` reserves a disjoint \
              24x24px trailing cross; `breadcrumb.rs` keeps its trigger rectangles disjoint \
-             from every segment. Missing: the single-`Tab`-stop property is not a framework \
-             guarantee. `rove_index` supplies the walk but nothing declares a composite as \
-             *one* stop, and of the eleven collections the pillar names only \
-             `RadioGroup`, `SegmentedButton`, `Menu`, `TreeView` and `DataTable` exist at \
-             all — `TabStrip`, `GridView`, `CalendarView`, `NavigationRail`, `Stepper` \
-             and `CommandPalette` are unbuilt, so their rosters cannot be single. The \
-             150ms (`time.delay.submenu`) diagonal aiming corridor is not implemented: \
-             `MenuCascade` switches branches on entry and carries no timer of any kind. \
-             `A11yContract` does not exist in any form — no widget model exposes a pure \
-             `{role, name, value, expanded, selected, checked, busy, invalid, disabled}` \
-             descriptor, so assistive projection and headless selectors still have nothing \
-             to read and would still have to infer state from painted geometry.",
+             from every segment. Now closed, clause by clause. The `A11yContract` exists \
+             as a pure nine-field value type over a closed `A11yRole` enum that carries \
+             its real ARIA name (`a11y/contract.rs`), and `a11y/project.rs` projects it \
+             from button, checkbox, radio and radio group, segmented control and segment, \
+             all six menu row kinds, tree rows, chips, text input, progress and the \
+             expander disclosure header — every field `Some` only where the source \
+             genuinely carries it, pinned per source by `filled_count`, with a source \
+             scan asserting neither file reads geometry or a clock. The single-`Tab`-stop \
+             property is a declared fact rather than an emergent accident: \
+             `a11y/tab_stop.rs::CompositeBoundary` states its members, live members, \
+             active member and edge rule, and answers `tab_stops()` (one while any member \
+             is live, zero when none), `entry_member()` (the active member, never member \
+             zero, degrading to the first *enabled* member) and `next_within()`; over a \
+             roster of three composites holding 100,006 members `total_tab_stops` returns \
+             three. The bounded-wrap / spatial-clamp rule is pinned against the shipping \
+             code and not merely declared: `rove_index` wraps, `TreeView::move_focus` and \
+             `TableView::move_row` clamp, and `check_composite` reports a category/edge \
+             contradiction either way round. The 150ms diagonal aiming corridor is a \
+             value-driven state machine (`surface/menu/aim.rs`) with no clock read at all \
+             — `grace_ms()` reads `DELAY_SUBMENU` from `token::time`, and \
+             `MenuCascade::hover_submenu_row` drives it so a sibling crossed inside the \
+             window is suppressed, the open branch's own trigger row preserves without \
+             flicker, entering the child card preserves, and re-entry restarts the full \
+             window. Missing: six of the eleven collections the pillar names (`TabStrip`, \
+             `GridView`, `CalendarView`, `NavigationRail`, `Stepper` and \
+             `CommandPalette`) are unbuilt Phase C, so their single-stop rosters cannot \
+             exist; and none of the three closed clauses has an automatic enforcement \
+             point — every check here is opt-in, so a composite that never calls a \
+             `project_*` function or declares a `CompositeBoundary` still renders \
+             perfectly, and the guarantee holds only where a host or a framework \
+             composite invokes it on the way out.",
         ),
-        note: None,
+        note: Some(
+            "Invented values, all recorded here. (1) `A11yRole`'s fourteen-member set is \
+             this crate's own closed vocabulary: §1.1 names the `role` field but never its \
+             domain. The ARIA strings themselves are real; the assignments are modelling — \
+             a single-select `SegmentedButton` projects `radiogroup` and a multi-select \
+             one `group`, a `Chip` and an expander header project `button`. (2) \
+             `A11yValue::Fraction` is normalised to 0..1 rather than a percentage so the \
+             projection makes no display decision. (3) `Checked` is the framework's own \
+             tri-state mirroring `CheckState`, not a spec type. (4) `CompositeCategory` \
+             (bounded group / spatial collection) and `EdgeBehaviour` are this framework's \
+             taxonomy for §1.1's second clause; the spec describes the split but names no \
+             types for it. (5) The corridor's grace window is anchored on pointer arrival \
+             at the sibling rather than on branch-open time — §4.9 says the switch happens \
+             \"after the 150ms diagonal aiming corridor check\" without fixing which \
+             instant the 150ms is measured from. (6) Reduced motion does not shorten the \
+             corridor: it is an input tolerance, not a transition, and collapsing it to \
+             `0ms` would make menus harder to use for exactly the users that setting \
+             protects. (7) `AimDecision::Collapse` is reported and never applied, so \
+             dismissal keeps a single owner in the cascade. (8) \
+             `MenuCascade::hover_submenu_row` takes the corridor as a parameter instead \
+             of storing it as a field, so cascade equality keeps meaning \"what is open\" \
+             and the pre-existing cascade equality assertions stay meaningful.",
+        ),
     },
     Coverage {
         id: "UIF-PRIN-009",
@@ -973,6 +1020,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "composite/toast.rs",
             "widget/progress.rs",
             "binding/mod.rs",
+            "surface/menu/aim.rs",
         ],
         reason: Some(
             "The token set exists and is complete, and the injection discipline that was \
@@ -993,18 +1041,19 @@ const SPEC_COVERAGE: &[Coverage] = &[
              (`HOVER_DELAY` → `DELAY_TOOLTIP_OPEN`, `KEYBOARD_FOCUS_DELAY` → `INSTANT`, \
              `DEBOUNCE_MS` → `DEBOUNCE_LIVE`, `DEFAULT_AUTO_DISMISS_MS` → \
              `TOAST_AUTO_DISMISS`), so each literal lives only under `token/` while call \
-             sites keep their domain vocabulary. Missing: consumption. Six of the ten rungs \
+             sites keep their domain vocabulary. Missing: consumption. Five of the ten rungs \
              have no consumer. `time.fast`, `time.normal`, `time.slow` and \
              `time.hold.copied` wait on the Phase-C widgets that would animate them — \
              `ToggleSwitch` thumb travel, the `ComboBox`/`DatePicker`/`TimePicker`/ \
              `ColorPicker` flyouts, the modal scrim and `NavigationRail` width, the \
              `CodeBlock` `[Copy]` tick — and `eased_progress` is called by nothing, because \
              no widget here yet interpolates a value across a duration. \
-             `time.delay.submenu` and `time.delay.tooltip_warm` are missing as \
-             *behaviours*, not merely as call sites: `MenuCascade` carries no aim-grace \
-             timer and `HoverController` is per-control with no cross-control memory, so \
-             every pointer arrival pays the full 400 ms and no diagonal safe corridor \
-             exists to switch branches inside.",
+              `time.delay.tooltip_warm` is still missing as a *behaviour*, not merely as a \
+              call site: `HoverController` is per-control with no cross-control memory, so \
+              every pointer arrival pays the full 400 ms. `time.delay.submenu` is now \
+              consumed and the corridor exists - `surface/menu/aim.rs::grace_ms()` reads \
+              the rung and `MenuCascade::hover_submenu_row` drives the window, so the \
+              unconsumed count is five rather than six.",
         ),
         note: Some(
             "All four constants that predate this change were already numerically correct \
