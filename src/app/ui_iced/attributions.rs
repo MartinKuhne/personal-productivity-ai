@@ -101,8 +101,10 @@ use iced::widget::{
 use iced::{Alignment, Element, Length, Padding, Point, Rectangle, Size};
 
 use iced_pro::state::{BaseState, VisualState};
-use iced_pro::surface::modal::ModalSizing;
-use iced_pro::token::{shape, space, typography};
+use iced_pro::surface::modal::{
+    ATTRIBUTIONS_LIST_MAX_HEIGHT, ModalSizing, SubRegionBands, subregion_height,
+};
+use iced_pro::token::{shape, size, space, typography};
 use iced_pro::widget::hyperlink;
 
 use crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES};
@@ -140,6 +142,100 @@ pub const ATTRIBUTIONS_CARD_ID: &str = "attributions_card_frame";
 /// Stable id for the credits scroll area, so the reducer can address it
 /// and the scroll position survives a tree rebuild (AGENTS §5).
 pub const ATTRIBUTIONS_LIST_ID: &str = "attributions_list_scroll";
+
+/// The Attributions card's **header band** — everything stacked above the
+/// credits list, including the divider under it and the three `space::SM`
+/// gaps those three rows sit on (`UIF-MOD-004`).
+///
+/// Every term is a token: the title's `TITLE_SM` line, the summary's
+/// `BODY` line, one `BORDER_HAIRLINE` divider and three `space::SM` gaps.
+/// The gaps are written out as three terms rather than as `3.0 * space::SM`
+/// **on purpose** — a coefficient is a numeric literal, and Rule B treats
+/// any literal in a visual-named constant as a violation unless the
+/// constant is registered. Writing the three terms keeps the composition
+/// literal-free, so the gate reads it as `TokenBound` on its own merits
+/// rather than by exemption, and the three terms are the three gaps,
+/// countable by eye.
+///
+/// The composition is **this card's** layout, not the framework's: the
+/// framework supplies the solver and the frame's padding, and only the
+/// host knows it renders a title, a summary line and one divider above the
+/// list. Keeping it here is what stops app layout knowledge leaking into
+/// `surface::modal`.
+///
+/// **Measured, not assumed:** with [`FOOTER_BAND_HEIGHT`] and the frame's
+/// padding this totals `150px`, and `480 - 150 = 330` is exactly the
+/// height the rendered card measures for the list. The sidecar pins both
+/// figures against a headless layout.
+pub const HEADER_BAND_HEIGHT: f32 = typography::TITLE_SM.line_height
+    + typography::BODY.line_height
+    + shape::BORDER_HAIRLINE
+    + space::SM
+    + space::SM
+    + space::SM;
+
+/// The Attributions card's **footer band** — the divider above the footer
+/// plus the footer control row plus the two `space::SM` gaps they sit on
+/// (`UIF-MOD-004`).
+///
+/// Literal-free for the same reason [`HEADER_BAND_HEIGHT`] is: one
+/// `BORDER_HAIRLINE`, a `size.control.md` footer row, and two `space::SM`
+/// gaps written out as two terms.
+pub const FOOTER_BAND_HEIGHT: f32 =
+    shape::BORDER_HAIRLINE + size::CONTROL_MD + space::SM + space::SM;
+
+/// The height the credits list is actually given, for a card of
+/// `card_height` (`UIF-MOD-004`).
+///
+/// Solved from the card's **solved** bounds through the framework's
+/// solver, then held down by the §2.2 cap. It is never the card's outer
+/// constant, and it never exceeds what the card has left:
+///
+/// ```text
+/// min( card_height - (header + 2 × padding + footer), ATTRIBUTIONS_LIST_MAX_HEIGHT )
+/// ```
+///
+/// Purity: pure function of `card_height`.
+#[must_use]
+pub fn credits_list_height(card_height: f32) -> f32 {
+    let bands = SubRegionBands::from_frame(&modal_frame())
+        .with_header(HEADER_BAND_HEIGHT)
+        .with_footer(FOOTER_BAND_HEIGHT);
+    subregion_height(card_height, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT)
+}
+
+/// The [`Length`] the credits list is rendered at, for a card of
+/// `card_height`.
+///
+/// `Fixed(solved)` whenever the solver found room. **The zero case falls
+/// back to `Fill`, and that is not a hedge — it is a measured iced
+/// behaviour.** `Length::Fixed(0.0)` is *void* in iced 0.14
+/// (`Size::is_void()` is true when either axis is `Fixed(0.0)`), and a
+/// void child is silently dropped from the widget tree. Verified here: at a
+/// 360×180 viewport the solved height is `0`, and with `Fixed(0.0)` the
+/// scrollable is not in the tree at all (`SelectorNotFound`), while with
+/// `Fill` it is present and measures `0.0`.
+///
+/// Losing the widget would break AGENTS §5 — `ATTRIBUTIONS_LIST_ID` is a
+/// stateful scrollable whose scroll position must survive a rebuild, and a
+/// widget that vanishes and returns under the same id starts fresh. It
+/// would also break §6's "do not let the layout collapse silently".
+///
+/// The fallback costs nothing in cap compliance: at zero room the two
+/// mechanisms agree on the height (zero), so `Fill` cannot exceed the cap
+/// there. The cap only ever binds where there *is* room, and that path is
+/// `Fixed`.
+///
+/// Purity: pure function of `card_height`.
+#[must_use]
+pub fn credits_list_length(card_height: f32) -> Length {
+    let solved = credits_list_height(card_height);
+    if solved > 0.0 {
+        Length::Fixed(solved)
+    } else {
+        Length::Fill
+    }
+}
 
 /// A snapshot of the third-party attribution catalog.
 ///
@@ -214,9 +310,11 @@ impl AttributionsViewModel {
 /// Renders the framed third-party attributions window.
 ///
 /// Title, count line, the scrollable three-column catalog and the shared
-/// Close footer, inside the §4.6.2 640×480 card. The list takes
-/// `Length::Fill`, so the card's height is the frame's, not the
-/// content's; the table is always allocated, empty or not.
+/// Close footer, inside the §4.6.2 640×480 card. The list's height is
+/// **solved** from the card's solved bounds by [`credits_list_height`]
+/// (`UIF-MOD-004`) and capped at [`ATTRIBUTIONS_LIST_MAX_HEIGHT`],
+/// so the card's height is the frame's, not the content's, and the table
+/// is always allocated, empty or not.
 ///
 /// Emitted messages:
 /// * a repository cell → [`AboutMessage::RepositoryOpened`]
@@ -249,7 +347,10 @@ pub fn attributions_view(
         Palette::fastmd_dark().text_muted,
     );
 
-    let list = credits_list(attribution_table(view_model.entries()));
+    let list = credits_list(
+        attribution_table(view_model.entries()),
+        credits_list_length(card_size.height),
+    );
 
     let footer = Row::with_children(vec![
         Space::new().width(Length::Fill).into(),
@@ -298,15 +399,38 @@ fn rung(
         .color(color)
 }
 
-/// The credits list: the table, given whatever vertical space the card
-/// has left.
+/// The credits list, given the [`Length`] the solver says it gets.
 ///
-/// `Length::Fill` rather than a fixed cap: the card is a fixed 480px box
-/// (§4.6.2), so the list's height is a remainder, not a chosen number.
-fn credits_list<'a>(table: Element<'a, Message>) -> iced::widget::Scrollable<'a, Message> {
-    scrollable(table)
-        .id(ATTRIBUTIONS_LIST_ID)
-        .height(Length::Fill)
+/// **`Length::Fixed(solved)`, not `Length::Fill` — and the reason is the
+/// §2.2 cap, not a dislike of `Fill`.** `Fill` was the right mechanism for
+/// the hazard the spec names: a remainder structurally cannot borrow the
+/// card's outer `480px` constant, so it cannot overflow past the header
+/// and footer bands. It is the wrong mechanism for the *positive* ask,
+/// because a remainder has no ceiling — in a 480px card it measured
+/// **330px** against the spec's **200px** cap.
+///
+/// iced 0.14 cannot express "fill, but not beyond N": `Length` is
+/// `Fill` / `FillPortion` / `Shrink` / `Fixed`, `Container` has no
+/// `max_height`, and there is no constraint widget. The cap therefore has
+/// to be a **solved fixed height**, which is exactly what `UIF-MOD-004`
+/// asks for.
+///
+/// **Overflow safety is preserved by construction, not by luck.** The
+/// solved value is `min(remainder, cap)`, and the remainder is computed
+/// from the same band terms this `Column` actually consumes, so
+/// `solved + bands == the card's inner height` — the list lands exactly
+/// where `Fill` would have put it, never further. The safety property that
+/// `Fill` gave for free is now carried by the solver, and the sidecar
+/// re-measures it at several viewports rather than trusting the argument.
+/// **The property is now conditional on the band terms being exact:** an
+/// understated band would over-solve and overflow where `Fill` could not
+/// have. That is the risk this change introduces, and it is why the layout
+/// tests assert the measured list bottom against the measured card bottom.
+fn credits_list<'a>(
+    table: Element<'a, Message>,
+    length: Length,
+) -> iced::widget::Scrollable<'a, Message> {
+    scrollable(table).id(ATTRIBUTIONS_LIST_ID).height(length)
 }
 
 /// The credits table: Crate / Authors / Repository.

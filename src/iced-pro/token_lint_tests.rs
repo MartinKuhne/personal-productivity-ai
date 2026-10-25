@@ -306,7 +306,12 @@ const PIN_RATIO: usize = 1;
 /// authority for figures no token carries; a derived total is not one,
 /// and leaving the entry would have claimed a §-backed literal that no
 /// longer exists in the file.
-const PIN_SURFACE_BOUND: usize = 35;
+/// 36 as of `UIF-MOD-004`, which adds `modal::ATTRIBUTIONS_LIST_MAX_HEIGHT`
+/// (200px). The value is a stated bound in the §2.2 closed table, not a
+/// multiple of any rung — the same standing `input_dialog::FOLDER_LIST_MAX_HEIGHT`
+/// has, and it is registered for the same reason. Nothing was re-tuned and
+/// no existing entry changed class.
+const PIN_SURFACE_BOUND: usize = 36;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

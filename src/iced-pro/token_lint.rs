@@ -389,6 +389,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         spec: "§4.6.2 — Attributions scrollable height 480px",
     },
     SurfaceGeometryConstant {
+        file: "surface/modal.rs",
+        name: "ATTRIBUTIONS_LIST_MAX_HEIGHT",
+        spec: "§4.6.2 / UIF-MOD-004 — Attributions credits list cap 200px",
+    },
+    SurfaceGeometryConstant {
         file: "surface/movable.rs",
         name: "CARD_DEFAULT_WIDTH",
         spec: "§4.7.1 — Movable Overlay Card default 680x440px",

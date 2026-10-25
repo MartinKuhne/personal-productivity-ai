@@ -7,7 +7,9 @@
 
 use super::*;
 use crate::ui::strings;
+use crate::ui_iced::about::{AboutViewModel, LICENSE_MAX_HEIGHT, LICENSE_SCROLL_ID};
 use iced::Element;
+use iced_pro::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT;
 
 /// A synthetic two-row catalog — never read from disk ([RUST-006]).
 fn fixture_entries() -> Vec<Attribution> {
@@ -276,40 +278,264 @@ fn the_attributions_card_renders_640x480() {
     drop(ui);
 }
 
+/// **Replaces `the_credits_list_fills_the_card_and_scrolls`.**
+///
+/// The retired test pinned the list at `330.0` — the uncapped `Length::Fill`
+/// remainder. `UIF-MOD-004` requires the sub-region to be *solved and
+/// capped*, at `ATTRIBUTIONS_LIST_MAX_HEIGHT = 200`, so that pin recorded
+/// a height 130px above the number the §2.2 closed table names. The test
+/// is rewritten around the cap rather than its number quietly edited: what
+/// is asserted now is that the cap binds, that it arrived from the solver
+/// rather than being restated by the view, and that the list still scrolls.
 #[test]
-fn the_credits_list_fills_the_card_and_scrolls() {
-    // The list is `Length::Fill`, so it takes whatever the title,
-    // summary, dividers and footer leave — a positive remainder — and the
-    // 57-row catalog is far taller than that, so it scrolls.
+fn the_credits_list_is_solved_and_capped_at_the_named_maximum() {
     let vm = AttributionsViewModel::from_catalog();
     let card = attributions_view(&vm, ROOMY_VIEWPORT);
     let mut ui = laid_out(ROOMY_VIEWPORT, card);
     let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    assert!(
-        region.height > 0.0,
-        "the list must get real space inside the 480px card, got {:.0}px",
-        region.height
-    );
-    assert!(
-        region.height < 480.0,
-        "the list shares the card with the title, summary, dividers and \
-         footer; it measured {:.0}px of a 480px card",
-        region.height
+
+    assert_eq!(
+        region.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "the card leaves 330px of remainder; §2.2 caps the list at 200, so \
+         the rendered region must be the cap"
     );
     assert_eq!(
-        region.height, 330.0,
-        "480 card - 2x16 frame padding - 24 title - 20 summary - 2 dividers \
-         - 32 footer - 5x8 gaps = 330px of list; if this moves, so did the \
-         box model and the change should be deliberate"
+        region.height,
+        credits_list_height(attributions_card_size(ROOMY_VIEWPORT).height),
+        "the rendered height is the solver's answer, not a number the view \
+         restates"
     );
     assert!(
         content.height > region.height,
-        "57 rows must overflow the region so the list scrolls; content \
-         {:.0}px vs region {:.0}px",
+        "the {}-row catalog overflows the capped region, so the list still \
+         scrolls: content {:.1}px vs region {:.1}px",
+        vm.count(),
         content.height,
-        region.height
+        region.height,
     );
     drop(ui);
+}
+
+/// **The cost of the cap, measured and recorded rather than buried.**
+///
+/// The spec pins the card at 480px *and* caps the list at 200px. Those
+/// two numbers are in tension for this card: the furniture is 150px, so
+/// the card has 330px to give and the cap only lets 200 of it be used.
+/// The remaining **130px is dead card** — nothing is laid out there — and
+/// the list loses roughly **4.4 visible rows**.
+///
+/// This test exists so the trade-off is a pinned, visible fact rather than
+/// something a reader has to recompute to notice. It asserts the tension
+/// rather than a desirable outcome; if the spec author resolves it (by
+/// shrinking the card, raising the cap, or letting the card content-fit),
+/// this test is the one that changes.
+#[test]
+fn the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows() {
+    let vm = AttributionsViewModel::from_catalog();
+    let card = attributions_view(&vm, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+
+    let rows = vm.count() as f32;
+    assert_eq!(rows, 58.0, "fixture: the shipped catalog is 58 crates");
+    let row_h = content.height / rows;
+    let uncapped = 330.0;
+
+    // The dead space the cap creates inside the fixed 480px card.
+    let dead = uncapped - region.height;
+    assert_eq!(dead, 130.0, "330px remainder - 200px cap = 130px unused");
+
+    // What that costs in visible rows.
+    let rows_before = uncapped / row_h;
+    let rows_after = region.height / row_h;
+    let lost = rows_before - rows_after;
+    assert!(
+        lost > 4.0 && lost < 5.0,
+        "the cap costs {lost:.2} visible rows ({rows_before:.2} -> {rows_after:.2} \
+         at {row_h:.2}px/row) — a real regression in what a reader can see \
+         without scrolling, recorded deliberately"
+    );
+}
+
+/// **Overflow safety, re-measured after replacing `Fill` with a solved
+/// fixed height.**
+///
+/// `Fill` made overflow structurally impossible. A solved `Length::Fixed`
+/// is safe only because the band terms it was computed from are the same
+/// terms this `Column` actually consumes — so `solved + bands` equals the
+/// card's inner height and the list lands exactly where `Fill` would have
+/// put it, never further. An *understated* band would over-solve and push
+/// the list through the footer, which is the exact hazard `UIF-MOD-004`
+/// names. This test is what makes that hazard observable rather than
+/// theoretical.
+#[test]
+fn the_credits_list_never_crosses_the_footer_band_at_any_viewport() {
+    let frame = modal_frame();
+    // The footer's own painted extent: the divider above it plus the
+    // control row. The gaps above that are not painted, so the hard limit
+    // is this, not the full footer band.
+    let footer_paint = shape::BORDER_HAIRLINE + size::CONTROL_MD;
+
+    // Every viewport tall enough to hold the card's own 150px of furniture
+    // plus its 32px of padding.
+    for (w, h) in [
+        (1280.0f32, 800.0f32),
+        (900.0, 600.0),
+        (700.0, 520.0),
+        (500.0, 300.0),
+        (420.0, 214.0),
+    ] {
+        let viewport = Size::new(w, h);
+        let vm = AttributionsViewModel::from_catalog();
+        let card = attributions_view(&vm, viewport);
+        let mut ui = laid_out(viewport, card);
+        let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
+        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+        drop(ui);
+
+        let inner_bottom = card_b.y + card_b.height - frame.content_padding;
+        let footer_top = inner_bottom - footer_paint;
+        let list_bottom = list.y + list.height;
+
+        assert!(
+            list_bottom <= footer_top + 0.01,
+            "{w}x{h}: the list bottom {list_bottom:.1} reached into the footer \
+             band (footer top {footer_top:.1}) — the band terms are understated"
+        );
+        assert!(
+            list_bottom <= card_b.y + card_b.height + 0.01,
+            "{w}x{h}: the list escaped the card entirely \
+             (list bottom {list_bottom:.1}, card bottom {:.1})",
+            card_b.y + card_b.height
+        );
+        assert!(
+            list.y >= card_b.y + frame.content_padding - 0.01,
+            "{w}x{h}: the list started above the card's inner top"
+        );
+    }
+}
+
+/// A viewport too short to hold the card's own furniture clamps the list
+/// to zero rather than producing a negative height or panicking.
+///
+/// The card's furniture is `150px` and its padding `32px`, so below a
+/// `214px` viewport the card cannot hold itself. That condition is
+/// pre-existing and independent of the sub-region solver — `Fill` hit it
+/// too — but the solver is now the thing that decides what the list gets
+/// there, so its clamp needs its own pin.
+#[test]
+fn a_viewport_too_short_for_the_cards_own_furniture_clamps_the_list_to_zero() {
+    let viewport = Size::new(360.0, 180.0);
+    let vm = AttributionsViewModel::from_catalog();
+    let card = attributions_view(&vm, viewport);
+    let mut ui = laid_out(viewport, card);
+    let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+
+    assert_eq!(
+        list.height, 0.0,
+        "148px of card cannot hold 150px of furniture; the solver clamps to \
+         zero rather than handing iced a negative extent"
+    );
+}
+
+/// The remainder binds below the cap, so the cap never invents space.
+#[test]
+fn a_short_card_gives_the_list_its_remainder_not_the_cap() {
+    // 300px viewport -> 268px card -> 118px remainder, under the 200 cap.
+    let viewport = Size::new(900.0, 300.0);
+    let vm = AttributionsViewModel::from_catalog();
+    let card = attributions_view(&vm, viewport);
+    let mut ui = laid_out(viewport, card);
+    let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+
+    let card_h = attributions_card_size(viewport).height;
+    let expected =
+        card_h - (HEADER_BAND_HEIGHT + 2.0 * modal_frame().content_padding + FOOTER_BAND_HEIGHT);
+    assert!(
+        expected < ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "fixture: this card is below the cap"
+    );
+    assert_eq!(
+        list.height, expected,
+        "below the cap the list gets everything the card has left"
+    );
+}
+
+/// Empty catalog: the list is still allocated, still capped, and the card
+/// does not collapse.
+#[test]
+fn an_empty_catalog_still_gets_the_capped_list() {
+    let vm = AttributionsViewModel::with_entries(vec![]);
+    let card = attributions_view(&vm, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
+    drop(ui);
+
+    assert_eq!(list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT);
+    assert_eq!(
+        card_b.height, 480.0,
+        "the empty state must not resize the card"
+    );
+    assert!(
+        content.height <= list.height,
+        "an empty table must not overflow the region: content {:.1} vs \
+         region {:.1}",
+        content.height,
+        list.height
+    );
+}
+
+/// A very large catalog does not change the region, only the scroll extent.
+#[test]
+fn a_very_large_catalog_changes_the_scroll_extent_not_the_region() {
+    let big: Vec<Attribution> = (0..5_000)
+        .map(|_| Attribution {
+            name: "synthetic-crate",
+            authors: "Nobody At All",
+            github_url: "https://github.com/x/y",
+        })
+        .collect();
+
+    let vm = AttributionsViewModel::with_entries(big);
+    let card = attributions_view(&vm, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+
+    assert_eq!(
+        list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "5,000 rows must not grow the region past the cap"
+    );
+    assert!(
+        content.height > 100_000.0,
+        "5,000 rows should be a very tall content extent, got {:.0}",
+        content.height
+    );
+}
+
+/// The About sibling is untouched by this change: it keeps its own cap and
+/// never routes through the attributions solver.
+#[test]
+fn the_about_card_is_unaffected_and_keeps_its_own_cap() {
+    assert_eq!(
+        LICENSE_MAX_HEIGHT, ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "both are 200 by coincidence of the spec, not by shared plumbing; if \
+         one moves and the other does not, that is the point"
+    );
+    let vm = AboutViewModel::from_build();
+    let card = crate::ui_iced::about::about_card(&vm, ROOMY_VIEWPORT);
+    let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let (region, _) = scroll_bounds(&mut ui, LICENSE_SCROLL_ID);
+    drop(ui);
+    assert!(
+        region.height <= LICENSE_MAX_HEIGHT + 0.01,
+        "the About license list keeps its own cap: {:.1} vs {LICENSE_MAX_HEIGHT}",
+        region.height
+    );
 }
 
 #[test]

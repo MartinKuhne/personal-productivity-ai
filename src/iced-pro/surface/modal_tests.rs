@@ -509,6 +509,223 @@ fn test_sizing_is_deterministic() {
 }
 
 // ---------------------------------------------------------------------------
+// 1b. Scrollable sub-region solving (UIF-MOD-004)
+// ---------------------------------------------------------------------------
+
+/// The band composition the Attributions card actually uses, spelled out
+/// here so the framework test can exercise the solver against a real set
+/// of terms rather than against numbers invented for the test.
+fn attributions_bands() -> SubRegionBands {
+    use crate::token::{shape, size, space, typography};
+    let header = typography::TITLE_SM.line_height
+        + typography::BODY.line_height
+        + shape::BORDER_HAIRLINE
+        + 3.0 * space::SM;
+    let footer = shape::BORDER_HAIRLINE + size::CONTROL_MD + 2.0 * space::SM;
+    SubRegionBands::from_frame(&ModalFrame::resolve(&Palette::dark()))
+        .with_header(header)
+        .with_footer(footer)
+}
+
+#[test]
+fn subregion_max_height_is_the_formula_the_requirement_states() {
+    // §4.6.2: subregion_max_h = modal_height - (header + 2 × body_padding + footer)
+    let bands = SubRegionBands::new(70.0, 50.0, 16.0);
+    assert_eq!(bands.total(), 70.0 + 2.0 * 16.0 + 50.0);
+    assert_eq!(subregion_max_height(480.0, bands), 480.0 - 152.0);
+    assert_eq!(subregion_max_height(480.0, bands), 328.0);
+}
+
+#[test]
+fn the_body_padding_is_charged_twice_and_only_inside_total() {
+    // Doubling the padding must move the total by exactly 2 × the delta,
+    // which is only true if the doubling happens once, in `total`.
+    let one = SubRegionBands::new(10.0, 10.0, 16.0);
+    let wider = SubRegionBands::new(10.0, 10.0, 24.0);
+    assert_eq!(wider.total() - one.total(), 2.0 * (24.0 - 16.0));
+}
+
+#[test]
+fn from_frame_seeds_the_body_padding_and_leaves_the_content_bands_empty() {
+    let frame = ModalFrame::resolve(&Palette::dark());
+    let bands = SubRegionBands::from_frame(&frame);
+    assert_eq!(bands.body_padding, frame.content_padding);
+    assert_eq!(bands.header, 0.0);
+    assert_eq!(bands.footer, 0.0);
+    // A bare full-bleed list: the card minus the two padding sides.
+    assert_eq!(
+        subregion_max_height(480.0, bands),
+        480.0 - 2.0 * frame.content_padding
+    );
+}
+
+#[test]
+fn the_builders_set_one_band_without_touching_the_others() {
+    let frame = ModalFrame::resolve(&Palette::dark());
+    let bands = SubRegionBands::from_frame(&frame)
+        .with_header(69.0)
+        .with_footer(49.0);
+    assert_eq!(bands.header, 69.0);
+    assert_eq!(bands.footer, 49.0);
+    assert_eq!(bands.body_padding, frame.content_padding);
+}
+
+#[test]
+fn the_attributions_band_composition_is_every_token_that_is_on_it() {
+    use crate::token::{shape, size, space, typography};
+    let bands = attributions_bands();
+
+    // header: title rung + summary rung + the divider under them + the
+    // three space::SM gaps they sit on.
+    assert_eq!(
+        bands.header,
+        typography::TITLE_SM.line_height
+            + typography::BODY.line_height
+            + shape::BORDER_HAIRLINE
+            + 3.0 * space::SM
+    );
+    // footer: the divider above the footer + the footer control row + the
+    // two space::SM gaps they sit on.
+    assert_eq!(
+        bands.footer,
+        shape::BORDER_HAIRLINE + size::CONTROL_MD + 2.0 * space::SM
+    );
+    // padding: the frame's own, which is space::LG.
+    assert_eq!(bands.body_padding, space::LG);
+
+    // No term is a bare literal: each equals a token path, asserted above.
+    // Pinned here as well so the total is traceable to the rungs.
+    assert_eq!(
+        bands.total(),
+        24.0 + 20.0 + 1.0 + 24.0 + 32.0 + 1.0 + 32.0 + 16.0
+    );
+}
+
+#[test]
+fn the_attributions_subregion_is_the_measured_remainder_not_the_card_constant() {
+    let bands = attributions_bands();
+    let solved = subregion_max_height(ATTRIBUTIONS_HEIGHT, bands);
+
+    // 480 - 150 = 330, which is what the rendered card measures for the
+    // credits list. Asserted against the card's own constant to make the
+    // point the requirement makes: the sub-region is NOT the card.
+    assert_eq!(solved, 330.0);
+    assert_ne!(
+        solved, ATTRIBUTIONS_HEIGHT,
+        "a sub-region solved at the card's outer height is the exact overflow \
+         UIF-MOD-004 forbids"
+    );
+    assert!(solved < ATTRIBUTIONS_HEIGHT);
+}
+
+#[test]
+fn the_cap_is_applied_after_the_remainder_not_instead_of_it() {
+    let bands = attributions_bands();
+
+    // Roomy card: the cap binds.
+    assert_eq!(
+        subregion_height(ATTRIBUTIONS_HEIGHT, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+        ATTRIBUTIONS_LIST_MAX_HEIGHT
+    );
+    // Short card: the remainder binds, so the cap never invents space.
+    let short = bands.total() + 80.0;
+    assert_eq!(
+        subregion_height(short, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+        80.0,
+        "a card that cannot reach the cap must still give the sub-region \
+         everything it has"
+    );
+    // Exactly at the cap.
+    let exact = bands.total() + ATTRIBUTIONS_LIST_MAX_HEIGHT;
+    assert_eq!(
+        subregion_height(exact, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+        ATTRIBUTIONS_LIST_MAX_HEIGHT
+    );
+}
+
+#[test]
+fn the_solved_height_never_exceeds_either_the_remainder_or_the_cap() {
+    let bands = attributions_bands();
+    for card in [0.0f32, 50.0, 150.0, 151.0, 300.0, 480.0, 1200.0] {
+        let solved = subregion_height(card, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT);
+        let remainder = subregion_max_height(card, bands);
+        assert!(
+            solved <= remainder,
+            "card {card}: solved {solved} > remainder {remainder}"
+        );
+        assert!(
+            solved <= ATTRIBUTIONS_LIST_MAX_HEIGHT,
+            "card {card}: solved {solved} breached the cap"
+        );
+        assert!(solved >= 0.0, "card {card}: solved {solved} is negative");
+    }
+}
+
+#[test]
+fn a_card_smaller_than_its_own_furniture_clamps_to_zero_rather_than_going_negative() {
+    let bands = attributions_bands();
+    // The Attributions card clamps to viewport - 32, so a viewport under
+    // 182px tall solves to a card smaller than the 150px it carries.
+    assert_eq!(subregion_max_height(150.0, bands), 0.0);
+    assert_eq!(subregion_max_height(100.0, bands), 0.0);
+    assert_eq!(
+        subregion_height(100.0, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+        0.0,
+        "a negative sub-region height would hand iced an inverted scrollable \
+         viewport; the clamp is load-bearing"
+    );
+    assert_eq!(subregion_max_height(151.0, bands), 1.0);
+}
+
+#[test]
+fn non_finite_inputs_cannot_poison_the_solved_height() {
+    let bands = attributions_bands();
+    assert_eq!(subregion_max_height(f32::NAN, bands), 0.0);
+    assert_eq!(
+        subregion_height(f32::NAN, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+        0.0
+    );
+    assert!(subregion_max_height(f32::INFINITY, bands).is_finite());
+}
+
+#[test]
+fn the_solver_is_pure_and_deterministic() {
+    let bands = attributions_bands();
+    for _ in 0..3 {
+        assert_eq!(
+            subregion_height(ATTRIBUTIONS_HEIGHT, bands, ATTRIBUTIONS_LIST_MAX_HEIGHT),
+            ATTRIBUTIONS_LIST_MAX_HEIGHT
+        );
+    }
+}
+
+/// `assertions_on_constants` is allowed on this one test: pinning a value
+/// the §2.2 closed table fixes *is* a constant-vs-constant comparison, and
+/// that is the whole point — an accidental edit to the constant has to fail
+/// something. The app's own gate file takes the same allowance for the same
+/// reason; here it is scoped to the function rather than the file so no
+/// other test inherits it.
+#[test]
+#[allow(clippy::assertions_on_constants)]
+fn attributions_list_max_height_is_the_number_the_closed_table_names() {
+    assert_eq!(ATTRIBUTIONS_LIST_MAX_HEIGHT, 200.0);
+    assert!(
+        ATTRIBUTIONS_LIST_MAX_HEIGHT < ATTRIBUTIONS_HEIGHT,
+        "the cap must be a cap on a 480px card, not a restatement of it"
+    );
+}
+
+#[test]
+fn attributions_list_max_height_is_registered_as_a_surface_geometry_constant() {
+    let hit = crate::token_lint::SURFACE_GEOMETRY_CONSTANTS
+        .iter()
+        .find(|e| e.name == "ATTRIBUTIONS_LIST_MAX_HEIGHT");
+    let entry = hit.expect("the new cap must be registered or Rule B reports it unbound");
+    assert_eq!(entry.file, "surface/modal.rs");
+    assert!(entry.spec.contains("UIF-MOD-004"));
+}
+
+// ---------------------------------------------------------------------------
 // 2. Opening and registration
 // ---------------------------------------------------------------------------
 

@@ -252,6 +252,27 @@ pub const ATTRIBUTIONS_WIDTH: f32 = 640.0;
 /// §4.6.2 — the Attributions card is a 480px scrollable region.
 pub const ATTRIBUTIONS_HEIGHT: f32 = 480.0;
 
+/// §4.6.2 / `UIF-MOD-004` — the tallest the Attributions credits list
+/// is allowed to get, whatever the card's solved remainder leaves it.
+///
+/// The spec names this in the closed §2.2 surface-geometry table, so the
+/// value is registered in
+/// [`SURFACE_GEOMETRY_CONSTANTS`](crate::token_lint::SURFACE_GEOMETRY_CONSTANTS)
+/// rather than derived from a rung: 200 is a stated bound, not a multiple
+/// of anything.
+///
+/// **Named `_HEIGHT`, not `_H`.** The spec writes `ATTRIBUTIONS_LIST_MAX_H`.
+/// The lint only inspects a constant whose name reads as a visual
+/// measurement, and its marker list
+/// ([`VISUAL_NAME_MARKERS`](crate::token_lint::VISUAL_NAME_MARKERS))
+/// matches `HEIGHT`, not a bare `H` — a constant named
+/// `ATTRIBUTIONS_LIST_MAX_H` would be invisible to the gate that exists to
+/// check it. The sibling §2.2 entry took the same decision: the spec's
+/// `FOLDER_LIST_MAX_H` is `FOLDER_LIST_MAX_HEIGHT` in
+/// [`input_dialog`](crate::surface::input_dialog). Same number, same
+/// reason.
+pub const ATTRIBUTIONS_LIST_MAX_HEIGHT: f32 = 200.0;
+
 // ---------------------------------------------------------------------------
 // Sizing policy
 // ---------------------------------------------------------------------------
@@ -454,6 +475,134 @@ impl ModalSizing {
             Size::new(card_width, card_height),
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// Scrollable sub-regions (§4.6.2 / UIF-MOD-004)
+// ---------------------------------------------------------------------------
+
+/// The vertical furniture inside a modal card that a scrollable sub-region
+/// is **not** allowed to use (`UIF-MOD-004`).
+///
+/// # Why a struct rather than three arguments or a frame derivation
+///
+/// * **Three bare `f32`s are silently interchangeable.**
+///   `subregion_max_height(h, 69.0, 16.0, 49.0)` compiles the same way
+///   whatever order the caller meant, and a swapped pair produces a cap
+///   that is wrong by a plausible amount rather than a type error. A
+///   struct names each term where it is built.
+/// * **[`ModalFrame`] cannot supply these, by its own design.** The frame
+///   answers *what the card is made of* and deliberately carries no
+///   header/body/footer sub-rectangles, because those need the title's
+///   measured height and the content's measured extent. Header and footer
+///   band heights are the same content-driven quantity, so deriving them
+///   from the frame would put back exactly the layout knowledge the frame
+///   refuses to hold.
+/// * **The frame *does* own one of the three terms.** `content_padding` is
+///   the body padding, so [`from_frame`](Self::from_frame) seeds it and a
+///   caller adds only the two terms that depend on its own card. The
+///   token-sourced part and the content-sourced part stay visibly separate
+///   at the call site instead of blurring into one number.
+/// * **The doubling lives here once.** §4.6.2 charges the body padding
+///   twice; [`total`](Self::total) is the only place that says `2 ×`, so
+///   no call site restates it ([RUST-021]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SubRegionBands {
+    /// Everything stacked above the sub-region — its dividers and the gaps
+    /// it sits on included.
+    pub header: f32,
+    /// Everything stacked below the sub-region — its dividers and the gaps
+    /// it sits on included.
+    pub footer: f32,
+    /// The card's body padding on **one** side. [`total`](Self::total)
+    /// charges it twice.
+    pub body_padding: f32,
+}
+
+impl SubRegionBands {
+    /// Every term stated directly.
+    #[must_use]
+    pub const fn new(header: f32, footer: f32, body_padding: f32) -> Self {
+        Self {
+            header,
+            footer,
+            body_padding,
+        }
+    }
+
+    /// The frame's own contribution: its body padding, with the two
+    /// content-driven bands still to be added.
+    ///
+    /// A card with no header and no footer is a real case — a bare
+    /// full-bleed list — so starting from the frame rather than requiring
+    /// all three terms is not a placeholder for missing data.
+    #[must_use]
+    pub const fn from_frame(frame: &ModalFrame) -> Self {
+        Self::new(0.0, 0.0, frame.content_padding)
+    }
+
+    /// Set the header band.
+    #[must_use]
+    pub const fn with_header(self, header: f32) -> Self {
+        Self { header, ..self }
+    }
+
+    /// Set the footer band.
+    #[must_use]
+    pub const fn with_footer(self, footer: f32) -> Self {
+        Self { footer, ..self }
+    }
+
+    /// Everything the sub-region does not get: `header + 2 × body_padding + footer`.
+    #[must_use]
+    pub const fn total(&self) -> f32 {
+        self.header + 2.0 * self.body_padding + self.footer
+    }
+}
+
+/// The tallest a scrollable sub-region may be inside a card of
+/// `card_height` (`UIF-MOD-004`).
+///
+/// `subregion_max_h = modal_height - (header_band + 2 × body_padding + footer_band)`,
+/// exactly as §4.6.2 states it. Pure: no clock, no globals, no palette
+/// lookup — the card's solved height and the band terms go in and one
+/// number comes out.
+///
+/// **Clamped at zero, and that clamp is load-bearing.** A card shorter than
+/// its own furniture is reachable: the Attributions card is `480px` fixed
+/// but clamps to `viewport - 32`, so a viewport under `182px` tall solves
+/// to a card smaller than the `150px` of header, padding and footer it
+/// carries. Without the clamp the solver would hand back a negative height,
+/// which iced does not reject — it lays the widget out at a negative
+/// extent and the result is a scrollable whose viewport is inverted. The
+/// clamp turns that into a zero-height list, which is the honest answer:
+/// there is no room.
+///
+/// **Non-finite input collapses to zero, the same way [`ModalSizing::solve`]
+/// collapses a `NaN` viewport.** An infinite card height would otherwise
+/// pass straight through the subtraction and out the other side as an
+/// infinite list, which is worse than the `NaN` case because it looks
+/// like it worked.
+///
+/// **This is the mechanism the requirement exists to install.** A
+/// sub-region must be solved from the card's *solved* bounds, never from
+/// the card's outer constant: sizing the credits list at
+/// [`ATTRIBUTIONS_HEIGHT`] directly would spend the 480px the header and
+/// footer already spent.
+#[must_use]
+pub fn subregion_max_height(card_height: f32, bands: SubRegionBands) -> f32 {
+    (finite(card_height) - finite(bands.total())).max(0.0)
+}
+
+/// The sub-region's height: what the card leaves it, held down by `cap`
+/// (`UIF-MOD-004`'s "stable cap" clause).
+///
+/// The cap is applied *after* the remainder is solved, not instead of it,
+/// so a card too short to reach the cap still gets everything it has.
+/// `min` of the two is what makes the cap a ceiling rather than a target.
+#[must_use]
+pub fn subregion_height(card_height: f32, bands: SubRegionBands, cap: f32) -> f32 {
+    subregion_max_height(card_height, bands).min(cap)
 }
 
 // ---------------------------------------------------------------------------

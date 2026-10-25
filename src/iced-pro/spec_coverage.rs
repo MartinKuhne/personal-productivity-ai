@@ -2998,26 +2998,68 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-MOD-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.6.2",
         evidence: &["surface/modal.rs"],
-        reason: Some(
-            "Missing a sub-region solver. `ModalSizing::solve` produces the CARD's \
-             bounds from the viewport; nothing here computes \
-             `subregion_max_h = modal_height - (header_band + 2 * body_padding + \
-             footer_band)` from the solved card, and `ATTRIBUTIONS_LIST_MAX_H = 200` \
-             is not defined in the token set.",
-        ),
+        reason: None,
         note: Some(
-            "The named failure mode is nonetheless absent, and by a better mechanism \
-             than the spec asks for: the host sizes the credits list `Length::Fill`, \
-             a remainder, so it structurally cannot borrow the card's outer 480px \
-             constant or overflow past the header and footer bands. What is missing \
-             is the positive ask — the solver, and the named cap that would hold the \
-             list at 200 rather than the ~330px a Fill remainder leaves in a 480px \
-             card.",
+            "`SubRegionBands` + `subregion_max_height` solve \
+             `card - (header + 2 × body_padding + footer)` from the card's \
+             *solved* bounds; `subregion_height` applies the cap after the \
+             remainder, so a card too short to reach the cap still gets \
+             everything it has. `ATTRIBUTIONS_LIST_MAX_HEIGHT = 200` is defined \
+             and registered in `SURFACE_GEOMETRY_CONSTANTS`, and the credits \
+             list is wired to it. Band terms are token-resolved by the host \
+             (`ui_iced/attributions.rs`: `HEADER_BAND_HEIGHT`, \
+             `FOOTER_BAND_HEIGHT`) because `ModalFrame` deliberately carries no \
+             header/footer sub-rectangles — it supplies `body_padding` via \
+             `from_frame` and nothing else. Two deviations from the \
+             requirement's letter: the constant is `_HEIGHT`, not the spec's \
+             `_H`, because `VISUAL_NAME_MARKERS` matches `HEIGHT` and a bare `H` \
+             would leave the gate blind to the very constant it exists to check \
+             (the spec's `FOLDER_LIST_MAX_H` is `FOLDER_LIST_MAX_HEIGHT` for the \
+             same reason); and the cap is a solved `Length::Fixed`, not a \
+             fill-with-ceiling, because iced 0.14 has no min/max `Length`, no \
+             `Container::max_height` and no constraint widget. The second costs \
+             something: `Fill`'s free overflow safety becomes *conditional on \
+             the band terms being exact* — an understated band over-solves \
+             through the footer, which `Fill` could not do. Measured at five \
+             viewports rather than trusted.",
         ),
     },
+    // **The two spec numbers are in tension for this card, and it is unresolved.**
+    // The card is pinned at 480px and its furniture is 150px, so it has 330px
+    // to give; the 200px cap lets 200 of that be used. The other **130px is
+    // dead card** — nothing is laid out there — and the list drops from ~11.2
+    // visible rows to ~6.8 (~29.4px/row over the 58-crate catalog).
+    // `the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows`
+    // pins that as a visible fact rather than a footnote. Resolving it means
+    // changing a pinned number (the card height or the cap), which is a spec
+    // decision, not an implementation one.
+    //
+    // **`Length::Fixed(0.0)` is void in iced 0.14** — `Size::is_void()` is true
+    // if *either* axis is `Fixed(0.0)`, and a void child is silently dropped
+    // from the widget tree. At a sub-182px viewport the solved height is 0 and
+    // the scrollable becomes `SelectorNotFound`, losing `ATTRIBUTIONS_LIST_ID`
+    // and its scroll position (AGENTS §5). Checked against `Fill`, which keeps
+    // the widget present at 0.0. `credits_list_length` therefore falls back to
+    // `Fill` at zero room; the cap cannot be breached there because both
+    // mechanisms agree the height is zero.
+    //
+    // **Token-gate defect found here, deliberately NOT fixed here.**
+    // `token_lint::join_continuation` returns a declaration's RHS untouched
+    // whenever the declaration line is non-empty, so a multi-line constant whose
+    // first line is a bare token is classified `TokenBound` without the rest of
+    // its expression ever being read — `pub const X: f32 = space::SM` newline
+    // `+ 500.0;` passes. Same class as INT-14, one level deeper: INT-14 closed
+    // "`=` ends the line"; this is "line 1 is a partial expression". Observed
+    // directly — `HEADER_BAND_HEIGHT` written multi-line with a `3.0`
+    // coefficient counted token-bound while the single-line `FOOTER_BAND_HEIGHT`
+    // with a `2.0` was correctly flagged. Both are now written literal-free
+    // (gaps as repeated `space::SM` terms), so they pass under any reading.
+    // Fixing the join would re-read every multi-line constant in both crates and
+    // could flip an unknown number of classifications; that needs its own
+    // increment with its own analysis.
     // --- §4.7 Movable Overlay Dialogs --------------------------------------
     Coverage {
         id: "UIF-MOV-001",

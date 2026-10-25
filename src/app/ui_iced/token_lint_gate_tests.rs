@@ -96,7 +96,15 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// properly it is an unbound-scalar finding, so it leaves this count and
 /// is carried on `APP_ALLOW_LIST` with the reason. Nothing was re-tuned:
 /// the constant's value is byte-for-byte what it was.
-const PIN_APP_TOKEN_BOUND: usize = 96;
+/// 98 as of `UIF-MOD-004`, which adds two genuinely token-bound visual
+/// constants to `ui_iced/attributions.rs`: `HEADER_BAND_HEIGHT` and
+/// `FOOTER_BAND_HEIGHT`. Both are pure sums of `typography::` / `shape::` /
+/// `size::` / `space::` tokens with **no numeric literal anywhere** — the
+/// gap counts are written out as repeated `space::SM` terms rather than as
+/// `3.0 *` / `2.0 *`, because a coefficient is a literal and would make
+/// the constant a finding. Neither is registered, neither is allow-listed,
+/// and neither was re-tuned: they pass because every term is a token.
+const PIN_APP_TOKEN_BOUND: usize = 98;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.
