@@ -410,7 +410,7 @@ where
     let mut label = Row::with_children(vec![text_part(
         parts.label_colour,
         typography::UI_COMPACT.size,
-        typography::UI_COMPACT.line_height,
+        typography::UI_COMPACT.iced_line_height(),
         typography::UI_COMPACT.font(typography::FAMILY_SANS, typography::Weight::Medium),
         parts.label.to_string(),
     )]);
@@ -419,7 +419,7 @@ where
         label = label.push(text_part(
             parts.marker_colour,
             typography::UI_COMPACT.size,
-            typography::UI_COMPACT.line_height,
+            typography::UI_COMPACT.iced_line_height(),
             typography::UI_COMPACT.font(typography::FAMILY_SANS, typography::Weight::Medium),
             marker.to_string(),
         ));
@@ -434,7 +434,7 @@ where
             Container::new(text_part(
                 parts.hint_colour,
                 typography::CAPTION.size,
-                typography::CAPTION.line_height,
+                typography::CAPTION.iced_line_height(),
                 typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::Regular),
                 hint.to_string(),
             ))
@@ -460,7 +460,7 @@ where
         row = row.push(text_part(
             parts.colour,
             typography::CAPTION.size,
-            typography::CAPTION.line_height,
+            typography::CAPTION.iced_line_height(),
             typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::Regular),
             text_value,
         ));
@@ -470,10 +470,19 @@ where
 }
 
 /// One piece of text on a rung, painted in a resolved colour.
+///
+/// `line_height` is an `iced::LineHeight`, deliberately not a bare `f32`.
+/// A bare `f32` at this boundary would reach iced through
+/// `From<f32> for LineHeight`, which means *multiple of the font size* —
+/// so a caller handing over a rung's pixel line height of `16.0` would
+/// get 16 × size pixels per line and the glyph would be clipped out of
+/// its band. See
+/// [`TypeRung::iced_line_height`](typography::TypeRung::iced_line_height),
+/// which is what every caller here passes.
 fn text_part<'a, Message>(
     colour: Color,
     size: f32,
-    line_height: f32,
+    resolved_line_height: iced::advanced::text::LineHeight,
     font: iced::Font,
     content: String,
 ) -> iced::Element<'a, Message>
@@ -482,7 +491,7 @@ where
 {
     text(content)
         .size(size)
-        .line_height(line_height)
+        .line_height(resolved_line_height)
         .font(font)
         .color(colour)
         .into()

@@ -199,6 +199,18 @@ pub const ROW_RADIUS: f32 = shape::RADIUS_WIDGET;
 /// §4.8.1 — the leading slot is a 16×16 box (`size.icon.md`).
 pub const LEADING_SLOT: f32 = size::ICON_MD;
 
+/// The leading glyph's line height: the slot's own height, as an
+/// **absolute** `iced::LineHeight`.
+///
+/// [`LEADING_SLOT`] is a pixel figure, and iced reads a bare `f32` line
+/// height as a multiple of the font size — `16.0` on a 16px glyph would
+/// ask for 256px per line and the glyph would be clipped out of the box
+/// entirely. See
+/// [`TypeRung::iced_line_height`](typography::TypeRung::iced_line_height),
+/// which is the rung-carried equivalent of this constant.
+pub const LEADING_LINE_HEIGHT: iced::advanced::text::LineHeight =
+    iced::advanced::text::LineHeight::Absolute(iced::Pixels(LEADING_SLOT));
+
 /// §4.8.1 — the trailing slot's type size, 12px (`type.caption`).
 pub const TRAILING_TYPE: f32 = typography::CAPTION.size;
 
@@ -1063,7 +1075,7 @@ where
 {
     text(content)
         .size(typography::UI_COMPACT.size)
-        .line_height(typography::UI_COMPACT.line_height)
+        .line_height(typography::UI_COMPACT.iced_line_height())
         .align_y(iced::alignment::Vertical::Center)
         .into()
 }
@@ -1078,7 +1090,7 @@ where
 {
     text(content)
         .size(TRAILING_TYPE)
-        .line_height(typography::CAPTION.line_height)
+        .line_height(typography::CAPTION.iced_line_height())
         .align_y(iced::alignment::Vertical::Center)
         .into()
 }
@@ -1104,7 +1116,7 @@ where
 {
     text(content)
         .size(TRAILING_TYPE)
-        .line_height(typography::CAPTION.line_height)
+        .line_height(typography::CAPTION.iced_line_height())
         .font(typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::SemiBold))
         .align_y(iced::alignment::Vertical::Center)
         .into()
@@ -1120,7 +1132,7 @@ where
 {
     text(glyph)
         .size(LEADING_SLOT)
-        .line_height(LEADING_SLOT)
+        .line_height(LEADING_LINE_HEIGHT)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center)
         .into()
@@ -1138,7 +1150,7 @@ where
 {
     text(String::new())
         .size(LEADING_SLOT)
-        .line_height(LEADING_SLOT)
+        .line_height(LEADING_LINE_HEIGHT)
         .into()
 }
 

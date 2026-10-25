@@ -337,6 +337,38 @@ impl TypeRung {
         }
     }
 
+    /// This rung's [`line_height`](Self::line_height) as an
+    /// `iced::LineHeight` in absolute pixels.
+    ///
+    /// **Why this exists, and why no call site may skip it.**
+    /// `line_height` is a *pixel* figure: `type.body` is `14/20`, twenty
+    /// pixels per line. iced does not read a bare `f32` that way.
+    /// `impl From<f32> for LineHeight` yields `LineHeight::Relative(factor)`
+    /// (`iced_core-0.14.0/src/text.rs:221-225`), and `Relative(f)` means
+    /// *f times the font size* — `to_absolute` returns `Pixels(f * size)`
+    /// (same file, line 209). So handing the rung's `20.0` straight to
+    /// `.line_height(...)` asks iced for 20 × 14 = **280px per line**,
+    /// not 20. Only `From<Pixels>` reaches `LineHeight::Absolute`.
+    ///
+    /// The overshoot is not cosmetic. Measured in this crate's headless
+    /// harness, a single-line `type.ui_compact` widget lays out at
+    /// **234px** instead of 18px (13 × 18), and the glyph is drawn at
+    /// the vertical centre of that inflated box — 112.5px below the top
+    /// of the 32px menu-row slot it was placed in, i.e. ~80px below the
+    /// slot's own bottom edge. cosmic_text clips the paragraph to the
+    /// buffer height it was given, so the glyph is removed entirely and
+    /// the row renders **no text at all**. That is what every one of
+    /// this crate's menu rows was doing before this helper existed.
+    ///
+    /// Routing every call site through here removes the ambiguous
+    /// conversion from the crate instead of fixing each site by hand: a
+    /// widget author cannot pick the wrong unit by accident, and
+    /// [`crate::token_lint`] can require it.
+    #[must_use]
+    pub const fn iced_line_height(&self) -> iced::advanced::text::LineHeight {
+        iced::advanced::text::LineHeight::Absolute(iced::Pixels(self.line_height))
+    }
+
     /// Whether this rung permits `weight` — the `Allowed Weights` column
     /// read as a predicate (`UIF-TOK-004`).
     ///

@@ -168,6 +168,144 @@ fn test_a_closed_cascade_solves_no_rectangles() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// End-to-end pixel check — the card the application actually mounts
+// ---------------------------------------------------------------------------
+
+/// The scale this file's pixel checks render at: two physical pixels per
+/// logical one, so a glyph's landing point resolves to half a logical
+/// pixel rather than being rounded away.
+const PIXEL_SCALE: f32 = 2.0;
+
+/// A channel value above which a pixel counts as ink — well above the
+/// darkest card fill this crate paints (`surface_variant` resolves to
+/// `pro.surface_raised`), well below any text colour it resolves, so a
+/// background never reads as a glyph.
+const INK_THRESHOLD: u32 = 90;
+
+/// Draw `element` once, headless, and return the RGBA framebuffer.
+///
+/// Re-implemented here rather than shared from `iced_pro::test_helpers`
+/// because that module is `#[cfg(test)]` to its own crate and cannot be
+/// reached from this one. Deliberately minimal: one draw, one screenshot.
+fn shoot(size: Size, element: Element<'static, Message>) -> Vec<u8> {
+    use iced::advanced::renderer::Headless as _;
+    use iced_test::futures::futures::executor::block_on;
+    use iced_test::renderer::Renderer;
+    use iced_test::runtime::user_interface::{self, UserInterface};
+
+    let mut renderer = block_on(<Renderer as iced::advanced::renderer::Headless>::new(
+        iced::Font::with_name("Fira Sans"),
+        iced::Pixels(16.0),
+        None,
+    ))
+    .expect("a headless renderer should be available for menu card tests");
+
+    let mut ui: UserInterface<'static, Message, iced::Theme, Renderer> = UserInterface::build(
+        element,
+        size,
+        user_interface::Cache::default(),
+        &mut renderer,
+    );
+
+    ui.draw(
+        &mut renderer,
+        &iced::Theme::Dark,
+        &iced::advanced::renderer::Style {
+            text_color: iced::Color::WHITE,
+        },
+        iced::mouse::Cursor::Unavailable,
+    );
+
+    renderer.screenshot(
+        Size::new(
+            (size.width * PIXEL_SCALE).round() as u32,
+            (size.height * PIXEL_SCALE).round() as u32,
+        ),
+        PIXEL_SCALE,
+        iced::Color::BLACK,
+    )
+}
+
+/// The vertical band of ink inside the logical rectangle `(x0,y0)..(x1,y1)`,
+/// in logical pixels, or `None` when that region carries none.
+///
+/// Bounded in **both** axes on purpose. A y-only scan is satisfied by the
+/// card's own bright perimeter stroke (`border_strong` is (120,120,120),
+/// well over the ink threshold), which runs down the left and right edges
+/// through every row band — so a y-only check reports "painted" for a
+/// card whose labels are entirely missing.
+fn ink_in_rect(rgba: &[u8], width: u32, x0: f32, y0: f32, x1: f32, y1: f32) -> Option<(f32, f32)> {
+    let height = (rgba.len() as u64 / 4 / u64::from(width)) as u32;
+    let top = ((y0 * PIXEL_SCALE).floor() as i64).clamp(0, height as i64) as u32;
+    let bottom = ((y1 * PIXEL_SCALE).ceil() as i64).clamp(0, height as i64) as u32;
+    let left = ((x0 * PIXEL_SCALE).floor() as i64).clamp(0, width as i64) as u32;
+    let right = ((x1 * PIXEL_SCALE).ceil() as i64).clamp(0, width as i64) as u32;
+
+    let mut first = u32::MAX;
+    let mut last = 0u32;
+
+    for y in top..bottom {
+        for x in left..right {
+            let i = ((y * width + x) * 4) as usize;
+            if i + 3 >= rgba.len() {
+                continue;
+            }
+            let peak = u32::from(rgba[i].max(rgba[i + 1]).max(rgba[i + 2]));
+            if peak > INK_THRESHOLD {
+                first = first.min(y);
+                last = last.max(y);
+            }
+        }
+    }
+
+    if first == u32::MAX || last < first {
+        return None;
+    }
+    Some((first as f32 / PIXEL_SCALE, (last + 1) as f32 / PIXEL_SCALE))
+}
+
+/// The application's own menu card paints a label inside every row rect
+/// the geometry solver reports for it.
+///
+/// The framework-side tests prove the row helper paints; this proves the
+/// card this crate actually mounts does, through [`card_element`] with the
+/// real palette and chrome. It is the difference between "the widget is
+/// correct" and "the menu the user opens shows its items".
+///
+/// Before `TypeRung::iced_line_height` existed this frame was blank. Each
+/// row's paragraph was clipped to the row's own height while its glyphs
+/// were being laid out `line_height × size` pixels down the box, so no
+/// label reached the framebuffer at all.
+#[test]
+fn test_the_app_menu_card_paints_every_row_inside_its_own_rect() {
+    let menu = menu_with(&["alpha", "beta", "gamma"]);
+    let cascade = opened(&menu);
+    let card = cascade.open_cards().first().expect("one open card");
+    let size = card_size(&menu);
+    let rect = Rectangle::new(Point::ORIGIN, size);
+    let element: Element<'static, Message> = card_element(card, &cascade, rect);
+
+    let rgba = shoot(size, element);
+    let width = (size.width * PIXEL_SCALE).round() as u32;
+
+    for row in 0..3 {
+        let r = row_rect(&menu, rect, row).expect("every row has a solved rect");
+        let band = ink_in_rect(&rgba, width, r.x, r.y, r.x + r.width, r.y + r.height)
+            .unwrap_or_else(|| {
+                panic!(
+                    "row {row} painted nothing inside its rect {r:?} — \
+                     an empty band means the row's label was clipped away"
+                )
+            });
+
+        assert!(
+            band.0 >= r.y && band.1 <= r.y + r.height,
+            "row {row} ink landed at {band:?}, outside its rect {r:?}"
+        );
+    }
+}
+
 #[test]
 fn test_card_inset_is_the_framework_token_not_a_restated_number() {
     assert_eq!(

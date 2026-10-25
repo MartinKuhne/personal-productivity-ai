@@ -269,7 +269,7 @@ where
     column = column.push(
         text(title.to_string())
             .size(TITLE_RUNG.size)
-            .line_height(TITLE_RUNG.line_height)
+            .line_height(TITLE_RUNG.iced_line_height())
             .font(TITLE_RUNG.font(typography::FAMILY_SANS, typography::Weight::Medium))
             .color(style.title_colour),
     );
@@ -278,7 +278,7 @@ where
         column = column.push(
             text(description.to_string())
                 .size(DESCRIPTION_RUNG.size)
-                .line_height(DESCRIPTION_RUNG.line_height)
+                .line_height(DESCRIPTION_RUNG.iced_line_height())
                 .font(DESCRIPTION_RUNG.font(typography::FAMILY_SANS, typography::Weight::Regular))
                 .color(style.description_colour),
         );

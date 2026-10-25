@@ -577,6 +577,122 @@ fn test_min_size_is_twelve_pixels() {
 }
 
 // ---------------------------------------------------------------------------
+// The `line_height` unit boundary — `iced_line_height`
+// ---------------------------------------------------------------------------
+
+// iced reads a bare `f32` line height as a *multiple of the font size*,
+// not as pixels. `line_height` is pixels. These tests pin the two apart so
+// the conversion can never be re-made by accident, and so nobody "fixes"
+// the discrepancy by changing the token — the token is right, the boundary
+// was wrong.
+
+/// Every rung crosses into iced as an absolute pixel line height equal to
+/// the spec's `Line Height (px)` column.
+#[test]
+fn test_iced_line_height_is_absolute_pixels_for_every_rung() {
+    for row in spec_rows() {
+        assert_eq!(
+            row.rung.iced_line_height(),
+            iced::advanced::text::LineHeight::Absolute(iced::Pixels(row.line_height)),
+            "{} must cross to iced as {}px absolute",
+            row.token,
+            row.line_height
+        );
+    }
+}
+
+/// Crossing as absolute pixels means the resolved line box does not move
+/// when the font size does — the defining property of an absolute height.
+#[test]
+fn test_iced_line_height_resolves_to_the_declared_pixels_regardless_of_size() {
+    for row in spec_rows() {
+        let resolved = row
+            .rung
+            .iced_line_height()
+            .to_absolute(iced::Pixels(row.size));
+        assert_eq!(
+            resolved,
+            iced::Pixels(row.line_height),
+            "{} resolved to {:?} at {}px, expected {}px",
+            row.token,
+            resolved,
+            row.size,
+            row.line_height
+        );
+    }
+}
+
+/// The trap itself, pinned. A bare `f32` of the same value is a
+/// *multiplier*: it resolves to `line_height × size` pixels. This is the
+/// number that was being asked for before `iced_line_height` existed, and
+/// it is asserted here so the difference is recorded rather than
+/// remembered.
+#[test]
+fn test_bare_f32_line_height_is_a_multiplier_not_pixels() {
+    for row in spec_rows() {
+        let bare = iced::advanced::text::LineHeight::from(row.rung.line_height);
+        assert_eq!(
+            bare,
+            iced::advanced::text::LineHeight::Relative(row.line_height),
+            "{}'s bare f32 {} must land as Relative, never Absolute",
+            row.token,
+            row.line_height
+        );
+
+        let wrong = bare.to_absolute(iced::Pixels(row.size));
+        let expected = row.line_height * row.size;
+        assert!(
+            (wrong.0 - expected).abs() < EPS,
+            "{} bare resolves to {:?}, expected {}px (line_height × size)",
+            row.token,
+            wrong,
+            expected
+        );
+        assert_ne!(
+            wrong,
+            iced::Pixels(row.line_height),
+            "{} bare must NOT equal the declared pixel line height",
+            row.token
+        );
+    }
+}
+
+/// The measured blow-up for the rung the menus render at, stated as a
+/// number so the size of the old defect is on the record: `type.ui_compact`
+/// asked iced for 234px per line instead of 18px.
+#[test]
+fn test_ui_compact_bare_line_height_asked_for_two_hundred_thirty_four_pixels() {
+    let wrong = iced::advanced::text::LineHeight::from(UI_COMPACT.line_height)
+        .to_absolute(iced::Pixels(UI_COMPACT.size));
+    assert_eq!(wrong, iced::Pixels(234.0));
+    assert_eq!(
+        UI_COMPACT
+            .iced_line_height()
+            .to_absolute(iced::Pixels(UI_COMPACT.size)),
+        iced::Pixels(18.0)
+    );
+}
+
+/// `iced_line_height` is a pure projection of the token: it introduces no
+/// value of its own and cannot disagree with the rung it came from.
+#[test]
+fn test_iced_line_height_carries_no_value_the_rung_did_not_have() {
+    for row in spec_rows() {
+        let pixels = match row.rung.iced_line_height() {
+            iced::advanced::text::LineHeight::Absolute(pixels) => pixels,
+            iced::advanced::text::LineHeight::Relative(_) => {
+                panic!("{} crossed to iced as a multiplier", row.token)
+            }
+        };
+        assert_eq!(
+            pixels.0, row.rung.line_height,
+            "{} projection drifted",
+            row.token
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Allowed-weight sets — the `Allowed Weights` column
 // ---------------------------------------------------------------------------
 

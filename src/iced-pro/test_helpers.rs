@@ -93,6 +93,7 @@ use iced::Size;
 use iced::advanced::image;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
+use iced::advanced::renderer::Headless as _;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::Tree;
 use iced::advanced::widget::Widget;
@@ -696,4 +697,127 @@ pub fn centre(bounds: Rectangle) -> Point {
         bounds.x + bounds.width / 2.0,
         bounds.y + bounds.height / 2.0,
     )
+}
+
+// ---------------------------------------------------------------------------
+// The pixel leg
+// ---------------------------------------------------------------------------
+
+/// The scale every pixel-level assertion renders at.
+///
+/// Two physical pixels per logical one, so a glyph's landing point is
+/// resolved to half a logical pixel rather than being rounded away.
+pub const PIXEL_SCALE: f32 = 2.0;
+
+/// A channel value above which a pixel counts as ink.
+///
+/// Well above the darkest token fill this crate paints and well below any
+/// text colour it resolves, so a background never reads as a glyph.
+pub const INK_THRESHOLD: u32 = 90;
+
+/// A headless renderer built the way every paint-level test wants it.
+///
+/// Split out from [`Harness::headless`] so a test that needs raw pixels
+/// rather than a stateful interface can render one frame without one.
+#[must_use]
+pub fn headless_renderer() -> HeadlessRenderer {
+    block_on(<HeadlessRenderer as renderer::Headless>::new(
+        Font::with_name("Fira Sans"),
+        Pixels(16.0),
+        None,
+    ))
+    .expect("a headless renderer should be available for iced-pro widget tests")
+}
+
+/// Draw `root` once at `size` and return the RGBA framebuffer.
+///
+/// Bounds cannot answer where a glyph was actually painted. A text widget
+/// can lay out at exactly the size its caller asked for and still put its
+/// ink outside that box — which is precisely how the `line_height`
+/// unit-confusion bug hid behind a fixed-height slot. Only the pixels can
+/// tell those two cases apart.
+#[must_use]
+pub fn screenshot<Message: 'static>(
+    size: Size,
+    scale: f32,
+    background: Color,
+    root: Element<'static, Message>,
+) -> Vec<u8> {
+    let mut renderer = headless_renderer();
+
+    let mut ui: UserInterface<'static, Message, Theme, HeadlessRenderer> =
+        UserInterface::build(root, size, user_interface::Cache::default(), &mut renderer);
+
+    ui.draw(
+        &mut renderer,
+        &Theme::Dark,
+        &renderer::Style {
+            text_color: Color::WHITE,
+        },
+        mouse::Cursor::Unavailable,
+    );
+
+    let physical = Size::new(
+        (size.width * scale).round() as u32,
+        (size.height * scale).round() as u32,
+    );
+    renderer.screenshot(physical, scale, background)
+}
+
+/// The vertical band of ink between logical `y_min` and `y_max`, in
+/// **logical** pixels.
+///
+/// `None` when the window carries no ink at all — which is what a widget
+/// that clips its own text looks like from the outside. The windowed form
+/// is what lets a test ask "did *this* row paint?" rather than "did
+/// anything on the frame paint?", which matters because one populated row
+/// can otherwise hide an empty neighbour.
+#[must_use]
+pub fn ink_band_between(
+    rgba: &[u8],
+    width: u32,
+    scale: f32,
+    y_min: f32,
+    y_max: f32,
+) -> Option<(f32, f32)> {
+    let height = (rgba.len() as u64 / 4 / u64::from(width)) as u32;
+    let top = ((y_min * scale).floor() as i64).clamp(0, height as i64) as u32;
+    let bottom = ((y_max * scale).ceil() as i64).clamp(0, height as i64) as u32;
+
+    let mut first = u32::MAX;
+    let mut last = 0u32;
+
+    for y in top..bottom {
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            if i + 3 >= rgba.len() {
+                continue;
+            }
+            let peak = rgba[i].max(rgba[i + 1]).max(rgba[i + 2]) as u32;
+            if peak > INK_THRESHOLD {
+                first = first.min(y);
+                last = last.max(y);
+            }
+        }
+    }
+
+    if first == u32::MAX || last < first {
+        return None;
+    }
+
+    Some((first as f32 / scale, (last + 1) as f32 / scale))
+}
+
+/// The vertical band of ink in a framebuffer, in **logical** pixels.
+///
+/// Shorthand for [`ink_band_between`] over the whole frame.
+#[must_use]
+pub fn ink_band(rgba: &[u8], physical_width: u32, scale: f32) -> Option<(f32, f32)> {
+    ink_band_between(rgba, physical_width, scale, f32::MIN, f32::MAX)
+}
+
+/// The physical width a framebuffer of `size` was rendered at.
+#[must_use]
+pub fn physical_width(size: Size, scale: f32) -> u32 {
+    (size.width * scale).round() as u32
 }

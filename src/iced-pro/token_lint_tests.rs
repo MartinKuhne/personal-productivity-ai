@@ -19,7 +19,7 @@ use crate::token_lint::{
     ALLOW_LIST, Audit, COLOUR_CONSTRUCTORS, COLOUR_DEFINITION_FILE, Rule,
     SURFACE_GEOMETRY_CONSTANTS, ScalarClass, SourceScan, VISUAL_NAME_MARKERS, VISUAL_SCOPE_DIRS,
     Violation, audit_crate, crate_root, in_visual_scope, is_test_file, is_visual_name,
-    redact_comments_and_strings, render, scan_source, surface_geometry,
+    redact_comments_and_strings, render, scan_source, source_files, surface_geometry,
 };
 
 // ---------------------------------------------------------------------------
@@ -891,4 +891,182 @@ fn an_empty_file_is_clean_and_an_empty_audit_is_clean() {
     assert!(scan.findings.is_empty());
     assert_eq!(violations_of(&scan).len(), 0);
     assert!(Audit::default().is_clean());
+}
+
+// ---------------------------------------------------------------------------
+// The `line_height` unit boundary — a source-level guard
+//
+// `TypeRung::iced_line_height` exists so no call site ever touches iced's
+// ambiguous `From<f32> for LineHeight`, which reads a bare `f32` as a
+// multiple of the font size rather than as pixels. That protection only
+// holds while it is enforced: one reintroduced
+// `.line_height(SOME_RUNG.line_height)` re-arms a defect that makes a
+// menu row render no text at all.
+//
+// So the scan reads the crate's own source, comments and string literals
+// redacted, finds every `.line_height(` call, and requires the argument
+// to name its unit. Like the pinned counts above, it is written so that a
+// scanner which quietly stopped matching goes red too: the call count is
+// asserted, not assumed.
+// ---------------------------------------------------------------------------
+
+/// Argument shapes a `.line_height(...)` call may legally carry.
+///
+/// Each names its unit, so neither the reader nor the compiler can
+/// mistake it for a multiplier:
+///
+/// * `iced_line_height()` — the rung's own projection to absolute pixels.
+/// * `Pixels(` / `Absolute(` — an explicit absolute construction.
+/// * `LEADING_LINE_HEIGHT` — the menu's `LineHeight`-typed constant.
+/// * `resolved_line_height` — `form_field::text_part`'s parameter,
+///   declared `iced::advanced::text::LineHeight`, so it can only have
+///   arrived from one of the shapes above.
+const LINE_HEIGHT_SAFE_SHAPES: [&str; 5] = [
+    "iced_line_height()",
+    "Pixels(",
+    "Absolute(",
+    "LEADING_LINE_HEIGHT",
+    "resolved_line_height",
+];
+
+/// Every `.line_height(` call in `code` and its argument text.
+///
+/// The needle requires the `.` to sit directly on `line_height(`, so
+/// `.iced_line_height(` — where `iced_` sits in between — is not
+/// mistaken for a call being audited.
+fn line_height_callsites(code: &str) -> Vec<String> {
+    let chars: Vec<char> = code.chars().collect();
+    let needle: Vec<char> = ".line_height(".chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i + needle.len() <= chars.len() {
+        if chars[i..i + needle.len()] == needle[..] {
+            let start = i + needle.len();
+            let mut depth = 1usize;
+            let mut j = start;
+            while j < chars.len() && depth > 0 {
+                match chars[j] {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 {
+                    j += 1;
+                }
+            }
+            out.push(chars[start..j].iter().collect());
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    out
+}
+
+/// No `.line_height(` call anywhere in the crate hands iced a bare pixel
+/// `f32`, and the scan is demonstrably still finding the calls.
+#[test]
+fn no_line_height_call_hands_iced_a_bare_f32() {
+    let root = crate_root();
+    let mut offenders: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+
+    for path in source_files(&root) {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let code = redact_comments_and_strings(&raw);
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string();
+
+        for arg in line_height_callsites(&code) {
+            checked += 1;
+            if !LINE_HEIGHT_SAFE_SHAPES
+                .iter()
+                .any(|shape| arg.contains(shape))
+            {
+                offenders.push(format!("{rel}: .line_height({arg})"));
+            }
+        }
+    }
+
+    assert!(
+        checked >= 8,
+        "the scan found only {checked} `.line_height(` calls; the widget layer has \
+         eight, so the scanner has gone quiet and cannot be trusted"
+    );
+    assert!(
+        offenders.is_empty(),
+        "these calls hand iced a value whose unit it cannot know, which iced reads as \
+         a multiple of the font size: {offenders:?}"
+    );
+}
+
+/// The scanner fires on the exact shape it exists to catch, so a green run
+/// above means "none found" rather than "none could be found".
+#[test]
+fn the_line_height_scan_fires_on_a_doctored_bare_f32() {
+    let doctored = "\
+fn build() {
+    text(\"x\")
+        .size(typography::UI_COMPACT.size)
+        .line_height(typography::UI_COMPACT.line_height)
+        .into();
+}
+";
+    let code = redact_comments_and_strings(doctored);
+    let calls = line_height_callsites(&code);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        !LINE_HEIGHT_SAFE_SHAPES
+            .iter()
+            .any(|shape| calls[0].contains(shape)),
+        "the doctored bare f32 must not read as safe: {:?}",
+        calls[0]
+    );
+}
+
+/// `.iced_line_height()` is not itself flagged — the needle sits on the
+/// dot, and `iced_` sits between it and `line_height(`.
+#[test]
+fn the_line_height_scan_does_not_flag_the_helper_itself() {
+    let good = "\
+fn build() {
+    text(\"x\")
+        .line_height(typography::UI_COMPACT.iced_line_height())
+        .into();
+}
+";
+    let code = redact_comments_and_strings(good);
+    let calls = line_height_callsites(&code);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        LINE_HEIGHT_SAFE_SHAPES
+            .iter()
+            .any(|shape| calls[0].contains(shape)),
+        "the helper form must read as safe: {:?}",
+        calls[0]
+    );
+}
+
+/// A bare pixel constant used as a line height is caught, which is the
+/// shape `LEADING_SLOT` used to be passed in.
+#[test]
+fn the_line_height_scan_fires_on_a_bare_pixel_constant() {
+    let doctored = "text(g).size(LEADING_SLOT).line_height(LEADING_SLOT).into();";
+    let code = redact_comments_and_strings(doctored);
+    let calls = line_height_callsites(&code);
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        !LINE_HEIGHT_SAFE_SHAPES
+            .iter()
+            .any(|shape| calls[0].contains(shape)),
+        "a bare LEADING_SLOT must not read as safe: {:?}",
+        calls[0]
+    );
 }

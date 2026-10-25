@@ -1659,6 +1659,217 @@ fn test_a_separator_paints_its_rule_and_nothing_else() {
     assert_eq!(layers[0].fill, p.border_subtle);
 }
 
+// ---------------------------------------------------------------------------
+// The `line_height` unit boundary — measured in pixels, not derived
+//
+// A text widget can lay out at exactly the height its caller asked for and
+// still paint its glyphs outside that box. That is how the `line_height`
+// unit bug hid: the row's outer height was pinned by `ROW_HEIGHT`, so no
+// bounds check moved, while the paragraph inside was being asked for
+// `line_height × size` pixels per line and clipping its own text away.
+// These tests therefore read the framebuffer, not the layout tree.
+// ---------------------------------------------------------------------------
+
+/// The element type the pixel and layout legs build.
+type PixelEl = Element<'static, (), iced::Theme, HeadlessRenderer>;
+
+/// The y a probe slot's top edge is placed at.
+///
+/// Pushed well down the canvas so ink thrown *downward* out of the slot —
+/// which is the direction the inflated line box threw it — is still
+/// inside the frame and shows up as a displaced band rather than nothing.
+const SLOT_TOP: f32 = 200.0;
+
+/// The canvas every pixel probe renders into.
+const CANVAS_HEIGHT: f32 = 800.0;
+
+/// The intrinsic height of `child` with nothing constraining its height.
+fn intrinsic_height(child: PixelEl) -> f32 {
+    const PROBE_ID: &str = "line_height_probe_box";
+
+    let root: PixelEl = iced::widget::container(child).id(PROBE_ID).into();
+    let mut sim: iced_test::Simulator<'_, (), iced::Theme, HeadlessRenderer> =
+        iced_test::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            Size::new(1000.0, 4000.0),
+            root,
+        );
+    sim.find(iced::widget::Id::from(PROBE_ID))
+        .expect("probe box should be reachable")
+        .bounds()
+        .height
+}
+
+/// The vertical band of ink when `root` is placed in a slot of
+/// `slot_height` whose top sits at [`SLOT_TOP`].
+fn ink_over_slot(root: PixelEl, slot_height: f32) -> Option<(f32, f32)> {
+    let viewport = Size::new(300.0, SLOT_TOP + CANVAS_HEIGHT);
+    let tree: PixelEl = iced::widget::column![
+        iced::widget::Space::new().height(SLOT_TOP),
+        iced::widget::container(root)
+            .height(slot_height)
+            .align_y(iced::alignment::Vertical::Top),
+    ]
+    .into();
+
+    let rgba = crate::test_helpers::screenshot(
+        viewport,
+        crate::test_helpers::PIXEL_SCALE,
+        Color::BLACK,
+        tree,
+    );
+    crate::test_helpers::ink_band(
+        &rgba,
+        crate::test_helpers::physical_width(viewport, crate::test_helpers::PIXEL_SCALE),
+        crate::test_helpers::PIXEL_SCALE,
+    )
+}
+
+/// Every slot's text lays out on the line grid its rung declares — the
+/// pixel figure in the token, never that figure multiplied by the size.
+#[test]
+fn test_every_menu_slot_lays_out_on_its_declared_line_grid() {
+    let cases: [(&str, PixelEl, f32, f32); 5] = [
+        (
+            "label",
+            label_text::<(), iced::Theme, HeadlessRenderer>("Edit document".into()),
+            typography::UI_COMPACT.line_height,
+            typography::UI_COMPACT.size * typography::UI_COMPACT.line_height,
+        ),
+        (
+            "trailing",
+            trailing_text::<(), iced::Theme, HeadlessRenderer>("Ctrl+E".into()),
+            typography::CAPTION.line_height,
+            typography::CAPTION.size * typography::CAPTION.line_height,
+        ),
+        (
+            "heading",
+            heading_text::<(), iced::Theme, HeadlessRenderer>("SECTION".into()),
+            typography::CAPTION.line_height,
+            typography::CAPTION.size * typography::CAPTION.line_height,
+        ),
+        (
+            "leading glyph",
+            leading_glyph::<(), iced::Theme, HeadlessRenderer>("\u{2713}".into()),
+            LEADING_SLOT,
+            LEADING_SLOT * LEADING_SLOT,
+        ),
+        (
+            "empty leading",
+            empty_leading::<(), iced::Theme, HeadlessRenderer>(),
+            LEADING_SLOT,
+            LEADING_SLOT * LEADING_SLOT,
+        ),
+    ];
+
+    for (name, element, declared, wrong) in cases {
+        let height = intrinsic_height(element);
+        assert_eq!(
+            height, declared,
+            "the {name} slot must lay out on its declared {declared}px line grid"
+        );
+        assert_ne!(
+            height, wrong,
+            "the {name} slot must not lay out at size × line_height"
+        );
+    }
+}
+
+/// Each slot paints its glyph inside the box the row actually gives it.
+///
+/// Per-slot rather than per-row on purpose: a row-level check can be
+/// satisfied by the leading glyph while the label paints nothing, and
+/// that is exactly how the original defect hid behind a row that still
+/// looked populated from a distance.
+///
+/// Before `iced_line_height` existed every case here produced an empty
+/// frame: the paragraph was clipped to the box it was handed while its
+/// glyphs were being laid out `line_height × size` pixels down.
+#[test]
+fn test_each_menu_slot_paints_its_glyph_inside_its_own_box() {
+    let action_row = action();
+    let content_box = ROW_HEIGHT - 2.0 * row_padding_y(&action_row);
+    let heading_row = Row::heading("SECTION");
+    let heading_box = HEADING_HEIGHT - 2.0 * row_padding_y(&heading_row);
+
+    let cases: [(&str, PixelEl, f32); 4] = [
+        (
+            "label",
+            label_text::<(), iced::Theme, HeadlessRenderer>("Edit document".into()),
+            content_box,
+        ),
+        (
+            "trailing",
+            trailing_text::<(), iced::Theme, HeadlessRenderer>("Ctrl+E".into()),
+            content_box,
+        ),
+        (
+            "heading",
+            heading_text::<(), iced::Theme, HeadlessRenderer>("SECTION".into()),
+            heading_box,
+        ),
+        (
+            "leading glyph",
+            leading_glyph::<(), iced::Theme, HeadlessRenderer>("\u{2713}".into()),
+            LEADING_SLOT,
+        ),
+    ];
+
+    for (name, element, box_height) in cases {
+        let band = ink_over_slot(element, box_height).unwrap_or_else(|| {
+            panic!(
+                "the {name} slot painted nothing in its {box_height}px box — \
+                 an empty frame means the paragraph clipped its own text away"
+            )
+        });
+        assert!(
+            band.0 >= SLOT_TOP && band.1 <= SLOT_TOP + box_height,
+            "the {name} slot ink landed at {band:?}, outside its box {SLOT_TOP}..{:.1}",
+            SLOT_TOP + box_height
+        );
+    }
+}
+
+/// A whole rest row paints inside its 32px slot — the assembled view of
+/// the per-slot guarantee above, kept so a regression in the row's own
+/// composition is caught and not only in a helper.
+#[test]
+fn test_a_rest_row_paints_its_text_inside_its_own_slot() {
+    let row = Row::action("edit", "Edit document")
+        .with_shortcut("Ctrl+E")
+        .with_icon("\u{270e}");
+    let widget: PixelEl = MenuRow::new(row, "ink_probe", |_| ())
+        .palette(palette())
+        .into();
+
+    let band = ink_over_slot(widget, ROW_HEIGHT)
+        .expect("a rest row must paint; an empty frame means clipped text");
+
+    assert!(
+        band.0 >= SLOT_TOP && band.1 <= SLOT_TOP + ROW_HEIGHT,
+        "row ink landed at {band:?}, outside the slot {SLOT_TOP}..{:.1}",
+        SLOT_TOP + ROW_HEIGHT
+    );
+}
+
+/// The pixel leg itself is trustworthy: a control that is known to render
+/// must produce ink, so a `None` band above means a real defect rather
+/// than a harness that never painted anything.
+#[test]
+fn test_the_pixel_leg_renders_a_known_good_text_widget() {
+    let control: PixelEl = iced::widget::text("Ag")
+        .size(typography::UI_COMPACT.size)
+        .line_height(typography::UI_COMPACT.iced_line_height())
+        .color(Color::WHITE)
+        .into();
+
+    let band = ink_over_slot(control, ROW_HEIGHT).expect("the control must paint");
+    assert!(
+        band.0 >= SLOT_TOP && band.1 <= SLOT_TOP + ROW_HEIGHT,
+        "control ink landed at {band:?}, outside the slot"
+    );
+}
+
 #[test]
 fn test_a_destructive_row_paints_the_danger_fill_and_never_the_text_red() {
     let p = palette();
