@@ -12,7 +12,8 @@
 //! 4. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 use crate::token::contrast::contrast_ratio;
 
 /// The expected cell count: the five §3.3 columns x the two mounts

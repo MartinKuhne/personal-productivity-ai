@@ -13,7 +13,8 @@
 //! 4. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 
 /// The expected cell count: 15 bars + 4 spinners + 3 stop buttons.
 const EXPECTED_CELLS: usize = 22;

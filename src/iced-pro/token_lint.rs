@@ -6,7 +6,8 @@
 //! `UIF-PRIN-001` forbids raw numeric literals in individual widget
 //! definitions, and `UIF-VER-001` asks for "zero raw RGB or hex literals
 //! … outside the token definitions". Before this module the only automated
-//! gate was [`gallery::unmapped_colours`](crate::gallery::unmapped_colours),
+//! gate was
+//! [`gallery_audit::unmapped_colours`](crate::gallery_audit::unmapped_colours),
 //! which inspects the colours the gallery *emits*. That gate is real but
 //! partial: a hard-coded colour is caught only if the gallery happens to
 //! render that cell, and a hard-coded padding, radius, stroke or size is

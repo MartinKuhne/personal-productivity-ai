@@ -28,14 +28,30 @@ use super::*;
 
 use crate::state::BaseState;
 use crate::state::VisualState;
+use crate::surface::input_dialog;
 use crate::surface::menu::view as menu_view;
+use crate::surface::movable::ACTION_CONTROL_SIZE;
+use crate::surface::movable::ACTION_GAP;
 use crate::surface::movable::TITLE_BAR_PADDING_HORIZONTAL;
 use crate::surface::zorder::ZBand;
 use crate::token::color::Palette;
 use crate::token::contrast;
+use crate::token::typography;
 use crate::widget::button;
 use crate::widget::button::ButtonVariant;
 use crate::widget::text_input::InputKind;
+
+// The cell constructors this file tests now live in the modules the
+// `RUST-053` split produced out of `gallery`. Glob-imported because the
+// file exercises every family in the matrix; each module's name says
+// where its producers live.
+use crate::gallery_audit::*;
+use crate::gallery_button::*;
+use crate::gallery_editor::*;
+use crate::gallery_input::*;
+use crate::gallery_menu::*;
+use crate::gallery_modal::*;
+use crate::gallery_movable::*;
 
 // ---------------------------------------------------------------------------
 // 1 — completeness

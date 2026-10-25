@@ -105,7 +105,20 @@ use crate::token_lint::{
 /// than by content, even though its only numbers are read-throughs of
 /// `token::time`. `gallery_warm.rs` sits outside the visual scope, like
 /// every other gallery cell file.
-const PIN_FILES_SCANNED: usize = 144;
+///
+/// 152 as of the `RUST-053` split of `gallery.rs`, whose eight
+/// additions are the subject-cohesive modules that file was cut into —
+/// `gallery_button.rs`, `gallery_input.rs`, `gallery_menu.rs`,
+/// `gallery_modal.rs`, `gallery_movable.rs`, `gallery_editor.rs`,
+/// `gallery_tooltip.rs` and `gallery_audit.rs`. Every one of them is a
+/// gallery cell file, which means it is scanned but not visual-scoped:
+/// Rule B's scope is `widget/`, `surface/` and `composite/`, and the
+/// gallery deliberately lives beside those rather than inside them,
+/// because a cell records what a resolver produced instead of being the
+/// code that paints it. The file count moves by eight and
+/// `PIN_RULE_B_FILES` does not move at all — the split added no visual
+/// literal to any scoped directory, and changed no literal in one either.
+const PIN_FILES_SCANNED: usize = 152;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

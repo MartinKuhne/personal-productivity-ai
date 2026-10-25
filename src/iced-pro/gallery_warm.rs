@@ -15,9 +15,10 @@
 //! the state 400 ms later would look identical whichever verdict applied.
 
 use crate::gallery::{
-    AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, TOOLTIP_CARD_SIZE, gallery_navbar,
-    paint_frame, surface_layer, tooltip_card_layers, viewport,
+    AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, paint_frame, surface_layer,
+    viewport,
 };
+use crate::gallery_tooltip::{TOOLTIP_CARD_SIZE, gallery_navbar, tooltip_card_layers};
 use crate::surface::tooltip::{
     ArrivalWarmth, HoverController, TimeMs, WarmSession, cold_wait_ms, handoff_window_ms,
     warm_wait_ms,

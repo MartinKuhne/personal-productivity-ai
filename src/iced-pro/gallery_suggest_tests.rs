@@ -16,7 +16,8 @@
 //! 5. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 
 /// The number of tiers the block drives.
 const TIERS: [SuggestTier; 11] = [
@@ -202,7 +203,7 @@ fn the_field_paints_exactly_what_the_search_input_paints() {
     for state in snapshot_states() {
         for rung in RUNGS {
             let suggest = field(state, rung, false);
-            let search = crate::gallery::text_input_cell_at(InputKind::Search, state, rung);
+            let search = crate::gallery_input::text_input_cell_at(InputKind::Search, state, rung);
             assert_eq!(
                 suggest.frame.quads,
                 search.frame.quads,

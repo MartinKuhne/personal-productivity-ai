@@ -12,7 +12,8 @@
 //! 4. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 use crate::widget::button::{self, ButtonVariant};
 
 /// The expected cell count: 2 subjects x 2 polarities x 2 heights x 5

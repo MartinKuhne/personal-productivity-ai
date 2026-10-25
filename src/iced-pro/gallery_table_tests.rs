@@ -4,9 +4,8 @@
 
 use crate::composite::table_cell::{self, CellBand};
 use crate::composite::table_header::{self, SortDirection};
-use crate::gallery::{
-    Cell, CellKind, ContrastRole, StyleValue, contrast_failures, unmapped_colours,
-};
+use crate::gallery::{Cell, CellKind, ContrastRole, StyleValue};
+use crate::gallery_audit::{contrast_failures, unmapped_colours};
 use crate::gallery_table::{
     cell_band_cell, cell_band_cells, header_posture_cell, header_posture_cells, layout_at,
     table_cells, table_width, width_regime_cell, width_regime_cells,

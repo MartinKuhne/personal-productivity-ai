@@ -4,9 +4,8 @@
 
 use crate::composite::tree_row::{INDENT_STEP, MIN_INDENT_STEP, MIN_LABEL_WIDTH};
 use crate::composite::virtual_list::{COMPACT_ROW_HEIGHT, RowRung, STANDARD_ROW_HEIGHT};
-use crate::gallery::{
-    Cell, CellKind, ContrastRole, StyleValue, contrast_failures, unmapped_colours,
-};
+use crate::gallery::{Cell, CellKind, ContrastRole, StyleValue};
+use crate::gallery_audit::{contrast_failures, unmapped_colours};
 use crate::gallery_tree::{
     Posture, narrow_row, sample_viewport, style_for, tree_cells, tree_row_cell, tree_row_cells,
     virtual_list_cell, virtual_list_cells, wide_row,

@@ -12,7 +12,8 @@
 //!    and that the ring grows outward rather than eating the fill.
 
 use super::*;
-use crate::gallery::{Cell, FrameQuad, StyleValue, contrast_failures, matrix, unmapped_colours};
+use crate::gallery::{Cell, FrameQuad, StyleValue, matrix};
+use crate::gallery_audit::{contrast_failures, unmapped_colours};
 use crate::state::{BaseState, VisualState};
 use crate::token::color::Palette;
 use crate::token::{shape, size};

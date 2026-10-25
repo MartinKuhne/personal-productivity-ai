@@ -11,9 +11,8 @@
 use crate::binding::ActionPending;
 use crate::composite::breadcrumb::{self, CrumbRole};
 use crate::composite::overflow_toolbar;
-use crate::gallery::{
-    Cell, CellKind, ContrastRole, StyleValue, contrast_failures, unmapped_colours,
-};
+use crate::gallery::{Cell, CellKind, ContrastRole, StyleValue};
+use crate::gallery_audit::{contrast_failures, unmapped_colours};
 use crate::gallery_breadcrumb::{
     breadcrumb_cells, collapse_regime_cell, collapse_regime_cells, crumb_posture_cells,
     overflow_row_cell, overflow_row_cells, separator_cell, strip, strip_regime_cells, trail,

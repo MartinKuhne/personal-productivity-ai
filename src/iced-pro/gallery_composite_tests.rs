@@ -5,10 +5,8 @@ use crate::composite::card::{self, CardElevation};
 use crate::composite::form_field::{self, CaptionKind, OverflowPolicy};
 use crate::composite::list_tile::{self, Leading, LeadingExtent, TileLines};
 use crate::composite::settings_row::{self, DEFAULT_CONTROL_HEIGHT};
-use crate::gallery::{
-    AuditClass, Cell, CellKind, ContrastRole, StyleEntry, StyleValue, judge, measure, rgb8,
-    threshold,
-};
+use crate::gallery::{Cell, CellKind, ContrastRole, StyleEntry, StyleValue, rgb8};
+use crate::gallery_audit::{AuditClass, judge, measure, threshold};
 use crate::gallery_composite::*;
 use crate::state::BaseState;
 use crate::token::color::Palette;

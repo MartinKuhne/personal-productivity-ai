@@ -16,7 +16,8 @@
 //! 5. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 
 /// The expected cell count: 12 slider + 4 slider-tier + 12 number box +
 /// 7 number-box-tier.
@@ -166,7 +167,7 @@ fn every_range_audit_pair_clears_its_floor() {
                 "{}: {} failed at {:.4}",
                 cell.id,
                 pair.channel,
-                crate::gallery::measure(pair).0
+                crate::gallery_audit::measure(pair).0
             );
         }
     }

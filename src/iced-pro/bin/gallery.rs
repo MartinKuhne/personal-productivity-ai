@@ -18,6 +18,7 @@
 //! ```
 
 use iced_pro::gallery::{self, Cell, CellKind};
+use iced_pro::gallery_audit::{contrast_failures, manifest, unmapped_colours};
 
 use std::error::Error;
 use std::fs;
@@ -153,14 +154,14 @@ fn run(output: &Path) -> Result<(), Box<dyn Error>> {
     let cells_dir = output.join("cells");
     fs::create_dir_all(&cells_dir)?;
 
-    fs::write(output.join("manifest.txt"), gallery::manifest())?;
+    fs::write(output.join("manifest.txt"), manifest())?;
 
     for cell in &cells {
         fs::write(cells_dir.join(cell_filename(&cell.id)), cell.snapshot())?;
     }
 
-    let unmapped = gallery::unmapped_colours(&cells);
-    let contrast = gallery::contrast_failures(&cells);
+    let unmapped = unmapped_colours(&cells);
+    let contrast = contrast_failures(&cells);
     let not_owned = cells
         .iter()
         .filter(|cell| cell.kind == CellKind::NotOwned)

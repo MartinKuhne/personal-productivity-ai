@@ -11,7 +11,8 @@
 //! 4. **Byte stability.** Two calls produce identical snapshots.
 
 use super::*;
-use crate::gallery::{Cell, StyleValue, judge, unmapped_colours};
+use crate::gallery::{Cell, StyleValue};
+use crate::gallery_audit::{judge, unmapped_colours};
 
 /// The expected cell count: 5 dots + 25 pills + 20 chips.
 const EXPECTED_CELLS: usize = 50;

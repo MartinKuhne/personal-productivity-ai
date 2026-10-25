@@ -1723,7 +1723,7 @@ fn a_button_with_nothing_in_flight_paints_no_spinner_layer() {
     };
     let padding = iced::Padding::from(8.0);
 
-    for variant in crate::gallery::BUTTON_VARIANTS {
+    for variant in crate::gallery_button::BUTTON_VARIANTS {
         for state in [REST, HOVERED, PRESSED, FOCUSED, DISABLED] {
             let style = expected_style(variant, state);
             assert_eq!(
