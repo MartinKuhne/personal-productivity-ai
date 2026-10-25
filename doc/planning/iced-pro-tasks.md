@@ -1,9 +1,13 @@
 # iced-pro — Implementation Task Ledger
 
 > **Status:** In progress — increment ledger for implementing
-> [`ui-framework.md`](ui-framework.md) as a new workspace crate.
+> [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) as a new workspace crate.
 > **Date:** 2026-10-21
-> **Spec:** [`doc/planning/ui-framework.md`](ui-framework.md) (UIF-* requirement IDs)
+> **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) (UIF-*
+> requirement IDs). The spec used to live in *this* directory as
+> `ui-framework.md`; commit `edbe04a` moved it inside the crate it governs.
+> Read §3c's opening record before treating any older path in this file as
+> current.
 > **Supervisor:** OpenCode agent session (orchestrates one subagent per increment)
 
 ---
@@ -37,7 +41,7 @@
 - **Docs mandatory** (`RUST-010`, `RUST-011`): `//!` on every module, `///` on
   every `pub` item. Cite the spec ID (`UIF-TOK-001`, `UIF-CMENU-001`, …) in the
   doc comment of the item implementing it.
-- **Read before writing:** `doc/planning/ui-framework.md` (the spec),
+- **Read before writing:** `src/iced-pro/spec.md` (the spec),
   `AGENTS.md` (root), `doc/distill/iced.md` (iced conventions).
 
 ---
@@ -824,7 +828,7 @@ future increments down a dead end.
       (`UIF-MOD-002` is defined once and cross-referenced once in `UIF-WIN-003`).
       **Disposition: 25 Implemented · 14 Partial · 7 NotOwned = 46**, asserted to
       partition the set exactly.
-      **The audit bites.** A test reads `doc/planning/ui-framework.md` at test
+      **The audit bites.** A test reads `src/iced-pro/spec.md` at test
       time, extracts every numbered ID by regex, and asserts both directions:
       every spec ID is classified, and every manifest entry exists in the spec.
       Verified by injection — adding a fake `UIF-FAKE-999` to the spec produced
@@ -1211,6 +1215,76 @@ D-3 said "standalone first — wiring is a later, separate project". That
 later project started here. These increments **do** touch `src/app/**`;
 they are the exception to the M-series constraint, taken under a separate
 supervisor instruction on branch `feature/iced-pro`.
+
+### The spec move — `doc/planning/ui-framework.md` → `src/iced-pro/spec.md`
+
+**This record is here because the spec is no longer where every other record in
+this file says it is.** Commit `edbe04a` ("doc update") moved the spec out of
+`doc/planning/` and into `src/iced-pro/`, the crate it governs, and rewrote it
+in the same step: 1548 lines to 1597, 138 insertions across 89 deletions. It
+also added a ninety-first requirement. Every reference to the
+old path in this ledger is now wrong; the ones that matter have been repointed,
+and the ones that are deliberate history have been left alone and labelled.
+
+**The spec is now co-located with the crate it governs, and the coverage reader
+resolves it with no traversal at all.** `spec_coverage_tests.rs:39`'s
+`spec_path()` used to walk two directories up —
+`CARGO_MANIFEST_DIR/../../doc/planning/ui-framework.md`. It is now
+`CARGO_MANIFEST_DIR/spec.md`. That is a better invariant rather than merely a
+different path: the reader no longer reaches outside the crate boundary to find
+the thing it audits, so the crate is self-contained for conformance checking.
+
+**The break was one function and it was total, and that is the lesson.**
+`edbe04a` repointed nothing that reads the spec, so the crate's own conformance
+gate went red through no fault of the code. Seven coverage tests failed — with
+**one** panic message, `cannot read the spec … (os error 2)`. Not seven
+findings: one dead path, because every one of those tests opens that file before
+it can assert anything. A coverage gate that cannot read the spec it covers
+reports nothing at all, which is worse than reporting failures, because a tree
+that reports nothing looks like a quiet tree. The failure mode of a moved
+conformance input is not "fewer assertions pass"; it is "no assertions run".
+
+**What moving a gated file requires, stated for the next contributor:** a spec
+move is not a docs-only change. The move is observable only through the gate that
+reads it, and that gate fails at one place no matter how many assertions hang off
+it. Repoint every reader in the same commit as the move, then confirm the reader
+still reads. A green coverage suite immediately after a spec move means nothing
+until someone has seen it open the new file — and a *red* one, as here, is the
+only reason the move was noticed at all. `0076e8d` did the repoint and the
+classification together, which is the shape the next one should take.
+
+**`UIF-MOD-004` — Scrollable Sub-Region Height Solving (`spec.md:1379`), added
+by the same commit; classified Partial.** The requirement: solve a scrollable
+sub-region as
+`subregion_max_h = modal_height - (header_band + 2 × body_padding + footer_band)`
+with every term taken from tokens, never borrow the card's outer height constant,
+and add a named constant to the closed §2.2 table (`spec.md:73`) when a
+sub-region needs a stable cap — `ATTRIBUTIONS_LIST_MAX_H = 200` for the
+Attributions credits list.
+
+*What is genuinely missing:* there is no sub-region solver. `ModalSizing::solve`
+produces the **card's** bounds from the viewport and stops there; nothing
+derives a sub-region from the solved card, and `ATTRIBUTIONS_LIST_MAX_H` is not
+defined in the token set.
+
+*What is not broken, said plainly so it is not re-fixed:* the specific failure
+the requirement names does not exist in this app, and it does not exist by a
+**better mechanism than the spec asks for**. `credits_list`
+(`attributions.rs:306`) sizes the list `.height(Length::Fill)` (`:309`) — a
+remainder rather than a chosen number — so it structurally cannot borrow the
+card's outer 480px constant and cannot overflow past the header and footer
+bands. The hazard is unreachable rather than defended against. Claiming
+`Implemented` would hide that the named cap is absent; claiming the app
+overflows would be false. `Partial`, with both halves stated, is the only
+honest row.
+
+*The cap is not cosmetic, so this is live work:* a `Fill` remainder in a 480px
+card leaves the credits list roughly 330px against the spec's 200px cap.
+
+**The ID total moves 90 → 91.** `EXPECTED_SPEC_ID_COUNT` (`spec_coverage.rs:84`)
+is pinned at 91 with a comment naming the commit that added the ninety-first, and
+the two-directional audit fails the build if the spec and the manifest disagree
+either way.
 
 ### INT-1 — Token bridge (done; recorded in `ARCHITECTURE_C4.md`)
 
@@ -2018,7 +2092,7 @@ not, so `wake_task` is what stops a `Hold` waiting on a mouse jiggle that
 may never come.
 
 **A spec drift was flagged rather than fixed, and the spec was taken.**
-§4.8.2 (`ui-framework.md:1421`) requires that moving to a sibling row on
+§4.8.2 (`spec.md:1452`) requires that moving to a sibling row on
 an ancestor card retires the deeper child branch after the corridor check.
 The first cut left it unimplemented and flagged it as a judgement call. The
 distinction that makes the rule safe — and that the first cut's hesitation
@@ -2334,10 +2408,28 @@ lines**.
 
 ### The INT series — what the integration work established
 
-Sixteen records spanning INT-1 through INT-11; 7724 → 8022 workspace
-tests (+298), every gate independently re-run at every step with
+Nineteen records spanning INT-1 through INT-14; 7724 → 8048 workspace
+tests (+324), every gate independently re-run at every step with
 `--workspace` and doc-warning lines counted explicitly. INT-9 through
-INT-11 alone are 7957 → 8022 (+65).
+INT-11 alone are 7957 → 8022 (+65); INT-12 through INT-14 are
+8022 → 8048 (+26).
+
+**Two headlines from the last round, and they are the same failure in
+different clothes.** First: a spec rewrite landed mid-stream and the
+conformance gate caught the move only by going **fully red** — seven tests,
+one panic message, because every coverage test opens the spec file before it
+can assert anything. That is the gate working, but only after the fact, and
+only because a red gate is loud. The spec now lives inside the crate it
+governs (`src/iced-pro/spec.md`); see the record at the head of §3c.
+Second: a lint gate was **passing code it could not read** — a wrapped `f32`
+const was classified `TokenBound` without its value ever being examined, and
+the count of "compliant" constants went up as though nothing had happened.
+The lesson generalises past this parser: a compliance check must distinguish
+"compliant" from "unread", or its green means nothing. That is the same
+class of failure as the "impossible because iced can't" claims of
+INT-9..11 — a confident verdict delivered without looking. The difference
+is that those were written by a person and this one was written into the tool,
+which makes it quieter and longer-lived.
 
 **One ownership contract emerged and held across every surface.**
 `ModalHost` and `InputDialogHost` self-register into `SurfaceRegistry` and
@@ -2373,6 +2465,23 @@ that needed a click because the aiming corridor never ran (INT-9), tree
 rows that never highlighted on hover (INT-10), and the unsaved marker
 rendered at 12px against the spec's 6px with neither the tab-strip accent
 bar nor the tree selection bar and depth guides present at all (INT-11).
+
+**The last three increments found four more defects — but in the spec and in
+the gates rather than in the app.** (1) `spec.md:883`'s mandated chip fill
+measures `1.067676:1` against the selection band it exists to survive, and
+no danger or warning token in the palette reaches `3.00` there — the rule
+asks for something the palette cannot express (INT-12, ruled and built in
+INT-13). (2) The framework's `3.00` coincident-fill obligation is
+**declarative only**: `gallery_audit::judge()` (`gallery_audit.rs:152`)
+returns `true` unconditionally for every class except `Judged`, so nothing
+in the enforcement path ever compares a fill against its mount (INT-13).
+(3) The token-lint gate blessed declarations it could not read as
+compliant (found INT-13, fixed INT-14). (4) That fix surfaced a literal
+that had shipped invisibly inside `TAG_TRIGGER_VERTICAL_PADDING`
+(`top.rs:309`) (INT-14). Three of the four are findings about the checking
+machinery rather than the checked code, and that is the more disturbing
+half: a gate that cannot see does not merely fail to help, it actively
+manufactures confidence.
 
 **The headline of the last three increments: the "impossible" claims were
 the blocking defect, not the missing code.** Four separate capabilities
@@ -2791,6 +2900,11 @@ postures: at rest it is a danger-coloured text label, and on selection it
 resolves to the identical ink as the label beside it, so it carries no
 distinction where the rule is about.
 
+**Superseded by INT-13.** The block recorded below stood until the spec author
+ruled on it. The measurement here is what that ruling was made from and is
+unchanged; the chip INT-13 builds is the answer to it. Read the rest of this
+piece as the analysis, and INT-13 as the outcome.
+
 Two independent blockers, both verified against the resolver's own output:
 
 1. **The badge atom cannot produce the mandated chip.** `badge::resolve_style`
@@ -2866,3 +2980,260 @@ generically in framework-free assertions and must not be repointed.
 **Gate state: 8038 workspace tests pass, 6 skipped.** `cargo check` 0 errors /
 0 warnings; `cargo clippy -D warnings` 0; `cargo fmt --check` 0 diffs;
 `cargo doc --no-deps` 0 warning lines.
+
+---
+
+### INT-13 — The `[PDF]` chip built to the mandate, and the mandate recorded as broken
+
+INT-12 left the badge blocked: `spec.md:883` mandates a chip on
+`status.danger.fill` behind `text.strong`, and the measurement said that fill is
+nearly invisible against the very band the rule exists to protect. The spec
+author ruled: **"if the spec mandates it, then follow the spec."** So this builds
+it exactly as written and records the measurement rather than quietly fixing the
+mandate or quietly hiding the number.
+
+**The chip as built — every colour from the atom's own resolvers.**
+
+| Property | Value | Source |
+|---|---|---|
+| fill | `status.danger.fill` | `badge::resolve_tone(BadgeTone::Danger, &pro).solid_fill` (`badge.rs:437`) |
+| foreground | `text.strong` | constant in **all four** postures |
+| radius | `shape::RADIUS_PILL` (999; iced clamps to 9px on an 18px chip) | `shape` |
+| height | 18px | `badge::COUNT_HEIGHT` = `size::BADGE_COUNT_HEIGHT` (`size.rs:209`) |
+| h-padding | 8px | `badge::CHIP_H_PADDING` = `space.sm` (`badge.rs:157`) |
+| text | `[PDF]` | `strings::TREE_PDF_BADGE` |
+
+No colour is hand-picked, so the "use the framework atom" obligation holds even
+though the atom cannot produce this shape itself. `contrast::assert_fill_foreground_lock`
+runs on the pair as actually built rather than on a claim about it.
+
+**The atom still cannot produce it — re-verified against `resolve_style`'s three
+arms, not assumed.** Solid `status.danger.fill` is reachable only through
+`BadgeKind::Count(u32)`, whose text is a number. `BadgeKind::Status` is
+hardcoded to `surface_raised` with the tone in the **foreground and border** —
+which is the danger-coloured text label the rule forbids — plus a mandatory
+leading glyph from a fixed four-set, none of which means "PDF-backed". §3.8
+(`spec.md:559`) defines exactly three kinds, so adding a text-bearing solid kind
+would contradict the spec's own inventory. Assembling from the atom's resolvers
+is the only way to follow `:883` without breaking §3.8.
+
+**The forbidden mechanism is now structurally absent, not merely avoided.**
+`pdf_badge_colour` is **deleted**, not repurposed. That function routed the badge
+through the selection lock, which is the thing `:883` forbids. With it gone there
+is no code path that could produce a lock-varying badge colour; the chip's
+foreground is a constant. Deleting the wrong function is a stronger guarantee
+than leaving it in and not calling it.
+
+**Contrast recomputed from raw sRGB via `token::contrast::contrast_ratio`; none
+of these figures is transcribed from the spec.**
+
+| Pair | Measured | Verdict |
+|---|---|---|
+| `text.strong` / `status.danger.fill` | **5.126966** | passes — spec `5.13`, atom header `5.1270`, both accurate |
+| `status.danger.fill` / `accent.fill` (selected band) | **1.067676** | fails `MIN_COINCIDENT_FILL_CONTRAST` (`contrast.rs:271`) `3.00` by **1.932324** |
+| `status.danger.fill` / `surface.base` | 3.880532 | visible at rest |
+| `status.danger.fill` / `surface.hover` | 3.166606 | visible on hover |
+| `status.danger.text` / `accent.fill` | 1.586348 | the forbidden pairing, pinned illegal |
+
+The chip's own FG/BG pair is genuinely good — 5.13:1, comfortably AA, and it is
+the pair the spec asks for. What fails is the chip's *boundary* against the band
+it sits on once the row is selected. Visible at rest, visible on hover,
+collapsed on selection: the mandated mechanism fails precisely in the one
+posture the rule exists to address.
+
+**How the shortfall is kept from reading as a pass.**
+`the_chip_fill_collapses_on_the_selected_band_recorded_shortfall_not_a_pass`
+opens with "THIS TEST RECORDS A FAILURE. IT IS NOT A PASSING RESULT." It asserts
+the value is BELOW the floor **on purpose** and pins `1.067676` and the
+`1.932324` gap to `1e-5`, so a palette retune that made the chip visible would
+fail the test rather than silently pass it. The stated correct response, written
+into the test, is to **delete it, not flip the comparison** — flipping would turn
+a recorded failure into a claim that the problem was solved. The ruling that put
+this here is recorded in the comment so the decision trail lives in the code and
+not only in a commit message.
+
+**The obligation that "should" catch this catches nothing — and that is a finding
+about the framework's enforcement surface, not about this chip.**
+`badge::badge_chrome_class` (`badge.rs:420`) does classify a solid pill
+`ChromeClass::CoincidentWithFill`, and `ChromeClass::minimum_contrast()` does
+return `Some(3.00)` (`contrast.rs:343`). But `gallery_audit::judge()`
+(`gallery_audit.rs:152`) returns `true` **unconditionally** for every class
+except `Judged`. Nothing in the enforcement path ever compares a badge fill
+against a selection band. The 3.00 coincident-fill obligation is **declarative
+only**. Nothing was bypassed here because there was nothing to bypass — and a test
+now asserts that fact directly, so nobody later reasons "the framework would have
+caught it."
+
+**Selection lock unmoved, as `:883` requires.** No colour path for label,
+chevron, depth guides or selection bar was touched. All four guard tests pass
+unchanged: `the_selection_lock_still_holds_on_a_selected_and_hovered_pdf_row`,
+`hover_moves_guide_geometry_never_colour_only_the_band`,
+`selection_outranks_the_pointer_so_hover_cannot_wash_it_out`,
+`the_depth_guides_land_on_indent_step_multiples`.
+
+**Geometry: the chip fills the declared slot edge-to-edge, so charged width equals
+painted width by construction.** `PDF_BADGE_SLOT` (`left.rs:426`) =
+`PDF_BADGE_TEXT_ALLOWANCE` (20 = `space.lg + space.xs`) +
+`PDF_BADGE_CHIP_PADDING_TOTAL` (8 + 8) = **36** — the same 36 as before, so
+`pdf_badge_fits`, `PDF_BADGE_CHARGE` and every downstream floor computation are
+unmoved. Row height stays at `HIT_TARGET_MIN` 24; the 18px chip sits in a 20px
+interior with 2px spare and its 16px line box inside the chip. Worst case at
+`LEFT_PANE_MIN_W = 150`: row_width 142, allowance 14, drawn 14, label 120 ≥ 96.
+The fit gate is **load-bearing** — allowance minus drawn is 0, below
+`PDF_BADGE_CHARGE`, so the chip is suppressed; forcing it in would leave 80px and
+breach the floor. Both halves are asserted, which is what proves the suppression
+is what protects the 96px floor rather than the layout happening to be roomy.
+The label never shifts: `row_box` takes no PDF-backed input.
+
+**A gate blind spot found, reported, and not exploited.** The first cut of this
+work hit a wrapped `PDF_BADGE_SLOT` that the token-lint gate classified without
+reading. It was restructured onto one line so it stayed gated — a workaround
+around a real hole rather than a fix to it. The hole itself, the survey that sized
+it, and the fix are INT-14's record. What belongs here is only the fact that the
+chip work is what surfaced it, and that the workaround was reported instead of
+left as the answer.
+
+**Open deviation, deliberately left.** The row **label** is still danger-tinted at
+rest and on hover via `row_label_colour`'s error tint (`left.rs:2019`). Read
+literally, `:883`'s closing clause — "never in a danger-colored text label" —
+reaches that too, and more broadly than the badge. Changing it is a wider
+behavioural change to every PDF-backed row than the badge rework that was scoped,
+so it is recorded as an open deviation in that function's doc rather than folded
+in here. That doc also falsely claimed the app has no badge at all; corrected.
+
+**Correction to this increment's own brief.** `PDF_BADGE_SLOT` was described in
+the brief as `space::XL + space::MD = 28px`. `XL` is 24 and `MD` is 12, so it
+is **36**. The original doc comment was right and the brief's arithmetic was
+wrong.
+
+Tests: 8038 → 8040 (+2) —
+`the_chip_fill_collapses_on_the_selected_band_recorded_shortfall_not_a_pass` and
+`the_badge_charge_cannot_breach_the_label_floor_at_the_minimum_pane`, both
+confirmed discovered by `cargo nextest list`.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8040 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
+lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
+
+---
+
+### INT-14 — The token-lint gate was passing code it could not read
+
+**The hole.** `classify_scalar` (`token_lint.rs:1159`) called
+`numeric_literals(&c.expr)` and returned `TokenBound` — a **pass** — when the
+result was empty. The parser is line-oriented by design, so a `pub const X: f32`
+whose right-hand side wrapped onto a second line yielded an empty expression, and
+"I could not read this" and "this is bound to tokens" produced the identical
+verdict. The parser's own doc comment named the correct principle — *"a parser
+that quietly gives up on a construct is more dangerous than one that simply does
+not look"* — and then did not honour it. It gave up, and the giving-up was
+indistinguishable from compliance.
+
+**Survey before fixing, run against the gate's real parser rather than a regex.**
+A scratch harness called the actual `f32_consts` / `classify_scalar` /
+`is_visual_name` / `in_scope` over both trees, so these are ground truth and not
+a pattern-match guess:
+
+| Tree | Files in visual scope | Gated `f32` consts | Wrapped |
+|---|---|---|---|
+| `iced-pro` | 81 | 233 | **2** |
+| `app` | 46 | 112 | **2** |
+
+The four wraps: `composite/form_field.rs:106` `STACKED_HEIGHT` (token-only),
+`composite/settings_row.rs:80` `MIN_HEIGHT` (token-only),
+`ui_iced/panels/left.rs:314` `ROW_WIDTH_SLACK` (token-only), and
+`ui_iced/panels/top.rs:309` `TAG_TRIGGER_VERTICAL_PADDING`
+(**literal-bearing**).
+
+**All four are rustfmt-produced** — each right-hand side exceeds the repo's
+100-column limit. That is what makes this a live trap rather than a historical
+curiosity: any gated constant that grows by one token in a future edit gets
+wrapped automatically and silently leaves the gate. Nobody has to choose to
+bypass it. Formatting does.
+
+**Treatment: parse the continuation, with `Unreadable` as the backstop.**
+`join_continuation()` (`token_lint.rs:1086`) appends following lines until the
+terminating semicolon — the same boundary the compiler uses — so the expression
+is actually read. It stops and returns `None` on a blank line or on a line that
+opens a new item (`pub` / `const` / `fn` / `impl` / `struct` / `enum` / `trait` /
+`#`), via `opens_new_item()` (`token_lint.rs:1113`), so a malformed declaration
+cannot swallow unrelated code below it. `redact_comments_and_strings` runs first,
+so a semicolon inside a string on a continuation line cannot mis-bind the
+expression boundary.
+
+**The ordering inside `classify_scalar` is the whole point.** It now checks for an
+empty expression **before** the empty-literals branch. An empty expression has no
+literals either, so reading the two as one case is exactly how the hole worked.
+"No literals" is a verdict about what was seen. "No expression" means nothing was
+seen.
+
+**New `ScalarClass::Unreadable` (`token_lint.rs:183`) is deliberately not
+compliant** — `is_compliant()` returns `false` for it (`token_lint.rs:194`), it
+carries its own label `unreadable-expr`, it emits a distinct Rule B finding, and
+it adds a `ScanStats.unreadable` counter to the report line
+(`token_lint.rs:867`: `…, N unreadable`) so a clean tree can be told apart from
+an unread one. Without that counter, "nothing to report" and "nothing readable"
+print the same way.
+
+**The three token-only wraps are now token-bound because the gate actually saw the
+tokens, not because it saw nothing.** That is the difference between a gate that
+works and a gate that waves things through.
+
+**It exposed a real violation on shipped code.** `TAG_TRIGGER_VERTICAL_PADDING`
+carries a literal `/ 2.0`. Under the old gate that was invisible. It is now a
+finding, and it is on the app allow-list **with a reason** rather than re-tuned:
+the `2.0` is a centring divisor, not a measurement, and binding it to a spacing
+rung would call a non-spacing value a spacing value. Collapsing the expression to
+the `space.xs` it happens to yield today would discard the rung-derivation the
+constant exists to carry. The non-vacuity assertion proves the allow-list entry
+suppresses a real finding rather than padding the list.
+
+**Non-vacuity proven by reproducing the old bug, not by asserting the new
+behaviour.** The join and the unreadable check were temporarily disabled and the
+new tests were run against them. Both failed exactly as they should — a wrapped
+literal reported `token_bound = 1` with **zero** findings, i.e. reported
+compliant. With the fix both pass. The simulation was reverted and verified clean;
+no scratch harness or marker remains in the tree. A test that only ever sees the
+fixed code proves nothing; this one was shown to catch the bug it exists for.
+
+**Nothing is exempted.** No wrapped declaration is skipped, which would have been
+the same hole with better documentation.
+
+**Pins moved, each with an explanatory comment.** `PIN_APP_TOKEN_BOUND` **97 →
+96** — `TAG_TRIGGER_VERTICAL_PADDING` left the compliant count and became a real
+finding. `PIN_APP_ALLOW_ENTRIES` **12 → 13** — the new allow-list entry, and the
+report assertion with it, plus a new `0 unreadable` assertion. Not moved:
+`PIN_FILES_SCANNED` 152, `PIN_RULE_B_FILES` 81, `PIN_TOKEN_BOUND` 193,
+`PIN_APP_FILES_SCANNED` 158, `PIN_APP_RULE_B_FILES` 45,
+`PIN_APP_SURFACE_BOUND` 3 — `rule_b_files` counts files in scope rather than
+const content, so it is immune to this class of change. No rendered value changed
+anywhere: `TAG_TRIGGER_VERTICAL_PADDING`'s expression is byte-for-byte what it
+was.
+
+**Correction to INT-13's own report.** INT-13 said the wrapped `PDF_BADGE_SLOT`
+"silently dropped out of the gate — the token-bound count read 96 instead of 97."
+That is wrong. **It did not drop out.** The old code counted it, as
+`token_bound`. That *is* the defect: it was counted as compliant without its
+value being read. The count was never evidence of the hole; the hole was invisible
+precisely **because** the constant was being counted as a pass. The 96-to-97
+delta came from a different constant added in the same edit. The blind spot itself
+was exactly as described; the diagnosis of the symptom was not.
+
+Tests: 8040 → 8048 (+8) — 7 in `token_lint_tests`
+(`a_wrapped_literal_is_not_reported_token_bound`,
+`a_wrapped_token_only_expression_is_read_rather_than_assumed`,
+`wrapping_is_transparent_to_the_value_and_never_to_the_verdict`,
+`an_unreachable_expression_is_reported_unreadable_not_approved`,
+`unreadable_is_never_compliant_and_never_token_bound`,
+`a_single_line_literal_still_violates_exactly_as_before`,
+`a_continuation_spanning_several_lines_is_joined_in_full`) and 1 in the app gate
+(`a_rewrapped_pdf_badge_slot_cannot_smuggle_a_literal_past_rule_b`), all
+confirmed discovered via `cargo nextest list`.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8048 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
+lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
