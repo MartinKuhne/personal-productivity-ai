@@ -762,6 +762,48 @@ pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
 /// (UI-038).
 pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
 
+/// Title of the confirmation raised when the user tries to leave the inline
+/// editor with unsaved edits (`UIF-MOD-002`).
+pub const DISCARD_CHANGES_WINDOW: &str = "Unsaved Changes";
+
+/// Confirm-button label for [`DISCARD_CHANGES_WINDOW`] — the destructive
+/// half of the unsaved-edit guard: throw the buffer away and close.
+pub const DISCARD_ACTION: &str = "Discard";
+
+/// Asks the user whether the unsaved edits in `name` should be thrown away,
+/// e.g. `Discard unsaved changes to "note.md"?`.
+///
+/// A formatting helper rather than a bare constant because the file name is
+/// interpolated into the sentence — the same shape as
+/// [`format_delete_confirm_prompt`].
+#[must_use]
+pub fn format_discard_changes_prompt(name: &str) -> String {
+    format!("Discard unsaved changes to \"{name}\"?")
+}
+
+/// Recovery-button label for a validation failure the user must fix in the
+/// buffer, e.g. `Fix line 3`.
+///
+/// The line number is the one the structured error carries
+/// (`UIF-MOD-003`'s "where"), so the button says what pressing it is for
+/// rather than showing a generic "OK".
+#[must_use]
+pub fn format_editor_recovery_label(line: u32) -> String {
+    format!("Fix line {line}")
+}
+
+/// Error surfaced when the editor's save could not even be queued for
+/// background execution (`UIF-MOD-003`: a failing action must be shown,
+/// not swallowed).
+pub const EDITOR_SAVE_QUEUE_ERROR: &str = "Could not queue the save. Try again.";
+
+/// Recovery-button label for a save that failed and can be re-run.
+pub const EDITOR_RETRY_LABEL: &str = "Retry";
+
+/// Recovery-button label when the failure names a region rather than a
+/// line, so the button still says what it is for.
+pub const EDITOR_FIX_LABEL: &str = "Fix the buffer";
+
 /// Marker glyph rendered in front of an unordered markdown list item
 /// (U+2022 BULLET).
 pub const LIST_BULLET: &str = "\u{2022}";

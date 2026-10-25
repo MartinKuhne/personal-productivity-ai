@@ -82,17 +82,106 @@
 //!
 //! Unit tests live in the sibling `editor_tests.rs` sidecar.
 
+//! # The framework owns the box, the app owns the answer
+//!
+//! As of integration increment **INT-5b** this module is a consumer of
+//! [`iced_pro::surface::modal`] rather than a re-implementation of §4.6.
+//! Nothing here carries a card measurement of its own:
+//!
+//! | Concern | Owner |
+//! |---|---|
+//! | Card width, height, gutter clamp | [`ModalSizing::editor`] via [`editor_size`] |
+//! | Card surface, border, radius, padding | [`ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
+//! | Header / footer divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
+//! | Title, buffer and status type; section gaps | `iced_pro::token::{typography, space}` |
+//! | Footer button geometry and states | [`iced_pro::widget::button_widget::Button`] |
+//! | Inverted canvas colours | [`EditorColors::inverted`] → `iced_pro::token::color::EditorPalette::inverted` |
+//! | Which buffer is open, what dismisses it | `OverlayState::editor` + `OverlayState::close_topmost` |
+//!
+//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not** used,
+//! for the same reason [`crate::ui_iced::about`] and
+//! [`crate::ui_iced::dialogs`] did not take it: the host self-registers
+//! its surface into a
+//! [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry) and
+//! pushes its own focus trap, while this app already owns
+//! `SURFACE_ID_EDITOR` in
+//! [`crate::ui_iced::app::OverlayState::sync_surfaces`] and owns
+//! dismissal in [`crate::ui_iced::app::OverlayState::close_topmost`].
+//! Two owners of one surface id is the collision INT-4 settled. What the
+//! host *would* have guarded for us is guarded here instead, by
+//! [`guard_leave`] — see the next section.
+//!
+//! # The unsaved-edit guard (`UIF-MOD-002`) — the real value of this increment
+//!
+//! Before this increment [`EditorViewModel::is_dirty`] existed and **no
+//! dismiss path consulted it**: `Escape`, a scrim click and the `Cancel`
+//! button all reached `close_editor` and dropped the buffer silently. The
+//! spec's rule is that every user-initiated close routes through one
+//! `attempt_dismiss` that refuses while `dirty` is set unless the user
+//! confirmed or explicitly cancelled.
+//!
+//! The rule is [`guard_leave`], and it reads the gesture, not just the
+//! flag:
+//!
+//! | Gesture | Clean buffer | Dirty buffer |
+//! |---|---|---|
+//! | [`LeaveGesture::Escape`] | closes | **refused** → discard confirmation |
+//! | [`LeaveGesture::Scrim`] | closes | **refused** → discard confirmation |
+//! | [`LeaveGesture::Cancel`] | closes | closes — this *is* the explicit discard |
+//!
+//! `Save` is absent from that table because it is not a guarded gesture: it
+//! commits the buffer, so there is no work for it to throw away.
+//!
+//! The confirmation is not a new surface. It reuses the INT-4 small dialog
+//! as [`DiscardEditorChanges`](crate::ui_iced::dialogs::DialogKind::DiscardEditorChanges),
+//! whose control row is the same
+//! [`InputControl::Confirmation`](iced_pro::surface::input_dialog::InputControl::Confirmation)
+//! the delete confirmation uses and whose
+//! primary button is [`ButtonVariant::Danger`] labelled
+//! [`strings::DISCARD_ACTION`]. Composing the two surfaces works because
+//! the dialog is registered *above* the editor in the modal band
+//! (`sync_surfaces` registers `SURFACE_ID_EDITOR` before
+//! `SURFACE_ID_DIALOG`), so:
+//!
+//! * a dirty `Escape` leaves the editor mounted, consumes the key
+//!   ([`UnwindAnswer::Unwound`](iced_pro::surface::zorder::UnwindAnswer::Unwound)) and opens the confirmation centred over
+//!   it;
+//! * `Discard` closes the dialog **and** the buffer;
+//! * `Cancel` closes only the dialog — the editor, and the edits in it,
+//!   stay exactly where they were;
+//! * a second `Escape` closes the confirmation, and a third asks again.
+//!   Re-asking is the correct failure mode; silently discarding is not.
+//!
+//! # What this increment does NOT wire (`UIF-MOD-001`)
+//!
+//! **`UIF-MOD-001` (strict keyboard focus trap + restoration) is NOT
+//! provided**, for the same reason INT-5a refused to claim it: the app
+//! captures only `Escape` off its keyboard stream
+//! (`ui_iced/subscription.rs`, `escape_to_message`) and leaves `Tab` to
+//! iced's built-in router, which knows nothing about a trap. Nothing
+//! would feed `FocusState::push_trap` the `Tab` events it needs, and the
+//! editor's focusable set is never enumerated by the app, so pushing a
+//! trap here would be a trap on paper only. Focus can still reach the
+//! panes under the scrim.
+//!
+//! Unit tests live in the sibling `editor_tests.rs` sidecar.
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use iced::widget::{Column, Row, container, space, text, text_editor};
-use iced::{Alignment, Element, Length};
+use iced::widget::{Column, Row, Space, container, text, text_editor};
+use iced::{Alignment, Element, Length, Size};
+
+use iced_pro::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
+use iced_pro::token::{shape, space, typography};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::markdown::{DocumentContent, MarkdownErrorKind, MarkdownParseError, validate_markdown};
 use crate::ui::strings;
-use crate::ui::theme::Palette;
+use crate::ui::theme::{EditorColors, Palette};
 use crate::ui_iced::message::{EditorMessage, Message};
-use crate::ui_iced::overlay::{ConfirmCancel, confirm_cancel_buttons, modal};
+use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
 
 #[cfg(test)]
 #[path = "editor_tests.rs"]
@@ -108,23 +197,118 @@ pub const MIN_UNDO_STEPS: usize = 100;
 /// undo steps exist, so storing exactly 100 would ship 99 and miss UI-042.
 pub const UNDO_CAPACITY: usize = MIN_UNDO_STEPS + 1;
 
-/// Default editor dialog width in points (UI-038).
-pub const EDITOR_DIALOG_WIDTH: f32 = 800.0;
+/// §4.6.2 — the Inline Document Editor's sizing policy: 80% of the
+/// viewport on both axes, clamped to `520..=960` wide and `380..=760`
+/// tall.
+///
+/// Held as the policy object rather than two numbers, so the card states
+/// *which* modal it is and the framework does the clamping. This replaced
+/// the app's fixed `800 x 600`, which was the same size on a 1024x768
+/// laptop and a 3840x2160 monitor.
+pub const EDITOR_SIZING: ModalSizing = ModalSizing::editor();
 
-/// Default editor dialog height in points (UI-038).
-pub const EDITOR_DIALOG_HEIGHT: f32 = 600.0;
+/// Stable id of the editor card box itself, so a layout test can address
+/// the rendered card rather than only its contents (AGENTS §5).
+pub const EDITOR_CARD_ID: &str = "editor.card";
 
-/// Text size of the dialog title.
-pub const EDITOR_TITLE_SIZE: f32 = 18.0;
+/// Stable id of the editing surface.
+///
+/// AGENTS §6 names this id as the one that must survive every rebuild:
+/// the `text_editor` widget is mounted under it unconditionally, so the
+/// caret and selection are never dropped by a branch in the card. It is
+/// also the control [`Recovery::FocusControl`] on a validation error
+/// points at.
+pub const EDITOR_TEXT_ID: &str = "editor.buffer";
 
-/// Text size of the editing area.
-pub const EDITOR_BODY_SIZE: f32 = 14.0;
+/// Stable focus id of the footer `Save` button.
+pub const EDITOR_SAVE_BUTTON_ID: &str = "editor.save";
 
-/// Text size of the status bar and validation message.
-pub const EDITOR_STATUS_SIZE: f32 = 12.0;
+/// Stable focus id of the footer `Cancel` button.
+pub const EDITOR_CANCEL_BUTTON_ID: &str = "editor.cancel";
 
-/// Vertical gap between the dialog's stacked sections.
-pub const EDITOR_SECTION_SPACING: f32 = 8.0;
+/// Stable focus id of the error banner's recovery button.
+pub const EDITOR_RECOVERY_BUTTON_ID: &str = "editor.recovery";
+
+/// `NFR-004` grouping code for a blocking Markdown validation failure.
+pub const EDITOR_VALIDATION_ERROR_CODE: &str = "EDITOR-4001";
+
+/// `NFR-004` grouping code for a save that could not be queued.
+pub const EDITOR_SAVE_ERROR_CODE: &str = "EDITOR-5001";
+
+/// The gesture the user used to try to leave the editor (`UIF-MOD-002`).
+///
+/// The guard has to read *which* gesture it is being asked about, not just
+/// whether the buffer is dirty: `Cancel` is the user saying "throw it
+/// away" in as many words, while `Escape` and a scrim click are reflexes
+/// that must never be able to do that. Collapsing the three into one
+/// "dismiss" message is exactly how the pre-INT-5b editor came to lose
+/// work on a keypress.
+///
+/// `Save` is deliberately absent: it commits the buffer, so there is no
+/// work for it to throw away and nothing for the guard to refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeaveGesture {
+    /// The `Escape` key, arriving through
+    /// [`crate::ui_iced::app::OverlayState::close_topmost`].
+    Escape,
+    /// A click on the scrim, outside the card.
+    Scrim,
+    /// The footer `Cancel` button — the explicit discard.
+    Cancel,
+}
+
+impl LeaveGesture {
+    /// The framework's own word for this gesture, so the app's guard and
+    /// the framework's `attempt_dismiss` shape speak the same language.
+    ///
+    /// `Cancel` maps to
+    /// [`DismissCause::Programmatic`](iced_pro::surface::modal::DismissCause::Programmatic)
+    /// because that is the cause the framework's `ModalHost` treats as
+    /// "the caller decided, `UIF-MOD-002` does not apply" — which is
+    /// precisely what an explicit `Cancel` is.
+    #[must_use]
+    pub const fn dismiss_cause(self) -> iced_pro::surface::modal::DismissCause {
+        match self {
+            Self::Escape => iced_pro::surface::modal::DismissCause::Escape,
+            Self::Scrim => iced_pro::surface::modal::DismissCause::Scrim,
+            Self::Cancel => iced_pro::surface::modal::DismissCause::Programmatic,
+        }
+    }
+}
+
+/// What [`guard_leave`] decided about one attempt to leave the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeaveDecision {
+    /// The editor may close.
+    Proceed,
+    /// Unsaved edits block this gesture; the caller must ask the user first.
+    ///
+    /// The refusal is terminal for this gesture — the caller consumes it
+    /// rather than letting it travel on and close something else.
+    AskBeforeDiscarding,
+}
+
+/// The whole of `UIF-MOD-002` for the inline editor, as a pure function.
+///
+/// Pure so the rule can be tested against every gesture without a widget
+/// tree, a runtime, or a file on disk — and so *both* dismiss paths (the
+/// `Escape` walk in `OverlayState` and the scrim message in the reducer)
+/// are provably answering the same question with the same function rather
+/// than each re-deriving it.
+///
+/// * An explicit [`LeaveGesture::Cancel`] always proceeds: that button is
+///   the escape hatch the requirement names.
+/// * `Escape` and `Scrim` proceed only while the buffer is clean. With
+///   unsaved edits they are refused, and the caller raises the discard
+///   confirmation instead of closing.
+#[must_use]
+pub fn guard_leave(dirty: bool, gesture: LeaveGesture) -> LeaveDecision {
+    match gesture {
+        LeaveGesture::Cancel => LeaveDecision::Proceed,
+        LeaveGesture::Escape | LeaveGesture::Scrim if dirty => LeaveDecision::AskBeforeDiscarding,
+        LeaveGesture::Escape | LeaveGesture::Scrim => LeaveDecision::Proceed,
+    }
+}
 
 /// Whether an iced [`Action`] changes buffer content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -324,6 +508,14 @@ pub struct EditorViewModel {
     column: usize,
     /// The blocking validation failure, if any (UI-043).
     validation_error: Option<MarkdownParseError>,
+    /// A save that failed and is still being shown (`UIF-MOD-003`).
+    ///
+    /// Sticky rather than derived: unlike the validation error, which is
+    /// recomputed from the buffer every keystroke, a refused save is a fact
+    /// about the *world* that stays true until the user retries. It clears
+    /// on a successful queue, on [`LeaveGesture::Cancel`], and when a new
+    /// error supersedes it — never on its own.
+    save_error: Option<ModalError>,
 }
 
 impl fmt::Debug for EditorViewModel {
@@ -335,6 +527,7 @@ impl fmt::Debug for EditorViewModel {
             .field("line", &self.line)
             .field("column", &self.column)
             .field("validation_error", &self.validation_error)
+            .field("save_error", &self.save_error)
             .field("history", &self.history)
             .finish()
     }
@@ -364,6 +557,7 @@ impl EditorViewModel {
             line: 1,
             column: 1,
             validation_error: None,
+            save_error: None,
         };
         vm.refresh_cursor();
         vm.revalidate();
@@ -432,6 +626,78 @@ impl EditorViewModel {
             error.line,
             error.column,
         ))
+    }
+
+    /// The save failure the banner is showing, if any (`UIF-MOD-003`).
+    #[must_use]
+    pub fn save_error(&self) -> Option<&ModalError> {
+        self.save_error.as_ref()
+    }
+
+    /// Show a save failure, superseding whatever was showing.
+    ///
+    /// Returns what it replaced, mirroring
+    /// [`ModalHost::set_error`](iced_pro::surface::modal::ModalHost::set_error):
+    /// the banner changes by exactly two operations, this and
+    /// [`clear_save_error`](Self::clear_save_error).
+    pub fn set_save_error(&mut self, error: ModalError) -> Option<ModalError> {
+        self.save_error.replace(error)
+    }
+
+    /// Record that a save could not be queued, in the app's own words.
+    ///
+    /// Returns whether the banner **changed**: showing a refusal where none
+    /// was showing is a change, re-noting the same refusal is not. That is
+    /// the contract [`ModalHost::set_error`](iced_pro::surface::modal::ModalHost::set_error)
+    /// keeps, and it is what lets a reducer tell a refusal worth repainting
+    /// from a repeat of one already on screen.
+    pub fn note_save_failed(&mut self) -> bool {
+        let was_showing = self.save_error.is_some();
+        self.save_error = Some(save_queue_error());
+        !was_showing
+    }
+
+    /// Clear the save banner; returns what it removed.
+    pub fn clear_save_error(&mut self) -> Option<ModalError> {
+        self.save_error.take()
+    }
+
+    /// The structured failure the card's error slot renders (`UIF-MOD-003`).
+    ///
+    /// One slot, two sources, with a stated precedence: a **save** failure
+    /// outranks a validation failure, because the user has already tried
+    /// to commit and been refused, and that is the more recent fact about
+    /// what went wrong. In practice the two are mutually exclusive — a
+    /// buffer that fails validation never reaches the save path — so the
+    /// ordering is a tie-break rule, not a common case.
+    ///
+    /// The validation arm carries [`ErrorLocation::Position`] with the
+    /// 1-based line and column the parser reported, and
+    /// [`Recovery::FocusControl`] pointing at [`EDITOR_TEXT_ID`]: what the
+    /// user must do is go fix that line in the buffer.
+    #[must_use]
+    pub fn modal_error(&self) -> Option<ModalError> {
+        if let Some(error) = self.save_error.as_ref() {
+            return Some(error.clone());
+        }
+        let error = self.validation_error?;
+        Some(
+            ModalError::new(
+                EDITOR_VALIDATION_ERROR_CODE,
+                strings::build_editor_validation_error(
+                    validation_reason(error.kind),
+                    error.line,
+                    error.column,
+                ),
+            )
+            .at(ErrorLocation::Position {
+                line: error.line as u32,
+                column: error.column as u32,
+            })
+            .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+                EDITOR_TEXT_ID,
+            ))),
+        )
     }
 
     /// Whether a save may proceed — `false` while a validation failure is
@@ -568,74 +834,343 @@ pub fn apply_editor_message(vm: &mut EditorViewModel, message: &EditorMessage) -
         EditorMessage::Undo { path } if path == vm.path() => vm.undo(),
         EditorMessage::Redo { path } if path == vm.path() => vm.redo(),
         EditorMessage::Undo { .. } | EditorMessage::Redo { .. } => false,
-        EditorMessage::SaveRequested { .. } | EditorMessage::CancelRequested => false,
+        EditorMessage::SaveRequested { .. }
+        | EditorMessage::CancelRequested
+        | EditorMessage::DismissRequested { .. }
+        | EditorMessage::Absorbed
+        | EditorMessage::RecoveryRequested { .. } => false,
     }
 }
 
-/// The editor dialog card: title, validation message, monospace text area
-/// and the status-bar / Save / Cancel footer (UI-038).
+/// The editor card's **outer** size for a viewport (§4.6.2).
+///
+/// Both axes come from [`EDITOR_SIZING`], so the card is viewport-
+/// responsive instead of the fixed `800 x 600` it replaced: 80% of the
+/// viewport, floored at `520 x 380` and capped at `960 x 760`, with the
+/// `VIEWPORT_GUTTER` (`space::XXL`) clamp applied last by the framework.
+///
+/// Exposed as a function of the viewport so the clamp behaviour is
+/// measurable at any window size rather than only asserted at one.
+#[must_use]
+pub fn editor_size(viewport: Size) -> Size {
+    Size::new(
+        EDITOR_SIZING.width.resolve(viewport.width, 0.0),
+        EDITOR_SIZING.height.resolve(viewport.height, 0.0),
+    )
+}
+
+/// The structured failure for a save that could not be queued
+/// (`UIF-MOD-003`, `NFR-004` code [`EDITOR_SAVE_ERROR_CODE`]).
+///
+/// `Recovery::Retry` because the refusal is transient — the worker's
+/// submission channel, not the document, is what said no.
+#[must_use]
+pub fn save_queue_error() -> ModalError {
+    ModalError::new(EDITOR_SAVE_ERROR_CODE, strings::EDITOR_SAVE_QUEUE_ERROR)
+        .with_recovery(Recovery::Retry)
+}
+
+/// The editor dialog card: title, inverted monospace text area, the
+/// structured error slot, and the status-bar / Save / Cancel footer
+/// (UI-038, §4.6.1).
+///
+/// Layout, with the §4.6.1 anatomy and the framework's own frame:
+///
+/// ```text
+/// ┌─ editor card · ModalSizing::editor() · surface.overlay · radius 6 ─┐
+/// │ Inline Editor                                                      │
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │ ┌ inverted canvas (white, black monospace, black hairline) ──────┐│
+/// │ └────────────────────────────────────────────────────────────────┘│
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │ [ Markdown validation failed: … (line 3, column 1)   [ Fix line 3 ]│
+/// │ [ Save ] [ Cancel ]                        Line: 1 | Col: 1        │
+/// └──────────────────────────────────────────────────────────────────┘
+/// ```
+///
+/// The error row is **conditional on the view-model** (AGENTS §6): the
+/// card's outer size is fixed by the sizing policy, so adding or removing
+/// the banner moves the canvas edge rather than resizing the card, and no
+/// empty placeholder is needed to hold the shape open.
 ///
 /// Rendered inside [`editor_modal`]; exposed separately so a caller can
 /// mount the card in its own overlay arrangement.
 #[must_use]
-pub fn editor_card(vm: &EditorViewModel) -> Element<'_, Message> {
-    let error_color = Palette::fastmd_dark().error;
+pub fn editor_card(vm: &EditorViewModel, viewport: Size) -> Element<'_, Message> {
+    let frame = ModalFrame::resolve(&Palette::pro());
+    let size = editor_size(viewport);
 
-    let title = text(strings::INLINE_EDITOR_WINDOW_TITLE).size(EDITOR_TITLE_SIZE);
-
-    // Always allocated so the card's shape does not change between the valid
-    // and invalid states.
-    let validation: Element<'_, Message> = text(vm.validation_message().unwrap_or_default())
-        .size(EDITOR_STATUS_SIZE)
-        .style(move |_theme| text::Style {
-            color: Some(error_color),
-        })
-        .into();
-
-    let area = text_editor(&vm.content)
-        .font(iced::Font::MONOSPACE)
-        .size(EDITOR_BODY_SIZE)
-        .height(Length::Fill)
-        .placeholder(strings::EDITOR_INPUT_PLACEHOLDER)
-        .on_action(|action| Message::Editor(EditorMessage::Action(action)));
-
-    let buttons = confirm_cancel_buttons(strings::SAVE_BUTTON, vm.save_enabled(), |outcome| {
-        Message::Editor(match outcome {
-            ConfirmCancel::Confirm => EditorMessage::SaveRequested {
-                path: vm.path().to_path_buf(),
-            },
-            ConfirmCancel::Cancel => EditorMessage::CancelRequested,
-        })
-    });
-
-    // Save/Cancel on the left, the line/column read-out pushed to the right.
-    // `Row` has no main-axis alignment knob, so a filling `Space` does it.
-    let footer = Row::with_children(vec![
-        buttons.into(),
-        space::Space::new().width(Length::Fill).into(),
-        text(vm.status_text()).size(EDITOR_STATUS_SIZE).into(),
+    let header = Row::with_children(vec![
+        rung(
+            strings::INLINE_EDITOR_WINDOW_TITLE,
+            typography::TITLE_SM,
+            Palette::fastmd_dark().text,
+        )
+        .into(),
     ])
-    .spacing(EDITOR_SECTION_SPACING)
     .align_y(Alignment::Center);
 
-    Column::with_children(vec![title.into(), validation, area.into(), footer.into()])
-        .spacing(EDITOR_SECTION_SPACING)
-        .width(Length::Fixed(EDITOR_DIALOG_WIDTH))
-        .height(Length::Fixed(EDITOR_DIALOG_HEIGHT))
+    let mut sections: Vec<Element<'_, Message>> = vec![
+        header.into(),
+        modal_divider(frame).into(),
+        editor_area(vm),
+        modal_divider(frame).into(),
+    ];
+
+    if let Some(error) = vm.modal_error() {
+        sections.push(error_banner(&error, vm.path()));
+    }
+
+    sections.push(editor_footer(vm));
+
+    modal_card(
+        Column::with_children(sections).spacing(space::SM),
+        frame,
+        EDITOR_CARD_ID,
+        Length::Fixed(size.width),
+        Length::Fixed(size.height),
+    )
+    .into()
+}
+
+/// The inverted editing canvas (UI-038, UI-046).
+///
+/// Mounted under [`EDITOR_TEXT_ID`] **unconditionally** — no branch here
+/// may take the `text_editor` out of the tree, because a rebuilt `Content`
+/// identity loses the caret (AGENTS §6). Only its *appearance* changes.
+///
+/// The canvas is the inverted white surface `color.editor.inverted.*`
+/// describes, not the dark card it sits in: raw editing on white, reading
+/// in the dark.
+fn editor_area(vm: &EditorViewModel) -> Element<'_, Message> {
+    let colors = EditorColors::inverted();
+
+    text_editor(&vm.content)
+        .id(EDITOR_TEXT_ID)
+        .font(iced::Font::MONOSPACE)
+        .size(typography::BODY.size)
+        .line_height(typography::BODY.iced_line_height())
+        .placeholder(strings::EDITOR_INPUT_PLACEHOLDER)
+        .height(Length::Fill)
+        .style(
+            move |_theme: &iced::Theme, _status: text_editor::Status| text_editor::Style {
+                background: iced::Background::Color(colors.background),
+                border: iced::Border {
+                    color: colors.border,
+                    width: shape::BORDER_HAIRLINE,
+                    radius: shape::RADIUS_WIDGET.into(),
+                },
+                placeholder: colors.placeholder,
+                value: colors.text,
+                selection: colors.selection,
+            },
+        )
+        .on_action(|action| Message::Editor(EditorMessage::Action(action)))
         .into()
+}
+
+/// The §4.6.1 inline status / error banner (`UIF-MOD-003`).
+///
+/// Painted on the **inverted canvas colour** rather than the dark card,
+/// because `color.editor.inverted.err` is a red specified for white:
+/// `RGB(180, 0, 0)` clears 4.5:1 on white and would not on
+/// `surface.overlay`. Putting the banner on the editor's own surface is
+/// what makes that token do the job its declaration claims.
+///
+/// The row carries the three things the requirement names — what failed
+/// (the message), where (the location is already interpolated into the
+/// message by [`strings::build_editor_validation_error`]), and what the
+/// user can do about it (the recovery button, labelled from
+/// [`Recovery`]).
+fn error_banner(error: &ModalError, path: &Path) -> Element<'static, Message> {
+    let colors = EditorColors::inverted();
+    let message = rung(error.message(), typography::CAPTION, colors.error).width(Length::Fill);
+
+    let recovery = footer_button(
+        ButtonVariant::Danger,
+        recovery_label(error),
+        Message::Editor(EditorMessage::RecoveryRequested {
+            path: path.to_path_buf(),
+            recovery: error.recovery().clone(),
+        }),
+        EDITOR_RECOVERY_BUTTON_ID,
+        true,
+    );
+
+    container(Row::with_children(vec![message.into(), recovery]).spacing(space::SM))
+        .width(Length::Fill)
+        .padding(space::XS)
+        .style(move |_theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(colors.background)),
+            border: iced::Border {
+                color: colors.border,
+                width: shape::BORDER_HAIRLINE,
+                radius: shape::RADIUS_WIDGET.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// The label the recovery button wears, read off the error's
+/// [`Recovery`] affordance.
+///
+/// The button says what pressing it *does* — "Retry" re-runs the failed
+/// save, "Fix line 3" moves the user to the offending line — rather than
+/// showing a generic acknowledgement that would claim nothing.
+#[must_use]
+pub fn recovery_label(error: &ModalError) -> String {
+    match error.recovery() {
+        Recovery::Retry => strings::EDITOR_RETRY_LABEL.to_owned(),
+        Recovery::FocusControl(_) => match error.location() {
+            Some(ErrorLocation::Position { line, .. }) => {
+                strings::format_editor_recovery_label(*line)
+            }
+            Some(ErrorLocation::Region(_)) | None => strings::EDITOR_FIX_LABEL.to_owned(),
+        },
+        Recovery::Acknowledge => strings::CLOSE_BUTTON.to_owned(),
+    }
+}
+
+/// The card footer: `Save` and `Cancel` on the left, the line/column
+/// read-out pushed to the right.
+///
+/// `Save` is `Primary` and `Cancel` is `Secondary`: the forward action is
+/// the accented one, and Cancel is the ordinary "leave without committing"
+/// control the same role `Close` plays on the About card. Neither is
+/// `Danger` — discarding here is *not* the destructive act the Danger
+/// variant is reserved for, and the framework keeps that word for the
+/// discard **confirmation**, where the user is actually being asked to
+/// give work up.
+///
+/// `Save` is disabled rather than removed while validation blocks it
+/// (AGENTS §6), so the control stays visible and the reason stays in the
+/// banner above it.
+fn editor_footer(vm: &EditorViewModel) -> Element<'_, Message> {
+    let save = footer_button(
+        ButtonVariant::Primary,
+        strings::SAVE_BUTTON,
+        Message::Editor(EditorMessage::SaveRequested {
+            path: vm.path().to_path_buf(),
+        }),
+        EDITOR_SAVE_BUTTON_ID,
+        vm.save_enabled(),
+    );
+
+    let cancel = footer_button(
+        ButtonVariant::Secondary,
+        strings::CANCEL_BUTTON,
+        Message::Editor(EditorMessage::CancelRequested),
+        EDITOR_CANCEL_BUTTON_ID,
+        true,
+    );
+
+    let status = rung(
+        vm.status_text(),
+        typography::CAPTION,
+        Palette::fastmd_dark().text,
+    );
+
+    // `Row` has no main-axis alignment knob, so a filling `Space` does it.
+    Row::with_children(vec![
+        save,
+        cancel,
+        Space::new().width(Length::Fill).into(),
+        status.into(),
+    ])
+    .spacing(space::SM)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// A footer-width framework button carrying `label`.
+///
+/// The label is mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box on purpose. `Button::is_icon_only` is a **geometric** test — any
+/// content no wider and no taller than `size::CONTROL_SM` (28px) is
+/// classed icon-only, and an icon-only button without a tooltip trips a
+/// `debug_assert!` in `outer_size` (`button_widget.rs:776`). A short
+/// label like `'Save'` sits close enough to that line that a different
+/// font measurement would cross it, so the label is given a width the
+/// test cannot fail.
+fn footer_button(
+    variant: ButtonVariant,
+    label: impl Into<String>,
+    on_press: Message,
+    focus_id: &'static str,
+    enabled: bool,
+) -> Element<'static, Message> {
+    let content = Column::new()
+        .width(Length::Fixed(
+            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(rung(
+            label,
+            typography::BODY,
+            Palette::fastmd_dark().text_strong,
+        ));
+
+    let button = Button::new(variant, content, on_press, focus_id).palette(Palette::pro());
+
+    if enabled {
+        button.into()
+    } else {
+        button.disabled().into()
+    }
+}
+
+/// Paints `value` on a type rung at its resting weight.
+///
+/// The single place this card turns a rung into a `text` widget, so no
+/// call site restates a point size ([RUST-021], `UIF-TOK-004`).
+///
+/// **`line_height` must be handed to iced as `Pixels`, not as a bare
+/// `f32`.** `impl From<f32> for iced::LineHeight` produces
+/// `LineHeight::Relative(factor)` — a *multiple* of the font size
+/// (`iced_core-0.14.0/src/text.rs:221-225`) — so `.line_height(20.0)`
+/// on a 14px rung means 20 x 14 = **280px per line**, not 20px. Only
+/// `From<Pixels>` reaches `LineHeight::Absolute`. [`TypeRung::iced_line_height`]
+/// is the crossing point that makes picking the wrong unit impossible.
+fn rung(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+) -> text::Text<'static> {
+    text(value.into())
+        .size(rung.size)
+        .line_height(rung.iced_line_height())
+        .color(color)
 }
 
 /// The blocking editor modal (UI-038, UI-045).
 ///
 /// [`editor_card`] centred over a scrim by
-/// [`crate::ui_iced::overlay::modal`]. Clicking outside dismisses the editor
-/// the same way Cancel does — both discard the buffer (UI-045); the reducer
-/// decides what "discard" means for the overlay slot.
+/// [`crate::ui_iced::overlay::modal_centered`], which supplies the
+/// card-boundary absorption as well as the scrim itself.
+///
+/// # What each click outside the card means (`UIF-MOD-002`)
+///
+/// The scrim emits [`EditorMessage::DismissRequested`] with
+/// [`LeaveGesture::Scrim`], **not** [`EditorMessage::CancelRequested`].
+/// That distinction is the guard: a scrim click on a clean buffer closes
+/// the editor exactly as it always did, but on a dirty one it is refused
+/// and the discard confirmation is raised instead. Before this increment
+/// the scrim sent `CancelRequested` directly, which is one of the three
+/// ways the editor used to lose unsaved work without asking.
+///
+/// A press that lands on the card's padding ring, on a disabled `Save`,
+/// or on dead space between rows is absorbed by
+/// [`EditorMessage::Absorbed`] and never reaches the scrim
+/// (`UIF-VER-003` / `UIF-INP-002`).
 #[must_use]
-pub fn editor_modal(vm: &EditorViewModel) -> Element<'_, Message> {
-    let card = container(editor_card(vm))
-        .width(Length::Shrink)
-        .height(Length::Shrink);
-
-    modal(card.into(), Message::Editor(EditorMessage::CancelRequested))
+pub fn editor_modal(vm: &EditorViewModel, viewport: Size) -> Element<'_, Message> {
+    modal_centered(
+        editor_card(vm, viewport),
+        Message::Editor(EditorMessage::Absorbed),
+        Message::Editor(EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        }),
+    )
 }

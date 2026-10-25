@@ -77,7 +77,7 @@ use crate::ui_iced::agent_debug::{AgentDebugViewModel, AgentDebugWindowState};
 use crate::ui_iced::attributions::AttributionsViewModel;
 use crate::ui_iced::batch_dialog::{BatchDialogState, BatchDialogViewModel, BatchRunStatus};
 use crate::ui_iced::context_menu::{self, ContextRow, ContextTarget};
-use crate::ui_iced::dialogs::DialogState;
+use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::fonts;
 use crate::ui_iced::layout;
@@ -854,6 +854,7 @@ impl OverlayState {
             hamburger_rects,
             editor,
             dialog,
+            dialog_anchor,
             tools,
             about,
             batch,
@@ -871,6 +872,7 @@ impl OverlayState {
             hamburger_rects,
             editor,
             dialog,
+            dialog_anchor,
             tools,
             about,
             batch,
@@ -910,6 +912,7 @@ struct ClosableSurfaces<'a> {
     hamburger_rects: &'a mut Vec<Rectangle>,
     editor: &'a mut Option<EditorViewModel>,
     dialog: &'a mut DialogState,
+    dialog_anchor: &'a mut Option<iced::Point>,
     tools: &'a mut ToolsDialogState,
     about: &'a mut AboutWindowState,
     batch: &'a mut BatchDialogState,
@@ -951,7 +954,23 @@ impl ClosableSurfaces<'_> {
                 }
                 (CLOSED_LAYER_HAMBURGER, was_open)
             }
-            SURFACE_ID_EDITOR => (CLOSED_LAYER_EDITOR, self.editor.take().is_some()),
+            // `UIF-MOD-002`: an `Escape` over a dirty editor must not
+            // discard it. The guard consumes the key here — the editor
+            // stays mounted and the discard confirmation is now the top
+            // of the modal band, so the *next* `Escape` closes that and
+            // leaves the buffer alone. Letting the key travel on instead
+            // would close something the user was not aiming at.
+            SURFACE_ID_EDITOR => {
+                if !guard_editor_leave(
+                    self.editor,
+                    self.dialog,
+                    self.dialog_anchor,
+                    crate::ui_iced::editor::LeaveGesture::Escape,
+                ) {
+                    return UnwindAnswer::Unwound;
+                }
+                (CLOSED_LAYER_EDITOR, self.editor.take().is_some())
+            }
             SURFACE_ID_DIALOG => (CLOSED_LAYER_DIALOG, self.dialog.close()),
             SURFACE_ID_TOOLS => (CLOSED_LAYER_TOOLS, self.tools.close()),
             SURFACE_ID_ABOUT => (CLOSED_LAYER_ABOUT, self.about.close()),
@@ -969,6 +988,56 @@ impl ClosableSurfaces<'_> {
             UnwindAnswer::Dismissed
         } else {
             UnwindAnswer::Declined(DeclineReason::NotOpen)
+        }
+    }
+}
+
+/// Applies the inline editor's unsaved-edit guard (`UIF-MOD-002`) to one
+/// leave gesture, and raises the discard confirmation when it refuses.
+///
+/// **This is the single place the editor's dirty flag is consulted on the
+/// way out.** Both dismiss paths call it — the `Escape` rank walk through
+/// [`ClosableSurfaces::unwind`], and the scrim click through
+/// `crate::ui_iced::update::leave_editor` — and both ask the same
+/// [`guard_leave`] rule, so neither can drift into answering a dirty
+/// buffer differently from the other.
+///
+/// Returns `true` when the caller may take (drop) the editor, and `false`
+/// when the gesture was refused — in which case the discard confirmation
+/// has been opened in `dialog` in the caller's place and the caller must
+/// consume the gesture without closing anything.
+///
+/// With no editor open it answers `true` rather than inventing a refusal:
+/// there is nothing to guard, and the caller's own `take()` is what
+/// reports "was not open anyway".
+///
+/// [RUST-020]: mutates only the dialog fields handed in; no I/O, no bus
+/// publish, which is what keeps both dismiss paths reduction-safe.
+pub(crate) fn guard_editor_leave(
+    editor: &Option<EditorViewModel>,
+    dialog: &mut DialogState,
+    dialog_anchor: &mut Option<iced::Point>,
+    gesture: crate::ui_iced::editor::LeaveGesture,
+) -> bool {
+    use crate::ui_iced::editor::{LeaveDecision, guard_leave};
+
+    let Some(vm) = editor.as_ref() else {
+        return true;
+    };
+
+    match guard_leave(vm.is_dirty(), gesture) {
+        LeaveDecision::Proceed => true,
+        LeaveDecision::AskBeforeDiscarding => {
+            dialog.open(DialogKind::DiscardEditorChanges {
+                path: vm.path().to_path_buf(),
+            });
+            // Centred, not cursor-anchored: this dialog was summoned by a
+            // keypress or a scrim click over a card that already fills
+            // most of the window, not by a pointer action on a tree row.
+            // `None` is what `resolve_dialog_anchor` reads as
+            // keyboard-invoked.
+            *dialog_anchor = None;
+            false
         }
     }
 }

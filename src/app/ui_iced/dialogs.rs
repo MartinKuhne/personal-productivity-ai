@@ -228,6 +228,23 @@ pub enum DialogKind {
         /// The path the user is being asked about.
         path: PathBuf,
     },
+    /// Confirm throwing away the unsaved edits in the inline editor's
+    /// buffer at `path` (`UIF-MOD-002`).
+    ///
+    /// This is the confirmation the editor's unsaved-edit guard raises when
+    /// `Escape` or a scrim click is refused. It is deliberately **this**
+    /// dialog rather than a bespoke one: the discard question has the same
+    /// shape as the delete question — one path, one destructive verb, a
+    /// `Danger` primary and a `Cancel` that changes nothing — so reusing
+    /// the INT-4 `Confirmation` control keeps the answer surface in one
+    /// place instead of teaching the user a second one.
+    ///
+    /// The kind carries the path rather than the buffer because the buffer
+    /// stays owned by `OverlayState::editor`; this dialog only asks.
+    DiscardEditorChanges {
+        /// The file whose unsaved edits are at stake.
+        path: PathBuf,
+    },
 }
 
 impl DialogKind {
@@ -238,6 +255,7 @@ impl DialogKind {
         match self {
             Self::CreateDirectory { parent } | Self::CreateDocument { parent } => parent,
             Self::Rename { path } | Self::Move { path } | Self::DeleteConfirm { path } => path,
+            Self::DiscardEditorChanges { path } => path,
         }
     }
 
@@ -250,6 +268,7 @@ impl DialogKind {
             Self::Rename { .. } => strings::RENAME_WINDOW,
             Self::Move { .. } => strings::MOVE_FILE_WINDOW,
             Self::DeleteConfirm { .. } => strings::DELETE_CONFIRM_WINDOW,
+            Self::DiscardEditorChanges { .. } => strings::DISCARD_CHANGES_WINDOW,
         }
     }
 
@@ -264,6 +283,7 @@ impl DialogKind {
             Self::Rename { .. } => Some(strings::ENTER_NEW_NAME),
             Self::Move { .. } => Some(strings::SELECT_DESTINATION_FOLDER),
             Self::DeleteConfirm { .. } => None,
+            Self::DiscardEditorChanges { .. } => None,
         }
     }
 
@@ -276,6 +296,7 @@ impl DialogKind {
     pub fn confirm_label(&self) -> &'static str {
         match self {
             Self::DeleteConfirm { .. } => strings::DELETE_ACTION,
+            Self::DiscardEditorChanges { .. } => strings::DISCARD_ACTION,
             _ => strings::OK_BUTTON,
         }
     }
@@ -336,17 +357,21 @@ impl DialogKind {
             Self::DeleteConfirm { .. } => InputControl::Confirmation {
                 summary: strings::format_delete_confirm_prompt(&self.target_name()),
             },
+            Self::DiscardEditorChanges { .. } => InputControl::Confirmation {
+                summary: strings::format_discard_changes_prompt(&self.target_name()),
+            },
         }
     }
 
     /// How this kind's primary button is styled (`UIF-INP-004`).
     ///
-    /// Only the delete confirmation is destructive. Every other kind is
-    /// the ordinary primary action, and the framework's default agrees.
+    /// Only the two confirmation kinds are destructive: deleting a file,
+    /// and throwing away an unsaved buffer. Every other kind is the
+    /// ordinary primary action, and the framework's default agrees.
     #[must_use]
     pub fn button_intent(&self) -> ButtonIntent {
         match self {
-            Self::DeleteConfirm { .. } => ButtonIntent::Danger,
+            Self::DeleteConfirm { .. } | Self::DiscardEditorChanges { .. } => ButtonIntent::Danger,
             Self::CreateDirectory { .. }
             | Self::CreateDocument { .. }
             | Self::Rename { .. }
@@ -366,7 +391,8 @@ impl DialogKind {
             Self::CreateDirectory { .. }
             | Self::CreateDocument { .. }
             | Self::Rename { .. }
-            | Self::Move { .. } => None,
+            | Self::Move { .. }
+            | Self::DiscardEditorChanges { .. } => None,
         }
     }
 }
@@ -652,6 +678,7 @@ impl DialogState {
             None => false,
             Some(DialogKind::Move { .. }) => self.selected_destination.is_some(),
             Some(DialogKind::DeleteConfirm { .. }) => true,
+            Some(DialogKind::DiscardEditorChanges { .. }) => true,
             Some(
                 DialogKind::CreateDirectory { .. }
                 | DialogKind::CreateDocument { .. }
@@ -709,7 +736,7 @@ impl DialogState {
                     }
                 }
             },
-            DialogKind::DeleteConfirm { .. } => {
+            DialogKind::DeleteConfirm { .. } | DialogKind::DiscardEditorChanges { .. } => {
                 self.close();
                 SubmitOutcome::Completed {
                     kind,
@@ -862,7 +889,9 @@ pub fn dialog_card(
         | DialogKind::CreateDocument { .. }
         | DialogKind::Rename { .. } => name_entry_card(state, kind, intent),
         DialogKind::Move { .. } => move_card(state, intent),
-        DialogKind::DeleteConfirm { .. } => delete_confirm_card(kind, intent),
+        DialogKind::DeleteConfirm { .. } | DialogKind::DiscardEditorChanges { .. } => {
+            delete_confirm_card(kind, intent)
+        }
     };
 
     modal_at(

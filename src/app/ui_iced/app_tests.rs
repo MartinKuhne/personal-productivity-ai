@@ -1023,3 +1023,193 @@ fn strip_verbatim_prefix(s: &str) -> String {
         .map(|v| v.to_string())
         .unwrap_or_else(|| s.to_string())
 }
+
+// --- UIF-MOD-002: the editor's unsaved-edit guard on the Escape path -----
+
+/// Open the inline editor with **unsaved** edits in it.
+///
+/// The buffer is dirtied through the same `apply_action` path a real
+/// keystroke takes, so `is_dirty()` is true for the reason it would be in
+/// the running app rather than because a test set a flag.
+fn open_dirty_editor(overlay: &mut OverlayState) {
+    let mut vm = EditorViewModel::open("M:\\lib\\note.md", "body");
+    vm.apply_action(iced::widget::text_editor::Action::Edit(
+        iced::widget::text_editor::Edit::Paste(Arc::new(" unsaved".to_string())),
+    ));
+    assert!(vm.is_dirty(), "the fixture must leave unsaved edits");
+    overlay.editor = Some(vm);
+}
+
+/// The dirty buffer's contents, captured before a gesture so a test can
+/// assert the *same bytes* are still there afterwards.
+///
+/// Read from the model rather than written out as a literal: the point of
+/// these tests is that the buffer survives, not that a paste lands at a
+/// particular offset, and pinning the offset here would only make the
+/// guard tests brittle.
+fn dirty_text(overlay: &OverlayState) -> String {
+    overlay.editor.as_ref().expect("editor open").text()
+}
+
+/// A clean buffer still dismisses on `Escape` — the guard must not turn
+/// every close into a question.
+#[test]
+fn test_escape_over_a_clean_editor_still_closes_it() {
+    let mut overlay = OverlayState::default();
+    open_editor(&mut overlay);
+    assert!(!overlay.editor.as_ref().unwrap().is_dirty());
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_EDITOR),
+        "a clean editor must close on Esc exactly as it did before the guard"
+    );
+    assert!(overlay.editor.is_none());
+    assert!(
+        !overlay.dialog.is_open(),
+        "a clean close must not raise a confirmation"
+    );
+}
+
+/// The regression this increment exists for: `Escape` over a **dirty**
+/// editor must not drop the buffer.
+#[test]
+fn test_escape_over_a_dirty_editor_does_not_discard_it() {
+    let mut overlay = OverlayState::default();
+    open_dirty_editor(&mut overlay);
+    let before = dirty_text(&overlay);
+
+    let _ = overlay.close_topmost();
+
+    assert!(
+        overlay.editor.is_some(),
+        "UIF-MOD-002: Esc over unsaved edits must leave the editor open"
+    );
+    assert_eq!(
+        dirty_text(&overlay),
+        before,
+        "the buffer contents must survive the refused Escape byte-for-byte"
+    );
+}
+
+/// The refused `Escape` is not a dead end: it raises the discard
+/// confirmation in the dialog slot, centred rather than cursor-anchored.
+#[test]
+fn test_escape_over_a_dirty_editor_raises_the_discard_confirmation() {
+    let mut overlay = OverlayState::default();
+    open_dirty_editor(&mut overlay);
+    overlay.dialog_anchor = Some(iced::Point::new(400.0, 300.0));
+
+    let _ = overlay.close_topmost();
+
+    assert_eq!(
+        overlay.dialog.kind(),
+        Some(&DialogKind::DiscardEditorChanges {
+            path: PathBuf::from("M:\\lib\\note.md"),
+        }),
+        "the refusal must open the INT-4 discard confirmation for the open file"
+    );
+    assert_eq!(
+        overlay.dialog_anchor, None,
+        "a keypress-raised dialog is keyboard-invoked, so it centres rather \
+         than following a cursor that is nowhere near the question"
+    );
+}
+
+/// The confirmation sits **above** the editor: the next `Escape` closes
+/// the question and leaves the buffer alone.
+#[test]
+fn test_escape_over_the_confirmation_closes_only_the_dialog() {
+    let mut overlay = OverlayState::default();
+    open_dirty_editor(&mut overlay);
+    let before = dirty_text(&overlay);
+    let _ = overlay.close_topmost();
+    assert!(overlay.dialog.is_open());
+
+    assert_eq!(
+        overlay.close_topmost(),
+        Some(CLOSED_LAYER_DIALOG),
+        "the confirmation is the top of the band and unwinds first"
+    );
+    assert!(
+        overlay.editor.is_some(),
+        "dismissing the question must never be the same as answering it"
+    );
+    assert_eq!(dirty_text(&overlay), before);
+}
+
+/// Three `Escape`s in a row must never discard: ask, close the question,
+/// ask again. Re-asking is the correct failure mode.
+#[test]
+fn test_repeated_escape_never_discards_unsaved_edits() {
+    let mut overlay = OverlayState::default();
+    open_dirty_editor(&mut overlay);
+    let before = dirty_text(&overlay);
+
+    for round in 0..3 {
+        let _ = overlay.close_topmost();
+        assert!(
+            overlay.editor.is_some(),
+            "round {round}: Esc must never drop the buffer"
+        );
+
+        // Close the question the previous Escape raised, if any.
+        if overlay.dialog.is_open() {
+            let _ = overlay.close_topmost();
+            assert!(!overlay.dialog.is_open());
+            assert!(overlay.editor.is_some());
+        }
+    }
+
+    assert_eq!(
+        dirty_text(&overlay),
+        before,
+        "after any number of Escape presses the edits are still there"
+    );
+}
+
+/// With no editor open there is nothing to guard, so the walk is not
+/// blocked — the caller's own `take()` reports "was not open".
+#[test]
+fn test_guard_with_no_editor_open_lets_the_walk_continue() {
+    let mut overlay = OverlayState::default();
+    open_dialog(&mut overlay);
+
+    assert!(guard_editor_leave(
+        &overlay.editor,
+        &mut overlay.dialog,
+        &mut overlay.dialog_anchor,
+        crate::ui_iced::editor::LeaveGesture::Escape,
+    ));
+    assert!(
+        overlay.dialog.is_open(),
+        "the guard must not touch an unrelated open dialog"
+    );
+}
+
+/// The guard answers the *gesture*, not just the flag: the same dirty
+/// buffer that refuses `Escape` accepts `Cancel`.
+#[test]
+fn test_guard_refuses_escape_but_accepts_cancel_on_the_same_dirty_buffer() {
+    let mut overlay = OverlayState::default();
+    open_dirty_editor(&mut overlay);
+
+    assert!(
+        !guard_editor_leave(
+            &overlay.editor,
+            &mut overlay.dialog,
+            &mut overlay.dialog_anchor,
+            crate::ui_iced::editor::LeaveGesture::Escape,
+        ),
+        "Escape on a dirty buffer must be refused"
+    );
+    assert!(
+        guard_editor_leave(
+            &overlay.editor,
+            &mut overlay.dialog,
+            &mut overlay.dialog_anchor,
+            crate::ui_iced::editor::LeaveGesture::Cancel,
+        ),
+        "Cancel is the explicit discard and must always be accepted"
+    );
+}

@@ -57,6 +57,7 @@ use iced::widget::operation;
 use iced_pro::focus::FocusState;
 use iced_pro::surface::menu::cascade::{CascadeOutcome, MenuKey, MenuTreeKind};
 use iced_pro::surface::menu::model::{Menu, MenuId};
+use iced_pro::surface::modal::Recovery;
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
@@ -65,11 +66,11 @@ use crate::markdown::document::DocumentContent;
 use crate::ui::tree_search::find_search_results_scoped;
 use crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID;
 use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
-use crate::ui_iced::app::{AppState, ContextMenu};
+use crate::ui_iced::app::{AppState, ContextMenu, guard_editor_leave};
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, index_of_selected};
 use crate::ui_iced::context_menu::ContextTarget;
 use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
-use crate::ui_iced::editor::{EditorViewModel, apply_editor_message};
+use crate::ui_iced::editor::{self, EditorViewModel, LeaveGesture, apply_editor_message};
 use crate::ui_iced::hamburger::{command_for_activation, hamburger_menu};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::message::{
@@ -973,17 +974,31 @@ fn activation_command(card: &Option<Menu>, outcome: &CascadeOutcome) -> Option<U
 
 // ───────────────────────────── editor ─────────────────────────────
 
-/// Inline editor reductions (UI-042..UI-045).
+/// Inline editor reductions (UI-042..UI-045, `UIF-MOD-002/003`).
 fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Message>> {
     match message {
         EditorMessage::SaveRequested { path } => {
             save_editor(state, &path);
             Vec::new()
         }
+        // The footer `Cancel` is the *explicit* discard: `guard_leave`
+        // lets it through whatever the buffer holds, because pressing it
+        // is the user saying "throw it away" in as many words.
         EditorMessage::CancelRequested => {
             close_editor(state);
             Vec::new()
         }
+        // A reflex dismiss — the scrim. Guarded, unlike `Cancel`: on a
+        // dirty buffer this closes nothing and raises the confirmation.
+        EditorMessage::DismissRequested { cause } => {
+            leave_editor(state, cause);
+            Vec::new()
+        }
+        // UIF-INP-002 / UIF-VER-003: the card boundary took the press.
+        // Deliberately no state change — a click on the padding ring or a
+        // disabled `Save` must leave the editor open and the buffer intact.
+        EditorMessage::Absorbed => Vec::new(),
+        EditorMessage::RecoveryRequested { path, recovery } => run_recovery(state, &path, recovery),
         other => {
             if let Some(vm) = state.overlay.editor.as_mut() {
                 // The changed-flag is not needed: the view-model rebuild at
@@ -995,23 +1010,101 @@ fn reduce_editor(state: &mut AppState, message: EditorMessage) -> Vec<Task<Messa
     }
 }
 
+/// Applies `UIF-MOD-002` to one reflex dismiss gesture on the scrim path.
+///
+/// The `Escape` path applies the same [`guard_leave`] from inside
+/// [`OverlayState::close_topmost`]'s rank walk; both call the one rule so
+/// the two paths cannot drift into answering differently.
+fn leave_editor(state: &mut AppState, gesture: LeaveGesture) {
+    let may_close = guard_editor_leave(
+        &state.overlay.editor,
+        &mut state.overlay.dialog,
+        &mut state.overlay.dialog_anchor,
+        gesture,
+    );
+
+    if may_close {
+        close_editor(state);
+    }
+}
+
+/// Performs the recovery affordance the error banner was showing
+/// (`UIF-MOD-003`: a failure must offer a way out, not just a message).
+fn run_recovery(state: &mut AppState, path: &Path, recovery: Recovery) -> Vec<Task<Message>> {
+    match recovery {
+        Recovery::Retry => {
+            save_editor(state, path);
+            Vec::new()
+        }
+        Recovery::FocusControl(_) => vec![focus_editor_buffer_task()],
+        Recovery::Acknowledge => {
+            if let Some(vm) = state.overlay.editor.as_mut() {
+                vm.clear_save_error();
+            }
+            Vec::new()
+        }
+    }
+}
+
+/// A runtime task that moves focus to the editor's buffer — the action
+/// `Recovery::FocusControl([EDITOR_TEXT_ID])` asks for.
+///
+/// Built directly on iced's focusable operation rather than through
+/// [`iced_pro::bridge::focus_task`], because the bridge projects a
+/// [`FocusState`](iced_pro::focus::FocusState) model and the editor card
+/// registers no focus group (see the `UIF-MOD-001` note in
+/// [`crate::ui_iced::editor`]'s module docs). Naming the widget id is the
+/// honest minimum for "put the caret where the error is".
+fn focus_editor_buffer_task() -> Task<Message> {
+    iced::advanced::widget::operate(
+        iced::advanced::widget::operation::focusable::focus::<Message>(iced::widget::Id::from(
+            editor::EDITOR_TEXT_ID,
+        )),
+    )
+}
+
 /// Write the buffer (front matter re-attached), publish the update so the
 /// tree and tag manager refresh, then close (UI-044, UI-045).
+///
+/// A save the worker will not accept is **surfaced, not swallowed**
+/// (`UIF-MOD-003`): the buffer stays open with a `Recovery::Retry` banner
+/// rather than looking saved when it is not.
 fn save_editor(state: &mut AppState, path: &Path) {
-    let Some(vm) = state.overlay.editor.as_ref() else {
+    let Some(full_text) = state
+        .overlay
+        .editor
+        .as_ref()
+        .filter(|vm| vm.path() == path)
+        .map(|vm| vm.document().to_string())
+    else {
         return;
     };
-    if vm.path() != path {
-        return;
-    }
-    let full_text = vm.document().to_string();
 
-    let _queued = state.app.orchestrator.queue_user_file_operation(
+    let queued = state.app.orchestrator.queue_user_file_operation(
         crate::background::UserFileOperation::SaveEditor {
             path: path.to_path_buf(),
             content: full_text,
         },
     );
+
+    if let Some(vm) = state.overlay.editor.as_mut() {
+        record_save_outcome(vm, queued);
+    }
+}
+
+/// Records the outcome of one save attempt on the buffer (`UIF-MOD-003`).
+///
+/// Split out so both halves of the outcome are reachable in a test: the
+/// worker's submission channel has no seam for forcing a refusal, so
+/// `save_editor` itself can only ever be observed taking the accepted
+/// branch. Naming the decision as its own pure function is what keeps the
+/// refused half covered rather than assumed.
+fn record_save_outcome(vm: &mut EditorViewModel, queued: bool) {
+    if queued {
+        vm.clear_save_error();
+    } else {
+        vm.note_save_failed();
+    }
 }
 
 /// Discards the editor buffer and clears the domain open flags.
@@ -1265,9 +1358,17 @@ fn reduce_dialog(state: &mut AppState, message: DialogMessage) -> Vec<Task<Messa
                     kind,
                     name,
                     destination,
-                } => {
-                    publish_and_drain(state, confirmed_command(&kind, name, destination));
-                }
+                } => match kind {
+                    // The discard confirmation resolved "yes": the buffer
+                    // goes, and with it the guard that raised this dialog.
+                    // Nothing is published — see `confirmed_command`.
+                    DialogKind::DiscardEditorChanges { .. } => close_editor(state),
+                    kind => {
+                        if let Some(command) = confirmed_command(&kind, name, destination) {
+                            publish_and_drain(state, command);
+                        }
+                    }
+                },
                 SubmitOutcome::Invalid { message } => {
                     state.overlay.dialog.set_error(message);
                 }
@@ -1299,25 +1400,37 @@ fn reduce_dialog(state: &mut AppState, message: DialogMessage) -> Vec<Task<Messa
 }
 
 /// The self-contained command a validated dialog submit produces.
-fn confirmed_command(kind: &DialogKind, name: String, destination: Option<PathBuf>) -> UserCommand {
+///
+/// `None` for a kind whose confirmed action is **pure UI state** rather
+/// than a workspace mutation: [`DialogKind::DiscardEditorChanges`] drops
+/// an in-memory buffer and clears two open-flags, which is exactly what
+/// the editor's own `Cancel` path already does. Publishing it as a
+/// `UserCommand` would imply an executor and a bus event for something
+/// that never leaves the UI thread ([FMD-065]).
+fn confirmed_command(
+    kind: &DialogKind,
+    name: String,
+    destination: Option<PathBuf>,
+) -> Option<UserCommand> {
     match kind {
-        DialogKind::CreateDirectory { parent } => UserCommand::ConfirmCreateDirectory {
+        DialogKind::CreateDirectory { parent } => Some(UserCommand::ConfirmCreateDirectory {
             parent: parent.clone(),
             name,
-        },
-        DialogKind::CreateDocument { parent } => UserCommand::ConfirmCreateDocument {
+        }),
+        DialogKind::CreateDocument { parent } => Some(UserCommand::ConfirmCreateDocument {
             parent: parent.clone(),
             name,
-        },
-        DialogKind::Rename { path } => UserCommand::ConfirmRename {
+        }),
+        DialogKind::Rename { path } => Some(UserCommand::ConfirmRename {
             path: path.clone(),
             new_name: name,
-        },
-        DialogKind::Move { path } => UserCommand::ConfirmMove {
+        }),
+        DialogKind::Move { path } => Some(UserCommand::ConfirmMove {
             file: path.clone(),
             destination: destination.unwrap_or_default(),
-        },
-        DialogKind::DeleteConfirm { path } => UserCommand::Delete(path.clone()),
+        }),
+        DialogKind::DeleteConfirm { path } => Some(UserCommand::Delete(path.clone())),
+        DialogKind::DiscardEditorChanges { .. } => None,
     }
 }
 

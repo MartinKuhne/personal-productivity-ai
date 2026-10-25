@@ -629,7 +629,7 @@ fn test_tab_middle_click_closes_that_tab() {
 #[test]
 fn test_editor_typewrite_then_save_emits_save_requested() {
     let vm = EditorViewModel::open("/notes/a.md", "# Title\n");
-    let mut ui = sim(editor_card(&vm));
+    let mut ui = sim(editor_card(&vm, iced::Size::new(1024.0, 768.0)));
 
     assert!(
         focus_text_editor(&mut ui).is_some(),
@@ -662,7 +662,7 @@ fn test_editor_typewrite_then_save_emits_save_requested() {
 #[test]
 fn test_editor_cancel_never_requests_a_save() {
     let vm = EditorViewModel::open("/notes/a.md", "# Title\n");
-    let mut ui = sim(editor_card(&vm));
+    let mut ui = sim(editor_card(&vm, iced::Size::new(1024.0, 768.0)));
     let _ = ui.click(strings::CANCEL_BUTTON);
 
     let emitted = messages(ui);
@@ -1247,5 +1247,144 @@ fn test_tree_pointer_motion_emits_the_cursor_anchor() {
     assert!(
         anchor == pointer,
         "root-space pointer {anchor:?} should equal full-view point {pointer:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Editor - resolved card geometry and the canvas's usable height
+// ---------------------------------------------------------------------------
+
+/// The editor card's own laid-out bounds, addressed by its stable id.
+fn editor_card_bounds(ui: &mut Sim<'_>) -> Option<iced::Rectangle> {
+    let wanted = iced::widget::Id::from(crate::ui_iced::editor::EDITOR_CARD_ID);
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(id),
+            bounds,
+            ..
+        } if *id == wanted => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// The editing canvas's laid-out bounds, addressed by its stable id.
+fn editor_canvas_bounds(ui: &mut Sim<'_>) -> Option<iced::Rectangle> {
+    let wanted = iced::widget::Id::from(crate::ui_iced::editor::EDITOR_TEXT_ID);
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable {
+            id: Some(id),
+            bounds,
+            ..
+        } if *id == wanted => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// A body whose fence never closes, so the card renders its error banner.
+const UNCLOSED_FENCE: &str = "# Title\n\n```\nstill inside the fence\n";
+
+/// The card really is laid out at the size `ModalSizing::editor()`
+/// resolves, not merely asked for it.
+#[test]
+fn test_editor_card_lays_out_at_the_resolved_size() {
+    let vm = EditorViewModel::open("/notes/a.md", "# Title\n");
+    let mut ui = sim(editor_card(&vm, iced::Size::new(1024.0, 768.0)));
+
+    let bounds =
+        editor_card_bounds(&mut ui).expect("the card must be addressable by EDITOR_CARD_ID");
+
+    assert!(
+        (bounds.width - 819.2).abs() < 0.01,
+        "1024 wide should resolve an 819.2pt card, got {}",
+        bounds.width
+    );
+    assert!(
+        (bounds.height - 614.4).abs() < 0.01,
+        "768 tall should resolve a 614.4pt card, got {}",
+        bounds.height
+    );
+}
+
+/// At the smallest card the policy allows, the editing canvas still gets
+/// ten full lines of body text - the point at which the card stops being
+/// a usable editor.
+#[test]
+fn test_canvas_keeps_ten_lines_at_the_policy_floor() {
+    let vm = EditorViewModel::open("/notes/a.md", "# Title\n");
+    // 600x420 resolves to the policy floor of 520x380.
+    let mut ui = sim(editor_card(&vm, iced::Size::new(600.0, 420.0)));
+
+    let card = editor_card_bounds(&mut ui).expect("card laid out");
+    assert!(
+        (card.width - 520.0).abs() < 0.01 && (card.height - 380.0).abs() < 0.01,
+        "expected the 520x380 floor, got {}x{}",
+        card.width,
+        card.height
+    );
+
+    let canvas = editor_canvas_bounds(&mut ui).expect("canvas laid out");
+    let ten_lines = iced_pro::token::typography::BODY.line_height * 10.0;
+    assert!(
+        canvas.height >= ten_lines,
+        "the canvas must keep at least ten body lines ({ten_lines}pt) at the \
+         policy floor; it got {:.1}pt",
+        canvas.height
+    );
+}
+
+/// The error banner is paid for out of the card's fixed height, so it must
+/// not starve the canvas - at the floor it costs less than two lines.
+#[test]
+fn test_error_banner_does_not_starve_the_canvas_at_the_floor() {
+    let clean = EditorViewModel::open("/notes/a.md", "# Title\n");
+    let mut clean_ui = sim(editor_card(&clean, iced::Size::new(600.0, 420.0)));
+    let clean_canvas = editor_canvas_bounds(&mut clean_ui).expect("clean canvas");
+
+    let failing = EditorViewModel::open("/notes/a.md", UNCLOSED_FENCE);
+    assert!(
+        failing.modal_error().is_some(),
+        "the fixture must actually produce a validation error"
+    );
+    let mut failing_ui = sim(editor_card(&failing, iced::Size::new(600.0, 420.0)));
+    let failing_canvas = editor_canvas_bounds(&mut failing_ui).expect("failing canvas");
+
+    let expected_banner_cost = iced_pro::token::size::CONTROL_MD  // the recovery button
+        + iced_pro::token::space::XS * 2.0                      // the banner's own padding
+        + iced_pro::token::space::SM; // the extra column gap it introduces
+    assert!(
+        (clean_canvas.height - failing_canvas.height - expected_banner_cost).abs() < 0.01,
+        "the banner must cost exactly what its tokens derive ({expected_banner_cost}pt: \
+         a CONTROL_MD recovery button + XS padding + one SM gap); it cost {:.1}pt",
+        clean_canvas.height - failing_canvas.height
+    );
+
+    let ten_lines = iced_pro::token::typography::BODY.line_height * 10.0;
+    assert!(
+        failing_canvas.height >= ten_lines,
+        "even with the banner up the canvas must keep ten lines at the floor, \
+         got {:.1}pt",
+        failing_canvas.height
+    );
+}
+
+/// The canvas keeps the SAME stable id whether or not the banner is showing,
+/// so toggling the error row cannot rebuild the `text_editor` and lose the
+/// caret (AGENTS 6).
+#[test]
+fn test_canvas_id_is_stable_across_the_error_branch() {
+    let clean = EditorViewModel::open("/notes/a.md", "# Title\n");
+    let mut clean_ui = sim(editor_card(&clean, iced::Size::new(1024.0, 768.0)));
+    assert!(
+        editor_canvas_bounds(&mut clean_ui).is_some(),
+        "the canvas must be present with no error showing"
+    );
+
+    let failing = EditorViewModel::open("/notes/a.md", UNCLOSED_FENCE);
+    let mut failing_ui = sim(editor_card(&failing, iced::Size::new(1024.0, 768.0)));
+    assert!(
+        editor_canvas_bounds(&mut failing_ui).is_some(),
+        "the canvas must still be present under the SAME id with the error up"
     );
 }

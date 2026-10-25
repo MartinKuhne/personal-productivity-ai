@@ -240,7 +240,7 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             "the context menu is folded into the base by overlay_host, never stacked here"
         ),
         OverlayLayer::Editor => match state.overlay.editor.as_ref() {
-            Some(buffer) => editor_modal(buffer),
+            Some(buffer) => editor_modal(buffer, state.viewport),
             None => empty_layer(),
         },
         OverlayLayer::Dialog => dialog_card(

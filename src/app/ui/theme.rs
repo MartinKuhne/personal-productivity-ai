@@ -248,6 +248,33 @@ pub struct EditorColors {
     /// red measured `3.9985:1` on white and failed the `UIF-TOK-006`
     /// 4.5:1 normal-text rule (gap **G-6**); `RGB(180, 0, 0)` clears it.
     pub error: Color,
+    /// Placeholder text on the inverted canvas — `RGB(115, 115, 115)`.
+    ///
+    /// **Framework token gap, reported not filled blindly:**
+    /// `iced_pro::token::color::EditorPalette` models `bg` / `fg` / `err`
+    /// only (`UIF-TOK-005`), and a real iced `text_editor` also needs a
+    /// placeholder colour. It is pinned here rather than in the editor
+    /// module so [AGENTS §4a] holds, and the sidecar asserts it clears the
+    /// `MIN_TEXT_CONTRAST` 4.5:1 rule against [`background`] — the same
+    /// bar the error colour was moved to meet.
+    ///
+    /// [`background`]: Self::background
+    pub placeholder: Color,
+    /// Selection highlight on the inverted canvas — `RGB(90, 140, 210)`.
+    ///
+    /// Same token gap as [`placeholder`](Self::placeholder): the framework
+    /// carries no selection colour. Chosen against two measured bounds,
+    /// both asserted in the sidecar via
+    /// [`iced_pro::token::contrast`] rather than eyeballed:
+    /// * `meets_chrome_contrast` against the white canvas (≥ 3.0) — it
+    ///   measured `3.43:1`, so the highlight is actually visible;
+    /// * `meets_text_contrast` for the **black buffer text sitting on it**
+    ///   (≥ 4.5) — it measured `6.12:1`, so a selection never turns the
+    ///   text unreadable.
+    ///
+    /// A lighter blue clears the first bound and fails the second, which is
+    /// why this one is darker than it looks.
+    pub selection: Color,
 }
 
 impl EditorColors {
@@ -262,6 +289,8 @@ impl EditorColors {
             text: pro.text,
             border: Color::BLACK,
             error: pro.error,
+            placeholder: Color::from_rgb8(115, 115, 115),
+            selection: Color::from_rgb8(90, 140, 210),
         }
     }
 }

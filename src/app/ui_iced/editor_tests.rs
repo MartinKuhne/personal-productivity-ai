@@ -8,6 +8,9 @@ use super::*;
 use crate::markdown::DocumentContent;
 use crate::ui::strings;
 use iced::widget::text_editor::{Edit, Motion, Position};
+use iced_pro::surface::modal::{
+    EDITOR_HEIGHT_MAX, EDITOR_HEIGHT_MIN, EDITOR_WIDTH_MAX, EDITOR_WIDTH_MIN,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,6 +30,14 @@ const UNTERMINATED_FENCE_BODY: &str = "# Title\n\n```\nstill inside the fence\n"
 fn open_vm(raw: &str) -> EditorViewModel {
     EditorViewModel::open("C:/tmp/note.md", raw)
 }
+
+/// A typical desktop viewport the view functions are built against.
+///
+/// Wide and tall enough that [`EDITOR_SIZING`] lands on its *fraction* arm
+/// (80%) rather than a clamp, so a view-construction test never depends on
+/// the card being squeezed. The clamp arms are pinned separately, in
+/// [`editor_size_resolves_per_viewport`].
+const TEST_VIEWPORT: Size = Size::new(1600.0, 1000.0);
 
 /// Every `Action` variant, with a representative payload, for exhaustive
 /// classification coverage.
@@ -787,7 +798,7 @@ fn reducer_reports_no_change_when_history_is_exhausted() {
 fn editor_card_builds_for_a_valid_buffer() {
     let vm = open_vm("# Title\n\nbody\n");
 
-    let element: Element<'_, Message> = editor_card(&vm);
+    let element: Element<'_, Message> = editor_card(&vm, TEST_VIEWPORT);
 
     let _ = element;
 }
@@ -796,7 +807,7 @@ fn editor_card_builds_for_a_valid_buffer() {
 fn editor_card_builds_for_an_invalid_buffer() {
     let vm = open_vm(UNTERMINATED_FENCE_BODY);
 
-    let element: Element<'_, Message> = editor_card(&vm);
+    let element: Element<'_, Message> = editor_card(&vm, TEST_VIEWPORT);
 
     assert!(!vm.save_enabled());
     let _ = element;
@@ -806,7 +817,7 @@ fn editor_card_builds_for_an_invalid_buffer() {
 fn editor_modal_builds_over_a_scrim() {
     let vm = open_vm("# Title\n\nbody\n");
 
-    let element: Element<'_, Message> = editor_modal(&vm);
+    let element: Element<'_, Message> = editor_modal(&vm, TEST_VIEWPORT);
 
     let _ = element;
 }
@@ -818,7 +829,7 @@ fn editor_card_builds_for_an_empty_buffer() {
     assert_eq!(vm.text(), "");
     assert!(vm.save_enabled(), "an empty body is valid markdown");
 
-    let element: Element<'_, Message> = editor_card(&vm);
+    let element: Element<'_, Message> = editor_card(&vm, TEST_VIEWPORT);
     let _ = element;
 }
 
@@ -828,4 +839,414 @@ fn validation_reason_covers_every_error_kind() {
         validation_reason(MarkdownErrorKind::UnterminatedCodeFence),
         strings::EDITOR_ERR_UNTERMINATED_FENCE
     );
+}
+
+// =========================================================================
+// UIF-MOD-002 - the guard rule, as a truth table
+// =========================================================================
+
+/// Every gesture x dirty-state combination, pinned in one place.
+///
+/// The guard is a pure function precisely so this table can exist: no
+/// widget tree, no runtime, no file. If a future change makes `Escape`
+/// discard a dirty buffer, this row fails rather than a user finding out.
+#[test]
+fn guard_leave_truth_table() {
+    use LeaveDecision::{AskBeforeDiscarding, Proceed};
+
+    let rows: Vec<(bool, LeaveGesture, LeaveDecision, &str)> = vec![
+        (
+            false,
+            LeaveGesture::Escape,
+            Proceed,
+            "clean + Escape closes: nothing is at stake",
+        ),
+        (
+            false,
+            LeaveGesture::Scrim,
+            Proceed,
+            "clean + scrim closes: nothing is at stake",
+        ),
+        (
+            false,
+            LeaveGesture::Cancel,
+            Proceed,
+            "clean + Cancel closes: nothing is at stake",
+        ),
+        (
+            true,
+            LeaveGesture::Escape,
+            AskBeforeDiscarding,
+            "dirty + Escape must NEVER discard silently",
+        ),
+        (
+            true,
+            LeaveGesture::Scrim,
+            AskBeforeDiscarding,
+            "dirty + scrim must NEVER discard silently",
+        ),
+        (
+            true,
+            LeaveGesture::Cancel,
+            Proceed,
+            "dirty + Cancel closes: that button IS the explicit discard",
+        ),
+    ];
+
+    for (dirty, gesture, expected, why) in rows {
+        assert_eq!(
+            guard_leave(dirty, gesture),
+            expected,
+            "dirty={dirty} {:?}: {why}",
+            gesture
+        );
+    }
+}
+
+/// The app's gesture vocabulary maps onto the framework's `DismissCause`
+/// without inventing a third word for the same thing.
+#[test]
+fn leave_gesture_maps_to_the_framework_dismiss_cause() {
+    use iced_pro::surface::modal::DismissCause;
+
+    assert_eq!(LeaveGesture::Escape.dismiss_cause(), DismissCause::Escape);
+    assert_eq!(LeaveGesture::Scrim.dismiss_cause(), DismissCause::Scrim);
+    // `Cancel` is "the caller decided", which is the cause the framework's
+    // ModalHost already exempts from UIF-MOD-002.
+    assert_eq!(
+        LeaveGesture::Cancel.dismiss_cause(),
+        DismissCause::Programmatic
+    );
+}
+
+/// The guard never mutates anything: same inputs, same answer, forever.
+#[test]
+fn guard_leave_is_stable_across_repeated_calls() {
+    for _ in 0..3 {
+        assert_eq!(
+            guard_leave(true, LeaveGesture::Escape),
+            LeaveDecision::AskBeforeDiscarding
+        );
+        assert_eq!(
+            guard_leave(false, LeaveGesture::Escape),
+            LeaveDecision::Proceed
+        );
+    }
+}
+
+// =========================================================================
+// 4.6.2 - resolved card size, per viewport
+// =========================================================================
+
+/// The card is viewport-responsive, and the clamps are evidenced rather
+/// than asserted at one lucky window size.
+///
+/// Resolution order is the framework's: want 80% of the viewport, floor
+/// at the policy minimum, cap at the policy maximum, then let the shared
+/// `VIEWPORT_GUTTER` (`space::XXL` = 32px) win over the floor when the
+/// two disagree.
+#[test]
+fn editor_size_resolves_per_viewport() {
+    let rows: Vec<(f32, f32, f32, f32, &str)> = vec![
+        // viewport w, h,   card w,   card h, which arm produced it
+        (800.0, 600.0, 640.0, 480.0, "80% of both axes"),
+        (1024.0, 768.0, 819.2, 614.4, "80% of both axes"),
+        (
+            1280.0,
+            800.0,
+            960.0,
+            640.0,
+            "width capped at 960, height 80%",
+        ),
+        (1920.0, 1080.0, 960.0, 760.0, "both axes capped"),
+        (3840.0, 2160.0, 960.0, 760.0, "both axes capped"),
+        (600.0, 420.0, 520.0, 380.0, "both axes floored"),
+        (500.0, 400.0, 468.0, 368.0, "gutter beats the floor"),
+        (
+            320.0,
+            240.0,
+            288.0,
+            208.0,
+            "gutter only; the floor cannot fit",
+        ),
+    ];
+
+    for (vw, vh, want_w, want_h, arm) in rows {
+        let size = editor_size(Size::new(vw, vh));
+        assert_eq!(
+            size,
+            Size::new(want_w, want_h),
+            "viewport {vw}x{vh} should resolve {want_w}x{want_h} ({arm})"
+        );
+    }
+}
+
+/// Whatever the viewport, the card never eats the gutter and never goes
+/// negative - the two properties the app relies on when it hands the
+/// resolved length straight to `Length::Fixed`.
+#[test]
+fn editor_size_always_leaves_the_gutter_and_stays_non_negative() {
+    for w in [0.0, 1.0, 64.0, 300.0, 1024.0, 4096.0] {
+        for h in [0.0, 1.0, 64.0, 300.0, 768.0, 4096.0] {
+            let size = editor_size(Size::new(w, h));
+            assert!(
+                size.width <= (w - space::XXL).max(0.0) + f32::EPSILON,
+                "width {w} must leave the {}px gutter, got {}",
+                space::XXL,
+                size.width
+            );
+            assert!(
+                size.height <= (h - space::XXL).max(0.0) + f32::EPSILON,
+                "height {h} must leave the {}px gutter, got {}",
+                space::XXL,
+                size.height
+            );
+            assert!(size.width >= 0.0 && size.height >= 0.0);
+        }
+    }
+}
+
+/// The card never exceeds the policy's own ceiling on a huge screen, and
+/// never drops below it while the gutter can still fit it.
+#[test]
+fn editor_size_respects_the_policy_bounds() {
+    let size = editor_size(Size::new(4096.0, 4096.0));
+    assert_eq!(size.width, EDITOR_WIDTH_MAX);
+    assert_eq!(size.height, EDITOR_HEIGHT_MAX);
+
+    // A viewport big enough that the floors are reachable without the
+    // gutter interfering.
+    let size = editor_size(Size::new(900.0, 520.0));
+    assert!(
+        size.width >= EDITOR_WIDTH_MIN || size.width >= 900.0 - space::XXL,
+        "width {} should reach the floor or the gutter",
+        size.width
+    );
+    assert!(size.height >= EDITOR_HEIGHT_MIN);
+}
+
+// =========================================================================
+// UIF-MOD-003 - the structured error slot
+// =========================================================================
+
+/// A clean, valid buffer has nothing to show.
+#[test]
+fn a_clean_valid_buffer_has_no_modal_error() {
+    let vm = open_vm("# Title\n\nbody\n");
+    assert_eq!(vm.modal_error(), None);
+}
+
+/// A validation failure reaches the banner as a *structured* error: a
+/// grouping code, the offending line and column, and the control that
+/// must be fixed - not just a string.
+#[test]
+fn a_validation_failure_carries_its_location_and_a_focus_recovery() {
+    let vm = open_vm(UNTERMINATED_FENCE_BODY);
+    let error = vm
+        .modal_error()
+        .expect("an invalid buffer must show an error");
+
+    assert_eq!(error.code(), EDITOR_VALIDATION_ERROR_CODE);
+    assert_eq!(
+        error.location(),
+        Some(&ErrorLocation::Position { line: 3, column: 1 }),
+        "the parser's line/column must reach the banner, not be flattened away"
+    );
+    assert_eq!(
+        error.recovery(),
+        &Recovery::FocusControl(iced_pro::focus::FocusId::new(EDITOR_TEXT_ID)),
+        "the recovery must name the buffer the user has to fix"
+    );
+    assert!(
+        error.message().contains("line 3"),
+        "the message must say where, got {:?}",
+        error.message()
+    );
+}
+
+/// A save that was refused outranks a validation failure: the user has
+/// already tried to commit and been turned down, which is the more recent
+/// fact about what went wrong.
+#[test]
+fn a_save_failure_outranks_a_validation_failure() {
+    let mut vm = open_vm(UNTERMINATED_FENCE_BODY);
+    assert_eq!(
+        vm.modal_error().map(|e| e.code().to_string()),
+        Some(EDITOR_VALIDATION_ERROR_CODE.to_string())
+    );
+
+    vm.set_save_error(save_queue_error());
+    assert_eq!(
+        vm.modal_error().map(|e| e.code().to_string()),
+        Some(EDITOR_SAVE_ERROR_CODE.to_string()),
+        "the refused save must be what the banner shows"
+    );
+    assert_eq!(
+        vm.modal_error().map(|e| e.recovery().clone()),
+        Some(Recovery::Retry),
+        "and it must offer a retry, not a focus jump"
+    );
+}
+
+/// The banner changes by exactly two operations, mirroring
+/// `ModalHost::set_error` / `clear_error`.
+#[test]
+fn save_error_set_clear_and_note_round_trip() {
+    let mut vm = open_vm("body");
+    assert!(vm.save_error().is_none());
+
+    // `note_save_failed` reports whether the banner *changed*.
+    assert!(
+        vm.note_save_failed(),
+        "showing a banner where none was is a change"
+    );
+    assert!(
+        !vm.note_save_failed(),
+        "showing the same banner twice is not"
+    );
+
+    let removed = vm.clear_save_error();
+    assert!(removed.is_some(), "clearing must return what it removed");
+    assert_eq!(
+        removed.map(|e| e.code().to_string()),
+        Some(EDITOR_SAVE_ERROR_CODE.to_string())
+    );
+    assert!(vm.save_error().is_none());
+    assert!(
+        vm.clear_save_error().is_none(),
+        "clearing an empty slot returns nothing"
+    );
+}
+
+/// `set_save_error` returns what it superseded, so a caller can tell a
+/// fresh failure from a replacement.
+#[test]
+fn set_save_error_returns_the_superseded_failure() {
+    let mut vm = open_vm("body");
+    assert_eq!(vm.set_save_error(save_queue_error()), None);
+    assert_eq!(
+        vm.set_save_error(save_queue_error())
+            .map(|e| e.code().to_string()),
+        Some(EDITOR_SAVE_ERROR_CODE.to_string())
+    );
+}
+
+/// Each recovery affordance gets a label that says what pressing it does.
+#[test]
+fn recovery_labels_name_what_the_button_does() {
+    let retry = ModalError::new("X", "x").with_recovery(Recovery::Retry);
+    assert_eq!(recovery_label(&retry), strings::EDITOR_RETRY_LABEL);
+
+    let focus_line = ModalError::new("X", "x")
+        .at(ErrorLocation::Position { line: 7, column: 2 })
+        .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+            EDITOR_TEXT_ID,
+        )));
+    assert_eq!(recovery_label(&focus_line), "Fix line 7");
+
+    let focus_region = ModalError::new("X", "x")
+        .at(ErrorLocation::Region("front matter".to_string()))
+        .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+            EDITOR_TEXT_ID,
+        )));
+    assert_eq!(recovery_label(&focus_region), strings::EDITOR_FIX_LABEL);
+
+    let ack = ModalError::new("X", "x").with_recovery(Recovery::Acknowledge);
+    assert_eq!(recovery_label(&ack), strings::CLOSE_BUTTON);
+}
+
+/// The save-refusal error is the shape the banner and the retry both rely on.
+#[test]
+fn save_queue_error_is_structured_and_retryable() {
+    let error = save_queue_error();
+    assert_eq!(error.code(), EDITOR_SAVE_ERROR_CODE);
+    assert_eq!(error.message(), strings::EDITOR_SAVE_QUEUE_ERROR);
+    assert_eq!(error.recovery(), &Recovery::Retry);
+    assert_eq!(error.location(), None);
+}
+
+/// The new editor messages never touch the buffer - they are dismiss and
+/// recovery traffic, not edits.
+#[test]
+fn dismiss_and_recovery_messages_never_mutate_the_buffer() {
+    let mut vm = open_vm("body");
+    let before = vm.text();
+
+    let messages = vec![
+        EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        },
+        EditorMessage::Absorbed,
+        EditorMessage::RecoveryRequested {
+            path: PathBuf::from("C:/tmp/note.md"),
+            recovery: Recovery::Retry,
+        },
+        EditorMessage::CancelRequested,
+    ];
+
+    for message in messages {
+        assert!(
+            !apply_editor_message(&mut vm, &message),
+            "{message:?} must report that it changed nothing"
+        );
+        assert_eq!(vm.text(), before, "{message:?} must not touch the text");
+    }
+}
+
+// =========================================================================
+// UI-046 - the inverted editor palette's contrast bounds
+// =========================================================================
+
+/// The two colours the framework does NOT carry are still held to the
+/// framework's own contrast rules, measured from raw sRGB rather than
+/// eyeballed.
+///
+/// `iced_pro::token::color::EditorPalette` models `bg` / `fg` / `err`
+/// only (`UIF-TOK-005`), so the placeholder and selection colours the
+/// app had to add are pinned here against
+/// [`iced_pro::token::contrast`] - the same bar that moved the error
+/// colour off pure red.
+#[test]
+fn inverted_editor_palette_meets_its_contrast_bounds() {
+    use iced_pro::token::contrast::{meets_chrome_contrast, meets_text_contrast};
+
+    let colors = EditorColors::inverted();
+
+    assert!(
+        meets_text_contrast(colors.text, colors.background),
+        "black buffer text on the white canvas must clear 4.5:1"
+    );
+    assert!(
+        meets_text_contrast(colors.error, colors.background),
+        "the error red must clear 4.5:1 on the white canvas"
+    );
+    assert!(
+        meets_text_contrast(colors.placeholder, colors.background),
+        "the placeholder must clear 4.5:1 on the white canvas"
+    );
+    // The selection is a fill, so it is held to the 3.0 chrome bar...
+    assert!(
+        meets_chrome_contrast(colors.selection, colors.background),
+        "the selection highlight must be visible against the canvas (>= 3.0)"
+    );
+    // ...and to the text bar for the black buffer text sitting ON it, so a
+    // selection never turns the text unreadable.
+    assert!(
+        meets_text_contrast(colors.text, colors.selection),
+        "black buffer text on the selection must still clear 4.5:1"
+    );
+}
+
+/// The app's inverted editor palette is the framework token, not a
+/// parallel set of numbers that can drift.
+#[test]
+fn inverted_editor_palette_delegates_to_the_framework_token() {
+    use iced_pro::token::color::EditorPalette;
+
+    let app = EditorColors::inverted();
+    let pro = EditorPalette::inverted();
+
+    assert_eq!(app.background, pro.background);
+    assert_eq!(app.text, pro.text);
+    assert_eq!(app.error, pro.error);
 }

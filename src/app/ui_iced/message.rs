@@ -343,6 +343,18 @@ pub enum TabMessage {
 /// Save / Cancel buttons plus the live buffer, with every `Action::Edit`
 /// intercepted so the undo history lives at OUR layer
 /// (`iced::widget::text_editor` has no native undo/redo).
+///
+/// # Why `CancelRequested` and `DismissRequested` are separate messages
+///
+/// They look like the same intent and are not. `CancelRequested` is the
+/// footer button: the user has said "throw the buffer away" explicitly, so
+/// `UIF-MOD-002`'s guard lets it through. `DismissRequested` is a
+/// *reflex* — the scrim (and, via the escape walk, `Escape`) — and must
+/// never be able to discard unsaved work without asking. Folding the two
+/// into one message is exactly how the pre-INT-5b editor lost edits on a
+/// keypress, so the cause travels with the intent ([FMD-068]) and the
+/// reducer decides through
+/// [`guard_leave`](crate::ui_iced::editor::guard_leave).
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorMessage {
     /// An [`iced::widget::text_editor::Action`] was performed in the buffer
@@ -358,7 +370,39 @@ pub enum EditorMessage {
     },
     /// The user cancelled the editor: discard the buffer, close the overlay
     /// (UI-045).
+    ///
+    /// This is the **explicit** discard the unsaved-edit guard names as its
+    /// escape hatch — it is never what a scrim click or `Escape` sends.
     CancelRequested,
+    /// A dismiss gesture that must pass the unsaved-edit guard before it
+    /// may close anything (`UIF-MOD-002`).
+    ///
+    /// `cause` says which gesture it was, because the answer depends on it:
+    /// a clean buffer closes, a dirty one is refused and the discard
+    /// confirmation is raised instead.
+    DismissRequested {
+        /// The gesture being guarded.
+        cause: crate::ui_iced::editor::LeaveGesture,
+    },
+    /// A press landed on the card's own boundary — its padding ring, a
+    /// disabled `Save`, dead space between rows — and was absorbed there.
+    ///
+    /// Deliberately changes nothing: the whole contract is that such a
+    /// press must not reach the scrim and must not close the editor
+    /// (`UIF-VER-003`, `UIF-INP-002`).
+    Absorbed,
+    /// The user pressed the error banner's recovery affordance
+    /// (`UIF-MOD-003`).
+    ///
+    /// `recovery` travels with the intent so the reducer performs *the
+    /// affordance that was rendered* rather than re-deriving one from
+    /// state that may since have moved.
+    RecoveryRequested {
+        /// File the failed action was aimed at.
+        path: PathBuf,
+        /// The affordance the banner was showing.
+        recovery: iced_pro::surface::modal::Recovery,
+    },
     /// Replay one snapshot back from the per-tab undo stack (UI-042).
     /// Per-tab stacks make the tab path part of the intent.
     Undo {

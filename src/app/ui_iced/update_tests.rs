@@ -2949,3 +2949,355 @@ fn test_escape_pressed_is_not_a_context_menu_dismissing_command() {
         OverlayMessage::ModifiersChanged { shift: true }
     )));
 }
+
+// =========================================================================
+// UIF-MOD-002 - the editor's unsaved-edit guard on the scrim / dialog paths
+// =========================================================================
+
+/// Open a clean editor buffer on a fixed path.
+fn seed_clean_editor(state: &mut AppState) {
+    state.overlay.editor = Some(EditorViewModel::open("M:\\lib\\note.md", "body"));
+}
+
+/// Dirty the open buffer through the real keystroke path.
+fn seed_dirty_editor(state: &mut AppState) {
+    seed_clean_editor(state);
+    state
+        .overlay
+        .editor
+        .as_mut()
+        .expect("editor open")
+        .apply_action(iced::widget::text_editor::Action::Edit(
+            iced::widget::text_editor::Edit::Paste(Arc::new(" unsaved".to_string())),
+        ));
+    assert!(
+        state.overlay.editor.as_ref().unwrap().is_dirty(),
+        "the fixture must leave unsaved edits"
+    );
+}
+
+/// The buffer's current text, for before/after comparisons.
+fn editor_text(state: &AppState) -> String {
+    state.overlay.editor.as_ref().expect("editor open").text()
+}
+
+/// A scrim click on a **clean** buffer still closes the editor - the
+/// guard must not turn every dismissal into a question.
+#[test]
+fn scrim_dismiss_on_a_clean_editor_closes_it() {
+    let (mut state, _storage) = fresh_state();
+    seed_clean_editor(&mut state);
+
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        }),
+    );
+
+    assert!(
+        state.overlay.editor.is_none(),
+        "a clean buffer must dismiss on a scrim click exactly as before"
+    );
+    assert!(
+        !state.overlay.dialog.is_open(),
+        "a clean dismissal must not raise a confirmation"
+    );
+}
+
+/// The core regression: a scrim click on a **dirty** buffer must not
+/// discard it. It raises the discard confirmation instead.
+#[test]
+fn scrim_dismiss_on_a_dirty_editor_raises_the_confirmation_instead_of_discarding() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    let before = editor_text(&state);
+
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        }),
+    );
+
+    assert!(
+        state.overlay.editor.is_some(),
+        "UIF-MOD-002: a scrim click over unsaved edits must keep the editor open"
+    );
+    assert_eq!(editor_text(&state), before, "the buffer must be untouched");
+    assert_eq!(
+        state.overlay.dialog.kind(),
+        Some(&DialogKind::DiscardEditorChanges {
+            path: PathBuf::from("M:\\lib\\note.md"),
+        }),
+        "the refusal must ask through the INT-4 discard confirmation"
+    );
+    assert_eq!(
+        state.overlay.dialog.kind().map(DialogKind::button_intent),
+        Some(iced_pro::surface::input_dialog::ButtonIntent::Danger),
+        "discarding unsaved work must wear the Danger variant, not a neutral one"
+    );
+}
+
+/// `Cancel` is the explicit discard the requirement names as its escape
+/// hatch: the same dirty buffer the scrim refuses, Cancel closes.
+#[test]
+fn the_cancel_button_still_closes_a_dirty_editor() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+
+    let _ = update(&mut state, Message::Editor(EditorMessage::CancelRequested));
+
+    assert!(
+        state.overlay.editor.is_none(),
+        "Cancel is the user saying throw-it-away explicitly; the guard must not block it"
+    );
+    assert!(
+        !state.overlay.dialog.is_open(),
+        "an explicit Cancel must not escalate into a confirmation"
+    );
+}
+
+/// Answering the confirmation "Discard" closes the buffer.
+#[test]
+fn confirming_the_discard_closes_the_editor() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        }),
+    );
+    assert!(state.overlay.dialog.is_open());
+
+    let _ = update(&mut state, Message::Dialog(DialogMessage::Submitted));
+
+    assert!(
+        state.overlay.editor.is_none(),
+        "Discard must actually discard the buffer"
+    );
+    assert!(
+        !state.overlay.dialog.is_open(),
+        "and the question must close with it"
+    );
+}
+
+/// Answering the confirmation "Cancel" closes only the question. The
+/// edits stay exactly where they were.
+#[test]
+fn cancelling_the_discard_confirmation_leaves_the_editor_open() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    let before = editor_text(&state);
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::DismissRequested {
+            cause: LeaveGesture::Scrim,
+        }),
+    );
+
+    let _ = update(&mut state, Message::Dialog(DialogMessage::Cancelled));
+
+    assert!(
+        state.overlay.editor.is_some(),
+        "backing out of the question must never discard the work it asked about"
+    );
+    assert_eq!(editor_text(&state), before);
+    assert!(!state.overlay.dialog.is_open());
+}
+
+/// A press absorbed by the card boundary changes nothing at all - not the
+/// buffer, not the overlay, not the dialog (`UIF-INP-002`).
+#[test]
+fn an_absorbed_press_changes_nothing() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    let before = editor_text(&state);
+
+    let _ = update(&mut state, Message::Editor(EditorMessage::Absorbed));
+
+    assert_eq!(editor_text(&state), before);
+    assert!(!state.overlay.dialog.is_open());
+    assert!(state.overlay.editor.is_some());
+}
+
+/// `Escape` through the reducer takes the same guarded path as the scrim:
+/// a dirty buffer survives it.
+#[test]
+fn escape_through_the_reducer_does_not_discard_a_dirty_editor() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    let before = editor_text(&state);
+
+    let _ = update(&mut state, Message::Overlay(OverlayMessage::EscapePressed));
+
+    assert!(
+        state.overlay.editor.is_some(),
+        "UIF-MOD-002: the reducer's Escape path must not drop unsaved edits either"
+    );
+    assert_eq!(editor_text(&state), before);
+    assert!(state.overlay.dialog.is_open());
+}
+
+/// A retry the worker accepted clears the banner: the user must not be
+/// left looking at a stale failure after a save that worked.
+#[test]
+fn recovery_retry_clears_the_banner_when_the_worker_accepts() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    state
+        .overlay
+        .editor
+        .as_mut()
+        .expect("editor open")
+        .set_save_error(crate::ui_iced::editor::save_queue_error());
+    assert!(
+        state
+            .overlay
+            .editor
+            .as_ref()
+            .unwrap()
+            .save_error()
+            .is_some()
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::RecoveryRequested {
+            path: PathBuf::from("M:\\lib\\note.md"),
+            recovery: Recovery::Retry,
+        }),
+    );
+
+    assert!(
+        state
+            .overlay
+            .editor
+            .as_ref()
+            .unwrap()
+            .save_error()
+            .is_none(),
+        "an accepted retry must clear the failure the banner is showing"
+    );
+}
+
+/// `Recovery::FocusControl` must produce exactly one runtime task - a
+/// recovery affordance that hands back nothing is a button that does
+/// nothing.
+///
+/// Driven through `run_recovery` directly rather than `update`, because
+/// `iced::Task` exposes no way to inspect what it carries once it is
+/// wrapped; the dispatch's own `Vec` is the last place the count is
+/// observable.
+#[test]
+fn recovery_focus_control_produces_exactly_one_task() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+
+    let tasks = run_recovery(
+        &mut state,
+        &PathBuf::from("M:\\lib\\note.md"),
+        Recovery::FocusControl(iced_pro::focus::FocusId::new(
+            crate::ui_iced::editor::EDITOR_TEXT_ID,
+        )),
+    );
+
+    assert_eq!(
+        tasks.len(),
+        1,
+        "the focus recovery must hand iced exactly one operation"
+    );
+    assert!(
+        state
+            .overlay
+            .editor
+            .as_ref()
+            .unwrap()
+            .save_error()
+            .is_none(),
+        "focusing the buffer must not touch the banner"
+    );
+}
+
+/// `Recovery::Retry` re-runs the save rather than focusing anything, so
+/// it queues work and returns no task of its own.
+#[test]
+fn recovery_retry_re_runs_the_save() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+
+    let tasks = run_recovery(
+        &mut state,
+        &PathBuf::from("M:\\lib\\note.md"),
+        Recovery::Retry,
+    );
+
+    assert!(tasks.is_empty(), "the retry is queued, not deferred");
+    assert!(
+        state
+            .overlay
+            .editor
+            .as_ref()
+            .unwrap()
+            .save_error()
+            .is_none(),
+        "an accepted retry must clear the failure the banner is showing"
+    );
+}
+
+/// `Recovery::Acknowledge` clears the banner without re-running anything.
+#[test]
+fn recovery_acknowledge_clears_the_banner() {
+    let (mut state, _storage) = fresh_state();
+    seed_dirty_editor(&mut state);
+    state
+        .overlay
+        .editor
+        .as_mut()
+        .expect("editor open")
+        .set_save_error(crate::ui_iced::editor::save_queue_error());
+
+    let _ = update(
+        &mut state,
+        Message::Editor(EditorMessage::RecoveryRequested {
+            path: PathBuf::from("M:\\lib\\note.md"),
+            recovery: Recovery::Acknowledge,
+        }),
+    );
+
+    assert!(
+        state
+            .overlay
+            .editor
+            .as_ref()
+            .unwrap()
+            .save_error()
+            .is_none()
+    );
+}
+
+/// Both halves of the save-outcome decision, pinned directly: the worker
+/// queue has no seam for forcing a refusal, so the refused branch is
+/// covered here rather than left assumed.
+#[test]
+fn record_save_outcome_surfaces_a_refusal_and_clears_an_acceptance() {
+    let mut vm = EditorViewModel::open("M:\\lib\\note.md", "body");
+
+    record_save_outcome(&mut vm, true);
+    assert!(
+        vm.save_error().is_none(),
+        "an accepted save must leave no banner behind"
+    );
+
+    record_save_outcome(&mut vm, false);
+    let error = vm.save_error().expect("a refused save must be surfaced");
+    assert_eq!(error.code(), crate::ui_iced::editor::EDITOR_SAVE_ERROR_CODE);
+    assert_eq!(error.recovery(), &Recovery::Retry);
+
+    record_save_outcome(&mut vm, true);
+    assert!(
+        vm.save_error().is_none(),
+        "a later accepted save must clear the earlier refusal"
+    );
+}
