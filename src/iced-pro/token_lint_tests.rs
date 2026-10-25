@@ -1092,3 +1092,273 @@ fn the_line_height_scan_fires_on_a_bare_pixel_constant() {
         calls[0]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Wrapped declarations — the INT-14 blind spot
+//
+// A `pub const NAME: f32 =` whose RHS `rustfmt` wraps onto the next line
+// used to leave `expr` empty. `numeric_literals("")` found nothing, and
+// `classify_scalar` returned `TokenBound` — a *pass* — for a constant whose
+// value had never been read. The parser's own header says a parser that
+// quietly gives up is more dangerous than one that does not look; giving
+// up and reporting approval is the worst of both.
+//
+// These tests hold both halves of the fix: a wrapped expression is now
+// actually read, and an expression that still cannot be read is reported
+// rather than approved.
+// ---------------------------------------------------------------------------
+
+/// The bug, reproduced in the shape it shipped. Same wrapping as the
+/// compliant case below, and it must not share that case's verdict.
+#[test]
+fn a_wrapped_literal_is_not_reported_token_bound() {
+    let src = concat!("pub const ROW_GAP: f32 =\n", "    space::MD + 13.0;\n");
+    let scan = scan_source("widget/wrapped.rs", src);
+
+    assert_eq!(
+        scan.token_bound, 0,
+        "a wrapped literal must NOT be counted token-bound — that was the hole"
+    );
+    assert_eq!(
+        scan.findings.len(),
+        1,
+        "it must surface as exactly one finding: {:?}",
+        scan.findings
+    );
+    assert_eq!(scan.findings[0].rule, Rule::UnboundVisualScalar);
+    assert_eq!(
+        scan.findings[0].line, 1,
+        "the finding is reported at the declaration's opening line, where the \
+         author can act on it"
+    );
+    assert_eq!(
+        scan.findings[0].constant_name(),
+        Some("ROW_GAP"),
+        "and it names the constant"
+    );
+    assert!(
+        scan.findings[0].detail.contains("13.0"),
+        "the finding must name the literal it read, proving the continuation \
+         was examined: {}",
+        scan.findings[0].detail
+    );
+}
+
+/// The preferred outcome: a wrapped, token-only expression is read as
+/// token-bound because the gate actually saw the tokens — not because it
+/// saw nothing.
+#[test]
+fn a_wrapped_token_only_expression_is_read_rather_than_assumed() {
+    let src = concat!("pub const ROW_GAP: f32 =\n", "    space::MD + space::SM;\n");
+    let scan = scan_source("widget/wrapped.rs", src);
+
+    assert!(scan.findings.is_empty(), "{:?}", scan.findings);
+    assert_eq!(scan.token_bound, 1);
+    assert_eq!(
+        scan.unreadable, 0,
+        "the expression was recovered, so this is not an unreadable declaration"
+    );
+}
+
+/// **Non-vacuity.** All four fixtures declare the same constant with the
+/// same name in the same file; they differ only in how the RHS is wrapped
+/// and what it contains. A gate that still could not see would call every
+/// one of them `token-bound`.
+#[test]
+fn wrapping_is_transparent_to_the_value_and_never_to_the_verdict() {
+    let fixtures = [
+        (
+            "wrapped literal",
+            "pub const ROW_GAP: f32 =\n    space::MD + 13.0;\n",
+        ),
+        (
+            "inline literal",
+            "pub const ROW_GAP: f32 = space::MD + 13.0;\n",
+        ),
+        (
+            "wrapped token",
+            "pub const ROW_GAP: f32 =\n    space::MD + space::SM;\n",
+        ),
+        (
+            "inline token",
+            "pub const ROW_GAP: f32 = space::MD + space::SM;\n",
+        ),
+    ];
+    let scanned: Vec<(&str, SourceScan)> = fixtures
+        .iter()
+        .map(|(name, src)| (*name, scan_source("widget/wrapped.rs", src)))
+        .collect();
+
+    let wrapped_literal = &scanned[0].1;
+    let inline_literal = &scanned[1].1;
+    let wrapped_token = &scanned[2].1;
+    let inline_token = &scanned[3].1;
+
+    // Wrapping changes nothing about the verdict the *value* earns.
+    assert_eq!(
+        wrapped_literal.findings.len(),
+        inline_literal.findings.len(),
+        "literal RHS: wrapped and inline must agree"
+    );
+    assert_eq!(
+        wrapped_literal.token_bound, inline_literal.token_bound,
+        "literal RHS: wrapped and inline must agree on token_bound"
+    );
+    assert_eq!(
+        wrapped_token.findings.len(),
+        inline_token.findings.len(),
+        "token RHS: wrapped and inline must agree"
+    );
+    assert_eq!(
+        wrapped_token.token_bound, inline_token.token_bound,
+        "token RHS: wrapped and inline must agree on token_bound"
+    );
+
+    // And the two families genuinely disagree, which is what proves the
+    // classifier read the continuation rather than the line break.
+    assert_eq!(
+        inline_literal.findings.len(),
+        1,
+        "the inline literal violates"
+    );
+    assert_eq!(inline_token.token_bound, 1, "the inline token binds");
+    assert_eq!(
+        wrapped_literal.findings.len(),
+        1,
+        "the wrapped literal violates"
+    );
+    assert_eq!(wrapped_token.token_bound, 1, "the wrapped token binds");
+}
+
+/// A declaration whose terminating `;` can never be reached is reported
+/// `unreadable`. It is never counted compliant, because nothing about it
+/// was established.
+#[test]
+fn an_unreachable_expression_is_reported_unreadable_not_approved() {
+    // Three ways the `;` can fail to arrive: the next line opens a new
+    // item, the next line is blank, or the file simply ends.
+    let cases = [
+        (
+            "next line opens a new item",
+            concat!(
+                "pub const ROW_GAP: f32 =\n",
+                "pub const OTHER_GAP: f32 = space::MD;\n"
+            ),
+        ),
+        (
+            "blank line breaks the continuation",
+            concat!(
+                "pub const ROW_GAP: f32 =\n",
+                "\n",
+                "pub const OTHER_GAP: f32 = space::MD;\n"
+            ),
+        ),
+        ("file ends mid-declaration", "pub const ROW_GAP: f32 =\n"),
+    ];
+
+    for (label, src) in cases {
+        let scan = scan_source("widget/broken.rs", src);
+        assert_eq!(
+            scan.unreadable, 1,
+            "{label}: the unreadable declaration must be counted"
+        );
+        assert!(
+            !scan.findings.is_empty(),
+            "{label}: unreadable must produce a finding, not silence"
+        );
+        let v = &scan.findings[0];
+        assert_eq!(v.rule, Rule::UnboundVisualScalar, "{label}");
+        assert_eq!(
+            v.constant_name(),
+            Some("ROW_GAP"),
+            "{label}: the unreadable constant is the one named"
+        );
+        assert!(
+            v.detail.contains("could not read"),
+            "{label}: the detail must say the expression was unreadable rather \
+             than claim an unbound measurement: {}",
+            v.detail
+        );
+    }
+}
+
+/// The unreadable declaration must never be counted `token_bound`, and the
+/// class must report itself non-compliant. This is the assertion whose
+/// absence created the hole.
+#[test]
+fn unreadable_is_never_compliant_and_never_token_bound() {
+    assert!(
+        !ScalarClass::Unreadable.is_compliant(),
+        "an unreadable declaration has not been shown to satisfy the rule"
+    );
+    assert_eq!(ScalarClass::Unreadable.label(), "unreadable-expr");
+
+    let src = "pub const ROW_GAP: f32 =\n";
+    let scan = scan_source("widget/broken.rs", src);
+    assert_eq!(
+        scan.token_bound, 0,
+        "unreadable must not be counted token-bound under any path"
+    );
+    assert_eq!(scan.unreadable, 1);
+}
+
+/// The happy path is unchanged: a single-line literal constant violates
+/// exactly as it always did, with the same message shape.
+#[test]
+fn a_single_line_literal_still_violates_exactly_as_before() {
+    let src = "pub const ROW_GAP: f32 = 13.0;\n";
+    let scan = scan_source("widget/inline.rs", src);
+    assert_eq!(scan.findings.len(), 1, "{:?}", scan.findings);
+    let v = &scan.findings[0];
+    assert_eq!(v.rule, Rule::UnboundVisualScalar);
+    assert_eq!(v.line, 1);
+    assert!(
+        v.detail.contains("13.0"),
+        "the ordinary violation message still names the literal: {}",
+        v.detail
+    );
+    assert!(
+        !v.detail.contains("could not read"),
+        "a readable declaration must not be described as unreadable: {}",
+        v.detail
+    );
+    assert_eq!(scan.unreadable, 0);
+}
+
+/// A multi-line continuation spanning more than one extra line is joined in
+/// full, so a long derived expression is read rather than truncated.
+#[test]
+fn a_continuation_spanning_several_lines_is_joined_in_full() {
+    let src = concat!(
+        "pub const STACKED_HEIGHT: f32 =\n",
+        "    HEADER_HEIGHT\n",
+        "    + BAND_GAP\n",
+        "    + CONTROL_SLOT_HEIGHT\n",
+        "    + BAND_GAP\n",
+        "    + CAPTION_SLOT_HEIGHT;\n",
+    );
+    let scan = scan_source("widget/tall.rs", src);
+    assert!(
+        scan.findings.is_empty(),
+        "a token-only multi-line RHS must be read as token-bound: {:?}",
+        scan.findings
+    );
+    assert_eq!(scan.token_bound, 1);
+    assert_eq!(scan.unreadable, 0);
+
+    // Same shape, but the last line carries a literal — the join must have
+    // reached it, not stopped early.
+    let with_literal = src.replace("+ CAPTION_SLOT_HEIGHT;", "+ CAPTION_SLOT_HEIGHT + 7.0;");
+    let after = scan_source("widget/tall.rs", &with_literal);
+    assert_eq!(
+        after.findings.len(),
+        1,
+        "the literal on the final continuation line must be seen: {:?}",
+        after.findings
+    );
+    assert!(
+        after.findings[0].detail.contains("7.0"),
+        "the finding names the literal from the last line: {}",
+        after.findings[0].detail
+    );
+}

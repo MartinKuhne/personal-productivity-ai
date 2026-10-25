@@ -87,11 +87,30 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// now composed from those chip metrics rather than from the spacing scale,
 /// so the fit tests, the label-floor arithmetic and `PDF_BADGE_CHARGE` are
 /// all unmoved.
-const PIN_APP_TOKEN_BOUND: usize = 97;
+/// 96 after INT-14 taught the parser to read a wrapped declaration's
+/// expression instead of approving the empty string it used to read.
+/// `TAG_TRIGGER_VERTICAL_PADDING` (`panels/top.rs`) wraps onto a second
+/// line and its RHS carries `/ 2.0`. Under the old parser the expression
+/// read empty, `numeric_literals` found nothing, and the constant was
+/// counted `token-bound` without its value ever being looked at. Read
+/// properly it is an unbound-scalar finding, so it leaves this count and
+/// is carried on `APP_ALLOW_LIST` with the reason. Nothing was re-tuned:
+/// the constant's value is byte-for-byte what it was.
+const PIN_APP_TOKEN_BOUND: usize = 96;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.
-const PIN_APP_ALLOW_ENTRIES: usize = 12;
+///
+/// 12 through INT-13. 13 after INT-14: `panels/top.rs:TAG_TRIGGER_VERTICAL_PADDING`
+/// became visible once wrapped declarations were actually read, and its
+/// `/ 2.0` is a centring divisor rather than a measurement. It is excused
+/// rather than fixed because every alternative is worse — binding the
+/// divisor to a spacing rung would call a non-spacing value a spacing
+/// value, and collapsing the expression to the `space.xs` it yields today
+/// would throw away the rung-derivation the constant exists to carry. The
+/// entry's own text states that, and the non-vacuity assertion below proves
+/// the entry is suppressing a real finding rather than padding the list.
+const PIN_APP_ALLOW_ENTRIES: usize = 13;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -561,5 +580,72 @@ fn the_report_names_the_gate_and_its_counts() {
     assert!(report.contains("fastmd/ui_iced"), "{report}");
     assert!(report.contains(APP_COLOUR_DEFINITION_FILE), "{report}");
     assert!(report.contains("violations: 0"), "{report}");
-    assert!(report.contains("suppressed: 12"), "{report}");
+    assert!(report.contains("suppressed: 13"), "{report}");
+    // The unreadable count is in the report so a clean-looking tree can be
+    // told apart from an unread one. Zero here means the parser actually
+    // read every declaration it counted.
+    assert!(report.contains("0 unreadable"), "{report}");
+}
+
+/// **The INT-13 regression.** `PDF_BADGE_SLOT` is the constant that
+/// exposed the hole: while its RHS wrapped onto a second line the parser
+/// read an empty expression, `numeric_literals` found nothing, and the
+/// gate counted it `token-bound` without ever looking at the value. It is
+/// single-line today, so the shape that hid it is gone — but the point of
+/// INT-14 is that re-wrapping it must no longer be a way to smuggle a
+/// literal past Rule B.
+#[test]
+fn a_rewrapped_pdf_badge_slot_cannot_smuggle_a_literal_past_rule_b() {
+    let path = app_source_root()
+        .join("ui_iced")
+        .join("panels")
+        .join("left.rs");
+    let text = std::fs::read_to_string(&path).expect("left.rs must be readable");
+
+    let baseline = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &text);
+    assert!(
+        baseline.findings.is_empty(),
+        "the real file must be clean before injection: {:?}",
+        baseline.findings
+    );
+    assert_eq!(
+        baseline.unreadable, 0,
+        "and nothing in it may be unreadable — every counted constant was read"
+    );
+
+    // Re-wrap the declaration exactly the way INT-13 had it, and put a
+    // bare literal on the continuation line.
+    let rewrapped = text.replace(
+        "pub const PDF_BADGE_SLOT: f32 = PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL;",
+        "pub const PDF_BADGE_SLOT: f32 =\n    PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL + 13.0;",
+    );
+    assert_ne!(
+        rewrapped, text,
+        "the substitution must have applied — if the real declaration changed \
+         shape, update this fixture so the regression keeps testing something"
+    );
+
+    let after = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &rewrapped);
+    assert_eq!(
+        after.findings.len(),
+        1,
+        "a literal smuggled into a re-wrapped slot must be caught, not waved \
+         through as token-bound: {:?}",
+        after.findings
+    );
+    assert_eq!(
+        after.findings[0].constant_name(),
+        Some("PDF_BADGE_SLOT"),
+        "and it must name the constant that smuggled it"
+    );
+    assert!(
+        after.findings[0].detail.contains("13.0"),
+        "the finding must name the literal it read from the continuation line: {}",
+        after.findings[0].detail
+    );
+    assert_eq!(
+        after.unreadable, 0,
+        "the expression was read, so this is a real verdict rather than an \
+         admission of blindness"
+    );
 }

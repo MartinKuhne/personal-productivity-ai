@@ -231,6 +231,24 @@ pub const APP_ALLOW_LIST: &[AllowEntry] = &[
                  table's measured geometry. Enumerated rather than rounded, \
                  so a future FTWA pass changes it deliberately.",
     },
+    AllowEntry {
+        key: "ui_iced/panels/top.rs:TAG_TRIGGER_VERTICAL_PADDING",
+        reason: "The `2.0` here is a **centring divisor**, not a visual \
+                 measurement: `(TAG_TRIGGER_RUNG.height() − BODY.line_height) \
+                 / 2` splits the leftover space evenly above and below the \
+                 label. The value is fully determined by the two rungs and \
+                 carries no independently chosen size. Binding the divisor to \
+                 a `space::` rung would be wrong (it is not a spacing value), \
+                 and replacing the whole expression with the `space.xs` it \
+                 happens to produce today would discard the derivation this \
+                 constant exists to provide — its doc states it is \"derived \
+                 from the rung rather than picked\", so it keeps tracking the \
+                 rung if that changes. Rule B reads an expression as text and \
+                 cannot tell a divisor from a measurement, so the distinction \
+                 is recorded here. Surfaced by INT-14: this literal was \
+                 invisible to the gate until wrapped declarations started \
+                 being read.",
+    },
 ];
 
 /// The app's scan scope, built from the constants above.

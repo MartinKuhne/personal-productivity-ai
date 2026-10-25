@@ -67,6 +67,27 @@
 //!   carries no literal at all. This is the common case and the one the
 //!   rule exists to keep common.
 //!
+//! # A wrapped declaration is read, not waved through
+//!
+//! The parser is line-oriented, and `rustfmt` wraps a declaration whose
+//! RHS outgrows the line width. That used to mean the opening line carried
+//! nothing after the `=`, the expression read empty, no literal was found,
+//! and the constant was reported [`ScalarClass::TokenBound`] — a **pass**
+//! for a value that had never been read. The parser had given up, and the
+//! result was indistinguishable from approval.
+//!
+//! `f32_consts` now joins a wrapped continuation up to the terminating
+//! `;`, so a token-only RHS split across lines is classified token-bound
+//! because the gate **actually saw the tokens**. A declaration whose `;`
+//! still cannot be reached is classified [`ScalarClass::Unreadable`],
+//! which is not compliant and is counted separately in the report, so a
+//! clean-looking tree can be told apart from an unread one.
+//!
+//! Landing this surfaced one literal that had been invisible: the app's
+//! `ui_iced/panels/top.rs:TAG_TRIGGER_VERTICAL_PADDING` carries a
+//! `/ 2.0` centring divisor. It is carried on the app's allow-list with
+//! the reason rather than re-tuned.
+//!
 //! # What this scan cannot catch
 //!
 //! Stated plainly, because a gate that overstates itself is worse than no
@@ -146,13 +167,31 @@ pub enum ScalarClass {
     SurfaceBound,
     /// None of the above: a visual primitive that should be a token.
     Violation,
+    /// The declaration's expression could not be read at all.
+    ///
+    /// This variant exists because the previous behaviour was a lie. An
+    /// empty expression used to fall through to
+    /// [`ScalarClass::TokenBound`], so a declaration the parser could not
+    /// read — a `const NAME: f32 =` whose value wrapped onto the next line
+    /// — was reported as a declaration that had been checked and approved.
+    /// Not being able to look is not the same as looking and approving, and
+    /// the two must never share a class.
+    ///
+    /// See the `f32_consts` parser, which now joins wrapped continuations
+    /// so this is reached only when the expression genuinely cannot be
+    /// recovered.
+    Unreadable,
 }
 
 impl ScalarClass {
     /// Whether this class satisfies `UIF-PRIN-001` rather than breaching it.
+    ///
+    /// [`Self::Unreadable`] is deliberately **not** compliant. A constant
+    /// the gate could not read has not been shown to satisfy anything, and
+    /// counting it as a pass is precisely the hole this variant closes.
     #[must_use]
     pub const fn is_compliant(self) -> bool {
-        !matches!(self, Self::Violation)
+        !matches!(self, Self::Violation | Self::Unreadable)
     }
 
     /// The column label for this class.
@@ -164,6 +203,7 @@ impl ScalarClass {
             Self::Ratio => "ratio",
             Self::SurfaceBound => "surface-bound",
             Self::Violation => "violation",
+            Self::Unreadable => "unreadable-expr",
         }
     }
 }
@@ -224,6 +264,11 @@ pub struct SourceScan {
     pub ratio: usize,
     /// Visual scalar constants covered by the §1.1 surface-bound registry.
     pub surface_bound: usize,
+    /// Visual scalar constants whose expression the parser could not read.
+    ///
+    /// Counted separately from [`findings`](Self::findings) so a summary
+    /// can tell "nothing was wrong" apart from "nothing could be seen".
+    pub unreadable: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +627,12 @@ pub struct ScanStats {
     pub ratio: usize,
     /// Visual scalar constants covered by the §1.1 registry.
     pub surface_bound: usize,
+    /// Visual scalar constants whose expression the parser could not read.
+    ///
+    /// Every such constant is also a finding. The counter exists so the
+    /// report can say *why* a scan found nothing rather than leaving a
+    /// clean-looking number over an unchecked surface.
+    pub unreadable: usize,
 }
 
 impl Audit {
@@ -670,6 +721,16 @@ pub fn scan_source_in(scope: &Scope<'_>, file: &str, text: &str) -> SourceScan {
                 ScalarClass::Zero => scan.zero += 1,
                 ScalarClass::Ratio => scan.ratio += 1,
                 ScalarClass::SurfaceBound => scan.surface_bound += 1,
+                ScalarClass::Unreadable => {
+                    scan.unreadable += 1;
+                    scan.findings.push(Violation {
+                        rule: Rule::UnboundVisualScalar,
+                        file: file.to_string(),
+                        line: c.line,
+                        code: c.decl.trim().to_string(),
+                        detail: describe_unreadable(&c),
+                    });
+                }
                 ScalarClass::Violation => scan.findings.push(Violation {
                     rule: Rule::UnboundVisualScalar,
                     file: file.to_string(),
@@ -738,6 +799,7 @@ pub fn scan_tree(root: &Path, scope: &Scope<'_>, allow: &[AllowEntry]) -> Audit 
         audit.stats.zero += scan.zero;
         audit.stats.ratio += scan.ratio;
         audit.stats.surface_bound += scan.surface_bound;
+        audit.stats.unreadable += scan.unreadable;
 
         for finding in scan.findings {
             match allow.iter().find(|e| e.key == finding.key()) {
@@ -802,8 +864,12 @@ pub fn render_scoped(label: &str, colour_file: &str, audit: &Audit) -> String {
         audit.stats.token_layer_colour_definitions
     ));
     out.push_str(&format!(
-        "visual scalars: {} token-bound, {} zero, {} ratio, {} surface-bound\n",
-        audit.stats.token_bound, audit.stats.zero, audit.stats.ratio, audit.stats.surface_bound
+        "visual scalars: {} token-bound, {} zero, {} ratio, {} surface-bound, {} unreadable\n",
+        audit.stats.token_bound,
+        audit.stats.zero,
+        audit.stats.ratio,
+        audit.stats.surface_bound,
+        audit.stats.unreadable
     ));
     out.push_str(&format!("violations: {}\n", audit.violations.len()));
     for v in &audit.violations {
@@ -978,21 +1044,77 @@ struct F32Const<'a> {
 /// in this crate is single-line, and a parser that quietly gives up on a
 /// construct is more dangerous than one that simply does not look. The
 /// sidecar asserts the parser finds the constants it is expected to find.
+///
+/// "Line-oriented" describes how the parser reads, not what it is allowed
+/// to ignore. `rustfmt` wraps a declaration whose RHS outgrows the line
+/// width, and the opening line then carries nothing after the `=`. Reading
+/// only that line yields an empty expression, which used to be classified
+/// as [`ScalarClass::TokenBound`] — a silent pass for a constant whose
+/// value was never looked at. [`join_continuation`] recovers the wrapped
+/// RHS so the classification is made against the expression the compiler
+/// actually sees, and a declaration that still cannot be recovered is
+/// reported as [`ScalarClass::Unreadable`] rather than approved.
 fn f32_consts<'a>(lines: &[&'a str]) -> Vec<F32Const<'a>> {
     let mut out = Vec::new();
     for (idx, raw) in lines.iter().enumerate() {
         let Some(decl) = parse_f32_const(raw.trim()) else {
             continue;
         };
+        let expr = join_continuation(lines, idx, decl.expr).unwrap_or_default();
         out.push(F32Const {
             line: idx + 1,
             decl: raw,
             is_pub: decl.is_pub,
             name: decl.name,
-            expr: decl.expr.to_string(),
+            expr,
         });
     }
     out
+}
+
+/// The full RHS of a declaration, joining a wrapped continuation.
+///
+/// A single-line declaration already carries its whole RHS, which is
+/// returned untouched. When the `=` ended the line the RHS continues below,
+/// so the following lines are appended until the terminating `;` is
+/// consumed — which is the same boundary the compiler uses.
+///
+/// Returns `None` when no terminating `;` can be reached: the next line is
+/// blank, or it opens a new item. That is reported rather than guessed at,
+/// because a *guessed* expression would be indistinguishable from a read
+/// one.
+fn join_continuation<'a>(lines: &[&'a str], at: usize, first: &'a str) -> Option<String> {
+    if !first.trim().is_empty() {
+        return Some(first.to_string());
+    }
+    let mut joined = String::new();
+    let mut idx = at + 1;
+    while idx < lines.len() {
+        let cont = lines[idx].trim();
+        if cont.is_empty() || opens_new_item(cont) {
+            return None;
+        }
+        if !joined.is_empty() {
+            joined.push(' ');
+        }
+        joined.push_str(cont);
+        if cont.contains(';') {
+            return Some(joined);
+        }
+        idx += 1;
+    }
+    None
+}
+
+/// Whether a line begins a new item rather than continuing an expression.
+///
+/// Guards [`join_continuation`] against swallowing unrelated code when a
+/// declaration is malformed and its `;` never arrives.
+fn opens_new_item(line: &str) -> bool {
+    const ITEM_OPENERS: [&str; 8] = [
+        "pub ", "const ", "fn ", "impl ", "struct ", "enum ", "trait ", "#",
+    ];
+    ITEM_OPENERS.iter().any(|prefix| line.starts_with(prefix))
 }
 
 /// The borrowed pieces of one `const … : f32 = …` declaration.
@@ -1035,6 +1157,14 @@ fn parse_f32_const<'a>(trimmed: &'a str) -> Option<Decl<'a>> {
 /// crate registers *its own* fixed bounds rather than borrowing iced-pro's
 /// §-references.
 fn classify_scalar(scope: &Scope<'_>, file: &str, c: &F32Const<'_>) -> ScalarClass {
+    // Checked before the empty-literals branch below, and deliberately
+    // ahead of it: an empty expression has no literals either, and reading
+    // the two as the same case is exactly how a wrapped declaration became
+    // invisible to Rule B. "No literals" is a verdict about what was seen;
+    // "no expression" means nothing was seen.
+    if c.expr.trim().is_empty() {
+        return ScalarClass::Unreadable;
+    }
     let literals = numeric_literals(&c.expr);
     if literals.is_empty() {
         return ScalarClass::TokenBound;
@@ -1049,6 +1179,18 @@ fn classify_scalar(scope: &Scope<'_>, file: &str, c: &F32Const<'_>) -> ScalarCla
         return ScalarClass::SurfaceBound;
     }
     ScalarClass::Violation
+}
+
+/// What an unreadable declaration looked like, for the finding.
+fn describe_unreadable(c: &F32Const<'_>) -> String {
+    format!(
+        "the gate could not read `{}`'s expression — the declaration opens \
+         but no terminating `;` could be reached, so nothing after the `=` was \
+         ever examined. This is reported instead of `token-bound`: an unreadable \
+         constant has not been shown to satisfy the rule. Put the declaration on \
+         one line, or fix whatever made it unreadable.",
+        c.name,
+    )
 }
 
 fn describe_scalar_violation(c: &F32Const<'_>) -> String {
