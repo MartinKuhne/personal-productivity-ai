@@ -826,6 +826,38 @@ pub const SAVE_BUTTON: &str = "Save";
 pub const PDF_BACKED_ERROR: &str = "Cannot modify this file. The system generates the file from a PDF. \
      Use write_yaml_header to modify front-matter.";
 
+/// Badge marking a tree row's file as PDF-backed (`UIF-PANE-003`,
+/// §4.3.2 "Single & Range Selection").
+///
+/// The section requires it because the selection lock strips the row's
+/// colour cue: on selection the label repaints `color.text.strong`, so a
+/// PDF-backed row and an ordinary row become identical in colour.
+///
+/// **This string's own survival is not the same as the cue surviving.**
+/// The word `[PDF]` does pass through the lock unchanged, but the lock
+/// takes its *salience* with it — at rest the mark is `status.danger.text`
+/// and on selection it is `text_strong`, i.e. the same ink as the label
+/// beside it. What is left is a content difference, not a visual-role one.
+/// `§3B.6:883` therefore does not accept a word-only cue: it requires the
+/// distinction to be carried by a chip **fill** (`status.danger.fill`
+/// behind `text.strong`) precisely so that something other than the glyphs
+/// survives the lock. See `left::pdf_badge_colour` for the current
+/// rendering and why it does not yet meet that rule.
+///
+/// **Sentence-case: exempt, and the exemption is the section's own.**
+/// `UIF-PRIN-007` capitalises the first word plus "proper nouns or
+/// acronyms (`Markdown`, `PDF`, `MCP`, `JSON`)" — it names `PDF` as one
+/// of its own examples of the exempt form. So `[PDF]` in caps is the
+/// *correct* rendering, not an ALL-CAPS violation.
+///
+/// **The brackets are rendered literally.** §4.4.1 uses bracketed
+/// notations for slots (`[●]`, `[Icon]`, `[×]`), so `[PDF]` could be read
+/// as "a badge reading PDF" rather than a literal. It is kept verbatim
+/// because the brackets make the mark read as a tag rather than as part
+/// of the file name — which is the disambiguation the badge exists to do
+/// for a file like `report.pdf.md`.
+pub const TREE_PDF_BADGE: &str = "[PDF]";
+
 /// Status-bar text in the inline editor showing the cursor position
 /// (UI-038), e.g. `Line: 3 | Col: 12`.
 pub fn build_editor_status_text(line: usize, column: usize) -> String {

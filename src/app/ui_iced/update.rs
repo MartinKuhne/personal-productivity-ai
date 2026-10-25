@@ -904,6 +904,20 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
         TabMessage::ContextMenuClosed => {
             close_context_menu(state);
         }
+        TabMessage::Entered { path } => {
+            state.overlay.hovered_tab = Some(path);
+        }
+        TabMessage::Left { path } => {
+            // Conditional clear, the same shape INT-10 uses for tree rows.
+            // Tab-to-tab movement publishes both halves in one iced event
+            // pass in tree order, so moving toward the end of the strip
+            // delivers the later tab's `Entered` before this tab's
+            // `Left`. Clearing unconditionally would erase the highlight
+            // that just arrived, in the same tick it appeared.
+            if state.overlay.hovered_tab.as_deref() == Some(path.as_path()) {
+                state.overlay.hovered_tab = None;
+            }
+        }
     }
 }
 

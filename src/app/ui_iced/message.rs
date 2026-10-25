@@ -360,7 +360,17 @@ pub enum TreeMessage {
 /// (`×` / middle-click), closing others/all, copying the path and revealing
 /// it in the explorer are all `UserCommand`s already. The tab strip's own
 /// view state is which tab's context menu is showing.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// **`Copy` was dropped in INT-12.** The channel used to be `Copy` because
+/// every payload it carried was `Copy`. `Entered` / `Left` carry a
+/// `PathBuf`, so the enum cannot be `Copy` any more and the
+/// `channels_that_can_be_are_copy` pin in `message_tests.rs` moves
+/// `TabMessage` from the `Copy` list to the `Clone` list. That is the pin
+/// re-classifying the channel, not a pin being weakened to make a change
+/// fit: the invariant it guards — "do not pay for a clone you could have
+/// avoided" — is untouched for the two variants that stayed `Copy`-sized,
+/// and a hover report carrying a path is not one of them.
+#[derive(Debug, Clone, PartialEq)]
 pub enum TabMessage {
     /// A right-click opened the context menu of the tab at `index`
     /// (index as rendered in the strip that frame, matching
@@ -371,6 +381,37 @@ pub enum TabMessage {
     },
     /// The tab context menu was dismissed.
     ContextMenuClosed,
+    /// The pointer crossed **into** the tab for `path` (INT-12).
+    ///
+    /// A view-local transition, not user intent: it selects nothing,
+    /// closes nothing and publishes nothing on the bus. It exists for the
+    /// same reason [`TreeMessage::RowEntered`] does — §4.4.1 gives the
+    /// tab's top indicator a **third** state (`color.border.strong` on a
+    /// hovered *inactive* tab) that is resolved from pointer state, and a
+    /// pure view cannot carry the pointer into that resolution by itself.
+    /// Until this crossing existed only the active and the resting states
+    /// were reachable, and the gap was recorded against the indicator
+    /// rather than closed.
+    ///
+    /// Keyed by **path** rather than by strip index for the reason INT-10
+    /// established: the tab list re-orders and shrinks under close,
+    /// close-others, close-all and a watcher-driven file deletion. An
+    /// index is not a stable address, and a highlight keyed by one lands
+    /// on a different tab the moment the list moves underneath it.
+    Entered {
+        /// The tab's file path.
+        path: PathBuf,
+    },
+    /// The pointer crossed **out of** the tab for `path` (INT-12).
+    ///
+    /// The reducer clears the highlight only if it still names this path,
+    /// so a pointer moving from tab A to tab B cannot have A's `Left`
+    /// arrive after B's `Entered` and wipe the highlight that just
+    /// arrived.
+    Left {
+        /// The tab's file path.
+        path: PathBuf,
+    },
 }
 
 /// Inline editor channel.

@@ -1619,7 +1619,7 @@ fn row(token: &'static str, role: Role, printed: [&'static str; 6]) -> SpecRow {
     }
 }
 
-/// The 22 numeric rows of `doc/planning/ui-framework.md` §2.5 as
+/// The 22 numeric rows of `spec.md` §2.5 as
 /// printed on 2026-10-23, transcribed exactly — wrong figures included.
 ///
 /// `surface.scrim` and `color.editor.inverted.*` are excluded: neither

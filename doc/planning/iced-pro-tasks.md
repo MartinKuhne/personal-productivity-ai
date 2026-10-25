@@ -2720,3 +2720,149 @@ difference is not perceptible.
   tightest case is `type.ui_compact`: `18 / 13 = 1.3846…`, which is `0.0046`
   from the printed `1.38×`. INC-03 pins the ratio at `5e-3`. Any future line-height
   retune must stay inside that band or the multiplier test must be re-derived.
+
+### INT-12 — Tree `[PDF]` badge, width-relative indent compression, tab-strip hover
+
+Two of the three signals INT-11's Part C audit identified as landable are in.
+The third is blocked, and the block is in the spec rather than in the code.
+
+**Piece 2 — width-relative indent compression: landed, and the rewritten spec
+mandates exactly this.** `row_indent_pixels(depth, row_width)` and
+`row_guide_offsets(depth, row_width)` both resolve through
+`tree_row::indent_geometry` rather than the retired flat clamp
+(`depth.min(MAX_ROW_INDENT_DEPTH) × INDENT_STEP`). `spec.md:882` requires the
+shared solver — *"Depth guides and row furniture MUST resolve from the same
+pure indent solver that lays out the row label … never a fixed nominal
+`16px x d`"* — and `spec.md:880` gives the rule the solver implements:
+`indent_budget = (row_width - 128px).max(0)`, nominal step `16px`,
+proportional compression to a `4px` floor, then collapse onto the innermost
+drawn guide reporting `collapsed_levels: u16`. INT-11's coupling note is
+honoured: guides read `indent_geometry().guides`, not
+`guide_positions(depth, INDENT_STEP)`, so they cannot drift from the labels.
+
+The old clamp was not merely suboptimal — at `50 × 16 = 800px` it pushed
+labels off-screen and made the `96px` floor false past roughly eight levels.
+
+**Worst-case floor arithmetic (`at_least_ninety_six_pixels_of_label_survive_the_worst_case`).**
+Pinned at the spec's own `LEFT_PANE_MIN_W = 150` (§4.3.1), not the app's
+wider `LEFT_PANEL_MIN_WIDTH = 180`, so the spec's worst case is checked and
+the app's own minimum is strictly safer:
+
+```
+row_width        = 150 − PANEL_PADDING(4) − PANEL_PADDING(4) = 142
+indent_allowance = (142 − 4 − 4 − 24 − 96).max(0)           =  14
+drawn indent     = allowance (fully compressed at depth >= 8) =  14
+label            = 142 − ROW_PADDING_X(4) − ROW_PADDING_X(4) − 14 = 120
+120 >= MIN_LABEL_WIDTH(96)                                   24px spare
+```
+
+Eight nominal levels would want `8 × 16 = 128px` against a `14px` allowance,
+so the compression is doing real work at this width rather than merely
+happening not to overflow. Checked at depths `0, 1, 8, 50, 200, 10_000`.
+
+**Piece 3 — tab-strip hover: landed.** `TabMessage::Entered { path }` /
+`Left { path }` → `OverlayState::hovered_tab` → `CenterPanelViewModel`, with
+conditional-clear arms in `reduce_tab` mirroring `TreeMessage::RowLeft`. The
+hover is **path-keyed, not index-keyed**: index-keying would reproduce
+INT-10's stale-address bug under `UIF-TAB-003` external closes, where a tab
+removed at index 2 silently moves the highlight to whatever slides into that
+slot. State is held in the reducer rather than read from iced `button` status
+because the tab also needs middle-press and right-press, which `button`
+cannot provide, and §6 requires branching on the view-model. `TabMessage` is
+consequently `Clone`, not `Copy`, to carry the `PathBuf` — its former `Copy`
+classification rested on a premise ("every payload field of these four
+channels is `Copy`") that this change made false. `STRIP_HEIGHT 36` /
+`TAB_HEIGHT 28` and the band-closure arithmetic are untouched.
+
+Scoped to the top-bar third state. §4.4.2 additionally mandates a
+`surface.hover` fill, `text.primary` label and `border.strong` perimeter on a
+hovered *inactive* tab; those are deliberately not wired, and the plumbing now
+makes them a small follow-on rather than a redesign.
+
+**Piece 1 — the `[PDF]` badge: landed against the old spec, superseded by the
+rewritten one, and blocked.** The badge was built as a trailing foreground
+mark coloured via `row_label_colour(selected, hovered, true)` —
+`status.danger.text` at rest, `text.strong` when selected — on the reasoning
+that a chip would make the section's `4.80:1` figure wrong. `spec.md:883` now
+forbids that mechanism outright: the distinction *"MUST NOT ride on badge text
+color"* and must instead be a chip on `status.danger.fill` behind
+`text.strong`. The landed badge is therefore non-compliant in **both**
+postures: at rest it is a danger-coloured text label, and on selection it
+resolves to the identical ink as the label beside it, so it carries no
+distinction where the rule is about.
+
+Two independent blockers, both verified against the resolver's own output:
+
+1. **The badge atom cannot produce the mandated chip.** `badge::resolve_style`
+   reaches a solid `status.danger.fill` only through `BadgeKind::Count(u32)`,
+   which renders a number (`count.text()` → `Some("7")`). The only
+   text-bearing kind, `BadgeKind::Status { icon, label }`, is hardcoded to
+   `fill: surface_raised` with the tone in the **foreground and border** —
+   `resolve_style(&Status + Danger)` returns `status_danger_text` for both,
+   i.e. exactly the danger-coloured text label the rule forbids. `Status`
+   also mandates a leading glyph from a fixed four-set (`✓ ⚠ ✕ ●`), none of
+   which denotes "PDF-backed". The two halves the rule needs live in mutually
+   exclusive variants, and `§3.8`'s inventory contains no text-bearing solid
+   chip to add without contradicting that section's own three-kind list.
+2. **The mandated fill does not survive the lock either.** The rule's stated
+   mechanism — *"so the chip fill itself carries the distinction and survives
+   the lock"* — is arithmetically false on the band the rule is about.
+
+**Contrast recomputed from raw sRGB via `token::contrast::contrast_ratio`;
+none of these figures is transcribed from the spec.**
+
+| Pair | Measured | Against |
+|---|---|---|
+| `text.strong` / `status.danger.fill` | **5.126966** | spec `5.13:1`, atom header `5.1270:1` — both accurate |
+| `status.danger.fill` / `accent.fill` (selected band) | **1.067676** | the rule's premise; fails |
+| `status.danger.fill` / `surface.base` | 3.880532 | clears the 3.0 coincident-fill floor |
+| `status.danger.fill` / `surface.raised` | 3.649497 | header prints `3.6495:1` — accurate |
+| `status.danger.fill` / `surface.hover` | 3.166606 | clears 3.0 |
+| `text.strong` / `accent.fill` | 4.801987 | spec `4.80:1` — accurate |
+| `status.danger.text` / `accent.fill` | 1.586348 | spec `1.59:1`; the INT-7b defect, pinned illegal |
+
+The chip would be visible at rest (`3.88:1`, `3.17:1`) and collapse into the
+selection band at `1.0677:1` — not a perceptible boundary. The atom
+classifies a solid pill as `ChromeClass::CoincidentWithFill`, which owes
+`MIN_COINCIDENT_FILL_CONTRAST` `3.00:1` against its mount; on the selection
+band the spec-exact chip delivers `1.0677:1` and fails the framework's own
+obligation by `1.93` points. So requirement #1 — that a selected PDF-backed
+row still read as PDF-backed via the chip fill — is not achievable by the
+mandated means, and resolving it needs a decision about the rule rather than
+about the code.
+
+**Rationale retired, not left to be re-believed.** The argument that the badge
+is safe *"because it is a word rather than a colour"* is removed from
+`strings::TREE_PDF_BADGE` and `left::pdf_badge_colour`. To be precise about
+what was wrong with it: the string `[PDF]` does pass through the lock
+unchanged, so the word survives — what the lock takes is its **salience**,
+leaving a content difference rather than a visual-role one. `§3B.6:883`
+declines a word-only cue for exactly that reason. The INT-7b protection the
+old rationale described is real and is retained: routing through the lock is
+what keeps `1.5863:1` unreachable.
+
+**Pins deliberately not moved.** `MIN_LABEL_WIDTH` (96), `LEFT_PANE_MIN_W`
+(150), `STRIP_HEIGHT` (36), `TAB_HEIGHT` (28), `TAB_INDICATOR_HEIGHT` (2) and
+every pinned tolerance are unchanged. `MAX_ROW_INDENT_DEPTH` was narrowed to
+govern only the auto-fit width request, not the drawn indent — a deliberate
+inconsistency that fails safe (deep trees compress slightly more than
+strictly needed; the floor still holds). `PIN_APP_TOKEN_BOUND` moves 91 → 93
+for `PDF_BADGE_SLOT` and `PDF_BADGE_GAP`; `files_scanned` 158 and
+`rule_b_files` 45 are unchanged because no new app files were added.
+
+**Stale spec-path doc comments repointed: 11.** The move left 12 literal
+`doc/planning/ui-framework.md` hits, all in `src/iced-pro/`. One of them —
+`spec_coverage_tests.rs:32` — is deliberate history (*"used to sit at …
+commit `edbe04a` moved it here"*) and was left alone. The other 11 are
+repointed to `spec.md` with no assertion changed: `mod.rs:5`,
+`spec_coverage.rs:2`, `spec_coverage.rs:253`, `spec_coverage_tests.rs:8`,
+`composite/mod.rs:8`, `token/color.rs:23`, `token/color.rs:90`,
+`token/contrast.rs:182`, `token/contrast_tests.rs:1622`,
+`token/typography_tests.rs:46`, `widget/mod.rs:6`. `composite/mod.rs:8` was
+not in the original site list. Six further `ui-framework` matches in
+`src/agent/`, `src/app/` and `src/md2pdf/` are the phrase "UI-framework" used
+generically in framework-free assertions and must not be repointed.
+
+**Gate state: 8038 workspace tests pass, 6 skipped.** `cargo check` 0 errors /
+0 warnings; `cargo clippy -D warnings` 0; `cargo fmt --check` 0 diffs;
+`cargo doc --no-deps` 0 warning lines.

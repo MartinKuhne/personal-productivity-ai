@@ -84,13 +84,18 @@
 //!   [`tree_row::resolve_style`] (`guide`, `selection_bar`) and were simply
 //!   never drawn. What the change really costs is per-row widget count, which
 //!   [`row_overlay`] states and the sidecar pins.
-//! * **The `[PDF]` badge.** §4.3.2 carries PDF-backed meaning through a
-//!   badge so it survives the selection lock. The app tints the whole
-//!   label with `error` instead; the lock now correctly overrides that
-//!   tint on a selected row, so the badge is the missing piece.
-//! * **Width-relative indent compression.** [`tree_row::indent_geometry`]
-//!   compresses the step instead of capping depth. The panel draws a flat
-//!   `padding-left` and keeps [`MAX_ROW_INDENT_DEPTH`].
+//! * **The `[PDF]` badge.** **Landed in INT-12.** §4.3.2 carries
+//!   PDF-backed meaning through a badge so it survives the selection lock.
+//!   The app previously tinted the whole label with `error` instead; the
+//!   lock correctly overrode that tint on a selected row, so the state
+//!   vanished. [`pdf_badge_colour`] now paints the `[PDF]` mark through
+//!   the *same* role lock the label uses, which is what makes the
+//!   `4.80:1` the spec names hold by construction rather than by a
+//!   second colour decision.
+//! * **Width-relative indent compression.** **Landed in INT-12.**
+//!   [`row_indent_pixels`] and [`row_guide_offsets`] both resolve through
+//!   [`tree_row::indent_geometry`], so the step compresses proportionally
+//!   instead of the depth being capped and the label being pushed off-screen.
 //!
 //! # Workspace-tree construction
 //!
@@ -167,6 +172,7 @@ use iced_pro::composite::tree_row;
 use iced_pro::state::{BaseState, VisualState};
 use iced_pro::token::space;
 use iced_pro::token::typography::{self, FAMILY_SANS};
+use iced_pro::widget::badge;
 use iced_pro::widget::text_input as pro_text_input;
 
 use crate::bus::events::user_command::UserCommand;
@@ -253,22 +259,34 @@ pub const SECONDARY_TEXT_SIZE: f32 = typography::CAPTION.size;
 /// constant.
 pub const ROW_INDENT_PER_DEPTH: f32 = tree_row::INDENT_STEP;
 
-/// Deepest indent that is drawn; deeper rows clamp to it, guarding
-/// against unbounded indentation.
+/// Deepest depth the **auto-fit measurement** charges for indentation.
 ///
 /// **App-owned.** It is *not* the same rule as
 /// [`tree_view::MAX_TREE_DEPTH`](iced_pro::composite::tree_view::MAX_TREE_DEPTH)
 /// (1000), which is a stack-overflow guard on the framework's recursive
-/// flatten and says nothing about how far a row may be indented on
-/// screen. Nor does the app implement the framework's width-relative
-/// three-tier compression ([`tree_row::indent_geometry`]) — the pane
-/// draws a flat `padding-left`, so a hard draw cap is what keeps a
-/// pathological tree from pushing labels out of the pane entirely.
+/// flatten.
 ///
-/// The framework's own module doc argues a fixed depth cap "is the usual
-/// answer and it is the wrong shape", and it is right — the correct fix
-/// is to draw the compressed tier. That is a rendering change, not a
-/// token alignment, and is left as a stated follow-on.
+/// **INT-12 narrowed what this constant governs, and the narrowing is
+/// worth reading.** It used to cap the *drawn* indent
+/// (`row_indent_pixels = depth.min(50) × 16`). That cap is gone: the
+/// drawn indent now resolves through [`tree_row::indent_geometry`], which
+/// bounds the indent by the row's width rather than by a depth number, so
+/// a `50`-level cap on what is painted is no longer part of the model —
+/// and never needed to be, because the width-relative tiers cannot push a
+/// label out of the pane in the first place.
+///
+/// What remains is one use: [`row_width`]'s auto-fit term clamps the depth
+/// it *requests* for a row, so a tree 200 levels deep does not ask the
+/// pane for `3200px` of indent. **This is a known, deliberate
+/// inconsistency and it fails safe.** The drawn indent ignores the cap;
+/// the width request honours it. The consequence is that past depth 50 a
+/// deep tree asks for less width than its nominal indent would want, so it
+/// compresses somewhat more than it strictly had to. The `96px` label
+/// floor still holds at every depth — that is guaranteed by the geometry,
+/// not by this constant — so the effect is cosmetic at depths no real
+/// workspace reaches. Removing the clamp from the auto-fit term is the
+/// clean follow-on; it changes pane-width behaviour, which is outside this
+/// increment.
 pub const MAX_ROW_INDENT_DEPTH: usize = 50;
 
 /// Width added on top of a measured label — the row's **fixed horizontal
@@ -328,6 +346,77 @@ pub const ROW_PADDING_X: f32 = tree_row::ROW_INSET_X;
 /// [`tree_row::label_fits_row`] is asserted against it so a rung retune
 /// that would clip a label fails a test instead of shipping.
 pub const ROW_MIN_HEIGHT: f32 = tree_row::ROW_HEIGHT_COMPACT;
+
+/// The `[PDF]` badge's type rung — the framework badge atom's own rung
+/// ([`badge::TYPE_RUNG`], `type.caption`, `12px`).
+///
+/// Taken from the badge atom rather than chosen here so the mark is typed
+/// the way every other badge in the app is typed. It is also the reason
+/// the badge costs the row nothing vertically: the caption line box is
+/// `16px` and the row's interior is `24 − 2 × 2 = 20px`, so the badge
+/// sits inside the compact rung with `4px` to spare and
+/// [`ROW_MIN_HEIGHT`] is untouched.
+pub const PDF_BADGE_RUNG: typography::TypeRung = badge::TYPE_RUNG;
+
+/// The width the `[PDF]` badge owns on a tree row.
+///
+/// **A declared slot, not a text measurement.** The badge is rendered
+/// inside a container fixed to this width, so the room the row charges
+/// for it and the room the badge actually occupies are the same number by
+/// construction. A reservation *guessed* from glyph widths would be a
+/// standing risk that the guess runs short and the label floor is
+/// breached by a font change; a slot cannot.
+///
+/// `space.xl + space.md` (`24 + 12 = 36`) is wide enough for the
+/// five-glyph `[PDF]` literal at the `12px` caption rung with slack, and
+/// is composed from the spacing scale rather than written as a literal
+/// ([RUST-021]).
+///
+/// # The compliant chip this slot is waiting on
+///
+/// `§3B.6:883` requires the badge to be a chip filled `status.danger.fill`
+/// behind `text.strong`. Two independent blockers stop that landing here,
+/// and neither is a matter of effort:
+///
+/// 1. **The badge atom cannot produce it.** `badge::resolve_style` reaches
+///    a solid `status.danger.fill` only through `BadgeKind::Count(u32)`,
+///    which renders a number (`count.text()` is `Some("7")`, never a
+///    word). The only text-bearing kind, `BadgeKind::Status { icon, label }`,
+///    is hardcoded to `fill: surface_raised` with the tone in the
+///    **foreground and border** — verified against the resolver's own
+///    output, which returns `status_danger_text` for both. So the pair the
+///    rule needs lives in two mutually exclusive variants, and mounting a
+///    `Status` in the Danger tone produces exactly the danger-coloured text
+///    label the rule forbids. `§3.8`'s inventory has no text-bearing solid
+///    chip to add, so this is a spec gap, not a missing constructor.
+/// 2. **The mandated fill does not survive the lock either.** Measured here
+///    from raw sRGB, `status.danger.fill` against `color.accent.fill` is
+///    **`1.0677:1`**. The rule's stated mechanism — "so the chip fill
+///    itself carries the distinction and survives the lock" — is false on
+///    the very band the rule is about. Against the *unselected* surfaces it
+///    is fine (`3.8805:1` on `surface.base`, `3.1666:1` on
+///    `surface.hover`), so the chip would be visible at rest and vanish on
+///    selection. The atom classifies a solid pill as
+///    `ChromeClass::CoincidentWithFill`, which owes `3.00:1` against its
+///    mount; on the selection band it would deliver `1.0677:1` and fail
+///    the framework's own obligation by `1.93` points.
+///
+/// A chip is therefore not a drop-in. Resolving this needs a decision about
+/// the rule, not about the code — see the INT-12 ledger note.
+pub const PDF_BADGE_SLOT: f32 = space::XL + space::MD;
+
+/// The horizontal gap between a row's label and its `[PDF]` badge —
+/// `space.xs`.
+pub const PDF_BADGE_GAP: f32 = space::XS;
+
+/// The total horizontal cost one `[PDF]` badge charges the row: the slot
+/// plus the gap in front of it.
+///
+/// This is the term §3B.6's row-furniture model does not have. The
+/// section budgets a row as `insets + chevron + indent + label` and
+/// never contemplates a trailing badge, so the badge has to be charged
+/// against what is left explicitly rather than assumed to be free.
+pub const PDF_BADGE_CHARGE: f32 = PDF_BADGE_SLOT + PDF_BADGE_GAP;
 
 /// Vertical padding inside one search-result card — `space.xs`.
 /// Paired with [`SEARCH_ROW_HEIGHT`], which is derived from it.
@@ -430,18 +519,131 @@ pub fn row_label(row: &FlatRow) -> String {
     format!("{} {}", row_icon(row.is_dir, row.is_expanded), row.name)
 }
 
-/// The indent one row of `depth` is drawn with, in logical points: the
-/// depth clamped to [`MAX_ROW_INDENT_DEPTH`], times the framework's
-/// [`tree_row::INDENT_STEP`].
+/// The pixel width one tree row is laid out at, given the pane's
+/// remembered width.
 ///
-/// Extracted so the drawn indent and the width solver read the *same*
-/// clamped number instead of each repeating the `min()` and the
-/// multiply, which is how the two would otherwise drift.
+/// The panel draws its body inside [`PANEL_PADDING`] on each side, so a
+/// row is `2 × PANEL_PADDING` narrower than the pane that holds it.
+/// `None` means the splitter has never been dragged, and the pane's
+/// default width is what the row gets.
+///
+/// **Why the floor is applied here rather than trusted upstream.** The
+/// indent policy this feeds is width-relative: the same depth resolves to
+/// a different indent at a different width. Handing it a width the pane
+/// will not honour would let a row compute indent for a geometry it never
+/// receives, so the width is floored to the pane's own minimum before
+/// the policy sees it. The *upper* bound needs the viewport and is not
+/// available here — but [`PanelLayout::set_width`] stores the width
+/// already clamped to `viewport × LEFT_PANEL_MAX_WIDTH_FRACTION` at
+/// drag time, so the remembered value cannot exceed the cap.
+///
+/// [`PanelLayout::set_width`]: crate::ui::panel_layout::PanelLayout::set_width
 ///
 /// Purity: pure.
 #[must_use]
-pub fn row_indent_pixels(depth: usize) -> f32 {
-    depth.min(MAX_ROW_INDENT_DEPTH) as f32 * ROW_INDENT_PER_DEPTH
+pub fn row_width_for(remembered: Option<f32>) -> f32 {
+    let pane = remembered.unwrap_or(LEFT_PANEL_DEFAULT_WIDTH);
+    (pane.max(LEFT_PANEL_MIN_WIDTH) - PANEL_PADDING - PANEL_PADDING).max(0.0)
+}
+
+/// The indent one row of `depth` is drawn with, in logical points, at a
+/// row `row_width` wide.
+///
+/// **INT-12 replaced this function's whole policy.** It used to be
+/// `depth.min(MAX_ROW_INDENT_DEPTH) × INDENT_STEP` — a flat clamp that
+/// capped *how deep* a row could indent while leaving the label's width
+/// entirely unconsidered. At the cap the indent was `50 × 16 = 800px`,
+/// which in a `280px` pane pushes the label `520px` past the right edge:
+/// the label is not truncated, it is **gone**. §3B.6's guarantee that the
+/// label "never narrows below `96px` at any tree depth (`20` or `200`)"
+/// was therefore false at every depth past about eight in any normally
+/// sized pane.
+///
+/// It now delegates to [`tree_row::indent_geometry`], the framework's
+/// three-tier width-relative solver: nominal `16px` per level while the
+/// budget lasts, proportional compression across all active levels once
+/// `depth × 16px` exceeds it, and a `4px` (`space.xs`) floor step beyond
+/// which deeper levels collapse onto the innermost drawn guide. The label
+/// keeps its `96px` because the *indent* is what absorbs the shortfall.
+///
+/// Extracted so the drawn indent and the guide offsets read the *same*
+/// resolution instead of each repeating the call, which is how the two
+/// would otherwise drift.
+///
+/// Purity: pure.
+#[must_use]
+pub fn row_indent_pixels(depth: usize, row_width: f32) -> f32 {
+    tree_row::indent_geometry(depth, row_width).width
+}
+
+/// Whether a `[PDF]` badge fits on a row of `depth` at `row_width`
+/// without breaching the `TREE_LABEL_MIN_W = 96px` label floor.
+///
+/// §3B.6 budgets a row as `insets + chevron + indent + label` and has no
+/// trailing-badge term at all, so the badge's cost ([`PDF_BADGE_CHARGE`])
+/// has to be charged against whatever the indent left over and the fit
+/// tested explicitly. Charging it silently is how the badge would eat the
+/// floor it exists to protect.
+///
+/// **The check is conservative in the safe direction.** The app folds its
+/// disclosure glyph into the label string rather than reserving
+/// [`tree_row::CHEVRON_COLUMN`] separately, so `indent_allowance`
+/// subtracts `24px` the app does not actually spend. The real label
+/// region is therefore *wider* than this test assumes, and a row that
+/// passes here clears the floor with margin rather than by luck.
+///
+/// **What this gate decides when it returns `false`.** At the pane's hard
+/// minimum width the two requirements collide: §4.3.2 wants the badge and
+/// §3B.6 forbids a label under `96px`, and there is not enough row for
+/// both. The floor wins, because §3B.6 states it absolutely ("**never**
+/// narrows below") where §4.3.2 states the badge as what special rows
+/// "include". The pane's auto-fit (`UIF-PANE-002`) normally removes the
+/// conflict by widening the pane to fit its longest row.
+///
+/// Purity: pure.
+#[must_use]
+pub fn pdf_badge_fits(depth: usize, row_width: f32) -> bool {
+    let allowance = tree_row::indent_allowance(row_width);
+    let drawn = tree_row::indent_geometry(depth, row_width).width;
+    allowance - drawn >= PDF_BADGE_CHARGE
+}
+
+/// The `[PDF]` badge's colour in a given posture.
+///
+/// **This function is the mechanism `§3B.6:883` forbids, and it is kept
+/// only because the compliant replacement is not yet available.** It is
+/// [`row_label_colour`] called with the row marked PDF-backed, so the
+/// badge rides the same `tree_row::locked_over` role lock as the label:
+/// `status.danger.text` at rest, `color.text.strong` once selected.
+///
+/// That does buy one real thing — it makes the INT-7b defect impossible
+/// to reintroduce, since a badge carrying its own `status.danger.text`
+/// through selection would paint `1.5863:1` on `color.accent.fill`
+/// (measured here from raw sRGB), which is unreadable and is the bug the
+/// role lock exists to kill.
+///
+/// But the price is the badge's whole purpose. On a selected row the badge
+/// resolves to the identical ink as the label beside it, so the chip
+/// carries no distinction there at all — and "the distinction survives
+/// the selection lock" is precisely what the rule asks for. A rule that
+/// forbids the cure's side effect while requiring the cure's benefit cannot
+/// be satisfied by a text colour at any value:
+///
+/// * `status.danger.text` on `accent.fill` = `1.5863:1` — unreadable,
+///   and the lock forbids it anyway.
+/// * `text.strong` on `accent.fill` = `4.8020:1` — readable, and
+///   indistinguishable from the label.
+///
+/// The rule's own answer is a chip whose **fill** carries the mark
+/// (`status.danger.fill` behind `text.strong`, `5.1270:1`). That pair is
+/// not reachable from the badge atom's public API for a text-bearing badge
+/// — see the note on [`PDF_BADGE_SLOT`] — so the rework is blocked, not
+/// merely unwritten.
+///
+/// Purity: pure.
+#[must_use]
+pub fn pdf_badge_colour(selected: bool, hovered: bool) -> Color {
+    row_label_colour(selected, hovered, true)
 }
 
 /// Width a single row needs: `indent + measured label + slack`.
@@ -1086,6 +1288,19 @@ pub struct LeftPanelViewModel {
     /// `ViewModels::from_app` from
     /// [`OverlayState::hovered_tree_row`](crate::ui_iced::app::OverlayState::hovered_tree_row).
     pub hovered_row: Option<PathBuf>,
+    /// The pixel width one tree row is laid out at (INT-12).
+    ///
+    /// Both INT-12 pieces need it and neither can invent it. The
+    /// width-relative indent policy (`tree_row::indent_geometry`) and
+    /// the `[PDF]` badge's fit test are both functions of the *row's*
+    /// width; a row that guesses its own width either compresses when it
+    /// need not, or breaches the `TREE_LABEL_MIN_W = 96px` floor when it
+    /// must not.
+    ///
+    /// Resolved by [`row_width_for`] from the pane's remembered width
+    /// less the panel's own padding, so the number the policy reads is
+    /// the number the row is drawn at.
+    pub row_width: f32,
 }
 
 impl LeftPanelViewModel {
@@ -1130,6 +1345,7 @@ impl LeftPanelViewModel {
             typst_available: fastmd_pdf::is_typst_available(),
             multi_select: false,
             hovered_row: None,
+            row_width: row_width_for(app.layout().left_panel_width),
         }
     }
 
@@ -1291,14 +1507,53 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     let pdf_backed = view_model.pdf_backed.contains(&row.path);
     let hovered = row_is_hovered(row, view_model.hovered_row.as_deref());
     let paint = row_paint(selected, hovered);
-    let row_box = row_box(row.depth, selected, hovered);
+    let row_box = row_box(row.depth, view_model.row_width, selected, hovered);
 
     let label = text(row_label(row))
         .size(ROW_TEXT_SIZE)
         .line_height(tree_row::LABEL_RUNG.iced_line_height())
         .color(row_label_colour(selected, hovered, pdf_backed));
 
-    let row_surface = container(label)
+    // The `[PDF]` badge rides **after** the label, never before it. The
+    // label's left edge is the line every row in the tree aligns to; a
+    // leading badge would push it by the badge's width on PDF-backed
+    // rows alone and the column would jog. Trailing, the label starts
+    // exactly where it always did and the badge occupies its own
+    // declared slot at the end.
+    //
+    // The badge is a text mark rather than a filled pill, and that is a
+    // forced choice rather than a taste call: §3.8's only text-bearing
+    // variant is the status chip at `size.badge.chip.height = 24px`,
+    // which is the *entire* compact row height. The row's interior is
+    // `24 − 2 × 2 = 20px`, so the chip cannot be placed without either
+    // overflowing into the neighbouring rows or resizing away from its
+    // own token; and the chip mandates a leading glyph (`✓`/`⚠`/`✕`/`●`)
+    // that `[PDF]` has no meaning for. The count pill is numeric-only.
+    // What is left is the mark §4.3.2's own contrast figure describes:
+    // `4.80:1` is `text.strong` on `accent.fill`, i.e. foreground on
+    // the row's own band, not a chip against its own `surface.raised`.
+    let content: Element<'a, Message> =
+        if pdf_backed && pdf_badge_fits(row.depth, view_model.row_width) {
+            let mark = container(
+                text(strings::TREE_PDF_BADGE)
+                    .size(PDF_BADGE_RUNG.size)
+                    .line_height(PDF_BADGE_RUNG.iced_line_height())
+                    .align_x(Alignment::Start)
+                    .color(pdf_badge_colour(selected, hovered)),
+            )
+            .width(Length::Fixed(PDF_BADGE_SLOT))
+            .align_y(Alignment::Center)
+            .into();
+
+            Row::with_children(vec![label.into(), mark])
+                .spacing(PDF_BADGE_GAP)
+                .align_y(Alignment::Center)
+                .into()
+        } else {
+            label.into()
+        };
+
+    let row_surface = container(content)
         .width(Length::Fill)
         // iced 0.14's `Container` has no `min_height`, so the compact
         // rung is applied as a fixed height. That is not a downgrade
@@ -1355,7 +1610,7 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     //
     // A resting, unindented row has nothing to paint and returns the base
     // directly rather than carrying an empty `Stack`.
-    let overlay = row_overlay(row.depth, selected, hovered);
+    let overlay = row_overlay(row.depth, view_model.row_width, selected, hovered);
     if overlay.is_empty() {
         return base;
     }
@@ -1461,7 +1716,7 @@ pub struct RowBox {
 ///
 /// See [`RowBox`] for why the posture parameters exist at all.
 #[must_use]
-pub fn row_box(depth: usize, selected: bool, hovered: bool) -> RowBox {
+pub fn row_box(depth: usize, row_width: f32, selected: bool, hovered: bool) -> RowBox {
     // Neither posture contributes to the box, and that is the whole
     // point of taking them: the invariance is testable rather than
     // merely asserted.
@@ -1472,28 +1727,40 @@ pub fn row_box(depth: usize, selected: bool, hovered: bool) -> RowBox {
             top: ROW_PADDING_Y,
             right: ROW_PADDING_X,
             bottom: ROW_PADDING_Y,
-            left: ROW_PADDING_X + row_indent_pixels(depth),
+            left: ROW_PADDING_X + row_indent_pixels(depth, row_width),
         },
     }
 }
 
 /// The x offset of each drawn depth-guide line, measured from the row's own
-/// left edge.
+/// left edge, at a row `row_width` wide.
 ///
-/// Delegated to [`tree_row::guide_positions`] rather than recomputed, for the
-/// same reason [`row_indent_pixels`] delegates the step: while both name the
-/// same geometry the app's tree and the framework's row cannot drift apart.
-/// The level count is the app's **clamped** depth, because a guide for a level
-/// that was never indented would hang inside the label rather than beside it.
+/// **INT-12 honoured the coupling note INT-11 left here.** The note said
+/// the guides read the app's *clamped* depth, and that if compression
+/// were ever introduced the offsets would have to switch to the
+/// compressed geometry or the guides would drift from the labels. They
+/// have switched: the offsets now come from
+/// [`tree_row::indent_geometry`]'s own `guides` vector rather than from
+/// `guide_positions(depth, INDENT_STEP)`, so a guide is drawn exactly
+/// where that tier of the indent actually landed. Under the old flat clamp
+/// the two agreed only because nothing compressed; the moment the indent
+/// became width-relative, `guide_positions(depth, 16.0)` would have drawn
+/// a line for every level at the *nominal* step while the labels sat at
+/// the compressed one — guides marching off to the right of the text
+/// they belong to.
 ///
-/// Each line is centred in its step (`ROW_INSET_X + level × step + step / 2`),
-/// which is where the framework puts it so it sits under its ancestor's
-/// disclosure column rather than on the boundary between two levels.
+/// Delegated rather than recomputed for the same reason the indent is:
+/// while both name the same geometry the app's tree and the framework's
+/// row cannot drift apart.
+///
+/// Each line is centred in its step by the framework, which puts it under
+/// its ancestor's disclosure column rather than on the boundary between
+/// two levels.
 ///
 /// Purity: pure.
 #[must_use]
-pub fn row_guide_offsets(depth: usize) -> Vec<f32> {
-    tree_row::guide_positions(depth.min(MAX_ROW_INDENT_DEPTH), ROW_INDENT_PER_DEPTH)
+pub fn row_guide_offsets(depth: usize, row_width: f32) -> Vec<f32> {
+    tree_row::indent_geometry(depth, row_width).guides
 }
 
 /// One painted stripe over a tree row: a full-height, fixed-width bar at a
@@ -1566,9 +1833,9 @@ impl RowOverlay {
 /// [`tree_row::GUIDE_WIDTH`] — no new literals, and the same constants the
 /// composite's own `row_slots` rectangles are built from.
 ///
-/// Purity: pure function of `(depth, selected, hovered)`.
+/// Purity: pure function of `(depth, row_width, selected, hovered)`.
 #[must_use]
-pub fn row_overlay(depth: usize, selected: bool, hovered: bool) -> RowOverlay {
+pub fn row_overlay(depth: usize, row_width: f32, selected: bool, hovered: bool) -> RowOverlay {
     let paint = row_paint(selected, hovered);
     RowOverlay {
         selection_bar: selected.then_some(RowStripe {
@@ -1576,7 +1843,7 @@ pub fn row_overlay(depth: usize, selected: bool, hovered: bool) -> RowOverlay {
             width: tree_row::SELECTION_BAR_WIDTH,
             color: paint.selection_bar,
         }),
-        guides: row_guide_offsets(depth)
+        guides: row_guide_offsets(depth, row_width)
             .into_iter()
             .map(|x| RowStripe {
                 x,

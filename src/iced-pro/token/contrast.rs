@@ -179,7 +179,7 @@
 //! # The spec's printed numeric columns are not authoritative
 //!
 //! Ledger gap **G-5** (`doc/planning/iced-pro-tasks.md`) establishes
-//! that the numeric columns of `doc/planning/ui-framework.md` §2.5 were
+//! that the numeric columns of `spec.md` §2.5 were
 //! hand-collected and are wrong in places. **The values this module
 //! computes are authoritative.** Nothing here transcribes a printed
 //! figure; the reconciliation lives in the test sidecar, which

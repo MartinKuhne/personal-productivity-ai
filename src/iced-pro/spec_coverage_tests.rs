@@ -5,7 +5,7 @@
 //! entry actually says something rather than gesturing.
 //!
 //! The second group is the reason the ledger exists. It reads
-//! `doc/planning/ui-framework.md` at test time, extracts every numbered
+//! `spec.md` at this crate's root at test time, extracts every numbered
 //! `UIF-*` id and asserts the ledger and the spec agree **in both
 //! directions**, so an ID added to the spec without a classification here
 //! fails the build, and a manifest entry the spec no longer contains fails

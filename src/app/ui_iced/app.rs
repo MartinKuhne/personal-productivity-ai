@@ -616,6 +616,21 @@ pub struct OverlayState {
     /// `prune_hovered_row` in `ui_iced/update.rs`, which runs in the
     /// frame tail right after the tree cache is refreshed.
     pub hovered_tree_row: Option<PathBuf>,
+    /// The tab the pointer is currently over, by **path** (INT-12).
+    ///
+    /// The tab strip's half of the INT-10 pattern. §4.4.1 slot 1 gives a
+    /// tab's top indicator three states — `accent.border` active,
+    /// `transparent` inactive at rest, `border.strong` on hover — and the
+    /// third one is a function of the pointer, so it has to live in
+    /// reducer state the same way the tree row's hover does.
+    ///
+    /// Keyed by path for the same reason as
+    /// [`hovered_tree_row`](Self::hovered_tree_row): the strip re-orders
+    /// and shrinks under close, close-others, close-all and a
+    /// watcher-driven deletion, so a strip index is not a stable address
+    /// and a highlight keyed by one would move to a different tab on its
+    /// own.
+    pub hovered_tab: Option<PathBuf>,
     /// The `iced-pro` z-band index of the surfaces currently open
     /// (`UIF-ZORD-*`), derived from the fields above by
     /// [`sync_surfaces`](Self::sync_surfaces).
@@ -735,6 +750,7 @@ impl Default for OverlayState {
             debug_scroll: None,
             modifiers: iced::keyboard::Modifiers::empty(),
             hovered_tree_row: None,
+            hovered_tab: None,
             surfaces: SurfaceRegistry::new(),
             pre_rank: PreRankCoordinator::new(),
         }
@@ -1575,6 +1591,12 @@ impl ViewModels {
         left.multi_select = overlay.modifiers.shift();
         left.hovered_row = overlay.hovered_tree_row.clone();
 
+        let mut center = CenterPanelViewModel::from_app_with_note_skills(app, note_skills);
+        // INT-12: the hovered tab is pointer state, and
+        // `CenterPanelViewModel::from_app` has no pointer input, so the
+        // crossing happens here exactly as the tree row's does above.
+        center.hovered_tab = overlay.hovered_tab.clone();
+
         let agent =
             AgentPanelViewModel::from_app(app).with_thinking_expanded(overlay.thinking_expanded);
 
@@ -1598,7 +1620,7 @@ impl ViewModels {
         Self {
             top: TopBarViewModel::from_app(app),
             left,
-            center: CenterPanelViewModel::from_app_with_note_skills(app, note_skills),
+            center,
             bottom: BottomPanelViewModel::from_app(app),
             agent,
             logs: BackgroundLogsViewModel::from_app(app),

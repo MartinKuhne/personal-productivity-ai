@@ -3854,3 +3854,123 @@ fn hover_survives_a_re_select_because_it_is_not_selection_state() {
         "and the selection did land"
     );
 }
+
+// ---------------------------------------------------------------------------
+// INT-12 — the tab strip's hover crossing (§4.4.1 slot 1's third state)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn entering_a_tab_records_it_as_hovered() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Entered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tab,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "the pointer's tab must reach overlay state"
+    );
+    assert_eq!(
+        state.models.center.hovered_tab,
+        Some(PathBuf::from("/ws/alpha.md")),
+        "and be projected into the center view-model the panel reads"
+    );
+}
+
+#[test]
+fn leaving_the_hovered_tab_clears_it() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Entered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Left {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(state.overlay.hovered_tab, None);
+    assert_eq!(state.models.center.hovered_tab, None);
+}
+
+#[test]
+fn leaving_a_different_tab_cannot_wipe_the_highlight_that_just_arrived() {
+    // The same race INT-10 pinned for tree rows. iced publishes both
+    // crossings in one event pass in tree order, so a move toward the
+    // end of the strip delivers the later tab's `Entered` before the
+    // earlier tab's `Left`. An unconditional clear would erase the
+    // highlight in the same tick it appeared.
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Entered {
+            path: PathBuf::from("/ws/beta.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Left {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.overlay.hovered_tab,
+        Some(PathBuf::from("/ws/beta.md")),
+        "a stale exit from the tab we came from must not clear the new hover"
+    );
+}
+
+#[test]
+fn a_hover_report_publishes_no_bus_command() {
+    // The hover is view-local state, not user intent ([FMD-068]). It must
+    // not be able to close, select or otherwise act on a tab.
+    let (mut state, _storage) = fresh_state();
+    let spy = command_spy(&state);
+
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Entered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Left {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert!(
+        drained(&spy).is_empty(),
+        "a pointer crossing must not publish anything on the command bus"
+    );
+}
+
+#[test]
+fn hovering_a_tab_does_not_change_which_tab_is_active() {
+    let (mut state, _storage) = fresh_state();
+
+    let _ = update(
+        &mut state,
+        Message::Tab(TabMessage::Entered {
+            path: PathBuf::from("/ws/alpha.md"),
+        }),
+    );
+
+    assert_eq!(
+        state.models.center.active_tab, None,
+        "hover is not activation"
+    );
+}

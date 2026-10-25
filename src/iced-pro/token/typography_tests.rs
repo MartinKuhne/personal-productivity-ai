@@ -43,7 +43,7 @@ const EPS: f32 = 1e-6;
 const RATIO_EPS: f32 = 5e-3;
 
 /// A row of the `UIF-TOK-004` table transcribed verbatim from
-/// `doc/planning/ui-framework.md` §2.4, paired with the constant that
+/// `spec.md` §2.4, paired with the constant that
 /// implements it.
 ///
 /// Keeping the transcription next to the rung means retuning either side

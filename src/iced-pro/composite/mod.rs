@@ -5,7 +5,7 @@
 //! a composite owns the *relationship between* controls and the text that
 //! explains them — the vertical rhythm of a labelled field, the horizontal
 //! split of a settings row, the three slots of a list tile. §3B of
-//! `doc/planning/ui-framework.md` specifies those relationships, and this
+//! `spec.md` at this crate's root specifies those relationships, and this
 //! subsystem is where they become code.
 //!
 //! The same split that runs through [`crate::widget`] runs through here, and

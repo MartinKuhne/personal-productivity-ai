@@ -382,6 +382,7 @@ fn vm_menu_items_for_out_of_range_index_is_empty() {
         thinking: String::new(),
         active_pdf_backed: false,
         note_skills: vec![skill("FormatMarkdown", "sys/FormatMarkdown.md")],
+        hovered_tab: None,
     };
 
     assert_eq!(vm.menu_items_for(0).len(), 8);
@@ -405,6 +406,7 @@ fn vm_active_tab_entry_agrees_with_the_active_index() {
         thinking: String::new(),
         active_pdf_backed: false,
         note_skills: Vec::new(),
+        hovered_tab: None,
     };
 
     assert_eq!(vm.active_tab_entry(), Some(&vm.tabs[1]));
@@ -587,6 +589,7 @@ fn vm_show_thinking_uses_the_gate() {
         thinking: String::new(),
         active_pdf_backed: false,
         note_skills: Vec::new(),
+        hovered_tab: None,
     };
     assert!(!vm.show_thinking());
 
@@ -778,22 +781,45 @@ fn the_unsaved_dot_occupies_its_slot_without_moving_tab_content() {
 
 // --- INT-11: the 2px top accent indicator -------------------------------
 
-/// Only the active tab gets the bar; an inactive tab resolves to `None` so
-/// the render path emits no bar at all rather than a leftover one.
+/// The indicator's three §4.4.1 states, all wired as of INT-12.
+///
+/// INT-11 built two of the three and recorded the third as needing the
+/// strip to report the pointer into the reducer. INT-12 built that
+/// crossing, so the third state is now reachable and asserted here.
 #[test]
-fn the_top_indicator_lands_on_the_active_tab_only() {
+fn the_top_indicator_resolves_all_three_states() {
     let pro = Palette::pro();
 
     assert_eq!(
-        tab_top_indicator(true),
+        tab_top_indicator(true, false),
         Some(pro.accent_border),
         "the active tab's bar is `accent.border`, §4.4.1 slot 1"
     );
     assert_eq!(
-        tab_top_indicator(false),
+        tab_top_indicator(false, false),
         None,
-        "an inactive tab must paint nothing — `None`, not a transparent bar, \
-         so no partial or leftover indicator is reachable"
+        "an inactive tab at rest must paint nothing — `None`, not a \
+         transparent bar, so no partial or leftover indicator is reachable"
+    );
+    assert_eq!(
+        tab_top_indicator(false, true),
+        Some(pro.border_strong),
+        "a hovered inactive tab takes `border.strong`, §4.4.1 slot 1's \
+          third state"
+    );
+    // Active outranks hover: a hovered active tab must not look like it
+    // lost activation.
+    assert_eq!(
+        tab_top_indicator(true, true),
+        tab_top_indicator(true, false),
+        "hover must not change an active tab's bar"
+    );
+    // The hovered bar is a different token from the active bar, so the
+    // two states cannot be confused.
+    assert_ne!(
+        tab_top_indicator(false, true),
+        tab_top_indicator(true, false),
+        "hovered-inactive and active must be visually distinct"
     );
     assert_eq!(
         TAB_INDICATOR_HEIGHT,
@@ -805,6 +831,69 @@ fn the_top_indicator_lands_on_the_active_tab_only() {
         TAB_INDICATOR_HEIGHT, 2.0,
         "`border.focus` is 2px, which is what §4.4.1 draws"
     );
+}
+
+/// The hovered bar's contrast, recomputed from raw sRGB rather than
+/// transcribed from the spec's rounded `3.68:1`.
+///
+/// §4.4.2 prices the hovered inactive tab's top bar at `border.strong`
+/// over the hovered `surface.hover` fill. That pairing is a chrome element
+/// (a `2px` rule, not body text), so the floor is `MIN_CHROME_CONTRAST`
+/// (`3.0:1`), and the measured figure clears it.
+#[test]
+fn the_hovered_top_bar_is_legible_against_the_hovered_tab_surface() {
+    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+
+    let pro = Palette::pro();
+    let bar = tab_top_indicator(false, true).expect("hovered inactive tab has a bar");
+    let hovered_surface = pro.surface_hover;
+
+    let ratio = contrast_ratio(bar, hovered_surface);
+    assert!(
+        ratio >= MIN_CHROME_CONTRAST,
+        "hovered bar measures {ratio:.6}:1 against surface.hover, floor is \
+         {MIN_CHROME_CONTRAST}"
+    );
+    // The spec's rounded figure, matched to five decimal places.
+    assert!(
+        (ratio - 3.67718).abs() < 1e-5,
+        "border.strong on surface.hover measures {ratio:.6}, expected ~3.67718 \
+         (the spec prints 3.68:1)"
+    );
+    // And the resting inactive tab still paints no bar, so the hover is
+    // a real change rather than always-on chrome.
+    assert_eq!(tab_top_indicator(false, false), None);
+}
+
+/// The hover predicate keys on the tab's path, not its position in the
+/// strip.
+///
+/// This is the INT-10 lesson applied to the tab strip. Every operation
+/// that changes what index a file sits at — `Close Others`, `Close All`,
+/// a middle-click, a watcher-driven deletion — would move an
+/// index-keyed highlight onto a tab the pointer never entered.
+#[test]
+fn tab_hover_is_keyed_by_path_so_a_reorder_cannot_move_it() {
+    let a = entry("a.md", false);
+    let b = entry("b.md", true);
+
+    assert!(tab_is_hovered(&a, Some(std::path::Path::new("a.md"))));
+    assert!(!tab_is_hovered(&b, Some(std::path::Path::new("a.md"))));
+
+    // Close `a`: `b` shifts from index 1 to index 0. A path-keyed
+    // highlight on `a` cannot follow it onto `b`.
+    let hovered_a = Some(std::path::PathBuf::from("a.md"));
+    assert!(!tab_is_hovered(&b, hovered_a.as_deref()));
+    // And once `a` is gone the stale highlight matches nothing, so no tab
+    // paints a hover it did not earn.
+    let tabs = [b.clone()];
+    assert!(
+        !tabs.iter().any(|t| tab_is_hovered(t, hovered_a.as_deref())),
+        "a highlight on a closed tab must match no remaining tab"
+    );
+    // Nothing is hovered when the state is `None`.
+    assert!(!tab_is_hovered(&a, None));
+    assert!(!tab_is_hovered(&b, None));
 }
 
 /// The 36px strip budget with the 2px indicator inside it, written out.

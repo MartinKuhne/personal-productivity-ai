@@ -71,7 +71,13 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// `size::INDICATOR_DOT` — but Rule B counts declarations, so moving a
 /// constant from the type floor onto the indicator token does not move
 /// this number.
-const PIN_APP_TOKEN_BOUND: usize = 91;
+/// 93 after INT-12's badge geometry in `panels/left.rs`:
+/// `PDF_BADGE_SLOT` (`space.xl + space.md`, the width the `[PDF]` mark
+/// owns) and `PDF_BADGE_GAP` (`space.xs`, the gap in front of it).
+/// `PDF_BADGE_CHARGE` is derived from those two rather than naming a token
+/// of its own, and `PDF_BADGE_RUNG` re-exports the badge atom's rung, so
+/// neither adds to this count.
+const PIN_APP_TOKEN_BOUND: usize = 93;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.

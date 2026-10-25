@@ -659,23 +659,54 @@ pub fn unsaved_dot(unsaved: bool, palette: &Palette, active: bool) -> UnsavedDot
 /// nothing.
 ///
 /// §4.4.1 slot 1 gives this bar three states: `accent.border` when active,
-/// `transparent` when inactive at rest, and `border.strong` on hover. **Only
-/// the first two are wired.** The hovered state needs the tab strip to report
-/// the pointer into the reducer the way the file tree has since INT-10
-/// (`left.rs`'s `RowEntered` / `RowLeft`), and that crossing has not been
-/// brought across — so it is an unbuilt interaction, not a paint gap.
+/// `transparent` when inactive at rest, and `border.strong` on hover.
+/// **All three are wired as of INT-12.** The hovered state needed the strip
+/// to report the pointer into the reducer the way the file tree has since
+/// INT-10, and that crossing is now in place (`TabMessage::Entered` /
+/// `Left` → `OverlayState::hovered_tab` → `CenterPanelViewModel::hovered_tab`).
 ///
-/// An inactive tab resolves to `None` rather than to a transparent fill, so
-/// the render path emits no bar at all and a leftover or partial indicator
-/// on an inactive tab is not reachable from here.
+/// **Active outranks hover.** A hovered *active* tab keeps
+/// `accent.border`, because §4.4.1's hover rung is stated for the tab that
+/// is not already marked active — a bar that changed from `accent.border`
+/// to `border.strong` under the cursor would read as the tab losing
+/// activation.
 ///
-/// `accent.border` is read from the framework palette; no numeric colour is
-/// introduced in this module (§4a).
+/// An inactive tab at rest resolves to `None` rather than to a transparent
+/// fill, so the render path emits no bar at all and a leftover or partial
+/// indicator on an inactive tab is not reachable from here.
 ///
-/// Purity: pure function of `active`.
+/// `accent.border` and `border.strong` are read from the framework palette;
+/// no numeric colour is introduced in this module (§4a). Against the
+/// hovered tab's `surface.hover` fill, `border.strong` measures
+/// `3.677181:1`, which is the `3.68:1` §4.4.2 prints for this bar and
+/// clears the `3.0:1` chrome floor.
+///
+/// Purity: pure function of `(active, hovered)`.
 #[must_use]
-pub fn tab_top_indicator(active: bool) -> Option<iced::Color> {
-    active.then(|| Palette::pro().accent_border)
+pub fn tab_top_indicator(active: bool, hovered: bool) -> Option<iced::Color> {
+    let pro = Palette::pro();
+    if active {
+        Some(pro.accent_border)
+    } else if hovered {
+        Some(pro.border_strong)
+    } else {
+        None
+    }
+}
+
+/// Whether `tab` is the tab the pointer is currently over.
+///
+/// Compared by **path**, mirroring `left::row_is_hovered`. The strip
+/// index is deliberately not consulted: `Close Others`, `Close All`, a
+/// middle-click and a watcher-driven file deletion all change what index
+/// a given file sits at, and a highlight keyed by index would slide onto
+/// whatever tab moved into the remembered slot. Keyed by path, the
+/// highlight can only ever sit on the tab the pointer actually entered.
+///
+/// Purity: pure.
+#[must_use]
+pub fn tab_is_hovered(tab: &TabEntry, hovered: Option<&std::path::Path>) -> bool {
+    hovered == Some(tab.path.as_path())
 }
 
 /// Label colour for a tab: `text_strong` on the active tab, `text_muted` on
@@ -883,6 +914,18 @@ pub struct CenterPanelViewModel {
     /// Note skills offered on the tab context menu (VFS-121), which is
     /// where "Format Markdown" (UI-033) comes from.
     pub note_skills: Vec<SkillFile>,
+    /// The tab the pointer is currently over, by **path** (INT-12).
+    ///
+    /// Drives §4.4.1 slot 1's third state: a hovered **inactive** tab
+    /// takes `color.border.strong` on its top indicator. Reported `None`
+    /// by [`from_app`](Self::from_app), which has no pointer input, and
+    /// overwritten by `ViewModels::from_app` from
+    /// [`OverlayState::hovered_tab`](crate::ui_iced::app::OverlayState::hovered_tab).
+    ///
+    /// Keyed by path rather than by strip index so a close or a
+    /// watcher-driven re-order cannot move the highlight onto a tab the
+    /// pointer never entered.
+    pub hovered_tab: Option<PathBuf>,
 }
 
 impl CenterPanelViewModel {
@@ -919,6 +962,7 @@ impl CenterPanelViewModel {
                 .as_deref()
                 .is_some_and(|path| app.pdf_backing_tracker().is_pdf_backed(path)),
             note_skills,
+            hovered_tab: None,
         }
     }
 
@@ -1006,7 +1050,13 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
         Row::<Message>::new()
             .spacing(TAB_SPACING)
             .align_y(Alignment::Center),
-        |tabs, (index, tab)| tabs.push(tab_widget(tab, index)),
+        |tabs, (index, tab)| {
+            tabs.push(tab_widget(
+                tab,
+                index,
+                tab_is_hovered(tab, view_model.hovered_tab.as_deref()),
+            ))
+        },
     );
 
     container(tabs)
@@ -1019,7 +1069,14 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 
 /// One tab: the unsaved marker slot, the title, the `×` close button, and
 /// the full select / middle-close / right-menu / cursor-motion interaction.
-fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
+///
+/// `hovered` is the INT-12 pointer state, resolved by
+/// [`tab_is_hovered`] against the tab's **path**. It reaches §4.4.1 slot
+/// 1's third indicator state and nothing else: the fill, the label and
+/// the perimeter stay as they were, so an active tab's styling cannot
+/// regress and the pinned `STRIP_HEIGHT` / `TAB_HEIGHT` band closure is
+/// untouched — the indicator rides in a `Stack` and takes no layout.
+fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
     let dot = unsaved_dot(tab.unsaved, &palette, tab.active);
@@ -1094,7 +1151,19 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         tab_context_menu_open_message(index),
     )
     .on_press(Message::Command(tab_select_command(&tab.path)))
-    .on_middle_press(tab_close_message(index));
+    .on_middle_press(tab_close_message(index))
+    // INT-12: the same edge-triggered hover crossing INT-10 put on the
+    // tree rows. `mouse_area` publishes `on_enter` only on
+    // `is_hovered && !was_hovered` and `on_exit` only on the inverse, and
+    // skips the check entirely when neither the cursor nor its own bounds
+    // moved (`iced_widget-0.14.2/src/mouse_area.rs:349-366`), so a
+    // per-frame strip rebuild cannot flood the reducer with hover reports.
+    .on_enter(Message::Tab(TabMessage::Entered {
+        path: tab.path.clone(),
+    }))
+    .on_exit(Message::Tab(TabMessage::Left {
+        path: tab.path.clone(),
+    }));
 
     // The `2px` top accent indicator rides *over* the tab in a `Stack`
     // rather than inside its padding box, and that placement is the whole
@@ -1112,7 +1181,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         .width(Length::Fill)
         .height(Length::Fixed(TAB_INDICATOR_HEIGHT))
         .style(move |_theme| container::Style {
-            background: tab_top_indicator(tab.active).map(Background::Color),
+            background: tab_top_indicator(tab.active, hovered).map(Background::Color),
             ..container::Style::default()
         });
 

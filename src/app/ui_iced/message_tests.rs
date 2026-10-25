@@ -158,13 +158,40 @@ fn test_message_is_clone_but_channels_that_can_be_are_copy() {
     assert_clone::<LogsMessage>();
     assert_clone::<ThemeMessage>();
 
-    // Every payload field of these four channels is `Copy`, so the channel
+    // Every payload field of these three channels is `Copy`, so the channel
     // itself must be — a missing `Copy` derive fails this at compile time.
     assert_copy::<WindowMessage>();
     assert_copy::<LayoutMessage>();
-    assert_copy::<TabMessage>();
     assert_copy::<ThemeMessage>();
     assert_copy::<WindowSnapshot>();
+
+    // `TabMessage` left this list in INT-12. It carries a `PathBuf` on the
+    // hover variants now, so it cannot be `Copy`; the pin is doing its job
+    // by re-classifying the channel rather than by staying satisfied.
+    assert_clone::<TabMessage>();
+}
+
+#[test]
+fn test_tab_channel_is_clone_rather_than_copy_now_that_it_carries_a_path() {
+    // The by-value-move proof, inverted: `TabMessage` no longer compiles
+    // as `Copy`, so the clone is explicit. Asserted through `Clone` so a
+    // future change that re-added `Copy` here (by dropping the path
+    // payload back out) is a deliberate edit rather than a silent drift.
+    let entered = TabMessage::Entered {
+        path: sample_path(),
+    };
+    let cloned = entered.clone();
+    assert_eq!(entered, cloned);
+
+    let left = TabMessage::Left {
+        path: sample_path(),
+    };
+    assert_ne!(entered, left);
+    assert_ne!(
+        TabMessage::ContextMenuClosed,
+        left,
+        "the hover variants must be distinct from the menu variants"
+    );
 }
 
 #[test]
@@ -174,10 +201,6 @@ fn test_copy_channel_value_survives_a_by_value_move() {
     let message = ThemeMessage::ScaleChanged { multiplier: 1.5 };
     let copy = message;
     assert_eq!(message, copy);
-
-    let tab = TabMessage::ContextMenuClosed;
-    let tab_copy = tab;
-    assert_eq!(tab, tab_copy);
 }
 
 #[test]

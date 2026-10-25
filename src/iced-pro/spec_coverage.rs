@@ -1,5 +1,5 @@
 //! Machine-readable coverage of every `UIF-*` requirement in
-//! `doc/planning/ui-framework.md`, plus the audit primitive that keeps
+//! `spec.md` at this crate's root, plus the audit primitive that keeps
 //! that coverage from silently going stale.
 //!
 //! # Why a manifest instead of a document
@@ -250,7 +250,7 @@ impl AuditReport {
 ///
 /// Pure: it takes the ids [`extract_spec_ids`] produced and never touches
 /// the filesystem, so the same function backs the real audit against
-/// `ui-framework.md` and the injected-failure test that proves the guard
+/// `spec.md` and the injected-failure test that proves the guard
 /// actually fires.
 #[must_use]
 pub fn audit(spec_ids: &[String]) -> AuditReport {

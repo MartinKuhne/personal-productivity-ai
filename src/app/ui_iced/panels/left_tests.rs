@@ -21,9 +21,18 @@
 use super::*;
 use crate::ui_iced::context_menu::{ContextGroup, ContextRow};
 use crate::ui_iced::test_helpers::test_app;
+use iced_pro::token::contrast::meets_text_contrast;
 use tempfile::TempDir;
 
 // --- fixtures -----------------------------------------------------------
+
+/// A row width wide enough that no depth under test compresses.
+///
+/// The deepest nominal indent exercised here is `50 × 16 = 800px` and
+/// `indent_allowance(2000) = 2000 − 128 = 1872`, so every depth in the
+/// nominal-tier assertions fits with room to spare. Tests that want the
+/// *compressed* tiers pass a real pane width instead.
+const WIDE_ROW: f32 = 2_000.0;
 
 /// A synthetic collapsed directory row — never opened ([RUST-006]).
 fn dir_row(name: &str, path: &str, depth: usize) -> FlatRow {
@@ -997,27 +1006,306 @@ fn row_width_delegates_to_the_framework_content_width() {
 }
 
 #[test]
-fn row_indent_pixels_clamps_deep_nesting_onto_the_step() {
-    assert_eq!(row_indent_pixels(0), 0.0);
-    assert_eq!(row_indent_pixels(1), tree_row::INDENT_STEP);
-    assert_eq!(row_indent_pixels(4), 4.0 * tree_row::INDENT_STEP);
+fn row_indent_pixels_is_width_relative_rather_than_depth_clamped() {
+    assert_eq!(row_indent_pixels(0, WIDE_ROW), 0.0);
+    assert_eq!(row_indent_pixels(1, WIDE_ROW), tree_row::INDENT_STEP);
+    assert_eq!(row_indent_pixels(4, WIDE_ROW), 4.0 * tree_row::INDENT_STEP);
     assert_eq!(
-        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
-        MAX_ROW_INDENT_DEPTH as f32 * tree_row::INDENT_STEP
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH, WIDE_ROW),
+        MAX_ROW_INDENT_DEPTH as f32 * tree_row::INDENT_STEP,
+        "where the budget lasts, the nominal step is what draws"
     );
-    // The app allows 50 levels of drawn indent; beyond that the clamp
-    // holds and the step never changes.
+
+    // **This assertion is the opposite of the one INT-12 deleted.** The
+    // old test said "one level past the cap must not indent further",
+    // which was the `min(depth, 50)` clamp being asserted back to itself.
+    // The clamp is gone because it was the bug: it capped the *depth*
+    // while leaving the *label* unprotected, so at the cap the indent was
+    // 800px and the label sat off-screen. Depth is now bounded by the
+    // budget rather than by a constant.
+    assert!(
+        row_indent_pixels(MAX_ROW_INDENT_DEPTH + 1, WIDE_ROW)
+            > row_indent_pixels(MAX_ROW_INDENT_DEPTH, WIDE_ROW),
+        "the budget decides how deep a row indents, not a cap"
+    );
+}
+
+#[test]
+fn the_indent_is_total_and_never_borrows_from_the_label_floor() {
+    // No depth at any width overflows, goes negative, or eats the room
+    // the framework reserved for the label.
+    for depth in [0usize, 1, 8, 50, 1_000, 10_000, usize::MAX] {
+        for width in [0.0f32, 1.0, 128.0, 150.0, 280.0, 1_000.0, WIDE_ROW] {
+            let indent = row_indent_pixels(depth, width);
+            assert!(indent.is_finite(), "depth {depth} width {width} overflowed");
+            assert!(
+                indent >= 0.0,
+                "depth {depth} width {width} indented negatively"
+            );
+            assert!(
+                indent <= tree_row::indent_allowance(width) + f32::EPSILON,
+                "depth {depth} width {width}: indent {indent} exceeded the \
+                 allowance {}",
+                tree_row::indent_allowance(width),
+            );
+        }
+    }
+}
+
+#[test]
+fn at_least_ninety_six_pixels_of_label_survive_the_worst_case() {
+    // §4.3.2 / §3B.6: `TREE_LABEL_MIN_W = 96px` of label stays visible
+    // at every depth, via proportional compression rather than a cap.
+    // The worst case the spec names is the deepest nesting in the narrowest
+    // pane, so that is what is checked rather than a friendly width.
+    //
+    // `LEFT_PANE_MIN_W = 150` is the spec's own figure (§4.3.1). The
+    // app's own `LEFT_PANEL_MIN_WIDTH` is 180, i.e. 30px *wider* than the
+    // spec's floor, so the spec's worst case is checked at 150 and the
+    // app's own minimum is strictly safer.
+    let spec_min_pane = 150.0;
+    let row_width = spec_min_pane - PANEL_PADDING - PANEL_PADDING;
+    let allowance = tree_row::indent_allowance(row_width);
+
+    for depth in [0usize, 1, 8, 50, 200, 10_000] {
+        let indent = row_indent_pixels(depth, row_width);
+        let label = row_width - ROW_PADDING_X - ROW_PADDING_X - indent;
+        assert!(
+            label >= tree_row::MIN_LABEL_WIDTH - f32::EPSILON,
+            "depth {depth} at the spec's minimum pane: label gets {label:.1}px, \
+             floor is {}",
+            tree_row::MIN_LABEL_WIDTH,
+        );
+        assert!(
+            indent <= allowance + f32::EPSILON,
+            "depth {depth}: indent must absorb the shortfall, not the label"
+        );
+    }
+
+    // The compression is real at this width, not merely non-overflowing:
+    // eight nominal levels would want `8 × 16 = 128px` and the allowance
+    // is only `142 − 128 = 14px`, so the step must have come down.
+    let compressed = tree_row::indent_geometry(8, row_width);
+    assert!(
+        compressed.step < tree_row::INDENT_STEP,
+        "eight levels cannot fit nominally in a 142px row; the step should \
+         have compressed from {} but stayed at {}",
+        tree_row::INDENT_STEP,
+        compressed.step,
+    );
     assert_eq!(
-        row_indent_pixels(MAX_ROW_INDENT_DEPTH + 1),
-        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
-        "one level past the cap must not indent further"
+        compressed.width, allowance,
+        "once compressing, the indent takes exactly the allowance"
+    );
+}
+
+#[test]
+fn the_badge_fits_only_where_the_label_floor_can_pay_for_it() {
+    // The badge is charged against what the indent left over, so the fit
+    // test must move with the width and the depth rather than being a
+    // constant yes.
+    //
+    // Wide row, shallow: plenty of room.
+    assert!(
+        pdf_badge_fits(0, WIDE_ROW),
+        "a wide row at depth 0 must show the badge"
+    );
+    // The charge is exactly `slot + gap`, so the boundary is exact: at a
+    // width whose allowance is the charge, it fits; a hair under, it does
+    // not.
+    let exact = tree_row::MIN_LABEL_WIDTH
+        + tree_row::CHEVRON_COLUMN
+        + ROW_PADDING_X
+        + ROW_PADDING_X
+        + PDF_BADGE_CHARGE;
+    assert!(
+        pdf_badge_fits(0, exact),
+        "at a width that leaves exactly the charge, the badge fits"
+    );
+    assert!(
+        !pdf_badge_fits(0, exact - 1.0),
+        "one pixel short of the charge must hide the badge rather than \
+         breach the label floor"
+    );
+    // Deeper rows spend the allowance on indent, so the badge drops out
+    // earlier the deeper it sits.
+    assert!(
+        !pdf_badge_fits(200, row_width_for(Some(LEFT_PANEL_MIN_WIDTH))),
+        "at depth 200 in the narrowest pane there is nothing left to charge"
+    );
+}
+
+#[test]
+fn the_badge_never_breaches_the_label_floor_wherever_it_shows() {
+    // The invariant the fit gate exists to hold, checked rather than
+    // argued: for every width and depth where the badge shows, the label
+    // still clears 96px after the badge has been paid for.
+    for width in [150.0f32, 180.0, 220.0, 280.0, 400.0, 800.0, WIDE_ROW] {
+        for depth in [0usize, 1, 2, 4, 8, 16, 32, 64, 128] {
+            if !pdf_badge_fits(depth, width) {
+                continue;
+            }
+            let indent = row_indent_pixels(depth, width);
+            let label = width - ROW_PADDING_X - ROW_PADDING_X - indent - PDF_BADGE_CHARGE;
+            assert!(
+                label >= tree_row::MIN_LABEL_WIDTH - f32::EPSILON,
+                "width {width} depth {depth}: label down to {label:.1}px with \
+                 the badge shown"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_pdf_badge_survives_the_selection_lock() {
+    // **THE requirement this increment exists for.** §4.3.2: "Special item
+    // states (such as PDF-backed notes) include a text/icon badge
+    // (`[PDF]`) so meaning and contrast (`4.80:1`) are preserved when
+    // selected."
+    //
+    // INT-7b fixed the *contrast* of a selected PDF-backed row by
+    // role-locking the label to `text.strong`, and in doing so destroyed
+    // the *meaning*: once role-locked, a selected PDF-backed row was
+    // pixel-identical to a selected ordinary row, so the PDF-backed
+    // state silently vanished on selection. The badge is the second half
+    // of that fix. It survives the lock because it is a word rather than
+    // a colour, and it stays legible because [`pdf_badge_colour`] routes
+    // it through the same `tree_row::locked_over` call the label uses —
+    // so it arrives at `text.strong` exactly when the label does, rather
+    // than carrying `status.danger.text` onto the selection band.
+    let pro = Palette::pro();
+    let band = row_paint(true, false).band;
+    let badge = pdf_badge_colour(true, false);
+
+    assert_eq!(
+        band, pro.accent_fill,
+        "a selected row's band is accent.fill"
     );
     assert_eq!(
-        row_indent_pixels(10_000),
-        row_indent_pixels(MAX_ROW_INDENT_DEPTH),
-        "an absurd depth must still land on the cap, not overflow"
+        badge, pro.text_strong,
+        "the badge must be locked to text.strong, not left danger-red"
     );
-    assert!(row_indent_pixels(usize::MAX).is_finite());
+    assert_ne!(
+        badge, band,
+        "a badge painted in its own background colour is not a badge"
+    );
+    assert!(
+        contrast_ratio(badge, band) >= 4.80,
+        "selected PDF-backed badge measures {:.4}:1 against the spec's 4.80:1",
+        contrast_ratio(badge, band),
+    );
+    // The badge and the label are the same colour here, which is the
+    // point: they lock together, so neither can be left behind by the
+    // other.
+    assert_eq!(
+        badge,
+        row_label_colour(true, false, true),
+        "the badge and a PDF-backed label must resolve identically when selected"
+    );
+}
+
+#[test]
+fn every_badge_posture_is_legible_computed_from_raw_srgb() {
+    // Each posture the badge can appear in, measured rather than
+    // transcribed. Nothing here is copied from the spec's rounded figures;
+    // every number is recomputed from the palette's sRGB channels by
+    // `contrast_ratio`.
+    let pro = Palette::pro();
+    let postures = [
+        ("rest", false, false),
+        ("hovered", false, true),
+        ("selected", true, false),
+        ("selected+hovered", true, true),
+    ];
+
+    for (name, selected, hovered) in postures {
+        let band = row_paint(selected, hovered).band;
+        let badge = pdf_badge_colour(selected, hovered);
+        let ratio = contrast_ratio(badge, band);
+        assert!(
+            meets_text_contrast(badge, band),
+            "badge in posture {name}: {ratio:.6}:1 against band {band:?} \
+             fails the 4.5:1 AA text floor"
+        );
+        // The badge never resolves to the band it sits on.
+        assert_ne!(badge, band, "posture {name}: badge invisible on its band");
+    }
+
+    // Pinned figures, so a palette retune that quietly moves one of them
+    // fails here instead of in a review screenshot.
+    let rest = contrast_ratio(pdf_badge_colour(false, false), row_paint(false, false).band);
+    let hovered = contrast_ratio(pdf_badge_colour(false, true), row_paint(false, true).band);
+    let selected = contrast_ratio(pdf_badge_colour(true, false), row_paint(true, false).band);
+    let selected_hovered = contrast_ratio(pdf_badge_colour(true, true), row_paint(true, true).band);
+
+    assert!((rest - 6.572479).abs() < 1e-5, "rest = {rest:.6}");
+    assert!((hovered - 5.363299).abs() < 1e-5, "hovered = {hovered:.6}");
+    assert!(
+        (selected - 4.801988).abs() < 1e-5,
+        "selected = {selected:.6}"
+    );
+    assert!(
+        (selected_hovered - selected).abs() < 1e-9,
+        "selection outranks hover, so the band must not move: \
+         {selected_hovered:.6} vs {selected:.6}"
+    );
+
+    // **The defect this design prevents, pinned as illegal.** Had the
+    // badge carried its own `status.danger.text` through selection rather
+    // than taking the lock, it would paint this on the selection band.
+    let unlocked = contrast_ratio(pro.status_danger_text, pro.accent_fill);
+    assert!(
+        unlocked < 2.0,
+        "status.danger.text on accent.fill is {unlocked:.6}:1 — if this ever \
+         becomes readable the lock being tested above is not what is saving it"
+    );
+}
+
+#[test]
+fn the_badge_cannot_move_the_label_because_the_box_never_sees_it() {
+    // "Must not shift the label" is structural, not behavioural: the
+    // badge is trailing content and [`row_box`] takes no PDF-backed
+    // input at all, so there is no path by which the badge reaches the
+    // label's left edge. Asserted rather than trusted, because the day
+    // someone adds a `pdf_backed` parameter to `row_box` this test is
+    // where they find out that was the invariant.
+    for depth in [0usize, 1, 7, 33] {
+        let left = ROW_PADDING_X + row_indent_pixels(depth, WIDE_ROW);
+        // The label's left edge is a function of depth alone.
+        assert_eq!(
+            row_box(depth, WIDE_ROW, false, false).padding.left,
+            left,
+            "depth {depth}: label left edge must be inset + indent"
+        );
+        assert_eq!(
+            row_box(depth, WIDE_ROW, true, true).padding.left,
+            left,
+            "depth {depth}: posture must not move the label either"
+        );
+    }
+    // And the row's height is the pinned rung whatever the badge does.
+    assert_eq!(row_box(9, WIDE_ROW, true, true).height, ROW_MIN_HEIGHT);
+    assert!(ROW_MIN_HEIGHT >= size::HIT_TARGET_MIN);
+}
+
+#[test]
+fn the_badge_is_a_shape_that_fits_the_compact_row() {
+    // The badge must not push the row past its pinned rung, and the row's
+    // interior must actually contain the badge's line box.
+    assert_eq!(ROW_MIN_HEIGHT, size::HIT_TARGET_MIN);
+    let interior = ROW_MIN_HEIGHT - ROW_PADDING_Y - ROW_PADDING_Y;
+    assert!(
+        interior >= PDF_BADGE_RUNG.line_height,
+        "the badge's {}px line box must fit the row's {interior}px interior",
+        PDF_BADGE_RUNG.line_height,
+    );
+    // The badge is typed on the badge atom's own rung, not a size picked
+    // here, and that rung is at or above the interface-wide type floor.
+    assert_eq!(PDF_BADGE_RUNG.size, badge::TYPE_RUNG.size);
+    assert!(PDF_BADGE_RUNG.size >= typography::MIN_SIZE);
+    // The slot is wide enough for the literal it declares, with slack.
+    assert!(PDF_BADGE_SLOT > PDF_BADGE_GAP);
+    assert_eq!(PDF_BADGE_CHARGE, PDF_BADGE_SLOT + PDF_BADGE_GAP);
 }
 
 #[test]
@@ -1461,19 +1749,19 @@ fn hovering_moves_no_part_of_the_row_box_at_any_depth_or_posture() {
     // neighbour. `row_box` takes the posture as an input precisely so
     // this can be diffed rather than promised.
     for depth in 0..8usize {
-        let rest = row_box(depth, false, false);
+        let rest = row_box(depth, WIDE_ROW, false, false);
         assert_eq!(
-            row_box(depth, false, true),
+            row_box(depth, WIDE_ROW, false, true),
             rest,
             "hover moved the row box at depth {depth}"
         );
         assert_eq!(
-            row_box(depth, true, false),
+            row_box(depth, WIDE_ROW, true, false),
             rest,
             "selection moved the row box at depth {depth}"
         );
         assert_eq!(
-            row_box(depth, true, true),
+            row_box(depth, WIDE_ROW, true, true),
             rest,
             "selected+hover moved the row box at depth {depth}"
         );
@@ -1483,7 +1771,7 @@ fn hovering_moves_no_part_of_the_row_box_at_any_depth_or_posture() {
         );
         assert_eq!(
             rest.padding.left,
-            ROW_PADDING_X + row_indent_pixels(depth),
+            ROW_PADDING_X + row_indent_pixels(depth, WIDE_ROW),
             "the indent is the only thing that varies, and only with depth"
         );
     }
@@ -1550,7 +1838,7 @@ fn a_stale_hover_path_paints_no_row_at_all() {
 /// the bar with the token instead of leaving a stale `2.0` behind.
 #[test]
 fn the_selection_bar_uses_the_frameworks_bar_width_not_a_new_literal() {
-    let overlay = row_overlay(2, true, false);
+    let overlay = row_overlay(2, WIDE_ROW, true, false);
     let bar = overlay
         .selection_bar
         .expect("a selected row must carry a selection bar");
@@ -1568,7 +1856,7 @@ fn the_selection_bar_uses_the_frameworks_bar_width_not_a_new_literal() {
     assert_eq!(bar.x, 0.0, "the bar is the row's left edge");
 
     assert_eq!(
-        row_overlay(2, false, false).selection_bar,
+        row_overlay(2, WIDE_ROW, false, false).selection_bar,
         None,
         "an unselected row must have no bar at all, not a transparent one"
     );
@@ -1583,7 +1871,7 @@ fn the_selection_bar_uses_the_frameworks_bar_width_not_a_new_literal() {
 #[test]
 fn the_depth_guides_land_on_indent_step_multiples() {
     for depth in 1..8usize {
-        let offsets = row_guide_offsets(depth);
+        let offsets = row_guide_offsets(depth, WIDE_ROW);
         assert_eq!(
             offsets.len(),
             depth,
@@ -1617,8 +1905,8 @@ fn the_depth_guides_land_on_indent_step_multiples() {
 #[test]
 fn no_depth_guide_reaches_the_label() {
     for depth in 1..12usize {
-        let label_left = ROW_PADDING_X + row_indent_pixels(depth);
-        let overlay = row_overlay(depth, false, false);
+        let label_left = ROW_PADDING_X + row_indent_pixels(depth, WIDE_ROW);
+        let overlay = row_overlay(depth, WIDE_ROW, false, false);
         let deepest = overlay
             .guides
             .last()
@@ -1634,30 +1922,63 @@ fn no_depth_guide_reaches_the_label() {
     }
 }
 
-/// The guide count clamps with the drawn indent, not with the raw depth.
+/// The guide set is exactly the set of levels that actually drew an
+/// indent tier — never more, never fewer.
 ///
-/// [`MAX_ROW_INDENT_DEPTH`] caps how far a row is indented, and the guide set
-/// is clamped to the same number. A guide for a level that was never indented
-/// would hang inside the label rather than beside it.
+/// **INT-12 rewrote this test.** It used to assert that the guide count
+/// clamped at [`MAX_ROW_INDENT_DEPTH`], which was the depth cap being
+/// asserted back to itself a second time. The cap is gone. The guide
+/// count now follows [`tree_row::indent_geometry`], which in the
+/// collapsed tier draws *fewer* guides than the depth and reports the
+/// surplus as `collapsed_levels` rather than hanging it inside the label.
+///
+/// What has not changed is why the test exists at all: a guide drawn for
+/// a level that was never indented sits in the label instead of beside
+/// it. That is the invariant, and it now holds by construction because
+/// both the indent and the guides read the same resolution — which is
+/// exactly the coupling INT-11's note on [`row_guide_offsets`] demanded.
 #[test]
-fn the_guide_count_clamps_with_the_drawn_indent() {
-    let at_cap = row_guide_offsets(MAX_ROW_INDENT_DEPTH).len();
-    let past_cap = row_guide_offsets(MAX_ROW_INDENT_DEPTH + 25).len();
+fn the_guide_set_matches_the_levels_that_actually_drew() {
+    // Nominal tier: one guide per level, none past the label's left edge.
+    for depth in [0usize, 1, 4, MAX_ROW_INDENT_DEPTH] {
+        let guides = row_guide_offsets(depth, WIDE_ROW);
+        assert_eq!(guides.len(), depth, "depth {depth}: one guide per level");
+        if let Some(last) = guides.last() {
+            assert!(
+                *last <= row_indent_pixels(depth, WIDE_ROW),
+                "depth {depth}: last guide at {last} passed the label's left \
+                 edge {}",
+                row_indent_pixels(depth, WIDE_ROW),
+            );
+        }
+    }
 
-    assert_eq!(
-        at_cap, MAX_ROW_INDENT_DEPTH,
-        "the cap itself still draws one guide per level"
+    // Collapsed tier: past the `4px` floor step the guide count stops
+    // growing, and the surplus is reported rather than drawn.
+    let narrow = row_width_for(Some(LEFT_PANEL_MIN_WIDTH));
+    let drawn = tree_row::indent_geometry(200, narrow);
+    assert!(
+        drawn.guides.len() < 200,
+        "200 levels cannot each get a line in a {narrow}px row"
     );
     assert_eq!(
-        past_cap, at_cap,
-        "going past the cap must not add guides, or they would land in the label"
+        drawn.guides.len() + drawn.collapsed_levels,
+        200,
+        "every level is either drawn or reported collapsed, none lost"
     );
     assert_eq!(
-        row_overlay(MAX_ROW_INDENT_DEPTH + 25, false, false)
+        row_guide_offsets(200, narrow),
+        drawn.guides,
+        "the app's guides are the compressed geometry, not the nominal step"
+    );
+    assert_eq!(
+        row_overlay(200, narrow, false, false)
             .guides
-            .len(),
-        at_cap,
-        "the overlay reads the same clamped set"
+            .iter()
+            .map(|stripe| stripe.x)
+            .collect::<Vec<_>>(),
+        drawn.guides,
+        "the overlay reads the same compressed set"
     );
 }
 
@@ -1677,7 +1998,7 @@ fn every_overlay_stripe_colour_is_the_frameworks_and_clears_the_chrome_floor() {
     for depth in 0..6usize {
         for hovered in [false, true] {
             let paint = row_paint(false, hovered);
-            let overlay = row_overlay(depth, false, hovered);
+            let overlay = row_overlay(depth, WIDE_ROW, false, hovered);
             for guide in &overlay.guides {
                 assert_eq!(
                     guide.color, paint.guide,
@@ -1703,7 +2024,7 @@ fn every_overlay_stripe_colour_is_the_frameworks_and_clears_the_chrome_floor() {
     for depth in 0..6usize {
         for hovered in [false, true] {
             let paint = row_paint(true, hovered);
-            let overlay = row_overlay(depth, true, hovered);
+            let overlay = row_overlay(depth, WIDE_ROW, true, hovered);
 
             let bar = overlay
                 .selection_bar
@@ -1757,8 +2078,8 @@ fn every_overlay_stripe_colour_is_the_frameworks_and_clears_the_chrome_floor() {
 #[test]
 fn hover_moves_guide_geometry_never_colour_only_the_band() {
     for depth in 1..8usize {
-        let rest = row_overlay(depth, false, false);
-        let hover = row_overlay(depth, false, true);
+        let rest = row_overlay(depth, WIDE_ROW, false, false);
+        let hover = row_overlay(depth, WIDE_ROW, false, true);
 
         assert_eq!(
             rest.guides.len(),
@@ -1783,7 +2104,7 @@ fn hover_moves_guide_geometry_never_colour_only_the_band() {
 /// A resting, unindented row carries no overlay, so it pays no `Stack`.
 #[test]
 fn a_resting_unindented_row_carries_no_overlay_at_all() {
-    let overlay = row_overlay(0, false, false);
+    let overlay = row_overlay(0, WIDE_ROW, false, false);
     assert!(
         overlay.is_empty(),
         "depth 0 has no guides and an unselected row has no bar"
@@ -1805,17 +2126,17 @@ fn a_resting_unindented_row_carries_no_overlay_at_all() {
 /// [FMD-060] / [FMD-061] are measured against.
 #[test]
 fn the_overlay_widget_cost_is_stated_and_bounded() {
-    assert_eq!(row_overlay(0, false, false).widget_cost(), 0);
-    assert_eq!(row_overlay(0, true, false).widget_cost(), 2);
-    assert_eq!(row_overlay(1, false, false).widget_cost(), 3);
-    assert_eq!(row_overlay(1, true, false).widget_cost(), 4);
-    assert_eq!(row_overlay(3, true, true).widget_cost(), 8);
+    assert_eq!(row_overlay(0, WIDE_ROW, false, false).widget_cost(), 0);
+    assert_eq!(row_overlay(0, WIDE_ROW, true, false).widget_cost(), 2);
+    assert_eq!(row_overlay(1, WIDE_ROW, false, false).widget_cost(), 3);
+    assert_eq!(row_overlay(1, WIDE_ROW, true, false).widget_cost(), 4);
+    assert_eq!(row_overlay(3, WIDE_ROW, true, true).widget_cost(), 8);
 
     // The formula, so a future edit cannot change the shape silently. The one
     // exception is the empty overlay, which skips the `Stack` entirely.
     for depth in 0..8usize {
         for selected in [false, true] {
-            let overlay = row_overlay(depth, selected, false);
+            let overlay = row_overlay(depth, WIDE_ROW, selected, false);
             let expected = if depth == 0 && !selected {
                 0
             } else {
@@ -1831,7 +2152,7 @@ fn the_overlay_widget_cost_is_stated_and_bounded() {
     }
 
     // A worst-case row in this app's tree, bounded.
-    let worst = row_overlay(MAX_ROW_INDENT_DEPTH, true, true);
+    let worst = row_overlay(MAX_ROW_INDENT_DEPTH, WIDE_ROW, true, true);
     assert_eq!(
         worst.widget_cost(),
         1 + 1 + MAX_ROW_INDENT_DEPTH * 2,

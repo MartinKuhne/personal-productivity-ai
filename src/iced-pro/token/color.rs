@@ -20,7 +20,7 @@
 //!
 //! # The polarity split
 //!
-//! Values are transcribed from `doc/planning/ui-framework.md` §2.5 as
+//! Values are transcribed from `spec.md` §2.5 as
 //! revised on 2026-10-22, and that transcription is authoritative. The
 //! revision re-baselines the vocabulary around a **polarity split**: a
 //! chromatic signal is no longer one token every context reuses, but a
@@ -87,7 +87,7 @@ use iced::Color;
 
 /// The dark application palette (`UIF-TOK-005`).
 ///
-/// One field per semantic colour token in `doc/planning/ui-framework.md`
+/// One field per semantic colour token in `spec.md`
 /// §2.5. A field name is its token's last two segments in snake_case —
 /// `color.surface.base` is [`Palette::surface_base`],
 /// `color.border.strong` is [`Palette::border_strong`] — so the spec
