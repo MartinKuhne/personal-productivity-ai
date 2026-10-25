@@ -29,21 +29,44 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use iced::widget::rich_text;
 use iced::widget::text::{Rich, Span};
-use iced::{Background, Color, Element, Font, Length};
+use iced::{Background, Color, Element, Font, Length, Padding};
+use iced_pro::token::space;
+use iced_pro::token::typography;
 use std::path::Path;
 
-/// Point size of body/paragraph inline text — the FastMD body size, 14 pt.
-pub const BODY_SIZE: f32 = 14.0;
+/// Point size of body/paragraph inline text — `type.body` (`UIF-TOK-004`).
+/// Value unchanged at `14`.
+pub const BODY_SIZE: f32 = typography::BODY.size;
 
-/// Point size of the list bullet / ordinal marker.
-pub const LIST_MARKER_SIZE: f32 = 14.0;
-
-/// Horizontal padding around an inline-code highlight.
+/// Point size of the list bullet / ordinal marker — `type.body`
+/// (`UIF-TOK-004`).
 ///
-/// Iced's span highlight takes explicit padding
-/// (`Span::padding`, `iced_core-0.14.0/src/text.rs:532-535`), so a small
-/// inset keeps the code chip readable.
-pub const CODE_HIGHLIGHT_PADDING: f32 = 1.0;
+/// Value unchanged at `14`. The marker rides on the same rung as the prose it
+/// introduces: a bullet smaller than its own line reads as a separate object
+/// rather than as the line's prefix.
+pub const LIST_MARKER_SIZE: f32 = typography::BODY.size;
+
+/// Padding around an inline-code highlight.
+///
+/// **Movement: `1` uniform → `[2 vertical, 4 horizontal]`.** `1` is not on
+/// the base-4 spacing grid. The two axes are resolved against different
+/// tokens because they answer different questions:
+///
+/// * **Horizontal is `space.xs` (4)** — `UIF-TOK-001` names itself as the
+///   "compact inner padding for tags, badges, **inline code**", so this is
+///   the token's own stated role.
+/// * **Vertical is `space.2xs` (2)** — deliberately one rung tighter.
+///   Iced applies span padding to the highlight box only and not to the
+///   text's own layout box (`iced_core-0.14.0/src/text.rs:395-397`), so a
+///   vertical `4` would make the chip `14 + 8 = 22` tall against a
+///   `type.body` line box of `20` and the highlight would bleed across the
+///   neighbouring line. `2` keeps it at `18`, inside the line.
+pub const CODE_HIGHLIGHT_PADDING: Padding = Padding {
+    top: space::XXS,
+    bottom: space::XXS,
+    left: space::XS,
+    right: space::XS,
+};
 
 /// A single styled inline run with every theme token already resolved.
 ///

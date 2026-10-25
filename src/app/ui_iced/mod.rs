@@ -162,6 +162,8 @@ pub mod table_width;
 #[cfg(test)]
 pub mod test_helpers;
 pub mod theme;
+#[cfg(test)]
+pub mod token_guard_tests;
 pub mod tools_dialog;
 pub mod update;
 pub mod view;

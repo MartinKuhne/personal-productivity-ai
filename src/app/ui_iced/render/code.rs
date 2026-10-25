@@ -21,29 +21,74 @@ use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::panels::top::phosphor_font;
 use iced::widget::{Column, Row, button, container, text};
 use iced::{Alignment, Background, Element, Font, Length, Padding};
+use iced_pro::token::typography;
+use iced_pro::token::{shape, size, space};
 
-/// Point size of the monospace code text — the body size, 14 pt.
-pub const CODE_TEXT_SIZE: f32 = 14.0;
+/// The rung the code body renders on — `type.body` (`UIF-TOK-004`).
+///
+/// §2.4 leaves the rung for *code blocks* **unstated**: of the six monospace
+/// usages it names, only the editor buffer (`type.body`), log entries
+/// (`type.ui_compact`) and timestamps (`type.caption`) get one. `BODY` is
+/// chosen because the code block is the same reading task as the editor
+/// buffer, which the spec does put on this rung — and because the surrounding
+/// document prose is `BODY`, so a fenced block does not shrink mid-paragraph.
+/// The gap is recorded rather than papered over: this is a decision made in
+/// the app, not a value read off the spec.
+pub const CODE_RUNG: typography::TypeRung = typography::BODY;
 
-/// Point size of the language caption.
-pub const CODE_LANGUAGE_SIZE: f32 = 11.0;
+/// Point size of the monospace code text — `type.body` (`UIF-TOK-004`).
+/// Value unchanged at `14`.
+pub const CODE_TEXT_SIZE: f32 = CODE_RUNG.size;
 
-/// Inner padding of the code panel.
-pub const CODE_PADDING: f32 = 8.0;
+/// Point size of the language caption — `type.caption` (`UIF-TOK-004`).
+///
+/// **Movement: 11 → 12 (+1). This is a legibility-floor fix, not a rename.**
+/// `11` sits **below** [`typography::MIN_SIZE`] (12), the rule that "no text
+/// anywhere in the interface may render smaller than 12px" (§2.4,
+/// `UIF-TOK-004`). The caption was rendering illegal text on every fenced
+/// block. `CAPTION` is also the rung §2.4 assigns to labels of this kind
+/// (shortcut hints, status chips), so the fix lands on a real rung rather
+/// than nudging the illegal number up by hand.
+pub const CODE_LANGUAGE_SIZE: f32 = typography::CAPTION.size;
 
-/// Gap between the caption, the code and the copy button.
-pub const CODE_SPACING: f32 = 4.0;
+/// Inner padding of the code panel — `space.sm` (`UIF-TOK-001`). Value
+/// unchanged at `8`.
+pub const CODE_PADDING: f32 = space::SM;
+
+/// Gap between the caption, the code and the copy button — `space.xs`
+/// (`UIF-TOK-001`). Value unchanged at `4`.
+pub const CODE_SPACING: f32 = space::XS;
 
 /// Width of the copy button's column, so the wrapping code label always
 /// leaves room for the button.
-pub const CODE_COPY_COLUMN_WIDTH: f32 = 30.0;
+///
+/// **Value unchanged at 30, now derived:** `size.control.sm + space.2xs`
+/// (`28 + 2`). The reservation has to hold the button's hit area plus a
+/// hair of slack so a code line wrapping against the column edge never
+/// slides under the glyph. `CONTROL_SM` is the compact control rung the
+/// button is built on; `XXS` is the dense micro-gap rung. No framework token
+/// names a *wrap reservation* directly, so the composition is stated here
+/// rather than left as a bare `30`.
+pub const CODE_COPY_COLUMN_WIDTH: f32 = size::CONTROL_SM + space::XXS;
 
-/// Border width drawn around the code panel, in logical pixels.
-pub const CODE_BORDER_WIDTH: f32 = 1.0;
+/// Border width drawn around the code panel — `border.hairline`
+/// (`UIF-TOK-003`). Value unchanged at `1`.
+pub const CODE_BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
-/// Corner radius of the code panel's border, matching the 4 px radius the
-/// FastMD dark visuals put on interactive containers.
-pub const CODE_BORDER_RADIUS: f32 = 4.0;
+/// Corner radius of the code panel's border — `shape.radius.widget`
+/// (`UIF-TOK-003`).
+///
+/// Value unchanged at `4`. The old doc justified `4` as "the radius the
+/// FastMD dark visuals put on interactive containers"; that is exactly what
+/// `RADIUS_WIDGET` is, so the number now comes from the token that says so.
+pub const CODE_BORDER_RADIUS: f32 = shape::RADIUS_WIDGET;
+
+/// Point size of the copy button's glyph — `size.icon.sm` (`UIF-TOK-002`).
+///
+/// Value unchanged at `14`. The old code reused [`CODE_TEXT_SIZE`] for the
+/// glyph, which happened to be the same number but tied a glyph's size to a
+/// type rung: retuning the code font would have resized the icon with it.
+pub const CODE_COPY_GLYPH_SIZE: f32 = size::ICON_SM;
 
 /// A fenced code block, resolved against the palette.
 ///
@@ -101,11 +146,13 @@ pub fn code_block(model: &CodeBlockModel) -> Element<'static, Message> {
             .unwrap_or_default(),
     )
     .size(CODE_LANGUAGE_SIZE)
+    .line_height(typography::CAPTION.iced_line_height())
     .color(palette.text_muted);
 
     let body = text(model.content.clone())
         .font(Font::MONOSPACE)
         .size(CODE_TEXT_SIZE)
+        .line_height(CODE_RUNG.iced_line_height())
         .color(palette.text)
         .width(Length::Fill)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph);
@@ -113,7 +160,7 @@ pub fn code_block(model: &CodeBlockModel) -> Element<'static, Message> {
     let copy = button(
         text(strings::ICON_COPY)
             .font(phosphor_font())
-            .size(CODE_TEXT_SIZE),
+            .size(CODE_COPY_GLYPH_SIZE),
     )
     .on_press(model.copy_message.clone());
 

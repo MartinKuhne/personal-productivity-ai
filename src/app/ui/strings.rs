@@ -236,6 +236,16 @@ pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 /// Phosphor glyph, so it resolves through the system symbol font.
 pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
 
+/// Disclosure glyph for an **expanded** block (the agent thinking panel).
+/// U+25BE BLACK DOWN-POINTING SMALL TRIANGLE, chosen over a Phosphor glyph
+/// so it resolves through the system symbol font like
+/// [`ICON_UNSAVED_DOT`].
+pub const ICON_DISCLOSE_EXPANDED: &str = "\u{25BE}";
+
+/// Disclosure glyph for a **collapsed** block (the agent thinking panel).
+/// U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE.
+pub const ICON_DISCLOSE_COLLAPSED: &str = "\u{25B8}";
+
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = "☰";
 

@@ -7,6 +7,11 @@
 //! reuse of [`crate::ui_iced::logs::should_follow`].
 //!
 //! No files, no bus, no agent threads and no user paths ([RUST-006]).
+//!
+//! `assertions_on_constants` is allowed throughout: this sidecar's job
+//! includes pinning token-bound constants, which is exactly what that lint
+//! fires on.
+#![allow(clippy::assertions_on_constants)]
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -14,9 +19,9 @@ use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
 
 use super::{
-    AGENT_TRANSCRIPT_SCROLLABLE_ID, agent_transcript_view, link_activated_message,
-    markdown_settings, markdown_style, render_markdown_items, render_turn, scroll_reported_message,
-    thinking_block, transcript_body,
+    AGENT_TRANSCRIPT_SCROLLABLE_ID, TRANSCRIPT_SPACING, TRANSCRIPT_TEXT_SIZE,
+    agent_transcript_view, link_activated_message, markdown_settings, markdown_style,
+    render_markdown_items, render_turn, scroll_reported_message, thinking_block, transcript_body,
 };
 use crate::ui_iced::agent::panel_state::{AgentPanelViewModel, TranscriptTurn};
 
@@ -82,7 +87,7 @@ fn link_activated_message_has_no_source_file() {
 fn markdown_style_uses_palette_tokens() {
     let palette = Palette::fastmd_dark();
     let style = markdown_style();
-    assert_eq!(style.link_color, palette.accent);
+    assert_eq!(style.link_color, palette.accent_text);
     assert_eq!(style.inline_code_color, palette.text_strong);
     assert_eq!(
         style.inline_code_highlight.background,
@@ -90,13 +95,114 @@ fn markdown_style_uses_palette_tokens() {
     );
 }
 
+/// The transcript link must **not** be painted with the accent *fill*.
+///
+/// `Palette::accent` is `color.accent.fill`, a background-only token; as a
+/// foreground it measures `4.14:1` on `surface.base`, `3.90:1` on
+/// `surface.raised` and `3.83:1` on `surface.code` — under the `4.50:1`
+/// active-text floor on all three. The guard pins the retired literal so a
+/// future edit that slides `link_color` back to `accent` fails here rather
+/// than quietly re-illegalising every hyperlink.
 #[test]
-fn markdown_settings_is_built_from_style() {
-    // Settings::with_text_size derives heading/code sizes from the base; the
-    // base size is the transcript body size.
+fn transcript_link_is_not_painted_with_the_accent_fill() {
+    use iced_pro::token::contrast::contrast_ratio;
+
+    let palette = Palette::fastmd_dark();
+    let link = super::transcript_link_color();
+
+    assert_ne!(
+        link, palette.accent,
+        "the transcript link must not use the accent FILL as a foreground"
+    );
+
+    // Recomputed from raw sRGB here, not transcribed from the doc table.
+    let pro = Palette::pro();
+    for surface in [pro.surface_base, pro.surface_raised, pro.surface_code] {
+        let ratio = contrast_ratio(link, surface);
+        assert!(
+            ratio >= 4.5,
+            "transcript link over {surface:?} is {ratio:.2}:1, below the 4.50:1 text floor"
+        );
+    }
+
+    // And the retired pairing is pinned as illegal, with the measured number.
+    let retired = contrast_ratio(palette.accent, pro.surface_base);
+    assert!(
+        retired < 4.5,
+        "accent_fill over surface.base should still measure under the floor, got {retired:.2}:1"
+    );
+}
+
+#[test]
+fn markdown_settings_binds_every_size_to_a_rung() {
+    use crate::ui_iced::render::{code, heading};
+
     let settings = markdown_settings();
-    assert_eq!(settings.code_size, settings.text_size * 0.75);
-    assert_eq!(settings.h1_size, settings.text_size * 2.0);
+
+    // The base is the transcript's own rung.
+    assert_eq!(f32::from(settings.text_size), TRANSCRIPT_TEXT_SIZE);
+
+    // The heading ladder is the document renderer's ladder, not iced's
+    // `base × 2 / −25%` multiplication table.
+    assert_eq!(f32::from(settings.h1_size), heading::H1_SIZE);
+    assert_eq!(f32::from(settings.h2_size), heading::H2_SIZE);
+    assert_eq!(f32::from(settings.h3_size), heading::H3_SIZE);
+    assert_eq!(f32::from(settings.h4_size), heading::H4_SIZE);
+    assert_eq!(f32::from(settings.h5_size), heading::H5_SIZE);
+    assert_eq!(f32::from(settings.h6_size), heading::H5_SIZE);
+    assert_eq!(f32::from(settings.code_size), code::CODE_TEXT_SIZE);
+    assert_eq!(f32::from(settings.spacing), TRANSCRIPT_SPACING);
+}
+
+/// iced's own `Settings::with_text_size` ladder is illegal at this base and
+/// must not be reachable from the transcript.
+///
+/// `with_text_size(14)` yields `code = 10.5` — under `type.min` (12) — and
+/// four off-scale heading sizes. This test pins the retired derivation so it
+/// cannot come back as a convenience call.
+#[test]
+fn markdown_settings_does_not_use_iced_derived_ladder() {
+    use iced_pro::token::typography::MIN_SIZE;
+
+    let settings = markdown_settings();
+    let retired =
+        iced::widget::markdown::Settings::with_text_size(TRANSCRIPT_TEXT_SIZE, markdown_style());
+
+    assert_ne!(
+        f32::from(settings.code_size),
+        f32::from(retired.code_size),
+        "code size must not come from iced's base × 0.75 derivation"
+    );
+    assert_ne!(
+        f32::from(settings.h1_size),
+        f32::from(retired.h1_size),
+        "h1 must not come from iced's base × 2.0 derivation"
+    );
+
+    // The retired ladder really was illegal — pinned so the numbers in the
+    // module doc stay true.
+    assert!(
+        f32::from(retired.code_size) < MIN_SIZE,
+        "expected iced's derived code size to sit under the floor, got {:?}",
+        retired.code_size
+    );
+
+    // And the replacement never does.
+    for size in [
+        f32::from(settings.h1_size),
+        f32::from(settings.h2_size),
+        f32::from(settings.h3_size),
+        f32::from(settings.h4_size),
+        f32::from(settings.h5_size),
+        f32::from(settings.h6_size),
+        f32::from(settings.code_size),
+        f32::from(settings.text_size),
+    ] {
+        assert!(
+            size >= MIN_SIZE,
+            "markdown settings render {size}pt, below the {MIN_SIZE}pt floor"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

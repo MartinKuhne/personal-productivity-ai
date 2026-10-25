@@ -66,33 +66,63 @@ use crate::ui_iced::table_width::TablePadding;
 use crate::ui_iced::table_width::{IcedTextMeasurer, TextMetrics};
 use iced::widget::{Column, Space, checkbox, container, rule, text};
 use iced::{Alignment, Element, Length};
+use iced_pro::token::{shape, space, typography};
 use std::path::PathBuf;
 
 use code::CodeBlockModel;
 use inline::SpanModel;
 use table::TableModel;
 
-/// Vertical gap between rendered blocks.
+/// Vertical gap between rendered blocks — `space.sm` (`UIF-TOK-001`).
 ///
-/// Mirrors the center panel's own `VIEWER_SPACING`
-/// (`src/app/ui_iced/panels/center.rs:177`) so the render path slots
-/// into the band's existing rhythm.
-pub const BLOCK_SPACING: f32 = 6.0;
+/// **Movement: 6 → 8 (+2).** `6` is not on the base-4 grid and sits exactly
+/// midway between `XS` (4) and `SM` (8). The tie is broken on *role*, the
+/// same way INT-7a broke it for `BAND_PADDING` and INT-7c for the center
+/// panel's `VIEWER_SPACING`: `SM` is the standard **sibling gap** and `XS`
+/// the compact **inner padding**, and these are sibling blocks.
+///
+/// This is the mirror of
+/// [`VIEWER_SPACING`](crate::ui_iced::panels::center::VIEWER_SPACING),
+/// whose doc says the render path follows the band's rhythm — moving both to
+/// the same rung is what stops the two drifting apart again.
+pub const BLOCK_SPACING: f32 = space::SM;
 
-/// Vertical gap between the front-matter block and the document body.
-pub const DOCUMENT_SPACING: f32 = 8.0;
+/// Vertical gap between the front-matter block and the document body —
+/// `space.sm` (`UIF-TOK-001`). Value unchanged at `8`.
+pub const DOCUMENT_SPACING: f32 = space::SM;
 
-/// One indentation level of a nested list item, in logical pixels.
-pub const INDENT_UNIT: f32 = 20.0;
+/// One indentation level of a nested list item, in logical pixels —
+/// `space.lg` (`UIF-TOK-001`).
+///
+/// **Movement: 20 → 16 (−4).** `20` sits on the base-4 grid but is **not a
+/// named rung**, and `UIF-TOK-001` says a spacing value that is not one of
+/// the rungs must not appear in layout code. Between `LG` (16) and `XL` (24)
+/// the tie is broken on *consistency*: the file tree's row indent is
+/// `tree_row::INDENT_STEP` = `16`, so a nested list in the document now
+/// steps the same distance as a nested folder in the tree. `XL` would have
+/// made document nesting visibly looser than the tree's for no stated reason.
+pub const INDENT_UNIT: f32 = space::LG;
 
-/// Space around a task-list checkbox.
-pub const TASK_CHECKBOX_SPACING: f32 = 4.0;
+/// Space around a task-list checkbox — `space.xs` (`UIF-TOK-001`). Value
+/// unchanged at `4`.
+pub const TASK_CHECKBOX_SPACING: f32 = space::XS;
 
-/// Width of the rendered horizontal rule; 1 px matches the top bar's rule.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Width of the rendered horizontal rule — `border.hairline`
+/// (`UIF-TOK-003`), the passive structural-divider stroke. Value unchanged
+/// at `1`.
+pub const SEPARATOR_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
-/// Point size of the list bullet / ordinal marker.
+/// Point size of the list bullet / ordinal marker — the inline module's own
+/// constant, re-exported so the marker size has exactly one definition
+/// ([RUST-021]).
 pub const LIST_MARKER_SIZE: f32 = inline::LIST_MARKER_SIZE;
+
+/// Line height of the list bullet / ordinal marker — `type.body`'s
+/// authoritative 20 px line (`UIF-TOK-004`).
+///
+/// The marker is laid out on the same line box as the prose it prefixes, so
+/// a bullet never sits on a shorter line than its own text.
+pub const LIST_MARKER_LINE_HEIGHT: f32 = typography::BODY.line_height;
 
 /// A list-item prefix.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -373,6 +403,7 @@ pub fn paragraph_block(
         row = row.push(
             text(marker.text())
                 .size(LIST_MARKER_SIZE)
+                .line_height(typography::BODY.iced_line_height())
                 .color(ctx.palette.text),
         );
     }

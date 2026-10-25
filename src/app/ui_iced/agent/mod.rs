@@ -41,8 +41,13 @@ pub mod panel_state;
 pub mod prompt_input;
 pub mod transcript;
 
-use iced::widget::{Column, Row, button, container, text};
+use iced::widget::{Column, Row, container, text};
 use iced::{Alignment, Element, Length};
+
+use iced_pro::token::space;
+use iced_pro::token::typography::{self, TypeRung};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -63,17 +68,52 @@ pub use transcript::{
     thinking_block, transcript_body,
 };
 
-/// Logical point size of the agent-session header.
-pub const HEADER_TEXT_SIZE: f32 = 18.0;
+/// The rung the agent panel's header line sits on — `type.title_sm`
+/// (`UIF-TOK-004`).
+///
+/// Held as a rung rather than a bare size because the header needs the point
+/// size *and* the authoritative 24 px line box, and binding both to one
+/// source is what stops a size retune leaving a mismatched line height behind.
+pub const HEADER_RUNG: TypeRung = typography::TITLE_SM;
 
-/// Logical point size of the status line.
-pub const STATUS_TEXT_SIZE: f32 = 14.0;
+/// Logical point size of the agent-session header — `type.title_sm`
+/// (`UIF-TOK-004`).
+///
+/// **Movement: 18 → 16 (−2).** `18` is not a rung on the type scale —
+/// `TITLE_SM` is 16 and `TITLE_MD` is 20, so nothing legal produced that
+/// number. §2.4 assigns `type.title_sm` to panel and overlay headers, which
+/// is what this is; `TITLE_MD` is the *document-H2* rung and this band is
+/// chrome, not document prose. The same off-scale `18` INT-7c fixed on
+/// [`AGENT_HEADER_SIZE`](super::panels::center::AGENT_HEADER_SIZE).
+pub const HEADER_TEXT_SIZE: f32 = HEADER_RUNG.size;
 
-/// Spacing between the panel's bands.
-pub const PANEL_SPACING: f32 = 6.0;
+/// The rung the status line and prompt controls share — `type.body`
+/// (`UIF-TOK-004`). Value unchanged at `14`.
+pub const BODY_RUNG: TypeRung = typography::BODY;
 
-/// Padding around the panel.
-pub const PANEL_PADDING: f32 = 8.0;
+/// Logical point size of the status line — `type.body` (`UIF-TOK-004`).
+/// Value unchanged at `14`.
+pub const STATUS_TEXT_SIZE: f32 = BODY_RUNG.size;
+
+/// Spacing between the panel's bands — `space.sm` (`UIF-TOK-001`).
+///
+/// **Movement: 6 → 8 (+2).** `6` is not on the base-4 grid and sits exactly
+/// midway between `XS` (4) and `SM` (8). The tie is broken on *role*, as
+/// INT-7a broke it for `BAND_PADDING` and INT-7c for
+/// [`VIEWER_SPACING`](super::panels::center::VIEWER_SPACING): `SM` is the
+/// standard **sibling gap**
+/// and `XS` the compact **inner padding**, and these are sibling bands.
+pub const PANEL_SPACING: f32 = space::SM;
+
+/// Padding around the panel — `space.sm` (`UIF-TOK-001`). Value unchanged
+/// at `8`.
+pub const PANEL_PADDING: f32 = space::SM;
+
+/// Stable id for the panel header's Close button ([AGENTS §5]).
+///
+/// Distinct from the center panel's own agent-band close control and from the
+/// prompt row's Clear-session control: one id, one live widget.
+pub const CLOSE_BUTTON_ID: &str = "agent_panel_close_button";
 
 /// The message the panel header's Close button produces: the
 /// `ClearAgentSession` intent.
@@ -104,18 +144,27 @@ pub fn close_message() -> Message {
 pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
+    let close_button = Button::new(
+        ButtonVariant::Ghost,
+        text(strings::AGENT_SESSION_CLOSE_BUTTON)
+            .size(STATUS_TEXT_SIZE)
+            .line_height(BODY_RUNG.iced_line_height()),
+        close_message(),
+        CLOSE_BUTTON_ID,
+    )
+    .compact();
+
     let header = Row::with_children(vec![
         text(strings::AGENT_SESSION_HEADER)
             .size(HEADER_TEXT_SIZE)
+            .line_height(HEADER_RUNG.iced_line_height())
+            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
             .color(palette.accent_text)
             .into(),
-        container(
-            button(text(strings::AGENT_SESSION_CLOSE_BUTTON).size(STATUS_TEXT_SIZE))
-                .on_press(close_message()),
-        )
-        .width(Length::Fill)
-        .align_right(Length::Shrink)
-        .into(),
+        container(close_button)
+            .width(Length::Fill)
+            .align_right(Length::Shrink)
+            .into(),
     ])
     .align_y(Alignment::Center);
 
@@ -125,6 +174,7 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
         view_model.status
     ))
     .size(STATUS_TEXT_SIZE)
+    .line_height(BODY_RUNG.iced_line_height())
     .color(palette.text_strong);
 
     let body = agent_transcript_view(view_model);

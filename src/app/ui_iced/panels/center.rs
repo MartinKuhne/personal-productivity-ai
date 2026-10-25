@@ -111,6 +111,45 @@
 //! There is no task-toggle constructor here: the render path does not yet
 //! emit task-checkbox intents (see the `message` module's UI-048 note).
 //!
+//! # Token binding (INT-7c)
+//!
+//! Every size and gap in this module is bound to a `iced_pro` token; the doc
+//! comment on each constant records the movement from the literal it replaced.
+//! Three of them were **off the type scale entirely** and had no legal source:
+//! `DOCUMENT_TITLE_SIZE` and `AGENT_HEADER_SIZE` (both `18`, now
+//! `type.title_sm` 16) and `EMPTY_STATE_SIZE` (`15`, now `type.body` 14).
+//!
+//! The **tab-strip height is now explicit**. It used to be emergent from
+//! `TAB_TEXT_SIZE + TAB_PADDING_Y + STRIP_PADDING`, which landed near 25 pt;
+//! §4.4.1 pins the box at `Height: 36px` and `size.control.lg`'s own token
+//! doc names itself as the Tab Strip height, so [`STRIP_HEIGHT`] is now a
+//! fixed `CONTROL_LG`. The band closes arithmetically the way INT-7a's navbar
+//! does:
+//! `STRIP_HEIGHT (36) = STRIP_PADDING (4) + HIT_TARGET_MIN (24) + 2 × TAB_PADDING_Y (2) + STRIP_PADDING (4)`,
+//! with [`TAB_HEIGHT`] = `28` = `size.control.sm` as the tab's own rung.
+//!
+//! Two §4.4.1 details are **not** implemented, both for the same structural
+//! reason — they need a layer the current widget tree cannot paint:
+//!
+//! * **The 2 px top accent indicator** (`accent.border` active,
+//!   `border.strong` hovered) needs a `Stack` per tab or a row widget that
+//!   reports hover into its own style. Same blocker as the file tree's 2 px
+//!   selection bar (INT-7b follow-on): iced 0.14's `mouse_area` never
+//!   reports hover into a `container` style.
+//! * **The strip's 1 px `border.subtle` bottom rule** is not painted either.
+//!   iced's `Border` is a uniform perimeter, so a bottom-only hairline needs
+//!   a `rule::horizontal` sibling inside the band — which would push the
+//!   band's content box past 36 unless the height is re-derived. Left as a
+//!   stated follow-on rather than folded in here.
+//!
+//! One further §4.4.2 deviation is recorded rather than changed: the spec
+//! gives the **active tab** a `surface.overlay` fill, while the app paints
+//! `palette.accent` under `text_strong`. That is a behaviour decision, not
+//! a token gap — the current pairing already satisfies the `UIF-TOK-006`
+//! fill/foreground lock (`accent_fill` vs `text_strong` = `4.80:1`), so
+//! nothing is unsafe; moving to `surface.overlay` would remove the accent
+//! highlight entirely and is the user's call.
+//!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
 #[cfg(test)]
@@ -121,6 +160,10 @@ use std::path::{Path, PathBuf};
 
 use iced::widget::{Column, Row, button, container, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Padding};
+
+use iced_pro::token::contrast;
+use iced_pro::token::typography::{self, TypeRung};
+use iced_pro::token::{size, space};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::SkillFile;
@@ -180,52 +223,222 @@ pub fn apply_tab_close_all_click() -> UserCommand {
     UserCommand::CloseAllTabs
 }
 
-/// Logical point size of a tab label.
+/// The type rung a tab label sits on — `type.ui_compact` (`UIF-TOK-004`).
 ///
-/// Pinned at 13.0, the nearest whole point to the 12.5 px default body
-/// size. This is a visual-pass constant — retune it in the visual review.
-pub const TAB_TEXT_SIZE: f32 = 13.0;
+/// §4.4.1 prices the tab's title label at `13px`, and §2.4 names
+/// `type.ui_compact` as the dense-list rung that carries tab labels. It is
+/// held as a whole [`TypeRung`] rather than a bare size because the tab needs
+/// three things out of it: the point size, the authoritative 18 px line box,
+/// and the weight the *active* label promotes to (§4.4.2 "13px SemiBold"
+/// active / "13px Regular" inactive) — and `UI_COMPACT` permits all four
+/// weights, so the promotion never leaves the scale.
+pub const TAB_RUNG: TypeRung = typography::UI_COMPACT;
 
-/// Horizontal padding inside one tab.
-pub const TAB_PADDING_X: f32 = 10.0;
+/// Logical point size of a tab label — `type.ui_compact` (`UIF-TOK-004`).
+///
+/// **Value unchanged at 13.** The old constant was a hand-written `13.0`
+/// described as "the nearest whole point to the 12.5 px default body size";
+/// that number happens to *be* the `ui_compact` rung, so the movement here is
+/// the binding, not the pixels.
+pub const TAB_TEXT_SIZE: f32 = TAB_RUNG.size;
 
-/// Vertical padding inside one tab.
-pub const TAB_PADDING_Y: f32 = 4.0;
+/// Horizontal padding inside one tab — `space.md` (`UIF-TOK-001`).
+///
+/// **Movement: 10 → 12 (+2 per side, +4 pt per tab).** `10` is not on the
+/// base-4 grid, and `UIF-TOK-001` states that a spacing value which is not
+/// one of the rungs must not appear in layout code. The tie between `SM` (8)
+/// and `MD` (12) is not a coin flip here: `space.md`'s own doc names itself
+/// as the "standard horizontal padding inside buttons, inputs, **tabs** and
+/// menu rows", so the tab is the token's stated role and the old `10` was an
+/// unowned number sitting 2 pt off the rung that was drawn for it.
+pub const TAB_PADDING_X: f32 = space::MD;
 
-/// Gap between adjacent tabs in the strip.
-pub const TAB_SPACING: f32 = 2.0;
+/// Vertical padding inside one tab — **derived**, not picked.
+///
+/// `(TAB_HEIGHT − size.hit_target.min) / 2 = (28 − 24) / 2 = 2`, which lands
+/// on `space.2xs` (`UIF-TOK-001`).
+///
+/// **Movement: 4 → 2 (−2 per side).** The close button's
+/// [`TAB_CLOSE_HIT_TARGET`] (24) is now the tallest thing inside a tab, so
+/// the vertical inset is whatever the band leaves over after it rather than a
+/// number chosen independently of it. That is what makes the whole strip close
+/// arithmetically instead of by coincidence:
+/// `STRIP_HEIGHT (36) = STRIP_PADDING (4) + HIT_TARGET_MIN (24) + 2 × TAB_PADDING_Y (2) + STRIP_PADDING (4)`.
+/// The old `4` could not coexist with a spec-mandated 24 × 24 close target —
+/// `24 + 2 × 4 = 32` would have overflowed the 28 pt tab.
+///
+/// The `type.ui_compact` line box (18) sits inside the 24 pt target with 3 pt
+/// to spare per side, so the label never touches the tab's edges.
+pub const TAB_PADDING_Y: f32 = (TAB_HEIGHT - size::HIT_TARGET_MIN) / 2.0;
 
-/// Gap between a tab's unsaved marker and its title.
-pub const TAB_MARKER_SPACING: f32 = 2.0;
+/// Gap between adjacent tabs in the strip — `space.2xs` (`UIF-TOK-001`),
+/// the dense inline micro-gap rung. Value unchanged at `2`.
+pub const TAB_SPACING: f32 = space::XXS;
 
-/// Gap between a tab's label and its `×` close button.
-pub const TAB_CLOSE_SPACING: f32 = 4.0;
+/// Gap between a tab's unsaved marker and its title — `space.2xs`
+/// (`UIF-TOK-001`). Value unchanged at `2`.
+pub const TAB_MARKER_SPACING: f32 = space::XXS;
 
-/// Fixed width of the unsaved-changes marker slot, so a tab keeps the same
-/// shape whether or not its document is dirty (the conditional-rendering
-/// rule: allocate, then toggle the content).
-pub const UNSAVED_MARKER_WIDTH: f32 = 12.0;
+/// Gap between a tab's label and its `×` close button — `space.xs`
+/// (`UIF-TOK-001`).
+///
+/// Value unchanged at `4`, which is also §4.4.1's stated separation between
+/// the close button and the tab activation zone (`>= 2px`,
+/// `UIF-PRIN-008`) with room to spare.
+pub const TAB_CLOSE_SPACING: f32 = space::XS;
 
-/// Padding inside the tab-strip band.
-pub const STRIP_PADDING: f32 = 4.0;
+/// Fixed width of the unsaved-changes marker slot — `space.md`
+/// (`UIF-TOK-001`), which is exactly §4.4.1's "Leading Status Slot
+/// (`12px`)".
+///
+/// Value unchanged at `12`. Kept as a fixed slot rather than shrink-to-fit so
+/// a tab keeps the same shape whether or not its document is dirty (the
+/// conditional-rendering rule: allocate, then toggle the content).
+pub const UNSAVED_MARKER_WIDTH: f32 = space::MD;
 
-/// Logical point size of the document title in the viewer area.
-pub const DOCUMENT_TITLE_SIZE: f32 = 18.0;
+/// Rendered size of the unsaved dot inside that slot — the type floor.
+///
+/// **Movement: 13 → 12 (−1).** The dot used to be painted at the tab label's
+/// own point size, which made it as loud as the title.
+///
+/// **A spec conflict, recorded rather than papered over.** §4.4.1 asks for a
+/// `6px` marker (`size.indicator.dot`), and [`size::INDICATOR_DOT`] is that
+/// token. It cannot be honoured here: this marker is painted with a **font
+/// glyph** (`strings::ICON_UNSAVED_DOT`), and §2.4's rule is absolute —
+/// *"No text anywhere in the interface may render smaller than 12px"*. A
+/// `text(..).size(6.0)` call is precisely the shape the INT-7c floor guard
+/// exists to catch, so taking the token literally would mean either breaking
+/// the floor or exempting this one call site and gutting the guard.
+///
+/// The marker is therefore pinned at [`typography::MIN_SIZE`] — the smallest
+/// size that is still legal text, and as much quieter than the label rung as
+/// a glyph can get. Rendering a true 6 px **shape** needs a quad/canvas
+/// painter under the tab, which is the same missing layer as the 2 px accent
+/// indicator recorded in the module header; when that lands this constant
+/// should move to [`size::INDICATOR_DOT`] and the guard should keep its teeth
+/// by scoping to legible text only.
+///
+/// [`size::INDICATOR_DOT`]: iced_pro::token::size::INDICATOR_DOT
+/// [`typography::MIN_SIZE`]: iced_pro::token::typography::MIN_SIZE
+pub const UNSAVED_DOT_SIZE: f32 = typography::MIN_SIZE;
 
-/// Logical point size of the agent-session header.
-pub const AGENT_HEADER_SIZE: f32 = 18.0;
+/// Point size of a tab's `×` close glyph — `size.icon.sm` (`UIF-TOK-002`).
+///
+/// **Movement: 13 → 14 (+1).** §4.4.1 slot 4 names `size.icon.sm` for the
+/// close glyph; the old value borrowed the label's rung instead of the icon
+/// scale, which is how a glyph ends up at a size no icon token produces.
+pub const TAB_CLOSE_GLYPH_SIZE: f32 = size::ICON_SM;
 
-/// Logical point size of the agent status and thinking text.
-pub const AGENT_BODY_SIZE: f32 = 14.0;
+/// Square hit area of a tab's `×` close button — `size.hit_target.min`
+/// (`UIF-TOK-002`).
+///
+/// **Movement: glyph-sized (~13 × ~18) → 24 × 24.** §4.4.1 requires a
+/// "`24px × 24px` disjoint hit target"; before this the button was only as
+/// large as its glyph plus iced's default padding, so the close affordance
+/// sat *below* the 24 px floor every interactive control in the interface is
+/// measured against. This is a real ergonomics fix, not a rename.
+pub const TAB_CLOSE_HIT_TARGET: f32 = size::HIT_TARGET_MIN;
 
-/// Logical point size of the empty-state prompt.
-pub const EMPTY_STATE_SIZE: f32 = 15.0;
+/// Padding inside the tab-strip band — `space.xs` (`UIF-TOK-001`). Value
+/// unchanged at `4`.
+pub const STRIP_PADDING: f32 = space::XS;
 
-/// Padding inside the document-viewer area.
-pub const VIEWER_PADDING: f32 = 8.0;
+/// Height of the **tab-strip band** — `size.control.lg` (`UIF-TOK-002`).
+///
+/// **Movement: emergent (~25) → pinned 36.** The strip had no height
+/// constant at all: its height was whatever `TAB_TEXT_SIZE` plus
+/// [`TAB_PADDING_Y`] plus [`STRIP_PADDING`] happened to add up to, which put
+/// it near 25 pt — 11 pt short of what the spec pins. §4.4.1 draws the box
+/// as `Tab Strip (Height: 36px, …)`, and [`size::CONTROL_LG`]'s own doc
+/// names itself as "the Top Navbar height and **the Tab Strip height**", so
+/// 36 is not a guess — it is the same rung INT-7a put the navbar on.
+///
+/// The band must be explicit rather than emergent for the same reason the
+/// navbar did: an emergent height means a type retune silently resizes a
+/// band that the layout contract treats as fixed.
+pub const STRIP_HEIGHT: f32 = size::CONTROL_LG;
 
-/// Gap between blocks inside the viewer area.
-pub const VIEWER_SPACING: f32 = 6.0;
+/// Height of one tab inside the band, **derived** from the band rather than
+/// picked: `STRIP_HEIGHT − 2 × STRIP_PADDING`.
+///
+/// `36 − 2 × 4 = 28`, which lands exactly on [`size::CONTROL_SM`] — the
+/// same closure INT-7a established for the navbar
+/// (`36 = XS + CONTROL_SM + XS`). The tab is therefore a compact control
+/// centred in a large structural band, and retuning the band or the inset
+/// moves the tab with it instead of leaving a height that no longer fits.
+pub const TAB_HEIGHT: f32 = STRIP_HEIGHT - 2.0 * STRIP_PADDING;
+
+/// The rung the viewer's prose sits on — `type.body` (`UIF-TOK-004`).
+///
+/// Held as a rung for the same reason [`TAB_RUNG`] is: the viewer needs the
+/// size *and* the authoritative 20 px line box, and binding both to one
+/// constant is what stops a size retune leaving a line height behind that no
+/// longer matches it.
+pub const BODY_RUNG: TypeRung = typography::BODY;
+
+/// The rung the center panel's header lines sit on — `type.title_sm`
+/// (`UIF-TOK-004`).
+///
+/// Both the document-title placeholder and the agent-session band's header
+/// are panel headers, so they share one rung and one line box.
+pub const HEADER_RUNG: TypeRung = typography::TITLE_SM;
+
+/// Logical point size of the document title in the viewer area —
+/// `type.title_sm` (`UIF-TOK-004`).
+///
+/// **Movement: 18 → 16 (−2).** `18` is not a rung: `TITLE_SM` is 16 and
+/// `TITLE_MD` is 20, so nothing on the scale produced that number, and the
+/// whole point of the rung system is that off-scale sizes are illegal.
+/// `TITLE_MD` was rejected because §2.4 reserves it for *document H2
+/// headings* and the About header — this is the pane's title line, not a
+/// heading inside the document. `TITLE_SM` is the rung §2.4 gives to panel
+/// section titles and "side sheet / empty-state headlines", which is what
+/// this placeholder is.
+pub const DOCUMENT_TITLE_SIZE: f32 = HEADER_RUNG.size;
+
+/// Logical point size of the agent-session header — `type.title_sm`
+/// (`UIF-TOK-004`).
+///
+/// **Movement: 18 → 16 (−2).** The same off-scale `18` as the document
+/// title, reached from a different direction and fixed the same way. §2.4
+/// assigns `type.title_sm` to "movable overlay headers" and panel section
+/// titles; the agent band is a panel header, so it takes that rung. `TITLE_MD`
+/// would put a *document-H2* size on a chrome band whose controls are 28 pt
+/// tall.
+pub const AGENT_HEADER_SIZE: f32 = HEADER_RUNG.size;
+
+/// Logical point size of the agent status and thinking text — `type.body`
+/// (`UIF-TOK-004`). Value unchanged at `14`.
+pub const AGENT_BODY_SIZE: f32 = BODY_RUNG.size;
+
+/// Logical point size of the empty-state prompt — `type.body`
+/// (`UIF-TOK-004`).
+///
+/// **Movement: 15 → 14 (−1).** `15` is not a rung. `CAPTION` (12) was
+/// rejected because the empty-state prompt is the pane's only content and its
+/// primary reading voice, not a caption subordinate to something else;
+/// `TITLE_SM` (16) was rejected because §2.4's empty-state *headline* is a
+/// heading, and this is a one-line prompt string. `BODY` is the document-prose
+/// rung the viewer actually carries once the real render lands, so the
+/// placeholder now matches the content it stands in for.
+pub const EMPTY_STATE_SIZE: f32 = BODY_RUNG.size;
+
+/// Padding inside the document-viewer area — `space.sm` (`UIF-TOK-001`),
+/// the standard gap rung used as the pane's inner inset. Value unchanged
+/// at `8`.
+pub const VIEWER_PADDING: f32 = space::SM;
+
+/// Gap between blocks inside the viewer area — `space.sm` (`UIF-TOK-001`).
+///
+/// **Movement: 6 → 8 (+2).** `6` is not on the base-4 grid and sits exactly
+/// midway between `XS` (4) and `SM` (8). The tie is broken on *role*, the
+/// same way INT-7a broke it for `BAND_PADDING`: `SM` is the standard
+/// **sibling gap**, `XS` is the compact **inner padding**, and this is a gap
+/// between sibling blocks. It also puts the viewer's block rhythm on the
+/// same rung as the render path's own
+/// [`BLOCK_SPACING`](crate::ui_iced::render::BLOCK_SPACING), whose module
+/// doc says it mirrors this constant — so the two stop drifting apart.
+pub const VIEWER_SPACING: f32 = space::SM;
 
 /// The title a tab renders: the file name, or the empty string when the path
 /// has none (e.g. a bare root).
@@ -382,6 +595,68 @@ pub fn tab_text_color(palette: &Palette, active: bool) -> iced::Color {
         palette.text_strong
     } else {
         palette.text_muted
+    }
+}
+
+/// Label font for a tab: the active tab takes [`TAB_RUNG`]'s **emphasis**
+/// weight (SemiBold), the inactive tabs its **resting** weight (Regular),
+/// both on `font.family.sans`.
+///
+/// This is §4.4.2's tab typography read literally — "13px SemiBold,
+/// `text.strong`" for Active against "13px Regular, `text.muted`" for
+/// Inactive. Before this the active tab changed *colour* only and the weight
+/// never moved, so the active tab was quieter than the spec asks. Both
+/// weights sit inside `UI_COMPACT`'s `allowed_weights`, so the emphasis is a
+/// rung-legal move rather than a weight invented for the occasion.
+///
+/// Purity: pure function of `active`.
+#[must_use]
+pub fn tab_label_font(active: bool) -> iced::Font {
+    let weight = if active {
+        TAB_RUNG.emphasis_weight
+    } else {
+        TAB_RUNG.weight
+    };
+    TAB_RUNG.font(typography::Family::Sans, weight)
+}
+
+/// The fill a tab paints behind its contents: `palette.accent` on the active
+/// tab, nothing on the others.
+///
+/// Extracted so the dot-colour rule below can ask *what is behind the dot*
+/// rather than assume — which is exactly what [`contrast::fill_lock`] says a
+/// foreground audit has to do, because the style itself does not know.
+///
+/// Purity: pure function of `active` for a given palette.
+#[must_use]
+pub fn tab_fill(palette: &Palette, active: bool) -> Option<iced::Color> {
+    active.then_some(palette.accent)
+}
+
+/// Colour of a tab's unsaved dot, given whether that tab is active.
+///
+/// **A real contrast fix, not a rename.** On an inactive tab the dot is
+/// `status.warning` over the pane surface — `6.86:1` on `surface.base`,
+/// `6.45:1` on `surface.raised`, comfortably legal. On the **active** tab
+/// the app paints `palette.accent` behind it, and `palette.accent` *is*
+/// `color.accent.fill` — one of the four solid fills `UIF-TOK-006` rule 4
+/// locks. `status.warning` on `accent.fill` measures **`1.65:1`**, so the
+/// dirty marker was effectively invisible on precisely the tab the user is
+/// looking at.
+///
+/// Rule 4's answer is role-based rather than threshold-based: every
+/// foreground painted inside a locked fill promotes to `color.text.strong`
+/// (`4.80:1` against `accent.fill`). That is what this does — the same
+/// `locked_over` shape INT-7b put on the file tree's row label, so the lock
+/// cannot release on an arithmetic accident.
+///
+/// Purity: pure function of `active` for a given palette.
+#[must_use]
+pub fn tab_unsaved_dot_color(palette: &Palette, active: bool) -> iced::Color {
+    let pro = Palette::pro();
+    match tab_fill(palette, active) {
+        Some(fill) if contrast::fill_lock_role(fill, &pro).is_locked_fill() => palette.text_strong,
+        _ => palette.warning,
     }
 }
 
@@ -643,7 +918,9 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 
     container(tabs)
         .width(Length::Fill)
+        .height(Length::Fixed(STRIP_HEIGHT))
         .padding(STRIP_PADDING)
+        .align_y(Alignment::Center)
         .into()
 }
 
@@ -654,24 +931,37 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
 
     let marker = container(
         text(unsaved_marker(tab.unsaved))
-            .size(TAB_TEXT_SIZE)
-            .color(palette.warning),
+            .size(UNSAVED_DOT_SIZE)
+            .line_height(TAB_RUNG.iced_line_height())
+            .color(tab_unsaved_dot_color(&palette, tab.active)),
     )
-    .width(Length::Fixed(UNSAVED_MARKER_WIDTH));
+    .width(Length::Fixed(UNSAVED_MARKER_WIDTH))
+    .align_x(Alignment::Center);
 
     let label = text(&tab.title)
         .size(TAB_TEXT_SIZE)
+        .line_height(TAB_RUNG.iced_line_height())
+        .font(tab_label_font(tab.active))
         .color(tab_text_color(&palette, tab.active));
 
     let label_row = Row::with_children(vec![marker.into(), label.into()])
         .spacing(TAB_MARKER_SPACING)
         .align_y(Alignment::Center);
 
+    // iced's `Button` lays its content at the top-left of its padding box, so
+    // the glyph is centred by the container that fills the hit target.
     let close = button(
-        text(strings::ICON_X)
-            .font(phosphor_font())
-            .size(TAB_TEXT_SIZE),
+        container(
+            text(strings::ICON_X)
+                .font(phosphor_font())
+                .size(TAB_CLOSE_GLYPH_SIZE),
+        )
+        .width(Length::Fixed(TAB_CLOSE_HIT_TARGET))
+        .height(Length::Fixed(TAB_CLOSE_HIT_TARGET))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center),
     )
+    .padding(0.0)
     .on_press(tab_close_message(index));
 
     let surface = container(
@@ -679,6 +969,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
             .spacing(TAB_CLOSE_SPACING)
             .align_y(Alignment::Center),
     )
+    .height(Length::Fixed(TAB_HEIGHT))
     .padding(Padding {
         top: TAB_PADDING_Y,
         right: TAB_PADDING_X,
@@ -686,7 +977,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize) -> Element<'a, Message> {
         left: TAB_PADDING_X,
     })
     .style(move |_theme| container::Style {
-        background: tab.active.then_some(Background::Color(palette.accent)),
+        background: tab_fill(&palette, tab.active).map(Background::Color),
         ..container::Style::default()
     });
 
@@ -712,6 +1003,7 @@ fn viewer_area<'a>(
         (Some(tab), None) => document_preview(tab),
         (None, _) => text(strings::NO_FILE_SELECTED_PROMPT)
             .size(EMPTY_STATE_SIZE)
+            .line_height(BODY_RUNG.iced_line_height())
             .color(palette.text_muted)
             .into(),
     };
@@ -741,6 +1033,8 @@ fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
     Column::with_children(vec![
         text(&tab.title)
             .size(DOCUMENT_TITLE_SIZE)
+            .line_height(HEADER_RUNG.iced_line_height())
+            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
             .color(palette.text_strong)
             .into(),
     ])
@@ -760,11 +1054,17 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
     let header = Row::with_children(vec![
         text(strings::AGENT_SESSION_HEADER)
             .size(AGENT_HEADER_SIZE)
+            .line_height(HEADER_RUNG.iced_line_height())
+            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
             .color(palette.accent_text)
             .into(),
         container(
-            button(text(strings::AGENT_SESSION_CLOSE_BUTTON).size(TAB_TEXT_SIZE))
-                .on_press(agent_session_close_message()),
+            button(
+                text(strings::AGENT_SESSION_CLOSE_BUTTON)
+                    .size(TAB_TEXT_SIZE)
+                    .line_height(TAB_RUNG.iced_line_height()),
+            )
+            .on_press(agent_session_close_message()),
         )
         .width(Length::Fill)
         .align_right(Length::Shrink)
@@ -778,16 +1078,19 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
         view_model.agent_status
     ))
     .size(AGENT_BODY_SIZE)
+    .line_height(BODY_RUNG.iced_line_height())
     .color(palette.text_strong);
 
     let thinking: Element<'_, Message> = if view_model.show_thinking() {
         Column::with_children(vec![
             text(strings::AGENT_THINKING_PROCESS)
                 .size(AGENT_BODY_SIZE)
+                .line_height(BODY_RUNG.iced_line_height())
                 .color(palette.text_strong)
                 .into(),
             text(&view_model.thinking)
                 .size(AGENT_BODY_SIZE)
+                .line_height(BODY_RUNG.iced_line_height())
                 .font(italic_font())
                 .color(palette.text_muted)
                 .into(),

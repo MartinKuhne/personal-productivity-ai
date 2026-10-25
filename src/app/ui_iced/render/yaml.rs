@@ -20,31 +20,63 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
 use iced::widget::{Column, container, text};
 use iced::{Alignment, Background, Element, Length};
+use iced_pro::token::space;
+use iced_pro::token::typography;
 
 /// Preferred width of the key column, in logical pixels.
+///
+/// **App-owned.** This is a content-width preference for the shapes front
+/// matter actually takes (`title`, `tags`, `date`, `categories`), not a
+/// measurement the framework models: `space` rungs are gaps and insets, not
+/// column widths, and `UIF-COMP-001`'s `FormField` control band is fixed at
+/// 32 and describes a form, not a metadata table. Same standing as
+/// [`YAML_MIN_KEY_WIDTH`] and [`YAML_WIDTH_CHROME`] below.
 pub const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 
-/// Horizontal gap between the key and value columns, in logical pixels.
-pub const YAML_COLUMN_GAP: f32 = 12.0;
+/// Horizontal gap between the key and value columns — `space.md`
+/// (`UIF-TOK-001`), the standard horizontal padding/gap rung. Value
+/// unchanged at `12`.
+pub const YAML_COLUMN_GAP: f32 = space::MD;
 
-/// Vertical gap between front-matter rows.
-pub const YAML_ROW_SPACING: f32 = 4.0;
+/// Vertical gap between front-matter rows — `space.xs` (`UIF-TOK-001`).
+/// Value unchanged at `4`.
+pub const YAML_ROW_SPACING: f32 = space::XS;
 
 /// Floor for the key column when the viewport is narrow.
+///
+/// **App-owned** for the same reason as [`YAML_KEY_COLUMN_WIDTH`]: a
+/// column-width floor is a content constraint, not a spacing rung.
 pub const YAML_MIN_KEY_WIDTH: f32 = 40.0;
 
 /// Floor for the value column.
+///
+/// **App-owned** — see [`YAML_MIN_KEY_WIDTH`].
 pub const YAML_MIN_VALUE_WIDTH: f32 = 40.0;
 
 /// Chrome subtracted from the available width before the key column is
 /// clamped — the frame allowance around the block.
+///
+/// **App-owned.** It is the render path's own budget for the container and
+/// scroll-bar allowance around the front-matter block, which no framework
+/// token describes; `UIF-TOK-001` deliberately has no rung for "frame
+/// allowance".
 pub const YAML_WIDTH_CHROME: f32 = 20.0;
 
-/// Space left under the whole front-matter block.
-pub const YAML_BOTTOM_SPACING: f32 = 8.0;
+/// Space left under the whole front-matter block — `space.sm`
+/// (`UIF-TOK-001`), the standard sibling-gap rung. Value unchanged at `8`.
+pub const YAML_BOTTOM_SPACING: f32 = space::SM;
 
 /// Row-index parity that receives the striped background.
 pub const YAML_STRIPE_PARITY: usize = 1;
+
+/// Point size of both front-matter columns — `type.body` (`UIF-TOK-004`).
+///
+/// **Replaces two bare `14.0` literals.** The key and value cells were each
+/// written as a raw `.size(14.0)` inside the row builder, which is exactly
+/// the repeated-literal shape [RUST-021] forbids and the shape the
+/// off-scale scan test looks for. The value happens to be legal — it *is*
+/// `type.body` — but it was not bound to anything.
+pub const YAML_ROW_SIZE: f32 = typography::BODY.size;
 
 /// One front-matter row with its solved column widths.
 #[derive(Clone, Debug, PartialEq)]
@@ -133,12 +165,14 @@ pub fn yaml_row(model: &YamlRowModel) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
 
     let key = text(model.key.clone())
-        .size(14.0)
+        .size(YAML_ROW_SIZE)
+        .line_height(typography::BODY.iced_line_height())
         .color(palette.accent_text_soft)
         .width(Length::Fixed(model.key_width.max(0.0)));
 
     let value = text(model.value.clone())
-        .size(14.0)
+        .size(YAML_ROW_SIZE)
+        .line_height(typography::BODY.iced_line_height())
         .color(palette.text_value)
         .width(Length::Fixed(model.value_width.max(0.0)))
         .wrapping(iced::widget::text::Wrapping::Word);

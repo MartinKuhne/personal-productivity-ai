@@ -231,7 +231,19 @@ fn test_non_code_span_has_no_highlight() {
 fn test_code_span_gets_the_highlight_padding() {
     let model = span_for_text("c", &style(&["code"]), 14.0, palette());
     let span = to_iced_span(&model);
-    assert_eq!(span.padding, iced::Padding::from(CODE_HIGHLIGHT_PADDING));
+    assert_eq!(span.padding, CODE_HIGHLIGHT_PADDING);
+
+    // The two axes come from different rungs on purpose: horizontal is the
+    // `space.xs` the token names for inline code, vertical is `space.2xs` so
+    // the highlight box stays inside the `type.body` line box.
+    assert_eq!(span.padding.left, space::XS);
+    assert_eq!(span.padding.right, space::XS);
+    assert_eq!(span.padding.top, space::XXS);
+    assert_eq!(span.padding.bottom, space::XXS);
+    assert_ne!(
+        span.padding.top, span.padding.left,
+        "a uniform padding would bleed the highlight across the neighbouring line"
+    );
 }
 
 // --- widget construction -------------------------------------------------

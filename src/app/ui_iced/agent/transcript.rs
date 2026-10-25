@@ -52,6 +52,8 @@
 
 use iced::widget::{Column, Row, button, container, scrollable, text};
 use iced::{Alignment, Element, Length};
+use iced_pro::token::typography::{self, TypeRung};
+use iced_pro::token::{shape, space};
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -69,18 +71,41 @@ use super::panel_state::{AgentPanelViewModel, TranscriptTurn};
 /// view and the reducer cannot drift ([RUST-021]).
 pub const AGENT_TRANSCRIPT_SCROLLABLE_ID: &str = "agent_transcript_scroll";
 
-/// Base logical point size of the transcript body text — the default body
-/// size, stated explicitly because iced needs it.
-pub const TRANSCRIPT_TEXT_SIZE: f32 = 14.0;
+/// The rung the transcript body renders on — `type.body` (`UIF-TOK-004`).
+///
+/// §2.4 puts document prose and text-input values on this rung; the
+/// transcript is prose the user reads, so it takes the same one. Held as a
+/// rung because the body needs the size *and* the 20 px line box.
+pub const TRANSCRIPT_RUNG: TypeRung = typography::BODY;
 
-/// Spacing between transcript blocks.
-pub const TRANSCRIPT_SPACING: f32 = 8.0;
+/// Base logical point size of the transcript body text — `type.body`
+/// (`UIF-TOK-004`). Value unchanged at `14`.
+pub const TRANSCRIPT_TEXT_SIZE: f32 = TRANSCRIPT_RUNG.size;
 
-/// Spacing inside the thinking disclosure.
-pub const THINKING_SPACING: f32 = 4.0;
+/// Spacing between transcript blocks — `space.sm` (`UIF-TOK-001`), the
+/// standard sibling-gap rung. Value unchanged at `8`.
+pub const TRANSCRIPT_SPACING: f32 = space::SM;
 
-/// Padding around the whole transcript body.
-pub const TRANSCRIPT_PADDING: f32 = 8.0;
+/// Spacing inside the thinking disclosure — `space.xs` (`UIF-TOK-001`).
+/// Value unchanged at `4`.
+pub const THINKING_SPACING: f32 = space::XS;
+
+/// Padding around the whole transcript body — `space.sm` (`UIF-TOK-001`).
+/// Value unchanged at `8`.
+pub const TRANSCRIPT_PADDING: f32 = space::SM;
+
+/// Padding inside a user-turn bubble — `space.xs` (`UIF-TOK-001`).
+///
+/// **Replaces a bare `.padding(4)` literal** ([RUST-021]).
+pub const TURN_PADDING: f32 = space::XS;
+
+/// Perimeter stroke of a user-turn bubble — `border.hairline`
+/// (`UIF-TOK-003`). **Replaces a bare `1.0` literal.**
+pub const TURN_BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
+/// Corner radius of a user-turn bubble — `shape.radius.widget`
+/// (`UIF-TOK-003`). **Replaces a bare `4.0` literal.**
+pub const TURN_BORDER_RADIUS: f32 = shape::RADIUS_WIDGET;
 
 /// The [`Message`] the transcript scrollable emits for a viewport report,
 /// built from a reused [`logs::ScrollSnapshot`].
@@ -110,8 +135,48 @@ pub fn link_activated_message(url: String) -> Message {
     })
 }
 
+/// The link colour a transcript hyperlink paints — `color.accent.text`
+/// (`UIF-TOK-005`).
+///
+/// **A real contrast fix, not a rename.** This used to be
+/// [`Palette::accent`], which *is* `color.accent.fill` — one of the four
+/// tokens `UIF-TOK-005` rule 4 reserves for **backgrounds**. Painted as a
+/// foreground it measures:
+///
+/// | over | ratio |
+/// | --- | --- |
+/// | `surface.base` | `4.14:1` |
+/// | `surface.raised` | `3.90:1` |
+/// | `surface.code` | `3.83:1` |
+///
+/// — every one of them **below** the `4.50:1` active-text floor §2.5 rule 1
+/// sets, on every surface the transcript can sit on. `color.accent.text` is
+/// the token the semantic system actually provides for accent-coloured
+/// *foreground*, and it measures `10.66:1` / `10.02:1` / `9.85:1` over the
+/// same three surfaces.
+///
+/// The fix is the role change, **not** a retune of the fill: `accent.fill`
+/// stays exactly where it is for the fills that use it, and nothing that
+/// paints *on* it moves.
+///
+/// Ratios recomputed from raw sRGB through
+/// [`contrast::contrast_ratio`](iced_pro::token::contrast::contrast_ratio),
+/// not transcribed.
+///
+/// Purity: pure.
+#[must_use]
+pub fn transcript_link_color() -> iced::Color {
+    Palette::fastmd_dark().accent_text
+}
+
 /// The Markdown text [`iced::widget::markdown::Style`] mapped from the FastMD dark palette tokens
 /// — no numeric colour literal is introduced.
+///
+/// The inline-code chip reuses
+/// [`CODE_HIGHLIGHT_PADDING`](crate::ui_iced::render::inline::CODE_HIGHLIGHT_PADDING)
+/// rather than restating a padding of its own, so an `` `inline code` `` chip
+/// is the same shape in the transcript and in the document viewer — one
+/// definition, one look ([RUST-021]).
 ///
 /// Purity: pure.
 #[must_use]
@@ -121,28 +186,64 @@ pub fn markdown_style() -> iced::widget::markdown::Style {
         font: iced::Font::DEFAULT,
         inline_code_highlight: iced::widget::markdown::Highlight {
             background: iced::Background::Color(palette.code_surface),
-            border: iced::Border::default().rounded(4),
+            border: iced::Border::default().rounded(shape::RADIUS_WIDGET),
         },
-        inline_code_padding: iced::Padding {
-            top: 0.0,
-            right: 1.0,
-            bottom: 0.0,
-            left: 1.0,
-        },
+        inline_code_padding: crate::ui_iced::render::inline::CODE_HIGHLIGHT_PADDING,
         inline_code_color: palette.text_strong,
         inline_code_font: iced::Font::MONOSPACE,
         code_block_font: iced::Font::MONOSPACE,
-        link_color: palette.accent,
+        link_color: transcript_link_color(),
     }
 }
 
-/// The [`iced::widget::markdown::Settings`] handed to `markdown::view`, sized from
-/// [`TRANSCRIPT_TEXT_SIZE`].
+/// The [`iced::widget::markdown::Settings`] handed to `markdown::view`.
+///
+/// # Why the fields are set by hand
+///
+/// `Settings::with_text_size` derives its whole ladder arithmetically off
+/// the base — `h1 = base × 2`, then 25% smaller per level, and
+/// `code = base × 0.75` (`iced_widget-0.14.2/src/markdown.rs:1073-1083`).
+/// At the transcript's `type.body` base of 14 that produces:
+///
+/// | field | derived | verdict |
+/// | --- | --- | --- |
+/// | `h1_size` | 28.00 | off-scale (scale tops out at 24) |
+/// | `h2_size` | 24.50 | off-scale |
+/// | `h3_size` | 21.00 | off-scale |
+/// | `h4_size` | 17.50 | off-scale |
+/// | `h5_size` | 14.00 | legal |
+/// | `h6_size` | 14.00 | legal |
+/// | `code_size` | **10.50** | **below `type.min` (12)** |
+/// | `spacing` | 12.25 | off the base-4 grid |
+///
+/// i.e. one size under the legibility floor and five off the scale, none of
+/// them chosen by anyone — they are a side effect of a multiplication table
+/// that knows nothing about `UIF-TOK-004`. So every field is bound to a rung
+/// here instead, reusing the **same** ladder the document viewer's
+/// [heading module](crate::ui_iced::render::heading) produces. The
+/// transcript and the document now render
+/// one Markdown at one set of sizes, and the floor test has something to
+/// hold.
 ///
 /// Purity: pure.
 #[must_use]
 pub fn markdown_settings() -> iced::widget::markdown::Settings {
-    iced::widget::markdown::Settings::with_text_size(TRANSCRIPT_TEXT_SIZE, markdown_style())
+    use crate::ui_iced::render::heading;
+
+    iced::widget::markdown::Settings {
+        text_size: iced::Pixels(TRANSCRIPT_TEXT_SIZE),
+        h1_size: iced::Pixels(heading::H1_SIZE),
+        h2_size: iced::Pixels(heading::H2_SIZE),
+        h3_size: iced::Pixels(heading::H3_SIZE),
+        h4_size: iced::Pixels(heading::H4_SIZE),
+        h5_size: iced::Pixels(heading::H5_SIZE),
+        // §2.4's ladder has no rung below CAPTION, and the document renderer
+        // floors H5 and H6 together — same rule here.
+        h6_size: iced::Pixels(heading::H5_SIZE),
+        code_size: iced::Pixels(crate::ui_iced::render::code::CODE_TEXT_SIZE),
+        spacing: iced::Pixels(TRANSCRIPT_SPACING),
+        style: markdown_style(),
+    }
 }
 
 /// Renders pre-parsed Markdown items through the built-in Markdown widget.
@@ -170,15 +271,16 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
         TranscriptTurn::User { text: user_text } => container(
             text(user_text)
                 .size(TRANSCRIPT_TEXT_SIZE)
+                .line_height(TRANSCRIPT_RUNG.iced_line_height())
                 .color(palette.text_strong),
         )
-        .padding(4)
+        .padding(TURN_PADDING)
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(palette.surface_variant)),
             border: iced::Border {
                 color: palette.border,
-                width: 1.0,
-                radius: 4.0.into(),
+                width: TURN_BORDER_WIDTH,
+                radius: TURN_BORDER_RADIUS.into(),
             },
             ..container::Style::default()
         })
@@ -195,25 +297,40 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 /// [`AgentMessage::ThinkingToggled`], and the body renders the extracted
 /// thinking text in muted italics.
 ///
+/// # Why the header is iced's `button`, not the framework's
+///
+/// [`Button`](iced_pro::widget::button_widget::Button) has no `.width()`
+/// builder — its width comes from the content `size_hint` inside a fixed
+/// control band ([`button::HEIGHT_COMPACT`](iced_pro::widget::button::HEIGHT_COMPACT)
+/// / `HEIGHT_STANDARD`), and the only width-shaped constructor is
+/// [`icon_only`](iced_pro::widget::button_widget::Button::icon_only). A
+/// disclosure header has to stretch the full pane
+/// width so the whole row is the click target, which the framework control
+/// cannot express. That is a framework gap, not a preference — recorded here
+/// so the next pass does not read the iced widget as an oversight.
+///
 /// Purity: pure over `view_model`.
 #[must_use]
 pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
+    let chevron = if view_model.thinking_expanded {
+        strings::ICON_DISCLOSE_EXPANDED
+    } else {
+        strings::ICON_DISCLOSE_COLLAPSED
+    };
+
     let header = button(
         Row::with_children(vec![
             text(strings::AGENT_THINKING_PROCESS)
                 .size(TRANSCRIPT_TEXT_SIZE)
+                .line_height(TRANSCRIPT_RUNG.iced_line_height())
                 .color(palette.text_strong)
                 .into(),
-            container(text(if view_model.thinking_expanded {
-                "▾"
-            } else {
-                "▸"
-            }))
-            .width(Length::Fill)
-            .align_right(Length::Shrink)
-            .into(),
+            container(text(chevron).size(TRANSCRIPT_TEXT_SIZE))
+                .width(Length::Fill)
+                .align_right(Length::Shrink)
+                .into(),
         ])
         .align_y(Alignment::Center),
     )
@@ -225,6 +342,7 @@ pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> 
     let body: Element<'_, Message> = if view_model.thinking_expanded {
         text(&view_model.thinking)
             .size(TRANSCRIPT_TEXT_SIZE)
+            .line_height(TRANSCRIPT_RUNG.iced_line_height())
             .font(italic_font())
             .color(palette.text_muted)
             .into()
@@ -259,6 +377,7 @@ pub fn transcript_body(view_model: &AgentPanelViewModel) -> Element<'_, Message>
         children.push(
             text(strings::AGENT_THINKING_LABEL)
                 .size(TRANSCRIPT_TEXT_SIZE)
+                .line_height(TRANSCRIPT_RUNG.iced_line_height())
                 .font(italic_font())
                 .color(palette.text_muted)
                 .into(),

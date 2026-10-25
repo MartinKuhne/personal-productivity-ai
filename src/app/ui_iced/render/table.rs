@@ -50,11 +50,13 @@ use crate::ui_iced::table_width::{
 };
 use iced::widget::{container, scrollable, table, text};
 use iced::{Background, Element, Length};
+use iced_pro::token::{shape, typography};
 
-/// Border width of the table's perimeter frame, in logical pixels.
+/// Border width of the table's perimeter frame, in logical pixels —
+/// `border.hairline` (`UIF-TOK-003`). Value unchanged at `1`.
 ///
 /// A `border_strong` line frames the whole grid.
-pub const TABLE_PERIMETER_WIDTH: f32 = 1.0;
+pub const TABLE_PERIMETER_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// Row-index parity that receives the striped background.
 ///
@@ -63,7 +65,17 @@ pub const STRIPE_PARITY: usize = 1;
 
 /// Height reserved for a blank cell, in logical pixels, so it still holds
 /// its row open.
-pub const EMPTY_CELL_HEIGHT: f32 = 18.0;
+///
+/// **Movement: 18 → 20 (+2).** `18` is `type.ui_compact`'s line height, but
+/// these cells render their content at `type.body` — so a blank cell was
+/// reserving a line box one rung smaller than the text beside it, and a row
+/// mixing a blank cell with body text still had to grow. Deriving the
+/// reservation from the rung the cell actually paints on
+/// ([`BODY_SIZE`]'s own line height) makes the blank cell hold exactly the
+/// line its neighbours occupy.
+///
+/// [`BODY_SIZE`]: super::inline::BODY_SIZE
+pub const EMPTY_CELL_HEIGHT: f32 = typography::BODY.line_height;
 
 /// One rendered table cell.
 #[derive(Clone, Debug, PartialEq)]
