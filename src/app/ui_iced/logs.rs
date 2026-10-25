@@ -87,6 +87,9 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LogsMessage, Message};
 use iced_pro::surface::movable::{AutoScrollSetting, FollowState, ScrollGeometry};
+use iced_pro::token::shape;
+use iced_pro::token::space;
+use iced_pro::token::typography::{self, TypeRung};
 
 /// Log filter predicate.
 ///
@@ -133,23 +136,44 @@ pub fn filter_logs<'a>(
 /// `chrono` format of the timestamp column: `HH:MM:SS.mmm`.
 pub const TIMESTAMP_FORMAT: &str = "%H:%M:%S%.3f";
 
-/// Logical point size of every log row.
-pub const ROW_TEXT_SIZE: f32 = 14.0;
+/// The rung every log row paints at — `type.body` (`UIF-TOK-004`).
+pub const ROW_RUNG: TypeRung = typography::BODY;
 
-/// Horizontal padding inside a log-table cell.
-pub const CELL_PADDING_X: f32 = 4.0;
+/// Logical point size of every log row.
+pub const ROW_TEXT_SIZE: f32 = ROW_RUNG.size;
+
+/// Horizontal padding inside a log-table cell — `space.xs` (`UIF-TOK-001`).
+pub const CELL_PADDING_X: f32 = space::XS;
 
 /// Vertical padding inside a log-table cell.
+///
+/// `1.0` is not a `space` rung — `space.2xs` is `2.0` and there is nothing
+/// between it and zero. Binding it would move every log row by a pixel,
+/// which is a density re-tune of the Logs panel rather than a token
+/// binding, and that re-tune is not this increment's call. Recorded as an
+/// enumerated exception in
+/// [`APP_ALLOW_LIST`](crate::ui_iced::token_lint_gate::APP_ALLOW_LIST) so
+/// the next pass over Logs inherits a named list instead of an unmeasured
+/// one.
 pub const CELL_PADDING_Y: f32 = 1.0;
 
 /// Padding around the whole viewer.
+///
+/// `6.0` sits exactly between `space.xs` (4) and `space.sm` (8) and is on
+/// neither. INT-7c broke that tie on *role* everywhere else — `SM` for
+/// sibling gaps, `XS` for inner padding — but the viewer's outer padding
+/// is neither, and moving it changes the panel's whole measure. Enumerated
+/// in
+/// [`APP_ALLOW_LIST`](crate::ui_iced::token_lint_gate::APP_ALLOW_LIST)
+/// rather than guessed at.
 pub const PANEL_PADDING: f32 = 6.0;
 
 /// Spacing between the controls in the filter row.
 pub const FILTER_SPACING: f32 = 6.0;
 
-/// Width of the horizontal rule under the filter row.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Width of the horizontal rule under the filter row —
+/// `shape.border.hairline` (`UIF-TOK-003`).
+pub const SEPARATOR_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// Slack, in logical points, allowed when deciding whether the viewport is
 /// "at the bottom".

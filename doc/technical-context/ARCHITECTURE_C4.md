@@ -65,14 +65,14 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
-  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Consumed by fastmd as the design-truth source since INT-1")
+  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
   Rel(ui_iced, bus, "publishes UserCommand; reads buses through the subscription bridge")
   Rel(ui_iced, iced_rt, "builds Elements; the runtime paints and dispatches input")
   Rel(ui_free, iced_pro, "derives overlapping palette tokens from UIF-TOK-005")
-  Rel(ui_iced, iced_pro, "maps iced theme roles, scrim alpha and splitter grab from tokens")
+  Rel(ui_iced, iced_pro, "tokens, framework widgets, menu engine, modal frames, movable hosts, z-order bands")
   Rel(ui_iced, orch, "reducer drives orchestrator state transitions")
   Rel(orch, ws, "file/tag/directory state")
   Rel(orch, agent_crate, "submits AgentPrompt, observes AgentEvent")
@@ -88,9 +88,10 @@ There are three crates in this workspace that matter to the picture above:
 together — `AppOrchestrator` submits prompts to and observes events from
 `fastmd-agent`.
 
-`iced-pro` is now consumed by the application, but only as the **design
-token source**. Since integration increment INT-1 the `fastmd` crate
-declares `iced-pro = { path = "src/iced-pro" }`, and:
+`iced-pro` is consumed by the application in two distinct ways, and the
+distinction is the one thing a reader should carry away from this section.
+
+**Tokens (since INT-1).**
 
 - `src/app/ui/theme.rs` derives every overlapping semantic palette token
   from `iced_pro::token::color::Palette::dark()` (`UIF-TOK-005`) instead
@@ -102,13 +103,38 @@ declares `iced-pro = { path = "src/iced-pro" }`, and:
 - `src/app/ui_iced/layout.rs` binds the pane-grid resize leeway to
   `iced_pro::token::size::SPLITTER_GRAB` (`UIF-TOK-002`).
 
-What is **not** yet consumed: the framework's widgets, menu engine, modal
-hosts, focus model and geometry solvers. The app still renders with stock
-iced widgets, and the six FastMD document/log content tokens stay
-app-owned literals under decision **D-2**. Porting the widget layer onto
-`iced-pro` is the follow-on work decision **D-8** describes. See the
-`iced-pro` component diagram further down for what that crate contains and
-what it deliberately does not own.
+**Widgets and surfaces (since INT-3, completed through INT-8).** The
+framework's claim that the app renders "only as the design token source"
+was true at INT-1 and is false now. The table below is the live
+integration surface, read from the `iced_pro::` imports of the production
+modules under `src/app/ui_iced/` — not from an intention list.
+
+| App module(s) | Framework subsystem rendered through |
+| --- | --- |
+| `hamburger.rs`, `context_menu.rs`, `menu_surface.rs` | `surface::menu` — `MenuCascade` openness controller, `model::{Menu, Row}`, `view` row matrix; `geometry::anchor` solves card placement and flips |
+| `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
+| `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
+| `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
+| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (`InputKind`), `widget::combo_box` |
+| `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
+| `attributions.rs` | `widget::hyperlink` |
+| `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
+| `app.rs`, `update.rs`, `message.rs` | `surface::zorder` band model + `SurfaceRegistry`, `focus::FocusState`, `bridge::focus_task`, `geometry::clamp::ResizeHandle` |
+| every converted surface | `token::{space, size, shape, typography, color, contrast}`, `state::{BaseState, VisualState}` |
+
+No `fastmd` type appears anywhere in `iced-pro`'s API, so the dependency
+stays strictly one-way.
+
+**Still not consumed:** `ModalHost` and `InputDialogHost` (the app takes
+their frame, sizing and error semantics but keeps dismiss ownership — see
+*The ownership contract* under the `iced-pro` component diagram);
+`bridge::tab_task`, so framework-driven `Tab` traversal is not wired;
+and the framework's `composite::search_input`, which does not exist. The
+six FastMD document/log content tokens stay app-owned literals under
+decision **D-2**. Porting what remains is the follow-on work decision
+**D-8** describes. See the `iced-pro` component diagram further down for
+what that crate contains, what it deliberately does not own, and where
+the seams between the two still leak.
 
 ## Optional Vector Search
 
@@ -149,7 +175,11 @@ builder. Repeated iced idioms — the cursor-anchored, viewport-clamped context
 menu, the blocking modal card, the confirm/cancel button pair, the
 follow-the-stream scroll rule — live in `ui_iced/overlay.rs` and
 `ui_iced/logs.rs`, which the panels, modals, tree and renderers call instead
-of hand-rolling the widget tree.
+of hand-rolling the widget tree. Since INT-3..INT-8 the *geometry, frame
+and band semantics* behind those idioms come from `iced-pro` rather than
+from local arithmetic, while open/close/dismiss ownership stays with
+`OverlayState` — see *The integration contract* under the `iced-pro`
+component diagram.
 
 ```mermaid
 C4Component
@@ -163,16 +193,20 @@ C4Component
   Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
   Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
   Component(render, "render", "Markdown viewing path: RenderEvent -> RenderBlock descriptors -> iced widgets (heading, inline, code, table, yaml)")
-  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair")
+  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to iced-pro modal::ModalSizing / ModalFrame")
+  Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through iced-pro surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
+  Component(movui, "movable_shell", "Movable card chrome driven by iced-pro movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
   Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")
   Component(agentui, "agent", "Agent panel: streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, prompt row with send/queue/cancel + chat-model pick_list")
-  Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card")
+  Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card; logs and agent_debug ride MovableHost")
   Component(persist, "persisted", "PersistedUiState save/restore through the injected UI-state storage handler")
   Component(tablew, "table_width (iced adapter)", "Available width -> FTWA solver inputs -> pinned iced column widths; heuristic text measurer")
+  Component(gate, "token_lint_gate", "App-side token gate: iced-pro's own scanner run over ui_iced under an app Scope (colour owner ui/theme.rs, visual scope ui_iced/, app geometry registry + enumerated allow-list)")
   Component(theme, "theme", "Palette token -> iced palette-role mapping; Theme::custom('FastMD Dark'); scrim colour (UI-002/GUD-003)")
   Component(fonts, "fonts", "iced::font::load bootstrap for the embedded icon font + platform symbol fallback")
   Component(osshell, "os_shell", "Framework-free platform wrappers: open-in-system-editor, reveal-in-file-explorer, open-URL")
   Component(logo, "logo", "The single place the shared logo mark element is constructed")
+  Component(pro, "iced-pro (framework crate)", "Tokens, atoms, composites, menu engine, modal frames, movable hosts, z-order bands consumed by the modules above")
   Component(helpers, "test_helpers (cfg(test))", "Framework-free fixtures: test_app / test_app_state over in-memory storage")
 
   Rel(app, update, "boot -> update")
@@ -191,6 +225,12 @@ C4Component
   Rel(fonts, app, "font boot task in boot()")
   Rel(update, osshell, "platform side effects")
   Rel(panels, logo, "logo_mark")
+  Rel(menuui, pro, "surface::menu cascade + geometry::anchor")
+  Rel(overlay, pro, "modal::ModalSizing + ModalFrame")
+  Rel(movui, pro, "movable::MovableHost rectangles")
+  Rel(panels, pro, "button_widget / text_input / combo_box + tokens")
+  Rel(app, pro, "SurfaceRegistry + FocusState (derived index only)")
+  Rel(gate, pro, "token_lint scanner under an app Scope")
 ```
 
 Supporting UI types (framework-free, in `ui/`): `TreeNode{name,path,is_dir,children:BTreeMap}`,
@@ -473,19 +513,21 @@ widget can reach `iced_core`'s widget-author surface. The library root is
 `mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly
 in `Cargo.toml`.
 
-**Consumption status (INT-1).** `fastmd` depends on this crate and reads its
-**tokens** — `token::color`, `token::size` and `surface::zorder::scrim_for`
-— from `src/app/ui/theme.rs`, `src/app/ui_iced/theme.rs` and
-`src/app/ui_iced/layout.rs`. It does **not** yet instantiate any
-framework widget, menu engine, modal host or solver; those remain
-described-but-not-consumed by the shipped application. No `fastmd` type
-appears anywhere in `iced-pro`'s API, so the dependency stays one-way.
-What the crate's own ledger says is and is not satisfied lives in
-`src/iced-pro/spec_coverage.rs`.
+**Consumption status (INT-8).** `fastmd` depends on this crate and reads
+far more than its tokens. Atoms (`widget::button_widget`, `text_input`,
+`combo_box`, `badge`, `toggle`, `progress`, `hyperlink`), composites
+(`composite::list_tile`, `form_field`, `tree_row`), the menu engine
+(`surface::menu`), modal frames (`surface::modal`), movable hosts
+(`surface::movable`), the z-order band model (`surface::zorder`), the
+focus model (`focus`, `bridge`) and the geometry solvers (`geometry`) are
+all live in the shipped application. What the crate's own ledger says is
+and is not satisfied lives in `src/iced-pro/spec_coverage.rs`; what the
+*integration* does and does not take is recorded below, because the
+ledger describes the framework and nothing in it describes the host.
 
 ```mermaid
 C4Component
-  title iced-pro — Subsystems (tokens consumed by fastmd; widgets not yet)
+  title iced-pro — Subsystems (all consumed by fastmd: tokens, atoms, composites, menus, modal frames, movable shells)
 
   Component(token, "token/", "Closed design-token set: space, size, shape, typography, color, contrast (UIF-TOK-001..006)")
   Component(st, "state.rs", "Interaction state machine: exclusive BaseState plus an orthogonal focus ring, resolved purely")
@@ -531,6 +573,114 @@ C4Component
   `Memory` implementations) is the only persistence seam; the crate never
   touches a storage location itself (RUST-024).
 
+### The integration contract (INT-3 .. INT-8)
+
+The whole INT series converged on one division of labour. It is a binding
+contract, not a style preference, and it is the rule the next contributor
+must not violate: **the framework supplies sizing, frame and semantics;
+`OverlayState` owns open / close / dismiss.**
+
+* **Framework supplies** — card geometry and its limits
+  (`modal::ModalSizing`, `CONTENT_HEIGHT_MAX`), the frame chrome
+  (`ModalFrame`), title-bar and resize-handle rectangles
+  (`movable::MovableHost`), menu card placement and flips
+  (`geometry::anchor`), the band and escape *rank* a surface belongs to
+  (`surface::zorder`), and the semantics of *why* a surface closed
+  (`modal::DismissCause`).
+* **`OverlayState` owns** — whether a surface is open, the transition in
+  and out of it, and the `SurfaceRegistry` index that fixes the order in
+  which surfaces unwind.
+
+**Why the host wrappers are not adopted.** `ModalHost::open`
+(`surface/modal.rs:926`) and `InputDialogHost::open`
+(`surface/input_dialog.rs:1142`) each **self-register** their surface
+into a `SurfaceRegistry` *and* push a focus trap on the way in. That
+makes them a second writer to the same index
+`OverlayState::sync_surfaces` maintains from the authoritative
+window-state fields, and a trap the app's reducer cannot pop without
+racing the framework. Adopting either would let the registry report a
+surface open that `AppState` had already closed, or leave a trap pushed
+after the card was gone. Every increment therefore took the frame and
+left the host: `ModalFrame` + `ModalSizing` yes, `ModalHost` no.
+
+`MovableHost` is the milder case and **is** adopted. It self-registers
+its control roster but pushes **no** focus trap, and `sync_surfaces`
+re-registers the same live rectangle from the authoritative field on the
+way past, so the two writers converge instead of colliding.
+
+### `SurfaceRegistry` is a derived index
+
+`OverlayState::surfaces` mirrors the reducer-held window-state fields
+(`batch`, `about`, `tools`, `debug`, `dialog`, `editor`, `context_menu`,
+`hamburger_open`) into the framework's band model: open field →
+`register`, closed field → `unregister`. Nothing reads the registry to
+decide what to draw, and nothing sets a field from a registry answer. The
+registry contributes exactly one thing the fields cannot: the **order**
+in which surfaces unwind, consulted only by
+`OverlayState::close_topmost`.
+
+**Registration is not closability.** The docked Logs panel is registered
+so it participates in z-order and in the escape walk, but the
+`SURFACE_ID_LOGS` arm of `ClosableSurfaces::unwind` answers
+`UnwindAnswer::Declined(DeclineReason::CannotUnwind)`. `Esc` must never
+close the docked log viewer. Two tests pin that
+(`app_tests.rs::test_close_topmost_never_closes_the_docked_logs_panel`,
+`update_tests.rs::test_escape_pressed_does_not_close_the_docked_logs_panel`)
+so a future "everything registered is closable" refactor fails against
+them rather than inheriting a flag.
+
+Registration order is the overlay host's own draw order — bottom-first
+within each band — so the card actually painted on top is the one that
+unwinds first, with no depth parameter anywhere. The two menu surfaces are
+registered with their **solved card rectangles** so `route_pointer`
+answers `PointerTarget::Surface` inside a menu card; the remaining
+surfaces are still registered regionless, which per
+`SurfaceRegistry`'s contract means they stack and take part in `Escape`
+but are never pointer-hit.
+
+### Known integration gaps
+
+Recorded because each is a place where the diagram above is smoother than
+the code:
+
+1. **`UIF-MOD-001`'s focus trap is not wired app-wide.** Only `Escape`
+   reaches the app (`ui_iced/subscription.rs:442`); iced's router owns
+   `Tab`, and the app never calls `bridge::tab_task`. The only trap
+   actually pushed in the running application is the menu's own
+   (`surface/menu/cascade.rs:1083`), scoped to the open hamburger cards.
+   "Focus model adopted" must not be read as "focus trapped".
+2. **`tree_row` and the tab strip are resolver-only.**
+   `composite::tree_row` produces `Layer` rectangles and fill-lock
+   decisions, never an `Element` — the gallery's canvas renderer is the
+   only code that paints its layers. The app's tree and tab strip consume
+   its *geometry* and *colour rules* while still drawing themselves.
+3. **`composite::search_input` does not exist.** The tree's search field
+   stays iced's `text_input` painted with `InputKind::Search`, because
+   `TextInput::new` on the uncontrolled path has no `on_submit`.
+4. **`ValidationRule::Name` accepts `..`.** `check_basename`
+   (`surface/input_dialog.rs:464`) rejects an empty value, leading or
+   trailing space, and the eight Windows-illegal characters — but `.` is
+   not an illegal character, so `..` passes the framework validator
+   cleanly. The app is not exposed only because
+   `crate::utils::path::is_safe_basename` separately rejects
+   `Component::ParentDir`. A host trusting the framework validator alone
+   would accept a traversal name.
+5. **The framework `Button` has no `.width()` builder** (width comes from
+   the content's `size_hint`; only `icon_only` is width-shaped), so a
+   full-width disclosure or action button cannot be expressed. The agent
+   panel's thinking-block header stays an iced `button` for that reason.
+6. **The token gate proves provenance, not legality.** `token_lint`, and
+   the app-side `ui_iced::token_lint_gate` that reuses it over all of
+   `ui_iced/`, proves a constant *reads a token* — not that the value is
+   a legal size. `token_guard_tests` checks legality for the converted
+   surfaces; nothing yet checks it for the ones still to be converted.
+7. **`SPACING` is not a visual-name marker.** `VISUAL_NAME_MARKERS`
+   carries `GAP` but not `SPACING`, so constants like
+   `agent_debug::CONTROL_SPACING = 6.0` and `CHEVRON_SPACING = 6.0` are
+   invisible to Rule B. Widening the marker list would surface more
+   off-grid values across both trees; that is a deliberate follow-on
+   decision, not something the gate quietly hides.
+
 ### What it deliberately does not own (decision D-2)
 
 Framework layer only. These stay with `fastmd` and are recorded as
@@ -574,8 +724,13 @@ it and, where it is not fully satisfied, what exactly is missing. The
 sidecar test reads `doc/planning/ui-framework.md` at test time and
 asserts the two sets agree in both directions, so adding an id to the
 spec without classifying it fails the build. The shape of the remaining
-gap: the contrast half of `UIF-VER-001` is automated but nothing checks
-for raw literals outside `token/` at source level; the snapshot gate
+gap: the contrast half of `UIF-VER-001` is automated, and since INT-8
+so is the literal half — `token_lint.rs` scans source text for colour
+constructors outside `token/color.rs` and for visually-named `pub const
+f32`s that read a bare number, and the same scanner now runs over
+`src/app/ui_iced` through `ui_iced::token_lint_gate`. What that gate
+still cannot see is recorded in its own module doc: inline literals,
+non-`pub` constants, indirection, and value legality. The snapshot gate
 covers only `Palette::dark()` and the standard control height; the type
 scale carries no font family and no 12px SemiBold / 13px Bold rung; and
 there is **no tooltip surface anywhere in the crate** — `UIF-NAV-003` is

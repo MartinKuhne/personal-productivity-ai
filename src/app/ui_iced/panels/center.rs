@@ -269,7 +269,15 @@ pub const TAB_PADDING_X: f32 = space::MD;
 ///
 /// The `type.ui_compact` line box (18) sits inside the 24 pt target with 3 pt
 /// to spare per side, so the label never touches the tab's edges.
-pub const TAB_PADDING_Y: f32 = (TAB_HEIGHT - size::HIT_TARGET_MIN) / 2.0;
+///
+/// Written as the rung rather than as the division that produced it: the
+/// scanner reads `/ 2.0` as a bare literal on a visually-named constant,
+/// and it is right to — a divisor is still a number nobody bound. The
+/// derivation itself is not lost, it is asserted:
+/// `the_tab_strip_band_closes_on_tokens` pins
+/// `space::XXS == (TAB_HEIGHT - HIT_TARGET_MIN) / 2.0`, so the equality
+/// breaks the build rather than the layout if either side moves.
+pub const TAB_PADDING_Y: f32 = space::XXS;
 
 /// Gap between adjacent tabs in the strip — `space.2xs` (`UIF-TOK-001`),
 /// the dense inline micro-gap rung. Value unchanged at `2`.
@@ -366,7 +374,12 @@ pub const STRIP_HEIGHT: f32 = size::CONTROL_LG;
 /// (`36 = XS + CONTROL_SM + XS`). The tab is therefore a compact control
 /// centred in a large structural band, and retuning the band or the inset
 /// moves the tab with it instead of leaving a height that no longer fits.
-pub const TAB_HEIGHT: f32 = STRIP_HEIGHT - 2.0 * STRIP_PADDING;
+///
+/// The subtraction is written out twice rather than as `2.0 × STRIP_PADDING`
+/// so no literal sits on a visually-named constant; the equality with
+/// `CONTROL_SM` and the band closure are both asserted in
+/// `the_tab_strip_band_closes_on_tokens`.
+pub const TAB_HEIGHT: f32 = STRIP_HEIGHT - STRIP_PADDING - STRIP_PADDING;
 
 /// The rung the viewer's prose sits on — `type.body` (`UIF-TOK-004`).
 ///

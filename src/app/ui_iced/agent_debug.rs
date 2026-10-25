@@ -125,7 +125,7 @@ mod tests;
 use std::collections::HashSet;
 
 use iced::widget::{
-    Column, Row, button, checkbox, container, mouse_area, pick_list, rule, scrollable, space, text,
+    Column, Row, Space, button, checkbox, container, mouse_area, pick_list, rule, scrollable, text,
     text_input,
 };
 use iced::{Alignment, Element, Font, Length};
@@ -139,29 +139,63 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 use crate::ui_iced::panels::top::phosphor_font;
+use iced_pro::token::typography::{self, TypeRung};
+use iced_pro::token::{shape, space};
 
 /// Width of the debug card, in logical pixels.
+///
+/// App-owned: §4.7.1 sets the movable-overlay default at `680 x 440`, and
+/// this card is deliberately narrower because its rows are single-line
+/// headers rather than a wide JSON pane. See the enumerated entry in
+/// [`APP_ALLOW_LIST`](crate::ui_iced::token_lint_gate::APP_ALLOW_LIST).
 pub const CARD_WIDTH: f32 = 600.0;
 
+/// The rung an entry's header row paints at — `type.body` (`UIF-TOK-004`).
+pub const ENTRY_RUNG: TypeRung = typography::BODY;
+
 /// Logical point size of an entry's header row.
-pub const ENTRY_TEXT_SIZE: f32 = 14.0;
+pub const ENTRY_TEXT_SIZE: f32 = ENTRY_RUNG.size;
+
+/// The rung a session-boundary label paints at — `type.caption`.
+pub const BOUNDARY_RUNG: TypeRung = typography::CAPTION;
 
 /// Logical point size of a session-boundary label.
-pub const BOUNDARY_TEXT_SIZE: f32 = 12.0;
+pub const BOUNDARY_TEXT_SIZE: f32 = BOUNDARY_RUNG.size;
+
+/// The rung the card title paints at — `type.title_sm` (`UIF-TOK-004`).
+///
+/// **Movement: 18 → 16 (−2).** `18` is not a rung: `TITLE_SM` is 16 and
+/// `TITLE_MD` is 20, so nothing on the scale produced that number. §2.4
+/// assigns `type.title_sm` to panel and overlay headers, which is what
+/// this is. INT-7c fixed the identical off-scale `18` on
+/// [`AGENT_HEADER_SIZE`](crate::ui_iced::panels::center::AGENT_HEADER_SIZE)
+/// and on the agent panel's own header.
+pub const TITLE_RUNG: TypeRung = typography::TITLE_SM;
 
 /// Logical point size of the card title.
-pub const TITLE_SIZE: f32 = 18.0;
+pub const TITLE_SIZE: f32 = TITLE_RUNG.size;
+
+/// The rung the expanded JSON body paints at — `type.body`, in a mono face.
+pub const JSON_RUNG: TypeRung = typography::BODY;
 
 /// Logical point size of the expanded JSON body, rendered in a monospace face.
-pub const JSON_TEXT_SIZE: f32 = 14.0;
+pub const JSON_TEXT_SIZE: f32 = JSON_RUNG.size;
 
-/// Height of one JSON line in logical points.
+/// Height of one JSON line in logical points — the `type.body` line box.
 ///
-/// iced's default [`LineHeight`](iced::widget::text::LineHeight) is
-/// `Relative(1.3)` (`iced_core-0.14.0/src/text.rs:215-218`), so a
-/// [`JSON_TEXT_SIZE`] line occupies `JSON_TEXT_SIZE × 1.3` points. That is
-/// what makes the `json_rows` setting mean "N visible lines".
-pub const JSON_LINE_HEIGHT: f32 = JSON_TEXT_SIZE * 1.3;
+/// **Movement: 18.2 → 20.0 (+1.8).** This used to be
+/// `JSON_TEXT_SIZE × 1.3`, i.e. iced's default `Relative(1.3)`
+/// (`iced_core-0.14.0/src/text.rs:215-218`) re-derived by hand. Two
+/// things are wrong with that: the multiplier is a bare literal with no
+/// owner, and a `f32` handed to iced's `LineHeight` reads as a
+/// *multiplier*, not pixels — the exact defect class `bb18c2d` exists to
+/// prevent.
+///
+/// The JSON body paints at `type.body`, so a line occupies the `type.body`
+/// line box, which is what makes `json_rows` mean "N visible lines". The
+/// row-count math in [`json_body_height`] is expressed in whole lines, so
+/// it stays correct at the rung's own height.
+pub const JSON_LINE_HEIGHT: f32 = JSON_RUNG.line_height;
 
 /// The `json_rows` catalogue the pick list offers: 8, 16, 24, 32 and 64.
 pub const JSON_ROW_CATALOG: [usize; 5] = [8, 16, 24, 32, 64];
@@ -194,8 +228,8 @@ pub const OMITTED_TOOLS_PLACEHOLDER: &str = strings::DEBUG_OMITTED_TOOLS_PLACEHO
 /// view and reducer cannot drift ([RUST-021]).
 pub const DEBUG_SCROLLABLE_ID: &str = "agent_debug_scroll";
 
-/// Padding inside the card.
-pub const CARD_PADDING: f32 = 12.0;
+/// Padding inside the card — `space.md` (`UIF-TOK-001`).
+pub const CARD_PADDING: f32 = space::MD;
 
 /// Vertical gap between card sections.
 pub const SECTION_SPACING: f32 = 8.0;
@@ -213,11 +247,12 @@ pub const BODY_SPACING: f32 = 4.0;
 pub const CHEVRON_SPACING: f32 = 6.0;
 
 /// Vertical padding inside a clickable header row, i.e. the height of its
-/// hit area.
-pub const HEADER_PADDING_Y: f32 = 4.0;
+/// hit area — `space.xs` (`UIF-TOK-001`).
+pub const HEADER_PADDING_Y: f32 = space::XS;
 
-/// Width of the rules separating card sections and boundary rows.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Width of the rules separating card sections and boundary rows —
+/// `shape.border.hairline` (`UIF-TOK-003`).
+pub const SEPARATOR_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
 /// The search text in the form the filter compares against: lower-cased once.
 ///
@@ -1092,11 +1127,8 @@ fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message>
     let copy =
         button(text(strings::DEBUG_COPY_JSON_BUTTON)).on_press(copy_json_command(row.json.clone()));
 
-    let actions = Row::with_children(vec![
-        space::Space::new().width(Length::Fill).into(),
-        copy.into(),
-    ])
-    .align_y(Alignment::Center);
+    let actions = Row::with_children(vec![Space::new().width(Length::Fill).into(), copy.into()])
+        .align_y(Alignment::Center);
 
     let body = text(row.json.clone())
         .font(Font::MONOSPACE)

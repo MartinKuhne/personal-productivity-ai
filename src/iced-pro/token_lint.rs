@@ -265,6 +265,7 @@ pub const COLOUR_CONSTRUCTORS: [&str; 4] = [
 /// visually-named constant is excused: no entry, no exemption. Keeping it
 /// a registry rather than a name-pattern rule is what stops "sounds like a
 /// bound" from standing in for "the spec set this number".
+#[derive(Debug)]
 pub struct SurfaceGeometryConstant {
     /// Crate-relative file, forward slashes.
     pub file: &'static str,
@@ -461,6 +462,56 @@ pub fn surface_geometry(file: &str, name: &str) -> Option<&'static SurfaceGeomet
         .find(|entry| entry.file == file && entry.name == name)
 }
 
+/// Which tree a scan governs, and on what terms.
+///
+/// The scanner itself is scope-free: it is the *scope* that says which file
+/// owns colours, which paths carry visual measurements, and which bare
+/// literals somebody has registered as a fixed bound. iced-pro's own tree
+/// is one such scope ([`crate_scope`]); a host crate that wants the same
+/// gate over its own sources supplies a second one instead of writing a
+/// second scanner.
+///
+/// That choice is deliberate. A parallel scanner starts identical and then
+/// drifts: a bug fixed in one leaves the other still reporting whatever it
+/// always reported, and two numbers that disagree about the same tree are
+/// worse than one number that is wrong in a known way. Every rule below is
+/// read from this struct rather than hard-coded, so there is exactly one
+/// implementation of each.
+#[derive(Clone, Copy, Debug)]
+pub struct Scope<'a> {
+    /// The one file this scope allows to define colours.
+    pub colour_definition_file: &'static str,
+    /// Path prefixes whose `pub const` measurements Rule B inspects.
+    pub visual_scope_prefixes: &'a [&'static str],
+    /// Bare literals this scope registers as fixed layout bounds.
+    pub surface_geometry: &'a [SurfaceGeometryConstant],
+}
+
+/// The scope of the crate this module is compiled into.
+///
+/// Built from the existing constants rather than restating them, so
+/// iced-pro's own audit is exactly what it was before this struct existed.
+#[must_use]
+pub fn crate_scope<'a>() -> Scope<'a> {
+    Scope {
+        colour_definition_file: COLOUR_DEFINITION_FILE,
+        visual_scope_prefixes: &VISUAL_SCOPE_DIRS,
+        surface_geometry: SURFACE_GEOMETRY_CONSTANTS,
+    }
+}
+
+/// Look up a registered layout bound in an arbitrary registry.
+#[must_use]
+pub fn lookup_geometry<'s>(
+    registry: &'s [SurfaceGeometryConstant],
+    file: &str,
+    name: &str,
+) -> Option<&'s SurfaceGeometryConstant> {
+    registry
+        .iter()
+        .find(|entry| entry.file == file && entry.name == name)
+}
+
 /// An individually justified exception to a finding.
 ///
 /// The allow-list is the only way a finding stops being a build failure,
@@ -567,14 +618,20 @@ impl Audit {
 // Entry points
 // ---------------------------------------------------------------------------
 
-/// Scan one file's text. Pure: no filesystem, no allow-list.
+/// Scan one file's text under an explicit [`Scope`]. Pure: no filesystem,
+/// no allow-list.
 ///
-/// `file` is the crate-relative path with forward slashes; it decides
-/// which rules apply. Feeding a fixture string through here exercises the
-/// same code the crate-wide scan runs, which is what makes the injection
-/// test meaningful.
+/// This is the whole scanner. [`scan_source`] is this function with
+/// iced-pro's own scope, and a host crate's gate is this function with its
+/// own — the same redaction, the same constructor patterns, the same
+/// scalar classifier, the same registry semantics.
+///
+/// `file` is the root-relative path with forward slashes; it decides which
+/// rules apply. Feeding a fixture string through here exercises the same
+/// code the tree-wide scan runs, which is what makes the injection test
+/// meaningful.
 #[must_use]
-pub fn scan_source(file: &str, text: &str) -> SourceScan {
+pub fn scan_source_in(scope: &Scope<'_>, file: &str, text: &str) -> SourceScan {
     let mut scan = SourceScan::default();
     let redacted = redact_comments_and_strings(text);
     let lines: Vec<&str> = redacted.split('\n').collect();
@@ -583,7 +640,7 @@ pub fn scan_source(file: &str, text: &str) -> SourceScan {
         return scan;
     }
 
-    let colour_host = file == COLOUR_DEFINITION_FILE;
+    let colour_host = file == scope.colour_definition_file;
 
     if !colour_host {
         for (idx, line) in lines.iter().enumerate() {
@@ -599,7 +656,7 @@ pub fn scan_source(file: &str, text: &str) -> SourceScan {
         }
     }
 
-    if in_visual_scope(file) {
+    if in_scope(file, scope.visual_scope_prefixes) {
         for c in f32_consts(&lines) {
             if !c.is_pub {
                 continue;
@@ -607,7 +664,7 @@ pub fn scan_source(file: &str, text: &str) -> SourceScan {
             if !is_visual_name(c.name) {
                 continue;
             }
-            match classify_scalar(file, &c) {
+            match classify_scalar(scope, file, &c) {
                 ScalarClass::TokenBound => scan.token_bound += 1,
                 ScalarClass::Zero => scan.zero += 1,
                 ScalarClass::Ratio => scan.ratio += 1,
@@ -633,9 +690,28 @@ pub fn scan_source(file: &str, text: &str) -> SourceScan {
     scan
 }
 
-/// Scan every production `.rs` under `root` and apply the allow-list.
+/// Scan one file's text under iced-pro's own scope. Pure: no filesystem,
+/// no allow-list.
+///
+/// `file` is the crate-relative path with forward slashes; it decides
+/// which rules apply. Feeding a fixture string through here exercises the
+/// same code the crate-wide scan runs, which is what makes the injection
+/// test meaningful.
 #[must_use]
-pub fn scan_and_audit(root: &Path) -> Audit {
+pub fn scan_source(file: &str, text: &str) -> SourceScan {
+    scan_source_in(&crate_scope(), file, text)
+}
+
+/// Scan every production `.rs` under `root` against an explicit scope and
+/// allow-list.
+///
+/// `root` is the directory the reported paths are relative to, so a host
+/// crate passes its own source root and gets host-relative findings. The
+/// allow-list is passed in rather than read from a global for the same
+/// reason the scope is: the entries belong to whoever owns the tree, and
+/// the staleness check below has to run against *that* list.
+#[must_use]
+pub fn scan_tree(root: &Path, scope: &Scope<'_>, allow: &[AllowEntry]) -> Audit {
     let mut audit = Audit::default();
 
     for path in source_files(root) {
@@ -648,14 +724,14 @@ pub fn scan_and_audit(root: &Path) -> Audit {
         }
 
         audit.stats.files_scanned += 1;
-        if rel == COLOUR_DEFINITION_FILE {
+        if rel == scope.colour_definition_file {
             audit.stats.rule_a_files += 1;
         }
-        if in_visual_scope(&rel) {
+        if in_scope(&rel, scope.visual_scope_prefixes) {
             audit.stats.rule_b_files += 1;
         }
 
-        let scan = scan_source(&rel, &text);
+        let scan = scan_source_in(scope, &rel, &text);
         audit.stats.token_layer_colour_definitions += scan.token_layer_colour_definitions;
         audit.stats.token_bound += scan.token_bound;
         audit.stats.zero += scan.zero;
@@ -663,14 +739,14 @@ pub fn scan_and_audit(root: &Path) -> Audit {
         audit.stats.surface_bound += scan.surface_bound;
 
         for finding in scan.findings {
-            match ALLOW_LIST.iter().find(|e| e.key == finding.key()) {
+            match allow.iter().find(|e| e.key == finding.key()) {
                 Some(entry) => audit.suppressed.push((finding, entry.reason)),
                 None => audit.violations.push(finding),
             }
         }
     }
 
-    audit.stale_allow_entries = ALLOW_LIST
+    audit.stale_allow_entries = allow
         .iter()
         .map(|e| e.key)
         .filter(|key| {
@@ -682,6 +758,12 @@ pub fn scan_and_audit(root: &Path) -> Audit {
         .collect();
 
     audit
+}
+
+/// Scan every production `.rs` under `root` and apply the allow-list.
+#[must_use]
+pub fn scan_and_audit(root: &Path) -> Audit {
+    scan_tree(root, &crate_scope(), ALLOW_LIST)
 }
 
 /// The crate root, resolved from the manifest directory.
@@ -699,11 +781,23 @@ pub fn audit_crate() -> Audit {
 /// Render the audit as a plain-text report.
 #[must_use]
 pub fn render(audit: &Audit) -> String {
+    render_scoped("iced-pro", COLOUR_DEFINITION_FILE, audit)
+}
+
+/// Render the audit under a caller-supplied label and colour-owner name.
+///
+/// Same report, different tree: a host crate's gate needs its own header
+/// and its own colour-definition filename without copying the report
+/// builder and drifting from it.
+#[must_use]
+pub fn render_scoped(label: &str, colour_file: &str, audit: &Audit) -> String {
     let mut out = String::new();
-    out.push_str("iced-pro — token discipline scan (UIF-PRIN-001 / UIF-VER-001)\n");
+    out.push_str(&format!(
+        "{label} — token discipline scan (UIF-PRIN-001 / UIF-VER-001)\n"
+    ));
     out.push_str(&format!("files scanned: {}\n", audit.stats.files_scanned));
     out.push_str(&format!(
-        "colour definitions in token/color.rs: {}\n",
+        "colour definitions in {colour_file}: {}\n",
         audit.stats.token_layer_colour_definitions
     ));
     out.push_str(&format!(
@@ -789,10 +883,16 @@ pub fn is_test_file(file: &str) -> bool {
     file.ends_with("_tests.rs") || file.ends_with("test_helpers.rs") || file.starts_with("tests/")
 }
 
-/// Whether Rule B inspects this file.
+/// Whether Rule B inspects this file under iced-pro's own visual scope.
 #[must_use]
 pub fn in_visual_scope(file: &str) -> bool {
-    VISUAL_SCOPE_DIRS.iter().any(|dir| file.starts_with(dir))
+    in_scope(file, &VISUAL_SCOPE_DIRS)
+}
+
+/// Whether a path falls under any of a scope's visual prefixes.
+#[must_use]
+pub fn in_scope(file: &str, prefixes: &[&str]) -> bool {
+    prefixes.iter().any(|dir| file.starts_with(dir))
 }
 
 /// Whether a constant name marks it as a visual measurement.
@@ -927,8 +1027,13 @@ fn parse_f32_const<'a>(trimmed: &'a str) -> Option<Decl<'a>> {
     Some(Decl { is_pub, name, expr })
 }
 
-/// Classify one visual scalar constant.
-fn classify_scalar(file: &str, c: &F32Const<'_>) -> ScalarClass {
+/// Classify one visual scalar constant against a scope's registry.
+///
+/// The four non-violating classes are the ones the spec itself draws (see
+/// the module header); the registry consulted is the scope's, so a host
+/// crate registers *its own* fixed bounds rather than borrowing iced-pro's
+/// §-references.
+fn classify_scalar(scope: &Scope<'_>, file: &str, c: &F32Const<'_>) -> ScalarClass {
     let literals = numeric_literals(&c.expr);
     if literals.is_empty() {
         return ScalarClass::TokenBound;
@@ -939,7 +1044,7 @@ fn classify_scalar(file: &str, c: &F32Const<'_>) -> ScalarClass {
     if literals.iter().all(|v| *v > 0.0 && *v < 1.0) {
         return ScalarClass::Ratio;
     }
-    if surface_geometry(file, c.name).is_some() {
+    if lookup_geometry(scope.surface_geometry, file, c.name).is_some() {
         return ScalarClass::SurfaceBound;
     }
     ScalarClass::Violation

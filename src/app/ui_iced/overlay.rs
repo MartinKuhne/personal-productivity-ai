@@ -126,25 +126,26 @@
 mod tests;
 
 use iced::widget::{
-    Container, MouseArea, Row, button, container, mouse_area, rule, space, stack, text,
+    Container, MouseArea, Row, Space, button, container, mouse_area, rule, stack, text,
 };
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 use iced_pro::surface::modal::ModalFrame;
 use iced_pro::surface::movable::MovableGeometry;
 use iced_pro::token::shape;
+use iced_pro::token::space;
 
 use crate::ui::strings;
 use crate::ui_iced::theme::scrim_color;
 
-/// Padding inside a modal dialog card.
-pub const MODAL_PADDING: f32 = 16.0;
+/// Padding inside a modal dialog card — `space.lg` (`UIF-TOK-001`).
+pub const MODAL_PADDING: f32 = space::LG;
 
-/// Width of the card border.
-pub const CARD_BORDER_WIDTH: f32 = 1.0;
+/// Width of the card border — `shape.border.hairline` (`UIF-TOK-003`).
+pub const CARD_BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
 
-/// Corner radius of the card border.
-pub const CARD_RADIUS: f32 = 4.0;
+/// Corner radius of the card border — `shape.radius.widget` (`UIF-TOK-003`).
+pub const CARD_RADIUS: f32 = shape::RADIUS_WIDGET;
 
 /// Horizontal gap between the confirm and cancel buttons.
 pub const CONFIRM_CANCEL_SPACING: f32 = 8.0;
@@ -380,8 +381,8 @@ where
 }
 
 /// A `Space` stretched to fill its parent.
-fn full_area() -> space::Space {
-    space::Space::new().width(Length::Fill).height(Length::Fill)
+fn full_area() -> Space {
+    Space::new().width(Length::Fill).height(Length::Fill)
 }
 
 /// Paints the scrim ([`scrim_color`]) over its whole bounds.

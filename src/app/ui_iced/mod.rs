@@ -164,6 +164,9 @@ pub mod test_helpers;
 pub mod theme;
 #[cfg(test)]
 pub mod token_guard_tests;
+pub mod token_lint_gate;
+#[cfg(test)]
+pub mod token_lint_gate_tests;
 pub mod tools_dialog;
 pub mod update;
 pub mod view;
