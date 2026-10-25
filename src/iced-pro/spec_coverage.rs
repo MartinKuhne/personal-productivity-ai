@@ -77,7 +77,11 @@ use std::fmt::Write as _;
 /// has explicitly deferred (`UIF-ATOM-005b`, `010`–`013`,
 /// `UIF-COMP-009`–`015`) and one new gate (`UIF-VER-005`). Every one of
 /// them is classified below; none is `Implemented`, because none is built.
-pub const EXPECTED_SPEC_ID_COUNT: usize = 90;
+/// The spec carries 91 numbered `UIF-*` ids.
+///
+/// It carried 90 until commit `edbe04a` added `UIF-MOD-004` (scrollable
+/// sub-region height solving) alongside the existing three modal contracts.
+pub const EXPECTED_SPEC_ID_COUNT: usize = 91;
 
 /// Where one `UIF-*` requirement stands against this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2990,6 +2994,28 @@ const SPEC_COVERAGE: &[Coverage] = &[
              affordance (`retry_pending` / `take_retry`); only `set_error` and \
              `clear_error` can write the banner, so 'clicking elsewhere must not clear \
              the error' is a non-event.",
+        ),
+    },
+    Coverage {
+        id: "UIF-MOD-004",
+        status: Status::Partial,
+        section: "§4.6.2",
+        evidence: &["surface/modal.rs"],
+        reason: Some(
+            "Missing a sub-region solver. `ModalSizing::solve` produces the CARD's \
+             bounds from the viewport; nothing here computes \
+             `subregion_max_h = modal_height - (header_band + 2 * body_padding + \
+             footer_band)` from the solved card, and `ATTRIBUTIONS_LIST_MAX_H = 200` \
+             is not defined in the token set.",
+        ),
+        note: Some(
+            "The named failure mode is nonetheless absent, and by a better mechanism \
+             than the spec asks for: the host sizes the credits list `Length::Fill`, \
+             a remainder, so it structurally cannot borrow the card's outer 480px \
+             constant or overflow past the header and footer bands. What is missing \
+             is the positive ask — the solver, and the named cap that would hold the \
+             list at 200 rather than the ~330px a Fill remainder leaves in a 480px \
+             card.",
         ),
     },
     // --- §4.7 Movable Overlay Dialogs --------------------------------------

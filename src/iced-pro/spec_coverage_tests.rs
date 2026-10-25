@@ -27,16 +27,17 @@ use crate::spec_coverage::{
 
 /// The spec file, resolved from the crate directory.
 ///
-/// `CARGO_MANIFEST_DIR` is `src/iced-pro`, so the repo root is two levels
-/// up. The file is read-only and in-repo — no user path is touched
-/// (RUST-006).
+/// The spec lives **inside** this crate as `spec.md`, so it resolves with no
+/// traversal at all. That is a change of state, not a preference: the spec
+/// used to sit at `doc/planning/ui-framework.md` and be read from two
+/// directories up, and commit `edbe04a` moved it here. Nothing else in the
+/// crate was repointed at the time, which is why this function is the only
+/// functional breakage that move caused.
+///
+/// The file is read-only as far as this crate is concerned and in-repo — no
+/// user path is touched (RUST-006).
 fn spec_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("doc")
-        .join("planning")
-        .join("ui-framework.md")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec.md")
 }
 
 fn spec_text() -> String {
