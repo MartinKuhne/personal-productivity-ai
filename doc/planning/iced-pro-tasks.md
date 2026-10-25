@@ -1411,9 +1411,20 @@ against the spec for all four targets, separator placement including never
 leading or trailing, destructive-group isolation, row-key uniqueness and
 route coverage, root-id stability, anchor flips, and row-grid contiguity.
 
-**Framework gap found:** `MenuRow` reports only `Activated`/`Absorbed`. It
-cannot drive hover or aim, so B-3's `AimCorridor` is **not consumable from
-the row widget**. This gates submenu aim behaviour and is still open.
+**Framework gap found — FALSE, and it kept the aiming corridor unwired
+until INT-9.** What this record asserted was that `MenuRow` reports only
+`Activated`/`Absorbed`, cannot drive hover or aim, and that B-3's
+`AimCorridor` is therefore **not consumable from the row widget**. INT-9
+disproved it two ways. First, iced 0.14.2's `mouse_area` has `on_enter`
+(`iced_widget-0.14.2/src/mouse_area.rs:106`), `on_move(Point)` (`:113`)
+and `on_exit` (`:120`) — hover entry/exit and pointer coordinates are
+plainly available. Second, and decisively, `MenuRow` **already recorded
+hover**: `surface/menu/view.rs:1652-1667` sets `state.hovered =
+cursor.is_over(layout.bounds())` on every event, under a comment saying
+the widget reports raw observations and `resolve` judges them. The row
+knew where the pointer was the whole time; `RowEvent` simply had no
+variant to say so. The gap was one missing enum pair, not a missing
+capability. Consumed in INT-9.
 
 ### INT-4 — Input dialogs on the framework dialog surface
 
@@ -1765,15 +1776,29 @@ its content because iced's relative line height was doing the arithmetic
 at ~51.2px inside); search glyphs 14 → 16 (they tracked `ROW_TEXT_SIZE`,
 which moved to 13, and a 13pt icon is not on the icon scale).
 
-**`tree_row` adopted for geometry and paint, blocked for rendering** —
-framework gaps, not wiring misses: no `Element`-producing widget (it
-resolves `TreeRowSlots`/`TreeRowStyle`/`Layer` rectangles and only the
-gallery's canvas turns those into pixels); hover/pressed tiers
-unreachable because iced 0.14's `mouse_area` never reports hover into a
-container style, so only `Rest` and `Selected` resolve; the 2px selection
-bar and depth guide lines are `Layer` rectangles needing a stack per row;
-and the `[PDF]` badge §4.3.2 uses to carry meaning through the selection
-lock does not exist.
+**`tree_row` adopted for geometry and paint, blocked for rendering** — of
+the four gaps named here, **two were real and two were false**, and both of
+the false ones have since been built.
+
+* **Still true:** `tree_row` produces no `Element` — it resolves
+  `TreeRowSlots`/`TreeRowStyle`/`Layer` rectangles and only the gallery's
+  canvas turns those into pixels. And the `[PDF]` badge §4.3.2 uses to
+  carry meaning through the selection lock still does not exist.
+* **FALSE — the hover tier (and with it the pressed tier).** As written,
+  "hover/pressed tiers unreachable because iced 0.14's `mouse_area` never
+  reports hover into a container style, so only `Rest` and `Selected`
+  resolve." That is true only of *automatic* style propagation, which is
+  not the mechanism. INT-10 captures `on_enter`/`on_exit` on the row's
+  existing context-menu `mouse_area` and hands `BaseState::Hovered` to
+  `resolve_style` itself; tree rows highlight on hover as of INT-10. The
+  `Pressed` tier is feasible on the same area — `on_press` (`:38`) pairs
+  with `on_release` (`:45`) — and is deliberately unbuilt as a design call,
+  not a primitive gap. See INT-10.
+* **FALSE — the selection bar and depth guides.** As written, "the 2px
+  selection bar and depth guide lines are `Layer` rectangles needing a
+  stack per row", carried as if needing a stack made them impossible. A
+  stack per row is exactly what INT-11 built, and it is skipped entirely
+  at depth 0. Built.
 
 **The increment plan's description of `right.rs` was wrong** — it contains
 no tab strip, only `should_show_panel`, `resolve_anchor` and two ToC
@@ -1830,13 +1855,23 @@ Render layer: heading ladder 32/24/18/14/12 → 24/20/16/14/12;
 18 → 20 = `BODY.line_height`; `INDENT_UNIT` 20 → 16 so document and tree
 nest the same distance as `tree_row::INDENT_STEP`.
 
-**Spec conflict resolved rather than papered over:** §4.4.1's 6px
-`size.indicator.dot` **cannot be honoured** — the marker is painted with a
-font glyph and §2.4 is absolute that no text renders below 12px. Taking
-the token literally meant either breaking the floor or exempting one call
-site and gutting the guard. The dot is pinned at `MIN_SIZE` 12 with
-`assert_ne!` against `INDICATOR_DOT` so the gap is noticed if it ever
-closes by accident rather than by decision.
+**Spec conflict "resolved" here — the premise was false and INT-11 closed
+it for real.** What this record asserted: §4.4.1's 6px
+`size.indicator.dot` **cannot be honoured**, because the marker is painted
+with a font glyph and §2.4 is absolute that no text renders below 12px, so
+the dot is pinned at `MIN_SIZE` 12 with `assert_ne!` against
+`INDICATOR_DOT`. The conflict was real only while a 6px *shape* was
+believed unavailable. It is available — `Space` with a styled border, 6×6,
+radius clamped to a circle. `UNSAVED_DOT_SIZE` now equals
+`size::INDICATOR_DOT` (`center.rs:338`), the `MIN_SIZE` workaround is
+retired, and so is the `assert_ne!`, which existed only to record a
+conflict that no longer exists. Critically, the floor guard keeps its teeth
+**by scope rather than by exemption**: `UNSAVED_DOT_SIZE` was removed from
+`converted_runtime_sizes()` (`token_guard_tests.rs:362`), the list of
+sizes the interface can render *as type*, so
+`nothing_in_the_converted_surfaces_renders_below_the_type_floor` and
+`every_converted_type_size_sits_on_a_rung` still mean exactly what they
+said — a 6pt font still fails them. No call site was exempted. See INT-11.
 
 Also: framework `Button` has **no `.width()` builder** (verified across its
 21 `pub fn`s), so the thinking-block disclosure header, which must
@@ -1926,11 +1961,383 @@ over-trusted.
 
 Tests: 7941 → 7957 (+16).
 
+### INT-9 — The submenu aiming corridor is consumed
+
+`c1f89fb`. Delivers `UIF-PRIN-008` / `UIF-FMENU-002` — the 150 ms
+diagonal aiming grace window — in the running application. The framework
+built the corridor back in B-3 and nothing could consume it, because this
+ledger's INT-3b record said the row widget could not report hover. It
+could; see the correction recorded there.
+
+**Framework: `RowEvent` gains `Hovered` and `Unhovered`.** `MenuRow` reads
+the previous `state.hovered` *before* the overwrite and publishes only on a
+`false → true` or `true → false` edge — never level-triggered, because the
+widget tree rebuilds constantly and a level-triggered report would flood
+the reducer every frame. Reported uniformly for all six row kinds, matching
+the philosophy already written into that code. Paint, press, capture,
+`Activated`, `Absorbed` and `mouse_interaction` are untouched.
+
+**Three premise corrections found by reading rather than assuming.**
+
+1. **iced 0.14 has no `Task::later`** — zero `later`/`delayed`/`after`
+   constructors in iced's `task.rs`. The replacement timer,
+   `iced::time::every`, lives in
+   `iced_futures::backend::native::{tokio,smol}::time`, and this app runs
+   the default thread-pool backend, whose `time` module is *literally*
+   empty: `iced_futures-0.14.0/src/backend/native/thread_pool.rs:20` is a
+   module declaration with nothing in it. So the wake-up sleeps on the
+   worker the task already runs on — at most one sleep per hover crossing,
+   each bounded by `grace_ms` (150 ms), on a pool sized to the CPU count,
+   and never on the UI thread, which is what `FMD-060`/`FMD-061` actually
+   require. A wake that arrives after its reason has gone is inert because
+   `on_deadline` re-reads the corridor.
+2. **`hover_submenu_row` already calls `aim.branch_opened` /
+   `branch_closed` itself** (`cascade.rs:802-808`). The app does not,
+   because that would be a second owner of the same fact.
+3. **Three existing framework tests could not pass literally unchanged.**
+   A press event carries the cursor into the row, so the hover edge
+   necessarily lands on that frame. Expected vectors updated only;
+   activation semantics unchanged and still pinned.
+
+**The app driver is `menu_aim.rs`, pure with respect to time:** every entry
+point takes `now: TimeMs`, so the 150 ms window is verified by arithmetic
+rather than by sleeping and cannot be flaky on a loaded machine.
+`TimeMs::now()` is called in the reducer, never in a resolver — the exit
+§2.6 was written for. The app had no time source at all before this: no
+`TimeMs`, no timer, no clock.
+
+**Three rules.** *Only a submenu parent opens anything.* *A pointer leaving
+never dismisses* — the corridor answers `Collapse` when the pointer is
+outside everything, and that answer is dropped, because dismissal belongs
+to the click-away blocker `menu_surface::overlay` mounts. `pointer_left_card`
+says the same about itself in the same words: a corridor that closed
+surfaces on its own would give one menu two owners. Without this rule every
+menu in the app would shut when the mouse swept past it. *A held switch
+must mature without another event* — iced is event-driven, the corridor is
+not, so `wake_task` is what stops a `Hold` waiting on a mouse jiggle that
+may never come.
+
+**A spec drift was flagged rather than fixed, and the spec was taken.**
+§4.8.2 (`ui-framework.md:1421`) requires that moving to a sibling row on
+an ancestor card retires the deeper child branch after the corridor check.
+The first cut left it unimplemented and flagged it as a judgement call. The
+distinction that makes the rule safe — and that the first cut's hesitation
+was conflating — is that **retiring a BRANCH is not dismissing the MENU**.
+Rule two still forbids the hover path from dismissing: the root card stays
+up and click-away still owns closing it. What goes is the child card the
+pointer walked away from, which is precisely what the corridor was built to
+time.
+
+Two things make the rule precise that a naive reading gets wrong, both
+found because existing tests caught them. **The ancestor-card qualifier is
+load-bearing:** a row *below* the root is inside the branch the user is
+aiming at, so retiring on that makes arriving at the target be what closes
+it — the exact opposite of the diagonal manoeuvre the corridor exists to
+serve. The first cut of the fix did exactly that and
+`test_the_pointer_inside_the_open_child_branch_preserves_the_branch`
+failed; the retire now keys off `target_for`, which already draws that
+line, rather than re-deriving depth. And **the retire drains to the root**
+rather than closing one level, so the rule stays honest if a deeper menu
+ever appears, and it clears the corridor unconditionally on a real retire —
+a guard left pointing at a row whose branch is gone is the stale-guard
+failure `guard_is_live` exists to catch, and here it would have been caught
+one hover late.
+
+**Still open: one corridor, one level.** The corridor tracks a single parent
+card's trigger rows by index, so the root card is the parent and everything
+below is `ChildBranch`. Correct for the hamburger, which nests one level
+deep. A two-level menu needs one corridor per parent card — a shape change,
+not a constant. Documented in the module header.
+
+Tests: 7957 → 7992 (+35). `view_tests` +6 — hover edge fires exactly
+once, repeats are silent, re-entry re-reports, all six row kinds, hover
+does not disturb activation, `Cursor::Unavailable` reads as leaving.
+`menu_aim` sidecar +21 — holds before 150 ms, holds at grace − 1, matures
+at grace, an early wake re-arms rather than being lost, `Preserve` on the
+trigger's own row, `ChildBranch` preserves, stale guard cleared,
+non-submenu opens nothing, pointer-out closes nothing, a closed tree owes no
+wake; plus five new retire tests — crossing to a plain sibling holds before
+retiring, the crossing retires once the window elapses and stops at the
+root, retiring with nothing open is a no-op, a retire leaves the menu open
+so dismissal stays with click-away, and a retire frees the corridor so the
+next crossing is not held. `update_tests` +8 — hover opens without a click
+and publishes no command, a held switch owes a wake proved by a `+1`
+task-unit delta against a `Preserve` control, the held switch completes on
+the real clock, pointer-out never dismisses, a late wake cannot resurrect a
+closed menu, the hamburger button is still click-to-open and hover cannot
+open it from closed, reopening clears a stale guard.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **7992 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
+lines**. Pins: iced-pro `PIN_FILES_SCANNED` 152 / `PIN_RULE_B_FILES` 81
+unchanged — no new files under `widget/`, `surface/` or `composite/`; the
+app-crate gate needed bumping, `PIN_APP_FILES_SCANNED` 157 → 158 and
+`PIN_APP_RULE_B_FILES` 44 → 45, from `menu_aim.rs`. Token-bound and
+surface-bound counts did not move; the module declares no visual scalar.
+
+### INT-10 — Tree rows highlight on pointer hover
+
+`f1e442b`. The file tree's hover tier existed in code and was
+unreachable. Now it is reached, and the reason it was believed impossible
+is corrected.
+
+**Verified broken before building, not assumed.** Traced end to end first,
+with four independent confirmations: `row_paint` hardcoded
+`BaseState::Rest`, the only `BaseState` the panel ever passed to
+`tree_row::resolve_style`; the style closure painted a background only when
+selected, so even a hover-resolved style would not have been drawn;
+`context_menu_trigger` built `mouse_area(content).on_right_press(..)` with
+no `on_enter`/`on_exit`; and a grep for `on_enter`/`on_exit`/`on_hover`
+across `src/app` returned zero hits in the entire app crate. The
+`Status::Hovered => BaseState::Hovered` mapping cited as evidence that a
+hover tier existed is real but belongs to the wrong component — it is
+`search_field_style`, the search `text_input`, driven by iced's own
+`text_input::Status`. A hover tier existed; it just was not the tree's.
+
+**Mechanism.** `mouse_area` `on_enter`/`on_exit` on the row's existing
+context-menu trigger (`overlay.rs:624`) → `TreeMessage::RowEntered{path}` /
+`RowLeft{path}` → `OverlayState::hovered_tree_row` →
+`LeftPanelViewModel::hovered_row` → `row_paint(selected, hovered)` →
+`BaseState::Hovered` → `color.surface.hover`. Edge-triggering is provided
+by iced rather than hand-rolled, which makes this simpler than INT-9:
+`mouse_area` publishes `on_enter` only on `is_hovered && !was_hovered` and
+`on_exit` only on the inverse, and skips the check entirely when neither
+the cursor nor its own bounds moved (`mouse_area.rs:349-366`). INT-9
+needed a manual previous-value capture because `MenuRow` drives its own
+state machine; here the app receives already-clean transitions.
+
+**Two details that turned out load-bearing.** `RowLeft` carries the path so
+the clear is conditional: both crossings of a row-to-row move publish in
+one iced pass in tree order, so moving the pointer *upward* delivers the
+lower row's `RowEntered` before the upper row's `RowLeft` — a bare clear
+would wipe the new highlight the tick it appeared
+(`leaving_a_different_row_cannot_wipe_the_highlight_that_just_arrived`).
+And a prune for rows that stop existing: a deleted or filtered row's
+`mouse_area` is gone before it can say goodbye, so `prune_hovered_row`
+runs in the frame tail after the tree cache refresh.
+
+**A contradiction with the brief, and it mattered: the live tree is NOT
+virtualized.** `left.rs:1266-1273` folds every `FlatRow` into a plain
+`Column` inside a `scrollable`; every row is constructed every frame, and
+`virtual_list` appears nowhere in the app crate outside a doc-comment
+inventory. Classic slot recycling does not occur. The real risk is
+re-ordering under expand/collapse, filter and watcher refresh, and keying on
+`path` handles it — which matters precisely because iced 0.14 reconciles
+widget `Tree`s by position, not by explicit `Id`
+(`iced_core-0.14.0/src/widget/tree.rs:86-107`), so an explicit `.id()`
+cannot make hover follow a file. `row_is_hovered` refuses to consider
+position at all.
+
+**One honest residual, and it fails the right way.** If a *different* file
+lands at byte-identical bounds under a stationary pointer, iced skips
+re-evaluation and never fires `RowEntered` for the new file. The old file's
+own `mouse_area` does re-evaluate, because its bounds moved, and fires
+`RowLeft`, so state self-corrects to nothing highlighted. The worst case is
+a *missing* highlight until the pointer moves — never a highlight on the
+wrong file.
+
+**Contrast computed from raw sRGB, not transcribed.** `text_primary` on
+`surface_hover` `RGB(32,32,36)` measures **10.7380:1** against the 4.5
+floor; the worst case, `status_danger_text` on `surface_hover`,
+**5.3633:1**; `text_strong` on `surface_hover` **16.2351:1**; resting
+baseline `text_primary` on `surface_base` **13.1590:1**. The §3B.6
+contrast lock is a *computed no-op* on hover rather than an absence of
+handling: `fill_lock_role(surface_hover)` is `Unlocked` — it is not one of
+the four locked solid fills — so `locked_over` returns the candidate
+untouched and the PDF error tint survives the pointer. That role is
+asserted directly rather than inferred. Selection still outranks the
+pointer: a selected-and-hovered row keeps `accent_fill` and locks to
+`text_strong`.
+
+**The `Pressed` tier: a false claim corrected before commit.** The first
+cut recorded it as "genuinely blocked" because `mouse_area` supposedly
+"offers no matching release callback, so a pressed band would be set and
+never cleared". That is false — `mouse_area` pairs `on_press`
+(`mouse_area.rs:38`) with `on_release` (`:45`). The tier is **feasible and
+deliberately unbuilt**, because a press-reactive row changes the panel's
+primary affordance and that is a design call rather than a missing
+primitive. Committing the original wording would have left a false gap in
+the code for the next person to inherit.
+
+**Part C — the other "impossible because iced can't" claims audited, none
+built in this increment.** The tab-strip 2px top accent indicator: wrong,
+same fallacy — needs neither a hover-reporting row nor a canvas. The 6px
+unsaved dot: half right — the glyph reasoning is sound, but "needs a
+canvas" is not. The tree 2px selection bar and depth guides: overstated —
+the stack-per-row is feasible. The strip's 1px `border.subtle` bottom rule:
+**largely correct, and it is not a hover claim** — the blocker is the 36px
+height budget, a real arithmetic constraint. `widget::toggle`
+"resolver-only" is not an iced limitation at all; the module itself says it
+was out of scope, so a real `Element` producer is feasible by this same
+pattern — a gap in framework coverage, not capability. Canvas specifically
+*is* genuinely unavailable (`iced/canvas` is not in the app's feature
+list), but none of the three pending indicators need it. All three were
+built in INT-11 except the bottom rule.
+
+Tests: 7992 → 8009 (+17) — 8 in `left_tests`, 9 in `update_tests`; the
+baseline was measured in a throwaway worktree rather than taken on trust.
+Both Logs `Esc` pins re-verified unchanged.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8009 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
+lines**. No new files under iced-pro or `src/app`, so 152/81 and 158/45
+are untouched.
+
+**Process incident.** The first attempt to append test blocks used
+PowerShell `Add-Content -Encoding utf8`, which double-encoded whole files
+— em-dashes became mojibake and a reverse-transform then destroyed
+box-drawing characters in `update_tests.rs`. Both files were restored from
+HEAD and re-applied with the `edit` tool, then verified free of `U+FFFD`
+with clean, distinct non-ASCII. Appending code with a shell encoding
+switch is not a shortcut; it corrupts at a distance.
+
+### INT-11 — The three indicators previously declared impossible
+
+`18b5d16`. All three pieces landed. INT-7b and INT-7c had written these
+off as needing a canvas painter that does not exist; INT-10's Part C audit
+proved that wrong and this builds on it.
+
+**Piece 1 — the 6px unsaved dot: the §4.4.1 conflict is closed, not
+re-worked-around.** INT-7c had to *violate* §4.4.1 to land this marker,
+pinning it at `MIN_SIZE` 12 with an `assert_ne!` against `INDICATOR_DOT`
+on the reasoning that taking the token literally meant either breaking the
+12px floor or exempting one call site and gutting the guard. That was a
+real conflict only because a 6px *shape* was believed unavailable.
+`UNSAVED_DOT_SIZE` moves `MIN_SIZE` (12) → `size::INDICATOR_DOT` (6)
+(`center.rs:338`); the floor workaround is retired and so is the
+`assert_ne!`, which existed only to record a conflict that no longer
+exists. The floor guard keeps its teeth **by scope rather than by
+exemption** — `UNSAVED_DOT_SIZE` is removed from
+`converted_runtime_sizes()` (`token_guard_tests.rs:362`), the list of
+sizes the interface can render *as type*, so a 6pt font still fails
+`nothing_in_the_converted_surfaces_renders_below_the_type_floor`. No call
+site was exempted.
+
+**Piece 2 — the 2px top accent indicator fits as a zero-layout overlay.**
+`TAB_INDICATOR_HEIGHT = shape::BORDER_FOCUS` (2) (`center.rs:361`), a
+`Stack` per tab: base is the existing mouse-area-wrapped tab, overlay is a
+full-width 2px `container`. The bar consumes no layout, so the pinned band
+arithmetic is untouched — `STRIP_HEIGHT 36 = STRIP_PADDING 4 + TAB_HEIGHT
+28 + STRIP_PADDING 4`, unchanged; `TAB_INDICATOR_HEIGHT 2 <= TAB_PADDING_Y
+2`, an exact fit; the bar occupies `y ∈ [0,2]` and the tab content box
+starts at `y = 2`, so it cannot reach the label. The `36 > 30`
+content-floor pin holds. Inactive tabs resolve to `None` rather than a
+transparent bar, so no partial or leftover indicator is reachable.
+
+**Piece 3 — tree selection bar and depth guides.** `row_guide_offsets`
+(`left.rs:1495`), `RowStripe` (`:1506`), `RowOverlay` (`:1523`),
+`row_overlay` (`:1571`), `stripe_element` (`:1599`). Colours come straight
+off `row_paint()`'s already-resolved `TreeRowStyle::selection_bar` and
+`::guide` — nothing re-decides them. Bar width is
+`tree_row::SELECTION_BAR_WIDTH` as-is (`tree_row.rs:165`) rather than a
+minted parallel constant; guide width is a new `tree_row::GUIDE_WIDTH`
+(`:174`) that `row_slots` now reads too (`:354`), so app and composite
+share one source. `guide_positions` (`:287`) was made `pub` for this.
+
+**Threshold determination: `MIN_CHROME_CONTRAST` 3.00:1 applies, not
+4.5.** The dot is a graphical object whose shape carries the state, not
+readable text — `UIF-TOK-006` rule 3 / WCAG 1.4.11. §2.4's floor is
+explicitly about text and never reaches a box. Both live pairings clear
+3.00 by a wide margin *and* clear 4.5, so the choice of floor changes no
+verdict — which is what should be true of a genuinely resolved conflict. On
+the active tab the question is moot anyway: rule four's role lock forces
+`text.strong` regardless of measurement. The INT-7c win over the old
+1.65:1 survives the shape change.
+
+**Contrast recomputed from raw sRGB — all seven figures re-derived
+independently, each matching the reported value to six decimal places.**
+`text_strong`/`accent_fill` **4.8020:1** (active dot, selected bar and
+guide — role-locked); `status_warning`/`surface_base` **6.8555:1**
+(inactive dot); the retired `status_warning`/`accent_fill` pairing
+**1.6547:1**, now pinned illegal; guide `border_strong`/`surface_base`
+**4.5062:1**; the worst case, guide `border_strong`/`surface_hover`,
+**3.6772:1**; and the two figures that explain why the stripes lock by
+role rather than by measurement — `border_strong`/`accent_fill`
+**1.0876:1** and `accent_border`/`accent_fill` **1.6098:1**. Every live
+pairing clears the 3.00:1 chrome floor, and the §3B.6 lock holds at every
+depth × posture.
+
+**Per-frame cost reported honestly and pinned** (`RowOverlay::widget_cost`,
+`left.rs:1546`): depth 0 unselected costs **0** — the `Stack` is skipped
+entirely. Depth `d` unselected costs `1 + 2d`; depth `d` selected costs
+`2 + 2d`. Against a ~3-widget baseline row, a depth-2 selected row goes 3 →
+9. The tree is not virtualized, so this is paid per visible row per frame.
+The two-per-guide cost is forced: iced's `Stack` lays every child at its own
+top-left origin with no per-child alignment
+(`iced_widget-0.14.2/src/stack.rs:193-205`) and `Container` has no
+`margin`. A uniform-pitch `Row` would save N − 1 widgets per row; the
+obviously-correct per-stripe wrapper was chosen over a layout that could
+drift from the geometry.
+
+**How INT-10's hover survived a stack.** The stripes are *siblings* of the
+row's `mouse_area` in the `Stack`, not children of it. iced dispatches
+events without occlusion culling and a plain `container` has no event
+override, so enter/exit/press/double-click/right-press all still land on
+the area underneath. Every INT-10 hover test passes unchanged — hover
+highlight, the path-keyed recycling matrix, the conditional `RowLeft`
+clear, the prune, idempotent re-entry. Both Logs `Esc` pins re-verified.
+
+**Corrections to the brief.** `container().width(6).height(6)
+.border_radius(3)` is not literally valid in iced 0.14 — there is no
+`iced::widget::empty` and no `Container::border_radius`. Radius lives on
+`container::Style.border.radius`, and `draw_background` passes that whole
+`Border` to the fill quad (`iced_widget-0.14.2/src/container.rs:446`), so
+the fill rounds even at `width: 0.0`; `Space` is the empty child.
+`border_radius(3)` would also have been a bare literal that Rule B reads as
+a `*_RADIUS` declaration, so `shape::RADIUS_PILL` (999) was used instead
+— iced clamps every corner to `min(w,h)/2`
+(`iced_graphics-0.14.0/src/geometry/path/builder.rs:173`), which over a
+6px box is 3. Identical render, fully token-driven, no violation. And
+**§4.4.1 slot 1 has three states, not active-only**: the spec also requires
+`border.strong` on a hovered *inactive* tab. Built active-only per brief;
+the hovered state is flagged as unbuilt rather than silently added or
+silently dropped, because it needs the tab strip to report hover into the
+reducer — new interaction plumbing outside this piece.
+
+**Pins resisted.** `STRIP_HEIGHT` 36 and `TAB_HEIGHT` 28 were not
+re-derived to make room, because the overlay made room unnecessary.
+`MIN_SIZE` 12 was neither lowered nor exempted. `MIN_CHROME_CONTRAST` 3.0
+and `MIN_TEXT_CONTRAST` 4.5 untouched. `SELECTION_BAR_WIDTH` used as-is.
+Guides clamp to the existing `MAX_ROW_INDENT_DEPTH` (`left.rs:272`) rather
+than a new cap. The only pin removed is the `assert_ne!` that recorded the
+now-closed conflict. Pin *counts* moved as counts, not values: iced-pro
+`PIN_TOKEN_BOUND` 192 → 193 (`tree_row::GUIDE_WIDTH`), app
+`PIN_APP_TOKEN_BOUND` 89 → 91 (`UNSAVED_DOT_RADIUS`,
+`TAB_INDICATOR_HEIGHT`); `PIN_APP_FILES_SCANNED` 158 and
+`PIN_RULE_B_FILES` 81 unchanged — no new files.
+
+**Still open.** Tab-strip hover reporting for the indicator's third state.
+The strip's 1px `border.subtle` bottom rule, genuinely blocked by the 36px
+budget rather than a missing layer — a bottom-only hairline needs a
+`rule::horizontal` sibling inside the band. The `[PDF]` badge on tree rows,
+still the missing piece behind the selection lock erasing the `error` tint.
+Width-relative indent compression via `tree_row::indent_geometry`
+(`tree_row.rs:234`) — the app still draws a flat clamped `padding-left`,
+and the new guides read the app's clamped depth, so if compression is
+adopted `row_guide_offsets` must switch to
+`indent_geometry(depth, row_width)`. Tree `Pressed` tier, unbuilt by
+INT-10's stated design decision rather than a primitive gap.
+
+Tests: 8009 → 8022 (+13) — `center_tests` +6 / −1 (the removed test was
+`unsaved_marker_is_the_dot_only_for_dirty_documents`, superseded by the
+shape-based pins), `left_tests` +8, `token_guard` renamed only.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8022 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
+lines**.
+
 ### The INT series — what the integration work established
 
-Nine increments, 7724 → 7957 workspace tests (+233), every gate
-independently re-run at every step with `--workspace` and doc-warning
-lines counted explicitly.
+Sixteen records spanning INT-1 through INT-11; 7724 → 8022 workspace
+tests (+298), every gate independently re-run at every step with
+`--workspace` and doc-warning lines counted explicitly. INT-9 through
+INT-11 alone are 7957 → 8022 (+65).
 
 **One ownership contract emerged and held across every surface.**
 `ModalHost` and `InputDialogHost` self-register into `SurfaceRegistry` and
@@ -1951,14 +2358,43 @@ a trap that iced would ignore.
 multi-row, `composite::search_input`, `bridge::apply_transition` /
 `advance` / `sync`, and `right.rs` as the tab strip. Each was caught by
 verifying against the files before wiring rather than by trusting the
-brief.
+brief. INT-11 added two more of the same kind, this time aimed at iced
+itself rather than at this repo: `iced::widget::empty` and
+`Container::border_radius` do not exist in 0.14, so a snippet written with
+both in it cannot compile.
 
-**Six user-visible defects were found by the integration work that the
+**Nine user-visible defects were found by the integration work that the
 framework's own test suite did not catch** — because the framework tests
 test resolvers, and the defects only appear when something actually paints:
 blank menus (`bb18c2d`), disabled-`Ok` dismissing a dialog, silent loss
 of unsaved editor work, PDF-label 1.59:1, transcript links failing AA on
-every surface, and the dirty dot invisible on the active tab.
+every surface, the dirty dot invisible on the active tab, submenu parents
+that needed a click because the aiming corridor never ran (INT-9), tree
+rows that never highlighted on hover (INT-10), and the unsaved marker
+rendered at 12px against the spec's 6px with neither the tab-strip accent
+bar nor the tree selection bar and depth guides present at all (INT-11).
+
+**The headline of the last three increments: the "impossible" claims were
+the blocking defect, not the missing code.** Four separate capabilities
+were written off as unavailable in iced 0.14 and all four turned out to be
+there — `MenuRow` driving hover and aim (asserted in INT-3b, disproved by
+INT-9), the tree hover tier (asserted in INT-7b, disproved by INT-10), the
+tree `Pressed` tier (asserted in INT-10's first cut, corrected before that
+same commit), and a 6px shape indicator plus a 2px overlay bar said to
+need a canvas painter (asserted in INT-7b and INT-7c, disproved by
+INT-11). The pattern is the same in every case: the claim confused
+*automatic style propagation*, or the absence of a convenience API, with a
+missing primitive. iced does not push hover into a container style on its
+own — nothing stopped the app from capturing the crossing itself and
+passing it in. iced has no `Task::later` — nothing stopped a sleep on the
+worker thread the task already occupied. `Container` has no
+`border_radius` builder — the radius was sitting on the style the whole
+time, and `draw_background` hands that whole `Border` to the fill quad.
+Each false claim was cheaper to repeat than to test, which is exactly why
+one survived months of "blocked" status. That is why the corrections are
+recorded here at the point of original assertion and not only in the
+increment that disproved them: a gap that is stated in the ledger becomes a
+premise the next contributor inherits.
 
 ---
 
