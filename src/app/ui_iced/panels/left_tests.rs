@@ -12,7 +12,7 @@
 //! lookup never touches the real user profile.
 
 use super::*;
-use crate::ui_iced::overlay::menu_labels;
+use crate::ui_iced::context_menu::{ContextGroup, ContextRow};
 use crate::ui_iced::test_helpers::test_app;
 use tempfile::TempDir;
 
@@ -273,34 +273,37 @@ fn double_click_opens_files_and_is_a_no_op_on_directories() {
 
 // --- context menus ----------------------------------------------------
 
+/// The visible labels of a context-row list, in render order.
+fn row_labels(rows: &[ContextRow]) -> Vec<&str> {
+    rows.iter().map(|item| item.label.as_str()).collect()
+}
+
 #[test]
 fn directory_menu_maps_every_row_to_its_user_command() {
     let items = directory_menu_items(Path::new("/lib/Work"), &[]);
     assert_eq!(
-        menu_labels(&items),
+        row_labels(&items),
         vec![
-            strings::SHOW_IN_EXPLORER_ACTION,
-            strings::COPY_PATH_ACTION,
+            strings::NEW_DOCUMENT_ACTION,
+            strings::CREATE_DIRECTORY_ACTION,
             strings::RENAME_ACTION,
             strings::MOVE_ACTION,
-            strings::CREATE_DIRECTORY_ACTION,
-            strings::NEW_DOCUMENT_ACTION,
+            strings::COPY_PATH_ACTION,
+            strings::SHOW_IN_EXPLORER_ACTION,
             strings::DELETE_ACTION,
-        ]
+        ],
+        "INT-3b reordered to §4.9.1's Creation | Folder Automation & \
+         Management | Destructive runs; no label changed"
     );
     assert_eq!(
         items[0].message,
-        Message::Command(UserCommand::ShowInExplorer(PathBuf::from("/lib/Work")))
-    );
-    assert_eq!(
-        items[4].message,
-        Message::Command(UserCommand::CreateDirectory {
+        Message::Command(UserCommand::CreateDocument {
             parent: PathBuf::from("/lib/Work")
         })
     );
     assert_eq!(
-        items[5].message,
-        Message::Command(UserCommand::CreateDocument {
+        items[1].message,
+        Message::Command(UserCommand::CreateDirectory {
             parent: PathBuf::from("/lib/Work")
         })
     );
@@ -319,14 +322,19 @@ fn folder_skills_run_against_the_directory_they_were_opened_on() {
     let items = directory_menu_items(Path::new("/lib/Work"), &skills);
 
     assert_eq!(items.len(), 8, "seven actions plus the folder skill");
-    assert_eq!(items[7].label, "tidy");
+    assert_eq!(items[2].label, "tidy");
     assert_eq!(
-        items[7].message,
+        items[2].message,
         Message::Tree(TreeMessage::SkillRunRequested {
             skill: PathBuf::from("/sys/Skills/Folder/tidy.md"),
             target_dir: Some(PathBuf::from("/lib/Work")),
             target_file: Some(PathBuf::from("/lib/Work")),
         })
+    );
+    assert_eq!(
+        items[2].group,
+        ContextGroup::Automation,
+        "contextual skills belong to the automation run (§4.9.1)"
     );
 }
 
@@ -334,43 +342,44 @@ fn folder_skills_run_against_the_directory_they_were_opened_on() {
 fn file_menu_maps_every_row_and_gates_save_as_pdf_on_typst() {
     let without_typst = file_menu_items(Path::new("/lib/note.md"), &[], false);
     assert_eq!(
-        menu_labels(&without_typst),
+        row_labels(&without_typst),
         vec![
             strings::EDIT_BUTTON,
-            strings::SHOW_IN_EXPLORER_ACTION,
-            strings::COPY_PATH_ACTION,
-            strings::RUN_AS_PROMPT_ACTION,
             strings::PRINT_ACTION,
+            strings::RUN_AS_PROMPT_ACTION,
             strings::RENAME_ACTION,
             strings::MOVE_ACTION,
+            strings::COPY_PATH_ACTION,
+            strings::SHOW_IN_EXPLORER_ACTION,
             strings::DELETE_ACTION,
-        ]
+        ],
+        "Open & Output | AI & Automation | File Management | Destructive"
     );
     assert_eq!(
         without_typst[0].message,
         Message::Command(UserCommand::OpenInEditor(PathBuf::from("/lib/note.md")))
     );
     assert_eq!(
-        without_typst[3].message,
-        Message::Tree(TreeMessage::RunAsPromptRequested {
+        without_typst[1].message,
+        Message::Tree(TreeMessage::PrintRequested {
             path: PathBuf::from("/lib/note.md")
         })
     );
     assert_eq!(
-        without_typst[4].message,
-        Message::Tree(TreeMessage::PrintRequested {
+        without_typst[2].message,
+        Message::Tree(TreeMessage::RunAsPromptRequested {
             path: PathBuf::from("/lib/note.md")
         })
     );
 
     let with_typst = file_menu_items(Path::new("/lib/note.md"), &[], true);
     assert_eq!(
-        menu_labels(&with_typst)[5],
+        row_labels(&with_typst)[2],
         strings::SAVE_AS_PDF_ACTION,
         "Save as PDF sits right after Print"
     );
     assert_eq!(
-        with_typst[5].message,
+        with_typst[2].message,
         Message::Command(UserCommand::SaveAsPdf(PathBuf::from("/lib/note.md")))
     );
 }
@@ -383,18 +392,16 @@ fn note_skills_run_against_the_file_only() {
     }];
     let items = file_menu_items(Path::new("/lib/note.md"), &skills, false);
 
+    assert_eq!(items[3].label, "summarize");
     assert_eq!(
-        items.last().map(|item| item.label.as_str()),
-        Some("summarize")
-    );
-    assert_eq!(
-        items.last().map(|item| item.message.clone()),
-        Some(Message::Tree(TreeMessage::SkillRunRequested {
+        items[3].message,
+        Message::Tree(TreeMessage::SkillRunRequested {
             skill: PathBuf::from("/sys/Skills/Note/summarize.md"),
             target_dir: None,
             target_file: Some(PathBuf::from("/lib/note.md")),
-        }))
+        })
     );
+    assert_eq!(items[3].group, ContextGroup::Automation);
 }
 
 #[test]
@@ -403,7 +410,7 @@ fn multi_select_menu_carries_the_whole_selection() {
     let items = multi_select_menu_items(&paths);
 
     assert_eq!(
-        menu_labels(&items),
+        row_labels(&items),
         vec![strings::MERGE_ACTION, strings::DELETE_ACTION]
     );
     assert_eq!(
@@ -444,8 +451,8 @@ fn a_single_selection_still_gets_the_full_file_menu() {
     let row = file_row("a.md", "/lib/a.md", 0);
     let items = context_menu_items(&row, &[PathBuf::from("/lib/a.md")], MenuContext::default());
     assert_eq!(
-        menu_labels(&items),
-        menu_labels(&file_menu_items(Path::new("/lib/a.md"), &[], false))
+        row_labels(&items),
+        row_labels(&file_menu_items(Path::new("/lib/a.md"), &[], false))
     );
 }
 
@@ -738,15 +745,30 @@ fn menu_items_for_uses_the_view_model_skill_lists() {
     let view_model = LeftPanelViewModel::from_app(&app);
 
     let dir_items = view_model.menu_items_for(&dir_row("Work", "/lib/Work", 0));
+    assert!(
+        dir_items
+            .iter()
+            .any(|item| item.label == "tidy" && item.group == ContextGroup::Automation),
+        "the folder skill comes from the view model, not a re-read of disk: {:?}",
+        row_labels(&dir_items)
+    );
     assert_eq!(
         dir_items.last().map(|item| item.label.as_str()),
-        Some("tidy")
+        Some(strings::DELETE_ACTION),
+        "§4.9.1 puts the destructive run last, so skills are no longer trailing"
     );
 
     let file_items = view_model.menu_items_for(&file_row("note.md", "/lib/note.md", 0));
+    assert!(
+        file_items
+            .iter()
+            .any(|item| item.label == "summarize" && item.group == ContextGroup::Automation),
+        "the note skill comes from the view model: {:?}",
+        row_labels(&file_items)
+    );
     assert_eq!(
         file_items.last().map(|item| item.label.as_str()),
-        Some("summarize")
+        Some(strings::DELETE_ACTION)
     );
 }
 

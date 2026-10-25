@@ -14,7 +14,6 @@ use iced::{Element, Point, Size};
 /// The app-side message vocabulary the primitives are wired to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TestMessage {
-    Item(usize),
     Confirm,
     Cancel,
     Close,
@@ -26,15 +25,6 @@ enum TestMessage {
 enum TestModal {
     Save,
     Rename,
-}
-
-/// A three-row context menu.
-fn sample_menu() -> Vec<MenuItem<TestMessage>> {
-    vec![
-        MenuItem::new("Show in Explorer", TestMessage::Item(0)),
-        MenuItem::new("Copy Path", TestMessage::Item(1)),
-        MenuItem::new("Rename", TestMessage::Item(2)),
-    ]
 }
 
 /// The viewport the geometry tests clamp against.
@@ -186,103 +176,22 @@ fn a_dismissed_slot_can_open_again() {
     assert_eq!(slot.anchor(), Some(Point::new(7.0, 8.0)));
 }
 
-// --- menu item projection ---------------------------------------------------
-
-#[test]
-fn menu_labels_project_every_row_in_order() {
-    let items = sample_menu();
-
-    assert_eq!(
-        menu_labels(&items),
-        vec!["Show in Explorer", "Copy Path", "Rename"]
-    );
-}
-
-#[test]
-fn empty_menu_projects_no_rows() {
-    assert!(menu_labels::<TestMessage>(&[]).is_empty());
-}
-
-#[test]
-fn display_renders_the_label_only() {
-    let item = MenuItem::new("Rename", TestMessage::Item(2));
-
-    assert_eq!(item.to_string(), "Rename");
-}
-
-#[test]
-fn map_keeps_the_label_and_maps_the_message() {
-    let mapped = MenuItem::new("Rename", 7).map(|index| TestMessage::Item(index * 10));
-
-    assert_eq!(mapped.label, "Rename");
-    assert_eq!(mapped.message, TestMessage::Item(70));
-}
-
-#[test]
-fn menu_projection_preserves_row_count() {
-    let items = sample_menu();
-
-    assert_eq!(menu_labels(&items).len(), items.len());
-    assert_eq!(menu_size(items.len()).height, menu_height_for(items.len()));
-}
-
-#[test]
-fn menu_index_of_finds_the_row_producing_a_message() {
-    let items = sample_menu();
-
-    assert_eq!(menu_index_of(&items, &TestMessage::Item(0)), Some(0));
-    assert_eq!(menu_index_of(&items, &TestMessage::Item(2)), Some(2));
-}
-
-#[test]
-fn menu_index_of_returns_none_for_a_message_no_row_emits() {
-    let items = sample_menu();
-
-    assert_eq!(menu_index_of(&items, &TestMessage::Close), None);
-    assert_eq!(
-        menu_index_of::<TestMessage>(&[], &TestMessage::Item(0)),
-        None
-    );
-}
-
-/// Independent restatement of the row-height contract used by the count test.
-fn menu_height_for(count: usize) -> f32 {
-    MENU_PADDING * 2.0
-        + MENU_ROW_HEIGHT * count as f32
-        + if count > 1 {
-            MENU_ROW_SPACING * (count as f32 - 1.0)
-        } else {
-            0.0
-        }
-}
-
 // --- geometry ---------------------------------------------------------------
 
-#[test]
-fn menu_size_of_an_empty_menu_is_padding_only() {
-    let size = menu_size(0);
-
-    assert_eq!(size.width, MENU_WIDTH);
-    assert_eq!(size.height, MENU_PADDING * 2.0);
-}
-
-#[test]
-fn menu_size_of_one_row_has_no_spacing_term() {
-    let size = menu_size(1);
-
-    assert_eq!(size.height, MENU_ROW_HEIGHT + MENU_PADDING * 2.0);
-}
-
-#[test]
-fn menu_size_grows_by_one_row_plus_spacing_per_item() {
-    let delta = menu_size(3).height - menu_size(2).height;
-
-    assert_eq!(delta, MENU_ROW_HEIGHT + MENU_ROW_SPACING);
+/// A stand-in card box: 200px wide, `rows` rows of 24px inside 4px of
+/// padding.
+///
+/// These are the numbers the removed legacy flat-card model produced. They
+/// stay here, local to the tests, because [`clamp_anchor`] is generic over
+/// any box and the clamp behaviour under test does not depend on where the
+/// size came from.
+fn card(rows: usize) -> Size {
+    Size::new(200.0, 4.0 * 2.0 + 24.0 * rows as f32)
 }
 
 #[test]
 fn clamp_anchor_leaves_a_fully_visible_box_untouched() {
-    let size = menu_size(3);
+    let size = card(3);
     let anchor = Point::new(10.0, 10.0);
 
     assert_eq!(clamp_anchor(anchor, size, viewport()), anchor);
@@ -290,7 +199,7 @@ fn clamp_anchor_leaves_a_fully_visible_box_untouched() {
 
 #[test]
 fn clamp_anchor_pulls_the_box_back_from_the_right_edge() {
-    let size = menu_size(3);
+    let size = card(3);
 
     let clamped = clamp_anchor(Point::new(795.0, 10.0), size, viewport());
 
@@ -300,7 +209,7 @@ fn clamp_anchor_pulls_the_box_back_from_the_right_edge() {
 
 #[test]
 fn clamp_anchor_pulls_the_box_back_from_the_bottom_edge() {
-    let size = menu_size(3);
+    let size = card(3);
 
     let clamped = clamp_anchor(Point::new(10.0, 599.0), size, viewport());
 
@@ -310,7 +219,7 @@ fn clamp_anchor_pulls_the_box_back_from_the_bottom_edge() {
 
 #[test]
 fn clamp_anchor_pulls_back_on_both_axes_at_the_corner() {
-    let size = menu_size(3);
+    let size = card(3);
 
     let clamped = clamp_anchor(Point::new(4000.0, 4000.0), size, viewport());
 
@@ -327,7 +236,7 @@ fn clamp_anchor_pulls_back_on_both_axes_at_the_corner() {
 fn clamp_anchor_never_goes_negative_when_the_viewport_is_smaller_than_the_box() {
     let tiny = Size::new(20.0, 20.0);
 
-    let clamped = clamp_anchor(Point::new(500.0, 500.0), menu_size(30), tiny);
+    let clamped = clamp_anchor(Point::new(500.0, 500.0), card(30), tiny);
 
     assert_eq!(
         clamped,
@@ -338,14 +247,14 @@ fn clamp_anchor_never_goes_negative_when_the_viewport_is_smaller_than_the_box() 
 
 #[test]
 fn clamp_anchor_clamps_a_negative_anchor_to_the_origin() {
-    let clamped = clamp_anchor(Point::new(-50.0, -25.0), menu_size(2), viewport());
+    let clamped = clamp_anchor(Point::new(-50.0, -25.0), card(2), viewport());
 
     assert_eq!(clamped, Point::new(0.0, 0.0));
 }
 
 #[test]
 fn clamp_anchor_is_idempotent() {
-    let size = menu_size(5);
+    let size = card(5);
     let once = clamp_anchor(Point::new(900.0, 700.0), size, viewport());
     let twice = clamp_anchor(once, size, viewport());
 
@@ -406,14 +315,6 @@ fn the_two_outcomes_are_distinct() {
 // --- widget shape contracts (observable without a renderer) ------------------
 
 #[test]
-fn context_menu_card_is_a_fixed_width_block() {
-    let items = sample_menu();
-    let card: Element<'_, TestMessage> = context_menu_card(&items);
-
-    assert_eq!(card.as_widget().size().width, Length::Fixed(MENU_WIDTH));
-}
-
-#[test]
 fn both_blockers_fill_the_available_area() {
     let transparent: Element<'_, TestMessage> = input_blocker(TestMessage::Close).into();
     let scrim: Element<'_, TestMessage> = scrim_blocker(TestMessage::Close).into();
@@ -443,46 +344,6 @@ fn menu_click_away_blocker_keeps_the_default_cursor_visible() {
         MENU_BLOCKER_INTERACTION,
         iced::mouse::Interaction::Idle,
         "the menu blocker must dismiss outside clicks without hiding the pointer"
-    );
-}
-
-#[test]
-fn with_context_menu_renders_the_base_unchanged_for_an_empty_menu() {
-    let base: Element<'_, TestMessage> = text("base").into();
-    let base_size = base.as_widget().size();
-
-    let mounted = with_context_menu(
-        base,
-        Point::new(10.0, 10.0),
-        &[],
-        viewport(),
-        TestMessage::Close,
-    );
-
-    assert_eq!(
-        mounted.as_widget().size(),
-        base_size,
-        "an empty menu must not add a card or change the layout"
-    );
-}
-
-#[test]
-fn with_context_menu_mounts_a_full_area_stack_over_the_base() {
-    let items = sample_menu();
-    let base: Element<'_, TestMessage> = text("base").into();
-
-    let mounted = with_context_menu(
-        base,
-        Point::new(10.0, 10.0),
-        &items,
-        viewport(),
-        TestMessage::Close,
-    );
-
-    assert_eq!(
-        mounted.as_widget().size(),
-        Size::new(Length::Fill, Length::Fill),
-        "the blocker layer needs the whole area to swallow clicks"
     );
 }
 

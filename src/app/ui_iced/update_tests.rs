@@ -656,6 +656,25 @@ fn editor_open_result_for_a_superseded_path_does_not_mount_the_editor() {
 
 // ───────────────────────────── Tree ─────────────────────────────
 
+/// The visible labels of the mounted context menu's root card, separators
+/// excluded — i.e. the rows the user can actually pick.
+fn context_menu_labels(state: &AppState) -> Vec<String> {
+    let menu = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .expect("a context menu is open");
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
+    menu.cascade
+        .card_menu(&root)
+        .expect("the root card is open")
+        .rows()
+        .iter()
+        .filter(|row| !row.is_separator())
+        .map(|row| row.label().to_owned())
+        .collect()
+}
+
 #[test]
 fn test_tree_context_menu_is_built_from_the_row_and_anchored_at_the_cursor() {
     let (mut state, _storage) = fresh_state();
@@ -677,7 +696,7 @@ fn test_tree_context_menu_is_built_from_the_row_and_anchored_at_the_cursor() {
     let menu = state.overlay.context_menu.as_ref().expect("menu opens");
     assert_eq!(menu.anchor, Point::new(64.0, 128.0));
     assert!(
-        !menu.items.is_empty(),
+        !context_menu_labels(&state).is_empty(),
         "a file row always has context-menu rows"
     );
     assert_eq!(state.mounted_layers(), vec![OverlayLayer::ContextMenu]);
@@ -1034,7 +1053,10 @@ fn test_tab_context_menu_opens_and_closes() {
     );
     let menu = state.overlay.context_menu.as_ref().expect("menu opens");
     assert_eq!(menu.anchor, Point::new(12.0, 34.0));
-    assert!(!menu.items.is_empty());
+    assert!(
+        !context_menu_labels(&state).is_empty(),
+        "the tab menu must have rows"
+    );
 
     let _ = update(&mut state, Message::Tab(TabMessage::ContextMenuClosed));
     assert!(state.overlay.context_menu.is_none());
@@ -1052,54 +1074,75 @@ fn test_tab_context_menu_for_a_missing_tab_mounts_nothing() {
 
 // ───────────────────────────── Menu (hamburger) ─────────────────────────────
 
+/// Picks the root card's `Windows` row.
+///
+/// Under the framework engine there is no separate "open submenu" message:
+/// a submenu card appears because its own row was activated, so this is the
+/// one way the tests navigate a level down.
+fn open_windows_submenu(state: &mut AppState) {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
+    use iced_pro::surface::menu::model::MenuId;
+
+    let root = MenuId::new(HAMBURGER_MENU_ID);
+    let row = state
+        .overlay
+        .hamburger_cascade
+        .card_menu(&root)
+        .expect("the root card is open")
+        .rows()
+        .iter()
+        .position(|row| row.key() == KEY_WINDOWS)
+        .expect("the Windows row lives in the root card");
+    let _ = update(
+        state,
+        Message::Menu(MenuMessage::RowPicked { card: root, row }),
+    );
+}
+
 #[test]
 fn test_menu_opened_flips_the_flag() {
     let (mut state, _storage) = fresh_state();
-    let windows_id = crate::ui_iced::panels::top::MenuSection::Windows
-        .menu_item_id()
-        .expect("submenu id");
-    state
-        .overlay
-        .hamburger_menu_state
-        .open_child(&[], windows_id);
     assert!(!state.overlay.hamburger_open);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     assert!(state.overlay.hamburger_open, "Opened must show the card");
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
+    assert!(
+        state.overlay.hamburger_cascade.is_open(),
+        "the cascade must be mounted alongside the flag, not left empty"
+    );
 }
 
 #[test]
 fn test_menu_closed_clears_the_flag() {
     let (mut state, _storage) = fresh_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(
-            crate::ui_iced::panels::top::MenuSection::Windows,
-        )),
-    );
+    open_windows_submenu(&mut state);
     let _ = update(&mut state, Message::Menu(MenuMessage::Closed));
     assert!(
         !state.overlay.hamburger_open,
         "Closed must unmount the card"
     );
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
+    assert!(
+        !state.overlay.hamburger_cascade.is_open(),
+        "the cascade must be unwound, not merely hidden"
+    );
 }
 
 #[test]
-fn test_menu_submenu_navigation_requires_an_open_menu() {
+fn test_submenu_requires_an_open_tree_and_stacks_rather_than_replacing() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
-    use crate::ui_iced::panels::top::MenuSection;
     use iced_pro::surface::menu::model::{MenuId, submenu_id};
 
     let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
 
-    // A submenu request with no tree mounted changes nothing: the cascade
-    // has no root card to hang a child on.
+    // A row pick naming a card that was never mounted changes nothing: the
+    // cascade has no root card to hang a child on.
     let (mut state, _storage) = fresh_state();
     let _ = update(
         &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
+        Message::Menu(MenuMessage::RowPicked {
+            card: windows_card.clone(),
+            row: 0,
+        }),
     );
     assert!(
         !state.overlay.hamburger_cascade.is_open(),
@@ -1110,13 +1153,10 @@ fn test_menu_submenu_navigation_requires_an_open_menu() {
         "nothing is registered while the tree is closed"
     );
 
-    // With the tree open the same request mounts the child card beside the
+    // Picking the root card's Windows row mounts the child card beside the
     // root instead of replacing it.
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
-    );
+    open_windows_submenu(&mut state);
     assert_eq!(
         state.overlay.hamburger_cascade.depth(),
         2,
@@ -1127,51 +1167,40 @@ fn test_menu_submenu_navigation_requires_an_open_menu() {
         &windows_card,
         "the deep card is the Windows submenu"
     );
-
-    // `Direct` names no submenu, so it is not a navigation step.
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Direct)),
-    );
-    assert_eq!(
-        state.overlay.hamburger_cascade.depth(),
-        2,
-        "a Direct section must neither open nor close a card"
-    );
-
-    // Closing the deepest card leaves the root mounted and the surface open.
-    let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
-    assert_eq!(
-        state.overlay.hamburger_cascade.depth(),
-        1,
-        "the root card remains after the submenu closes"
-    );
     assert!(
         state.overlay.hamburger_open,
-        "stepping out one level does not dismiss the surface"
+        "stepping into a submenu does not dismiss the surface"
     );
 }
 
 #[test]
 fn test_menu_row_activation_routes_the_command_and_closes() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_ABOUT};
+    use iced_pro::surface::menu::model::MenuId;
+
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+
+    let root = MenuId::new(HAMBURGER_MENU_ID);
+    let row = state
+        .overlay
+        .hamburger_cascade
+        .card_menu(&root)
+        .expect("the root card is open")
+        .rows()
+        .iter()
+        .position(|row| row.key() == KEY_ABOUT)
+        .expect("the About row lives in the root card");
     let _ = update(
         &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(
-            crate::ui_iced::panels::top::MenuSection::Windows,
-        )),
+        Message::Menu(MenuMessage::RowPicked { card: root, row }),
     );
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::RowActivated(UserCommand::OpenAboutDialog)),
-    );
+
     assert!(
         !state.overlay.hamburger_open,
         "a row pick must close the menu in the same reduction"
     );
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
     assert!(
         drained(&spy).contains(&UserCommand::OpenAboutDialog),
         "the row's own command must be routed"
@@ -1183,7 +1212,6 @@ fn test_menu_toggle_routes_its_new_value_and_stays_open() {
     use crate::ui_iced::hamburger::{
         HAMBURGER_MENU_ID, KEY_BACKGROUND_OPERATIONS, KEY_WINDOWS, hamburger_menu,
     };
-    use crate::ui_iced::panels::top::MenuSection;
     use iced_pro::surface::menu::model::{MenuId, submenu_id};
 
     let (mut state, _storage) = fresh_state();
@@ -1203,10 +1231,7 @@ fn test_menu_toggle_routes_its_new_value_and_stays_open() {
         .expect("the background-operations row");
 
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
-    );
+    open_windows_submenu(&mut state);
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::RowPicked {
@@ -1254,12 +1279,7 @@ fn test_menu_opening_dismisses_a_live_context_menu() {
     assert!(state.overlay.context_menu.is_some());
 
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(
-            crate::ui_iced::panels::top::MenuSection::Windows,
-        )),
-    );
+    open_windows_submenu(&mut state);
     assert!(
         state.overlay.context_menu.is_none(),
         "the two menus never share the screen"
@@ -1271,11 +1291,11 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
     let (mut state, _storage) = fresh_state();
     seed_rows(&mut state, vec![file_row("/notes/a.md")]);
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(
-            crate::ui_iced::panels::top::MenuSection::Windows,
-        )),
+    open_windows_submenu(&mut state);
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the fixture has two cards mounted"
     );
 
     let _ = update(
@@ -1288,7 +1308,10 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
         !state.overlay.hamburger_open,
         "opening a context menu must dismiss the hamburger"
     );
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
+    assert!(
+        !state.overlay.hamburger_cascade.is_open(),
+        "the whole hamburger tree goes, not only the card on screen"
+    );
 }
 
 // ───────────────────────────── Editor ─────────────────────────────

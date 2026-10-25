@@ -55,6 +55,7 @@
 //!
 //! Unit tests live in the sibling `app_tests.rs` sidecar.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -75,14 +76,13 @@ use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
 use crate::ui_iced::agent_debug::{AgentDebugViewModel, AgentDebugWindowState};
 use crate::ui_iced::attributions::AttributionsViewModel;
 use crate::ui_iced::batch_dialog::{BatchDialogState, BatchDialogViewModel, BatchRunStatus};
+use crate::ui_iced::context_menu::{self, ContextRow, ContextTarget};
 use crate::ui_iced::dialogs::DialogState;
 use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::fonts;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::{BackgroundLogsViewModel, ScrollSnapshot};
-use crate::ui_iced::menu::{MenuItem, MenuState};
 use crate::ui_iced::message::{BootMessage, Message, WindowMessage};
-use crate::ui_iced::overlay::MenuItem as LegacyMenuItem;
 use crate::ui_iced::panels::bottom::BottomPanelViewModel;
 use crate::ui_iced::panels::center::CenterPanelViewModel;
 use crate::ui_iced::panels::left::LeftPanelViewModel;
@@ -99,7 +99,8 @@ use fastmd_agent::AgentSession;
 use iced_pro::binding::pre_rank::DragCapture;
 use iced_pro::binding::pre_rank::PreRankCoordinator;
 use iced_pro::focus::FocusState;
-use iced_pro::surface::menu::cascade::MenuCascade;
+use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
+use iced_pro::surface::menu::model::MenuId;
 use iced_pro::surface::zorder::DeclineReason;
 use iced_pro::surface::zorder::PreRankedEscape;
 use iced_pro::surface::zorder::Surface;
@@ -212,6 +213,7 @@ impl AppState {
     pub fn rebuild_view_models(&mut self) {
         self.models = ViewModels::from_app(&self.app, &self.overlay);
         self.refresh_hamburger_rects();
+        self.refresh_context_rects();
     }
 
     /// Recomputes the solved rectangles of the open hamburger cards
@@ -241,6 +243,23 @@ impl AppState {
         };
     }
 
+    /// Recomputes the solved rectangles of the open context-menu cards into
+    /// [`ContextMenu::rects`] (`UIF-CMENU-001`).
+    ///
+    /// Same reason as [`refresh_hamburger_rects`](Self::refresh_hamburger_rects):
+    /// the placement depends on the viewport, and a resize that lands while a
+    /// context menu is open must move the card the same way the solver would
+    /// have placed it on the frame that opened it. The anchor itself is fixed
+    /// at open time — the pointer that opened the menu, not the live cursor —
+    /// so only the viewport side of the solve is ever refreshed here.
+    ///
+    /// [RUST-020]: mutates only `overlay.context_menu.rects`; no I/O.
+    pub fn refresh_context_rects(&mut self) {
+        if let Some(menu) = self.overlay.context_menu.as_mut() {
+            menu.rects = context_menu::open_card_rects(&menu.cascade, menu.anchor, self.viewport);
+        }
+    }
+
     /// Which floating windows are showing, bottom-most layer first.
     /// Delegates to [`mounted_layers`].
     #[must_use]
@@ -249,48 +268,92 @@ impl AppState {
     }
 }
 
-/// A floating context menu: where it was opened and the rows it shows.
+/// A floating context menu: the target it was opened on, the live menu
+/// cascade, and the geometry solved for it.
 ///
-/// The reducer builds the rows from the panel view-model that owns the
-/// target (`LeftPanelViewModel::menu_items_for` /
-/// `CenterPanelViewModel::menu_items_for`) so the view stays a pure
-/// projection and never reads the domain model to decide menu contents.
-#[derive(Clone, Debug, PartialEq)]
+/// The surface is **self-contained** (integration increment INT-3b). The
+/// [`MenuCascade`] that owns
+/// which card is open and the [`FocusState`] scoped to that card's rows both
+/// live here, so dismissing the surface drops the focus trap along with it and
+/// no second copy of the state can outlive the menu. The tree/tab context menu
+/// and the hamburger each own a surface, which is what keeps
+/// [`MenuCascade::open`] — a per-cascade rule — from
+/// having to know about the other menu.
+///
+/// The rows themselves are owned by the cascade, which clones the model on
+/// open. What this struct keeps beside it is the **routing table** from a row's
+/// key to the self-contained [`Message`] that row publishes ([FMD-068]),
+/// because a framework [`Row`](iced_pro::surface::menu::model::Row) carries
+/// structure and not intent. Both views are derived from the same
+/// [`ContextRow`] list, so they cannot disagree.
+#[derive(Clone, Debug)]
 pub struct ContextMenu {
+    /// The workspace target the menu was opened on — §4.9.1's four targets.
+    pub target: ContextTarget,
     /// Root-space point in window coordinates, taken from the
     /// [`LayoutMessage::CursorMoved`](crate::ui_iced::message::LayoutMessage::CursorMoved)
-    /// that preceded the open request.
+    /// that preceded the open request (`UIF-CMENU-001`).
     pub anchor: iced::Point,
-    /// The rows to render, in display order.
-    pub items: Vec<MenuItem<Message>>,
-    /// Reducer-owned nested-menu path for this surface.
-    pub state: MenuState,
+    /// Which card of this tree is open, and where the keyboard sits in it.
+    pub cascade: MenuCascade,
+    /// The focus model scoped to this surface's open cards.
+    pub focus: FocusState,
+    /// Row key → the intent message that row publishes when activated.
+    pub routes: HashMap<String, Message>,
+    /// Solved viewport rectangles of the open cards, root first.
+    pub rects: Vec<Rectangle>,
 }
 
 impl ContextMenu {
-    /// Creates a context menu with its submenu path closed.
+    /// Opens the surface on `target` at pointer `anchor` from `rows`.
+    ///
+    /// Returns `None` when the cascade refuses to open, which happens when the
+    /// target produced no navigable rows:
+    /// [`MenuCascade::stabilise`] closes any card the
+    /// keyboard cannot enter, so an all-disabled or empty card cannot stay
+    /// mounted. The caller treats `None` as "render nothing", which is the
+    /// behaviour the previous `!items.is_empty()` mount check gave.
+    ///
+    /// The card geometry is solved here rather than left to a later pass so a
+    /// menu never renders at an unsolved position: `rects` is index-aligned
+    /// with [`MenuCascade::open_cards`] from the
+    /// first frame.
     #[must_use]
-    pub fn new(anchor: iced::Point, items: Vec<MenuItem<Message>>) -> Self {
-        Self {
-            anchor,
-            items,
-            state: MenuState::default(),
+    pub fn open(
+        target: ContextTarget,
+        anchor: iced::Point,
+        rows: &[ContextRow],
+        viewport: Size,
+    ) -> Option<Self> {
+        let menu = context_menu::menu_from_rows(context_menu::root_id(&target), rows);
+        let mut cascade = MenuCascade::new();
+        let mut focus = FocusState::new();
+        cascade.open(&menu, MenuTreeKind::Context, &mut focus);
+        if !cascade.is_open() {
+            return None;
         }
+
+        Some(Self {
+            target,
+            anchor,
+            rects: context_menu::open_card_rects(&cascade, anchor, viewport),
+            routes: context_menu::routes_from_rows(rows),
+            cascade,
+            focus,
+        })
     }
 
-    /// Converts legacy flat rows into the reusable menu model.
+    /// The intent message that row `row` of card `card` publishes, `None`
+    /// when the card or row is unknown or the row carries no intent.
+    ///
+    /// Read **before** the row is activated: a row whose
+    /// [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) closes
+    /// the tree takes its card with it, so looking the key up afterwards would
+    /// find nothing.
     #[must_use]
-    pub(crate) fn from_legacy_items(
-        anchor: iced::Point,
-        items: Vec<LegacyMenuItem<Message>>,
-    ) -> Self {
-        Self::new(
-            anchor,
-            items
-                .into_iter()
-                .map(|item| MenuItem::action(item.label, item.message))
-                .collect(),
-        )
+    pub fn row_message(&self, card: &MenuId, row: usize) -> Option<Message> {
+        let key = self.cascade.card_menu(card)?.row(row)?.key();
+        self.routes.get(key).cloned()
     }
 }
 
@@ -344,8 +407,6 @@ pub struct OverlayState {
     /// the shared menu surface is mounted by the overlay host from state every
     /// frame.
     pub hamburger_open: bool,
-    /// Reducer-owned submenu path for the hamburger surface.
-    pub hamburger_menu_state: MenuState,
     /// The `iced-pro` cascade that owns the hamburger tree's openness
     /// (`UIF-FMENU-001/002`, `UIF-CMENU-002/003`) — INT-3a.
     ///
@@ -474,7 +535,6 @@ impl Default for OverlayState {
             dialog_anchor: None,
             context_menu: None,
             hamburger_open: false,
-            hamburger_menu_state: MenuState::default(),
             hamburger_cascade: MenuCascade::new(),
             menu_focus: FocusState::new(),
             hamburger_rects: Vec::new(),
@@ -583,15 +643,16 @@ impl OverlayState {
     /// makes the card actually painted on top the one that unwinds first,
     /// with no depth parameter anywhere.
     ///
-    /// # Regions: hamburger real, the rest still empty — review area
+    /// # Regions: menus real, the rest still empty — review area
     ///
-    /// The hamburger is registered with the **solved card rectangles**
-    /// [`refresh_hamburger_rects`](AppState::refresh_hamburger_rects)
-    /// computed from the framework anchor solver, one region per open card
-    /// (root plus any live submenu). That closes the INT-2 review area for
-    /// this surface: `route_pointer` now answers
+    /// The hamburger and the tree/tab context menu are registered with the
+    /// **solved card rectangles** the framework anchor solver produced
+    /// ([`refresh_hamburger_rects`](AppState::refresh_hamburger_rects) and
+    /// [`refresh_context_rects`](AppState::refresh_context_rects)), one
+    /// region per open card. That closes the INT-2 review area for both menu
+    /// surfaces: `route_pointer` now answers
     /// [`PointerTarget::Surface`](iced_pro::surface::zorder::PointerTarget::Surface)
-    /// for a point inside a menu card.
+    /// for a point inside either menu card.
     ///
     /// Every **other** surface is still registered with an empty region
     /// list. Per [`SurfaceRegistry`]'s own contract a regionless surface
@@ -599,7 +660,7 @@ impl OverlayState {
     /// in `Escape`, which is the half those increments wired. Populating
     /// their real viewport rectangles belongs to the remaining widget
     /// increments (INT-4..7), where each card's geometry becomes known the
-    /// same way the hamburger's did here.
+    /// same way the menus' did here.
     ///
     /// # Call site
     ///
@@ -611,11 +672,14 @@ impl OverlayState {
     pub fn sync_surfaces(&mut self) {
         // ── Menu band (`ZBand::Menu`, escape rank 3) ────────────────────
         // Registered bottom-first, matching `overlay_host`'s mount order.
-        sync_surface(
+        sync_surface_with_regions(
             &mut self.surfaces,
             SURFACE_ID_CONTEXT_MENU,
             SurfaceKind::MenuCard,
             self.context_menu.is_some(),
+            self.context_menu
+                .as_ref()
+                .map_or_else(Vec::new, |menu| menu.rects.clone()),
         );
         sync_surface_with_regions(
             &mut self.surfaces,
@@ -785,7 +849,6 @@ impl OverlayState {
         let OverlayState {
             context_menu,
             hamburger_open,
-            hamburger_menu_state,
             hamburger_cascade,
             menu_focus,
             hamburger_rects,
@@ -803,7 +866,6 @@ impl OverlayState {
         let mut closable = ClosableSurfaces {
             context_menu,
             hamburger_open,
-            hamburger_menu_state,
             hamburger_cascade,
             menu_focus,
             hamburger_rects,
@@ -843,7 +905,6 @@ impl OverlayState {
 struct ClosableSurfaces<'a> {
     context_menu: &'a mut Option<ContextMenu>,
     hamburger_open: &'a mut bool,
-    hamburger_menu_state: &'a mut MenuState,
     hamburger_cascade: &'a mut MenuCascade,
     menu_focus: &'a mut FocusState,
     hamburger_rects: &'a mut Vec<Rectangle>,
@@ -876,7 +937,6 @@ impl ClosableSurfaces<'_> {
             SURFACE_ID_HAMBURGER => {
                 let was_open = std::mem::take(self.hamburger_open);
                 if was_open {
-                    self.hamburger_menu_state.close_all();
                     // The cascade owns the open cards and the focus trap
                     // they pushed, so dismissing the surface has to unwind
                     // both — a closed surface with a live trap would leave
@@ -1022,11 +1082,7 @@ pub const SURFACE_ID_AGENT_DEBUG: &str = "overlay.agent_debug";
 #[must_use]
 pub fn mounted_layers(overlay: &OverlayState, models: &ViewModels) -> Vec<OverlayLayer> {
     let mut layers = Vec::new();
-    if overlay
-        .context_menu
-        .as_ref()
-        .is_some_and(|menu| !menu.items.is_empty())
-    {
+    if overlay.context_menu.is_some() {
         layers.push(OverlayLayer::ContextMenu);
     }
     if overlay.editor.is_some() {
@@ -1743,7 +1799,10 @@ pub fn launch(inputs: LaunchInputs) -> iced::Result {
     .scale_factor(|state: &AppState| state.requested_scale_factor())
     .subscription(|state: &AppState| {
         let base = subscription::subscription(&state.receivers);
-        if state.overlay.hamburger_open {
+        // Either framework-driven menu needs the navigation-key stream. The
+        // two surfaces are mutually exclusive, so one gate covering both
+        // still yields at most one menu consumer at a time.
+        if state.overlay.hamburger_open || state.overlay.context_menu.is_some() {
             iced::Subscription::batch([base, subscription::menu_keyboard_events()])
         } else {
             base

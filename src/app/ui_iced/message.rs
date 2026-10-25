@@ -47,8 +47,6 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::ui::tree_search::SearchResultEntry;
-use crate::ui_iced::menu::MenuItemId;
-use crate::ui_iced::panels::top::MenuSection;
 use iced::widget::pane_grid;
 use iced_pro::surface::menu::cascade::MenuKey;
 use iced_pro::surface::menu::model::MenuId;
@@ -801,42 +799,41 @@ pub enum AgentDebugMessage {
 
 /// Shared floating-menu interaction channel.
 ///
-/// Opening the menu is a **view-local transition** — the menu is floating
-/// widget state, not application state — so it must not ride
-/// [`Message::Command`] (rule 1 in the module header). The channel carries
-/// the open/closed state the menu needs in order to render as a menu rather
-/// than as a value display.
+/// Opening a menu is a **view-local transition** — a menu is floating widget
+/// state, not application state — so it must not ride [`Message::Command`]
+/// (rule 1 in the module header). The channel carries what the two
+/// framework-driven menu surfaces need in order to be driven from the view.
 ///
-/// * [`Self::Opened`] / [`Self::Closed`] — the menu's open ⇄ closed bookends.
-/// * [`Self::SubmenuOpened`] / [`Self::SubmenuClosed`] — view-local
-///   navigation between the top-level menu and one submenu.
-/// * [`Self::ToggleChanged`] — a controlled toggle requested a new value;
-///   the reducer converts it to the corresponding application command.
-/// * [`Self::RowActivated`] — a selectable row was picked. The wrapped
-///   [`UserCommand`] IS the row's user intent; the reducer executes it
-///   through `route_command` and closes the menu in the same reduction,
-///   which is what a menu selection does.
-/// * Context-submenu variants update a tree/tab menu's reducer-owned path;
-///   ignored interactions consume disabled-row hits without dismissing it.
+/// Since INT-3b this channel serves **both** the top-bar hamburger
+/// ([`hamburger`](crate::ui_iced::hamburger)) and the file-tree / tab
+/// [context menu](crate::ui_iced::context_menu). One channel is enough
+/// because the app keeps the two surfaces mutually exclusive, so
+/// [`OverlayState::hamburger_open`](crate::ui_iced::app::OverlayState::hamburger_open)
+/// is a complete discriminator for which cascade a message belongs to.
 ///
-/// The menu rows themselves are built from
-/// [`crate::ui_iced::panels::top::build_menu_entries`], the full
-/// UI-061..UI-066 hierarchy and the no-chat-models placeholder. `Message`
-/// derives `PartialEq` on every channel; the payloads here are comparable.
+/// * [`Self::Opened`] / [`Self::Closed`] — the hamburger's open ⇄ closed
+///   bookends. A context menu is opened by its own
+///   [`TreeMessage::ContextMenuOpened`] /
+///   [`TabMessage::ContextMenuOpened`]
+///   instead, because its open carries a target the ☰ button cannot supply.
+/// * [`Self::RowPicked`] — the address of a row the user activated.
+/// * [`Self::Key`] — a navigation key raised while a menu is mounted.
+/// * [`Self::InteractionIgnored`] — a non-navigable row consumed the hit.
+///
+/// The older variants this enum used to carry (`RowActivated`,
+/// `ToggleChanged`, `SubmenuOpened`/`SubmenuClosed` and the
+/// context-submenu pair) are **gone**. Each one modelled a transition the
+/// app-side menu engine had to be told about by hand; the
+/// [`MenuCascade`](iced_pro::surface::menu::cascade::MenuCascade) now owns
+/// submenu depth, checked state and close behaviour, so there is nothing
+/// left for the view to report.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MenuMessage {
     /// The ☰ button opened the menu.
     Opened,
     /// The menu was dismissed (click-away) without picking a row.
     Closed,
-    /// A top-level submenu button was activated.
-    SubmenuOpened(MenuSection),
-    /// The user navigated back to the top-level menu.
-    SubmenuClosed,
-    /// A selectable menu row was picked. The wrapped command executes via
-    /// `route_command` and the menu closes.
-    RowActivated(UserCommand),
-    /// A row of the framework-driven hamburger tree was clicked.
+    /// A row of a framework-driven menu tree was activated.
     ///
     /// Carries the **address**, not the intent: the reducer runs
     /// [`MenuCascade::activate_row`](iced_pro::surface::menu::cascade::MenuCascade::activate_row)
@@ -846,39 +843,23 @@ pub enum MenuMessage {
     /// [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) keeps
     /// the menu open. A checkable row therefore does **not** close the
     /// card, which is the behaviour the previous
-    /// [`Self::RowActivated`] path could not express.
+    /// address-and-close path could not express.
     RowPicked {
         /// Path of the card holding the row.
         card: MenuId,
         /// Row index within that card, furniture rows included.
         row: usize,
     },
-    /// A menu-navigation key was pressed while the hamburger tree was open.
+    /// A menu-navigation key was pressed while a menu tree was open.
     ///
     /// Produced only by the keyboard lane's
     /// [`menu_key_to_message`](crate::ui_iced::subscription::menu_key_to_message)
-    /// and only while the tree is mounted. `Escape` is deliberately **not**
+    /// and only while a tree is mounted. `Escape` is deliberately **not**
     /// one of these: dismissal stays on
     /// [`OverlayMessage::EscapePressed`]
     /// → `close_topmost`, so the `UIF-WIN-003` band walk remains the only
     /// Escape path in the app and this increment does not fork it.
     Key(MenuKey),
-    /// A controlled toggle row requested a new checked value.
-    ToggleChanged {
-        /// Identifier of the toggle row.
-        id: MenuItemId,
-        /// Requested checked value after the click.
-        checked: bool,
-    },
-    /// A submenu in the tree or tab context menu was opened.
-    ContextSubmenuOpened {
-        /// Path to the parent menu, from the root.
-        parent_path: Vec<MenuItemId>,
-        /// Identifier of the child submenu to open.
-        id: MenuItemId,
-    },
-    /// The deepest submenu in the tree or tab context menu was closed.
-    ContextSubmenuClosed,
     /// A disabled or informational row consumed input without changing state.
     InteractionIgnored,
 }

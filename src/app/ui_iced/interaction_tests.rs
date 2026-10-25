@@ -74,7 +74,6 @@ use crate::ui_iced::hamburger::{
     KEY_CHAT_MODELS, KEY_NO_MODELS, KEY_TABLE_WRAP, KEY_TOOLS, KEY_WINDOWS, RADIO_GROUP_CHAT_MODEL,
     RADIO_GROUP_TABLE_WRAP, command_for_activation, hamburger_menu, strategy_key,
 };
-use crate::ui_iced::menu::{MenuItem as WidgetMenuItem, MenuItemId};
 use crate::ui_iced::message::{
     AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, TreeMessage,
 };
@@ -327,14 +326,16 @@ fn test_tree_row_right_click_mounts_a_live_context_menu() {
     );
 
     // 3. rebuild the full app view and assert the menu rows are on screen.
-    let expected: Vec<String> = state
-        .overlay
-        .context_menu
-        .as_ref()
-        .unwrap()
-        .items
+    //    Read from the cascade's own card, which is what the view renders.
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
+    let expected: Vec<String> = menu
+        .cascade
+        .card_menu(&root)
+        .expect("the root card is open")
+        .rows()
         .iter()
-        .filter_map(|item| item.label().map(str::to_owned))
+        .filter(|row| !row.is_separator())
+        .map(|row| row.label().to_owned())
         .collect();
     assert!(!expected.is_empty(), "the file menu must have rows");
 
@@ -346,17 +347,24 @@ fn test_tree_row_right_click_mounts_a_live_context_menu() {
         );
     }
 
-    // 4. clicking a menu row publishes that row's own message.
+    // 4. clicking a menu row publishes its **address**, not a baked-in
+    //    message. The intent is resolved by the reducer from the routing
+    //    table built off the same row list the card was built from.
     let first = expected[0].clone();
-    let first_message = match &state.overlay.context_menu.as_ref().unwrap().items[0] {
-        WidgetMenuItem::Action { message, .. } => message.clone(),
-        item => panic!("expected an action row, got {item:?}"),
-    };
-    let _ = view_ui.click(first.as_str());
+    let first_message = menu.row_message(&root, 0).expect("row 0 carries an intent");
     assert_eq!(
-        messages(view_ui),
-        vec![first_message],
-        "the clicked menu row must publish its own command",
+        first_message,
+        Message::Command(crate::bus::events::user_command::UserCommand::OpenInEditor(
+            path.clone()
+        )),
+        "{first:?} is the first row of the single-file menu (§4.9.1 group 1)"
+    );
+
+    let _ = view_ui.click(first.as_str());
+    assert_emitted(
+        &messages(view_ui),
+        &Message::Menu(MenuMessage::RowPicked { card: root, row: 0 }),
+        "a menu row publishes its card address, never the command itself",
     );
 }
 
@@ -408,70 +416,89 @@ fn test_tab_right_click_mounts_a_live_context_menu() {
     );
     let menu = state.overlay.context_menu.as_ref().expect("tab menu opens");
     assert_eq!(menu.anchor, click_point);
-    assert!(!menu.items.is_empty());
-    let first_message = match &menu.items[0] {
-        WidgetMenuItem::Action { message, .. } => message.clone(),
-        item => panic!("expected an action row, got {item:?}"),
-    };
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
+    // The address is a **model** row index, separators included, so the
+    // lookup must not filter them out — that would shift every index past
+    // the first group boundary.
+    let edit_row = menu
+        .cascade
+        .card_menu(&root)
+        .expect("the tab root card is open")
+        .rows()
+        .iter()
+        .position(|row| !row.is_separator() && row.label() == strings::EDIT_BUTTON)
+        .expect("the tab menu carries an Edit row");
+    assert_eq!(
+        menu.row_message(&root, edit_row),
+        Some(Message::Command(
+            crate::bus::events::user_command::UserCommand::OpenInEditor(path.clone())
+        )),
+        "the Edit row routes to the tab's own path"
+    );
 
     let mut ui = sim(view(&state));
     assert!(ui.find(strings::EDIT_BUTTON).is_ok());
     let _ = ui.click(strings::EDIT_BUTTON);
-    let emitted = messages(ui);
     assert_emitted(
-        &emitted,
-        &first_message,
-        "the tab menu row emits the action snapshot by the reducer",
+        &messages(ui),
+        &Message::Menu(MenuMessage::RowPicked {
+            card: root,
+            row: edit_row,
+        }),
+        "the tab menu row publishes its address so the reducer resolves the intent",
     );
 }
 
-/// A context-menu submenu event updates reducer-owned path state while the
-/// parent row stays visible beside its child surface.
+/// The shipped file-tree / tab context menus are **flat**: the cascade is
+/// one card deep, so no submenu surface ever appears over them.
+///
+/// This replaces the pre-INT-3b nested-submenu test, which drove a
+/// `ContextSubmenuOpened` event that no longer exists. §4.9.1 gives every
+/// target a single card of grouped rows and [`ContextRow`] has no submenu
+/// variant, so depth > 1 is unreachable from the app. The framework-side
+/// submenu geometry is covered by the cascade's own tests instead.
 #[test]
-fn test_context_menu_nested_surface_keeps_its_parent_mounted() {
+fn test_the_shipped_context_menu_is_flat_and_a_row_pick_dismisses_it() {
     let mut state = test_app_state();
-    let submenu_id = MenuItemId::new("test.context.submenu");
     let path = PathBuf::from("notes/nested.md");
-    state.overlay.context_menu = Some(crate::ui_iced::app::ContextMenu::new(
+    let rows = crate::ui_iced::panels::left::file_menu_items(&path, &[], true);
+    state.overlay.context_menu = crate::ui_iced::app::ContextMenu::open(
+        crate::ui_iced::context_menu::ContextTarget::TreeFile { path: path.clone() },
         iced::Point::new(420.0, 220.0),
-        vec![WidgetMenuItem::submenu(
-            submenu_id,
-            strings::MENU_WINDOWS,
-            vec![WidgetMenuItem::action(
-                strings::OPEN_IN_EDITOR_ACTION,
-                Message::Command(crate::bus::events::user_command::UserCommand::OpenInEditor(
-                    path.clone(),
-                )),
-            )],
-        )],
-    ));
-
-    let submenu_label = format!("{} >", strings::MENU_WINDOWS);
-    let mut ui = sim(view(&state));
-    let _ = ui.click(submenu_label.as_str());
-    let emitted = messages(ui);
-    let opened = Message::Menu(MenuMessage::ContextSubmenuOpened {
-        parent_path: Vec::new(),
-        id: submenu_id,
-    });
-    assert_emitted(
-        &emitted,
-        &opened,
-        "context menu submenu rows emit a controlled open event",
+        &rows,
+        state.viewport,
     );
-    let _ = update(&mut state, opened);
+    let menu = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .expect("the fixture opens a card");
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
 
-    let mut ui = sim(view(&state));
-    assert!(ui.find(submenu_label.as_str()).is_ok());
-    assert!(ui.find(strings::OPEN_IN_EDITOR_ACTION).is_ok());
-    let _ = ui.click(strings::OPEN_IN_EDITOR_ACTION);
-    let emitted = messages(ui);
-    assert_emitted(
-        &emitted,
-        &Message::Command(crate::bus::events::user_command::UserCommand::OpenInEditor(
-            path,
-        )),
-        "the child action emits its original application command",
+    assert_eq!(
+        menu.cascade.open_cards().len(),
+        1,
+        "a context menu mounts exactly one card"
+    );
+    assert!(
+        menu.cascade
+            .card_menu(&root)
+            .expect("root card")
+            .rows()
+            .iter()
+            .all(|row| row.child().is_none()),
+        "no shipped context row opens a submenu"
+    );
+
+    // Picking a row whose ClosePolicy closes the tree takes the whole
+    // surface with it — focus trap included, because ContextMenu owns it.
+    let _ = update(
+        &mut state,
+        Message::Menu(MenuMessage::RowPicked { card: root, row: 0 }),
+    );
+    assert!(
+        state.overlay.context_menu.is_none(),
+        "an action row dismisses the surface it lives in"
     );
 }
 

@@ -41,7 +41,8 @@
 //! when there is no cursor. The card's size is deterministic
 //! ([`dialog_size`]) because every row is a fixed-height widget, so the
 //! clamp cannot drift from the real layout — the same argument
-//! [`crate::ui_iced::overlay::menu_size`] makes for menus.
+//! [`the shared menu-card size helper`](crate::ui_iced::menu_surface::card_size)
+//! makes for menu cards.
 //!
 //! # The delete confirmation
 //!
@@ -444,8 +445,9 @@ pub fn validate_name(kind: &DialogKind, name: &str) -> Result<(), String> {
 /// The deterministic rendered size of a dialog card.
 ///
 /// Every row is a fixed-height widget, so this is exact rather than an
-/// estimate — the same property [`crate::ui_iced::overlay::menu_size`]
-/// provides for menus, and what makes [`resolve_dialog_anchor`] safe to
+/// estimate — the same property
+/// [`the shared menu-card size helper`](crate::ui_iced::menu_surface::card_size)
+/// provides for menu cards, and what makes [`resolve_dialog_anchor`] safe to
 /// run before the card has been laid out. The error row is always
 /// allocated, so the size does not change when an error appears.
 #[must_use]

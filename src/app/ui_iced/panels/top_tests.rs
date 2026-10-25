@@ -295,23 +295,6 @@ fn menu_section_titles_use_the_submenu_strings() {
     );
 }
 
-#[test]
-fn menu_section_ids_round_trip_only_for_submenus() {
-    assert_eq!(MenuSection::Direct.menu_item_id(), None);
-    for section in [
-        MenuSection::Windows,
-        MenuSection::ChatModels,
-        MenuSection::TableWrap,
-    ] {
-        let id = section.menu_item_id().expect("submenu sections have ids");
-        assert_eq!(MenuSection::from_menu_item_id(id), Some(section));
-    }
-    assert_eq!(
-        MenuSection::from_menu_item_id(MenuItemId::new("hamburger.unknown")),
-        None
-    );
-}
-
 // --- hamburger menu structure (UI-061..UI-066) ---------------------------
 
 #[test]
@@ -775,122 +758,9 @@ fn hamburger_anchor_clamps_to_non_negative_x_on_a_narrow_viewport() {
 /// A selectable row's message is the row's own command riding the menu
 /// channel, so the reducer can close the menu in the same reduction.
 #[test]
-fn hamburger_row_message_wraps_the_row_command_on_the_menu_channel() {
-    let command = apply_about_button_click();
-    assert_eq!(
-        hamburger_row_message(&command),
-        Message::Menu(MenuMessage::RowActivated(command))
-    );
-}
-
-/// Card rows render *below* their section header, so the label carries the
-/// check slot but no submenu prefix.
-#[test]
-fn hamburger_row_label_has_check_slot_and_no_submenu_prefix() {
-    let checked = hamburger_row_label("Hybrid", true);
-    let unchecked = hamburger_row_label("Hybrid", false);
-    assert!(
-        checked.contains('✓'),
-        "checked row must show the tick: {checked}"
-    );
-    assert!(checked.ends_with("Hybrid"));
-    assert!(!unchecked.contains('✓'));
-    assert!(
-        !unchecked.contains('>'),
-        "card rows carry no submenu prefix"
-    );
-    assert!(unchecked.ends_with("Hybrid"));
-}
-
-#[test]
 fn submenu_label_uses_the_required_right_arrow_cue() {
     assert_eq!(
         strings::format_menu_submenu_label(strings::MENU_WINDOWS),
         "Windows... >"
     );
-}
-
-/// The production entry model becomes one root action set with nested
-/// sections, including the no-models placeholder.
-#[test]
-fn hamburger_menu_items_preserve_the_nested_production_hierarchy() {
-    let app = test_app();
-    let view_model = TopBarViewModel::from_app(&app);
-    let entries = build_menu_entries(&view_model);
-    let items = hamburger_menu_items(&entries);
-
-    assert_eq!(items.len(), 6, "three direct actions and three submenus");
-    let submenu = |section: MenuSection| {
-        let id = section.menu_item_id().expect("submenu section id");
-        items
-            .iter()
-            .find_map(|item| match item {
-                WidgetMenuItem::Submenu {
-                    id: item_id,
-                    children,
-                    ..
-                } if *item_id == id => Some(children),
-                _ => None,
-            })
-            .expect("submenu is present")
-    };
-    assert_eq!(submenu(MenuSection::Windows).len(), 2);
-    assert!(
-        submenu(MenuSection::Windows)
-            .iter()
-            .all(|item| matches!(item, WidgetMenuItem::Toggle { .. }))
-    );
-    assert_eq!(
-        submenu(MenuSection::ChatModels).len(),
-        1,
-        "an empty model list is represented by its disabled placeholder"
-    );
-    assert_eq!(submenu(MenuSection::TableWrap).len(), 5);
-}
-
-#[test]
-fn hamburger_toggle_ids_resolve_to_the_requested_commands() {
-    let entries = build_menu_entries(&TopBarViewModel::from_app(&test_app()));
-    let items = hamburger_menu_items(&entries);
-    let windows = MenuSection::Windows.menu_item_id().expect("submenu id");
-    let toggles = items
-        .iter()
-        .find_map(|item| match item {
-            WidgetMenuItem::Submenu { id, children, .. } if *id == windows => Some(children),
-            _ => None,
-        })
-        .expect("windows submenu");
-    let actual: Vec<_> = toggles
-        .iter()
-        .filter_map(|item| match item {
-            WidgetMenuItem::Toggle { id, label, .. } => Some((label.as_str(), *id)),
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(
-        actual.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
-        vec![
-            strings::MENU_BACKGROUND_OPERATIONS,
-            strings::MENU_AGENT_DEBUG
-        ]
-    );
-    assert_eq!(
-        hamburger_toggle_command(actual[0].1, true),
-        Some(apply_background_logs_toggle(true))
-    );
-    assert_eq!(
-        hamburger_toggle_command(actual[1].1, false),
-        Some(apply_agent_debug_toggle(false))
-    );
-    assert_eq!(
-        hamburger_toggle_command(MenuItemId::new("hamburger.unknown"), true),
-        None
-    );
-}
-
-/// Empty menu models remain empty and therefore do not create an overlay.
-#[test]
-fn hamburger_menu_items_for_empty_entries_are_empty() {
-    assert!(hamburger_menu_items(&[]).is_empty());
 }

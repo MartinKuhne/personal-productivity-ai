@@ -16,7 +16,6 @@ use crate::config::{AppConfig, InMemoryConfigStorage};
 use crate::ui_iced::app::{ContextMenu, OverlayLayer, build_state};
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::editor::EditorViewModel;
-use crate::ui_iced::menu::MenuItem;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,6 +43,26 @@ fn show_debug(state: &mut AppState) {
     state.app.orchestrator.agent_panel_state.show_debug_window = true;
 }
 
+/// Opens a real single-file context menu at `point`.
+///
+/// Built from the production row producer rather than a hand-made item
+/// list, so the mount and render assertions describe the menu the app
+/// actually shows.
+fn open_context_menu(state: &mut AppState, point: iced::Point) {
+    let path = PathBuf::from("/notes/a.md");
+    let rows = crate::ui_iced::panels::left::file_menu_items(&path, &[], false);
+    state.overlay.context_menu = ContextMenu::open(
+        crate::ui_iced::context_menu::ContextTarget::TreeFile { path },
+        point,
+        &rows,
+        state.viewport,
+    );
+    assert!(
+        state.overlay.context_menu.is_some(),
+        "the fixture must actually open a card"
+    );
+}
+
 #[test]
 fn test_band_spacing_matches_task_contract() {
     assert_eq!(BAND_SPACING_PIXELS, 8.0);
@@ -60,23 +79,17 @@ fn test_nothing_is_mounted_on_a_fresh_state() {
 }
 
 #[test]
-fn test_context_menu_mounts_only_when_it_has_rows() {
+fn test_context_menu_mounts_only_when_a_card_actually_opened() {
     let mut state = fresh_state();
 
-    state.overlay.context_menu = Some(ContextMenu::new(iced::Point::new(10.0, 20.0), Vec::new()));
+    state.overlay.context_menu = None;
     assert_eq!(
         state.mounted_layers(),
         Vec::<OverlayLayer>::new(),
-        "an empty menu must not mount a click-blocking layer"
+        "no surface means no click-blocking layer"
     );
 
-    state.overlay.context_menu = Some(ContextMenu::new(
-        iced::Point::new(10.0, 20.0),
-        vec![MenuItem::action(
-            "Open",
-            Message::Tree(TreeMessage::ContextMenuClosed),
-        )],
-    ));
+    open_context_menu(&mut state, iced::Point::new(10.0, 20.0));
     assert_eq!(state.mounted_layers(), vec![OverlayLayer::ContextMenu]);
 }
 
@@ -140,13 +153,7 @@ fn test_batch_dialog_is_the_topmost_layer() {
     state.overlay.dialog.open(DialogKind::DeleteConfirm {
         path: PathBuf::from("/notes/a.md"),
     });
-    state.overlay.context_menu = Some(ContextMenu::new(
-        iced::Point::new(0.0, 0.0),
-        vec![MenuItem::action(
-            "Row",
-            Message::Tree(TreeMessage::ContextMenuClosed),
-        )],
-    ));
+    open_context_menu(&mut state, iced::Point::new(0.0, 0.0));
     state.rebuild_view_models();
 
     assert_eq!(
@@ -190,13 +197,7 @@ fn test_view_builds_with_every_overlay_mounted() {
     state.overlay.dialog.open(DialogKind::Rename {
         path: PathBuf::from("/notes/a.md"),
     });
-    state.overlay.context_menu = Some(ContextMenu::new(
-        iced::Point::new(4.0, 4.0),
-        vec![MenuItem::action(
-            "Row",
-            Message::Tree(TreeMessage::ContextMenuClosed),
-        )],
-    ));
+    open_context_menu(&mut state, iced::Point::new(4.0, 4.0));
     state.rebuild_view_models();
 
     let _element: iced::Element<'_, Message> = view(&state);

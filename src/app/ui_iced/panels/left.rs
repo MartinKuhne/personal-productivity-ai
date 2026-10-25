@@ -108,9 +108,13 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui::tree::{FlatRow, flatten_tree};
 use crate::ui::tree_search::SearchResultEntry;
+use crate::ui_iced::context_menu::{
+    ContextGroup, ContextRow, ContextTarget, KEY_COPY_PATH, KEY_CREATE_DIRECTORY, KEY_DELETE,
+    KEY_EDIT, KEY_MERGE, KEY_MOVE, KEY_NEW_DOCUMENT, KEY_PRINT, KEY_RENAME, KEY_RUN_AS_PROMPT,
+    KEY_SAVE_AS_PDF, KEY_SHOW_IN_EXPLORER,
+};
 use crate::ui_iced::layout::clamped_width;
 use crate::ui_iced::message::{Message, SearchMessage, TreeMessage};
-use crate::ui_iced::overlay::MenuItem;
 
 use super::top::phosphor_font;
 
@@ -304,66 +308,96 @@ pub fn row_double_click_command(row: &FlatRow) -> Option<UserCommand> {
     }
 }
 
-/// Context-menu rows for a **directory** row, in menu order (UI-006),
-/// followed by the VFS-122 folder skills.
+/// Context-menu rows for a **directory** row, in §4.9.1's group order
+/// (UI-006, VFS-122).
+///
+/// The spec's three runs are **Creation** (New document, Create Directory),
+/// **Folder Automation & Management** (folder skills, then Rename, Move,
+/// Copy path, Show in File Explorer) and **Destructive** (Delete). A
+/// separator is emitted between the runs by
+/// [`menu_from_rows`](crate::ui_iced::context_menu::menu_from_rows); the
+/// rows here only declare which run they belong to.
 ///
 /// Purity: pure.
 #[must_use]
-pub fn directory_menu_items(path: &Path, folder_skills: &[SkillFile]) -> Vec<MenuItem<Message>> {
+pub fn directory_menu_items(path: &Path, folder_skills: &[SkillFile]) -> Vec<ContextRow> {
     let mut items = vec![
-        MenuItem::new(
-            strings::SHOW_IN_EXPLORER_ACTION,
-            Message::Command(UserCommand::ShowInExplorer(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::COPY_PATH_ACTION,
-            Message::Command(UserCommand::CopyPath(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::RENAME_ACTION,
-            Message::Command(UserCommand::Rename(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::MOVE_ACTION,
-            Message::Command(UserCommand::Move(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::CREATE_DIRECTORY_ACTION,
-            Message::Command(UserCommand::CreateDirectory {
-                parent: path.to_path_buf(),
-            }),
-        ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_NEW_DOCUMENT,
             strings::NEW_DOCUMENT_ACTION,
+            ContextGroup::Primary,
             Message::Command(UserCommand::CreateDocument {
                 parent: path.to_path_buf(),
             }),
         ),
-        MenuItem::new(
-            strings::DELETE_ACTION,
-            Message::Command(UserCommand::Delete(path.to_path_buf())),
+        ContextRow::new(
+            KEY_CREATE_DIRECTORY,
+            strings::CREATE_DIRECTORY_ACTION,
+            ContextGroup::Primary,
+            Message::Command(UserCommand::CreateDirectory {
+                parent: path.to_path_buf(),
+            }),
         ),
     ];
 
-    items.extend(folder_skills.iter().map(|skill| {
-        MenuItem::new(
-            skill.name.clone(),
-            Message::Tree(TreeMessage::SkillRunRequested {
-                skill: skill.path.clone(),
-                target_dir: Some(path.to_path_buf()),
-                target_file: Some(path.to_path_buf()),
-            }),
-        )
-    }));
+    items.extend(
+        folder_skills
+            .iter()
+            .map(|skill| ContextRow::skill(skill, Some(path.to_path_buf()), path)),
+    );
+
+    items.extend([
+        ContextRow::new(
+            KEY_RENAME,
+            strings::RENAME_ACTION,
+            ContextGroup::Automation,
+            Message::Command(UserCommand::Rename(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_MOVE,
+            strings::MOVE_ACTION,
+            ContextGroup::Automation,
+            Message::Command(UserCommand::Move(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_COPY_PATH,
+            strings::COPY_PATH_ACTION,
+            ContextGroup::Automation,
+            Message::Command(UserCommand::CopyPath(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_SHOW_IN_EXPLORER,
+            strings::SHOW_IN_EXPLORER_ACTION,
+            ContextGroup::Automation,
+            Message::Command(UserCommand::ShowInExplorer(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_DELETE,
+            strings::DELETE_ACTION,
+            ContextGroup::Destructive,
+            Message::Command(UserCommand::Delete(path.to_path_buf())),
+        ),
+    ]);
 
     items
 }
 
-/// Context-menu rows for a **single-selected file**, in menu order
+/// Context-menu rows for a **single-selected file**, in §4.9.1's group order
 /// (UI-007, UI-008, UI-009..UI-014, UI-020).
+///
+/// The spec's four runs are **Open & Output** (Edit, Print, Save as PDF),
+/// **AI & Automation** (Run as prompt, then the VFS-121 note skills),
+/// **File Management** (Rename, Move, Copy path, Show in File Explorer) and
+/// **Destructive** (Delete).
 ///
 /// `typst_available` gates "Save as PDF…": the row is absent, not
 /// disabled, when the `typst` CLI is missing.
+///
+/// §4.9.1 also lists `Open in Editor` in the file menu's first run. The app
+/// has never had that row on a tree target — `Edit` **is** the
+/// `UserCommand::OpenInEditor` row — and adding a second row that fires the
+/// same command is new user-facing behaviour, so it is deliberately **not**
+/// added here.
 ///
 /// Purity: pure.
 #[must_use]
@@ -371,28 +405,18 @@ pub fn file_menu_items(
     path: &Path,
     note_skills: &[SkillFile],
     typst_available: bool,
-) -> Vec<MenuItem<Message>> {
+) -> Vec<ContextRow> {
     let mut items = vec![
-        MenuItem::new(
+        ContextRow::new(
+            KEY_EDIT,
             strings::EDIT_BUTTON,
+            ContextGroup::Primary,
             Message::Command(UserCommand::OpenInEditor(path.to_path_buf())),
         ),
-        MenuItem::new(
-            strings::SHOW_IN_EXPLORER_ACTION,
-            Message::Command(UserCommand::ShowInExplorer(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::COPY_PATH_ACTION,
-            Message::Command(UserCommand::CopyPath(path.to_path_buf())),
-        ),
-        MenuItem::new(
-            strings::RUN_AS_PROMPT_ACTION,
-            Message::Tree(TreeMessage::RunAsPromptRequested {
-                path: path.to_path_buf(),
-            }),
-        ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_PRINT,
             strings::PRINT_ACTION,
+            ContextGroup::Primary,
             Message::Tree(TreeMessage::PrintRequested {
                 path: path.to_path_buf(),
             }),
@@ -400,35 +424,60 @@ pub fn file_menu_items(
     ];
 
     if typst_available {
-        items.push(MenuItem::new(
+        items.push(ContextRow::new(
+            KEY_SAVE_AS_PDF,
             strings::SAVE_AS_PDF_ACTION,
+            ContextGroup::Primary,
             Message::Command(UserCommand::SaveAsPdf(path.to_path_buf())),
         ));
     }
 
-    items.push(MenuItem::new(
-        strings::RENAME_ACTION,
-        Message::Command(UserCommand::Rename(path.to_path_buf())),
+    items.push(ContextRow::new(
+        KEY_RUN_AS_PROMPT,
+        strings::RUN_AS_PROMPT_ACTION,
+        ContextGroup::Automation,
+        Message::Tree(TreeMessage::RunAsPromptRequested {
+            path: path.to_path_buf(),
+        }),
     ));
-    items.push(MenuItem::new(
-        strings::MOVE_ACTION,
-        Message::Command(UserCommand::Move(path.to_path_buf())),
-    ));
-    items.push(MenuItem::new(
-        strings::DELETE_ACTION,
-        Message::Command(UserCommand::Delete(path.to_path_buf())),
-    ));
+    items.extend(
+        note_skills
+            .iter()
+            .map(|skill| ContextRow::skill(skill, None, path)),
+    );
 
-    items.extend(note_skills.iter().map(|skill| {
-        MenuItem::new(
-            skill.name.clone(),
-            Message::Tree(TreeMessage::SkillRunRequested {
-                skill: skill.path.clone(),
-                target_dir: None,
-                target_file: Some(path.to_path_buf()),
-            }),
-        )
-    }));
+    items.extend([
+        ContextRow::new(
+            KEY_RENAME,
+            strings::RENAME_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::Rename(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_MOVE,
+            strings::MOVE_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::Move(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_COPY_PATH,
+            strings::COPY_PATH_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::CopyPath(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_SHOW_IN_EXPLORER,
+            strings::SHOW_IN_EXPLORER_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::ShowInExplorer(path.to_path_buf())),
+        ),
+        ContextRow::new(
+            KEY_DELETE,
+            strings::DELETE_ACTION,
+            ContextGroup::Destructive,
+            Message::Command(UserCommand::Delete(path.to_path_buf())),
+        ),
+    ]);
 
     items
 }
@@ -441,14 +490,18 @@ pub fn file_menu_items(
 ///
 /// Purity: pure.
 #[must_use]
-pub fn multi_select_menu_items(paths: &[PathBuf]) -> Vec<MenuItem<Message>> {
+pub fn multi_select_menu_items(paths: &[PathBuf]) -> Vec<ContextRow> {
     vec![
-        MenuItem::new(
+        ContextRow::new(
+            KEY_MERGE,
             strings::MERGE_ACTION,
+            ContextGroup::Primary,
             Message::Command(UserCommand::MergePrompt(paths.to_vec())),
         ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_DELETE,
             strings::DELETE_ACTION,
+            ContextGroup::Destructive,
             Message::Tree(TreeMessage::DeleteSelectedRequested {
                 paths: paths.to_vec(),
             }),
@@ -470,6 +523,32 @@ pub struct MenuContext<'a> {
     pub typst_available: bool,
 }
 
+/// The §4.9.1 context target `row` represents under `selected_files`.
+///
+/// The **single** place the multi-select rule lives: [`context_menu_items`]
+/// picks the menu through this, so the target the floating surface records and
+/// the menu it actually renders cannot drift apart.
+///
+/// Purity: pure.
+#[must_use]
+pub fn context_target_for(row: &FlatRow, selected_files: &[PathBuf]) -> ContextTarget {
+    if row.is_dir {
+        return ContextTarget::TreeDirectory {
+            path: row.path.clone(),
+        };
+    }
+    let is_multi = selected_files.len() > 1 && selected_files.iter().any(|path| path == &row.path);
+    if is_multi {
+        ContextTarget::TreeMultiSelect {
+            paths: selected_files.to_vec(),
+        }
+    } else {
+        ContextTarget::TreeFile {
+            path: row.path.clone(),
+        }
+    }
+}
+
 /// The context-menu rows for `row`, choosing the directory / multi-select /
 /// single-file menu: the multi-select menu applies only when more than one
 /// file is selected *and* this path is one of them.
@@ -480,15 +559,22 @@ pub fn context_menu_items(
     row: &FlatRow,
     selected_files: &[PathBuf],
     context: MenuContext<'_>,
-) -> Vec<MenuItem<Message>> {
-    if row.is_dir {
-        return directory_menu_items(&row.path, context.folder_skills);
-    }
-    let is_multi = selected_files.len() > 1 && selected_files.iter().any(|path| path == &row.path);
-    if is_multi {
-        multi_select_menu_items(selected_files)
-    } else {
-        file_menu_items(&row.path, context.note_skills, context.typst_available)
+) -> Vec<ContextRow> {
+    match context_target_for(row, selected_files) {
+        ContextTarget::TreeDirectory { path } => directory_menu_items(&path, context.folder_skills),
+        ContextTarget::TreeMultiSelect { paths } => multi_select_menu_items(&paths),
+        ContextTarget::TreeFile { path } => {
+            file_menu_items(&path, context.note_skills, context.typst_available)
+        }
+        // A tab target is served by
+        // [`tab_context_menu_items`](super::center::tab_context_menu_items),
+        // never here: [`context_target_for`] can only produce `Tab` if a
+        // caller routed a tab through the tree builder. The single-file menu
+        // is returned rather than panicking because a view-side builder must
+        // not abort the frame over a routing mistake.
+        ContextTarget::Tab { path, .. } => {
+            file_menu_items(&path, context.note_skills, context.typst_available)
+        }
     }
 }
 
@@ -791,9 +877,15 @@ impl LeftPanelViewModel {
                 .any(|file| file.as_path() == path)
     }
 
+    /// The §4.9.1 context target the row whose menu is open represents.
+    #[must_use]
+    pub fn menu_target_for(&self, row: &FlatRow) -> ContextTarget {
+        context_target_for(row, &self.selected_files)
+    }
+
     /// The context-menu rows for the row whose menu is open.
     #[must_use]
-    pub fn menu_items_for(&self, row: &FlatRow) -> Vec<MenuItem<Message>> {
+    pub fn menu_items_for(&self, row: &FlatRow) -> Vec<ContextRow> {
         context_menu_items(
             row,
             &self.selected_files,

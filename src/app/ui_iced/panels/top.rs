@@ -42,9 +42,10 @@
 //! child menus, and `iced_aw` is not a dependency. The full hierarchy is
 //! therefore kept in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state.
-//! [`hamburger_menu_items`] projects that model into nested reusable menu
-//! rows, keeping parent surfaces mounted as a child opens and preserving
-//! each selectable row's [`hamburger_row_message`].
+//! The **render path** is separate: [`hamburger_menu`](crate::ui_iced::hamburger::hamburger_menu)
+//! builds the `iced-pro` [`Menu`](iced_pro::surface::menu::model::Menu) tree
+//! the framework cascade drives, so the top bar itself only emits
+//! [`MenuMessage::Opened`]).
 //!
 //! # Feature-gated widgets
 //!
@@ -98,7 +99,6 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::fonts::PHOSPHOR_FONT_NAME;
 use crate::ui_iced::logo::logo_mark;
-use crate::ui_iced::menu::{MenuItem as WidgetMenuItem, MenuItemId};
 use crate::ui_iced::message::{MenuMessage, Message};
 
 // The framework-free helpers this panel owns, **relocated into this
@@ -258,8 +258,9 @@ pub const PICK_LIST_PADDING: Padding = Padding {
 pub const SEPARATOR_WIDTH: f32 = 1.0;
 
 /// Minimum width of the hamburger menu surface, in logical points. The
-/// reusable menu's default width
-/// ([`crate::ui_iced::menu::MENU_SURFACE_WIDTH`]) exceeds this bound.
+/// shared menu-card width
+/// ([`menu_surface::CARD_WIDTH`](crate::ui_iced::menu_surface::CARD_WIDTH))
+/// exceeds this bound.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
 
 /// Height of the ☰ glyph the hamburger button renders.
@@ -290,30 +291,6 @@ pub fn hamburger_menu_anchor(viewport: Size) -> Point {
         (viewport.width - MENU_ANCHOR_RIGHT_MARGIN + MENU_ANCHOR_BELOW_BAR).max(0.0),
         BAR_HEIGHT_POINTS,
     )
-}
-
-/// The [`Message`] a selectable hamburger menu row publishes.
-///
-/// The row's own [`UserCommand`] is the self-contained intent; it rides the
-/// menu channel so the reducer can close the menu in the same reduction
-/// ([`MenuMessage::RowActivated`]).
-///
-/// Purity: pure function of `command`.
-#[must_use]
-pub fn hamburger_row_message(command: &UserCommand) -> Message {
-    Message::Menu(MenuMessage::RowActivated(command.clone()))
-}
-
-/// The label a command-bearing hamburger row renders.
-///
-/// Menu-card rows sit *below* their submenu title, so they carry no submenu
-/// prefix — the check slot (`✓`, blank when unchecked) plus the row label is
-/// the full text.
-///
-/// Purity: pure function of `(label, checked)`.
-#[must_use]
-pub fn hamburger_row_label(label: &str, checked: bool) -> String {
-    strings::format_menu_row_label(None, label, checked)
 }
 
 /// The Phosphor icon font handle used for the logo mark.
@@ -459,13 +436,6 @@ pub enum MenuSection {
     TableWrap,
 }
 
-const MENU_WINDOWS_ID: MenuItemId = MenuItemId::new("hamburger.windows");
-const MENU_CHAT_MODELS_ID: MenuItemId = MenuItemId::new("hamburger.chat_models");
-const MENU_TABLE_WRAP_ID: MenuItemId = MenuItemId::new("hamburger.table_wrap");
-const MENU_BACKGROUND_OPERATIONS_ID: MenuItemId =
-    MenuItemId::new("hamburger.background_operations");
-const MENU_AGENT_DEBUG_ID: MenuItemId = MenuItemId::new("hamburger.agent_debug");
-
 impl MenuSection {
     /// The submenu name rendered in front of the row label, `None` for
     /// top-level rows.
@@ -475,31 +445,6 @@ impl MenuSection {
             MenuSection::Windows => Some(strings::MENU_WINDOWS_TITLE),
             MenuSection::ChatModels => Some(strings::MENU_CHAT_MODELS),
             MenuSection::TableWrap => Some(strings::MENU_TABLE_WRAP_ALGORITHM),
-        }
-    }
-
-    /// Stable widget identifier for this section, or `None` for direct rows.
-    #[must_use]
-    pub const fn menu_item_id(self) -> Option<MenuItemId> {
-        match self {
-            MenuSection::Direct => None,
-            MenuSection::Windows => Some(MENU_WINDOWS_ID),
-            MenuSection::ChatModels => Some(MENU_CHAT_MODELS_ID),
-            MenuSection::TableWrap => Some(MENU_TABLE_WRAP_ID),
-        }
-    }
-
-    /// Resolves a stable widget identifier to its section.
-    #[must_use]
-    pub fn from_menu_item_id(id: MenuItemId) -> Option<Self> {
-        if id == MENU_WINDOWS_ID {
-            Some(Self::Windows)
-        } else if id == MENU_CHAT_MODELS_ID {
-            Some(Self::ChatModels)
-        } else if id == MENU_TABLE_WRAP_ID {
-            Some(Self::TableWrap)
-        } else {
-            None
         }
     }
 }
@@ -680,64 +625,6 @@ pub fn build_menu_entries(view_model: &TopBarViewModel) -> Vec<MenuEntry> {
     });
 
     entries
-}
-
-/// Projects the hamburger hierarchy into the reusable menu-widget model.
-///
-/// Direct entries remain at the root; section entries become child rows of
-/// their matching submenu, preserving checked labels and the command carried
-/// by each selectable item.
-#[must_use]
-pub fn hamburger_menu_items(entries: &[MenuEntry]) -> Vec<WidgetMenuItem<Message>> {
-    entries
-        .iter()
-        .filter(|entry| entry.section == MenuSection::Direct)
-        .filter_map(|entry| match &entry.kind {
-            MenuEntryKind::Submenu(section) => {
-                let id = section.menu_item_id()?;
-                let children = entries
-                    .iter()
-                    .filter(|child| child.section == *section)
-                    .filter_map(hamburger_child_item)
-                    .collect();
-                Some(WidgetMenuItem::submenu(id, entry.label.clone(), children))
-            }
-            _ => hamburger_child_item(entry),
-        })
-        .collect()
-}
-
-fn hamburger_child_item(entry: &MenuEntry) -> Option<WidgetMenuItem<Message>> {
-    match &entry.kind {
-        MenuEntryKind::Action(UserCommand::ToggleBackgroundLogs(_)) => {
-            Some(WidgetMenuItem::toggle(
-                MENU_BACKGROUND_OPERATIONS_ID,
-                entry.label.clone(),
-                entry.checked,
-            ))
-        }
-        MenuEntryKind::Action(UserCommand::ToggleAgentDebugWindow(_)) => Some(
-            WidgetMenuItem::toggle(MENU_AGENT_DEBUG_ID, entry.label.clone(), entry.checked),
-        ),
-        MenuEntryKind::Action(command) => Some(WidgetMenuItem::action(
-            hamburger_row_label(&entry.label, entry.checked),
-            hamburger_row_message(command),
-        )),
-        MenuEntryKind::Placeholder => Some(WidgetMenuItem::disabled(entry.label.clone())),
-        MenuEntryKind::Submenu(_) => None,
-    }
-}
-
-/// Resolves a hamburger toggle event to the self-contained application intent.
-#[must_use]
-pub fn hamburger_toggle_command(id: MenuItemId, checked: bool) -> Option<UserCommand> {
-    if id == MENU_BACKGROUND_OPERATIONS_ID {
-        Some(apply_background_logs_toggle(checked))
-    } else if id == MENU_AGENT_DEBUG_ID {
-        Some(apply_agent_debug_toggle(checked))
-    } else {
-        None
-    }
 }
 
 /// Creates a top-level menu entry that opens `section`.

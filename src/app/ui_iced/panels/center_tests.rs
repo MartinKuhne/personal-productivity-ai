@@ -16,9 +16,14 @@
 
 use super::*;
 use crate::config::ContentLibrary;
-use crate::ui_iced::overlay::menu_labels;
+use crate::ui_iced::message::TreeMessage;
 use crate::ui_iced::test_helpers::test_app;
 use tempfile::TempDir;
+
+/// The visible labels of a context-row list, in render order.
+fn row_labels(rows: &[ContextRow]) -> Vec<&str> {
+    rows.iter().map(|item| item.label.as_str()).collect()
+}
 
 // --- fixtures -----------------------------------------------------------
 
@@ -64,7 +69,7 @@ fn select(app: &mut FastMdApp, path: &str) {
 }
 
 /// The message a menu row with `label` carries.
-fn message_for(items: &[MenuItem<Message>], label: &str) -> Message {
+fn message_for(items: &[ContextRow], label: &str) -> Message {
     items
         .iter()
         .find(|item| item.label == label)
@@ -248,16 +253,18 @@ fn agent_session_close_message_clears_the_agent_session() {
 fn tab_context_menu_labels_are_in_the_expected_order() {
     let items = tab_context_menu_items(1, Path::new("lib/note.md"), &[]);
     assert_eq!(
-        menu_labels(&items),
+        row_labels(&items),
         vec![
-            strings::EDIT_BUTTON,
             strings::CLOSE_TAB_MENU,
             strings::CLOSE_OTHERS_MENU,
             strings::CLOSE_ALL_TABS_MENU,
+            strings::EDIT_BUTTON,
+            strings::OPEN_IN_EDITOR_ACTION,
             strings::COPY_PATH_ACTION,
             strings::SHOW_IN_EXPLORER_ACTION,
-            strings::OPEN_IN_EDITOR_ACTION,
-        ]
+        ],
+        "INT-3b reordered to §4.9.1's Tab Lifecycle | Edit & Automation | \
+         Location runs; no label changed"
     );
 }
 
@@ -334,12 +341,24 @@ fn tab_context_menu_note_skill_rows_map_to_deferred_skill_runs() {
 }
 
 #[test]
-fn tab_context_menu_skill_rows_come_after_the_fixed_rows() {
+fn tab_context_menu_skill_rows_sit_inside_the_automation_run() {
     let skills = vec![skill("FormatMarkdown", "sys/FormatMarkdown.md")];
     let items = tab_context_menu_items(0, Path::new("note.md"), &skills);
+    let index = items
+        .iter()
+        .position(|item| item.label == "FormatMarkdown")
+        .expect("the skill row must be present");
+
+    assert_eq!(items[index].group, ContextGroup::Automation);
     assert_eq!(
-        items.last().map(|item| item.label.as_str()),
-        Some("FormatMarkdown")
+        items[index - 1].label,
+        strings::OPEN_IN_EDITOR_ACTION,
+        "the skill run follows the editor rows, not the whole menu"
+    );
+    assert_eq!(
+        items[index + 1].label,
+        strings::COPY_PATH_ACTION,
+        "the Location run comes after automation, so skills are not last"
     );
 }
 
@@ -603,7 +622,7 @@ fn tab_menu_file_actions_match_the_tree_file_menu() {
     let tab_items = tab_context_menu_items(0, path, &skills);
     let tree_items = file_menu_items(path, &skills, false);
 
-    let message_for = |items: &[MenuItem<Message>], label: &str| -> Option<Message> {
+    let message_for = |items: &[ContextRow], label: &str| -> Option<Message> {
         items
             .iter()
             .find(|item| item.label == label)

@@ -44,10 +44,7 @@ use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::background_logs_view;
-use crate::ui_iced::menu::{
-    HorizontalPreference, MenuEvent, MenuPosition, MenuStyle, VerticalPreference, menu_overlay,
-};
-use crate::ui_iced::message::{LayoutMessage, MenuMessage, Message, TreeMessage};
+use crate::ui_iced::message::{LayoutMessage, Message};
 use crate::ui_iced::overlay::modal;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
@@ -200,30 +197,16 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// The overlay host: the bands with every mounted floating window stacked
 /// above them, bottom-most first.
 ///
-/// The tree/tab context menu and top-bar hamburger are mounted here through
-/// [`menu_overlay`], which owns their click-away blocker, directional
-/// placement and nested surfaces. Higher windows are stacked above them as
-/// full-screen overlays. The reducer keeps the two menus mutually exclusive,
-/// so at most one menu surface is live per frame.
+/// The tree/tab context menu and the top-bar hamburger are both rendered by
+/// the `iced-pro` menu engine and folded into the base here, each with its own
+/// click-away blocker and solved card geometry. Higher windows are stacked
+/// above them as full-screen overlays. The reducer keeps the two menus
+/// mutually exclusive, so at most one menu surface is live per frame.
 fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
     let mut base = base_bands(state);
 
-    if let Some(menu) = state.overlay.context_menu.as_ref()
-        && !menu.items.is_empty()
-    {
-        base = menu_overlay(
-            base.map(MenuEvent::Action),
-            &menu.items,
-            &menu.state,
-            MenuPosition::Point {
-                point: menu.anchor,
-                horizontal: HorizontalPreference::Auto,
-                vertical: VerticalPreference::Auto,
-            },
-            state.viewport,
-            MenuStyle::default(),
-        )
-        .map(context_menu_event_to_message);
+    if let Some(menu) = state.overlay.context_menu.as_ref() {
+        base = crate::ui_iced::context_menu::overlay(base, &menu.cascade, &menu.rects);
     }
 
     if state.overlay.hamburger_open {
@@ -247,20 +230,6 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
         let mut all = vec![base];
         all.extend(layers);
         stack(all).into()
-    }
-}
-
-fn context_menu_event_to_message(event: MenuEvent<Message>) -> Message {
-    match event {
-        MenuEvent::Action(message) => message,
-        MenuEvent::Toggle { .. } | MenuEvent::RadioSelected { .. } | MenuEvent::Ignored => {
-            Message::Menu(MenuMessage::InteractionIgnored)
-        }
-        MenuEvent::OpenSubmenu { parent_path, id } => {
-            Message::Menu(MenuMessage::ContextSubmenuOpened { parent_path, id })
-        }
-        MenuEvent::CloseSubmenu => Message::Menu(MenuMessage::ContextSubmenuClosed),
-        MenuEvent::Dismissed => Message::Tree(TreeMessage::ContextMenuClosed),
     }
 }
 

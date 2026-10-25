@@ -21,8 +21,12 @@
 //! - [`overlay`] — the shared context-menu and blocking-modal primitives:
 //!   the overlay slot model, cursor anchoring with viewport clamping, the
 //!   scrim that swallows input, and the confirm/cancel button pair.
-//! - [`menu`] — reusable menu rows, point/anchor placement, and nested
-//!   message-driven menu surfaces ([MENU-001]..[MENU-015]).
+//! - [`menu_surface`] — the shared framework-menu card chrome and solved
+//!   geometry every menu card is painted from.
+//! - [`hamburger`] and [`context_menu`] — the two menu surfaces driven by
+//!   the `iced-pro` menu engine: nested message-driven surfaces
+//!   ([MENU-001]..[MENU-015]) and the file-tree / tab context menu
+//!   (§4.9.1).
 //! - [`editor`] — the inline Markdown editor modal with an undo/redo history
 //!   stack, pre-save GFM validation and the front-matter-preserving save
 //!   model (UI-037..UI-045).
@@ -130,6 +134,9 @@ pub mod agent_debug;
 pub mod app;
 pub mod attributions;
 pub mod batch_dialog;
+/// The file-tree and document-tab context menus rendered by the `iced-pro`
+/// menu engine.
+pub mod context_menu;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
@@ -140,7 +147,8 @@ pub mod interaction_tests;
 pub mod layout;
 pub mod logo;
 pub mod logs;
-pub mod menu;
+/// Shared card chrome and solved geometry for framework-driven menus.
+pub mod menu_surface;
 pub mod message;
 pub mod os_shell;
 pub mod overlay;

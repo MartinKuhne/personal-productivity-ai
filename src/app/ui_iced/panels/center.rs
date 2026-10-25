@@ -47,25 +47,30 @@
 //!
 //! # Tab context menu (UI-026..UI-034)
 //!
-//! [`tab_context_menu_items`] is the single definition of the tab menu, in
-//! this order: Edit, Close Tab, Close Others, Close All Tabs, Copy Path,
-//! Show in File Explorer, Open in Editor, then the VFS-121 note skills.
+//! [`tab_context_menu_items`] is the single definition of the tab menu. Since
+//! INT-3b it emits [`ContextRow`]s in §4.9.1's **group order** rather than
+//! the old flat order: **Tab Lifecycle** (Close Tab, Close Others, Close All
+//! Tabs), then **Edit & Automation** (Edit, Open in Editor, then the
+//! VFS-121 note skills), then **Location** (Copy path, Show in File
+//! Explorer).
 //!
 //! **UI-033 "Format Markdown" is not a `UserCommand`.** It is a seeded
 //! VFS-121 *note skill* (`Skills/Note/FormatMarkdown.md`) whose click reads
 //! the skill file and publishes
 //! `UserCommand::RunSkillPrompt { content, target_dir: None, target_file }`.
 //! A pure view may not read files, so the row emits the **existing**
-//! [`TreeMessage::SkillRunRequested`] deferred-intent variant — the same one
+//! [`TreeMessage::SkillRunRequested`](crate::ui_iced::message::TreeMessage::SkillRunRequested)
+//! deferred-intent variant — the same one
 //! the file-tree's note-skill rows emit. Reusing it rather than adding a
 //! `TabMessage` twin keeps UI-034's "consistent behaviour across both menu
 //! locations" and keeps `TabMessage: Copy` intact. The reducer routes both
 //! variants through one handler.
 //!
-//! Menu **separators** are not representable: the overlay card is a uniform
-//! column of buttons ([`overlay`](crate::ui_iced::overlay)) and its
-//! `MenuItem` rows have no separator kind.
-//! The grouping is therefore carried by row order only.
+//! Menu **separators** used to be unrepresentable: the overlay card was a
+//! uniform column of buttons whose `MenuItem` rows had no separator kind, so
+//! the grouping was carried by row order alone. That gap is closed — each row
+//! declares its [`ContextGroup`] and the framework menu engine emits a real
+//! `1px border.subtle` divider at every group boundary (§4.9.1).
 //!
 //! # UI-048 — the thinking delimiter
 //!
@@ -122,8 +127,11 @@ use crate::config::SkillFile;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::message::{Message, TabMessage, TreeMessage};
-use crate::ui_iced::overlay::MenuItem;
+use crate::ui_iced::context_menu::{
+    ContextGroup, ContextRow, KEY_CLOSE_ALL_TABS, KEY_CLOSE_OTHERS, KEY_CLOSE_TAB, KEY_COPY_PATH,
+    KEY_EDIT, KEY_OPEN_IN_EDITOR, KEY_SHOW_IN_EXPLORER,
+};
+use crate::ui_iced::message::{Message, TabMessage};
 
 use super::left::note_skill_files;
 use super::top::phosphor_font;
@@ -390,49 +398,61 @@ pub fn tab_context_menu_items(
     index: usize,
     path: &Path,
     note_skills: &[SkillFile],
-) -> Vec<MenuItem<Message>> {
+) -> Vec<ContextRow> {
     let path = path.to_path_buf();
     let mut items = vec![
-        MenuItem::new(
-            strings::EDIT_BUTTON,
-            Message::Command(UserCommand::OpenInEditor(path.clone())),
-        ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_CLOSE_TAB,
             strings::CLOSE_TAB_MENU,
+            ContextGroup::Primary,
             Message::Command(apply_tab_close_click(index)),
         ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_CLOSE_OTHERS,
             strings::CLOSE_OTHERS_MENU,
+            ContextGroup::Primary,
             Message::Command(apply_tab_close_others_click(index)),
         ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_CLOSE_ALL_TABS,
             strings::CLOSE_ALL_TABS_MENU,
+            ContextGroup::Primary,
             Message::Command(apply_tab_close_all_click()),
         ),
-        MenuItem::new(
-            strings::COPY_PATH_ACTION,
-            Message::Command(UserCommand::CopyPath(path.clone())),
+        ContextRow::new(
+            KEY_EDIT,
+            strings::EDIT_BUTTON,
+            ContextGroup::Automation,
+            Message::Command(UserCommand::OpenInEditor(path.clone())),
         ),
-        MenuItem::new(
-            strings::SHOW_IN_EXPLORER_ACTION,
-            Message::Command(UserCommand::ShowInExplorer(path.clone())),
-        ),
-        MenuItem::new(
+        ContextRow::new(
+            KEY_OPEN_IN_EDITOR,
             strings::OPEN_IN_EDITOR_ACTION,
+            ContextGroup::Automation,
             Message::Command(UserCommand::OpenInEditor(path.clone())),
         ),
     ];
 
-    items.extend(note_skills.iter().map(|skill| {
-        MenuItem::new(
-            skill.name.clone(),
-            Message::Tree(TreeMessage::SkillRunRequested {
-                skill: skill.path.clone(),
-                target_dir: None,
-                target_file: Some(path.clone()),
-            }),
-        )
-    }));
+    items.extend(
+        note_skills
+            .iter()
+            .map(|skill| ContextRow::skill(skill, None, &path)),
+    );
+
+    items.extend([
+        ContextRow::new(
+            KEY_COPY_PATH,
+            strings::COPY_PATH_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::CopyPath(path.clone())),
+        ),
+        ContextRow::new(
+            KEY_SHOW_IN_EXPLORER,
+            strings::SHOW_IN_EXPLORER_ACTION,
+            ContextGroup::Management,
+            Message::Command(UserCommand::ShowInExplorer(path.clone())),
+        ),
+    ]);
 
     items
 }
@@ -549,7 +569,7 @@ impl CenterPanelViewModel {
     /// The context-menu rows for the tab at `index`; empty for an index that
     /// is not open, so a stale menu request renders nothing.
     #[must_use]
-    pub fn menu_items_for(&self, index: usize) -> Vec<MenuItem<Message>> {
+    pub fn menu_items_for(&self, index: usize) -> Vec<ContextRow> {
         match self.tabs.get(index) {
             Some(tab) => tab_context_menu_items(index, &tab.path, &self.note_skills),
             None => Vec::new(),

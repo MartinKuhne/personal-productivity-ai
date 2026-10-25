@@ -18,10 +18,11 @@
 //! | Row painting + hit testing | `MenuRow` |
 //! | Row intent | [`command_for_activation`](crate::ui_iced::hamburger::command_for_activation) |
 //!
-//! The tree/tab **context** menu is deliberately untouched: this increment
-//! converts one surface to prove the pattern, so
-//! [`crate::ui_iced::menu`] still serves it and its hand-rolled constants
-//! stay alive for that reason.
+//! The tree/tab **context** menu was converted onto the same engine in the
+//! following increment (INT-3b), so both menu surfaces in the app now share
+//! [`the shared menu-surface module`](crate::ui_iced::menu_surface)'s chrome
+//! and geometry and
+//! the hand-rolled flat-menu constants that used to back them are gone.
 //!
 //! # Row kinds are now real, not painted
 //!
@@ -56,25 +57,19 @@
 #[path = "hamburger_tests.rs"]
 mod tests;
 
-use iced::widget::{Column, container, stack};
-use iced::{Element, Length, Padding, Point, Rectangle, Size};
-use std::collections::HashMap;
+use iced::{Element, Point, Rectangle, Size};
 
 use iced_pro::geometry::anchor::{self, Anchor, ControlAlignment, Placement};
-use iced_pro::surface::menu::cascade::{MenuCascade, OpenCard};
+use iced_pro::surface::menu::cascade::MenuCascade;
 use iced_pro::surface::menu::model::{
     ActivationEffect, Menu, MenuId, RadioGroupId, Row, submenu_id,
 };
-use iced_pro::surface::menu::view::{self, MenuRow, RowEvent};
-use iced_pro::token::space;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::table_width::DeficitStrategy;
 use crate::ui::strings;
-use crate::ui::theme::Palette;
-use crate::ui_iced::menu::MENU_SURFACE_WIDTH;
+use crate::ui_iced::menu_surface;
 use crate::ui_iced::message::{MenuMessage, Message};
-use crate::ui_iced::overlay;
 use crate::ui_iced::panels::top::{
     BAR_HEIGHT_POINTS, MENU_ANCHOR_RIGHT_MARGIN, TopBarViewModel, apply_about_button_click,
     apply_agent_debug_toggle, apply_background_logs_toggle, apply_batch_button_click,
@@ -120,21 +115,10 @@ pub const KEY_AGENT_DEBUG: &str = "agent_debug";
 /// Row key: the "no models configured" placeholder.
 pub const KEY_NO_MODELS: &str = "no_models";
 
-/// Card inset between the card edge and its rows (`space.xs`, §4.8.1).
-///
-/// This replaces the previous hand-rolled `MENU_SURFACE_PADDING` of 6 px.
-/// The framework states the inset as a token, so the card is 2 px tighter
-/// on every side than the surface it replaced.
-pub const CARD_INSET: f32 = space::XS;
-
-/// Card width, reusing the app's existing menu width.
-///
-/// §4.8.1 gives the menu card a **range** (`224px..320px`) rather than a
-/// value, and `iced-pro` publishes no menu-card width token — the only
-/// card-width constant in the framework is the Input Dialog's 320. So the
-/// app's existing 224 (the low end of the range, and what it rendered
-/// before) is carried over unchanged rather than restated here.
-pub const CARD_WIDTH: f32 = MENU_SURFACE_WIDTH;
+/// Card inset, card width and the card-size sum are shared with the
+/// context-menu surface through [`menu_surface`], and re-exported here so the
+/// INT-3a public path stays intact.
+pub use crate::ui_iced::menu_surface::{CARD_INSET, CARD_WIDTH, card_size};
 
 /// Builds the hamburger menu as a framework [`Menu`] tree.
 ///
@@ -338,20 +322,6 @@ pub fn hamburger_trigger_rect(viewport: Size) -> Rectangle {
     Rectangle::new(Point::ORIGIN, Size::new(width, BAR_HEIGHT_POINTS))
 }
 
-/// The card size §4.8.1 produces for `menu`: fixed width, height summed
-/// from the framework's own per-kind row heights plus the card inset.
-///
-/// There is **no inter-row spacing** here. The previous surface added 1 px
-/// between every row; the framework's row grid is contiguous, with a
-/// separator row carrying its own 9 px.
-///
-/// Purity: pure function of `menu`.
-#[must_use]
-pub fn card_size(menu: &Menu) -> Size {
-    let rows: f32 = menu.rows().iter().map(view::row_height).sum();
-    Size::new(CARD_WIDTH, rows + CARD_INSET * 2.0)
-}
-
 /// Solves the root card's placement under the navbar.
 ///
 /// Purity: pure function of `(menu, viewport)`.
@@ -369,11 +339,10 @@ pub fn root_placement(menu: &Menu, viewport: Size) -> Placement {
 
 /// Solves the viewport rectangle of every open card, root first.
 ///
-/// A child card is anchored to the **row** that opened it, not to its
-/// parent card (§4.8.1 / `UIF-FMENU-002`), so the parent's already-solved
-/// rectangle is used to derive the trigger row's rectangle inside it.
-/// Cards whose parent did not get a rectangle — which cannot happen for a
-/// cascade walked in open order — are skipped rather than guessed at.
+/// Delegates the walk to
+/// [`menu_surface::open_card_rects`],
+/// supplying [`root_placement`] as the root anchor — the one thing the
+/// hamburger does differently from the context-menu surface.
 ///
 /// These are the rectangles registered with the
 /// [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry), which
@@ -383,157 +352,22 @@ pub fn root_placement(menu: &Menu, viewport: Size) -> Placement {
 /// Purity: pure function of `(cascade, viewport)`.
 #[must_use]
 pub fn open_card_rects(cascade: &MenuCascade, viewport: Size) -> Vec<Rectangle> {
-    let view = Rectangle::new(Point::ORIGIN, viewport);
-    let mut placed: HashMap<MenuId, Rectangle> = HashMap::new();
-    let mut rects = Vec::new();
-
-    for card in cascade.open_cards() {
-        let rect = match card.trigger() {
-            None => root_placement(card.menu(), viewport).rect(),
-            Some(trigger) => {
-                let Some(parent_rect) = placed.get(&trigger.parent).copied() else {
-                    continue;
-                };
-                let Some(parent_menu) = cascade.card_menu(&trigger.parent) else {
-                    continue;
-                };
-                let Some(row_rect) = row_rect(parent_menu, parent_rect, trigger.row) else {
-                    continue;
-                };
-                anchor::solve(
-                    Anchor::Control {
-                        rect: row_rect,
-                        alignment: ControlAlignment::submenu(),
-                    },
-                    card_size(card.menu()),
-                    view,
-                )
-                .rect()
-            }
-        };
-
-        placed.insert(card.id().clone(), rect);
-        rects.push(rect);
-    }
-
-    rects
-}
-
-/// The rectangle one row occupies inside an already-placed card.
-///
-/// Offset from the card's top-left by the inset plus the heights of every
-/// row above it — the same contiguous grid [`card_size`] sums, which is
-/// what makes the submenu land against the row rather than the card.
-fn row_rect(menu: &Menu, card: Rectangle, row: usize) -> Option<Rectangle> {
-    let target = menu.row(row)?;
-    let offset: f32 = menu.rows()[..row].iter().map(view::row_height).sum();
-    Some(Rectangle::new(
-        Point::new(card.x + CARD_INSET, card.y + CARD_INSET + offset),
-        Size::new(card.width - CARD_INSET * 2.0, view::row_height(target)),
-    ))
+    menu_surface::open_card_rects(cascade, viewport, |menu| root_placement(menu, viewport))
 }
 
 /// Renders every open card of `cascade` above `base`, plus the click-away
 /// blocker that dismisses the whole tree.
 ///
-/// `rects` is the output of [`open_card_rects`] for the same cascade and
-/// viewport, index-aligned with
-/// [`MenuCascade::open_cards`](MenuCascade::open_cards) — the view does
-/// not re-solve geometry, it paints the rectangles the reducer already
+/// Delegates to [`menu_surface::overlay`]
+/// with the hamburger's own dismiss message. `rects` is the output of
+/// [`open_card_rects`] for the same cascade and viewport, index-aligned with
+/// [`MenuCascade::open_cards`](MenuCascade::open_cards) — the view does not
+/// re-solve geometry, it paints the rectangles the reducer already
 /// registered. Cards past the end of `rects` are not mounted.
-///
-/// Each card is a [`MenuRow`] per model row inside the §4.8.1 card chrome.
-/// A submenu parent row is told whether its child is open so it paints the
-/// Active-Submenu-Parent cell rather than a plain Hovered one.
-///
-/// The rows publish [`MenuMessage::RowPicked`] carrying the card path and
-/// row index; the reducer runs
-/// [`MenuCascade::activate_row`](MenuCascade::activate_row) and lets the
-/// row's own close policy decide whether the menu survives the click.
 pub fn overlay<'a>(
     base: Element<'a, Message>,
     cascade: &MenuCascade,
     rects: &[Rectangle],
 ) -> Element<'a, Message> {
-    if !cascade.is_open() {
-        return base;
-    }
-
-    let mut layers: Vec<Element<'a, Message>> = vec![
-        base,
-        overlay::input_blocker(Message::Menu(MenuMessage::Closed)).into(),
-    ];
-    layers.extend(
-        cascade
-            .open_cards()
-            .iter()
-            .zip(rects)
-            .map(|(card, rect)| card_element(card, cascade, *rect)),
-    );
-
-    stack(layers)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-}
-
-/// Positions one card at its solved rectangle inside the full-window stack.
-///
-/// The overlay host mounts floating surfaces by padding a full-size
-/// container out to the card's origin, which keeps the card in root-space
-/// coordinates regardless of pane or scroll offsets.
-pub fn positioned<'a>(card: Element<'a, Message>, rect: Rectangle) -> Element<'a, Message> {
-    container(card)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(Padding {
-            top: rect.y,
-            right: 0.0,
-            bottom: 0.0,
-            left: rect.x,
-        })
-        .into()
-}
-
-/// Builds one open card: the §4.8.1 chrome around a column of
-/// [`MenuRow`] widgets, mounted at the card's solved `rect`.
-fn card_element<'a>(
-    card: &OpenCard,
-    cascade: &MenuCascade,
-    rect: Rectangle,
-) -> Element<'a, Message> {
-    let menu = card.menu();
-    let mut rows = Column::<Message>::new();
-
-    for (index, row) in menu.rows().iter().enumerate() {
-        let child_open = row
-            .child_id()
-            .is_some_and(|child| cascade.is_card_open(child));
-        let address = MenuMessage::RowPicked {
-            card: menu.id().clone(),
-            row: index,
-        };
-
-        rows = rows.push(
-            MenuRow::new(
-                row.clone(),
-                menu.row_focus_id(row),
-                move |event| match event {
-                    RowEvent::Activated => Message::Menu(address.clone()),
-                    RowEvent::Absorbed => Message::Menu(MenuMessage::InteractionIgnored),
-                },
-            )
-            .palette(Palette::pro())
-            .submenu_open(child_open),
-        );
-    }
-
-    positioned(
-        container(rows)
-            .width(Length::Fixed(CARD_WIDTH))
-            .padding(CARD_INSET)
-            .style(overlay::card_style)
-            .into(),
-        rect,
-    )
+    menu_surface::overlay(base, cascade, rects, Message::Menu(MenuMessage::Closed))
 }

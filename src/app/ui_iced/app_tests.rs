@@ -10,7 +10,6 @@
 
 use super::*;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
-use crate::bus::events::user_command::UserCommand;
 use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui_iced::dialogs::DialogKind;
@@ -18,6 +17,7 @@ use crate::ui_iced::persisted::InMemoryUiStateStorage;
 use iced_pro::binding::pre_rank::DragCapture;
 use iced_pro::binding::pre_rank::DragKind;
 use iced_pro::binding::pre_rank::PreRankCoordinator;
+use iced_pro::surface::menu::model::{Menu, Row};
 use iced_pro::surface::zorder::SurfaceId;
 use iced_pro::surface::zorder::SurfaceKind;
 use iced_pro::surface::zorder::SurfaceRegistry;
@@ -377,15 +377,20 @@ fn open_editor(overlay: &mut OverlayState) {
     overlay.editor = Some(EditorViewModel::open("M:\\lib\\note.md", "body"));
 }
 
-/// Open a floating context menu with one row.
+/// Open a floating context menu on a real single-file target.
 fn open_context_menu(overlay: &mut OverlayState) {
-    overlay.context_menu = Some(ContextMenu::new(
+    let path = PathBuf::from("M:\\lib\\note.md");
+    let rows = crate::ui_iced::panels::left::file_menu_items(&path, &[], false);
+    overlay.context_menu = ContextMenu::open(
+        crate::ui_iced::context_menu::ContextTarget::TreeFile { path },
         iced::Point::new(12.0, 34.0),
-        vec![MenuItem::action(
-            crate::ui::strings::OPEN_IN_EDITOR_ACTION,
-            Message::Command(UserCommand::OpenInEditor(PathBuf::from("M:\\lib\\note.md"))),
-        )],
-    ));
+        &rows,
+        iced::Size::new(1200.0, 800.0),
+    );
+    assert!(
+        overlay.context_menu.is_some(),
+        "the fixture must actually open a card"
+    );
 }
 
 /// Open the batch dialog over an empty candidate set.
@@ -449,13 +454,13 @@ fn test_close_topmost_closes_each_layer_in_turn() {
         (
             CLOSED_LAYER_HAMBURGER,
             |o| {
-                o.hamburger_open = true;
-                o.hamburger_menu_state.open_child(
-                    &[],
-                    crate::ui_iced::panels::top::MenuSection::Windows
-                        .menu_item_id()
-                        .unwrap(),
+                let menu = Menu::new(
+                    crate::ui_iced::hamburger::HAMBURGER_MENU_ID,
+                    vec![Row::action("x", "X")],
                 );
+                o.hamburger_cascade
+                    .open(&menu, MenuTreeKind::Fixed, &mut o.menu_focus);
+                o.hamburger_open = o.hamburger_cascade.is_open();
             },
             |o| o.hamburger_open,
         ),
@@ -475,7 +480,10 @@ fn test_close_topmost_closes_each_layer_in_turn() {
             !is_open(&overlay),
             "{name} must be closed after close_topmost"
         );
-        assert!(overlay.hamburger_menu_state.open_path().is_empty());
+        assert!(
+            !overlay.hamburger_cascade.is_open(),
+            "the hamburger cascade must be fully unwound, not merely hidden"
+        );
         assert_eq!(
             overlay.close_topmost(),
             None,

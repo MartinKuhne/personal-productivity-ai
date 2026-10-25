@@ -1,5 +1,7 @@
-//! Low-level iced overlay chrome and modal primitives, including flat-menu
-//! helpers; application menus use the reducer-driven widget in [`crate::ui_iced::menu`].
+//! Low-level iced overlay chrome and modal primitives; application menus are
+//! rendered by [`menu_surface`](crate::ui_iced::menu_surface) and its two
+//! consumers, [`hamburger`](crate::ui_iced::hamburger) and
+//! [`context_menu`](crate::ui_iced::context_menu).
 //!
 //! iced has no single call that produces either shape, so this module
 //! supplies them as **pure view functions over plain state structs** — no
@@ -38,8 +40,9 @@
 //! 2. **The built-in `overlay::menu::Menu` is not the application menu.** It
 //!    takes caller-held mutable state and renders plain `ToString` rows, so
 //!    it does not fit the pure-view pattern or the nested row types FastMD
-//!    needs. The reducer-driven [`crate::ui_iced::menu::menu_overlay`] owns
-//!    placement and rendering from immutable menu data plus reducer state.
+//!    needs. The `iced-pro` menu engine owns placement and rendering from
+//!    immutable menu data plus reducer state, mounted through
+//!    [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay).
 //! 3. **Event precedence is already what we want.** `Stack::update` walks
 //!    children top-down and returns as soon as one captures the event
 //!    (`stack.rs:262-264`), so the dialog card gets the click and the scrim
@@ -47,11 +50,10 @@
 //!
 //! ## What positioning IS achievable
 //!
-//! * Flat cursor-anchored cards through [`with_context_menu`], or directional
-//!   point/rectangle anchoring and nested surfaces through
-//!   [`crate::ui_iced::menu::menu_overlay`].
-//! * Exact viewport clamping — legacy card size is deterministic through
-//!   [`menu_size`], while the reusable widget measures from its row model.
+//! * Exact viewport clamping through [`clamp_anchor`], which is what the
+//!   dialogs in this module use. Menu cards no longer clamp by hand:
+//!   [`anchor::solve`](iced_pro::geometry::anchor::solve) resolves the
+//!   placement, including the flip, before the card is ever laid out.
 //! * Centred, blocking modals with a dimmed scrim ([`modal`]), and the
 //!   same modal placed at an explicit clamped top-left position
 //!   ([`modal_at`] — the cursor-anchored small dialogs).
@@ -70,13 +72,14 @@
 //!   the same coordinate space. Individual row/tab triggers only request
 //!   opening; they do not report local coordinates.
 //! * **The built-in `Menu` has no submenu nesting.** FastMD's reusable
-//!   [`crate::ui_iced::menu`] module supplies nested parent/child surfaces
-//!   without adding `iced_aw`; the flat helpers in this module remain
-//!   intentionally single-level.
+//!   engine ([`MenuCascade`](iced_pro::surface::menu::cascade::MenuCascade))
+//!   supplies nested parent/child surfaces without adding `iced_aw`; the
+//!   flat helpers in this module remain intentionally single-level.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
 //!   (`menu.rs:244-270`), but we are not using `Menu`. [`clamp_anchor`]
-//!   clamps rather than flips; a caller wanting flip-above can compare
-//!   [`menu_size`] against the space below the anchor itself.
+//!   clamps rather than flips, which is all the dialogs need. Menu cards
+//!   get their flip from [`anchor::solve`](iced_pro::geometry::anchor::solve),
+//!   which mirrors an axis when the preferred side cannot hold the card.
 //!
 //! # Expected call shapes
 //!
@@ -120,25 +123,11 @@
 #[path = "overlay_tests.rs"]
 mod tests;
 
-use std::fmt;
-
-use iced::widget::{Column, MouseArea, Row, button, container, mouse_area, space, stack, text};
+use iced::widget::{MouseArea, Row, button, container, mouse_area, space, stack, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point, Size};
 
 use crate::ui::strings;
 use crate::ui_iced::theme::scrim_color;
-
-/// Width of a rendered context-menu card.
-pub const MENU_WIDTH: f32 = 200.0;
-
-/// Height of one rendered context-menu row.
-pub const MENU_ROW_HEIGHT: f32 = 24.0;
-
-/// Vertical gap between adjacent context-menu rows.
-pub const MENU_ROW_SPACING: f32 = 2.0;
-
-/// Padding inside the context-menu card.
-pub const MENU_PADDING: f32 = 4.0;
 
 /// Gap left between the anchor point and the menu card so the cursor does
 /// not sit on the first row.
@@ -265,85 +254,6 @@ impl<Kind> OverlaySlot<Kind> {
         *self = Self::Closed;
         was_open
     }
-}
-
-/// One row of a context menu.
-///
-/// `Display` is the row label, so the same type serves as the menu's model
-/// and as what a test asserts against. Labels come from
-/// `crate::ui::strings`; the primitive never invents one.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MenuItem<Message> {
-    /// The label rendered on the row.
-    pub label: String,
-    /// The message produced when the row is activated.
-    pub message: Message,
-}
-
-impl<Message> MenuItem<Message> {
-    /// A row labelled `label` that emits `message`.
-    #[must_use]
-    pub fn new(label: impl Into<String>, message: Message) -> Self {
-        Self {
-            label: label.into(),
-            message,
-        }
-    }
-
-    /// Maps the row's message into another message type, keeping the label.
-    #[must_use]
-    pub fn map<Other>(self, f: impl FnOnce(Message) -> Other) -> MenuItem<Other> {
-        MenuItem {
-            label: self.label,
-            message: f(self.message),
-        }
-    }
-}
-
-impl<Message> fmt::Display for MenuItem<Message> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.label)
-    }
-}
-
-/// The row labels a menu projects, in render order.
-///
-/// This is the `MenuItem` → visible-row projection; a menu with `n` items
-/// always renders exactly `n` rows.
-#[must_use]
-pub fn menu_labels<Message>(items: &[MenuItem<Message>]) -> Vec<String> {
-    items.iter().map(|item| item.label.clone()).collect()
-}
-
-/// The row index carrying `message`, if any row does.
-///
-/// Lets a reducer recover which row produced a message without the widget
-/// having to encode the index itself.
-#[must_use]
-pub fn menu_index_of<Message: PartialEq>(
-    items: &[MenuItem<Message>],
-    message: &Message,
-) -> Option<usize> {
-    items.iter().position(|item| &item.message == message)
-}
-
-/// The deterministic rendered size of a context-menu card.
-///
-/// Rows are uniform-height buttons, so this is exact rather than an
-/// estimate — which is what makes [`clamp_anchor`] safe to run before the
-/// card has been laid out.
-#[must_use]
-pub fn menu_size(item_count: usize) -> Size {
-    let rows = item_count as f32;
-    let spacing = if item_count > 1 {
-        MENU_ROW_SPACING * (rows - 1.0)
-    } else {
-        0.0
-    };
-    Size::new(
-        MENU_WIDTH,
-        MENU_ROW_HEIGHT * rows + spacing + MENU_PADDING * 2.0,
-    )
 }
 
 /// Clamps `anchor` so a `size` box placed at it stays inside `viewport`.
@@ -507,45 +417,19 @@ pub(crate) fn card_style(_theme: &iced::Theme) -> container::Style {
     }
 }
 
-/// A legacy flat context-menu card: one button per item.
-///
-/// Application context menus use [`crate::ui_iced::menu::menu_overlay`]; this
-/// helper remains for callers that need a flat card. Each row emits its own
-/// [`MenuItem::message`] on press.
-#[must_use]
-pub fn context_menu_card<'a, Message>(items: &'a [MenuItem<Message>]) -> Element<'a, Message>
-where
-    Message: Clone + 'a,
-{
-    let rows = items.iter().fold(
-        Column::<Message>::new().spacing(MENU_ROW_SPACING),
-        |rows, item| {
-            rows.push(
-                button(text(item.label.clone()))
-                    .width(Length::Fill)
-                    .on_press(item.message.clone()),
-            )
-        },
-    );
-
-    container(rows)
-        .width(Length::Fixed(MENU_WIDTH))
-        .padding(MENU_PADDING)
-        .style(card_style)
-        .into()
-}
-
 /// Mounts a **prebuilt card** over `base`, anchored at `anchor`.
 ///
 /// A low-level flat-card mounting helper for callers that render the card
-/// themselves. Application menus use [`crate::ui_iced::menu::menu_overlay`]
+/// themselves. Framework-driven menus use
+/// [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay)
 /// instead. This helper layers `base`, a transparent [`input_blocker`], and
 /// the card pushed to the [`clamp_anchor`]ed position; a click outside emits
 /// `on_close`.
 ///
 /// `viewport` is the size of the area `base` fills; `size` is the card's
-/// rendered size (deterministic per [`menu_size`] when rows are
-/// uniform-height buttons).
+/// rendered size, which the caller must know up front — the framework's
+/// [`card_size`](crate::ui_iced::menu_surface::card_size) gives it exactly
+/// for a menu card.
 #[must_use]
 pub fn with_card_at<'a, Message>(
     base: Element<'a, Message>,
@@ -581,42 +465,6 @@ where
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
-}
-
-/// Mounts a context menu over `base`, anchored at `anchor`.
-///
-/// Layers, bottom to top: `base`, a transparent [`input_blocker`], then the
-/// menu card pushed to the clamped anchor. A click that misses the card hits
-/// the blocker and emits `on_close`; a click on a row emits that row's
-/// message and never reaches the blocker, because `Stack::update` stops at
-/// the first capture (`stack.rs:262-264`).
-///
-/// `viewport` is the size of the area `base` fills — the anchor is clamped
-/// against it so the card can never leave the screen. An empty `items` list
-/// renders `base` unchanged rather than an empty card.
-#[must_use]
-pub fn with_context_menu<'a, Message>(
-    base: Element<'a, Message>,
-    anchor: Point,
-    items: &'a [MenuItem<Message>],
-    viewport: Size,
-    on_close: Message,
-) -> Element<'a, Message>
-where
-    Message: Clone + 'a,
-{
-    if items.is_empty() {
-        return base;
-    }
-
-    with_card_at(
-        base,
-        anchor,
-        context_menu_card(items),
-        menu_size(items.len()),
-        viewport,
-        on_close,
-    )
 }
 
 /// A blocking modal overlay: scrim + centred dialog card.
