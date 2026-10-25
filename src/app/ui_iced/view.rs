@@ -36,16 +36,14 @@ use crate::ui::panel_layout::{LEFT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_DEFAULT_WIDT
 use crate::ui_iced::about::about_card;
 use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
 use crate::ui_iced::agent::transcript::agent_transcript_view;
-use crate::ui_iced::agent_debug::agent_debug_card;
 use crate::ui_iced::app::{AppState, OverlayLayer};
 use crate::ui_iced::attributions::attributions_view;
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_modal};
 use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
-use crate::ui_iced::logs::background_logs_view;
-use crate::ui_iced::message::{LayoutMessage, Message};
-use crate::ui_iced::overlay::{modal, modal_centered};
+use crate::ui_iced::message::{LayoutMessage, Message, MovableCard};
+use crate::ui_iced::overlay::modal_centered;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
@@ -249,14 +247,15 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             state.overlay.dialog_anchor,
             state.viewport,
         ),
-        OverlayLayer::Logs => modal(
-            background_logs_view(&state.models.logs),
-            Message::Command(UserCommand::ToggleBackgroundLogs(false)),
-        ),
-        OverlayLayer::AgentDebug => modal(
-            agent_debug_card(&state.models.debug),
-            Message::Command(UserCommand::ToggleDebugWindow(false)),
-        ),
+        // Logs still renders its pre-INT-6 body; its §4.7.1 shell is the
+        // stated follow-on. It does get the scrim-free mount and the host's
+        // geometry, which is the blocking half of `UIF-MOV-003`.
+        OverlayLayer::Logs => movable_overlay_layer(MovableCard::Logs, state, |_host| {
+            crate::ui_iced::logs::background_logs_view(&state.models.logs)
+        }),
+        OverlayLayer::AgentDebug => movable_overlay_layer(MovableCard::AgentDebug, state, |host| {
+            crate::ui_iced::agent_debug::agent_debug_movable_card(host, &state.models.debug)
+        }),
         OverlayLayer::Tools => {
             crate::ui_iced::tools_dialog::tools_modal(&state.models.tools, state.viewport)
         }
@@ -278,6 +277,53 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
 /// card-boundary absorption and `CancelBatch` as the dismiss.
 fn batch_layer(view_model: &BatchDialogViewModel, viewport: Size) -> iced::Element<'_, Message> {
     batch_modal(view_model, viewport)
+}
+
+/// One Band-1 movable utility layer — **no scrim** (`UIF-MOV-003`, INT-6).
+///
+/// Replaces the `modal(...)` mount these two cards used before. The old
+/// mount laid a full-area `scrim_blocker` under the card, which swallowed
+/// every click outside it and made the log viewer a blocking dialog — the
+/// exact thing §4.7 forbids, since the user watches these cards *while*
+/// working in the document behind them.
+///
+/// Here the card is positioned at its host's own geometry over a
+/// scrim-free full-screen container, so a press outside the card falls
+/// through to Band 0. When the host is holding a drag or a resize, the
+/// gesture capture lane is stacked on top so moves keep arriving after the
+/// card has run out from under the pointer.
+///
+/// `build` receives the card's host so the caller can size its §4.7.1
+/// bands from the host's resolved rectangles rather than a locally-computed
+/// box. Falls back to an empty layer when no host is synced — a state the
+/// reducer should never leave, but one that must not panic inside a frame.
+fn movable_overlay_layer<'a>(
+    card: MovableCard,
+    state: &'a AppState,
+    build: impl FnOnce(&'a iced_pro::surface::movable::MovableHost) -> iced::Element<'a, Message>,
+) -> iced::Element<'a, Message> {
+    let host = match card {
+        MovableCard::Logs => state.overlay.logs_movable.as_ref(),
+        MovableCard::AgentDebug => state.overlay.debug_movable.as_ref(),
+    };
+
+    let Some(host) = host else {
+        return empty_layer();
+    };
+
+    let framed = crate::ui_iced::overlay::movable_layer(build(host), host.geometry());
+
+    if host.is_capturing() {
+        iced::widget::stack(vec![
+            framed,
+            crate::ui_iced::movable_shell::gesture_capture_layer(card),
+        ])
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .into()
+    } else {
+        framed
+    }
 }
 
 /// An empty full-screen layer, standing in for a state the selector said was

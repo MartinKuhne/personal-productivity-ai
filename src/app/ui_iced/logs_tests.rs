@@ -18,8 +18,9 @@ use crate::ui_iced::message::{LogsMessage, Message};
 
 use super::{
     BOTTOM_STICK_TOLERANCE, BackgroundLogsViewModel, CategoryFilterOption, ScrollSnapshot,
-    category_color, category_filter_options, category_tag, filter_logs, is_log_visible, log_table,
-    message_color, scroll_snapshot, should_follow, timestamp_color, timestamp_text,
+    auto_scroll_setting, category_color, category_filter_options, category_tag, filter_logs,
+    follow_state, is_log_visible, log_table, message_color, scroll_snapshot, should_follow,
+    timestamp_color, timestamp_text,
 };
 
 /// Every category the ring buffer can produce, in declaration order.
@@ -701,4 +702,118 @@ fn scroll_snapshot_reads_the_three_axes_it_needs() {
     assert!(!snapshot.fits());
     assert!(!snapshot.is_at_bottom());
     let _ = scroll_snapshot; // the iced-facing reader; driven by the widget at runtime
+}
+
+// ─────────── INT-6: `should_follow` unified with `FollowState::resolve` ───────────
+
+use iced_pro::surface::movable::{AT_BOTTOM_TOLERANCE, AutoScrollSetting, FollowState};
+
+/// All four cells of the framework's pause/resume matrix (`UIF-MOV-004`),
+/// reached through the app's own entry point. `should_follow` is now this
+/// matrix's projection to a bool, so the two must agree cell for cell.
+#[test]
+fn follow_state_agrees_with_should_follow_across_all_four_cells() {
+    let at_bottom = ScrollSnapshot {
+        offset_y: 800.0,
+        viewport_height: 200.0,
+        content_height: 1000.0,
+    };
+    let scrolled_up = ScrollSnapshot {
+        offset_y: 100.0,
+        viewport_height: 200.0,
+        content_height: 1000.0,
+    };
+
+    for (auto_scroll, snapshot, expected) in [
+        (true, Some(at_bottom), true),
+        (true, Some(scrolled_up), false),
+        (false, Some(at_bottom), false),
+        (false, Some(scrolled_up), false),
+    ] {
+        let state = follow_state(auto_scroll, snapshot);
+        assert_eq!(
+            state.is_following(),
+            should_follow(auto_scroll, snapshot),
+            "follow_state and should_follow must agree for auto_scroll={auto_scroll}"
+        );
+        assert_eq!(
+            state.is_following(),
+            expected,
+            "unexpected cell for auto_scroll={auto_scroll}, at_bottom={:?}",
+            snapshot.map(|v| v.is_at_bottom())
+        );
+    }
+}
+
+/// No viewport report means there is nothing to follow — the framework's
+/// `at_bottom = false` cell, not a special case.
+#[test]
+fn no_report_is_paused_not_following() {
+    assert_eq!(follow_state(true, None), FollowState::Paused);
+    assert_eq!(follow_state(false, None), FollowState::Paused);
+    assert!(!should_follow(true, None));
+}
+
+/// The setting translation is the single place `bool` becomes the
+/// framework's enum ([RUST-021]).
+#[test]
+fn the_bool_translates_to_the_framework_setting() {
+    assert_eq!(auto_scroll_setting(true), AutoScrollSetting::Enabled);
+    assert_eq!(auto_scroll_setting(false), AutoScrollSetting::Disabled);
+    assert!(auto_scroll_setting(true).permits_following());
+    assert!(!auto_scroll_setting(false).permits_following());
+}
+
+/// **Tolerance delta, pinned deliberately.** The app's bottom margin stays
+/// `1.0` pt, narrower than the framework's `AT_BOTTOM_TOLERANCE` of
+/// `space::XXS` = `2.0` pt. A viewport 1.5 pt short of the tail is
+/// therefore NOT at the bottom here, where the framework's own
+/// `ScrollGeometry::at_bottom` would call it bottom.
+///
+/// Adopting the framework's wider margin would keep yanking the view down
+/// while the user is 1.5 pt into reading history. Widening it is a
+/// behaviour change that needs its own decision, so INT-6 unified the
+/// decision matrix without moving this threshold.
+#[test]
+#[allow(clippy::assertions_on_constants)]
+fn the_app_keeps_a_tighter_bottom_margin_than_the_framework() {
+    assert_eq!(BOTTOM_STICK_TOLERANCE, 1.0);
+    assert_eq!(AT_BOTTOM_TOLERANCE, 2.0);
+    assert!(
+        BOTTOM_STICK_TOLERANCE < AT_BOTTOM_TOLERANCE,
+        "the app margin must stay the narrower of the two"
+    );
+
+    let just_short = ScrollSnapshot {
+        offset_y: 800.0 - 1.5,
+        viewport_height: 200.0,
+        content_height: 1000.0,
+    };
+    assert!(
+        !just_short.is_at_bottom(),
+        "1.5 pt short is outside the app's 1.0 pt margin"
+    );
+    assert!(
+        just_short.to_geometry().at_bottom(),
+        "the same frame reads as at-bottom under the framework's 2.0 pt margin"
+    );
+    assert!(!should_follow(true, Some(just_short)));
+}
+
+/// The framework-geometry mapping keeps the field transposition correct:
+/// `ScrollSnapshot` is `(offset, viewport, content)`, the framework's
+/// constructor is `(offset, content, viewport)`.
+#[test]
+fn to_geometry_maps_the_fields_in_the_frameworks_order() {
+    let snapshot = ScrollSnapshot {
+        offset_y: 120.0,
+        viewport_height: 200.0,
+        content_height: 1000.0,
+    };
+    let geometry = snapshot.to_geometry();
+
+    assert_eq!(geometry.offset, 120.0);
+    assert_eq!(geometry.content, 1000.0);
+    assert_eq!(geometry.viewport, 200.0);
+    assert_eq!(geometry.max_offset(), snapshot.max_offset());
 }

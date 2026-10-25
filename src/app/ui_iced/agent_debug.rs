@@ -865,14 +865,17 @@ impl AgentDebugViewModel {
 /// iced rebuilds the tree structurally every frame, so a disclosure
 /// branch does not destabilise sibling identity.
 ///
+/// The debug card's filter / control bar contents (§4.7.1 band 2).
+///
+/// Extracted from [`agent_debug_card`] so the movable Band-1 shell
+/// ([`movable_shell`](crate::ui_iced::movable_shell::movable_shell)) can
+/// host the same controls in its own filter band without a second copy of
+/// the widget list drifting away from this one ([RUST-021]).
+///
 /// Purity: pure view over `view_model`.
 #[must_use]
-pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message> {
+pub fn agent_debug_controls(view_model: &AgentDebugViewModel) -> Row<'_, Message> {
     let palette = Palette::fastmd_dark();
-
-    let title = text(strings::AGENT_DEBUG_WINDOW)
-        .size(TITLE_SIZE)
-        .color(palette.text_strong);
 
     let search_label = text(strings::SEARCH_LABEL)
         .size(ENTRY_TEXT_SIZE)
@@ -898,7 +901,7 @@ pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message
 
     let clear = button(text(strings::CLEAR_BUTTON)).on_press(clear_command());
 
-    let controls = Row::with_children(vec![
+    Row::with_children(vec![
         search_label.into(),
         search_field.width(Length::Fill).into(),
         auto_scroll_toggle.into(),
@@ -907,18 +910,75 @@ pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message
         clear.into(),
     ])
     .spacing(CONTROL_SPACING)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+}
 
-    let list = scrollable(entry_list(view_model))
+/// The debug card's scrollable entry list (§4.7.1 band 3).
+///
+/// Carries the stable [`DEBUG_SCROLLABLE_ID`] so the reducer can aim a
+/// scroll operation at it whichever frame the card is mounted in
+/// (AGENTS §5).
+///
+/// Purity: pure view over `view_model`.
+#[must_use]
+pub fn agent_debug_viewport(view_model: &AgentDebugViewModel) -> Element<'_, Message> {
+    scrollable(entry_list(view_model))
         .id(DEBUG_SCROLLABLE_ID)
         .height(Length::Fill)
-        .on_scroll(|viewport| scroll_reported_message(&logs::scroll_snapshot(&viewport)));
+        .on_scroll(|viewport| scroll_reported_message(&logs::scroll_snapshot(&viewport)))
+        .into()
+}
+
+/// The Agent Debug Inspector rendered in the §4.7.1 movable Band-1
+/// silhouette (`UIF-MOV-001` … `UIF-MOV-004`, INT-6).
+///
+/// Same content as [`agent_debug_card`] — the controls come from
+/// [`agent_debug_controls`] and the list from [`agent_debug_viewport`] —
+/// but framed by the shared shell, which supplies the draggable title bar,
+/// the sunken monospace viewport and the footer with its ◢ resize grip,
+/// sized from the host's own geometry rather than this module's retired
+/// `CARD_WIDTH` constant.
+///
+/// Purity: pure view over `host` and `view_model`.
+#[must_use]
+pub fn agent_debug_movable_card<'a>(
+    host: &iced_pro::surface::movable::MovableHost,
+    view_model: &'a AgentDebugViewModel,
+) -> Element<'a, Message> {
+    let palette = Palette::fastmd_dark();
+    let status = text(strings::movable_row_count(view_model.rows.len()))
+        .size(ENTRY_TEXT_SIZE)
+        .color(palette.text_muted);
+
+    crate::ui_iced::movable_shell::movable_shell(
+        host,
+        crate::ui_iced::message::MovableCard::AgentDebug,
+        agent_debug_controls(view_model),
+        agent_debug_viewport(view_model),
+        status.into(),
+    )
+}
+
+/// The debug card's filter / control bar contents (§4.7.1 band 2).
+///
+/// Purity: pure view over `view_model`.
+#[must_use]
+pub fn agent_debug_card(view_model: &AgentDebugViewModel) -> Element<'_, Message> {
+    let palette = Palette::fastmd_dark();
+
+    let title = text(strings::AGENT_DEBUG_WINDOW)
+        .size(TITLE_SIZE)
+        .color(palette.text_strong);
+
+    let controls = agent_debug_controls(view_model);
+
+    let list = agent_debug_viewport(view_model);
 
     Column::with_children(vec![
         title.into(),
         controls.into(),
         rule::horizontal(SEPARATOR_WIDTH).into(),
-        list.into(),
+        list,
     ])
     .spacing(SECTION_SPACING)
     .padding(CARD_PADDING)

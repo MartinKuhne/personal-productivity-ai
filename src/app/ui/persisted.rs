@@ -5,7 +5,7 @@
 //! the framework's storage.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 /// Current on-disk schema version.
@@ -61,6 +61,24 @@ pub struct PersistedUiState {
     /// open the dialog once; the same version stays quiet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about_shown_for_version: Option<String>,
+    /// Remembered geometry of the app's movable Band-1 utility overlays
+    /// (`UIF-MOV-001`), keyed by the `iced-pro` storage key
+    /// (`movable:<surface-id>`, see
+    /// [`movable::storage_key`](iced_pro::surface::movable::storage_key))
+    /// and holding that crate's canonical `x,y,width,height` text form
+    /// ([`MovableGeometry::encode`](iced_pro::surface::movable::MovableGeometry::encode)).
+    ///
+    /// Stored as the framework's own encoded string rather than four loose
+    /// numbers so this model does not re-derive a format the framework
+    /// already owns and guarantees lossless across a round trip. A value
+    /// that will not decode is treated as absent, which is the same state a
+    /// first launch is in — the card simply opens at the framework default.
+    ///
+    /// `#[serde(default)]` keeps every pre-existing v1 payload readable:
+    /// an absent map means "no remembered position", so this addition moves
+    /// neither [`CURRENT_SCHEMA_VERSION`] nor the v0→v1 migration.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub overlay_geometry: BTreeMap<String, String>,
 }
 
 #[cfg(test)]

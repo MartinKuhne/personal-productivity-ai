@@ -58,6 +58,8 @@ use iced_pro::focus::FocusState;
 use iced_pro::surface::menu::cascade::{CascadeOutcome, MenuKey, MenuTreeKind};
 use iced_pro::surface::menu::model::{Menu, MenuId};
 use iced_pro::surface::modal::Recovery;
+use iced_pro::surface::movable::PointerPhase;
+use iced_pro::surface::movable::SurfaceTarget;
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
@@ -66,7 +68,7 @@ use crate::markdown::document::DocumentContent;
 use crate::ui::tree_search::find_search_results_scoped;
 use crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID;
 use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
-use crate::ui_iced::app::{AppState, ContextMenu, guard_editor_leave};
+use crate::ui_iced::app::{AppState, ContextMenu, OverlayState, guard_editor_leave};
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, index_of_selected};
 use crate::ui_iced::context_menu::ContextTarget;
 use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
@@ -76,13 +78,14 @@ use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
     DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, MenuMessage, Message,
-    OverlayMessage, RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage,
-    TreeMessage, WindowMessage,
+    MovableCard, MovableMessage, OverlayMessage, RenderMessage, SearchMessage, TabMessage,
+    ThemeMessage, ToolsDialogMessage, TreeMessage, WindowMessage,
 };
 use crate::ui_iced::os_shell;
 use crate::ui_iced::panels::bottom::submit_commands;
 use crate::ui_iced::panels::left::ROW_TEXT_SIZE;
 use crate::ui_iced::persisted;
+use crate::ui_iced::persisted::UiStateGeometryStorage;
 use crate::ui_iced::table_width::fira_sans_width;
 
 /// NFR-001/NFR-004 error-code name for a failed font registration.
@@ -126,11 +129,100 @@ pub fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::Inbound(message) => reduce_inbound(state, message),
         Message::Menu(message) => tasks.extend(reduce_menu(state, message)),
         Message::Overlay(message) => reduce_overlay(state, message),
+        Message::Movable(message) => tasks.push(reduce_movable(state, message)),
         Message::Boot(message) => tasks.push(reduce_boot(message)),
     }
 
     tasks.extend(finish_frame(state));
     Task::batch(tasks)
+}
+
+// ───────────────────────── movable Band-1 utility cards ──────────────────────
+
+/// Drive one pointer event through a Band-1 movable card's
+/// [`MovableHost`] (`UIF-MOV-001`, `UIF-MOV-002`, INT-6).
+///
+/// The reducer holds no drag logic of its own: it hands the event to the
+/// host and lets the framework decide the zone, apply the clamp and settle
+/// the geometry. What this layer owns is *which* host, and the press
+/// position — see [`MovableMessage`] for why the press reads the last
+/// reported position rather than carrying one.
+///
+/// # Persistence
+///
+/// The host calls `save` only when a drag or resize **settles**, never per
+/// frame, so the write-through to the injected handler is off the hot path
+/// ([NFR-002]).
+///
+/// [RUST-020]: mutates only the host, the registry and the persisted
+/// geometry via the injected handler. Publishes nothing.
+fn reduce_movable(state: &mut AppState, message: MovableMessage) -> Task<Message> {
+    let OverlayState {
+        debug_movable,
+        logs_movable,
+        surfaces,
+        utility_focus,
+        cursor,
+        ..
+    } = &mut state.overlay;
+
+    let slot = match message.card_kind() {
+        MovableCard::Logs => logs_movable,
+        MovableCard::AgentDebug => debug_movable,
+    };
+
+    let Some(host) = slot.as_mut() else {
+        return Task::none();
+    };
+
+    let mut storage =
+        UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, state.storage.as_ref());
+
+    // The press position is the last cursor the view reported for this
+    // card. `mouse_area::on_press` carries no point in iced 0.14, so the
+    // move lane is the only source of a coordinate (see `MovableMessage`).
+    let at = cursor.unwrap_or_else(|| host.card().position());
+
+    let (phase, target) = match &message {
+        MovableMessage::Moved { .. } => (PointerPhase::Moved, SurfaceTarget::Outside),
+        MovableMessage::TitlePressed { .. } => (PointerPhase::Pressed, SurfaceTarget::TitleBar),
+        MovableMessage::BodyPressed { .. } => (PointerPhase::Pressed, SurfaceTarget::Content),
+        MovableMessage::GripPressed { handle, .. } => {
+            (PointerPhase::Pressed, SurfaceTarget::Resize(*handle))
+        }
+        MovableMessage::DockRequested { .. } => (PointerPhase::Pressed, SurfaceTarget::Dock),
+        MovableMessage::CloseRequested { .. } => (PointerPhase::Pressed, SurfaceTarget::Close),
+        MovableMessage::Released { .. } => (PointerPhase::Released, SurfaceTarget::Outside),
+    };
+
+    let response = host.on_pointer(phase, at, target, utility_focus, surfaces, &mut storage);
+
+    // A `Close ×` on a Band-1 card closes the card, but the card's
+    // visibility is application state the host does not own. Rather than
+    // let the host unmount a card the view-model still reports visible, the
+    // close is turned back into the same `UserCommand` the menu entry uses
+    // ([FMD-068]); `sync_movable_hosts` then drops the host on the next
+    // rebuild, so there is one path out and not two.
+    if matches!(message, MovableMessage::CloseRequested { .. }) && !response.stays_open() {
+        return close_command(message.card_kind());
+    }
+
+    Task::none()
+}
+
+/// The [`UserCommand`](crate::bus::events::user_command::UserCommand) that
+/// hides a movable card, so the title-bar `Close ×` and the menu entry take
+/// exactly the same path ([FMD-068]).
+///
+/// Deferred by one frame through `Task::perform` on a ready future because
+/// the borrow of `state` held by [`reduce_movable`] must end before the
+/// command can run against the whole app.
+fn close_command(card: MovableCard) -> Task<Message> {
+    let command = match card {
+        MovableCard::Logs => UserCommand::ToggleBackgroundLogs(false),
+        MovableCard::AgentDebug => UserCommand::ToggleDebugWindow(false),
+    };
+    Task::perform(std::future::ready(()), move |_| Message::Command(command))
 }
 
 // ───────────────────────────── overlay dismissal ─────────────────────────────

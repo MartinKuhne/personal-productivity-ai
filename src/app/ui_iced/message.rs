@@ -115,6 +115,9 @@ pub enum Message {
     /// tree selection need, produced only by the subscription bridge's
     /// keyboard lane.
     Overlay(OverlayMessage),
+    /// Pointer events for the Band-1 movable utility cards
+    /// (`UIF-MOV-001`, `UIF-MOV-002`, INT-6).
+    Movable(MovableMessage),
     /// Boot-infrastructure reports — the terminal outcomes of the one-shot
     /// tasks the `boot` closure returns (font registration). Not a panel
     /// channel and not user intent: the producer is the boot task chain
@@ -1143,6 +1146,99 @@ impl PartialEq for InboundMessage {
                 },
             ) => source_a == source_b && count_a == count_b,
             _ => false,
+        }
+    }
+}
+
+/// Which Band-1 movable utility card a [`MovableMessage`] is about.
+///
+/// A selector rather than two separate message enums because the reducer
+/// arms are identical apart from which host they drive, and a shared arm is
+/// one fewer place for the two cards' drag behaviour to drift apart
+/// ([RUST-023]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MovableCard {
+    /// The Background Operations Log.
+    Logs,
+    /// The Agent Debug Inspector.
+    AgentDebug,
+}
+
+/// Pointer events for the Band-1 movable utility cards
+/// (`UIF-MOV-001`, `UIF-MOV-002`, INT-6).
+///
+/// # Why the position rides on the move, not the press
+///
+/// iced 0.14's `mouse_area` reports a cursor position on
+/// `on_move(Point)` only � `on_press` carries a bare `Message` and there
+/// is no `on_press_with` in this version
+/// (`iced_widget-0.14.2/src/mouse_area.rs:38-116`). The reducer therefore
+/// pairs a press with the **last position reported for that card**, which
+/// is the press location: the pointer has to be over the title bar to press
+/// it, and the view only emits [`MovableCard`]-scoped moves while it is.
+///
+/// While a gesture holds, the view mounts a full-screen capture area so
+/// moves keep arriving even when the card runs out from under the pointer �
+/// without it, a fast drag would stop reporting the moment the title bar
+/// escaped the cursor.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MovableMessage {
+    /// The pointer moved over the card; `at` is in root/window coordinates.
+    Moved {
+        /// Which card.
+        card: MovableCard,
+        /// Pointer position in root coordinates.
+        at: iced::Point,
+    },
+    /// A press landed on the card's title bar (`UIF-MOV-001`).
+    TitlePressed {
+        /// Which card.
+        card: MovableCard,
+    },
+    /// A press landed on a resize grip (`UIF-MOV-002`).
+    GripPressed {
+        /// Which card.
+        card: MovableCard,
+        /// Which grip.
+        handle: iced_pro::geometry::clamp::ResizeHandle,
+    },
+    /// A press landed on the card's body, claimed by no inner control
+    /// (`UIF-MOV-003` click-promotion).
+    BodyPressed {
+        /// Which card.
+        card: MovableCard,
+    },
+    /// The `Dock` trailing action in the title bar was pressed
+    /// (`UIF-MOV-001`).
+    DockRequested {
+        /// Which card.
+        card: MovableCard,
+    },
+    /// The `Close ×` trailing action in the title bar was pressed
+    /// (`UIF-MOV-001`).
+    CloseRequested {
+        /// Which card.
+        card: MovableCard,
+    },
+    /// The button came up while this card held a gesture.
+    Released {
+        /// Which card.
+        card: MovableCard,
+    },
+}
+
+impl MovableMessage {
+    /// Which card this event is about.
+    #[must_use]
+    pub const fn card_kind(&self) -> MovableCard {
+        match self {
+            Self::Moved { card, .. }
+            | Self::TitlePressed { card }
+            | Self::BodyPressed { card }
+            | Self::GripPressed { card, .. }
+            | Self::DockRequested { card }
+            | Self::CloseRequested { card }
+            | Self::Released { card } => *card,
         }
     }
 }

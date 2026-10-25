@@ -60,7 +60,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use iced::widget::pane_grid;
-use iced::{Rectangle, Size, Task};
+use iced::{Point, Rectangle, Size, Task};
 
 use crate::background::Task as BackgroundTask;
 use crate::background::logs::BackgroundLogs;
@@ -70,6 +70,7 @@ use crate::config::{AppConfig, ConfigStorageHandler, ContentLibrary};
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::app::FastMdApp;
+use crate::ui::strings;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::ui_iced::about::{AboutViewModel, AboutWindowState};
 use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
@@ -87,7 +88,7 @@ use crate::ui_iced::panels::bottom::BottomPanelViewModel;
 use crate::ui_iced::panels::center::CenterPanelViewModel;
 use crate::ui_iced::panels::left::LeftPanelViewModel;
 use crate::ui_iced::panels::top::TopBarViewModel;
-use crate::ui_iced::persisted::{self, UiStateStorage};
+use crate::ui_iced::persisted::{self, UiStateGeometryStorage, UiStateStorage};
 use crate::ui_iced::search::SearchViewModel;
 use crate::ui_iced::subscription::{self, BusReceivers};
 use crate::ui_iced::tools_dialog::{ToolsDialogState, ToolsDialogViewModel};
@@ -101,6 +102,9 @@ use iced_pro::binding::pre_rank::PreRankCoordinator;
 use iced_pro::focus::FocusState;
 use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
 use iced_pro::surface::menu::model::MenuId;
+use iced_pro::surface::movable::GeometryStorage;
+use iced_pro::surface::movable::MovableHost;
+use iced_pro::surface::movable::MovableSpec;
 use iced_pro::surface::zorder::DeclineReason;
 use iced_pro::surface::zorder::PreRankedEscape;
 use iced_pro::surface::zorder::Surface;
@@ -214,6 +218,69 @@ impl AppState {
         self.models = ViewModels::from_app(&self.app, &self.overlay);
         self.refresh_hamburger_rects();
         self.refresh_context_rects();
+        self.sync_movable_hosts();
+    }
+
+    /// Reconcile the two Band-1 movable hosts with the visibility the
+    /// view-models just reported (`UIF-MOV-001`, INT-6).
+    ///
+    /// Run from [`rebuild_view_models`](Self::rebuild_view_models) so the
+    /// hosts track exactly the `logs.visible` / `debug.visible` the overlay
+    /// host mounts — there is no second copy of "is this card open" that
+    /// could disagree — and so a viewport resize reaches them. The second
+    /// half matters: `MovableHost` clamps against the viewport it was
+    /// given, so a card that outlives a window shrink has to be pulled back
+    /// into reach or its title bar ends up off-screen and unreachable,
+    /// which is the failure `UIF-MOV-002` exists to prevent.
+    ///
+    /// Idempotent: opening an already-open card and closing an
+    /// already-closed one are both no-ops, so running this on every
+    /// `update` costs two `Option` matches and a viewport comparison.
+    ///
+    /// [RUST-020]: mutates only `overlay`'s hosts/registry/focus and the
+    /// persisted geometry through the injected handler. Publishes nothing
+    /// to a bus and touches no filesystem path directly — the write goes
+    /// through [`UiStateGeometryStorage`], which is the whole point of the
+    /// [`GeometryStorage`] seam ([RUST-024]).
+    pub fn sync_movable_hosts(&mut self) {
+        let viewport = Rectangle::new(Point::ORIGIN, self.viewport);
+        let logs_visible = self.models.logs.visible;
+        let debug_visible = self.models.debug.visible;
+
+        let OverlayState {
+            debug_movable,
+            logs_movable,
+            logs_visible: logs_visible_flag,
+            surfaces,
+            utility_focus,
+            ..
+        } = &mut self.overlay;
+
+        *logs_visible_flag = self.models.logs.visible;
+
+        let mut storage =
+            UiStateGeometryStorage::new(&mut self.app.persisted_ui_state, self.storage.as_ref());
+
+        sync_one_movable_host(
+            debug_movable,
+            SURFACE_ID_AGENT_DEBUG,
+            strings::AGENT_DEBUG_WINDOW,
+            debug_visible,
+            viewport,
+            utility_focus,
+            surfaces,
+            &mut storage,
+        );
+        sync_one_movable_host(
+            logs_movable,
+            SURFACE_ID_LOGS,
+            strings::BACKGROUND_LOGS_WINDOW,
+            logs_visible,
+            viewport,
+            utility_focus,
+            surfaces,
+            &mut storage,
+        );
     }
 
     /// Recomputes the solved rectangles of the open hamburger cards
@@ -524,6 +591,71 @@ pub struct OverlayState {
     /// tested now, rather than being retrofitted under a live drag in
     /// INT-6.
     pub pre_rank: PreRankCoordinator,
+    /// The Agent Debug Inspector's movable-overlay host (`UIF-MOV-001` …
+    /// `UIF-MOV-004`, INT-6).
+    ///
+    /// `Some` while the inspector is open. The host owns the card's
+    /// rectangle, its drag/resize capture and its follow state; the view
+    /// reads the §4.7.1 band rectangles off it and the reducer drives
+    /// pointer events through it.
+    ///
+    /// # Ownership, and why this is not `MovableHost`'s own registration
+    ///
+    /// [`MovableHost::open`] self-registers its surface into a
+    /// [`SurfaceRegistry`] and its control roster into a [`FocusState`].
+    /// INT-4/5a/5b/5c each found the same shape on the modal hosts and each
+    /// resolved it the same way, because `OverlayState` — not the framework
+    /// — decides what is open, in what order, and what `Escape` may close
+    /// (see [`close_topmost`](Self::close_topmost)).
+    ///
+    /// `MovableHost` is the milder case: unlike `ModalHost` it pushes **no
+    /// focus trap** on open ("a modeless card that grabbed the keyboard on
+    /// open would contradict the only reason it is not a modal"), so the
+    /// self-registration does not fight the app. It is therefore driven
+    /// against the app's own `surfaces` / `focus`, and
+    /// [`sync_surfaces`](Self::sync_surfaces) re-registers the same
+    /// rectangle every frame from the host's live geometry — so the index
+    /// and the host can never disagree, and the app keeps the deciding vote
+    /// on dismissal.
+    pub debug_movable: Option<MovableHost>,
+    /// The Background Operations Log's movable-overlay host
+    /// (`UIF-MOV-001`, INT-6).
+    ///
+    /// Same arrangement as [`debug_movable`](Self::debug_movable). Note
+    /// that being registered here does **not** make the log viewer
+    /// `Esc`-closable; the explicit `SURFACE_ID_LOGS` arm of
+    /// `ClosableSurfaces::unwind` is what holds that refusal.
+    pub logs_movable: Option<MovableHost>,
+    /// Mirror of [`BackgroundLogsViewModel::visible`]
+    /// (`crate::ui_iced::logs::BackgroundLogsViewModel`), written by
+    /// [`AppState::sync_movable_hosts`].
+    ///
+    /// The log viewer's visibility has never been a reducer-held field — it
+    /// is application state owned by
+    /// [`UserCommand::ToggleBackgroundLogs`](crate::bus::events::user_command::UserCommand::ToggleBackgroundLogs),
+    /// which is exactly why only Agent Debug was mappable to a
+    /// `MovableCard` before INT-6. Mirroring the flag here lets
+    /// [`sync_surfaces`](Self::sync_surfaces) stay a pure function of
+    /// `OverlayState` instead of reaching into the view-models.
+    ///
+    /// It carries **no** authority over what is displayed — the view-model
+    /// remains the truth — and it is not what makes the card closable
+    /// either: the `SURFACE_ID_LOGS` arm of `ClosableSurfaces::unwind`
+    /// refuses the key.
+    pub logs_visible: bool,
+    /// The [`FocusState`] the two Band-1 movable cards register their
+    /// control rosters in.
+    ///
+    /// Kept separate from [`menu_focus`](Self::menu_focus) so a floating
+    /// log's roster cannot appear in the menus' roving order, and vice
+    /// versa. The hosts need *a* focus model to register against; giving
+    /// them the menus' would make two unrelated subsystems share one
+    /// keyboard position.
+    ///
+    /// Nothing focuses into it yet: `UIF-MOD-001`'s lesson holds here too,
+    /// since only `Escape` reaches the app from the keyboard
+    /// (`ui_iced/subscription.rs`) and iced's own router owns `Tab`.
+    pub utility_focus: FocusState,
 }
 
 impl Default for OverlayState {
@@ -543,6 +675,10 @@ impl Default for OverlayState {
             tools: ToolsDialogState::new(),
             about: AboutWindowState::new(),
             batch: BatchDialogState::new(),
+            debug_movable: None,
+            logs_movable: None,
+            logs_visible: false,
+            utility_focus: FocusState::new(),
             search: SearchViewModel::new(),
             cursor: None,
             thinking_expanded: true,
@@ -590,6 +726,59 @@ fn sync_surface_with_regions(
         registry.register(SurfaceId::new(id), kind, regions);
     } else {
         registry.unregister(&SurfaceId::new(id));
+    }
+}
+
+/// Bring one [`MovableHost`] slot in line with whether its card should be
+/// open (`UIF-MOV-001`, INT-6).
+///
+/// The three live transitions are all this does:
+///
+/// | visible | slot   | action |
+/// |---------|--------|--------|
+/// | yes     | empty  | open at the persisted geometry, clamped into `viewport` |
+/// | yes     | filled | `set_viewport` — re-clamp against a resized window |
+/// | no      | filled | `close` (unregisters, persists the settled geometry), then drop |
+/// | no      | empty | nothing |
+///
+/// Opening goes through [`MovableHost::open`], which resolves the geometry
+/// in the framework's order of authority — explicit spec, then the
+/// injected sink, then §4.7.1's `680 × 440` — and runs the result through
+/// the size policy and the reachability clamp. That last step is why a card
+/// saved on a 2560px monitor survives being opened on a 1024px one with
+/// its title bar still grabbable (`UIF-MOV-002`).
+///
+/// The host self-registers into `registry` on open. That is deliberate here
+/// rather than a collision: `MovableHost` registers its control roster but
+/// focuses nothing, so nothing is stolen from the workspace, and
+/// [`OverlayState::sync_surfaces`] re-registers the same live rectangle on
+/// every pass so the index cannot drift from the host.
+#[allow(clippy::too_many_arguments)]
+fn sync_one_movable_host(
+    slot: &mut Option<MovableHost>,
+    id: &str,
+    title: &'static str,
+    visible: bool,
+    viewport: Rectangle,
+    focus: &mut FocusState,
+    registry: &mut SurfaceRegistry,
+    storage: &mut dyn GeometryStorage,
+) {
+    match (visible, slot.as_mut()) {
+        (true, None) => {
+            let spec = MovableSpec::new(SurfaceId::new(id), title);
+            *slot = Some(MovableHost::open(spec, viewport, focus, registry, storage));
+        }
+        (true, Some(host)) => {
+            if host.viewport() != viewport {
+                host.set_viewport(viewport, registry, storage);
+            }
+        }
+        (false, Some(host)) => {
+            host.close(focus, registry, storage);
+            *slot = None;
+        }
+        (false, None) => {}
     }
 }
 
@@ -736,11 +925,39 @@ impl OverlayState {
         );
 
         // ── Utility-overlay band (`ZBand::UtilityOverlay`, rank 1) ──────
-        sync_surface(
+        // Both cards are registered with their **live host rectangle**, not
+        // an empty region list, because `UIF-MOV-003` needs
+        // `SurfaceRegistry::route_pointer` to answer `Surface` for a point
+        // inside the card and `Workspace` for a point outside it. That is
+        // the structural form of "no scrim": the registry, not a
+        // full-screen blocker, decides what the card owns.
+        //
+        // The `open` flag still comes from the authoritative `OverlayState`
+        // field rather than from the host. The index stays derived from the
+        // truth it mirrors, exactly as every other band here — the host
+        // supplies geometry only, and never decides what gets registered.
+        sync_surface_with_regions(
             &mut self.surfaces,
             SURFACE_ID_AGENT_DEBUG,
             SurfaceKind::MovableCard,
             self.debug.is_open(),
+            self.debug_movable
+                .as_ref()
+                .map_or_else(Vec::new, |host| vec![host.card()]),
+        );
+        // `logs_visible` is the mirror `AppState::sync_movable_hosts` writes
+        // from `BackgroundLogsViewModel::visible`, because the log viewer's
+        // visibility has always lived on the view-model instead of on a
+        // reducer-held field. Mirroring it keeps `sync_surfaces` a pure
+        // function of `OverlayState`, which is its standing contract.
+        sync_surface_with_regions(
+            &mut self.surfaces,
+            SURFACE_ID_LOGS,
+            SurfaceKind::MovableCard,
+            self.logs_visible,
+            self.logs_movable
+                .as_ref()
+                .map_or_else(Vec::new, |host| vec![host.card()]),
         );
     }
 
@@ -977,6 +1194,24 @@ impl ClosableSurfaces<'_> {
             SURFACE_ID_ATTRIBUTIONS => (CLOSED_LAYER_ATTRIBUTIONS, self.about.close()),
             SURFACE_ID_BATCH => (CLOSED_LAYER_BATCH, self.batch.close()),
             SURFACE_ID_AGENT_DEBUG => (CLOSED_LAYER_AGENT_DEBUG, self.debug.close()),
+            // The Background Operations Log is registered for z-order and
+            // click-promotion in Band 1, but is deliberately **not** in the
+            // `Esc` stack: its visibility is application state owned by
+            // `UserCommand::ToggleBackgroundLogs`, not reducer-held
+            // overlay state, and `OverlayState` carries no field for it to
+            // clear.
+            //
+            // Declining with `CannotUnwind` rather than falling through to
+            // the catch-all below is the point: the catch-all means "the
+            // two halves are wired wrong", whereas this says the surface is
+            // open, known, and refuses the key on purpose. The key keeps
+            // travelling, exactly as `test_close_topmost_never_closes_the_
+            // docked_logs_panel` and
+            // `test_escape_pressed_does_not_close_the_docked_logs_panel`
+            // require.
+            SURFACE_ID_LOGS => {
+                return UnwindAnswer::Declined(DeclineReason::CannotUnwind);
+            }
             // `sync_surfaces` is the only writer of this index, so an
             // unknown id means the two halves are wired wrong — not a
             // user-facing state worth inventing a layer name for.
@@ -1140,6 +1375,16 @@ pub const SURFACE_ID_BATCH: &str = "overlay.batch";
 
 /// Registry id for the agent debug window (`MovableCard`).
 pub const SURFACE_ID_AGENT_DEBUG: &str = "overlay.agent_debug";
+
+/// Registry id of the Background Operations Log's movable Band-1 card
+/// (`UIF-MOV-001`, INT-6).
+///
+/// Registered so the card takes part in z-order and click-promotion inside
+/// `ZBand::UtilityOverlay` alongside
+/// [`SURFACE_ID_AGENT_DEBUG`]. Registration is
+/// **not** the same thing as closability here — see the explicit
+/// `ClosableSurfaces::unwind` arm for this id, which declines the key.
+pub const SURFACE_ID_LOGS: &str = "overlay.logs";
 
 /// The z-ordered set of showing layers, bottom-most first.
 ///

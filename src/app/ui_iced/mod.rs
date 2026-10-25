@@ -150,6 +150,7 @@ pub mod logs;
 /// Shared card chrome and solved geometry for framework-driven menus.
 pub mod menu_surface;
 pub mod message;
+pub mod movable_shell;
 pub mod os_shell;
 pub mod overlay;
 pub mod panels;

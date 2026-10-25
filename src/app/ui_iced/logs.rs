@@ -86,6 +86,7 @@ use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LogsMessage, Message};
+use iced_pro::surface::movable::{AutoScrollSetting, FollowState, ScrollGeometry};
 
 /// Log filter predicate.
 ///
@@ -157,6 +158,23 @@ pub const SEPARATOR_WIDTH: f32 = 1.0;
 /// `f32` comparison would drop the stick on a sub-pixel difference; 1 pt is
 /// far below what a user can perceive and far above the accumulation error
 /// of a frame's worth of rows.
+///
+/// # Delta against the framework's `AT_BOTTOM_TOLERANCE`
+///
+/// `iced_pro::surface::movable::AT_BOTTOM_TOLERANCE` is `space::XXS` =
+/// **2.0 pt**. This margin stays **1.0 pt**, deliberately narrower, and the
+/// follow decision therefore uses this value rather than the framework's
+/// `ScrollGeometry::at_bottom`. Adopting 2.0 would widen the band in which
+/// a viewport still counts as "at the tail", so a log the user has scrolled
+/// up by 1.5 pt would keep being yanked down — precisely the behaviour
+/// `logs_tests::just_short_of_the_end_is_at_bottom` and
+/// `logs_tests::past_the_margin_is_not_at_bottom` pin from the other side
+/// (the latter asserts a viewport 2.0 pt short is **not** at the bottom,
+/// which under the framework's tolerance would flip to at-bottom).
+///
+/// Widening it is a behaviour change that needs its own decision; INT-6
+/// unifies the decision *matrix* (`FollowState::resolve`) without silently
+/// moving the position threshold underneath the existing pins.
 pub const BOTTOM_STICK_TOLERANCE: f32 = 1.0;
 
 /// Stable iced widget id of the log list's `scrollable`.
@@ -359,6 +377,21 @@ impl ScrollSnapshot {
     pub fn follows_with(&self, auto_scroll: bool) -> bool {
         should_follow(auto_scroll, Some(*self))
     }
+
+    /// The same frame as the framework's [`ScrollGeometry`], for handing to
+    /// [`MovableHost::on_scroll`](iced_pro::surface::movable::MovableHost).
+    ///
+    /// Note the field order differs from this struct's: the framework's
+    /// constructor is `(offset, content, viewport)`, not
+    /// `(offset, viewport, content)`. Mapping it here rather than at each
+    /// call site keeps that transposition from being re-derived wrong
+    /// ([RUST-021]).
+    ///
+    /// Purity: pure.
+    #[must_use]
+    pub const fn to_geometry(&self) -> ScrollGeometry {
+        ScrollGeometry::new(self.offset_y, self.content_height, self.viewport_height)
+    }
 }
 
 /// Captures the vertical geometry of an iced scrollable viewport report.
@@ -376,6 +409,45 @@ pub fn scroll_snapshot(viewport: &scrollable::Viewport) -> ScrollSnapshot {
     }
 }
 
+/// The auto-scroll preference translated into the framework's vocabulary
+/// (`UIF-MOV-004`).
+///
+/// The app has carried this as a `bool` since before `iced-pro` named it;
+/// going through this one function means the translation exists in exactly
+/// one place ([RUST-021]) and the framework's `AutoScrollSetting` is what
+/// every follow decision is actually made against.
+///
+/// Purity: pure.
+#[must_use]
+pub const fn auto_scroll_setting(auto_scroll: bool) -> AutoScrollSetting {
+    if auto_scroll {
+        AutoScrollSetting::Enabled
+    } else {
+        AutoScrollSetting::Disabled
+    }
+}
+
+/// The follow rule as the framework's own [`FollowState`] (`UIF-MOV-004`).
+///
+/// Same matrix the framework defines — following requires *both* permission
+/// (the setting is on) and position (the viewport is at the tail) — with the
+/// position test still supplied by [`ScrollSnapshot::is_at_bottom`] and its
+/// [`BOTTOM_STICK_TOLERANCE`]. See that constant for why the app's margin
+/// stays tighter than the framework's
+/// [`AT_BOTTOM_TOLERANCE`](iced_pro::surface::movable::AT_BOTTOM_TOLERANCE).
+///
+/// Exposed alongside [`should_follow`] because the two questions are
+/// different: `should_follow` answers "scroll now?", `follow_state` answers
+/// "what state is this view in", which is what the footer's
+/// "N behind" affordance needs.
+///
+/// Purity: pure.
+#[must_use]
+pub fn follow_state(auto_scroll: bool, snapshot: Option<ScrollSnapshot>) -> FollowState {
+    let at_bottom = snapshot.is_some_and(|viewport| viewport.is_at_bottom());
+    FollowState::resolve(auto_scroll_setting(auto_scroll), at_bottom)
+}
+
 /// The auto-scroll **intent**: should the reducer scroll the log list to the
 /// end this frame?
 ///
@@ -387,6 +459,13 @@ pub fn scroll_snapshot(viewport: &scrollable::Viewport) -> ScrollSnapshot {
 /// geometry there is nothing to follow, and scrolling blind would fight the
 /// widget's own initial layout.
 ///
+/// As of INT-6 this is [`follow_state`]'s projection to a bool rather than a
+/// locally-written `&&`: the decision matrix is the framework's
+/// (`UIF-MOV-004`), and this layer contributes only the position test.
+/// Every existing pin — at-bottom follows, scrolled-up does not, setting off
+/// does not, no report does not — is exactly one of the framework's four
+/// cells, so the unification changes no behaviour.
+///
 /// Executing the intent is reducer work:
 /// `operation::scrollable::scroll_to(LOG_SCROLLABLE_ID.into(),
 /// AbsoluteOffset { x: 0.0, y: snapshot.max_offset() })`
@@ -397,7 +476,7 @@ pub fn scroll_snapshot(viewport: &scrollable::Viewport) -> ScrollSnapshot {
 /// Purity: pure.
 #[must_use]
 pub fn should_follow(auto_scroll: bool, snapshot: Option<ScrollSnapshot>) -> bool {
-    snapshot.is_some_and(|viewport| auto_scroll && viewport.is_at_bottom())
+    follow_state(auto_scroll, snapshot).is_following()
 }
 
 /// Everything the log viewer needs to render, snapshotted off the ring

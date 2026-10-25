@@ -35,6 +35,7 @@ mod tests;
 use crate::ui::{CURRENT_SCHEMA_VERSION, PersistedUiState};
 use iced::window::Position;
 use iced::{Point, Size};
+use iced_pro::surface::movable::{GeometryStorage, MovableGeometry};
 use std::path::{Path, PathBuf};
 
 /// NFR-001/NFR-004 error-code name for failed UI-state saves.
@@ -241,6 +242,87 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
                 PersistedUiState::default()
             }
         },
+    }
+}
+
+/// The `iced-pro` movable-overlay geometry sink, backed by the live
+/// [`PersistedUiState`] model and the injected [`UiStateStorage`] handler
+/// (`UIF-MOV-001`, [RUST-024]).
+///
+/// `iced-pro` deliberately owns *that* a card's rectangle should be
+/// remembered and *when* it settled, and nothing about where it lives. This
+/// is the app side of that arrangement: the framework's
+/// [`GeometryStorage`] seam, filled with the app's own storage handler so
+/// no platform-default user location is named anywhere in the write path
+/// ([RUST-024]).
+///
+/// # Why it borrows the live model rather than reading the handler
+///
+/// The close-time save ([`apply_close_metrics`] + [`save_ui_state`]) writes
+/// the whole `PersistedUiState` it is handed. Had this sink instead done a
+/// read-modify-write against the handler, that later save would have
+/// silently reverted every overlay position settled during the session,
+/// because the close-time model knows nothing about them. Writing into
+/// `state.app.persisted_ui_state` keeps exactly one authoritative copy,
+/// and the write-through below only decides *when* it reaches the handler.
+///
+/// # Call cadence
+///
+/// [`MovableHost`](iced_pro::surface::movable::MovableHost) calls
+/// [`load`](GeometryStorage::load) once when a card opens and
+/// [`save`](GeometryStorage::save) only when a drag or resize *settles* —
+/// never per frame — so the write-through never lands on a hot path and
+/// [NFR-002] is not at risk.
+pub struct UiStateGeometryStorage<'a> {
+    /// The live, in-memory snapshot the app treats as authoritative.
+    state: &'a mut PersistedUiState,
+    /// The injected sink the write-through goes to.
+    storage: &'a dyn UiStateStorage,
+}
+
+impl<'a> UiStateGeometryStorage<'a> {
+    /// Wrap the live model and the injected handler.
+    #[must_use]
+    pub fn new(state: &'a mut PersistedUiState, storage: &'a dyn UiStateStorage) -> Self {
+        Self { state, storage }
+    }
+
+    /// Persist the whole live model, logging (never raising) a failure so
+    /// the caller keeps its [NFR-001] ERROR path.
+    fn write_through(&self) {
+        if let Err(error) = save_ui_state(self.storage, self.state) {
+            tracing::error!(
+                name = UI_STATE_SAVE_ERROR_CODE,
+                %error,
+                "Failed to persist movable overlay geometry"
+            );
+        }
+    }
+}
+
+impl GeometryStorage for UiStateGeometryStorage<'_> {
+    /// Read the remembered geometry from the live model — no I/O, so a
+    /// card open cannot block on the storage backend ([NFR-003]).
+    fn load(&mut self, key: &str) -> Option<MovableGeometry> {
+        self.state
+            .overlay_geometry
+            .get(key)
+            .and_then(|text| MovableGeometry::decode(text))
+    }
+
+    fn save(&mut self, key: &str, geometry: MovableGeometry) {
+        self.state
+            .overlay_geometry
+            .insert(key.to_owned(), geometry.encode());
+        self.write_through();
+    }
+
+    /// Forget the key, and write through only when something was actually
+    /// there — clearing an already-empty key must not rewrite the file.
+    fn clear(&mut self, key: &str) {
+        if self.state.overlay_geometry.remove(key).is_some() {
+            self.write_through();
+        }
     }
 }
 

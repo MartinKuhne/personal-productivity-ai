@@ -18,6 +18,7 @@ use iced_pro::binding::pre_rank::DragCapture;
 use iced_pro::binding::pre_rank::DragKind;
 use iced_pro::binding::pre_rank::PreRankCoordinator;
 use iced_pro::surface::menu::model::{Menu, Row};
+use iced_pro::surface::movable::MovableGeometry;
 use iced_pro::surface::zorder::SurfaceId;
 use iced_pro::surface::zorder::SurfaceKind;
 use iced_pro::surface::zorder::SurfaceRegistry;
@@ -1211,5 +1212,277 @@ fn test_guard_refuses_escape_but_accepts_cancel_on_the_same_dirty_buffer() {
             crate::ui_iced::editor::LeaveGesture::Cancel,
         ),
         "Cancel is the explicit discard and must always be accepted"
+    );
+}
+
+// ─────────────── INT-6: Band-1 movable utility overlays ─────────────────────
+
+/// Build a host at a known rectangle inside `viewport`, opened against
+/// throwaway registry/focus so the test controls exactly what lands in the
+/// overlay's own index afterwards.
+fn host_at(id: &str, x: f32, y: f32, w: f32, h: f32, viewport: Rectangle) -> MovableHost {
+    let spec = MovableSpec::new(SurfaceId::new(id), "test card")
+        .with_geometry(MovableGeometry::new(Point::new(x, y), Size::new(w, h)));
+    MovableHost::open(
+        spec,
+        viewport,
+        &mut iced_pro::focus::FocusState::new(),
+        &mut SurfaceRegistry::new(),
+        &mut iced_pro::surface::movable::NoopGeometryStorage,
+    )
+}
+
+fn viewport_1280x800() -> Rectangle {
+    Rectangle::new(Point::ORIGIN, Size::new(1280.0, 800.0))
+}
+
+/// Both movable cards register in `ZBand::UtilityOverlay` with their **live
+/// host rectangle**, which is what lets the registry answer the routing
+/// question `UIF-MOV-003` is really about.
+#[test]
+fn both_movable_cards_register_with_their_live_rect() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.logs_visible = true;
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.logs_movable = Some(host_at(
+        SURFACE_ID_LOGS,
+        400.0,
+        300.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+
+    overlay.sync_surfaces();
+
+    assert_eq!(
+        overlay.surfaces.count_in(ZBand::UtilityOverlay),
+        2,
+        "both cards sit in the utility band"
+    );
+    assert_eq!(
+        overlay.surfaces.count_in(ZBand::Modal),
+        0,
+        "a movable card is not a modal"
+    );
+
+    let logs = overlay
+        .surfaces
+        .get(&SurfaceId::new(SURFACE_ID_LOGS))
+        .expect("logs registered");
+    assert_eq!(
+        logs.regions(),
+        &[overlay.logs_movable.as_ref().unwrap().card()],
+        "the registered region is the host's own card rect, not a copy"
+    );
+}
+
+/// `UIF-MOV-003`, the load-bearing half: with only movable cards open, a
+/// press outside every card reaches the workspace. Under the old `modal`
+/// mount it would have hit a scrim and been swallowed.
+#[test]
+fn a_press_outside_every_movable_card_reaches_the_workspace() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.logs_visible = true;
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.logs_movable = Some(host_at(
+        SURFACE_ID_LOGS,
+        400.0,
+        300.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.sync_surfaces();
+
+    let route = overlay.surfaces.route_pointer(Point::new(1240.0, 780.0));
+    assert!(
+        route.reaches_workspace(),
+        "no scrim may stand between the card band and Band 0, got {:?}",
+        route.target()
+    );
+}
+
+/// The complement: a press inside a card is owned by that card, so the
+/// card's own absorber is what should take it — not the workspace.
+#[test]
+fn a_press_inside_a_movable_card_is_owned_by_that_card() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.sync_surfaces();
+
+    let inside = overlay.logs_movable.as_ref().map(|_| ()).is_none() && true;
+    assert!(inside, "fixture: only agent debug is open");
+
+    let route = overlay.surfaces.route_pointer(Point::new(300.0, 300.0));
+    assert_eq!(
+        route.target().surface_id(),
+        Some(&SurfaceId::new(SURFACE_ID_AGENT_DEBUG)),
+        "the point is inside the debug card"
+    );
+}
+
+/// `UIF-MOV-003`'s promotion rule: clicking a Band-1 card raises it above
+/// the other Band-1 card, and the raise is observable through routing at a
+/// point where the two cards overlap.
+#[test]
+fn clicking_a_movable_card_promotes_it_above_the_other_band_1_card() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.logs_visible = true;
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.logs_movable = Some(host_at(
+        SURFACE_ID_LOGS,
+        400.0,
+        300.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.sync_surfaces();
+
+    // Whichever card the registration order happens to put on top, the
+    // rule under test is that promoting the *other* one flips it. Asserting
+    // it that way keeps the test about the promotion rule rather than about
+    // an incidental registration order.
+    let overlap = Point::new(500.0, 400.0);
+    let before = overlay
+        .surfaces
+        .topmost_in(ZBand::UtilityOverlay)
+        .map(|surface| surface.id().as_str().to_owned());
+    let other = if before.as_deref() == Some(SURFACE_ID_LOGS) {
+        SURFACE_ID_AGENT_DEBUG
+    } else {
+        SURFACE_ID_LOGS
+    };
+
+    let raised = overlay.surfaces.promote(&SurfaceId::new(other));
+    assert!(raised, "promote must accept a registered surface");
+    assert_eq!(
+        overlay
+            .surfaces
+            .route_pointer(overlap)
+            .target()
+            .surface_id(),
+        Some(&SurfaceId::new(other)),
+        "the clicked card must now win the overlap"
+    );
+    assert_eq!(
+        overlay
+            .surfaces
+            .topmost_in(ZBand::UtilityOverlay)
+            .map(|surface| surface.id().as_str().to_owned())
+            .as_deref(),
+        Some(other),
+        "the raise must be visible as the band's new top"
+    );
+}
+
+/// Promotion is confined to its own band: raising a utility card must not
+/// let it outrank a modal, which sits a whole band higher.
+#[test]
+fn promoting_a_utility_card_does_not_outrank_a_modal() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.logs_visible = true;
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.logs_movable = Some(host_at(
+        SURFACE_ID_LOGS,
+        400.0,
+        300.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    open_batch(&mut overlay);
+    overlay.sync_surfaces();
+
+    overlay.surfaces.promote(&SurfaceId::new(SURFACE_ID_LOGS));
+
+    let overlap = Point::new(500.0, 400.0);
+    assert_eq!(
+        overlay
+            .surfaces
+            .route_pointer(overlap)
+            .target()
+            .surface_id(),
+        Some(&SurfaceId::new(SURFACE_ID_BATCH)),
+        "a Band-1 raise must not reach above the modal band"
+    );
+}
+
+/// The registration driver is the authoritative `OverlayState` field, not
+/// the presence of a host: closing the field drops the surface even if a
+/// stale host were still around.
+#[test]
+fn closing_the_authoritative_field_drops_the_movable_surface() {
+    let viewport = viewport_1280x800();
+    let mut overlay = OverlayState::default();
+    overlay.debug.open();
+    overlay.debug_movable = Some(host_at(
+        SURFACE_ID_AGENT_DEBUG,
+        100.0,
+        100.0,
+        680.0,
+        440.0,
+        viewport,
+    ));
+    overlay.sync_surfaces();
+    assert!(
+        overlay
+            .surfaces
+            .contains(&SurfaceId::new(SURFACE_ID_AGENT_DEBUG))
+    );
+
+    overlay.debug.close();
+    overlay.sync_surfaces();
+    assert!(
+        !overlay
+            .surfaces
+            .contains(&SurfaceId::new(SURFACE_ID_AGENT_DEBUG)),
+        "the index must not outlive the field it is derived from"
     );
 }

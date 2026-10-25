@@ -346,3 +346,156 @@ fn test_platform_default_constructor_is_shielded_in_tests() {
 fn test_raw_corrupt_json_fails_to_deserialize() {
     assert!(serde_json::from_str::<PersistedUiState>("this is not json{{{{").is_err());
 }
+
+// ───────────────── INT-6: movable overlay geometry sink ─────────────────────
+
+/// The framework's canonical encoded form is what lands in the model, so a
+/// later reader never has to guess a format this crate invented.
+#[test]
+fn geometry_round_trips_through_the_injected_handler() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+    let wanted = MovableGeometry::new(Point::new(120.0, 80.0), Size::new(680.0, 440.0));
+
+    UiStateGeometryStorage::new(&mut model, &storage).save("movable:overlay.logs", wanted);
+
+    assert_eq!(
+        model
+            .overlay_geometry
+            .get("movable:overlay.logs")
+            .map(String::as_str),
+        Some(wanted.encode().as_str()),
+        "the stored text must be the framework's own `x,y,width,height` form"
+    );
+
+    let restored = UiStateGeometryStorage::new(&mut model, &storage).load("movable:overlay.logs");
+    assert_eq!(restored, Some(wanted), "round trip must be lossless");
+}
+
+/// A save writes through to the handler, not only into the in-memory model —
+/// otherwise a crash between settles would lose the position the user just
+/// dragged the card to.
+#[test]
+fn save_writes_through_to_the_handler() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+
+    UiStateGeometryStorage::new(&mut model, &storage)
+        .save("movable:overlay.agent_debug", MovableGeometry::DEFAULT);
+
+    let json = storage.saved_json().expect("write must reach the handler");
+    assert!(
+        json.contains("movable:overlay.agent_debug"),
+        "the persisted payload must carry the key, got: {json}"
+    );
+}
+
+/// A second card's save must not clobber the first card's entry — the two
+/// hosts share one model and one handler.
+#[test]
+fn two_cards_share_one_model_without_clobbering() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+
+    let logs = MovableGeometry::new(Point::new(10.0, 20.0), Size::new(680.0, 440.0));
+    let debug = MovableGeometry::new(Point::new(300.0, 400.0), Size::new(700.0, 500.0));
+
+    {
+        let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
+        sink.save("movable:overlay.logs", logs);
+        sink.save("movable:overlay.agent_debug", debug);
+    }
+
+    let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
+    assert_eq!(sink.load("movable:overlay.logs"), Some(logs));
+    assert_eq!(sink.load("movable:overlay.agent_debug"), Some(debug));
+}
+
+#[test]
+fn clear_forgets_a_saved_geometry() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+    let key = "movable:overlay.logs";
+
+    UiStateGeometryStorage::new(&mut model, &storage).save(key, MovableGeometry::DEFAULT);
+    UiStateGeometryStorage::new(&mut model, &storage).clear(key);
+
+    assert_eq!(
+        UiStateGeometryStorage::new(&mut model, &storage).load(key),
+        None
+    );
+    assert!(model.overlay_geometry.is_empty());
+}
+
+/// Clearing a key that was never saved must not rewrite the payload — a
+/// no-op that still hit storage would turn every card close into a write.
+#[test]
+fn clearing_an_absent_key_does_not_write() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+
+    UiStateGeometryStorage::new(&mut model, &storage).clear("movable:overlay.logs");
+
+    assert!(
+        storage.saved_json().is_none(),
+        "clearing nothing must not produce a save"
+    );
+}
+
+/// A value that will not decode reads as absent, so a corrupt entry falls
+/// back to the framework default rather than to a garbage rectangle.
+#[test]
+fn a_corrupt_saved_value_reads_as_absent() {
+    let storage = InMemoryUiStateStorage::new();
+    let mut model = PersistedUiState::default();
+    model.overlay_geometry.insert(
+        "movable:overlay.logs".to_owned(),
+        "not,a,geometry".to_owned(),
+    );
+
+    assert_eq!(
+        UiStateGeometryStorage::new(&mut model, &storage).load("movable:overlay.logs"),
+        None
+    );
+}
+
+/// [RUST-024] / [RUST-006]: the sink reaches the filesystem only through
+/// the handler it was handed. With the noop handler the write path is a
+/// black hole, and no platform-default user location is ever named.
+#[test]
+fn the_sink_never_names_a_user_profile_path() {
+    let mut model = PersistedUiState::default();
+    let noop = NoopUiStateStorage;
+
+    {
+        let mut sink = UiStateGeometryStorage::new(&mut model, &noop);
+        sink.save("movable:overlay.logs", MovableGeometry::DEFAULT);
+        sink.save("movable:overlay.agent_debug", MovableGeometry::DEFAULT);
+        sink.clear("movable:overlay.logs");
+    }
+
+    // The model is pure data; the only thing that could have touched a disk
+    // is the handler, and `NoopUiStateStorage` discards every write.
+    let serialised = serde_json::to_string(&model).expect("model serialises");
+    for forbidden in ["APPDATA", "USERPROFILE", "\\\\.\\"] {
+        assert!(
+            !serialised.contains(forbidden),
+            "persisted geometry must not name {forbidden}"
+        );
+    }
+}
+
+/// A payload written before `overlay_geometry` existed still loads, with the
+/// map simply empty — the reason the schema version did not move.
+#[test]
+fn a_pre_int6_payload_still_loads() {
+    let legacy = r#"{"schema_version":1,"left_panel_width":240.0}"#;
+    let storage = InMemoryUiStateStorage::new();
+    storage.save_ui_state(legacy).expect("seed");
+
+    let loaded = load_ui_state(&storage);
+    assert!(
+        loaded.overlay_geometry.is_empty(),
+        "an absent map reads as empty, not as an error"
+    );
+}

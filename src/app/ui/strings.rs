@@ -728,6 +728,42 @@ pub const LOG_CATEGORY_LLM_TOOLS: &str = "LLM Tools";
 /// Error label when background manager lock fails.
 pub const BACKGROUND_MGR_ACCESS_ERROR: &str = "Error: could not access background manager";
 
+/// Format template for a movable card's footer row count (§4.7.1 footer).
+///
+/// A template with a named placeholder rather than a positional `{}`, so the
+/// placeholder travels with the text and a reworded string cannot silently
+/// break the substitution ([RUST-021]).
+pub const MOVABLE_ROW_COUNT_TEMPLATE: &str = "{count} entries";
+
+/// Footer status text for a movable card that shows `count` rows.
+#[must_use]
+pub fn movable_row_count(count: usize) -> String {
+    MOVABLE_ROW_COUNT_TEMPLATE.replace("{count}", &count.to_string())
+}
+
+/// Title of the Background Operations Log's movable Band-1 card
+/// (`UIF-MOV-001`, §4.7.1).
+///
+/// Distinct from [`MENU_BACKGROUND_OPERATIONS`],
+/// which is the *menu* entry that opens it. The card's own title bar names
+/// the surface, not the command.
+pub const BACKGROUND_LOGS_WINDOW: &str = "Background Operations Log";
+
+/// Label of the `Dock` trailing action in a movable card's title bar
+/// (§4.7.1, `UIF-MOV-001`).
+pub const MOVABLE_DOCK_BUTTON: &str = "Dock";
+
+/// Tooltip on a movable card's title bar, naming the drag affordance
+/// (`UIF-MOV-001`).
+pub const MOVABLE_TITLE_DRAG_TOOLTIP: &str = "Drag to move";
+
+/// Tooltip on the ◢ resize grip in a movable card's footer
+/// (§4.7.1, `UIF-MOV-002`).
+pub const MOVABLE_RESIZE_TOOLTIP: &str = "Drag to resize";
+
+/// Tooltip on the `Close` action in a movable card's title bar.
+pub const MOVABLE_CLOSE_TOOLTIP: &str = "Close";
+
 // Agent Debug Window
 /// Window title for the agent debug window.
 pub const AGENT_DEBUG_WINDOW: &str = "Agent Debug";

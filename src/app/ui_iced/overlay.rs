@@ -131,6 +131,7 @@ use iced::widget::{
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 use iced_pro::surface::modal::ModalFrame;
+use iced_pro::surface::movable::MovableGeometry;
 use iced_pro::token::shape;
 
 use crate::ui::strings;
@@ -627,4 +628,57 @@ where
     Message: 'a,
 {
     mouse_area(content).on_right_press(on_right_press)
+}
+
+/// Mount a Band-1 movable utility card **without a scrim**
+/// (`UIF-MOV-003`, INT-6).
+///
+/// # Why this is not [`modal`] / [`modal_centered`]
+///
+/// Every modal mount in this module puts a full-area [`scrim_blocker`]
+/// under the card. That blocker is a `mouse_area` with an `on_press`, and
+/// iced stops a mouse event at the first child that captures it — which is
+/// exactly what makes those surfaces blocking, and exactly what
+/// `UIF-MOV-003` forbids here. §4.7 hands the log and the inspector to the
+/// user *while they are doing something else*, so a press outside the card
+/// has to reach Band 0.
+///
+/// So this mount adds no blocker at all. A plain `container` stretched to
+/// `Fill` captures nothing: it has no handler, reports the event unclaimed,
+/// and the surrounding stack keeps travelling downward to the base bands.
+/// The card is placed inside it at the host's own geometry via
+/// start-alignment plus an offset padding — the same placement [`modal_at`]
+/// uses, minus the scrim.
+///
+/// # What the caller owns
+///
+/// The card must absorb presses that land *on* it, or clicking the card
+/// would fall through too. That absorber lives on the card itself, in
+/// [`movable_shell`](crate::ui_iced::movable_shell::movable_shell), not
+/// here.
+///
+/// `geometry` comes from the card's
+/// [`MovableHost`](iced_pro::surface::movable::MovableHost) and never from
+/// a locally-computed rectangle, so the painted card and the rectangle the
+/// registry routes pointer events against are the same rectangle.
+#[must_use]
+pub fn movable_layer<'a, Message>(
+    card: impl Into<Element<'a, Message>>,
+    geometry: MovableGeometry,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    container(card)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Start)
+        .align_y(Alignment::Start)
+        .padding(Padding {
+            top: geometry.position.y,
+            right: 0.0,
+            bottom: 0.0,
+            left: geometry.position.x,
+        })
+        .into()
 }
