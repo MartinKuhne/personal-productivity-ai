@@ -4,7 +4,7 @@
 //! shared tokens, and element-construction smoke tests. No renderer, no
 //! window, no filesystem access.
 
-use crate::ui_iced::about::ABOUT_BANNER_SIZE;
+use iced_pro::token::size::ICON_LG;
 
 use super::*;
 
@@ -51,7 +51,7 @@ fn logo_mark_builds_at_every_caller_size() {
     // Smoke: both real call sites (top bar, About banner) must produce a
     // usable `'static` element without panicking.
     let top: Element<'static, Message> = logo_mark(LOGO_MARK_SIZE);
-    let banner: Element<'static, Message> = logo_mark(ABOUT_BANNER_SIZE);
+    let banner: Element<'static, Message> = logo_mark(ICON_LG);
     let _ = (top, banner);
 }
 

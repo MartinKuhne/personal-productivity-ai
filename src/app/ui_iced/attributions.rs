@@ -11,6 +11,39 @@
 //! `cargo-about` file and no runtime shell-out anywhere; the data is
 //! compiled in.
 //!
+//! # The framework owns the box, the app owns the rows
+//!
+//! As of integration increment INT-5a this window takes its geometry from
+//! [`iced_pro::surface::modal`] rather than from constants of its own:
+//!
+//! | Concern | Owner |
+//! |---|---|
+//! | Card width (640px) and height (480px), gutter clamp | [`ModalSizing::attributions`] via [`attributions_card_size`] |
+//! | Card surface, border, radius, content padding | [`iced_pro::surface::modal::ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
+//! | Section divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
+//! | Title / cell type sizes, cell padding | `iced_pro::token::{typography, space, shape}` |
+//! | Link colour, underline, hit height | `iced_pro::widget::hyperlink` resolver (`UIF-ATOM-001d`) |
+//! | Which window is open, what dismisses it | `AboutWindowState` + `OverlayState::close_topmost` |
+//!
+//! The list is no longer a hand-picked `340px` cap. The card is a fixed
+//! 480px box and the scrollable takes `Length::Fill`, so the credits
+//! region is *whatever the card has left* after the title, summary,
+//! dividers and footer — and it stays 480px total whether the catalog has
+//! two rows or two thousand.
+//!
+//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not**
+//! used, for the same reason [`crate::ui_iced::about`] does not take it:
+//! the app already owns `SURFACE_ID_ATTRIBUTIONS` in
+//! `crate::ui_iced::app::OverlayState::sync_surfaces` and owns
+//! dismissal in `crate::ui_iced::app::OverlayState::close_topmost`.
+//! Consequently
+//! `UIF-MOD-001` (focus trap), `UIF-MOD-002` (dirty/busy guard) and
+//! `UIF-MOD-003` (error banner) are **not** wired here — see that
+//! module's "What that choice does NOT buy" section for the full
+//! accounting. What *is* wired is the card-boundary absorption
+//! ([`AboutMessage::Absorbed`]) that keeps a press on the card's
+//! padding or a dead row from reaching the scrim.
+//!
 //! # What the catalog actually carries
 //!
 //! `Attribution { name, authors, github_url }` — that is the whole row.
@@ -32,62 +65,81 @@
 //! header names actually line up.
 //!
 //! ```text
-//! Third-Party Attributions
-//! 57 direct third-party dependencies
-//! ────────────────────────────────────────────────────────────
-//! Crate   │ Authors             │ Repository
-//! ─────────┼───────────────────┼──────────────────────────────
-//! anyhow  │ David Tolnay      │ https://github.com/dtolnay/…
+//! ┌─ Attributions card · 640×480 · surface.overlay · radius 6 ───┐
+//! │ Third-Party Attributions                                     │
+//! │ 57 direct third-party dependencies                           │
+//! │ ──────────────────────────────────────────────────────────── │
+//! │ Crate   │ Authors             │ Repository                   │
+//! │ ────────┼─────────────────────┼──────────────────────────────│
+//! │ anyhow  │ David Tolnay        │ github.com/dtolnay/anyhow    │
+//! │         │                     │  ↑ accent_text, underlined,   │
+//! │         │                     │    24px hit target            │
+//! │         …  Length::Fill — scrolls  …                          │
+//! │ ──────────────────────────────────────────────────────────── │
+//! │                                          [ Close ]           │
+//! └──────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! The repository cell is clickable: iced has no `hyperlink_to`, so the
-//! row emits the deferred intent [`AboutMessage::RepositoryOpened`] and
-//! the reducer opens the URL.
+//! The repository cell is a hyperlink. iced has no `hyperlink_to` and
+//! `iced_pro` ships the hyperlink as a **resolver, not a rendered
+//! widget** (`widget/hyperlink.rs` has `resolve_style` and the geometry
+//! but no `Widget` impl), so the cell composes them: the resolver's
+//! resting `foreground` (`color.accent.text`) and `underlined` flag drive
+//! the label, `hyperlink::MIN_HEIGHT` (`size.hit_target.min`) drives the
+//! hit box, and a [`mouse_area`] carries the press. The row emits the
+//! deferred intent [`AboutMessage::RepositoryOpened`] and the reducer
+//! opens the URL.
 //!
 //! The empty catalog renders the same widget tree with an empty table and
 //! an empty-state summary line, so the shape never changes (AGENTS §6).
 //!
 //! Unit tests live in the sibling `attributions_tests.rs` sidecar.
 
-use iced::widget::{Column, Row, container, mouse_area, rule, scrollable, space, table, text};
-use iced::{Alignment, Element, Length};
+use iced::widget::{
+    Column, Row, Space, container, mouse_area, rich_text, scrollable, table, text, text::Span,
+};
+use iced::{Alignment, Element, Length, Padding, Point, Rectangle, Size};
+
+use iced_pro::state::{BaseState, VisualState};
+use iced_pro::surface::modal::ModalSizing;
+use iced_pro::token::{shape, space, typography};
+use iced_pro::widget::hyperlink;
 
 use crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES};
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::about::{
-    ABOUT_BODY_SIZE, ABOUT_SECTION_SPACING, SEPARATOR_WIDTH, close_button,
-};
+use crate::ui_iced::about::{close_button, modal_frame};
 use crate::ui_iced::message::{AboutMessage, Message};
+use crate::ui_iced::overlay::{modal_card, modal_divider};
 
 #[cfg(test)]
 #[path = "attributions_tests.rs"]
 mod tests;
 
-/// Width of the attributions card — same card width as the About dialog
-/// ([`crate::ui_iced::about::ABOUT_CARD_WIDTH`]).
-pub const ATTRIBUTIONS_CARD_WIDTH: f32 = 620.0;
+/// §4.6.2 — the Attributions card's sizing policy: 640×480 fixed.
+pub const ATTRIBUTIONS_SIZING: ModalSizing = ModalSizing::attributions();
 
-/// Logical point size of the window title.
-pub const ATTRIBUTIONS_TITLE_SIZE: f32 = 18.0;
+/// The Attributions card's **outer** size for a viewport (§4.6.2).
+///
+/// 640×480, each axis clamped to the viewport minus
+/// [`VIEWPORT_GUTTER`](iced_pro::surface::modal::VIEWPORT_GUTTER). The
+/// content extent is passed as zero because this policy is *fixed* on
+/// both axes — the card is 480px tall whether the catalog holds two
+/// rows or two thousand, and the list scrolls inside it.
+#[must_use]
+pub fn attributions_card_size(viewport: Size) -> Size {
+    ATTRIBUTIONS_SIZING
+        .solve(Rectangle::new(Point::ORIGIN, viewport), Size::ZERO)
+        .size()
+}
 
-/// Logical point size of a table header cell.
-pub const ATTRIBUTIONS_HEADER_SIZE: f32 = 14.0;
+/// Stable id of the Attributions card box itself, so a layout test can
+/// address the rendered card rather than only its contents (AGENTS §5).
+pub const ATTRIBUTIONS_CARD_ID: &str = "attributions_card_frame";
 
-/// Logical point size of a table body cell.
-pub const ATTRIBUTIONS_ROW_SIZE: f32 = 14.0;
-
-/// Maximum height of the credits scroll area, in logical pixels.
-pub const ATTRIBUTIONS_LIST_MAX_HEIGHT: f32 = 340.0;
-
-/// Horizontal padding inside a table cell.
-pub const CELL_PADDING_X: f32 = 6.0;
-
-/// Vertical padding inside a table cell.
-pub const CELL_PADDING_Y: f32 = 2.0;
-
-/// Padding inside the card.
-pub const CARD_PADDING: f32 = 12.0;
+/// Stable id for the credits scroll area, so the reducer can address it
+/// and the scroll position survives a tree rebuild (AGENTS §5).
+pub const ATTRIBUTIONS_LIST_ID: &str = "attributions_list_scroll";
 
 /// A snapshot of the third-party attribution catalog.
 ///
@@ -151,65 +203,110 @@ impl AttributionsViewModel {
         }
     }
 
-    /// Renders this snapshot as the attributions window
+    /// Renders this snapshot as the framed attributions window
     /// ([`attributions_view`]).
     #[must_use]
-    pub fn view(&self) -> Element<'_, Message> {
-        attributions_view(self)
+    pub fn view(&self, viewport: Size) -> Element<'_, Message> {
+        attributions_view(self, viewport)
     }
 }
 
-/// Renders the third-party attributions window.
+/// Renders the framed third-party attributions window.
 ///
 /// Title, count line, the scrollable three-column catalog and the shared
-/// Close footer. The list is capped at
-/// [`ATTRIBUTIONS_LIST_MAX_HEIGHT`] and scrolls; the table is always
-/// allocated, empty or not.
+/// Close footer, inside the §4.6.2 640×480 card. The list takes
+/// `Length::Fill`, so the card's height is the frame's, not the
+/// content's; the table is always allocated, empty or not.
 ///
 /// Emitted messages:
 /// * a repository cell → [`AboutMessage::RepositoryOpened`]
 /// * the footer → [`AboutMessage::CloseRequested`]
 ///
-/// Like [`crate::ui_iced::about::about_card`], this is card content: the
-/// root view mounts it through
-/// [`crate::ui_iced::overlay::modal`] with
-/// `Message::About(AboutMessage::CloseRequested)` as the dismiss message.
+/// Like [`crate::ui_iced::about::about_card`], this is a framed card:
+/// the root view centres it over the scrim with
+/// [`crate::ui_iced::overlay::modal_centered`], passing
+/// [`AboutMessage::Absorbed`] as the card-boundary message and
+/// [`AboutMessage::CloseRequested`] as the dismiss message.
 ///
-/// Purity: pure view over `view_model`.
+/// Purity: pure view over `view_model` and `viewport`.
 #[must_use]
-pub fn attributions_view(view_model: &AttributionsViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+pub fn attributions_view(
+    view_model: &AttributionsViewModel,
+    viewport: Size,
+) -> Element<'_, Message> {
+    let frame = modal_frame();
+    let card_size = attributions_card_size(viewport);
 
-    let title = text(strings::ABOUT_ATTRIBUTIONS_HEADER)
-        .size(ATTRIBUTIONS_TITLE_SIZE)
-        .color(palette.text_strong);
+    let title = rung(
+        strings::ABOUT_ATTRIBUTIONS_HEADER,
+        typography::TITLE_SM,
+        Palette::fastmd_dark().text_strong,
+    );
 
-    let summary = text(view_model.summary())
-        .size(ABOUT_BODY_SIZE)
-        .color(palette.text_muted);
+    let summary = rung(
+        view_model.summary(),
+        typography::BODY,
+        Palette::fastmd_dark().text_muted,
+    );
 
-    let list = scrollable(attribution_table(view_model.entries()))
-        .height(Length::Fixed(ATTRIBUTIONS_LIST_MAX_HEIGHT));
+    let list = credits_list(attribution_table(view_model.entries()));
 
     let footer = Row::with_children(vec![
-        space::Space::new().width(Length::Fill).into(),
+        Space::new().width(Length::Fill).into(),
         close_button(),
     ])
-    .spacing(ABOUT_SECTION_SPACING)
+    .spacing(space::SM)
     .align_y(Alignment::Center);
 
-    Column::with_children(vec![
+    let body = Column::with_children(vec![
         title.into(),
         summary.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         list.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         footer.into(),
     ])
-    .spacing(ABOUT_SECTION_SPACING)
-    .padding(CARD_PADDING)
-    .width(Length::Fixed(ATTRIBUTIONS_CARD_WIDTH))
+    .spacing(space::SM);
+
+    modal_card(
+        body,
+        frame,
+        ATTRIBUTIONS_CARD_ID,
+        Length::Fixed(card_size.width),
+        Length::Fixed(card_size.height),
+    )
     .into()
+}
+
+/// Paints `value` on a type rung at its resting weight.
+///
+/// The single place this window turns a rung into a `text` widget, so no
+/// call site restates a point size ([RUST-021], `UIF-TOK-004`).
+///
+/// `line_height` is passed as `iced::Pixels`, never as a bare `f32`:
+/// `From<f32> for iced::LineHeight` yields `Relative(factor)`, a
+/// multiple of the font size, so a bare `20.0` would mean twenty lines
+/// of leading. See `about::rung` for the measured evidence.
+fn rung(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+) -> text::Text<'static> {
+    text(value.into())
+        .size(rung.size)
+        .line_height(iced::Pixels(rung.line_height))
+        .color(color)
+}
+
+/// The credits list: the table, given whatever vertical space the card
+/// has left.
+///
+/// `Length::Fill` rather than a fixed cap: the card is a fixed 480px box
+/// (§4.6.2), so the list's height is a remainder, not a chosen number.
+fn credits_list<'a>(table: Element<'a, Message>) -> iced::widget::Scrollable<'a, Message> {
+    scrollable(table)
+        .id(ATTRIBUTIONS_LIST_ID)
+        .height(Length::Fill)
 }
 
 /// The credits table: Crate / Authors / Repository.
@@ -232,20 +329,14 @@ pub fn attribution_table(entries: &[Attribution]) -> Element<'static, Message> {
         table::column(
             header_cell(strings::ABOUT_COL_CRATE),
             move |entry: Attribution| -> Element<'static, Message> {
-                text(entry.name)
-                    .size(ATTRIBUTIONS_ROW_SIZE)
-                    .color(crate_name_color())
-                    .into()
+                rung(entry.name, typography::UI_COMPACT, crate_name_color()).into()
             },
         )
         .width(Length::Shrink),
         table::column(
             header_cell(strings::ABOUT_COL_AUTHORS),
             move |entry: Attribution| -> Element<'static, Message> {
-                text(entry.authors)
-                    .size(ATTRIBUTIONS_ROW_SIZE)
-                    .color(authors_color())
-                    .into()
+                rung(entry.authors, typography::UI_COMPACT, authors_color()).into()
             },
         )
         .width(Length::Shrink),
@@ -257,32 +348,76 @@ pub fn attribution_table(entries: &[Attribution]) -> Element<'static, Message> {
     ];
 
     table::table(columns, entries.to_vec())
-        .padding_x(CELL_PADDING_X)
-        .padding_y(CELL_PADDING_Y)
-        .separator_x(SEPARATOR_WIDTH)
-        .separator_y(SEPARATOR_WIDTH)
+        .padding_x(space::XS)
+        .padding_y(space::XXS)
+        .separator_x(shape::BORDER_HAIRLINE)
+        .separator_y(shape::BORDER_HAIRLINE)
         .width(Length::Fill)
         .into()
 }
 
 /// A column-header cell.
+///
+/// `UI_COMPACT` is the dense-table rung (§2.4). The header is
+/// distinguished by `text_strong` rather than by weight: the app
+/// registers no SemiBold face (see `ui_iced/fonts.rs`), so
+/// `UI_COMPACT.emphasis_weight` cannot actually be painted, and colour is
+/// the distinction the runtime can honour.
 fn header_cell(label: &'static str) -> Element<'static, Message> {
-    text(label)
-        .size(ATTRIBUTIONS_HEADER_SIZE)
-        .color(Palette::fastmd_dark().text_strong)
-        .into()
+    rung(
+        label,
+        typography::UI_COMPACT,
+        Palette::fastmd_dark().text_strong,
+    )
+    .into()
 }
 
-/// A clickable repository cell.
-fn repository_cell(url: &'static str) -> Element<'static, Message> {
+/// A clickable repository cell, drawn as a `UIF-ATOM-001d` hyperlink.
+///
+/// The framework ships the hyperlink as a resolver and a geometry, not a
+/// rendered widget, so the cell composes them itself:
+///
+/// * the resting
+///   [`HyperlinkStyle::foreground`](iced_pro::widget::hyperlink::HyperlinkStyle::foreground)
+///   (`color.accent.text`) and
+///   [`HyperlinkStyle::underlined`](iced_pro::widget::hyperlink::HyperlinkStyle::underlined)
+///   drive the label — **not** the
+///   `accent_fill` colour the cell used before, which measured below the
+///   4.5:1 floor against this card's surface;
+/// * [`hyperlink::MIN_HEIGHT`] (`size.hit_target.min`) is the hit box,
+///   so the cell is a real target rather than a text-height sliver;
+/// * [`hyperlink::PADDING_X`] insets the label the way the resolver's
+///   `label_bounds` assumes.
+///
+/// The mount passed to the resolver is the card's own surface, which is
+/// what the label is actually drawn on — resolving against a transparent
+/// fill would be measuring a colour that is not there.
+#[must_use]
+pub fn repository_cell(url: &'static str) -> Element<'static, Message> {
+    let mount = modal_frame().surface;
+    let style = hyperlink::resolve_style(
+        VisualState {
+            base: BaseState::Rest,
+            focused: false,
+        },
+        mount,
+        &Palette::pro(),
+    );
+
+    let label = rich_text(vec![
+        Span::<String>::new(url.to_owned())
+            .size(typography::UI_COMPACT.size)
+            .color(style.foreground)
+            .underline(style.underlined),
+    ])
+    .width(Length::Fill);
+
     mouse_area(
-        container(
-            text(url)
-                .size(ATTRIBUTIONS_ROW_SIZE)
-                .color(repository_color()),
-        )
-        .width(Length::Fill)
-        .padding(2.0),
+        container(label)
+            .width(Length::Fill)
+            .height(Length::Fixed(hyperlink::MIN_HEIGHT))
+            .align_y(Alignment::Center)
+            .padding(Padding::ZERO.horizontal(hyperlink::PADDING_X)),
     )
     .on_press(repository_press(url))
     .into()
@@ -316,8 +451,21 @@ pub fn authors_color() -> iced::Color {
     Palette::fastmd_dark().text
 }
 
-/// Palette colour for the repository column (`accent` — it is a link).
+/// Palette colour for the repository column.
+///
+/// `color.accent.text`, read through the framework's own hyperlink
+/// resolver at rest rather than retyped here — the link's colour is
+/// §3.1d's business, and a second copy of it in this module is a second
+/// thing that could drift.
 #[must_use]
 pub fn repository_color() -> iced::Color {
-    Palette::fastmd_dark().accent
+    hyperlink::resolve_style(
+        VisualState {
+            base: BaseState::Rest,
+            focused: false,
+        },
+        modal_frame().surface,
+        &Palette::pro(),
+    )
+    .foreground
 }

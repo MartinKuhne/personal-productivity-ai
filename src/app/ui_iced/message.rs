@@ -692,6 +692,18 @@ pub enum AboutMessage {
     /// mutually exclusive, so the reducer needs exactly one "hide it"
     /// transition ([`crate::ui_iced::about::AboutWindowState::close`]).
     CloseRequested,
+    /// A press landed inside the open card's perimeter but on nothing that
+    /// acts — its padding ring, dead space between sections, or a
+    /// control with no handler. A deliberate **no-op**: the press is
+    /// consumed so it cannot reach the scrim and dismiss the window
+    /// (`UIF-VER-003`), and the window stays open.
+    ///
+    /// It is a message rather than nothing so the absorption is
+    /// observable: a test can assert the reducer received it and changed
+    /// nothing, which is the difference between "the click was swallowed
+    /// by the card" and "the click never arrived"
+    /// ([FMD-071]).
+    Absorbed,
 }
 
 /// Batch prompt-processing dialog channel (BATCH-001..BATCH-014).

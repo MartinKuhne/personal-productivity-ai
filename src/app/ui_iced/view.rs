@@ -45,7 +45,7 @@ use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::background_logs_view;
 use crate::ui_iced::message::{LayoutMessage, Message};
-use crate::ui_iced::overlay::modal;
+use crate::ui_iced::overlay::{modal, modal_centered};
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
@@ -260,12 +260,14 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             crate::ui_iced::tools_dialog::tools_dialog_card(&state.models.tools),
             Message::Tools(crate::ui_iced::message::ToolsDialogMessage::CloseRequested),
         ),
-        OverlayLayer::About => modal(
-            about_card(&state.models.about),
+        OverlayLayer::About => modal_centered(
+            about_card(&state.models.about, state.viewport),
+            Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
             Message::About(crate::ui_iced::message::AboutMessage::CloseRequested),
         ),
-        OverlayLayer::Attributions => modal(
-            attributions_view(&state.models.attributions),
+        OverlayLayer::Attributions => modal_centered(
+            attributions_view(&state.models.attributions, state.viewport),
+            Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
             Message::About(crate::ui_iced::message::AboutMessage::CloseRequested),
         ),
         OverlayLayer::Batch => batch_layer(&state.models.batch),

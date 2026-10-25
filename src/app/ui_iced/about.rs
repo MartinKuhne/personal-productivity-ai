@@ -7,6 +7,58 @@
 //! open/close state ([`AboutWindowState`]) and performs the two side
 //! effects the card only requests.
 //!
+//! # The framework owns the box, the app owns the answer
+//!
+//! As of integration increment INT-5a this module is a consumer of
+//! [`iced_pro::surface::modal`] rather than a re-implementation of
+//! §4.6.2. Nothing here carries a card measurement of its own:
+//!
+//! | Concern | Owner |
+//! |---|---|
+//! | Card width, gutter clamp | [`ModalSizing::about`] via [`about_card_width`] |
+//! | Card surface, border, radius, padding | [`ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
+//! | Section divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
+//! | Type sizes, gaps, glyph size | `iced_pro::token::{typography, space, size, shape}` |
+//! | Footer / teaser button geometry and states | [`iced_pro::widget::button_widget::Button`] |
+//! | Which window is open, what dismisses it | [`AboutWindowState`] + `OverlayState::close_topmost` |
+//!
+//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not** used,
+//! for the same reason [`crate::ui_iced::dialogs`] did not take it: the
+//! host self-registers its surface in a
+//! [`iced_pro::surface::zorder::SurfaceRegistry`] and pushes its own
+//! focus trap, while this app already owns `SURFACE_ID_ABOUT` in
+//! [`crate::ui_iced::app::OverlayState::sync_surfaces`] and owns
+//! dismissal in [`crate::ui_iced::app::OverlayState::close_topmost`].
+//! Two owners of one surface id is the collision INT-4 settled; the app
+//! keeps both. See that module's docs for the full reasoning.
+//!
+//! # What that choice does NOT buy (`UIF-MOD-001..003`)
+//!
+//! Stated plainly, because the framework docs describe a host and this
+//! card is not wired to it:
+//!
+//! * **`UIF-MOD-001` (focus trap + restoration) — NOT provided.** The
+//!   app captures only `Escape` off its keyboard stream
+//!   (`ui_iced/subscription.rs`) and leaves `Tab` to iced's built-in
+//!   router, which knows nothing about a trap. Nothing would feed
+//!   `FocusState::push_trap` the `Tab` events it needs, so pushing one
+//!   here would be a trap on paper only. Focus can still reach the
+//!   panes under the scrim.
+//! * **`UIF-MOD-002` (unsaved-edit / busy guard) — NOT provided, and
+//!   nothing is lost.** The About card has no editable field and no
+//!   in-flight action, so `dirty` and `busy` are permanently `false` and
+//!   the guard could never refuse a dismissal.
+//! * **`UIF-MOD-003` (structured error banner) — NOT provided.** This
+//!   card has no failing action: every field is compile-time data and the
+//!   two effects it requests (clipboard write, open credits) are not
+//!   modelled as failures. `ModalError` therefore never appears here.
+//!
+//! What the card *does* provide is the two dismissal paths the app owns
+//! (`Escape` and scrim click, both routed to
+//! [`AboutMessage::CloseRequested`]) plus the card-boundary absorption
+//! [`AboutMessage::Absorbed`] that stops a press on the padding ring or
+//! a dead control from reaching the scrim.
+//!
 //! # Data sources (all compile-time — no render-time I/O)
 //!
 //! | Field | Source |
@@ -62,42 +114,78 @@
 //!
 //! Unit tests live in the sibling `about_tests.rs` sidecar.
 
-use iced::widget::{Column, Row, button, mouse_area, rule, scrollable, space, text};
-use iced::{Alignment, Element, Length};
+use iced::widget::{Column, Row, Space, mouse_area, scrollable, text};
+use iced::{Alignment, Element, Length, Size};
+
+use iced_pro::surface::modal::{ModalFrame, ModalSizing};
+use iced_pro::token::{size, space, typography};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::ui::attributions::DIRECT_DEPENDENCIES;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logo;
 use crate::ui_iced::message::{AboutMessage, Message};
+use crate::ui_iced::overlay::{modal_card, modal_divider};
 
 #[cfg(test)]
 #[path = "about_tests.rs"]
 mod tests;
 
-/// Width of the About card, in logical pixels.
-pub const ABOUT_CARD_WIDTH: f32 = 620.0;
+/// §4.6.2 — the About card's sizing policy: 440px wide, content-fit.
+///
+/// Held as the policy object rather than a number, so the card states
+/// *which* modal it is and the framework does the clamping.
+pub const ABOUT_SIZING: ModalSizing = ModalSizing::about();
 
-/// Logical point size of the app-name heading.
-pub const ABOUT_HEADING_SIZE: f32 = 22.0;
+/// The About card's **outer** width for a viewport width (§4.6.2).
+///
+/// 440px on any viewport wide enough to hold it, clamped to
+/// `viewport.width - VIEWPORT_GUTTER` (`space::XXL`, 32px) below that.
+/// The card's padding is *inside* this figure — see
+/// [`crate::ui_iced::overlay::modal_card`].
+#[must_use]
+pub fn about_card_width(viewport_width: f32) -> f32 {
+    ABOUT_SIZING.width.resolve(viewport_width, 0.0)
+}
 
-/// Logical point size of the banner glyph.
-pub const ABOUT_BANNER_SIZE: f32 = 48.0;
-
-/// Logical point size of a section header.
-pub const ABOUT_HEADER_SIZE: f32 = 16.0;
-
-/// Logical point size of body, fact and metadata rows.
-pub const ABOUT_BODY_SIZE: f32 = 14.0;
-
-/// Vertical gap between card sections and between inline labels.
-pub const ABOUT_SECTION_SPACING: f32 = 8.0;
+/// The frame this card is drawn with (§4.6.1).
+///
+/// Resolved from the app's framework palette on each call rather than
+/// cached: [`ModalFrame::resolve`] is a `const fn` over a `Copy` value,
+/// and reading it at the call site keeps the frame visibly owned by the
+/// framework instead of copied into this module's own constants.
+#[must_use]
+pub fn modal_frame() -> ModalFrame {
+    ModalFrame::resolve(&Palette::pro())
+}
 
 /// Maximum height of the license scroll area, in logical pixels.
+///
+/// **A token gap, reported rather than papered over.** §4.6.2 gives the
+/// About card a *content-fit* height policy with no ceiling, and the
+/// license body is the only unbounded thing in it: reflowed at the
+/// card's 440px width the MIT text runs to roughly 26 lines, so left
+/// uncapped the card would grow past 800px tall. The framework has no
+/// token for "how tall one scroll region inside a card may get" —
+/// [`iced_pro::surface::modal::CONTENT_HEIGHT_MAX`] is the tallest a
+/// *whole* content-fit card body may be (480px), which would still make
+/// this card ~710px tall.
+///
+/// So the cap stays an app-owned value. It is a layout decision about
+/// one region of one card, not a design token, and it is deliberately
+/// not stretched to a framework constant that means something else.
 pub const LICENSE_MAX_HEIGHT: f32 = 200.0;
 
-/// Width of the horizontal rules separating card sections.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Stable id of the About card box itself, so a layout test (and the
+/// reducer, if it ever needs to) can address the rendered card rather
+/// than only its contents (AGENTS §5).
+pub const ABOUT_CARD_ID: &str = "about_card_frame";
+
+/// Stable id for the license scroll area, so the reducer can address it
+/// and the scroll position survives a tree rebuild (AGENTS §5).
+pub const LICENSE_SCROLL_ID: &str = "about_license_scroll";
 
 /// The sentinel `build.rs` writes when git metadata is unavailable.
 pub const UNKNOWN_BUILD_METADATA: &str = "unknown";
@@ -137,6 +225,7 @@ pub fn should_auto_show_about(recorded: Option<&str>, current: &str) -> bool {
 }
 
 /// Applies the first-run auto-show decision to startup state (spec FR-016).
+///
 /// When [`should_auto_show_about`] holds for the recorded version, opens
 /// the dialog and records `current` so later starts stay quiet.
 /// Returns `true` when the dialog was auto-opened.
@@ -242,33 +331,35 @@ impl AboutViewModel {
         strings::format_attribution_count(self.attribution_count)
     }
 
-    /// Renders this snapshot as the About card ([`about_card`]).
+    /// Renders this snapshot as the framed About card ([`about_card`]).
     #[must_use]
-    pub fn view(&self) -> Element<'_, Message> {
-        about_card(self)
+    pub fn view(&self, viewport: Size) -> Element<'_, Message> {
+        about_card(self, viewport)
     }
 }
 
-/// Renders the About card.
+/// Renders the framed About card at the §4.6.2 size.
 ///
 /// Layout, with the attributions section rendered as a teaser button:
 ///
 /// ```text
-/// [⚡]  FastMD Viewer
-///       Copyright (c) 2026 Martin Kuhne
-/// Version: 0.2.0
-/// <description>
-/// ─────────────────────────────────────────────
-/// Branch: chore/x   Commit: 1a2b3c4d   Built: 2026-10-18
-/// ─────────────────────────────────────────────
-/// License
-/// ┌ MIT License … (scrollable, 200px cap) ─────┐
-/// ─────────────────────────────────────────────
-/// Third-Party Attributions
-/// 57 direct third-party dependencies
-/// [ View third-party attributions... ]
-/// ─────────────────────────────────────────────
-///                                   [ Close ]
+/// ┌─ About card · 440px outer · surface.overlay · radius 6 ─────┐
+/// │ [⚡]  FastMD Viewer                                         │
+/// │       Copyright (c) 2026 Martin Kuhne                       │
+/// │ Version: 0.2.0                                              │
+/// │ <description>                                               │
+/// │ ─────────────────────────────────────────────────────────── │
+/// │ Branch: chore/x   Commit: 1a2b3c4d   Built: 2026-10-18      │
+/// │ ─────────────────────────────────────────────────────────── │
+/// │ License                                                     │
+/// │ ┌ MIT License … (scrollable, 200px cap) ───────────────────┐│
+/// │ ─────────────────────────────────────────────────────────── │
+/// │ Third-Party Attributions                                    │
+/// │ 57 direct third-party dependencies                          │
+/// │ [ View third-party attributions... ]                         │
+/// │ ─────────────────────────────────────────────────────────── │
+/// │                                        [ Close ]            │
+/// └─────────────────────────────────────────────────────────────┘
 /// ```
 ///
 /// Emitted messages:
@@ -277,64 +368,104 @@ impl AboutViewModel {
 /// * the teaser button → [`AboutMessage::AttributionsRequested`]
 /// * the footer → [`AboutMessage::CloseRequested`]
 ///
-/// The card is the *content* only: the root view mounts it through
-/// [`crate::ui_iced::overlay::modal`] with
-/// `Message::About(AboutMessage::CloseRequested)` as the dismiss message
-/// so a scrim click or Escape closes it.
+/// The card is **framed but not mounted**: it carries its own §4.6.1
+/// chrome and outer width, and the root view centres it over the scrim
+/// with [`crate::ui_iced::overlay::modal_centered`], passing
+/// [`AboutMessage::Absorbed`] as the card-boundary message and
+/// [`AboutMessage::CloseRequested`] as the dismiss message.
 ///
 /// Every row is always allocated — the unknown-build and empty-catalog
 /// states change text and press handlers, never the widget count (AGENTS
 /// §6).
 ///
-/// Purity: pure view over `view_model`.
+/// Purity: pure view over `view_model` and `viewport`.
 #[must_use]
-pub fn about_card(view_model: &AboutViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+pub fn about_card(view_model: &AboutViewModel, viewport: Size) -> Element<'_, Message> {
+    let frame = modal_frame();
+    let card_width = about_card_width(viewport.width);
 
     let identity = Column::with_children(vec![
-        text(view_model.app_name)
-            .size(ABOUT_HEADING_SIZE)
-            .color(palette.text_strong)
-            .into(),
-        text(view_model.copyright)
-            .size(ABOUT_BODY_SIZE)
-            .color(palette.text_muted)
-            .into(),
+        rung(
+            view_model.app_name,
+            typography::TITLE_MD,
+            Palette::fastmd_dark().text_strong,
+        )
+        .into(),
+        rung(
+            view_model.copyright,
+            typography::BODY,
+            Palette::fastmd_dark().text_muted,
+        )
+        .into(),
     ])
-    .spacing(2.0);
+    .spacing(space::XXS);
 
     let header = Row::with_children(vec![banner_mark(), identity.into()])
-        .spacing(ABOUT_SECTION_SPACING * 2.0)
+        .spacing(space::LG)
         .align_y(Alignment::Center);
 
     let facts = Column::with_children(vec![
-        text(view_model.version_line())
-            .size(ABOUT_BODY_SIZE)
-            .color(palette.text_value)
-            .into(),
-        text(view_model.description)
-            .size(ABOUT_BODY_SIZE)
-            .color(palette.text)
-            .into(),
+        rung(
+            view_model.version_line(),
+            typography::BODY,
+            Palette::fastmd_dark().text_value,
+        )
+        .into(),
+        rung(
+            view_model.description,
+            typography::BODY,
+            Palette::fastmd_dark().text,
+        )
+        .into(),
     ])
-    .spacing(2.0);
+    .spacing(space::XXS);
 
-    Column::with_children(vec![
+    let body = Column::with_children(vec![
         header.into(),
         facts.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         build_metadata_row(view_model),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         license_section(view_model),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         attributions_teaser(view_model),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+        modal_divider(frame).into(),
         about_footer(),
     ])
-    .spacing(ABOUT_SECTION_SPACING)
-    .padding(ABOUT_SECTION_SPACING)
-    .width(Length::Fixed(ABOUT_CARD_WIDTH))
+    .spacing(space::SM);
+
+    modal_card(
+        body,
+        frame,
+        ABOUT_CARD_ID,
+        Length::Fixed(card_width),
+        Length::Shrink,
+    )
     .into()
+}
+
+/// Paints `value` on a type rung at its resting weight.
+///
+/// The single place this card turns a rung into a `text` widget, so no
+/// call site restates a point size ([RUST-021], `UIF-TOK-004`).
+///
+/// **`line_height` must be handed to iced as `Pixels`, not as a bare
+/// `f32`.** `impl From<f32> for iced::LineHeight` produces
+/// `LineHeight::Relative(factor)` — a *multiple* of the font size
+/// (`iced_core-0.14.0/src/text.rs:221-225`) — so `.line_height(20.0)`
+/// on a 14px rung means 20 × 14 = **280px per line**, not 20px. Only
+/// `From<Pixels>` reaches `LineHeight::Absolute`. Measured in the
+/// sidecar: the bare-`f32` form reported 280px for one BODY line, the
+/// `Pixels` form reports 20px.
+fn rung(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+) -> text::Text<'static> {
+    text(value.into())
+        .size(rung.size)
+        .line_height(iced::Pixels(rung.line_height))
+        .color(color)
 }
 
 /// The glyph the About banner renders.
@@ -349,14 +480,72 @@ pub fn banner_glyph() -> &'static str {
 /// The rendered banner mark (top panel of the card).
 #[must_use]
 pub fn banner_mark() -> Element<'static, Message> {
-    logo::logo_mark(ABOUT_BANNER_SIZE)
+    logo::logo_mark(banner_size())
+}
+
+/// The point size the banner mark renders at.
+///
+/// `size.icon.lg` ([`size::ICON_LG`]) — the token whose declared role is
+/// the brand mark. The value this replaced was 48px, which no token in the
+/// icon scale covered; 20px is the nearest real rung, and taking it is
+/// what keeps the banner on the scale instead of beside it.
+#[must_use]
+pub const fn banner_size() -> f32 {
+    size::ICON_LG
 }
 
 /// The Close button shared by the About and attributions cards.
+///
+/// A framework [`Button`] in the `Secondary` variant: `Close` dismisses
+/// the window without confirming or committing anything, which is the
+/// same role the input dialogs' `Cancel` plays, and leaves the About
+/// card's primary variant free for the forward action.
 #[must_use]
 pub fn close_button() -> Element<'static, Message> {
-    button(text(strings::CLOSE_BUTTON))
-        .on_press(Message::About(AboutMessage::CloseRequested))
+    footer_button(
+        ButtonVariant::Secondary,
+        strings::CLOSE_BUTTON,
+        Message::About(AboutMessage::CloseRequested),
+        ABOUT_CLOSE_BUTTON_ID,
+    )
+}
+
+/// Stable focus id of the About / attributions `Close` button.
+pub const ABOUT_CLOSE_BUTTON_ID: &str = "about_close";
+
+/// Stable focus id of the About card's "view attributions" button.
+pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON_ID: &str = "about_view_attributions";
+
+/// A footer-width framework button carrying `label`.
+///
+/// The label is mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box on purpose. `Button::is_icon_only` is a **geometric** test — any
+/// content no wider and no taller than `size::CONTROL_SM` (28px) is
+/// classed icon-only, and an icon-only button without a tooltip trips a
+/// `debug_assert!` in `outer_size` (`button_widget.rs:776`). A short
+/// label like `'Close'` sits close enough to that line that a different
+/// font measurement would cross it, so the label is given a width the
+/// test cannot fail.
+fn footer_button(
+    variant: ButtonVariant,
+    label: &'static str,
+    on_press: Message,
+    focus_id: &'static str,
+) -> Element<'static, Message> {
+    let content = Column::new()
+        .width(Length::Fixed(
+            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(rung(
+            label,
+            typography::BODY,
+            Palette::fastmd_dark().text_strong,
+        ));
+
+    Button::new(variant, content, on_press, focus_id)
+        .palette(Palette::pro())
         .into()
 }
 
@@ -364,32 +553,27 @@ pub fn close_button() -> Element<'static, Message> {
 #[must_use]
 pub fn about_footer() -> Element<'static, Message> {
     Row::with_children(vec![
-        space::Space::new().width(Length::Fill).into(),
+        Space::new().width(Length::Fill).into(),
         close_button(),
     ])
-    .spacing(ABOUT_SECTION_SPACING)
+    .spacing(space::SM)
     .align_y(Alignment::Center)
     .into()
 }
 
 /// The Branch / Commit / Built row.
 fn build_metadata_row(view_model: &AboutViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
-    let muted = |value: &str| {
-        text(value.to_owned())
-            .size(ABOUT_BODY_SIZE)
-            .color(palette.text_muted)
-    };
+    let muted = |value: String| rung(value, typography::BODY, Palette::fastmd_dark().text_muted);
 
     Row::with_children(vec![
-        muted(strings::ABOUT_BRANCH_LABEL).into(),
-        muted(view_model.branch).into(),
-        muted(strings::ABOUT_COMMIT_LABEL).into(),
+        muted(strings::ABOUT_BRANCH_LABEL.to_owned()).into(),
+        muted(view_model.branch.to_owned()).into(),
+        muted(strings::ABOUT_COMMIT_LABEL.to_owned()).into(),
         commit_cell(view_model),
-        muted(strings::ABOUT_DATE_LABEL).into(),
-        muted(view_model.build_date).into(),
+        muted(strings::ABOUT_DATE_LABEL.to_owned()).into(),
+        muted(view_model.build_date.to_owned()).into(),
     ])
-    .spacing(ABOUT_SECTION_SPACING)
+    .spacing(space::SM)
     .align_y(Alignment::Center)
     .into()
 }
@@ -397,9 +581,11 @@ fn build_metadata_row(view_model: &AboutViewModel) -> Element<'_, Message> {
 /// The commit-hash cell: always allocated, and pressable only when there
 /// is a real hash to copy (spec FR-007 fallback).
 fn commit_cell(view_model: &AboutViewModel) -> Element<'_, Message> {
-    let cell = text(view_model.commit_short_hash)
-        .size(ABOUT_BODY_SIZE)
-        .color(Palette::fastmd_dark().text_value);
+    let cell = rung(
+        view_model.commit_short_hash,
+        typography::BODY,
+        Palette::fastmd_dark().text_value,
+    );
 
     let area = mouse_area(cell);
     match commit_copy_press(view_model.is_build_metadata_unknown()) {
@@ -424,42 +610,52 @@ pub fn commit_copy_press(metadata_unknown: bool) -> Option<Message> {
 
 /// The license header plus its capped, scrollable body.
 fn license_section(view_model: &AboutViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
-
-    let header = text(strings::ABOUT_LICENSE_HEADER)
-        .size(ABOUT_HEADER_SIZE)
-        .color(palette.text_strong);
+    let header = rung(
+        strings::ABOUT_LICENSE_HEADER,
+        typography::TITLE_SM,
+        Palette::fastmd_dark().text_strong,
+    );
 
     let body = scrollable(
-        text(&view_model.license_text)
-            .size(ABOUT_BODY_SIZE)
-            .width(Length::Fill),
+        rung(
+            &view_model.license_text,
+            typography::BODY,
+            Palette::fastmd_dark().text,
+        )
+        .width(Length::Fill),
     )
+    .id(LICENSE_SCROLL_ID)
     .height(Length::Fixed(LICENSE_MAX_HEIGHT));
 
     Column::with_children(vec![header.into(), body.into()])
-        .spacing(ABOUT_SECTION_SPACING)
+        .spacing(space::SM)
         .into()
 }
 
 /// The attributions header, count line and the button that opens the
 /// credits window ([`crate::ui_iced::attributions`]).
 fn attributions_teaser(view_model: &AboutViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+    let header = rung(
+        strings::ABOUT_ATTRIBUTIONS_HEADER,
+        typography::TITLE_SM,
+        Palette::fastmd_dark().text_strong,
+    );
 
-    let header = text(strings::ABOUT_ATTRIBUTIONS_HEADER)
-        .size(ABOUT_HEADER_SIZE)
-        .color(palette.text_strong);
+    let summary = rung(
+        view_model.attributions_summary(),
+        typography::BODY,
+        Palette::fastmd_dark().text_muted,
+    );
 
-    let summary = text(view_model.attributions_summary())
-        .size(ABOUT_BODY_SIZE)
-        .color(palette.text_muted);
+    let open = footer_button(
+        ButtonVariant::Primary,
+        strings::ABOUT_VIEW_ATTRIBUTIONS_BUTTON,
+        Message::About(AboutMessage::AttributionsRequested),
+        ABOUT_VIEW_ATTRIBUTIONS_BUTTON_ID,
+    );
 
-    let open = button(text(strings::ABOUT_VIEW_ATTRIBUTIONS_BUTTON))
-        .on_press(Message::About(AboutMessage::AttributionsRequested));
-
-    Column::with_children(vec![header.into(), summary.into(), open.into()])
-        .spacing(ABOUT_SECTION_SPACING)
+    Column::with_children(vec![header.into(), summary.into(), open])
+        .spacing(space::SM)
         .into()
 }
 
@@ -480,6 +676,15 @@ impl AboutWindow {
         match self {
             Self::About => strings::ABOUT_DIALOG_TITLE,
             Self::Attributions => strings::ABOUT_ATTRIBUTIONS_HEADER,
+        }
+    }
+
+    /// The §4.6.2 sizing policy this window's card is mounted with.
+    #[must_use]
+    pub const fn sizing(&self) -> ModalSizing {
+        match self {
+            Self::About => ModalSizing::about(),
+            Self::Attributions => ModalSizing::attributions(),
         }
     }
 }
@@ -567,11 +772,15 @@ impl AboutWindowState {
     /// [`AboutMessage::RepositoryOpened`] change nothing here — they are
     /// deferred intents the reducer acts on (clipboard write, URL open),
     /// so they return `false` while still requiring that action.
+    /// [`AboutMessage::Absorbed`] returns `false` and requires nothing:
+    /// its whole job is to have arrived and changed nothing.
     pub fn apply(&mut self, message: AboutMessage) -> bool {
         match message {
             AboutMessage::AttributionsRequested => self.open_attributions(),
             AboutMessage::CloseRequested => self.close(),
-            AboutMessage::CopyCommitHashRequested | AboutMessage::RepositoryOpened { .. } => false,
+            AboutMessage::CopyCommitHashRequested
+            | AboutMessage::RepositoryOpened { .. }
+            | AboutMessage::Absorbed => false,
         }
     }
 }

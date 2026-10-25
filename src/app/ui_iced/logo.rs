@@ -82,7 +82,7 @@ pub fn logo_font() -> Font {
 ///
 /// The one place the stand-in is constructed. The top bar passes
 /// [`LOGO_MARK_SIZE`]; the About banner passes
-/// [`crate::ui_iced::about::ABOUT_BANNER_SIZE`].
+/// [`crate::ui_iced::about::banner_size`].
 #[must_use]
 pub fn logo_mark(size: f32) -> Element<'static, Message> {
     text(logo_glyph())

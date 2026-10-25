@@ -125,8 +125,13 @@
 #[path = "overlay_tests.rs"]
 mod tests;
 
-use iced::widget::{MouseArea, Row, button, container, mouse_area, space, stack, text};
+use iced::widget::{
+    Container, MouseArea, Row, button, container, mouse_area, rule, space, stack, text,
+};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
+
+use iced_pro::surface::modal::ModalFrame;
+use iced_pro::token::shape;
 
 use crate::ui::strings;
 use crate::ui_iced::theme::scrim_color;
@@ -490,6 +495,115 @@ where
                 bottom: 0.0,
                 left: position.x,
             })
+            .into(),
+    ])
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// The §4.6.1 modal card box, resolved from a framework
+/// [`ModalFrame`] rather than the app's older `card_style`.
+///
+/// Every visual value comes off the frame the framework resolved —
+/// `color.surface.overlay`, `color.border.strong` at
+/// `shape::BORDER_HAIRLINE`, `shape::RADIUS_CARD`, `space::LG` content
+/// padding — so a modal card cannot drift from the frame the spec
+/// describes. `card_style` stays in service for the menu surfaces,
+/// which are `UIF-MENU` cards, not `UIF-MOD` cards; converting them is a
+/// separate increment.
+///
+/// **The `width`/`height` are the *visible* card's outer extent**, not
+/// the content's. The frame's padding is subtracted inside that box, so
+/// a caller passing the §4.6.2 `ABOUT_MODAL_W` gets a card that *is*
+/// that wide, with `space::LG` of padding eaten by the frame. This is
+/// the same convention [`iced_pro::surface::input_dialog::InputLayout::solve`]
+/// uses (`inner_width = card.width - 2 * CARD_PADDING`).
+///
+/// `id` is the card's stable [`iced::widget::Id`] (AGENTS §5). It is a
+/// parameter rather than an internal default because one helper draws
+/// several different cards, and two live widgets must never share an id.
+/// It also makes the card addressable by a headless layout test, which is
+/// how "is the card actually the width the policy says it is?" gets
+/// answered by measurement instead than by assertion.
+#[must_use]
+pub fn modal_card<'a, Message>(
+    content: impl Into<Element<'a, Message>>,
+    frame: ModalFrame,
+    id: impl Into<iced::widget::Id>,
+    width: Length,
+    height: Length,
+) -> Container<'a, Message> {
+    container(content)
+        .id(id)
+        .width(width)
+        .height(height)
+        .padding(frame.content_padding)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(frame.surface)),
+            border: Border {
+                color: frame.border,
+                width: frame.border_width,
+                radius: frame.radius.into(),
+            },
+            ..container::Style::default()
+        })
+}
+
+/// The §4.6.1 divider between a modal's header, body and footer.
+///
+/// The rule's own weight is `shape::BORDER_HAIRLINE` and its colour is
+/// the frame's `divider` (`color.border.subtle`) rather than iced's
+/// derived `background.strong`, so the line inside the card is the line
+/// the frame says it is.
+#[must_use]
+pub fn modal_divider(frame: ModalFrame) -> rule::Rule<'static, iced::Theme> {
+    rule::horizontal(shape::BORDER_HAIRLINE).style(move |theme: &iced::Theme| {
+        let mut style = rule::default(theme);
+        style.color = frame.divider;
+        style
+    })
+}
+
+/// A blocking modal over a card that is **already framed**: scrim, centred
+/// card, and the card's own hit-capture boundary.
+///
+/// The counterpart to [`modal`] for cards built by [`modal_card`]. It
+/// adds no padding and no chrome of its own — the card owns both — and
+/// supplies the one thing [`modal`] never had: the
+/// [`mouse_area`] boundary that captures every press landing inside the
+/// card perimeter and publishes `on_absorb`.
+///
+/// [`MouseArea`] updates its **content first** and only takes the event
+/// itself when nothing below consumed it (`mouse_area.rs:225-241`), so
+/// the card's live controls keep their presses exactly as before. What
+/// falls through to the boundary is the padding ring, a **disabled**
+/// button, and dead space between rows — and those presses stop there
+/// instead of reaching the scrim. Clicking the card's padding therefore
+/// cannot dismiss the dialog (`UIF-VER-003`).
+///
+/// The wrap is layout-transparent: `MouseArea::size` and `::layout`
+/// delegate straight to their content (`mouse_area.rs:185-199`), so the
+/// capture area is exactly the visible card, padding included.
+///
+/// A click outside the card lands on the scrim and emits `on_dismiss`.
+/// Escape is wired by the caller, exactly as with [`modal`].
+#[must_use]
+pub fn modal_centered<'a, Message>(
+    card: Element<'a, Message>,
+    on_absorb: Message,
+    on_dismiss: Message,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    stack(vec![
+        scrim_blocker(on_dismiss).into(),
+        container(mouse_area(card).on_press(on_absorb))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
             .into(),
     ])
     .width(Length::Fill)
