@@ -50,6 +50,9 @@
 //! Unit tests live in the sibling `text_input_model_tests.rs` sidecar.
 
 use crate::binding::Controlled;
+use crate::validation::disallowed::DisallowedClass;
+use crate::validation::punish::{Punishment, punish};
+use crate::validation::stance::EditStance;
 use crate::widget::text_input::InputKind;
 use crate::widget::text_input::SlotContent;
 use crate::widget::text_input::slot_content;
@@ -207,6 +210,16 @@ pub struct TextInputModel {
     /// `true` by default, matching what the widget did before this model
     /// existed. See the [module docs](self) for why the default matters.
     pub clearable: bool,
+    /// Whether the user has committed to this field yet (`UIF-PRIN-009`).
+    ///
+    /// Private rather than `pub` like the seven fields above it, because
+    /// this one is not an input the host supplies — it is the field's own
+    /// history, and a host that could write it directly could declare the
+    /// user finished with a field they have never focused. The transitions
+    /// go through [`note_commit`](Self::note_commit), [`note_blur`](Self::note_blur)
+    /// and [`note_submit`](Self::note_submit), which correspond to the
+    /// three events §1.1 actually names.
+    stance: EditStance,
 }
 
 impl Default for TextInputModel {
@@ -227,6 +240,7 @@ impl Default for TextInputModel {
             read_only: false,
             disabled: false,
             clearable: true,
+            stance: EditStance::Pristine,
         }
     }
 }
@@ -291,6 +305,19 @@ impl TextInputModel {
         self
     }
 
+    /// Declare the field's commit history at construction time.
+    ///
+    /// The escape hatch for the one case a host genuinely knows: a form
+    /// being re-displayed after a failed submit has fields the user *has*
+    /// committed to, and rebuilding the model from scratch would otherwise
+    /// put them back to pristine and hide errors the user has already been
+    /// shown. Ordinary construction should not need it.
+    #[must_use]
+    pub fn with_stance(mut self, stance: EditStance) -> Self {
+        self.stance = stance;
+        self
+    }
+
     /// Wraps this model as host-owned state.
     #[must_use]
     pub fn controlled(&self) -> Controlled<'_, TextInputModel> {
@@ -307,6 +334,80 @@ impl TextInputModel {
     #[must_use]
     pub fn is_invalid(&self) -> bool {
         self.validation.is_some()
+    }
+
+    /// The field's commit history (`UIF-PRIN-009`).
+    #[must_use]
+    pub const fn stance(&self) -> EditStance {
+        self.stance
+    }
+
+    /// Whether the user has not yet committed to this field.
+    ///
+    /// The condition under which §1.1 withholds the invalid visual. Note
+    /// this is not `!is_invalid()` — a pristine field can be very invalid.
+    #[must_use]
+    pub const fn is_pristine(&self) -> bool {
+        self.stance.is_pristine()
+    }
+
+    /// Whether the user has committed to, or left, this field.
+    #[must_use]
+    pub const fn is_touched(&self) -> bool {
+        self.stance.is_touched()
+    }
+
+    /// `on_commit`: the user committed a value, so the field is no longer
+    /// pristine.
+    pub fn note_commit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// `on_focus_change(false)`: the user left the field, which §1.1
+    /// counts the same as a commit for punishment purposes.
+    pub fn note_blur(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// The form was submitted, which commits every field in it whether or
+    /// not the user ever focused them.
+    ///
+    /// This is the transition that makes the pillar's "or submits the
+    /// form" clause real: a user who hits `Ok` on a form full of empty
+    /// required fields should see all of them light up, and none of them
+    /// will have been blurred.
+    pub fn note_submit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// Return the field to pristine — a new form, not the old one with
+    /// its memory wiped.
+    pub fn reset_stance(&mut self) {
+        self.stance = EditStance::Pristine;
+    }
+
+    /// What this field should paint this frame, with no disallowed-character
+    /// class in play.
+    ///
+    /// The single call a renderer makes instead of reading
+    /// [`is_invalid`](Self::is_invalid) and guessing about history.
+    #[must_use]
+    pub fn punishment(&self) -> Punishment {
+        punish(self.stance, self.is_invalid(), false)
+    }
+
+    /// What this field should paint this frame under `class`'s character
+    /// rules (`UIF-INP-003`).
+    ///
+    /// The carve-out path: a value containing a character the class
+    /// refuses paints immediately even while pristine.
+    #[must_use]
+    pub fn punishment_under(&self, class: DisallowedClass) -> Punishment {
+        punish(
+            self.stance,
+            self.is_invalid(),
+            class.contains_any(&self.value),
+        )
     }
 
     /// Whether the user may change the value at all.

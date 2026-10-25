@@ -889,31 +889,88 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/text_input_model.rs",
             "widget/text_input.rs",
             "widget/text_area_model.rs",
+            "widget/password_model.rs",
+            "widget/text_input_controller.rs",
             "binding/tier.rs",
+            "binding/snapshot.rs",
             "composite/form_field.rs",
+            "validation/stance.rs",
+            "validation/disallowed.rs",
+            "validation/punish.rs",
+            "validation/recovery.rs",
         ],
         reason: Some(
-            "The machinery for the recovery half is in place; the choreography that decides \
-             *when* to punish is not. `state.rs` makes `Invalid` a base state ranked \
-             `Disabled > Invalid > Pressed > Hovered > Rest`, `TextInputModel::validation` \
-             carries the host's own message with `is_invalid` reading it, and the `Live<T>` \
-             tier gives every keystroke a path to a repaint — so a host that clears \
-             `validation` sees the red mark gone on the very next frame, which is \
-             'Reward Early' working as specified. Missing: nothing implements 'Punish \
-             Late'. No model in this crate carries a `pristine` or `touched` flag, so the \
-             framework cannot withhold an `Invalid` border until the first `on_commit` or \
-             `blur` — invalidity arrives from the host and paints immediately whatever the \
-             field's history, and a field the user has not yet finished typing in can be \
-             red right now. The one carve-out the pillar grants (a disallowed character \
-             punished in real time, e.g. a slash in a filesystem basename) is equally \
-             unmodelled, so the framework cannot distinguish the permitted early punish \
-             from the forbidden one. Non-destructive recovery is half true: the \
-             snapshot-at-first-edit `Escape` path restores the pre-edit buffer, but \
-             `selection: Option<TextRange>` is carried by the model and never applied to \
-             the editor (already recorded against `UIF-ATOM-002a`) and no scroll offset is \
-             carried at all, so a rejected operation cannot restore either.",
+            "Two of the three clauses now hold as framework state plus one pure decision; \
+             the third holds in-model only; and none of them has a call site in the \
+             renderer. 'Punish Late' is implemented: `validation::stance::EditStance` \
+             gives a field a real history — `Pristine` until `note_commit`, `note_blur` \
+             or `note_submit`, and provably NOT advanced by a programmatic `value` write, \
+             a `with_validation` call or a `with_selection` request — carried by \
+             `TextInputModel`, `TextAreaModel` and `PasswordInputModel`. \
+             `validation::punish::punish(stance, invalid, disallowed)` is the single \
+             authority a renderer is meant to call: pristine + invalid paints nothing \
+             while still reporting `invalid() == true` so a submit stays blocked, touched \
+             + invalid paints, and a disallowed character paints regardless of stance and \
+             outranks both. The carve-out is modelled as \
+             `DisallowedClass::FilenameBasename` over the eight `FILENAME_ILLEGAL_CHARS` \
+             plus the Unicode `Cc` set — the same rule `surface/input_dialog.rs`'s \
+             basename validator already applied, whose literal now aliases the canonical \
+             constant instead of copying it. 'Reward Early' still holds, and now holds for \
+             a stronger reason than the `Live<T>` repaint path alone: `painted` is a pure \
+             function of this frame's inputs with no latch, no timer and no decay to \
+             clear, so the frame the value becomes valid is the frame the paint stops. \
+             'Non-Destructive Recovery' is widened but not finished: \
+             `validation::recovery::EditSnapshot` carries buffer + selection + scroll \
+             through the existing `binding::snapshot` linear guard, and \
+             `restore_text_input` / `restore_text_area` write all three back, so a \
+             rejected operation no longer loses the selection or the viewport — but the \
+             restore is model-only. `TextInputModel::selection` is documented as a request \
+             the editor may or may not honour, and nothing in this crate pushes it into \
+             iced's editor state, so the caret is NOT put back on screen; \
+             `TextAreaModel`'s scroll offset is the one field a renderer actually reads \
+             back off the model. Missing: the enforcement point. No renderer in this crate \
+             calls `punish` — `widget/text_input.rs` still derives its perimeter from \
+             `state::resolve`'s raw `invalid` input, so a pristine-but-invalid field still \
+             paints red until a host, or a later increment, routes the atom through the \
+             decision. `TextInputEmission::advances_stance()` exists so that routing is \
+             one line at the wiring site rather than a rule each host re-derives and gets \
+             subtly different.",
         ),
-        note: None,
+        note: Some(
+            "Invented values and judgements, all recorded here. (1) `EditStance`'s two \
+             names: §1.1 says `pristine` and names the three events; `Touched` as the \
+             complement is framework vocabulary. (2) `PunishReason`'s four arms are an \
+             invented taxonomy, added so 'invalid but withheld' and 'valid' stay \
+             distinguishable instead of both collapsing to `painted == false`. (3) \
+             `Punishment::invalid` is computed as `invalid || disallowed` — the judgement \
+             that a refused character is itself an invalidity before the host's validator \
+             has run, so the visual and the submit gate cannot come apart. Not stated in \
+             the spec. (4) `Cancelled` does NOT advance the stance: the spec lists commit, \
+             blur and submit only, and treating `Escape` as a commitment would let a \
+             restored value go red the moment the user tried to back out of an edit. (5) \
+             `Cleared` DOES advance, on the reading that the trailing `×` is a commit-tier \
+             act. (6) `EditSnapshot` carries a fourth field, `was_dirty`, that the pillar \
+             does not name: writing a buffer marks a well dirty, so a snapshot that did \
+             not remember the pre-edit dirtiness would turn a clean field dirty by \
+             reverting it — changing a fact the clause says stays intact. (7) \
+             `ScrollOffset` is a newtype that floors negative input at zero. (8) The \
+             disallowed set is the crate's pre-existing basename rule reused, not a \
+             transcription: §1.1 names only `/` and `\0`, and `UIF-INP-003` says 'valid \
+             filesystem basename characters' without enumerating them, so the eight \
+             `FILENAME_ILLEGAL_CHARS` plus all of Unicode `Cc` come from `check_basename`. \
+             Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, \
+             `LPT1`–`LPT9`) are deliberately NOT included: the carve-out is about \
+             characters, and a reserved name is legal one character at a time, which puts \
+             it on the withheld side of the line rather than the instant-punish side. (9) \
+             `EditSnapshot::from_text_input` reports `scroll: None` rather than \
+             `Some(ZERO)`, because a single-line model carries no scroll position and \
+             claiming one would restore something that was never there. (10) \
+             `with_stance` on each model is an escape hatch for a form re-displayed after \
+             a failed submit; ordinary construction never needs it. (11) \
+             `PIN_FILES_SCANNED` moved 137 → 142 for the five new `validation/` files; \
+             `PIN_RULE_B_FILES` did not move, because `validation/` sits outside the \
+             visual scope and defines no visual literal.",
+        ),
     },
     // --- §2 Foundation Design Tokens ----------------------------------------
     Coverage {

@@ -232,15 +232,22 @@ impl PasswordController {
 /// is rebuilt from `model` every frame and never mutated in place.
 #[must_use]
 pub fn mirror(model: &PasswordInputModel) -> TextInputModel {
-    TextInputModel {
-        value: model.value().expose().to_string(),
-        placeholder: model.placeholder().to_string(),
-        selection: None,
-        validation: model.validation().map(str::to_string),
-        read_only: model.is_read_only(),
-        disabled: model.is_disabled(),
-        clearable: false,
+    let mut mirrored = TextInputModel::new(model.value().expose())
+        .with_placeholder(model.placeholder().to_string())
+        .with_clearable(false)
+        .with_stance(model.stance());
+
+    if model.is_read_only() {
+        mirrored = mirrored.read_only();
     }
+    if model.is_disabled() {
+        mirrored = mirrored.disabled();
+    }
+    if let Some(message) = model.validation() {
+        mirrored = mirrored.with_validation(message);
+    }
+
+    mirrored
 }
 
 /// The kind the mirror renders as.

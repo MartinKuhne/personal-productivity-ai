@@ -51,6 +51,9 @@ use crate::binding::Commit;
 use crate::binding::Live;
 use crate::token::space;
 use crate::token::typography;
+use crate::validation::disallowed::DisallowedClass;
+use crate::validation::punish::{Punishment, punish};
+use crate::validation::stance::EditStance;
 use crate::widget::text_input_model::TextRange;
 
 /// A position in a multi-line buffer.
@@ -448,6 +451,7 @@ pub struct TextAreaModel {
     disabled: bool,
     read_only: bool,
     scroll_offset: f32,
+    stance: EditStance,
 }
 
 impl Default for TextAreaModel {
@@ -470,6 +474,7 @@ impl TextAreaModel {
             disabled: false,
             read_only: false,
             scroll_offset: 0.0,
+            stance: EditStance::Pristine,
         }
     }
 
@@ -498,6 +503,17 @@ impl TextAreaModel {
     #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
+        self
+    }
+
+    /// Declare the well's commit history at construction time.
+    ///
+    /// The same escape hatch `TextInputModel::with_stance` provides, for
+    /// the same reason: a model rebuilt after a failed submit knows the
+    /// user already committed.
+    #[must_use]
+    pub fn with_stance(mut self, stance: EditStance) -> Self {
+        self.stance = stance;
         self
     }
 
@@ -543,6 +559,73 @@ impl TextAreaModel {
     #[must_use]
     pub fn is_invalid(&self) -> bool {
         self.validation.is_some()
+    }
+
+    /// The well's commit history (`UIF-PRIN-009`).
+    ///
+    /// Distinct from [`is_dirty`](Self::is_dirty), which answers a
+    /// different question. A well can be dirty — the buffer differs from
+    /// what the host last settled — and still pristine, because the user
+    /// typed into it and has not committed or blurred yet. Conflating the
+    /// two would punish a field for being edited rather than for being
+    /// finished with.
+    #[must_use]
+    pub const fn stance(&self) -> EditStance {
+        self.stance
+    }
+
+    /// Whether the user has not yet committed to this well.
+    #[must_use]
+    pub const fn is_pristine(&self) -> bool {
+        self.stance.is_pristine()
+    }
+
+    /// Whether the user has committed to, or left, this well.
+    #[must_use]
+    pub const fn is_touched(&self) -> bool {
+        self.stance.is_touched()
+    }
+
+    /// `on_commit`: the user committed the buffer.
+    pub fn note_commit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// `on_focus_change(false)`: the user left the well.
+    pub fn note_blur(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// The containing form was submitted.
+    pub fn note_submit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// Return the well to pristine for a new form.
+    pub fn reset_stance(&mut self) {
+        self.stance = EditStance::Pristine;
+    }
+
+    /// What this well should paint this frame, with no disallowed-character
+    /// class in play.
+    #[must_use]
+    pub fn punishment(&self) -> Punishment {
+        punish(self.stance, self.is_invalid(), false)
+    }
+
+    /// What this well should paint this frame under `class`'s character
+    /// rules.
+    ///
+    /// Multi-line buffers rarely carry a basename class, but the shape is
+    /// the same one the single-line field uses so a renderer has one call
+    /// to make rather than two rules to remember.
+    #[must_use]
+    pub fn punishment_under(&self, class: DisallowedClass) -> Punishment {
+        punish(
+            self.stance,
+            self.is_invalid(),
+            class.contains_any(self.text()),
+        )
     }
 
     /// Whether the host has taken the well away.

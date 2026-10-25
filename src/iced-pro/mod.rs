@@ -46,6 +46,7 @@ pub mod state;
 pub mod surface;
 pub mod token;
 pub mod token_lint;
+pub mod validation;
 pub mod widget;
 
 #[cfg(test)]

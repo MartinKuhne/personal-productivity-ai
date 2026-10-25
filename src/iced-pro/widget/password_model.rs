@@ -47,6 +47,9 @@ use std::fmt;
 use crate::binding::Cancel;
 use crate::binding::Commit;
 use crate::binding::Live;
+use crate::validation::disallowed::DisallowedClass;
+use crate::validation::punish::{Punishment, punish};
+use crate::validation::stance::EditStance;
 use crate::widget::text_input::SlotContent;
 use crate::widget::text_input::slot_content;
 
@@ -179,6 +182,7 @@ pub struct PasswordInputModel {
     focused: bool,
     disabled: bool,
     read_only: bool,
+    stance: EditStance,
 }
 
 impl PasswordInputModel {
@@ -193,6 +197,7 @@ impl PasswordInputModel {
             focused: false,
             disabled: false,
             read_only: false,
+            stance: EditStance::Pristine,
         }
     }
 
@@ -221,6 +226,15 @@ impl PasswordInputModel {
     #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
+        self
+    }
+
+    /// Declare the field's commit history at construction time.
+    ///
+    /// The same escape hatch the other validation-bearing models provide.
+    #[must_use]
+    pub fn with_stance(mut self, stance: EditStance) -> Self {
+        self.stance = stance;
         self
     }
 
@@ -269,6 +283,72 @@ impl PasswordInputModel {
     #[must_use]
     pub fn is_invalid(&self) -> bool {
         self.validation.is_some()
+    }
+
+    /// The field's commit history (`UIF-PRIN-009`).
+    ///
+    /// Carried here rather than only on the mirrored `TextInputModel`
+    /// because the mirror is rebuilt from this model every frame: a
+    /// stance stored on the mirror would be reset by the very rebuild
+    /// that reads it, and the password field would be permanently
+    /// pristine no matter what the user did.
+    #[must_use]
+    pub const fn stance(&self) -> EditStance {
+        self.stance
+    }
+
+    /// Whether the user has not yet committed to this field.
+    #[must_use]
+    pub const fn is_pristine(&self) -> bool {
+        self.stance.is_pristine()
+    }
+
+    /// Whether the user has committed to, or left, this field.
+    #[must_use]
+    pub const fn is_touched(&self) -> bool {
+        self.stance.is_touched()
+    }
+
+    /// `on_commit`: the user committed a secret.
+    pub fn note_commit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// `on_focus_change(false)`: the user left the field.
+    pub fn note_blur(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// The containing form was submitted.
+    pub fn note_submit(&mut self) {
+        self.stance = EditStance::Touched;
+    }
+
+    /// Return the field to pristine for a new form.
+    pub fn reset_stance(&mut self) {
+        self.stance = EditStance::Pristine;
+    }
+
+    /// What this field should paint this frame, with no disallowed-character
+    /// class in play.
+    ///
+    /// Reads the **plaintext** length through the class, never the mask:
+    /// the mask is a rendering artefact and no character rule is ever
+    /// about it.
+    #[must_use]
+    pub fn punishment(&self) -> Punishment {
+        punish(self.stance, self.is_invalid(), false)
+    }
+
+    /// What this field should paint this frame under `class`'s character
+    /// rules.
+    #[must_use]
+    pub fn punishment_under(&self, class: DisallowedClass) -> Punishment {
+        punish(
+            self.stance,
+            self.is_invalid(),
+            class.contains_any(self.value.expose()),
+        )
     }
 
     /// Whether the field is showing its secret.

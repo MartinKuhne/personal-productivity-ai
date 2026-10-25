@@ -90,7 +90,15 @@ use crate::token_lint::{
 /// content, so it is counted by Rule B even though its only number is a
 /// read-through of `token::time::DELAY_SUBMENU`. That is why
 /// `PIN_RULE_B_FILES` moves for the first time since `INC-50`.
-const PIN_FILES_SCANNED: usize = 137;
+///
+/// 142 as of `B-4`, whose five additions are the `validation/` subsystem
+/// — `validation/mod.rs`, `stance.rs`, `disallowed.rs`, `punish.rs` and
+/// `recovery.rs` (`UIF-PRIN-009`). Like `layout/`, `microcopy/` and the
+/// four `a11y/` files before it, it defines no visual literal: the
+/// subsystem's only quantities are a stance, a character class and a
+/// three-field snapshot, none of which a token could have supplied. The
+/// file count moves and `PIN_RULE_B_FILES` does not.
+const PIN_FILES_SCANNED: usize = 142;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

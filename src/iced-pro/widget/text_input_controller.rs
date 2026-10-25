@@ -153,6 +153,34 @@ impl TextInputEmission {
     pub const fn settles(&self) -> bool {
         !matches!(self, Self::Changed(_) | Self::FocusChanged(_))
     }
+
+    /// Whether a host should mark the model it drives touched (`UIF-PRIN-009`).
+    ///
+    /// The bridge between the engine's tier vocabulary and the model's
+    /// history, so the rule "which events commit a user to a field" lives
+    /// here rather than being re-derived at every wiring site — and every
+    /// wiring site getting it subtly different.
+    ///
+    /// * `Committed` and `Cleared` advance it: both are deliberate acts
+    ///   on the value.
+    /// * `FocusChanged(false)` advances it — that is a `blur`, which
+    ///   §1.1 names outright.
+    /// * `Changed` does not: a keystroke is not a commitment, and
+    ///   advancing on every keystroke is precisely the 'punish on the
+    ///   first character' behaviour the pillar forbids.
+    /// * `FocusChanged(true)` does not: taking focus is the opposite of
+    ///   finishing.
+    /// * `Cancelled` does **not**, which is the interesting one. `Escape`
+    ///   restores the pre-edit value and leaves the field where it was;
+    ///   marking it touched would let a restored-but-invalid value paint
+    ///   red the moment the user tried to back out of their edit.
+    #[must_use]
+    pub const fn advances_stance(&self) -> bool {
+        match self {
+            Self::Committed(_) | Self::Cleared(_) | Self::FocusChanged(false) => true,
+            Self::Changed(_) | Self::Cancelled(_) | Self::FocusChanged(true) => false,
+        }
+    }
 }
 
 impl PartialEq for TextInputEmission {

@@ -218,7 +218,13 @@ pub const CONFIRMATION_CONTROL_HEIGHT: f32 = 0.0;
 /// The union of the Windows-reserved set and the two path separators. POSIX
 /// allows most of these, but a name written here is expected to survive a
 /// round trip through Windows, so the stricter set is the rule.
-const ILLEGAL_BASENAME_CHARS: &str = "/\\:*?\"<>|";
+///
+/// Aliased to [`FILENAME_ILLEGAL_CHARS`](crate::validation::disallowed::FILENAME_ILLEGAL_CHARS)
+/// rather than spelled out again: this validator and `UIF-PRIN-009`'s
+/// instant-punish class must refuse exactly the same characters, and two
+/// literals that happen to agree today are two literals that can disagree
+/// tomorrow.
+const ILLEGAL_BASENAME_CHARS: &str = crate::validation::disallowed::FILENAME_ILLEGAL_CHARS;
 
 /// Validation message codes (`NFR-004`).
 const CODE_EMPTY: &str = "INP-1001";

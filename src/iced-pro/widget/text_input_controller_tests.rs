@@ -599,3 +599,103 @@ fn equality_tracks_whether_a_session_is_open_not_just_the_current_value() {
          session is state at all"
     );
 }
+
+// -- advances_stance: the tier-to-history bridge (UIF-PRIN-009) -------------
+
+#[test]
+fn a_committed_or_cleared_value_advances_the_stance() {
+    assert!(TextInputEmission::Committed(Commit::new("v".to_owned())).advances_stance());
+    assert!(TextInputEmission::Cleared(Commit::new(String::new())).advances_stance());
+}
+
+#[test]
+fn focus_loss_advances_the_stance_and_focus_gain_does_not() {
+    assert!(TextInputEmission::FocusChanged(false).advances_stance());
+    assert!(!TextInputEmission::FocusChanged(true).advances_stance());
+}
+
+#[test]
+fn a_live_tick_never_advances_the_stance() {
+    for value in ["", "one keystroke", "the whole buffer"] {
+        assert!(
+            !TextInputEmission::Changed(Live::new(value.to_owned())).advances_stance(),
+            "a keystroke declared the user finished with the field"
+        );
+    }
+}
+
+#[test]
+fn a_cancel_never_advances_the_stance() {
+    assert!(
+        !TextInputEmission::Cancelled(Cancel::new("restored".to_owned())).advances_stance(),
+        "backing out of an edit must not count as committing to it"
+    );
+}
+
+#[test]
+fn every_tier_is_accounted_for_in_the_stance_rule() {
+    let tiers = [
+        TextInputEmission::Changed(Live::new("a".to_owned())),
+        TextInputEmission::Committed(Commit::new("a".to_owned())),
+        TextInputEmission::Cleared(Commit::new(String::new())),
+        TextInputEmission::Cancelled(Cancel::new("a".to_owned())),
+        TextInputEmission::FocusChanged(true),
+        TextInputEmission::FocusChanged(false),
+    ];
+    let advancing: Vec<&str> = tiers
+        .iter()
+        .filter(|emission| emission.advances_stance())
+        .map(TextInputEmission::tier)
+        .collect();
+    assert_eq!(advancing, vec!["commit", "commit", "focus"]);
+}
+
+#[test]
+fn a_host_wired_by_advances_stance_gets_the_pillar_right() {
+    let mut model = TextInputModel::empty();
+    let mut engine = TextInputController::new();
+
+    engine
+        .note_edit("dup".to_owned())
+        .then(|| model.value = engine.take_live().expect("a live tick"));
+    model = model.with_validation("That name is taken.");
+    assert!(
+        model.is_pristine(),
+        "typing must not commit the user to the field"
+    );
+    assert!(
+        !model.punishment().painted(),
+        "a field the user is still typing in must not go red"
+    );
+
+    let emission = engine.commit().expect("Enter settles");
+    if emission.advances_stance() {
+        model.note_commit();
+    }
+    assert!(
+        model.punishment().painted(),
+        "after a commit the invalidity shows"
+    );
+}
+
+#[test]
+fn escaping_a_bad_edit_leaves_the_field_pristine_and_unpunished() {
+    let mut model = TextInputModel::new("kept");
+    let mut engine = TextInputController::with_value("kept");
+
+    engine.note_edit("kept but wrong".to_owned());
+    model.value = engine.take_live().expect("a live tick");
+    model.validation = Some("nope".to_owned());
+    assert!(!model.punishment().painted());
+
+    let emission = engine.revert().expect("Escape reverts the session");
+    assert!(
+        !emission.advances_stance(),
+        "Escape must not declare the user finished, or the restored value \
+         would go red the moment they tried to back out"
+    );
+    model.value = emission.value().expect("a restored value").to_owned();
+    model.validation = None;
+    assert!(model.is_pristine());
+    assert!(!model.punishment().painted());
+}
