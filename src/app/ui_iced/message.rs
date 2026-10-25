@@ -786,6 +786,18 @@ pub enum BatchDialogMessage {
     ModeChanged(crate::agent::batch::types::BatchMode),
     /// The concurrency pick-list selection changed (1..=8).
     ConcurrencyChanged(u8),
+    /// A press landed on the card's own boundary — its padding ring, a
+    /// disabled `Process` button, or dead space between rows — and was
+    /// absorbed there (`UIF-VER-003`).
+    ///
+    /// The variant exists so the card can be mounted through
+    /// [`crate::ui_iced::overlay::modal_centered`], whose `mouse_area`
+    /// boundary needs somewhere to send what it captures. Without it a
+    /// click on the card's padding would fall through to the scrim and
+    /// cancel a batch the user never meant to leave.
+    ///
+    /// It changes nothing: its whole job is to have arrived.
+    Absorbed,
 }
 
 /// Tools dialog window channel (UI-051..UI-060).
@@ -805,6 +817,18 @@ pub enum BatchDialogMessage {
 pub enum ToolsDialogMessage {
     /// The scrim was clicked or Escape pressed — hide the tools dialog.
     CloseRequested,
+    /// A press landed on the card's own boundary — its padding ring, a
+    /// disabled action button, or dead space between rows — and was
+    /// absorbed there (`UIF-VER-003`).
+    ///
+    /// Needed so the card can be mounted through
+    /// [`crate::ui_iced::overlay::modal_centered`], whose `mouse_area`
+    /// boundary needs somewhere to send what it captures. Without it a
+    /// click on the card's padding would fall through to the scrim and
+    /// close a dialog the user never meant to leave.
+    ///
+    /// It changes nothing: its whole job is to have arrived.
+    Absorbed,
 }
 
 /// Agent debug window channel (UI-048).

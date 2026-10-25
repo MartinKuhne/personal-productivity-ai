@@ -85,15 +85,25 @@ mod tests;
 
 use std::collections::HashMap;
 
-use iced::widget::{
-    Column, Row, button, checkbox, container, rule, scrollable, table, text, tooltip,
-};
-use iced::{Alignment, Element, Length, Size};
+use iced::font::Weight;
+use iced::widget::{Column, Row, Space, checkbox, container, scrollable, table, text, tooltip};
+use iced::{Alignment, Background, Element, Length, Size};
+
+use iced_pro::composite::list_tile;
+use iced_pro::state::{BaseState, VisualState};
+use iced_pro::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
+use iced_pro::token::{shape, space, typography};
+use iced_pro::widget::badge;
+use iced_pro::widget::badge_model::{BadgeModel, BadgeTone, StatusIcon};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
+use iced_pro::widget::toggle::{self, ToggleControl, TogglePolarity};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, ToolsDialogMessage};
+use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
 
 /// Tool-group identity, kind and state — reused unchanged from the tool
 /// registry ([RUST-051]); the same types the `UserCommand`s carry.
@@ -101,74 +111,41 @@ pub use crate::agent::tools::registry::{
     InternalToolGroup, ToolErrorKind, ToolGroupError, ToolGroupId, ToolGroupKind, ToolGroupState,
 };
 
-/// Default width of the tools card.
-pub const DEFAULT_WIDTH: f32 = 720.0;
+/// §4.6.2 — the Tools & Integrations card's sizing policy: 720px wide
+/// clamped to the viewport gutter, content-fit at least
+/// [`TOOLS_HEIGHT_MIN`](iced_pro::surface::modal::TOOLS_HEIGHT_MIN) and
+/// never more than 80% of the viewport.
+///
+/// Held as the policy object rather than a set of numbers, so the card
+/// states *which* modal it is and the framework does the clamping. This
+/// replaced the app's own `DEFAULT_WIDTH` / `MIN_HEIGHT = 200` /
+/// `MAX_HEIGHT_HARD_CAP = 1200` triple: the width was already the spec's,
+/// but the height policy was the app's invention — a 200px floor the spec
+/// does not have and a 1200px hard cap that let the card grow past any
+/// sane reading of §4.6.2 on a large monitor.
+pub const TOOLS_SIZING: ModalSizing = ModalSizing::tools_and_integrations();
 
-/// Minimum width of the tools card.
-pub const MIN_WIDTH: f32 = 520.0;
+/// Stable id of the Tools card box itself, so a layout test can address
+/// the rendered card rather than only its contents (AGENTS §5).
+pub const TOOLS_CARD_ID: &str = "tools.card";
 
-/// Height budget for one tool-group row.
-pub const ROW_HEIGHT: f32 = 24.0;
+/// Stable id of the scrollable group list.
+///
+/// AGENTS §5: the list keeps its scroll position across rebuilds because
+/// it is mounted under this id unconditionally — including when the row
+/// set changes or an error banner appears above it.
+pub const TOOLS_LIST_ID: &str = "tools.list";
 
-/// Height of the table header row.
-pub const HEADER_HEIGHT: f32 = 20.0;
+/// Stable focus id of the error banner's `Retry` control.
+pub const TOOLS_ERROR_RETRY_ID: &str = "tools.error.retry";
 
-/// Title bar + window border + interior padding above the table.
-pub const CHROME_HEIGHT: f32 = 56.0;
-
-/// Extra padding for the dialog scroll area.
-pub const EXTRA_PADDING: f32 = 8.0;
-
-/// Minimum height of the tools dialog.
-pub const MIN_HEIGHT: f32 = 200.0;
-
-/// Hard cap so a 4K monitor does not produce a 2000-px-tall dialog.
-pub const MAX_HEIGHT_HARD_CAP: f32 = 1200.0;
-
-/// Maximum height of the scrollable group list inside the card.
-pub const LIST_MAX_HEIGHT: f32 = MAX_HEIGHT_HARD_CAP;
-
-/// Logical point size of the window title.
-pub const TOOLS_TITLE_SIZE: f32 = 18.0;
-
-/// Logical point size of a table header cell.
-pub const TOOLS_HEADER_SIZE: f32 = 14.0;
-
-/// Logical point size of a table body cell.
-pub const TOOLS_ROW_SIZE: f32 = 14.0;
-
-/// Logical point size of the error tooltip body.
-pub const TOOLS_ERROR_SIZE: f32 = 12.0;
-
-/// Logical point size of the `✓ parallel` chip.
-pub const TOOLS_CHIP_SIZE: f32 = 12.0;
-
-/// Padding inside the `✓ parallel` chip.
-pub const CHIP_PADDING: f32 = 2.0;
-
-/// Corner radius of the `✓ parallel` chip.
-pub const CHIP_RADIUS: f32 = 3.0;
-
-/// Gap between a row's char count and its `✓ parallel` chip.
-pub const CHIP_SPACING: f32 = 6.0;
-
-/// Gap between the `⚠` marker and its hover tooltip.
-pub const TOOLTIP_GAP: f32 = 4.0;
-
-/// Horizontal padding inside a table cell.
-pub const CELL_PADDING_X: f32 = 6.0;
-
-/// Vertical padding inside a table cell.
-pub const CELL_PADDING_Y: f32 = 2.0;
-
-/// Padding inside the card.
-pub const CARD_PADDING: f32 = 12.0;
-
-/// Vertical gap between card sections.
-pub const SECTION_SPACING: f32 = 8.0;
-
-/// Width of the table and card separators.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// `NFR-004` error code for a failed MCP authentication surfaced in the
+/// card's error banner (`UIF-MOD-003`).
+///
+/// `5001` is the client-side "upstream auth was refused" slot: the flow
+/// ran and the server said no, which is a server-side fault reported
+/// through the client rather than a bad request the app made.
+pub const TOOLS_AUTH_ERROR_CODE: &str = "TOOLS-5001";
 
 /// The prompt context the char-count column is measured against.
 ///
@@ -261,6 +238,12 @@ pub struct ToolGroupRow {
     pub parallel_safe: bool,
     /// The rendered `Kind: message` error line, `None` when clean.
     pub error: Option<String>,
+    /// The recorded error's **kind**, carried through from
+    /// [`ToolGroupState::last_error`] so the dialog-level
+    /// [`modal_error`](ToolsDialogViewModel::modal_error) can tell an
+    /// authentication failure from an execution failure without parsing
+    /// the rendered line back apart.
+    pub error_kind: Option<ToolErrorKind>,
 }
 
 impl ToolGroupRow {
@@ -409,6 +392,7 @@ pub fn row_from_group(
         prompt_char_count: group.prompt_char_count(char_count_for_tool),
         parallel_safe: group.parallel_safe,
         error: group.last_error.as_ref().map(error_line_text),
+        error_kind: group.last_error.as_ref().map(|err| err.kind),
     }
 }
 
@@ -515,20 +499,6 @@ pub fn error_text_color() -> iced::Color {
     Palette::fastmd_dark().error
 }
 
-/// The token the `✓ parallel` chip is painted with — `Palette::success`,
-/// the palette's completion-role colour. Resolved through the shared
-/// palette so no numeric literal reaches the panel.
-#[must_use]
-pub fn parallel_chip_color() -> iced::Color {
-    Palette::fastmd_dark().success
-}
-
-/// The token the `✓ parallel` chip's surface uses.
-#[must_use]
-pub fn parallel_chip_surface_color() -> iced::Color {
-    Palette::fastmd_dark().surface_variant
-}
-
 /// The token a disabled / informational cell uses.
 #[must_use]
 pub fn muted_color() -> iced::Color {
@@ -541,30 +511,63 @@ pub fn row_label_color() -> iced::Color {
     Palette::fastmd_dark().text_strong
 }
 
-/// The tools dialog's height budget for `row_count` rows in a `viewport`.
+/// The Tools card's **outer** width for a viewport width (§4.6.2).
 ///
-/// Preferred height is
-/// `CHROME + HEADER + row_count * ROW_HEIGHT + EXTRA_PADDING`, clamped
-/// into `[MIN_HEIGHT, min(viewport.height * 0.85, MAX_HEIGHT_HARD_CAP)]`
-/// so the dialog grows to fit every row when the screen has room and
-/// scrolls otherwise.
-///
-/// Returns `(default_size, min_size, max_height)`.
-///
-/// Purity: pure.
+/// 720px on any viewport wide enough to hold it, clamped to
+/// `viewport.width - VIEWPORT_GUTTER` (`space::XXL`, 32px) below that.
+/// The card's padding is *inside* this figure — see
+/// [`crate::ui_iced::overlay::modal_card`].
 #[must_use]
-pub fn compute_dialog_size(viewport: Size, row_count: usize) -> (Size, Size, f32) {
-    let preferred_height =
-        CHROME_HEIGHT + HEADER_HEIGHT + (row_count as f32) * ROW_HEIGHT + EXTRA_PADDING;
-    let screen_max = (viewport.height * 0.85).max(MIN_HEIGHT);
-    let max_height = screen_max.min(MAX_HEIGHT_HARD_CAP);
-    let default_height = preferred_height.min(max_height).max(MIN_HEIGHT);
-    let min_height = MIN_HEIGHT.min(default_height);
+pub fn tools_card_width(viewport_width: f32) -> f32 {
+    TOOLS_SIZING.width.resolve(viewport_width, 0.0)
+}
 
-    (
-        Size::new(DEFAULT_WIDTH, default_height),
-        Size::new(MIN_WIDTH, min_height),
-        max_height,
+/// The content height the card's table region asks the policy for, for
+/// `row_count` groups plus a header row and an optional error banner.
+///
+/// Every figure is a framework constant rather than a card-local number:
+/// the row height is [`list_tile`]'s single-line tile — the same
+/// `size::CONTROL_MD` grid every selectable row in the app sits on, and
+/// exactly what the Actions cell's 32px `Button` needs — and the text
+/// bands are the type rungs they are rendered at.
+#[must_use]
+pub const fn tools_content_height(row_count: usize, shows_error: bool) -> f32 {
+    let rows = list_tile::SINGLE_LINE_HEIGHT * (row_count as f32 + 1.0);
+    let banner = if shows_error {
+        typography::BODY.line_height + space::SM
+    } else {
+        0.0
+    };
+    typography::TITLE_SM.line_height
+        + typography::BODY.line_height
+        + shape::BORDER_HAIRLINE
+        + rows
+        + banner
+}
+
+/// The Tools card's **outer** height for a viewport and row count.
+///
+/// The policy is content-fit with a
+/// [`TOOLS_HEIGHT_MIN`](iced_pro::surface::modal::TOOLS_HEIGHT_MIN) floor and
+/// an 80%-of-viewport cap, the gutter
+/// clamp applied last by the framework. This is the change that retired
+/// the app's `MIN_HEIGHT = 200` / `MAX_HEIGHT_HARD_CAP = 1200`: the floor
+/// is now the spec's 320 and the ceiling is the viewport's own 80%, so
+/// the card can no longer outgrow the screen it is on.
+#[must_use]
+pub fn tools_card_height(viewport: Size, row_count: usize, shows_error: bool) -> f32 {
+    TOOLS_SIZING.height.resolve(
+        viewport.height,
+        tools_content_height(row_count, shows_error),
+    )
+}
+
+/// The Tools card's outer size for a viewport and row count (§4.6.2).
+#[must_use]
+pub fn tools_card_size(viewport: Size, row_count: usize, shows_error: bool) -> Size {
+    Size::new(
+        tools_card_width(viewport.width),
+        tools_card_height(viewport, row_count, shows_error),
     )
 }
 
@@ -666,69 +669,187 @@ impl ToolsDialogViewModel {
         }
     }
 
-    /// The card's height budget for the current row count.
+    /// The structured failure this card surfaces (`UIF-MOD-003`).
+    ///
+    /// A failed MCP authentication is the failure this dialog actually has:
+    /// the registry records it on the group as a
+    /// [`ToolErrorKind::Authentication`] `last_error`, and the row mapping
+    /// already carries that kind through. Deriving the banner from the
+    /// rows rather than a separate slot means the banner changes on
+    /// exactly two events — the failure being recorded, and the user
+    /// clearing it with `Restart` — which is the same discipline
+    /// `ModalHost`'s `set_error` / `clear_error` pair enforces
+    /// explicitly.
+    ///
+    /// `Recovery::Retry` because the flow is re-entrant: pressing Retry
+    /// re-issues `StartMcpAuth` for the same server, which is exactly
+    /// what the Authenticate button does.
+    ///
+    /// Purity: pure function of the rows.
     #[must_use]
-    pub fn size_for(&self, viewport: Size) -> (Size, Size, f32) {
-        compute_dialog_size(viewport, self.count())
+    pub fn modal_error(&self) -> Option<ModalError> {
+        let row = self.rows.iter().find(|row| {
+            row.error_kind == Some(ToolErrorKind::Authentication) && row.mcp_server().is_some()
+        })?;
+        let server = row.mcp_server().unwrap_or_default();
+        Some(
+            ModalError::new(
+                TOOLS_AUTH_ERROR_CODE,
+                strings::format_tools_auth_error(row.display_name.as_str()),
+            )
+            .at(ErrorLocation::Region(format!(
+                "{}: {}",
+                strings::TOOLS_KIND_COLUMN,
+                server
+            )))
+            .with_recovery(Recovery::Retry),
+        )
+    }
+
+    /// Whether the error banner occupies its band this frame.
+    #[must_use]
+    pub fn shows_error(&self) -> bool {
+        self.modal_error().is_some()
+    }
+
+    /// The message the banner's `Retry` affordance emits: re-run the
+    /// authentication that failed.
+    ///
+    /// Purity: pure.
+    #[must_use]
+    pub fn retry_message(&self) -> Option<Message> {
+        let row = self.rows.iter().find(|row| {
+            row.error_kind == Some(ToolErrorKind::Authentication) && row.mcp_server().is_some()
+        })?;
+        Some(start_auth_command(row.mcp_server().unwrap_or_default()))
+    }
+
+    /// The card's outer size for the current row count (§4.6.2).
+    #[must_use]
+    pub fn size_for(&self, viewport: Size) -> Size {
+        tools_card_size(viewport, self.count(), self.shows_error())
     }
 
     /// Renders this snapshot as the tools card ([`tools_dialog_card`]).
     #[must_use]
-    pub fn view(&self) -> Element<'_, Message> {
-        tools_dialog_card(self)
+    pub fn view(&self, viewport: Size) -> Element<'_, Message> {
+        tools_dialog_card(self, viewport)
     }
 }
 
-/// Renders the tools dialog card.
+/// Renders the tools card at its §4.6.2 size.
 ///
 /// ```text
-/// Tools
-/// 9 Group
-/// ─────────────────────────────────────────────────────────────────
-/// ☑ │ Filesystem        │ Internal    │ read, write │ 1204 [✓ parallel] │
-/// ☑ │ my-server         │ MCP (remote)│ fetch       │  612 │ ⚠ →hover: "Execution: …"  [Restart] [Authenticate] [Forget]
-/// ─────────────────────────────────────────────────────────────────
+/// ┌─ Tools card · ModalSizing::tools_and_integrations() · radius 8 ──┐
+/// │ Tools                                                            │
+/// │ 9 Group                                                          │
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │ [!] MCP authentication failed for `srv`.        [ Retry ]         │
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │ ☑ │ Group      │ Kind        │ Tools  │ Prompt      │ Actions     │
+/// │ ☑ │ Filesystem │ Internal    │ read…  │ 1204 (✓)  │             │
+/// │ ☑ │ my-server  │ MCP (remote)│ fetch  │  612       │ ⚠ [Auth]…  │
+/// └──────────────────────────────────────────────────────────────────┘
 /// ```
 ///
-/// The parallel-safe chip renders only on `parallel_safe` rows ([UI-058]);
-/// the error text renders only inside the marker's tooltip ([UI-057]).
+/// The parallel-safe marker renders only on `parallel_safe` rows
+/// ([UI-058]); the row-level error text renders only inside the `⚠`
+/// marker's hover tooltip ([UI-057]), while a *failed authentication*
+/// additionally raises the card-level banner (`UIF-MOD-003`).
 ///
-/// The card is the *content* only: the root view mounts it through
-/// [`crate::ui_iced::overlay::modal`] with [`dismiss_message()`] as the
-/// dismiss message so a scrim click or Escape closes it.
+/// The card is the *content* only: [`tools_modal`] mounts it through
+/// [`crate::ui_iced::overlay::modal_centered`], which supplies the scrim
+/// and the card-boundary absorption.
 ///
 /// Emitted messages:
 /// * enable checkbox → [`UserCommand::SetToolGroupEnabled`]
 /// * Restart → [`UserCommand::ClearToolGroupError`]
 /// * Authenticate → [`UserCommand::StartMcpAuth`] (inert while running)
 /// * Forget → [`UserCommand::ForgetMcpAuth`]
+/// * Retry → [`UserCommand::StartMcpAuth`] for the failed server
 ///
-/// Purity: pure view over `view_model`.
+/// Purity: pure view over `view_model` and `viewport`.
 #[must_use]
-pub fn tools_dialog_card(view_model: &ToolsDialogViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+pub fn tools_dialog_card(
+    view_model: &ToolsDialogViewModel,
+    viewport: Size,
+) -> Element<'_, Message> {
+    let frame = modal_frame();
 
-    let title = text(strings::TOOLS_DIALOG_TITLE)
-        .size(TOOLS_TITLE_SIZE)
-        .color(palette.text_strong);
-
-    let summary = text(view_model.summary())
-        .size(TOOLS_ROW_SIZE)
-        .color(palette.text_muted);
+    let banner = view_model
+        .modal_error()
+        .map(|error| error_banner(&error, view_model.retry_message()))
+        .unwrap_or_else(|| Space::new().height(Length::Shrink).into());
 
     let list = scrollable(tools_table(view_model.rows()))
-        .height(Length::Fixed(LIST_MAX_HEIGHT))
+        .id(TOOLS_LIST_ID)
+        .height(Length::Fill)
         .width(Length::Fill);
 
-    Column::with_children(vec![
-        title.into(),
-        summary.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
+    let body = Column::with_children(vec![
+        rung(
+            strings::TOOLS_DIALOG_TITLE,
+            typography::TITLE_SM,
+            Palette::fastmd_dark().text_strong,
+        )
+        .into(),
+        rung(
+            view_model.summary(),
+            typography::BODY,
+            Palette::fastmd_dark().text_muted,
+        )
+        .into(),
+        modal_divider(frame).into(),
+        banner,
         list.into(),
     ])
-    .spacing(SECTION_SPACING)
-    .padding(CARD_PADDING)
-    .width(Length::Fixed(DEFAULT_WIDTH))
+    .spacing(space::SM);
+
+    modal_card(
+        body,
+        frame,
+        TOOLS_CARD_ID,
+        Length::Fixed(tools_card_width(viewport.width)),
+        Length::Fixed(tools_card_height(
+            viewport,
+            view_model.count(),
+            view_model.shows_error(),
+        )),
+    )
+    .into()
+}
+
+/// The card-level structured failure banner (`UIF-MOD-003`).
+///
+/// The banner states **what** failed, **where** it happened and **what
+/// the user can do** — the three things §4.6.3 names — and the modal
+/// stays open showing it. `Retry` is live whenever the retry command
+/// exists; when it does not, the control stays visible and inert rather
+/// than disappearing (AGENTS §6), so the banner never reads as if an
+/// action were available when none is.
+fn error_banner(error: &ModalError, retry: Option<Message>) -> Element<'static, Message> {
+    let palette = Palette::fastmd_dark();
+
+    let detail = match error.location() {
+        Some(ErrorLocation::Region(region)) => format!("{} — {}", error.message(), region),
+        _ => error.message().to_string(),
+    };
+
+    let can_retry = retry.is_some();
+
+    Row::with_children(vec![
+        rung(detail, typography::BODY, palette.error).into(),
+        Space::new().width(Length::Fill).into(),
+        footer_button(
+            ButtonVariant::Danger,
+            strings::TOOLS_RETRY_BUTTON,
+            retry.unwrap_or_else(dismiss_message),
+            TOOLS_ERROR_RETRY_ID,
+            can_retry,
+        ),
+    ])
+    .spacing(space::MD)
+    .align_y(Alignment::Center)
     .into()
 }
 
@@ -736,17 +857,19 @@ pub fn tools_dialog_card(view_model: &ToolsDialogViewModel) -> Element<'_, Messa
 /// mapping and the verified iced citations. With zero rows the header still
 /// renders, so the empty state needs no separate widget.
 ///
+/// Every cell is fixed to [`list_tile::SINGLE_LINE_HEIGHT`] so the rendered
+/// rows are the same height the card's own height budget
+/// ([`tools_content_height`]) charged for them, and the Actions cell's 32px
+/// buttons sit on the same `size::CONTROL_MD` grid as every other
+/// selectable row in the app.
+///
 /// Purity: pure over `rows`.
 #[must_use]
 pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
     let columns = vec![
         table::column(
             header_cell(""),
-            move |row: ToolGroupRow| -> Element<'static, Message> {
-                checkbox(row.enabled)
-                    .on_toggle(move |enabled| set_enabled_command(&row.id, enabled))
-                    .into()
-            },
+            move |row: ToolGroupRow| -> Element<'static, Message> { enable_cell(&row) },
         )
         .width(Length::Shrink),
         table::column(
@@ -757,20 +880,22 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
         table::column(
             header_cell(strings::TOOLS_KIND_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> {
-                text(row.kind_label)
-                    .size(TOOLS_ROW_SIZE)
-                    .color(Palette::fastmd_dark().text)
-                    .into()
+                cell(rung(
+                    row.kind_label,
+                    typography::BODY,
+                    Palette::fastmd_dark().text,
+                ))
             },
         )
         .width(Length::Shrink),
         table::column(
             header_cell(strings::TOOLS_LIST_COLUMN),
             move |row: ToolGroupRow| -> Element<'static, Message> {
-                text(row.tools_label)
-                    .size(TOOLS_ROW_SIZE)
-                    .color(Palette::fastmd_dark().text)
-                    .into()
+                cell(rung(
+                    row.tools_label.clone(),
+                    typography::BODY,
+                    Palette::fastmd_dark().text,
+                ))
             },
         )
         .width(Length::Fill),
@@ -787,63 +912,148 @@ pub fn tools_table(rows: &[ToolGroupRow]) -> Element<'static, Message> {
     ];
 
     table::table(columns, rows.to_vec())
-        .padding_x(CELL_PADDING_X)
-        .padding_y(CELL_PADDING_Y)
-        .separator_x(SEPARATOR_WIDTH)
-        .separator_y(SEPARATOR_WIDTH)
+        .padding_x(space::XS)
+        .padding_y(0.0)
+        .separator_x(shape::BORDER_HAIRLINE)
+        .separator_y(shape::BORDER_HAIRLINE)
         .width(Length::Fill)
+        .into()
+}
+
+/// One table cell pinned to the framework's single-line row height.
+fn cell(content: text::Text<'static>) -> Element<'static, Message> {
+    container(content)
+        .height(Length::Fixed(list_tile::SINGLE_LINE_HEIGHT))
+        .align_y(Alignment::Center)
         .into()
 }
 
 /// A column-header cell.
 fn header_cell(label: &'static str) -> Element<'static, Message> {
-    text(label)
-        .size(TOOLS_HEADER_SIZE)
-        .color(row_label_color())
+    container(rung_weighted(
+        label,
+        typography::UI_COMPACT,
+        Palette::fastmd_dark().text_strong,
+        typography::Weight::SemiBold,
+    ))
+    .height(Length::Fixed(list_tile::SINGLE_LINE_HEIGHT))
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The enable control: iced's checkbox painted from
+/// [`toggle::resolve_style`] (`UIF-ATOM-003`).
+///
+/// The framework's toggle module resolves the *paint* for a
+/// `(control, polarity)` pair but ships no `Element`-producing builder —
+/// its indicator is described as [`Layer`]s, not a widget — so the
+/// interactive control stays iced's `checkbox` and the resolved
+/// [`ToggleStyle`] is mapped onto iced's own style struct. The colours are
+/// therefore the framework's, including the contrast lock
+/// [`resolve_style`] runs before handing a style back; only the geometry
+/// of the hit target is iced's.
+fn enable_cell(row: &ToolGroupRow) -> Element<'static, Message> {
+    let style = toggle::resolve_style(
+        if row.enabled {
+            TogglePolarity::On
+        } else {
+            TogglePolarity::Off
+        },
+        VisualState {
+            base: BaseState::Rest,
+            focused: false,
+        },
+        &Palette::pro(),
+    );
+
+    let id = row.id.clone();
+    let enabled = row.enabled;
+
+    checkbox(enabled)
+        .on_toggle(move |toggled| set_enabled_command(&id, toggled))
+        .style(move |_theme, _status| iced::widget::checkbox::Style {
+            background: Background::Color(style.indicator_fill),
+            icon_color: style.mark,
+            border: iced::Border {
+                color: style.indicator_border,
+                width: style.indicator_border_width,
+                radius: toggle::indicator_radius(ToggleControl::Checkbox).into(),
+            },
+            text_color: Some(style.label),
+        })
         .into()
 }
 
 /// The Prompt column's cell: the summed char count, followed by the
-/// `✓ parallel` chip when — and only when — the group is parallel-safe
-/// ([UI-058]). The chip's absence is not a negative signal, so a
+/// `✓ parallel` marker when — and only when — the group is parallel-safe
+/// ([UI-058]). The marker's absence is not a negative signal, so a
 /// non-parallel row renders the count alone.
 fn char_count_cell(row: &ToolGroupRow) -> Element<'static, Message> {
-    let count: Element<'static, Message> = text(row.prompt_char_count.to_string())
-        .size(TOOLS_ROW_SIZE)
-        .color(Palette::fastmd_dark().text_value)
-        .into();
+    let count: Element<'static, Message> = rung(
+        row.prompt_char_count.to_string(),
+        typography::BODY,
+        Palette::fastmd_dark().text_value,
+    )
+    .into();
 
     match parallel_chip_label(row) {
-        Some(label) => Row::with_children(vec![count, parallel_chip(label)])
-            .spacing(CHIP_SPACING)
-            .align_y(Alignment::Center)
-            .into(),
-        None => count,
+        Some(label) => cell_in_row(
+            Row::with_children(vec![count, parallel_chip(label)])
+                .spacing(space::XS)
+                .align_y(Alignment::Center),
+        ),
+        None => cell_in_row(count),
     }
 }
 
-/// The `✓ parallel` chip — a styled `container` around the label, painted
-/// with [`Palette::success`] on a [`Palette::surface_variant`] fill.
-/// Every colour comes from the shared palette.
+/// The `✓ parallel` marker, resolved as a framework **status badge**
+/// (`UIF-ATOM-008`) rather than an ad-hoc styled box.
+///
+/// `widget::chip` (`UIF-ATOM-006`) was the first candidate and is the
+/// wrong one: its three variants are `Assist`, `Filter` and `Input`, all
+/// of which describe *what pressing the chip does*, and none of them
+/// carries a status colour at all — a chip's selected polarity resolves
+/// to `accent.fill`, not to success. A `✓` that means "this group is
+/// parallel-safe" is a judgement, and §3.8's status chip is the framework's
+/// component for a judgement: [`BadgeKind::Status`] with
+/// [`StatusIcon::Success`] on [`BadgeTone::Success`] yields the pill's
+/// height, padding, radius, stroke and colour from one resolver call.
+///
+/// The pinned label [`strings::TOOLS_PARALLEL_CHIP`] already carries its
+/// own `✓`, so the badge's separate status glyph is not drawn on top of
+/// it — the badge supplies the box and the tone, the string supplies the
+/// mark.
 fn parallel_chip(label: &'static str) -> Element<'static, Message> {
-    let palette = Palette::fastmd_dark();
+    let model = BadgeModel::status(StatusIcon::Success, label).with_tone(BadgeTone::Success);
+    let style = badge::resolve_style(&model, &Palette::pro());
 
-    container(
-        text(label)
-            .size(TOOLS_CHIP_SIZE)
-            .color(parallel_chip_color()),
-    )
-    .padding(CHIP_PADDING)
-    .style(move |_theme| container::Style {
-        background: Some(parallel_chip_surface_color().into()),
+    container(rung_weighted(
+        label,
+        typography::CAPTION,
+        style.text,
+        style.weight,
+    ))
+    .height(Length::Fixed(style.height))
+    .padding(iced::Padding::from([0.0, style.h_padding]))
+    .align_y(Alignment::Center)
+    .style(move |_theme: &iced::Theme| container::Style {
+        background: Some(Background::Color(style.fill)),
         border: iced::Border {
-            color: palette.border,
-            width: SEPARATOR_WIDTH,
-            radius: CHIP_RADIUS.into(),
+            color: style.border,
+            width: style.border_width,
+            radius: style.radius.into(),
         },
         ..container::Style::default()
     })
     .into()
+}
+
+/// A row-height wrapper for content that is already a `Row`.
+fn cell_in_row(content: impl Into<Element<'static, Message>>) -> Element<'static, Message> {
+    container(content)
+        .height(Length::Fixed(list_tile::SINGLE_LINE_HEIGHT))
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// The group-name cell: the strong display name on a single line. The
@@ -851,45 +1061,207 @@ fn parallel_chip(label: &'static str) -> Element<'static, Message> {
 /// in the `⚠` marker's hover tooltip (see [`actions_cell`]), so the cell
 /// keeps the same shape whether or not an error was recorded.
 fn group_cell(row: &ToolGroupRow) -> Element<'static, Message> {
-    text(row.display_name.clone())
-        .size(TOOLS_ROW_SIZE)
-        .color(row_label_color())
-        .into()
+    cell(rung(
+        row.display_name.clone(),
+        typography::BODY,
+        Palette::fastmd_dark().text_strong,
+    ))
 }
 
 /// The Actions cell: the `⚠` marker wrapped in an
 /// [`iced::widget::tooltip::Tooltip`] whose body is the row's
 /// `Kind: message` line ([UI-057]), plus the row's mapped action buttons.
 /// A clean row keeps the marker slot empty and mounts no tooltip.
+///
+/// `Forget` is the one `Danger` control on this card. It discards a stored
+/// OAuth credential, which is the only action in the dialog that makes the
+/// user give something up that they cannot re-derive by pressing a button
+/// — `Restart` and `Authenticate` both just try again. `Restart` and
+/// `Authenticate` are `Secondary` for that reason.
 fn actions_cell(row: &ToolGroupRow) -> Element<'static, Message> {
     let marker = match error_tooltip_body(row) {
         Some(body) => tooltip::Tooltip::new(
-            text(strings::TOOLS_ERROR_ICON)
-                .size(TOOLS_ROW_SIZE)
-                .color(error_marker_color()),
-            text(body.to_owned())
-                .size(TOOLS_ERROR_SIZE)
-                .style(|_theme| iced::widget::text::Style {
-                    color: Some(error_text_color()),
-                }),
+            rung(
+                strings::TOOLS_ERROR_ICON,
+                typography::BODY,
+                error_marker_color(),
+            ),
+            rung(body.to_owned(), typography::CAPTION, error_text_color()),
             tooltip::Position::Bottom,
         )
-        .gap(TOOLTIP_GAP)
+        .gap(space::XS)
         .into(),
-        None => text("").size(TOOLS_ROW_SIZE).into(),
+        None => Space::new().width(Length::Shrink).into(),
     };
 
     let buttons = row_actions(row).into_iter().fold(
-        Row::<Message>::new().spacing(SECTION_SPACING),
-        |buttons, action| {
-            buttons.push(button(text(action.label)).on_press_maybe(action.press.clone()))
-        },
+        Row::<Message>::new().spacing(space::SM),
+        |buttons, action| buttons.push(action_button(&action)),
     );
 
-    Row::with_children(vec![marker, buttons.into()])
-        .spacing(SECTION_SPACING)
-        .align_y(Alignment::Center)
-        .into()
+    cell_in_row(
+        Row::with_children(vec![marker, buttons.into()])
+            .spacing(space::SM)
+            .align_y(Alignment::Center),
+    )
+}
+
+/// One action button, variant chosen by what the action costs the user.
+fn action_button(action: &ToolAction) -> Element<'static, Message> {
+    let variant = if action.label == strings::TOOLS_FORGET {
+        ButtonVariant::Danger
+    } else {
+        ButtonVariant::Secondary
+    };
+
+    footer_button(
+        variant,
+        action.label,
+        action.press.clone().unwrap_or_else(dismiss_message),
+        action_focus_id(action.label),
+        action.is_enabled(),
+    )
+}
+
+/// The stable focus id for an action label.
+///
+/// Ids are derived from the label rather than the row so the same control
+/// keeps the same id across rebuilds. Two live buttons never share one id
+/// because a row renders each label at most once — `Restart`,
+/// `Authenticate` / `Authenticating…` and `Forget` are distinct labels —
+/// and the dialog shows one table.
+#[must_use]
+pub fn action_focus_id(label: &str) -> &'static str {
+    if label == strings::TOOLS_FORGET {
+        "tools.action.forget"
+    } else if label == strings::TOOLS_RESTART {
+        "tools.action.restart"
+    } else if label == strings::TOOLS_AUTH_BUTTON {
+        "tools.action.authenticate"
+    } else {
+        "tools.action.running"
+    }
+}
+
+/// A footer-width framework button carrying `label`.
+///
+/// The label is mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box on purpose. `Button::is_icon_only` is a **geometric** test — any
+/// content no wider and no taller than `size::CONTROL_SM` (28px) is
+/// classed icon-only, and an icon-only button without a tooltip trips a
+/// `debug_assert!` in `outer_size`. A short label like `'Forget'` sits
+/// close enough to that line that a different font measurement would cross
+/// it, so the label is given a width the test cannot fail.
+fn footer_button(
+    variant: ButtonVariant,
+    label: impl Into<String>,
+    on_press: Message,
+    focus_id: &'static str,
+    enabled: bool,
+) -> Element<'static, Message> {
+    let content = Column::new()
+        .width(Length::Fixed(
+            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(rung(
+            label,
+            typography::BODY,
+            Palette::fastmd_dark().text_strong,
+        ));
+
+    let button = Button::new(variant, content, on_press, focus_id).palette(Palette::pro());
+
+    if enabled {
+        button.into()
+    } else {
+        button.disabled().into()
+    }
+}
+
+/// Paints `value` on a type rung at its resting weight.
+///
+/// The single place this card turns a rung into a `text` widget, so no
+/// call site restates a point size ([RUST-021], `UIF-TOK-004`).
+///
+/// **`line_height` must be handed to iced as a resolved `LineHeight`, not
+/// a bare `f32`.** `impl From<f32> for iced::LineHeight` produces
+/// `LineHeight::Relative(factor)` — a *multiple* of the font size — so
+/// `.line_height(20.0)` on a 14px rung means 280px per line.
+/// [`TypeRung::iced_line_height`] is the crossing point that makes picking
+/// the wrong unit impossible.
+fn rung(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+) -> text::Text<'static> {
+    rung_weighted(value, rung, color, typography::Weight::Regular)
+}
+
+/// [`rung`] at an explicit framework weight.
+///
+/// iced 0.14's `Text` has no `.weight()` builder — weight travels on the
+/// [`iced::Font`] record — and the framework's own `typography::Weight` is
+/// a distinct type from `iced::font::Weight`. This is the one place that
+/// crosses between them, so no call site restates the mapping or the
+/// struct ([RUST-021]).
+fn rung_weighted(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+    weight: typography::Weight,
+) -> text::Text<'static> {
+    text(value.into())
+        .size(rung.size)
+        .line_height(rung.iced_line_height())
+        .font(iced::Font {
+            weight: iced_weight(weight),
+            ..Default::default()
+        })
+        .color(color)
+}
+
+/// The iced weight a framework [`typography::Weight`] renders as.
+///
+/// The four rungs of the `UIF-TOK-004` scale map one-to-one onto iced's
+/// named classes; nothing here invents a weight the scale does not have.
+#[must_use]
+pub const fn iced_weight(weight: typography::Weight) -> Weight {
+    match weight {
+        typography::Weight::Regular => Weight::Normal,
+        typography::Weight::Medium => Weight::Medium,
+        typography::Weight::SemiBold => Weight::Semibold,
+        typography::Weight::Bold => Weight::Bold,
+    }
+}
+
+/// The frame this card is drawn with (§4.6.1).
+#[must_use]
+pub fn modal_frame() -> ModalFrame {
+    ModalFrame::resolve(&Palette::pro())
+}
+
+/// The blocking tools modal: [`tools_dialog_card`] centred over a scrim by
+/// [`crate::ui_iced::overlay::modal_centered`].
+///
+/// # What each click means
+///
+/// The scrim emits [`dismiss_message()`], the same single close
+/// transition Escape uses. A press that lands on the card's padding ring,
+/// on an inert `Authenticating…` button, or on dead space between rows is
+/// absorbed by [`ToolsDialogMessage::Absorbed`] and never reaches the
+/// scrim (`UIF-VER-003`) — before this increment the card was mounted
+/// through the older `overlay::modal`, which had **no absorb boundary at
+/// all**, so a press on dead space inside the card fell through and closed
+/// the dialog.
+#[must_use]
+pub fn tools_modal(view_model: &ToolsDialogViewModel, viewport: Size) -> Element<'_, Message> {
+    modal_centered(
+        tools_dialog_card(view_model, viewport),
+        Message::Tools(ToolsDialogMessage::Absorbed),
+        dismiss_message(),
+    )
 }
 
 /// Which tools dialog is open — the pure state the reducer holds.
@@ -946,6 +1318,7 @@ impl ToolsDialogState {
     pub fn apply(&mut self, message: ToolsDialogMessage) -> bool {
         match message {
             ToolsDialogMessage::CloseRequested => self.close(),
+            ToolsDialogMessage::Absorbed => false,
         }
     }
 }

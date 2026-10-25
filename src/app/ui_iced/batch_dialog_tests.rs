@@ -12,6 +12,7 @@
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
+use iced_pro::surface::modal::{BATCH_WIDTH, CONTENT_HEIGHT_MAX, VIEWPORT_GUTTER};
 use std::path::PathBuf;
 
 /// A candidate prompt record that is never read off disk.
@@ -600,10 +601,14 @@ fn batch_config_accessor_mirrors_the_view_model() {
 
 // --- View construction ------------------------------------------------
 
+/// A roomy viewport, so view-construction tests exercise the policy's
+/// unclamped branch rather than the gutter clamp.
+const ROOMY: Size = Size::new(1920.0, 1080.0);
+
 #[test]
 fn card_builds_for_the_config_view() {
     let model = valid_model();
-    let element = batch_dialog_card(&model);
+    let element = batch_dialog_card(&model, ROOMY);
     // A built Element is a non-zero-sized boxed widget tree; the point of
     // the test is that the config branch constructs without panicking.
     assert!(std::mem::size_of_val(&element) > 0);
@@ -629,7 +634,7 @@ fn card_builds_for_the_progress_view_in_every_run_state() {
         },
     ] {
         let model = valid_model().with_status(status);
-        let element = batch_dialog_card(&model);
+        let element = batch_dialog_card(&model, ROOMY);
         assert!(std::mem::size_of_val(&element) > 0);
     }
 }
@@ -637,7 +642,7 @@ fn card_builds_for_the_progress_view_in_every_run_state() {
 #[test]
 fn card_builds_from_an_empty_model_without_panicking() {
     let model = BatchDialogViewModel::empty();
-    let element = batch_dialog_card(&model);
+    let element = batch_dialog_card(&model, ROOMY);
     assert!(std::mem::size_of_val(&element) > 0);
     assert!(!model.can_start());
 }
@@ -646,7 +651,228 @@ fn card_builds_from_an_empty_model_without_panicking() {
 fn view_method_builds_the_same_card_shape() {
     let model = valid_model();
     // Both entry points must produce the same branch for the same model.
-    let via_view = std::mem::size_of_val(&model.view());
-    let via_card = std::mem::size_of_val(&batch_dialog_card(&model));
+    let via_view = std::mem::size_of_val(&model.view(ROOMY));
+    let via_card = std::mem::size_of_val(&batch_dialog_card(&model, ROOMY));
     assert_eq!(via_view, via_card);
+}
+// --- §4.6.2 sizing: the framework resolves the box, the card only asks --
+
+/// The Batch card's width at four viewports, each with the value the
+/// framework's own policy must produce.
+///
+/// The point is not the number — `BATCH_WIDTH` is the framework's — but
+/// that the app no longer owns a width of its own at any viewport.
+#[test]
+fn card_width_is_the_framework_policy_at_every_viewport() {
+    // Roomy: the policy's own figure, untouched.
+    assert_eq!(batch_card_width(1920.0), BATCH_WIDTH);
+    assert_eq!(batch_card_width(1366.0), BATCH_WIDTH);
+    // Exactly the width the card needs: still no clamp.
+    assert_eq!(batch_card_width(BATCH_WIDTH + VIEWPORT_GUTTER), BATCH_WIDTH);
+    // Too narrow: the gutter clamp takes over, 32px off the viewport.
+    assert_eq!(batch_card_width(500.0), 500.0 - VIEWPORT_GUTTER);
+    assert_eq!(batch_card_width(400.0), 400.0 - VIEWPORT_GUTTER);
+}
+
+/// The Batch card's height is the content-fit ceiling, clamped last by
+/// the gutter — the same resolution order the editor's axis showed, with
+/// the ceiling replacing the 80%-of-viewport want.
+#[test]
+fn card_height_is_the_content_fit_ceiling_clamped_by_the_gutter() {
+    assert_eq!(batch_card_height(1080.0), CONTENT_HEIGHT_MAX);
+    assert_eq!(batch_card_height(600.0), CONTENT_HEIGHT_MAX);
+    // Below the ceiling the viewport wins: the card cannot be taller than
+    // the screen minus the gutter.
+    assert_eq!(batch_card_height(500.0), 500.0 - VIEWPORT_GUTTER);
+    assert_eq!(batch_card_height(400.0), 400.0 - VIEWPORT_GUTTER);
+}
+
+/// The card's size is the two axes composed, so no caller can pair a
+/// width from one policy with a height from another.
+#[test]
+fn card_size_composes_both_axes_from_the_one_policy() {
+    let size = batch_card_size(Size::new(1920.0, 1080.0));
+    assert_eq!(size, Size::new(BATCH_WIDTH, CONTENT_HEIGHT_MAX));
+
+    let squeezed = batch_card_size(Size::new(500.0, 400.0));
+    assert_eq!(squeezed, Size::new(468.0, 368.0));
+}
+
+/// The width this card used to carry is retired and must never come back.
+///
+/// `BATCH_CARD_WIDTH = 500.0` was the app's own figure and was 60px
+/// narrower than §4.6.2's `BATCH_MODAL_MAX`. The guard is written against
+/// the literal rather than the deleted constant so a future edit that
+/// re-introduces 500 anywhere in this card's width path fails here with a
+/// named reason instead of silently re-shrinking the dialog.
+#[test]
+fn the_retired_500px_card_width_never_returns() {
+    const RETIRED_BATCH_CARD_WIDTH: f32 = 500.0;
+    assert_ne!(RETIRED_BATCH_CARD_WIDTH, BATCH_WIDTH);
+    assert_ne!(batch_card_width(1920.0), RETIRED_BATCH_CARD_WIDTH);
+    assert_ne!(
+        batch_card_size(Size::new(1920.0, 1080.0)).width,
+        RETIRED_BATCH_CARD_WIDTH
+    );
+}
+
+/// The +60px the card gained is a real rewrap, not a rounding artefact:
+/// every prompt-candidate row now lays out across 60px more, so a display
+/// name that fitted on one line at 500 may take two at 560 or vice versa.
+/// Recorded here so the delta is a known change rather than a surprise.
+#[test]
+fn the_card_is_60px_wider_than_the_retired_figure() {
+    assert_eq!(BATCH_WIDTH - 500.0, 60.0);
+}
+
+// --- The pattern field's error comes from the subsystem ---------------
+
+/// A blank pattern in File mode is the subsystem's own refusal, worded by
+/// `strings`, and it is `'static` so the caption band can hold it.
+#[test]
+fn a_blank_pattern_in_file_mode_reports_the_required_message() {
+    let model = BatchDialogViewModel {
+        pattern: String::new(),
+        ..valid_model()
+    };
+    assert_eq!(
+        model.pattern_error(),
+        Some(strings::BATCH_PATTERN_REQUIRED_ERROR)
+    );
+
+    let blank_spaces = BatchDialogViewModel {
+        pattern: "   ".to_string(),
+        ..valid_model()
+    };
+    assert_eq!(
+        blank_spaces.pattern_error(),
+        Some(strings::BATCH_PATTERN_REQUIRED_ERROR)
+    );
+}
+
+/// An unparsable glob is a different message from a blank one, and neither
+/// is the raw `glob::PatternError` text.
+#[test]
+fn an_unparsable_glob_reports_the_invalid_message() {
+    let model = BatchDialogViewModel {
+        pattern: "[unclosed".to_string(),
+        ..valid_model()
+    };
+    assert_eq!(
+        model.pattern_error(),
+        Some(strings::BATCH_PATTERN_INVALID_ERROR)
+    );
+}
+
+/// A valid glob in File mode reports nothing.
+#[test]
+fn a_valid_glob_in_file_mode_reports_no_error() {
+    let model = BatchDialogViewModel {
+        pattern: "*.md".to_string(),
+        ..valid_model()
+    };
+    assert_eq!(model.pattern_error(), None);
+}
+
+/// Directory mode skips the pattern term entirely, so whatever is in the
+/// field cannot be a fault there.
+#[test]
+fn directory_mode_never_faults_the_pattern_field() {
+    for pattern in ["", "   ", "[unclosed", "*.md"] {
+        let model = BatchDialogViewModel {
+            pattern: pattern.to_string(),
+            mode: BatchMode::Directory,
+            ..valid_model()
+        };
+        assert_eq!(
+            model.pattern_error(),
+            None,
+            "Directory mode must not fault pattern {pattern:?}"
+        );
+    }
+}
+
+/// The pattern field's failure and the whole-composition gate agree: a
+/// field the card calls broken is a composition `can_start` refuses.
+#[test]
+fn a_faulted_pattern_field_also_blocks_start() {
+    let broken = BatchDialogViewModel {
+        pattern: "[unclosed".to_string(),
+        ..valid_model()
+    };
+    assert!(broken.pattern_error().is_some());
+    assert!(!broken.can_start());
+}
+
+// --- Progress status mapping ----------------------------------------
+
+/// A cancellation request is `Paused`, not `Error`: the user stopped the
+/// run, nothing failed.
+#[test]
+fn a_cancel_request_maps_to_paused_not_error() {
+    let cancelled = BatchRunStatus {
+        has_handle: true,
+        finished: true,
+        cancel_requested: true,
+    };
+    assert_eq!(progress_status(cancelled), ProgressStatus::Paused);
+    assert!(
+        !progress_status(cancelled).is_moving(),
+        "a cancel-requested run must not be drawn as still progressing"
+    );
+}
+
+/// A running batch is `Active`, and a finished one is still `Active`
+/// because `ProgressStatus` has no completed position — the completion
+/// text carries "done", not the bar.
+#[test]
+fn a_run_maps_to_active_and_completion_is_not_a_status() {
+    let running = BatchRunStatus {
+        has_handle: true,
+        finished: false,
+        cancel_requested: false,
+    };
+    let finished = BatchRunStatus {
+        has_handle: true,
+        finished: true,
+        cancel_requested: false,
+    };
+    assert_eq!(progress_status(running), ProgressStatus::Active);
+    assert_eq!(progress_status(finished), ProgressStatus::Active);
+    assert!(progress_status(running).is_moving());
+}
+
+/// The indeterminate model the bar is built from reports no fraction, so
+/// nothing here invents a completed-of-total count the batch subsystem
+/// never reported.
+#[test]
+fn the_progress_model_carries_no_invented_fraction() {
+    let model = ProgressModel::indeterminate().with_status(ProgressStatus::Active);
+    assert!(model.is_indeterminate());
+    assert_eq!(model.fraction(), None);
+}
+
+// --- Absorption -----------------------------------------------------
+
+/// `Absorbed` is the no-op the card-boundary `mouse_area` needs, and it
+/// must not disturb the open state.
+#[test]
+fn absorbed_changes_nothing() {
+    let mut state = BatchDialogState::new();
+    state.open(valid_model());
+    assert!(state.is_open());
+    assert!(
+        !state.apply(BatchDialogMessage::Absorbed),
+        "Absorbed must report no state change"
+    );
+    assert!(state.is_open());
+}
+
+/// Absorbing while closed stays closed — the variant cannot open a dialog.
+#[test]
+fn absorbed_cannot_open_a_closed_dialog() {
+    let mut state = BatchDialogState::new();
+    assert!(!state.is_open());
+    assert!(!state.apply(BatchDialogMessage::Absorbed));
+    assert!(!state.is_open());
 }

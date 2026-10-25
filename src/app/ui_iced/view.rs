@@ -39,7 +39,7 @@ use crate::ui_iced::agent::transcript::agent_transcript_view;
 use crate::ui_iced::agent_debug::agent_debug_card;
 use crate::ui_iced::app::{AppState, OverlayLayer};
 use crate::ui_iced::attributions::attributions_view;
-use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_dialog_card};
+use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_modal};
 use crate::ui_iced::dialogs::dialog_card;
 use crate::ui_iced::editor::editor_modal;
 use crate::ui_iced::layout;
@@ -53,6 +53,7 @@ use crate::ui_iced::panels::right::toc_indent_pixels;
 use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
+use iced::Size;
 use iced::widget::{button, column, container, mouse_area, scrollable, stack, text};
 
 /// Vertical gap between the three bands, in logical pixels.
@@ -256,10 +257,9 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             agent_debug_card(&state.models.debug),
             Message::Command(UserCommand::ToggleDebugWindow(false)),
         ),
-        OverlayLayer::Tools => modal(
-            crate::ui_iced::tools_dialog::tools_dialog_card(&state.models.tools),
-            Message::Tools(crate::ui_iced::message::ToolsDialogMessage::CloseRequested),
-        ),
+        OverlayLayer::Tools => {
+            crate::ui_iced::tools_dialog::tools_modal(&state.models.tools, state.viewport)
+        }
         OverlayLayer::About => modal_centered(
             about_card(&state.models.about, state.viewport),
             Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
@@ -270,17 +270,14 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
             Message::About(crate::ui_iced::message::AboutMessage::CloseRequested),
         ),
-        OverlayLayer::Batch => batch_layer(&state.models.batch),
+        OverlayLayer::Batch => batch_layer(&state.models.batch, state.viewport),
     }
 }
 
-/// The batch dialog layer: the card over a scrim whose dismiss publishes the
-/// `CancelBatch` command.
-fn batch_layer(view_model: &BatchDialogViewModel) -> iced::Element<'_, Message> {
-    modal(
-        batch_dialog_card(view_model),
-        Message::Command(UserCommand::CancelBatch),
-    )
+/// The batch dialog layer: the framed card centred over a scrim, with the
+/// card-boundary absorption and `CancelBatch` as the dismiss.
+fn batch_layer(view_model: &BatchDialogViewModel, viewport: Size) -> iced::Element<'_, Message> {
+    batch_modal(view_model, viewport)
 }
 
 /// An empty full-screen layer, standing in for a state the selector said was

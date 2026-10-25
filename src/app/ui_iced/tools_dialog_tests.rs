@@ -6,13 +6,16 @@
 //! ([RUST-006]); the only app-level read is one `FastMdApp::empty_state`
 //! smoke test.
 //!
-//! The `compute_dialog_size` cases pin the height rule across the
-//! row-count and viewport range the dialog can face.
+//! The `tools_card_*` cases pin the §4.6.2 sizing policy across the
+//! row-count and viewport range the dialog can face, and the `modal_error`
+//! cases pin `UIF-MOD-003`'s auth-failure banner and its `Recovery`.
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use iced::Size;
+use iced_pro::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
+use iced_pro::widget::badge_model::BadgeKind;
 
 /// An internal family group with two tools.
 fn internal_group(family: InternalToolGroup) -> ToolGroupState {
@@ -643,18 +646,37 @@ fn the_error_marker_uses_the_warning_token_and_the_text_the_error_token() {
     );
 }
 
+/// **This pin moved, and here is why.** It used to assert that the marker
+/// read `Palette::success` and `Palette::surface_variant` directly through
+/// two card-local helpers. Those helpers are retired: the marker is now a
+/// `UIF-ATOM-008` status badge, so its text and fill come out of
+/// `badge::resolve_tone` / `badge::resolve_style` and a card-local colour
+/// getter would be a second source of truth for one pill's paint.
+///
+/// What the pin still guards is unchanged and restated against the real
+/// source: the marker reads as *success*, and it must never read as an
+/// error.
 #[test]
-fn the_parallel_chip_tokens_come_from_the_shared_palette() {
-    assert_eq!(parallel_chip_color(), Palette::fastmd_dark().success);
-    assert_eq!(
-        parallel_chip_surface_color(),
-        Palette::fastmd_dark().surface_variant
-    );
+fn the_parallel_marker_tokens_come_from_the_badge_tone_resolver() {
+    let palette = Palette::pro();
+    let model = BadgeModel::status(StatusIcon::Success, strings::TOOLS_PARALLEL_CHIP)
+        .with_tone(BadgeTone::Success);
+    let style = badge::resolve_style(&model, &palette);
+    let tone = badge::resolve_tone(BadgeTone::Success, &palette);
+
+    assert_eq!(style.text, tone.text);
     assert_ne!(
-        parallel_chip_color(),
-        Palette::fastmd_dark().error,
-        "the parallel-safe chip must not read as an error badge"
+        style.text,
+        badge::resolve_tone(BadgeTone::Danger, &palette).text,
+        "the parallel-safe marker must not read as an error badge"
     );
+
+    let danger = badge::resolve_tone(BadgeTone::Danger, &palette);
+    assert_ne!(
+        style.fill, danger.dot_fill,
+        "the marker's surface must not read as an error badge either"
+    );
+    assert_ne!(style.fill, danger.solid_fill, "and not a solid error pill");
 }
 
 #[test]
@@ -707,77 +729,137 @@ fn card_and_table_build_for_a_populated_and_an_empty_model() {
             &name_len,
         ),
     ]);
-    assert!(std::mem::size_of_val(&tools_dialog_card(&populated)) > 0);
+    assert!(std::mem::size_of_val(&tools_dialog_card(&populated, ROOMY)) > 0);
     assert!(std::mem::size_of_val(&tools_table(populated.rows())) > 0);
 
     let empty = ToolsDialogViewModel::empty();
-    assert!(std::mem::size_of_val(&tools_dialog_card(&empty)) > 0);
+    assert!(std::mem::size_of_val(&tools_dialog_card(&empty, ROOMY)) > 0);
     // The header still renders with zero rows, so no extra widget is needed.
     assert!(std::mem::size_of_val(&tools_table(empty.rows())) > 0);
 }
 
-// --- height rule -----------------------------------------------------------
+// --- §4.6.2 sizing ---------------------------------------------------------
+//
+// Each case below replaces one `compute_dialog_size` pin. The reason each
+// pin moved is stated on the case, because the policy changed on both
+// ends: the app's `MIN_HEIGHT = 200` became the spec's
+// `TOOLS_HEIGHT_MIN = 320`, and its `MAX_HEIGHT_HARD_CAP = 1200` became
+// the framework's 80%-of-viewport cap with the `VIEWPORT_GUTTER` clamp
+// applied last.
 
+/// A roomy viewport, so the unclamped branch is what is being measured.
+const ROOMY: Size = Size::new(1920.0, 1080.0);
+
+/// The width is the framework's `TOOLS_WIDTH` and no longer the app's
+/// `DEFAULT_WIDTH` — the two agreed at 720, so the value is unchanged and
+/// only the owner moved.
 #[test]
-fn dialog_size_fits_few_rows_on_a_large_screen() {
-    let viewport = Size::new(1920.0, 1080.0);
-    // 7 groups: 56 + 20 + 7*24 + 8 = 252.
-    let (default_size, min_size, max_height) = compute_dialog_size(viewport, 7);
-    assert!(
-        default_size.height >= 250.0,
-        "default height must be large enough to fit 7 rows; got {}",
-        default_size.height
-    );
-    assert!(
-        (max_height - 918.0).abs() < 1.0,
-        "max_height should be 918 on a 1080-tall screen; got {max_height}"
-    );
-    assert!(min_size.height <= default_size.height);
+fn card_width_is_the_frameworks_720_until_the_gutter_clamps() {
+    assert_eq!(tools_card_width(1920.0), TOOLS_WIDTH);
+    assert_eq!(TOOLS_WIDTH, 720.0);
+    assert_eq!(tools_card_width(752.0), TOOLS_WIDTH);
+    assert_eq!(tools_card_width(700.0), 700.0 - VIEWPORT_GUTTER);
 }
 
+/// Seven groups on a 1080p screen: the content wants 301px and the
+/// policy's **floor** lifts it to 320.
+///
+/// This is where the old `MIN_HEIGHT = 200` pin moved. The retired rule
+/// produced 252 and called it a fit; the framework's floor is 320, so the
+/// card is 68px taller than the old rule asked for and 320 rather than
+/// the old test's "≥ 250". The floor is the spec's, not the app's.
 #[test]
-fn dialog_size_fits_many_rows_when_the_screen_has_room() {
+fn few_rows_on_a_large_screen_sit_on_the_policy_floor() {
     let viewport = Size::new(1920.0, 1080.0);
-    // 30 rows: 56 + 20 + 30*24 + 8 = 804, inside the 918 cap.
-    let (default_size, _min_size, max_height) = compute_dialog_size(viewport, 30);
+    let content = tools_content_height(7, false);
+    assert_eq!(content, 301.0, "24 + 20 + 1 + 32*8");
+
+    let height = tools_card_height(viewport, 7, false);
+    assert_eq!(height, TOOLS_HEIGHT_MIN);
     assert!(
-        default_size.height >= 804.0,
-        "default height must fit all 30 rows when the screen has room; got {}",
-        default_size.height
+        height > 252.0,
+        "the retired rule produced 252; the framework floor must be taller"
     );
-    assert!(max_height >= default_size.height);
 }
 
+/// Thirty groups on a 1080p screen: the content wants 1037px and the
+/// **80%-of-viewport cap** pulls it back to 864, so the list scrolls.
+///
+/// The old pin said 804 fits inside a 918 cap (0.85 of the viewport).
+/// The framework caps at 0.80, so the card is 40px shorter and the
+/// remaining rows scroll. The cap moved from the app's 0.85 to the
+/// spec's 0.80.
 #[test]
-fn dialog_size_caps_on_a_small_screen() {
+fn many_rows_are_capped_at_eighty_percent_of_the_viewport() {
+    let viewport = Size::new(1920.0, 1080.0);
+    assert_eq!(tools_content_height(30, false), 1037.0);
+
+    let height = tools_card_height(viewport, 30, false);
+    assert_eq!(height, 1080.0 * 0.8);
+    assert!(height < 918.0, "the retired 0.85 cap must not return");
+}
+
+/// A small screen with a hundred groups: the 320 floor and the 80% cap
+/// agree at 320, and the gutter leaves room for it.
+#[test]
+fn a_small_screen_still_holds_the_floor() {
     let viewport = Size::new(800.0, 400.0);
-    let (_default_size, _min_size, max_height) = compute_dialog_size(viewport, 100);
-    // 400 * 0.85 = 340, so 100 rows cannot overflow the screen.
-    assert!(max_height < 400.0, "max_height must be < screen height");
-    assert!(max_height > MIN_HEIGHT, "max_height must stay usable");
+    let height = tools_card_height(viewport, 100, false);
+    assert_eq!(height, TOOLS_HEIGHT_MIN);
+    assert!(height < viewport.height - VIEWPORT_GUTTER);
 }
 
+/// A viewport shorter than the floor: the **gutter beats the floor**, the
+/// resolution order the framework documents.
+///
+/// The old rule clamped to `MIN_HEIGHT` and would have handed back 200 on
+/// a 100px screen — a card taller than the window. The framework takes
+/// `viewport - VIEWPORT_GUTTER` = 68 instead, so the card always fits.
 #[test]
-fn dialog_size_never_goes_below_the_minimum() {
+fn the_gutter_beats_the_floor_on_a_stubby_viewport() {
     let viewport = Size::new(800.0, 100.0);
-    let (default_size, min_size, max_height) = compute_dialog_size(viewport, 0);
-    assert!(default_size.height >= MIN_HEIGHT);
-    assert!(min_size.height <= default_size.height);
-    assert!(max_height >= MIN_HEIGHT);
-}
-
-#[test]
-fn the_hard_cap_bounds_a_giant_viewport() {
-    let viewport = Size::new(3840.0, 2160.0);
-    let (_default, _min, max_height) = compute_dialog_size(viewport, 500);
+    let height = tools_card_height(viewport, 0, false);
+    assert_eq!(height, 100.0 - VIEWPORT_GUTTER);
     assert!(
-        (max_height - MAX_HEIGHT_HARD_CAP).abs() < 1.0,
-        "a 4K viewport must still cap at the hard limit; got {max_height}"
+        height < TOOLS_HEIGHT_MIN,
+        "the floor must yield to the gutter rather than overflow the screen"
     );
 }
 
+/// A 4K viewport with five hundred groups caps at 80% of the screen
+/// (1728px), **not** at the retired 1200px hard cap.
+///
+/// The old `MAX_HEIGHT_HARD_CAP = 1200` pin is the one that moved most.
+/// The framework has no absolute height ceiling for this modal: §4.6.2
+/// caps it against the viewport, and a 2160px screen has the room. The
+/// card is therefore taller than the old cap allowed, and still bounded —
+/// by the screen rather than by a number the app invented.
 #[test]
-fn view_model_size_for_uses_its_own_row_count() {
+fn a_giant_viewport_caps_at_the_viewport_not_a_hard_cap() {
+    let viewport = Size::new(3840.0, 2160.0);
+    let height = tools_card_height(viewport, 500, false);
+    assert_eq!(height, 2160.0 * 0.8);
+    assert_ne!(height, 1200.0, "the retired hard cap must not return");
+}
+
+/// The error banner's band is charged into the content height, so a
+/// failing authentication cannot push the list out of a card sized for
+/// the clean state.
+#[test]
+fn the_error_banner_band_is_reserved_in_the_height() {
+    let clean = tools_content_height(7, false);
+    let failing = tools_content_height(7, true);
+    assert!(
+        failing > clean,
+        "showing an error must add height, not steal it from the list"
+    );
+    assert_eq!(failing - clean, 20.0 + 8.0, "BODY line + space.SM");
+}
+
+/// `size_for` is the policy applied to this snapshot's own row count and
+/// error state, not a fixed figure.
+#[test]
+fn view_model_size_for_uses_its_own_row_count_and_error_state() {
     let view_model = ToolsDialogViewModel::with_rows(vec![row_from_group(
         &internal_group(InternalToolGroup::Trello),
         McpAuthFacts::default(),
@@ -786,8 +868,9 @@ fn view_model_size_for_uses_its_own_row_count() {
     let viewport = Size::new(1920.0, 1080.0);
     assert_eq!(
         view_model.size_for(viewport),
-        compute_dialog_size(viewport, 1)
+        tools_card_size(viewport, 1, view_model.shows_error())
     );
+    assert_eq!(view_model.size_for(viewport).width, TOOLS_WIDTH);
 }
 
 // --- window state transitions ------------------------------------------
@@ -906,4 +989,337 @@ fn from_app_marks_a_stdio_server_ineligible_for_oauth() {
     assert_eq!(row.kind_label, strings::TOOLS_KIND_MCP_STDIO);
     assert!(!row.auth_state.shows_controls());
     assert!(row_actions(row).is_empty());
+}
+// --- The `✓ parallel` marker is a framework status badge -----------------
+//
+// `widget::chip` (`UIF-ATOM-006`) was the first candidate for this marker
+// and is the wrong component: its three variants (`Assist`, `Filter`,
+// `Input`) all describe *what pressing the chip does*, and its selected
+// polarity resolves to `accent.fill` — there is no success colour anywhere
+// in `ChipStyle`. A `✓` that reports "this group may run concurrently" is
+// a judgement, and §3.8's status chip is the framework's component for a
+// judgement. These cases pin that the marker really is resolved as
+// `UIF-ATOM-008` and not painted from the retired ad-hoc constants.
+
+/// The marker resolves as a `Status` badge on the `Success` tone.
+#[test]
+fn the_parallel_marker_is_a_success_tone_status_badge() {
+    let model = BadgeModel::status(StatusIcon::Success, strings::TOOLS_PARALLEL_CHIP)
+        .with_tone(BadgeTone::Success);
+
+    assert!(
+        matches!(model.kind(), BadgeKind::Status { .. }),
+        "the marker must be a judgement (Status), not a count or a dot"
+    );
+    assert_eq!(model.tone(), BadgeTone::Success);
+}
+
+/// Every box measurement comes from the badge resolver, and none of them is
+/// the retired `CHIP_PADDING = 2` / `CHIP_RADIUS = 3` / `TOOLS_CHIP_SIZE = 12`.
+#[test]
+fn the_marker_box_is_resolved_not_ad_hoc() {
+    let palette = Palette::pro();
+    let model = BadgeModel::status(StatusIcon::Success, strings::TOOLS_PARALLEL_CHIP)
+        .with_tone(BadgeTone::Success);
+    let style = badge::resolve_style(&model, &palette);
+
+    assert_eq!(style.height, badge::CHIP_HEIGHT);
+    assert_eq!(style.h_padding, space::SM);
+    assert_eq!(style.radius, shape::RADIUS_PILL);
+    assert_eq!(style.border_width, badge::CHIP_BORDER_WIDTH);
+    assert!(style.shows_glyph, "a status badge always carries its glyph");
+
+    // The retired ad-hoc figures, asserted absent rather than merely unused.
+    const RETIRED_CHIP_PADDING: f32 = 2.0;
+    const RETIRED_CHIP_RADIUS: f32 = 3.0;
+    const RETIRED_CHIP_SIZE: f32 = 12.0;
+    assert_ne!(style.h_padding, RETIRED_CHIP_PADDING);
+    assert_ne!(style.radius, RETIRED_CHIP_RADIUS);
+    assert_ne!(style.height, RETIRED_CHIP_SIZE);
+}
+
+/// The marker's colour is the `Success` tone's own text colour, resolved
+/// through the tone table — not the app palette's `success` token reached
+/// for directly, and not the chip resolver's `accent.fill`.
+#[test]
+fn the_marker_colour_is_the_success_tone_not_an_accent() {
+    let palette = Palette::pro();
+    let model = BadgeModel::status(StatusIcon::Success, strings::TOOLS_PARALLEL_CHIP)
+        .with_tone(BadgeTone::Success);
+    let style = badge::resolve_style(&model, &palette);
+
+    let tone = badge::resolve_tone(BadgeTone::Success, &palette);
+    assert_eq!(style.text, tone.text);
+    assert_eq!(style.glyph, tone.text);
+    assert_ne!(
+        style.fill, palette.accent_fill,
+        "the marker must not read as a selected chip"
+    );
+}
+
+/// The success text on the badge's own fill clears the text-contrast bar,
+/// recomputed from the raw sRGB values rather than trusted from the
+/// resolver's own lock.
+#[test]
+fn the_marker_text_clears_the_contrast_bar_against_its_fill() {
+    let palette = Palette::pro();
+    let model = BadgeModel::status(StatusIcon::Success, strings::TOOLS_PARALLEL_CHIP)
+        .with_tone(BadgeTone::Success);
+    let style = badge::resolve_style(&model, &palette);
+
+    let ratio = iced_pro::token::contrast::contrast_ratio(style.text, style.fill);
+    assert!(
+        iced_pro::token::contrast::meets_text_contrast(style.text, style.fill),
+        "success text on the badge fill is {ratio:.4}:1, below the 4.5:1 text bar"
+    );
+}
+
+/// A row that is not parallel-safe gets no marker at all — the absence is
+/// not a negative signal, so no second badge appears in its place.
+#[test]
+fn a_non_parallel_row_still_gets_no_marker() {
+    let mut row = row_from_group(
+        &internal_group(InternalToolGroup::Trello),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    row.parallel_safe = false;
+    assert_eq!(parallel_chip_label(&row), None);
+
+    row.parallel_safe = true;
+    assert_eq!(
+        parallel_chip_label(&row),
+        Some(strings::TOOLS_PARALLEL_CHIP),
+        "the pinned label is still the model-level rule"
+    );
+}
+
+// --- UIF-MOD-003: the auth failure the dialog actually has -------------
+
+/// An MCP group whose recorded error is an authentication failure raises a
+/// structured banner with a live `Recovery::Retry` (`UIF-MOD-003`).
+#[test]
+fn a_failed_authentication_raises_a_modal_error_with_retry() {
+    let view_model = ToolsDialogViewModel::with_rows(vec![auth_failing_row("srv")]);
+
+    let error = view_model
+        .modal_error()
+        .expect("an authentication failure must surface a banner");
+    assert_eq!(error.recovery(), &Recovery::Retry);
+    assert!(view_model.shows_error());
+}
+
+/// The banner carries the `NFR-004` error code and names the server the
+/// flow was for, in both the message and the location.
+#[test]
+fn the_banner_names_the_code_and_the_server() {
+    let view_model = ToolsDialogViewModel::with_rows(vec![auth_failing_row("linear")]);
+    let error = view_model.modal_error().unwrap();
+
+    assert_eq!(error.code(), TOOLS_AUTH_ERROR_CODE);
+    assert!(
+        error.message().contains("linear"),
+        "the message must name the server; got {:?}",
+        error.message()
+    );
+    assert_eq!(
+        error.location(),
+        Some(&ErrorLocation::Region("Kind: linear".to_string()))
+    );
+}
+
+/// The `Retry` affordance is genuinely wired: it re-issues
+/// `StartMcpAuth` for the same server, the same command the row's own
+/// Authenticate button carries.
+#[test]
+fn the_retry_reissues_the_authentication_that_failed() {
+    let view_model = ToolsDialogViewModel::with_rows(vec![auth_failing_row("srv")]);
+    assert_eq!(view_model.retry_message(), Some(start_auth_command("srv")));
+}
+
+/// An execution failure is a different fault and does **not** raise the
+/// card-level auth banner — it stays where [UI-057] puts it, in the row's
+/// `⚠` tooltip.
+#[test]
+fn an_execution_error_is_not_surfaced_as_an_auth_failure() {
+    let mut row = row_from_group(
+        &mcp_group("srv", ToolGroupKind::McpRemote, true),
+        McpAuthFacts::default(),
+        &name_len,
+    );
+    row.error = Some("Execution: tool blew up".to_string());
+    row.error_kind = Some(ToolErrorKind::Execution);
+
+    let view_model = ToolsDialogViewModel::with_rows(vec![row]);
+    assert!(
+        view_model.modal_error().is_none(),
+        "an execution failure must not claim the auth banner"
+    );
+    assert!(!view_model.shows_error());
+    // …and the row-level tooltip still carries it.
+    assert_eq!(
+        error_tooltip_body(view_model.rows().first().unwrap()),
+        Some("Execution: tool blew up")
+    );
+}
+
+/// A clean dialog has no banner, so the reserved band costs nothing.
+#[test]
+fn a_clean_dialog_carries_no_banner() {
+    let view_model = ToolsDialogViewModel::with_rows(vec![row_from_group(
+        &internal_group(InternalToolGroup::Trello),
+        McpAuthFacts::default(),
+        &name_len,
+    )]);
+    assert!(view_model.modal_error().is_none());
+    assert_eq!(view_model.retry_message(), None);
+    assert!(!view_model.shows_error());
+}
+
+/// The error **kind** survives the row mapping, so the banner never has to
+/// parse the rendered `Kind: message` line back apart to know what failed.
+#[test]
+fn the_error_kind_is_carried_through_the_row_mapping() {
+    let group = mcp_group("srv", ToolGroupKind::McpRemote, true);
+    let mut group = group;
+    group.last_error = Some(ToolGroupError {
+        kind: ToolErrorKind::Authentication,
+        message: "401 unauthorized".to_string(),
+        occurred_at_unix_ms: 1_700_000_000_000,
+    });
+
+    let row = row_from_group(&group, McpAuthFacts::default(), &name_len);
+    assert_eq!(row.error_kind, Some(ToolErrorKind::Authentication));
+    assert_eq!(
+        row.error.as_deref(),
+        Some("Authentication: 401 unauthorized")
+    );
+}
+
+// --- Button variants: what each action costs the user -------------------
+
+/// `Forget` is the one `Danger` control on the card: it discards a stored
+/// credential the user cannot re-derive without running the flow again.
+#[test]
+fn forget_is_the_only_danger_action() {
+    let row = auth_failing_row("srv");
+    let actions = row_actions(&row);
+
+    let forget = actions
+        .iter()
+        .find(|a| a.label == strings::TOOLS_FORGET)
+        .expect("an eligible MCP row must offer Forget");
+    assert!(forget.is_enabled());
+    assert_eq!(
+        action_variant(forget),
+        ButtonVariant::Danger,
+        "discarding a credential is the destructive act"
+    );
+}
+
+/// `Restart` and `Authenticate` are `Secondary`: both just try again, and
+/// neither takes anything away.
+#[test]
+fn retrying_actions_are_secondary_not_danger() {
+    let row = auth_failing_row("srv");
+    for label in [strings::TOOLS_RESTART, strings::TOOLS_AUTH_BUTTON] {
+        let action = row_actions(&row)
+            .into_iter()
+            .find(|a| a.label == label)
+            .unwrap_or_else(|| panic!("{label} must be offered on a failing auth row"));
+        assert_eq!(
+            action_variant(&action),
+            ButtonVariant::Secondary,
+            "{label} only re-runs work and must not wear the destructive skin"
+        );
+    }
+}
+
+/// An inert `Authenticating…` action stays visible and reports itself
+/// disabled rather than vanishing mid-flow (AGENTS §6).
+#[test]
+fn an_in_flight_auth_action_stays_visible_and_inert() {
+    let mut row = auth_failing_row("srv");
+    row.auth_state = ToolAuthState::InProgress;
+    let actions = row_actions(&row);
+
+    let running = actions
+        .iter()
+        .find(|a| a.label == strings::TOOLS_AUTH_RUNNING)
+        .expect("an in-progress row must show the running label");
+    assert!(!running.is_enabled());
+    assert_eq!(action_focus_id(running.label), "tools.action.running");
+}
+
+/// Each action label maps to a distinct stable focus id, so no two live
+/// buttons can share one (AGENTS §5).
+#[test]
+fn every_action_label_maps_to_its_own_focus_id() {
+    let ids = [
+        action_focus_id(strings::TOOLS_FORGET),
+        action_focus_id(strings::TOOLS_RESTART),
+        action_focus_id(strings::TOOLS_AUTH_BUTTON),
+        action_focus_id(strings::TOOLS_AUTH_RUNNING),
+    ];
+    let mut unique = ids.to_vec();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "focus ids must not collide: {ids:?}"
+    );
+}
+
+// --- Absorption -------------------------------------------------------
+
+/// `Absorbed` is the no-op the card-boundary `mouse_area` needs.
+#[test]
+fn absorbed_changes_nothing() {
+    let mut state = ToolsDialogState::new();
+    assert!(state.open());
+    assert!(
+        !state.apply(ToolsDialogMessage::Absorbed),
+        "Absorbed must report no state change"
+    );
+    assert!(state.is_open());
+}
+
+/// Absorbing while closed stays closed.
+#[test]
+fn absorbed_cannot_open_a_closed_dialog() {
+    let mut state = ToolsDialogState::new();
+    assert!(!state.apply(ToolsDialogMessage::Absorbed));
+    assert!(!state.is_open());
+}
+
+// --- fixtures ---------------------------------------------------------
+
+/// An MCP row whose last recorded error is a failed authentication.
+fn auth_failing_row(server: &str) -> ToolGroupRow {
+    let mut group = mcp_group(server, ToolGroupKind::McpRemote, true);
+    group.last_error = Some(ToolGroupError {
+        kind: ToolErrorKind::Authentication,
+        message: "401 unauthorized".to_string(),
+        occurred_at_unix_ms: 1_700_000_000_000,
+    });
+    row_from_group(
+        &group,
+        McpAuthFacts {
+            eligible: true,
+            in_progress: false,
+        },
+        &name_len,
+    )
+}
+
+/// The variant the renderer would give this action — the same rule
+/// `action_button` applies, exposed so the test can assert it without
+/// building a widget tree.
+fn action_variant(action: &ToolAction) -> ButtonVariant {
+    if action.label == strings::TOOLS_FORGET {
+        ButtonVariant::Danger
+    } else {
+        ButtonVariant::Secondary
+    }
 }

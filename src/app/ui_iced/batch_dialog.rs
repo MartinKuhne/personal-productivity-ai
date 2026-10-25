@@ -66,40 +66,93 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use iced::widget::{
-    Column, Row, button, container, mouse_area, pick_list, rule, scrollable, space, text,
-    text_input,
+    Column, Row, Space, container, mouse_area, pick_list, scrollable, text, text_input,
 };
-use iced::{Alignment, Background, Element, Length};
+use iced::{Alignment, Background, Element, Length, Size};
+
+use iced_pro::composite::{form_field, list_tile};
+use iced_pro::state::BaseState;
+use iced_pro::surface::modal::{CONTENT_HEIGHT_MAX, ModalFrame, ModalSizing};
+use iced_pro::token::{space, typography};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
+use iced_pro::widget::combo_box;
+use iced_pro::widget::progress;
+use iced_pro::widget::progress_model::{ProgressModel, ProgressStatus};
 
 use crate::agent::batch::types::{BatchDialogConfig, validate_batch_params};
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{BatchDialogMessage, Message};
-use crate::ui_iced::overlay::{ConfirmCancel, confirm_cancel_buttons};
+use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
 
 /// The batch payload the Process button composes — reused unchanged from
 /// the batch subsystem ([RUST-051]); it is the `UserCommand::StartBatch`
 /// payload (`src/app/bus/events/user_command.rs:134`).
 pub use crate::agent::batch::types::{BatchConfig, BatchMode, PromptInfo};
 
-/// Minimum width of the batch card, in logical pixels.
-pub const BATCH_CARD_WIDTH: f32 = 500.0;
+/// §4.6.2 — the Batch Processing card's sizing policy: 560px wide clamped
+/// to the viewport gutter, content-fit up to [`CONTENT_HEIGHT_MAX`].
+///
+/// Held as the policy object rather than two numbers, so the card states
+/// *which* modal it is and the framework does the clamping. This replaced
+/// the app's fixed `BATCH_CARD_WIDTH = 500`, which was 60px narrower than
+/// the spec's `BATCH_MODAL_MAX` and was the same width on a laptop and a
+/// 4K monitor.
+pub const BATCH_SIZING: ModalSizing = ModalSizing::batch_processing();
 
-/// Vertical gap between card rows, in logical pixels.
-pub const BATCH_SECTION_SPACING: f32 = 10.0;
+/// The Batch card's **outer** width for a viewport width (§4.6.2).
+///
+/// 560px on any viewport wide enough to hold it, clamped to
+/// `viewport.width - VIEWPORT_GUTTER` (`space::XXL`, 32px) below that.
+/// The card's padding is *inside* this figure — see
+/// [`crate::ui_iced::overlay::modal_card`].
+#[must_use]
+pub fn batch_card_width(viewport_width: f32) -> f32 {
+    BATCH_SIZING.width.resolve(viewport_width, 0.0)
+}
 
-/// Logical point size of a field label, row or hint.
-pub const BATCH_BODY_SIZE: f32 = 14.0;
+/// The Batch card's **outer** height for a viewport height (§4.6.2).
+///
+/// The policy is content-fit capped at [`CONTENT_HEIGHT_MAX`] (480px),
+/// clamped last by the viewport gutter. Because the app cannot measure its
+/// own content before laying out, the card is mounted *at* that ceiling
+/// with its body in a scrollable — which is exactly what the framework
+/// constant's own words describe: "the tallest a content-fit modal body
+/// is allowed to get before it has to scroll".
+///
+/// The alternative — shrinking to the content — is not available at this
+/// card's shape: five stacked [`form_field`]
+/// rows alone consume `5 × STACKED_HEIGHT` = 380px before the prompt
+/// candidate list is given a single pixel, so a content-fit card would
+/// already be at the ceiling with no room for the one region that actually
+/// needs it. See the module docs.
+#[must_use]
+pub fn batch_card_height(viewport_height: f32) -> f32 {
+    BATCH_SIZING
+        .height
+        .resolve(viewport_height, CONTENT_HEIGHT_MAX)
+}
 
-/// Logical point size of the running-view heading.
-pub const BATCH_HEADING_SIZE: f32 = 18.0;
+/// The Batch card's outer size for a viewport (§4.6.2).
+#[must_use]
+pub fn batch_card_size(viewport: Size) -> Size {
+    Size::new(
+        batch_card_width(viewport.width),
+        batch_card_height(viewport.height),
+    )
+}
 
-/// Maximum height of the scrollable prompt-candidate list.
-pub const BATCH_PROMPT_LIST_MAX_HEIGHT: f32 = 180.0;
+/// Stable id of the Batch card box itself, so a layout test can address
+/// the rendered card rather than only its contents (AGENTS §5).
+pub const BATCH_CARD_ID: &str = "batch.card";
 
-/// Width of the horizontal rules separating card sections.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Stable focus id of the footer `Process` button.
+pub const BATCH_PROCESS_BUTTON_ID: &str = "batch.process";
+
+/// Stable focus id of the footer `Cancel` / `Close` button.
+pub const BATCH_CANCEL_BUTTON_ID: &str = "batch.cancel";
 
 /// Lowest selectable concurrency — the lower bound of the pick list
 /// (`(1u8..=8)`) and of
@@ -383,10 +436,43 @@ impl BatchDialogViewModel {
         self.mode == BatchMode::File
     }
 
+    /// The wildcard pattern field's own failure message, `None` when the
+    /// field is acceptable.
+    ///
+    /// The **decision** is the batch subsystem's, not this card's: it is
+    /// `validate_batch_params` pinned at [`CONCURRENCY_MIN`] so the
+    /// concurrency term can never be the one that fails and what the field
+    /// reports is genuinely the pattern's own fault. In Directory mode the
+    /// subsystem skips the pattern entirely, so this is `None` there.
+    ///
+    /// Only the **wording** is local, and it is a `&'static str` on
+    /// purpose: the `form_field` caption band borrows its message for as
+    /// long as the card lives, and a `String` minted here could not
+    /// outlive the frame that rendered it. The subsystem's raw
+    /// `glob::PatternError` text is deliberately not surfaced — it is
+    /// developer-facing, and §4 puts user-facing wording in
+    /// `ui/strings.rs`.
+    ///
+    /// Purity: pure.
+    #[must_use]
+    pub fn pattern_error(&self) -> Option<&'static str> {
+        if validate_batch_params(self.mode, &self.pattern, CONCURRENCY_MIN).is_ok() {
+            return None;
+        }
+        // The trimmed-empty test picks *which* message to show, never
+        // *whether* one is shown — the failure itself came from the
+        // subsystem above, so this cannot widen or narrow the rule.
+        if self.pattern.trim().is_empty() {
+            Some(strings::BATCH_PATTERN_REQUIRED_ERROR)
+        } else {
+            Some(strings::BATCH_PATTERN_INVALID_ERROR)
+        }
+    }
+
     /// Renders this snapshot as the batch card ([`batch_dialog_card`]).
     #[must_use]
-    pub fn view(&self) -> Element<'_, Message> {
-        batch_dialog_card(self)
+    pub fn view(&self, viewport: Size) -> Element<'_, Message> {
+        batch_dialog_card(self, viewport)
     }
 }
 
@@ -562,6 +648,7 @@ impl BatchDialogState {
             BatchDialogMessage::ConcurrencyChanged(concurrency) => {
                 apply_field(&mut self.model.concurrency, concurrency)
             }
+            BatchDialogMessage::Absorbed => false,
         }
     }
 }
@@ -575,26 +662,30 @@ fn apply_field<T: PartialEq>(field: &mut T, value: T) -> bool {
     true
 }
 
-/// Renders the batch card.
+/// Renders the batch card at its §4.6.2 size.
 ///
-/// The card is the *content* only: the root view mounts it through
-/// [`crate::ui_iced::overlay::modal`] with [`cancel_message()`] as the
-/// dismiss message so a scrim click or Escape cancels.
+/// The card is the *content* only: [`batch_modal`] mounts it through
+/// [`crate::ui_iced::overlay::modal_centered`], which supplies the scrim
+/// and the card-boundary absorption.
 ///
 /// ```text
-/// configuration view                          progress view
-/// ───────────────────────────────           ───────────────────────────────
-/// Directory:  [ pick list          v ]      Batch Processing
-/// Pattern:    [ *.md             (inert    ───────────────────────────────
-///                in Directory mode) ]       Processing...
-/// Prompt:                                 Click Cancel to stop processing...
-/// ┌ scrollable candidate rows ──┐         ───────────────────────────────
-/// │ System / Skills/Batch/Foo   │                        [ Cancel ]
-/// └─────────────────────────────┘
-/// Mode:       (•) File   ( ) Directory
-/// Concurrency:[ 4 v ]
-/// ───────────────────────────────
-///                    [ Process ] [ Cancel ]
+/// ┌─ Batch card · ModalSizing::batch_processing() · radius 6 ────────┐
+/// │ Batch Prompt Processing                                          │
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │ Directory:                                            (required) │
+/// │ [ Select directory...                                       v ]  │
+/// │ Pattern:                                                    hint │
+/// │ [ *.md                                                     | ]   │
+/// │ Mode:                                                            │
+/// │ ( ) File   ( ) Directory                                         │
+/// │ Concurrency:                                                     │
+/// │ [ 4 v ]                                                          │
+/// │ Prompt:                                                          │
+/// │ ┌ scrollable candidate rows (list_tile, 32px each) ─────────────┐│
+/// │ └───────────────────────────────────────────────────────────────┘│
+/// │ ──────────────────────────────────────────────────────────────── │
+/// │                          [ Cancel ] [ Process ]                  │
+/// └─────────────────────────────────────────────────────────────────┘
 /// ```
 ///
 /// Emitted messages:
@@ -606,24 +697,39 @@ fn apply_field<T: PartialEq>(field: &mut T, value: T) -> bool {
 /// * Process → [`UserCommand::StartBatch`] via [`start_message`]
 /// * Cancel / Close → [`UserCommand::CancelBatch`] via [`cancel_message`]
 ///
-/// Purity: pure view over `view_model`.
+/// Purity: pure view over `view_model` and `viewport`.
 #[must_use]
-pub fn batch_dialog_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
+pub fn batch_dialog_card(
+    view_model: &BatchDialogViewModel,
+    viewport: Size,
+) -> Element<'_, Message> {
     if view_model.status.shows_progress_view() {
-        progress_card(view_model)
+        progress_card(view_model, viewport)
     } else {
-        config_card(view_model)
+        config_card(view_model, viewport)
     }
 }
 
+/// The card's title bar (§4.6.1 — "Title (16px Bold)").
+fn card_title() -> Element<'static, Message> {
+    rung(
+        strings::BATCH_DIALOG_WINDOW,
+        typography::TITLE_SM,
+        Palette::fastmd_dark().text_strong,
+    )
+    .into()
+}
+
 /// The idle configuration card.
-fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message> {
-    let palette = Palette::fastmd_dark();
-    let label = |text_value: &'static str| {
-        text(text_value)
-            .size(BATCH_BODY_SIZE)
-            .color(palette.text_strong)
-    };
+///
+/// Every labelled row is a [`form_field`] band triple: the framework
+/// resolves the label, the required marker and the caption's voice, so no
+/// row here restates a colour or a point size. The rows are stacked in a
+/// fixed-height card whose remaining space is taken by the prompt
+/// candidate list — see [`batch_card_height`] for why the card is mounted
+/// at the policy ceiling rather than shrinking.
+fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Element<'a, Message> {
+    let frame = modal_frame();
 
     let directory_options = view_model.directory_options();
     let selected_directory = view_model
@@ -631,19 +737,31 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message>
         .and_then(|idx| directory_options.get(idx))
         .cloned();
 
-    let directory_row = Row::with_children(vec![
-        label(strings::BATCH_DIALOG_DIRECTORY_LABEL).into(),
+    let directory = stacked_field(
+        strings::BATCH_DIALOG_DIRECTORY_LABEL,
+        true,
+        None,
+        view_model.selected_dir_idx.is_some(),
+        None,
+        None,
         pick_list(directory_options, selected_directory, |option| {
             Message::Batch(BatchDialogMessage::DirectorySelected(Some(option.index)))
         })
         .placeholder(strings::BATCH_DIALOG_SELECT_DIRECTORY)
+        .width(Length::Fill)
         .into(),
-    ])
-    .spacing(BATCH_SECTION_SPACING)
-    .align_y(Alignment::Center);
+    );
 
-    let pattern_row = Row::with_children(vec![
-        label(strings::BATCH_DIALOG_PATTERN_LABEL).into(),
+    let pattern_error = view_model.pattern_error();
+    let pattern = stacked_field(
+        strings::BATCH_DIALOG_PATTERN_LABEL,
+        view_model.pattern_editable(),
+        None,
+        pattern_error.is_none(),
+        view_model
+            .pattern_editable()
+            .then_some(strings::BATCH_PATTERN_FIELD_HELPER),
+        pattern_error,
         text_input(strings::BATCH_DIALOG_PATTERN_HINT, &view_model.pattern)
             // In Directory mode the pattern is unused, so the field stays
             // allocated but stops reporting edits.
@@ -652,92 +770,161 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel) -> Element<'a, Message>
                     .pattern_editable()
                     .then_some(|text| Message::Batch(BatchDialogMessage::PatternChanged { text })),
             )
+            .width(Length::Fill)
             .into(),
-    ])
-    .spacing(BATCH_SECTION_SPACING)
-    .align_y(Alignment::Center);
+    );
 
-    let prompt_section = Column::with_children(vec![
-        label(strings::BATCH_DIALOG_PROMPT_LABEL).into(),
-        scrollable(prompt_rows(view_model))
-            .height(Length::Fixed(BATCH_PROMPT_LIST_MAX_HEIGHT))
+    let mode = stacked_field(
+        strings::BATCH_DIALOG_MODE_LABEL,
+        false,
+        None,
+        true,
+        None,
+        None,
+        Row::with_children(vec![
+            iced::widget::radio(
+                strings::BATCH_MODE_FILE,
+                BatchMode::File,
+                Some(view_model.mode),
+                |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
+            )
             .into(),
-    ])
-    .spacing(2.0);
-
-    let mode_row = Row::with_children(vec![
-        label(strings::BATCH_DIALOG_MODE_LABEL).into(),
-        iced::widget::radio(
-            strings::BATCH_MODE_FILE,
-            BatchMode::File,
-            Some(view_model.mode),
-            |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
-        )
+            iced::widget::radio(
+                strings::BATCH_MODE_DIRECTORY,
+                BatchMode::Directory,
+                Some(view_model.mode),
+                |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
+            )
+            .into(),
+        ])
+        .spacing(space::LG)
+        .align_y(Alignment::Center)
         .into(),
-        iced::widget::radio(
-            strings::BATCH_MODE_DIRECTORY,
-            BatchMode::Directory,
-            Some(view_model.mode),
-            |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
-        )
-        .into(),
-    ])
-    .spacing(BATCH_SECTION_SPACING)
-    .align_y(Alignment::Center);
+    );
 
-    let concurrency_row = Row::with_children(vec![
-        label(strings::BATCH_DIALOG_CONCURRENCY_LABEL).into(),
+    let concurrency = stacked_field(
+        strings::BATCH_DIALOG_CONCURRENCY_LABEL,
+        false,
+        None,
+        true,
+        Some(strings::BATCH_CONCURRENCY_HELPER),
+        None,
         pick_list(
             BatchDialogViewModel::concurrency_options(),
             Some(view_model.concurrency),
             |value| Message::Batch(BatchDialogMessage::ConcurrencyChanged(value)),
         )
+        .width(Length::Fixed(combo_box::MIN_WIDTH))
         .into(),
-    ])
-    .spacing(BATCH_SECTION_SPACING)
-    .align_y(Alignment::Center);
+    );
+
+    let prompt = prompt_section(view_model);
+
+    let body = Column::with_children(vec![directory, pattern, mode, concurrency, prompt])
+        .spacing(space::MD);
+
+    let card = modal_card(
+        Column::with_children(vec![
+            card_title(),
+            modal_divider(frame).into(),
+            body.into(),
+            modal_divider(frame).into(),
+            config_footer(view_model),
+        ])
+        .spacing(space::SM),
+        frame,
+        BATCH_CARD_ID,
+        Length::Fixed(batch_card_width(viewport.width)),
+        Length::Fixed(batch_card_height(viewport.height)),
+    );
+
+    card.into()
+}
+
+/// The Prompt section: the framework-resolved header, the scrollable
+/// candidate list, and the reserved caption band.
+///
+/// This is the one labelled row that **cannot** use
+/// [`form_field::stacked`]: that widget fixes its control band at
+/// [`CONTROL_SLOT_HEIGHT`](form_field::CONTROL_SLOT_HEIGHT) — 32px, one
+/// control — and the candidate list is a multi-row region that has to fill
+/// whatever the card has left. The *decisions* still come from the
+/// framework ([`form_field::resolve_header`] and
+/// [`form_field::resolve_caption`]); only the middle band is this card's
+/// own height. See the module docs.
+fn prompt_section(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
+    let palette = Palette::pro();
+    let selected = view_model.selected_prompt().is_some();
 
     Column::with_children(vec![
-        directory_row.into(),
-        pattern_row.into(),
-        prompt_section.into(),
-        mode_row.into(),
-        concurrency_row.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
-        config_footer(view_model),
+        field_header(
+            strings::BATCH_DIALOG_PROMPT_LABEL,
+            true,
+            Some(strings::BATCH_PROMPT_FIELD_HINT),
+            &palette,
+        ),
+        scrollable(prompt_rows(view_model))
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .into(),
+        field_caption(form_field::resolve_caption(selected, None, None, &palette)),
     ])
-    .spacing(BATCH_SECTION_SPACING)
-    .padding(BATCH_SECTION_SPACING)
-    .width(Length::Fixed(BATCH_CARD_WIDTH))
+    .spacing(form_field::BAND_GAP)
+    .height(Length::Fill)
     .into()
 }
 
-/// The scrollable prompt-candidate rows — real selectable rows rather than
-/// a combo, the same shape the move dialog's destination
-/// picker uses (`ui_iced/dialogs.rs:644-661`).
+/// The scrollable prompt-candidate rows — real selectable rows rather
+/// than a combo, the same shape the move dialog's destination picker uses
+/// (`ui_iced/dialogs.rs:644-661`), now measured on the framework's
+/// list-tile grid.
 fn prompt_rows(view_model: &BatchDialogViewModel) -> Column<'_, Message> {
-    view_model.available_prompts.iter().enumerate().fold(
-        Column::new().spacing(2.0),
-        |rows, (index, prompt)| {
+    view_model
+        .available_prompts
+        .iter()
+        .enumerate()
+        .fold(Column::new(), |rows, (index, prompt)| {
             rows.push(prompt_row(
                 prompt,
                 index,
                 view_model.selected_prompt_idx == Some(index),
             ))
-        },
-    )
+        })
 }
 
-/// One selectable prompt-candidate row.
+/// One selectable prompt-candidate row, laid out and painted from
+/// [`list_tile`] (`UIF-COMP-005`).
+///
+/// The row is a single-line tile: [`tile_height`](list_tile::tile_height)
+/// tall, inset by [`TILE_PADDING`](list_tile::TILE_PADDING), painted by
+/// [`resolve_style`](list_tile::resolve_style). The selected fill is the
+/// framework's `accent.fill` rather than the app's older `accent`, and the
+/// row is 32px rather than a content-height `padding(4)` strip — which is
+/// what puts a candidate on the same grid as every other selectable row
+/// in the app and clears the `size::HIT_TARGET_MIN` floor for the whole
+/// line.
 fn prompt_row(prompt: &PromptInfo, index: usize, selected: bool) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+    let style = list_tile::resolve_style(selected, false, BaseState::Rest, &Palette::pro());
 
-    let label = text(prompt.display_name.clone()).size(BATCH_BODY_SIZE);
+    let label = rung(
+        prompt.display_name.clone(),
+        *list_tile::TITLE_RUNG,
+        style.title_colour,
+    );
+
     let surface = container(label)
         .width(Length::Fill)
-        .padding(4.0)
-        .style(move |_theme| container::Style {
-            background: selected.then_some(Background::Color(palette.accent)),
+        .height(Length::Fixed(list_tile::tile_height(
+            list_tile::TileLines::Single,
+        )))
+        .padding(iced::Padding::from([0.0, list_tile::TILE_PADDING.left]))
+        .align_y(Alignment::Center)
+        .style(move |_theme: &iced::Theme| container::Style {
+            background: if style.background.a == 0.0 {
+                None
+            } else {
+                Some(Background::Color(style.background))
+            },
             ..container::Style::default()
         });
 
@@ -748,60 +935,91 @@ fn prompt_row(prompt: &PromptInfo, index: usize, selected: bool) -> Element<'_, 
         .into()
 }
 
-/// The configuration footer: spacer plus the Process / Cancel pair.
+/// The configuration footer, laid out the way §4.6.1 draws it: status
+/// info, `Fill`, then `[Cancel] [Primary]` right-aligned.
+///
+/// `Process` is `Primary` and `Cancel` is `Secondary`. Neither is
+/// `Danger`: starting a batch is the forward action and cancelling one is
+/// the ordinary leave-without-committing control, the same roles `Save`
+/// and `Cancel` play on the editor card. The framework reserves `Danger`
+/// for the confirmation surface where the user is actually being asked to
+/// give something up.
+///
+/// `Process` is disabled rather than removed while the composition is
+/// invalid (AGENTS §6), so the control stays visible and the reason stays
+/// in the field captions above it.
 fn config_footer(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
-    let confirm = start_message(view_model).unwrap_or_else(cancel_message);
-    let buttons = confirm_cancel_buttons(
+    let process = footer_button(
+        ButtonVariant::Primary,
         strings::BATCH_PROCESS_BUTTON,
+        start_message(view_model).unwrap_or_else(cancel_message),
+        BATCH_PROCESS_BUTTON_ID,
         view_model.can_start(),
-        move |outcome| match outcome {
-            ConfirmCancel::Confirm => confirm.clone(),
-            ConfirmCancel::Cancel => cancel_message(),
-        },
+    );
+
+    let cancel = footer_button(
+        ButtonVariant::Secondary,
+        strings::CANCEL_BUTTON,
+        cancel_message(),
+        BATCH_CANCEL_BUTTON_ID,
+        true,
     );
 
     Row::with_children(vec![
-        space::Space::new().width(Length::Fill).into(),
-        buttons.into(),
+        Space::new().width(Length::Fill).into(),
+        cancel,
+        process,
     ])
-    .spacing(BATCH_SECTION_SPACING)
+    .spacing(space::SM)
     .align_y(Alignment::Center)
     .into()
 }
 
 /// The in-flight / completed progress card.
-fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
-    let palette = Palette::fastmd_dark();
+///
+/// The bar is an **indeterminate** [`ProgressModel`]
+/// (`UIF-ATOM-009`): [`BatchRunStatus`] carries only
+/// `has_handle` / `finished` / `cancel_requested`, so there is no
+/// completed-of-total count to render. Drawing a determinate bar here
+/// would be inventing a number the batch subsystem never reported, so the
+/// track is painted at the framework's height and radius in the
+/// framework's status colour and left unfilled.
+fn progress_card(view_model: &BatchDialogViewModel, viewport: Size) -> Element<'_, Message> {
+    let frame = modal_frame();
+    let palette = Palette::pro();
     let status = view_model.status;
 
-    let heading = text(strings::BATCH_RUNNING_HEADING)
-        .size(BATCH_HEADING_SIZE)
-        .color(palette.text_strong);
+    let model = ProgressModel::indeterminate().with_status(progress_status(status));
+    let colour = progress::fill_colour(model.status(), &palette);
 
     let body = if let Some(completed) = status.completion_text() {
-        let cancelled = status.cancellation_text().unwrap_or("");
         Column::with_children(vec![
-            text(completed).size(BATCH_BODY_SIZE).into(),
-            text(cancelled)
-                .size(BATCH_BODY_SIZE)
-                .style(move |_theme| iced::widget::text::Style {
-                    color: Some(palette.warning),
+            rung(completed, typography::BODY, Palette::fastmd_dark().text).into(),
+            status
+                .cancellation_text()
+                .map(|cancelled| {
+                    rung(cancelled, typography::BODY, Palette::fastmd_dark().warning).into()
                 })
-                .into(),
+                .unwrap_or_else(|| Space::new().height(Length::Shrink).into()),
         ])
-        .spacing(2.0)
+        .spacing(space::XXS)
         .into()
     } else {
         Column::with_children(vec![
-            text(strings::BATCH_PROCESSING_TEXT)
-                .size(BATCH_BODY_SIZE)
-                .into(),
-            text(strings::BATCH_RUNNING_CANCEL_HINT)
-                .size(BATCH_BODY_SIZE)
-                .color(palette.text_muted)
-                .into(),
+            rung(
+                strings::BATCH_PROCESSING_TEXT,
+                typography::BODY,
+                Palette::fastmd_dark().text,
+            )
+            .into(),
+            rung(
+                strings::BATCH_RUNNING_CANCEL_HINT,
+                typography::CAPTION,
+                Palette::fastmd_dark().text_muted,
+            )
+            .into(),
         ])
-        .spacing(2.0)
+        .spacing(space::XXS)
         .into()
     };
 
@@ -812,21 +1030,246 @@ fn progress_card(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
     };
 
     let footer = Row::with_children(vec![
-        space::Space::new().width(Length::Fill).into(),
-        button(text(button_label)).on_press(cancel_message()).into(),
+        Space::new().width(Length::Fill).into(),
+        footer_button(
+            ButtonVariant::Secondary,
+            button_label,
+            cancel_message(),
+            BATCH_CANCEL_BUTTON_ID,
+            true,
+        ),
     ])
-    .spacing(BATCH_SECTION_SPACING)
+    .spacing(space::SM)
     .align_y(Alignment::Center);
 
-    Column::with_children(vec![
-        heading.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
-        body,
-        rule::horizontal(SEPARATOR_WIDTH).into(),
-        footer.into(),
-    ])
-    .spacing(BATCH_SECTION_SPACING)
-    .padding(BATCH_SECTION_SPACING)
-    .width(Length::Fixed(BATCH_CARD_WIDTH))
+    modal_card(
+        Column::with_children(vec![
+            card_title(),
+            modal_divider(frame).into(),
+            progress_track(colour),
+            body,
+            modal_divider(frame).into(),
+            footer.into(),
+        ])
+        .spacing(space::SM),
+        frame,
+        BATCH_CARD_ID,
+        Length::Fixed(batch_card_width(viewport.width)),
+        Length::Shrink,
+    )
     .into()
+}
+
+/// The indeterminate progress track — the framework's own bar box.
+///
+/// [`TRACK_HEIGHT`](progress::TRACK_HEIGHT) tall with
+/// [`TRACK_RADIUS`](progress::TRACK_RADIUS) ends, painted in the resolved
+/// fill colour. No fraction is drawn, because the model has none.
+fn progress_track(colour: iced::Color) -> Element<'static, Message> {
+    container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(progress::TRACK_HEIGHT))
+        .style(move |_theme: &iced::Theme| container::Style {
+            background: Some(Background::Color(colour)),
+            border: iced::Border {
+                color: colour,
+                width: 0.0,
+                radius: progress::TRACK_RADIUS.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+/// The [`ProgressStatus`] a batch run maps onto.
+///
+/// A cancellation request is `Paused`, not `Error`: the user stopped it,
+/// nothing failed. A finished run is reported as `Active` because
+/// [`ProgressStatus`] has **no completed position** — the completion
+/// text, not the bar, carries "done". That is a gap in `UIF-ATOM-009`
+/// reported rather than papered over with a colour that means something
+/// else.
+#[must_use]
+pub fn progress_status(status: BatchRunStatus) -> ProgressStatus {
+    if status.cancel_requested {
+        ProgressStatus::Paused
+    } else {
+        ProgressStatus::Active
+    }
+}
+
+/// The frame this card is drawn with (§4.6.1).
+#[must_use]
+pub fn modal_frame() -> ModalFrame {
+    ModalFrame::resolve(&Palette::pro())
+}
+
+/// A labelled field whose control fits the framework's fixed 32px control
+/// band (`UIF-COMP-004`, §3B.1).
+fn stacked_field<'a>(
+    label: &'static str,
+    required: bool,
+    hint: Option<&'static str>,
+    valid: bool,
+    helper: Option<&'static str>,
+    error: Option<&'static str>,
+    control: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let palette = Palette::pro();
+    form_field::stacked(
+        form_field::resolve_header(label, required, hint, &palette),
+        control,
+        form_field::resolve_caption(valid, helper, error, &palette),
+    )
+}
+
+/// The header band [`stacked_field`] renders internally, exposed for the
+/// one row whose control is taller than the fixed band
+/// ([`prompt_section`]).
+fn field_header<'a>(
+    label: &'static str,
+    required: bool,
+    hint: Option<&'static str>,
+    palette: &iced_pro::token::color::Palette,
+) -> Element<'a, Message> {
+    let parts = form_field::resolve_header(label, required, hint, palette);
+
+    let mut row = Row::new()
+        .width(Length::Fill)
+        .align_y(Alignment::Center)
+        .push(rung(
+            parts.label,
+            typography::UI_COMPACT,
+            parts.label_colour,
+        ));
+
+    if let Some(marker) = parts.marker {
+        row = row.push(rung(
+            marker.to_string(),
+            typography::UI_COMPACT,
+            parts.marker_colour,
+        ));
+    }
+
+    if let Some(hint_text) = parts.hint {
+        row = row.push(
+            container(rung(hint_text, typography::CAPTION, parts.hint_colour))
+                .width(Length::Fill)
+                .align_x(Alignment::End),
+        );
+    }
+
+    container(row)
+        .height(Length::Fixed(form_field::HEADER_HEIGHT))
+        .into()
+}
+
+/// The reserved caption band [`stacked_field`] renders internally,
+/// exposed for [`prompt_section`].
+///
+/// The band is always [`CAPTION_SLOT_HEIGHT`](form_field::CAPTION_SLOT_HEIGHT)
+/// tall whether or not it has anything to say — that is the whole point of
+/// a *reserved* band: a caption arriving cannot push the control above it
+/// and a caption leaving cannot pull it back.
+fn field_caption(parts: form_field::CaptionParts<'_>) -> Element<'static, Message> {
+    let mut row = Row::new()
+        .width(Length::Fill)
+        .spacing(space::XXS)
+        .align_y(Alignment::Center);
+
+    if let Some(glyph) = parts.glyph {
+        row = row.push(rung(glyph.to_string(), typography::CAPTION, parts.colour));
+    }
+
+    if let Some(value) = parts.text {
+        row = row.push(rung(value, typography::CAPTION, parts.colour));
+    }
+
+    container(row)
+        .height(Length::Fixed(form_field::CAPTION_SLOT_HEIGHT))
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// A footer-width framework button carrying `label`.
+///
+/// The label is mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box on purpose. `Button::is_icon_only` is a **geometric** test — any
+/// content no wider and no taller than `size::CONTROL_SM` (28px) is
+/// classed icon-only, and an icon-only button without a tooltip trips a
+/// `debug_assert!` in `outer_size` (`button_widget.rs:776`). A short
+/// label like `'Cancel'` sits close enough to that line that a different
+/// font measurement would cross it, so the label is given a width the
+/// test cannot fail.
+fn footer_button(
+    variant: ButtonVariant,
+    label: impl Into<String>,
+    on_press: Message,
+    focus_id: &'static str,
+    enabled: bool,
+) -> Element<'static, Message> {
+    let content = Column::new()
+        .width(Length::Fixed(
+            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(rung(
+            label,
+            typography::BODY,
+            Palette::fastmd_dark().text_strong,
+        ));
+
+    let button = Button::new(variant, content, on_press, focus_id).palette(Palette::pro());
+
+    if enabled {
+        button.into()
+    } else {
+        button.disabled().into()
+    }
+}
+
+/// Paints `value` on a type rung at its resting weight.
+///
+/// The single place this card turns a rung into a `text` widget, so no
+/// call site restates a point size ([RUST-021], `UIF-TOK-004`).
+///
+/// **`line_height` must be handed to iced as a resolved `LineHeight`, not
+/// a bare `f32`.** `impl From<f32> for iced::LineHeight` produces
+/// `LineHeight::Relative(factor)` — a *multiple* of the font size — so
+/// `.line_height(20.0)` on a 14px rung means 280px per line.
+/// [`TypeRung::iced_line_height`] is the crossing point that makes
+/// picking the wrong unit impossible.
+fn rung(
+    value: impl Into<String>,
+    rung: typography::TypeRung,
+    color: iced::Color,
+) -> text::Text<'static> {
+    text(value.into())
+        .size(rung.size)
+        .line_height(rung.iced_line_height())
+        .color(color)
+}
+
+/// The blocking batch modal: [`batch_dialog_card`] centred over a scrim
+/// by [`crate::ui_iced::overlay::modal_centered`].
+///
+/// # What each click means
+///
+/// The scrim emits [`UserCommand::CancelBatch`] on [`cancel_message`]'s
+/// channel, the same single cancel transition the Cancel button uses. A
+/// press that lands on the card's padding ring, on a disabled `Process`,
+/// or on dead space between rows is absorbed by
+/// [`BatchDialogMessage::Absorbed`] and never reaches the scrim
+/// (`UIF-VER-003`) — before this increment the card was mounted through
+/// the older `overlay::modal`, which had **no absorb boundary at all**,
+/// so a press on dead space inside the card fell through and cancelled
+/// the dialog.
+#[must_use]
+pub fn batch_modal(view_model: &BatchDialogViewModel, viewport: Size) -> Element<'_, Message> {
+    modal_centered(
+        batch_dialog_card(view_model, viewport),
+        Message::Batch(BatchDialogMessage::Absorbed),
+        cancel_message(),
+    )
 }

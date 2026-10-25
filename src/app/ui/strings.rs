@@ -158,6 +158,17 @@ pub fn format_tool_group_error(kind: &str, message: &str) -> String {
     format!("{kind}: {message}")
 }
 
+/// Banner button that re-runs the action that failed (`UIF-MOD-003`'s
+/// `Recovery::Retry`).
+pub const TOOLS_RETRY_BUTTON: &str = "Retry";
+
+/// Card-level banner line for a failed MCP authentication, naming the
+/// server the flow was for.
+#[must_use]
+pub fn format_tools_auth_error(server: &str) -> String {
+    format!("Authentication for {server} failed.")
+}
+
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 
@@ -618,6 +629,21 @@ pub const BATCH_RUNNING_CANCEL_HINT: &str =
 
 /// Button label to close the batch dialog after processing completes.
 pub const BATCH_CLOSE_BUTTON: &str = "Close";
+
+/// Helper caption under the wildcard-pattern field while it is editable.
+pub const BATCH_PATTERN_FIELD_HELPER: &str = "Glob matched against the chosen directory.";
+
+/// Helper caption under the concurrency selector.
+pub const BATCH_CONCURRENCY_HELPER: &str = "Concurrent LLM calls, 1 to 8.";
+
+/// Hint shown on the prompt-candidate field's header row.
+pub const BATCH_PROMPT_FIELD_HINT: &str = "Pick one prompt";
+
+/// Validation caption for a wildcard-pattern field left blank in File mode.
+pub const BATCH_PATTERN_REQUIRED_ERROR: &str = "A glob pattern is required in File mode.";
+
+/// Validation caption for a wildcard-pattern field that is not a valid glob.
+pub const BATCH_PATTERN_INVALID_ERROR: &str = "That is not a valid glob pattern.";
 
 // Tree Widget Actions
 /// Context menu item to open file location in OS file explorer.
