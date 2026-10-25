@@ -63,11 +63,17 @@
 //! file. Tier 3 (screenshot baselines) and tier 4 (`.ice` replay) live in
 //! `tests/iced_visual/` — see `tests/iced_visual/README.md`.
 
+use crate::bus::events::user_command::UserCommand;
 use crate::config::ContentLibrary;
 use crate::ui::strings;
 use crate::ui_iced::app::AppState;
 use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::{EditorViewModel, editor_card};
+use crate::ui_iced::hamburger::{
+    HAMBURGER_MENU_ID, KEY_ABOUT, KEY_AGENT_DEBUG, KEY_BACKGROUND_OPERATIONS, KEY_BATCH,
+    KEY_CHAT_MODELS, KEY_NO_MODELS, KEY_TABLE_WRAP, KEY_TOOLS, KEY_WINDOWS, RADIO_GROUP_CHAT_MODEL,
+    RADIO_GROUP_TABLE_WRAP, command_for_activation, hamburger_menu, strategy_key,
+};
 use crate::ui_iced::menu::{MenuItem as WidgetMenuItem, MenuItemId};
 use crate::ui_iced::message::{
     AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, TreeMessage,
@@ -76,14 +82,15 @@ use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
 use crate::ui_iced::panels::left::{left_panel, row_icon};
 use crate::ui_iced::panels::top::{
-    MenuEntry, MenuEntryKind, MenuSection, apply_about_button_click, build_menu_entries,
-    hamburger_row_label, hamburger_row_message, top_bar,
+    apply_agent_debug_toggle, apply_background_logs_toggle, apply_table_width_strategy_change,
+    strategy_menu_order, top_bar,
 };
 use crate::ui_iced::test_helpers::test_app_state;
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
 use iced::Element;
 use iced::mouse;
+use iced_pro::surface::menu::model::{ActivationEffect, Menu, MenuId, RadioGroupId, submenu_id};
 use iced_test::Selector;
 use iced_test::selector::{Candidate, Target};
 use std::path::PathBuf;
@@ -174,6 +181,26 @@ fn focus_text_editor(ui: &mut Sim<'_>) -> Option<iced::Rectangle> {
 /// Collects every message the driver produced so far.
 fn messages(ui: Sim<'_>) -> Vec<Message> {
     ui.into_messages().collect()
+}
+
+/// Index of the row carrying `key` inside `menu`.
+///
+/// A `RowPicked` addresses a row by position, so a test that wants to name
+/// a specific row looks its key up rather than hardcoding an index that
+/// shifts the moment a row is inserted above it.
+fn row_at(menu: &Menu, key: &str) -> usize {
+    menu.rows()
+        .iter()
+        .position(|row| row.key() == key)
+        .unwrap_or_else(|| panic!("no hamburger row with key {key:?}"))
+}
+
+/// The `RowPicked` message that addresses row `key` of card `card`.
+fn picked(card: MenuId, menu: &Menu, key: &str) -> Message {
+    Message::Menu(MenuMessage::RowPicked {
+        card,
+        row: row_at(menu, key),
+    })
 }
 
 /// Asserts `emitted` contains `expected`.
@@ -859,9 +886,10 @@ fn test_top_bar_hamburger_is_at_the_far_right_edge() {
     );
 }
 
-/// The full loop: `Opened` mounts the shared menu in the real `view()`, a row pick
-/// publishes that row's own [`UserCommand`] on the menu channel, and the
-/// reducer closes the menu in the same reduction.
+/// The full loop on the framework path: `Opened` mounts the cascade's root
+/// card in the real `view()`, a row click addresses that row by card and
+/// index, and the reducer runs the cascade so the row's own close policy
+/// decides whether the tree survives.
 #[test]
 fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
     let mut state = test_app_state();
@@ -869,90 +897,147 @@ fn test_hamburger_menu_opens_and_routes_a_row_through_the_reducer() {
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     state.rebuild_view_models();
     assert!(state.overlay.hamburger_open, "Opened must flip the flag");
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        1,
+        "open mounts exactly the root card"
+    );
+    assert_eq!(
+        state.overlay.hamburger_rects.len(),
+        1,
+        "the registered surface carries the root card's solved rectangle"
+    );
 
-    let about = strings::format_menu_row_label(None, strings::MENU_ABOUT, false);
+    let menu = hamburger_menu(&state.models.top);
     let mut ui = sim(view(&state));
     let bounds = ui
         .find(|candidate: Candidate<'_>| match candidate {
             Candidate::Text {
                 content, bounds, ..
-            } if content == about.as_str() => Some(bounds),
+            } if content == strings::MENU_ABOUT => Some(bounds),
             _ => None,
         })
         .expect("the About row inside the mounted hamburger card");
     click_at(&mut ui, bounds.center());
     let emitted = messages(ui);
+    let address = picked(MenuId::new(HAMBURGER_MENU_ID), &menu, KEY_ABOUT);
     assert_emitted(
         &emitted,
-        &Message::Menu(MenuMessage::RowActivated(apply_about_button_click())),
-        "clicking the About row must publish its own command on the menu channel",
+        &address,
+        "clicking the About row must address it by card path and row index",
     );
 
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::RowActivated(apply_about_button_click())),
-    );
+    let _ = update(&mut state, address);
     assert!(
         !state.overlay.hamburger_open,
-        "a row pick must close the menu in the same reduction"
+        "an Action row's ClosePolicy must close the tree in the same reduction"
+    );
+    assert!(
+        state.overlay.hamburger_rects.is_empty(),
+        "a closed tree registers no region"
     );
 }
 
-/// Clicking submenu buttons replaces the controlled child path while keeping
-/// the parent menu surface mounted.
+/// The label a framework row paints is the model's own label, not a
+/// check-slot or chevron baked into the string.
+///
+/// Pins the rendered-text change INT-3a introduces: the previous path drew
+/// `"✓ About FastMD..."` and `"Windows... >"` out of
+/// `strings::format_menu_row_label`, so a test written against those
+/// strings cannot find the row any more.
+#[test]
+fn test_hamburger_row_labels_are_the_bare_model_labels() {
+    let mut state = test_app_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    state.rebuild_view_models();
+
+    let mut ui = sim(view(&state));
+    for label in [
+        strings::MENU_BATCH,
+        strings::MENU_TOOLS,
+        strings::MENU_ABOUT,
+    ] {
+        assert!(
+            ui.find(label).is_ok(),
+            "root row {label:?} must render under its own label"
+        );
+    }
+    for baked in [
+        strings::format_menu_row_label(None, strings::MENU_ABOUT, false),
+        format!("{} >", strings::MENU_WINDOWS),
+    ] {
+        assert!(
+            ui.find(baked.as_str()).is_err(),
+            "the check-slot / chevron-baked label {baked:?} must no longer be painted"
+        );
+    }
+}
+
+/// Clicking a submenu parent mounts its card beside the root instead of
+/// replacing it, and the cascade — not a hand-held path — records which
+/// cards are up.
 #[test]
 fn test_hamburger_submenu_path_is_controlled_by_the_reducer() {
     let mut state = test_app_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    state.rebuild_view_models();
+
+    let root = MenuId::new(HAMBURGER_MENU_ID);
+    let menu = hamburger_menu(&state.models.top);
 
     let mut ui = sim(view(&state));
-    let submenu_label = format!("{} >", strings::MENU_WINDOWS);
-    let _ = ui.click(submenu_label.as_str());
-    let emitted = messages(ui);
+    let _ = ui.click(strings::MENU_WINDOWS);
+    let windows_pick = picked(root.clone(), &menu, KEY_WINDOWS);
     assert_emitted(
-        &emitted,
-        &Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
-        "Windows must open as a clickable submenu",
+        &messages(ui),
+        &windows_pick,
+        "Windows must be a clickable submenu row on the root card",
     );
 
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
-    );
-    let windows_id = MenuSection::Windows.menu_item_id().expect("submenu id");
+    let _ = update(&mut state, windows_pick);
+    state.rebuild_view_models();
     assert_eq!(
-        state.overlay.hamburger_menu_state.open_path(),
-        &[windows_id]
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the submenu card mounts above the root rather than replacing it"
     );
-
-    let mut ui = sim(view(&state));
-    let background_label = strings::MENU_BACKGROUND_OPERATIONS;
-    let debug_label = strings::MENU_AGENT_DEBUG;
-    assert!(ui.find(background_label).is_ok());
-    assert!(ui.find(debug_label).is_ok());
-    assert!(
-        ui.find(format!("{} >", strings::MENU_CHAT_MODELS).as_str())
-            .is_ok()
-    );
-
-    let chat_models = format!("{} >", strings::MENU_CHAT_MODELS);
-    let _ = ui.click(chat_models.as_str());
-    assert!(
-        messages(ui).contains(&Message::Menu(MenuMessage::SubmenuOpened(
-            MenuSection::ChatModels,
-        )))
-    );
-    let _ = update(
-        &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::ChatModels)),
-    );
-    let chat_models_id = MenuSection::ChatModels.menu_item_id().expect("submenu id");
     assert_eq!(
-        state.overlay.hamburger_menu_state.open_path(),
-        &[chat_models_id]
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &submenu_id(&root, KEY_WINDOWS),
+        "the second card is the Windows submenu the row opened"
     );
-    let mut ui = sim(view(&state));
-    assert!(ui.find(strings::NO_CHAT_MODELS_CONFIGURED).is_ok());
+    assert_eq!(
+        state.overlay.hamburger_rects.len(),
+        2,
+        "both cards register their own solved rectangle"
+    );
+
+    // `Sim` holds the rendered `Element`, which borrows `state`
+    // invariantly, so each driver is scoped and dropped before the next
+    // reduction rather than living across a `&mut state`.
+    {
+        let mut ui = sim(view(&state));
+        assert!(ui.find(strings::MENU_BACKGROUND_OPERATIONS).is_ok());
+        assert!(ui.find(strings::MENU_AGENT_DEBUG).is_ok());
+        assert!(ui.find(strings::MENU_CHAT_MODELS).is_ok());
+    }
+
+    // A second submenu parent swaps the deep card for its own branch.
+    let chat_pick = picked(root.clone(), &menu, KEY_CHAT_MODELS);
+    let _ = update(&mut state, chat_pick);
+    state.rebuild_view_models();
+    assert_eq!(
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &submenu_id(&root, KEY_CHAT_MODELS),
+        "opening another branch replaces the deep card"
+    );
+    {
+        let mut ui = sim(view(&state));
+        assert!(
+            ui.find(strings::NO_CHAT_MODELS_CONFIGURED).is_ok(),
+            "the empty-models placeholder must paint so the card is never blank"
+        );
+    }
 }
 
 /// A click that misses the mounted menu lands on the blocker and closes it.
@@ -973,70 +1058,104 @@ fn test_hamburger_menu_click_away_closes_the_menu() {
     );
 }
 
-/// Every selectable row of the production shared hamburger menu publishes
-/// its own `UserCommand` on the menu channel when clicked in the full view.
+/// Every activatable row of the production hamburger tree resolves to a
+/// self-contained `UserCommand`, and each kind resolves through the effect
+/// the framework actually reports for it.
+///
+/// The previous path baked the checked state into the label and fired a
+/// pre-built command, so "which command" and "what new value" were the
+/// same string. Here the row's **key** says what was picked and the
+/// [`ActivationEffect`] says what happened; the resolver joins them.
 #[test]
 fn test_hamburger_rows_emit_their_commands() {
     let state = test_app_state();
-    let entries = build_menu_entries(&state.models.top);
-    let actions: Vec<&MenuEntry> = entries
+    let menu = hamburger_menu(&state.models.top);
+
+    // Root: the three dialog actions are the only publishers there.
+    let root_publishing: Vec<&str> = menu
+        .rows()
         .iter()
-        .filter(|entry| matches!(entry.kind, MenuEntryKind::Action(_)))
+        .filter(|row| row.activatable() && row.child_id().is_none())
+        .map(|row| row.key())
         .collect();
-    assert!(
-        actions.len() >= 5,
-        "the hamburger must offer the full UI-061..UI-066 row set"
+    assert_eq!(
+        root_publishing,
+        [KEY_BATCH, KEY_TOOLS, KEY_ABOUT],
+        "the root card publishes exactly the three dialog actions"
+    );
+    for key in &root_publishing {
+        assert!(
+            command_for_activation(key, &ActivationEffect::Command).is_some(),
+            "root action {key:?} must resolve to a command"
+        );
+    }
+
+    // Submenu parents open a card; they publish no command of their own.
+    for key in [KEY_WINDOWS, KEY_CHAT_MODELS, KEY_TABLE_WRAP] {
+        assert!(
+            menu.rows()
+                .iter()
+                .any(|row| row.key() == key && row.child_id().is_some()),
+            "{key:?} must be a submenu parent on the root card"
+        );
+    }
+
+    // Check rows carry their new value on the effect, not in the label.
+    assert_eq!(
+        command_for_activation(
+            KEY_BACKGROUND_OPERATIONS,
+            &ActivationEffect::Toggled { checked: true }
+        ),
+        Some(apply_background_logs_toggle(true)),
+        "Background operations must publish the value the cascade committed"
+    );
+    assert_eq!(
+        command_for_activation(
+            KEY_AGENT_DEBUG,
+            &ActivationEffect::Toggled { checked: false }
+        ),
+        Some(apply_agent_debug_toggle(false)),
+        "Agent debug must publish the value the cascade committed"
     );
 
-    for entry in actions {
-        let command = match &entry.kind {
-            MenuEntryKind::Action(command) => command,
-            other => unreachable!("filtered to Action rows, got {other:?}"),
-        };
-        let is_toggle = matches!(
-            command,
-            crate::bus::events::user_command::UserCommand::ToggleBackgroundLogs(_)
-                | crate::bus::events::user_command::UserCommand::ToggleAgentDebugWindow(_)
+    // Radio rows name what they select, whatever their siblings were on.
+    assert_eq!(
+        command_for_activation(
+            "model:gpt-4o",
+            &ActivationEffect::Selected {
+                group: RadioGroupId::new(RADIO_GROUP_CHAT_MODEL),
+                cleared: vec![0, 1],
+            }
+        ),
+        Some(UserCommand::SelectChatModel("gpt-4o".to_owned())),
+        "a chat-model radio row must select the model its own key names"
+    );
+    for variant in strategy_menu_order() {
+        let key = strategy_key(variant);
+        assert_eq!(
+            command_for_activation(
+                &key,
+                &ActivationEffect::Selected {
+                    group: RadioGroupId::new(RADIO_GROUP_TABLE_WRAP),
+                    cleared: Vec::new(),
+                }
+            ),
+            Some(apply_table_width_strategy_change(variant)),
+            "{key:?} must resolve back to its own strategy"
         );
-        let label = if is_toggle {
-            entry.label.clone()
-        } else {
-            hamburger_row_label(&entry.label, entry.checked)
-        };
-        let mut state = test_app_state();
-        let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
-        if entry.section != MenuSection::Direct {
-            let _ = update(
-                &mut state,
-                Message::Menu(MenuMessage::SubmenuOpened(entry.section)),
-            );
-        }
-        let mut ui = sim(view(&state));
-        let _ = ui.click(label.as_str());
-        let emitted = messages(ui);
-        if matches!(
-            command,
-            crate::bus::events::user_command::UserCommand::ToggleBackgroundLogs(_)
-                | crate::bus::events::user_command::UserCommand::ToggleAgentDebugWindow(_)
-        ) {
-            assert!(
-                matches!(
-                    emitted.as_slice(),
-                    [Message::Menu(MenuMessage::ToggleChanged { checked, .. })]
-                        if *checked == !entry.checked
-                ),
-                "hamburger toggle {:?} must request its inverse checked state, got {emitted:?}",
-                entry.label,
-            );
-        } else {
-            assert_eq!(
-                emitted,
-                vec![hamburger_row_message(command)],
-                "hamburger row {:?} must publish its own command",
-                entry.label,
-            );
-        }
     }
+
+    // Furniture and unknown keys publish nothing rather than guessing.
+    assert_eq!(
+        command_for_activation(KEY_NO_MODELS, &ActivationEffect::Command),
+        None,
+        "the disabled placeholder must publish nothing"
+    );
+    assert_eq!(
+        command_for_activation("not-a-hamburger-row", &ActivationEffect::Command),
+        None,
+        "an unknown key must publish nothing"
+    );
 }
 
 // ---------------------------------------------------------------------------

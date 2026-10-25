@@ -53,10 +53,7 @@ use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
 use crate::ui_iced::panels::right::toc_indent_pixels;
-use crate::ui_iced::panels::top::{
-    MENU_ANCHOR_BELOW_BAR, MenuSection, build_menu_entries, hamburger_menu_anchor,
-    hamburger_menu_items, top_bar,
-};
+use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
 use iced::widget::{button, column, container, mouse_area, scrollable, stack, text};
@@ -230,25 +227,11 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
     }
 
     if state.overlay.hamburger_open {
-        let entries = build_menu_entries(&state.models.top);
-        let items = hamburger_menu_items(&entries);
-        let style = MenuStyle {
-            anchor_gap: MENU_ANCHOR_BELOW_BAR,
-            ..MenuStyle::default()
-        };
-        base = menu_overlay(
-            base.map(MenuEvent::Action),
-            &items,
-            &state.overlay.hamburger_menu_state,
-            MenuPosition::Point {
-                point: hamburger_menu_anchor(state.viewport),
-                horizontal: HorizontalPreference::Left,
-                vertical: VerticalPreference::Below,
-            },
-            state.viewport,
-            style,
-        )
-        .map(hamburger_menu_event_to_message);
+        base = crate::ui_iced::hamburger::overlay(
+            base,
+            &state.overlay.hamburger_cascade,
+            &state.overlay.hamburger_rects,
+        );
     }
 
     let layers: Vec<iced::Element<'_, Message>> = state
@@ -278,23 +261,6 @@ fn context_menu_event_to_message(event: MenuEvent<Message>) -> Message {
         }
         MenuEvent::CloseSubmenu => Message::Menu(MenuMessage::ContextSubmenuClosed),
         MenuEvent::Dismissed => Message::Tree(TreeMessage::ContextMenuClosed),
-    }
-}
-
-fn hamburger_menu_event_to_message(event: MenuEvent<Message>) -> Message {
-    match event {
-        MenuEvent::Action(message) => message,
-        MenuEvent::Toggle { id, checked } => {
-            Message::Menu(MenuMessage::ToggleChanged { id, checked })
-        }
-        MenuEvent::RadioSelected { .. } | MenuEvent::Ignored => {
-            Message::Menu(MenuMessage::InteractionIgnored)
-        }
-        MenuEvent::OpenSubmenu { id, .. } => MenuSection::from_menu_item_id(id)
-            .map(|section| Message::Menu(MenuMessage::SubmenuOpened(section)))
-            .unwrap_or(Message::Menu(MenuMessage::InteractionIgnored)),
-        MenuEvent::CloseSubmenu => Message::Menu(MenuMessage::SubmenuClosed),
-        MenuEvent::Dismissed => Message::Menu(MenuMessage::Closed),
     }
 }
 

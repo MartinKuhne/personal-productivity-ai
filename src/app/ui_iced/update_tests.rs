@@ -1088,37 +1088,68 @@ fn test_menu_closed_clears_the_flag() {
 
 #[test]
 fn test_menu_submenu_navigation_requires_an_open_menu() {
+    use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
     use crate::ui_iced::panels::top::MenuSection;
-    let windows_id = MenuSection::Windows.menu_item_id().expect("submenu id");
+    use iced_pro::surface::menu::model::{MenuId, submenu_id};
 
+    let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
+
+    // A submenu request with no tree mounted changes nothing: the cascade
+    // has no root card to hang a child on.
     let (mut state, _storage) = fresh_state();
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
+    assert!(
+        !state.overlay.hamburger_cascade.is_open(),
+        "a submenu request cannot open the tree by itself"
+    );
+    assert!(
+        state.overlay.hamburger_rects.is_empty(),
+        "nothing is registered while the tree is closed"
+    );
 
+    // With the tree open the same request mounts the child card beside the
+    // root instead of replacing it.
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
     assert_eq!(
-        state.overlay.hamburger_menu_state.open_path(),
-        &[windows_id]
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the submenu card stacks above the root"
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &windows_card,
+        "the deep card is the Windows submenu"
     );
 
+    // `Direct` names no submenu, so it is not a navigation step.
     let _ = update(
         &mut state,
         Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Direct)),
     );
     assert_eq!(
-        state.overlay.hamburger_menu_state.open_path(),
-        &[windows_id]
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "a Direct section must neither open nor close a card"
     );
 
+    // Closing the deepest card leaves the root mounted and the surface open.
     let _ = update(&mut state, Message::Menu(MenuMessage::SubmenuClosed));
-    assert!(state.overlay.hamburger_menu_state.open_path().is_empty());
+    assert_eq!(
+        state.overlay.hamburger_cascade.depth(),
+        1,
+        "the root card remains after the submenu closes"
+    );
+    assert!(
+        state.overlay.hamburger_open,
+        "stepping out one level does not dismiss the surface"
+    );
 }
 
 #[test]
@@ -1149,54 +1180,63 @@ fn test_menu_row_activation_routes_the_command_and_closes() {
 
 #[test]
 fn test_menu_toggle_routes_its_new_value_and_stays_open() {
+    use crate::ui_iced::hamburger::{
+        HAMBURGER_MENU_ID, KEY_BACKGROUND_OPERATIONS, KEY_WINDOWS, hamburger_menu,
+    };
+    use crate::ui_iced::panels::top::MenuSection;
+    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
-    let entries = crate::ui_iced::panels::top::build_menu_entries(&state.models.top);
-    let menu_items = crate::ui_iced::panels::top::hamburger_menu_items(&entries);
-    let windows_id = crate::ui_iced::panels::top::MenuSection::Windows
-        .menu_item_id()
-        .expect("submenu id");
-    let toggle_id = menu_items
+    let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
+    let menu = hamburger_menu(&state.models.top);
+    let windows = menu
+        .rows()
         .iter()
-        .find_map(|item| match item {
-            crate::ui_iced::menu::MenuItem::Submenu { id, children, .. } if *id == windows_id => {
-                children.iter().find_map(|child| match child {
-                    crate::ui_iced::menu::MenuItem::Toggle {
-                        id,
-                        label,
-                        checked: false,
-                        ..
-                    } if label == crate::ui::strings::MENU_BACKGROUND_OPERATIONS => Some(*id),
-                    _ => None,
-                })
-            }
-            _ => None,
-        })
-        .expect("background-operations toggle");
+        .find(|row| row.key() == KEY_WINDOWS)
+        .and_then(|row| row.child())
+        .expect("the Windows submenu");
+    let toggle_row = windows
+        .rows()
+        .iter()
+        .position(|row| row.key() == KEY_BACKGROUND_OPERATIONS)
+        .expect("the background-operations row");
 
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
     let _ = update(
         &mut state,
-        Message::Menu(MenuMessage::SubmenuOpened(
-            crate::ui_iced::panels::top::MenuSection::Windows,
-        )),
+        Message::Menu(MenuMessage::SubmenuOpened(MenuSection::Windows)),
     );
     let _ = update(
         &mut state,
-        Message::Menu(MenuMessage::ToggleChanged {
-            id: toggle_id,
-            checked: true,
+        Message::Menu(MenuMessage::RowPicked {
+            card: windows_card.clone(),
+            row: toggle_row,
         }),
     );
 
     assert!(
         state.overlay.hamburger_open,
-        "toggle selection keeps the menu open"
+        "a Check row's StayOpen policy keeps the menu open"
     );
     assert_eq!(
-        state.overlay.hamburger_menu_state.open_path(),
-        &[windows_id],
-        "toggle selection keeps the active submenu open"
+        state.overlay.hamburger_cascade.depth(),
+        2,
+        "the active submenu card stays mounted after a toggle"
+    );
+    assert_eq!(
+        state.overlay.hamburger_cascade.open_cards()[1].id(),
+        &windows_card,
+        "the toggle must not swap the branch it was picked from"
+    );
+    assert!(
+        state
+            .overlay
+            .hamburger_cascade
+            .card_menu(&windows_card)
+            .and_then(|menu| menu.row(toggle_row))
+            .is_some_and(|row| row.is_checked()),
+        "the cascade committed the new checked value into its own model copy"
     );
     assert!(drained(&spy).contains(&UserCommand::ToggleBackgroundLogs(true)));
 }

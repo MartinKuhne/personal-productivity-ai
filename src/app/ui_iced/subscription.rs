@@ -95,7 +95,10 @@ use crate::bus::core::Bus;
 use crate::bus::events::directory::DirectoryChanged;
 use crate::bus::events::file::FileChanged;
 use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived};
-use crate::ui_iced::message::{BusSource, InboundMessage, Message, OverlayMessage, WindowMessage};
+use crate::ui_iced::message::{
+    BusSource, InboundMessage, MenuMessage, Message, OverlayMessage, WindowMessage,
+};
+use iced_pro::surface::menu::cascade::MenuKey;
 
 /// A bus event handed to the pure mapper [`bus_event_to_message`].
 ///
@@ -409,6 +412,64 @@ fn keyboard_events() -> iced::Subscription<Message> {
         iced::event::listen_with(escape_to_message),
         iced::event::listen_with(modifiers_to_message),
     ])
+}
+
+/// The menu-navigation keyboard lane (INT-3a, `UIF-CMENU-003`).
+///
+/// Mounted **only while the hamburger tree is open**, by the
+/// `.subscription(...)` builder in `app.rs`. That conditionality is the
+/// whole safety story: an always-on lane mapping `Enter`/`Space`/arrows
+/// would emit a message on every such keypress in the app, waking the
+/// reducer to do nothing. Gating on the open state means the lane exists
+/// exactly when something can answer it, and iced's subscription diff
+/// drops the listener the frame the menu closes.
+pub fn menu_keyboard_events() -> iced::Subscription<Message> {
+    iced::event::listen_with(menu_key_to_message)
+}
+
+/// Pure arrow/Enter/Space → [`MenuKey`] mapping for the menu keyboard lane.
+///
+/// * **`Status::Ignored` only.** A key a widget consumed stays consumed.
+///   This is what keeps the lane from stealing arrow keys from a focused
+///   text editor or `Enter` from a focused button: those arrive
+///   `Captured` and are not ours. When the menu is open the cascade has
+///   moved focus onto a menu row, and a
+///   [`MenuRow`](iced_pro::surface::menu::view::MenuRow) handles no key
+///   events of its own, so the navigation keys arrive `Ignored` — which
+///   is the case this lane exists to catch.
+/// * **`Escape` is deliberately absent.** Dismissal belongs to
+///   `escape_to_message` → `close_topmost`, so the `UIF-WIN-003` band
+///   walk remains the app's only Escape path. Mapping `Escape` to
+///   [`MenuKey::Escape`] here would put a second, menu-local dismissal
+///   rule alongside the registry's and let them disagree about how many
+///   `Esc`s a nested menu takes.
+/// * **`KeyPressed` only.** A release is not a navigation step.
+///
+/// The window id is carried but unused: the app is single-window.
+///
+/// [RUST-020]: pure.
+#[must_use]
+pub fn menu_key_to_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    if status != iced::event::Status::Ignored {
+        return None;
+    }
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
+        return None;
+    };
+    let menu_key = match key {
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => MenuKey::Up,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => MenuKey::Down,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => MenuKey::Left,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => MenuKey::Right,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => MenuKey::Enter,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => MenuKey::Space,
+        _ => return None,
+    };
+    Some(Message::Menu(MenuMessage::Key(menu_key)))
 }
 
 /// Pure `Esc` → dismiss mapping for the keyboard lane ([UI-056]).

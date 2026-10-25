@@ -54,6 +54,9 @@ use std::sync::Arc;
 
 use iced::Task;
 use iced::widget::operation;
+use iced_pro::focus::FocusState;
+use iced_pro::surface::menu::cascade::{CascadeOutcome, MenuTreeKind};
+use iced_pro::surface::menu::model::MenuId;
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
@@ -66,6 +69,10 @@ use crate::ui_iced::app::{AppState, ContextMenu};
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, index_of_selected};
 use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
 use crate::ui_iced::editor::{EditorViewModel, apply_editor_message};
+use crate::ui_iced::hamburger::{
+    HAMBURGER_MENU_ID, KEY_CHAT_MODELS, KEY_TABLE_WRAP, KEY_WINDOWS, command_for_activation,
+    hamburger_menu,
+};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
@@ -76,6 +83,7 @@ use crate::ui_iced::message::{
 use crate::ui_iced::os_shell;
 use crate::ui_iced::panels::bottom::submit_commands;
 use crate::ui_iced::panels::left::ROW_TEXT_SIZE;
+use crate::ui_iced::panels::top::MenuSection;
 use crate::ui_iced::persisted;
 use crate::ui_iced::table_width::fira_sans_width;
 
@@ -706,51 +714,115 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
     }
 }
 
-/// Top-bar hamburger-menu reductions.
+/// Top-bar hamburger-menu reductions, driven by the `iced-pro` menu engine.
 ///
-/// Opened / Closed only flip [`OverlayState::hamburger_open`]; the view
-/// mounts the shared menu widget from the [`TopBarViewModel`] snapshot
-/// ([`crate::ui_iced::panels::top::build_menu_entries`]) anchored under the
-/// ☰ button. A row pick publishes the row's own [`UserCommand`] through
-/// [`route_command`] and closes the menu in the same reduction — the row's
-/// intent stays self-contained and the click lands exactly like
-/// a dropdown selection.
+/// Openness lives in [`OverlayState::hamburger_cascade`], not in a bool the
+/// view reads: [`MenuMessage::Opened`] hands the built
+/// [`Menu`](iced_pro::surface::menu::model::Menu) to
+/// [`MenuCascade::open`](MenuCascade::open), a row pick runs
+/// [`MenuCascade::activate_row`](MenuCascade::activate_row), and the row's
+/// own [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) decides
+/// whether the tree survives — which is why a checkbox keeps the card open
+/// and an action closes it without either behaviour being spelled out here.
+///
+/// [`hamburger_open`](OverlayState::hamburger_open) is written back from
+/// `cascade.is_open()` after every transition rather than being set
+/// independently, so the bool and the cascade cannot disagree about what is
+/// mounted.
+///
+/// `Escape` is **not** handled here. It arrives as
+/// [`OverlayMessage::EscapePressed`](MenuMessage::Closed)
+/// → `close_topmost`, so the `UIF-WIN-003` band walk stays the app's only
+/// Escape path.
 fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>> {
     match message {
         MenuMessage::Opened => {
             // The two menus never share the screen: opening the hamburger
             // dismisses any live tree/tab context menu.
             state.overlay.context_menu = None;
-            state.overlay.hamburger_open = true;
+            let menu = hamburger_menu(&state.models.top);
+            state.overlay.hamburger_cascade.open(
+                &menu,
+                MenuTreeKind::Fixed,
+                &mut state.overlay.menu_focus,
+            );
             state.overlay.hamburger_menu_state.close_all();
-            Vec::new()
+            settle(state, Vec::new())
         }
         MenuMessage::Closed => {
-            state.overlay.hamburger_open = false;
+            state
+                .overlay
+                .hamburger_cascade
+                .close_tree(&mut state.overlay.menu_focus);
             state.overlay.hamburger_menu_state.close_all();
-            Vec::new()
+            settle(state, Vec::new())
+        }
+        MenuMessage::RowPicked { card, row } => {
+            if !state.overlay.hamburger_open {
+                return Vec::new();
+            }
+            let outcome = state.overlay.hamburger_cascade.activate_row(
+                &card,
+                row,
+                &mut state.overlay.menu_focus,
+            );
+            let command = activation_command(state, &card, &outcome);
+            let tasks = match command {
+                Some(command) => route_command(state, command),
+                None => Vec::new(),
+            };
+            settle(state, tasks)
+        }
+        MenuMessage::Key(key) => {
+            if !state.overlay.hamburger_open {
+                return Vec::new();
+            }
+            // The card the key acts on is the active one *before* the
+            // transition: `Enter` on a submenu parent activates that row
+            // and then changes which card is active, so reading the active
+            // card afterwards would name the wrong one.
+            let active = state
+                .overlay
+                .hamburger_cascade
+                .active_card()
+                .map(|card| card.id().clone());
+            let outcome = state
+                .overlay
+                .hamburger_cascade
+                .on_key(key, &mut state.overlay.menu_focus);
+            let command = active
+                .as_ref()
+                .and_then(|card| activation_command(state, card, &outcome));
+            let tasks = match command {
+                Some(command) => route_command(state, command),
+                None => Vec::new(),
+            };
+            settle(state, tasks)
         }
         MenuMessage::SubmenuOpened(section) => {
-            if state.overlay.hamburger_open
-                && let Some(id) = section.menu_item_id()
-            {
-                state.overlay.hamburger_menu_state.open_child(&[], id);
+            if state.overlay.hamburger_open {
+                open_submenu_section(state, section);
             }
-            Vec::new()
+            settle(state, Vec::new())
         }
         MenuMessage::SubmenuClosed => {
-            state.overlay.hamburger_menu_state.close_deepest();
-            Vec::new()
+            if state.overlay.hamburger_open {
+                state
+                    .overlay
+                    .hamburger_cascade
+                    .close_deepest(&mut state.overlay.menu_focus);
+            }
+            settle(state, Vec::new())
         }
         MenuMessage::ToggleChanged { id, checked } => {
             if state.overlay.hamburger_open
                 && let Some(command) =
                     crate::ui_iced::panels::top::hamburger_toggle_command(id, checked)
             {
-                route_command(state, command)
-            } else {
-                Vec::new()
+                let tasks = route_command(state, command);
+                return settle(state, tasks);
             }
+            Vec::new()
         }
         MenuMessage::ContextSubmenuOpened { parent_path, id } => {
             if let Some(menu) = state.overlay.context_menu.as_mut() {
@@ -771,6 +843,72 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
             route_command(state, command)
         }
     }
+}
+
+/// Writes the cascade's post-transition openness back to the state,
+/// refreshes the registered card geometry, and projects the framework
+/// focus onto iced's router.
+///
+/// Every hamburger transition ends here so the three follow-on effects
+/// cannot be forgotten by one arm of the match.
+fn settle(state: &mut AppState, mut tasks: Vec<Task<Message>>) -> Vec<Task<Message>> {
+    state.overlay.hamburger_open = state.overlay.hamburger_cascade.is_open();
+    state.refresh_hamburger_rects();
+    tasks.extend(focus_projection(&state.overlay.menu_focus));
+    tasks
+}
+
+/// Projects the framework focus model onto iced's focus router.
+///
+/// Only emits when the framework actually has a focused member: pushing a
+/// focus task with nothing focused would ask iced to focus an id that no
+/// live widget answers to.
+fn focus_projection(focus: &FocusState) -> Vec<Task<Message>> {
+    if focus.current().is_some() {
+        vec![iced_pro::bridge::focus_task(focus)]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Resolves the [`UserCommand`] an activation publishes for card `card`.
+fn activation_command(
+    state: &AppState,
+    card: &MenuId,
+    outcome: &CascadeOutcome,
+) -> Option<UserCommand> {
+    let activation = outcome.activation()?;
+    let key = state
+        .overlay
+        .hamburger_cascade
+        .card_menu(card)
+        .and_then(|menu| menu.row(activation.row))?
+        .key()
+        .to_owned();
+    command_for_activation(&key, &activation.effect)
+}
+
+/// Opens the cascade card belonging to `section` from the root card.
+fn open_submenu_section(state: &mut AppState, section: MenuSection) {
+    let key = match section {
+        MenuSection::Windows => KEY_WINDOWS,
+        MenuSection::ChatModels => KEY_CHAT_MODELS,
+        MenuSection::TableWrap => KEY_TABLE_WRAP,
+        MenuSection::Direct => return,
+    };
+    let root = MenuId::new(HAMBURGER_MENU_ID);
+    let Some(row) = state
+        .overlay
+        .hamburger_cascade
+        .card_menu(&root)
+        .and_then(|menu| menu.rows().iter().position(|row| row.key() == key))
+    else {
+        return;
+    };
+    state
+        .overlay
+        .hamburger_cascade
+        .open_submenu(&root, row, &mut state.overlay.menu_focus);
 }
 
 // ───────────────────────────── editor ─────────────────────────────

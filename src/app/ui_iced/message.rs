@@ -50,6 +50,8 @@ use crate::ui::tree_search::SearchResultEntry;
 use crate::ui_iced::menu::MenuItemId;
 use crate::ui_iced::panels::top::MenuSection;
 use iced::widget::pane_grid;
+use iced_pro::surface::menu::cascade::MenuKey;
+use iced_pro::surface::menu::model::MenuId;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -834,6 +836,33 @@ pub enum MenuMessage {
     /// A selectable menu row was picked. The wrapped command executes via
     /// `route_command` and the menu closes.
     RowActivated(UserCommand),
+    /// A row of the framework-driven hamburger tree was clicked.
+    ///
+    /// Carries the **address**, not the intent: the reducer runs
+    /// [`MenuCascade::activate_row`](iced_pro::surface::menu::cascade::MenuCascade::activate_row)
+    /// on it and reads the resulting
+    /// [`ActivationEffect`](iced_pro::surface::menu::model::ActivationEffect)
+    /// to learn both the command and whether the row's
+    /// [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) keeps
+    /// the menu open. A checkable row therefore does **not** close the
+    /// card, which is the behaviour the previous
+    /// [`Self::RowActivated`] path could not express.
+    RowPicked {
+        /// Path of the card holding the row.
+        card: MenuId,
+        /// Row index within that card, furniture rows included.
+        row: usize,
+    },
+    /// A menu-navigation key was pressed while the hamburger tree was open.
+    ///
+    /// Produced only by the keyboard lane's
+    /// [`menu_key_to_message`](crate::ui_iced::subscription::menu_key_to_message)
+    /// and only while the tree is mounted. `Escape` is deliberately **not**
+    /// one of these: dismissal stays on
+    /// [`OverlayMessage::EscapePressed`]
+    /// → `close_topmost`, so the `UIF-WIN-003` band walk remains the only
+    /// Escape path in the app and this increment does not fork it.
+    Key(MenuKey),
     /// A controlled toggle row requested a new checked value.
     ToggleChanged {
         /// Identifier of the toggle row.

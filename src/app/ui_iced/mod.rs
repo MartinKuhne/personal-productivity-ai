@@ -133,6 +133,8 @@ pub mod batch_dialog;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
+/// The top-bar hamburger menu rendered by the `iced-pro` menu engine.
+pub mod hamburger;
 #[cfg(test)]
 pub mod interaction_tests;
 pub mod layout;

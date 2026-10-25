@@ -59,7 +59,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use iced::widget::pane_grid;
-use iced::{Size, Task};
+use iced::{Rectangle, Size, Task};
 
 use crate::background::Task as BackgroundTask;
 use crate::background::logs::BackgroundLogs;
@@ -98,6 +98,8 @@ use crate::workspace::watcher::Workspace;
 use fastmd_agent::AgentSession;
 use iced_pro::binding::pre_rank::DragCapture;
 use iced_pro::binding::pre_rank::PreRankCoordinator;
+use iced_pro::focus::FocusState;
+use iced_pro::surface::menu::cascade::MenuCascade;
 use iced_pro::surface::zorder::DeclineReason;
 use iced_pro::surface::zorder::PreRankedEscape;
 use iced_pro::surface::zorder::Surface;
@@ -209,6 +211,34 @@ impl AppState {
     /// borrow over `&AppState`.
     pub fn rebuild_view_models(&mut self) {
         self.models = ViewModels::from_app(&self.app, &self.overlay);
+        self.refresh_hamburger_rects();
+    }
+
+    /// Recomputes the solved rectangles of the open hamburger cards
+    /// (`UIF-FMENU-001`, `UIF-FMENU-002`) into
+    /// [`OverlayState::hamburger_rects`].
+    ///
+    /// Run from [`rebuild_view_models`](Self::rebuild_view_models) so the
+    /// geometry stays current against **both** inputs the cards depend on:
+    /// a viewport resize, and a chat-model list that changed while the menu
+    /// was open and therefore changed the card's height. Because the
+    /// cascade's open state and the anchor inputs are both pure here, the
+    /// rectangles the registry holds are the rectangles the view paints —
+    /// there is no second solve that could disagree.
+    ///
+    /// A closed tree refreshes to an empty list, so the registered surface
+    /// never keeps a stale region after dismissal.
+    ///
+    /// [RUST-020]: mutates only `overlay.hamburger_rects`; no I/O.
+    pub fn refresh_hamburger_rects(&mut self) {
+        self.overlay.hamburger_rects = if self.overlay.hamburger_open {
+            crate::ui_iced::hamburger::open_card_rects(
+                &self.overlay.hamburger_cascade,
+                self.viewport,
+            )
+        } else {
+            Vec::new()
+        };
     }
 
     /// Which floating windows are showing, bottom-most layer first.
@@ -316,6 +346,60 @@ pub struct OverlayState {
     pub hamburger_open: bool,
     /// Reducer-owned submenu path for the hamburger surface.
     pub hamburger_menu_state: MenuState,
+    /// The `iced-pro` cascade that owns the hamburger tree's openness
+    /// (`UIF-FMENU-001/002`, `UIF-CMENU-002/003`) — INT-3a.
+    ///
+    /// It holds a **copy** of each open card's [`Menu`](iced_pro::surface::menu::model::Menu)
+    /// with the selection the user just made, which is why the view renders
+    /// from `open_cards()` rather than rebuilding the tree from the view
+    /// model: the view model is still stale for one frame after a pick.
+    /// [`hamburger_open`](Self::hamburger_open) remains the authority for
+    /// *whether* the menu shows, exactly as it does for every other
+    /// surface; the cascade decides only *which cards* of the tree are up.
+    pub hamburger_cascade: MenuCascade,
+    /// The framework focus model scoped to the open hamburger cards.
+    ///
+    /// # Why this exists now, and why it is scoped to the menu
+    ///
+    /// [`MenuCascade::on_key`](iced_pro::surface::menu::cascade::MenuCascade::on_key)
+    /// takes `&mut FocusState`: the cascade cannot rove a keyboard it has
+    /// no member list for. Adopting the framework menu engine therefore
+    /// forces this state into the app whether or not anyone reads it yet.
+    ///
+    /// It is scoped to **one surface** — the menu's own focusable rows,
+    /// registered by the cascade as one
+    /// [`FocusGroup`](iced_pro::focus::FocusGroup) per open card, with a
+    /// focus trap pushed on open and popped on close. That is the
+    /// condition the INT-2 deferral note at the top of this module asked
+    /// for: the member set is not fiction, because the framework itself
+    /// enumerates it from the menu model as cards mount and close. It is
+    /// **not** an app-wide focus model, and nothing outside the hamburger
+    /// reads it.
+    ///
+    /// Reconciled with that deferral note (see
+    /// [the module-level discussion](OverlayState#tab--focus-projection-is-deliberately-deferred)):
+    /// what was deferred was running a *second app-wide* focus model in
+    /// parallel with iced's with nothing keeping it in sync. A single
+    /// surface whose members the framework registers itself is the
+    /// opposite case, so this field does not contradict the note — it is
+    /// the note's stated exit condition, arriving one surface at a time.
+    ///
+    /// Projected onto iced's router through
+    /// [`bridge::focus_task`](iced_pro::bridge::focus_task) after every
+    /// cascade transition. `Tab` is not routed by the app; the trap keeps
+    /// it inside the card once a host hands `Tab` to
+    /// [`bridge::tab_task`](iced_pro::bridge::tab_task), which the app
+    /// still does not do.
+    pub menu_focus: FocusState,
+    /// Solved viewport rectangles of every open hamburger card, root
+    /// first, as produced by
+    /// [`open_card_rects`](crate::ui_iced::hamburger::open_card_rects).
+    ///
+    /// Kept on the state rather than recomputed in the view so
+    /// [`sync_surfaces`](Self::sync_surfaces) can register the geometry
+    /// the user actually sees, and so the view paints the same rectangles
+    /// the registry holds instead of solving them a second time.
+    pub hamburger_rects: Vec<Rectangle>,
     /// The inline editor buffer (owns the live `text_editor::Content`, so
     /// the overlay as a whole is not `Clone`).
     pub editor: Option<EditorViewModel>,
@@ -391,6 +475,9 @@ impl Default for OverlayState {
             context_menu: None,
             hamburger_open: false,
             hamburger_menu_state: MenuState::default(),
+            hamburger_cascade: MenuCascade::new(),
+            menu_focus: FocusState::new(),
+            hamburger_rects: Vec::new(),
             editor: None,
             debug: AgentDebugWindowState::new(),
             tools: ToolsDialogState::new(),
@@ -421,8 +508,26 @@ impl Default for OverlayState {
 /// [RUST-021]: the id is always a `&'static str` const, never an inline
 /// literal at the call site.
 fn sync_surface(registry: &mut SurfaceRegistry, id: &str, kind: SurfaceKind, open: bool) {
+    sync_surface_with_regions(registry, id, kind, open, Vec::new());
+}
+
+/// Region-carrying form of [`sync_surface`].
+///
+/// A surface whose card geometry is known registers the real viewport
+/// rectangles so [`SurfaceRegistry::route_pointer`] can answer
+/// `PointerTarget::Surface` for a point inside the card. The hamburger
+/// carries its solved placement here as of INT-3a; the other surfaces
+/// still register empty and remain under the review note on
+/// [`sync_surfaces`](OverlayState::sync_surfaces).
+fn sync_surface_with_regions(
+    registry: &mut SurfaceRegistry,
+    id: &str,
+    kind: SurfaceKind,
+    open: bool,
+    regions: Vec<Rectangle>,
+) {
     if open {
-        registry.register(SurfaceId::new(id), kind, Vec::new());
+        registry.register(SurfaceId::new(id), kind, regions);
     } else {
         registry.unregister(&SurfaceId::new(id));
     }
@@ -478,18 +583,23 @@ impl OverlayState {
     /// makes the card actually painted on top the one that unwinds first,
     /// with no depth parameter anywhere.
     ///
-    /// # Regions are empty on purpose — review area
+    /// # Regions: hamburger real, the rest still empty — review area
     ///
-    /// Every surface is registered with an empty region list. Per
-    /// [`SurfaceRegistry`]'s own contract a regionless surface is never
-    /// hit by the pointer but still stacks and still takes part in
-    /// `Escape`, which is exactly the half this increment wires.
-    /// **Consequence to review before this index is ever used for pointer
-    /// routing:** [`SurfaceRegistry::route_pointer`] can never answer
-    /// `PointerTarget::Surface` here — it falls through to the band rule,
-    /// i.e. `DismissBand(Menu)` or `Scrim(..)`. Populating real viewport
-    /// rectangles belongs to the widget increments (INT-3..7), where the
-    /// overlay host actually knows each card's geometry.
+    /// The hamburger is registered with the **solved card rectangles**
+    /// [`refresh_hamburger_rects`](AppState::refresh_hamburger_rects)
+    /// computed from the framework anchor solver, one region per open card
+    /// (root plus any live submenu). That closes the INT-2 review area for
+    /// this surface: `route_pointer` now answers
+    /// [`PointerTarget::Surface`](iced_pro::surface::zorder::PointerTarget::Surface)
+    /// for a point inside a menu card.
+    ///
+    /// Every **other** surface is still registered with an empty region
+    /// list. Per [`SurfaceRegistry`]'s own contract a regionless surface
+    /// is never hit by the pointer but still stacks and still takes part
+    /// in `Escape`, which is the half those increments wired. Populating
+    /// their real viewport rectangles belongs to the remaining widget
+    /// increments (INT-4..7), where each card's geometry becomes known the
+    /// same way the hamburger's did here.
     ///
     /// # Call site
     ///
@@ -507,11 +617,12 @@ impl OverlayState {
             SurfaceKind::MenuCard,
             self.context_menu.is_some(),
         );
-        sync_surface(
+        sync_surface_with_regions(
             &mut self.surfaces,
             SURFACE_ID_HAMBURGER,
             SurfaceKind::MenuCard,
             self.hamburger_open,
+            self.hamburger_rects.clone(),
         );
 
         // ── Modal band (`ZBand::Modal`, escape rank 2) ──────────────────
@@ -675,6 +786,9 @@ impl OverlayState {
             context_menu,
             hamburger_open,
             hamburger_menu_state,
+            hamburger_cascade,
+            menu_focus,
+            hamburger_rects,
             editor,
             dialog,
             tools,
@@ -690,6 +804,9 @@ impl OverlayState {
             context_menu,
             hamburger_open,
             hamburger_menu_state,
+            hamburger_cascade,
+            menu_focus,
+            hamburger_rects,
             editor,
             dialog,
             tools,
@@ -727,6 +844,9 @@ struct ClosableSurfaces<'a> {
     context_menu: &'a mut Option<ContextMenu>,
     hamburger_open: &'a mut bool,
     hamburger_menu_state: &'a mut MenuState,
+    hamburger_cascade: &'a mut MenuCascade,
+    menu_focus: &'a mut FocusState,
+    hamburger_rects: &'a mut Vec<Rectangle>,
     editor: &'a mut Option<EditorViewModel>,
     dialog: &'a mut DialogState,
     tools: &'a mut ToolsDialogState,
@@ -757,6 +877,17 @@ impl ClosableSurfaces<'_> {
                 let was_open = std::mem::take(self.hamburger_open);
                 if was_open {
                     self.hamburger_menu_state.close_all();
+                    // The cascade owns the open cards and the focus trap
+                    // they pushed, so dismissing the surface has to unwind
+                    // both — a closed surface with a live trap would leave
+                    // focus pointing into cards that are no longer mounted.
+                    // `Escape` deliberately closes the **whole** tree here
+                    // rather than `close_deepest`: one keypress, one
+                    // surface is the `UIF-WIN-003` rule this walk
+                    // implements, and stepping out one submenu level per
+                    // `Esc` would fork that behaviour from the registry's.
+                    self.hamburger_cascade.close_tree(self.menu_focus);
+                    self.hamburger_rects.clear();
                 }
                 (CLOSED_LAYER_HAMBURGER, was_open)
             }
@@ -1610,7 +1741,14 @@ pub fn launch(inputs: LaunchInputs) -> iced::Result {
     .window(settings)
     .theme(|_state: &AppState| crate::ui_iced::theme::fastmd_dark_theme())
     .scale_factor(|state: &AppState| state.requested_scale_factor())
-    .subscription(|state: &AppState| subscription::subscription(&state.receivers))
+    .subscription(|state: &AppState| {
+        let base = subscription::subscription(&state.receivers);
+        if state.overlay.hamburger_open {
+            iced::Subscription::batch([base, subscription::menu_keyboard_events()])
+        } else {
+            base
+        }
+    })
     .presets(presets)
     .run();
 
