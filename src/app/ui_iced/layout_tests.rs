@@ -331,3 +331,25 @@ fn test_resize_leeway_is_the_framework_splitter_grab_token() {
     );
     assert_eq!(RESIZE_LEEWAY_PIXELS, 10.0);
 }
+
+/// [RUST-021] / `UIF-TOK-002`: the stub band height follows the
+/// framework's `size.control.lg` rung — the same rung the live navbar
+/// band is built at — rather than keeping its own off-scale `28`.
+///
+/// **Movement: 28 → 36**, tracking
+/// [`crate::ui_iced::panels::top::BAR_HEIGHT_POINTS`]. The stubs are
+/// unmounted dev scaffolding; see [`STUB_BAND_HEIGHT_POINTS`] for why one
+/// fixed height cannot represent both real bands.
+#[test]
+fn test_stub_band_height_is_the_framework_control_lg_token() {
+    assert_eq!(
+        STUB_BAND_HEIGHT_POINTS,
+        iced_pro::token::size::CONTROL_LG,
+        "STUB_BAND_HEIGHT_POINTS must be iced_pro::token::size::CONTROL_LG"
+    );
+    assert_eq!(STUB_BAND_HEIGHT_POINTS, 36.0);
+    assert_ne!(
+        STUB_BAND_HEIGHT_POINTS, 28.0,
+        "the retired off-token 28 must not come back"
+    );
+}

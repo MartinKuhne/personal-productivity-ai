@@ -239,6 +239,14 @@ pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = "☰";
 
+/// Tooltip for the icon-only hamburger menu button (`UIF-NAV-003`).
+///
+/// The ☰ glyph carries no readable text, so `UIF-ATOM-001`'s icon-only
+/// cell requires the words to live in the tooltip; the framework's
+/// `Button::icon_only` constructor makes supplying them a parameter
+/// rather than a convention.
+pub const HAMBURGER_MENU_TOOLTIP: &str = "Open menu";
+
 /// ID salt for the hamburger menu.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
 

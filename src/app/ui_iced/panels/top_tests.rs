@@ -706,30 +706,176 @@ fn top_bar_builds_for_both_indexing_states() {
     let _ = top_bar(&TopBarViewModel::from_app(&app));
 }
 
-// --- compact-bar band contract ---------------------------------------------
+// --- band contract (INT-7a: resolved from tokens, not literals) ---------
 
-/// Regression: the top bar keeps its fixed 28 pt band. Without a fixed
-/// height the pick lists' default 5 pt button padding grows the band to
-/// ~40 logical points — the user-visible "navbar way too tall" report.
+/// The top bar band is the `size.control.lg` rung, which `UIF-TOK-002`
+/// names as the Top Navbar height (§4.1.1, §4.2.1).
+///
+/// The bar used to be `CONTROL_SM` (28). The `assert_ne!` guards below
+/// pin that the retired literal is gone rather than merely shadowed.
 #[test]
-fn top_band_height_matches_legacy_toolbar() {
-    assert_eq!(BAR_HEIGHT_POINTS, 28.0);
+fn top_band_height_is_the_control_lg_rung() {
+    assert_eq!(BAR_HEIGHT_POINTS, size::CONTROL_LG);
+    assert_eq!(BAR_HEIGHT_POINTS, 36.0);
+    assert_ne!(
+        BAR_HEIGHT_POINTS, 28.0,
+        "the retired CONTROL_SM band must not come back"
+    );
 }
 
-/// Regression: both pick lists use the tightened [`PICK_LIST_PADDING`],
-/// whose content height (padding + 16 pt text line) must fit inside the
-/// [`BAR_HEIGHT_POINTS`] band minus the [`BAR_PADDING`] chrome so
-/// nothing is clipped:
-/// `(top + bottom) padding + 16 + 2 * BAR_PADDING <= BAR_HEIGHT_POINTS`.
+/// The band closes arithmetically around one compact control rung:
+/// `CONTROL_LG = XS + CONTROL_SM + XS`. That is what makes the navbar's
+/// 36pt height and its 28pt controls the same fact rather than two
+/// numbers that have to be kept in step by hand.
 #[test]
-fn pick_list_content_fits_inside_the_fixed_band() {
-    let pick_list_content = PICK_LIST_PADDING.top + PICK_LIST_PADDING.bottom + 16.0; // iced default text size
-    let border_allowance = 2.0; // 1 pt style border above + below
-    assert!(
-        pick_list_content + border_allowance + 2.0 * BAR_PADDING <= BAR_HEIGHT_POINTS,
-        "pick list ({pick_list_content} + {border_allowance}) does not fit \
-         BAR_HEIGHT_POINTS = {BAR_HEIGHT_POINTS} with BAR_PADDING = {BAR_PADDING}"
+fn band_padding_wraps_one_compact_control_rung_exactly() {
+    assert_eq!(BAR_PADDING.top, space::XS);
+    assert_eq!(BAR_PADDING.bottom, space::XS);
+    assert_eq!(BAR_PADDING.left, space::MD);
+    assert_eq!(BAR_PADDING.right, space::MD);
+    assert_eq!(
+        BAR_PADDING.top + size::CONTROL_SM + BAR_PADDING.bottom,
+        BAR_HEIGHT_POINTS,
+        "vertical chrome plus a CONTROL_SM control must fill the band exactly"
     );
+}
+
+/// The tag trigger's laid-out height (line height + vertical padding, the
+/// pick_list layout contract at
+/// `iced_widget-0.14.2/src/pick_list.rs:421-432`) lands on the compact
+/// rung it is declared against, and fills the band's content box exactly.
+/// The trigger's `border.hairline` perimeter is painted inside its own
+/// quad, so it costs no extra layout room.
+#[test]
+fn tag_trigger_lands_on_its_declared_rung_and_fits_the_band() {
+    let trigger_content =
+        typography::BODY.line_height + TAG_TRIGGER_PADDING.top + TAG_TRIGGER_PADDING.bottom;
+    assert_eq!(
+        trigger_content,
+        TAG_TRIGGER_RUNG.height(),
+        "BODY line height plus the trigger's vertical padding must land on the rung"
+    );
+    assert_eq!(TAG_TRIGGER_RUNG.height(), size::CONTROL_SM);
+
+    let content_box = BAR_HEIGHT_POINTS - BAR_PADDING.top - BAR_PADDING.bottom;
+    assert_eq!(
+        trigger_content,
+        content_box,
+        "the trigger fills the band's content box exactly: rung {} vs box {}",
+        TAG_TRIGGER_RUNG.height(),
+        content_box
+    );
+}
+
+/// The brand title sits on `type.title_sm`, the rung §4.2.1 assigns it —
+/// not the off-scale 18 the bar used to paint.
+#[test]
+fn brand_title_sits_on_the_title_sm_rung() {
+    assert_eq!(TITLE_SIZE, typography::TITLE_SM.size);
+    assert_eq!(TITLE_SIZE, 16.0);
+    assert_ne!(
+        TITLE_SIZE, 18.0,
+        "18 was never a rung on the type scale; it must not return"
+    );
+    // §2.4 names the navbar brand title as a Bold usage, which is the
+    // rung's emphasis weight, and the rung permits it.
+    assert!(typography::TITLE_SM.allows(typography::Weight::Bold));
+    assert_eq!(
+        typography::TITLE_SM.emphasis_weight,
+        typography::Weight::Bold
+    );
+}
+
+/// Every remaining top-bar scalar resolves to a named token rather than a
+/// literal, so a retune of the scale moves the bar with it.
+#[test]
+fn top_bar_scalars_resolve_from_tokens() {
+    assert_eq!(BAR_SPACING, space::SM);
+    assert_eq!(SEPARATOR_WIDTH, shape::BORDER_HAIRLINE);
+    assert_eq!(MENU_BUTTON_GLYPH_SIZE, size::ICON_MD);
+    assert_eq!(MENU_ANCHOR_RIGHT_MARGIN, space::MD);
+    assert_eq!(MENU_ANCHOR_BELOW_BAR, space::XS);
+    assert_eq!(
+        TAG_TRIGGER_PADDING.left,
+        combo_box::HORIZONTAL_PADDING,
+        "the trigger's horizontal inset comes from the combobox atom, not a local number"
+    );
+    assert_eq!(
+        TAG_TRIGGER_VERTICAL_PADDING,
+        (TAG_TRIGGER_RUNG.height() - typography::BODY.line_height) / 2.0,
+        "the vertical inset is derived from the rung, not picked"
+    );
+    assert_eq!(TAG_TRIGGER_VERTICAL_PADDING, space::XS);
+}
+
+/// The tag trigger's paint comes from the framework combobox resolver for
+/// every iced status, not from iced's own theme — and the chevron tracks
+/// the *open* flag the resolver takes separately from hover.
+#[test]
+fn tag_trigger_paint_resolves_through_the_combo_atom() {
+    let pro = Palette::pro();
+    let rest = VisualState {
+        base: BaseState::Rest,
+        focused: false,
+    };
+    let hovered = VisualState {
+        base: BaseState::Hovered,
+        focused: false,
+    };
+
+    let active = tag_trigger_style(pick_list::Status::Active);
+    let resolved_rest = combo_box::resolve_trigger(rest, &pro);
+    assert_eq!(
+        active.background,
+        Background::Color(resolved_rest.background)
+    );
+    assert_eq!(active.border.color, resolved_rest.border_color);
+    assert_eq!(active.border.width, resolved_rest.border_width);
+    assert_eq!(active.text_color, resolved_rest.text);
+    assert_eq!(active.placeholder_color, resolved_rest.placeholder);
+    assert_eq!(
+        active.border.radius,
+        combo_box::RADIUS.into(),
+        "the trigger wears the widget radius, not iced's default"
+    );
+
+    let hover = tag_trigger_style(pick_list::Status::Hovered);
+    let resolved_hover = combo_box::resolve_trigger(hovered, &pro);
+    assert_eq!(
+        hover.background,
+        Background::Color(resolved_hover.background)
+    );
+    assert_eq!(hover.border.color, resolved_hover.border_color);
+    assert_ne!(
+        hover.border.color, active.border.color,
+        "hover must be distinguishable from rest through the atom"
+    );
+
+    // §3.4: the chevron goes to text.strong while the flyout is open,
+    // whether or not the pointer is still over the trigger.
+    let open = tag_trigger_style(pick_list::Status::Opened { is_hovered: false });
+    assert_eq!(
+        open.handle_color,
+        combo_box::chevron_color(rest, true, &pro),
+        "an open flyout drives the chevron, not hover"
+    );
+    assert_eq!(open.handle_color, pro.text_strong);
+    assert_ne!(
+        open.handle_color, active.handle_color,
+        "the open chevron must differ from the resting one"
+    );
+
+    let open_hovered = tag_trigger_style(pick_list::Status::Opened { is_hovered: true });
+    assert_eq!(open_hovered.handle_color, pro.text_strong);
+}
+
+/// The hamburger trigger carries an app-chosen stable `Id` rather than
+/// `Id::unique()`, so it keeps its focus state across tree rebuilds
+/// ([AGENTS §5]).
+#[test]
+fn hamburger_trigger_has_a_stable_id() {
+    assert_eq!(HAMBURGER_BUTTON_ID, "topbar_hamburger_button");
+    assert_ne!(HAMBURGER_BUTTON_ID, strings::HAMBURGER_MENU_ID_SALT);
 }
 
 // --- hamburger menu widget model -------------------------------------------

@@ -57,6 +57,18 @@
 //! * **Hand-rolled right-alignment.** iced's `Row` lays the Stop button
 //!   out, so neither a magic number nor `available_rect_before_wrap`
 //!   bookkeeping is needed.
+//! * **The command field is the framework's paint on iced's widget, not
+//!   the framework's widget.** [`TextInput`](iced_pro::widget::text_input::TextInput)
+//!   exists and renders, but its uncontrolled constructor takes
+//!   `on_input` only — there is **no submit callback** on that path. Enter
+//!   reaches a host only as the [`Committed`](iced_pro::widget::text_input_controller::TextInputEmission::Committed)
+//!   tier of the *controlled* path, which requires the value to live in an
+//!   app-owned `TextInputModel` rather than in
+//!   `agent_panel_state.command_input`. Submitting a prompt is the band's
+//!   whole job, so the field stays iced's `text_input` styled through
+//!   [`command_field_style`] → [`resolve_input_style`](iced_pro::widget::text_input::resolve_input_style).
+//!   Migrating the model is a state-ownership change and a stated
+//!   follow-on.
 //!
 //! Unit tests live in the sibling `bottom_tests.rs` sidecar.
 
@@ -64,8 +76,15 @@
 #[path = "bottom_tests.rs"]
 mod tests;
 
-use iced::widget::{Column, Row, button, container, text, text_input};
-use iced::{Alignment, Color, Element, Font, Length};
+use iced::widget::{Column, Row, container, text, text_input};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length};
+
+use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::typography;
+use iced_pro::token::{shape, space};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
+use iced_pro::widget::text_input as pro_text_input;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;
@@ -113,8 +132,8 @@ pub fn compute_file_context(
     let dir_len = dir_display.chars().count();
     let file_len = file_name.chars().count();
 
-    let base_size = 12.0;
-    let min_size = 8.0;
+    let base_size = FILE_CONTEXT_BASE_SIZE;
+    let min_size = FILE_CONTEXT_MIN_SIZE;
 
     let font_size = if file_len > dir_len && dir_len > 0 {
         let ratio = dir_len as f32 / file_len as f32;
@@ -183,24 +202,71 @@ pub fn clear_command_input_command() -> UserCommand {
     UserCommand::ClearCommandInput
 }
 
-/// Logical point size of the prompt prefix and the command input.
-pub const PROMPT_TEXT_SIZE: f32 = 14.0;
+/// Logical point size of the prompt prefix and the command input —
+/// `type.body` (`UIF-TOK-004`). Value unchanged at `14`.
+pub const PROMPT_TEXT_SIZE: f32 = typography::BODY.size;
 
-/// Logical point size of the Stop button label.
-pub const STOP_BUTTON_TEXT_SIZE: f32 = 14.0;
+/// Logical point size of the Stop button label — `type.body`. Value
+/// unchanged at `14`.
+pub const STOP_BUTTON_TEXT_SIZE: f32 = typography::BODY.size;
 
-/// Spacing between the band's items.
-pub const BAND_SPACING: f32 = 8.0;
+/// Spacing between the band's items — `space.sm` (`UIF-TOK-001`), the
+/// standard sibling-control gap. Value unchanged at `8`.
+pub const BAND_SPACING: f32 = space::SM;
 
-/// Vertical spacing between the prompt prefix and the file-context label.
-pub const CONTEXT_SPACING: f32 = 2.0;
+/// Vertical spacing between the prompt prefix and the file-context label —
+/// `space.2xs` (`UIF-TOK-001`), the dense inline micro-gap rung. Value
+/// unchanged at `2`.
+pub const CONTEXT_SPACING: f32 = space::XXS;
 
-/// Inner padding of the band.
-pub const BAND_PADDING: f32 = 6.0;
+/// Inner padding of the band — `space.xs` (`UIF-TOK-001`).
+///
+/// **Movement: 6 → 4.** `6` is not on the base-4 spacing grid, and
+/// `UIF-TOK-001` states that a spacing value which is not one of the
+/// rungs must not appear in layout code. The old value sat exactly
+/// midway between `XS` (4) and `SM` (8), so the tie was broken on
+/// *role* rather than distance: `SM` is documented as a sibling-control
+/// **gap**, while `XS` is the compact **inner padding** rung — which is
+/// what a band's inset is. The band tightens by 2 pt per side.
+pub const BAND_PADDING: f32 = space::XS;
+
+/// Starting size of the file-context label — `type.caption`
+/// (`UIF-TOK-004`).
+///
+/// The label sits one rung below the prompt's `BODY` on purpose: it is
+/// the de-emphasised half of the prefix/file pair. Value unchanged at
+/// `12`.
+pub const FILE_CONTEXT_BASE_SIZE: f32 = typography::CAPTION.size;
+
+/// Floor the file-context label may shrink to — `MIN_SIZE`
+/// (`UIF-TOK-004`), the interface-wide 12px legibility rule.
+///
+/// **Movement: 8 → 12, and the de-emphasis gradient dies with it.**
+/// The helper used `min_size = 8`, a size the type scale forbids. Raising
+/// the floor to the rule's own value means it now equals
+/// [`FILE_CONTEXT_BASE_SIZE`], so `base * ratio` can never land below it
+/// and the ratio branch resolves to the base on every input. The label
+/// still reads as de-emphasised — `CAPTION` (12) against the prompt's
+/// `BODY` (14) — but it no longer *modulates* with the directory/file
+/// length ratio.
+///
+/// Restoring a gradient is a behaviour decision, not a token alignment:
+/// it needs the base rung raised above the floor (e.g. base `BODY`, floor
+/// `CAPTION`), which would make the label as large as the prompt in the
+/// common case and undo the de-emphasis from the other direction. Left
+/// as a stated follow-on rather than decided here.
+pub const FILE_CONTEXT_MIN_SIZE: f32 = typography::MIN_SIZE;
 
 /// Fallback size for the file-context label when the reused
-/// [`compute_file_context`] helper produced none.
-pub const FILE_CONTEXT_FALLBACK_SIZE: f32 = 12.0;
+/// [`compute_file_context`] helper produced none — `MIN_SIZE`
+/// (`UIF-TOK-004`). Value unchanged at `12`.
+pub const FILE_CONTEXT_FALLBACK_SIZE: f32 = typography::MIN_SIZE;
+
+/// Stable id for the command input ([AGENTS §5]).
+pub const COMMAND_INPUT_ID: &str = "bottom_command_input";
+
+/// Stable id for the Stop button ([AGENTS §5]).
+pub const STOP_BUTTON_ID: &str = "bottom_stop_button";
 
 /// What the bottom band needs to render, snapshotted off `FastMdApp`.
 ///
@@ -299,11 +365,11 @@ pub fn stop_enabled(agent_running: bool) -> bool {
 
 /// Colour of the always-allocated Stop button's label.
 ///
-/// A disabled `Button::on_press_maybe(None)` still renders in its enabled
-/// look, which would present a red "Stop" over nothing running (the
-/// button-visibility defect UI-001 reports). The label therefore drops to
-/// the `text_muted` token while idle and returns to `error` the moment a
-/// turn is cancellable — same palette rule as
+/// A disabled control that still paints in its enabled look would present a
+/// red "Stop" over nothing running (the button-visibility defect UI-001
+/// reports). The label therefore drops to the `text_muted` token while idle
+/// and returns to `error` the moment a turn is cancellable — same palette
+/// rule as
 /// [`crate::ui_iced::panels::top::indexing_status_color`].
 ///
 /// Purity: pure function of `running`.
@@ -314,6 +380,73 @@ pub fn stop_button_color(running: bool) -> Color {
         palette.error
     } else {
         palette.text_muted
+    }
+}
+
+/// Framework button variant the Stop control wears.
+///
+/// `Danger` while a turn is actually cancellable; `Secondary` when idle,
+/// so the band never paints a red CTA over nothing to stop. Paired with
+/// [`stop_button_color`], whose running value
+/// ([`Palette::error`](Palette::error) = `status_danger_text`) is exactly
+/// the `Danger` rest cell's resolved foreground — the label obeys the
+/// framework's contrast lock while running, and drops below `Secondary`'s
+/// lock to `text_muted` when idle so an inert control reads inert.
+///
+/// Purity: pure function of `running`.
+#[must_use]
+pub fn stop_button_variant(running: bool) -> ButtonVariant {
+    if running {
+        ButtonVariant::Danger
+    } else {
+        ButtonVariant::Secondary
+    }
+}
+
+/// The command field's paint, resolved through the framework's text-input
+/// atom (`UIF-ATOM-002`).
+///
+/// iced styles a `text_input` from `(Theme, Status)`; the framework
+/// resolves an input from `(InputKind, VisualState, Palette)`. This is the
+/// crossing point — iced's four statuses are translated to the framework's
+/// `(base, focused)` pair and the fill, perimeter, value, placeholder,
+/// icon and selection colours all come from
+/// [`pro_text_input::resolve_input_style`] at
+/// [`InputKind::TextEntry`](pro_text_input::InputKind::TextEntry) rather
+/// than from iced's own theme.
+///
+/// Purity: pure function of `status`.
+#[must_use]
+pub fn command_field_style(
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    use iced::widget::text_input::{Status, Style};
+
+    let palette = Palette::pro();
+    let base = match status {
+        Status::Active => BaseState::Rest,
+        Status::Hovered => BaseState::Hovered,
+        Status::Focused { .. } => BaseState::Rest,
+        Status::Disabled => BaseState::Disabled,
+    };
+    let focused = matches!(status, Status::Focused { .. });
+    let resolved = pro_text_input::resolve_input_style(
+        pro_text_input::InputKind::TextEntry,
+        VisualState { base, focused },
+        &palette,
+    );
+
+    Style {
+        background: Background::Color(resolved.background),
+        border: Border {
+            color: resolved.border_color,
+            width: resolved.border_width,
+            radius: shape::RADIUS_WIDGET.into(),
+        },
+        icon: resolved.icon,
+        placeholder: resolved.placeholder,
+        value: resolved.text,
+        selection: resolved.selection_background,
     }
 }
 
@@ -328,9 +461,13 @@ pub fn stop_button_color(running: bool) -> Color {
 /// Every item is **always allocated**: with no file context the label is an
 /// empty string rather than a missing widget, and the Stop button is always
 /// present but inert unless the agent is running
-/// (`Button::on_press_maybe`). The widget-tree shape therefore does not
-/// change across the idle ⇄ running or no-file ⇄ file transitions
-/// (AGENTS §6).
+/// (`Button::disabled`). The widget-tree shape therefore does not change
+/// across the idle ⇄ running or no-file ⇄ file transitions (AGENTS §6).
+///
+/// Both interactive items sit on the same control rung: the field is padded
+/// to `CONTROL_SM` (`BODY` line height 20 + 2 × `space.xs`) and the Stop
+/// button takes `.compact()`, so the row satisfies §1's Row Density
+/// Homogeneity rule rather than mixing 28 and 32 in one band.
 #[must_use]
 pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
@@ -355,20 +492,35 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
         .spacing(CONTEXT_SPACING);
 
     let command_field = text_input(strings::COMMAND_INPUT_HINT, &view_model.command_input)
+        .id(COMMAND_INPUT_ID)
+        .size(PROMPT_TEXT_SIZE)
+        .line_height(typography::BODY.iced_line_height())
+        .padding(space::XS)
+        .style(|_theme, status| command_field_style(status))
         .on_input(|text| Message::Agent(AgentMessage::InputChanged { text }))
         .on_submit(Message::Agent(AgentMessage::Submit {
             text: view_model.command_input.clone(),
         }));
 
-    let stop_button = button(
-        text(strings::STOP_AGENT_BUTTON)
-            .size(STOP_BUTTON_TEXT_SIZE)
-            .color(stop_button_color(view_model.agent_running)),
+    let stop_label = text(strings::STOP_AGENT_BUTTON)
+        .size(STOP_BUTTON_TEXT_SIZE)
+        .line_height(typography::BODY.iced_line_height())
+        .color(stop_button_color(view_model.agent_running));
+
+    let stop_button = Button::new(
+        stop_button_variant(view_model.agent_running),
+        stop_label,
+        Message::Command(UserCommand::CancelAgent),
+        STOP_BUTTON_ID,
     )
-    .on_press_maybe(
-        stop_enabled(view_model.agent_running)
-            .then_some(Message::Command(UserCommand::CancelAgent)),
-    );
+    .palette(Palette::pro())
+    .compact();
+
+    let stop_button: Element<'_, Message> = if stop_enabled(view_model.agent_running) {
+        stop_button.into()
+    } else {
+        stop_button.disabled().into()
+    };
 
     Row::with_children(vec![
         context_group.into(),

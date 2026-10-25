@@ -20,9 +20,17 @@
 //! * **Indexing status** — [`indexing_status_text`] plus the `success`
 //!   palette token once indexing has finished.
 //! * **Tag filter** — an [`iced::widget::pick_list()`] over
-//!   [`TagFilterOption`]; emits [`UserCommand::SelectTagFilter`].
-//! * **Hamburger** — a literal ☰ [`iced::widget::button()`] labelled with
-//!   [`strings::HAMBURGER_MENU_BUTTON`], emitting
+//!   [`TagFilterOption`]; emits [`UserCommand::SelectTagFilter`]. Its
+//!   trigger is painted through the framework combobox atom —
+//!   [`tag_trigger_style`] routes iced's statuses into
+//!   [`combo_box::resolve_trigger`] — at the compact rung
+//!   [`TAG_TRIGGER_RUNG`], not through iced's own theme.
+//! * **Hamburger** — the framework's own
+//!   [`Button::icon_only`](iced_pro::widget::button_widget::Button::icon_only)
+//!   in the `Ghost` variant at the compact rung, carrying the ☰ from
+//!   [`strings::HAMBURGER_MENU_BUTTON`] plus the label
+//!   [`strings::HAMBURGER_MENU_TOOLTIP`] that `UIF-NAV-003` requires of
+//!   an icon-only navbar control. Emits
 //!   [`Message::Menu`] [`MenuMessage::Opened`];
 //!   the reducer flips
 //!   [`crate::ui_iced::app::OverlayState::hamburger_open`] and the
@@ -33,6 +41,19 @@
 //!   last-picked row, and it can render only flattened selectable rows
 //!   (no section headers, and no "no models configured" placeholder — see
 //!   *Nested submenus* below).
+//!
+//! # Framework adoption is partial for the tag filter, with a reason
+//!
+//! `iced_pro::widget::combo_box` is a **resolver and geometry module**, not
+//! a widget: it publishes [`combo_box::trigger_bounds`],
+//! [`combo_box::chevron_bounds`] and [`combo_box::resolve_trigger`] for the
+//! gallery's contrast audit, and no `ComboBox` type that renders an
+//! `Element`. The state half, [`ComboHost`](iced_pro::widget::combo_host::ComboHost),
+//! drives open/filter/commit against a `FocusState` the app does not keep
+//! for this control. So the trigger's paint comes from the framework today
+//! while the flyout stays iced's. Adopting `ComboHost` here means giving the
+//! navbar a focus roster — a state-ownership change, not a token alignment,
+//! and it is left as a stated follow-on.
 //!
 //! # Nested submenus (UI-062/UI-064/UI-066)
 //!
@@ -89,8 +110,15 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use iced::widget::{Row, button, container, pick_list, rule, text};
-use iced::{Alignment, Color, Element, Font, Length, Padding, Point, Size};
+use iced::widget::{Row, container, pick_list, rule, text};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding, Point, Size};
+
+use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::typography::{self, FAMILY_SANS};
+use iced_pro::token::{shape, size, space};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
+use iced_pro::widget::combo_box;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::table_width::DeficitStrategy;
@@ -218,64 +246,124 @@ pub const CHAT_USE_CASE: &str = "chat";
 /// surface includes it ([RUST-051]).
 pub use crate::ui_iced::logo::LOGO_MARK_SIZE;
 
-/// Logical point size of the app-title heading.
-pub const TITLE_SIZE: f32 = 18.0;
-
-/// Horizontal spacing between top-bar items.
-pub const BAR_SPACING: f32 = 8.0;
-
-/// Inner padding of the top bar; small so the fixed [`BAR_HEIGHT_POINTS`]
-/// band still fits the pick lists' content height ([`PICK_LIST_PADDING`])
-/// and the 20 pt logo mark.
-pub const BAR_PADDING: f32 = 2.0;
-
-/// Full-on-screen height of the **top bar band**, in logical points — the
-/// 28 pt band contract this bar is laid out against.
+/// Logical point size of the app-title heading — `type.title_sm`
+/// (`UIF-TOK-004`).
 ///
-/// The bar must stay this compact; without the fixed height
-/// the two pick lists' default button padding (5 pt vertical each)
-/// grew the band to ~40 pt and the bar rendered far taller than the
-/// layout expects.
-pub const BAR_HEIGHT_POINTS: f32 = 28.0;
+/// **Movement: 18 → 16.** The bar used to paint the brand title at a bare
+/// `18`, which is not a rung on the type scale — `TITLE_SM` is 16 and
+/// `TITLE_MD` is 20, so nothing on the scale produced that number. §4.2.1
+/// names the navbar brand title as `type.title_sm` outright, so the title
+/// drops 2 pt onto the rung the spec actually assigns rather than staying
+/// off-scale. `TITLE_MD` was rejected: it is the document-H2 and
+/// About-header rung, and a 20 pt brand line would be the loudest thing
+/// inside a 36 pt band whose controls are 28.
+pub const TITLE_SIZE: f32 = typography::TITLE_SM.size;
 
-/// Vertical padding of the two top-bar pick lists.
+/// Horizontal spacing between top-bar items — `space.sm` (`UIF-TOK-001`),
+/// the standard sibling-control gap §4.2.1 prices for every navbar zone.
+/// Value unchanged at `8`.
+pub const BAR_SPACING: f32 = space::SM;
+
+/// Inner padding of the top bar — `[4px, 12px]`, the pair §4.2.1 prints.
 ///
-/// iced's `pick_list` inherits `button::DEFAULT_PADDING` (5 pt vertical)
-/// when unset, which — combined with [`BAR_PADDING`] — pushed the bar's
-/// natural height well past [`BAR_HEIGHT_POINTS`]. Tightening to 2 pt
-/// vertical (horizontal hit-target unchanged at 10 pt) fits both
-/// widgets inside the fixed band (pick_list layout contract:
-/// `iced_widget-0.14.2/src/pick_list.rs:421-432` — height = padding +
-/// text line height).
-pub const PICK_LIST_PADDING: Padding = Padding {
-    top: 2.0,
-    bottom: 2.0,
-    left: 10.0,
-    right: 10.0,
+/// **Movement: 2 → `[4, 12]`.** The old single scalar `2` was chosen to
+/// keep the pick lists inside the then-28 pt band, not to sit on the
+/// spacing grid. With the band now `CONTROL_LG` the grid pair fits with
+/// room to spare, and the bar closes arithmetically:
+/// `CONTROL_LG (36) = XS (4) + CONTROL_SM (28) + XS (4)`.
+pub const BAR_PADDING: Padding = Padding {
+    top: space::XS,
+    bottom: space::XS,
+    left: space::MD,
+    right: space::MD,
 };
 
-/// Width of the vertical rule drawn between top-bar groups.
-pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Full-on-screen height of the **top bar band**, in logical points —
+/// `size.control.lg` (`UIF-TOK-002`).
+///
+/// **Movement: 28 → 36.** The band was `CONTROL_SM`, but `CONTROL_LG`'s
+/// own token doc names it as the Top Navbar height, and §4.1.1 and §4.2.1
+/// both print 36px for the band. `CONTROL_SM` is still the rung the bar's
+/// *controls* take (§4.2.1 "Right: Workspace Controls — Height 28px"),
+/// which is why the band grew while the trigger and button did not.
+///
+/// The bar must stay a fixed height either way: without it the trigger's
+/// own content height drives the band and the bar renders taller than the
+/// layout contract allows.
+pub const BAR_HEIGHT_POINTS: f32 = size::CONTROL_LG;
 
-/// Minimum width of the hamburger menu surface, in logical points. The
-/// shared menu-card width
-/// ([`menu_surface::CARD_WIDTH`](crate::ui_iced::menu_surface::CARD_WIDTH))
-/// exceeds this bound.
+/// The rung the tag-filter trigger takes — the compact select rung
+/// (`size.control.sm`), per §4.2.1's 28px navbar control band.
+///
+/// Replaces the retired `PICK_LIST_PADDING` scalar pair, which existed
+/// only to fight iced's default 5pt button padding down into the old
+/// 28 pt band.
+pub const TAG_TRIGGER_RUNG: combo_box::ComboRung = combo_box::ComboRung::Compact;
+
+/// Vertical padding inside the tag-filter trigger, **derived from the
+/// rung** rather than picked: `(rung − BODY line height) / 2`.
+///
+/// `(CONTROL_SM 28 − 20) / 2 = 4`, which lands on `space.xs` — so the
+/// trigger's height is a consequence of the rung it is declared against,
+/// not a number that has to be kept in step with it by hand.
+pub const TAG_TRIGGER_VERTICAL_PADDING: f32 =
+    (TAG_TRIGGER_RUNG.height() - typography::BODY.line_height) / 2.0;
+
+/// Padding inside the tag-filter trigger.
+///
+/// Horizontal comes from the framework's own select padding
+/// ([`combo_box::HORIZONTAL_PADDING`], `space.md`); vertical is
+/// [`TAG_TRIGGER_VERTICAL_PADDING`], which puts the trigger's laid-out
+/// height on [`TAG_TRIGGER_RUNG`].
+///
+/// iced's `pick_list` inherits `button::DEFAULT_PADDING` (5 pt vertical)
+/// when unset, which pushed the bar's natural height past its band
+/// (pick_list layout contract: `iced_widget-0.14.2/src/pick_list.rs:421-432`
+/// — height = padding + text line height).
+pub const TAG_TRIGGER_PADDING: Padding = Padding {
+    top: TAG_TRIGGER_VERTICAL_PADDING,
+    bottom: TAG_TRIGGER_VERTICAL_PADDING,
+    left: combo_box::HORIZONTAL_PADDING,
+    right: combo_box::HORIZONTAL_PADDING,
+};
+
+/// Width of the vertical rule drawn between top-bar groups —
+/// `border.hairline` (`UIF-TOK-003`). Value unchanged at `1`.
+pub const SEPARATOR_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
+/// Minimum width of the hamburger menu surface, in logical points.
+///
+/// **App-owned.** No framework token covers it: `combo_box::MIN_WIDTH`
+/// (120) is the *select* trigger's floor, not a menu card's, and the
+/// hamburger's real width comes from
+/// [`menu_surface::CARD_WIDTH`](crate::ui_iced::menu_surface::CARD_WIDTH),
+/// which exceeds this bound. Same standing as `CARD_WIDTH` and
+/// `LICENSE_MAX_HEIGHT`, which are app-owned for the same reason.
 pub const MENU_MIN_WIDTH: f32 = 180.0;
 
-/// Height of the ☰ glyph the hamburger button renders.
+/// Height of the ☰ glyph the hamburger button renders —
+/// `size.icon.md` (`UIF-TOK-002`), the standard button/menu leading slot
+/// rung. Value unchanged at `16`.
+pub const MENU_BUTTON_GLYPH_SIZE: f32 = size::ICON_MD;
+
+/// Right inset between the hamburger menu surface and the window's right
+/// edge — `space.md` (`UIF-TOK-001`). Value unchanged at `12`.
+pub const MENU_ANCHOR_RIGHT_MARGIN: f32 = space::MD;
+
+/// Gap between the top bar's bottom edge and the hamburger menu surface —
+/// `space.xs` (`UIF-TOK-001`), the §4.8.1 menu-anchor gap. Value
+/// unchanged at `4`.
+pub const MENU_ANCHOR_BELOW_BAR: f32 = space::XS;
+
+/// Stable id for the hamburger trigger button ([AGENTS §5]).
 ///
-/// The requested Unicode glyph uses the regular text font, at the same size
-/// the tag-filter pick list's text renders; button padding keeps both controls
-/// the same height inside the fixed bar band.
-pub const MENU_BUTTON_GLYPH_SIZE: f32 = 16.0;
-
-/// Right inset between the hamburger menu surface and the window's right edge;
-/// the menu opens out from the right-aligned ☰ button.
-pub const MENU_ANCHOR_RIGHT_MARGIN: f32 = 12.0;
-
-/// Gap between the top bar's bottom edge and the hamburger menu surface.
-pub const MENU_ANCHOR_BELOW_BAR: f32 = 4.0;
+/// The tag-filter trigger deliberately has **no** counterpart: iced 0.14's
+/// `PickList` exposes no `.id()` setter (its builder surface is
+/// `placeholder`/`width`/`menu_height`/`padding`/`text_*`/`font`/`handle`/
+/// `on_open`/`on_close`/`style`/`menu_style` —
+/// `iced_widget-0.14.2/src/pick_list.rs:218-323`), and its open state is
+/// never addressed from the reducer, so nothing needs a stable handle on it.
+pub const HAMBURGER_BUTTON_ID: &str = "topbar_hamburger_button";
 
 /// Root-space point beside the right-aligned hamburger button.
 ///
@@ -763,6 +851,73 @@ impl TopBarViewModel {
     }
 }
 
+/// The tag-filter trigger's paint, resolved through the framework's
+/// combobox atom (`UIF-ATOM-004`).
+///
+/// iced's `pick_list` is styled by a `(Theme, Status) -> Style` closure
+/// and the framework resolves a trigger from `(VisualState, Palette)`.
+/// This is the crossing point: iced's three statuses are translated to the
+/// framework's `(base, open)` pair and the trigger's fill, perimeter,
+/// value and chevron colours all come from
+/// [`combo_box::resolve_trigger`] / [`combo_box::chevron_color`] rather
+/// than from iced's own theme.
+///
+/// Two resolved channels have nowhere to go and are deliberately dropped:
+/// `focus_ring_color` / `focus_ring_width`. iced's `pick_list::Style` has
+/// no ring field — the widget draws no focus ring of its own — so a
+/// keyboard-focus ring on this trigger is framework work, not app work.
+///
+/// Purity: pure function of `status`.
+#[must_use]
+pub fn tag_trigger_style(status: pick_list::Status) -> pick_list::Style {
+    let palette = Palette::pro();
+    let (base, open) = match status {
+        pick_list::Status::Active => (BaseState::Rest, false),
+        pick_list::Status::Hovered => (BaseState::Hovered, false),
+        pick_list::Status::Opened { is_hovered } => (
+            if is_hovered {
+                BaseState::Hovered
+            } else {
+                BaseState::Rest
+            },
+            true,
+        ),
+    };
+    let visual = VisualState {
+        base,
+        focused: false,
+    };
+    let resolved = combo_box::resolve_trigger(visual, &palette);
+
+    pick_list::Style {
+        text_color: resolved.text,
+        placeholder_color: resolved.placeholder,
+        handle_color: combo_box::chevron_color(visual, open, &palette),
+        background: Background::Color(resolved.background),
+        border: Border {
+            color: resolved.border_color,
+            width: resolved.border_width,
+            radius: combo_box::RADIUS.into(),
+        },
+    }
+}
+
+/// The navbar brand title, painted on its own rung.
+///
+/// §4.2.1 asks for `type.title_sm` at `Bold`, and §2.4 names the navbar
+/// brand title as one of the two `title_sm` usages that take the rung's
+/// **emphasis** weight rather than its resting SemiBold. The rung permits
+/// it (`TypeRung::allows`), so the weight comes from the rung instead of
+/// a hand-picked number.
+fn brand_title<'a>() -> text::Text<'a> {
+    let rung = typography::TITLE_SM;
+    text(strings::APP_TITLE)
+        .size(rung.size)
+        .line_height(rung.iced_line_height())
+        .font(rung.font(FAMILY_SANS, rung.emphasis_weight))
+        .color(Palette::fastmd_dark().accent_text)
+}
+
 /// Renders the top toolbar from a view-model snapshot.
 ///
 /// The returned element emits [`Message::Command`] for the tag filter and
@@ -776,16 +931,15 @@ impl TopBarViewModel {
 /// indexing-finished transition.
 ///
 /// The bar renders as a full-width band at the fixed
-/// [`BAR_HEIGHT_POINTS`] height (content vertically centred), with compact
-/// pick lists via [`PICK_LIST_PADDING`].
+/// [`BAR_HEIGHT_POINTS`] height (content vertically centred), with the
+/// tag trigger padded to [`TAG_TRIGGER_PADDING`] so it lands on
+/// [`TAG_TRIGGER_RUNG`].
 pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
     let logo = logo_mark(LOGO_MARK_SIZE);
 
-    let title = text(strings::APP_TITLE)
-        .size(TITLE_SIZE)
-        .color(palette.accent_text);
+    let title = brand_title();
 
     let status = text(indexing_status_text(
         view_model.indexing_finished,
@@ -800,15 +954,23 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
         |option| Message::Command(option.command()),
     )
     .placeholder(strings::TAG_FILTER_DEFAULT)
-    .padding(PICK_LIST_PADDING)
+    .padding(TAG_TRIGGER_PADDING)
+    .style(|_theme, status| tag_trigger_style(status))
     .width(Length::Shrink)
     .into();
 
-    let hamburger: Element<'_, Message> =
-        button(text(strings::HAMBURGER_MENU_BUTTON).size(MENU_BUTTON_GLYPH_SIZE))
-            .padding(PICK_LIST_PADDING)
-            .on_press(Message::Menu(MenuMessage::Opened))
-            .into();
+    let hamburger: Element<'_, Message> = Button::icon_only(
+        ButtonVariant::Ghost,
+        text(strings::HAMBURGER_MENU_BUTTON)
+            .size(MENU_BUTTON_GLYPH_SIZE)
+            .color(palette.text_strong),
+        Message::Menu(MenuMessage::Opened),
+        HAMBURGER_BUTTON_ID,
+        strings::HAMBURGER_MENU_TOOLTIP,
+    )
+    .palette(Palette::pro())
+    .compact()
+    .into();
 
     container(
         Row::with_children(vec![
@@ -826,8 +988,8 @@ pub fn top_bar(view_model: &TopBarViewModel) -> Element<'_, Message> {
     )
     // Full-width band at the fixed height, its content
     // vertically centred (`iced_widget-0.14.2/src/container.rs:150-159`).
-    // Without the fixed length the band grows to the pick lists' content
-    // height and renders far taller than the band contract allows.
+    // Without the fixed length the band grows to the trigger's content
+    // height and renders taller than the band contract allows.
     .width(Length::Fill)
     .center_y(BAR_HEIGHT_POINTS)
     .into()

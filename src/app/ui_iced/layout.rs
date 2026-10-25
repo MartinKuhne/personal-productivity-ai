@@ -50,8 +50,23 @@ use iced::widget::pane_grid::{self, Configuration, Pane, Split};
 /// same measurement ([RUST-021]). The value is unchanged at `10.0`.
 pub const RESIZE_LEEWAY_PIXELS: f32 = iced_pro::token::size::SPLITTER_GRAB;
 
-/// Full-on-screen height of the stub top/bottom bands, in logical points.
-pub const STUB_BAND_HEIGHT_POINTS: f32 = 28.0;
+/// Full-on-screen height of the stub top/bottom bands, in logical points —
+/// `size.control.lg` (`UIF-TOK-002`), the rung the live navbar is built
+/// at.
+///
+/// **Movement: 28 → 36**, following the navbar band (see
+/// [`crate::ui_iced::panels::top::BAR_HEIGHT_POINTS`]).
+///
+/// **These stubs are dev scaffolding and nothing mounts them.**
+/// [`top_band`] and [`bottom_band`] are `pub` but have no caller anywhere
+/// in the crate — the live view builds the real navbar and command band.
+/// They are kept on the token rather than at the old literal so no
+/// off-scale `28` survives in the tree, but note that one fixed height
+/// cannot represent both real bands: §4.1.1 makes the top band 36px and
+/// the bottom band `Shrink 44px..120px`. Removing the stubs outright is
+/// the cleaner end state and is left as a stated follow-on rather than
+/// folded into a token-alignment increment.
+pub const STUB_BAND_HEIGHT_POINTS: f32 = iced_pro::token::size::CONTROL_LG;
 
 /// Text rendered inside every stub region: a dev-scaffolding label, not
 /// user-facing copy — kept in exactly one place per [RUST-021].
