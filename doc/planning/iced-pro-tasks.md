@@ -1345,6 +1345,621 @@ the same composition the app uses. **INT-6 must replace the body of
 `cargo fmt --check` clean · `cargo doc --workspace --no-deps` after
 `cargo clean --doc`: all 5 crates re-documented, **0 warning lines**.
 
+### INT-3a — The hamburger menu renders on the framework menu engine
+
+First framework *widget* the app actually draws. `ui_iced/hamburger.rs`
+builds a `Menu` tree, drives the cascade, projects focus, and settles
+activations through `command_for_activation`.
+
+Two framework behaviours had to be worked around rather than used:
+
+- `MenuCascade::stabilise` closes any card the keyboard cannot enter, so
+  a card whose only row is disabled cannot stay open. Every ported menu
+  therefore needs an enabled, stays-open placeholder row.
+- The empty-`regions` hole INT-2 left is closed **for this surface only**:
+  INT-3a registers real `Placement` rectangles, so `route_pointer` can
+  resolve `PointerTarget::Surface` against the hamburger card. Other
+  surfaces still register empty regions.
+
+Reconciled with the INT-2 deferral note in `app.rs`: `MenuCascade::on_key`
+requires `&mut FocusState`, so the exit condition INT-2 named was met by
+the framework enumerating its own members. App-wide `Tab` traversal stays
+iced-owned.
+
+Gates: 7749 workspace tests, all five green.
+
+### INT-3b — Context menus on the framework menu engine
+
+`cbef6a4`. File-tree, directory, multi-select and tab context menus now
+render through `surface::menu`, pointer-anchored via `anchor::solve`.
+
+**This retired the app's second menu engine outright.** The app carried
+two: `menu.rs` (983 ln, rich `Action/Toggle/Radio/Submenu/Heading/
+Separator` + `MenuState`) and `overlay.rs`'s simple
+`MenuItem{label,message}`. Producers returned the simple type, `app.rs`
+widened it, `menu_overlay` drew it. Two engines for one surface meant the
+simple type's limits were the surface's limits — which is exactly why
+separators were impossible.
+
+**The separator gap is closed for real.** `center.rs` documented that the
+overlay card was a uniform column of buttons whose rows had no separator
+kind, so grouping was carried by row order alone. Each row now declares a
+`ContextGroup` and the engine emits a real `1px border.subtle` divider at
+every group boundary. The tab menu carries three groups — Primary,
+Automation, Management — so it draws two dividers where it previously
+drew none.
+
+New: `context_menu.rs` (the `ContextRow`/`ContextGroup` model, row-key
+routing, stable root ids) and `menu_surface.rs` (card chrome and solved
+geometry shared with the hamburger, so the two cannot drift on inset,
+width, row grid or focus-id scheme). An unsolved card is not mounted, so a
+card past the end of the rect list can never appear at a guessed position.
+
+`CARD_WIDTH = 224` is the app's own choice pinned at the low end of
+§4.8.1's `224..320` range because iced-pro publishes **no** menu-card
+width token — documented as such rather than passed off as a framework
+number.
+
+Row height (32), heading height (24), separator height (9) and card width
+(224) unchanged; card inset 6 → 4 (`space.xs`), inter-row spacing 1 → 0
+(contiguous grid, separators carry their own 9px). Quadrant flip pinned in
+three directions.
+
+Tests: net −25 (7749 → 7724). Shedding, not loss — 59 removed with the
+code they tested, 34 denser tests added covering group-run sequences
+against the spec for all four targets, separator placement including never
+leading or trailing, destructive-group isolation, row-key uniqueness and
+route coverage, root-id stability, anchor flips, and row-grid contiguity.
+
+**Framework gap found:** `MenuRow` reports only `Activated`/`Absorbed`. It
+cannot drive hover or aim, so B-3's `AimCorridor` is **not consumable from
+the row widget**. This gates submenu aim behaviour and is still open.
+
+### INT-4 — Input dialogs on the framework dialog surface
+
+`ae408dd`. CreateDirectory, CreateDocument, Rename, Move, DeleteConfirm.
+
+**The constant mapping was EXACT.** All eight — width 320, title 24,
+prompt 20, input 32, error 20, buttons 32, gap 8, list max 200 — already
+equalled their framework counterparts, as did the three type rungs
+16/14/12. The app's dialog geometry was spec-conformant by coincidence,
+so the rebinding is provenance with no pixel movement.
+
+**Punish Late is now real on this surface.** B-4 built `EditStance` and
+`punish()` with no renderer calling them. `painted_error()` is now the
+only thing the card may draw, gated on `punishment().painted()`. The
+subtle part is correct: the confirm gate reads `blocks_submit`, **not**
+`painted` — a pristine empty field is invalid and unsubmittable even
+though nothing is drawn. Withholding the visual is not forgetting the
+fact. Closes the B-4 renderer residual **for the input-dialog surface**;
+other app text inputs still never call `punish()`.
+
+**Two real defects fixed.**
+
+1. Clicking a disabled `Ok` used to **dismiss** the dialog — the press
+   fell through the card to the scrim. A pre-existing test asserted
+   exactly that: *"the inert Ok click must fall through to the modal
+   scrim, which dismisses"*. That is the behaviour `UIF-INP-002` forbids
+   verbatim. The spec was re-read at L1309 to confirm before the assertion
+   was rewritten — the test was wrong, not the gate.
+2. A silently-blocking `Ok`. `DisallowedClass::FilenameBasename` refuses
+   characters `is_safe_basename` does not, so `"a:b"` gave `painted ==
+   true` with `validation == None` — a disabled button with no
+   explanation. Now falls back to `DIALOG_NAME_UNSAFE_ERROR`.
+
+**`ValidationRule::Name` deliberately NOT adopted — framework gap
+recorded in `spec_coverage.rs`.** The spec names it as the injected rule,
+but `check_basename` (`surface/input_dialog.rs:464`) rejects only empty,
+edge-spacing, control characters and the illegal character class. It does
+**not** reject `.` or `..` as whole names, so the rule accepts a
+directory-traversal name. It is a character-class check, not a traversal
+guard. The app keeps its stricter `is_safe_basename`, which separately
+rejects `Component::ParentDir`.
+
+`InputDialogHost` not adopted — its focus trap and `SurfaceRegistry`
+self-registration collide with `OverlayState` ownership. `keyboard_invoked`
+cannot be honoured: the app cannot distinguish pointer- from
+shortcut-invoked dialogs, so `None` means "no pointer ever reported", not
+"keyboard". §4.5.1 wants Cancel-first right-aligned; the app renders
+`Ok, Cancel` left. Report-only.
+
+Tests: 7724 → 7746 (+22).
+
+### INT-5a — About and Attributions on the framework modal frame
+
+`eddb3a2`. Width change is spec-mandated: §4 sizing gives About 440 and
+Attributions 640×480; the framework presets match exactly; **the app used
+620 for both** and was non-conformant.
+
+About 620 → 440 (−180px). Measured 440.0 exactly, 268.0 at a 300px
+viewport where the gutter clamp reaches the box, 440×624 at 1024×768 with
+144px headroom. Licence body lays out at 24 lines × 20 = 480px and
+scrolls inside its 200px window with every word reachable.
+
+**The `line_height` footgun, discovered here** — see the dedicated entry
+below. `From<f32> for LineHeight` is a *multiplier*, not pixels.
+
+Contrast recomputed from raw sRGB: the old `accent_fill` on
+`surface_raised` that users actually saw measures **3.90:1** — a WCAG
+failure. Moving to `accent_text` on `surface_overlay` gives **9.49:1**.
+The fix is the token move, not a fill retune.
+
+`LICENSE_MAX_HEIGHT = 200` stays app-owned: no framework token covers how
+tall one scroll region inside a card may get, and `CONTENT_HEIGHT_MAX`
+(480) is the ceiling for a whole content-fit card body — and the licence
+body measures exactly 480px, so using it would mean no scroll and a
+~764px card.
+
+`UIF-MOD-001` focus trap **not wired and not claimable**: only Escape
+reaches the app (`subscription.rs:442`); iced's router owns `Tab`, so a
+pushed trap would be fiction. `UIF-MOD-002` not wired (no editable field,
+no in-flight action). `UIF-MOD-003` not wired (no failing action). What
+*is* wired: dismiss via Escape and scrim, and card-boundary absorption.
+
+Tests: 7746 → 7779 (+33).
+
+### The `line_height` footgun — menus rendered **no ink at all**
+
+`bb18c2d`. The most serious defect found in the whole series.
+
+`TypeRung::line_height` is a bare `f32` holding **pixels** (20.0 for
+`BODY`, 18.0 for `UI_COMPACT`, 16.0 for `CAPTION`). But iced maps
+`From<f32> for LineHeight` → `LineHeight::Relative(factor)`
+(`iced_core-0.14.0/src/text.rs:221`), and
+`Relative.to_absolute` returns `Pixels(factor * text_size)` (same file,
+line 209). Passing a rung's `line_height` into `.line_height(...)` asked
+iced for line_height × font_size pixels per line.
+
+Measured: `CAPTION` 192px, `UI_COMPACT` 234px, `BODY` 280px, `TITLE_SM`
+384px — exactly `size × line_height`.
+
+**What the user saw: nothing.** INT-5a guessed the fixed 32px row slot
+masked this. It did not mask it — it caused total disappearance. The
+glyph is drawn at the vertical centre of the inflated line box (~112px
+below the box top for `UI_COMPACT`), and cosmic_text clips the paragraph
+to the buffer height it was handed, which is the 32px slot. A real
+`MenuRow` before the fix: **no ink anywhere in a 600×6000 buffer.**
+After: ink at 1000.5..1020.5 across 1876px. The app's own mounted card
+failed *"row 0 painted nothing inside its rect {x:4, y:4, w:216, h:32}"*.
+**Every menu in the app was blank**, and had been since INT-3a shipped.
+
+Fix: `TypeRung::iced_line_height()` returns
+`LineHeight::Absolute(Pixels(self.line_height))`. No token **values**
+changed — the bug was at the boundary. All eight sites routed through it.
+
+Footgun survey: `iced_core` has `From<f32>` for `Degrees`, `Radians`,
+`Radius`, `Length`, `Padding`, `Pixels`, `Rotation`, `LineHeight`. Only
+`LineHeight`'s is a multiplier rather than a magnitude; the others are
+unused or never cross to iced here. `LineHeight` was the only realized
+instance.
+
+Guards: 14 tests, each verified to FAIL on a reintroduced bug.
+Independently confirmed here — reintroducing the bare `f32` at
+`settings_row.rs:272` makes `no_line_height_call_hands_iced_a_bare_f32`
+fail, and restoring returns the tree to green. **The guard is not
+vacuous.**
+
+Near-miss worth recording: the first app-level ink test **passed with the
+bug present**, because it bounded only `y` and the card's `border_strong`
+(120,120,120) sits above the ink threshold and runs down the left and
+right edges through every row band. Caught by ASCII-arting the frame. The
+helper now bounds `x` too, and the permanent guard is per-slot rather than
+per-row for the same reason.
+
+### INT-5b — Editor modal sizing and the unsaved-edit guard
+
+`96f1b4e`. **The gap: `EditorViewModel::is_dirty()` existed all along and
+nothing used it to guard dismissal.** A search found only `tree_dirty` in
+`orchestrator.rs`, unrelated. Escape or a scrim click over an editor with
+unsaved work discarded it without a word. `UIF-MOD-002` is exactly this,
+and it was simply unimplemented.
+
+One rule, `guard_leave`, routed through `guard_editor_leave`, reached from
+both dismissal paths — the Escape unwind on `SURFACE_ID_EDITOR` and the
+scrim click in `reduce_editor`. Escape over a dirty editor is refused and
+raises a discard confirmation; a scrim click over a **clean** editor still
+dismisses normally, which matters because that path must not regress. The
+`Cancel` button closes a dirty editor on purpose — that is the explicit
+discard the spec names.
+
+**Escape-rank correctness was the subtle part.** A refusal returns
+`UnwindAnswer::Unwound`, consuming the key, **not** `Declined`. Returning
+`Declined` would let the Escape travel on down the rank walk and close
+`AgentDebug` or `About` sitting *underneath* the editor — so guarding the
+editor would have started closing other surfaces.
+`test_repeated_escape_never_discards_unsaved_edits` drives three rounds
+and asserts the edits survive every one.
+
+The confirmation surface is reused, not invented — `DialogKind::
+DiscardEditorChanges` on INT-4's `InputDialog` with
+`InputControl::Confirmation` + `ButtonVariant::Danger`.
+
+Fixed 800×600 becomes viewport-responsive: 800×600 → 640×480, 1024×768
+→ 819.2×614.4, 1280×800 → 960×640 (width capped), 1920×1080 →
+960×760 (both capped), 600×420 → 520×380 (both floored), 320×240 →
+288×208 (gutter only). Usable canvas height at the 520×380 floor is ≥
+200pt, ten body lines, clean and with the error banner up. The banner
+costs exactly 48pt, pinned to its tokens.
+
+`EDITOR_TITLE_SIZE` 18 → `TITLE_SM` 16 because 18 was never a rung and
+§4.6.1 says 16. Error slot `EDITOR-4001`/`EDITOR-5001` with live
+`Recovery::Retry` and `FocusControl`. `EditorPalette` under `UIF-TOK-005`
+carries only background/foreground/error — a real `text_editor` also needs
+placeholder and selection, both added with contrast measured through the
+crate's own WCAG solver.
+
+Not claimed: `UIF-MOD-001` trap (Tab is iced's). A save that fails
+**during** background execution is still not surfaced — only a queue
+refusal is, because `UserFileOperationCompleted` failure results are not
+routed back to the editor error slot.
+
+Tests: 7793 → 7832 (+39).
+
+### INT-5c — Batch and Tools dialogs on the framework modal stack
+
+`8756315`, both halves.
+
+**A real bug fixed on the way:** both dialogs previously mounted via
+`overlay::modal`, which had **no absorb boundary at all**. A press on dead
+space inside the card fell straight through and cancelled or closed the
+dialog.
+
+**Three components the increment plan named do not exist as assumed.** Each
+was verified before wiring:
+
+| Named | Reality | Used instead |
+|---|---|---|
+| `widget::chip` + `ChipVariant::Success` | `ChipVariant` has exactly `Assist`/`Filter`/`Input`; `ChipStyle` has **no status-colour axis** | `widget::badge` (`UIF-ATOM-008`) — a `✓` meaning "parallel-safe" is a *judgement*, and §3.8 is the framework's component for a judgement |
+| `widget::toggle` | Resolver-only — ships `ToggleStyle` as `Layer`s, no `Element`-producing builder | iced `checkbox` **painted from `toggle::resolve_style`**, including its contrast lock |
+| `form_field::stacked` for multi-row | Fixes its control band at `CONTROL_SLOT_HEIGHT = 32px` | Single-control fields use `stacked()`; the prompt section reuses `resolve_header`/`resolve_caption` with a filling middle band |
+
+Also `ProgressStatus` has no `Completed` position and `BatchRunStatus`
+carries no completed/total counts, so the bar is indeterminate — nothing
+invents a fraction the subsystem never reported.
+
+Batch 500 → 560 per `BATCH_WIDTH`, guarded by `assert_ne!` against the
+retired literal. Batch mounts at the §4.6.2 **ceiling** rather than
+content-fit, and that is load-bearing: five `stacked` `form_field`s at
+`STACKED_HEIGHT` 76 consume 380px before the prompt list gets a pixel.
+
+Tools width was already the spec's 720 — only the owner moved. The height
+**policy** changed, which matters more than the number. The app's invented
+`MIN_HEIGHT 200` / `MAX_HEIGHT_HARD_CAP 1200` became the framework's 320
+floor, 80%-of-viewport cap and gutter-last rule. The case that mattered:
+0 rows at a 100px window previously clamped to **200 — taller than its
+own window**; now 68.
+
+Error surfacing is genuinely used here, unlike About:
+`ToolErrorKind::Authentication` → `ModalError` `TOOLS-5001` with
+`ErrorLocation::Region` and a live `Recovery::Retry` that re-issues
+`StartMcpAuth`. `error_kind` is carried onto `ToolGroupRow` from
+`group.last_error` so the banner never parses the rendered
+"Kind: message" line back apart. `Forget` is the card's only
+`ButtonVariant::Danger` because it discards a credential the user cannot
+re-derive by pressing a button.
+
+Two second sources of truth retired: `parallel_chip_color` and
+`parallel_chip_surface_color`.
+
+Tests: 7832 → 7866 (+34).
+
+### INT-6 — Movable Band-1 utility overlays
+
+`bd8456e`. Agent Debug fully converted; Logs gets the blocking half
+removed but keeps its pre-INT-6 interior.
+
+**The design question: registration is not closability.** The plan wanted
+both cards registered as Band-1 `MovableCard`s, and two existing tests pin
+that the docked Logs panel must **never** be Esc-closable
+(`app_tests.rs:924`, `update_tests.rs:2813`). Not actually in conflict:
+`SurfaceRegistry` registration gives a surface its z-order and promotion;
+closability is a separate decision made by the app's `ClosableSurfaces`
+match in `close_topmost`. `sync_surfaces` now registers both cards as
+`MovableCard` with their **real** card rects rather than empty ones, so
+`route_pointer` answers Surface inside and Workspace outside, while
+`SURFACE_ID_LOGS` returns an explicit `Declined(CannotUnwind)`.
+
+Both pin tests pass with their bodies **untouched** — `update_tests.rs` has
+no diff at all.
+
+**Geometry persistence** `[RUST-024]`: `UiStateGeometryStorage`
+implements `GeometryStorage` over the live `persisted_ui_state` plus the
+injected `UiStateStorage`. It borrows the live model rather than doing a
+handler-side read-modify-write on purpose: the close-time save writes the
+whole model it is handed, so a handler-side RMW would have silently
+reverted every position settled mid-session. `load` is pure memory with no
+I/O on card open `[NFR-003]`; `save` fires only at settle, never per
+frame `[NFR-002]`. Backed by an additive `overlay_geometry:
+BTreeMap<String,String>`, `serde(default)`, so **no schema bump**.
+
+**A contract almost broken:** the first cut keyed registration off
+`host.is_some()` and broke five existing pins. The real contract is that
+the index derives from the authoritative `OverlayState` field, so
+`agent_debug` keys off `debug.is_open()` and Logs off a new explicit
+`logs_visible` mirror. Logs' visibility has always lived on
+`BackgroundLogsViewModel`, which is exactly why only Agent Debug was
+mappable before this increment.
+
+**`AT_BOTTOM_TOLERANCE` deliberately NOT adopted.** The framework value is
+`space::XXS` = 2.0; the app's `BOTTOM_STICK_TOLERANCE` stays 1.0.
+`logs_tests` pins a viewport 2.0pt short as NOT at bottom, so switching to
+2.0 flips that cell and would keep yanking the view down 1.5pt into
+someone's reading history. The decision matrix was unified **without**
+moving the position threshold.
+
+**Plan components that do not exist:** `composite::search_input` is not in
+`iced_pro::composite` at all. Also iced 0.14 `mouse_area` has no
+`on_press_with` — `on_press` carries a bare `Message` and only
+`on_move(Point)` yields a coordinate — so a press is paired with the last
+reported position. Sound in practice (the pointer must be over the bar to
+press it) but an inference, not a press-time coordinate. It is also why
+the full-screen capture lane is required: without it a drag that outruns
+the title bar freezes mid-gesture.
+
+**Correction to the brief:** `MovableHost` pushes **no** focus trap, which
+is precisely why it *is* adopted and `sync_surfaces` converges with it.
+Only `ModalHost` (`modal.rs:926`) and `InputDialogHost`
+(`input_dialog.rs:1142`) are refused.
+
+Tests: 7866 → 7892 (+26).
+
+### INT-7a — Navbar and command band token alignment
+
+`179b029`. `top.rs`, `bottom.rs`, `layout.rs` all fully converted.
+
+**Navbar band 28 → 36 pt, spec-correct not preference.**
+`size.control.lg`'s own token doc names it "Primary structural bars: Top
+Navbar height" and the layout sketch prints Band 1 at 36px. What did
+**not** grow is the controls inside it — the trigger and buttons stay at
+`CONTROL_SM` 28 because §4.2.1 prints "Right: Workspace Controls — Height
+28px" *inside* that 36px band. The band grew around unchanged controls.
+
+Brand title 18 → 16 and Normal → Bold (`TITLE_SM`, the rung §4.2.1 names;
+18 was never a rung). Navbar padding 2 → [4, 12]; the bar now closes
+arithmetically: `CONTROL_LG (36) = XS (4) + CONTROL_SM (28) + XS (4)`.
+
+**File-context floor 8 → 12 pt.** `compute_file_context` used `min_size =
+8`, a size the type scale forbids. A long directory path could shrink the
+label below anything the framework considers legible.
+
+`stop_button_variant(running)` returns `Danger` while a turn is actually
+cancellable, `Secondary` when idle — and the colour claim is *checked*:
+`stop_button_label_colour_matches_the_danger_rest_lock` pins that the idle
+label's muted colour and the Danger rest cell's resolved foreground are
+the same token resolution, so the button cannot drift to a colour that
+contradicts its own variant.
+
+`band_scalars_resolve_from_tokens_and_share_one_density_rung` pins
+PRIN-006's row-density homogeneity for the command band.
+
+Tests: 7892 → 7903 (+11).
+
+### INT-7b — File tree and ToC panel
+
+`df053e3`. Row geometry, sizes and paint derive from `tree_row`'s own
+constants rather than parallel app-side numbers.
+
+**Three real defects.**
+
+1. **Selected PDF-backed label: 1.59:1 → 4.80:1.** The app tinted the
+   whole tree label with `status_danger_text` to mark a PDF-backed file.
+   On a **selected** row that put red on the accent fill —
+   `RGB(255,92,92)` on `RGB(93,96,238)`. Recomputed from raw sRGB:
+   **1.5863:1** before, **4.802:1** after. WCAG AA needs 4.5. Not
+   marginal — unreadable, and it only appeared on rows that were both
+   selected *and* PDF-backed, which is why it survived.
+2. **Tree rows had no height floor at all** — ~20px against the 24px
+   pointer minimum §4.3.2 states. Now `ROW_HEIGHT_COMPACT`
+   (`HIT_TARGET_MIN` = 24).
+3. **Sub-floor text in search results.** `SECONDARY_TEXT_SIZE` was 11.0,
+   below `MIN_SIZE` 12. Three lines carried it — match-count suffix,
+   library-relative path, snippet — so every search result rendered below
+   the `UIF-TOK-004` floor. Same class as INT-7a's `min_size = 8`.
+4. Header weight was illegal: 16px **Regular** is not a legal `TITLE_SM`
+   rendering — that rung forbids Regular outright.
+
+Rendered: row text 14 → 13; indent 18 → 16/level (depth 4: 72px → 64px);
+row inset-x 6 → 4; panel padding 6 → 4; auto-fit slack 40 → 32 (panel
+auto-fits 8px narrower); search cards 52 → 58 (the old 52 only cleared
+its content because iced's relative line height was doing the arithmetic
+at ~51.2px inside); search glyphs 14 → 16 (they tracked `ROW_TEXT_SIZE`,
+which moved to 13, and a 13pt icon is not on the icon scale).
+
+**`tree_row` adopted for geometry and paint, blocked for rendering** —
+framework gaps, not wiring misses: no `Element`-producing widget (it
+resolves `TreeRowSlots`/`TreeRowStyle`/`Layer` rectangles and only the
+gallery's canvas turns those into pixels); hover/pressed tiers
+unreachable because iced 0.14's `mouse_area` never reports hover into a
+container style, so only `Rest` and `Selected` resolve; the 2px selection
+bar and depth guide lines are `Layer` rectangles needing a stack per row;
+and the `[PDF]` badge §4.3.2 uses to carry meaning through the selection
+lock does not exist.
+
+**The increment plan's description of `right.rs` was wrong** — it contains
+no tab strip, only `should_show_panel`, `resolve_anchor` and two ToC
+indent constants, both binding **exactly** (4 = `space::XS`, 12 =
+`space::MD`). The tab strip lives in `center.rs`.
+
+Tests: 7903 → 7923 (+20).
+
+### INT-7c — Center panel, agent panel, render layer
+
+`f7e5ed1`, all three areas. Closes INT-7.
+
+**Two accessibility defects, every figure independently recomputed from
+raw sRGB and matched to two decimals.**
+
+1. **The unsaved-changes dot was invisible on the active tab.**
+   `status_warning` on `accent_fill` measures **1.65:1** — the marker sat
+   on the very tab the user was looking at. `tab_unsaved_dot_color()` now
+   applies the role lock, giving **4.80:1**.
+2. **Transcript links failed WCAG AA on every surface they can appear on.**
+   The link colour was `Palette::accent`, i.e. `color.accent.fill` — a
+   **background-only** token — painted as a foreground. Measured 4.14:1
+   on `surface.base`, 3.90:1 on `surface.raised`, 3.83:1 on
+   `surface.code`; the floor is 4.5, so it passed nowhere. Now
+   `accent_text` at 10.66 / 10.02 / 9.85. The fix is the role change,
+   not a fill retune.
+
+**Three off-scale type sizes corrected:** 18, 18 and 15 were not on the
+type scale at all.
+
+**The tab strip height was emergent and is now explicit.** No strip-height
+constant existed; height fell out of text size plus padding at ~30. Now
+`STRIP_HEIGHT = CONTROL_LG` 36 with `TAB_HEIGHT = STRIP_HEIGHT −
+2×STRIP_PADDING = CONTROL_SM` 28 — the same band closure INT-7a found for
+the navbar. `TAB_PADDING_Y` had to move 4 → 2 as a **consequence, not a
+choice**: it is derived as `(TAB_HEIGHT − HIT_TARGET_MIN)/2`, because the
+old 4 could not coexist with the spec's 24×24 close target (24 + 2×4 = 32
+overflows a 28pt tab). The close hit target moves from glyph-sized and
+sub-24 to a real 24×24.
+`the_tab_strip_height_is_not_the_sum_of_its_contents` pins 36 > 30 so the
+band cannot silently revert to emergent.
+
+**Iced's derived markdown ladder was illegal, five sizes at once.**
+`Settings::with_text_size(14)` yields `code = 10.50` (below the 12
+floor), `h1` 28, `h2` 24.5, `h3` 21, `h4` 17.5 (all off-scale) and
+`spacing` 12.25 (off the base-4 grid). Nobody chose those — they are the
+side effect of a multiplication table. `markdown_settings()` now sets
+every field by hand to the same ladder `render::heading` produces, so the
+transcript and the document viewer render one Markdown at one legal set of
+sizes.
+
+Render layer: heading ladder 32/24/18/14/12 → 24/20/16/14/12;
+`CODE_LANGUAGE_SIZE` 11 → 12 (was below `MIN_SIZE`); `EMPTY_CELL_HEIGHT`
+18 → 20 = `BODY.line_height`; `INDENT_UNIT` 20 → 16 so document and tree
+nest the same distance as `tree_row::INDENT_STEP`.
+
+**Spec conflict resolved rather than papered over:** §4.4.1's 6px
+`size.indicator.dot` **cannot be honoured** — the marker is painted with a
+font glyph and §2.4 is absolute that no text renders below 12px. Taking
+the token literally meant either breaking the floor or exempting one call
+site and gutting the guard. The dot is pinned at `MIN_SIZE` 12 with
+`assert_ne!` against `INDICATOR_DOT` so the gap is noticed if it ever
+closes by accident rather than by decision.
+
+Also: framework `Button` has **no `.width()` builder** (verified across its
+21 `pub fn`s), so the thinking-block disclosure header, which must
+stretch the full pane so the whole row is the click target, stays iced's
+button. And `agent_panel`/`agent_prompt_row` are **not mounted in the live
+view** — `view.rs::agent_session_body` calls `agent_transcript_view`
+directly, so the prompt row is currently dead surface.
+
+Tests: 7923 → 7941 (+18).
+
+### INT-8 — Token-lint gate over the app's iced layer + C4 sync
+
+`c2111a9`. Closes the INT series.
+
+**The honest starting count**, measured by landing the gate with an empty
+allow-list and letting the real linter dump the audit rather than
+estimating with a regex: 157 production files under `src/app`, **31 Rule
+B violations** (unbound visual-measurement `pub const f32`), and **zero
+Rule A violations** — §4a was already clean by hand across the entire app
+crate, zero hex colour literals in app production code, with all 8 colour
+constructors inside `ui/theme.rs`. The gate adds enforcement where none
+existed and needed no colour exceptions at all.
+
+Resolved as **16 fixed · 3 spec-registered · 12 allow-listed**
+(`token_bound` 73 → 89).
+
+Two of the sixteen were real defects, not rebindings: `agent_debug`'s
+`TITLE_SIZE` 18 → `TITLE_SM` 16 (18 is on no rung), and `JSON_LINE_HEIGHT`
+18.2 → 20.0 — it was `JSON_TEXT_SIZE * 1.3`, which is iced's
+undocumented `Relative(1.3)` re-derived by hand **and** a bare `f32` line
+height, i.e. the `bb18c2d` class reintroduced by arithmetic instead of by
+conversion.
+
+**One scope mechanism, not two.** `VISUAL_SCOPE_DIRS` was *not* widened —
+that would change iced-pro's semantics and still do nothing for the app,
+whose scan root is iced-pro's own manifest dir. `token_lint` gained a
+`Scope` descriptor plus `scan_source_in`, `scan_tree`, `in_scope`,
+`lookup_geometry`, `render_scoped`, `crate_scope`; `scan_source` is now a
+thin wrapper over `scan_source_in(&crate_scope(), ..)`. A parallel scanner
+starts identical and then drifts: fix a false negative in one and the
+other keeps reporting what it always reported, and two numbers disagreeing
+about the same tree is worse than one wrong in a known way.
+`the_app_scope_and_the_framework_scope_agree_on_the_same_shape` asserts
+both scopes produce an identical finding for identical input, so a fork in
+practice fails the build.
+
+**The allow-list is enumerated, not a grandfather clause.** Twelve
+entries, each with its own reason, and `scan_tree` reports any entry that
+suppresses nothing, so an entry cannot outlive its reason;
+`no_allow_entry_is_a_blanket_exclusion` pins the shape. Each is a number
+no token carries at its current value, where binding it to the nearest
+rung would be a **rendering change** rather than a token binding —
+including two `table_width` FTWA solver inputs where changing 5.0
+re-solves every column of every table. Landing the gate was licence to
+*name* every place still needing a decision, not licence to re-tune the
+app.
+
+`PIN_FILES_SCANNED` (144) and `PIN_RULE_B_FILES` (81) **did not move** —
+the machinery was generalised rather than iced-pro's scope changed, so all
+31 existing iced-pro `token_lint` tests pass untouched. New app-side pins:
+157 files, rule_a 1, rule_b 44, colour_definitions 8, token_bound 89,
+surface_bound 3, allow_entries 12.
+`this_gate_checks_provenance_not_legality` pins that a token-bound constant
+passes whatever its value, so nobody reads a green gate as "the sizes are
+legal". INT-7c's `token_guard_tests.rs` is **not** subsumed: that file
+proves *legality* of the specific converted surfaces, this gate proves
+*provenance* across the whole layer.
+
+**C4 sync: three stale claims were live in the authoritative architecture
+picture.** The Level-3 diagram title said *"widgets not yet"* and the prose
+said iced-pro is consumed *"only as the design token source"* — both true
+at INT-1, both false since INT-3. A third, not previously flagged, said
+*"nothing checks for raw literals outside `token/` at source level"* — now
+false as of this increment. All three verified at zero occurrences. New
+sections record the integration contract, that `SurfaceRegistry` is a
+derived index and registration ≠ closability, and seven known integration
+gaps.
+
+**Still open after INT-8:** `SPACING` was not added to
+`VISUAL_NAME_MARKERS` — it would surface `CONTROL_SPACING`,
+`CHEVRON_SPACING` and `FILTER_SPACING` at 6.0 across both trees
+mid-increment, so it is recorded as a gap rather than silently widened.
+Rule B still reads *declarations*, not expressions, so inline literals,
+non-`pub` constants and indirection stay invisible — inherited from the
+scanner and restated in the gate's module doc so it cannot be
+over-trusted.
+
+Tests: 7941 → 7957 (+16).
+
+### The INT series — what the integration work established
+
+Nine increments, 7724 → 7957 workspace tests (+233), every gate
+independently re-run at every step with `--workspace` and doc-warning
+lines counted explicitly.
+
+**One ownership contract emerged and held across every surface.**
+`ModalHost` and `InputDialogHost` self-register into `SurfaceRegistry` and
+push a focus trap, which collides with `OverlayState::sync_surfaces` /
+`close_topmost` ownership; both are refused. `MovableHost` registers its
+control roster **without** a trap, so it *is* adopted and the sync
+converges with it. The rule for the next contributor: take framework
+sizing, frame and semantics; keep app-side open/close/dismiss ownership;
+never create a second writer to the surface index.
+
+**`UIF-MOD-001`'s focus trap is unwired everywhere and is not claimable
+anywhere.** Only `Escape` reaches the app (`subscription.rs:442`); iced's
+router owns `Tab`. Every increment refused to claim it rather than writing
+a trap that iced would ignore.
+
+**The plan was wrong about six named components.** `ChipVariant::Success`,
+`widget::toggle` as an `Element` producer, `form_field::stacked` for
+multi-row, `composite::search_input`, `bridge::apply_transition` /
+`advance` / `sync`, and `right.rs` as the tab strip. Each was caught by
+verifying against the files before wiring rather than by trusting the
+brief.
+
+**Six user-visible defects were found by the integration work that the
+framework's own test suite did not catch** — because the framework tests
+test resolvers, and the defects only appear when something actually paints:
+blank menus (`bb18c2d`), disabled-`Ok` dismissing a dialog, silent loss
+of unsaved editor work, PDF-label 1.59:1, transcript links failing AA on
+every surface, and the dirty dot invisible on the active tab.
+
 ---
 
 ## 4. Known spec gaps / open questions
