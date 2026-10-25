@@ -59,6 +59,27 @@
 //! [`HoverController::pointer_enter`] already implements, applied to a second
 //! channel rather than a second call.
 //!
+//! ## A third case: the warm handoff
+//!
+//! The two channels above answer *how did the user get here*. `UIF-TOK-007` adds
+//! a third question that is orthogonal to both: **has the user already been
+//! shown a tooltip somewhere else, moments ago?** If so, `time.delay.tooltip_warm`
+//! says the wait is `0 ms` rather than 400 ms.
+//!
+//! That question is unanswerable inside one controller, because the fact is not
+//! about this control. So the controller does not try. The host keeps a shared
+//! [`WarmSession`](super::warm::WarmSession) per group of tooltip-bearing
+//! controls and hands the verdict in through
+//! [`HoverController::pointer_enter_warm`](HoverController::pointer_enter_warm),
+//! which arms the machine with the wait that verdict carries. Everything else
+//! here — the `Pending` boundary, idempotence, suppression — is unchanged,
+//! because the handoff only changes *which number* the boundary is drawn
+//! against.
+//!
+//! A cold verdict defers to this controller's own configured delay rather than
+//! to the token, so the handoff can only ever *remove* a wait, never override
+//! one. See [`HoverController::pointer_enter_warm`](HoverController::pointer_enter_warm).
+//!
 //! ## Suppression
 //!
 //! [`HoverController::dismiss`] (a click, an Escape) hides the tooltip **and suppresses
@@ -77,6 +98,8 @@
 //! Unit tests live in the sibling `hover_tests.rs` sidecar.
 
 use std::time::{Duration, Instant};
+
+use super::warm::{ArrivalWarmth, warm_wait_ms};
 
 /// Process-wide origin for [`TimeMs::now`], fixed the first instant one is taken.
 static CLOCK_ORIGIN: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
@@ -253,15 +276,25 @@ impl ArrivalSource {
     }
 }
 
-/// A live arrival: when it happened and through which channel.
+/// A live arrival: when it happened, through which channel, and how long it
+/// actually waits.
 ///
 /// One value rather than two parallel fields so "armed" and "how it was armed" cannot drift
 /// apart — there is no such thing as an arrival instant with no channel, or a channel with
 /// no instant.
+///
+/// The wait rides on the arrival rather than being read off the controller at
+/// `tick` time because the delay is a property of *arriving*, which is the same
+/// argument the module docs give for `pointer_exit` taking no clock. It is also
+/// what lets one controller take a **different** wait per arrival: a cold
+/// pointer arrival carries [`HOVER_DELAY`](super::HOVER_DELAY) while a warm
+/// handoff from a [`WarmSession`](super::warm::WarmSession) carries `0 ms`,
+/// against the same configured controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Arm {
     at: TimeMs,
     by: ArrivalSource,
+    wait: Duration,
 }
 
 /// Decides *when* a tooltip may paint, from arrival events and a clock the caller supplies.
@@ -330,12 +363,13 @@ impl HoverController {
         }
     }
 
-    /// Arm the controller from `now` through `by`, unless something is already armed.
-    fn arm(&mut self, now: TimeMs, by: ArrivalSource) -> bool {
+    /// Arm the controller from `now` through `by`, waiting `wait`, unless
+    /// something is already armed.
+    fn arm(&mut self, now: TimeMs, by: ArrivalSource, wait: Duration) -> bool {
         if self.armed.is_some() {
             return false;
         }
-        self.armed = Some(Arm { at: now, by });
+        self.armed = Some(Arm { at: now, by, wait });
         self.suppressed = false;
         true
     }
@@ -349,7 +383,39 @@ impl HoverController {
     ///
     /// Returns whether this call re-armed the delay.
     pub fn pointer_enter(&mut self, now: TimeMs) -> bool {
-        self.arm(now, ArrivalSource::Pointer)
+        self.arm(now, ArrivalSource::Pointer, self.delay)
+    }
+
+    /// The pointer arrived at the control at `now`, carrying a wait already
+    /// decided by a shared [`WarmSession`](super::warm::WarmSession)
+    /// (`UIF-TOK-007`).
+    ///
+    /// This is the warm-handoff entry point: the controller does not own the
+    /// cross-control memory and cannot answer "has the user just seen a tooltip
+    /// elsewhere?" on its own, so the host asks its session and hands the verdict
+    /// over here. A [`Warm`](super::warm::ArrivalWarmth::Warm) arrival is armed
+    /// with `0 ms` and is `Shown` on the first tick.
+    ///
+    /// A **cold** arrival is armed with this controller's own configured
+    /// [`delay`](Self::delay), not with the token's 400 ms. That is deliberate
+    /// and it is an accessibility property: a host that raised the hover delay —
+    /// a user who set it to two seconds because tooltips otherwise fire under a
+    /// travelling cursor — must not find the handoff path quietly *shortening*
+    /// it. The handoff only ever removes a wait the user has already earned; it
+    /// never overrides a delay the host was configured with.
+    ///
+    /// Same idempotence rule as [`pointer_enter`](Self::pointer_enter): an
+    /// already-armed controller is left alone, so a host that reports the
+    /// pointer every frame cannot re-time an arrival in flight — and cannot turn
+    /// a cold wait into a warm one by arriving again.
+    ///
+    /// Returns whether this call armed the controller.
+    pub fn pointer_enter_warm(&mut self, now: TimeMs, warmth: ArrivalWarmth) -> bool {
+        let wait = match warmth {
+            ArrivalWarmth::Warm => Duration::from_millis(warm_wait_ms()),
+            ArrivalWarmth::Cold => self.delay,
+        };
+        self.arm(now, ArrivalSource::Pointer, wait)
     }
 
     /// Keyboard focus landed on the control at `now`.
@@ -366,7 +432,7 @@ impl HoverController {
     ///
     /// Returns whether this call armed the controller.
     pub fn keyboard_focus_enter(&mut self, now: TimeMs) -> bool {
-        self.arm(now, ArrivalSource::Keyboard)
+        self.arm(now, ArrivalSource::Keyboard, self.keyboard_delay)
     }
 
     /// The pointer left the control.
@@ -454,15 +520,16 @@ impl HoverController {
 
     /// The delay that actually applies to the current arrival.
     ///
-    /// The pointer delay while a pointer arrival is armed, the keyboard delay while a
-    /// keyboard arrival is armed, and the pointer delay when nothing is armed — a
-    /// controller at rest has no live delay, and reporting the pointer's keeps this
-    /// accessor total rather than optional.
+    /// The wait the live arrival carries — the pointer delay for an ordinary
+    /// pointer arrival, `0 ms` for a warm handoff, the keyboard delay for a
+    /// keyboard arrival. When nothing is armed it reports the configured pointer
+    /// delay: a controller at rest has no live wait, and reporting the
+    /// pointer's keeps this accessor total rather than optional.
     #[must_use]
     pub fn active_delay(&self) -> Duration {
-        match self.arrival_source() {
-            Some(ArrivalSource::Keyboard) => self.keyboard_delay,
-            Some(ArrivalSource::Pointer) | None => self.delay,
+        match self.armed {
+            Some(arm) => arm.wait,
+            None => self.delay,
         }
     }
 
@@ -471,7 +538,7 @@ impl HoverController {
     /// **Pure**: answers without mutating, so a host may call it as often as it likes and a
     /// test may probe the same controller at many instants. The controller does not need to
     /// remember that it became visible — `Shown` is recomputed from the arrival instant
-    /// every time, against the delay belonging to the channel that arrived.
+    /// every time, against the wait that arrival carried.
     #[must_use]
     pub fn tick(&self, now: TimeMs) -> Visibility {
         let Some(armed) = self.armed else {
@@ -480,11 +547,7 @@ impl HoverController {
         if self.suppressed {
             return Visibility::Hidden;
         }
-        let delay = match armed.by {
-            ArrivalSource::Pointer => self.delay,
-            ArrivalSource::Keyboard => self.keyboard_delay,
-        };
-        if now.elapsed_since(armed.at) >= delay.as_millis() as u64 {
+        if now.elapsed_since(armed.at) >= armed.wait.as_millis() as u64 {
             Visibility::Shown
         } else {
             Visibility::Pending

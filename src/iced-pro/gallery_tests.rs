@@ -607,6 +607,11 @@ fn expected_ids() -> Vec<String> {
             "state-keyboard",
             "place-flip-above",
             "place-clamped",
+            // `UIF-TOK-007` / `B-5`: the three warm-handoff verdicts, each
+            // probed at the arrival instant.
+            "warm-cold-first-hover",
+            "warm-handoff",
+            "warm-cooled",
         ]
         .iter()
         .map(|name| format!("tooltip/{name}")),
@@ -762,7 +767,8 @@ fn per_subject_cell_counts_match_the_plan() {
         ("drag-tier", 3),
         ("editor", 2),
         ("zband", 1),
-        ("tooltip", 7),
+        // `UIF-TOK-007` / `B-5` adds the three warm-handoff verdict cells.
+        ("tooltip", 10),
         // `UIF-ATOM-007` / `INC-39`: 3 width regimes x 2 footer shapes.
         ("popover", 6),
         ("navbar", 1),

@@ -482,11 +482,21 @@ pub const DELAY_TOOLTIP_OPEN: DurationToken = DurationToken {
 /// full [`DELAY_TOOLTIP_OPEN`]; a second one inside this window pays
 /// nothing, because the user has demonstrably gone looking.
 ///
-/// **No consumer exists in this crate, and neither does the behaviour.**
-/// [`HoverController`](crate::surface::tooltip::hover::HoverController)
-/// is per-control and holds no cross-control memory, so every arrival
-/// pays the full delay today. Declaring the rung is the token half of a
-/// requirement whose behavioural half is still open.
+/// **Consumed as a behaviour, not merely as a number.**
+/// [`WarmSession`](crate::surface::tooltip::warm::WarmSession) is the
+/// crate's cross-control memory. The window this rung names is the
+/// interval after the last *visible* tooltip inside which the next
+/// arrival is handed off at `0 ms`, and past which the session cools
+/// back to the full [`DELAY_TOOLTIP_OPEN`]. The rung is read there
+/// through
+/// [`handoff_window_ms`](crate::surface::tooltip::warm::handoff_window_ms),
+/// which is this crate's consumption point for it.
+///
+/// Which number is which matters, because the row's shape invites the
+/// reverse reading. 100ms is the **window**; the warm *wait* is `0ms`.
+/// A "warm arrival waits 100ms" model would need a second, unspec'd
+/// duration for the window and would leave the row's explicit
+/// `0ms wait` unimplemented.
 pub const DELAY_TOOLTIP_WARM: DurationToken = DurationToken {
     name: "time.delay.tooltip_warm",
     ms: 100,

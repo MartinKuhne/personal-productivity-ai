@@ -98,7 +98,14 @@ use crate::token_lint::{
 /// subsystem's only quantities are a stance, a character class and a
 /// three-field snapshot, none of which a token could have supplied. The
 /// file count moves and `PIN_RULE_B_FILES` does not.
-const PIN_FILES_SCANNED: usize = 142;
+/// 144 as of `B-5`, whose two additions are the tooltip warm-handoff
+/// session — `surface/tooltip/warm.rs` — and its gallery block,
+/// `gallery_warm.rs` (`UIF-TOK-007`). Only one of them joins Rule B:
+/// `warm.rs` sits under `surface/`, which is scoped by directory rather
+/// than by content, even though its only numbers are read-throughs of
+/// `token::time`. `gallery_warm.rs` sits outside the visual scope, like
+/// every other gallery cell file.
+const PIN_FILES_SCANNED: usize = 144;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -130,7 +137,11 @@ const PIN_RULE_A_FILES: usize = 1;
 /// counted whether or not it carries a colour literal — and `aim.rs`
 /// carries none, taking its only number from
 /// `token::time::DELAY_SUBMENU`.
-const PIN_RULE_B_FILES: usize = 80;
+/// 81 as of `B-5`, the one addition being `surface/tooltip/warm.rs`.
+/// Like `aim.rs` before it, it is counted because of where it lives, not
+/// because of what it contains: the module defines no literal of its own
+/// and takes both of its numbers from `token::time`.
+const PIN_RULE_B_FILES: usize = 81;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

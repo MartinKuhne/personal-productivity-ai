@@ -674,7 +674,7 @@ pub fn paint_frame(namer: Namer, viewport: Rectangle, layers: &[(&'static str, L
 /// Every argument still comes from a token or from a surface resolver; the
 /// helper exists so the composite builders read as a stack of named
 /// surfaces rather than as repeated struct literals.
-fn surface_layer(
+pub(crate) fn surface_layer(
     bounds: Rectangle,
     fill: Color,
     border: Color,
@@ -3584,12 +3584,12 @@ use crate::surface::tooltip::{
 /// gallery supplies one rather than inventing a text measurer. Width is `space.xl * 7`,
 /// height the minimum hit target, which is roughly what a short label occupies at
 /// `type.caption`.
-const TOOLTIP_CARD_SIZE: Size = Size::new(space::XL * 7.0, size::HIT_TARGET_MIN);
+pub(crate) const TOOLTIP_CARD_SIZE: Size = Size::new(space::XL * 7.0, size::HIT_TARGET_MIN);
 
 /// The navbar the placement cells are anchored in: a `size.control.lg` bar with a
 /// `size.control.sm` entry inset inside it — the exact geometry that makes the
 /// bar-versus-button anchor choice matter.
-fn gallery_navbar(width: f32) -> (Rectangle, Rectangle) {
+pub(crate) fn gallery_navbar(width: f32) -> (Rectangle, Rectangle) {
     let band = Rectangle::new(Point::new(0.0, 0.0), Size::new(width, size::CONTROL_LG));
     let entry = Rectangle::new(
         Point::new(space::SM, 4.0),
@@ -3600,7 +3600,7 @@ fn gallery_navbar(width: f32) -> (Rectangle, Rectangle) {
 
 /// Paint the tooltip card plus the anchor it hangs from, so a cell shows the *relationship*
 /// rather than a floating swatch.
-fn tooltip_card_layers(
+pub(crate) fn tooltip_card_layers(
     style: &TooltipStyle,
     card: Rectangle,
     anchor: Option<Rectangle>,
@@ -3950,6 +3950,7 @@ pub fn tooltip_cells() -> Vec<Cell> {
     cells.extend(tooltip_state_cells());
     cells.push(tooltip_flip_cell());
     cells.push(tooltip_clamped_cell());
+    cells.extend(crate::gallery_warm::cells());
     cells
 }
 

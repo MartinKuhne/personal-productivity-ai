@@ -38,6 +38,7 @@ pub mod gallery_suggest;
 pub mod gallery_table;
 pub mod gallery_toggle;
 pub mod gallery_tree;
+pub mod gallery_warm;
 pub mod geometry;
 pub mod layout;
 pub mod microcopy;

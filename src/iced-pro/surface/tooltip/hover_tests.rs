@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::surface::tooltip::HOVER_DELAY;
+use crate::surface::tooltip::warm::ArrivalWarmth;
 use std::time::Duration;
 
 const D: Duration = Duration::from_millis(HOVER_DELAY);
@@ -447,4 +448,50 @@ fn a_custom_delay_drives_the_boundary() {
     c.pointer_enter(T0);
     assert_eq!(c.tick(at(T0.as_millis() + 36)), Visibility::Pending);
     assert_eq!(c.tick(at(T0.as_millis() + 37)), Visibility::Shown);
+}
+
+// ---------------------------------------------------------------------------
+// The wait rides on the arrival (`UIF-TOK-007` warm handoff)
+// ---------------------------------------------------------------------------
+
+/// The cold arm of the warm-handoff entry point must cost **exactly** what a plain
+/// pointer arrival costs, at every instant. If the two ever drifted, a host would
+/// be able to change a control's hover delay by choosing which method it called.
+#[test]
+fn a_cold_handoff_and_a_plain_enter_agree_at_every_instant() {
+    let probes = [
+        0,
+        1,
+        HOVER_DELAY / 2,
+        HOVER_DELAY - 1,
+        HOVER_DELAY,
+        HOVER_DELAY + 1,
+    ];
+    for offset in probes {
+        let mut plain = controller();
+        plain.pointer_enter(T0);
+        let mut handed_off = controller();
+        handed_off.pointer_enter_warm(T0, ArrivalWarmth::Cold);
+        assert_eq!(
+            handed_off.tick(at(T0.as_millis() + offset)),
+            plain.tick(at(T0.as_millis() + offset)),
+            "cold handoff must match a plain enter at +{offset}ms"
+        );
+        assert_eq!(handed_off.active_delay(), plain.active_delay());
+    }
+}
+
+/// A warm handoff is a **pointer** arrival that happens to carry no wait. It must
+/// not arrive looking like a keyboard arrival, because a host that distinguishes
+/// the channels — a navbar that reports how the tooltip was reached — would be
+/// told the wrong thing.
+#[test]
+fn a_warm_handoff_shows_at_once_but_stays_a_pointer_arrival() {
+    let mut c = controller();
+    assert!(c.pointer_enter_warm(T0, ArrivalWarmth::Warm));
+    assert_eq!(c.tick(T0), Visibility::Shown);
+    assert_eq!(c.arrival_source(), Some(ArrivalSource::Pointer));
+    assert!(!c.is_keyboard_armed());
+    assert_eq!(c.active_delay(), Duration::ZERO);
+    assert_eq!(c.entered_at(), Some(T0));
 }
