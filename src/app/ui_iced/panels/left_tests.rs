@@ -826,14 +826,65 @@ fn view_model_auto_fit_delegates_to_the_pure_solver() {
 
 // --- colour tokens ----------------------------------------------------
 
+/// The rule that replaced REQ-450's label tint.
+///
+/// `§3B.6:883`'s closing clause forbids carrying the `[PDF]`
+/// distinction "in a danger-colored text label". The retired
+/// `row_text_color` returned `palette.error` for PDF-backed files at
+/// rest; that function is deleted, so the label resolves to the body
+/// token for every row and the danger token reaches a row label nowhere.
+///
+/// **This test is the inverse of the one it replaced.** The retired test
+/// `pdf_backed_rows_use_the_error_token_and_others_the_body_token`
+/// asserted `row_text_color(&p, true) == p.error`. It is not kept and
+/// flipped: the old assertion described behaviour the rule now prohibits,
+/// so the whole test was rewritten around the new rule rather than
+/// inverted to keep a green line.
 #[test]
-fn pdf_backed_rows_use_the_error_token_and_others_the_body_token() {
-    let palette = Palette::fastmd_dark();
-    assert_eq!(row_text_color(&palette, true), palette.error);
-    assert_eq!(row_text_color(&palette, false), palette.text);
-    assert_ne!(
-        row_text_color(&palette, true),
-        row_text_color(&palette, false)
+fn a_pdf_backed_row_label_never_uses_the_error_token() {
+    let app = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    // Rest and hover: the body token, because the band is not a locked
+    // fill and `locked_over` passes the candidate through untouched.
+    for hovered in [false, true] {
+        assert_eq!(
+            row_label_colour(false, hovered),
+            app.text,
+            "an unselected row labels with the body token (hovered = {hovered})"
+        );
+        assert_ne!(
+            row_label_colour(false, hovered),
+            app.error,
+            "no unselected posture may render the danger token on a label \
+             (hovered = {hovered})"
+        );
+    }
+
+    // Selected: the lock promotes to text.strong, exactly as INT-7b left
+    // it. The promotion is unchanged; what changed is that the candidate
+    // handed to the lock is the body token rather than the danger token.
+    for hovered in [false, true] {
+        assert_eq!(
+            row_label_colour(true, hovered),
+            pro.text_strong,
+            "the selection lock still promotes the label (hovered = {hovered})"
+        );
+        assert_ne!(
+            row_label_colour(true, hovered),
+            app.error,
+            "the danger token is absent on the band too (hovered = {hovered})"
+        );
+    }
+
+    // The retired pairing is still the unreadable one, so the rule this
+    // test guards is still a real rule and not a tautology about a
+    // palette that has since been fixed.
+    let retired_pairing = iced_pro::token::contrast::contrast_ratio(app.error, pro.accent_fill);
+    assert!(
+        retired_pairing < 3.0,
+        "fixture: the retired danger-on-accent pairing must still be the \
+         unreadable one, measured {retired_pairing:.6}:1"
     );
 }
 
@@ -1221,7 +1272,7 @@ fn the_pdf_badge_survives_the_selection_lock() {
     // work it could not do.
     assert_eq!(
         chip.foreground,
-        row_label_colour(true, false, true),
+        row_label_colour(true, false),
         "the chip's text must match the locked label so the two cannot diverge"
     );
 
@@ -1578,31 +1629,320 @@ fn a_selected_pdf_backed_label_is_locked_off_the_unreadable_red() {
     );
 
     assert_eq!(
-        row_label_colour(true, false, true),
+        row_label_colour(true, false),
         pro.text_strong,
         "§3B.6 locks the row label to text.strong on the accent fill by role"
     );
     assert_ne!(
-        row_label_colour(true, false, true),
+        row_label_colour(true, false),
         app_palette.error,
         "a selected PDF-backed row must not render red-on-indigo"
     );
-    let locked_contrast = contrast_ratio(row_label_colour(true, false, true), pro.accent_fill);
+    let locked_contrast = contrast_ratio(row_label_colour(true, false), pro.accent_fill);
     assert!(
         locked_contrast >= 4.5,
         "the locked label clears the text-contrast rule at {locked_contrast}:1"
     );
 }
 
+/// The rule this replaces asserted the opposite: that an unselected
+/// PDF-backed row kept its `error` tint and that the tint was the visible
+/// PDF cue. `§3B.6:883`'s closing clause forbids that, so the resting
+/// label is now the body token for every row and the chip is the only
+/// mark. The test is rewritten around the new rule rather than flipped.
 #[test]
-fn an_unselected_row_keeps_the_apps_own_label_rule() {
+fn an_unselected_pdf_backed_row_is_labelled_exactly_like_an_ordinary_row() {
     let app_palette = Palette::fastmd_dark();
-    assert_eq!(row_label_colour(false, false, true), app_palette.error);
-    assert_eq!(row_label_colour(false, false, false), app_palette.text);
+    assert_eq!(
+        row_label_colour(false, false),
+        app_palette.text,
+        "the resting label is the body token, PDF-backed or not"
+    );
     assert_ne!(
-        row_label_colour(false, false, true),
-        row_label_colour(false, false, false),
-        "the PDF-backed tint must still be visible off the selection band"
+        row_label_colour(false, false),
+        app_palette.error,
+        "the retired danger tint must not be the resting label colour"
+    );
+    // The retired rule made a PDF-backed row's resting label differ from
+    // an ordinary row's. That difference is gone by construction: the
+    // resolver takes no PDF-backed input, so there is no second colour
+    // for it to return.
+    let resting = row_label_colour(false, false);
+    let resting_ratio = contrast_ratio(resting, row_paint(false, false).band);
+    assert!(
+        resting_ratio >= 4.5,
+        "and the body token still clears the text floor on the resting band \
+         at {resting_ratio:.6}:1"
+    );
+}
+
+/// Every posture, swept against every danger token the palette offers.
+///
+/// `§3B.6:883` forbids carrying the `[PDF]` distinction "in a
+/// danger-colored text label". The label resolver no longer takes a
+/// PDF-backed input at all, so this is a sweep over the whole input space
+/// of the function rather than a spot check: four postures × three danger
+/// tokens, none of which may appear.
+///
+/// Non-vacuity: the fixture pins that the app's `error` token **is** the
+/// framework's `status.danger.text` — the exact token `:883` names — and
+/// that the danger fill is a distinct value, so the sweep is not
+/// comparing one colour against itself three times.
+#[test]
+fn no_posture_resolves_a_row_label_to_any_danger_token() {
+    let app = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    // Fixture: the app's `error` token IS the framework's
+    // `status.danger.text` (`theme.rs:202` maps it directly), which is
+    // the very token `§3B.6:883` names as the forbidden label colour.
+    // The fill is a different colour, so the sweep below is not sweeping
+    // one value three times.
+    assert_eq!(
+        app.error, pro.status_danger_text,
+        "fixture: the app's error token is the framework's status.danger.text, \
+         the exact token :883 forbids on a label"
+    );
+    assert_ne!(
+        pro.status_danger_text, pro.status_danger_fill,
+        "fixture: danger text and danger fill are distinct"
+    );
+
+    let danger_tokens = [
+        ("app.error", app.error),
+        ("status.danger.text", pro.status_danger_text),
+        ("status.danger.fill", pro.status_danger_fill),
+    ];
+
+    for selected in [false, true] {
+        for hovered in [false, true] {
+            let resolved = row_label_colour(selected, hovered);
+            for (name, danger) in danger_tokens.iter() {
+                assert_ne!(
+                    resolved, *danger,
+                    "a row label must never resolve to {name} \
+                     (selected = {selected}, hovered = {hovered})"
+                );
+            }
+        }
+    }
+}
+
+/// The selection lock is **load-bearing for the body token too**, and this
+/// increment did not change that.
+///
+/// Before INT-15 the candidate handed to `locked_over` on the selection
+/// band was `error`, measuring **1.586348:1** raw. It is now the body
+/// token, which measures **3.176079:1** raw — better, but still under the
+/// `4.5` text floor. Only the role-based lock lifts it to `text.strong`
+/// at **4.801987:1**. So the lock is not a leftover from the retired
+/// tint: strip the lock and the resting token would still fail the text
+/// rule on the band, just less badly than the danger token did. Removing
+/// the tint therefore introduced no new bad pairing, and it did not make
+/// the lock optional.
+#[test]
+fn the_lock_is_load_bearing_for_the_body_token_not_only_the_retired_tint() {
+    let app = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    let retired_pairing = contrast_ratio(app.error, pro.accent_fill);
+    let body_raw = contrast_ratio(app.text, pro.accent_fill);
+    let locked = contrast_ratio(row_label_colour(true, false), pro.accent_fill);
+
+    assert!(
+        retired_pairing < 3.0,
+        "fixture: the retired danger-on-accent pairing is still the \
+         unreadable one at {retired_pairing:.6}:1"
+    );
+    assert!(
+        body_raw > retired_pairing,
+        "the body token is strictly better than the retired pairing \
+         ({body_raw:.6} > {retired_pairing:.6})"
+    );
+    assert!(
+        body_raw < 4.5,
+        "but the body token raw on the band is {body_raw:.6}:1, still under \
+         the 4.5 text floor — the lock is required, not vestigial"
+    );
+    assert!(
+        locked >= 4.5,
+        "and the lock lifts the painted label to {locked:.6}:1"
+    );
+}
+
+/// The chip is the sole carrier and INT-13's build is untouched.
+///
+/// Removing the label tint must not disturb the mark that replaced it, so
+/// every field of the resolved chip is pinned to the value INT-13 landed,
+/// and the chip's ink is still the locked label colour.
+#[test]
+fn the_chip_is_the_sole_pdf_carrier_and_is_unchanged() {
+    let pro = Palette::pro();
+    let chip = pdf_badge_chip();
+
+    assert_eq!(chip.fill, pro.status_danger_fill, "the mandated fill");
+    assert_eq!(
+        chip.foreground, pro.text_strong,
+        "the mandated foreground, constant in every posture"
+    );
+    assert_eq!(chip.height, badge::COUNT_HEIGHT, "18px count-pill rung");
+    assert_eq!(chip.radius, shape::RADIUS_PILL, "pill radius");
+    assert_eq!(chip.h_padding, badge::CHIP_H_PADDING, "space.sm h-padding");
+
+    // The chip's own FG/BG pair is genuinely compliant, measured here
+    // rather than transcribed.
+    let chip_pair = contrast_ratio(chip.foreground, chip.fill);
+    assert!(
+        chip_pair >= 4.5,
+        "text.strong on status.danger.fill clears AA at {chip_pair:.6}:1"
+    );
+
+    // And the chip is still mounted from the same slot the row charges for.
+    assert_eq!(
+        PDF_BADGE_SLOT,
+        PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL,
+        "charged width equals painted width by construction"
+    );
+}
+
+/// **THE SUPPRESSION HOLE — characterised, not fixed.**
+///
+/// With the label tint gone the chip is the **only** carrier of the
+/// PDF-backed distinction, and the chip is suppressed wherever mounting
+/// it would breach the `96px` label floor ([`pdf_badge_fits`]). In that
+/// posture a PDF-backed row is **visually identical to an ordinary row**:
+/// same label colour, same band, no mark.
+///
+/// The condition is exact. The chip costs [`PDF_BADGE_CHARGE`] (`40px`)
+/// and the indent solver leaves only `allowance - drawn` of headroom,
+/// which is **`0` for every compressed or collapsed row**. The chip
+/// therefore shows iff `row_width >= 168 + 16 × depth`, i.e.
+/// `pane >= 176 + 16 × depth`:
+///
+/// | Pane | Chip shows at depths |
+/// |---|---|
+/// | 150 — spec `LEFT_PANE_MIN_W` | **none**, not even depth 0 |
+/// | 176 | 0 only |
+/// | 180 — app `LEFT_PANEL_MIN_WIDTH` | 0 only |
+/// | 280 — app default | 0–6 |
+///
+/// **This is the cost of `§3B.6:883`, not an oversight.** The spec's own
+/// fallback for a row that cannot mount a chip is the leading file-type
+/// **icon shape** (`UIF-PRIN-005` redundant cueing), and this tree has no
+/// file-type icon slot — the leading glyph is the dir/expanded state baked
+/// into the measured label. Whether to build one is an open decision for
+/// the spec author, recorded in the ledger; it is deliberately not
+/// guessed at here.
+#[test]
+fn a_pdf_backed_row_can_end_up_with_no_visible_distinction_at_all() {
+    let row_width_of = |pane: f32| (pane - PANEL_PADDING - PANEL_PADDING).max(0.0);
+
+    // --- the exact boundary: pane = 176 + 16 × depth -----------------
+    for depth in 0..=12usize {
+        let fitting_pane = 176.0 + 16.0 * depth as f32;
+        assert!(
+            pdf_badge_fits(depth, row_width_of(fitting_pane)),
+            "depth {depth} must fit at the boundary pane {fitting_pane}"
+        );
+        assert!(
+            !pdf_badge_fits(depth, row_width_of(fitting_pane - 1.0)),
+            "depth {depth} must NOT fit one point narrower than its boundary"
+        );
+    }
+
+    // --- the two widths that matter ----------------------------------
+    // Spec minimum: nothing shows, at any depth.
+    let spec_min = row_width_of(150.0);
+    let shown_at_spec_min: Vec<usize> = (0..=64usize)
+        .filter(|d| pdf_badge_fits(*d, spec_min))
+        .collect();
+    assert!(
+        shown_at_spec_min.is_empty(),
+        "at the spec's LEFT_PANE_MIN_W = 150 (row_width {spec_min}) NO depth \
+         shows the chip, so every PDF-backed row there is undistinct: {shown_at_spec_min:?}"
+    );
+
+    // App minimum: only depth 0 shows; every nested PDF-backed file is undistinct.
+    let app_min = row_width_of(LEFT_PANEL_MIN_WIDTH);
+    let shown_at_app_min: Vec<usize> = (0..=64usize)
+        .filter(|d| pdf_badge_fits(*d, app_min))
+        .collect();
+    assert_eq!(
+        shown_at_app_min,
+        vec![0],
+        "at the app's own LEFT_PANEL_MIN_WIDTH = {LEFT_PANEL_MIN_WIDTH} \
+         (row_width {app_min}) only depth 0 shows the chip; every nested \
+         PDF-backed file is visually identical to an ordinary one"
+    );
+
+    // App default: 0..=6 show, 7 does not.
+    let app_default = row_width_of(LEFT_PANEL_DEFAULT_WIDTH);
+    let shown_at_default: Vec<usize> = (0..=64usize)
+        .filter(|d| pdf_badge_fits(*d, app_default))
+        .collect();
+    assert_eq!(
+        shown_at_default,
+        vec![0, 1, 2, 3, 4, 5, 6],
+        "at the app's default 280 pane the chip reaches depth 6 and stops"
+    );
+
+    // --- and in every suppressed posture there is genuinely nothing ---
+    // The label resolves to the ordinary row's colour in all four
+    // postures, so a suppressed-chip PDF row and an ordinary row share
+    // every painted pixel. Asserted against the tokens rather than
+    // against itself: rest/hover are the body token, selected is the
+    // lock's text.strong.
+    let ordinary = [
+        (false, false, Palette::fastmd_dark().text),
+        (false, true, Palette::fastmd_dark().text),
+        (true, false, Palette::pro().text_strong),
+        (true, true, Palette::pro().text_strong),
+    ];
+    for depth in 1..=12usize {
+        for (selected, hovered, expected) in ordinary {
+            assert!(
+                !pdf_badge_fits(depth, app_min),
+                "fixture: depth {depth} is suppressed at the app minimum"
+            );
+            assert_eq!(
+                row_label_colour(selected, hovered),
+                expected,
+                "a suppressed-chip PDF row at depth {depth} paints exactly \
+                 what an ordinary row paints (selected = {selected}, \
+                 hovered = {hovered}) — no distinction of any kind survives"
+            );
+        }
+    }
+}
+
+/// The auto-fit does not pay for the chip, so it cannot rescue it.
+///
+/// `UIF-PANE-002` widens the pane to fit the longest row, which would
+/// normally remove the width conflict. It does not: `auto_fit_width`
+/// charges `tree_row::content_width` — indent plus label plus furniture —
+/// and has **no badge term**, so a pane auto-fitted to a deep PDF-backed
+/// row still suppresses that row's chip.
+#[test]
+fn auto_fit_does_not_widen_the_pane_to_keep_the_chip() {
+    let measure = |label: &str| label.len() as f32 * 7.0;
+    let deep_pdf_row = FlatRow {
+        depth: 8,
+        name: "deep.md".to_string(),
+        path: PathBuf::from("a/b/c/d/e/f/g/h/deep.md"),
+        is_dir: false,
+        is_expanded: false,
+    };
+    let rows = [deep_pdf_row];
+
+    let fitted = auto_fit_width(&rows, 10_000.0, measure);
+    let row_width = (fitted.max(LEFT_PANEL_MIN_WIDTH) - PANEL_PADDING - PANEL_PADDING).max(0.0);
+    assert!(
+        !pdf_badge_fits(8, row_width),
+        "a pane auto-fitted to a depth-8 row of {} chars still cannot mount \
+         the chip: fitted {fitted}, row_width {row_width}, allowance-minus-drawn \
+         {:.1} < charge {PDF_BADGE_CHARGE}",
+        "deep.md".len(),
+        tree_row::indent_allowance(row_width) - tree_row::indent_geometry(8, row_width).width,
     );
 }
 
@@ -1901,22 +2241,22 @@ fn hover_leaves_the_label_rule_untouched_because_the_hover_band_is_not_locked() 
          two cases is real and not an accident of one lookup"
     );
 
-    // Consequence: the resting label rule survives the pointer, the PDF
-    // tint included.
+    // Consequence: the resting label rule survives the pointer. It no
+    // longer carries a PDF tint, so what survives is the body token.
     assert_eq!(
-        row_label_colour(false, true, false),
+        row_label_colour(false, true),
         app_palette.text,
         "a hovered plain row keeps the body token"
     );
     assert_eq!(
-        row_label_colour(false, true, true),
-        app_palette.error,
-        "a hovered PDF-backed row keeps its error tint"
-    );
-    assert_eq!(
-        row_label_colour(false, true, true),
-        row_label_colour(false, false, true),
+        row_label_colour(false, true),
+        row_label_colour(false, false),
         "hover must not change the label colour at all, only the band under it"
+    );
+    assert_ne!(
+        row_label_colour(false, true),
+        app_palette.error,
+        "and the resting colour hover preserves is not the danger token"
     );
     assert_ne!(
         row_paint(false, true).band,
@@ -1931,7 +2271,7 @@ fn the_selection_lock_still_holds_on_a_selected_and_hovered_pdf_row() {
 
     // The original defect was red-on-indigo. Hover adds a third input to
     // the same row; the lock must still win.
-    let colour = row_label_colour(true, true, true);
+    let colour = row_label_colour(true, true);
     assert_eq!(
         colour, pro.text_strong,
         "selected + hovered + PDF-backed still locks to text.strong"

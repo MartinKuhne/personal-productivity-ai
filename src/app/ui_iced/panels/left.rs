@@ -94,6 +94,17 @@
 //!   resolvers rather than taken from the badge atom, and it carries a
 //!   recorded contrast shortfall against the selected band that the
 //!   function's own doc states and the sidecar pins.
+//! * **The `error` label tint is GONE.** **Removed in INT-15.** The same
+//!   §3B.6:883 clause ends *"never in a danger-colored text label"*, and
+//!   a PDF-backed row's `error`-tinted label is exactly that. The chip is
+//!   now the **sole** carrier and [`row_label_colour`] takes no
+//!   PDF-backed input at all — the retired `row_text_color` helper was
+//!   deleted rather than neutered, so no code path can put a danger token
+//!   on a row label. **The consequence is real and is not hidden:** the
+//!   chip is suppressed wherever mounting it would breach the `96px`
+//!   label floor, and in that posture a PDF-backed row is visually
+//!   identical to an ordinary one. See [`pdf_badge_fits`] and
+//!   `a_pdf_backed_row_can_end_up_with_no_visible_distinction_at_all`.
 //! * **Width-relative indent compression.** **Landed in INT-12.**
 //!   [`row_indent_pixels`] and [`row_guide_offsets`] both resolve through
 //!   [`tree_row::indent_geometry`], so the step compresses proportionally
@@ -617,8 +628,20 @@ pub fn row_indent_pixels(depth: usize, row_width: f32) -> f32 {
 /// §3B.6 forbids a label under `96px`, and there is not enough row for
 /// both. The floor wins, because §3B.6 states it absolutely ("**never**
 /// narrows below") where §4.3.2 states the badge as what special rows
-/// "include". The pane's auto-fit (`UIF-PANE-002`) normally removes the
-/// conflict by widening the pane to fit its longest row.
+/// "include".
+///
+/// **Auto-fit does NOT rescue this.** A note here used to claim
+/// `UIF-PANE-002` "normally removes the conflict by widening the pane to
+/// fit its longest row". It does not: [`auto_fit_width`] charges
+/// [`tree_row::content_width`] — indent + label + furniture — and has
+/// **no badge term**, so a pane fitted to a deep PDF-backed row still
+/// suppresses that row's chip. `auto_fit_does_not_widen_the_pane_to_keep_the_chip`
+/// pins that. The chip shows iff `row_width >= 168 + 16 × depth`
+/// (`pane >= 176 + 16 × depth`); compressed and collapsed rows never
+/// clear it, because `allowance - drawn` is `0` there. With the label tint
+/// removed this is the only carrier, so a suppressed chip leaves the row
+/// undistinct — see the module header and
+/// `a_pdf_backed_row_can_end_up_with_no_visible_distinction_at_all`.
 ///
 /// Purity: pure.
 #[must_use]
@@ -1331,8 +1354,14 @@ pub struct LeftPanelViewModel {
     /// The multi-selected files, sorted so emitted commands are
     /// deterministic.
     pub selected_files: Vec<PathBuf>,
-    /// The visible file rows that are PDF-backed — rendered with the
-    /// `error` token (REQ-450).
+    /// The visible file rows that are PDF-backed.
+    ///
+    /// **This drives the [`pdf_badge_chip`] only.** It used to say these
+    /// rows render with the `error` token (REQ-450); that tint is
+    /// prohibited by `§3B.6:883`'s "never in a danger-colored text
+    /// label" clause and was removed in INT-15. Nothing here may be read
+    /// as a colour: the label colour resolver
+    /// ([`row_label_colour`]) does not take this set at all.
     pub pdf_backed: HashSet<PathBuf>,
     /// Skills offered on directory rows (VFS-122).
     pub folder_skills: Vec<SkillFile>,
@@ -1591,7 +1620,7 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     let label = text(row_label(row))
         .size(ROW_TEXT_SIZE)
         .line_height(tree_row::LABEL_RUNG.iced_line_height())
-        .color(row_label_colour(selected, hovered, pdf_backed));
+        .color(row_label_colour(selected, hovered));
 
     // The `[PDF]` chip rides **after** the label, never before it. The
     // label's left edge is the line every row in the tree aligns to; a
@@ -1984,46 +2013,63 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 /// The tree row's label colour, with the framework's **role-based**
 /// selection lock applied (`UIF-TOK-006` rule 4 / §3B.6).
 ///
-/// Off the selection band the app's own rule stands: the `error` token on
-/// PDF-backed files (REQ-450), the body token otherwise. On the band
-/// the label is locked to `text.strong`, because
-/// `status_danger_text` over `accent_fill` measures **1.59:1** — a
-/// selected PDF-backed file used to render red-on-indigo and was
-/// effectively unreadable, which is exactly the failure §3B.6's lock
-/// exists to prevent.
+/// **A PDF-backed row's label is not danger-tinted, and this function cannot
+/// be told to make it one.** `§3B.6:883`'s closing clause forbids carrying
+/// the `[PDF]` distinction *"in a danger-colored text label"*, so the
+/// signature takes no PDF-backed input: the label resolves from the band
+/// alone, exactly as an ordinary row's label does, in every posture. The
+/// chip ([`pdf_badge_chip`]) is the sole carrier.
 ///
-/// # Hover and the contrast lock
+/// # Removed by deletion, not by a branch that declines
+///
+/// Until this increment the resting rule was `row_text_color`, which returned
+/// the app's `error` token for PDF-backed files (REQ-450) and the body token
+/// otherwise. That is exactly the danger-coloured text label the clause
+/// names, so the function is **deleted** rather than left in place behind a
+/// parameter that ignores it. With it gone there is no code path that can put
+/// a danger token on a row label — a stronger guarantee than a branch that
+/// merely happens not to take it. INT-13 applied the same reasoning to the
+/// retired `pdf_badge_colour`.
+///
+/// # The selection lock is untouched
+///
+/// Off the band the body token stands; on it the label locks to `text.strong`.
+/// The lock was never the problem — it is the only reason the old tint was
+/// survivable at all. `status_danger_text` over `accent_fill` measures
+/// **1.586348:1**, and a selected PDF-backed file used to render
+/// red-on-indigo and was effectively unreadable; `locked_over` is what
+/// stopped that. Removing the tint does not weaken that protection: the
+/// danger token now never reaches the label in any posture, so the forbidden
+/// pairing is unreachable **by construction** rather than corrected after
+/// the fact by the lock.
+///
+/// # Hover
 ///
 /// `hovered` moves the band from the pane's resting surface to
-/// `color.surface.hover`, so the lock is re-run against the *actual*
-/// band rather than against a remembered answer. It resolves to a
-/// **no-op** on hover, and that is a computed result, not an absence of
-/// handling: `surface_hover` is not a locked fill under
+/// `color.surface.hover`, so the lock is re-run against the *actual* band
+/// rather than against a remembered answer. It resolves to a **no-op** on
+/// hover, and that is a computed result, not an absence of handling:
+/// `surface_hover` is not a locked fill under
 /// [`fill_lock_role`](iced_pro::token::contrast::fill_lock_role), so
-/// `locked_over` returns the candidate untouched and the resting label
-/// rule — including the `error` tint on PDF-backed rows — survives the
-/// pointer. Both pairings clear the text floor by a wide margin, and the
-/// sidecar pins the measured ratios rather than transcribing them.
+/// `locked_over` returns the candidate untouched. The sidecar pins the
+/// measured ratios rather than transcribing them.
 ///
-/// §4.3.2 asks for a `[PDF]` badge so the *meaning* survives selection,
-/// and INT-12 added one — see [`pdf_badge_chip`]. Note that the badge is a
-/// **separate mark**; this function still tints the whole label with
-/// `error` at rest and on hover. Read literally, `§3B.6:883`'s closing
-/// clause ("never in a danger-colored text label") reaches that tint as
-/// well as the badge, which would mean the label should not be danger-tinted
-/// at all. That is a wider change than the badge rework and is deliberately
-/// **not** taken here; it is recorded as an open deviation.
+/// # The cost of removing the tint
 ///
-/// Purity: pure function of `(selected, hovered, pdf_backed)`.
+/// The chip is now the only carrier, and the chip is **suppressed** wherever
+/// mounting it would breach the `96px` label floor — see [`pdf_badge_fits`].
+/// In that posture a PDF-backed row is visually identical to an ordinary
+/// one. That is the consequence of the rule, not an oversight: the exact
+/// widths and depths at which it happens are measured and pinned by
+/// `a_pdf_backed_row_can_end_up_with_no_visible_distinction_at_all`.
+///
+/// Purity: pure function of `(selected, hovered)`.
 #[must_use]
-pub fn row_label_colour(selected: bool, hovered: bool, pdf_backed: bool) -> Color {
+pub fn row_label_colour(selected: bool, hovered: bool) -> Color {
     let pro = Palette::pro();
+    let app = Palette::fastmd_dark();
     let paint = row_paint(selected, hovered);
-    tree_row::locked_over(
-        row_text_color(&Palette::fastmd_dark(), pdf_backed),
-        paint.band,
-        &pro,
-    )
+    tree_row::locked_over(app.text, paint.band, &pro)
 }
 
 /// Stable id for the tree's search field ([AGENTS §5]).
@@ -2085,19 +2131,6 @@ pub fn search_field_style(
         placeholder: resolved.placeholder,
         value: resolved.text,
         selection: resolved.selection_background,
-    }
-}
-
-/// Label colour for a tree row: the `error` token on PDF-backed files
-/// (REQ-450), the default body token otherwise.
-///
-/// Purity: pure.
-#[must_use]
-pub fn row_text_color(palette: &Palette, pdf_backed: bool) -> iced::Color {
-    if pdf_backed {
-        palette.error
-    } else {
-        palette.text
     }
 }
 
