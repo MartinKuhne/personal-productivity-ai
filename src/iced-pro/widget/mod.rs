@@ -92,6 +92,8 @@
 //!   transitions: the deterministic tri-state rule, the roving
 //!   radio group, and the switch's busy refusal
 //!   (`UIF-ATOM-003`, §3.0.4.1)
+//! * [`toggle_widget`] — the live, interactive `iced::Widget`s for
+//!   `Checkbox`, `RadioGroup` and `ToggleSwitch` (`UIF-ATOM-003`, §3.3)
 //! * [`badge`] — the paint resolver and geometry for the three §3.8
 //!   badges: the `6px` dot, the count pill that folds at `99+`, and the
 //!   status chip whose leading glyph is mandatory. None of the three is
@@ -224,3 +226,6 @@ pub mod text_input_controller;
 pub mod text_input_model;
 pub mod toggle;
 pub mod toggle_model;
+pub mod toggle_widget;
+
+pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

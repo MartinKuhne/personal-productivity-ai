@@ -1638,35 +1638,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.3",
         evidence: &[
             "widget/toggle.rs",
             "widget/toggle_model.rs",
+            "widget/toggle_widget.rs",
             "token/size.rs",
             "gallery_toggle.rs",
         ],
-        reason: Some(
-            "Resolver, models and geometry are built; the widget is not. `widget/toggle.rs` \
-             resolves the two-row polarity matrix for all three atoms (`resolve_style` keyed \
-             on `TogglePolarity`, one matrix shared by every control), classifies the \
-             indicator's chrome (§3.5's four classes: `CoincidentWithFill` when the fill \
-             meets the 3.00 floor, `RestingDivider` at Rest, `Judged` otherwise), derives \
-             the focus ring adaptively rather than storing two constants, and supplies the \
-             pure geometry — the 16×16px box at `radius.widget`, the circle with its \
-             centred `size.checkbox.box / 2` dot, the 36×20px track with the 14×14px thumb \
-             at a derived 3px inset, and the 24px hit target spanning the label across an \
-             8px gap. `widget/toggle_model.rs` holds `CheckState` with the deterministic \
-             `Indeterminate`→`Unchecked` rule (advance only when every enabled child is \
-             already checked; a leaf goes to `Checked`), `RadioGroupModel<Id>` with \
-             arrow-key roving that skips disabled options and wraps both ends, and \
-             `SwitchModel` that refuses `toggle()` while `busy` or `disabled`. All of it is \
-             audited across 30 gallery cells. Missing: the `iced` `Element` wrapper itself — \
-             `toggle.rs` paints layers and routes `ToggleKey`, but nothing here implements \
-             `Widget`, so no `on_toggle(CheckState)` / `on_toggle(bool)` callback reaches \
-             an application, and the `✓` is carried as a colour in `resolved.mark` rather \
-             than drawn as a glyph.",
-        ),
+        reason: None,
         note: Some(
             "Two figures in §3.3's printed ratio column do not reproduce from the palette \
              under the §1.1 maths: `accent.border` on `surface.hover` is 5.44:1, not the \

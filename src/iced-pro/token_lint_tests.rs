@@ -119,7 +119,7 @@ use crate::token_lint::{
 /// code that paints it. The file count moves by eight and
 /// `PIN_RULE_B_FILES` does not move at all — the split added no visual
 /// literal to any scoped directory, and changed no literal in one either.
-const PIN_FILES_SCANNED: usize = 153;
+const PIN_FILES_SCANNED: usize = 154;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -155,7 +155,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// Like `aim.rs` before it, it is counted because of where it lives, not
 /// because of what it contains: the module defines no literal of its own
 /// and takes both of its numbers from `token::time`.
-const PIN_RULE_B_FILES: usize = 81;
+/// 82 as of `UIF-ATOM-003`, whose one addition is `widget/toggle_widget.rs`.
+const PIN_RULE_B_FILES: usize = 82;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
