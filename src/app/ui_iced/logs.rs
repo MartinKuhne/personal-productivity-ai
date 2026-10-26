@@ -76,9 +76,10 @@
 mod tests;
 
 use iced::widget::{
-    Column, Row, button, checkbox, container, pick_list, rule, scrollable, table, text, text_input,
+    Column, Row, button, checkbox, container, pick_list, rule, scrollable, table, text,
 };
 use iced::{Alignment, Element, Length};
+use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::background::logs::BackgroundLogs;
 use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
@@ -209,6 +210,9 @@ pub const BOTTOM_STICK_TOLERANCE: f32 = 1.0;
 /// an explicit id cannot be scrolled programmatically at all. Named once
 /// here so the view and the reducer cannot drift apart ([RUST-021]).
 pub const LOG_SCROLLABLE_ID: &str = "background_logs_scroll";
+
+/// Stable focus id for the background-log search input (UI-047).
+pub const LOG_SEARCH_INPUT_FOCUS_ID: &str = "background_logs_search_input";
 
 /// Formatted timestamp of a log row ([`TIMESTAMP_FORMAT`]).
 ///
@@ -695,8 +699,16 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
         .size(ROW_TEXT_SIZE)
         .color(palette.text);
 
-    let search_field = text_input("", &view_model.search_text)
-        .on_input(|text| Message::Logs(LogsMessage::SearchChanged { text }));
+    let search_field = TextInput::new(
+        InputKind::TextEntry,
+        String::new(),
+        &view_model.search_text,
+        |text| Message::Logs(LogsMessage::SearchChanged { text }),
+        LOG_SEARCH_INPUT_FOCUS_ID,
+    )
+    .compact()
+    .width(Length::Fill)
+    .palette(Palette::pro());
 
     let category_pick: Element<'_, Message> = pick_list(
         view_model.category_options.clone(),
@@ -716,7 +728,7 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
 
     let filter_row = Row::with_children(vec![
         search_label.into(),
-        search_field.width(Length::Fill).into(),
+        search_field.into(),
         text(strings::CATEGORY_LABEL)
             .size(ROW_TEXT_SIZE)
             .color(palette.text)

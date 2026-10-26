@@ -115,7 +115,7 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
 | `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
-| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), controlled `widget::text_input` (`TextInputModel` / `TextInputEmission` on the bottom command field and agent prompt; `InputKind` on the resolver-backed search field), `widget::combo_box` |
+| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field and agent prompt; callback `TextInput::new` on log/debug search; `InputKind` resolver on left-panel search), `widget::combo_box` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
 | `attributions.rs` | `widget::hyperlink` |
 | `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
@@ -125,9 +125,9 @@ modules under `src/app/ui_iced/` — not from an intention list.
 The controlled text-input event boundary distinguishes an explicit
 `Committed` (Enter or an explicit settle) from `FocusCommitted` (an edit
 settled by blur), while both remain members of the commit tier. The mounted
-agent prompt submits only the explicit event; blur synchronizes its draft
-without starting an agent run. Name dialogs deliberately route both events
-to their existing submit behavior.
+agent prompt and bottom command field submit only the explicit event; blur
+synchronizes their drafts without starting an agent run. Name dialogs
+deliberately route both events to their existing submit behavior.
 
 No `fastmd` type appears anywhere in `iced-pro`'s API, so the dependency
 stays strictly one-way.

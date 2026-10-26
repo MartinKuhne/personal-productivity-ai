@@ -17,10 +17,10 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LogsMessage, Message};
 
 use super::{
-    BOTTOM_STICK_TOLERANCE, BackgroundLogsViewModel, CategoryFilterOption, ScrollSnapshot,
-    auto_scroll_setting, category_color, category_filter_options, category_tag, filter_logs,
-    follow_state, is_log_visible, log_table, message_color, scroll_snapshot, should_follow,
-    timestamp_color, timestamp_text,
+    BOTTOM_STICK_TOLERANCE, BackgroundLogsViewModel, CategoryFilterOption,
+    LOG_SEARCH_INPUT_FOCUS_ID, ScrollSnapshot, auto_scroll_setting, category_color,
+    category_filter_options, category_tag, filter_logs, follow_state, is_log_visible, log_table,
+    message_color, scroll_snapshot, should_follow, timestamp_color, timestamp_text,
 };
 
 /// Every category the ring buffer can produce, in declaration order.
@@ -661,6 +661,69 @@ fn background_logs_view_builds_for_a_populated_snapshot() {
     logs.show_background_logs = true;
     let view_model = BackgroundLogsViewModel::from_logs(&logs);
     let _element = super::background_logs_view(&view_model);
+}
+
+#[test]
+fn live_background_logs_search_typing_emits_search_changed_with_stable_identity() {
+    use iced_test::selector::Candidate;
+
+    let logs = BackgroundLogs::new();
+    let view_model = BackgroundLogsViewModel::from_logs(&logs);
+    let expected_id = iced::widget::Id::from(LOG_SEARCH_INPUT_FOCUS_ID.to_string());
+    let mut ui = iced_test::simulator(super::background_logs_view(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput { bounds, .. } => Some(bounds),
+            _ => None,
+        })
+        .expect("the background logs view must mount its search input");
+    let has_stable_id = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == expected_id => Some(bounds),
+            _ => None,
+        })
+        .is_ok();
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("x");
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert_eq!(
+        messages,
+        vec![Message::Logs(LogsMessage::SearchChanged {
+            text: "x".to_string(),
+        })],
+        "typing must preserve the exact search-change message contract"
+    );
+    assert!(
+        has_stable_id,
+        "the live search input must use its stable focus/widget identity"
+    );
+
+    let mut rebuilt_ui = iced_test::simulator(super::background_logs_view(&view_model));
+    assert!(
+        rebuilt_ui
+            .find(|candidate: Candidate<'_>| match candidate {
+                Candidate::TextInput {
+                    id: Some(id),
+                    bounds,
+                    ..
+                } if *id == expected_id => Some(bounds),
+                _ => None,
+            })
+            .is_ok(),
+        "the search input must retain its stable focus/widget identity across view rebuilds"
+    );
 }
 
 #[test]

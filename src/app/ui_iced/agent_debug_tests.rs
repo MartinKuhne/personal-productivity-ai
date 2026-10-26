@@ -23,13 +23,13 @@ use crate::ui_iced::logs::ScrollSnapshot;
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 
 use super::{
-    AgentDebugViewModel, AgentDebugWindowState, DebugEntryView, JSON_LINE_HEIGHT, JSON_ROW_CATALOG,
-    JsonRowsOption, OMITTED_TOOLS_PLACEHOLDER, TOOLS_KEY, agent_debug_card, auto_scroll_command,
-    chevron_glyph, clear_command, copy_json_command, dismiss_command, display_json,
-    duplicate_tool_indices, entry_list, entry_matches, entry_row, filter_debug_entries,
-    header_text, json_body_height, json_line_count, json_row_options, kind_label,
-    normalized_search, scroll_reported_message, search_command, toggle_entry_command,
-    unescape_json_strings, visible_json_lines,
+    AGENT_DEBUG_SEARCH_INPUT_FOCUS_ID, AgentDebugViewModel, AgentDebugWindowState, DebugEntryView,
+    JSON_LINE_HEIGHT, JSON_ROW_CATALOG, JsonRowsOption, OMITTED_TOOLS_PLACEHOLDER, TOOLS_KEY,
+    agent_debug_card, agent_debug_controls, auto_scroll_command, chevron_glyph, clear_command,
+    copy_json_command, dismiss_command, display_json, duplicate_tool_indices, entry_list,
+    entry_matches, entry_row, filter_debug_entries, header_text, json_body_height, json_line_count,
+    json_row_options, kind_label, normalized_search, scroll_reported_message, search_command,
+    toggle_entry_command, unescape_json_strings, visible_json_lines,
 };
 
 // ---------------------------------------------------------------------------
@@ -732,6 +732,68 @@ fn an_empty_snapshot_renders_an_empty_list_rather_than_nothing() {
     let _card = agent_debug_card(&view_model);
     let _list = entry_list(&view_model);
     let _element = view_model.view();
+}
+
+#[test]
+fn live_agent_debug_search_typing_emits_the_exact_command_and_keeps_identity_on_rebuild() {
+    use iced_test::selector::Candidate;
+
+    let view_model = AgentDebugViewModel::from_entries(&[], true, "", true, 8);
+    let expected_id = iced::widget::Id::from(AGENT_DEBUG_SEARCH_INPUT_FOCUS_ID.to_string());
+    let mut ui = iced_test::simulator(agent_debug_controls(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput { bounds, .. } => Some(bounds),
+            _ => None,
+        })
+        .expect("the agent debug controls must mount the search input");
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == expected_id => Some(bounds),
+            _ => None,
+        })
+        .is_ok(),
+        "the search input must start with its stable widget identity"
+    );
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let query = "network timeout";
+    let _ = ui.typewrite(query);
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert_eq!(
+        messages.last(),
+        Some(&Message::Command(UserCommand::SetDebugSearchText(
+            query.to_string()
+        ))),
+        "typing must emit the exact existing search command"
+    );
+
+    let rebuilt_view_model = AgentDebugViewModel::from_entries(&[], true, query, true, 8);
+    let mut rebuilt_ui = iced_test::simulator(agent_debug_controls(&rebuilt_view_model));
+    assert!(
+        rebuilt_ui
+            .find(|candidate: Candidate<'_>| match candidate {
+                Candidate::TextInput {
+                    id: Some(id),
+                    bounds,
+                    ..
+                } if *id == expected_id => Some(bounds),
+                _ => None,
+            })
+            .is_ok(),
+        "the search input must retain its stable widget identity across view rebuilds"
+    );
 }
 
 #[test]

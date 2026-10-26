@@ -126,9 +126,9 @@ use std::collections::HashSet;
 
 use iced::widget::{
     Column, Row, Space, button, checkbox, container, mouse_area, pick_list, rule, scrollable, text,
-    text_input,
 };
 use iced::{Alignment, Element, Font, Length};
+use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::agent::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
@@ -227,6 +227,9 @@ pub const OMITTED_TOOLS_PLACEHOLDER: &str = strings::DEBUG_OMITTED_TOOLS_PLACEHO
 /// without one cannot be scrolled programmatically at all. Named once so
 /// view and reducer cannot drift ([RUST-021]).
 pub const DEBUG_SCROLLABLE_ID: &str = "agent_debug_scroll";
+
+/// Stable focus id for the agent-debug search input (UI-048).
+pub const AGENT_DEBUG_SEARCH_INPUT_FOCUS_ID: &str = "agent_debug_search_input";
 
 /// Padding inside the card — `space.md` (`UIF-TOK-001`).
 pub const CARD_PADDING: f32 = space::MD;
@@ -916,7 +919,16 @@ pub fn agent_debug_controls(view_model: &AgentDebugViewModel) -> Row<'_, Message
         .size(ENTRY_TEXT_SIZE)
         .color(palette.text);
 
-    let search_field = text_input("", &view_model.search_text).on_input(search_command);
+    let search_field = TextInput::new(
+        InputKind::TextEntry,
+        "",
+        &view_model.search_text,
+        search_command,
+        AGENT_DEBUG_SEARCH_INPUT_FOCUS_ID,
+    )
+    .compact()
+    .width(Length::Fill)
+    .palette(Palette::pro());
 
     let auto_scroll_toggle = checkbox(view_model.auto_scroll)
         .label(strings::AUTO_SCROLL_CHECKBOX)
@@ -938,7 +950,7 @@ pub fn agent_debug_controls(view_model: &AgentDebugViewModel) -> Row<'_, Message
 
     Row::with_children(vec![
         search_label.into(),
-        search_field.width(Length::Fill).into(),
+        search_field.into(),
         auto_scroll_toggle.into(),
         rows_label.into(),
         json_rows_pick,
