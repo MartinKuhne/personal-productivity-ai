@@ -115,12 +115,19 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
 | `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
-| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (`InputKind`), `widget::combo_box` |
+| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (`TextInputModel` / `TextInputEmission` on the agent prompt; `InputKind` on other fields), `widget::combo_box` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
 | `attributions.rs` | `widget::hyperlink` |
 | `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
 | `app.rs`, `update.rs`, `message.rs` | `surface::zorder` band model + `SurfaceRegistry`, `focus::FocusState`, `bridge::focus_task`, `geometry::clamp::ResizeHandle` |
 | every converted surface | `token::{space, size, shape, typography, color, contrast}`, `state::{BaseState, VisualState}` |
+
+The controlled text-input event boundary distinguishes an explicit
+`Committed` (Enter or an explicit settle) from `FocusCommitted` (an edit
+settled by blur), while both remain members of the commit tier. The mounted
+agent prompt submits only the explicit event; blur synchronizes its draft
+without starting an agent run. Name dialogs deliberately route both events
+to their existing submit behavior.
 
 No `fastmd` type appears anywhere in `iced-pro`'s API, so the dependency
 stays strictly one-way.
@@ -197,7 +204,7 @@ C4Component
   Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through iced-pro surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
   Component(movui, "movable_shell", "Movable card chrome driven by iced-pro movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
   Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")
-  Component(agentui, "agent", "Agent panel: streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, prompt row with send/queue/cancel + chat-model pick_list")
+  Component(agentui, "agent", "Mounted agent panel: header/status, streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, iced-pro controlled prompt field, send/queue/cancel + chat-model pick_list")
   Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card; logs and agent_debug ride MovableHost")
   Component(persist, "persisted", "PersistedUiState save/restore through the injected UI-state storage handler")
   Component(tablew, "table_width (iced adapter)", "Available width -> FTWA solver inputs -> pinned iced column widths; heuristic text measurer")

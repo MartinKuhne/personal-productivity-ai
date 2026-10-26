@@ -126,6 +126,17 @@ fn test_a_committed_tier_comes_back_wrapped_and_redacted() {
 }
 
 #[test]
+fn test_a_focus_commit_uses_the_same_secret_boundary_as_a_commit() {
+    let emission = PasswordController::translate(TextInputEmission::FocusCommitted(
+        crate::binding::Commit::new(PLAINTEXT.to_string()),
+    ))
+    .expect("a focus commit must translate");
+
+    assert!(matches!(emission, PasswordEmission::Committed(_)));
+    assert!(!format!("{emission:?}").contains(PLAINTEXT));
+}
+
+#[test]
 fn test_a_cancelled_tier_carries_the_restored_secret_redacted() {
     let emission = PasswordController::translate(TextInputEmission::Cancelled(
         crate::binding::Cancel::new(PLAINTEXT.to_string()),

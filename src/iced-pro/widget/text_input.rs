@@ -940,6 +940,7 @@ where
     /// is not the event. `emit` sees every tier the field produces —
     /// [`Changed`](TextInputEmission::Changed),
     /// [`Committed`](TextInputEmission::Committed),
+    /// [`FocusCommitted`](TextInputEmission::FocusCommitted),
     /// [`Cleared`](TextInputEmission::Cleared),
     /// [`Cancelled`](TextInputEmission::Cancelled) and
     /// [`FocusChanged`](TextInputEmission::FocusChanged) — and returns

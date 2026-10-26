@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use crate::config::{AppConfig, LlmConfig};
 use crate::ui::strings;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use super::{
     AgentPanelViewModel, TranscriptTurn, TurnRole, chat_model_options, split_user_turn,
@@ -318,7 +319,7 @@ fn base_vm() -> AgentPanelViewModel {
         queued_prompts: Vec::new(),
         chat_models: Vec::new(),
         current_chat_model: None,
-        command_input: String::new(),
+        command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }
 }
@@ -403,4 +404,16 @@ fn from_app_parses_the_transcript_once_the_session_is_visible() {
     assert!(vm.visible);
     assert_eq!(vm.turns.len(), 2, "a visible session parses both turns");
     assert_eq!(vm.thinking, "deep thought");
+}
+
+#[test]
+fn from_app_snapshots_command_input_into_the_prompt_model() {
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.agent_panel_state.command_input = "draft prompt".to_string();
+
+    let vm = AgentPanelViewModel::from_app(&app);
+
+    assert_eq!(vm.command_input.value, "draft prompt");
+    assert_eq!(vm.command_input.placeholder, strings::COMMAND_INPUT_HINT);
+    assert!(!vm.command_input.clearable);
 }

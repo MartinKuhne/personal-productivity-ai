@@ -38,7 +38,8 @@
 //! | Callback | Tier | Produced by |
 //! |---|---|---|
 //! | `on_change(String)` | [`Live<String>`] | [`note_edit`](TextInputController::note_edit) → [`take_live`](TextInputController::take_live) |
-//! | `on_commit(String)` | [`Commit<String>`] | `Enter`, or focus loss with an open session |
+//! | `on_commit(String)` | [`Committed`](TextInputEmission::Committed) | `Enter` or an explicit settle |
+//! | focus-loss settle | [`FocusCommitted`](TextInputEmission::FocusCommitted) | focus loss with an open session |
 //! | `on_clear()` | [`Commit<String>`] of the empty value | the trailing `×`, or `Escape` on an untouched non-empty field |
 //! | `on_focus_change(bool)` | not a value tier — the edge that opens and closes sessions | [`note_focus`](TextInputController::note_focus) |
 //!
@@ -103,8 +104,14 @@ use crate::widget::text_input_model::TextInputModel;
 pub enum TextInputEmission {
     /// `Live<String>` — `on_change`, one coalesced tick per delivery.
     Changed(Live<String>),
-    /// `Commit<String>` — `on_commit`, settled by `Enter` or focus loss.
+    /// `Commit<String>` — `on_commit`, settled by `Enter` or an explicit commit.
     Committed(Commit<String>),
+    /// `Commit<String>` — `on_commit` settled by focus loss.
+    ///
+    /// Carries the same committed value as [`Self::Committed`], but keeps
+    /// blur distinct so hosts can avoid treating leaving a field as an
+    /// explicit action such as submitting a prompt.
+    FocusCommitted(Commit<String>),
     /// `Commit<String>` — `on_clear`, the empty value by way of the
     /// trailing `×` or an `Escape` that had no session to revert.
     Cleared(Commit<String>),
@@ -126,7 +133,7 @@ impl TextInputEmission {
     pub fn value(&self) -> Option<&str> {
         match self {
             Self::Changed(live) => Some(live.value()),
-            Self::Committed(commit) => Some(commit.value()),
+            Self::Committed(commit) | Self::FocusCommitted(commit) => Some(commit.value()),
             Self::Cleared(commit) => Some(commit.value()),
             Self::Cancelled(cancel) => Some(cancel.restored()),
             Self::FocusChanged(_) => None,
@@ -142,7 +149,7 @@ impl TextInputEmission {
     pub const fn tier(&self) -> &'static str {
         match self {
             Self::Changed(_) => "live",
-            Self::Committed(_) | Self::Cleared(_) => "commit",
+            Self::Committed(_) | Self::FocusCommitted(_) | Self::Cleared(_) => "commit",
             Self::Cancelled(_) => "cancel",
             Self::FocusChanged(_) => "focus",
         }
@@ -161,8 +168,8 @@ impl TextInputEmission {
     /// here rather than being re-derived at every wiring site — and every
     /// wiring site getting it subtly different.
     ///
-    /// * `Committed` and `Cleared` advance it: both are deliberate acts
-    ///   on the value.
+    /// * `Committed`, `FocusCommitted` and `Cleared` advance it: each
+    ///   settles the value, whether explicitly or by leaving the field.
     /// * `FocusChanged(false)` advances it — that is a `blur`, which
     ///   §1.1 names outright.
     /// * `Changed` does not: a keystroke is not a commitment, and
@@ -177,7 +184,10 @@ impl TextInputEmission {
     #[must_use]
     pub const fn advances_stance(&self) -> bool {
         match self {
-            Self::Committed(_) | Self::Cleared(_) | Self::FocusChanged(false) => true,
+            Self::Committed(_)
+            | Self::FocusCommitted(_)
+            | Self::Cleared(_)
+            | Self::FocusChanged(false) => true,
             Self::Changed(_) | Self::Cancelled(_) | Self::FocusChanged(true) => false,
         }
     }
@@ -196,6 +206,7 @@ impl PartialEq for TextInputEmission {
         match (self, other) {
             (Self::Changed(a), Self::Changed(b)) => a.value() == b.value(),
             (Self::Committed(a), Self::Committed(b)) => a.value() == b.value(),
+            (Self::FocusCommitted(a), Self::FocusCommitted(b)) => a.value() == b.value(),
             (Self::Cleared(a), Self::Cleared(b)) => a.value() == b.value(),
             (Self::Cancelled(a), Self::Cancelled(b)) => a.restored() == b.restored(),
             (Self::FocusChanged(a), Self::FocusChanged(b)) => a == b,
@@ -209,6 +220,10 @@ impl fmt::Debug for TextInputEmission {
         match self {
             Self::Changed(live) => f.debug_tuple("Changed").field(live.value()).finish(),
             Self::Committed(commit) => f.debug_tuple("Committed").field(commit.value()).finish(),
+            Self::FocusCommitted(commit) => f
+                .debug_tuple("FocusCommitted")
+                .field(commit.value())
+                .finish(),
             Self::Cleared(commit) => f.debug_tuple("Cleared").field(commit.value()).finish(),
             Self::Cancelled(cancel) => f.debug_tuple("Cancelled").field(cancel.restored()).finish(),
             Self::FocusChanged(focused) => f.debug_tuple("FocusChanged").field(focused).finish(),
@@ -409,7 +424,7 @@ impl TextInputController {
     /// - rising edge → `FocusChanged(true)`. **No snapshot is taken.**
     ///   That is the decision the module doc argues for: focus-gain is not
     ///   a gesture.
-    /// - falling edge → `Committed(v)` if a session is open, then
+    /// - falling edge → `FocusCommitted(v)` if a session is open, then
     ///   `FocusChanged(false)`. The commit comes first because the host
     ///   should see the settled value before it sees that the field is
     ///   gone.
@@ -440,7 +455,7 @@ impl TextInputController {
             self.snapshot = None;
 
             if let Some(commit) = self.gesture.commit(self.current.clone()) {
-                emissions.push(TextInputEmission::Committed(commit));
+                emissions.push(TextInputEmission::FocusCommitted(commit));
             }
         }
         emissions.push(TextInputEmission::FocusChanged(false));

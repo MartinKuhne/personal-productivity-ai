@@ -54,6 +54,23 @@ fn delete_state() -> DialogState {
     state
 }
 
+#[test]
+fn a_blurred_name_field_still_submits_before_reporting_blur() {
+    use iced_pro::binding::Commit;
+    use iced_pro::widget::text_input_controller::TextInputEmission;
+
+    assert_eq!(
+        dialog_field_emit(TextInputEmission::FocusCommitted(Commit::new(
+            "new name".to_string(),
+        ))),
+        Some(Message::Dialog(DialogMessage::Submitted))
+    );
+    assert_eq!(
+        dialog_field_emit(TextInputEmission::FocusChanged(false)),
+        Some(Message::Dialog(DialogMessage::Blurred))
+    );
+}
+
 // --- DialogKind: target / title / prompt / label ---------------------------
 
 #[test]

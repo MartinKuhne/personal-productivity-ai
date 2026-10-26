@@ -30,16 +30,15 @@
 //!
 //! Unit tests live in the sibling `prompt_input_tests.rs` sidecar.
 
-use iced::widget::{Column, Row, pick_list, text, text_input};
-use iced::{Alignment, Background, Border, Element, Length};
+use iced::widget::{Column, Row, pick_list, text};
+use iced::{Alignment, Element, Length};
 
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::shape;
 use iced_pro::token::space;
 use iced_pro::token::typography::{self, TypeRung};
 use iced_pro::widget::button::ButtonVariant;
 use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input as pro_text_input;
+use iced_pro::widget::text_input::{InputKind, TextInput};
+use iced_pro::widget::text_input_controller::TextInputEmission;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
@@ -102,54 +101,6 @@ pub const STOP_BUTTON_ID: &str = "agent_stop_button";
 
 /// Stable id for the Clear-session button ([AGENTS §5]).
 pub const CLEAR_SESSION_BUTTON_ID: &str = "agent_clear_session_button";
-
-/// The prompt field's paint, resolved through the framework's text-input
-/// atom (`UIF-ATOM-002`).
-///
-/// The same crossing point as the command band's
-/// [`command_field_style`](crate::ui_iced::panels::bottom::command_field_style):
-/// iced styles a `text_input` from `(Theme, Status)` while the framework
-/// resolves one from `(InputKind, VisualState, Palette)`, so this translates
-/// iced's four statuses into the framework's `(base, focused)` pair. Fill,
-/// perimeter, value, placeholder, icon and selection all come from
-/// [`pro_text_input::resolve_input_style`] at
-/// [`InputKind::TextEntry`](pro_text_input::InputKind::TextEntry) rather
-/// than from iced's own theme.
-///
-/// Purity: pure function of `status`.
-#[must_use]
-pub fn prompt_field_style(
-    status: iced::widget::text_input::Status,
-) -> iced::widget::text_input::Style {
-    use iced::widget::text_input::{Status, Style};
-
-    let palette = Palette::pro();
-    let base = match status {
-        Status::Active => BaseState::Rest,
-        Status::Hovered => BaseState::Hovered,
-        Status::Focused { .. } => BaseState::Rest,
-        Status::Disabled => BaseState::Disabled,
-    };
-    let focused = matches!(status, Status::Focused { .. });
-    let resolved = pro_text_input::resolve_input_style(
-        pro_text_input::InputKind::TextEntry,
-        VisualState { base, focused },
-        &palette,
-    );
-
-    Style {
-        background: Background::Color(resolved.background),
-        border: Border {
-            color: resolved.border_color,
-            width: resolved.border_width,
-            radius: shape::RADIUS_WIDGET.into(),
-        },
-        icon: resolved.icon,
-        placeholder: resolved.placeholder,
-        value: resolved.text,
-        selection: resolved.selection_background,
-    }
-}
 
 /// A framework button that stays **allocated** whether or not it can fire.
 ///
@@ -249,16 +200,46 @@ pub fn current_model_option<'a>(
     options.iter().find(|entry| entry.name == current)
 }
 
+/// Maps the controlled prompt field's tiers onto its existing message channel.
+///
+/// Typing updates the host-owned command input, Enter submits the tier's value,
+/// and Escape restores the pre-edit value through the same input-change
+/// message. A focus-loss commit resynchronizes the final value without
+/// submitting it; focus edges have no prompt-side effect. Clear is deliberately
+/// ignored: the prompt uses a non-clearable text-entry model and has no clear
+/// affordance.
+fn prompt_field_emit(emission: TextInputEmission) -> Option<Message> {
+    match emission {
+        TextInputEmission::Changed(live) => Some(Message::Agent(AgentMessage::InputChanged {
+            text: live.value().to_string(),
+        })),
+        TextInputEmission::Committed(commit) => Some(Message::Agent(AgentMessage::Submit {
+            text: commit.value().to_string(),
+        })),
+        TextInputEmission::FocusCommitted(commit) => {
+            Some(Message::Agent(AgentMessage::InputChanged {
+                text: commit.value().to_string(),
+            }))
+        }
+        TextInputEmission::Cancelled(cancel) => Some(Message::Agent(AgentMessage::InputChanged {
+            text: cancel.restored().to_string(),
+        })),
+        TextInputEmission::FocusChanged(_) | TextInputEmission::Cleared(_) => None,
+    }
+}
+
 /// Renders the agent prompt row from a snapshot.
 ///
 /// Emitted messages:
-/// * typing → [`AgentMessage::InputChanged`]
+/// * typing / restoring an edit with Escape → [`AgentMessage::InputChanged`]
 /// * Enter / Send → [`AgentMessage::Submit`] (reducer runs
 ///   [`submit_commands`])
 /// * Queue while running → [`AgentMessage::Submit`] (reducer queues)
 /// * Stop while running → [`UserCommand::CancelAgent`]
 /// * model pick → [`UserCommand::SelectChatModel`]
 /// * Clear session → [`UserCommand::ClearAgentSession`]
+/// * blur → [`AgentMessage::InputChanged`] with the settled value, never Submit
+/// * focus edges and clear tiers → no message
 ///
 /// Every control is always allocated and gated with `on_press_maybe`, so the
 /// prompt block's widget shape is stable across the idle ⇄ running and empty
@@ -268,36 +249,36 @@ pub fn current_model_option<'a>(
 #[must_use]
 pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
+    let prompt = view_model.command_input.value.as_str();
 
-    let command_field = text_input(strings::COMMAND_INPUT_HINT, &view_model.command_input)
-        .id(PROMPT_INPUT_ID)
-        .size(CONTROL_TEXT_SIZE)
-        .line_height(CONTROL_RUNG.iced_line_height())
-        .padding(space::XS)
-        .style(|_theme, status| prompt_field_style(status))
-        .on_input(|text| Message::Agent(AgentMessage::InputChanged { text }))
-        .on_submit(Message::Agent(AgentMessage::Submit {
-            text: view_model.command_input.clone(),
-        }));
+    let command_field = TextInput::controlled(
+        InputKind::TextEntry,
+        view_model.command_input.controlled(),
+        PROMPT_INPUT_ID,
+        prompt_field_emit,
+    )
+    .width(Length::Fill)
+    .compact()
+    .palette(Palette::pro());
 
     let send_button = gated_button(
         ButtonVariant::Primary,
         strings::AGENT_SEND_BUTTON,
         Message::Agent(AgentMessage::Submit {
-            text: view_model.command_input.clone(),
+            text: prompt.to_string(),
         }),
         SEND_BUTTON_ID,
-        send_enabled(&view_model.command_input, view_model.running),
+        send_enabled(prompt, view_model.running),
     );
 
     let queue_button = gated_button(
         ButtonVariant::Secondary,
         strings::AGENT_QUEUE_BUTTON,
         Message::Agent(AgentMessage::Submit {
-            text: view_model.command_input.clone(),
+            text: prompt.to_string(),
         }),
         QUEUE_BUTTON_ID,
-        queue_enabled(&view_model.command_input, view_model.running),
+        queue_enabled(prompt, view_model.running),
     );
 
     let cancel_button = gated_button(
@@ -342,7 +323,7 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     };
 
     let actions = Row::with_children(vec![
-        command_field.width(Length::Fill).into(),
+        command_field.into(),
         send_button.into(),
         queue_button.into(),
         cancel_button.into(),

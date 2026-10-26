@@ -12,10 +12,15 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui_iced::message::{AgentMessage, Message};
 use crate::ui_iced::panels::top::ChatModelEntry;
+use iced_pro::binding::{Cancel, Commit, Live};
+use iced_pro::widget::text_input_controller::TextInputController;
+use iced_pro::widget::text_input_controller::TextInputEmission;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use super::{
-    agent_prompt_row, cancel_enabled, clear_session_message, current_model_option, queue_display,
-    queue_enabled, select_model_message, send_enabled, submit_commands,
+    PROMPT_INPUT_ID, agent_prompt_row, cancel_enabled, clear_session_message, current_model_option,
+    prompt_field_emit, queue_display, queue_enabled, select_model_message, send_enabled,
+    submit_commands,
 };
 use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
 
@@ -37,9 +42,15 @@ fn base_vm() -> AgentPanelViewModel {
         queued_prompts: Vec::new(),
         chat_models: Vec::new(),
         current_chat_model: None,
-        command_input: String::new(),
+        command_input: prompt_model(""),
         auto_scroll: true,
     }
+}
+
+fn prompt_model(value: &str) -> TextInputModel {
+    TextInputModel::new(value)
+        .with_placeholder(strings::COMMAND_INPUT_HINT)
+        .with_clearable(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +212,7 @@ fn submit_blank_produces_nothing() {
 #[test]
 fn prompt_row_builds_idle() {
     let mut vm = base_vm();
-    vm.command_input = "hello".to_string();
+    vm.command_input = prompt_model("hello");
     vm.chat_models = vec![entry("a", 1), entry("b", 2)];
     vm.current_chat_model = Some("a".to_string());
     let _ = agent_prompt_row(&vm);
@@ -211,7 +222,7 @@ fn prompt_row_builds_idle() {
 fn prompt_row_builds_running_with_queue() {
     let mut vm = base_vm();
     vm.running = true;
-    vm.command_input = "queued prompt".to_string();
+    vm.command_input = prompt_model("queued prompt");
     vm.queued_prompts = vec!["p1".to_string()];
     let _ = agent_prompt_row(&vm);
 }
@@ -233,4 +244,174 @@ fn submit_message_from_row_is_agent_submit() {
         Message::Agent(AgentMessage::Submit { text }) => assert_eq!(text, "x"),
         other => panic!("expected Submit, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Controlled prompt emissions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prompt_emissions_map_to_the_existing_agent_message_contract() {
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::Changed(Live::new("typed".to_string()))),
+        Some(Message::Agent(AgentMessage::InputChanged {
+            text: "typed".to_string(),
+        }))
+    );
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::Committed(Commit::new(
+            "submitted".to_string()
+        ))),
+        Some(Message::Agent(AgentMessage::Submit {
+            text: "submitted".to_string(),
+        }))
+    );
+}
+
+#[test]
+fn prompt_focus_loss_syncs_the_value_without_submitting() {
+    let mut controller = TextInputController::with_value("before");
+    controller.note_focus(true);
+    assert!(controller.note_edit("typed prompt".to_string()));
+
+    let messages: Vec<_> = controller
+        .note_focus(false)
+        .into_iter()
+        .filter_map(prompt_field_emit)
+        .collect();
+
+    assert_eq!(
+        messages,
+        vec![Message::Agent(AgentMessage::InputChanged {
+            text: "typed prompt".to_string(),
+        })],
+        "blur must preserve the settled text but must never dispatch Submit"
+    );
+}
+
+#[test]
+fn prompt_enter_still_submits_the_edited_value() {
+    let mut controller = TextInputController::with_value("before");
+    controller.note_focus(true);
+    assert!(controller.note_edit("typed prompt".to_string()));
+
+    let message = controller.commit().and_then(prompt_field_emit);
+
+    assert_eq!(
+        message,
+        Some(Message::Agent(AgentMessage::Submit {
+            text: "typed prompt".to_string(),
+        }))
+    );
+}
+
+#[test]
+fn prompt_cancel_restores_the_host_owned_text_without_submitting() {
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::Cancelled(Cancel::new(
+            "before edit".to_string()
+        ))),
+        Some(Message::Agent(AgentMessage::InputChanged {
+            text: "before edit".to_string(),
+        }))
+    );
+}
+
+#[test]
+fn prompt_focus_and_unavailable_clear_emissions_have_no_message() {
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::FocusChanged(true)),
+        None
+    );
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::FocusChanged(false)),
+        None
+    );
+    assert_eq!(
+        prompt_field_emit(TextInputEmission::Cleared(Commit::new(String::new()))),
+        None,
+        "the prompt has no clear affordance, so a clear tier is not routed"
+    );
+}
+
+#[test]
+fn live_prompt_typing_emits_the_existing_input_changed_message() {
+    use iced_test::selector::Candidate;
+
+    let vm = base_vm();
+    let prompt_id = iced::widget::Id::from(PROMPT_INPUT_ID);
+    let mut ui = iced_test::simulator(agent_prompt_row(&vm));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == prompt_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the prompt row must mount its controlled text input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("summarize");
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Agent(AgentMessage::InputChanged {
+            text: "summarize".to_string(),
+        })),
+        "the live controlled prompt must preserve InputChanged, got {messages:?}"
+    );
+}
+
+#[test]
+fn live_prompt_enter_emits_submit_with_the_edited_value() {
+    use iced_test::selector::Candidate;
+
+    let vm = base_vm();
+    let prompt_id = iced::widget::Id::from(PROMPT_INPUT_ID);
+    let mut ui = iced_test::simulator(agent_prompt_row(&vm));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == prompt_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the prompt row must mount its controlled text input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("summarize");
+    let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Agent(AgentMessage::Submit {
+            text: "summarize".to_string(),
+        })),
+        "Enter must submit the live editor value, got {messages:?}"
+    );
+}
+
+#[test]
+fn prompt_model_uses_command_input_as_its_only_value_and_has_no_clear_action() {
+    let mut vm = base_vm();
+    vm.command_input = prompt_model("draft");
+
+    assert_eq!(vm.command_input.value, "draft");
+    assert!(!vm.command_input.clearable);
 }

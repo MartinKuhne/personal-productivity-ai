@@ -696,7 +696,7 @@ impl<Id: Clone + fmt::Display + PartialEq> AutoSuggestHost<Id> {
         }
         for emission in self.controller.note_focus(focused) {
             match emission {
-                TextInputEmission::Committed(commit) => {
+                TextInputEmission::FocusCommitted(commit) => {
                     out.push(AutoSuggestEmission::QueryCommitted(commit));
                 }
                 TextInputEmission::FocusChanged(focused) => {

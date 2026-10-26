@@ -2073,6 +2073,7 @@ impl Host {
         match emission {
             TextInputEmission::Changed(live) => model.value = live.value().to_owned(),
             TextInputEmission::Committed(commit) => model.value = commit.value().to_owned(),
+            TextInputEmission::FocusCommitted(commit) => model.value = commit.value().to_owned(),
             TextInputEmission::Cleared(_) => model.value = String::new(),
             TextInputEmission::Cancelled(cancel) => model.value = cancel.restored().to_owned(),
             TextInputEmission::FocusChanged(_) => {}
@@ -2129,6 +2130,10 @@ fn changed(value: &str) -> TextInputEmission {
 
 fn committed(value: &str) -> TextInputEmission {
     TextInputEmission::Committed(Commit::new(value.to_owned()))
+}
+
+fn focus_committed(value: &str) -> TextInputEmission {
+    TextInputEmission::FocusCommitted(Commit::new(value.to_owned()))
 }
 
 fn cleared() -> TextInputEmission {
@@ -2240,7 +2245,7 @@ fn test_losing_focus_settles_the_edit_and_reports_the_edge() {
 
     assert_eq!(
         drift(&mut harness),
-        vec![committed("hi"), focus(false)],
+        vec![focus_committed("hi"), focus(false)],
         "a blur commits before it closes the boundary, never after"
     );
 }
@@ -2361,7 +2366,10 @@ fn test_escape_does_not_revert_a_field_that_does_not_hold_the_keyboard() {
 
     typed(&mut harness, 'x');
     harness.unfocus();
-    assert_eq!(drift(&mut harness), vec![committed("x"), focus(false)]);
+    assert_eq!(
+        drift(&mut harness),
+        vec![focus_committed("x"), focus(false)]
+    );
 
     // Hovered again, but the keyboard is long gone.
     harness.hover(centre(bounds));

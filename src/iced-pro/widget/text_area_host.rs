@@ -354,6 +354,7 @@ impl TextAreaController {
 fn map_settle(emission: TextInputEmission) -> TextAreaEmission {
     match emission {
         TextInputEmission::Committed(commit) => TextAreaEmission::Committed(commit),
+        TextInputEmission::FocusCommitted(commit) => TextAreaEmission::Committed(commit),
         TextInputEmission::Cancelled(cancel) => TextAreaEmission::Cancelled(cancel),
         TextInputEmission::Cleared(commit) => TextAreaEmission::Committed(commit),
         TextInputEmission::Changed(live) => TextAreaEmission::Changed(live),

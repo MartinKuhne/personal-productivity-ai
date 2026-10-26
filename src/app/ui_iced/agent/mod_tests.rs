@@ -10,6 +10,7 @@
 use crate::bus::events::user_command::UserCommand;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::panels::top::ChatModelEntry;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use super::{AgentPanelViewModel, TranscriptTurn, agent_panel, close_message};
 
@@ -24,7 +25,7 @@ fn base_vm() -> AgentPanelViewModel {
         queued_prompts: Vec::new(),
         chat_models: Vec::new(),
         current_chat_model: None,
-        command_input: String::new(),
+        command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }
 }
@@ -66,7 +67,7 @@ fn agent_panel_builds_with_conversation() {
         },
     ];
     vm.current_chat_model = Some("a".into());
-    vm.command_input = "next".into();
+    vm.command_input = TextInputModel::new("next").with_clearable(false);
     vm.queued_prompts = vec!["q1".into()];
     let _ = agent_panel(&vm);
 }

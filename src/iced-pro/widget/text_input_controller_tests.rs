@@ -29,6 +29,10 @@ fn committed(value: &str) -> TextInputEmission {
     TextInputEmission::Committed(Commit::new(value.to_owned()))
 }
 
+fn focus_committed(value: &str) -> TextInputEmission {
+    TextInputEmission::FocusCommitted(Commit::new(value.to_owned()))
+}
+
 fn cleared() -> TextInputEmission {
     TextInputEmission::Cleared(Commit::new(String::new()))
 }
@@ -414,7 +418,7 @@ fn focus_loss_settles_an_open_session_before_reporting_the_edge() {
 
     assert_eq!(
         emissions,
-        vec![committed("hell"), focused(false)],
+        vec![focus_committed("hell"), focused(false)],
         "the host must see the settled value before it sees that the field \
          is gone"
     );
@@ -517,12 +521,14 @@ fn resetting_an_idle_engine_is_well_defined() {
 fn every_tier_names_its_tier_and_carries_its_value() {
     assert_eq!(changed("a").tier(), "live");
     assert_eq!(committed("b").tier(), "commit");
+    assert_eq!(focus_committed("b").tier(), "commit");
     assert_eq!(cleared().tier(), "commit");
     assert_eq!(cancelled("c").tier(), "cancel");
     assert_eq!(focused(true).tier(), "focus");
 
     assert_eq!(changed("a").value(), Some("a"));
     assert_eq!(committed("b").value(), Some("b"));
+    assert_eq!(focus_committed("b").value(), Some("b"));
     assert_eq!(cleared().value(), Some(""));
     assert_eq!(cancelled("c").value(), Some("c"));
     assert_eq!(focused(true).value(), None);
@@ -533,6 +539,7 @@ fn only_the_settling_arms_close_a_session() {
     assert!(!changed("a").settles());
     assert!(!focused(true).settles());
     assert!(committed("b").settles());
+    assert!(focus_committed("b").settles());
     assert!(cleared().settles());
     assert!(cancelled("c").settles());
 }
@@ -540,6 +547,8 @@ fn only_the_settling_arms_close_a_session() {
 #[test]
 fn tiers_of_different_kinds_never_compare_equal() {
     assert_ne!(changed("x"), committed("x"));
+    assert_ne!(committed("x"), focus_committed("x"));
+    assert_ne!(focus_committed("x"), focus_committed("y"));
     assert_ne!(committed("x"), cancelled("x"));
     assert_ne!(committed("x"), cleared());
     assert_ne!(cancelled("x"), cleared());
@@ -549,6 +558,7 @@ fn tiers_of_different_kinds_never_compare_equal() {
 fn same_tier_same_payload_compares_equal() {
     assert_eq!(committed("x"), committed("x"));
     assert_ne!(committed("x"), committed("y"));
+    assert_eq!(focus_committed("x"), focus_committed("x"));
     assert_eq!(focused(true), focused(true));
     assert_ne!(focused(true), focused(false));
     assert_eq!(changed("x"), changed("x"));
@@ -558,6 +568,10 @@ fn same_tier_same_payload_compares_equal() {
 #[test]
 fn a_tier_debug_prints_its_payload_not_its_wrapper() {
     assert_eq!(format!("{:?}", committed("v")), "Committed(\"v\")");
+    assert_eq!(
+        format!("{:?}", focus_committed("v")),
+        "FocusCommitted(\"v\")"
+    );
     assert_eq!(format!("{:?}", cleared()), "Cleared(\"\")");
     assert_eq!(format!("{:?}", cancelled("v")), "Cancelled(\"v\")");
     assert_eq!(format!("{:?}", focused(true)), "FocusChanged(true)");
@@ -605,6 +619,7 @@ fn equality_tracks_whether_a_session_is_open_not_just_the_current_value() {
 #[test]
 fn a_committed_or_cleared_value_advances_the_stance() {
     assert!(TextInputEmission::Committed(Commit::new("v".to_owned())).advances_stance());
+    assert!(focus_committed("v").advances_stance());
     assert!(TextInputEmission::Cleared(Commit::new(String::new())).advances_stance());
 }
 
@@ -637,6 +652,7 @@ fn every_tier_is_accounted_for_in_the_stance_rule() {
     let tiers = [
         TextInputEmission::Changed(Live::new("a".to_owned())),
         TextInputEmission::Committed(Commit::new("a".to_owned())),
+        focus_committed("a"),
         TextInputEmission::Cleared(Commit::new(String::new())),
         TextInputEmission::Cancelled(Cancel::new("a".to_owned())),
         TextInputEmission::FocusChanged(true),
@@ -647,7 +663,7 @@ fn every_tier_is_accounted_for_in_the_stance_rule() {
         .filter(|emission| emission.advances_stance())
         .map(TextInputEmission::tier)
         .collect();
-    assert_eq!(advancing, vec!["commit", "commit", "focus"]);
+    assert_eq!(advancing, vec!["commit", "commit", "commit", "focus"]);
 }
 
 #[test]

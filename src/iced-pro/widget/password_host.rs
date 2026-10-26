@@ -155,24 +155,26 @@ impl PasswordController {
 
     /// Translate one tier the atom's engine produced.
     ///
-    /// `Changed` and `Committed` have their `String` re-wrapped as a
-    /// [`SecretInput`] — the redaction is applied at the boundary where
-    /// the plaintext leaves the editor, which is the last point at which
-    /// it can be applied before a host sees it. `Cancelled` carries the
-    /// restore target, which is a secret too, and is wrapped the same
-    /// way. `Cleared` cannot occur on a password mirror and is mapped to
-    /// `None` rather than to a fabricated arm, so a host that ever does
-    /// see one knows the mirror was built wrong instead of quietly
-    /// receiving an empty password.
+    /// `Changed`, `Committed` and `FocusCommitted` have their `String`
+    /// re-wrapped as a [`SecretInput`] — the redaction is applied at the
+    /// boundary where the plaintext leaves the editor, which is the last
+    /// point at which it can be applied before a host sees it. `Cancelled`
+    /// carries the restore target, which is a secret too, and is wrapped
+    /// the same way. `Cleared` cannot occur on a password mirror and is
+    /// mapped to `None` rather than to a fabricated arm, so a host that
+    /// ever does see one knows the mirror was built wrong instead of
+    /// quietly receiving an empty password.
     #[must_use]
     pub fn translate(emission: TextInputEmission) -> Option<PasswordEmission> {
         match emission {
             TextInputEmission::Changed(live) => Some(PasswordEmission::Changed(
                 crate::binding::Live::new(SecretInput::new(live.into_value())),
             )),
-            TextInputEmission::Committed(commit) => Some(PasswordEmission::Committed(
-                crate::binding::Commit::new(SecretInput::new(commit.into_value())),
-            )),
+            TextInputEmission::Committed(commit) | TextInputEmission::FocusCommitted(commit) => {
+                Some(PasswordEmission::Committed(crate::binding::Commit::new(
+                    SecretInput::new(commit.into_value()),
+                )))
+            }
             TextInputEmission::Cancelled(cancel) => Some(PasswordEmission::Cancelled(
                 crate::binding::Cancel::new(SecretInput::new(cancel.into_restored())),
             )),

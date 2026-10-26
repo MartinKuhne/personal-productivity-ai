@@ -44,6 +44,7 @@ use crate::config::AppConfig;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui_iced::panels::top::{CHAT_USE_CASE, ChatModelEntry};
+use iced_pro::widget::text_input_model::TextInputModel;
 
 /// The UI-owned panel state — widget toggles and command input — reused
 /// unchanged ([RUST-051]): `src/app/ui/agent/panel_state.rs:13`.
@@ -298,8 +299,11 @@ pub struct AgentPanelViewModel {
     pub chat_models: Vec<ChatModelEntry>,
     /// The currently active chat-model key (`AppConfig::current_chat_model_key`).
     pub current_chat_model: Option<String>,
-    /// The command input's current text (`AgentPanelState::command_input`).
-    pub command_input: String,
+    /// The derived prompt-field view model. Its value snapshots the
+    /// source-of-truth `AgentPanelState::command_input`; it is not an
+    /// independently mutated copy, and is the only prompt value the view
+    /// reads.
+    pub command_input: TextInputModel,
     /// Follow-the-stream preference for the transcript scroll. Holding it as
     /// a field keeps the shared [`crate::ui_iced::logs::should_follow`] rule
     /// usable and lets a user toggle exist without touching the view.
@@ -341,7 +345,9 @@ impl AgentPanelViewModel {
             queued_prompts: state.pending_prompts.clone(),
             chat_models: chat_model_options(app.config()),
             current_chat_model: app.config().current_chat_model_key(),
-            command_input: panel.command_input.clone(),
+            command_input: TextInputModel::new(panel.command_input.clone())
+                .with_placeholder(strings::COMMAND_INPUT_HINT)
+                .with_clearable(false),
             auto_scroll: true,
         }
     }

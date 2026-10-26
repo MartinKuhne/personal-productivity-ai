@@ -1047,7 +1047,8 @@ fn name_entry_card<'a>(
 /// Route one field tier onto the dialog's message channel.
 ///
 /// `Changed` is the keystroke stream, `Committed` is `Enter`, and
-/// `FocusChanged(false)` is the blur that commits the field. A
+/// `FocusCommitted` preserves the name dialog's existing submit-on-blur
+/// behavior. `FocusChanged(false)` reports the blur edge. A
 /// [`TextInputEmission::Cancelled`] (Escape inside the field) is
 /// deliberately dropped: Escape belongs to the overlay's dismiss chain,
 /// not to the field.
@@ -1056,7 +1057,9 @@ fn dialog_field_emit(emission: TextInputEmission) -> Option<Message> {
         TextInputEmission::Changed(live) => Some(Message::Dialog(DialogMessage::NameChanged {
             text: live.value().to_string(),
         })),
-        TextInputEmission::Committed(_) => Some(Message::Dialog(DialogMessage::Submitted)),
+        TextInputEmission::Committed(_) | TextInputEmission::FocusCommitted(_) => {
+            Some(Message::Dialog(DialogMessage::Submitted))
+        }
         TextInputEmission::Cleared(_) => Some(Message::Dialog(DialogMessage::NameChanged {
             text: String::new(),
         })),

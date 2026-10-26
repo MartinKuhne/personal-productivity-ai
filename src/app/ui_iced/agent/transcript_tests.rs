@@ -17,6 +17,7 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use super::{
     AGENT_TRANSCRIPT_SCROLLABLE_ID, TRANSCRIPT_SPACING, TRANSCRIPT_TEXT_SIZE,
@@ -37,7 +38,7 @@ fn base_vm() -> AgentPanelViewModel {
         queued_prompts: Vec::new(),
         chat_models: Vec::new(),
         current_chat_model: None,
-        command_input: String::new(),
+        command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }
 }
