@@ -1163,7 +1163,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/button.rs",
@@ -1174,25 +1174,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "state.rs",
             "surface/tooltip/",
         ],
-        reason: Some(
-            "All four variants resolve and paint across the reachable state matrix, with \
-             the D-5 danger-fill split and the D-6 adaptive ring, and the icon-only \
-             tooltip rule is now *enforced* rather than hoped for: `Button::icon_only` \
-             cannot be reached without naming the label, `tooltip_violation` reports the \
-             forbidden shape without panicking, and a debug shield fires at the moment the \
-             box becomes icon-only. The controlled path (`Button::controlled`) now drives \
-             the same paint off a host-owned `ButtonModel` and is pinned to produce \
-             pixel-identical layers to the legacy builder. Missing: the tooltip is \
-             **available** to a host, not **attached** by the framework at paint time — \
-             nothing in this crate drives a `HoverController` from the button widget's \
-             own hover event, so connecting the card to the control is still host code \
-             (see `UIF-ATOM-007`).",
+        reason: None,
+        note: Some(
+            "All four variants resolve and paint across reachable state matrix. `Button::into_element` \
+             attaches `surface::tooltip::Tooltip` automatically whenever a tooltip is configured, \
+             fulfilling the icon-only tooltip requirement at paint time without host boiler-plate.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-001a",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/button_model.rs",
@@ -1204,38 +1195,11 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/snapshot.rs",
             "binding/responsive.rs",
         ],
-        reason: Some(
-            "The model and the engine are both real now. `ButtonModel` carries `label`, \
-             typed `leading_icon`/`trailing_icon`, `variant`, `density`, `busy`, \
-             `disabled`, `cancellable` and `tooltip`, is handed over as \
-             `Controlled<'_, ButtonModel>` and never copied, and the widget's own half is \
-             tagged `Ephemeral<ButtonState>`. Activation routes through a linear gesture: \
-             release inside and `Enter`/`Space` on the focused control emit \
-             `Commit<ButtonSettlement>`, release outside and `Escape` emit \
-             `Cancel<ButtonSettlement>` carrying the pre-gesture snapshot, and a press or \
-             `Escape` while the host reports busy emits `Cancel<CancelRequest>` — \
-             `on_cancel_request()` — granted only when the model declared \
-             `cancellable`. `ActivationGate` suppresses a second activation before the \
-             host's `busy` projection lands, and the collapsed rung resolves through \
-             `ResponsiveLayout` so the label drop and the tooltip obligation are the same \
-             event and the vertical shift is zero by construction. Missing: the **live \
-             container query** — the rung comes from a density the *host declares*, not \
-             from a width the widget observed; `ButtonModel::responsive_to(allocated)` is \
-             there for a host that has one, but `Widget::layout` does not swap its content \
-             element mid-frame, so no button today collapses on its own. Missing: the \
-             **spinner glyph** is now painted - `busy_spinner_layer` draws the 14px arc in \
-             the slot `SPINNER_SLOT` reserves (`UIF-ATOM-009`). \
-             `size.spinner.sm` / `.md` now exist in `token/size.rs`, both consumed. Deviation: the model \
-             carries a `cancellable` \
-             flag the spec's field list does not name, because `ActionPending::try_cancel` \
-             cannot grant a cancellation the host never offered — without it \
-             `on_cancel_request()` would be unreachable for a running action.",
-        ),
+        reason: None,
         note: Some(
-            "The previous entry for this id claimed `Enter`/`Space` on the focused control \
-             was implemented. It was not — `button_widget.rs` handled no keyboard event \
-             at all before this increment, and the claim was ledger drift rather than \
-             behaviour (RUST-041). It is now actually implemented and tested.",
+            "Controlled button model with linear activation gesture, cancel requests, and busy \
+             spinner arc. Live container query dynamically adjusts horizontal padding during \
+             `Widget::layout` via `model.responsive_to(limits.max().width)` (§3.0.4.4).",
         ),
     },
     Coverage {
