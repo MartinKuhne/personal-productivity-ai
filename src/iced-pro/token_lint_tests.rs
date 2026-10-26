@@ -123,7 +123,11 @@ use crate::token_lint::{
 /// 155 as of the live tooltip widget — `surface/tooltip/widget.rs`
 /// (`UIF-ATOM-007`). It sits under `surface/`, which is visual-scoped, so
 /// `PIN_RULE_B_FILES` moves with it.
-const PIN_FILES_SCANNED: usize = 155;
+///
+/// 157 as of `UIF-ATOM-005b`: `widget/range_slider.rs` and
+/// `widget/range_slider_model.rs`. Both live under `widget/`, so both join
+/// Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 157;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -161,7 +165,9 @@ const PIN_RULE_A_FILES: usize = 1;
 /// and takes both of its numbers from `token::time`.
 /// 82 as of `UIF-ATOM-003`, whose one addition is `widget/toggle_widget.rs`.
 /// 83 as of `UIF-ATOM-007`, whose one addition is `surface/tooltip/widget.rs`.
-const PIN_RULE_B_FILES: usize = 83;
+/// 85 as of `UIF-ATOM-005b`, whose two additions are `widget/range_slider.rs`
+/// and `widget/range_slider_model.rs`.
+const PIN_RULE_B_FILES: usize = 85;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -270,7 +276,13 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 ///
 /// 194 as of `UIF-ATOM-007`: `surface/tooltip/mod.rs`'s `SHORTCUT_GAP` bound
 /// to `token::space::SM`.
-const PIN_TOKEN_BOUND: usize = 194;
+///
+/// 207 as of `UIF-ATOM-005b`: the 13 `range_slider::` geometry and readout
+/// constants (`TRACK_HEIGHT`, `TRACK_RADIUS`, `THUMB_SIZE`, `THUMB_HIT_SIZE`,
+/// `THUMB_RING_WIDTH`, `RAIL_BORDER_WIDTH`, `READOUT_GAP`, `READOUT_RADIUS`,
+/// `READOUT_BORDER_WIDTH`, `READOUT_FONT_SIZE`, `READOUT_PADDING_X`,
+/// `READOUT_PADDING_Y`, `FOCUS_RING_WIDTH`).
+const PIN_TOKEN_BOUND: usize = 207;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

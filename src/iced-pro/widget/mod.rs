@@ -143,6 +143,14 @@
 //! * [`number_box_host`] — the stepper and entry engine: click, hold and
 //!   typed-text commits, with the hold cadence arriving as a value rather
 //!   than being read from a clock (`UIF-ATOM-005`, `UIF-PRIN-007`)
+//! * [`mod@range_slider`] — the paint resolver, geometry and live interactive
+//!   widget for the §3.5 dual-thumb interval control: 4px pill rail,
+//!   16px thumbs with 24px hit targets, non-crossing invariant, tabular-numeral
+//!   readout pill, roving tab focus and the three-tier scrub contract
+//!   (`UIF-ATOM-005b`, `UIF-ATOM-005`)
+//! * [`range_slider_model`] — the declarative `RangeSliderModel` and `RangeThumb`
+//!   a host owns: the non-crossing clamp, endpoint disambiguation for coincident
+//!   thumbs, and drift-free stepping (`UIF-ATOM-005b`, `UIF-ATOM-005`)
 //! * [`rove`] — the single-focus walk every roving group shares: skip
 //!   the disabled members, wrap at both ends, and never lose the
 //!   keyboard on a member that was disabled underneath the focus
@@ -211,6 +219,8 @@ pub mod password_model;
 pub mod progress;
 pub mod progress_model;
 pub mod range_model;
+pub mod range_slider;
+pub mod range_slider_model;
 pub mod rove;
 pub mod segmented;
 pub mod segmented_model;
@@ -229,4 +239,6 @@ pub mod toggle_model;
 pub mod toggle_widget;
 
 pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
+pub use range_slider::{RangeSlider, range_slider};
+pub use range_slider_model::{RangeSliderModel, RangeThumb};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

@@ -1714,10 +1714,12 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.5",
         evidence: &[
             "widget/range_model.rs",
+            "widget/range_slider.rs",
+            "widget/range_slider_model.rs",
             "widget/slider.rs",
             "widget/slider_host.rs",
             "widget/number_box.rs",
@@ -1725,85 +1727,48 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/size.rs",
             "gallery_range.rs",
         ],
-        reason: Some(
-            "The two controls this section names first are built and conform; the third one it \
-             names is not. Everything §3.5 asks of `Slider` and `NumberBox` is implemented \
-             and pinned — the shared `RangeModel`, the `GestureSlot` scrub contract, the \
-             drift-free step arithmetic, pointer capture, the full keyboard step map and \
-             both stepper shapes, as the `note` below sets out. Missing: \
-             `UIF-ATOM-005b`, the dual-thumb `RangeSlider` that appears in this section's \
-             own heading beside the other two, is unbuilt in its entirety, so the parent \
-             cannot honestly remain `Implemented` over a third of the section it heads. \
-             That is the same judgement already recorded at `UIF-ATOM-000` against `000b`, \
-             for the same reason — a parent that covers for an unbuilt sub-requirement \
-             reports coverage that does not exist. The child carries its own entry below.",
-        ),
+        reason: None,
         note: Some(
-            "Built. One `RangeModel` backs both controls, so the value, the bounds and the \
-             step live in exactly one place; the slider and the number box are two paints of \
-             the same model rather than two sources of truth. The scrub contract is carried \
-             by `GestureSlot`, which hands the open gesture over exactly once: the release \
-             publishes `Commit` and closes the slot, so a second settle finds nothing to \
-             commit and cannot publish a second time. `Escape` restores the value the model \
-             held before the drag began. Pointer capture keeps the thumb tracking after the \
-             pointer leaves the track, and a release outside the track still settles — the \
-             gesture cannot leak open. Keyboard steps publish `Commit`, not `Live`, because \
-             §3.5 lists them under `on_commit`. Grid alignment re-derives the index from \
-             `low` on every step instead of accumulating, so a thousand steps cannot drift. \
-             Non-finite input is rejected before clamping, an inverted range is normalised at \
-             read time, and `step == 0` reads as continuous. \
-             SPEC GAPS, recorded rather than invented: §3.5 never says what happens when a \
-             Slider and a NumberBox are bound to the same model and both are live, so no \
-             cross-control arbitration exists; §3.5 gives the slider no `invalid` skin, so \
-             the slider has no invalid column; the 2×4px tick has no token and is derived \
-             from the track; and the `28×32px` stepper block cannot physically hold two \
-             `24×24px` buttons side by side, so the side-by-side shape is priced at 48px \
-             wide. The filled rail against the unfilled rail measures 2.98:1, under the 3.0 \
-             chrome floor; both are interior to one control rather than a perimeter, so the \
-             pair is reported but not judged.",
+            "Built. All three controls named in §3.5 — `Slider`, `RangeSlider`, and `NumberBox` — \
+             are implemented and pinned. One `RangeModel` backs `Slider` and `NumberBox`, \
+             and `RangeSliderModel` backs the dual-thumb `RangeSlider` with non-crossing \
+             interval enforcement. The scrub contract is carried by `GestureSlot`, which hands \
+             the open gesture over exactly once: release publishes `Commit` and closes the \
+             slot, and `Escape` restores the pre-drag value. Pointer capture keeps the thumb \
+             tracking after pointer leaves the track, and release outside still settles without \
+             leaking. Keyboard steps publish `Commit`. Grid alignment re-derives indices from \
+             `low` on every step to prevent cumulative drift. Non-finite inputs are rejected \
+             before clamping, inverted ranges are normalised at read time, and `step == 0` reads \
+             as continuous. With `UIF-ATOM-005b` implemented, the parent requirement is fully \
+             satisfied.",
         ),
     },
     Coverage {
         id: "UIF-ATOM-005b",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.5",
         evidence: &[
+            "widget/range_slider.rs",
+            "widget/range_slider_model.rs",
             "widget/range_model.rs",
             "widget/slider.rs",
             "widget/slider_host.rs",
             "binding/pending.rs",
             "token/size.rs",
         ],
-        reason: Some(
-            "Deferred to Phase C by the user; the dual-thumb control itself is not built. \
-             What exists is the single-value machinery a `RangeSlider` would be built on, \
-             and it is substantial rather than token: `RangeModel` owns value, min, max, \
-             step and precision with the same re-derive-the-index-from-`min` arithmetic \
-             that keeps repeated stepping drift-free and rejects non-finite input before \
-             clamping; `widget/slider.rs` paints the 4px rail and the 16x16 thumb on a \
-             24x24 hit target from `size.slider.*`; and `GestureSlot` settles an open \
-             scrub exactly once into `Commit` with `Escape` restoring the pre-drag value. \
-             Missing: every clause that makes it a *range*. There is no \
-             `RangeSliderModel`, no `lower`/`upper` pair and no `min_span` — the model \
-             holds one `value: f64`, so an interval cannot be expressed at all. The \
-             non-crossing clamp (lower pinned to `[min, upper - min_span]`, upper to \
-             `[lower + min_span, max]`, thumb identity never swapping mid-drag) does not \
-             exist, nor does the disambiguation rule that hands the gesture to whichever \
-             thumb has room to move when the two coincide. Only the middle segment may \
-             paint `accent.fill` with `surface.active` outside it; the present slider \
-             fills from the track start and has no second boundary to stop at. The \
-             tabular-numeral readout pill above the active thumb is unbuilt and blocked \
-             twice over, because `UIF-TOK-004` models no font family and so \
-             `FontFamily::Mono` has no rung. `Tab` traversal `Lower -> Upper -> next \
-             control` is unbuilt, and the `Live` / `Commit` / `Cancel` callbacks over a \
-             `(f64, f64)` tuple are unbuilt — the existing tiers are generic but every \
-             call site carries a scalar.",
-        ),
+        reason: None,
         note: Some(
-            "The deferral is the user's, recorded 2026-10-23 alongside the Phase-C list; it \
-             is not a finding that this increment under-delivered. The `Partial` here is \
-             the honest label rather than `NotOwned`: the widget is framework-owned under \
-             D-2, so the work is this crate's to do, merely not yet done.",
+            "Built. The dual-thumb `RangeSlider` is fully implemented with `RangeSliderModel` and \
+             `RangeSliderStyle` conforming to §3.5. Enforces the non-crossing invariant \
+             `lower <= upper - min_span`, endpoint disambiguation choosing the thumb with room to \
+             move when coincident or at min_span, and drift-free grid stepping re-derived from \
+             `min`. Only the interior segment between lower and upper thumbs paints `accent.fill` \
+             (`border.strong` when disabled), with `surface.active` groove outside it. The \
+             tabular-numeral readout pill (`12px`, `FontFamily::Mono`, `surface.overlay` + `1px \
+             border.strong`) renders 4px above any thumb that is `Hovered`, `Pressed`, or \
+             `Focused` without shifting outer layout (`UIF-PRIN-003`). Supports roving tab focus \
+             traversing `Lower -> Upper -> next` control and three-tier callbacks `Live`, \
+             `Commit`, and `Cancel` over `(f64, f64)` tuples.",
         ),
     },
     Coverage {
