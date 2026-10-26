@@ -46,14 +46,30 @@
 //!
 //! Unit tests live in the sibling `hyperlink_tests.rs` sidecar.
 
+use crate::binding::Controlled;
+use crate::focus::FocusId;
 use crate::state::{BaseState, InteractionInput, VisualState, resolve};
 use crate::token::color::Palette;
 use crate::token::shape;
 use crate::token::size;
 use crate::token::space;
+use crate::widget::button_widget::Layer;
 use crate::widget::focusable::FocusableState;
-use iced::advanced::widget::operation;
-use iced::{Color, Point, Rectangle, Size};
+use crate::widget::hyperlink_model::{HyperlinkEmission, HyperlinkModel, HyperlinkTarget};
+
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::text::{self as text_core, LineHeight, Paragraph as _};
+use iced::advanced::widget::operation::{self, Operation};
+use iced::advanced::widget::tree;
+use iced::advanced::widget::{Id, Tree, Widget};
+use iced::advanced::{Clipboard, Shell};
+use iced::alignment;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
+use iced::mouse;
+use iced::{Background, Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Size};
 
 /// The minimum hit-target height — `min_height: 24px` (§3.1d,
 /// `size.hit_target.min`).
@@ -272,6 +288,446 @@ impl operation::Focusable for HyperlinkState {
 
     fn unfocus(&mut self) {
         self.focusable.unfocus();
+    }
+}
+
+/// The pill layer painted behind a hyperlink in hovered and pressed states (`UIF-ATOM-001d`).
+#[must_use]
+pub fn pill_layer(bounds: Rectangle, style: &HyperlinkStyle) -> Option<Layer> {
+    if style.is_transparent_background() {
+        return None;
+    }
+    Some(Layer {
+        bounds,
+        fill: style.background,
+        border: Border::default().rounded(RADIUS),
+    })
+}
+
+/// The underline layer drawn under the label (`UIF-ATOM-001d`).
+#[must_use]
+pub fn underline_layer(bounds: Rectangle, style: &HyperlinkStyle) -> Option<Layer> {
+    if !style.underlined {
+        return None;
+    }
+    Some(Layer {
+        bounds: underline_bounds(bounds),
+        fill: style.foreground,
+        border: Border::default(),
+    })
+}
+
+/// The focus ring layer drawn outside the hit box (`UIF-ATOM-001d`).
+#[must_use]
+pub fn focus_ring_layer(bounds: Rectangle, style: &HyperlinkStyle) -> Option<Layer> {
+    if style.focus_ring_width <= 0.0 {
+        return None;
+    }
+    Some(Layer {
+        bounds: bounds.expand(style.focus_ring_width),
+        fill: Color::TRANSPARENT,
+        border: Border::default()
+            .color(style.focus_ring_color)
+            .width(style.focus_ring_width)
+            .rounded(RADIUS + style.focus_ring_width),
+    })
+}
+
+/// The live, interactive hyperlink widget (`UIF-ATOM-001d`, §3.1d).
+///
+/// An inline or standalone interactive text control displaying a label,
+/// underline affordance, and hover/press pill background. It routes mouse and
+/// keyboard events to either a standalone closure (`on_press`) or a
+/// [`Controlled`] binding over [`HyperlinkModel`] (`emit`).
+pub struct Hyperlink<'a, Message> {
+    label: String,
+    uri: String,
+    external: bool,
+    focus_id: FocusId,
+    widget_id: Id,
+    enabled: bool,
+    palette: Palette,
+    mount: Color,
+    model: Option<Controlled<'a, HyperlinkModel>>,
+    emit: Option<Box<dyn Fn(HyperlinkEmission) -> Option<Message> + 'a>>,
+    on_press: Option<Box<dyn Fn(HyperlinkTarget) -> Option<Message> + 'a>>,
+}
+
+impl<'a, Message> Hyperlink<'a, Message> {
+    /// Build a **controlled** hyperlink over a host-owned [`HyperlinkModel`] (`UIF-ATOM-001d`).
+    ///
+    /// The model owns the link's label, URI, externality, and disabled state.
+    /// User activations and hover events are dispatched through `emit`.
+    #[must_use]
+    pub fn controlled(
+        model: Controlled<'a, HyperlinkModel>,
+        focus_id: impl Into<FocusId>,
+        emit: impl Fn(HyperlinkEmission) -> Option<Message> + 'a,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = crate::bridge::widget_id(&focus_id);
+        let current = model.get();
+        let label = current.label.clone();
+        let uri = current.uri.clone();
+        let external = current.external;
+        let enabled = current.enabled();
+        Self {
+            label,
+            uri,
+            external,
+            focus_id,
+            widget_id,
+            enabled,
+            palette: Palette::dark(),
+            mount: Palette::dark().surface_base,
+            model: Some(model),
+            emit: Some(Box::new(emit)),
+            on_press: None,
+        }
+    }
+
+    /// Build a **standalone** hyperlink publishing to an `on_press` callback (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn standalone(
+        label: impl Into<String>,
+        uri: impl Into<String>,
+        focus_id: impl Into<FocusId>,
+        on_press: impl Fn(HyperlinkTarget) -> Option<Message> + 'a,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = crate::bridge::widget_id(&focus_id);
+        Self {
+            label: label.into(),
+            uri: uri.into(),
+            external: false,
+            focus_id,
+            widget_id,
+            enabled: true,
+            palette: Palette::dark(),
+            mount: Palette::dark().surface_base,
+            model: None,
+            emit: None,
+            on_press: Some(Box::new(on_press)),
+        }
+    }
+
+    /// Set the mount background color this link sits on (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn mount(mut self, mount: Color) -> Self {
+        self.mount = mount;
+        self
+    }
+
+    /// Set the color palette for styling (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// Set whether this link opens externally (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn external(mut self, external: bool) -> Self {
+        self.external = external;
+        self
+    }
+
+    /// Set whether this link is enabled (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// The visible label of this link (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn label(&self) -> &str {
+        if let Some(model) = &self.model {
+            &model.get().label
+        } else {
+            &self.label
+        }
+    }
+
+    /// The target URI of this link (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn uri(&self) -> &str {
+        if let Some(model) = &self.model {
+            &model.get().uri
+        } else {
+            &self.uri
+        }
+    }
+
+    /// Whether opening this link leaves the application (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn is_external(&self) -> bool {
+        if let Some(model) = &self.model {
+            model.get().external
+        } else {
+            self.external
+        }
+    }
+
+    /// Whether this link accepts interaction (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        if let Some(model) = &self.model {
+            model.get().enabled()
+        } else {
+            self.enabled
+        }
+    }
+
+    /// The framework-level identity this link answers to (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn focus_id(&self) -> &FocusId {
+        &self.focus_id
+    }
+
+    /// The iced [`Id`] this link registers with the focus router (`UIF-ATOM-001d`).
+    #[must_use]
+    pub fn widget_id(&self) -> &Id {
+        &self.widget_id
+    }
+
+    /// Helper to activate the link (`UIF-ATOM-001d`).
+    fn activate(&self, shell: &mut Shell<'_, Message>) {
+        if !self.is_enabled() {
+            return;
+        }
+        if let (Some(model), Some(emit)) = (&self.model, &self.emit)
+            && let Some(commit) = model.get().activate()
+            && let Some(message) = emit(HyperlinkEmission::Opened(commit))
+        {
+            shell.publish(message);
+        } else if let Some(on_press) = &self.on_press {
+            let target = HyperlinkTarget {
+                uri: self.uri().to_owned(),
+                external: self.is_external(),
+            };
+            if let Some(message) = on_press(target) {
+                shell.publish(message);
+            }
+        }
+    }
+}
+
+/// The read-write [`HyperlinkState`] from a widget tree node.
+fn hyperlink_state(tree: &mut Tree) -> &mut HyperlinkState {
+    tree.state.downcast_mut::<HyperlinkState>()
+}
+
+/// The read-only [`HyperlinkState`] from a widget tree node.
+fn hyperlink_state_ref(tree: &Tree) -> &HyperlinkState {
+    tree.state.downcast_ref::<HyperlinkState>()
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer> for Hyperlink<'_, Message>
+where
+    Renderer: text_core::Renderer,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<HyperlinkState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(HyperlinkState::new())
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Shrink, Length::Fixed(MIN_HEIGHT))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let label = self.label();
+        let measured_width = {
+            let paragraph =
+                <Renderer::Paragraph as text_core::Paragraph>::with_text(text_core::Text {
+                    content: label,
+                    bounds: Size::INFINITE,
+                    size: renderer.default_size(),
+                    line_height: text_core::LineHeight::default(),
+                    font: renderer.default_font(),
+                    align_x: text_core::Alignment::Left,
+                    align_y: alignment::Vertical::Top,
+                    shaping: text_core::Shaping::default(),
+                    wrapping: text_core::Wrapping::None,
+                });
+            paragraph.min_bounds().width
+        };
+        let label_width = if measured_width > 0.0 {
+            measured_width
+        } else {
+            label.len() as f32 * 8.0
+        };
+        let intrinsic = control_size(label_width);
+        let size = limits.resolve(Length::Shrink, Length::Fixed(MIN_HEIGHT), intrinsic);
+        layout::Node::new(size)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        let state = hyperlink_state(tree);
+
+        if self.is_enabled() {
+            operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
+        } else {
+            <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if self.is_enabled() && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if shell.is_event_captured() {
+            return;
+        }
+
+        let is_over = cursor.is_over(layout.bounds());
+        let state = hyperlink_state(tree);
+        let was_hovered = state.hovered;
+
+        state.hovered = is_over;
+
+        if !self.is_enabled() {
+            state.pressed = false;
+            if was_hovered
+                && let Some(emit) = &self.emit
+                && let Some(message) = emit(HyperlinkModel::hover_cleared())
+            {
+                shell.publish(message);
+            }
+            return;
+        }
+
+        // Emit hover transitions for controlled hyperlinks
+        if !was_hovered && is_over {
+            if let (Some(model), Some(emit)) = (&self.model, &self.emit)
+                && let Some(emission) = model.get().hover_entered()
+                && let Some(message) = emit(emission)
+            {
+                shell.publish(message);
+            }
+        } else if was_hovered
+            && !is_over
+            && let Some(emit) = &self.emit
+            && let Some(message) = emit(HyperlinkModel::hover_cleared())
+        {
+            shell.publish(message);
+        }
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if is_over => {
+                state.pressed = true;
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.pressed => {
+                state.pressed = false;
+                if is_over {
+                    self.activate(shell);
+                }
+                shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Enter | Named::Space),
+                ..
+            }) if state.is_focused() => {
+                self.activate(shell);
+                shell.capture_event();
+            }
+            _ => {}
+        }
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = hyperlink_state_ref(tree);
+        let visual = state.visual_state(self.is_enabled());
+        let style = resolve_style(visual, self.mount, &self.palette);
+        let bounds = layout.bounds();
+
+        for layer in [
+            pill_layer(bounds, &style),
+            focus_ring_layer(bounds, &style),
+            underline_layer(bounds, &style),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            renderer.fill_quad(layer.quad(), Background::Color(layer.fill));
+        }
+
+        let text_bounds = label_bounds(bounds);
+        renderer.fill_text(
+            text_core::Text {
+                content: self.label().to_owned(),
+                bounds: text_bounds.size(),
+                size: renderer.default_size(),
+                line_height: LineHeight::Absolute(Pixels(text_bounds.height)),
+                font: renderer.default_font(),
+                align_x: text_core::Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: text_core::Shaping::default(),
+                wrapping: text_core::Wrapping::None,
+            },
+            text_bounds.position(),
+            style.foreground,
+            *viewport,
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<Hyperlink<'a, Message>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: 'a + text_core::Renderer,
+{
+    fn from(hyperlink: Hyperlink<'a, Message>) -> Self {
+        Element::new(hyperlink)
     }
 }
 

@@ -1420,7 +1420,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-001d",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/hyperlink.rs",
@@ -1429,25 +1429,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/color.rs",
             "gallery_hyperlink.rs",
         ],
-        reason: Some(
-            "Built as the inline-or-standalone interactive-text atom: 24px hit target, \
-             `radius.widget` focus ring, and the four painted states §3.1d names — \
-             `accent.text` with a 1px underline at rest, `text.strong` on a \
-             `surface.hover` pill on hover, `accent.text` on `surface.active` pressed, \
-             `text.disabled` with the underline removed when disabled. `HyperlinkState` \
-             implements `operation::Focusable` by delegating to a `FocusableState`, so a \
-             link joins the framework's focus order rather than carrying a private one. \
-             `HyperlinkModel { label, uri, external, disabled }` emits \
-             `Commit<HyperlinkTarget { uri, external }>` — a typed value, not a raw \
-             message — and `HoverUri(Option<String>)` is a separate tier, so a status-bar \
-             target never arrives as a commit. A disabled link emits neither. The focus \
-             ring is resolved against the **mount**, not the pill, because the control \
-             paints nothing at rest; the label is audited against whatever it actually \
-             sits on (the pill where one is painted, the mount otherwise) so the \
-             transparent-fill exemption cannot silently drop the figures §3.1d quotes. \
-             Missing: the **live `iced::Widget`** that draws the text, underline and pill \
-             and routes real events into `HyperlinkState`.",
-        ),
+        reason: None,
         note: Some(
             "Every ratio §3.1d prints was recomputed from raw sRGB through \
              `token/contrast.rs` and matched — including the disabled polarity. The \
