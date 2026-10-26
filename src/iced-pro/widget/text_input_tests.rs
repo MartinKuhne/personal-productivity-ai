@@ -45,7 +45,7 @@ use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, composite_over, contrast_ratio, meets_chrome_contrast,
     meets_text_contrast,
 };
-use crate::token::{shape, size, space};
+use crate::token::{shape, size, space, typography};
 use iced::Color;
 use iced::Point;
 use iced::widget::column;
@@ -1105,6 +1105,49 @@ fn test_the_editor_lays_out_in_the_text_area_not_the_whole_field() {
             bounds.width, want.width,
             "{kind:?}: the editor's width is not the text area's — if it \
              were the whole field, the reserved slot would be painted over"
+        );
+    }
+}
+
+#[test]
+fn test_every_input_kind_uses_the_body_rung_for_its_inner_editor() {
+    // iced's TextInput keeps its size and line-height private once it is
+    // erased into the framework's Element. Compare the actual inner
+    // editor's registered layout against a raw iced editor built with both
+    // properties of the framework body rung; a size or line-height drift
+    // changes the observable line-box height.
+    let body_height = {
+        let mut harness = Harness::headless(|| {
+            iced::widget::text_input::TextInput::new("hint", "value")
+                .id(iced_id("field"))
+                .on_input(Msg::Edit)
+                .size(typography::BODY.size)
+                .line_height(typography::BODY.iced_line_height())
+                .padding(iced::Padding::ZERO)
+                .into()
+        });
+        let recorded = harness.recorded();
+
+        assert_eq!(
+            recorded.len(),
+            1,
+            "the reference editor must register exactly once, got {recorded:?}"
+        );
+        recorded[0].1.height
+    };
+
+    for kind in [
+        InputKind::TextEntry,
+        InputKind::Search,
+        InputKind::DropdownTrigger,
+        InputKind::Password,
+        InputKind::TextArea,
+    ] {
+        let bounds = editor_bounds(kind, "value", false, true, 240.0);
+
+        assert_eq!(
+            bounds.height, body_height,
+            "{kind:?} inner editor does not use the complete body rung"
         );
     }
 }

@@ -169,7 +169,7 @@ use crate::focus::FocusId;
 use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::token::color::Palette;
 use crate::token::contrast;
-use crate::token::{shape, size, space};
+use crate::token::{shape, size, space, typography};
 use crate::widget::button_widget::Layer;
 use crate::widget::focus;
 use crate::widget::text_input_controller::TextInputController;
@@ -1047,6 +1047,9 @@ where
         let editor = text_input::TextInput::new(&self.placeholder, &self.value)
             .id(self.widget_id.clone())
             .width(Length::Fill)
+            // Input values use the `type.body` rung (UIF-TOK-004).
+            .size(typography::BODY.size)
+            .line_height(typography::BODY.iced_line_height())
             .padding(Padding::ZERO)
             // `UIF-ATOM-002c`: masking is iced's own `Value::secure`, which
             // substitutes `•` (U+2022) for **each grapheme** rather than
