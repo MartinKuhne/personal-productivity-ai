@@ -1935,29 +1935,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-012",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.12",
-        evidence: &["token/color.rs", "token/contrast.rs", "widget/slider.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `ColorPickerModel`, \
-             `Rgba8`, `Hsva`, `ColorSwatchButton`, saturation/value canvas, hue or alpha \
-             slider, hex input or preset swatch grid exists. Missing: the whole \
-             requirement — the 16x16px preview well over the 4x4px neutral checkerboard \
-             with its mandatory `1px border.strong` inner frame that keeps a near-black \
-             swatch visually bounded; the 180x140px SV canvas with its dual-ring \
-             crosshair thumb; the 4px hue and optional alpha sliders; the validated \
-             `#RRGGBB[AA]` text input; the 24x24px preset theme grid; and the `Live` / \
-             `Commit` / `Cancel` callbacks over `Rgba8`. Two pieces the section leans on \
-             are already written and are load-bearing rather than incidental: \
-             `token/color.rs` is the closed semantic colour set including \
-             `surface.code`, and `token/contrast.rs` is a WCAG 2.1 luminance and \
-             contrast-ratio solver that composites translucent layers before measuring — \
-             so the picker's live `4.80:1 AA` / `2.40:1 Fail` status chip already has \
-             its arithmetic available. What is missing is the colour *type* and every \
-             pixel: no `Rgba8`/`Hsva` pair exists and no HSV-to-RGB conversion does, so \
-             even the canvas's own coordinate maths is unwritten.",
-        ),
+        evidence: &["widget/color_picker.rs"],
+        reason: None,
         note: None,
     },
     Coverage {

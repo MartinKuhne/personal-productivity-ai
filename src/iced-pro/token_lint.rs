@@ -598,6 +598,21 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "TIME_FLYOUT_MAX_HEIGHT",
         spec: "§3.11 — TimePicker drum flyout card max height 260px",
     },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_FLYOUT_WIDTH",
+        spec: "§3.12 — ColorPicker flyout card width 240px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_WELL_WIDTH",
+        spec: "§3.12 — ColorPicker saturation/value plane width 180px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_WELL_HEIGHT",
+        spec: "§3.12 — ColorPicker saturation/value plane height 140px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

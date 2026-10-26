@@ -73,9 +73,10 @@ pub use composite::{
 };
 pub use widget::{
     AmPm, Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
-    CivilTime, DatePicker, DatePickerModel, DateRangePicker, DateSelection, RatingControl,
-    RatingModel, RatingStep, TimePicker, TimePickerModel, TimeSegment, Weekday, YearMonth, avatar,
-    calendar_view, date_picker, date_range_picker, rating_control, time_picker,
+    CivilTime, ColorPicker, ColorPickerModel, ColorSwatchButton, DatePicker, DatePickerModel,
+    DateRangePicker, DateSelection, Hsva, RatingControl, RatingModel, RatingStep, Rgba8,
+    TimePicker, TimePickerModel, TimeSegment, Weekday, YearMonth, avatar, calendar_view,
+    color_picker, color_swatch_button, date_picker, date_range_picker, rating_control, time_picker,
 };
 
 #[cfg(test)]
