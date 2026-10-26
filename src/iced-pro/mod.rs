@@ -12,9 +12,18 @@
 //! design tokens. Raw numeric literals in individual widget definitions are
 //! forbidden; widgets resolve their style through the token modules only.
 //!
-//! The crate is standalone: the `fastmd` application does not consume it yet.
-//! Wiring the app onto this framework is a separate, later project (decision
-//! D-3 in `doc/planning/iced-pro-tasks.md`).
+//! Since the INT series (`doc/planning/iced-pro-tasks.md` §3c) the `fastmd`
+//! application consumes this crate as its UI framework: the tokens, atoms,
+//! composites, menu engine, modal frames, movable hosts, z-order band model
+//! and geometry solvers are live in `src/app/ui_iced/` (see the integration
+//! contract in `doc/technical-context/ARCHITECTURE_C4.md`).
+//!
+//! The ownership boundary is the one `spec.md` §5 states ("Presentation vs.
+//! Lifecycle Ownership Split") and decisions D-2 / D-8 record: this crate
+//! supplies sizing, frame and semantics; the host application owns surface
+//! lifecycle (open / close / dismiss), keeps the single writer to
+//! `SurfaceRegistry`, and injects all persistence. No `fastmd` type appears
+//! in this API — the dependency points one way.
 
 pub mod a11y;
 pub mod binding;

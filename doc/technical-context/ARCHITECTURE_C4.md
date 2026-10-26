@@ -513,7 +513,9 @@ C4Component
 ## Component Diagram (Level 3) — `iced-pro` crate (`src/iced-pro/`)
 
 `iced-pro` implements the widget-library specification
-`doc/planning/ui-framework.md`, whose requirement IDs are `UIF-*`.
+`src/iced-pro/spec.md` — co-located with the crate it governs since commit
+`edbe04a` (previously `doc/planning/ui-framework.md`) — whose requirement
+IDs are `UIF-*`.
 Package `iced-pro`, library name `iced_pro`, iced 0.14 with the same
 renderer features `fastmd` uses plus `advanced` — the only way a custom
 widget can reach `iced_core`'s widget-author surface. The library root is
@@ -545,7 +547,7 @@ C4Component
   Component(zo, "surface/zorder.rs", "Four z-bands as data: backdrop, pointer rule, key disposition, escape rank; registry routing")
   Component(mu, "surface/menu/", "Unified fixed + context menu engine: model, row-matrix view, cascade controller")
   Component(ho, "surface/ hosts", "modal.rs, input_dialog.rs, movable.rs — frame hosts, not widgets")
-  Component(ga, "gallery.rs + bin/gallery.rs", "UIF-VER-004 harness: 91 cells, token-mapping gate, contrast gate")
+  Component(ga, "gallery.rs + bin/gallery.rs", "UIF-VER-004 harness: the full (Variant × State) matrix across both palette worlds (Standard / InvertedEditor) and both control rungs; token-mapping gate, contrast gate")
   Component(sc, "spec_coverage.rs", "UIF-* coverage ledger + the audit primitive")
   Component(th, "test_helpers (cfg(test))", "Headless render/operate harness with focus read-back")
 
@@ -725,25 +727,24 @@ cross-session persistence are likewise host-owned.
 
 ### Coverage ledger
 
-`spec_coverage.rs` classifies all 46 numbered `UIF-*` ids: **25
-Implemented, 14 Partial, 7 NotOwned**, each with the modules that satisfy
-it and, where it is not fully satisfied, what exactly is missing. The
-sidecar test reads `doc/planning/ui-framework.md` at test time and
-asserts the two sets agree in both directions, so adding an id to the
-spec without classifying it fails the build. The shape of the remaining
-gap: the contrast half of `UIF-VER-001` is automated, and since INT-8
-so is the literal half — `token_lint.rs` scans source text for colour
+`spec_coverage.rs` classifies all 92 numbered `UIF-*` ids
+(`EXPECTED_SPEC_ID_COUNT`): **84 Implemented, 1 Partial (`UIF-COMP-016`,
+specified but unbuilt), 7 NotOwned** —
+the seven `NotOwned` are the app-owned surfaces decision D-2 leaves with
+`fastmd` (navbar slot contents, tree and tab content, the business logic
+of the app-specific dialogs, window-geometry persistence). The sidecar
+test reads `CARGO_MANIFEST_DIR/spec.md` at test time — the spec has been
+co-located with the crate it governs since `edbe04a` — and asserts the two
+sets agree in both directions, so adding an id to the spec without
+classifying it fails the build. The authoritative counts live in
+`spec_coverage.rs`, not in this prose. The literal half of `UIF-VER-001`
+is automated since INT-8: `token_lint.rs` scans source text for colour
 constructors outside `token/color.rs` and for visually-named `pub const
-f32`s that read a bare number, and the same scanner now runs over
+f32`s that read a bare number, and the same scanner runs over
 `src/app/ui_iced` through `ui_iced::token_lint_gate`. What that gate
 still cannot see is recorded in its own module doc: inline literals,
-non-`pub` constants, indirection, and value legality. The snapshot gate
-covers only `Palette::dark()` and the standard control height; the type
-scale carries no font family and no 12px SemiBold / 13px Bold rung; and
-there is **no tooltip surface anywhere in the crate** — `UIF-NAV-003` is
-Partial because D-2 excludes the navbar's contents, not a generic
-hover-delayed floating card, so that one is unimplemented framework work
-rather than a scope exclusion.
+non-`pub` constants, indirection, and value legality — `token_guard_tests`
+checks legality for the converted surfaces only.
 
 ## Test Surface
 
