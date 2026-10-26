@@ -2406,27 +2406,25 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-011",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.11",
-        evidence: &["widget/badge.rs", "state.rs", "token/size.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `StepperModel`, \
-             `StepStatus`, `StepItem`, connector line, `PipsPagerModel` or pip strip \
-             exists. Missing: the whole requirement — the 36px horizontal and the vertical \
-             step sequences; the 24x24px pill node that encodes `Completed` / `Current` / \
-             `Pending` / `Error` by glyph *and* colour together rather than by tint alone; \
-             the `border.subtle` versus `accent.border` connector lines; the non-shifting \
-             wizard footer that renders `[Previous]` as `Disabled` rather than absent on \
-             step 0 so footer button coordinates never move between steps; the linear \
-             versus free-navigation gate; the 24px pips strip with its 6x6px inactive dots \
-             and 16x6px `radius.pill` active pip between its two 24x24px arrow buttons; \
-             and both callback sets. The redundant-cue rule the stepper exists to satisfy \
-             (`UIF-PRIN-005`) is honoured elsewhere in the crate and the check and \
-             exclamation marks are already painted by `widget/badge.rs`, but no step state \
-             machine, no completion ordering and no pip geometry exists anywhere.",
+        evidence: &[
+            "composite/stepper.rs",
+            "composite/pips_pager.rs",
+            "widget/badge.rs",
+            "state.rs",
+            "token/size.rs",
+        ],
+        reason: None,
+        note: Some(
+            "`Stepper` satisfies §3B.11 and `UIF-PRIN-005` in both Horizontal (36px / `size::CONTROL_LG`) \
+             and Vertical orientations with connector lines (1px `border.subtle` / `accent.border`) and 24x24px \
+             pill indicators encoding Completed ('✓' / `accent.fill`), Current (number / `surface.active` + \
+             2px `accent.border`), Pending (number / `surface.raised` + 1px `border.strong`), and Error ('!' / \
+             `status.danger.fill`). `wizard_footer` preserves 0px layout shift by rendering `[← Previous]` as \
+             `Disabled` on step 0 (`UIF-PRIN-004`). `PipsPager` satisfies §3B.11 with a 24px bar, boundary-clamped \
+             24x24px navigation buttons, 6x6px inactive dots, 16x6px pill active pip, and page change commits.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-012",

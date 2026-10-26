@@ -134,7 +134,10 @@ use crate::token_lint::{
 ///
 /// 162 as of `UIF-ATOM-013`: `widget/avatar.rs` and `widget/rating.rs`. Both
 /// live under `widget/`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 162;
+///
+/// 164 as of `UIF-COMP-011`: `composite/stepper.rs` and `composite/pips_pager.rs`. Both
+/// live under `composite/`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 164;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -178,7 +181,9 @@ const PIN_RULE_A_FILES: usize = 1;
 /// `composite/skeleton.rs` and `composite/pagination.rs`.
 /// 90 as of `UIF-ATOM-013`, whose two additions are `widget/avatar.rs` and
 /// `widget/rating.rs`.
-const PIN_RULE_B_FILES: usize = 90;
+/// 92 as of `UIF-COMP-011`, whose two additions are `composite/stepper.rs` and
+/// `composite/pips_pager.rs`.
+const PIN_RULE_B_FILES: usize = 92;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -300,7 +305,13 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `skeleton::` (`DEFAULT_RADIUS`, `BORDER_WIDTH`, `TREE_ROW_HEIGHT`,
 /// `TABLE_ROW_HEIGHT`, `TABLE_ROW_COMPACT_HEIGHT`), and
 /// `pagination::` (`BAR_HEIGHT`, `BORDER_WIDTH`, `BUTTON_SIZE`, `PADDING_X`).
-const PIN_TOKEN_BOUND: usize = 225;
+///
+/// 240 as of `UIF-COMP-011`: the 15 token-bound visual constants in
+/// `stepper::` (`BAR_HEIGHT`, `NODE_SIZE`, `NODE_RADIUS`, `CONNECTOR_STROKE`,
+/// `CURRENT_BORDER_WIDTH`, `LABEL_GAP`, `STEP_GAP`, `FOOTER_BUTTON_HEIGHT`) and
+/// `pips_pager::` (`BAR_HEIGHT`, `BUTTON_SIZE`, `PIP_SIZE_INACTIVE`,
+/// `PIP_WIDTH_ACTIVE`, `PIP_HEIGHT`, `PIP_GAP`, `PIP_RADIUS`).
+const PIN_TOKEN_BOUND: usize = 240;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

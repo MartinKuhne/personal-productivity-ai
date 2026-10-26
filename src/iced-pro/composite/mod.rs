@@ -86,6 +86,10 @@
 //!   with a 1200ms shimmer pulse or static subtle border under reduced motion (`UIF-COMP-014`, `UIF-PRIN-003`)
 //! * [`mod@pagination`] — the 32px footer bar with tabular mono range summary, page size
 //!   options, and boundary-clamped navigation buttons (`UIF-COMP-014`)
+//! * [`mod@stepper`] — the multi-step workflow header and vertical wizard sequence with
+//!   redundant glyph/colour status cues and non-shifting footer (`UIF-COMP-011`, `UIF-PRIN-005`, `UIF-PRIN-004`)
+//! * [`mod@pips_pager`] — the compact 24px carousel and pagination indicator strip with
+//!   boundary-clamped navigation buttons (`UIF-COMP-011`, `UIF-PRIN-004`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -103,9 +107,11 @@ pub mod list_tile;
 pub mod notification;
 pub mod overflow_toolbar;
 pub mod pagination;
+pub mod pips_pager;
 pub mod scroll_view;
 pub mod settings_row;
 pub mod skeleton;
+pub mod stepper;
 pub mod table_cell;
 pub mod table_column;
 pub mod table_header;
@@ -119,4 +125,9 @@ pub use empty_state::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
 };
 pub use pagination::{PaginationBar, PaginationModel, pagination_bar};
+pub use pips_pager::{PipsPager, PipsPagerModel, pips_pager};
 pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
+pub use stepper::{
+    StepItem, StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, stepper,
+    wizard_footer,
+};
