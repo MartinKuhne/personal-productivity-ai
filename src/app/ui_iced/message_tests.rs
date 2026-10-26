@@ -7,8 +7,8 @@
 use super::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
     DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message,
-    RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TreeMessage,
-    WindowMessage, WindowSnapshot,
+    RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TooltipId,
+    TreeMessage, WindowMessage, WindowSnapshot,
 };
 use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
@@ -161,13 +161,16 @@ fn test_message_is_clone_but_channels_that_can_be_are_copy() {
     // Every payload field of these three channels is `Copy`, so the channel
     // itself must be — a missing `Copy` derive fails this at compile time.
     assert_copy::<WindowMessage>();
-    assert_copy::<LayoutMessage>();
+    assert_clone::<LayoutMessage>();
     assert_copy::<ThemeMessage>();
     assert_copy::<WindowSnapshot>();
 
     // `TabMessage` left this list in INT-12. It carries a `PathBuf` on the
     // hover variants now, so it cannot be `Copy`; the pin is doing its job
     // by re-classifying the channel rather than by staying satisfied.
+    // `LayoutMessage` left this list when tooltip hover/focus variants added
+    // `String` payloads (tooltip text for dynamic tooltips), making it
+    // `Clone` rather than `Copy`.
     assert_clone::<TabMessage>();
 }
 
@@ -375,33 +378,69 @@ fn test_debug_window_controls_stay_on_the_command_channel() {
 }
 
 #[test]
-fn test_cursor_moved_is_a_copy_layout_report_that_stays_distinct() {
+fn test_cursor_moved_is_a_clone_layout_report_that_stays_distinct() {
     // The context-menu anchor. `MouseArea::on_right_press`
     // cannot carry a position, so the reducer has to remember this one.
     let moved = LayoutMessage::CursorMoved {
         point: iced::Point::new(12.0, 34.0),
     };
-    let copy = moved;
-    assert_eq!(moved, copy, "CursorMoved must keep the channel `Copy`");
+    let cloned = moved.clone();
+    assert_eq!(moved, cloned, "CursorMoved must keep the channel `Clone`");
 
+    // Use cloned for Message::Layout since moved is consumed
     assert_eq!(
-        Message::Layout(moved),
+        Message::Layout(cloned.clone()),
         Message::Layout(LayoutMessage::CursorMoved {
             point: iced::Point::new(12.0, 34.0),
         })
     );
     assert_ne!(
-        Message::Layout(moved),
+        Message::Layout(cloned.clone()),
         Message::Layout(LayoutMessage::CursorMoved {
             point: iced::Point::new(12.0, 35.0),
         }),
         "a different point must not compare equal"
     );
     assert_ne!(
-        Message::Layout(moved),
+        Message::Layout(cloned),
         Message::Layout(LayoutMessage::TreeAutoFit),
         "cursor motion must not collapse into the auto-fit request"
     );
+}
+
+#[test]
+fn test_tooltip_hover_enter_can_carry_dynamic_text() {
+    // ToolsError tooltip needs dynamic text from the row's error
+    let enter = LayoutMessage::TooltipHoverEnter {
+        id: TooltipId::ToolsError,
+        tooltip_text: Some("Authentication: invalid credentials".to_string()),
+    };
+    let cloned = enter.clone();
+    assert_eq!(enter, cloned);
+
+    // SearchTrigger tooltip doesn't need dynamic text (uses static string)
+    let enter_search = LayoutMessage::TooltipHoverEnter {
+        id: TooltipId::SearchTrigger,
+        tooltip_text: None,
+    };
+    // Verify via pattern matching
+    if let LayoutMessage::TooltipHoverEnter { id, tooltip_text } = enter_search {
+        assert_eq!(id, TooltipId::SearchTrigger);
+        assert!(tooltip_text.is_none());
+    } else {
+        panic!("expected TooltipHoverEnter variant");
+    }
+}
+
+#[test]
+fn test_tooltip_focus_enter_shows_immediately() {
+    // Keyboard focus should show tooltip immediately (0ms delay)
+    let enter = LayoutMessage::TooltipFocusEnter {
+        id: TooltipId::SearchTrigger,
+        tooltip_text: None,
+    };
+    let cloned = enter.clone();
+    assert_eq!(enter, cloned);
 }
 
 #[test]

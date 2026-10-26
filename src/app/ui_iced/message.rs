@@ -47,6 +47,7 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
 use crate::ui::tree_search::SearchResultEntry;
+use crate::ui_iced::app::TooltipId;
 use iced::widget::pane_grid;
 use iced_pro::surface::menu::cascade::MenuKey;
 use iced_pro::surface::menu::model::MenuId;
@@ -205,7 +206,7 @@ pub struct WindowSnapshot {
 /// press point (`iced_widget-0.14.2/src/mouse_area.rs:68-71`), which is
 /// exactly the gap [`crate::ui_iced::overlay::context_menu_trigger`]
 /// documents.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum LayoutMessage {
     /// A pane-grid split was dragged ([`pane_grid::ResizeEvent`]:
     /// `split` + `ratio`), fed through `PaneGrid::on_resize`. Reduces onto
@@ -231,6 +232,32 @@ pub enum LayoutMessage {
         /// Pointer position relative to the full-window content root.
         point: iced::Point,
     },
+    /// Pointer entered a tooltip-bearing control.
+    TooltipHoverEnter {
+        /// Which tooltip control was entered.
+        id: TooltipId,
+        /// Optional tooltip text for dynamic tooltips (e.g., tools error markers).
+        /// Only used for `TooltipId::ToolsError`.
+        tooltip_text: Option<String>,
+    },
+    /// Pointer exited a tooltip-bearing control.
+    TooltipHoverExit {
+        /// Which tooltip control was exited.
+        id: TooltipId,
+    },
+    /// Keyboard focus entered a tooltip-bearing control.
+    TooltipFocusEnter {
+        /// Which tooltip control received focus.
+        id: TooltipId,
+        /// Optional tooltip text for dynamic tooltips (e.g., tools error markers).
+        /// Only used for `TooltipId::ToolsError`.
+        tooltip_text: Option<String>,
+    },
+    /// Keyboard focus exited a tooltip-bearing control.
+    TooltipFocusExit {
+        /// Which tooltip control lost focus.
+        id: TooltipId,
+    },
 }
 
 /// Field-wise equality for [`LayoutMessage`].
@@ -248,6 +275,28 @@ impl PartialEq for LayoutMessage {
             }
             (Self::TreeAutoFit, Self::TreeAutoFit) => true,
             (Self::CursorMoved { point: a }, Self::CursorMoved { point: b }) => a == b,
+            (
+                Self::TooltipHoverEnter {
+                    id: a,
+                    tooltip_text: ta,
+                },
+                Self::TooltipHoverEnter {
+                    id: b,
+                    tooltip_text: tb,
+                },
+            ) => a == b && ta == tb,
+            (Self::TooltipHoverExit { id: a }, Self::TooltipHoverExit { id: b }) => a == b,
+            (
+                Self::TooltipFocusEnter {
+                    id: a,
+                    tooltip_text: ta,
+                },
+                Self::TooltipFocusEnter {
+                    id: b,
+                    tooltip_text: tb,
+                },
+            ) => a == b && ta == tb,
+            (Self::TooltipFocusExit { id: a }, Self::TooltipFocusExit { id: b }) => a == b,
             _ => false,
         }
     }
@@ -862,6 +911,13 @@ pub enum BatchDialogMessage {
     ModeChanged(crate::agent::batch::types::BatchMode),
     /// The concurrency pick-list selection changed (1..=8).
     ConcurrencyChanged(u8),
+    /// Prompt candidates discovered for the currently open dialog.
+    PromptCandidatesLoaded {
+        /// Generation of the open request that launched discovery.
+        generation: u64,
+        /// Candidates discovered from the configured content libraries.
+        prompts: Vec<crate::agent::batch::types::PromptInfo>,
+    },
     /// A press landed on the card's own boundary — its padding ring, a
     /// disabled `Process` button, or dead space between rows — and was
     /// absorbed there (`UIF-VER-003`).

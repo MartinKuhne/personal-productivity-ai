@@ -2,6 +2,7 @@
 //!
 //! Drains the `UserCommand` bus and mutates `AppOrchestrator` state.
 //! This decouple UI from direct state mutations.
+//! Unit tests live in the sibling `command_executor_tests.rs` sidecar.
 
 use crate::bus::events::user_command::UserCommand;
 use crate::orchestrator::AppOrchestrator;
@@ -431,20 +432,11 @@ impl AppOrchestrator {
                     .mcp_manager()
                     .mark_needs_auth(&name, false);
             }
-            UserCommand::StartBatch(config) => {
+            UserCommand::StartBatch {
+                config,
+                prompt_text,
+            } => {
                 if self.dialogs.batch_handle.is_none() {
-                    let prompt_text = self
-                        .dialogs
-                        .batch_dialog_config
-                        .available_prompts
-                        .get(
-                            self.dialogs
-                                .batch_dialog_config
-                                .selected_prompt_idx
-                                .unwrap_or(0),
-                        )
-                        .map(|p| p.content.clone())
-                        .unwrap_or_default();
                     let (coordinator, cancel_flag) = crate::agent::batch::BatchCoordinator::new(
                         config,
                         self.config.clone(),
@@ -460,8 +452,6 @@ impl AppOrchestrator {
             }
             UserCommand::CancelBatch => {
                 self.dialogs.batch_dialog_open = false;
-                self.dialogs.batch_dialog_config.available_prompts.clear();
-                self.dialogs.batch_dialog_config.selected_prompt_idx = None;
             }
             UserCommand::SelectTagFilter(tag) => {
                 self.tags.selected_tag = tag;
@@ -507,3 +497,7 @@ impl AppOrchestrator {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "command_executor_tests.rs"]
+mod tests;

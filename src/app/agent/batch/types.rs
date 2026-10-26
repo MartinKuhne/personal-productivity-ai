@@ -65,7 +65,7 @@ pub(crate) fn validate_batch_params(
 }
 
 /// Discovered prompt file available for selection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptInfo {
     /// Full path to prompt markdown file
     pub path: PathBuf,

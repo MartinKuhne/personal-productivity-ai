@@ -105,7 +105,7 @@ Unified typed intake. Every variant carries all data the executor needs (no `&mu
 | `ConfirmCreateDirectory { parent, name }` | `parent`, `name: String` | `()` | No | `fs::create_dir_all` + `DirectoryEventProducer` + `watcher.watch` |
 | `ConfirmCreateDocument { parent, name }` | `parent`, `name` | `()` | No | `write_new_document` + `publish_discovered` |
 | `ConfirmRename { path, new_name }` | `path`, `new_name` | `()` | No | `fs::rename` + file- or directory-bus rename events + workspace/tags/tabs fixup |
-| `StartBatch(BatchConfig)` | `config: BatchConfig` | `()` | No | `BatchCoordinator::new` + `coordinator.execute()` `src/app/agent/batch/coordinator.rs:46` (`thread::spawn`) -> `batch_handle` |
+| `StartBatch { config, prompt_text }` | `config: BatchConfig`, `prompt_text: String` | `()` | No | `BatchCoordinator::new` + `coordinator.execute()` `src/app/agent/batch/coordinator.rs:46` (`thread::spawn`) -> `batch_handle`; `prompt_text` is a snapshot of the selected prompt body at commit time |
 | `CancelBatch` | — | `()` | No | close batch dialog, clear prompts |
 
 ---

@@ -832,6 +832,37 @@ fn orchestrator_user_commands_persist_via_injected_config_storage() {
 }
 
 #[test]
+fn start_batch_uses_its_command_prompt_snapshot_not_dialog_state_or_disk() {
+    let mut orch = harness();
+    let temp = tempfile::tempdir().unwrap();
+    orch.dialogs.batch_dialog_config.available_prompts =
+        vec![crate::agent::batch::types::PromptInfo {
+            path: temp.path().join("stale-dialog-prompt.md"),
+            display_name: "Stale dialog prompt".to_string(),
+            library_name: "test".to_string(),
+            content: "stale dialog prompt text".to_string(),
+        }];
+    orch.dialogs.batch_dialog_config.selected_prompt_idx = Some(0);
+    let config = crate::agent::batch::types::BatchConfig {
+        directory: temp.path().to_path_buf(),
+        pattern: "*.md".to_string(),
+        prompt_path: temp.path().join("missing-prompt.md"),
+        mode: crate::agent::batch::types::BatchMode::File,
+        concurrency: 1,
+    };
+
+    orch.apply_user_command(crate::bus::events::user_command::UserCommand::StartBatch {
+        config,
+        prompt_text: "command-selected prompt text".to_string(),
+    });
+
+    assert!(
+        orch.dialogs.batch_handle.is_some(),
+        "a self-contained batch command must not need a prompt-file read or dialog back-reference"
+    );
+}
+
+#[test]
 fn test_select_file_command_loads_markdown_content() {
     let mut orch = harness();
     let dir = tempfile::tempdir().unwrap();

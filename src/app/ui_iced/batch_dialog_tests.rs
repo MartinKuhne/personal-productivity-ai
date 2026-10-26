@@ -13,6 +13,7 @@ use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use iced_pro::surface::modal::{BATCH_WIDTH, CONTENT_HEIGHT_MAX, VIEWPORT_GUTTER};
+use iced_test::selector::Candidate;
 use std::path::PathBuf;
 
 /// A candidate prompt record that is never read off disk.
@@ -223,13 +224,13 @@ fn an_out_of_range_index_reads_as_no_selection() {
 }
 
 #[test]
-fn pattern_is_editable_only_in_file_mode() {
-    assert!(valid_model().pattern_editable());
+fn pattern_row_is_visible_only_in_file_mode() {
+    assert!(valid_model().pattern_row_visible());
     let directory_mode = BatchDialogViewModel {
         mode: BatchMode::Directory,
         ..valid_model()
     };
-    assert!(!directory_mode.pattern_editable());
+    assert!(!directory_mode.pattern_row_visible());
 }
 
 #[test]
@@ -334,12 +335,17 @@ fn index_of_selected_follows_the_value_not_the_position() {
 // --- Action -> command mapping ----------------------------------------
 
 #[test]
-fn start_message_is_the_composed_batch_config_on_the_command_channel() {
-    let model = valid_model();
+fn start_message_carries_the_selected_prompt_body_and_config_on_the_command_channel() {
+    let mut model = valid_model();
+    model.available_prompts[1].content = "selected Beta prompt body".to_string();
+    model.selected_prompt_idx = Some(1);
     let expected_config = model.build_batch_config().expect("valid");
     assert_eq!(
         start_message(&model),
-        Some(Message::Command(UserCommand::StartBatch(expected_config)))
+        Some(Message::Command(UserCommand::StartBatch {
+            config: expected_config,
+            prompt_text: "selected Beta prompt body".to_string(),
+        }))
     );
 }
 
@@ -511,6 +517,77 @@ fn toggle_flips_the_visible_state() {
 }
 
 #[test]
+fn prompt_candidate_refresh_rejects_stale_results_and_preserves_selection_by_path() {
+    let selected = PromptInfo {
+        path: PathBuf::from("selected.md"),
+        display_name: "Selected".to_string(),
+        library_name: "test".to_string(),
+        content: "selected body".to_string(),
+    };
+    let model = BatchDialogViewModel {
+        available_prompts: vec![selected.clone()],
+        selected_prompt_idx: Some(0),
+        ..valid_model()
+    };
+    let mut state = BatchDialogState::new();
+    state.open(model.clone());
+    let stale_generation = state.prompt_load_generation();
+    state.close();
+
+    let refreshed = vec![
+        PromptInfo {
+            path: PathBuf::from("new.md"),
+            display_name: "New".to_string(),
+            library_name: "test".to_string(),
+            content: "new body".to_string(),
+        },
+        selected,
+    ];
+    assert!(
+        !state.apply_prompt_candidates(stale_generation, refreshed.clone()),
+        "a completed scan must not update a closed dialog"
+    );
+
+    state.open(model);
+    let current_generation = state.prompt_load_generation();
+    assert_ne!(stale_generation, current_generation);
+    assert!(
+        !state.apply_prompt_candidates(stale_generation, refreshed.clone()),
+        "a previous open request must not overwrite a newer prompt catalog"
+    );
+    assert!(state.apply_prompt_candidates(current_generation, refreshed));
+    assert_eq!(state.model().selected_prompt_idx, Some(1));
+}
+
+#[test]
+fn prompt_candidate_refresh_clears_a_selection_that_disappeared() {
+    let selected = PromptInfo {
+        path: PathBuf::from("selected.md"),
+        display_name: "Selected".to_string(),
+        library_name: "test".to_string(),
+        content: "selected body".to_string(),
+    };
+    let model = BatchDialogViewModel {
+        available_prompts: vec![selected],
+        selected_prompt_idx: Some(0),
+        ..valid_model()
+    };
+    let mut state = BatchDialogState::new();
+    state.open(model);
+
+    assert!(state.apply_prompt_candidates(
+        state.prompt_load_generation(),
+        vec![PromptInfo {
+            path: PathBuf::from("replacement.md"),
+            display_name: "Replacement".to_string(),
+            library_name: "test".to_string(),
+            content: "replacement body".to_string(),
+        }],
+    ));
+    assert!(state.model().selected_prompt_idx.is_none());
+}
+
+#[test]
 fn current_view_follows_the_run_status() {
     let mut state = BatchDialogState::new();
     state.open(valid_model());
@@ -612,6 +689,122 @@ fn card_builds_for_the_config_view() {
     // A built Element is a non-zero-sized boxed widget tree; the point of
     // the test is that the config branch constructs without panicking.
     assert!(std::mem::size_of_val(&element) > 0);
+}
+
+/// The real File-mode card reports its existing pattern-change message when
+/// the user types into the empty field from its placeholder.
+#[test]
+fn file_mode_pattern_input_emits_pattern_changed_when_typed() {
+    let model = BatchDialogViewModel {
+        pattern: String::new(),
+        ..valid_model()
+    };
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+    let bounds = pattern_input_bounds(&mut ui);
+    click_at(&mut ui, bounds.center());
+    let _ = ui.typewrite("x");
+
+    assert_eq!(
+        ui.into_messages().collect::<Vec<_>>(),
+        vec![Message::Batch(BatchDialogMessage::PatternChanged {
+            text: "x".to_string(),
+        })]
+    );
+}
+
+/// The field has an addressable, stable identity in File mode.
+#[test]
+fn file_mode_pattern_input_has_its_stable_id() {
+    let model = valid_model();
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+    assert_eq!(BATCH_PATTERN_INPUT_FOCUS_ID, "batch_dialog_pattern_input");
+    let expected = iced::widget::Id::from(BATCH_PATTERN_INPUT_FOCUS_ID);
+
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput { id: Some(id), .. } if *id == expected => Some(()),
+            _ => None,
+        })
+        .is_ok(),
+        "the File-mode pattern input must expose its stable widget id"
+    );
+}
+
+/// The prompt list remains addressable when the conditional pattern row is absent.
+#[test]
+fn prompt_scrollable_keeps_its_stable_id_in_both_modes() {
+    for mode in [BatchMode::File, BatchMode::Directory] {
+        let model = BatchDialogViewModel {
+            mode,
+            ..valid_model()
+        };
+        let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+
+        assert!(
+            ui.find(iced::widget::Id::from(BATCH_PROMPT_SCROLLABLE_ID))
+                .is_ok(),
+            "the prompt scrollable must retain its stable id in {mode:?} mode"
+        );
+    }
+}
+
+/// Directory mode hides the unused pattern row and ignores its retained value.
+#[test]
+fn directory_mode_hides_pattern_field_and_emits_no_edit() {
+    let model = BatchDialogViewModel {
+        mode: BatchMode::Directory,
+        ..valid_model()
+    };
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+    let expected = iced::widget::Id::from(BATCH_PATTERN_INPUT_FOCUS_ID);
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput { id: Some(id), .. } if *id == expected => Some(()),
+            _ => None,
+        })
+        .is_err(),
+        "Directory mode must not mount the wildcard-pattern input"
+    );
+    assert!(
+        ui.find(strings::BATCH_DIALOG_PATTERN_LABEL).is_err(),
+        "Directory mode must hide the wildcard-pattern row label"
+    );
+
+    let _ = ui.typewrite("x");
+
+    let emitted = ui.into_messages().collect::<Vec<_>>();
+    assert!(
+        emitted.is_empty(),
+        "a hidden Directory-mode pattern field must not emit messages: {emitted:?}"
+    );
+}
+
+/// Finds the text-input field in the real Batch card's simulator tree.
+fn pattern_input_bounds(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+) -> iced::Rectangle {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::TextInput { bounds, .. } => Some(bounds),
+        _ => None,
+    })
+    .expect("the Batch card must render its pattern input")
+}
+
+/// Sends pointer motion and a left click at the supplied widget position.
+fn click_at(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    position: iced::Point,
+) {
+    ui.point_at(position);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position,
+    })]);
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
 }
 
 #[test]

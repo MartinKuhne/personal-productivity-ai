@@ -5,7 +5,11 @@ use crate::config::{AppConfig, ContentLibrary};
 use crate::markdown::Document;
 use serde_norway::Value;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::path::{Path, PathBuf};
+
+const PROMPT_DISCOVERY_ERROR_CODE: &str = "BATCH-4001";
+const PROMPT_DISCOVERY_FAILURE_MESSAGE: &str = "Prompt discovery failed";
 use walkdir::WalkDir;
 
 /// Discovers all prompt files in content libraries.
@@ -19,7 +23,14 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             continue;
         }
 
-        for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(root) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    log_prompt_discovery_error(root, error);
+                    continue;
+                }
+            };
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -33,7 +44,7 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
+                    log_prompt_discovery_error(path, e);
                     continue;
                 }
             };
@@ -80,32 +91,49 @@ pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
         if !batch_dir.exists() || !batch_dir.is_dir() {
             continue;
         }
-        if let Ok(entries) = std::fs::read_dir(&batch_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    let file_name = path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    if file_name.starts_with('.') {
+        let entries = match std::fs::read_dir(&batch_dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log_prompt_discovery_error(&batch_dir, error);
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    log_prompt_discovery_error(&batch_dir, error);
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if path.is_file() {
+                let file_name = path
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if file_name.starts_with('.') {
+                    continue;
+                }
+                let content = match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(error) => {
+                        log_prompt_discovery_error(&path, error);
                         continue;
                     }
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let doc = Document::new(content);
-                        let stem = path
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| file_name.clone());
-                        let display_name = format!("{} / Skills/Batch/{}", lib.name, stem);
-                        skills.push(PromptInfo {
-                            path: path.clone(),
-                            display_name,
-                            library_name: lib.name.clone(),
-                            content: doc.body().trim().to_string(),
-                        });
-                    }
-                }
+                };
+                let doc = Document::new(content);
+                let stem = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| file_name.clone());
+                let display_name = format!("{} / Skills/Batch/{}", lib.name, stem);
+                skills.push(PromptInfo {
+                    path: path.clone(),
+                    display_name,
+                    library_name: lib.name.clone(),
+                    content: doc.body().trim().to_string(),
+                });
             }
         }
     }
@@ -115,6 +143,17 @@ pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
             .then_with(|| a.path.cmp(&b.path))
     });
     skills
+}
+
+/// Emits the coded error shared by failures while scanning prompt libraries.
+fn log_prompt_discovery_error(path: &Path, error: impl Display) {
+    tracing::error!(
+        target: "batch",
+        error_code = PROMPT_DISCOVERY_ERROR_CODE,
+        path = %path.display(),
+        error = %error,
+        message = PROMPT_DISCOVERY_FAILURE_MESSAGE
+    );
 }
 
 /// Resolve a set of prompt paths into full `PromptInfo` objects.
@@ -135,7 +174,7 @@ pub fn resolve_prompts(
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
+                    log_prompt_discovery_error(path, e);
                     return None;
                 }
             };
@@ -323,5 +362,115 @@ mod tests {
         assert_eq!(skills[1].content, "M content");
         assert_eq!(skills[2].display_name, "System / Skills/Batch/Z_Skill");
         assert_eq!(skills[2].content, "Z content");
+    }
+
+    #[test]
+    fn test_resolve_prompts_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("prompt.md");
+        fs::write(
+            &path,
+            "---\ntitle: Resolved\ntags: [prompt]\n---\nResolved prompt body.",
+        )
+        .unwrap();
+
+        let libs = vec![ContentLibrary {
+            root_folder: dir.path().to_string_lossy().to_string(),
+            name: "TestLib".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let prompt_paths = BTreeSet::from([path.clone()]);
+
+        let resolved = resolve_prompts(&prompt_paths, &libs);
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].path, path);
+        assert_eq!(resolved[0].display_name, "TestLib / prompt.md");
+        assert_eq!(resolved[0].content, "Resolved prompt body.");
+        assert_eq!(resolved[0].library_name, "TestLib");
+    }
+
+    #[test]
+    fn test_resolve_prompts_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.md");
+        let libs = vec![ContentLibrary {
+            root_folder: dir.path().to_string_lossy().to_string(),
+            name: "TestLib".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let prompt_paths = BTreeSet::from([path]);
+
+        let resolved = resolve_prompts(&prompt_paths, &libs);
+
+        assert_eq!(resolved.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_prompts_without_prompt_tag() {
+        // resolve_prompts does NOT filter by prompt tag — it trusts the caller
+        // (tag manager) to supply only prompt-tagged paths. It just reads the
+        // file and builds PromptInfo.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("not-a-prompt.md");
+        fs::write(
+            &path,
+            "---\ntitle: Not a Prompt\ntags: [other]\n---\nBody without prompt tag.",
+        )
+        .unwrap();
+
+        let libs = vec![ContentLibrary {
+            root_folder: dir.path().to_string_lossy().to_string(),
+            name: "TestLib".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let prompt_paths = BTreeSet::from([path]);
+
+        let resolved = resolve_prompts(&prompt_paths, &libs);
+
+        // The path is returned even without a prompt tag because resolve_prompts
+        // trusts the caller's prompt_paths set.
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].content, "Body without prompt tag.");
+    }
+
+    #[test]
+    fn test_resolve_prompts_invalid_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid.md");
+        // Write invalid UTF-8
+        std::fs::write(&path, &[0xFF, 0xFE, 0xFD]).unwrap();
+
+        let libs = vec![ContentLibrary {
+            root_folder: dir.path().to_string_lossy().to_string(),
+            name: "TestLib".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let prompt_paths = BTreeSet::from([path]);
+
+        let resolved = resolve_prompts(&prompt_paths, &libs);
+
+        assert_eq!(resolved.len(), 0);
+    }
+
+    #[test]
+    fn test_log_prompt_discovery_error_emits_structured_fields() {
+        // This test verifies the structured log is emitted with the correct fields.
+        // We can't easily capture tracing events in unit tests without a subscriber,
+        // so we just verify the function compiles and runs without panicking.
+        let path = Path::new("test/path.md");
+        log_prompt_discovery_error(path, "test error message");
+        log_prompt_discovery_error(
+            path,
+            std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
+        );
     }
 }

@@ -115,7 +115,7 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
 | `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
-| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field, agent prompt and left-panel search; callback `TextInput::new` on log/debug search), `widget::combo_box` |
+| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs`, `batch_dialog.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field, agent prompt and left-panel search; callback `TextInput::new` on log/debug search and the Batch wildcard-pattern field, omitted in Directory mode per SPEC `BATCH-007`); Batch prompt candidates are discovered on the iced task executor when the dialog opens, and `StartBatch` carries the selected prompt body snapshot; prompt discovery errors use error code `BATCH-4001` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
 | `attributions.rs` | `widget::hyperlink` |
 | `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
@@ -499,7 +499,7 @@ C4Component
   Component(ed, "editor", "Inline editor; EditorColors inverted white-on-black; validation via pulldown-cmark; undo/redo >=100; clipboard; cursor nav; save combines body + original front-matter")
   Component(print, "print", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
   Component(browser, "browser", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
-  Component(batch, "batch", "{coordinator, discoverer, executor, file_matcher, prompts, types}; batch prompt processing; concurrency 1-8; File vs Directory modes; dialog UI in ui/batch_dialog.rs")
+  Component(batch, "batch", "{coordinator, discoverer, executor, file_matcher, prompts, types}; batch prompt processing; concurrency 1-8; File vs Directory modes; dialog UI in ui_iced/batch_dialog.rs")
   Component(utils, "utils", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
   Component(err, "error", "AgentError")
 

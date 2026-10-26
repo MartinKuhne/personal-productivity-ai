@@ -65,9 +65,7 @@ mod tests;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use iced::widget::{
-    Column, Row, Space, container, mouse_area, pick_list, scrollable, text, text_input,
-};
+use iced::widget::{Column, Row, Space, container, mouse_area, pick_list, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Size};
 
 use iced_pro::composite::{form_field, list_tile};
@@ -79,6 +77,7 @@ use iced_pro::widget::button_widget::Button;
 use iced_pro::widget::combo_box;
 use iced_pro::widget::progress;
 use iced_pro::widget::progress_model::{ProgressModel, ProgressStatus};
+use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::agent::batch::types::{BatchDialogConfig, validate_batch_params};
 use crate::bus::events::user_command::UserCommand;
@@ -87,9 +86,9 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{BatchDialogMessage, Message};
 use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
 
-/// The batch payload the Process button composes — reused unchanged from
-/// the batch subsystem ([RUST-051]); it is the `UserCommand::StartBatch`
-/// payload (`src/app/bus/events/user_command.rs:134`).
+/// The batch configuration the Process button composes — reused unchanged
+/// from the batch subsystem ([RUST-051]); the command also carries the
+/// selected prompt body as a snapshot ([FMD-068]).
 pub use crate::agent::batch::types::{BatchConfig, BatchMode, PromptInfo};
 
 /// §4.6.2 — the Batch Processing card's sizing policy: 560px wide clamped
@@ -153,6 +152,12 @@ pub const BATCH_PROCESS_BUTTON_ID: &str = "batch.process";
 
 /// Stable focus id of the footer `Cancel` / `Close` button.
 pub const BATCH_CANCEL_BUTTON_ID: &str = "batch.cancel";
+
+/// Stable focus/widget id for the Batch dialog's wildcard-pattern input.
+pub const BATCH_PATTERN_INPUT_FOCUS_ID: &str = "batch_dialog_pattern_input";
+
+/// Stable widget id for the Batch dialog's prompt-candidate scrollable.
+pub const BATCH_PROMPT_SCROLLABLE_ID: &str = "batch_dialog_prompt_scrollable";
 
 /// Lowest selectable concurrency — the lower bound of the pick list
 /// (`(1u8..=8)`) and of
@@ -427,12 +432,12 @@ impl BatchDialogViewModel {
         (CONCURRENCY_MIN..=CONCURRENCY_MAX).collect()
     }
 
-    /// Whether the wildcard pattern field accepts edits — it is inert in
-    /// Directory mode while staying allocated (AGENTS §6).
+    /// Whether the wildcard-pattern row is shown — only File mode uses it
+    /// (`BATCH-007`).
     ///
     /// Purity: pure.
     #[must_use]
-    pub fn pattern_editable(&self) -> bool {
+    pub fn pattern_row_visible(&self) -> bool {
         self.mode == BatchMode::File
     }
 
@@ -509,9 +514,12 @@ pub fn index_of_selected<'list, T: PartialEq>(
 /// Purity: pure.
 #[must_use]
 pub fn start_message(view_model: &BatchDialogViewModel) -> Option<Message> {
-    view_model
-        .build_batch_config()
-        .map(|config| Message::Command(UserCommand::StartBatch(config)))
+    let config = view_model.build_batch_config()?;
+    let prompt_text = view_model.selected_prompt()?.content.clone();
+    Some(Message::Command(UserCommand::StartBatch {
+        config,
+        prompt_text,
+    }))
 }
 
 /// The Cancel button, the Close button and the scrim/Escape dismiss all
@@ -545,6 +553,7 @@ pub enum BatchDialogView {
 pub struct BatchDialogState {
     open: bool,
     model: BatchDialogViewModel,
+    prompt_load_generation: u64,
 }
 
 impl BatchDialogState {
@@ -557,7 +566,11 @@ impl BatchDialogState {
     /// A closed dialog seeded with a candidate snapshot.
     #[must_use]
     pub fn with_model(model: BatchDialogViewModel) -> Self {
-        Self { open: false, model }
+        Self {
+            open: false,
+            model,
+            prompt_load_generation: 0,
+        }
     }
 
     /// Whether the dialog is showing.
@@ -572,11 +585,18 @@ impl BatchDialogState {
         &self.model
     }
 
+    /// Generation attached to the latest open request's prompt discovery.
+    #[must_use]
+    pub fn prompt_load_generation(&self) -> u64 {
+        self.prompt_load_generation
+    }
+
     /// Shows the dialog over `model`, clamping any selection that no
     /// longer resolves against the freshly supplied candidate lists.
     ///
     /// Returns whether the open state changed.
     pub fn open(&mut self, model: BatchDialogViewModel) -> bool {
+        self.prompt_load_generation = self.prompt_load_generation.wrapping_add(1);
         let mut model = model;
         model.selected_dir_idx =
             clamp_selection(model.selected_dir_idx, model.available_dirs.len());
@@ -648,8 +668,33 @@ impl BatchDialogState {
             BatchDialogMessage::ConcurrencyChanged(concurrency) => {
                 apply_field(&mut self.model.concurrency, concurrency)
             }
+            BatchDialogMessage::PromptCandidatesLoaded {
+                generation,
+                prompts,
+            } => self.apply_prompt_candidates(generation, prompts),
             BatchDialogMessage::Absorbed => false,
         }
+    }
+
+    /// Applies candidates only if they belong to the current open request.
+    /// The prior selection follows its path when it remains available.
+    pub fn apply_prompt_candidates(&mut self, generation: u64, prompts: Vec<PromptInfo>) -> bool {
+        if !self.open || generation != self.prompt_load_generation {
+            return false;
+        }
+
+        let selected_path = self
+            .model
+            .selected_prompt()
+            .map(|prompt| prompt.path.clone());
+        self.model.available_prompts = prompts;
+        self.model.selected_prompt_idx = selected_path.and_then(|path| {
+            self.model
+                .available_prompts
+                .iter()
+                .position(|prompt| prompt.path == path)
+        });
+        true
     }
 }
 
@@ -752,27 +797,30 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
         .into(),
     );
 
-    let pattern_error = view_model.pattern_error();
-    let pattern = stacked_field(
-        strings::BATCH_DIALOG_PATTERN_LABEL,
-        view_model.pattern_editable(),
-        None,
-        pattern_error.is_none(),
-        view_model
-            .pattern_editable()
-            .then_some(strings::BATCH_PATTERN_FIELD_HELPER),
-        pattern_error,
-        text_input(strings::BATCH_DIALOG_PATTERN_HINT, &view_model.pattern)
-            // In Directory mode the pattern is unused, so the field stays
-            // allocated but stops reporting edits.
-            .on_input_maybe(
-                view_model
-                    .pattern_editable()
-                    .then_some(|text| Message::Batch(BatchDialogMessage::PatternChanged { text })),
-            )
-            .width(Length::Fill)
-            .into(),
-    );
+    let pattern = if view_model.pattern_row_visible() {
+        let pattern_error = view_model.pattern_error();
+        let pattern_input = TextInput::new(
+            InputKind::TextEntry,
+            strings::BATCH_DIALOG_PATTERN_HINT,
+            &view_model.pattern,
+            |text| Message::Batch(BatchDialogMessage::PatternChanged { text }),
+            BATCH_PATTERN_INPUT_FOCUS_ID,
+        )
+        .width(Length::Fill)
+        .palette(Palette::pro());
+
+        Some(stacked_field(
+            strings::BATCH_DIALOG_PATTERN_LABEL,
+            true,
+            None,
+            pattern_error.is_none(),
+            Some(strings::BATCH_PATTERN_FIELD_HELPER),
+            pattern_error,
+            pattern_input.into(),
+        ))
+    } else {
+        None
+    };
 
     let mode = stacked_field(
         strings::BATCH_DIALOG_MODE_LABEL,
@@ -820,8 +868,12 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
 
     let prompt = prompt_section(view_model);
 
-    let body = Column::with_children(vec![directory, pattern, mode, concurrency, prompt])
-        .spacing(space::MD);
+    let mut body_rows = vec![directory];
+    if let Some(pattern) = pattern {
+        body_rows.push(pattern);
+    }
+    body_rows.extend([mode, concurrency, prompt]);
+    let body = Column::with_children(body_rows).spacing(space::MD);
 
     let card = modal_card(
         Column::with_children(vec![
@@ -864,6 +916,7 @@ fn prompt_section(view_model: &BatchDialogViewModel) -> Element<'_, Message> {
             &palette,
         ),
         scrollable(prompt_rows(view_model))
+            .id(BATCH_PROMPT_SCROLLABLE_ID)
             .height(Length::Fill)
             .width(Length::Fill)
             .into(),

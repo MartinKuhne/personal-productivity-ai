@@ -106,6 +106,7 @@ use iced_pro::surface::menu::model::MenuId;
 use iced_pro::surface::movable::GeometryStorage;
 use iced_pro::surface::movable::MovableHost;
 use iced_pro::surface::movable::MovableSpec;
+use iced_pro::surface::tooltip::{HoverController, TooltipAnchor, WarmSession};
 use iced_pro::surface::zorder::DeclineReason;
 use iced_pro::surface::zorder::PreRankedEscape;
 use iced_pro::surface::zorder::Surface;
@@ -425,6 +426,41 @@ impl ContextMenu {
     }
 }
 
+/// Tooltip subsystem state (`UIF-ATOM-007`).
+///
+/// Each tooltip-bearing control has its own [`HoverController`] for the
+/// hover-delay state machine. The [`WarmSession`] is shared across all
+/// controls for cross-control warm handoff (100 ms window per
+/// `time.delay.tooltip_warm`).
+#[derive(Debug, Default)]
+pub struct TooltipState {
+    /// Controller for the left panel search trigger (magnifier) button.
+    pub search_trigger_controller: HoverController,
+    /// Controller for the left panel search clear (×) button.
+    pub search_clear_controller: HoverController,
+    /// Controller for the currently hovered tools dialog error marker.
+    pub tools_error_controller: HoverController,
+    /// Tooltip text for the tools error controller (set on hover enter).
+    pub tools_error_tooltip: Option<String>,
+    /// Anchor rectangle for the tools error tooltip (set on hover enter).
+    pub tools_error_anchor: Option<TooltipAnchor>,
+    /// Shared warm session for cross-control warm handoff.
+    pub warm_session: WarmSession,
+    /// The currently active tooltip, if any.
+    pub active_tooltip: Option<TooltipId>,
+}
+
+/// Which tooltip is currently active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TooltipId {
+    /// Left panel search trigger button.
+    SearchTrigger,
+    /// Left panel search clear button.
+    SearchClear,
+    /// Tools dialog error marker (carries the tool group name).
+    ToolsError,
+}
+
 /// Reducer-owned floating-window state.
 ///
 /// Several floating surfaces can genuinely be open at once — a context menu
@@ -718,6 +754,12 @@ pub struct OverlayState {
     /// since only `Escape` reaches the app from the keyboard
     /// (`ui_iced/subscription.rs`) and iced's own router owns `Tab`.
     pub utility_focus: FocusState,
+    /// Tooltip subsystem state (`UIF-ATOM-007`).
+    ///
+    /// Each tooltip-bearing control has its own [`HoverController`]. The
+    /// [`WarmSession`] is shared across all controls for cross-control warm
+    /// handoff (100ms window per `time.delay.tooltip_warm`).
+    pub tooltip: TooltipState,
 }
 
 impl Default for OverlayState {
@@ -753,6 +795,7 @@ impl Default for OverlayState {
             hovered_tab: None,
             surfaces: SurfaceRegistry::new(),
             pre_rank: PreRankCoordinator::new(),
+            tooltip: TooltipState::default(),
         }
     }
 }
@@ -1603,9 +1646,12 @@ impl ViewModels {
         let mut debug = AgentDebugViewModel::from_app(app);
         debug.expanded = overlay.debug.expanded_ids().clone();
 
-        let batch =
+        let batch = if overlay.batch.is_open() {
+            overlay.batch.model().clone()
+        } else {
             BatchDialogViewModel::from_config(&app.orchestrator.dialogs.batch_dialog_config)
-                .with_status(batch_run_status(&app.orchestrator.dialogs));
+        }
+        .with_status(batch_run_status(&app.orchestrator.dialogs));
 
         // The tools snapshot deep-clones the whole tool-group registry plus
         // per-tool auth facts and char counts. It is only rendered while the

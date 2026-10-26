@@ -2042,6 +2042,51 @@ fn test_search_cleared_returns_the_tree_view() {
     assert!(!state.models.left.is_searching);
 }
 
+#[test]
+fn batch_dialog_composition_and_candidates_survive_cancel_and_reopen() {
+    let (mut state, _storage) = fresh_state();
+    let prompt = PromptInfo {
+        path: PathBuf::from("fixture/prompts/selected.md"),
+        display_name: "Test / selected.md".to_string(),
+        library_name: "Test".to_string(),
+        content: "selected prompt body".to_string(),
+    };
+    let config = &mut state.app.orchestrator.dialogs.batch_dialog_config;
+    config.available_dirs = vec![PathBuf::from("fixture/target")];
+    config.available_prompts = vec![prompt.clone()];
+    config.selected_dir_idx = Some(0);
+    config.selected_prompt_idx = Some(0);
+
+    let _ = update(&mut state, Message::Command(UserCommand::OpenBatchDialog));
+    let _ = update(
+        &mut state,
+        Message::Batch(BatchDialogMessage::PatternChanged {
+            text: "*.txt".to_string(),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Batch(BatchDialogMessage::ModeChanged(
+            crate::agent::batch::types::BatchMode::Directory,
+        )),
+    );
+    let _ = update(
+        &mut state,
+        Message::Batch(BatchDialogMessage::ConcurrencyChanged(7)),
+    );
+    let _ = update(&mut state, Message::Command(UserCommand::CancelBatch));
+    let _ = update(&mut state, Message::Command(UserCommand::OpenBatchDialog));
+
+    assert_eq!(state.models.batch.pattern, "*.txt");
+    assert_eq!(
+        state.models.batch.mode,
+        crate::agent::batch::types::BatchMode::Directory
+    );
+    assert_eq!(state.models.batch.concurrency, 7);
+    assert_eq!(state.models.batch.available_prompts, vec![prompt]);
+    assert_eq!(state.models.batch.selected_prompt_idx, Some(0));
+}
+
 // ───────────────────────────── Logs ─────────────────────────────
 
 #[test]

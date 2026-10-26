@@ -60,7 +60,7 @@ use iced_pro::surface::menu::model::{Menu, MenuId};
 use iced_pro::surface::modal::Recovery;
 use iced_pro::surface::movable::PointerPhase;
 use iced_pro::surface::movable::SurfaceTarget;
-use iced_pro::surface::tooltip::TimeMs;
+use iced_pro::surface::tooltip::{DismissReason, TimeMs};
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
@@ -69,7 +69,7 @@ use crate::markdown::document::DocumentContent;
 use crate::ui::tree_search::find_search_results_scoped;
 use crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID;
 use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
-use crate::ui_iced::app::{AppState, ContextMenu, OverlayState, guard_editor_leave};
+use crate::ui_iced::app::{AppState, ContextMenu, OverlayState, TooltipId, guard_editor_leave};
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, index_of_selected};
 use crate::ui_iced::context_menu::ContextTarget;
 use crate::ui_iced::dialogs::{DialogKind, SubmitOutcome};
@@ -288,6 +288,40 @@ fn dismisses_context_menu(message: &Message) -> bool {
 fn reduce_overlay(state: &mut AppState, message: OverlayMessage) {
     match message {
         OverlayMessage::EscapePressed => {
+            // Tooltip dismissal is a pre-pass before z-band escape handling.
+            // A tooltip must dismiss itself on Escape and still let the
+            // keyboard owner underneath have the key.
+            let tooltip = &mut state.overlay.tooltip;
+            let _now = TimeMs::now();
+            let mut dismissed = false;
+
+            if tooltip.search_trigger_controller.is_active() {
+                let _ = tooltip
+                    .search_trigger_controller
+                    .dismiss(DismissReason::Escape);
+                dismissed = true;
+            }
+            if tooltip.search_clear_controller.is_active() {
+                let _ = tooltip
+                    .search_clear_controller
+                    .dismiss(DismissReason::Escape);
+                dismissed = true;
+            }
+            if tooltip.tools_error_controller.is_active() {
+                let _ = tooltip
+                    .tools_error_controller
+                    .dismiss(DismissReason::Escape);
+                dismissed = true;
+            }
+
+            if dismissed {
+                tooltip.active_tooltip = None;
+                tooltip.tools_error_tooltip = None;
+                tooltip.tools_error_anchor = None;
+                // Suppress until pointer exits - the controllers' suppress flag handles this
+            }
+
+            // Then proceed with normal z-band escape handling
             state.overlay.close_topmost();
         }
         OverlayMessage::ModifiersChanged { shift } => {
@@ -324,6 +358,27 @@ fn finish_frame(state: &mut AppState) -> Vec<Task<Message>> {
     prune_hovered_row(state);
     state.app.orchestrator.handle_file_selection();
     join_finished_batch(state);
+
+    // Tooltip subsystem: tick all controllers with the current frame time.
+    // This drives the hover-delay state machines and updates visibility.
+    let now = TimeMs::now();
+    let tooltip = &mut state.overlay.tooltip;
+    let search_trigger_vis = tooltip.search_trigger_controller.tick(now);
+    let search_clear_vis = tooltip.search_clear_controller.tick(now);
+    let tools_error_vis = tooltip.tools_error_controller.tick(now);
+
+    // If any tooltip is visible, note it in the warm session for cross-control
+    // warm handoff (100ms window per time.delay.tooltip_warm).
+    if search_trigger_vis.is_visible() {
+        tooltip.warm_session.note_visible(now);
+    }
+    if search_clear_vis.is_visible() {
+        tooltip.warm_session.note_visible(now);
+    }
+    if tools_error_vis.is_visible() {
+        tooltip.warm_session.note_visible(now);
+    }
+
     state.rebuild_view_models();
     tasks.extend(follow_scroll_tasks(state));
     sync_persisted_panel_widths(state);
@@ -519,10 +574,17 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
         }
         UserCommand::OpenBatchDialog => {
             publish_and_drain(state, UserCommand::OpenBatchDialog);
-            let fresh = state.models.batch.clone();
+            let prompt_config = state.app.orchestrator.config.clone();
+            let fresh = BatchDialogViewModel::from_config(
+                &state.app.orchestrator.dialogs.batch_dialog_config,
+            )
+            .with_status(state.models.batch.status);
             let model = reindex_batch_selection(state.overlay.batch.model(), fresh);
             state.overlay.batch.open(model);
-            Vec::new()
+            vec![batch_prompt_discovery_task(
+                prompt_config,
+                state.overlay.batch.prompt_load_generation(),
+            )]
         }
         UserCommand::OpenToolsDialog => {
             publish_and_drain(state, UserCommand::OpenToolsDialog);
@@ -592,6 +654,20 @@ fn reindex_batch_selection(
         }
     }
     fresh
+}
+
+/// Discovers prompt candidates on iced's task executor, keeping library I/O
+/// off the UI thread (FMD-060..061).
+fn batch_prompt_discovery_task(config: crate::config::AppConfig, generation: u64) -> Task<Message> {
+    Task::perform(
+        async move { crate::agent::batch::prompts::discover_prompts(&config) },
+        move |prompts| {
+            Message::Batch(BatchDialogMessage::PromptCandidatesLoaded {
+                generation,
+                prompts,
+            })
+        },
+    )
 }
 
 /// Lifts the `TextBuffer` the executor just populated into an
@@ -707,6 +783,139 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
         LayoutMessage::CursorMoved { point } => {
             state.overlay.cursor = Some(point);
         }
+        LayoutMessage::TooltipHoverEnter { id, tooltip_text } => {
+            let now = TimeMs::now();
+            match id {
+                TooltipId::SearchTrigger => {
+                    state
+                        .overlay
+                        .tooltip
+                        .search_trigger_controller
+                        .pointer_enter_warm(
+                            now,
+                            state.overlay.tooltip.warm_session.warmth_for(now),
+                        );
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::SearchTrigger);
+                }
+                TooltipId::SearchClear => {
+                    state
+                        .overlay
+                        .tooltip
+                        .search_clear_controller
+                        .pointer_enter_warm(
+                            now,
+                            state.overlay.tooltip.warm_session.warmth_for(now),
+                        );
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::SearchClear);
+                }
+                TooltipId::ToolsError => {
+                    state
+                        .overlay
+                        .tooltip
+                        .tools_error_controller
+                        .pointer_enter_warm(
+                            now,
+                            state.overlay.tooltip.warm_session.warmth_for(now),
+                        );
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::ToolsError);
+                    if let Some(text) = tooltip_text {
+                        state.overlay.tooltip.tools_error_tooltip = Some(text);
+                    }
+                }
+            }
+        }
+        LayoutMessage::TooltipHoverExit { id } => match id {
+            TooltipId::SearchTrigger => {
+                state
+                    .overlay
+                    .tooltip
+                    .search_trigger_controller
+                    .pointer_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::SearchTrigger) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+            }
+            TooltipId::SearchClear => {
+                state.overlay.tooltip.search_clear_controller.pointer_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::SearchClear) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+            }
+            TooltipId::ToolsError => {
+                state.overlay.tooltip.tools_error_controller.pointer_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::ToolsError) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+                state.overlay.tooltip.tools_error_tooltip = None;
+                state.overlay.tooltip.tools_error_anchor = None;
+            }
+        },
+        LayoutMessage::TooltipFocusEnter { id, tooltip_text } => {
+            let now = TimeMs::now();
+            match id {
+                TooltipId::SearchTrigger => {
+                    state
+                        .overlay
+                        .tooltip
+                        .search_trigger_controller
+                        .keyboard_focus_enter(now);
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::SearchTrigger);
+                }
+                TooltipId::SearchClear => {
+                    state
+                        .overlay
+                        .tooltip
+                        .search_clear_controller
+                        .keyboard_focus_enter(now);
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::SearchClear);
+                }
+                TooltipId::ToolsError => {
+                    state
+                        .overlay
+                        .tooltip
+                        .tools_error_controller
+                        .keyboard_focus_enter(now);
+                    state.overlay.tooltip.active_tooltip = Some(TooltipId::ToolsError);
+                    if let Some(text) = tooltip_text {
+                        state.overlay.tooltip.tools_error_tooltip = Some(text);
+                    }
+                }
+            }
+        }
+        LayoutMessage::TooltipFocusExit { id } => match id {
+            TooltipId::SearchTrigger => {
+                state
+                    .overlay
+                    .tooltip
+                    .search_trigger_controller
+                    .keyboard_focus_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::SearchTrigger) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+            }
+            TooltipId::SearchClear => {
+                state
+                    .overlay
+                    .tooltip
+                    .search_clear_controller
+                    .keyboard_focus_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::SearchClear) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+            }
+            TooltipId::ToolsError => {
+                state
+                    .overlay
+                    .tooltip
+                    .tools_error_controller
+                    .keyboard_focus_exit();
+                if state.overlay.tooltip.active_tooltip == Some(TooltipId::ToolsError) {
+                    state.overlay.tooltip.active_tooltip = None;
+                }
+                state.overlay.tooltip.tools_error_tooltip = None;
+                state.overlay.tooltip.tools_error_anchor = None;
+            }
+        },
     }
 }
 
@@ -1694,7 +1903,33 @@ fn reduce_about(state: &mut AppState, message: AboutMessage) -> Vec<Task<Message
 
 /// Batch dialog selection reductions (BATCH-001..BATCH-014).
 fn reduce_batch(state: &mut AppState, message: BatchDialogMessage) {
-    state.overlay.batch.apply(message);
+    match message {
+        BatchDialogMessage::PromptCandidatesLoaded {
+            generation,
+            prompts,
+        } => {
+            if state
+                .overlay
+                .batch
+                .apply_prompt_candidates(generation, prompts.clone())
+            {
+                let selected_prompt_idx = state.overlay.batch.model().selected_prompt_idx;
+                let config = &mut state.app.orchestrator.dialogs.batch_dialog_config;
+                config.available_prompts = prompts;
+                config.selected_prompt_idx = selected_prompt_idx;
+            }
+        }
+        other => {
+            state.overlay.batch.apply(other);
+            let model = state.overlay.batch.model();
+            let config = &mut state.app.orchestrator.dialogs.batch_dialog_config;
+            config.selected_dir_idx = model.selected_dir_idx;
+            config.selected_prompt_idx = model.selected_prompt_idx;
+            config.pattern.clone_from(&model.pattern);
+            config.mode = model.mode;
+            config.concurrency = model.concurrency;
+        }
+    }
 }
 
 /// Tools dialog dismiss reduction (UI-051..UI-060).

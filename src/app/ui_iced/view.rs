@@ -35,7 +35,7 @@ use crate::markdown::parse_markdown_to_events;
 use crate::ui::panel_layout::{LEFT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_DEFAULT_WIDTH};
 use crate::ui_iced::about::about_card;
 use crate::ui_iced::agent::agent_panel;
-use crate::ui_iced::app::{AppState, OverlayLayer};
+use crate::ui_iced::app::{AppState, OverlayLayer, TooltipId};
 use crate::ui_iced::attributions::attributions_view;
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_modal};
 use crate::ui_iced::dialogs::dialog_card;
@@ -52,6 +52,8 @@ use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
 use iced::Size;
 use iced::widget::{button, column, container, mouse_area, scrollable, stack, text};
+use iced_pro::surface::tooltip::{TooltipAnchor, TooltipStyle};
+use iced_pro::token::color::Palette;
 
 /// Vertical gap between the three bands, in logical pixels.
 const BAND_SPACING_PIXELS: f32 = 8.0;
@@ -194,6 +196,10 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// click-away blocker and solved card geometry. Higher windows are stacked
 /// above them as full-screen overlays. The reducer keeps the two menus
 /// mutually exclusive, so at most one menu surface is live per frame.
+///
+/// The tooltip subsystem (`UIF-ATOM-007`) mounts as a presentation layer above
+/// all z-bands — it is not a z-band itself and does not participate in escape
+/// handling. Dismissal is a pre-pass in the reducer.
 fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
     let mut base = base_bands(state);
 
@@ -216,13 +222,108 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
         .map(|layer| overlay_element(layer, state))
         .collect();
 
-    if layers.is_empty() {
-        base
-    } else {
-        let mut all = vec![base];
-        all.extend(layers);
-        stack(all).into()
+    let mut all = vec![base];
+    all.extend(layers);
+
+    // Tooltip presentation layer — mounted above all z-bands (`UIF-ATOM-007`).
+    if let Some(tooltip_element) = tooltip_layer(state) {
+        all.push(tooltip_element);
     }
+
+    stack(all).into()
+}
+
+/// Tooltip presentation layer — mounted above all z-bands (`UIF-ATOM-007`).
+///
+/// This is a pure presentation layer, not a z-band. It renders the currently
+/// active tooltip (if any) using the iced-pro tooltip subsystem's styling and
+/// placement. The tooltip subsystem handles:
+/// - Hover delay (400ms pointer, 0ms keyboard focus)
+/// - Warm handoff (100ms window for cross-control immediate show)
+/// - Placement (below, left-aligned with flip/clamp)
+/// - Styling (surface.overlay fill, border.strong border, text.primary text)
+fn tooltip_layer(state: &AppState) -> Option<iced::Element<'_, Message>> {
+    let tooltip = &state.overlay.tooltip;
+    let active_tooltip = tooltip.active_tooltip?;
+    let now = iced_pro::surface::tooltip::TimeMs::now();
+
+    // Check visibility for the active tooltip
+    let is_visible = match active_tooltip {
+        TooltipId::SearchTrigger => tooltip.search_trigger_controller.tick(now).is_visible(),
+        TooltipId::SearchClear => tooltip.search_clear_controller.tick(now).is_visible(),
+        TooltipId::ToolsError => tooltip.tools_error_controller.tick(now).is_visible(),
+    };
+
+    if !is_visible {
+        return None;
+    }
+
+    // Get tooltip text and anchor for the active tooltip
+    let (tooltip_text, anchor) = match active_tooltip {
+        TooltipId::SearchTrigger => (crate::ui::strings::SEARCH_TRIGGER_TOOLTIP.to_string(), None),
+        TooltipId::SearchClear => (crate::ui::strings::SEARCH_CLEAR_TOOLTIP.to_string(), None),
+        TooltipId::ToolsError => {
+            let text = tooltip.tools_error_tooltip.clone().unwrap_or_default();
+            let anchor = tooltip.tools_error_anchor;
+            (text, anchor)
+        }
+    };
+
+    // Resolve tooltip style from palette
+    let palette = Palette::dark();
+    let style = TooltipStyle::resolve(&palette);
+
+    // For now, use a simple anchored tooltip at cursor position
+    // TODO: Proper anchor resolution from control layout
+    let cursor = state.overlay.cursor.unwrap_or(iced::Point::ORIGIN);
+    let anchor = anchor.unwrap_or(TooltipAnchor::Pointer(cursor));
+
+    // Measure card size (approximate)
+    let card_size = iced::Size::new(style.max_width.min(280.0), 40.0);
+
+    // Resolve placement
+    let viewport = iced::Rectangle::new(iced::Point::ORIGIN, state.viewport);
+    let placement = anchor.resolve(card_size, viewport);
+
+    // Build tooltip card
+    let tooltip_element = container(
+        text(tooltip_text)
+            .size(style.font.size)
+            .line_height(style.font.iced_line_height())
+            .color(style.foreground),
+    )
+    .padding(iced::Padding {
+        top: style.padding_vertical,
+        bottom: style.padding_vertical,
+        left: style.padding_horizontal,
+        right: style.padding_horizontal,
+    })
+    .style(move |_theme: &iced::Theme| iced::widget::container::Style {
+        background: Some(iced::Background::Color(style.background)),
+        border: iced::Border {
+            color: style.border_color,
+            width: style.border_width,
+            radius: style.radius.into(),
+        },
+        ..Default::default()
+    })
+    .width(Length::Shrink)
+    .height(Length::Shrink);
+
+    // Position as overlay at the resolved placement
+    Some(
+        container(tooltip_element)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Left)
+            .align_y(iced::alignment::Vertical::Top)
+            .padding(iced::Padding {
+                top: placement.rect().y,
+                left: placement.rect().x,
+                ..Default::default()
+            })
+            .into(),
+    )
 }
 
 /// Builds one mounted overlay layer as a full-screen blocking element.

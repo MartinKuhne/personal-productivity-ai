@@ -67,6 +67,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::config::ContentLibrary;
 use crate::ui::strings;
 use crate::ui_iced::app::AppState;
+use crate::ui_iced::batch_dialog::BatchMode;
 use crate::ui_iced::dialogs::{DialogKind, DialogState};
 use crate::ui_iced::editor::{EditorViewModel, editor_card};
 use crate::ui_iced::hamburger::{
@@ -75,8 +76,8 @@ use crate::ui_iced::hamburger::{
     RADIO_GROUP_TABLE_WRAP, command_for_activation, hamburger_menu, strategy_key,
 };
 use crate::ui_iced::message::{
-    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, SearchMessage,
-    TreeMessage,
+    AgentMessage, BatchDialogMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage,
+    Message, SearchMessage, TreeMessage,
 };
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
@@ -953,6 +954,72 @@ fn test_command_band_enter_submits_the_typed_prompt() {
             text: "/models".to_string(),
         }),
         "Enter must submit the field's current text",
+    );
+}
+
+/// The live Batch dialog reflects reducer-owned mode changes in its next view.
+#[test]
+fn test_batch_directory_mode_hides_pattern_row_through_root_view() {
+    let mut state = test_app_state();
+    state.overlay.batch.open(state.models.batch.clone());
+    state.rebuild_view_models();
+
+    let mut ui = sim(view(&state));
+    assert!(
+        ui.find(strings::BATCH_DIALOG_PATTERN_LABEL).is_ok(),
+        "File mode initially shows its wildcard-pattern row"
+    );
+    drop(ui);
+
+    let _ = update(
+        &mut state,
+        Message::Batch(BatchDialogMessage::ModeChanged(BatchMode::Directory)),
+    );
+
+    assert_eq!(
+        state.models.batch.mode,
+        BatchMode::Directory,
+        "the rebuilt live view model must follow the reducer-owned mode"
+    );
+    let mut ui = sim(view(&state));
+    assert!(
+        ui.find(strings::BATCH_DIALOG_PATTERN_LABEL).is_err(),
+        "the next root view must hide the wildcard-pattern row in Directory mode"
+    );
+}
+
+/// A completed prompt-discovery task updates the open dialog and its reopen cache.
+#[test]
+fn test_batch_prompt_candidates_loaded_updates_live_dialog() {
+    let mut state = test_app_state();
+    state.overlay.batch.open(state.models.batch.clone());
+    let prompt_generation = state.overlay.batch.prompt_load_generation();
+    let prompt = crate::agent::batch::types::PromptInfo {
+        path: std::path::PathBuf::from("library/selected.md"),
+        display_name: "Library / selected.md".to_string(),
+        library_name: "Library".to_string(),
+        content: "selected prompt body".to_string(),
+    };
+
+    let _ = update(
+        &mut state,
+        Message::Batch(BatchDialogMessage::PromptCandidatesLoaded {
+            generation: prompt_generation,
+            prompts: vec![prompt.clone()],
+        }),
+    );
+
+    assert_eq!(state.models.batch.available_prompts.len(), 1);
+    assert_eq!(state.models.batch.available_prompts[0].path, prompt.path);
+    assert_eq!(
+        state
+            .app
+            .orchestrator
+            .dialogs
+            .batch_dialog_config
+            .available_prompts[0]
+            .path,
+        prompt.path
     );
 }
 

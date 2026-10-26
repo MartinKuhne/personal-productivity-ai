@@ -85,8 +85,10 @@ mod tests;
 
 use std::collections::HashMap;
 
+use crate::ui_iced::app::TooltipId;
+use crate::ui_iced::message::{LayoutMessage, Message, ToolsDialogMessage};
 use iced::font::Weight;
-use iced::widget::{Column, Row, Space, checkbox, container, scrollable, table, text, tooltip};
+use iced::widget::{Column, Row, Space, checkbox, container, mouse_area, scrollable, table, text};
 use iced::{Alignment, Background, Element, Length, Size};
 
 use iced_pro::composite::list_tile;
@@ -102,7 +104,6 @@ use iced_pro::widget::toggle::{self, ToggleControl, TogglePolarity};
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::message::{Message, ToolsDialogMessage};
 use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
 
 /// Tool-group identity, kind and state — reused unchanged from the tool
@@ -1068,10 +1069,9 @@ fn group_cell(row: &ToolGroupRow) -> Element<'static, Message> {
     ))
 }
 
-/// The Actions cell: the `⚠` marker wrapped in an
-/// [`iced::widget::tooltip::Tooltip`] whose body is the row's
-/// `Kind: message` line ([UI-057]), plus the row's mapped action buttons.
-/// A clean row keeps the marker slot empty and mounts no tooltip.
+/// The Actions cell: the `⚠` marker with hover tooltip ([UI-057]),
+/// plus the row's mapped action buttons. A clean row keeps the marker
+/// slot empty and mounts no tooltip.
 ///
 /// `Forget` is the one `Danger` control on this card. It discards a stored
 /// OAuth credential, which is the only action in the dialog that makes the
@@ -1080,17 +1080,22 @@ fn group_cell(row: &ToolGroupRow) -> Element<'static, Message> {
 /// `Authenticate` are `Secondary` for that reason.
 fn actions_cell(row: &ToolGroupRow) -> Element<'static, Message> {
     let marker = match error_tooltip_body(row) {
-        Some(body) => tooltip::Tooltip::new(
-            rung(
+        Some(body) => {
+            let marker_content = rung(
                 strings::TOOLS_ERROR_ICON,
                 typography::BODY,
                 error_marker_color(),
-            ),
-            rung(body.to_owned(), typography::CAPTION, error_text_color()),
-            tooltip::Position::Bottom,
-        )
-        .gap(space::XS)
-        .into(),
+            );
+            let marker_with_hover = mouse_area(marker_content)
+                .on_enter(Message::Layout(LayoutMessage::TooltipHoverEnter {
+                    id: TooltipId::ToolsError,
+                    tooltip_text: Some(body.to_string()),
+                }))
+                .on_exit(Message::Layout(LayoutMessage::TooltipHoverExit {
+                    id: TooltipId::ToolsError,
+                }));
+            marker_with_hover.into()
+        }
         None => Space::new().width(Length::Shrink).into(),
     };
 

@@ -177,7 +177,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::widget::{Column, Row, Space, Stack, container, mouse_area, scrollable, text, tooltip};
+use crate::ui_iced::app::TooltipId;
+use crate::ui_iced::message::{LayoutMessage, Message};
+use iced::widget::{Column, Row, Space, Stack, container, mouse_area, scrollable, text};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use iced_pro::composite::tree_row;
@@ -212,7 +214,7 @@ use crate::ui_iced::context_menu::{
     KEY_SAVE_AS_PDF, KEY_SHOW_IN_EXPLORER,
 };
 use crate::ui_iced::layout::clamped_width;
-use crate::ui_iced::message::{Message, SearchMessage, TreeMessage};
+use crate::ui_iced::message::{SearchMessage, TreeMessage};
 
 use super::top::phosphor_font;
 
@@ -1569,29 +1571,35 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
     .compact()
     .palette(Palette::pro());
 
-    let search_trigger = tooltip::Tooltip::new(
-        search_trigger_button(view_model.query.value.clone()),
-        text(strings::SEARCH_TRIGGER_TOOLTIP)
-            .size(typography::CAPTION.size)
-            .line_height(typography::CAPTION.iced_line_height())
-            .color(palette.text),
-        tooltip::Position::Bottom,
-    )
-    .gap(space::XS);
-    let clear_trigger = tooltip::Tooltip::new(
-        clear_trigger_button(view_model.is_searching),
-        text(strings::SEARCH_CLEAR_TOOLTIP)
-            .size(typography::CAPTION.size)
-            .line_height(typography::CAPTION.iced_line_height())
-            .color(palette.text),
-        tooltip::Position::Bottom,
-    )
-    .gap(space::XS);
+    let search_trigger_btn = search_trigger_button(view_model.query.value.clone());
+    let search_trigger = mouse_area(search_trigger_btn)
+        .on_enter(Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::SearchTrigger,
+            tooltip_text: None,
+        }))
+        .on_exit(Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::SearchTrigger,
+        }));
+
+    let clear_trigger_btn = clear_trigger_button(view_model.is_searching);
+    let clear_trigger: Element<'_, Message> = if view_model.is_searching {
+        mouse_area(clear_trigger_btn)
+            .on_enter(Message::Layout(LayoutMessage::TooltipHoverEnter {
+                id: TooltipId::SearchClear,
+                tooltip_text: None,
+            }))
+            .on_exit(Message::Layout(LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchClear,
+            }))
+            .into()
+    } else {
+        clear_trigger_btn.into()
+    };
 
     let search_row = Row::with_children(vec![
         search_field.width(Length::Fill).into(),
         search_trigger.into(),
-        clear_trigger.into(),
+        clear_trigger,
     ])
     .spacing(SEARCH_ROW_SPACING)
     .align_y(Alignment::Center);
