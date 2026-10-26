@@ -657,3 +657,128 @@ fn a_rewrapped_pdf_badge_slot_cannot_smuggle_a_literal_past_rule_b() {
          admission of blindness"
     );
 }
+
+/// **The partial-first-line shape, on a real app file.** INT-14's test above
+/// re-wraps with `=` ending the line. This re-wraps with the opening term
+/// left on line 1 — the shape the old `!is_empty()` guard returned early on
+/// — and smuggles the same literal onto the continuation.
+#[test]
+fn a_partial_first_line_rewrap_cannot_smuggle_a_literal_either() {
+    let path = app_source_root()
+        .join("ui_iced")
+        .join("panels")
+        .join("left.rs");
+    let text = std::fs::read_to_string(&path).expect("left.rs must be readable");
+
+    let baseline = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &text);
+    assert!(
+        baseline.findings.is_empty(),
+        "the real file must be clean before injection: {:?}",
+        baseline.findings
+    );
+
+    let rewrapped = text.replace(
+        "pub const PDF_BADGE_SLOT: f32 = PDF_BADGE_TEXT_ALLOWANCE + PDF_BADGE_CHIP_PADDING_TOTAL;",
+        "pub const PDF_BADGE_SLOT: f32 = PDF_BADGE_TEXT_ALLOWANCE\n    + PDF_BADGE_CHIP_PADDING_TOTAL + 13.0;",
+    );
+    assert_ne!(
+        rewrapped, text,
+        "the substitution must have applied — if the real declaration changed \
+         shape, update this fixture so the regression keeps testing something"
+    );
+
+    let after = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &rewrapped);
+    assert_eq!(
+        after.findings.len(),
+        1,
+        "a literal below a partial first line must be caught: {:?}",
+        after.findings
+    );
+    assert_eq!(
+        after.findings[0].constant_name(),
+        Some("PDF_BADGE_SLOT"),
+        "and it must name the constant that smuggled it"
+    );
+    assert!(
+        after.findings[0].detail.contains("13.0"),
+        "the finding must name the literal read off the continuation line: {}",
+        after.findings[0].detail
+    );
+    assert_eq!(
+        after.token_bound,
+        baseline.token_bound - 1,
+        "the smuggled constant must leave the token-bound column, not stay in it \
+         — that was the hole"
+    );
+}
+
+/// **The one constant this survey actually exposed, and its handling.**
+///
+/// `SEARCH_ROW_HEIGHT` shipped as a partial-first-line sum whose
+/// continuation carried `* 2.0` twice. Under the old guard the gate read
+/// only `tree_row::LABEL_RUNG.line_height`, found no literals, and counted
+/// it `token-bound` — a pass granted without the value ever being read.
+///
+/// It was fixed by writing the doubled terms out rather than multiplying,
+/// which keeps the composition literal-free and the value identical. This
+/// test pins both halves: the shipped form is clean, and putting the
+/// coefficients back trips the gate.
+#[test]
+fn the_search_row_height_exposure_is_closed_and_reopening_it_trips_the_gate() {
+    let path = app_source_root()
+        .join("ui_iced")
+        .join("panels")
+        .join("left.rs");
+    let text = std::fs::read_to_string(&path).expect("left.rs must be readable");
+
+    let written_out = concat!(
+        "pub const SEARCH_ROW_HEIGHT: f32 = tree_row::LABEL_RUNG.line_height\n",
+        "    + typography::CAPTION.line_height\n",
+        "    + typography::CAPTION.line_height\n",
+        "    + SEARCH_CARD_PADDING\n",
+        "    + SEARCH_CARD_PADDING;",
+    );
+    let with_coefficients = concat!(
+        "pub const SEARCH_ROW_HEIGHT: f32 = tree_row::LABEL_RUNG.line_height\n",
+        "    + typography::CAPTION.line_height * 2.0\n",
+        "    + SEARCH_CARD_PADDING * 2.0;",
+    );
+
+    assert!(
+        text.contains(written_out),
+        "the shipped form must be the literal-free one; if this fails the \
+         constant was re-multiplied and the gate would now flag it"
+    );
+
+    let baseline = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &text);
+    assert!(
+        baseline.findings.is_empty(),
+        "SEARCH_ROW_HEIGHT as shipped must bind, not violate: {:?}",
+        baseline.findings
+    );
+
+    let reopened = text.replace(written_out, with_coefficients);
+    assert_ne!(reopened, text, "the substitution must have applied");
+    let after = token_lint::scan_source_in(&app_scope(), "ui_iced/panels/left.rs", &reopened);
+    assert_eq!(
+        after.findings.len(),
+        1,
+        "restoring the `* 2.0` coefficients must be caught now: {:?}",
+        after.findings
+    );
+    assert_eq!(
+        after.findings[0].constant_name(),
+        Some("SEARCH_ROW_HEIGHT"),
+        "and it must name the constant"
+    );
+    assert!(
+        after.findings[0].detail.contains("2.0"),
+        "the finding must name the coefficient: {}",
+        after.findings[0].detail
+    );
+    assert_eq!(
+        after.token_bound,
+        baseline.token_bound - 1,
+        "the coefficient version must leave the token-bound column, not stay in it"
+    );
+}

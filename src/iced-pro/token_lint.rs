@@ -1059,6 +1059,10 @@ struct F32Const<'a> {
 /// RHS so the classification is made against the expression the compiler
 /// actually sees, and a declaration that still cannot be recovered is
 /// reported as [`ScalarClass::Unreadable`] rather than approved.
+///
+/// The same recovery covers a second wrapped shape: a hand-broken sum
+/// whose opening line carries only the first term. Both are joined to the
+/// terminating `;`; neither is classified until its whole RHS is in hand.
 fn f32_consts<'a>(lines: &[&'a str]) -> Vec<F32Const<'a>> {
     let mut out = Vec::new();
     for (idx, raw) in lines.iter().enumerate() {
@@ -1079,20 +1083,53 @@ fn f32_consts<'a>(lines: &[&'a str]) -> Vec<F32Const<'a>> {
 
 /// The full RHS of a declaration, joining a wrapped continuation.
 ///
-/// A single-line declaration already carries its whole RHS, which is
-/// returned untouched. When the `=` ended the line the RHS continues below,
-/// so the following lines are appended until the terminating `;` is
-/// consumed — which is the same boundary the compiler uses.
+/// The rule is **terminator-based, not emptiness-based**: a declaration is
+/// complete on its opening line if and only if that line carries the
+/// terminating `;`. Anything else continues below, and the following lines
+/// are appended until the `;` arrives — the same boundary the compiler
+/// uses.
 ///
-/// Returns `None` when no terminating `;` can be reached: the next line is
-/// blank, or it opens a new item. That is reported rather than guessed at,
-/// because a *guessed* expression would be indistinguishable from a read
-/// one.
+/// # Why not "is the first line non-empty"
+///
+/// The previous condition was `!first.trim().is_empty()`, which returned
+/// the opening line for **any** non-empty RHS. That is correct for a
+/// single-line declaration and for INT-14's shape (`=` ends the line, the
+/// whole value is below), but it is wrong for the third shape a `f32`
+/// constant can take:
+///
+/// ```text
+/// pub const X: f32 = space::SM
+///     + 500.0;
+/// ```
+///
+/// Here line 1 is a *partial* expression. Returning it alone handed
+/// `"space::SM"` to [`classify_scalar`], which found no literals and
+/// reported `TokenBound` — a pass granted to a constant whose actual value
+/// was never read. `500.0` was invisible to the gate.
+///
+/// That hole is worse than the one INT-14 closed. INT-14 needed the RHS to
+/// be entirely absent from line 1, which only `rustfmt`'s own wrap
+/// produces. This shape is what a developer writes by hand when breaking a
+/// long sum across lines — and once written, `rustfmt` keeps it, because
+/// each line is within `max_width`. Two constants in this tree were living
+/// in that shape when it was found.
+///
+/// # Returns
+///
+/// `None` when no terminating `;` can be reached: the next line is blank,
+/// or it opens a new item. That is reported as
+/// [`ScalarClass::Unreadable`] rather than guessed at, because a *guessed*
+/// expression would be indistinguishable from a read one.
 fn join_continuation<'a>(lines: &[&'a str], at: usize, first: &'a str) -> Option<String> {
-    if !first.trim().is_empty() {
+    // The terminator is the only reliable signal that the declaration ends
+    // here. Emptiness is not: a non-empty first line may be the whole RHS
+    // or only its opening term.
+    if first.contains(';') {
         return Some(first.to_string());
     }
-    let mut joined = String::new();
+    // Seed with whatever line 1 carried — possibly nothing, which is
+    // INT-14's shape and must keep joining exactly as it did.
+    let mut joined = first.trim().to_string();
     let mut idx = at + 1;
     while idx < lines.len() {
         let cont = lines[idx].trim();

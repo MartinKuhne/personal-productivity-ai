@@ -19,7 +19,8 @@ use crate::token_lint::{
     ALLOW_LIST, Audit, COLOUR_CONSTRUCTORS, COLOUR_DEFINITION_FILE, Rule,
     SURFACE_GEOMETRY_CONSTANTS, ScalarClass, SourceScan, VISUAL_NAME_MARKERS, VISUAL_SCOPE_DIRS,
     Violation, audit_crate, crate_root, in_visual_scope, is_test_file, is_visual_name,
-    redact_comments_and_strings, render, scan_source, source_files, surface_geometry,
+    join_continuation, redact_comments_and_strings, render, scan_source, source_files,
+    surface_geometry,
 };
 
 // ---------------------------------------------------------------------------
@@ -1366,4 +1367,283 @@ fn a_continuation_spanning_several_lines_is_joined_in_full() {
         "the finding names the literal from the last line: {}",
         after.findings[0].detail
     );
+}
+
+// ---------------------------------------------------------------------------
+// The second half of the continuation hole — a PARTIAL first-line RHS
+//
+// INT-14 closed the shape where `=` ends the line and the whole value sits
+// below. This group closes the shape where line 1 carries the *opening term*
+// and the rest continues underneath:
+//
+//     pub const X: f32 = space::SM
+//         + 500.0;
+//
+// The old condition was `!first.trim().is_empty()`, so line 1 was returned
+// alone as `"space::SM"`. `numeric_literals` found nothing and the constant
+// was reported `TokenBound` — a pass granted without the value ever being
+// read. `500.0` never reached the classifier.
+//
+// This shape is worse than INT-14's because it is what a developer writes
+// by hand when breaking a long sum across lines, and once written `rustfmt`
+// keeps it (each line is inside `max_width`). Two constants in this tree
+// were living in it when the hole was found.
+// ---------------------------------------------------------------------------
+
+/// **The bug, in the shape it shipped.** A literal on a continuation line
+/// below a non-empty first line must now be seen and must fail.
+#[test]
+fn a_literal_below_a_partial_first_line_is_seen_and_fails() {
+    let src = concat!("pub const ROW_GAP: f32 = space::MD\n", "    + 13.0;\n");
+    let scan = scan_source("widget/partial.rs", src);
+
+    assert_eq!(
+        scan.token_bound, 0,
+        "a partial-first-line RHS with a literal must NOT be token-bound — that \
+         was the hole: the first term alone looked clean"
+    );
+    assert_eq!(
+        scan.findings.len(),
+        1,
+        "it must surface as exactly one finding: {:?}",
+        scan.findings
+    );
+    assert_eq!(scan.findings[0].rule, Rule::UnboundVisualScalar);
+    assert_eq!(scan.findings[0].constant_name(), Some("ROW_GAP"));
+    assert!(
+        scan.findings[0].detail.contains("13.0"),
+        "the finding must name the literal from the continuation line, proving \
+         the join reached past line 1: {}",
+        scan.findings[0].detail
+    );
+    assert_eq!(
+        scan.unreadable, 0,
+        "the expression WAS recovered — this is a read-and-failed case, not an \
+         unreadable one"
+    );
+}
+
+/// The same shape with a token-only continuation binds, because the whole
+/// expression was read — not because line 1 looked clean.
+#[test]
+fn a_token_only_continuation_below_a_partial_first_line_binds() {
+    let src = concat!("pub const ROW_GAP: f32 = space::MD\n", "    + space::SM;\n");
+    let scan = scan_source("widget/partial.rs", src);
+
+    assert!(scan.findings.is_empty(), "{:?}", scan.findings);
+    assert_eq!(scan.token_bound, 1);
+    assert_eq!(scan.unreadable, 0);
+}
+
+/// **Non-vacuity.** Six fixtures, same constant name, same file, differing
+/// only in where the wrap falls and what the continuation holds. A gate that
+/// still stopped at line 1 would call the two partial-with-literal shapes
+/// `token-bound`.
+#[test]
+fn where_the_wrap_falls_never_changes_the_verdict_the_value_earns() {
+    let fixtures = [
+        (
+            "inline literal",
+            "pub const ROW_GAP: f32 = space::MD + 13.0;\n",
+        ),
+        (
+            "empty-first literal",
+            "pub const ROW_GAP: f32 =\n    space::MD + 13.0;\n",
+        ),
+        (
+            "partial-first literal",
+            "pub const ROW_GAP: f32 = space::MD\n    + 13.0;\n",
+        ),
+        (
+            "inline token",
+            "pub const ROW_GAP: f32 = space::MD + space::SM;\n",
+        ),
+        (
+            "empty-first token",
+            "pub const ROW_GAP: f32 =\n    space::MD + space::SM;\n",
+        ),
+        (
+            "partial-first token",
+            "pub const ROW_GAP: f32 = space::MD\n    + space::SM;\n",
+        ),
+    ];
+
+    let mut literal_shapes = Vec::new();
+    let mut token_shapes = Vec::new();
+    for (label, src) in fixtures {
+        let scan = scan_source("widget/wrap.rs", src);
+        if label.contains("literal") {
+            literal_shapes.push((label, scan));
+        } else {
+            token_shapes.push((label, scan));
+        }
+    }
+
+    for (label, scan) in &literal_shapes {
+        assert_eq!(
+            scan.findings.len(),
+            1,
+            "{label}: a literal must fail regardless of where the wrap falls: {:?}",
+            scan.findings
+        );
+        assert_eq!(scan.token_bound, 0, "{label}: a literal never binds");
+    }
+    for (label, scan) in &token_shapes {
+        assert_eq!(
+            scan.token_bound, 1,
+            "{label}: a token-only RHS binds regardless of the wrap"
+        );
+        assert!(scan.findings.is_empty(), "{label}: {:?}", scan.findings);
+    }
+}
+
+/// **INT-14 regression guard.** The empty-first-line shape must still join
+/// exactly as it did. The fix changed the guard from emptiness to the
+/// terminator; `""` carries no terminator, so it must still fall through
+/// to the join loop.
+#[test]
+fn the_empty_first_line_shape_still_joins_after_the_fix() {
+    let literal = concat!("pub const ROW_GAP: f32 =\n", "    space::MD + 13.0;\n");
+    let scan = scan_source("widget/int14.rs", literal);
+    assert_eq!(
+        scan.findings.len(),
+        1,
+        "INT-14's caught case must still be caught: {:?}",
+        scan.findings
+    );
+    assert!(scan.findings[0].detail.contains("13.0"));
+    assert_eq!(scan.token_bound, 0);
+
+    let token = concat!("pub const ROW_GAP: f32 =\n", "    space::MD + space::SM;\n");
+    let ok = scan_source("widget/int14.rs", token);
+    assert_eq!(ok.token_bound, 1);
+    assert!(ok.findings.is_empty(), "{:?}", ok.findings);
+}
+
+/// **No behaviour change on the happy path.** A declaration that ends on
+/// its opening line is returned untouched, exactly as before.
+#[test]
+fn a_declaration_ending_on_its_opening_line_is_returned_untouched() {
+    let lines: Vec<&str> = vec!["pub const A: f32 = space::MD + 13.0;", "fn later() {}"];
+    assert_eq!(
+        join_continuation(&lines, 0, " space::MD + 13.0;"),
+        Some(" space::MD + 13.0;".to_string()),
+        "the raw first-line RHS is returned verbatim when it carries the \
+         terminator — no join, no trim, no reordering"
+    );
+}
+
+/// The decision rule itself, asserted directly: the **terminator** decides,
+/// never emptiness.
+#[test]
+fn the_terminator_decides_the_join_and_emptiness_does_not() {
+    let lines: Vec<&str> = vec![
+        "pub const A: f32 = space::MD",
+        "    + 13.0;",
+        "pub const B: f32 = space::MD;",
+        "pub const C: f32 =",
+        "    space::SM;",
+    ];
+
+    // Partial first line → joined through to the terminator.
+    assert_eq!(
+        join_continuation(&lines, 0, " space::MD"),
+        Some("space::MD + 13.0;".to_string()),
+        "a non-empty first line WITHOUT a terminator must continue joining — \
+         this is the case the old `!is_empty()` guard returned early on"
+    );
+    // Complete first line → returned as-is.
+    assert_eq!(
+        join_continuation(&lines, 2, " space::MD;"),
+        Some(" space::MD;".to_string())
+    );
+    // Empty first line (INT-14) → joins.
+    assert_eq!(
+        join_continuation(&lines, 3, ""),
+        Some("space::SM;".to_string())
+    );
+}
+
+/// The `opens_new_item` / blank-line guards still bite on the partial shape,
+/// so a malformed declaration cannot swallow the code below it.
+#[test]
+fn a_partial_first_line_that_cannot_reach_a_terminator_is_unreadable() {
+    let cases = [
+        (
+            "continuation swallowed by a new item",
+            concat!(
+                "pub const ROW_GAP: f32 = space::MD\n",
+                "pub const OTHER: f32 = space::SM;\n"
+            ),
+        ),
+        (
+            "blank line before the terminator",
+            concat!(
+                "pub const ROW_GAP: f32 = space::MD\n",
+                "\n",
+                "    + 13.0;\n"
+            ),
+        ),
+        (
+            "file ends mid-expression",
+            "pub const ROW_GAP: f32 = space::MD\n",
+        ),
+    ];
+
+    for (label, src) in cases {
+        let scan = scan_source("widget/broken_partial.rs", src);
+        assert_eq!(
+            scan.unreadable, 1,
+            "{label}: must be reported unreadable, not silently token-bound"
+        );
+        assert_eq!(
+            scan.token_bound, 0,
+            "{label}: an expression that was never fully read cannot bind"
+        );
+        assert!(
+            scan.findings[0].detail.contains("could not read"),
+            "{label}: reported as unreadable, not as an unbound measurement: {}",
+            scan.findings[0].detail
+        );
+    }
+}
+
+/// A coefficient on a continuation line is a literal and must be caught,
+/// not mistaken for part of a token path. This is the exact shape that made
+/// the hole live in real code.
+#[test]
+fn a_multiplier_on_a_continuation_line_is_caught_not_glossed() {
+    let src = concat!(
+        "pub const CARD_HEIGHT: f32 = TITLE_RUNG.line_height\n",
+        "    + CAPTION_RUNG.line_height * 2.0\n",
+        "    + CARD_PADDING * 2.0;\n",
+    );
+    let scan = scan_source("widget/mult.rs", src);
+    assert_eq!(
+        scan.token_bound, 0,
+        "`* 2.0` is a literal on a continuation line; the join must reach it"
+    );
+    assert_eq!(scan.findings.len(), 1, "{:?}", scan.findings);
+    assert!(
+        scan.findings[0].detail.contains("2.0"),
+        "the finding names the coefficient: {}",
+        scan.findings[0].detail
+    );
+
+    // The same sum written with the doubled terms spelled out binds cleanly,
+    // which is how the one exposed constant in the tree was fixed.
+    let fixed = concat!(
+        "pub const CARD_HEIGHT: f32 = TITLE_RUNG.line_height\n",
+        "    + CAPTION_RUNG.line_height\n",
+        "    + CAPTION_RUNG.line_height\n",
+        "    + CARD_PADDING\n",
+        "    + CARD_PADDING;\n",
+    );
+    let ok = scan_source("widget/mult.rs", fixed);
+    assert_eq!(
+        ok.token_bound, 1,
+        "literal-free composition binds: {:?}",
+        ok.findings
+    );
+    assert!(ok.findings.is_empty(), "{:?}", ok.findings);
 }
