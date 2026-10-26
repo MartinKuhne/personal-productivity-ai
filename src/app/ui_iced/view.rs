@@ -34,8 +34,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::markdown::parse_markdown_to_events;
 use crate::ui::panel_layout::{LEFT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_DEFAULT_WIDTH};
 use crate::ui_iced::about::about_card;
-use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
-use crate::ui_iced::agent::transcript::agent_transcript_view;
+use crate::ui_iced::agent::agent_panel;
 use crate::ui_iced::app::{AppState, OverlayLayer};
 use crate::ui_iced::attributions::attributions_view;
 use crate::ui_iced::batch_dialog::{BatchDialogViewModel, batch_modal};
@@ -105,18 +104,12 @@ fn base_bands(state: &AppState) -> iced::Element<'_, Message> {
 /// document, then the empty state.
 fn center_body(state: &AppState) -> iced::Element<'_, Message> {
     if state.models.center.show_agent_session {
-        agent_session_body(&state.models.agent)
+        agent_panel(&state.models.agent)
     } else if state.models.center.has_tabs() {
         center_panel_rendered(&state.models.center, Some(document_body(state)))
     } else {
         center_panel_rendered(&state.models.center, None)
     }
-}
-
-/// The agent session view — the streaming transcript, shown while the center
-/// pane's `show_agent_session` flag is on.
-fn agent_session_body(view_model: &AgentPanelViewModel) -> iced::Element<'_, Message> {
-    agent_transcript_view(view_model)
 }
 
 /// The active document rendered through the markdown path

@@ -261,8 +261,10 @@ pub fn current_model_option<'a>(
 /// * Clear session → [`UserCommand::ClearAgentSession`]
 ///
 /// Every control is always allocated and gated with `on_press_maybe`, so the
-/// row's widget shape is stable across the idle ⇄ running and empty ⇄
-/// filled transitions (AGENTS §6).
+/// prompt block's widget shape is stable across the idle ⇄ running and empty
+/// ⇄ filled transitions (AGENTS §6). The editable prompt and its action gates
+/// share the first row; model/session controls occupy the second row so they
+/// do not starve labeled buttons of width in the center pane.
 #[must_use]
 pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
@@ -339,20 +341,32 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
         None => Column::<Message>::new().into(),
     };
 
-    Row::with_children(vec![
+    let actions = Row::with_children(vec![
         command_field.width(Length::Fill).into(),
         send_button.into(),
         queue_button.into(),
         cancel_button.into(),
+    ])
+    .spacing(ROW_SPACING)
+    .align_y(Alignment::Center);
+
+    let session_controls = Row::with_children(vec![
         model_label.into(),
         model_pick,
         queue_badge,
         clear_button.into(),
     ])
     .spacing(ROW_SPACING)
-    .padding(ROW_PADDING)
-    .align_y(Alignment::Center)
-    .into()
+    .align_y(Alignment::Center);
+
+    // Keep the prompt and its action gates in the center pane's available
+    // width. A single row also contains the model selector and session
+    // controls; at ordinary center-pane widths, iced can otherwise allocate
+    // zero width to a labeled button while laying the row out.
+    Column::with_children(vec![actions.into(), session_controls.into()])
+        .spacing(ROW_SPACING)
+        .padding(ROW_PADDING)
+        .into()
 }
 
 // ---------------------------------------------------------------------------

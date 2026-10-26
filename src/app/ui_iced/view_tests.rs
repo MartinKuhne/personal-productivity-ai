@@ -17,6 +17,7 @@ use crate::ui_iced::app::{ContextMenu, OverlayLayer, build_state};
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
+use iced_test::selector::Candidate;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -209,6 +210,109 @@ fn test_view_builds_while_the_agent_session_owns_the_center_pane() {
     state.app.orchestrator.agent_panel_state.show_results = true;
     state.rebuild_view_models();
     let _element: iced::Element<'_, Message> = view(&state);
+}
+
+#[test]
+fn test_live_view_mounts_and_routes_the_agent_prompt_controls() {
+    use crate::ui::strings;
+    use crate::ui_iced::agent::prompt_input::PROMPT_INPUT_ID;
+    use crate::ui_iced::message::AgentMessage;
+    use crate::ui_iced::update::update;
+
+    let mut state = fresh_state();
+    state.app.orchestrator.agent_panel_state.show_results = true;
+    state.rebuild_view_models();
+
+    let prompt_id = iced::widget::Id::from(PROMPT_INPUT_ID);
+    let mut ui = iced_test::simulator(view(&state));
+    assert!(
+        ui.find(strings::AGENT_SESSION_HEADER).is_ok(),
+        "the full live view must mount the agent session header"
+    );
+    let prompt_bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == prompt_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the full live view must expose the agent prompt field");
+    assert!(
+        prompt_bounds.width > 0.0 && prompt_bounds.height > 0.0,
+        "the prompt field must receive usable center-pane bounds, got {prompt_bounds:?}"
+    );
+
+    ui.point_at(prompt_bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("summarize");
+    let input_messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        input_messages.contains(&Message::Agent(AgentMessage::InputChanged {
+            text: "summarize".to_string(),
+        })),
+        "typing in the mounted prompt must emit the existing agent input message, got {input_messages:?}"
+    );
+
+    for message in input_messages {
+        let _ = update(&mut state, message);
+    }
+    state.rebuild_view_models();
+
+    let mut ui = iced_test::simulator(view(&state));
+    assert!(
+        ui.find(strings::AGENT_SEND_BUTTON).is_ok(),
+        "the mounted Send control must remain reachable in the live center pane"
+    );
+    let _ = ui.click(strings::AGENT_SEND_BUTTON);
+    let send_messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        send_messages.contains(&Message::Agent(AgentMessage::Submit {
+            text: "summarize".to_string(),
+        })),
+        "Send must use the existing agent message/reducer route, got {send_messages:?}"
+    );
+}
+
+#[test]
+fn test_live_view_gives_the_center_pane_to_the_agent_only_while_shown() {
+    use crate::ui::strings;
+
+    let mut state = fresh_state();
+    let tab_path = PathBuf::from("/notes/agent-owned.md");
+    state.app.tabs_mut().open_tab(tab_path);
+    state.app.orchestrator.agent_panel_state.show_results = true;
+    state.rebuild_view_models();
+
+    {
+        let mut agent_view = iced_test::simulator(view(&state));
+        assert!(
+            agent_view.find(strings::AGENT_SESSION_HEADER).is_ok(),
+            "the visible agent session must own the live center pane"
+        );
+        assert!(
+            agent_view.find("agent-owned.md").is_err(),
+            "the document tab must not be layered into the center while the agent owns it"
+        );
+    }
+
+    state.app.orchestrator.agent_panel_state.show_results = false;
+    state.rebuild_view_models();
+    let mut document_view = iced_test::simulator(view(&state));
+    assert!(
+        document_view.find(strings::AGENT_SESSION_HEADER).is_err(),
+        "hiding the agent session must remove the panel from the live center"
+    );
+    assert!(
+        document_view.find("agent-owned.md").is_ok(),
+        "the previously-open document tab must reclaim the center when the session is hidden"
+    );
 }
 
 #[test]
