@@ -588,6 +588,16 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "CALENDAR_FLYOUT_WIDTH",
         spec: "§3.10 — Calendar Flyout fixed width 256px",
     },
+    SurfaceGeometryConstant {
+        file: "widget/time_picker.rs",
+        name: "TIME_FLYOUT_WIDTH",
+        spec: "§3.11 — TimePicker drum flyout card width 220px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/time_picker.rs",
+        name: "TIME_FLYOUT_MAX_HEIGHT",
+        spec: "§3.11 — TimePicker drum flyout card max height 260px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

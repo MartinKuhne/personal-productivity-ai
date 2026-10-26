@@ -150,7 +150,8 @@ use crate::token_lint::{
 /// and `composite/keybind_recorder.rs`, joining Rule B's visual scope.
 ///
 /// 172 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 172;
+/// 173 as of `UIF-ATOM-011`: `widget/time_picker.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 173;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -203,7 +204,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 99 as of `UIF-COMP-015`, whose three additions are `composite/code_block.rs`,
 /// `composite/diff_viewer.rs`, and `composite/keybind_recorder.rs`.
 /// 100 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`.
-const PIN_RULE_B_FILES: usize = 100;
+/// 101 as of `UIF-ATOM-011`: `widget/time_picker.rs`.
+const PIN_RULE_B_FILES: usize = 101;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -361,7 +363,11 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// 302 as of Increment 18 (`UIF-ATOM-010`): the 8 token-bound visual constants in `date_picker::`
 /// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `NAV_BUTTON_SIZE`,
 /// `WEEKDAY_ROW_HEIGHT`, `CELL_SIZE`, `RADIUS`, `FLYOUT_PADDING`).
-const PIN_TOKEN_BOUND: usize = 302;
+///
+/// 310 as of `UIF-ATOM-011`: the 8 token-bound visual constants in `time_picker::`
+/// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `ROW_HEIGHT`,
+/// `FOOTER_HEIGHT`, `FOOTER_BUTTON_HEIGHT`, `RADIUS`, `HAIRLINE_WIDTH`).
+const PIN_TOKEN_BOUND: usize = 310;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -426,7 +432,8 @@ const PIN_RATIO: usize = 1;
 /// 52 as of `UIF-COMP-015`, which registers the two §3B.15 figures:
 /// `code_block::GUTTER_WIDTH` (40px) and `diff_viewer::GUTTER_WIDTH` (40px).
 /// 53 as of Increment 18 (`UIF-ATOM-010`), which registers `date_picker::CALENDAR_FLYOUT_WIDTH` (256px).
-const PIN_SURFACE_BOUND: usize = 53;
+/// 55 as of `UIF-ATOM-011`, which registers `time_picker::TIME_FLYOUT_WIDTH` (220px) and `time_picker::TIME_FLYOUT_MAX_HEIGHT` (260px).
+const PIN_SURFACE_BOUND: usize = 55;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

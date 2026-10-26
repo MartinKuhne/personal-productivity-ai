@@ -190,6 +190,8 @@
 //! * [`mod@date_picker`] — the DatePicker, DateRangePicker & CalendarView widgets
 //!   with pure civil calendar arithmetic, 42-cell fixed day grid, and
 //!   redundancy cues (§3.10, `UIF-ATOM-010`, `UIF-PRIN-003`, `UIF-PRIN-005`)
+//! * [`mod@time_picker`] — the TimePicker widget with civil time arithmetic,
+//!   segmented trigger, drum flyout and three-tier callbacks (§3.11, `UIF-ATOM-011`, `UIF-PRIN-003`, `UIF-PRIN-005`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -240,6 +242,7 @@ pub mod text_area_model;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;
+pub mod time_picker;
 pub mod toggle;
 pub mod toggle_model;
 pub mod toggle_widget;
@@ -253,4 +256,5 @@ pub use date_picker::{
 pub use range_slider::{RangeSlider, range_slider};
 pub use range_slider_model::{RangeSliderModel, RangeThumb};
 pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};
+pub use time_picker::{AmPm, CivilTime, TimePicker, TimePickerModel, TimeSegment, time_picker};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

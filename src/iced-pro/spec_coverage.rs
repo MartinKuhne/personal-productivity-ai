@@ -1922,32 +1922,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-011",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.11",
-        evidence: &["widget/text_input.rs", "surface/popover/mod.rs", "widget/rove.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `TimePickerModel`, \
-             `CivilTime`, segmented trigger, drum flyout or time arithmetic exists. \
-             Missing: the whole requirement — the `HH : MM [: SS] [AM/PM]` monospace \
-             segmented trigger with per-segment arrow spinning and its trailing 24x24px \
-             clock button; the 200-240px drum card of parallel scrollable 32px-row \
-             columns stepped by `minute_increment` and separated by `border.subtle` \
-             hairlines; the central 32px selection band; the pinned 36px \
-             `[Cancel] / [check OK]` footer that keeps the focus trap non-empty; the \
-             12-versus-24-hour and show-seconds modes; and the `Live` / `Commit` / \
-             `Cancel` callbacks over `CivilTime`, including the pre-open snapshot the \
-             `Escape` tier restores. Reusable pieces are real and would carry a builder a \
-             long way: `widget/text_input.rs` supplies the segmented cell and the \
-             zero-shift trailing-slot partition, `surface::popover` supplies the banded \
-             card with its escape rank, and `widget/rove.rs` supplies the skip-disabled \
-             walk the column focus would use. None of it is assembled into a time \
-             control. The `time.normal` (180ms) open transition the section assumes is a rung \
-             (`token::time::NORMAL`, `EaseOutCubic`), so nothing on the token side blocks \
-             a builder; what is missing is a widget that interpolates a value across a \
-             duration.",
+        evidence: &["widget/time_picker.rs"],
+        reason: None,
+        note: Some(
+            "Implemented TimePicker (§3.11, UIF-ATOM-011) with pure civil time arithmetic, \
+             monospace segmented trigger, 220px drum flyout card with header band, parallel \
+             scrollable columns, central 32px selection band, pinned 36px footer, and three-tier \
+             callbacks (Live, Commit, Cancel) with pre-open snapshot restoration.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-012",
