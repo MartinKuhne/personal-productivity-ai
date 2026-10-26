@@ -72,7 +72,9 @@ pub use composite::{
     side_sheet, skeleton, stepper, wizard_footer,
 };
 pub use widget::{
-    Avatar, AvatarModel, AvatarShape, AvatarSize, RatingControl, RatingModel, RatingStep, avatar,
+    Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
+    DatePicker, DatePickerModel, DateRangePicker, DateSelection, RatingControl, RatingModel,
+    RatingStep, Weekday, YearMonth, avatar, calendar_view, date_picker, date_range_picker,
     rating_control,
 };
 

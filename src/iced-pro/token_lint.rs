@@ -583,6 +583,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "GUTTER_WIDTH",
         spec: "§3B.15 — DiffViewer line-number gutter width 40px",
     },
+    SurfaceGeometryConstant {
+        file: "widget/date_picker.rs",
+        name: "CALENDAR_FLYOUT_WIDTH",
+        spec: "§3.10 — Calendar Flyout fixed width 256px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

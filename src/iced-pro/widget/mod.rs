@@ -187,6 +187,9 @@
 //!   [`HyperlinkTarget`](crate::widget::hyperlink_model::HyperlinkTarget)
 //!   rather than a bare string, and a status-bar preview that clears to
 //!   `None` (`UIF-ATOM-001d`)
+//! * [`mod@date_picker`] — the DatePicker, DateRangePicker & CalendarView widgets
+//!   with pure civil calendar arithmetic, 42-cell fixed day grid, and
+//!   redundancy cues (§3.10, `UIF-ATOM-010`, `UIF-PRIN-003`, `UIF-PRIN-005`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -209,6 +212,7 @@ pub mod chip_model;
 pub mod combo_box;
 pub mod combo_host;
 pub mod combo_model;
+pub mod date_picker;
 pub mod focus;
 pub mod focusable;
 pub mod hyperlink;
@@ -242,6 +246,10 @@ pub mod toggle_widget;
 
 pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
 pub use avatar::{Avatar, AvatarModel, AvatarShape, AvatarSize, avatar};
+pub use date_picker::{
+    CalendarView, CalendarViewMode, CivilDate, DatePicker, DatePickerModel, DateRangePicker,
+    DateSelection, Weekday, YearMonth, calendar_view, date_picker, date_range_picker,
+};
 pub use range_slider::{RangeSlider, range_slider};
 pub use range_slider_model::{RangeSliderModel, RangeThumb};
 pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};

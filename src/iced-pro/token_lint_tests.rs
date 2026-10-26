@@ -148,7 +148,9 @@ use crate::token_lint::{
 ///
 /// 171 as of `UIF-COMP-015`: `composite/code_block.rs`, `composite/diff_viewer.rs`,
 /// and `composite/keybind_recorder.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 171;
+///
+/// 172 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 172;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -200,7 +202,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 96 as of `UIF-COMP-013`, whose one addition is `composite/grid_view.rs`.
 /// 99 as of `UIF-COMP-015`, whose three additions are `composite/code_block.rs`,
 /// `composite/diff_viewer.rs`, and `composite/keybind_recorder.rs`.
-const PIN_RULE_B_FILES: usize = 99;
+/// 100 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`.
+const PIN_RULE_B_FILES: usize = 100;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -354,7 +357,11 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `BUTTON_GAP`, `LINE_HEIGHT`), and `keybind_recorder::` (`HEIGHT`, `KEYCAP_HEIGHT`,
 /// `CLEAR_BUTTON_SIZE`, `RADIUS`, `BORDER_REST_WIDTH`, `BORDER_FOCUS_WIDTH`,
 /// `KEYCAP_RADIUS`, `KEYCAP_PADDING_X`, `KEYCAP_GAP`, `PADDING_X`).
-const PIN_TOKEN_BOUND: usize = 294;
+///
+/// 302 as of Increment 18 (`UIF-ATOM-010`): the 8 token-bound visual constants in `date_picker::`
+/// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `NAV_BUTTON_SIZE`,
+/// `WEEKDAY_ROW_HEIGHT`, `CELL_SIZE`, `RADIUS`, `FLYOUT_PADDING`).
+const PIN_TOKEN_BOUND: usize = 302;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -418,7 +425,8 @@ const PIN_RATIO: usize = 1;
 /// `grid_view::DEFAULT_MIN_TILE_WIDTH` (160px) and `grid_view::DEFAULT_TILE_HEIGHT` (120px).
 /// 52 as of `UIF-COMP-015`, which registers the two §3B.15 figures:
 /// `code_block::GUTTER_WIDTH` (40px) and `diff_viewer::GUTTER_WIDTH` (40px).
-const PIN_SURFACE_BOUND: usize = 52;
+/// 53 as of Increment 18 (`UIF-ATOM-010`), which registers `date_picker::CALENDAR_FLYOUT_WIDTH` (256px).
+const PIN_SURFACE_BOUND: usize = 53;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

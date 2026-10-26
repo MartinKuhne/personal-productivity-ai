@@ -1905,32 +1905,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-010",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.10",
-        evidence: &["surface/popover/mod.rs", "surface/zorder.rs", "widget/text_input.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `DatePickerModel`, \
-             `DateSelection`, `CivilDate`, `YearMonth`, `CalendarViewMode` or `Weekday` \
-             type exists in this crate, no segmented trigger, no calendar flyout, and no \
-             calendar arithmetic of any kind. Missing: the whole requirement — the 32px \
-             segmented `YYYY-MM-DD` trigger with per-segment focus, digit auto-advance and \
-             in-place `Up`/`Down` increment that does not open the flyout; the reserved \
-             24x24px trailing calendar button on the `002b` zero-shift slot; the 256px \
-             fixed 6x7 day grid that holds its height exactly across 28- and 31-day \
-             months; the today / selected / in-range / blackout cueing with its diagonal \
-             strikethrough on out-of-bounds days; the `Days -> Months -> Years` \
-             drill-down; the two-click range selection with hover preview; the full 2D \
-             keyboard map; and the `Live` / `Commit` / `Cancel` callback set. The card it \
-             would live in is the cheap part and is already proven: `surface::popover` and \
-             the menu engine supply a Z-Band 2 / Escape Rank 3 card with anchored \
-             placement, dismissal and a focus roster, and `surface/zorder.rs` already \
-             registers that band. The date model is the expensive part and is genuinely \
-             unbuilt: this crate carries no calendar dependency and no civil-date type, so \
-             month lengths, leap years and day-of-week derivation are new work rather than \
-             a wrapper over something existing.",
+        evidence: &[
+            "widget/date_picker.rs",
+            "surface/popover/mod.rs",
+            "surface/zorder.rs",
+            "widget/text_input.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Implemented DatePicker, DateRangePicker & CalendarView (§3.10, UIF-ATOM-010) \
+             with pure civil calendar arithmetic, 42-cell fixed day grid, redundancy cues, \
+             live/commit/cancel callbacks, and keyboard navigation.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-011",
