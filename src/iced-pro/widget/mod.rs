@@ -228,4 +228,5 @@ pub mod toggle;
 pub mod toggle_model;
 pub mod toggle_widget;
 
+pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

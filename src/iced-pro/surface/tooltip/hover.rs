@@ -306,7 +306,7 @@ struct Arm {
 /// hidden ──pointer_enter(t0)──────────► pending ──tick(t0+400)──► shown
 /// hidden ──keyboard_focus_enter(t0)──► shown on the first tick (0 ms delay)
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HoverController {
     /// The live arrival, or `None` when neither the pointer nor the keyboard is on the
     /// control. Carries the channel so `tick` can pick the right delay.

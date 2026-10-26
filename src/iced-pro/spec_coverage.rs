@@ -1630,10 +1630,8 @@ const SPEC_COVERAGE: &[Coverage] = &[
              recorded against §4 rather than quietly adjusted here.",
         ),
         note: Some(
-            "The `font.family.mono` requirement inside this one still cannot be \
-             met: `UIF-TOK-004` models no font family at all, so a mono text \
-             area has no rung to ask for it. That gap stays recorded against \
-             `UIF-TOK-004` rather than being papered over here.",
+            "`FontFamily::Mono` (`UIF-TOK-004`) is now wired to `TextAreaModel` \
+             via `.with_font_family()` and the `.mono()` builder method.",
         ),
     },
     Coverage {
@@ -1853,12 +1851,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.7",
         evidence: &[
             "surface/tooltip/mod.rs",
             "surface/tooltip/hover.rs",
             "surface/tooltip/place.rs",
+            "surface/tooltip/widget.rs",
             "surface/popover/mod.rs",
             "surface/popover/model.rs",
             "surface/popover/place.rs",
@@ -1866,54 +1865,17 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "geometry/anchor.rs",
             "gallery_popover.rs",
         ],
-        reason: Some(
-            "Both halves built. The `Tooltip` half is conformed to §3.7 as revised: 400ms \
-             hover delay, 0ms keyboard-focus delay that opens immediately through a second \
-             arrival channel rather than a retimed hover, `surface.overlay` fill, `1px \
-             border.strong`, `radius.widget` (4px), 280px max width and `4px 8px` \
-             padding, dismissal on pointer leave, key press or `Escape`, and pointer \
-             transparency through a layer that sits above every z-band without joining the \
-             registry. The `TeachingPopover` half is built as `surface::popover`: the \
-             interactive callout clamped to the 280–360px band with `1px accent.border`, \
-             `radius.card` (6px) and `space.md` padding, a 13px SemiBold title over a \
-             13px Regular body on `type.ui_compact`, and `PopoverModel<ActionId>` whose \
-             footer produces `on_action(ActionId)` or `on_dismiss()`. Placement reuses \
-             `geometry::anchor::solve` — `PreferredSide` maps onto the existing alignment \
-             axes, so the two side placements share the submenu's flip and clamp rather \
-             than a second solver. The card enters `SurfaceRegistry` as \
-             `SurfaceKind::TeachingPopover` over `ZBand::Menu`, which is exactly §3.7's \
-             \"Z-Band 2 / Escape Rank 3\": `ZBand::Menu` *is* band 2 and its \
-             `escape_rank()` *is* 3, so no new band was added and no rank retuned. \
-             `open` pushes its own focus trap the way `MenuCascade::mount` does, so a \
-             callout opened inside a modal nests rather than replacing, and closing \
-             restores what the modal held. Missing, unchanged from before this increment: the tooltip is not wired to any \
-             widget's own hover or focus event inside this crate, so a host must drive a \
-             `HoverController` itself; and the optional trailing shortcut pill in \
-             `font.family.mono` has no rung to name, because `UIF-TOK-004` models no font \
-             family.",
-        ),
+        reason: None,
         note: Some(
-            "Three of INC-31's invented values were wrong against the revision and are now \
-             conformed: hover delay 500 → 400 ms, radius `RADIUS_CARD` (6px) → \
-             `RADIUS_WIDGET` (4px), and max width from 'the host's problem' to 280px \
-             owned and clamped here. Keyboard-focus opening at 0 ms did not exist at all \
-             and is now a real second arrival channel. The fill/border/text triple INC-31 \
-             chose was already right — the spec's own `4.01:1` border and `11.72:1` text \
-             figures match what this crate recomputed from raw sRGB, not transcribed. \
-             **§3.7's printed `accent.border` / `surface.overlay` figure of `5.94:1` was \
-             recomputed this increment at `5.9394:1` — the section rounds, and the \
-             measurement agrees; so does the title at `17.7168:1` and the body at \
-             `11.7180:1`. No disagreement with the printed column, unlike §3.8.** Two \
-             framework-supplied decisions are recorded here because §3.7 does not state \
-             them: the dismiss button is **always present** (`DISMISS_LABEL`), since the \
-             section's model carries only `primary_action: Option<…>` and a popover with \
-             no focusable control would trap the keyboard around an empty scope; and \
-             pointer-leave deliberately dismisses **nothing**, which is what lets the \
-             cursor travel from the trigger across the gap onto a footer button without \
-             the card vanishing under it. `Escape` on a callout dismisses *and consumes* \
-             at rank 3, so a modal underneath stays open — the opposite of the tooltip's \
-             \"dismiss but do not consume\", and the reason the callout joins the registry \
-             where the tooltip stays out.",
+            "Live `Tooltip` widget wiring and optional trailing shortcut pill in \
+             `FontFamily::Mono` (`text.muted` 6.78:1) are implemented in \
+             `surface/tooltip/widget.rs`. Both halves of §3.7 (Tooltip and \
+             TeachingPopover) are now fully implemented: 400ms hover delay, 0ms \
+             keyboard-focus delay opening immediately via `HoverController`, \
+             `surface.overlay` fill, `1px border.strong`, `radius.widget` (4px), \
+             280px max width and `4px 8px` padding, dismissal on pointer leave, key \
+             press or `Escape` (without consuming `Escape`), and pointer transparency \
+             through a layer outside `SurfaceRegistry`.",
         ),
     },
     Coverage {

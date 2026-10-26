@@ -2629,3 +2629,27 @@ fn test_every_foreground_only_token_is_rejected_on_every_locked_fill() {
          forbids both — the rule is about roles, not ratios"
     );
 }
+
+#[test]
+fn assert_contrast_passes_above_threshold() {
+    let p = Palette::dark();
+    assert_contrast(
+        p.text_primary,
+        p.surface_base,
+        MIN_TEXT_CONTRAST,
+        "test passing",
+    );
+}
+
+#[test]
+#[should_panic(expected = "contrast check failed for 'test failing'")]
+#[cfg(debug_assertions)]
+fn assert_contrast_panics_below_threshold_in_debug() {
+    let p = Palette::dark();
+    assert_contrast(
+        p.surface_overlay,
+        p.surface_base,
+        MIN_TEXT_CONTRAST,
+        "test failing",
+    );
+}

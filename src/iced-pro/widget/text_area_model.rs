@@ -452,6 +452,7 @@ pub struct TextAreaModel {
     read_only: bool,
     scroll_offset: f32,
     stance: EditStance,
+    font_family: typography::FontFamily,
 }
 
 impl Default for TextAreaModel {
@@ -475,6 +476,7 @@ impl TextAreaModel {
             read_only: false,
             scroll_offset: 0.0,
             stance: EditStance::Pristine,
+            font_family: typography::FontFamily::Sans,
         }
     }
 
@@ -517,7 +519,27 @@ impl TextAreaModel {
         self
     }
 
+    /// Set the font family for the text area buffer (`UIF-ATOM-002e`).
+    #[must_use]
+    pub fn with_font_family(mut self, font_family: typography::FontFamily) -> Self {
+        self.font_family = font_family;
+        self
+    }
+
+    /// Set the font family to monospace (`UIF-ATOM-002e`).
+    #[must_use]
+    pub fn mono(mut self) -> Self {
+        self.font_family = typography::FontFamily::Mono;
+        self
+    }
+
     // -- reads ---------------------------------------------------------
+
+    /// The font family used for the text area buffer (`UIF-ATOM-002e`).
+    #[must_use]
+    pub fn font_family(&self) -> typography::FontFamily {
+        self.font_family
+    }
 
     /// The buffer.
     #[must_use]

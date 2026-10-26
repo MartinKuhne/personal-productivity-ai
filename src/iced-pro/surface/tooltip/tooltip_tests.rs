@@ -326,6 +326,33 @@ fn style_binds_every_field_to_its_named_token() {
         );
         assert_eq!(s.radius, shape::RADIUS_WIDGET, "{name} radius");
         assert_eq!(s.font, typography::CAPTION, "{name} type rung");
+        assert_eq!(
+            s.shortcut_foreground, palette.text_muted,
+            "{name} shortcut foreground"
+        );
+        assert_eq!(
+            s.shortcut_font,
+            typography::FontFamily::Mono,
+            "{name} shortcut font family"
+        );
+    }
+}
+
+/// The trailing shortcut pill is `text_muted` on `surface_overlay`, measuring ~6.78:1
+/// and clearing the WCAG 2.1 AA text contrast floor (`UIF-ATOM-007`, §3.7).
+#[test]
+fn shortcut_pill_clears_the_text_contrast_floor_on_the_card() {
+    for (name, palette) in palettes() {
+        let s = TooltipStyle::resolve(&palette);
+        let ratio = contrast::contrast_ratio(s.shortcut_foreground, s.background);
+        assert!(
+            meets_text_contrast(s.shortcut_foreground, s.background),
+            "{name}: tooltip shortcut pill contrast {ratio:.4}:1 is below the {MIN_TEXT_CONTRAST}:1 floor"
+        );
+        assert!(
+            (ratio - 6.78).abs() < 0.05,
+            "{name}: shortcut pill contrast expected ~6.78:1, got {ratio:.4}:1"
+        );
     }
 }
 

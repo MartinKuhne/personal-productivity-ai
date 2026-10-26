@@ -440,3 +440,28 @@ fn test_history_arms_report_their_own_tier() {
         "cursor"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Font family tests (`UIF-ATOM-002e`)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_default_font_family_is_sans() {
+    let model = TextAreaModel::new();
+    assert_eq!(model.font_family(), typography::FontFamily::Sans);
+}
+
+#[test]
+fn test_with_font_family_sets_family() {
+    let model = TextAreaModel::new().with_font_family(typography::FontFamily::Mono);
+    assert_eq!(model.font_family(), typography::FontFamily::Mono);
+
+    let back_to_sans = model.with_font_family(typography::FontFamily::Sans);
+    assert_eq!(back_to_sans.font_family(), typography::FontFamily::Sans);
+}
+
+#[test]
+fn test_mono_builder_sets_monospace_family() {
+    let model = TextAreaModel::new().mono();
+    assert_eq!(model.font_family(), typography::FontFamily::Mono);
+}

@@ -119,7 +119,11 @@ use crate::token_lint::{
 /// code that paints it. The file count moves by eight and
 /// `PIN_RULE_B_FILES` does not move at all — the split added no visual
 /// literal to any scoped directory, and changed no literal in one either.
-const PIN_FILES_SCANNED: usize = 154;
+///
+/// 155 as of the live tooltip widget — `surface/tooltip/widget.rs`
+/// (`UIF-ATOM-007`). It sits under `surface/`, which is visual-scoped, so
+/// `PIN_RULE_B_FILES` moves with it.
+const PIN_FILES_SCANNED: usize = 155;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -156,7 +160,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// because of what it contains: the module defines no literal of its own
 /// and takes both of its numbers from `token::time`.
 /// 82 as of `UIF-ATOM-003`, whose one addition is `widget/toggle_widget.rs`.
-const PIN_RULE_B_FILES: usize = 82;
+/// 83 as of `UIF-ATOM-007`, whose one addition is `surface/tooltip/widget.rs`.
+const PIN_RULE_B_FILES: usize = 83;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -262,7 +267,10 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// for §3B.6's "vertical `1px` tree depth guides". The count moves by one
 /// because a declaration was added, not because a number changed — the same
 /// asymmetry `SELECTION_BAR_WIDTH` demonstrated above.
-const PIN_TOKEN_BOUND: usize = 193;
+///
+/// 194 as of `UIF-ATOM-007`: `surface/tooltip/mod.rs`'s `SHORTCUT_GAP` bound
+/// to `token::space::SM`.
+const PIN_TOKEN_BOUND: usize = 194;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
