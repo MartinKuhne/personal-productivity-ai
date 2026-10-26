@@ -2428,34 +2428,26 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-012",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.12",
         evidence: &[
+            "composite/side_sheet.rs",
             "surface/zorder.rs",
             "surface/modal.rs",
             "surface/movable.rs",
             "surface/modal_tier.rs",
         ],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `SideSheetModel`, \
-             `SheetMode`, docked/overlay/scrim variant, resize grab or pin state exists. \
-             Missing: the whole requirement — the 360px drawer resizable across \
-             [280px, 520px] over a 10px `size.splitter.grab` edge divider; the 36px \
-             header with its 16px SemiBold title, 24x24px `[Pin/Unpin]` and 24x24px \
-             `[Close]`; the padded scrollable body and optional 48px action footer; and \
-             the three-mode band mapping, `Docked` at Z-Band 0 sharing the horizontal \
-             workspace layout without covering content, `ModelessOverlay` at Z-Band 1 / \
-             Escape Rank 1 when focused, and `ModalScrim` at Z-Band 3 / Escape Rank 2 \
-             with the `UIF-MOD-002` dirty and busy close guard. Of any Phase-C item this \
-             one has the most nearly-available plumbing: `surface/zorder.rs` already owns \
-             all four bands and their escape ranks, `surface/modal.rs` proves the scrim, \
-             the focus trap and the dirty/busy guard, and `surface/movable.rs` proves a \
-             drag-and-clamp gesture over an injected geometry seam. None of it is docked, \
-             none of it is a sheet, and no rule maps a viewport narrower than 800px onto \
-             `ModalScrim`.",
+        reason: None,
+        note: Some(
+            "SideSheet contextual drawer composite with Docked (Z-Band 0 / Rank 0), \
+             ModelessOverlay (Z-Band 1 / Rank 1), and ModalScrim (Z-Band 3 / Rank 2) modes. \
+             Supports Left and Right placement, resizable [280px..520px] via a 10px grab handle \
+             governed by GestureSlot<f32>, full-height 1px divider line and centered 2x24px \
+             grip pill promoted to accent.border on hover or drag, 36px header with 16px title, \
+             24x24px Pin/Unpin mode toggle, 24x24px Close button with UIF-MOD-002 busy/dirty close \
+             gating, scrollable 16px body, optional 48px footer, and automatic 800px responsive \
+             breakpoint promotion to ModalScrim.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-013",

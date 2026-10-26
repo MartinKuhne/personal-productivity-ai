@@ -503,6 +503,26 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "TRIGGER_GAP",
         spec: "§3B.8 — OverflowToolbar trigger clearance 8px, the remainder of the 36px reserve",
     },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "DEFAULT_WIDTH",
+        spec: "§3B.12 — SideSheet default width 360px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "MIN_WIDTH",
+        spec: "§3B.12 — SideSheet min width 280px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "MAX_WIDTH",
+        spec: "§3B.12 — SideSheet max width 520px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "FOOTER_HEIGHT",
+        spec: "§3B.12 — SideSheet action footer height 48px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

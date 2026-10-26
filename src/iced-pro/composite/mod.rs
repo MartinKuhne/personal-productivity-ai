@@ -90,6 +90,8 @@
 //!   redundant glyph/colour status cues and non-shifting footer (`UIF-COMP-011`, `UIF-PRIN-005`, `UIF-PRIN-004`)
 //! * [`mod@pips_pager`] — the compact 24px carousel and pagination indicator strip with
 //!   boundary-clamped navigation buttons (`UIF-COMP-011`, `UIF-PRIN-004`)
+//! * [`mod@side_sheet`] — the contextual inspector drawer with Docked, ModelessOverlay and ModalScrim modes,
+//!   10px resize divider, and 36px header (`UIF-COMP-012`, `UIF-PRIN-006`, `UIF-MOD-002`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -110,6 +112,7 @@ pub mod pagination;
 pub mod pips_pager;
 pub mod scroll_view;
 pub mod settings_row;
+pub mod side_sheet;
 pub mod skeleton;
 pub mod stepper;
 pub mod table_cell;
@@ -126,6 +129,10 @@ pub use empty_state::{
 };
 pub use pagination::{PaginationBar, PaginationModel, pagination_bar};
 pub use pips_pager::{PipsPager, PipsPagerModel, pips_pager};
+pub use side_sheet::{
+    SheetMode, SheetPlacement, SideSheet, SideSheetModel, SideSheetResize, SideSheetState,
+    side_sheet,
+};
 pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
 pub use stepper::{
     StepItem, StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, stepper,

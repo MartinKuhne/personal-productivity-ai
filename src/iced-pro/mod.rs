@@ -61,9 +61,10 @@ pub mod widget;
 
 pub use composite::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, PaginationBar,
-    PaginationModel, PipsPager, PipsPagerModel, Skeleton, SkeletonStyle, StepItem, StepStatus,
+    PaginationModel, PipsPager, PipsPagerModel, SheetMode, SheetPlacement, SideSheet,
+    SideSheetModel, SideSheetResize, SideSheetState, Skeleton, SkeletonStyle, StepItem, StepStatus,
     Stepper, StepperModel, StepperOrientation, WizardFooterConfig, empty_state, pagination_bar,
-    pips_pager, skeleton, stepper, wizard_footer,
+    pips_pager, side_sheet, skeleton, stepper, wizard_footer,
 };
 pub use widget::{
     Avatar, AvatarModel, AvatarShape, AvatarSize, RatingControl, RatingModel, RatingStep, avatar,

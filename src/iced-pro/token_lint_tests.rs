@@ -137,7 +137,9 @@ use crate::token_lint::{
 ///
 /// 164 as of `UIF-COMP-011`: `composite/stepper.rs` and `composite/pips_pager.rs`. Both
 /// live under `composite/`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 164;
+///
+/// 165 as of `UIF-COMP-012`: `composite/side_sheet.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 165;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -183,7 +185,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// `widget/rating.rs`.
 /// 92 as of `UIF-COMP-011`, whose two additions are `composite/stepper.rs` and
 /// `composite/pips_pager.rs`.
-const PIN_RULE_B_FILES: usize = 92;
+/// 93 as of `UIF-COMP-012`, whose one addition is `composite/side_sheet.rs`.
+const PIN_RULE_B_FILES: usize = 93;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -311,7 +314,12 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `CURRENT_BORDER_WIDTH`, `LABEL_GAP`, `STEP_GAP`, `FOOTER_BUTTON_HEIGHT`) and
 /// `pips_pager::` (`BAR_HEIGHT`, `BUTTON_SIZE`, `PIP_SIZE_INACTIVE`,
 /// `PIP_WIDTH_ACTIVE`, `PIP_HEIGHT`, `PIP_GAP`, `PIP_RADIUS`).
-const PIN_TOKEN_BOUND: usize = 240;
+///
+/// 248 as of `UIF-COMP-012`: the 8 token-bound visual constants in
+/// `side_sheet::` (`HEADER_HEIGHT`, `GRAB_WIDTH`, `GRIP_PILL_WIDTH`,
+/// `GRIP_PILL_HEIGHT`, `GRIP_PILL_RADIUS`, `DIVIDER_STROKE`,
+/// `HEADER_BUTTON_SIZE`, `BODY_PADDING`).
+const PIN_TOKEN_BOUND: usize = 248;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -362,7 +370,10 @@ const PIN_RATIO: usize = 1;
 /// multiple of any rung — the same standing `input_dialog::FOLDER_LIST_MAX_HEIGHT`
 /// has, and it is registered for the same reason. Nothing was re-tuned and
 /// no existing entry changed class.
-const PIN_SURFACE_BOUND: usize = 36;
+/// 40 as of `UIF-COMP-012`, which registers the four §3B.12 figures:
+/// `side_sheet::DEFAULT_WIDTH` (360px), `side_sheet::MIN_WIDTH` (280px),
+/// `side_sheet::MAX_WIDTH` (520px), and `side_sheet::FOOTER_HEIGHT` (48px).
+const PIN_SURFACE_BOUND: usize = 40;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 
