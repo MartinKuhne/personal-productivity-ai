@@ -1237,6 +1237,121 @@ fn the_line_height_scan_fires_on_a_bare_pixel_constant() {
 }
 
 // ---------------------------------------------------------------------------
+// The inline layout literal boundary — Rule C scan (UIF-PRIN-001, UIF-VER-001)
+//
+// UIF-PRIN-001 forbids raw numeric literals in individual widget definitions,
+// including inline calls like Length::Fixed(12.0), Padding::new(8.0), or
+// Pixels(14.0). All production files in visual scopes must use token paths or
+// registered constants rather than inline numbers.
+// ---------------------------------------------------------------------------
+
+fn inline_layout_callsites(code: &str, needle: &str) -> Vec<String> {
+    let chars: Vec<char> = code.chars().collect();
+    let needle_chars: Vec<char> = needle.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i + needle_chars.len() <= chars.len() {
+        if chars[i..i + needle_chars.len()] == needle_chars[..] {
+            let start = i + needle_chars.len();
+            let mut depth = 1usize;
+            let mut j = start;
+            while j < chars.len() && depth > 0 {
+                match chars[j] {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 {
+                    j += 1;
+                }
+            }
+            out.push(chars[start..j].iter().collect());
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    out
+}
+
+#[test]
+fn no_inline_layout_call_hands_iced_a_bare_nonzero_literal() {
+    let root = crate_root();
+    let mut offenders: Vec<String> = Vec::new();
+    let needles = [
+        "Length::Fixed(",
+        "Padding::new(",
+        "Padding::from(",
+        "Pixels(",
+    ];
+    let mut checked = 0usize;
+
+    for path in source_files(&root) {
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string()
+            .replace('\\', "/");
+
+        // Only scan production files in widget/, surface/, and composite/
+        if is_test_file(&rel)
+            || (!rel.starts_with("widget/")
+                && !rel.starts_with("surface/")
+                && !rel.starts_with("composite/"))
+        {
+            continue;
+        }
+
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let code = redact_comments_and_strings(&raw);
+
+        for needle in needles {
+            for arg in inline_layout_callsites(&code, needle) {
+                checked += 1;
+                let trimmed = arg.trim();
+                // A bare nonzero numeric literal starts with 1..=9
+                if trimmed
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_digit() && c != '0')
+                {
+                    offenders.push(format!("{rel}: {needle}{trimmed})"));
+                }
+            }
+        }
+    }
+
+    assert!(
+        checked >= 10,
+        "the scan found only {checked} inline layout calls; scanner may have gone quiet"
+    );
+    assert!(
+        offenders.is_empty(),
+        "inline layout calls must not pass bare nonzero numeric literals: {offenders:?}"
+    );
+}
+
+#[test]
+fn the_inline_layout_scan_fires_on_a_doctored_literal() {
+    let doctored = "let _ = Length::Fixed(42.0);";
+    let code = redact_comments_and_strings(doctored);
+    let calls = inline_layout_callsites(&code, "Length::Fixed(");
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0]
+            .trim()
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit() && c != '0')
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Wrapped declarations — the INT-14 blind spot
 //
 // A `pub const NAME: f32 =` whose RHS `rustfmt` wraps onto the next line

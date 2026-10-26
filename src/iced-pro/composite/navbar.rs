@@ -244,7 +244,7 @@ pub fn navbar_trigger_element<'a, Message: 'a + Clone>(
             .size(Pixels(typography::BODY.size))
             .color(text_color),
     )
-    .padding(iced::Padding::new(4.0).horizontal(TRIGGER_PADDING_HORIZONTAL))
+    .padding(iced::Padding::new(space::XS).horizontal(TRIGGER_PADDING_HORIZONTAL))
     .style(move |_theme, status| {
         let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
         let is_pressed = matches!(status, iced::widget::button::Status::Pressed);

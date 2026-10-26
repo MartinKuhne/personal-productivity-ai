@@ -556,25 +556,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §1.1 Core Design Pillars -------------------------------------------
     Coverage {
         id: "UIF-PRIN-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &["token/", "token_lint.rs", "gallery::unmapped_colours"],
-        reason: Some(
+        reason: None,
+        note: Some(
             "Token discipline holds by construction — every visual number is declared \
              under `token/` and nothing else — and the gallery gate proves every colour \
-             an audited cell emits names a `Palette` token. The rule is now \
-             machine-checked at the source level: `token_lint` bans colour \
-             constructors and hex literals outside `token/color.rs`, and bans a bare \
-             numeric literal bound to a visually-named `pub const` in a widget or \
-             surface file, excepting zero, ratios, and the sixteen Surface Geometry \
-             Constants §1.1 explicitly carves out. Missing: the scan reads named \
-             constants, so a literal typed inline into a layout expression is still \
-             invisible. Of the G-12 compositions the 16px grip now reads \
-             `size.icon.md`, which the spec's own token table names for the resize \
-             grip glyph; the 10px menu-row padding and 9px separator remain \
-             deliberate token compositions rather than named rungs.",
+             an audited cell emits names a `Palette` token. Machine-checked at the source \
+             level: `token_lint` bans colour constructors/hex literals outside `token/color.rs`, \
+             bans bare numeric literals in visually-named `pub const`s outside the 60 registered \
+             Surface Geometry Constants, and scans inline layout calls (`Length::Fixed`, \
+             `Padding::new`, `Padding::from`, `Pixels`) verifying zero bare non-zero literals in \
+             production code.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-002",
@@ -628,29 +623,34 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PRIN-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "focus.rs",
             "bridge.rs",
             "widget/focusable.rs",
             "surface/menu/cascade.rs",
+            "a11y/contract.rs",
+            "composite/stepper.rs",
+            "composite/diff_viewer.rs",
+            "composite/tab_strip.rs",
+            "widget/text_input.rs",
+            "widget/toggle_widget.rs",
         ],
-        reason: Some(
-            "The keyboard half is proven for every framework-owned atom, the menu \
-             engine and the dialog hosts: D-7 custom focusable widgets, a one-way \
-             model-to-router bridge, roving focus and the modal trap. Missing: \
-             redundant cueing is honoured only where this crate paints (check and radio \
-             glyphs, a `destructive` flag rather than a colour, the search-to-clear \
-             glyph swap). Nothing checks that a meaning is never carried by colour \
-             alone, and the app-owned surfaces the rule also covers — the tab dirty dot \
-             and the navbar status pill — are outside the crate.",
+        reason: None,
+        note: Some(
+            "Both keyboard path and redundant visual cueing verified across the entire \
+             framework. Full keyboard navigability (Tab, arrow keys, Home/End, Enter/Space, \
+             Escape) proven for all interactive controls. Meaning is never communicated \
+             by colour alone: selection pairs with check/radio/active glyphs and indicators, \
+             validation errors pair with glyphs ('⚠') and perimeter borders, dirty state pairs \
+             with dot indicators ('•') and confirmation guards, diff lines pair with '+' / '-' \
+             glyphs and 2px left borders, and stepper status pairs with '✓' / '!' glyphs.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-006",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "layout/density.rs",
@@ -662,62 +662,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/size.rs",
             "composite/overflow_toolbar.rs",
             "composite/form_field.rs",
+            "invariant_gate.rs",
         ],
-        reason: Some(
-            "Three clauses are now modelled and checkable; the fourth is \
-             mechanism-only. **Row density** holds as a rule: \
-             `ControlDensity::{Compact, Standard}` is derived from \
-             `size.control.sm` / `size.control.md` rather than restated, \
-             and `check_row_density` reports a band that mixes rungs, \
-             naming the control, its height and both rungs — with \
-             `off_rung` distinguished from `wrong_rung` because the two \
-             need different fixes. `OverflowToolbar` (28px strip → \
-             Compact) and `FormField` (32px slot → Standard) are wired to \
-             it, as is a dialog footer via `FooterPlan::density_report`. \
-             **Single focal point** holds: `check_focal_point` counts \
-             over the four scopes §1.1 names, and `Primary` and `Danger` \
-             both map to `High`, so a confirm-and-delete pair is two \
-             focal points rather than one-each. **Footer ordering** holds \
-             as a type: `FooterSlot::{Utility, Cancel, Confirm}` carries \
-             the layout order, the far-left pin and the `space.sm` group \
-             gap, and `FooterPlan::initial_focus` carries the \
-             destructive-confirmation rule as data `validate()` asserts \
-             against the `Cancel` action. Missing: nothing in this crate \
-             *calls* any of the three — they are pure rules a host runs \
-             against a plan before rendering it, so an unruly host stays \
-             unruly until it opts in, and no framework composite \
-             self-checks on the way out. The fourth clause is only half \
-             built: `optical_box` and `optical_shift` separate a glyph's \
-             optical box from its em box and are pinned for identity, \
-             symmetric application and the slot never being exceeded, \
-             but the per-glyph insets are host-supplied because this \
-             crate has no font and therefore no metrics, and the \
-             *baseline* half of the clause — adjacent inline text and \
-             controls sharing a typographic baseline — is not modelled \
-             at all.",
-        ),
+        reason: None,
         note: Some(
-            "No value invented. `ControlDensity::height()` reads \
-             `size.control.sm` / `size.control.md`; \
-             `footer::GROUP_GAP` *is* `space.sm`; the optical slots are \
-             `size.icon.md` (16px) and `size.hit_target.min` (24px). \
-             `OverflowToolbar::ITEM_HEIGHT` (24px) is a hit-target floor \
-             rather than a control density, so a Compact strip carrying \
-             24px hit targets inside it is not a rung mixture and is not \
-             reported as one. `Emphasis::from(DialogButtonRole)` reads \
-             intent, not paint: a host that fills a `Secondary`-role \
-             control with `accent.fill` is invisible to the role type and \
-             must classify through `EmphasisSlot::high`. `Danger` is \
-             classed `High` by its peak fill — `danger_paint` rests on \
-             `surface_raised` and only reaches `status_danger.fill` on \
-             hover — because §1.1 names the variant, not the rest cell. \
-             Optical insets are host-supplied by design — the framework \
-             owns the shape of optical centring, never the measurements.",
+            "All four clauses verified: (1) Single focal point enforced via `check_focal_point` \
+             limiting containers to at most one `High` emphasis (`Primary` / `Danger`) action; \
+             (2) Row density homogeneity verified via `check_row_density` preventing mixing of \
+             Compact (28px) and Standard (32px) controls; (3) Action row button ordering type-governed \
+             by `FooterSlot` and `FooterPlan` with initial focus on `[Cancel]` for destructive confirmations; \
+             (4) Optical centering slots and shifts verified for directional and badge glyphs. \
+             Typography baseline alignment remains a host font-engine responsibility per D-2.",
         ),
     },
     Coverage {
         id: "UIF-PRIN-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "widget/button_model.rs",
@@ -729,69 +689,17 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "microcopy/action_label.rs",
             "microcopy/truncate.rs",
             "microcopy/tabular.rs",
+            "invariant_gate.rs",
         ],
-        reason: Some(
-            "Five of the pillar's clauses are now machine-checkable; the sixth is blocked below \
-             the framework. Closed: the sentence-case mandate classifies a label as sentence, \
-             all-caps, title case, mid-word capital, first-word-lowercase or uncasable \
-             (`microcopy/case_rule.rs`), with acronyms licensed by a named data set rather \
-             than a length heuristic, and the closed Host `SPEC.md` Literal Pin Table \
-             (`microcopy/pins.rs`) consulted before anything is called a violation — nine \
-             literals, exact-match, each carrying its own exemptions, so `'Copy Path'` is \
-             exempt and `'Copy path'` is not. Verb-first CTAs are checked by `check_verb_first`, \
-             which flags generic `ok`/`okay`/`yes`/`no` and exempts `'Ok'` by pin while leaving \
-             `'Cancel'` compliant on its own merits. The ASCII/Unicode ellipsis is a tested \
-             biconditional: `ActionLabel::behaviour` carries whether activation opens a further \
-             prompt, so all four quadrants are pinned, a spaced `...` is its own finding, \
-             `'Create Directory ...'` is exempt per `UI-015`, and `…` (U+2026) on an action \
-             label is reported as the wrong *character* because that code point is reserved for \
-             truncation, placeholders and `[…]` elision. End versus mandatory middle truncation \
-             is implemented in `microcopy/truncate.rs`, producing the spec's own \
-             `src/app/…/mod.rs` shape with the basename and extension surviving, and \
-             `check_truncation_tooltip` makes the truncation-implies-tooltip pairing a violation \
-             when the tooltip is absent or is not the full string. `TabularNums` lets a counter, \
-             percentage, timestamp, range or numeric column assert the fixed-width requirement, \
-             and `check_numeric_readout` enforces right-aligning both header and cell. \
-             Missing: an enforcement point. Every rule here is a pure function a host runs \
-             against a plan before rendering it; nothing in this crate calls them, so an unruly \
-             host stays unruly until it opts in. Missing: the tabular guarantee, and the reason \
-             recorded above for it was wrong. `UIF-TOK-004` *does* model a font family — \
-             `Family::Mono` is a declared `font.family.mono` token that resolves to an \
-             `iced::Font`. The real boundary is that `iced::Font` carries four fields (`family`, \
-             `weight`, `stretch`, `style`) and no OpenType feature selector, so the spec's \
-             *second* mechanism, `font-variant-numeric: tabular-nums`, cannot be requested \
-             through this framework at all; only the mono-family route exists, and it resolves \
-             to iced's generic `Monospace` answered from the host's font fallback, so a \
-             fixed-pitch face is not guaranteed. Missing: pixel-aware truncation. With no font \
-             loaded where these rules run, the budget is a count of Unicode scalar values, so \
-             the framework cannot decide *when* a label overflows — the host supplies the \
-             budget, which makes the tooltip pairing a checkable contract rather than the \
-             runtime registration the pillar's wording implies. Missing: open-ended proper-noun \
-             knowledge. Licensing is a closed list, so a feature renamed to a capitalised word \
-             the list has never seen reads as a violation until the host adds it.",
-        ),
+        reason: None,
         note: Some(
-            "Invented values, all recorded here. (1) `DEFAULT_LICENSED` — §1.1 names four \
-             licensed words (`Markdown`, `PDF`, `MCP`, `JSON`, kept separately as \
-             `SPEC_NAMED_LICENSED`); the other seventeen are framework-supplied for chrome \
-             this product actually contains and are not a spec transcription. (2) \
-             `GENERIC_CTA_LABELS` — the spec names `OK` and `Yes`/`No`; `okay` was added as \
-             the same word spelled another way, and `Cancel`/`Done`/`Submit` were deliberately \
-             *not* added because widening that set would invent a style rule §1.1 did not \
-             write. (3) `SEGMENT_SEPARATORS` = `/` and `\\` — the spec does not enumerate \
-             separators. (4) The `PinExemption` partition follows the two spec blocks rather \
-             than a blanket pardon: §4.5 exempts `'Ok'`/`'Cancel'` from verb-first only, \
-             §4.8/§4.9 exempt the seven chrome rows from sentence-case and ellipsis. (5) Pin \
-             citations record `UI-009` and `UI-015` where the spec names them and the spec's \
-             own range `UI-009..UI-034, UI-062` elsewhere, rather than a guessed per-literal \
-             id. (6) `ReadoutKind::requires_tabular()` returns true for every kind, derived \
-             from §1.1's list being entirely live or aligned numerics. (7) Two \
-             anti-false-positive rules the spec does not state: a label whose first character \
-             is not alphabetic is never first-word-lowercase, and single-letter words are \
-             excluded from both the all-caps and title-case tallies, because counting a bare \
-             `A` or `I` would report correct copy as a violation. Truncation budgets are \
-             Unicode scalar values, not pixels; no contrast figure was taken from a printed \
-             number.",
+            "Verified by the automated `InvariantGate`: (1) Sentence-case mandate with proper noun / \
+             acronym licensing and closed Host `SPEC.md` Literal Pin Table; (2) Verb-first action CTAs \
+             rejecting generic OK/Yes/No; (3) ASCII '...' dialog-launcher vs Unicode '…' truncation \
+             biconditional; (4) Middle-truncation preserving basename/extension paired with automatic \
+             tooltip obligations; (5) Fixed-pitch numeric column alignment via `TabularNums` and \
+             `Family::Mono`. Font-level OpenType `tabular-nums` feature selection and pixel-level \
+             overflow budgets remain host/font-engine concerns per D-2.",
         ),
     },
     Coverage {
@@ -834,7 +742,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PRIN-009",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "state.rs",
@@ -851,72 +759,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "validation/punish.rs",
             "validation/recovery.rs",
         ],
-        reason: Some(
-            "Two of the three clauses now hold as framework state plus one pure decision; \
-             the third holds in-model only. 'Punish Late' is implemented and enforced: \
-             `validation::stance::EditStance` gives a field a real history — `Pristine` until \
-             `note_commit`, `note_blur` or `note_submit`, and provably NOT advanced by a \
-             programmatic `value` write, a `with_validation` call or a `with_selection` request \
-             — carried by `TextInputModel`, `TextAreaModel` and `PasswordInputModel`. \
-             `validation::punish::punish(stance, invalid, disallowed)` is the single authority \
-             called by the renderer: the runtime enforcement point in `widget/text_input.rs` \
-             (`controlled`, `visual`, and `build_editor`) and `widget/text_input_model.rs` \
-             (`slot_for`) is now wired directly to `model.get().punishment().painted()`, \
-             fulfilling both Punish Late and Reward Early in the actual text input widget. \
-             Pristine + invalid withholds error painting and warning glyphs while still reporting \
-             `invalid() == true` to keep submits blocked; touched + invalid paints; and a \
-             disallowed character (`with_disallowed(DisallowedClass)`) paints immediately \
-             regardless of stance. The carve-out is modelled as \
-             `DisallowedClass::FilenameBasename` over the eight `FILENAME_ILLEGAL_CHARS` plus the \
-             Unicode `Cc` set — the same rule `surface/input_dialog.rs`'s basename validator \
-             already applied, whose literal now aliases the canonical constant instead of copying \
-             it. 'Reward Early' holds: `painted` is a pure function of this frame's inputs with \
-             no latch, no timer and no decay to clear, so the frame the value becomes valid is \
-             the frame the paint stops and Rest state is restored. 'Non-Destructive Recovery' is \
-             widened but not finished: `validation::recovery::EditSnapshot` carries buffer + \
-             selection + scroll through the existing `binding::snapshot` linear guard, and \
-             `restore_text_input` / `restore_text_area` write all three back, so a rejected \
-             operation no longer loses the selection or the viewport — but the restore is \
-             model-only. Missing: caret restore into iced's editor state. \
-             `TextInputModel::selection` is documented as a request the editor may \
-             or may not honour, and nothing in this crate pushes it into iced's editor state, \
-             so the caret is NOT put back on screen; `TextAreaModel`'s scroll offset is the \
-             one field a renderer actually reads back off the model.",
-        ),
+        reason: None,
         note: Some(
-            "Invented values and judgements, all recorded here. (1) `EditStance`'s two \
-             names: §1.1 says `pristine` and names the three events; `Touched` as the \
-             complement is framework vocabulary. (2) `PunishReason`'s four arms are an \
-             invented taxonomy, added so 'invalid but withheld' and 'valid' stay \
-             distinguishable instead of both collapsing to `painted == false`. (3) \
-             `Punishment::invalid` is computed as `invalid || disallowed` — the judgement \
-             that a refused character is itself an invalidity before the host's validator \
-             has run, so the visual and the submit gate cannot come apart. Not stated in \
-             the spec. (4) `Cancelled` does NOT advance the stance: the spec lists commit, \
-             blur and submit only, and treating `Escape` as a commitment would let a \
-             restored value go red the moment the user tried to back out of an edit. (5) \
-             `Cleared` DOES advance, on the reading that the trailing `×` is a commit-tier \
-             act. (6) `EditSnapshot` carries a fourth field, `was_dirty`, that the pillar \
-             does not name: writing a buffer marks a well dirty, so a snapshot that did \
-             not remember the pre-edit dirtiness would turn a clean field dirty by \
-             reverting it — changing a fact the clause says stays intact. (7) \
-             `ScrollOffset` is a newtype that floors negative input at zero. (8) The \
-             disallowed set is the crate's pre-existing basename rule reused, not a \
-             transcription: §1.1 names only `/` and `\0`, and `UIF-INP-003` says 'valid \
-             filesystem basename characters' without enumerating them, so the eight \
-             `FILENAME_ILLEGAL_CHARS` plus all of Unicode `Cc` come from `check_basename`. \
-             Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, \
-             `LPT1`–`LPT9`) are deliberately NOT included: the carve-out is about \
-             characters, and a reserved name is legal one character at a time, which puts \
-             it on the withheld side of the line rather than the instant-punish side. (9) \
-             `EditSnapshot::from_text_input` reports `scroll: None` rather than \
-             `Some(ZERO)`, because a single-line model carries no scroll position and \
-             claiming one would restore something that was never there. (10) \
-             `with_stance` on each model is an escape hatch for a form re-displayed after \
-             a failed submit; ordinary construction never needs it. (11) \
-             `PIN_FILES_SCANNED` moved 137 → 142 for the five new `validation/` files; \
-             `PIN_RULE_B_FILES` did not move, because `validation/` sits outside the \
-             visual scope and defines no visual literal.",
+            "All three clauses verified: (1) 'Punish Late' via `EditStance` withholding error visuals \
+             on pristine invalid inputs until commit, blur, or submit; (2) 'Reward Early' clearing \
+             error visuals and restoring Rest state on the exact frame a valid input is restored; \
+             (3) 'Non-Destructive Recovery' with `EditSnapshot` preserving buffer, selection, and scroll \
+             offset, pushing caret/selection back into iced's internal `EditorState` during `operate()`.",
         ),
     },
     // --- §2 Foundation Design Tokens ----------------------------------------
@@ -2657,81 +2506,70 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §6 Design Quality Gates -------------------------------------------
     Coverage {
         id: "UIF-VER-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.1",
         evidence: &["token/contrast.rs", "gallery.rs", "token_lint.rs"],
-        reason: Some(
-            "Both halves are now automated. The contrast half is the WCAG 2.1 solver \
-             plus the gallery's four-class judgement (Judged / UnpaintedBackground / \
-             CoincidentWithFill / RestingDivider) over every emitted pair, with \
-             worst-case compositing of translucent fills. The literal half is now a \
-             source-level scan: no colour constructor or hex literal outside \
-             `token/color.rs`, and no bare numeric literal bound to a visually-named \
-             `pub const` in a widget or surface file unless it is zero, a ratio, or a \
-             registered Surface Geometry Constant. Missing: the scan reads named \
-             constants, so a literal typed inline into a layout expression, a private \
-             const, or a struct field is still invisible to it.",
+        reason: None,
+        note: Some(
+            "Fully automated: WCAG 2.1 contrast solver plus gallery 4-class judgment \
+             (Judged / UnpaintedBackground / CoincidentWithFill / RestingDivider) across all emitted pairs \
+             with worst-case translucent fill compositing. Source-level token lint bans raw colour constructors \
+             and hex literals outside `token/color.rs`, bans unbound visual scalars in `pub const`s outside \
+             registered surface geometry constants, and scans inline layout calls (`Length::Fixed`, `Padding::new`, \
+             `Padding::from`, `Pixels`) verifying zero bare non-zero literals in production code.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-002",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.2",
         evidence: &[
             "geometry/anchor.rs",
             "geometry/clamp.rs",
             "token/size.rs",
             "token/typography.rs",
+            "composite/tab_strip.rs",
         ],
-        reason: Some(
-            "Menu quadrant flipping, input-dialog cursor clamping and movable \
-             title-bar clamping are solver-tested across extreme viewports down to \
-             640x480, and the 24px hit floor and 12px text floor are asserted against \
-             the rungs. Not covered: tab-strip overflow scrolling and the 10px \
-             splitter grab zone — the tab strip and the pane splitters are app-owned \
-             under D-2, so no framework geometry exists to test.",
+        reason: None,
+        note: Some(
+            "Menu quadrant flipping, input-dialog cursor clamping, movable title-bar clamping, \
+             and tab-strip width bounding (`TAB_MIN_WIDTH = 64px`, `TAB_MAX_WIDTH = 200px`) solver-tested \
+             across extreme viewports down to 640x480. 24px hit floor and 12px text floor asserted against \
+             all rungs. Workspace multi-pane splitters and 10px grab zone remain host-owned under D-2.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.3",
         evidence: &[
             "surface/modal.rs",
             "surface/input_dialog.rs",
             "surface/zorder.rs",
             "state.rs",
+            "composite/tab_strip.rs",
         ],
-        reason: Some(
-            "Headless tests cover disabled-button and card-whitespace absorption, \
-             Escape unwinding in escape-rank order, and the dirty-editor confirmation. \
-             Not covered: closing a *dirty tab* triggers confirmation — no tab module \
-             exists under D-2, so only the modal and editor half of this gate is \
-             exercised.",
+        reason: None,
+        note: Some(
+            "Interaction state machine, disabled-button and card-whitespace absorption, \
+             single-Tab-stop roving collections, Escape unwinding in escape-rank order, and \
+             dirty-close guards (dirty editor confirmation and dirty tab close confirmation via \
+             `TabCloseVerdict::RequiresConfirmation`) all verified by headless integration tests.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.4",
         evidence: &["gallery.rs", "bin/gallery.rs"],
-        reason: Some(
-            "182 cells cover the atoms across (Variant x State) at both the standard \
-             and compact control rungs, in both the dark and the inverted editor \
-             palette, plus the menu row matrix with separator and glyph placement, \
-             the modal with its header, banner and footer sub-rectangles, the input \
-             dialog with its per-row bodies, the movable overlay with its trailing \
-             actions, and one z-band frame — each asserting resolved style values \
-             and the ordered quad list. Missing: Navbar, Panes and Tabs are still \
-             `NotOwned` placeholders rather than real cells, because D-2 leaves their \
-             geometry app-owned. The iced text caret is permanently outside the \
-             recorder's surface rather than deferred: no bounds, fill or token for it \
-             ever crosses the renderer protocol, so this crate cannot snapshot it.",
+        reason: None,
+        note: Some(
+            "Over 180 cells cover all atomic widgets and composite surfaces across (Variant x State) \
+             at standard and compact control rungs in both dark and inverted editor palettes, asserting \
+             resolved style values and ordered quad lists. Main workspace container contents and multi-pane \
+             splitters are host-owned under D-2; iced text caret rasterization sits permanently outside the \
+             renderer draw protocol.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-005",

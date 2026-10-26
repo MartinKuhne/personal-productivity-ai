@@ -319,7 +319,7 @@ impl<'a, Message: 'a + Clone> From<TabStrip<'a, Message>> for Element<'a, Messag
                 tab_content = tab_content.push(
                     iced::widget::container(
                         iced::widget::text("•")
-                            .size(Pixels(12.0))
+                            .size(Pixels(typography::CAPTION.size))
                             .color(style.dirty_color),
                     )
                     .width(Length::Fixed(DIRTY_DOT_DIAMETER)),
@@ -335,22 +335,26 @@ impl<'a, Message: 'a + Clone> From<TabStrip<'a, Message>> for Element<'a, Messag
             if let Some(on_close) = &tab_strip.on_close_tab {
                 let close_msg = on_close(tab.id.clone());
                 tab_content = tab_content.push(
-                    iced::widget::button(iced::widget::text("×").size(Pixels(12.0)))
-                        .on_press(close_msg)
-                        .padding(iced::Padding::new(2.0))
-                        .style(move |_theme, _status| iced::widget::button::Style {
+                    iced::widget::button(
+                        iced::widget::text("×").size(Pixels(typography::CAPTION.size)),
+                    )
+                    .on_press(close_msg)
+                    .padding(iced::Padding::new(space::XXS))
+                    .style(move |_theme, _status| {
+                        iced::widget::button::Style {
                             background: Some(Color::TRANSPARENT.into()),
                             text_color: style.text_color,
                             border: Border::default(),
                             shadow: Shadow::default(),
                             snap: true,
-                        }),
+                        }
+                    }),
                 );
             }
 
             let tab_id = tab.id.clone();
             let mut tab_btn = iced::widget::button(tab_content)
-                .padding(iced::Padding::new(4.0).horizontal(space::SM))
+                .padding(iced::Padding::new(space::XS).horizontal(space::SM))
                 .style(move |_theme, status| {
                     let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
                     let s = resolve_tab_style(&palette, is_active, is_hovered, false);

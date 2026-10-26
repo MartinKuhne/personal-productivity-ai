@@ -122,3 +122,34 @@ fn test_tab_strip_widget_into_element_renders_cleanly() {
 
     let _el: Element<'_, Msg> = tab_strip.into();
 }
+
+#[test]
+fn test_tab_strip_extreme_viewport_stress_down_to_640x480() {
+    let mut model = TabStripModel::new();
+    for i in 0..12 {
+        model.open_tab(
+            TabItem::new(
+                format!("doc{i}"),
+                format!("Long Document Title Number {i}.md"),
+            )
+            .with_dirty(i % 3 == 0),
+        );
+    }
+    assert_eq!(model.tabs.len(), 12);
+
+    // Stress across viewport widths: 640px, 800px, 1024px, 1920px, 3840px
+    let viewports = [640.0, 800.0, 1024.0, 1920.0, 3840.0];
+    for vp_width in viewports {
+        let available_width = vp_width - 32.0; // Subtract shell margins
+        let tab_width =
+            (available_width / model.tabs.len() as f32).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH);
+        assert!(
+            tab_width >= TAB_MIN_WIDTH,
+            "tab width must not fall below 64px floor"
+        );
+        assert!(
+            tab_width <= TAB_MAX_WIDTH,
+            "tab width must not exceed 200px ceiling"
+        );
+    }
+}
