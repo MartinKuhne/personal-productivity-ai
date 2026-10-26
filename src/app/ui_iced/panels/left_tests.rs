@@ -74,6 +74,23 @@ fn measure(label: &str) -> f32 {
     label.chars().count() as f32 * 8.0
 }
 
+#[test]
+fn search_icon_buttons_keep_their_stable_ids_and_tooltip_labels() {
+    let magnifier = super::search_trigger_button("needle".to_string());
+    assert_eq!(
+        magnifier.focus_id().as_str(),
+        super::SEARCH_TRIGGER_FOCUS_ID
+    );
+    assert_eq!(
+        magnifier.tooltip_text(),
+        Some(strings::SEARCH_TRIGGER_TOOLTIP)
+    );
+
+    let clear = super::clear_trigger_button(false);
+    assert_eq!(clear.focus_id().as_str(), super::SEARCH_CLEAR_FOCUS_ID);
+    assert_eq!(clear.tooltip_text(), Some(strings::SEARCH_CLEAR_TOOLTIP));
+}
+
 /// A test app whose "System" content library is rooted in a temp dir, so
 /// `from_app`'s skill lookup stays off the real user profile ([RUST-006]).
 fn app_with_system_lib() -> (FastMdApp, TempDir) {

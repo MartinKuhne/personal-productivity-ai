@@ -157,10 +157,11 @@
 //!   other reducer-owned merges. The Shift keydown is delivered and reduced
 //!   **before** the row-click message, so the bit is current when
 //!   [`row_click_command`] runs.
-//! * **Tooltips.** iced 0.14 has no tooltip primitive, so the search and
-//!   clear buttons' tooltips
+//! * **Tooltip presentation.** The search and clear button labels
 //!   ([`strings::SEARCH_TRIGGER_TOOLTIP`],
-//!   [`strings::SEARCH_CLEAR_TOOLTIP`]) are not rendered.
+//!   [`strings::SEARCH_CLEAR_TOOLTIP`]) are displayed through iced's native
+//!   hover tooltip. The app does not yet mount the focus-aware shared
+//!   [`iced_pro::surface::tooltip`] host for these controls.
 //! * **Search box position.** UI-050 says "at the bottom of the directory
 //!   tree pane"; the panel renders it directly under the header, which is
 //!   the shipped behaviour rather than the spec wording ([RUST-041] drift
@@ -176,7 +177,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::widget::{Column, Row, Space, Stack, button, container, mouse_area, scrollable, text};
+use iced::widget::{Column, Row, Space, Stack, container, mouse_area, scrollable, text, tooltip};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use iced_pro::composite::tree_row;
@@ -187,6 +188,8 @@ use iced_pro::token::space;
 use iced_pro::token::typography::{self, FAMILY_SANS};
 use iced_pro::widget::badge;
 use iced_pro::widget::badge_model::BadgeTone;
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 use iced_pro::widget::text_input as pro_text_input;
 use iced_pro::widget::text_input::{InputKind, TextInput};
 use iced_pro::widget::text_input_controller::TextInputEmission;
@@ -497,6 +500,12 @@ pub const SEARCH_ROW_HEIGHT: f32 = tree_row::LABEL_RUNG.line_height
 /// have drawn them and stops the icon size silently tracking the label
 /// size.
 pub const SEARCH_GLYPH_SIZE: f32 = pro_text_input::SLOT_GLYPH_SIZE;
+
+/// Stable focus/widget identity for the left-panel magnifier button.
+pub const SEARCH_TRIGGER_FOCUS_ID: &str = "left_search_trigger";
+
+/// Stable focus/widget identity for the left-panel clear button.
+pub const SEARCH_CLEAR_FOCUS_ID: &str = "left_search_clear";
 
 /// Spacing between the search field and its two trailing controls —
 /// `space.xs` (`UIF-TOK-001`), the compact gap. Value unchanged at `4`,
@@ -1560,25 +1569,24 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
     .compact()
     .palette(Palette::pro());
 
-    let search_trigger = button(
-        text(strings::ICON_MAGNIFYING_GLASS)
-            .font(phosphor_font())
-            .size(SEARCH_GLYPH_SIZE),
+    let search_trigger = tooltip::Tooltip::new(
+        search_trigger_button(view_model.query.value.clone()),
+        text(strings::SEARCH_TRIGGER_TOOLTIP)
+            .size(typography::CAPTION.size)
+            .line_height(typography::CAPTION.iced_line_height())
+            .color(palette.text),
+        tooltip::Position::Bottom,
     )
-    .on_press(Message::Search(SearchMessage::Submitted {
-        query: view_model.query.value.clone(),
-    }));
-
-    let clear_trigger = button(
-        text(strings::ICON_X)
-            .font(phosphor_font())
-            .size(SEARCH_GLYPH_SIZE),
+    .gap(space::XS);
+    let clear_trigger = tooltip::Tooltip::new(
+        clear_trigger_button(view_model.is_searching),
+        text(strings::SEARCH_CLEAR_TOOLTIP)
+            .size(typography::CAPTION.size)
+            .line_height(typography::CAPTION.iced_line_height())
+            .color(palette.text),
+        tooltip::Position::Bottom,
     )
-    .on_press_maybe(
-        view_model
-            .is_searching
-            .then_some(Message::Search(SearchMessage::Cleared)),
-    );
+    .gap(space::XS);
 
     let search_row = Row::with_children(vec![
         search_field.width(Length::Fill).into(),
@@ -1598,6 +1606,42 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
         .spacing(PANEL_PADDING)
         .padding(PANEL_PADDING)
         .into()
+}
+
+/// Builds the left-panel magnifier and captures the current query.
+fn search_trigger_button(query: String) -> Button<'static, Message> {
+    Button::icon_only(
+        ButtonVariant::Ghost,
+        text(strings::ICON_MAGNIFYING_GLASS)
+            .font(phosphor_font())
+            .size(SEARCH_GLYPH_SIZE),
+        Message::Search(SearchMessage::Submitted { query }),
+        SEARCH_TRIGGER_FOCUS_ID,
+        strings::SEARCH_TRIGGER_TOOLTIP,
+    )
+    .compact()
+    .palette(Palette::pro())
+}
+
+/// Builds the always-visible clear control, disabling it outside search mode.
+fn clear_trigger_button(is_searching: bool) -> Button<'static, Message> {
+    let button = Button::icon_only(
+        ButtonVariant::Ghost,
+        text(strings::ICON_X)
+            .font(phosphor_font())
+            .size(SEARCH_GLYPH_SIZE),
+        Message::Search(SearchMessage::Cleared),
+        SEARCH_CLEAR_FOCUS_ID,
+        strings::SEARCH_CLEAR_TOOLTIP,
+    )
+    .compact()
+    .palette(Palette::pro());
+
+    if is_searching {
+        button
+    } else {
+        button.disabled()
+    }
 }
 
 /// Routes controlled search-field tiers into the existing search message channel.

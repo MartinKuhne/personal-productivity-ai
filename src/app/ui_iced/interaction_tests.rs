@@ -80,7 +80,9 @@ use crate::ui_iced::message::{
 };
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
-use crate::ui_iced::panels::left::{left_panel, row_icon};
+use crate::ui_iced::panels::left::{
+    SEARCH_CLEAR_FOCUS_ID, SEARCH_TRIGGER_FOCUS_ID, left_panel, row_icon,
+};
 use crate::ui_iced::panels::top::{
     apply_agent_debug_toggle, apply_background_logs_toggle, apply_table_width_strategy_change,
     strategy_menu_order, top_bar,
@@ -354,6 +356,91 @@ fn test_left_search_input_keeps_its_stable_id() {
         .is_ok(),
         "the search field must keep its stable focus/widget identity"
     );
+}
+
+/// Clicking the magnifier emits only the submission carrying the snapshotted query.
+#[test]
+fn test_left_search_magnifier_emits_exact_submission_message() {
+    let mut state = test_app_state();
+    state.overlay.search.set_query("needle".to_string());
+    state.rebuild_view_models();
+
+    let mut ui = sim(left_panel(&state.models.left));
+    let _ = ui
+        .click(strings::ICON_MAGNIFYING_GLASS)
+        .expect("the left-panel magnifier is visible");
+
+    assert_eq!(
+        messages(ui),
+        vec![Message::Search(SearchMessage::Submitted {
+            query: "needle".to_string(),
+        })]
+    );
+}
+
+/// Clicking clear in the active-search branch emits only the clear message.
+#[test]
+fn test_left_search_clear_emits_exact_cleared_message() {
+    let mut state = test_app_state();
+    state.overlay.search.set_query("needle".to_string());
+    state.overlay.search.submit();
+    state.rebuild_view_models();
+
+    let mut ui = sim(left_panel(&state.models.left));
+    let _ = ui
+        .click(strings::ICON_X)
+        .expect("the left-panel clear button is visible");
+
+    assert_eq!(messages(ui), vec![Message::Search(SearchMessage::Cleared)]);
+}
+
+/// The clear control remains visible when inactive but cannot emit a message.
+#[test]
+fn test_left_search_inactive_clear_remains_visible_and_emits_nothing() {
+    use iced_test::selector::Candidate;
+
+    let state = test_app_state();
+    let mut ui = sim(left_panel(&state.models.left));
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text { content, .. } if content == strings::ICON_X => Some(()),
+            _ => None,
+        })
+        .is_ok(),
+        "the inactive clear control must remain visible"
+    );
+
+    let _ = ui
+        .click(strings::ICON_X)
+        .expect("the inactive clear control remains present");
+
+    assert!(messages(ui).is_empty(), "inactive clear must be inert");
+}
+
+/// Both live icon controls keep distinct, stable focus/widget identities.
+#[test]
+fn test_left_search_icon_controls_keep_stable_focus_ids() {
+    use iced_test::selector::Candidate;
+
+    let mut state = test_app_state();
+    state.overlay.search.set_query("needle".to_string());
+    state.overlay.search.submit();
+    state.rebuild_view_models();
+    let mut ui = sim(left_panel(&state.models.left));
+
+    for expected_id in [SEARCH_TRIGGER_FOCUS_ID, SEARCH_CLEAR_FOCUS_ID] {
+        let expected_widget_id = iced::widget::Id::from(expected_id);
+        assert!(
+            ui.find(|candidate: Candidate<'_>| match candidate {
+                Candidate::Focusable { id: Some(id), .. } if *id == expected_widget_id => {
+                    Some(())
+                }
+                _ => None,
+            })
+            .is_ok(),
+            "the left-panel search control must register stable id {expected_id:?}"
+        );
+    }
 }
 
 /// The compact field geometry leaves its neighbouring magnifier and clear
