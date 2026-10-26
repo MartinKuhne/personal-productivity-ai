@@ -141,7 +141,9 @@ use crate::token_lint::{
 /// 165 as of `UIF-COMP-012`: `composite/side_sheet.rs`, joining Rule B's visual scope.
 ///
 /// 166 as of `UIF-COMP-009`: `composite/navigation_rail.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 166;
+///
+/// 167 as of `UIF-COMP-010`: `composite/command_palette.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 167;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -189,7 +191,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// `composite/pips_pager.rs`.
 /// 93 as of `UIF-COMP-012`, whose one addition is `composite/side_sheet.rs`.
 /// 94 as of `UIF-COMP-009`, whose one addition is `composite/navigation_rail.rs`.
-const PIN_RULE_B_FILES: usize = 94;
+/// 95 as of `UIF-COMP-010`, whose one addition is `composite/command_palette.rs`.
+const PIN_RULE_B_FILES: usize = 95;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -326,7 +329,11 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// 254 as of `UIF-COMP-009`: the 6 token-bound visual constants in
 /// `navigation_rail::` (`ROW_HEIGHT`, `TOGGLE_SIZE`, `ICON_SIZE`,
 /// `INDICATOR_WIDTH`, `GRAB_WIDTH`, `DIVIDER_STROKE`).
-const PIN_TOKEN_BOUND: usize = 254;
+///
+/// 260 as of `UIF-COMP-010`: the 6 token-bound visual constants in
+/// `command_palette::` (`ROW_SINGLE_HEIGHT`, `FOOTER_HEIGHT`, `ICON_SIZE`,
+/// `RADIUS`, `GROUP_HEADER_HEIGHT`, `DIVIDER_STROKE`).
+const PIN_TOKEN_BOUND: usize = 260;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -383,7 +390,10 @@ const PIN_RATIO: usize = 1;
 /// 44 as of `UIF-COMP-009`, which registers the four §3B.9 figures:
 /// `navigation_rail::COMPACT_WIDTH` (48px), `navigation_rail::EXPANDED_DEFAULT_WIDTH` (220px),
 /// `navigation_rail::EXPANDED_MIN_WIDTH` (180px), and `navigation_rail::EXPANDED_MAX_WIDTH` (320px).
-const PIN_SURFACE_BOUND: usize = 44;
+/// 48 as of `UIF-COMP-010`, which registers the four §3B.10 figures:
+/// `command_palette::CARD_WIDTH` (560px), `command_palette::CARD_HEIGHT` (380px),
+/// `command_palette::SEARCH_HEIGHT` (40px), and `command_palette::ROW_DOUBLE_HEIGHT` (44px).
+const PIN_SURFACE_BOUND: usize = 48;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

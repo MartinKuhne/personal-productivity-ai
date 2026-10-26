@@ -60,12 +60,13 @@ pub mod validation;
 pub mod widget;
 
 pub use composite::{
-    EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, NavDestination,
-    NavigationRail, NavigationRailModel, PaginationBar, PaginationModel, PipsPager, PipsPagerModel,
-    SheetMode, SheetPlacement, SideSheet, SideSheetModel, SideSheetResize, SideSheetState,
-    Skeleton, SkeletonStyle, StepItem, StepStatus, Stepper, StepperModel, StepperOrientation,
-    WizardFooterConfig, empty_state, navigation_rail, pagination_bar, pips_pager, side_sheet,
-    skeleton, stepper, wizard_footer,
+    CommandPalette, CommandPaletteModel, EmptyState, EmptyStateKind, EmptyStateModel,
+    EmptyStateStyle, EscapeDisposition, Icon, NavDestination, NavigationRail, NavigationRailModel,
+    PaginationBar, PaginationModel, PaletteGroup, PaletteItem, PaletteMode, PipsPager,
+    PipsPagerModel, SheetMode, SheetPlacement, SideSheet, SideSheetModel, SideSheetResize,
+    SideSheetState, Skeleton, SkeletonStyle, StepItem, StepStatus, Stepper, StepperModel,
+    StepperOrientation, WizardFooterConfig, command_palette, empty_state, navigation_rail,
+    pagination_bar, pips_pager, side_sheet, skeleton, stepper, wizard_footer,
 };
 pub use widget::{
     Avatar, AvatarModel, AvatarShape, AvatarSize, RatingControl, RatingModel, RatingStep, avatar,

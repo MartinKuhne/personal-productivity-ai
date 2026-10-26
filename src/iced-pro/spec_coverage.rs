@@ -2367,38 +2367,25 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-010",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.10",
         evidence: &[
+            "composite/command_palette.rs",
             "widget/auto_suggest_model.rs",
             "widget/auto_suggest_host.rs",
             "surface/modal.rs",
             "surface/zorder.rs",
         ],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built as a palette: \
-             the user deferred this composite to Phase C on 2026-10-23. No \
-             `CommandPaletteModel`, `PaletteMode`, `PaletteGroup`, prefix-mode contract or \
-             two-stage `Escape` exists in palette form. Missing: the whole requirement — \
-             the 560x380px card top-centred at a fixed 64px offset over `surface.scrim` \
-             in Z-Band 3 / Escape Rank 2 so result counts never shift the input; the 40px \
-             search field with its leading glyph, its removable `>` / `#` / `@` mode chip \
-             that `Backspace` at caret 0 resets to Files, and its trailing `Esc` hint; the \
-             virtualized grouped result list with matched-span emphasis, the active-row \
-             subtitle promoted to `text.strong` under the Rule 4 foreground lock, and \
-             right-aligned mono shortcut pills; the 24px keyboard legend footer; and the \
-             `Live` / `Commit` / `Cancel` callback set. The closest relative in this crate \
-             is genuinely close and worth naming rather than hiding: `AutoSuggestModel` and \
-             `AutoSuggestHost` already implement a trailing-edge 200ms debounce restarted \
-             per keystroke, a monotonic generation guard that drops out-of-order answers \
-             and counts them, a roving highlight that deliberately leaves the text caret \
-             alone, and a two-stage `Escape`. None of that is a palette: there is no \
-             scrim-mounted modal card at the palette's band, no mode-prefix state, no \
-             grouped-result virtualization and no `Ctrl+K` binding — and the scrim, band \
-             and escape-rank plumbing exists independently in `surface/modal.rs` and \
-             `surface/zorder.rs` without being joined to any of it.",
+        reason: None,
+        note: Some(
+            "CommandPalette / SearchView modal card (§3B.10) with 560x380px surface mounted in \
+             Z-Band 3 / Escape Rank 2 over surface.scrim, fixed 64px top offset, 40px search \
+             header with removable mode prefix chips (> # @) and Mono Esc hint, grouped results \
+             with 24px section headers, 32px single / 44px double rows with matched span \
+             emphasis, active-row Rule 4 text.strong subtitle promotion, right-aligned mono \
+             shortcut pills, 24px keyboard legend footer, and two-stage Escape with Live/Commit/Cancel \
+             callback tier.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-011",

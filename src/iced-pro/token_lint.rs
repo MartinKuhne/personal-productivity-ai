@@ -543,6 +543,26 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "EXPANDED_MAX_WIDTH",
         spec: "§3B.9 — NavigationRail expanded max width 320px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "CARD_WIDTH",
+        spec: "§3B.10 — CommandPalette card width 560px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "CARD_HEIGHT",
+        spec: "§3B.10 — CommandPalette card height 380px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "SEARCH_HEIGHT",
+        spec: "§3B.10 — CommandPalette search row height 40px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "ROW_DOUBLE_HEIGHT",
+        spec: "§3B.10 — CommandPalette two-line item height 44px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

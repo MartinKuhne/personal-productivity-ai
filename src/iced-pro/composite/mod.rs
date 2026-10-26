@@ -94,6 +94,8 @@
 //!   10px resize divider, and 36px header (`UIF-COMP-012`, `UIF-PRIN-006`, `UIF-MOD-002`)
 //! * [`mod@navigation_rail`] — the collapsible navigation rail composite supporting compact (48px)
 //!   and resizable expanded (180–320px) modes with roving keyboard focus (`UIF-COMP-009`, `UIF-PRIN-005`, `UIF-PRIN-006`)
+//! * [`mod@command_palette`] — the quick-open and command palette modal card with prefix modes,
+//!   two-stage Escape, and Rule 4 text.strong subtitle promotion (`UIF-COMP-010`, `UIF-PRIN-003`, `UIF-TOK-006`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -103,6 +105,7 @@
 
 pub mod breadcrumb;
 pub mod card;
+pub mod command_palette;
 pub mod empty_state;
 pub mod expander;
 pub mod form_field;
@@ -127,6 +130,14 @@ pub mod tree_row;
 pub mod tree_view;
 pub mod virtual_list;
 
+pub use command_palette::{
+    CARD_HEIGHT, CARD_WIDTH, CommandPalette, CommandPaletteModel, CommandPaletteState,
+    DIVIDER_STROKE, EscapeDisposition, FOOTER_HEIGHT, GLYPH_SEARCH, GROUP_HEADER_HEIGHT, LABEL_ESC,
+    LEGEND_KEYBOARD, NO_RESULTS, PLACEHOLDER_COMMANDS, PLACEHOLDER_FILES, PLACEHOLDER_SYMBOLS,
+    PLACEHOLDER_TAGS, PaletteGroup, PaletteItem, PaletteMode, RADIUS, ROW_DOUBLE_HEIGHT,
+    ROW_SINGLE_HEIGHT, SEARCH_HEIGHT, SEARCHING, TOP_OFFSET, card_bounds, command_palette,
+    highlight_spans,
+};
 pub use empty_state::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
 };
