@@ -1,7 +1,7 @@
 //! Tests for the segmented-control resolver and geometry —
 //! `UIF-ATOM-001b`, §3.1b.
 //!
-//! Six groups, in order:
+//! Seven groups, in order:
 //!
 //! 1. **Composition.** The unselected segment *is* the Secondary button
 //!    resolver's answer, and the selected segment *is* its `Pressed`
@@ -16,10 +16,20 @@
 //!    the boxes tile the strip without overlap or gap.
 //! 6. **Contrast.** Every ratio the module doc quotes, recomputed from
 //!    the raw sRGB through the crate's own `contrast_ratio`.
+//! 7. **Live widget.** Controlled creation, hover, clicks, selection mode
+//!    transitions, disabled gating, keyboard navigation, and headless rendering.
+
+use std::collections::BTreeSet;
 
 use super::*;
 use crate::state::BaseState;
+use crate::test_helpers::{Harness, focus_one};
 use crate::token::{contrast, contrast::contrast_ratio};
+use crate::widget::button_model::ButtonDensity;
+use crate::widget::segmented_model::{SegmentItem, SelectionMode};
+use iced::advanced::widget::Widget;
+use iced::keyboard::key::{Key, Named};
+use iced_test::renderer::Renderer as HeadlessRenderer;
 
 fn palette() -> Palette {
     Palette::dark()
@@ -487,4 +497,347 @@ fn the_strip_heights_are_the_two_spec_rungs() {
     assert_eq!(FOCUS_RING_WIDTH, 2.0);
     assert_eq!(CHECK_GLYPH, 14.0);
     assert_eq!(CHECK_SLOT_WIDTH, 22.0);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Live widget
+// ---------------------------------------------------------------------------
+
+fn leaked<Id: Clone + Ord>(model: SegmentedModel<Id>) -> &'static SegmentedModel<Id> {
+    Box::leak(Box::new(model))
+}
+
+fn key_press(key: Named) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(key),
+        modified_key: Key::Named(key),
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::NONE,
+        text: None,
+        repeat: false,
+    })
+}
+
+fn widget_bounds<M: Send + 'static>(harness: &mut Harness<M, HeadlessRenderer>) -> Rectangle {
+    let recorded = harness.recorded();
+    assert!(
+        !recorded.is_empty(),
+        "a segmented button registers exactly one focusable node, got {recorded:?}"
+    );
+    recorded[0].1
+}
+
+fn sample_segments() -> Vec<SegmentItem<&'static str>> {
+    vec![
+        SegmentItem::new("left", "Left"),
+        SegmentItem::new("center", "Center"),
+        SegmentItem::new("right", "Right"),
+    ]
+}
+
+#[test]
+fn test_controlled_creation_and_state_initialization() {
+    let model = leaked(SegmentedModel::new(sample_segments()));
+    let btn = SegmentedButton::<BTreeSet<&'static str>, &'static str>::controlled(
+        Controlled::new(model),
+        "seg_btn",
+        Some,
+    );
+
+    assert_eq!(btn.focus_id().as_str(), "seg_btn");
+    assert_eq!(btn.widget_id(), &widget_id(btn.focus_id()));
+    assert_eq!(btn.model().segments.len(), 3);
+    assert_eq!(btn.palette_ref(), &Palette::dark());
+
+    let mut custom_palette = Palette::dark();
+    custom_palette.accent_text = Color::WHITE;
+    let btn_custom = btn.with_palette(custom_palette);
+    assert_eq!(btn_custom.palette_ref(), &custom_palette);
+
+    let tag = Widget::<BTreeSet<&'static str>, iced::Theme, HeadlessRenderer>::tag(&btn_custom);
+    assert_eq!(tag, tree::Tag::of::<SegmentedState>());
+
+    let state = Widget::<BTreeSet<&'static str>, iced::Theme, HeadlessRenderer>::state(&btn_custom);
+    let downcast = state.downcast_ref::<SegmentedState>();
+    assert_eq!(downcast.hovered, None);
+    assert_eq!(downcast.pressed, None);
+    assert_eq!(downcast.focused_segment, None);
+    assert!(!downcast.focusable.is_focused());
+
+    let size = Widget::<BTreeSet<&'static str>, iced::Theme, HeadlessRenderer>::size(&btn_custom);
+    assert_eq!(
+        size,
+        Size::new(Length::Shrink, Length::Fixed(HEIGHT_STANDARD))
+    );
+}
+
+#[test]
+fn test_mouse_hover_over_different_segments() {
+    let model = leaked(SegmentedModel::new(sample_segments()));
+    let mut harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(model), "seg_hover", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let label_widths = [
+        "Left".len() as f32 * 8.0,
+        "Center".len() as f32 * 8.0,
+        "Right".len() as f32 * 8.0,
+    ];
+
+    let b0 = segment_bounds(bounds, 0, &label_widths);
+    let b1 = segment_bounds(bounds, 1, &label_widths);
+    let b2 = segment_bounds(bounds, 2, &label_widths);
+
+    let pt0 = Point::new(b0.x + b0.width / 2.0, b0.y + b0.height / 2.0);
+    let pt1 = Point::new(b1.x + b1.width / 2.0, b1.y + b1.height / 2.0);
+    let pt2 = Point::new(b2.x + b2.width / 2.0, b2.y + b2.height / 2.0);
+    let outside_pt = Point::new(bounds.x + bounds.width + 50.0, bounds.y + 50.0);
+
+    // Hover emits no messages
+    let msgs0 = harness.hover(pt0);
+    assert!(msgs0.is_empty());
+
+    let msgs1 = harness.hover(pt1);
+    assert!(msgs1.is_empty());
+
+    let msgs2 = harness.hover(pt2);
+    assert!(msgs2.is_empty());
+
+    let msgs_out = harness.hover(outside_pt);
+    assert!(msgs_out.is_empty());
+}
+
+#[test]
+fn test_click_unselected_segment_toggles_selection_single_select() {
+    let model = leaked(SegmentedModel::new(sample_segments()).with_selected("left"));
+    let mut harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(model), "seg_click_single", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let label_widths = [
+        "Left".len() as f32 * 8.0,
+        "Center".len() as f32 * 8.0,
+        "Right".len() as f32 * 8.0,
+    ];
+
+    let b1 = segment_bounds(bounds, 1, &label_widths);
+    let pt1 = Point::new(b1.x + b1.width / 2.0, b1.y + b1.height / 2.0);
+
+    harness.hover(pt1);
+    let press_msgs = harness.press(pt1);
+    assert!(
+        press_msgs.is_empty(),
+        "press on segment produces no immediate emission"
+    );
+
+    let release_msgs = harness.release(pt1);
+    assert_eq!(release_msgs.len(), 1);
+    assert_eq!(release_msgs[0], BTreeSet::from(["center"]));
+
+    // Drag out cancels
+    harness.hover(pt1);
+    harness.press(pt1);
+    let cancel_msgs = harness.release(Point::new(bounds.x + 1000.0, bounds.y + 1000.0));
+    assert!(cancel_msgs.is_empty(), "drag out produces no emission");
+
+    // Click on already selected segment produces no emission in SingleSelect mode
+    let b0 = segment_bounds(bounds, 0, &label_widths);
+    let pt0 = Point::new(b0.x + b0.width / 2.0, b0.y + b0.height / 2.0);
+    harness.hover(pt0);
+    harness.press(pt0);
+    let no_evict_msgs = harness.release(pt0);
+    assert!(
+        no_evict_msgs.is_empty(),
+        "clicking held single-select member is a no-op"
+    );
+}
+
+#[test]
+fn test_click_unselected_segment_toggles_selection_multi_select() {
+    let model = leaked(SegmentedModel::multi(sample_segments()).with_selected("left"));
+    let mut harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(model), "seg_click_multi", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let label_widths = [
+        "Left".len() as f32 * 8.0,
+        "Center".len() as f32 * 8.0,
+        "Right".len() as f32 * 8.0,
+    ];
+
+    let b1 = segment_bounds(bounds, 1, &label_widths);
+    let pt1 = Point::new(b1.x + b1.width / 2.0, b1.y + b1.height / 2.0);
+
+    harness.hover(pt1);
+    let press_msgs = harness.press(pt1);
+    assert!(press_msgs.is_empty());
+
+    let add_msgs = harness.release(pt1);
+    assert_eq!(add_msgs.len(), 1);
+    assert_eq!(add_msgs[0], BTreeSet::from(["left", "center"]));
+
+    // Click on already selected segment removes it in MultiSelect mode
+    let b0 = segment_bounds(bounds, 0, &label_widths);
+    let pt0 = Point::new(b0.x + b0.width / 2.0, b0.y + b0.height / 2.0);
+    harness.hover(pt0);
+    harness.press(pt0);
+    let remove_msgs = harness.release(pt0);
+    assert_eq!(remove_msgs.len(), 1);
+    assert_eq!(remove_msgs[0], BTreeSet::new());
+}
+
+#[test]
+fn test_click_disabled_segment_produces_no_emission() {
+    let segments = vec![
+        SegmentItem::new("a", "Alpha"),
+        SegmentItem::new("b", "Beta").disabled(),
+        SegmentItem::new("c", "Gamma"),
+    ];
+    let model = leaked(SegmentedModel::new(segments));
+    let mut harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(model), "seg_disabled_item", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let label_widths = [
+        "Alpha".len() as f32 * 8.0,
+        "Beta".len() as f32 * 8.0,
+        "Gamma".len() as f32 * 8.0,
+    ];
+
+    let b1 = segment_bounds(bounds, 1, &label_widths);
+    let pt1 = Point::new(b1.x + b1.width / 2.0, b1.y + b1.height / 2.0);
+
+    harness.hover(pt1);
+    assert!(harness.press(pt1).is_empty());
+    assert!(harness.release(pt1).is_empty());
+
+    // Whole strip disabled
+    let inert_model = leaked(SegmentedModel::new(sample_segments()).disabled());
+    let mut inert_harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(inert_model), "seg_inert", Some).into()
+    });
+
+    let b0 = Point::new(10.0, 10.0);
+    inert_harness.hover(b0);
+    assert!(inert_harness.press(b0).is_empty());
+    assert!(inert_harness.release(b0).is_empty());
+}
+
+#[test]
+fn test_keyboard_arrow_roving_and_selection() {
+    let model = leaked(SegmentedModel::new(sample_segments()));
+    let mut harness = Harness::headless(move || {
+        SegmentedButton::controlled(Controlled::new(model), "seg_kb", Some).into()
+    });
+
+    focus_one(&mut harness, "seg_kb");
+
+    // ArrowRight roves to first enabled segment (0, "left")
+    let r1 = harness.pointer(&[key_press(Named::ArrowRight)], mouse::Cursor::Unavailable);
+    assert!(r1.is_empty());
+
+    // ArrowRight roves to next enabled segment (1, "center")
+    let r2 = harness.pointer(&[key_press(Named::ArrowRight)], mouse::Cursor::Unavailable);
+    assert!(r2.is_empty());
+
+    // Space selects focused segment ("center")
+    let space_msgs = harness.pointer(&[key_press(Named::Space)], mouse::Cursor::Unavailable);
+    assert_eq!(space_msgs.len(), 1);
+    assert_eq!(space_msgs[0], BTreeSet::from(["center"]));
+
+    // ArrowLeft roves backward to segment (0, "left")
+    let l1 = harness.pointer(&[key_press(Named::ArrowLeft)], mouse::Cursor::Unavailable);
+    assert!(l1.is_empty());
+
+    // Enter selects focused segment ("left")
+    let enter_msgs = harness.pointer(&[key_press(Named::Enter)], mouse::Cursor::Unavailable);
+    assert_eq!(enter_msgs.len(), 1);
+    assert_eq!(enter_msgs[0], BTreeSet::from(["left"]));
+}
+
+#[test]
+fn test_segment_radius_combinations() {
+    let single = segment_radius(0, 1);
+    assert_eq!(single.top_left, RADIUS);
+    assert_eq!(single.top_right, RADIUS);
+    assert_eq!(single.bottom_right, RADIUS);
+    assert_eq!(single.bottom_left, RADIUS);
+
+    let first_of_three = segment_radius(0, 3);
+    assert_eq!(first_of_three.top_left, RADIUS);
+    assert_eq!(first_of_three.bottom_left, RADIUS);
+    assert_eq!(first_of_three.top_right, 0.0);
+    assert_eq!(first_of_three.bottom_right, 0.0);
+
+    let middle_of_three = segment_radius(1, 3);
+    assert_eq!(middle_of_three.top_left, 0.0);
+    assert_eq!(middle_of_three.bottom_left, 0.0);
+    assert_eq!(middle_of_three.top_right, 0.0);
+    assert_eq!(middle_of_three.bottom_right, 0.0);
+
+    let last_of_three = segment_radius(2, 3);
+    assert_eq!(last_of_three.top_left, 0.0);
+    assert_eq!(last_of_three.bottom_left, 0.0);
+    assert_eq!(last_of_three.top_right, RADIUS);
+    assert_eq!(last_of_three.bottom_right, RADIUS);
+}
+
+#[test]
+fn test_headless_draw_across_states() {
+    let p = palette();
+    for density in [ButtonDensity::Standard, ButtonDensity::Compact] {
+        for mode in [SelectionMode::SingleSelect, SelectionMode::MultiSelect] {
+            for disabled in [false, true] {
+                let mut m = SegmentedModel::new(sample_segments())
+                    .with_mode(mode)
+                    .with_density(density)
+                    .with_selected("left");
+                if disabled {
+                    m = m.disabled();
+                }
+                let model = leaked(m);
+                let mut harness = Harness::headless(move || {
+                    SegmentedButton::controlled(Controlled::new(model), "seg_render", Some)
+                        .palette(p)
+                        .into()
+                });
+
+                let pt0 = Point::new(15.0, 10.0);
+                let pt1 = Point::new(60.0, 10.0);
+
+                // Rest render
+                harness.render();
+
+                // Hover segment 0
+                harness.hover(pt0);
+                harness.render();
+
+                // Press segment 0
+                harness.press(pt0);
+                harness.render();
+                harness.release(pt0);
+
+                // Hover segment 1
+                harness.hover(pt1);
+                harness.render();
+
+                // Press segment 1
+                harness.press(pt1);
+                harness.render();
+                harness.release(pt1);
+
+                if !disabled {
+                    focus_one(&mut harness, "seg_render");
+                    harness.render();
+                }
+            }
+        }
+    }
 }

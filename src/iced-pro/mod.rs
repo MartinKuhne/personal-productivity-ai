@@ -48,6 +48,7 @@ pub mod gallery_tooltip;
 pub mod gallery_tree;
 pub mod gallery_warm;
 pub mod geometry;
+pub mod invariant_gate;
 pub mod layout;
 pub mod microcopy;
 pub mod spec_coverage;
@@ -57,6 +58,25 @@ pub mod token;
 pub mod token_lint;
 pub mod validation;
 pub mod widget;
+
+pub use composite::{
+    CodeBlock, CodeBlockModel, CommandPalette, CommandPaletteModel, DiffDisplayMode, DiffHunk,
+    DiffLine, DiffLineKind, DiffViewer, DiffViewerModel, EmptyState, EmptyStateKind,
+    EmptyStateModel, EmptyStateStyle, EscapeDisposition, GridNavKey, GridTile, GridView,
+    GridViewModel, Icon, KeyChord, KeybindRecorder, KeybindRecorderModel, NavDestination,
+    NavigationRail, NavigationRailModel, PaginationBar, PaginationModel, PaletteGroup, PaletteItem,
+    PaletteMode, PipsPager, PipsPagerModel, SheetMode, SheetPlacement, SideSheet, SideSheetModel,
+    SideSheetResize, SideSheetState, Skeleton, SkeletonStyle, StepItem, StepStatus, Stepper,
+    StepperModel, StepperOrientation, WizardFooterConfig, code_block, command_palette, diff_viewer,
+    empty_state, grid_view, keybind_recorder, navigation_rail, pagination_bar, pips_pager,
+    side_sheet, skeleton, stepper, wizard_footer,
+};
+pub use widget::{
+    Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
+    DatePicker, DatePickerModel, DateRangePicker, DateSelection, RatingControl, RatingModel,
+    RatingStep, Weekday, YearMonth, avatar, calendar_view, date_picker, date_range_picker,
+    rating_control,
+};
 
 #[cfg(test)]
 pub mod test_helpers;

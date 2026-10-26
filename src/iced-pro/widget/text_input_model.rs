@@ -210,6 +210,11 @@ pub struct TextInputModel {
     /// `true` by default, matching what the widget did before this model
     /// existed. See the [module docs](self) for why the default matters.
     pub clearable: bool,
+    /// An optional character class that is refused immediately (`UIF-PRIN-009`).
+    ///
+    /// When set, characters belonging to this class trigger immediate visual
+    /// punishment even if the field's [`stance`](Self::stance) is still pristine.
+    pub disallowed: Option<DisallowedClass>,
     /// Whether the user has committed to this field yet (`UIF-PRIN-009`).
     ///
     /// Private rather than `pub` like the seven fields above it, because
@@ -240,6 +245,7 @@ impl Default for TextInputModel {
             read_only: false,
             disabled: false,
             clearable: true,
+            disallowed: None,
             stance: EditStance::Pristine,
         }
     }
@@ -318,6 +324,16 @@ impl TextInputModel {
         self
     }
 
+    /// Sets an immediate disallowed character class (`UIF-PRIN-009`).
+    ///
+    /// Values containing characters from this class are punished immediately
+    /// without waiting for the user to commit or blur the field.
+    #[must_use]
+    pub fn with_disallowed(mut self, disallowed: DisallowedClass) -> Self {
+        self.disallowed = Some(disallowed);
+        self
+    }
+
     /// Wraps this model as host-owned state.
     #[must_use]
     pub fn controlled(&self) -> Controlled<'_, TextInputModel> {
@@ -386,14 +402,18 @@ impl TextInputModel {
         self.stance = EditStance::Pristine;
     }
 
-    /// What this field should paint this frame, with no disallowed-character
-    /// class in play.
+    /// What this field should paint this frame, enforcing punish-late rules (`UIF-PRIN-009`).
     ///
     /// The single call a renderer makes instead of reading
     /// [`is_invalid`](Self::is_invalid) and guessing about history.
+    /// If [`disallowed`](Self::disallowed) is configured, any refused character
+    /// triggers immediate punishment even while pristine.
     #[must_use]
     pub fn punishment(&self) -> Punishment {
-        punish(self.stance, self.is_invalid(), false)
+        match self.disallowed {
+            Some(class) => self.punishment_under(class),
+            None => punish(self.stance, self.is_invalid(), false),
+        }
     }
 
     /// What this field should paint this frame under `class`'s character
@@ -422,7 +442,7 @@ impl TextInputModel {
         !self.disabled && !self.read_only
     }
 
-    /// What the reserved trailing slot carries for this model's state.
+    /// What the reserved trailing slot carries for this model's state (`UIF-PRIN-009`).
     ///
     /// [`slot_content`] decides the glyph; [`clearable`](Self::clearable)
     /// decides whether it may act. A non-clearable model downgrades an
@@ -430,9 +450,12 @@ impl TextInputModel {
     /// it simply does nothing when pressed, which is what the zero-shift
     /// invariant requires: the glyph's *meaning* changed, its geometry did
     /// not.
+    ///
+    /// Warning icons in trailing slots are withheld while pristine and show
+    /// immediately when disallowed or touched.
     #[must_use]
     pub fn slot_for(&self, kind: InputKind) -> SlotContent {
-        match slot_content(kind, self.has_value(), self.is_invalid()) {
+        match slot_content(kind, self.has_value(), self.punishment().painted()) {
             SlotContent::Actionable(glyph) if !self.clearable => SlotContent::Passive(glyph),
             other => other,
         }

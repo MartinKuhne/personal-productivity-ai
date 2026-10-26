@@ -217,3 +217,43 @@ fn test_the_splitter_grab_is_a_band_not_a_control() {
          rung ({CONTROL_SM}) that may sit beside a pane"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Avatar size rungs (§3.13, `UIF-ATOM-013`)
+// ---------------------------------------------------------------------------
+
+/// Avatar diameter values match the spec: 24px, 32px, 36px (`UIF-ATOM-013`).
+#[test]
+fn test_avatar_sizes_match_spec() {
+    assert_eq!(AVATAR_SM, 24.0, "size.avatar.sm must be 24px");
+    assert_eq!(AVATAR_MD, 32.0, "size.avatar.md must be 32px");
+    assert_eq!(AVATAR_LG, 36.0, "size.avatar.lg must be 36px");
+}
+
+/// Avatar rungs are strictly ascending.
+#[test]
+fn test_avatar_sizes_are_strictly_ordered() {
+    assert!(
+        AVATAR_SM < AVATAR_MD,
+        "size.avatar.sm ({AVATAR_SM}) must be smaller than size.avatar.md ({AVATAR_MD})"
+    );
+    assert!(
+        AVATAR_MD < AVATAR_LG,
+        "size.avatar.md ({AVATAR_MD}) must be smaller than size.avatar.lg ({AVATAR_LG})"
+    );
+}
+
+/// Every avatar rung clears the mandatory hit target floor.
+#[test]
+fn test_every_avatar_size_clears_hit_target_floor() {
+    for (name, val) in [
+        ("size.avatar.sm", AVATAR_SM),
+        ("size.avatar.md", AVATAR_MD),
+        ("size.avatar.lg", AVATAR_LG),
+    ] {
+        assert!(
+            val >= HIT_TARGET_MIN,
+            "{name} ({val}) must clear the {HIT_TARGET_MIN}px hit-target floor"
+        );
+    }
+}

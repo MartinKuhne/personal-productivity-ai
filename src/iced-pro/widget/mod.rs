@@ -92,6 +92,8 @@
 //!   transitions: the deterministic tri-state rule, the roving
 //!   radio group, and the switch's busy refusal
 //!   (`UIF-ATOM-003`, §3.0.4.1)
+//! * [`toggle_widget`] — the live, interactive `iced::Widget`s for
+//!   `Checkbox`, `RadioGroup` and `ToggleSwitch` (`UIF-ATOM-003`, §3.3)
 //! * [`badge`] — the paint resolver and geometry for the three §3.8
 //!   badges: the `6px` dot, the count pill that folds at `99+`, and the
 //!   status chip whose leading glyph is mandatory. None of the three is
@@ -141,6 +143,14 @@
 //! * [`number_box_host`] — the stepper and entry engine: click, hold and
 //!   typed-text commits, with the hold cadence arriving as a value rather
 //!   than being read from a clock (`UIF-ATOM-005`, `UIF-PRIN-007`)
+//! * [`mod@range_slider`] — the paint resolver, geometry and live interactive
+//!   widget for the §3.5 dual-thumb interval control: 4px pill rail,
+//!   16px thumbs with 24px hit targets, non-crossing invariant, tabular-numeral
+//!   readout pill, roving tab focus and the three-tier scrub contract
+//!   (`UIF-ATOM-005b`, `UIF-ATOM-005`)
+//! * [`range_slider_model`] — the declarative `RangeSliderModel` and `RangeThumb`
+//!   a host owns: the non-crossing clamp, endpoint disambiguation for coincident
+//!   thumbs, and drift-free stepping (`UIF-ATOM-005b`, `UIF-ATOM-005`)
 //! * [`rove`] — the single-focus walk every roving group shares: skip
 //!   the disabled members, wrap at both ends, and never lose the
 //!   keyboard on a member that was disabled underneath the focus
@@ -177,6 +187,9 @@
 //!   [`HyperlinkTarget`](crate::widget::hyperlink_model::HyperlinkTarget)
 //!   rather than a bare string, and a status-bar preview that clears to
 //!   `None` (`UIF-ATOM-001d`)
+//! * [`mod@date_picker`] — the DatePicker, DateRangePicker & CalendarView widgets
+//!   with pure civil calendar arithmetic, 42-cell fixed day grid, and
+//!   redundancy cues (§3.10, `UIF-ATOM-010`, `UIF-PRIN-003`, `UIF-PRIN-005`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -187,6 +200,7 @@
 
 pub mod auto_suggest_host;
 pub mod auto_suggest_model;
+pub mod avatar;
 pub mod badge;
 pub mod badge_model;
 pub mod button;
@@ -198,6 +212,7 @@ pub mod chip_model;
 pub mod combo_box;
 pub mod combo_host;
 pub mod combo_model;
+pub mod date_picker;
 pub mod focus;
 pub mod focusable;
 pub mod hyperlink;
@@ -209,6 +224,9 @@ pub mod password_model;
 pub mod progress;
 pub mod progress_model;
 pub mod range_model;
+pub mod range_slider;
+pub mod range_slider_model;
+pub mod rating;
 pub mod rove;
 pub mod segmented;
 pub mod segmented_model;
@@ -224,3 +242,15 @@ pub mod text_input_controller;
 pub mod text_input_model;
 pub mod toggle;
 pub mod toggle_model;
+pub mod toggle_widget;
+
+pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
+pub use avatar::{Avatar, AvatarModel, AvatarShape, AvatarSize, avatar};
+pub use date_picker::{
+    CalendarView, CalendarViewMode, CivilDate, DatePicker, DatePickerModel, DateRangePicker,
+    DateSelection, Weekday, YearMonth, calendar_view, date_picker, date_range_picker,
+};
+pub use range_slider::{RangeSlider, range_slider};
+pub use range_slider_model::{RangeSliderModel, RangeThumb};
+pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};
+pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

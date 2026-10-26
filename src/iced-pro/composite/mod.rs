@@ -80,6 +80,30 @@
 //!   cannot see how many items went inline versus into the menu, which is what
 //!   makes the `0px` vertical-shift requirement structural instead of
 //!   observed (`UIF-COMP-008`, `UIF-PRIN-003`)
+//! * [`mod@empty_state`] — the non-collapsing placeholder distinguishing empty,
+//!   zero-match and load-error states with a 40x40px badge and recovery CTA (`UIF-COMP-014`, `UIF-PRIN-004`)
+//! * [`mod@skeleton`] — the loading placeholder reserving exact target widget dimensions
+//!   with a 1200ms shimmer pulse or static subtle border under reduced motion (`UIF-COMP-014`, `UIF-PRIN-003`)
+//! * [`mod@pagination`] — the 32px footer bar with tabular mono range summary, page size
+//!   options, and boundary-clamped navigation buttons (`UIF-COMP-014`)
+//! * [`mod@stepper`] — the multi-step workflow header and vertical wizard sequence with
+//!   redundant glyph/colour status cues and non-shifting footer (`UIF-COMP-011`, `UIF-PRIN-005`, `UIF-PRIN-004`)
+//! * [`mod@pips_pager`] — the compact 24px carousel and pagination indicator strip with
+//!   boundary-clamped navigation buttons (`UIF-COMP-011`, `UIF-PRIN-004`)
+//! * [`mod@side_sheet`] — the contextual inspector drawer with Docked, ModelessOverlay and ModalScrim modes,
+//!   10px resize divider, and 36px header (`UIF-COMP-012`, `UIF-PRIN-006`, `UIF-MOD-002`)
+//! * [`mod@navigation_rail`] — the collapsible navigation rail composite supporting compact (48px)
+//!   and resizable expanded (180–320px) modes with roving keyboard focus (`UIF-COMP-009`, `UIF-PRIN-005`, `UIF-PRIN-006`)
+//! * [`mod@command_palette`] — the quick-open and command palette modal card with prefix modes,
+//!   two-stage Escape, and Rule 4 text.strong subtitle promotion (`UIF-COMP-010`, `UIF-PRIN-003`, `UIF-TOK-006`)
+//! * [`mod@grid_view`] — the 2D virtualized tile and card grid with deterministic column solving
+//!   and 2D boundary clamping (`UIF-COMP-013`, `UIF-VER-002`, `UIF-PRIN-006`)
+//! * [`mod@code_block`] — the fenced code block container with 28px header, language badge,
+//!   fixed 24x24px copy button with 1500ms success hold, 13px mono body and 40px line-number gutter (`UIF-COMP-015`, `UIF-PRIN-003`)
+//! * [`mod@diff_viewer`] — the visual diff viewer pairing + and - glyphs with 2px indicator bars
+//!   and distinct text roles in unified and side-by-side modes with per-hunk actions (`UIF-COMP-015`, `UIF-PRIN-005`, `UIF-PRIN-006`)
+//! * [`mod@keybind_recorder`] — the 32px shortcut capture input with mono keycap pills,
+//!   trailing clear button, and raw chord interception (`UIF-COMP-015`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -89,14 +113,26 @@
 
 pub mod breadcrumb;
 pub mod card;
+pub mod code_block;
+pub mod command_palette;
+pub mod diff_viewer;
+pub mod empty_state;
 pub mod expander;
 pub mod form_field;
+pub mod grid_view;
 pub mod info_bar;
+pub mod keybind_recorder;
 pub mod list_tile;
+pub mod navigation_rail;
 pub mod notification;
 pub mod overflow_toolbar;
+pub mod pagination;
+pub mod pips_pager;
 pub mod scroll_view;
 pub mod settings_row;
+pub mod side_sheet;
+pub mod skeleton;
+pub mod stepper;
 pub mod table_cell;
 pub mod table_column;
 pub mod table_header;
@@ -105,3 +141,41 @@ pub mod toast;
 pub mod tree_row;
 pub mod tree_view;
 pub mod virtual_list;
+
+pub use code_block::{CodeBlock, CodeBlockModel, code_block};
+pub use command_palette::{
+    CARD_HEIGHT, CARD_WIDTH, CommandPalette, CommandPaletteModel, CommandPaletteState,
+    DIVIDER_STROKE, EscapeDisposition, FOOTER_HEIGHT, GLYPH_SEARCH, GROUP_HEADER_HEIGHT, LABEL_ESC,
+    LEGEND_KEYBOARD, NO_RESULTS, PLACEHOLDER_COMMANDS, PLACEHOLDER_FILES, PLACEHOLDER_SYMBOLS,
+    PLACEHOLDER_TAGS, PaletteGroup, PaletteItem, PaletteMode, RADIUS, ROW_DOUBLE_HEIGHT,
+    ROW_SINGLE_HEIGHT, SEARCH_HEIGHT, SEARCHING, TOP_OFFSET, card_bounds, command_palette,
+    highlight_spans,
+};
+pub use diff_viewer::{
+    DiffDisplayMode, DiffHunk, DiffLine, DiffLineKind, DiffViewer, DiffViewerModel, diff_viewer,
+};
+pub use empty_state::{
+    EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
+};
+pub use grid_view::{
+    BORDER_REST_WIDTH, BORDER_SELECTED_WIDTH, CHECKBOX_INSET, CHECKBOX_SIZE,
+    DEFAULT_MIN_TILE_WIDTH, DEFAULT_TILE_HEIGHT, GAP, GLYPH_CHECK, GUTTER_WIDTH, GridNavKey,
+    GridTile, GridView, GridViewModel, GridViewState, grid_view, solve_columns, tile_rect,
+};
+pub use keybind_recorder::{KeyChord, KeybindRecorder, KeybindRecorderModel, keybind_recorder};
+pub use navigation_rail::{
+    COMPACT_WIDTH, EXPANDED_DEFAULT_WIDTH, EXPANDED_MAX_WIDTH, EXPANDED_MIN_WIDTH, GLYPH_TOGGLE,
+    ICON_SIZE, INDICATOR_WIDTH, LABEL_TOGGLE, NavDestination, NavRailResize, NavigationRail,
+    NavigationRailModel, NavigationRailState, ROW_HEIGHT, TOGGLE_SIZE, navigation_rail,
+};
+pub use pagination::{PaginationBar, PaginationModel, pagination_bar};
+pub use pips_pager::{PipsPager, PipsPagerModel, pips_pager};
+pub use side_sheet::{
+    SheetMode, SheetPlacement, SideSheet, SideSheetModel, SideSheetResize, SideSheetState,
+    side_sheet,
+};
+pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
+pub use stepper::{
+    StepItem, StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, stepper,
+    wizard_footer,
+};

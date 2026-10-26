@@ -119,7 +119,38 @@ use crate::token_lint::{
 /// code that paints it. The file count moves by eight and
 /// `PIN_RULE_B_FILES` does not move at all — the split added no visual
 /// literal to any scoped directory, and changed no literal in one either.
-const PIN_FILES_SCANNED: usize = 152;
+///
+/// 155 as of the live tooltip widget — `surface/tooltip/widget.rs`
+/// (`UIF-ATOM-007`). It sits under `surface/`, which is visual-scoped, so
+/// `PIN_RULE_B_FILES` moves with it.
+///
+/// 157 as of `UIF-ATOM-005b`: `widget/range_slider.rs` and
+/// `widget/range_slider_model.rs`. Both live under `widget/`, so both join
+/// Rule B's visual scope.
+///
+/// 160 as of `UIF-COMP-014`: `composite/empty_state.rs`, `composite/skeleton.rs`
+/// and `composite/pagination.rs`. All three live under `composite/`, joining
+/// Rule B's visual scope.
+///
+/// 162 as of `UIF-ATOM-013`: `widget/avatar.rs` and `widget/rating.rs`. Both
+/// live under `widget/`, joining Rule B's visual scope.
+///
+/// 164 as of `UIF-COMP-011`: `composite/stepper.rs` and `composite/pips_pager.rs`. Both
+/// live under `composite/`, joining Rule B's visual scope.
+///
+/// 165 as of `UIF-COMP-012`: `composite/side_sheet.rs`, joining Rule B's visual scope.
+///
+/// 166 as of `UIF-COMP-009`: `composite/navigation_rail.rs`, joining Rule B's visual scope.
+///
+/// 167 as of `UIF-COMP-010`: `composite/command_palette.rs`, joining Rule B's visual scope.
+///
+/// 168 as of `UIF-COMP-013`: `composite/grid_view.rs`, joining Rule B's visual scope.
+///
+/// 171 as of `UIF-COMP-015`: `composite/code_block.rs`, `composite/diff_viewer.rs`,
+/// and `composite/keybind_recorder.rs`, joining Rule B's visual scope.
+///
+/// 172 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 172;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -155,7 +186,24 @@ const PIN_RULE_A_FILES: usize = 1;
 /// Like `aim.rs` before it, it is counted because of where it lives, not
 /// because of what it contains: the module defines no literal of its own
 /// and takes both of its numbers from `token::time`.
-const PIN_RULE_B_FILES: usize = 81;
+/// 82 as of `UIF-ATOM-003`, whose one addition is `widget/toggle_widget.rs`.
+/// 83 as of `UIF-ATOM-007`, whose one addition is `surface/tooltip/widget.rs`.
+/// 85 as of `UIF-ATOM-005b`, whose two additions are `widget/range_slider.rs`
+/// and `widget/range_slider_model.rs`.
+/// 88 as of `UIF-COMP-014`, whose three additions are `composite/empty_state.rs`,
+/// `composite/skeleton.rs` and `composite/pagination.rs`.
+/// 90 as of `UIF-ATOM-013`, whose two additions are `widget/avatar.rs` and
+/// `widget/rating.rs`.
+/// 92 as of `UIF-COMP-011`, whose two additions are `composite/stepper.rs` and
+/// `composite/pips_pager.rs`.
+/// 93 as of `UIF-COMP-012`, whose one addition is `composite/side_sheet.rs`.
+/// 94 as of `UIF-COMP-009`, whose one addition is `composite/navigation_rail.rs`.
+/// 95 as of `UIF-COMP-010`, whose one addition is `composite/command_palette.rs`.
+/// 96 as of `UIF-COMP-013`, whose one addition is `composite/grid_view.rs`.
+/// 99 as of `UIF-COMP-015`, whose three additions are `composite/code_block.rs`,
+/// `composite/diff_viewer.rs`, and `composite/keybind_recorder.rs`.
+/// 100 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`.
+const PIN_RULE_B_FILES: usize = 100;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -261,7 +309,59 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// for §3B.6's "vertical `1px` tree depth guides". The count moves by one
 /// because a declaration was added, not because a number changed — the same
 /// asymmetry `SELECTION_BAR_WIDTH` demonstrated above.
-const PIN_TOKEN_BOUND: usize = 193;
+///
+/// 194 as of `UIF-ATOM-007`: `surface/tooltip/mod.rs`'s `SHORTCUT_GAP` bound
+/// to `token::space::SM`.
+///
+/// 207 as of `UIF-ATOM-005b`: the 13 `range_slider::` geometry and readout
+/// constants (`TRACK_HEIGHT`, `TRACK_RADIUS`, `THUMB_SIZE`, `THUMB_HIT_SIZE`,
+/// `THUMB_RING_WIDTH`, `RAIL_BORDER_WIDTH`, `READOUT_GAP`, `READOUT_RADIUS`,
+/// `READOUT_BORDER_WIDTH`, `READOUT_FONT_SIZE`, `READOUT_PADDING_X`,
+/// `READOUT_PADDING_Y`, `FOCUS_RING_WIDTH`).
+///
+/// 225 as of `UIF-COMP-014`: the 18 token-bound visual constants in
+/// `empty_state::` (`MAX_WIDTH`, `PADDING`, `BADGE_SIZE`, `BADGE_RADIUS`,
+/// `BADGE_BORDER_WIDTH`, `ICON_SIZE`, `BADGE_GAP`, `TEXT_GAP`, `ACTION_GAP`),
+/// `skeleton::` (`DEFAULT_RADIUS`, `BORDER_WIDTH`, `TREE_ROW_HEIGHT`,
+/// `TABLE_ROW_HEIGHT`, `TABLE_ROW_COMPACT_HEIGHT`), and
+/// `pagination::` (`BAR_HEIGHT`, `BORDER_WIDTH`, `BUTTON_SIZE`, `PADDING_X`).
+///
+/// 240 as of `UIF-COMP-011`: the 15 token-bound visual constants in
+/// `stepper::` (`BAR_HEIGHT`, `NODE_SIZE`, `NODE_RADIUS`, `CONNECTOR_STROKE`,
+/// `CURRENT_BORDER_WIDTH`, `LABEL_GAP`, `STEP_GAP`, `FOOTER_BUTTON_HEIGHT`) and
+/// `pips_pager::` (`BAR_HEIGHT`, `BUTTON_SIZE`, `PIP_SIZE_INACTIVE`,
+/// `PIP_WIDTH_ACTIVE`, `PIP_HEIGHT`, `PIP_GAP`, `PIP_RADIUS`).
+///
+/// 248 as of `UIF-COMP-012`: the 8 token-bound visual constants in
+/// `side_sheet::` (`HEADER_HEIGHT`, `GRAB_WIDTH`, `GRIP_PILL_WIDTH`,
+/// `GRIP_PILL_HEIGHT`, `GRIP_PILL_RADIUS`, `DIVIDER_STROKE`,
+/// `HEADER_BUTTON_SIZE`, `BODY_PADDING`).
+///
+/// 254 as of `UIF-COMP-009`: the 6 token-bound visual constants in
+/// `navigation_rail::` (`ROW_HEIGHT`, `TOGGLE_SIZE`, `ICON_SIZE`,
+/// `INDICATOR_WIDTH`, `GRAB_WIDTH`, `DIVIDER_STROKE`).
+///
+/// 260 as of `UIF-COMP-010`: the 6 token-bound visual constants in
+/// `command_palette::` (`ROW_SINGLE_HEIGHT`, `FOOTER_HEIGHT`, `ICON_SIZE`,
+/// `RADIUS`, `GROUP_HEADER_HEIGHT`, `DIVIDER_STROKE`).
+///
+/// 269 as of `UIF-COMP-013`: the 9 token-bound visual constants in
+/// `grid_view::` (`GAP`, `GUTTER_WIDTH`, `CHECKBOX_SIZE`, `RADIUS`,
+/// `BORDER_SELECTED_WIDTH`, `BORDER_REST_WIDTH`, `CHECKBOX_INSET`,
+/// `TILE_PADDING`, `ICON_SIZE`).
+///
+/// 294 as of `UIF-COMP-015`: the 25 token-bound visual constants in `code_block::`
+/// (`HEADER_HEIGHT`, `COPY_BUTTON_SIZE`, `RADIUS`, `BORDER_WIDTH`, `CODE_PADDING`,
+/// `GUTTER_PADDING_X`), `diff_viewer::` (`HEADER_HEIGHT`, `INDICATOR_BAR_WIDTH`,
+/// `RADIUS`, `BORDER_WIDTH`, `DIVIDER_WIDTH`, `BUTTON_HEIGHT`, `BUTTON_PADDING_X`,
+/// `BUTTON_GAP`, `LINE_HEIGHT`), and `keybind_recorder::` (`HEIGHT`, `KEYCAP_HEIGHT`,
+/// `CLEAR_BUTTON_SIZE`, `RADIUS`, `BORDER_REST_WIDTH`, `BORDER_FOCUS_WIDTH`,
+/// `KEYCAP_RADIUS`, `KEYCAP_PADDING_X`, `KEYCAP_GAP`, `PADDING_X`).
+///
+/// 302 as of Increment 18 (`UIF-ATOM-010`): the 8 token-bound visual constants in `date_picker::`
+/// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `NAV_BUTTON_SIZE`,
+/// `WEEKDAY_ROW_HEIGHT`, `CELL_SIZE`, `RADIUS`, `FLYOUT_PADDING`).
+const PIN_TOKEN_BOUND: usize = 302;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -312,7 +412,21 @@ const PIN_RATIO: usize = 1;
 /// multiple of any rung — the same standing `input_dialog::FOLDER_LIST_MAX_HEIGHT`
 /// has, and it is registered for the same reason. Nothing was re-tuned and
 /// no existing entry changed class.
-const PIN_SURFACE_BOUND: usize = 36;
+/// 40 as of `UIF-COMP-012`, which registers the four §3B.12 figures:
+/// `side_sheet::DEFAULT_WIDTH` (360px), `side_sheet::MIN_WIDTH` (280px),
+/// `side_sheet::MAX_WIDTH` (520px), and `side_sheet::FOOTER_HEIGHT` (48px).
+/// 44 as of `UIF-COMP-009`, which registers the four §3B.9 figures:
+/// `navigation_rail::COMPACT_WIDTH` (48px), `navigation_rail::EXPANDED_DEFAULT_WIDTH` (220px),
+/// `navigation_rail::EXPANDED_MIN_WIDTH` (180px), and `navigation_rail::EXPANDED_MAX_WIDTH` (320px).
+/// 48 as of `UIF-COMP-010`, which registers the four §3B.10 figures:
+/// `command_palette::CARD_WIDTH` (560px), `command_palette::CARD_HEIGHT` (380px),
+/// `command_palette::SEARCH_HEIGHT` (40px), and `command_palette::ROW_DOUBLE_HEIGHT` (44px).
+/// 50 as of `UIF-COMP-013`, which registers the two §3B.13 figures:
+/// `grid_view::DEFAULT_MIN_TILE_WIDTH` (160px) and `grid_view::DEFAULT_TILE_HEIGHT` (120px).
+/// 52 as of `UIF-COMP-015`, which registers the two §3B.15 figures:
+/// `code_block::GUTTER_WIDTH` (40px) and `diff_viewer::GUTTER_WIDTH` (40px).
+/// 53 as of Increment 18 (`UIF-ATOM-010`), which registers `date_picker::CALENDAR_FLYOUT_WIDTH` (256px).
+const PIN_SURFACE_BOUND: usize = 53;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

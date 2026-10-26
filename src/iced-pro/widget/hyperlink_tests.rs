@@ -337,3 +337,469 @@ fn assert_ratio(actual: f32, quoted: f32) {
         "recomputed {actual:.4} but quoted {quoted:.4}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 6. The live iced Hyperlink Widget (UIF-ATOM-001d, §3.1d)
+// ---------------------------------------------------------------------------
+
+use crate::binding::Controlled;
+use crate::test_helpers::{Harness, Theme, centre, focus_one};
+use iced::Font;
+use iced::keyboard::Location;
+use iced::keyboard::Modifiers;
+use iced::keyboard::key::{Key, Named};
+use iced_test::futures::futures::executor::block_on;
+use iced_test::renderer::Renderer as HeadlessRenderer;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TestMsg {
+    Pressed(HyperlinkTarget),
+    Emitted(HyperlinkEmission),
+}
+
+fn leaked(model: HyperlinkModel) -> &'static HyperlinkModel {
+    Box::leak(Box::new(model))
+}
+
+fn key_press(name: Named) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(name),
+        modified_key: Key::Named(name),
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: Location::Standard,
+        modifiers: Modifiers::NONE,
+        text: None,
+        repeat: false,
+    })
+}
+
+fn widget_bounds<M: Send + 'static, R: renderer::Renderer>(
+    harness: &mut Harness<M, R>,
+) -> Rectangle {
+    let recorded = harness.recorded();
+    assert_eq!(
+        recorded.len(),
+        1,
+        "a hyperlink registers exactly one focusable node, got {recorded:?}"
+    );
+    recorded[0].1
+}
+
+const FAR_AWAY: Point = Point::new(10_000.0, 10_000.0);
+
+#[test]
+fn test_standalone_and_controlled_creation() {
+    // Standalone
+    let link = Hyperlink::<TestMsg>::standalone("Docs", "https://docs.rs", "link_docs", |target| {
+        Some(TestMsg::Pressed(target))
+    })
+    .external(true)
+    .enabled(true)
+    .mount(Color::BLACK)
+    .palette(Palette::dark());
+
+    assert_eq!(link.label(), "Docs");
+    assert_eq!(link.uri(), "https://docs.rs");
+    assert!(link.is_external());
+    assert!(link.is_enabled());
+    assert_eq!(link.focus_id().as_str(), "link_docs");
+    assert_eq!(link.widget_id(), &crate::bridge::widget_id(link.focus_id()));
+
+    // Controlled
+    let model = leaked(HyperlinkModel::external("About", "/about").disabled());
+    let ctl_link =
+        Hyperlink::<TestMsg>::controlled(Controlled::new(model), "link_about", |emission| {
+            Some(TestMsg::Emitted(emission))
+        });
+
+    assert_eq!(ctl_link.label(), "About");
+    assert_eq!(ctl_link.uri(), "/about");
+    assert!(ctl_link.is_external());
+    assert!(!ctl_link.is_enabled());
+    assert_eq!(ctl_link.focus_id().as_str(), "link_about");
+}
+
+#[test]
+fn test_mouse_hover_press_and_release_activation() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone("Click me", "https://example.com", "link_click", |target| {
+            Some(TestMsg::Pressed(target))
+        })
+        .into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let over = centre(bounds);
+
+    // Hover does not emit press message
+    let hover_msgs = harness.hover(over);
+    assert!(hover_msgs.is_empty());
+
+    // Press does not emit press message
+    let press_msgs = harness.press(over);
+    assert!(press_msgs.is_empty());
+
+    // Release over bounds emits Pressed message
+    let release_msgs = harness.release(over);
+    assert_eq!(
+        release_msgs,
+        vec![TestMsg::Pressed(HyperlinkTarget::new(
+            "https://example.com",
+            false
+        ))]
+    );
+}
+
+#[test]
+fn test_mouse_drag_out_cancels_activation() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone("Click me", "https://example.com", "link_cancel", |target| {
+            Some(TestMsg::Pressed(target))
+        })
+        .into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let over = centre(bounds);
+
+    harness.hover(over);
+    harness.press(over);
+
+    // Release far away from bounds
+    let release_msgs = harness.release(FAR_AWAY);
+    assert!(
+        release_msgs.is_empty(),
+        "releasing outside the bounds must not activate the hyperlink"
+    );
+}
+
+#[test]
+fn test_controlled_mouse_activation() {
+    let model = leaked(HyperlinkModel::external("Open External", "https://iced.rs"));
+    let mut harness = Harness::headless(move || {
+        Hyperlink::controlled(Controlled::new(model), "link_ext", |emission| {
+            Some(TestMsg::Emitted(emission))
+        })
+        .into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let over = centre(bounds);
+
+    harness.hover(over);
+    harness.press(over);
+    let messages = harness.release(over);
+
+    assert_eq!(messages.len(), 1);
+    match &messages[0] {
+        TestMsg::Emitted(HyperlinkEmission::Opened(commit)) => {
+            assert_eq!(
+                commit.value(),
+                &HyperlinkTarget::new("https://iced.rs", true)
+            );
+        }
+        other => panic!("expected Opened emission, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_keyboard_enter_and_space_activation_when_focused() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone(
+            "Key link",
+            "https://example.com/key",
+            "link_key",
+            |target| Some(TestMsg::Pressed(target)),
+        )
+        .into()
+    });
+
+    focus_one(&mut harness, "link_key");
+
+    // Enter activates
+    let enter_msgs = harness.pointer(&[key_press(Named::Enter)], mouse::Cursor::Unavailable);
+    assert_eq!(
+        enter_msgs,
+        vec![TestMsg::Pressed(HyperlinkTarget::new(
+            "https://example.com/key",
+            false
+        ))]
+    );
+
+    // Space activates
+    let space_msgs = harness.pointer(&[key_press(Named::Space)], mouse::Cursor::Unavailable);
+    assert_eq!(
+        space_msgs,
+        vec![TestMsg::Pressed(HyperlinkTarget::new(
+            "https://example.com/key",
+            false
+        ))]
+    );
+}
+
+#[test]
+fn test_keyboard_ignored_when_unfocused() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone(
+            "Unfocused",
+            "https://example.com",
+            "link_unfocused",
+            |target| Some(TestMsg::Pressed(target)),
+        )
+        .into()
+    });
+
+    let enter_msgs = harness.pointer(&[key_press(Named::Enter)], mouse::Cursor::Unavailable);
+    assert!(
+        enter_msgs.is_empty(),
+        "unfocused link must not handle Enter"
+    );
+
+    let space_msgs = harness.pointer(&[key_press(Named::Space)], mouse::Cursor::Unavailable);
+    assert!(
+        space_msgs.is_empty(),
+        "unfocused link must not handle Space"
+    );
+}
+
+#[test]
+fn test_disabled_link_ignores_clicks_and_keyboard() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone(
+            "Disabled",
+            "https://example.com",
+            "link_disabled",
+            |target| Some(TestMsg::Pressed(target)),
+        )
+        .enabled(false)
+        .into()
+    });
+
+    // A disabled link does not register with the focus router
+    assert!(
+        harness.recorded().is_empty(),
+        "a disabled link must not register with the focus router"
+    );
+
+    let over = Point::new(10.0, 10.0);
+
+    // Mouse click does nothing
+    harness.hover(over);
+    harness.press(over);
+    let release_msgs = harness.release(over);
+    assert!(
+        release_msgs.is_empty(),
+        "disabled link must not emit on click"
+    );
+
+    // Keyboard keys do nothing
+    let key_msgs = harness.pointer(&[key_press(Named::Enter)], mouse::Cursor::Unavailable);
+    assert!(
+        key_msgs.is_empty(),
+        "disabled link must not emit on key press"
+    );
+}
+
+#[test]
+fn test_hover_emits_uri_on_enter_and_none_on_exit() {
+    let model = leaked(HyperlinkModel::new("Hover me", "https://preview.url"));
+    let mut harness = Harness::headless(move || {
+        Hyperlink::controlled(Controlled::new(model), "link_hover", |emission| {
+            Some(TestMsg::Emitted(emission))
+        })
+        .into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let over = centre(bounds);
+
+    // Cursor enters: emits HoverUri(Some(...))
+    let enter_msgs = harness.hover(over);
+    assert_eq!(
+        enter_msgs,
+        vec![TestMsg::Emitted(HyperlinkEmission::HoverUri(Some(
+            "https://preview.url".to_owned()
+        )))]
+    );
+
+    // Cursor leaves: emits HoverUri(None)
+    let exit_msgs = harness.hover(FAR_AWAY);
+    assert_eq!(
+        exit_msgs,
+        vec![TestMsg::Emitted(HyperlinkEmission::HoverUri(None))]
+    );
+}
+
+#[test]
+fn test_disabled_controlled_link_does_not_emit_hover() {
+    let model = leaked(HyperlinkModel::new("Disabled hover", "https://disabled.url").disabled());
+    let mut harness = Harness::headless(move || {
+        Hyperlink::controlled(Controlled::new(model), "link_dis_hover", |emission| {
+            Some(TestMsg::Emitted(emission))
+        })
+        .into()
+    });
+
+    assert!(
+        harness.recorded().is_empty(),
+        "a disabled controlled link must not register with focus"
+    );
+
+    let over = Point::new(10.0, 10.0);
+    let enter_msgs = harness.hover(over);
+    assert!(
+        enter_msgs.is_empty(),
+        "a disabled controlled link must not emit a hover uri preview"
+    );
+}
+
+#[test]
+fn test_mouse_interaction_pointer_when_enabled() {
+    let mut harness = Harness::headless(|| {
+        Hyperlink::standalone("Pointer", "https://example.com", "link_ptr", |target| {
+            Some(TestMsg::Pressed(target))
+        })
+        .into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let over = centre(bounds);
+
+    let renderer = block_on(<HeadlessRenderer as renderer::Headless>::new(
+        Font::with_name("Fira Sans"),
+        Pixels(16.0),
+        None,
+    ))
+    .unwrap();
+
+    let mut link =
+        Hyperlink::<TestMsg>::standalone("Pointer", "https://example.com", "link_ptr", |_| None);
+    let tree = Tree {
+        tag: tree::Tag::of::<HyperlinkState>(),
+        state: tree::State::new(HyperlinkState::new()),
+        children: Vec::new(),
+    };
+    let layout_node = layout::Node::new(bounds.size());
+    let layout = Layout::new(&layout_node);
+
+    assert_eq!(
+        Widget::<TestMsg, Theme, HeadlessRenderer>::mouse_interaction(
+            &link,
+            &tree,
+            layout,
+            mouse::Cursor::Available(over),
+            &bounds,
+            &renderer,
+        ),
+        mouse::Interaction::Pointer
+    );
+
+    assert_eq!(
+        Widget::<TestMsg, Theme, HeadlessRenderer>::mouse_interaction(
+            &link,
+            &tree,
+            layout,
+            mouse::Cursor::Available(FAR_AWAY),
+            &bounds,
+            &renderer,
+        ),
+        mouse::Interaction::None
+    );
+
+    // Disabled link
+    link = link.enabled(false);
+    assert_eq!(
+        Widget::<TestMsg, Theme, HeadlessRenderer>::mouse_interaction(
+            &link,
+            &tree,
+            layout,
+            mouse::Cursor::Available(over),
+            &bounds,
+            &renderer,
+        ),
+        mouse::Interaction::None
+    );
+}
+
+#[test]
+fn test_drawing_through_headless_renderer_in_all_states() {
+    let p = palette();
+    for enabled in [true, false] {
+        for focused in [false, true] {
+            for mount in [p.surface_base, p.surface_overlay] {
+                let mut harness = Harness::headless(move || {
+                    let link = Hyperlink::<TestMsg>::standalone(
+                        "Test Link",
+                        "https://example.com",
+                        "link_render",
+                        |_| None,
+                    )
+                    .enabled(enabled)
+                    .mount(mount);
+
+                    link.into()
+                });
+
+                if focused && enabled {
+                    focus_one(&mut harness, "link_render");
+                }
+
+                // Render at rest
+                harness.render();
+
+                // Render while hovered
+                let over = Point::new(10.0, 10.0);
+                harness.hover(over);
+                harness.render();
+
+                // Render while pressed
+                harness.press(over);
+                harness.render();
+
+                // Release
+                harness.release(over);
+                harness.render();
+            }
+        }
+    }
+}
+
+#[test]
+fn test_layers_match_visual_states() {
+    let p = palette();
+    let bounds = Rectangle::new(Point::ORIGIN, control_size(60.0));
+
+    // Rest: no pill, no ring, underlined
+    let rest_style = resolve_style(REST, p.surface_base, &p);
+    assert!(pill_layer(bounds, &rest_style).is_none());
+    assert!(focus_ring_layer(bounds, &rest_style).is_none());
+    assert!(underline_layer(bounds, &rest_style).is_some());
+
+    // Hovered: pill present, no ring, underlined
+    let hover_style = resolve_style(HOVERED, p.surface_base, &p);
+    let pill = pill_layer(bounds, &hover_style).expect("hovered link must have pill layer");
+    assert_eq!(pill.fill, p.surface_hover);
+    assert_eq!(pill.bounds, bounds);
+    assert!(focus_ring_layer(bounds, &hover_style).is_none());
+    assert!(underline_layer(bounds, &hover_style).is_some());
+
+    // Rest + Focused: no pill, ring present, underlined
+    let focused_style = resolve_style(REST_FOCUSED, p.surface_base, &p);
+    assert!(pill_layer(bounds, &focused_style).is_none());
+    let ring = focus_ring_layer(bounds, &focused_style).expect("focused link must have focus ring");
+    assert_eq!(ring.bounds, bounds.expand(FOCUS_RING_WIDTH));
+    assert_eq!(ring.border.width, FOCUS_RING_WIDTH);
+    assert_eq!(
+        ring.border.color,
+        crate::widget::focus::resolve_ring_color_for_background(p.surface_base, &p)
+    );
+    assert!(underline_layer(bounds, &focused_style).is_some());
+
+    // Disabled: no pill, no ring, NO underline
+    let disabled_style = resolve_style(DISABLED, p.surface_base, &p);
+    assert!(pill_layer(bounds, &disabled_style).is_none());
+    assert!(focus_ring_layer(bounds, &disabled_style).is_none());
+    assert!(underline_layer(bounds, &disabled_style).is_none());
+}

@@ -964,7 +964,7 @@ where
             focus_id,
         );
         widget.enabled = !model.get().disabled;
-        widget.invalid = model.get().is_invalid();
+        widget.invalid = model.get().punishment().painted();
         widget.model = Some(model);
         widget.emit = Some(Box::new(emit));
         widget.sync();
@@ -1039,7 +1039,10 @@ where
         let kind = self.kind;
         let palette = self.palette;
         let enabled = self.enabled;
-        let invalid = self.invalid;
+        let invalid = match self.model {
+            Some(model) => model.get().punishment().painted(),
+            None => self.invalid,
+        };
         let on_input = self.on_input.clone();
         let edits = self.edits.clone();
         let bound = self.model.is_some();
@@ -1491,12 +1494,16 @@ where
     /// slot too, and the slot is outside the child.
     #[must_use]
     pub fn visual(&self, tree: &Tree, bounds: Rectangle, cursor: mouse::Cursor) -> VisualState {
+        let invalid = match self.model {
+            Some(model) => model.get().punishment().painted(),
+            None => self.invalid,
+        };
         state::resolve(InteractionInput {
             enabled: self.enabled,
             hovered: cursor.is_over(bounds),
             pressed: false,
             focused: editor_focused::<Renderer>(tree) && !self.is_read_only(),
-            invalid: self.invalid,
+            invalid,
         })
     }
 }

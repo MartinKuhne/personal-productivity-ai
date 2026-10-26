@@ -26,13 +26,13 @@ const EVERY_KIND: [InputKind; 3] = [
 /// Build a model in one exact state so the loops below read as a table
 /// rather than as a chain of conditional builders.
 fn model_in(has_value: bool, invalid: bool, clearable: bool) -> TextInputModel {
-    let model = TextInputModel::new(if has_value { "v" } else { "" }).with_clearable(clearable);
+    let mut model = TextInputModel::new(if has_value { "v" } else { "" }).with_clearable(clearable);
 
     if invalid {
-        model.with_validation("no")
-    } else {
-        model
+        model = model.with_validation("no");
+        model.note_commit();
     }
+    model
 }
 
 // -------------------------------------------------------------------
@@ -97,9 +97,10 @@ fn a_clearable_model_reproduces_the_widgets_own_slot_exactly() {
 }
 
 #[test]
-fn an_invalid_model_shows_the_error_glyph_for_every_kind() {
+fn an_invalid_model_shows_the_error_glyph_for_every_kind_once_touched() {
     for kind in EVERY_KIND {
-        let model = TextInputModel::new("x").with_validation("bad");
+        let mut model = TextInputModel::new("x").with_validation("bad");
+        model.note_commit();
 
         assert_eq!(model.slot_for(kind), SlotContent::Passive(GLYPH_ERROR));
         assert!(
@@ -108,6 +109,47 @@ fn an_invalid_model_shows_the_error_glyph_for_every_kind() {
              error glyph is passive, so the two never stack"
         );
     }
+}
+
+#[test]
+fn a_pristine_invalid_model_withholds_the_error_glyph() {
+    for kind in EVERY_KIND {
+        let model = TextInputModel::new("x").with_validation("bad");
+        assert!(model.is_pristine());
+        assert_ne!(
+            model.slot_for(kind),
+            SlotContent::Passive(GLYPH_ERROR),
+            "a pristine invalid {kind:?} must withhold the error glyph (UIF-PRIN-009)"
+        );
+    }
+}
+
+#[test]
+fn a_pristine_model_with_disallowed_character_shows_error_glyph_immediately() {
+    for kind in EVERY_KIND {
+        let model = TextInputModel::new("bad/name")
+            .with_validation("illegal character")
+            .with_disallowed(crate::validation::disallowed::DisallowedClass::FilenameBasename);
+        assert!(model.is_pristine());
+        assert_eq!(
+            model.slot_for(kind),
+            SlotContent::Passive(GLYPH_ERROR),
+            "a pristine field with disallowed character must show the error glyph immediately (UIF-PRIN-009)"
+        );
+    }
+}
+
+#[test]
+fn with_disallowed_and_punishment_dispatch() {
+    let pristine_clean = TextInputModel::new("clean_name")
+        .with_validation("error")
+        .with_disallowed(crate::validation::disallowed::DisallowedClass::FilenameBasename);
+    assert!(!pristine_clean.punishment().painted());
+
+    let pristine_illegal = TextInputModel::new("dirty/name")
+        .with_validation("error")
+        .with_disallowed(crate::validation::disallowed::DisallowedClass::FilenameBasename);
+    assert!(pristine_illegal.punishment().painted());
 }
 
 // -------------------------------------------------------------------

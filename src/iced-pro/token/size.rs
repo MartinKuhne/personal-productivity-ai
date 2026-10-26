@@ -216,6 +216,22 @@ pub const BADGE_COUNT_HEIGHT: f32 = 18.0;
 /// (§3.8), so it owes nothing to the hit-target floor.
 pub const BADGE_CHIP_HEIGHT: f32 = 24.0;
 
+// ---------------------------------------------------------------------------
+//  Avatar geometry (§3.13, `UIF-ATOM-013`) — the container diameter rungs
+// ---------------------------------------------------------------------------
+
+/// `size.avatar.sm` — small avatar diameter: `24 × 24px` (`UIF-ATOM-013`, §3.13).
+///
+/// Meets the [`HIT_TARGET_MIN`] floor exactly: even the smallest avatar
+/// provides a compliant touch target when interactive.
+pub const AVATAR_SM: f32 = 24.0;
+
+/// `size.avatar.md` — medium / standard avatar diameter: `32 × 32px` (`UIF-ATOM-013`, §3.13).
+pub const AVATAR_MD: f32 = 32.0;
+
+/// `size.avatar.lg` — large avatar diameter: `36 × 36px` (`UIF-ATOM-013`, §3.13).
+pub const AVATAR_LG: f32 = 36.0;
+
 #[cfg(test)]
 #[path = "size_tests.rs"]
 mod size_tests;

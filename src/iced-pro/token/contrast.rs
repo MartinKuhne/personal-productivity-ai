@@ -815,6 +815,22 @@ pub fn assert_fill_foreground_lock(background: Color, foreground: Color, palette
     );
 }
 
+/// Assert that the contrast ratio between `fg` and `bg` meets or exceeds `min_ratio`.
+///
+/// A construction-time shield called by style resolvers. In a debug build, a breach aborts
+/// right at the resolver that constructed the pair.
+///
+/// # Panics
+/// In a `debug_assertions` build, when `contrast_ratio(fg, bg) < min_ratio`.
+#[track_caller]
+pub fn assert_contrast(fg: Color, bg: Color, min_ratio: f32, label: &str) {
+    let ratio = contrast_ratio(fg, bg);
+    debug_assert!(
+        ratio >= min_ratio,
+        "contrast check failed for '{label}': ratio {ratio:.4}:1 < required {min_ratio:.4}:1 (fg {fg:?}, bg {bg:?})"
+    );
+}
+
 #[cfg(test)]
 #[path = "contrast_tests.rs"]
 mod contrast_tests;

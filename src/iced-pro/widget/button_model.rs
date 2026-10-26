@@ -85,6 +85,15 @@ pub enum ButtonDensity {
 }
 
 impl ButtonDensity {
+    /// The control height corresponding to this density rung (§3.1, `UIF-ATOM-001a`).
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        match self {
+            Self::Standard => size::CONTROL_MD,
+            Self::Compact => size::CONTROL_SM,
+        }
+    }
+
     /// The [`Breakpoint`] this density asks the responsive layout to resolve.
     pub fn breakpoint(self) -> Breakpoint {
         match self {

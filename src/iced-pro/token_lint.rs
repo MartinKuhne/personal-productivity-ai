@@ -503,6 +503,91 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "TRIGGER_GAP",
         spec: "§3B.8 — OverflowToolbar trigger clearance 8px, the remainder of the 36px reserve",
     },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "DEFAULT_WIDTH",
+        spec: "§3B.12 — SideSheet default width 360px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "MIN_WIDTH",
+        spec: "§3B.12 — SideSheet min width 280px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "MAX_WIDTH",
+        spec: "§3B.12 — SideSheet max width 520px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/side_sheet.rs",
+        name: "FOOTER_HEIGHT",
+        spec: "§3B.12 — SideSheet action footer height 48px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "COMPACT_WIDTH",
+        spec: "§3B.9 — NavigationRail compact width 48px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_DEFAULT_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded default width 220px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_MIN_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded min width 180px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_MAX_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded max width 320px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "CARD_WIDTH",
+        spec: "§3B.10 — CommandPalette card width 560px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "CARD_HEIGHT",
+        spec: "§3B.10 — CommandPalette card height 380px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "SEARCH_HEIGHT",
+        spec: "§3B.10 — CommandPalette search row height 40px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/command_palette.rs",
+        name: "ROW_DOUBLE_HEIGHT",
+        spec: "§3B.10 — CommandPalette two-line item height 44px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/grid_view.rs",
+        name: "DEFAULT_MIN_TILE_WIDTH",
+        spec: "§3B.13 — GridView default min tile width 160px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/grid_view.rs",
+        name: "DEFAULT_TILE_HEIGHT",
+        spec: "§3B.13 — GridView default tile height 120px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/code_block.rs",
+        name: "GUTTER_WIDTH",
+        spec: "§3B.15 — CodeBlock line-number gutter width 40px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/diff_viewer.rs",
+        name: "GUTTER_WIDTH",
+        spec: "§3B.15 — DiffViewer line-number gutter width 40px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/date_picker.rs",
+        name: "CALENDAR_FLYOUT_WIDTH",
+        spec: "§3.10 — Calendar Flyout fixed width 256px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

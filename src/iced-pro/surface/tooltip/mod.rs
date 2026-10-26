@@ -86,10 +86,13 @@
 //! [`UnwindAnswer`]: crate::surface::zorder::UnwindAnswer
 //! [`widget::button::resolve_style`]: crate::widget::button::resolve_style
 //! [`zorder::ZBand`](crate::surface::zorder::ZBand): crate::surface::zorder::ZBand
+//!
+//! Unit tests live in the sibling `tooltip_tests.rs` sidecar.
 
 pub mod hover;
 pub mod place;
 pub mod warm;
+pub mod widget;
 
 use crate::token::{color::Palette, contrast, shape, space, time, typography};
 use iced::Color;
@@ -97,6 +100,47 @@ use iced::Color;
 pub use hover::{ArrivalSource, DismissReason, Dismissal, HoverController, TimeMs, Visibility};
 pub use place::{TOOLTIP_ALIGNMENT, TOOLTIP_GAP, TooltipAnchor};
 pub use warm::{ArrivalWarmth, WarmSession, cold_wait_ms, handoff_window_ms, warm_wait_ms};
+pub use widget::{Tooltip, TooltipState, tooltip};
+
+/// Content of a tooltip card: a primary text label and an optional trailing shortcut pill (`UIF-ATOM-007`, §3.7).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TooltipContent {
+    /// The primary explanation label.
+    pub label: String,
+    /// Optional trailing shortcut text rendered in `FontFamily::Mono`.
+    pub shortcut: Option<String>,
+}
+
+impl TooltipContent {
+    /// Create a tooltip content with only a primary label (`UIF-ATOM-007`).
+    #[must_use]
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            shortcut: None,
+        }
+    }
+
+    /// Create a tooltip content with a primary label and trailing shortcut pill (`UIF-ATOM-007`).
+    #[must_use]
+    pub fn with_shortcut(label: impl Into<String>, shortcut: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            shortcut: Some(shortcut.into()),
+        }
+    }
+}
+
+impl<T: Into<String>> From<T> for TooltipContent {
+    fn from(label: T) -> Self {
+        Self::new(label)
+    }
+}
+
+/// The gap between a primary tooltip label and an optional trailing shortcut pill (`UIF-ATOM-007`).
+///
+/// **8px** ([`space::SM`]). Bound to a design token per `UIF-PRIN-001`.
+pub const SHORTCUT_GAP: f32 = space::SM;
 
 /// How long the pointer must rest before a tooltip appears, in milliseconds.
 ///
@@ -212,6 +256,10 @@ pub struct TooltipStyle {
     pub padding_vertical: f32,
     /// Horizontal padding — [`PADDING_HORIZONTAL`] (`space.sm`).
     pub padding_horizontal: f32,
+    /// Shortcut pill text colour — [`Palette::text_muted`] (`UIF-ATOM-007`).
+    pub shortcut_foreground: Color,
+    /// Shortcut pill font family — [`typography::FontFamily::Mono`] (`UIF-ATOM-007`).
+    pub shortcut_font: typography::FontFamily,
 }
 
 impl TooltipStyle {
@@ -234,6 +282,12 @@ impl TooltipStyle {
         let foreground = palette.text_primary;
 
         contrast::assert_fill_foreground_lock(background, foreground, palette);
+        contrast::assert_contrast(
+            palette.text_muted,
+            background,
+            contrast::MIN_TEXT_CONTRAST,
+            "tooltip shortcut pill",
+        );
 
         Self {
             background,
@@ -245,6 +299,8 @@ impl TooltipStyle {
             max_width: MAX_WIDTH,
             padding_vertical: PADDING_VERTICAL,
             padding_horizontal: PADDING_HORIZONTAL,
+            shortcut_foreground: palette.text_muted,
+            shortcut_font: typography::FontFamily::Mono,
         }
     }
 }
