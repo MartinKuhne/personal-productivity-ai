@@ -72,10 +72,11 @@ pub use composite::{
     side_sheet, skeleton, stepper, wizard_footer,
 };
 pub use widget::{
-    Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
-    DatePicker, DatePickerModel, DateRangePicker, DateSelection, RatingControl, RatingModel,
-    RatingStep, Weekday, YearMonth, avatar, calendar_view, date_picker, date_range_picker,
-    rating_control,
+    AmPm, Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
+    CivilTime, ColorPicker, ColorPickerModel, ColorSwatchButton, DatePicker, DatePickerModel,
+    DateRangePicker, DateSelection, Hsva, RatingControl, RatingModel, RatingStep, Rgba8,
+    TimePicker, TimePickerModel, TimeSegment, Weekday, YearMonth, avatar, calendar_view,
+    color_picker, color_swatch_button, date_picker, date_range_picker, rating_control, time_picker,
 };
 
 #[cfg(test)]

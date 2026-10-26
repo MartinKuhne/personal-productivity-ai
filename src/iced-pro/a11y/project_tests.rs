@@ -537,3 +537,45 @@ fn projecting_does_not_mutate_the_source_model() {
     let _ = project_segment(&segmented, 1);
     assert_eq!(segmented, before_segmented);
 }
+
+#[test]
+fn test_project_new_collection_items() {
+    // Tab item projection
+    let tab = crate::composite::tab_strip::TabItem::new("t1", "Document 1");
+    let c_tab = project_tab_item(&tab, true);
+    assert_eq!(c_tab.role, A11yRole::Button);
+    assert_eq!(c_tab.name, Some("Document 1"));
+    assert_eq!(c_tab.selected, Some(true));
+
+    // Nav rail destination projection
+    let nav = crate::composite::navigation_rail::NavDestination::new("home", "Home", "⌂");
+    let c_nav = project_nav_rail_destination(&nav, false);
+    assert_eq!(c_nav.role, A11yRole::Button);
+    assert_eq!(c_nav.name, Some("Home"));
+    assert_eq!(c_nav.selected, Some(false));
+
+    // Stepper step projection
+    let step = crate::composite::stepper::StepItem::new(
+        "step_1",
+        "Account Setup",
+        crate::composite::stepper::StepStatus::Current,
+    );
+    let c_step = project_stepper_step(&step, true);
+    assert_eq!(c_step.role, A11yRole::Button);
+    assert_eq!(c_step.name, Some("Account Setup"));
+    assert_eq!(c_step.selected, Some(true));
+
+    // Grid tile projection
+    let tile = crate::composite::grid_view::GridTile::new("tile_1", "Project Alpha");
+    let c_tile = project_grid_tile(&tile, false);
+    assert_eq!(c_tile.role, A11yRole::Button);
+    assert_eq!(c_tile.name, Some("Project Alpha"));
+    assert_eq!(c_tile.selected, Some(false));
+
+    // Command palette item projection
+    let cmd = crate::composite::command_palette::PaletteItem::new("cmd_1", "Save File");
+    let c_cmd = project_command_palette_item(&cmd, true);
+    assert_eq!(c_cmd.role, A11yRole::MenuItem);
+    assert_eq!(c_cmd.name, Some("Save File"));
+    assert_eq!(c_cmd.selected, Some(true));
+}

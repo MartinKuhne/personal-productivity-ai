@@ -457,3 +457,46 @@ fn slugs_are_stable_and_distinct() {
     );
     assert_ne!(EdgeBehaviour::Wraps.slug(), EdgeBehaviour::Clamps.slug());
 }
+
+#[test]
+fn test_all_eleven_collections_in_the_pillar_have_boundaries() {
+    // §1.1 UIF-PRIN-008 names 11 collections:
+    // Bounded groups (wraps):
+    // 1. Menu
+    // 2. RadioGroup
+    // 3. SegmentedButton
+    // 4. NavigationRail
+    // 5. CommandPalette
+    // 6. TabStrip
+    // 7. Stepper
+    // Spatial collections (clamps):
+    // 8. TreeView
+    // 9. TableView
+    // 10. GridView
+    // 11. CalendarView
+    let enabled_three = [0, 1, 2];
+    let roster = vec![
+        bounded("Menu", &enabled_three, Some(0)),
+        bounded("RadioGroup", &enabled_three, Some(0)),
+        bounded("SegmentedButton", &enabled_three, Some(0)),
+        bounded("NavigationRail", &enabled_three, Some(0)),
+        bounded("CommandPalette", &enabled_three, Some(0)),
+        bounded("TabStrip", &enabled_three, Some(0)),
+        bounded("Stepper", &enabled_three, Some(0)),
+        spatial("TreeView", 100, &enabled_three, Some(0)),
+        spatial("TableView", 100, &enabled_three, Some(0)),
+        spatial("GridView", 100, &enabled_three, Some(0)),
+        spatial("CalendarView", 42, &enabled_three, Some(0)),
+    ];
+
+    assert_eq!(roster.len(), 11, "exactly 11 collections named in §1.1");
+    assert_eq!(
+        total_tab_stops(&roster),
+        11,
+        "each collection constitutes exactly one tab stop"
+    );
+    assert!(
+        check_roster(&roster).is_empty(),
+        "no edge rule violations across all 11 collections"
+    );
+}

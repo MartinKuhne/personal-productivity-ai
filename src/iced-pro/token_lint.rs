@@ -588,6 +588,41 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "CALENDAR_FLYOUT_WIDTH",
         spec: "§3.10 — Calendar Flyout fixed width 256px",
     },
+    SurfaceGeometryConstant {
+        file: "widget/time_picker.rs",
+        name: "TIME_FLYOUT_WIDTH",
+        spec: "§3.11 — TimePicker drum flyout card width 220px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/time_picker.rs",
+        name: "TIME_FLYOUT_MAX_HEIGHT",
+        spec: "§3.11 — TimePicker drum flyout card max height 260px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_FLYOUT_WIDTH",
+        spec: "§3.12 — ColorPicker flyout card width 240px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_WELL_WIDTH",
+        spec: "§3.12 — ColorPicker saturation/value plane width 180px",
+    },
+    SurfaceGeometryConstant {
+        file: "widget/color_picker.rs",
+        name: "COLOR_WELL_HEIGHT",
+        spec: "§3.12 — ColorPicker saturation/value plane height 140px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/tab_strip.rs",
+        name: "TAB_MIN_WIDTH",
+        spec: "§4.4.1 — Tab Strip min tab width 64px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/tab_strip.rs",
+        name: "TAB_MAX_WIDTH",
+        spec: "§4.4.1 — Tab Strip max tab width 200px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

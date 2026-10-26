@@ -810,3 +810,63 @@ fn test_time_module_has_no_imports() {
         "token/time.rs must import nothing to read a clock with, found {use_lines:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 6. Transition interpolation helpers (§2.6, UIF-TOK-007)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_switch_thumb_progress_evaluates_fast_with_ease_out() {
+    assert_eq!(switch_thumb_progress(0, false), 0.0);
+    assert_eq!(switch_thumb_progress(FAST.ms, false), 1.0);
+    assert_eq!(switch_thumb_progress(FAST.ms * 2, false), 1.0);
+    // At half duration (50ms), EaseOutCubic: 1 - (1 - 0.5)^3 = 1 - 0.125 = 0.875
+    let half = switch_thumb_progress(50, false);
+    assert!((half - 0.875).abs() < EPS, "expected 0.875, got {half}");
+    // Reduced motion immediately resolves to finished (1.0)
+    assert_eq!(switch_thumb_progress(0, true), 1.0);
+    assert_eq!(switch_thumb_progress(25, true), 1.0);
+}
+
+#[test]
+fn test_flyout_arrival_progress_evaluates_normal_with_ease_out() {
+    assert_eq!(flyout_arrival_progress(0, false), 0.0);
+    assert_eq!(flyout_arrival_progress(NORMAL.ms, false), 1.0);
+    assert_eq!(flyout_arrival_progress(NORMAL.ms * 2, false), 1.0);
+    // Reduced motion immediately resolves to 1.0
+    assert_eq!(flyout_arrival_progress(0, true), 1.0);
+}
+
+#[test]
+fn test_slow_transition_progress_evaluates_slow_with_ease_in_out() {
+    assert_eq!(slow_transition_progress(0, false), 0.0);
+    assert_eq!(slow_transition_progress(SLOW.ms, false), 1.0);
+    // At half duration (120ms), EaseInOutCubic meets at 0.5
+    let half = slow_transition_progress(120, false);
+    assert!((half - 0.5).abs() < EPS, "expected 0.5, got {half}");
+    // Reduced motion immediately resolves to 1.0
+    assert_eq!(slow_transition_progress(0, true), 1.0);
+}
+
+#[test]
+fn test_rail_width_interpolate_transitions_between_bounds() {
+    let from = 48.0;
+    let to = 220.0;
+    assert_eq!(rail_width_interpolate(from, to, 0, false), from);
+    assert_eq!(rail_width_interpolate(from, to, SLOW.ms, false), to);
+    let mid = rail_width_interpolate(from, to, 120, false);
+    assert!((mid - (from + (to - from) * 0.5)).abs() < EPS);
+    // Under reduced motion: immediate transition to target width
+    assert_eq!(rail_width_interpolate(from, to, 0, true), to);
+}
+
+#[test]
+fn test_hold_copied_equals_code_block_hold_duration() {
+    use crate::composite::code_block::HOLD_COPIED_MS;
+    assert_eq!(
+        HOLD_COPIED.ms,
+        u64::from(HOLD_COPIED_MS),
+        "time.hold.copied and code_block::HOLD_COPIED_MS must agree"
+    );
+    assert_eq!(HOLD_COPIED_MS, 1500);
+}

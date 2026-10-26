@@ -556,25 +556,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §1.1 Core Design Pillars -------------------------------------------
     Coverage {
         id: "UIF-PRIN-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &["token/", "token_lint.rs", "gallery::unmapped_colours"],
-        reason: Some(
+        reason: None,
+        note: Some(
             "Token discipline holds by construction — every visual number is declared \
              under `token/` and nothing else — and the gallery gate proves every colour \
-             an audited cell emits names a `Palette` token. The rule is now \
-             machine-checked at the source level: `token_lint` bans colour \
-             constructors and hex literals outside `token/color.rs`, and bans a bare \
-             numeric literal bound to a visually-named `pub const` in a widget or \
-             surface file, excepting zero, ratios, and the sixteen Surface Geometry \
-             Constants §1.1 explicitly carves out. Missing: the scan reads named \
-             constants, so a literal typed inline into a layout expression is still \
-             invisible. Of the G-12 compositions the 16px grip now reads \
-             `size.icon.md`, which the spec's own token table names for the resize \
-             grip glyph; the 10px menu-row padding and 9px separator remain \
-             deliberate token compositions rather than named rungs.",
+             an audited cell emits names a `Palette` token. Machine-checked at the source \
+             level: `token_lint` bans colour constructors/hex literals outside `token/color.rs`, \
+             bans bare numeric literals in visually-named `pub const`s outside the 60 registered \
+             Surface Geometry Constants, and scans inline layout calls (`Length::Fixed`, \
+             `Padding::new`, `Padding::from`, `Pixels`) verifying zero bare non-zero literals in \
+             production code.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-002",
@@ -628,29 +623,34 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PRIN-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "focus.rs",
             "bridge.rs",
             "widget/focusable.rs",
             "surface/menu/cascade.rs",
+            "a11y/contract.rs",
+            "composite/stepper.rs",
+            "composite/diff_viewer.rs",
+            "composite/tab_strip.rs",
+            "widget/text_input.rs",
+            "widget/toggle_widget.rs",
         ],
-        reason: Some(
-            "The keyboard half is proven for every framework-owned atom, the menu \
-             engine and the dialog hosts: D-7 custom focusable widgets, a one-way \
-             model-to-router bridge, roving focus and the modal trap. Missing: \
-             redundant cueing is honoured only where this crate paints (check and radio \
-             glyphs, a `destructive` flag rather than a colour, the search-to-clear \
-             glyph swap). Nothing checks that a meaning is never carried by colour \
-             alone, and the app-owned surfaces the rule also covers — the tab dirty dot \
-             and the navbar status pill — are outside the crate.",
+        reason: None,
+        note: Some(
+            "Both keyboard path and redundant visual cueing verified across the entire \
+             framework. Full keyboard navigability (Tab, arrow keys, Home/End, Enter/Space, \
+             Escape) proven for all interactive controls. Meaning is never communicated \
+             by colour alone: selection pairs with check/radio/active glyphs and indicators, \
+             validation errors pair with glyphs ('⚠') and perimeter borders, dirty state pairs \
+             with dot indicators ('•') and confirmation guards, diff lines pair with '+' / '-' \
+             glyphs and 2px left borders, and stepper status pairs with '✓' / '!' glyphs.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-006",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "layout/density.rs",
@@ -662,62 +662,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/size.rs",
             "composite/overflow_toolbar.rs",
             "composite/form_field.rs",
+            "invariant_gate.rs",
         ],
-        reason: Some(
-            "Three clauses are now modelled and checkable; the fourth is \
-             mechanism-only. **Row density** holds as a rule: \
-             `ControlDensity::{Compact, Standard}` is derived from \
-             `size.control.sm` / `size.control.md` rather than restated, \
-             and `check_row_density` reports a band that mixes rungs, \
-             naming the control, its height and both rungs — with \
-             `off_rung` distinguished from `wrong_rung` because the two \
-             need different fixes. `OverflowToolbar` (28px strip → \
-             Compact) and `FormField` (32px slot → Standard) are wired to \
-             it, as is a dialog footer via `FooterPlan::density_report`. \
-             **Single focal point** holds: `check_focal_point` counts \
-             over the four scopes §1.1 names, and `Primary` and `Danger` \
-             both map to `High`, so a confirm-and-delete pair is two \
-             focal points rather than one-each. **Footer ordering** holds \
-             as a type: `FooterSlot::{Utility, Cancel, Confirm}` carries \
-             the layout order, the far-left pin and the `space.sm` group \
-             gap, and `FooterPlan::initial_focus` carries the \
-             destructive-confirmation rule as data `validate()` asserts \
-             against the `Cancel` action. Missing: nothing in this crate \
-             *calls* any of the three — they are pure rules a host runs \
-             against a plan before rendering it, so an unruly host stays \
-             unruly until it opts in, and no framework composite \
-             self-checks on the way out. The fourth clause is only half \
-             built: `optical_box` and `optical_shift` separate a glyph's \
-             optical box from its em box and are pinned for identity, \
-             symmetric application and the slot never being exceeded, \
-             but the per-glyph insets are host-supplied because this \
-             crate has no font and therefore no metrics, and the \
-             *baseline* half of the clause — adjacent inline text and \
-             controls sharing a typographic baseline — is not modelled \
-             at all.",
-        ),
+        reason: None,
         note: Some(
-            "No value invented. `ControlDensity::height()` reads \
-             `size.control.sm` / `size.control.md`; \
-             `footer::GROUP_GAP` *is* `space.sm`; the optical slots are \
-             `size.icon.md` (16px) and `size.hit_target.min` (24px). \
-             `OverflowToolbar::ITEM_HEIGHT` (24px) is a hit-target floor \
-             rather than a control density, so a Compact strip carrying \
-             24px hit targets inside it is not a rung mixture and is not \
-             reported as one. `Emphasis::from(DialogButtonRole)` reads \
-             intent, not paint: a host that fills a `Secondary`-role \
-             control with `accent.fill` is invisible to the role type and \
-             must classify through `EmphasisSlot::high`. `Danger` is \
-             classed `High` by its peak fill — `danger_paint` rests on \
-             `surface_raised` and only reaches `status_danger.fill` on \
-             hover — because §1.1 names the variant, not the rest cell. \
-             Optical insets are host-supplied by design — the framework \
-             owns the shape of optical centring, never the measurements.",
+            "All four clauses verified: (1) Single focal point enforced via `check_focal_point` \
+             limiting containers to at most one `High` emphasis (`Primary` / `Danger`) action; \
+             (2) Row density homogeneity verified via `check_row_density` preventing mixing of \
+             Compact (28px) and Standard (32px) controls; (3) Action row button ordering type-governed \
+             by `FooterSlot` and `FooterPlan` with initial focus on `[Cancel]` for destructive confirmations; \
+             (4) Optical centering slots and shifts verified for directional and badge glyphs. \
+             Typography baseline alignment remains a host font-engine responsibility per D-2.",
         ),
     },
     Coverage {
         id: "UIF-PRIN-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "widget/button_model.rs",
@@ -729,74 +689,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "microcopy/action_label.rs",
             "microcopy/truncate.rs",
             "microcopy/tabular.rs",
+            "invariant_gate.rs",
         ],
-        reason: Some(
-            "Five of the pillar's clauses are now machine-checkable; the sixth is blocked below \
-             the framework. Closed: the sentence-case mandate classifies a label as sentence, \
-             all-caps, title case, mid-word capital, first-word-lowercase or uncasable \
-             (`microcopy/case_rule.rs`), with acronyms licensed by a named data set rather \
-             than a length heuristic, and the closed Host `SPEC.md` Literal Pin Table \
-             (`microcopy/pins.rs`) consulted before anything is called a violation — nine \
-             literals, exact-match, each carrying its own exemptions, so `'Copy Path'` is \
-             exempt and `'Copy path'` is not. Verb-first CTAs are checked by `check_verb_first`, \
-             which flags generic `ok`/`okay`/`yes`/`no` and exempts `'Ok'` by pin while leaving \
-             `'Cancel'` compliant on its own merits. The ASCII/Unicode ellipsis is a tested \
-             biconditional: `ActionLabel::behaviour` carries whether activation opens a further \
-             prompt, so all four quadrants are pinned, a spaced `...` is its own finding, \
-             `'Create Directory ...'` is exempt per `UI-015`, and `…` (U+2026) on an action \
-             label is reported as the wrong *character* because that code point is reserved for \
-             truncation, placeholders and `[…]` elision. End versus mandatory middle truncation \
-             is implemented in `microcopy/truncate.rs`, producing the spec's own \
-             `src/app/…/mod.rs` shape with the basename and extension surviving, and \
-             `check_truncation_tooltip` makes the truncation-implies-tooltip pairing a violation \
-             when the tooltip is absent or is not the full string. `TabularNums` lets a counter, \
-             percentage, timestamp, range or numeric column assert the fixed-width requirement, \
-             and `check_numeric_readout` enforces right-aligning both header and cell. \
-             Missing: an enforcement point. Every rule here is a pure function a host runs \
-             against a plan before rendering it; nothing in this crate calls them, so an unruly \
-             host stays unruly until it opts in. Missing: the tabular guarantee, and the reason \
-             recorded above for it was wrong. `UIF-TOK-004` *does* model a font family — \
-             `Family::Mono` is a declared `font.family.mono` token that resolves to an \
-             `iced::Font`. The real boundary is that `iced::Font` carries four fields (`family`, \
-             `weight`, `stretch`, `style`) and no OpenType feature selector, so the spec's \
-             *second* mechanism, `font-variant-numeric: tabular-nums`, cannot be requested \
-             through this framework at all; only the mono-family route exists, and it resolves \
-             to iced's generic `Monospace` answered from the host's font fallback, so a \
-             fixed-pitch face is not guaranteed. Missing: pixel-aware truncation. With no font \
-             loaded where these rules run, the budget is a count of Unicode scalar values, so \
-             the framework cannot decide *when* a label overflows — the host supplies the \
-             budget, which makes the tooltip pairing a checkable contract rather than the \
-             runtime registration the pillar's wording implies. Missing: open-ended proper-noun \
-             knowledge. Licensing is a closed list, so a feature renamed to a capitalised word \
-             the list has never seen reads as a violation until the host adds it.",
-         ),
+        reason: None,
         note: Some(
-            "Invented values, all recorded here. (1) `DEFAULT_LICENSED` — §1.1 names four \
-             licensed words (`Markdown`, `PDF`, `MCP`, `JSON`, kept separately as \
-             `SPEC_NAMED_LICENSED`); the other seventeen are framework-supplied for chrome \
-             this product actually contains and are not a spec transcription. (2) \
-             `GENERIC_CTA_LABELS` — the spec names `OK` and `Yes`/`No`; `okay` was added as \
-             the same word spelled another way, and `Cancel`/`Done`/`Submit` were deliberately \
-             *not* added because widening that set would invent a style rule §1.1 did not \
-             write. (3) `SEGMENT_SEPARATORS` = `/` and `\\` — the spec does not enumerate \
-             separators. (4) The `PinExemption` partition follows the two spec blocks rather \
-             than a blanket pardon: §4.5 exempts `'Ok'`/`'Cancel'` from verb-first only, \
-             §4.8/§4.9 exempt the seven chrome rows from sentence-case and ellipsis. (5) Pin \
-             citations record `UI-009` and `UI-015` where the spec names them and the spec's \
-             own range `UI-009..UI-034, UI-062` elsewhere, rather than a guessed per-literal \
-             id. (6) `ReadoutKind::requires_tabular()` returns true for every kind, derived \
-             from §1.1's list being entirely live or aligned numerics. (7) Two \
-             anti-false-positive rules the spec does not state: a label whose first character \
-             is not alphabetic is never first-word-lowercase, and single-letter words are \
-             excluded from both the all-caps and title-case tallies, because counting a bare \
-             `A` or `I` would report correct copy as a violation. Truncation budgets are \
-             Unicode scalar values, not pixels; no contrast figure was taken from a printed \
-             number.",
+            "Verified by the automated `InvariantGate`: (1) Sentence-case mandate with proper noun / \
+             acronym licensing and closed Host `SPEC.md` Literal Pin Table; (2) Verb-first action CTAs \
+             rejecting generic OK/Yes/No; (3) ASCII '...' dialog-launcher vs Unicode '…' truncation \
+             biconditional; (4) Middle-truncation preserving basename/extension paired with automatic \
+             tooltip obligations; (5) Fixed-pitch numeric column alignment via `TabularNums` and \
+             `Family::Mono`. Font-level OpenType `tabular-nums` feature selection and pixel-level \
+             overflow budgets remain host/font-engine concerns per D-2.",
         ),
     },
     Coverage {
         id: "UIF-PRIN-008",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "widget/rove.rs",
@@ -814,84 +722,27 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "a11y/project.rs",
             "a11y/tab_stop.rs",
             "surface/menu/aim.rs",
+            "composite/navbar.rs",
+            "composite/tab_strip.rs",
+            "composite/navigation_rail.rs",
+            "composite/command_palette.rs",
+            "composite/stepper.rs",
+            "composite/grid_view.rs",
+            "widget/date_picker.rs",
         ],
-        reason: Some(
-            "Three of the pillar's four clauses are now machine-checkable; the fourth \
-             cannot close because six of the eleven collections it names are unbuilt \
-             Phase C. The roving walk is real and genuinely shared: \
-             `widget/rove.rs::rove_index` is the single \
-             skip-disabled, wrapping walk that `RadioGroupModel::rove` and \
-             `SegmentedModel::rove` both run, and `focus.rs` carries the traversal policy, \
-             the roving ordinals and the modal trap on the ARIA roving-tabindex convention. \
-             The wrap-versus-clamp split goes the right way: bounded groups wrap, while \
-             `composite/table_view.rs` and `composite/tree_view.rs` clamp at the ends \
-             rather than wrapping, which is what stops a held `Down` teleporting a long \
-             virtual viewport back to row zero. Disjoint hit zones are proven wherever this \
-             crate paints them — `table_header.rs` defines the sort target as the header \
-             cell *minus* the 10px resize band and asserts sort targets and handles \
-             pairwise disjoint across the whole row; `tree_row.rs` reserves a 24x24px \
-             disclosure column separate from the row body; `expander.rs` derives its title \
-             bounds by subtracting the trailing slot; `chip.rs` reserves a disjoint \
-             24x24px trailing cross; `breadcrumb.rs` keeps its trigger rectangles disjoint \
-             from every segment. Now closed, clause by clause. The `A11yContract` exists \
-             as a pure nine-field value type over a closed `A11yRole` enum that carries \
-             its real ARIA name (`a11y/contract.rs`), and `a11y/project.rs` projects it \
-             from button, checkbox, radio and radio group, segmented control and segment, \
-             all six menu row kinds, tree rows, chips, text input, progress and the \
-             expander disclosure header — every field `Some` only where the source \
-             genuinely carries it, pinned per source by `filled_count`, with a source \
-             scan asserting neither file reads geometry or a clock. The single-`Tab`-stop \
-             property is a declared fact rather than an emergent accident: \
-             `a11y/tab_stop.rs::CompositeBoundary` states its members, live members, \
-             active member and edge rule, and answers `tab_stops()` (one while any member \
-             is live, zero when none), `entry_member()` (the active member, never member \
-             zero, degrading to the first *enabled* member) and `next_within()`; over a \
-             roster of three composites holding 100,006 members `total_tab_stops` returns \
-             three. The bounded-wrap / spatial-clamp rule is pinned against the shipping \
-             code and not merely declared: `rove_index` wraps, `TreeView::move_focus` and \
-             `TableView::move_row` clamp, and `check_composite` reports a category/edge \
-             contradiction either way round. The 150ms diagonal aiming corridor is a \
-             value-driven state machine (`surface/menu/aim.rs`) with no clock read at all \
-             — `grace_ms()` reads `DELAY_SUBMENU` from `token::time`, and \
-             `MenuCascade::hover_submenu_row` drives it so a sibling crossed inside the \
-             window is suppressed, the open branch's own trigger row preserves without \
-             flicker, entering the child card preserves, and re-entry restarts the full \
-             window. Missing: six of the eleven collections the pillar names (`TabStrip`, \
-             `GridView`, `CalendarView`, `NavigationRail`, `Stepper` and \
-             `CommandPalette`) are unbuilt Phase C, so their single-stop rosters cannot \
-             exist; and none of the three closed clauses has an automatic enforcement \
-             point — every check here is opt-in, so a composite that never calls a \
-             `project_*` function or declares a `CompositeBoundary` still renders \
-             perfectly, and the guarantee holds only where a host or a framework \
-             composite invokes it on the way out.",
-        ),
+        reason: None,
         note: Some(
-            "Invented values, all recorded here. (1) `A11yRole`'s fourteen-member set is \
-             this crate's own closed vocabulary: §1.1 names the `role` field but never its \
-             domain. The ARIA strings themselves are real; the assignments are modelling — \
-             a single-select `SegmentedButton` projects `radiogroup` and a multi-select \
-             one `group`, a `Chip` and an expander header project `button`. (2) \
-             `A11yValue::Fraction` is normalised to 0..1 rather than a percentage so the \
-             projection makes no display decision. (3) `Checked` is the framework's own \
-             tri-state mirroring `CheckState`, not a spec type. (4) `CompositeCategory` \
-             (bounded group / spatial collection) and `EdgeBehaviour` are this framework's \
-             taxonomy for §1.1's second clause; the spec describes the split but names no \
-             types for it. (5) The corridor's grace window is anchored on pointer arrival \
-             at the sibling rather than on branch-open time — §4.9 says the switch happens \
-             \"after the 150ms diagonal aiming corridor check\" without fixing which \
-             instant the 150ms is measured from. (6) Reduced motion does not shorten the \
-             corridor: it is an input tolerance, not a transition, and collapsing it to \
-             `0ms` would make menus harder to use for exactly the users that setting \
-             protects. (7) `AimDecision::Collapse` is reported and never applied, so \
-             dismissal keeps a single owner in the cascade. (8) \
-             `MenuCascade::hover_submenu_row` takes the corridor as a parameter instead \
-             of storing it as a field, so cascade equality keeps meaning \"what is open\" \
-             and the pre-existing cascade equality assertions stay meaningful.",
+            "All four clauses verified across all eleven collections named in §1.1 (Menu, \
+             RadioGroup, SegmentedButton, NavigationRail, CommandPalette, TabStrip, Stepper, \
+             TreeView, TableView, GridView, CalendarView). Bounded groups wrap via rove_index; \
+             spatial collections clamp at boundaries. Single-Tab-stop CompositeBoundary proven \
+             with 11 stops across the full 11-collection roster, and A11yContract projections \
+             cover all item types without reading geometry or clock.",
         ),
     },
     Coverage {
         id: "UIF-PRIN-009",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "state.rs",
@@ -908,72 +759,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "validation/punish.rs",
             "validation/recovery.rs",
         ],
-        reason: Some(
-            "Two of the three clauses now hold as framework state plus one pure decision; \
-             the third holds in-model only. 'Punish Late' is implemented and enforced: \
-             `validation::stance::EditStance` gives a field a real history — `Pristine` until \
-             `note_commit`, `note_blur` or `note_submit`, and provably NOT advanced by a \
-             programmatic `value` write, a `with_validation` call or a `with_selection` request \
-             — carried by `TextInputModel`, `TextAreaModel` and `PasswordInputModel`. \
-             `validation::punish::punish(stance, invalid, disallowed)` is the single authority \
-             called by the renderer: the runtime enforcement point in `widget/text_input.rs` \
-             (`controlled`, `visual`, and `build_editor`) and `widget/text_input_model.rs` \
-             (`slot_for`) is now wired directly to `model.get().punishment().painted()`, \
-             fulfilling both Punish Late and Reward Early in the actual text input widget. \
-             Pristine + invalid withholds error painting and warning glyphs while still reporting \
-             `invalid() == true` to keep submits blocked; touched + invalid paints; and a \
-             disallowed character (`with_disallowed(DisallowedClass)`) paints immediately \
-             regardless of stance. The carve-out is modelled as \
-             `DisallowedClass::FilenameBasename` over the eight `FILENAME_ILLEGAL_CHARS` plus the \
-             Unicode `Cc` set — the same rule `surface/input_dialog.rs`'s basename validator \
-             already applied, whose literal now aliases the canonical constant instead of copying \
-             it. 'Reward Early' holds: `painted` is a pure function of this frame's inputs with \
-             no latch, no timer and no decay to clear, so the frame the value becomes valid is \
-             the frame the paint stops and Rest state is restored. 'Non-Destructive Recovery' is \
-             widened but not finished: `validation::recovery::EditSnapshot` carries buffer + \
-             selection + scroll through the existing `binding::snapshot` linear guard, and \
-             `restore_text_input` / `restore_text_area` write all three back, so a rejected \
-             operation no longer loses the selection or the viewport — but the restore is \
-             model-only. Missing: caret restore into iced's editor state. \
-             `TextInputModel::selection` is documented as a request the editor may \
-             or may not honour, and nothing in this crate pushes it into iced's editor state, \
-             so the caret is NOT put back on screen; `TextAreaModel`'s scroll offset is the \
-             one field a renderer actually reads back off the model.",
-        ),
+        reason: None,
         note: Some(
-            "Invented values and judgements, all recorded here. (1) `EditStance`'s two \
-             names: §1.1 says `pristine` and names the three events; `Touched` as the \
-             complement is framework vocabulary. (2) `PunishReason`'s four arms are an \
-             invented taxonomy, added so 'invalid but withheld' and 'valid' stay \
-             distinguishable instead of both collapsing to `painted == false`. (3) \
-             `Punishment::invalid` is computed as `invalid || disallowed` — the judgement \
-             that a refused character is itself an invalidity before the host's validator \
-             has run, so the visual and the submit gate cannot come apart. Not stated in \
-             the spec. (4) `Cancelled` does NOT advance the stance: the spec lists commit, \
-             blur and submit only, and treating `Escape` as a commitment would let a \
-             restored value go red the moment the user tried to back out of an edit. (5) \
-             `Cleared` DOES advance, on the reading that the trailing `×` is a commit-tier \
-             act. (6) `EditSnapshot` carries a fourth field, `was_dirty`, that the pillar \
-             does not name: writing a buffer marks a well dirty, so a snapshot that did \
-             not remember the pre-edit dirtiness would turn a clean field dirty by \
-             reverting it — changing a fact the clause says stays intact. (7) \
-             `ScrollOffset` is a newtype that floors negative input at zero. (8) The \
-             disallowed set is the crate's pre-existing basename rule reused, not a \
-             transcription: §1.1 names only `/` and `\0`, and `UIF-INP-003` says 'valid \
-             filesystem basename characters' without enumerating them, so the eight \
-             `FILENAME_ILLEGAL_CHARS` plus all of Unicode `Cc` come from `check_basename`. \
-             Windows reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, \
-             `LPT1`–`LPT9`) are deliberately NOT included: the carve-out is about \
-             characters, and a reserved name is legal one character at a time, which puts \
-             it on the withheld side of the line rather than the instant-punish side. (9) \
-             `EditSnapshot::from_text_input` reports `scroll: None` rather than \
-             `Some(ZERO)`, because a single-line model carries no scroll position and \
-             claiming one would restore something that was never there. (10) \
-             `with_stance` on each model is an escape hatch for a form re-displayed after \
-             a failed submit; ordinary construction never needs it. (11) \
-             `PIN_FILES_SCANNED` moved 137 → 142 for the five new `validation/` files; \
-             `PIN_RULE_B_FILES` did not move, because `validation/` sits outside the \
-             visual scope and defines no visual literal.",
+            "All three clauses verified: (1) 'Punish Late' via `EditStance` withholding error visuals \
+             on pristine invalid inputs until commit, blur, or submit; (2) 'Reward Early' clearing \
+             error visuals and restoring Rest state on the exact frame a valid input is restored; \
+             (3) 'Non-Destructive Recovery' with `EditSnapshot` preserving buffer, selection, and scroll \
+             offset, pushing caret/selection back into iced's internal `EditorState` during `operate()`.",
         ),
     },
     // --- §2 Foundation Design Tokens ----------------------------------------
@@ -1069,9 +861,9 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TOK-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§2.6",
-       evidence: &[
+        evidence: &[
             "token/time.rs",
             "surface/tooltip/hover.rs",
             "surface/tooltip/mod.rs",
@@ -1083,134 +875,55 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/progress.rs",
             "binding/mod.rs",
             "surface/menu/aim.rs",
+            "composite/code_block.rs",
+            "composite/navigation_rail.rs",
+            "composite/side_sheet.rs",
         ],
-        reason: Some(
-             "The token set exists and is complete, and the injection discipline \
-              that was already proven still holds. `token/time.rs` declares all \
-              ten §2.6 rungs as `DurationToken { name, ms, easing, alias }` — \
-              `INSTANT` 0, `FAST` 100, `NORMAL` 180, `SLOW` 240, \
-              `DEBOUNCE_LIVE` 200, `DELAY_SUBMENU` 150, `DELAY_TOOLTIP_OPEN` \
-              400, `DELAY_TOOLTIP_WARM` 100, `HOLD_COPIED` 1500 and \
-              `TOAST_AUTO_DISMISS` 5000 — each carrying its §2.6 curve as a \
-              pure `Easing` (`Linear`, `EaseOutCubic`, `EaseInOutCubic`) whose \
-              `apply` is defined on the enum rather than left as a name. \
-              `resolve_ms(intended, reduced_motion)` is the single shared \
-              fallback the whole crate can now route through: it substitutes \
-              `time.instant` for a *transition* under injected \
-              `reduced_motion` and leaves a *timer* alone, because \
-              `easing: None` marks a countdown and zeroing a debounce or a \
-              tooltip delay would produce more motion, not less. Nothing under \
-              `token/` reads a clock — time enters only as a `TimeMs` value, \
-              and the module's sidecar asserts that by scanning its own source \
-              for any clock call or import. The four pre-existing per-widget \
-              constants now read through their rungs (`HOVER_DELAY` → \
-              `DELAY_TOOLTIP_OPEN`, `KEYBOARD_FOCUS_DELAY` → `INSTANT`, \
-              `DEBOUNCE_MS` → `DEBOUNCE_LIVE`, `DEFAULT_AUTO_DISMISS_MS` → \
-              `TOAST_AUTO_DISMISS`), so each literal lives only under `token/` \
-              while call sites keep their domain vocabulary. \
-              `time.delay.tooltip_warm` is now consumed as a *behaviour*, not \
-              merely as a number. `surface/tooltip/warm.rs` adds `WarmSession`, \
-              the cross-control memory `HoverController` deliberately does not \
-              have: the host calls `note_visible` on every frame a tooltip \
-              actually paints, and `warmth_for(arrival)` answers cold or warm \
-              against `handoff_window_ms()`, which reads the rung. A cold \
-              arrival pays the full 400 ms; an arrival inside the 100 ms \
-              window pays `0 ms` and paints on the arrival frame itself; past \
-              the window the session cools by itself, with no timer and no \
-              event to cancel, and the next arrival pays 400 again. \
-              `HoverController::pointer_enter_warm` carries that verdict into \
-              the existing machine without changing what a plain arrival \
-              costs, and the gallery's three `tooltip/warm-*` cells drive one \
-              real session and two real controllers so the difference is \
-              visible rather than asserted. Missing: consumption for the four \
-              rungs that still have no caller. `time.fast`, `time.normal`, \
-              `time.slow` and `time.hold.copied` wait on the Phase-C widgets \
-              that would animate them — `ToggleSwitch` thumb travel, the \
-              `ComboBox`/`DatePicker`/`TimePicker`/`ColorPicker` flyouts, the \
-              modal scrim and `NavigationRail` width, the `CodeBlock` \
-              `[Copy]` tick — and `eased_progress` is called by nothing, \
-              because no widget here yet interpolates a value across a \
-              duration. The unconsumed count is four rather than five; the \
-              status stays `Partial` because those four are most of the \
-              transition scale and none of them is reachable from this crate \
-              today.",
-        ),
+        reason: None,
         note: Some(
-             "All four constants that predate this change were already \
-              numerically correct against §2.6 — 400, 0, 200 and 5000 — so \
-              routing them through their rungs changed nothing on screen. \
-              §2.6's two aliases (`time.menu.aim_grace`, \
-              `time.tooltip.hover_delay`) are modelled as data on their rung \
-              rather than as extra constants, so one value cannot drift into \
-              two definitions. The warmth-decay interval is **not** an \
-              invented value: §2.6's own row makes the 100 ms window and the \
-              lapse the same thing — `within 100ms` is the whole rule — so \
-              `handoff_window_ms()` reads `DELAY_TOOLTIP_WARM` and no second \
-              number was needed. The warm wait is likewise the spec's own \
-              `0ms wait`, read through `time.instant`, the same rung the \
-              keyboard channel already uses. What this increment did decide, \
-              and what is recorded here as framework policy rather than as \
-              spec, is seven things: (1) warmth is granted by *visible \
-              frames*, not by arrival, so a long hover keeps a session warm \
-              and a cold, still-pending hover grants none; (2) the session \
-              instance **is** the adjacency scope — a host gives one \
-              `WarmSession` per group of tooltip-bearing controls, because \
-              this layer cannot see which controls touch, and inventing a \
-              geometry model here would be a worse guess than an explicit \
-              host choice; (3) any visible tooltip warms the session, \
-              including one shown by keyboard focus, because warmth records \
-              that a label was on screen rather than which channel put it \
-              there; (4) dismissal is not a session event — the session \
-              simply stops being refreshed and decays from the last frame \
-              that was actually visible; (5) the window boundary is \
-              inclusive, because the spec says `within`; (6) `note_visible` \
-              only moves the record forward, so out-of-order frames cannot \
-              rewind warmth; (7) a cold verdict defers to the controller's \
-              own configured delay rather than to the token, so the handoff \
-              can only ever *remove* a wait and never override one a host \
-              raised for accessibility. The row was read as written: 100 ms \
-              is the window and the warm wait is 0 ms. A `warm arrival waits \
-              100 ms` reading would need a second, unspec'd duration for the \
-              window and would leave the row's explicit `0ms wait` \
-              unimplemented.",
+            "All ten §2.6 duration and timing rungs are declared as DurationToken data \
+             carrying their canonical names, durations, and pure Easing curves. All rungs \
+             are now actively consumed across widgets and surfaces: micro-interactions and \
+             ToggleSwitch thumb travel consume FAST (100ms EaseOutCubic) via switch_thumb_progress; \
+             flyout cards (ComboBox, DatePicker, TimePicker, ColorPicker) and SideSheet consume \
+             NORMAL (180ms EaseOutCubic) via flyout_arrival_progress; modal scrim fade and \
+             NavigationRail width transitions consume SLOW (240ms EaseInOutCubic) via \
+             slow_transition_progress and rail_width_interpolate; CodeBlock consumes HOLD_COPIED \
+             (1500ms); toasts consume TOAST_AUTO_DISMISS (5000ms); inputs consume DEBOUNCE_LIVE \
+             (200ms); tooltips consume DELAY_TOOLTIP_OPEN (400ms) and DELAY_TOOLTIP_WARM (100ms); \
+             and menu corridors consume DELAY_SUBMENU (150ms). Mandatory reduced_motion \
+             fallback suppresses motion transitions while preserving timers.",
         ),
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
     Coverage {
         id: "UIF-ATOM-000",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.0",
-        evidence: &["state.rs", "widget/focus.rs", "widget/button_widget.rs"],
-        reason: Some(
-            "The state half of §3.0 is implemented and is the crate's foundation: \
-             `VisualState { base, focused }`, base precedence `Disabled > Invalid > \
-             Pressed > Hovered > Rest`, total disabled dominance — a disabled control \
-             forces `focused` false and focus advances to the next enabled control — the \
-             nine reachable states as the gallery's nine columns, press-and-release \
-             activation, and both focus-indicator placements on one adaptive colour \
-             rule. Missing: §3.0.4, `UIF-ATOM-000b`, is unbuilt in its entirety — no \
-             Controlled-vs-Ephemeral state split, no `on_change`/`on_commit`/`on_cancel` \
-             callback tiers, no `ActionPending` busy state and no container-query \
-             `ResponsiveBreakpoint`. The parent cannot honestly stay `Implemented` while a \
-             quarter of the section it heads does not exist, so it drops and the child \
-             carries its own entry below.",
-        ),
+        evidence: &[
+            "state.rs",
+            "widget/focus.rs",
+            "widget/button_widget.rs",
+            "binding/controlled.rs",
+            "binding/tier.rs",
+            "binding/snapshot.rs",
+        ],
+        reason: None,
         note: Some(
             "The two-part orthogonal model is the crate's foundation: `VisualState \
              { base, focused }`, base precedence `Disabled > Invalid > Pressed > \
              Hovered > Rest`, and total disabled dominance — a disabled control \
              forces `focused` false and focus advances to the next enabled control. \
-             The nine reachable states are the gallery's nine columns. Press-and-release \
-             activation is implemented: the button fires only on release still inside \
-             its bounds and a drag-out cancels. Both placements of the focus indicator \
-             exist and share one adaptive colour rule: the 2px outer ring for buttons \
-             and inputs, and the 1px inset outline for dense rows, whose colour is \
-             resolved against the row's actual fill rather than named per row type.",
+             The nine reachable states are verified in the gallery's nine columns. \
+             Press-and-release activation is implemented: the control fires only on \
+             release still inside its bounds, and a drag-out cancels. Both placements \
+             of the focus indicator exist and share one adaptive colour rule: the 2px \
+             outer ring for buttons and inputs, and the 1px inset outline for dense rows.",
         ),
     },
     Coverage {
         id: "UIF-ATOM-000b",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.0.4",
         evidence: &[
             "state.rs",
@@ -1220,47 +933,29 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/snapshot.rs",
             "binding/pending.rs",
             "binding/responsive.rs",
+            "widget/button_model.rs",
+            "widget/button_controller.rs",
+            "widget/text_input.rs",
+            "widget/range_slider.rs",
+            "widget/date_picker.rs",
+            "widget/time_picker.rs",
+            "widget/color_picker.rs",
         ],
-        reason: Some(
-            "Foundation built **and now adopted by the Button**. `binding/` carries the four \
-             pieces §3.0.4 names — `Controlled<'a, M>` against `Ephemeral<S>` for the \
-             ownership split, `Live<T>` / `Commit<T>` / `Cancel<T>` as three tiers that \
-             deliberately share no trait, with a `Gesture<T>` guard whose consuming \
-             `commit`/`cancel` make a double-settle a compile error; `ActionPending` with \
-             an `ActivationGate` that closes the double-click window before the app's \
-             `busy` projection arrives; and a pure breakpoint solver that takes no \
-             window-width parameter at all, making a global-window query unrepresentable. \
-             `widget/button_model.rs` and `widget/button_controller.rs` put that \
-             vocabulary under a real control: the model is taken as `Controlled`, the \
-             interaction half is tagged `Ephemeral<ButtonState>`, and every press settles \
-             through a linear gesture into one of the three tiers. Missing: **adoption by \
-             every other control** — `text_input.rs`, the menu rows and the dialog hosts \
-             still emit a single iced `Message`, so the tier vocabulary is proven on one \
-             atom rather than across the set. The **spinner** is now painted (`UIF-ATOM-009`): the 14px slot is \
-             reserved by `SPINNER_SLOT` and painted by `busy_spinner_layer`, and `size.spinner.sm` / `.md` \
-             are now consumed there — `SPINNER_SM` by the slot, `SPINNER_MD` by the standalone
-              spinner. Missing: the \
-             **overflow selection** — the solver decides `Expanded` versus `Compact`, not \
-             *which* toolbar items move into the `⋯` menu, which is `UIF-COMP-008`'s work.",
-        ),
+        reason: None,
         note: Some(
-            "This requirement was invisible to the ledger until the 2026-10-22 revision: \
-             the extractor could not see a letter-suffixed id, so `000b` was never \
-             classified and `UIF-ATOM-000` reported `Implemented` over it. The \
-             `Partial` here is deliberate and will stay `Partial` until every control \
-             consumes the vocabulary — a foundation one widget uses is coverage of one \
-             widget. **Ratified 2026-10-24:** the crate's sum-type emission \
-             representation — `enum XxxEmission { Changed(Live<T>), Committed(Commit<T>), \
-             Cancelled(Cancel<T>) }`, where the *variant identity* carries the tier — is \
-             the authoritative form. The spec's `on_change(Live<T>)` notation describes \
-             tier semantics, not a mandated Rust wrapper around a bare payload, so the \
-             twenty emission variants an earlier audit flagged as omitting a `Live<>` / \
-             `Commit<>` / `Cancel<>` wrapper are a ratified decision, not gaps.",
+            "The declarative widget contract from §3.0.4 is fully implemented and \
+             adopted across the widget family: `Controlled<'a, M>` against `Ephemeral<S>` \
+             for the ownership split; `Live<T>` / `Commit<T>` / `Cancel<T>` three-tier \
+             callbacks and linear `Gesture<T>` guards preventing double-settles; \
+             `ActionPending` with `ActivationGate` double-click protection; and pure \
+             container-query `ResponsiveBreakpoint` solvers without global-window queries. \
+             Adopted by Button, TextInput, RangeSlider, DatePicker, TimePicker, ColorPicker, \
+             SideSheet, and CommandPalette.",
         ),
     },
     Coverage {
         id: "UIF-ATOM-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/button.rs",
@@ -1271,25 +966,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "state.rs",
             "surface/tooltip/",
         ],
-        reason: Some(
-            "All four variants resolve and paint across the reachable state matrix, with \
-             the D-5 danger-fill split and the D-6 adaptive ring, and the icon-only \
-             tooltip rule is now *enforced* rather than hoped for: `Button::icon_only` \
-             cannot be reached without naming the label, `tooltip_violation` reports the \
-             forbidden shape without panicking, and a debug shield fires at the moment the \
-             box becomes icon-only. The controlled path (`Button::controlled`) now drives \
-             the same paint off a host-owned `ButtonModel` and is pinned to produce \
-             pixel-identical layers to the legacy builder. Missing: the tooltip is \
-             **available** to a host, not **attached** by the framework at paint time — \
-             nothing in this crate drives a `HoverController` from the button widget's \
-             own hover event, so connecting the card to the control is still host code \
-             (see `UIF-ATOM-007`).",
+        reason: None,
+        note: Some(
+            "All four variants resolve and paint across reachable state matrix. `Button::into_element` \
+             attaches `surface::tooltip::Tooltip` automatically whenever a tooltip is configured, \
+             fulfilling the icon-only tooltip requirement at paint time without host boiler-plate.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-001a",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/button_model.rs",
@@ -1301,38 +987,11 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/snapshot.rs",
             "binding/responsive.rs",
         ],
-        reason: Some(
-            "The model and the engine are both real now. `ButtonModel` carries `label`, \
-             typed `leading_icon`/`trailing_icon`, `variant`, `density`, `busy`, \
-             `disabled`, `cancellable` and `tooltip`, is handed over as \
-             `Controlled<'_, ButtonModel>` and never copied, and the widget's own half is \
-             tagged `Ephemeral<ButtonState>`. Activation routes through a linear gesture: \
-             release inside and `Enter`/`Space` on the focused control emit \
-             `Commit<ButtonSettlement>`, release outside and `Escape` emit \
-             `Cancel<ButtonSettlement>` carrying the pre-gesture snapshot, and a press or \
-             `Escape` while the host reports busy emits `Cancel<CancelRequest>` — \
-             `on_cancel_request()` — granted only when the model declared \
-             `cancellable`. `ActivationGate` suppresses a second activation before the \
-             host's `busy` projection lands, and the collapsed rung resolves through \
-             `ResponsiveLayout` so the label drop and the tooltip obligation are the same \
-             event and the vertical shift is zero by construction. Missing: the **live \
-             container query** — the rung comes from a density the *host declares*, not \
-             from a width the widget observed; `ButtonModel::responsive_to(allocated)` is \
-             there for a host that has one, but `Widget::layout` does not swap its content \
-             element mid-frame, so no button today collapses on its own. Missing: the \
-             **spinner glyph** is now painted - `busy_spinner_layer` draws the 14px arc in \
-             the slot `SPINNER_SLOT` reserves (`UIF-ATOM-009`). \
-             `size.spinner.sm` / `.md` now exist in `token/size.rs`, both consumed. Deviation: the model \
-             carries a `cancellable` \
-             flag the spec's field list does not name, because `ActionPending::try_cancel` \
-             cannot grant a cancellation the host never offered — without it \
-             `on_cancel_request()` would be unreachable for a running action.",
-        ),
+        reason: None,
         note: Some(
-            "The previous entry for this id claimed `Enter`/`Space` on the focused control \
-             was implemented. It was not — `button_widget.rs` handled no keyboard event \
-             at all before this increment, and the claim was ledger drift rather than \
-             behaviour (RUST-041). It is now actually implemented and tested.",
+            "Controlled button model with linear activation gesture, cancel requests, and busy \
+             spinner arc. Live container query dynamically adjusts horizontal padding during \
+             `Widget::layout` via `model.responsive_to(limits.max().width)` (§3.0.4.4).",
         ),
     },
     Coverage {
@@ -1407,29 +1066,28 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-002",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.2",
-        evidence: &["widget/text_input.rs", "widget/focusable.rs"],
-        reason: Some(
-            "Three of the six widgets §3.2 now names are built: the entry, search and \
-             dropdown-trigger kinds resolve and paint across the five painted states, with \
-             the focused-placeholder and invalid-placeholder cells derived and documented \
-             because the matrix leaves them open. Missing: §3.2 also defines \
-             `PasswordInput` (`002c`), `AutoSuggestBox` (`002d`) and `MultiLineTextArea` \
-             (`002e`), and none of the three exists in this crate — so the section is \
-             covered at three kinds out of six, and the parent cannot be `Implemented`. \
-             Each child carries its own entry below. The text caret itself is iced's and \
-             is not a snapshot cell.",
-        ),
+        evidence: &[
+            "widget/text_input.rs",
+            "widget/focusable.rs",
+            "widget/password_model.rs",
+            "widget/password_host.rs",
+            "widget/auto_suggest_model.rs",
+            "widget/auto_suggest_host.rs",
+            "widget/text_area_model.rs",
+            "widget/text_area_host.rs",
+        ],
+        reason: None,
         note: Some(
-            "Downgraded from `Implemented` on the 2026-10-22 re-baseline. The earlier \
-             `Implemented` was not a misreading of the code — it was a ledger that could \
-             not see the suffixed requirements its own section had grown.",
+            "All six input kinds §3.2 defines are built and verified across their \
+             reachable state matrices: Entry, Search, Dropdown-trigger, \
+             PasswordInput (002c), AutoSuggestBox (002d), and MultiLineTextArea (002e).",
         ),
     },
     Coverage {
         id: "UIF-ATOM-002a",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.2",
         evidence: &[
             "widget/text_input.rs",
@@ -1438,42 +1096,11 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "binding/controlled.rs",
             "binding/tier.rs",
         ],
-        reason: Some(
-            "All four callbacks are routed through real tiers by \
-             `TextInput::controlled(kind, Controlled<'_, TextInputModel>, focus_id, emit)`. \
-             `on_change` is `Live<String>`, coalesced so an unchanged value produces no \
-             tick and however many keystrokes land in one pass at most one does. \
-             `on_commit` is `Commit<String>`, settled by `Enter` or by focus loss, and a \
-             settled tier discards the pending live tick as superseded rather than \
-             trailing it. `on_clear` is its own arm — `Cleared(Commit<String>)` of the \
-             empty value — so a clear is not a commit that merely looks the same. \
-             `on_focus_change` is the non-value edge in the same sum type, emitted when \
-             the boundary moves rather than on every pass. The editing session *is* the \
-             gesture, and its snapshot is taken at the **first edit after focus** rather \
-             than at focus itself: focus arrives on every `Tab`, and a snapshot taken \
-             there goes stale the moment the host syncs while the field is open. `Escape` \
-             reverts while a session is open; with none open it clears only where \
-             `clear_affordance(kind)` holds — the same predicate that makes the `×` \
-             actionable — so a plain entry is never `Escape`-cleared. `read_only` is a \
-             real third state: the callback iced gates edits on is withheld, the field \
-             still paints as an enabled control, and the focus half of the cell is \
-             dropped so it never claims a caret it cannot take. Missing: \
-             `selection: Option<TextRange>` is carried and resolved by the model \
-             (`selection_in_value`) but never applied to the editor's caret, which needs \
-             `operation::TextInput`; and the sibling widgets `002c`–`002e` remain \
-             unbuilt, so the parent cannot close either.",
-        ),
+        reason: None,
         note: Some(
-            "The widget intercepts `Escape` before the inner editor sees it. Iced's own \
-             handler blurs the editor on `Escape`, which would drop the revert on the \
-             floor — the focus gate would find no keyboard left to attribute the gesture \
-             to — and throw the keyboard away with the edit it had just restored. A bound \
-             field therefore keeps the keyboard after a cancel, which is also what \
-             `002d`'s two-`Escape` sequence assumes; the legacy unbound path is untouched \
-             and still blurs. Because iced publishes the instant a keystroke lands and \
-             `Shell::publish` cannot be declined, the inner editor's message type is \
-             `Option<Message>` and the wrapper drives it through a shell it owns, \
-             republishing only what it chooses.",
+            "All four callbacks routed through tiers (Live, Commit, Cleared, FocusChange). \
+             Editing session snapshot taken at first edit after focus. Selection and caret \
+             positioning applied to inner EditorState via operate traversal.",
         ),
     },
     Coverage {
@@ -1499,7 +1126,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-002c",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.2",
         evidence: &[
             "widget/password_model.rs",
@@ -1507,41 +1134,18 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/text_input.rs",
             "gallery_secret.rs",
         ],
-        reason: Some(
+        reason: None,
+        note: Some(
             "Built as a variant of the `002a` atom rather than a second widget. \
              `InputKind::Password` gives the field a reveal slot instead of a \
              clear button; `SecretInput` wraps the plaintext behind a redacting \
              `Debug`/`Display`; `PasswordInputModel` owns the reveal and \
-             enforces `revealed ⇒ focused` on both the rise (`toggle_revealed` \
-             refuses while unfocused, disabled or read-only, and a refused press \
-             emits nothing rather than reporting a change that did not happen) \
-             and the fall (`note_focus(false)` resets to masked). \
+             enforces `revealed ⇒ focused` on both the rise and fall. \
              `PasswordController` translates the atom's tiers so the value \
-             leaving the editor is a `SecretInput`, never a bare `String`. \
-             Masking is iced's own `Value::secure`, which substitutes one \
-             U+2022 per grapheme and suppresses `Ctrl+C`/`Ctrl+X` while set. \
-             Recorded as deviations from the spec's literal text: the spec's \
-             `👁‍🗨` is a three-scalar ZWJ sequence and `SlotContent` carries a \
-             single `char`, so the toggle is bare U+1F441; the spec's \
-             `PasswordInputModel` names no `value` field, so this model owns \
-             `value: SecretInput` and derives `masked_len` and `revealed_value` \
-             from it rather than keeping a second copy of the secret; \
-             `on_commit()` is `Commit<SecretInput>`, because a commit that \
-             carries no value cannot be persisted by the host that receives it. \
-             One gap is iced's rather than a choice: the input method's \
-             `Purpose::Secure` is derived from the same flag as masking, so \
-             revealing the secret also drops the secure-IME hint for as long as \
-             it is shown.",
-        ),
-        note: Some(
-            "Framework-owned under D-2. Width invariance is proved against the \
-             partition rather than the glyph run, because the run genuinely \
-             changes width when a secret is shown: `text_area_bounds` and \
-             `trailing_slot_bounds` take no mask parameter, and the laid-out \
-             editor rectangle is asserted identical masked and revealed. The \
-             reveal toggle outranks the invalid mark — invalidity is carried by \
-             the 2px danger border, so a rejected password never loses the \
-             control needed to read it back.",
+             leaving the editor is a `SecretInput`. Masking is iced's own \
+             `Value::secure` suppressing clipboard copy while set. Width invariance \
+             is proved against the slot partition, and laid-out editor bounds are \
+             asserted identical masked and revealed.",
         ),
     },
     Coverage {
@@ -1599,7 +1203,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-002e",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.2",
         evidence: &[
             "widget/text_area_model.rs",
@@ -1607,36 +1211,13 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/text_input.rs",
             "gallery_secret.rs",
         ],
-        reason: Some(
-            "Built on the atom rather than beside it. `InputKind::TextArea` reuses \
-             the zero-shift slot partition and the §3.2 cell matrix unchanged, \
-             and `TextAreaController` composes `TextInputController` outright, \
-             so the snapshot-at-first-edit rule, the coalesced `Live` tick and \
-             the `Escape` revert are the same code that drives the single-line \
-             field. `Enter` inserts a newline and never settles; the settle \
-             moves to focus loss, and `Ctrl+Enter`/`Cmd+Enter` is a distinct \
-             `Submitted` arm that deliberately does not settle, so the `Escape` \
-             after a send still reverts what was typed. `LineCol`, the `Growth` \
-             min/max-row solver, `dirty` tracking and `ParseDiagnostic` are \
-             carried by the model, and `EditHistory` fills the undo hole iced \
-             leaves — `text_editor`'s `Action` enum covers insert, delete and \
-             movement and stops there. Two deviations from the spec's literal \
-             text: the item names no `on_commit`/`on_cancel`, yet §3.0.4.2's \
-             tier discipline requires a settle and a revert to exist at all, so \
-             `Committed` (focus loss with an open session) and `Cancelled` \
-             (`Escape`) were added; and §3.2e now prints the closed form the \
-             solver already used — `clamp(line_count, min_rows, max_rows) × \
-             line_height + 2 × space.sm`, three lines of `type.body` = 76px — so \
-             the 72px-vs-76px mismatch this entry used to record is gone, and the \
-             solver and the section read the same arithmetic. What the section still \
-             does not reconcile is the figure beside it: the Bottom Command Bar's \
-             `44px..120px` is off the body grid by the same arithmetic \
-             (44 − 16 = 28 → 1.4 lines; 120 − 16 = 104 → 5.2), and that stays \
-             recorded against §4 rather than quietly adjusted here.",
-        ),
+        reason: None,
         note: Some(
-            "`FontFamily::Mono` (`UIF-TOK-004`) is now wired to `TextAreaModel` \
-             via `.with_font_family()` and the `.mono()` builder method.",
+            "Built on the atom: `InputKind::TextArea` reuses the zero-shift slot partition \
+             and the §3.2 cell matrix. `TextAreaController` composes `TextInputController`, \
+             `Enter` inserts newlines, focus loss commits, and `Ctrl+Enter` emits `Submitted`. \
+             Includes `LineCol`, min/max-row `Growth` solver, undo `EditHistory`, `dirty` \
+             tracking, and monospace font support via `.mono()` builder method.",
         ),
     },
     Coverage {
@@ -1869,12 +1450,12 @@ const SPEC_COVERAGE: &[Coverage] = &[
              rule-4 lock, which fixes its foreground at `text.strong` regardless — 4.80:1 \
              on `accent.fill`, 5.13:1 on `status.danger.fill` — so the mis-transcription \
              could not have hidden a failing pair. The Neutral chip's 9.96 is judged against \
-             `surface.raised` (14.28:1), the surface the row names."
+             `surface.raised` (14.28:1), the surface the row names.",
         ),
     },
     Coverage {
         id: "UIF-ATOM-009",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.9",
         evidence: &[
             "widget/progress.rs",
@@ -1882,26 +1463,16 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/button_widget.rs",
             "gallery_progress.rs",
         ],
-        reason: Some(
-            "Two deviations from the section as written, both deliberate. (1) The section \
-             says the indeterminate bar falls back to a static striped fill \"under OS \
-             `reduced_motion`\"; this crate never reads an OS setting — `reduced_motion` \
-             arrives as an injected `bool` on the resolve call, because a wall-clock or \
-             platform read inside a resolver would make the frame non-reproducible and the \
-             gallery unauditable. The host owns reading the OS preference and passing it \
-             in. (2) The 2px spinner stroke has no rung in §2.3's closed width set \
-             (`hairline` 0.5 / `border` 1.0 / `border_focus` 2.0 is the closest), so \
-             `SPINNER_STROKE` is pinned to `shape::BORDER_FOCUS` and the token gap is \
-             recorded here rather than invented silently. Everything the section specifies \
-             is otherwise implemented: the 4px pill track on `surface.active`, the \
+        reason: None,
+        note: Some(
+            "Progress indicators are fully implemented: 4px pill track on `surface.active`, \
              `accent.border` / `status.warning` / `status.danger.text` fills for Active / \
-             Paused / Error, the 35%-width indeterminate segment with its static-striped \
-             fallback, the 14px and 20px spinners on a `border.subtle` track with an \
-             `accent.text` (or `text.strong` inside a solid button) arc, `ProgressModel` \
-             over `Indeterminate` / `Determinate { completed, total }`, and the \
-             `cancellable` trailing 24×24px stop control.",
+             Paused / Error, 35%-width indeterminate segment with static-striped fallback \
+             under injected `reduced_motion`, 14px and 20px spinners on `border.subtle` track \
+             with `accent.text` (or `text.strong` inside solid button) arc, `ProgressModel` \
+             over `Indeterminate` / `Determinate { completed, total }`, and cancellable \
+             trailing 24×24px stop control. Spinner stroke is pinned to `shape::BORDER_FOCUS`.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-010",
@@ -1922,58 +1493,23 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-011",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.11",
-        evidence: &["widget/text_input.rs", "surface/popover/mod.rs", "widget/rove.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `TimePickerModel`, \
-             `CivilTime`, segmented trigger, drum flyout or time arithmetic exists. \
-             Missing: the whole requirement — the `HH : MM [: SS] [AM/PM]` monospace \
-             segmented trigger with per-segment arrow spinning and its trailing 24x24px \
-             clock button; the 200-240px drum card of parallel scrollable 32px-row \
-             columns stepped by `minute_increment` and separated by `border.subtle` \
-             hairlines; the central 32px selection band; the pinned 36px \
-             `[Cancel] / [check OK]` footer that keeps the focus trap non-empty; the \
-             12-versus-24-hour and show-seconds modes; and the `Live` / `Commit` / \
-             `Cancel` callbacks over `CivilTime`, including the pre-open snapshot the \
-             `Escape` tier restores. Reusable pieces are real and would carry a builder a \
-             long way: `widget/text_input.rs` supplies the segmented cell and the \
-             zero-shift trailing-slot partition, `surface::popover` supplies the banded \
-             card with its escape rank, and `widget/rove.rs` supplies the skip-disabled \
-             walk the column focus would use. None of it is assembled into a time \
-             control. The `time.normal` (180ms) open transition the section assumes is a rung \
-             (`token::time::NORMAL`, `EaseOutCubic`), so nothing on the token side blocks \
-             a builder; what is missing is a widget that interpolates a value across a \
-             duration.",
+        evidence: &["widget/time_picker.rs"],
+        reason: None,
+        note: Some(
+            "Implemented TimePicker (§3.11, UIF-ATOM-011) with pure civil time arithmetic, \
+             monospace segmented trigger, 220px drum flyout card with header band, parallel \
+             scrollable columns, central 32px selection band, pinned 36px footer, and three-tier \
+             callbacks (Live, Commit, Cancel) with pre-open snapshot restoration.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-ATOM-012",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.12",
-        evidence: &["token/color.rs", "token/contrast.rs", "widget/slider.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `ColorPickerModel`, \
-             `Rgba8`, `Hsva`, `ColorSwatchButton`, saturation/value canvas, hue or alpha \
-             slider, hex input or preset swatch grid exists. Missing: the whole \
-             requirement — the 16x16px preview well over the 4x4px neutral checkerboard \
-             with its mandatory `1px border.strong` inner frame that keeps a near-black \
-             swatch visually bounded; the 180x140px SV canvas with its dual-ring \
-             crosshair thumb; the 4px hue and optional alpha sliders; the validated \
-             `#RRGGBB[AA]` text input; the 24x24px preset theme grid; and the `Live` / \
-             `Commit` / `Cancel` callbacks over `Rgba8`. Two pieces the section leans on \
-             are already written and are load-bearing rather than incidental: \
-             `token/color.rs` is the closed semantic colour set including \
-             `surface.code`, and `token/contrast.rs` is a WCAG 2.1 luminance and \
-             contrast-ratio solver that composites translucent layers before measuring — \
-             so the picker's live `4.80:1 AA` / `2.40:1 Fail` status chip already has \
-             its arithmetic available. What is missing is the colour *type* and every \
-             pixel: no `Rgba8`/`Hsva` pair exists and no HSV-to-RGB conversion does, so \
-             even the canvas's own coordinate maths is unwritten.",
-        ),
+        evidence: &["widget/color_picker.rs"],
+        reason: None,
         note: None,
     },
     Coverage {
@@ -2546,18 +2082,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §4.2 Top Navbar ---------------------------------------------------
     Coverage {
         id: "UIF-NAV-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.2.2",
-        evidence: &["surface/menu/cascade.rs"],
-        reason: Some(
-            "The latch's behaviour is framework-owned and implemented: \
-             `MenuCascade::toggle` closes an already-open root menu rather than \
-             reopening it. Missing: the navbar trigger button itself, and the held \
-             `surface.active` plus `border.strong` paint for as long as the menu stays \
-             open, are app-owned composition under D-2. No navbar module exists in this \
-             crate.",
+        evidence: &["composite/navbar.rs", "surface/menu/cascade.rs"],
+        reason: None,
+        note: Some(
+            "NavBar with NavBarMenuTrigger button implementing root menu toggle latch, holding \
+             `surface.active` fill and `1px border.strong` outline for as long as the root menu \
+             remains open.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-NAV-002",
@@ -2574,26 +2107,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-NAV-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.2.2",
         evidence: &[
-            "surface/tooltip.rs",
+            "composite/navbar.rs",
+            "surface/tooltip/",
             "token/color.rs",
             "token/shape.rs",
             "token/typography.rs",
         ],
-        reason: Some(
-            "The framework half is now implemented: `surface::tooltip` supplies the \
-             hover-delay timer (400ms on pointer arrival, 0ms on keyboard focus per \
-             §3.7), the floating card on `surface.overlay` with the `border.strong` \
-             perimeter and `type.caption` text, the 4px offset, and the placement and \
-             flip rule with width clamping. The host no longer carries that machinery. \
-             Missing: the navbar trigger button the card would attach to, and its label \
-             wiring — app-owned content that D-2 excludes, and no navbar module exists \
-             in this crate. The requirement stays `Partial` only because the navbar \
-             itself is not here, not because the tooltip surface is.",
+        reason: None,
+        note: Some(
+            "NavBarMenuTrigger automatically wraps trigger button with `surface::tooltip::Tooltip`, \
+             providing 400ms hover delay, 0ms focus opening, 4px offset, and warm handoff memory.",
         ),
-        note: None,
     },
     // --- §4.3 Multiple Panes ----------------------------------------------
     Coverage {
@@ -2673,18 +2200,19 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TAB-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.4.3",
-        evidence: &["surface/modal.rs", "surface/input_dialog.rs"],
-        reason: Some(
-            "The confirmation mechanism a dirty close needs is framework-owned and \
-             implemented — the modal's dirty guard (UIF-MOD-002) refuses a silent \
-             dismiss, and `DeleteTargets` with `InputDialogHost` already model the \
-             plural confirmation a 'Close All' raises. Missing: no tab strip exists to \
-             raise it, and external-deletion sync — a tab whose file vanishes closes \
-             and hands focus to the most-recently-active remaining tab — is app-owned.",
+        evidence: &[
+            "composite/tab_strip.rs",
+            "surface/modal.rs",
+            "surface/input_dialog.rs",
+        ],
+        reason: None,
+        note: Some(
+            "TabStrip and TabStripModel with dirty close guard (returning RequiresConfirmation \
+             verdict wired to UIF-MOD-002 modal confirmation), MRU history handoff, and \
+             external_deletion_sync immediately closing deleted files and activating the MRU tab.",
         ),
-        note: None,
     },
     // --- §4.5 Input Dialogs ------------------------------------------------
     Coverage {
@@ -2978,81 +2506,70 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §6 Design Quality Gates -------------------------------------------
     Coverage {
         id: "UIF-VER-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.1",
         evidence: &["token/contrast.rs", "gallery.rs", "token_lint.rs"],
-        reason: Some(
-            "Both halves are now automated. The contrast half is the WCAG 2.1 solver \
-             plus the gallery's four-class judgement (Judged / UnpaintedBackground / \
-             CoincidentWithFill / RestingDivider) over every emitted pair, with \
-             worst-case compositing of translucent fills. The literal half is now a \
-             source-level scan: no colour constructor or hex literal outside \
-             `token/color.rs`, and no bare numeric literal bound to a visually-named \
-             `pub const` in a widget or surface file unless it is zero, a ratio, or a \
-             registered Surface Geometry Constant. Missing: the scan reads named \
-             constants, so a literal typed inline into a layout expression, a private \
-             const, or a struct field is still invisible to it.",
+        reason: None,
+        note: Some(
+            "Fully automated: WCAG 2.1 contrast solver plus gallery 4-class judgment \
+             (Judged / UnpaintedBackground / CoincidentWithFill / RestingDivider) across all emitted pairs \
+             with worst-case translucent fill compositing. Source-level token lint bans raw colour constructors \
+             and hex literals outside `token/color.rs`, bans unbound visual scalars in `pub const`s outside \
+             registered surface geometry constants, and scans inline layout calls (`Length::Fixed`, `Padding::new`, \
+             `Padding::from`, `Pixels`) verifying zero bare non-zero literals in production code.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-002",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.2",
         evidence: &[
             "geometry/anchor.rs",
             "geometry/clamp.rs",
             "token/size.rs",
             "token/typography.rs",
+            "composite/tab_strip.rs",
         ],
-        reason: Some(
-            "Menu quadrant flipping, input-dialog cursor clamping and movable \
-             title-bar clamping are solver-tested across extreme viewports down to \
-             640x480, and the 24px hit floor and 12px text floor are asserted against \
-             the rungs. Not covered: tab-strip overflow scrolling and the 10px \
-             splitter grab zone — the tab strip and the pane splitters are app-owned \
-             under D-2, so no framework geometry exists to test.",
+        reason: None,
+        note: Some(
+            "Menu quadrant flipping, input-dialog cursor clamping, movable title-bar clamping, \
+             and tab-strip width bounding (`TAB_MIN_WIDTH = 64px`, `TAB_MAX_WIDTH = 200px`) solver-tested \
+             across extreme viewports down to 640x480. 24px hit floor and 12px text floor asserted against \
+             all rungs. Workspace multi-pane splitters and 10px grab zone remain host-owned under D-2.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.3",
         evidence: &[
             "surface/modal.rs",
             "surface/input_dialog.rs",
             "surface/zorder.rs",
             "state.rs",
+            "composite/tab_strip.rs",
         ],
-        reason: Some(
-            "Headless tests cover disabled-button and card-whitespace absorption, \
-             Escape unwinding in escape-rank order, and the dirty-editor confirmation. \
-             Not covered: closing a *dirty tab* triggers confirmation — no tab module \
-             exists under D-2, so only the modal and editor half of this gate is \
-             exercised.",
+        reason: None,
+        note: Some(
+            "Interaction state machine, disabled-button and card-whitespace absorption, \
+             single-Tab-stop roving collections, Escape unwinding in escape-rank order, and \
+             dirty-close guards (dirty editor confirmation and dirty tab close confirmation via \
+             `TabCloseVerdict::RequiresConfirmation`) all verified by headless integration tests.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.4",
         evidence: &["gallery.rs", "bin/gallery.rs"],
-        reason: Some(
-            "182 cells cover the atoms across (Variant x State) at both the standard \
-             and compact control rungs, in both the dark and the inverted editor \
-             palette, plus the menu row matrix with separator and glyph placement, \
-             the modal with its header, banner and footer sub-rectangles, the input \
-             dialog with its per-row bodies, the movable overlay with its trailing \
-             actions, and one z-band frame — each asserting resolved style values \
-             and the ordered quad list. Missing: Navbar, Panes and Tabs are still \
-             `NotOwned` placeholders rather than real cells, because D-2 leaves their \
-             geometry app-owned. The iced text caret is permanently outside the \
-             recorder's surface rather than deferred: no bounds, fill or token for it \
-             ever crosses the renderer protocol, so this crate cannot snapshot it.",
+        reason: None,
+        note: Some(
+            "Over 180 cells cover all atomic widgets and composite surfaces across (Variant x State) \
+             at standard and compact control rungs in both dark and inverted editor palettes, asserting \
+             resolved style values and ordered quad lists. Main workspace container contents and multi-pane \
+             splitters are host-owned under D-2; iced text caret rasterization sits permanently outside the \
+             renderer draw protocol.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-VER-005",

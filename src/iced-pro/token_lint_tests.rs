@@ -150,7 +150,10 @@ use crate::token_lint::{
 /// and `composite/keybind_recorder.rs`, joining Rule B's visual scope.
 ///
 /// 172 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 172;
+/// 173 as of `UIF-ATOM-011`: `widget/time_picker.rs`, joining Rule B's visual scope.
+/// 174 as of `UIF-ATOM-012`: `widget/color_picker.rs`, joining Rule B's visual scope.
+/// 176 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
+const PIN_FILES_SCANNED: usize = 176;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -203,7 +206,10 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 99 as of `UIF-COMP-015`, whose three additions are `composite/code_block.rs`,
 /// `composite/diff_viewer.rs`, and `composite/keybind_recorder.rs`.
 /// 100 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`.
-const PIN_RULE_B_FILES: usize = 100;
+/// 101 as of `UIF-ATOM-011`: `widget/time_picker.rs`.
+/// 102 as of `UIF-ATOM-012`: `widget/color_picker.rs`.
+/// 104 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
+const PIN_RULE_B_FILES: usize = 104;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -361,7 +367,21 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// 302 as of Increment 18 (`UIF-ATOM-010`): the 8 token-bound visual constants in `date_picker::`
 /// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `NAV_BUTTON_SIZE`,
 /// `WEEKDAY_ROW_HEIGHT`, `CELL_SIZE`, `RADIUS`, `FLYOUT_PADDING`).
-const PIN_TOKEN_BOUND: usize = 302;
+///
+/// 310 as of `UIF-ATOM-011`: the 8 token-bound visual constants in `time_picker::`
+/// (`TRIGGER_HEIGHT`, `TRAILING_BUTTON_SIZE`, `HEADER_HEIGHT`, `ROW_HEIGHT`,
+/// `FOOTER_HEIGHT`, `FOOTER_BUTTON_HEIGHT`, `RADIUS`, `HAIRLINE_WIDTH`).
+///
+/// 325 as of `UIF-ATOM-012`: the 15 token-bound visual constants in `color_picker::`
+/// (`TRIGGER_HEIGHT_SM`, `TRIGGER_HEIGHT_MD`, `PREVIEW_WELL_SIZE`, `CHECKERBOARD_CELL_SIZE`,
+/// `SWATCH_SIZE`, `SLIDER_TRACK_HEIGHT`, `THUMB_SIZE`, `CARD_PADDING`, `CARD_RADIUS`,
+/// `INNER_BORDER_WIDTH`, `DUAL_RING_OUTER_WIDTH`, `DUAL_RING_INNER_WIDTH`, `SWATCH_GAP`,
+/// `SECTION_GAP`, `CONTRAST_CHIP_HEIGHT`).
+///
+/// 332 as of Increments 24 & 25: the 7 token-bound visual constants in `navbar::` (`NAVBAR_HEIGHT_STANDARD`,
+/// `NAVBAR_HEIGHT_COMPACT`, `HORIZONTAL_PADDING`, `ACTION_SPACING`, `ITEM_SPACING`, `TEXT_SIZE`)
+/// and `tab_strip::` (`TAB_STRIP_HEIGHT`, `CLOSE_BUTTON_SIZE`).
+const PIN_TOKEN_BOUND: usize = 332;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -426,7 +446,10 @@ const PIN_RATIO: usize = 1;
 /// 52 as of `UIF-COMP-015`, which registers the two §3B.15 figures:
 /// `code_block::GUTTER_WIDTH` (40px) and `diff_viewer::GUTTER_WIDTH` (40px).
 /// 53 as of Increment 18 (`UIF-ATOM-010`), which registers `date_picker::CALENDAR_FLYOUT_WIDTH` (256px).
-const PIN_SURFACE_BOUND: usize = 53;
+/// 55 as of `UIF-ATOM-011`, which registers `time_picker::TIME_FLYOUT_WIDTH` (220px) and `time_picker::TIME_FLYOUT_MAX_HEIGHT` (260px).
+/// 58 as of `UIF-ATOM-012`, which registers `color_picker::COLOR_FLYOUT_WIDTH` (240px), `color_picker::COLOR_WELL_WIDTH` (180px), and `color_picker::COLOR_WELL_HEIGHT` (140px).
+/// 60 as of Increment 25 (`UIF-TAB-003`), which registers `tab_strip::TAB_MIN_WIDTH` (64px) and `tab_strip::TAB_MAX_WIDTH` (240px).
+const PIN_SURFACE_BOUND: usize = 60;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 
@@ -1210,6 +1233,121 @@ fn the_line_height_scan_fires_on_a_bare_pixel_constant() {
             .any(|shape| calls[0].contains(shape)),
         "a bare LEADING_SLOT must not read as safe: {:?}",
         calls[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The inline layout literal boundary — Rule C scan (UIF-PRIN-001, UIF-VER-001)
+//
+// UIF-PRIN-001 forbids raw numeric literals in individual widget definitions,
+// including inline calls like Length::Fixed(12.0), Padding::new(8.0), or
+// Pixels(14.0). All production files in visual scopes must use token paths or
+// registered constants rather than inline numbers.
+// ---------------------------------------------------------------------------
+
+fn inline_layout_callsites(code: &str, needle: &str) -> Vec<String> {
+    let chars: Vec<char> = code.chars().collect();
+    let needle_chars: Vec<char> = needle.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i + needle_chars.len() <= chars.len() {
+        if chars[i..i + needle_chars.len()] == needle_chars[..] {
+            let start = i + needle_chars.len();
+            let mut depth = 1usize;
+            let mut j = start;
+            while j < chars.len() && depth > 0 {
+                match chars[j] {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 {
+                    j += 1;
+                }
+            }
+            out.push(chars[start..j].iter().collect());
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    out
+}
+
+#[test]
+fn no_inline_layout_call_hands_iced_a_bare_nonzero_literal() {
+    let root = crate_root();
+    let mut offenders: Vec<String> = Vec::new();
+    let needles = [
+        "Length::Fixed(",
+        "Padding::new(",
+        "Padding::from(",
+        "Pixels(",
+    ];
+    let mut checked = 0usize;
+
+    for path in source_files(&root) {
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string()
+            .replace('\\', "/");
+
+        // Only scan production files in widget/, surface/, and composite/
+        if is_test_file(&rel)
+            || (!rel.starts_with("widget/")
+                && !rel.starts_with("surface/")
+                && !rel.starts_with("composite/"))
+        {
+            continue;
+        }
+
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let code = redact_comments_and_strings(&raw);
+
+        for needle in needles {
+            for arg in inline_layout_callsites(&code, needle) {
+                checked += 1;
+                let trimmed = arg.trim();
+                // A bare nonzero numeric literal starts with 1..=9
+                if trimmed
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_digit() && c != '0')
+                {
+                    offenders.push(format!("{rel}: {needle}{trimmed})"));
+                }
+            }
+        }
+    }
+
+    assert!(
+        checked >= 10,
+        "the scan found only {checked} inline layout calls; scanner may have gone quiet"
+    );
+    assert!(
+        offenders.is_empty(),
+        "inline layout calls must not pass bare nonzero numeric literals: {offenders:?}"
+    );
+}
+
+#[test]
+fn the_inline_layout_scan_fires_on_a_doctored_literal() {
+    let doctored = "let _ = Length::Fixed(42.0);";
+    let code = redact_comments_and_strings(doctored);
+    let calls = inline_layout_callsites(&code, "Length::Fixed(");
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0]
+            .trim()
+            .chars()
+            .next()
+            .map_or(false, |c| c.is_ascii_digit() && c != '0')
     );
 }
 

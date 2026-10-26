@@ -123,6 +123,7 @@ pub mod grid_view;
 pub mod info_bar;
 pub mod keybind_recorder;
 pub mod list_tile;
+pub mod navbar;
 pub mod navigation_rail;
 pub mod notification;
 pub mod overflow_toolbar;
@@ -133,6 +134,7 @@ pub mod settings_row;
 pub mod side_sheet;
 pub mod skeleton;
 pub mod stepper;
+pub mod tab_strip;
 pub mod table_cell;
 pub mod table_column;
 pub mod table_header;
@@ -163,6 +165,11 @@ pub use grid_view::{
     GridTile, GridView, GridViewModel, GridViewState, grid_view, solve_columns, tile_rect,
 };
 pub use keybind_recorder::{KeyChord, KeybindRecorder, KeybindRecorderModel, keybind_recorder};
+pub use navbar::{
+    NAVBAR_HEIGHT_COMPACT, NAVBAR_HEIGHT_STANDARD, NavBar, NavBarMenuTrigger, NavBarModel,
+    TRIGGER_HEIGHT_COMPACT, TRIGGER_HEIGHT_STANDARD, TRIGGER_PADDING_HORIZONTAL, TriggerStyle,
+    navbar_trigger_element, resolve_trigger_style,
+};
 pub use navigation_rail::{
     COMPACT_WIDTH, EXPANDED_DEFAULT_WIDTH, EXPANDED_MAX_WIDTH, EXPANDED_MIN_WIDTH, GLYPH_TOGGLE,
     ICON_SIZE, INDICATOR_WIDTH, LABEL_TOGGLE, NavDestination, NavRailResize, NavigationRail,
@@ -178,4 +185,8 @@ pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
 pub use stepper::{
     StepItem, StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, stepper,
     wizard_footer,
+};
+pub use tab_strip::{
+    CLOSE_BUTTON_SIZE, DIRTY_DOT_DIAMETER, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TAB_STRIP_HEIGHT,
+    TabCloseVerdict, TabItem, TabItemStyle, TabStrip, TabStripModel, resolve_tab_style,
 };

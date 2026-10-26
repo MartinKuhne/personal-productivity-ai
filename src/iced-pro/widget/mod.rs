@@ -190,6 +190,10 @@
 //! * [`mod@date_picker`] — the DatePicker, DateRangePicker & CalendarView widgets
 //!   with pure civil calendar arithmetic, 42-cell fixed day grid, and
 //!   redundancy cues (§3.10, `UIF-ATOM-010`, `UIF-PRIN-003`, `UIF-PRIN-005`)
+//! * [`mod@time_picker`] — the TimePicker widget with civil time arithmetic,
+//!   segmented trigger, drum flyout and three-tier callbacks (§3.11, `UIF-ATOM-011`, `UIF-PRIN-003`, `UIF-PRIN-005`)
+//! * [`mod@color_picker`] — the ColorPicker & ColorSwatchButton widgets with
+//!   Rgba8 / Hsva models, 2D SV canvas, sliders, preset swatches and contrast readout (§3.12, `UIF-ATOM-012`, `UIF-TOK-006`, `UIF-PRIN-005`)
 //!
 //! Atoms read every visual number from [`crate::token`] and never
 //! restate it (`UIF-PRIN-001`). The only numeric literals an atom file
@@ -209,6 +213,7 @@ pub mod button_model;
 pub mod button_widget;
 pub mod chip;
 pub mod chip_model;
+pub mod color_picker;
 pub mod combo_box;
 pub mod combo_host;
 pub mod combo_model;
@@ -240,12 +245,17 @@ pub mod text_area_model;
 pub mod text_input;
 pub mod text_input_controller;
 pub mod text_input_model;
+pub mod time_picker;
 pub mod toggle;
 pub mod toggle_model;
 pub mod toggle_widget;
 
 pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
 pub use avatar::{Avatar, AvatarModel, AvatarShape, AvatarSize, avatar};
+pub use color_picker::{
+    ColorPicker, ColorPickerModel, ColorSwatchButton, Hsva, Rgba8, color_picker,
+    color_swatch_button,
+};
 pub use date_picker::{
     CalendarView, CalendarViewMode, CivilDate, DatePicker, DatePickerModel, DateRangePicker,
     DateSelection, Weekday, YearMonth, calendar_view, date_picker, date_range_picker,
@@ -253,4 +263,5 @@ pub use date_picker::{
 pub use range_slider::{RangeSlider, range_slider};
 pub use range_slider_model::{RangeSliderModel, RangeThumb};
 pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};
+pub use time_picker::{AmPm, CivilTime, TimePicker, TimePickerModel, TimeSegment, time_picker};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

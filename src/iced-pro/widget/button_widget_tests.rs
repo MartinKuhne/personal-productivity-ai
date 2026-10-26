@@ -1914,3 +1914,62 @@ fn the_spinner_never_widens_the_box_it_is_painted_in() {
         "the spinner must sit inside the button's own bounds (`UIF-PRIN-003`)"
     );
 }
+
+#[test]
+fn test_button_into_element_with_tooltip_attaches_tooltip_widget() {
+    let button = Button::<Msg>::icon_only(
+        ButtonVariant::Ghost,
+        Element::new(Blank::new(Size::new(16.0, 16.0))),
+        Msg::Save,
+        "btn_tt",
+        "Close tab",
+    );
+    let _el: Element<'_, Msg> = button.into_element();
+}
+
+#[test]
+fn test_button_into_element_without_tooltip_produces_plain_element() {
+    let button = Button::<Msg>::new(
+        ButtonVariant::Primary,
+        Element::new(Blank::new(Size::new(100.0, 20.0))),
+        Msg::Save,
+        "btn_plain",
+    );
+    let _el: Element<'_, Msg> = button.into_element();
+}
+
+#[test]
+fn test_button_layout_compresses_horizontal_padding_on_container_query() {
+    use iced::advanced::Widget;
+    use iced::advanced::layout::Limits;
+
+    let model =
+        ButtonModel::new("Save").with_density(crate::widget::button_model::ButtonDensity::Standard);
+    let controlled = crate::binding::controlled::Controlled::new(&model);
+
+    let mut button: Button<'_, Msg, Theme, Recorder> = Button::controlled(
+        controlled,
+        Element::new(Blank::new(Size::new(40.0, 16.0))),
+        "btn_cq",
+        |_| None,
+    );
+
+    let mut tree = Tree {
+        tag: button.tag(),
+        state: button.state(),
+        children: button.children(),
+    };
+    let renderer = Recorder::default();
+
+    // Wide container query: fits expanded, horizontal padding is space::MD (12.0)
+    let wide_limits = Limits::NONE.max_width(500.0).max_height(100.0);
+    let _node_wide = button.layout(&mut tree, &renderer, &wide_limits);
+    assert_eq!(button.padding.left, crate::token::space::MD);
+    assert_eq!(button.padding.right, crate::token::space::MD);
+
+    // Narrow container query: forced compact, horizontal padding compresses to space::SM (8.0)
+    let narrow_limits = Limits::NONE.max_width(10.0).max_height(100.0);
+    let _node_narrow = button.layout(&mut tree, &renderer, &narrow_limits);
+    assert_eq!(button.padding.left, crate::token::space::SM);
+    assert_eq!(button.padding.right, crate::token::space::SM);
+}

@@ -728,8 +728,30 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
     /// The test is the one the layout already applies: content small enough that
     /// [`button::ICON_ONLY_MIN_WIDTH`] and [`button::ICON_ONLY_MIN_HEIGHT`] are what
     /// determine the box, rather than the content itself. That is the moment a button
-    /// stops being "a box around a label" and becomes an icon with no readable text — so
-    /// it is exactly the moment a tooltip stops being optional.
+    /// Convert this button into an [`Element`] with automatic [`Tooltip`](crate::surface::tooltip::Tooltip)
+    /// wrapping whenever a tooltip is configured (`UIF-ATOM-001`, `UIF-ATOM-007`).
+    #[must_use]
+    pub fn into_element(self) -> Element<'a, Message, Theme, Renderer>
+    where
+        Message: 'a + Clone,
+        Theme: 'a,
+        Renderer: 'a + renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+    {
+        if let Some(tooltip_text) = self.tooltip.clone() {
+            let palette = self.palette;
+            let el = Element::new(self);
+            Element::new(
+                crate::surface::tooltip::Tooltip::new(el, tooltip_text).with_palette(palette),
+            )
+        } else {
+            Element::new(self)
+        }
+    }
+
+    /// Whether this button's content fits within the icon-only minimum dimensions.
+    ///
+    /// At or below this size the button stops being "a box around a label" and becomes an
+    /// icon with no readable text — so it is exactly the moment a tooltip stops being optional.
     ///
     /// Pure, and deliberately measured against the *content* rather than a flag: the host
     /// never declares "this is an icon", the geometry says so.
@@ -909,6 +931,13 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
+        if let Some(model) = &self.model
+            && limits.max().width.is_finite()
+        {
+            let responsive = model.get().responsive_to(limits.max().width);
+            self.padding = Padding::ZERO.horizontal(responsive.horizontal_padding());
+        }
+
         let content = self.content.as_widget_mut().layout(
             &mut tree.children[0],
             renderer,

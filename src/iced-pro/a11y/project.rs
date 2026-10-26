@@ -323,6 +323,64 @@ pub fn project_disclosure(toggle: &DisclosureToggle) -> A11yContract<'_> {
     A11yContract::new(A11yRole::Button).expanded(toggle.is_open())
 }
 
+/// Project a [`TabItem`](crate::composite::tab_strip::TabItem) from a tab strip (`UIF-PRIN-008`).
+#[must_use]
+pub fn project_tab_item(
+    tab: &crate::composite::tab_strip::TabItem,
+    is_active: bool,
+) -> A11yContract<'_> {
+    A11yContract::new(A11yRole::Button)
+        .named(&tab.title)
+        .selected(is_active)
+}
+
+/// Project a [`NavDestination`](crate::composite::navigation_rail::NavDestination) from a navigation rail (`UIF-PRIN-008`).
+#[must_use]
+pub fn project_nav_rail_destination<DestId>(
+    destination: &crate::composite::navigation_rail::NavDestination<DestId>,
+    is_selected: bool,
+) -> A11yContract<'_> {
+    A11yContract::new(A11yRole::Button)
+        .named(&destination.label)
+        .selected(is_selected)
+        .disabled(destination.disabled)
+}
+
+/// Project a [`StepItem`](crate::composite::stepper::StepItem) from a stepper wizard (`UIF-PRIN-008`).
+#[must_use]
+pub fn project_stepper_step<StepId>(
+    step: &crate::composite::stepper::StepItem<StepId>,
+    is_active: bool,
+) -> A11yContract<'_> {
+    A11yContract::new(A11yRole::Button)
+        .named(&step.label)
+        .selected(is_active)
+        .disabled(step.disabled)
+}
+
+/// Project a [`GridTile`](crate::composite::grid_view::GridTile) from a grid view (`UIF-PRIN-008`).
+#[must_use]
+pub fn project_grid_tile<Id>(
+    tile: &crate::composite::grid_view::GridTile<Id>,
+    is_selected: bool,
+) -> A11yContract<'_> {
+    A11yContract::new(A11yRole::Button)
+        .named(&tile.title)
+        .selected(is_selected)
+        .disabled(tile.disabled)
+}
+
+/// Project a [`PaletteItem`](crate::composite::command_palette::PaletteItem) from a command palette (`UIF-PRIN-008`).
+#[must_use]
+pub fn project_command_palette_item<ItemId>(
+    item: &crate::composite::command_palette::PaletteItem<ItemId>,
+    is_selected: bool,
+) -> A11yContract<'_> {
+    A11yContract::new(A11yRole::MenuItem)
+        .named(&item.title)
+        .selected(is_selected)
+}
+
 #[cfg(test)]
 #[path = "project_tests.rs"]
 mod project_tests;

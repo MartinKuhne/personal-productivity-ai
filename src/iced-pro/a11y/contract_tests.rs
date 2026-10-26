@@ -313,3 +313,58 @@ fn projection_is_deterministic_across_repeated_calls() {
     assert_eq!(first, second);
     assert_eq!(first.to_string(), second.to_string());
 }
+
+// -- redundant cues verification (UIF-PRIN-005) -------------------------------
+
+#[test]
+fn test_redundant_cues_across_all_semantic_statuses() {
+    use crate::composite::diff_viewer::{DiffLine, DiffLineKind, GLYPH_ADDED, GLYPH_DELETED};
+    use crate::composite::stepper::{
+        GLYPH_COMPLETED, GLYPH_ERROR as STEPPER_ERROR, StepItem, StepStatus,
+    };
+    use crate::composite::tab_strip::{DIRTY_DOT_DIAMETER, TabItem, TabStripModel};
+    use crate::widget::text_input::{GLYPH_CLEAR, GLYPH_ERROR, GLYPH_SEARCH};
+    use crate::widget::toggle_widget::{CHECK_MARK, INDETERMINATE_MARK};
+
+    // 1. Selection: Toggle controls pair selection state with glyphs / indicators, never color alone
+    assert_eq!(CHECK_MARK, "✓");
+    assert_eq!(INDETERMINATE_MARK, "\u{2212}");
+
+    // 2. Validation errors: TextInput pairs error state with glyph and perimeter border
+    assert_eq!(GLYPH_ERROR, '⚠');
+    assert_eq!(GLYPH_SEARCH, '🔍');
+    assert_eq!(GLYPH_CLEAR, '×');
+
+    // 3. Dirty state: TabStrip pairs unsaved edits with dirty dot indicator and close confirmation guard
+    assert_eq!(DIRTY_DOT_DIAMETER, 6.0);
+    let mut tab_model = TabStripModel::new();
+    let dirty_tab = TabItem::new("doc1", "Document 1").with_dirty(true);
+    tab_model.open_tab(dirty_tab);
+    let verdict = tab_model.request_close("doc1");
+    assert!(matches!(
+        verdict,
+        crate::composite::tab_strip::TabCloseVerdict::RequiresConfirmation { .. }
+    ));
+
+    // 4. Diff lines: Added lines carry '+' glyph and deleted lines carry '-' glyph
+    assert_eq!(GLYPH_ADDED, "+");
+    assert_eq!(GLYPH_DELETED, "-");
+    let added = DiffLine {
+        kind: DiffLineKind::Added,
+        old_line: None,
+        new_line: Some(1),
+        text: "new line".to_string(),
+    };
+    assert_eq!(added.kind, DiffLineKind::Added);
+
+    // 5. Stepper: Completed steps carry '✓' glyph and Error steps carry '!' glyph
+    assert_eq!(GLYPH_COMPLETED, "✓");
+    assert_eq!(STEPPER_ERROR, "!");
+    let step = StepItem {
+        id: 0,
+        label: "Step 1".to_string(),
+        status: StepStatus::Completed,
+        disabled: false,
+    };
+    assert_eq!(step.status, StepStatus::Completed);
+}
