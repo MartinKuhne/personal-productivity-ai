@@ -1990,29 +1990,27 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-013",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.13",
-        evidence: &["widget/badge_model.rs", "token/contrast.rs", "token/size.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this widget to Phase C on 2026-10-23. No `AvatarModel`, \
-             `AvatarSize`, `RatingModel`, `RatingStep`, star row, initials fallback or \
-             presence cut-out exists. Missing: the whole requirement — the 24 / 32 / \
-             36px circular or rounded-square container with its `1px border.strong` \
-             perimeter; the deterministic `image -> one-or-two uppercase initials -> \
-             generic person glyph` fallback cascade with the 4.50:1 floor its initials \
-             must clear on `accent.fill` or `surface.active`; the 6x6px presence badge \
-             with its `1px surface.base` cut-out ring; the row of five 24x24px star slots \
-             at `space.xs` gap with `status.warning` fills and `border.strong` empties; \
-             half-step versus whole-step rating with hover preview; clear-on-reclick and \
-             `Delete`; and the `Live` / `Commit` / `Cancel` callback set. Reusable pieces \
-             exist: `BadgeTone` and the §3.8 tones the presence dot would borrow are \
-             built in `widget/badge_model.rs`, and `token/contrast.rs` can verify the \
-             initials-on-fill pairing the moment one is drawn. Neither is assembled into \
-             an avatar or a rating control, and the star glyph itself is not among the \
-             marks this crate paints.",
+        evidence: &[
+            "widget/avatar.rs",
+            "widget/rating.rs",
+            "widget/badge_model.rs",
+            "token/contrast.rs",
+            "token/size.rs",
+        ],
+        reason: None,
+        note: Some(
+            "`Avatar` / `PersonPicture` and `RatingControl` implemented in full under \
+             §3.13 (`UIF-ATOM-013`). `Avatar` provides the 24/32/36px circular or rounded-square \
+             container with 1px border.strong perimeter, the 3-stage fallback cascade \
+             (image -> initials -> generic person glyph) clearing 4.50:1 contrast on \
+             accent.fill/surface.active, and the 6x6px presence badge with 1px surface.base \
+             cutout ring. `RatingControl` provides the row of five 24x24px star slots at \
+             space.xs gap with status.warning fills and border.strong empties, whole-step and \
+             half-step rating with hover preview, clear-on-reclick/Delete, keyboard \
+             navigation, and the Live / Commit / Cancel callback set.",
         ),
-        note: None,
     },
     // --- §3B Composite Patterns --------------------------------------------
     //

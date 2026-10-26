@@ -63,6 +63,10 @@ pub use composite::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, PaginationBar,
     PaginationModel, Skeleton, SkeletonStyle, empty_state, pagination_bar, skeleton,
 };
+pub use widget::{
+    Avatar, AvatarModel, AvatarShape, AvatarSize, RatingControl, RatingModel, RatingStep, avatar,
+    rating_control,
+};
 
 #[cfg(test)]
 pub mod test_helpers;

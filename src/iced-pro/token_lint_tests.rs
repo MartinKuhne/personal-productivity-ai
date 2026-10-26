@@ -131,7 +131,10 @@ use crate::token_lint::{
 /// 160 as of `UIF-COMP-014`: `composite/empty_state.rs`, `composite/skeleton.rs`
 /// and `composite/pagination.rs`. All three live under `composite/`, joining
 /// Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 160;
+///
+/// 162 as of `UIF-ATOM-013`: `widget/avatar.rs` and `widget/rating.rs`. Both
+/// live under `widget/`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 162;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -173,7 +176,9 @@ const PIN_RULE_A_FILES: usize = 1;
 /// and `widget/range_slider_model.rs`.
 /// 88 as of `UIF-COMP-014`, whose three additions are `composite/empty_state.rs`,
 /// `composite/skeleton.rs` and `composite/pagination.rs`.
-const PIN_RULE_B_FILES: usize = 88;
+/// 90 as of `UIF-ATOM-013`, whose two additions are `widget/avatar.rs` and
+/// `widget/rating.rs`.
+const PIN_RULE_B_FILES: usize = 90;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.

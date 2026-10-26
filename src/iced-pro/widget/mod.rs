@@ -197,6 +197,7 @@
 
 pub mod auto_suggest_host;
 pub mod auto_suggest_model;
+pub mod avatar;
 pub mod badge;
 pub mod badge_model;
 pub mod button;
@@ -221,6 +222,7 @@ pub mod progress_model;
 pub mod range_model;
 pub mod range_slider;
 pub mod range_slider_model;
+pub mod rating;
 pub mod rove;
 pub mod segmented;
 pub mod segmented_model;
@@ -239,6 +241,8 @@ pub mod toggle_model;
 pub mod toggle_widget;
 
 pub use crate::surface::tooltip::{Tooltip, TooltipContent, TooltipState, tooltip};
+pub use avatar::{Avatar, AvatarModel, AvatarShape, AvatarSize, avatar};
 pub use range_slider::{RangeSlider, range_slider};
 pub use range_slider_model::{RangeSliderModel, RangeThumb};
+pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};
