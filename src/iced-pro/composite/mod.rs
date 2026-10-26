@@ -98,6 +98,12 @@
 //!   two-stage Escape, and Rule 4 text.strong subtitle promotion (`UIF-COMP-010`, `UIF-PRIN-003`, `UIF-TOK-006`)
 //! * [`mod@grid_view`] — the 2D virtualized tile and card grid with deterministic column solving
 //!   and 2D boundary clamping (`UIF-COMP-013`, `UIF-VER-002`, `UIF-PRIN-006`)
+//! * [`mod@code_block`] — the fenced code block container with 28px header, language badge,
+//!   fixed 24x24px copy button with 1500ms success hold, 13px mono body and 40px line-number gutter (`UIF-COMP-015`, `UIF-PRIN-003`)
+//! * [`mod@diff_viewer`] — the visual diff viewer pairing + and - glyphs with 2px indicator bars
+//!   and distinct text roles in unified and side-by-side modes with per-hunk actions (`UIF-COMP-015`, `UIF-PRIN-005`, `UIF-PRIN-006`)
+//! * [`mod@keybind_recorder`] — the 32px shortcut capture input with mono keycap pills,
+//!   trailing clear button, and raw chord interception (`UIF-COMP-015`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -107,12 +113,15 @@
 
 pub mod breadcrumb;
 pub mod card;
+pub mod code_block;
 pub mod command_palette;
+pub mod diff_viewer;
 pub mod empty_state;
 pub mod expander;
 pub mod form_field;
 pub mod grid_view;
 pub mod info_bar;
+pub mod keybind_recorder;
 pub mod list_tile;
 pub mod navigation_rail;
 pub mod notification;
@@ -133,6 +142,7 @@ pub mod tree_row;
 pub mod tree_view;
 pub mod virtual_list;
 
+pub use code_block::{CodeBlock, CodeBlockModel, code_block};
 pub use command_palette::{
     CARD_HEIGHT, CARD_WIDTH, CommandPalette, CommandPaletteModel, CommandPaletteState,
     DIVIDER_STROKE, EscapeDisposition, FOOTER_HEIGHT, GLYPH_SEARCH, GROUP_HEADER_HEIGHT, LABEL_ESC,
@@ -140,6 +150,9 @@ pub use command_palette::{
     PLACEHOLDER_TAGS, PaletteGroup, PaletteItem, PaletteMode, RADIUS, ROW_DOUBLE_HEIGHT,
     ROW_SINGLE_HEIGHT, SEARCH_HEIGHT, SEARCHING, TOP_OFFSET, card_bounds, command_palette,
     highlight_spans,
+};
+pub use diff_viewer::{
+    DiffDisplayMode, DiffHunk, DiffLine, DiffLineKind, DiffViewer, DiffViewerModel, diff_viewer,
 };
 pub use empty_state::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
@@ -149,6 +162,7 @@ pub use grid_view::{
     DEFAULT_MIN_TILE_WIDTH, DEFAULT_TILE_HEIGHT, GAP, GLYPH_CHECK, GUTTER_WIDTH, GridNavKey,
     GridTile, GridView, GridViewModel, GridViewState, grid_view, solve_columns, tile_rect,
 };
+pub use keybind_recorder::{KeyChord, KeybindRecorder, KeybindRecorderModel, keybind_recorder};
 pub use navigation_rail::{
     COMPACT_WIDTH, EXPANDED_DEFAULT_WIDTH, EXPANDED_MAX_WIDTH, EXPANDED_MIN_WIDTH, GLYPH_TOGGLE,
     ICON_SIZE, INDICATOR_WIDTH, LABEL_TOGGLE, NavDestination, NavRailResize, NavigationRail,

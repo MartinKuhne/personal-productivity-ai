@@ -60,14 +60,16 @@ pub mod validation;
 pub mod widget;
 
 pub use composite::{
-    CommandPalette, CommandPaletteModel, EmptyState, EmptyStateKind, EmptyStateModel,
-    EmptyStateStyle, EscapeDisposition, GridNavKey, GridTile, GridView, GridViewModel, Icon,
-    NavDestination, NavigationRail, NavigationRailModel, PaginationBar, PaginationModel,
-    PaletteGroup, PaletteItem, PaletteMode, PipsPager, PipsPagerModel, SheetMode, SheetPlacement,
-    SideSheet, SideSheetModel, SideSheetResize, SideSheetState, Skeleton, SkeletonStyle, StepItem,
-    StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, command_palette,
-    empty_state, grid_view, navigation_rail, pagination_bar, pips_pager, side_sheet, skeleton,
-    stepper, wizard_footer,
+    CodeBlock, CodeBlockModel, CommandPalette, CommandPaletteModel, DiffDisplayMode, DiffHunk,
+    DiffLine, DiffLineKind, DiffViewer, DiffViewerModel, EmptyState, EmptyStateKind,
+    EmptyStateModel, EmptyStateStyle, EscapeDisposition, GridNavKey, GridTile, GridView,
+    GridViewModel, Icon, KeyChord, KeybindRecorder, KeybindRecorderModel, NavDestination,
+    NavigationRail, NavigationRailModel, PaginationBar, PaginationModel, PaletteGroup, PaletteItem,
+    PaletteMode, PipsPager, PipsPagerModel, SheetMode, SheetPlacement, SideSheet, SideSheetModel,
+    SideSheetResize, SideSheetState, Skeleton, SkeletonStyle, StepItem, StepStatus, Stepper,
+    StepperModel, StepperOrientation, WizardFooterConfig, code_block, command_palette, diff_viewer,
+    empty_state, grid_view, keybind_recorder, navigation_rail, pagination_bar, pips_pager,
+    side_sheet, skeleton, stepper, wizard_footer,
 };
 pub use widget::{
     Avatar, AvatarModel, AvatarShape, AvatarSize, RatingControl, RatingModel, RatingStep, avatar,

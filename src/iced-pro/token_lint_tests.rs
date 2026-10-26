@@ -145,7 +145,10 @@ use crate::token_lint::{
 /// 167 as of `UIF-COMP-010`: `composite/command_palette.rs`, joining Rule B's visual scope.
 ///
 /// 168 as of `UIF-COMP-013`: `composite/grid_view.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 168;
+///
+/// 171 as of `UIF-COMP-015`: `composite/code_block.rs`, `composite/diff_viewer.rs`,
+/// and `composite/keybind_recorder.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 171;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -195,7 +198,9 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 94 as of `UIF-COMP-009`, whose one addition is `composite/navigation_rail.rs`.
 /// 95 as of `UIF-COMP-010`, whose one addition is `composite/command_palette.rs`.
 /// 96 as of `UIF-COMP-013`, whose one addition is `composite/grid_view.rs`.
-const PIN_RULE_B_FILES: usize = 96;
+/// 99 as of `UIF-COMP-015`, whose three additions are `composite/code_block.rs`,
+/// `composite/diff_viewer.rs`, and `composite/keybind_recorder.rs`.
+const PIN_RULE_B_FILES: usize = 99;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -341,7 +346,15 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `grid_view::` (`GAP`, `GUTTER_WIDTH`, `CHECKBOX_SIZE`, `RADIUS`,
 /// `BORDER_SELECTED_WIDTH`, `BORDER_REST_WIDTH`, `CHECKBOX_INSET`,
 /// `TILE_PADDING`, `ICON_SIZE`).
-const PIN_TOKEN_BOUND: usize = 269;
+///
+/// 294 as of `UIF-COMP-015`: the 25 token-bound visual constants in `code_block::`
+/// (`HEADER_HEIGHT`, `COPY_BUTTON_SIZE`, `RADIUS`, `BORDER_WIDTH`, `CODE_PADDING`,
+/// `GUTTER_PADDING_X`), `diff_viewer::` (`HEADER_HEIGHT`, `INDICATOR_BAR_WIDTH`,
+/// `RADIUS`, `BORDER_WIDTH`, `DIVIDER_WIDTH`, `BUTTON_HEIGHT`, `BUTTON_PADDING_X`,
+/// `BUTTON_GAP`, `LINE_HEIGHT`), and `keybind_recorder::` (`HEIGHT`, `KEYCAP_HEIGHT`,
+/// `CLEAR_BUTTON_SIZE`, `RADIUS`, `BORDER_REST_WIDTH`, `BORDER_FOCUS_WIDTH`,
+/// `KEYCAP_RADIUS`, `KEYCAP_PADDING_X`, `KEYCAP_GAP`, `PADDING_X`).
+const PIN_TOKEN_BOUND: usize = 294;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -403,7 +416,9 @@ const PIN_RATIO: usize = 1;
 /// `command_palette::SEARCH_HEIGHT` (40px), and `command_palette::ROW_DOUBLE_HEIGHT` (44px).
 /// 50 as of `UIF-COMP-013`, which registers the two §3B.13 figures:
 /// `grid_view::DEFAULT_MIN_TILE_WIDTH` (160px) and `grid_view::DEFAULT_TILE_HEIGHT` (120px).
-const PIN_SURFACE_BOUND: usize = 50;
+/// 52 as of `UIF-COMP-015`, which registers the two §3B.15 figures:
+/// `code_block::GUTTER_WIDTH` (40px) and `diff_viewer::GUTTER_WIDTH` (40px).
+const PIN_SURFACE_BOUND: usize = 52;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

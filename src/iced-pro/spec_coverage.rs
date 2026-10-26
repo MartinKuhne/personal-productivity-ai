@@ -2481,36 +2481,26 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-015",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.15",
         evidence: &[
             "token/color.rs",
             "token/typography.rs",
-            "composite/form_field.rs",
-            "widget/text_input.rs",
+            "composite/code_block.rs",
+            "composite/diff_viewer.rs",
+            "composite/keybind_recorder.rs",
         ],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `CodeBlock`, \
-             `DiffViewerModel`, `DiffHunk`, `DiffDisplayMode`, `KeybindRecorderModel` or \
-             `KeyChord` type exists. Missing: the whole requirement — the code container \
-             with its 28px header, language badge and fixed-width `[Copy]` slot that holds \
-             the success tick for `time.hold.copied` (1500ms) at 0px shift, and its 13px \
-             mono body with a 40px right-aligned tabular line-number gutter; the diff view \
-             that pairs `+` and `-` glyphs with 2px `status.success` and \
-             `status.danger.text` left bars and distinct text roles rather than relying \
-             on background tint alone, in unified and side-by-side modes with per-hunk \
-             accept and reject buttons in the hunk header; and the keybind recorder's \
-             32px listening input, mono keycap pills, trailing clear button, raw chord \
-             interception with `Escape` cancelling without clearing, and conflict \
-             surfacing through `FormField` validation. Two blockers are recorded against \
-             other requirements rather than solved here: `UIF-TOK-004` models no font \
-             family, so `FontFamily::Mono` — the type all three of these are written in — \
-             has no rung. `time.hold.copied` is a rung now (`token::time::HOLD_COPIED`). The \
-             `surface.code` background the section asks for already exists in \
-             `token/color.rs`, so neither the timing nor the palette is the gap.",
+        reason: None,
+        note: Some(
+            "Increment 17 realised the developer composites specified in §3B.15: `CodeBlock` with \
+             28px header, language badge, fixed 24x24px copy button holding success checkmark \
+             for 1500ms at 0px shift, 13px mono body and 40px tabular line-number gutter; \
+             `DiffViewer` pairing + and - glyphs with 2px status.success and status.danger.text \
+             left bars and distinct text roles in unified and side-by-side modes with per-hunk \
+             accept/reject buttons; and `KeybindRecorder` with 32px height, mono keycap pills, \
+             trailing 24x24px clear button, raw chord interception with Escape cancelling without \
+             clearing, and conflict surfacing.",
         ),
-        note: None,
     },
     // --- §4.1 Main Window --------------------------------------------------
     Coverage {

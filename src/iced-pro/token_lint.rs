@@ -573,6 +573,16 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "DEFAULT_TILE_HEIGHT",
         spec: "§3B.13 — GridView default tile height 120px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/code_block.rs",
+        name: "GUTTER_WIDTH",
+        spec: "§3B.15 — CodeBlock line-number gutter width 40px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/diff_viewer.rs",
+        name: "GUTTER_WIDTH",
+        spec: "§3B.15 — DiffViewer line-number gutter width 40px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.
