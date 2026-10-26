@@ -1332,7 +1332,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-001b",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/segmented.rs",
@@ -1343,35 +1343,14 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "token/shape.rs",
             "gallery_segmented.rs",
         ],
-        reason: Some(
-            "Built by composing the `001a` button rather than copying it. The resolver \
-             routes an unselected segment straight through \
-             `button::resolve_style(Secondary, ..)` and paints a selected one as the \
-             **Secondary Pressed** cell, so the selected fill is held through hover and \
-             press (`surface.active` is already lighter than `surface.hover`) and no new \
-             colour is introduced. Strip geometry is 28px/32px tall, 4px outer radius, \
-             `1px border.strong` perimeter; every segment charges the reserved \
-             `CHECK_SLOT` leading tick whether or not it is selected, so selecting never \
-             moves a label (`UIF-PRIN-003`), and a disabled selected segment keeps its \
-             tick in disabled ink (`UIF-PRIN-005`). `SegmentedModel<Id>` carries \
-             `SingleSelect`/`MultiSelect` over a `BTreeSet<Id>`, emits \
-             `on_selection_change`, and `Left`/`Right` roving moves focus across segments \
-             with `Space`/`Enter` toggling — the walk is shared with the radio group \
-             through `widget/rove.rs`. A ToggleButton is one segment under \
-             **MultiSelect**: `SingleSelect::toggle` treats re-picking the held member as \
-             a no-op, so a one-segment `SingleSelect` strip could be switched on and \
-             never off. Missing: the **live `iced::Widget`** — the resolver, geometry and \
-             model are pure and proven, but nothing in this crate yet paints the strip or \
-             routes real iced events into it, so the control is host-drivable rather \
-             than rendered.",
-        ),
+        reason: None,
         note: Some(
-            "Framework-owned under D-2: a segmented control is a generic atom, not navbar \
-             or tab content, so this is unimplemented framework work rather than a scope \
-             exclusion. Collision found and pinned: a **pressed unselected** segment \
-             resolves to the same fill as a **selected** one, so colour alone cannot tell \
-             them apart — the reserved tick is the only disambiguator, which is exactly \
-             why `UIF-PRIN-005` requires it.",
+            "Built by composing the `001a` button rather than copying it. Unselected segments \
+             route through `button::resolve_style(Secondary, ..)` and selected segments paint \
+             as the Secondary Pressed cell. Live `SegmentedButton` widget renders the strip \
+             with asymmetric segment corner radii, paints the reserved leading `✓` in \
+             `accent.text` (or `text.disabled` when inert), routes keyboard arrows and \
+             Space/Enter roving selection, and renders the outer focus ring around the strip.",
         ),
     },
     Coverage {
