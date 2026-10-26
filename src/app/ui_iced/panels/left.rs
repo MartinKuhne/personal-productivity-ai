@@ -176,13 +176,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::widget::{
-    Column, Row, Space, Stack, button, container, mouse_area, scrollable, text, text_input,
-};
+use iced::widget::{Column, Row, Space, Stack, button, container, mouse_area, scrollable, text};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
 use iced_pro::composite::tree_row;
-use iced_pro::state::{BaseState, VisualState};
+use iced_pro::state::BaseState;
 use iced_pro::token::contrast;
 use iced_pro::token::shape;
 use iced_pro::token::space;
@@ -190,6 +188,9 @@ use iced_pro::token::typography::{self, FAMILY_SANS};
 use iced_pro::widget::badge;
 use iced_pro::widget::badge_model::BadgeTone;
 use iced_pro::widget::text_input as pro_text_input;
+use iced_pro::widget::text_input::{InputKind, TextInput};
+use iced_pro::widget::text_input_controller::TextInputEmission;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, SkillFile};
@@ -1354,8 +1355,8 @@ pub fn note_skill_files(app: &FastMdApp) -> Vec<SkillFile> {
 pub struct LeftPanelViewModel {
     /// The visible tree rows, in flatten order (UI-017/UI-018 preserved).
     pub rows: Arc<Vec<FlatRow>>,
-    /// The search box's current text.
-    pub query: String,
+    /// The host-owned model for the search field.
+    pub query: TextInputModel,
     /// Whether a content search is active — results replace the tree
     /// (UI-050).
     pub is_searching: bool,
@@ -1446,7 +1447,7 @@ impl LeftPanelViewModel {
 
         Self {
             rows,
-            query: app.search().query().to_string(),
+            query: search_input_model(app.search().query()),
             is_searching: app.search().is_searching(),
             results: app.search().results_arc(),
             selected_file: app.selection().selected_file().cloned(),
@@ -1467,6 +1468,16 @@ impl LeftPanelViewModel {
             hovered_row: None,
             row_width: row_width_for(app.layout().left_panel_width),
         }
+    }
+
+    /// Replaces the search-field snapshot from its authoritative reducer value.
+    ///
+    /// The query lives in [`OverlayState::search`](crate::ui_iced::app::OverlayState::search);
+    /// this view-model stores only the controlled input model derived from it.
+    /// Rebuilding that model keeps the shared placeholder and the separate
+    /// panel clear button as the only clear affordance.
+    pub fn set_query(&mut self, query: impl Into<String>) {
+        self.query = search_input_model(query);
     }
 
     /// Whether `path` is part of a multi-selection (more than one file
@@ -1508,6 +1519,13 @@ impl LeftPanelViewModel {
     }
 }
 
+/// Builds the non-clearable controlled model for the separate-button search row.
+fn search_input_model(query: impl Into<String>) -> TextInputModel {
+    TextInputModel::new(query)
+        .with_placeholder(strings::SEARCH_PLACEHOLDER)
+        .with_clearable(false)
+}
+
 /// Renders the left file-tree panel from a view-model snapshot.
 ///
 /// Emitted messages:
@@ -1532,16 +1550,15 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
         .font(typography::TITLE_SM.font(FAMILY_SANS, typography::TITLE_SM.weight))
         .color(palette.text_strong);
 
-    let search_field = text_input(strings::SEARCH_PLACEHOLDER, &view_model.query)
-        .id(SEARCH_INPUT_ID)
-        .size(ROW_TEXT_SIZE)
-        .line_height(tree_row::LABEL_RUNG.iced_line_height())
-        .padding(SEARCH_CARD_PADDING)
-        .style(|_theme, status| search_field_style(status))
-        .on_input(|text| Message::Search(SearchMessage::QueryChanged { text }))
-        .on_submit(Message::Search(SearchMessage::Submitted {
-            query: view_model.query.clone(),
-        }));
+    let search_field = TextInput::controlled(
+        InputKind::TextEntry,
+        view_model.query.controlled(),
+        SEARCH_INPUT_ID,
+        search_field_emit,
+    )
+    .width(Length::Fill)
+    .compact()
+    .palette(Palette::pro());
 
     let search_trigger = button(
         text(strings::ICON_MAGNIFYING_GLASS)
@@ -1549,7 +1566,7 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
             .size(SEARCH_GLYPH_SIZE),
     )
     .on_press(Message::Search(SearchMessage::Submitted {
-        query: view_model.query.clone(),
+        query: view_model.query.value.clone(),
     }));
 
     let clear_trigger = button(
@@ -1581,6 +1598,34 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
         .spacing(PANEL_PADDING)
         .padding(PANEL_PADDING)
         .into()
+}
+
+/// Routes controlled search-field tiers into the existing search message channel.
+///
+/// Typing and blur synchronize the query, explicit Enter commits submit the
+/// value carried by that commit, and Escape restores the pre-edit query.
+/// Focus edges and the widget clear tier have no effect: the panel owns a
+/// separate magnifier and clear control, and its input is non-clearable.
+fn search_field_emit(emission: TextInputEmission) -> Option<Message> {
+    match emission {
+        TextInputEmission::Changed(live) => Some(Message::Search(SearchMessage::QueryChanged {
+            text: live.value().to_string(),
+        })),
+        TextInputEmission::Committed(commit) => Some(Message::Search(SearchMessage::Submitted {
+            query: commit.value().to_string(),
+        })),
+        TextInputEmission::FocusCommitted(commit) => {
+            Some(Message::Search(SearchMessage::QueryChanged {
+                text: commit.value().to_string(),
+            }))
+        }
+        TextInputEmission::Cancelled(cancel) => {
+            Some(Message::Search(SearchMessage::QueryChanged {
+                text: cancel.restored().to_string(),
+            }))
+        }
+        TextInputEmission::FocusChanged(_) | TextInputEmission::Cleared(_) => None,
+    }
 }
 
 /// The tree branch of the panel body: the virtual row list, or the
@@ -2086,65 +2131,6 @@ pub fn row_label_colour(selected: bool, hovered: bool) -> Color {
 
 /// Stable id for the tree's search field ([AGENTS §5]).
 pub const SEARCH_INPUT_ID: &str = "left_panel_search_input";
-
-/// The search field's paint, resolved through the framework's text-input
-/// atom at [`InputKind::Search`](pro_text_input::InputKind::Search)
-/// (`UIF-ATOM-002`).
-///
-/// Unlike the bottom band, which uses the framework's controlled
-/// [`TextInput`](pro_text_input::TextInput) directly with its palette:
-/// iced styles a `text_input` from `(Theme, Status)`, the framework
-/// resolves one from `(InputKind, VisualState, Palette)`. Every channel
-/// — fill, perimeter, value, placeholder, icon, selection — comes from
-/// [`pro_text_input::resolve_input_style`] rather than from iced's own
-/// theme.
-///
-/// This is the framework's *paint* on iced's *widget*, and that is as
-/// far as the search row can go today:
-/// [`composite::search_input`](iced_pro::composite) **does not exist**
-/// (the composite directory has breadcrumb, card, expander, form_field,
-/// info_bar, list_tile, notification, overflow_toolbar, scroll_view,
-/// settings_row, table_* , toast, tree_row, tree_view, virtual_list), and
-/// [`TextInput`](pro_text_input::TextInput)'s uncontrolled constructor
-/// takes `on_input` only — Enter reaches a host solely as the
-/// `Committed` tier of the *controlled* path, which needs an app-owned
-/// `TextInputModel`. Submitting a query is the field's whole job, so the
-/// value stays in `app.search()` and the field stays iced's.
-///
-/// Purity: pure function of `status`.
-#[must_use]
-pub fn search_field_style(
-    status: iced::widget::text_input::Status,
-) -> iced::widget::text_input::Style {
-    use iced::widget::text_input::{Status, Style};
-
-    let palette = Palette::pro();
-    let base = match status {
-        Status::Active => BaseState::Rest,
-        Status::Hovered => BaseState::Hovered,
-        Status::Focused { .. } => BaseState::Rest,
-        Status::Disabled => BaseState::Disabled,
-    };
-    let focused = matches!(status, Status::Focused { .. });
-    let resolved = pro_text_input::resolve_input_style(
-        pro_text_input::InputKind::Search,
-        VisualState { base, focused },
-        &palette,
-    );
-
-    Style {
-        background: Background::Color(resolved.background),
-        border: Border {
-            color: resolved.border_color,
-            width: resolved.border_width,
-            radius: pro_text_input::RADIUS.into(),
-        },
-        icon: resolved.icon,
-        placeholder: resolved.placeholder,
-        value: resolved.text,
-        selection: resolved.selection_background,
-    }
-}
 
 /// The search-result branch of the panel body (UI-050).
 fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message> {

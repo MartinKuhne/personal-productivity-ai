@@ -21,7 +21,9 @@
 use super::*;
 use crate::ui_iced::context_menu::{ContextGroup, ContextRow};
 use crate::ui_iced::test_helpers::test_app;
+use iced_pro::binding::{Cancel, Commit, Live};
 use iced_pro::token::contrast::meets_text_contrast;
+use iced_pro::widget::text_input_controller::TextInputEmission;
 use tempfile::TempDir;
 
 // --- fixtures -----------------------------------------------------------
@@ -652,7 +654,9 @@ fn from_app_snapshots_an_empty_workspace() {
     // discovered, so nothing hangs beneath it.
     assert_eq!(view_model.rows.len(), 1);
     assert!(view_model.rows[0].is_dir);
-    assert_eq!(view_model.query, "");
+    assert_eq!(view_model.query.value, "");
+    assert_eq!(view_model.query.placeholder, strings::SEARCH_PLACEHOLDER);
+    assert!(!view_model.query.clearable);
     assert!(!view_model.is_searching);
     assert!(view_model.results.is_empty());
     assert_eq!(view_model.selected_file, None);
@@ -678,7 +682,7 @@ fn from_app_carries_query_search_state_and_selection() {
     app.selection_mut().select_file(note.clone());
 
     let view_model = LeftPanelViewModel::from_app(&app);
-    assert_eq!(view_model.query, "crisp");
+    assert_eq!(view_model.query.value, "crisp");
     assert!(view_model.is_searching);
     assert_eq!(view_model.selected_file, Some(note.clone()));
     assert_eq!(
@@ -688,6 +692,60 @@ fn from_app_carries_query_search_state_and_selection() {
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>(),
         vec![note]
+    );
+}
+
+#[test]
+fn setting_the_search_query_rebuilds_its_non_clearable_field_model() {
+    let (app, _dir) = app_with_system_lib();
+    let mut view_model = LeftPanelViewModel::from_app(&app);
+
+    view_model.set_query("overlay query");
+
+    assert_eq!(view_model.query.value, "overlay query");
+    assert_eq!(view_model.query.placeholder, strings::SEARCH_PLACEHOLDER);
+    assert!(!view_model.query.clearable);
+}
+
+#[test]
+fn controlled_search_emissions_keep_submit_blur_cancel_and_focus_distinct() {
+    assert_eq!(
+        search_field_emit(TextInputEmission::Changed(Live::new("live".to_string()))),
+        Some(Message::Search(SearchMessage::QueryChanged {
+            text: "live".to_string(),
+        }))
+    );
+    assert_eq!(
+        search_field_emit(TextInputEmission::Committed(Commit::new(
+            "submitted".to_string()
+        ))),
+        Some(Message::Search(SearchMessage::Submitted {
+            query: "submitted".to_string(),
+        }))
+    );
+    assert_eq!(
+        search_field_emit(TextInputEmission::FocusCommitted(Commit::new(
+            "blurred".to_string()
+        ))),
+        Some(Message::Search(SearchMessage::QueryChanged {
+            text: "blurred".to_string(),
+        }))
+    );
+    assert_eq!(
+        search_field_emit(TextInputEmission::Cancelled(Cancel::new(
+            "restored".to_string()
+        ))),
+        Some(Message::Search(SearchMessage::QueryChanged {
+            text: "restored".to_string(),
+        }))
+    );
+    assert_eq!(
+        search_field_emit(TextInputEmission::FocusChanged(true)),
+        None
+    );
+    assert_eq!(
+        search_field_emit(TextInputEmission::Cleared(Commit::new(String::new()))),
+        None
     );
 }
 
@@ -897,7 +955,6 @@ fn a_pdf_backed_row_label_never_uses_the_error_token() {
 // constant that would have moved with it.
 
 use iced_pro::composite::tree_row;
-use iced_pro::state::{BaseState, VisualState};
 use iced_pro::token::contrast::ChromeClass;
 use iced_pro::token::contrast::contrast_ratio;
 use iced_pro::token::{size, space, typography};
@@ -1943,52 +2000,6 @@ fn auto_fit_does_not_widen_the_pane_to_keep_the_chip() {
          {:.1} < charge {PDF_BADGE_CHARGE}",
         "deep.md".len(),
         tree_row::indent_allowance(row_width) - tree_row::indent_geometry(8, row_width).width,
-    );
-}
-
-#[test]
-fn the_search_field_paints_from_the_framework_search_input_kind() {
-    use iced::widget::text_input::Status;
-
-    let pro = Palette::pro();
-    for (status, base, focused) in [
-        (Status::Active, BaseState::Rest, false),
-        (Status::Hovered, BaseState::Hovered, false),
-        (Status::Focused { is_hovered: false }, BaseState::Rest, true),
-        (Status::Disabled, BaseState::Disabled, false),
-    ] {
-        let resolved = pro_text_input::resolve_input_style(
-            pro_text_input::InputKind::Search,
-            VisualState { base, focused },
-            &pro,
-        );
-        let style = search_field_style(status);
-        assert_eq!(
-            (style.background, style.border.color, style.border.width),
-            (
-                iced::Background::Color(resolved.background),
-                resolved.border_color,
-                resolved.border_width
-            ),
-            "search field at {status:?} must carry the framework's resolved fill"
-        );
-        assert_eq!(style.value, resolved.text);
-        assert_eq!(style.placeholder, resolved.placeholder);
-        assert_eq!(style.icon, resolved.icon);
-        assert_eq!(style.selection, resolved.selection_background);
-    }
-}
-
-#[test]
-fn the_search_field_is_not_painted_from_iced_s_own_theme() {
-    // A cheap tripwire: the focused border must be the framework's focus
-    // stroke, which is strictly heavier than iced's resting input border.
-    let focused =
-        search_field_style(iced::widget::text_input::Status::Focused { is_hovered: false });
-    let active = search_field_style(iced::widget::text_input::Status::Active);
-    assert!(
-        focused.border.width > active.border.width,
-        "focus must be drawn by the framework's focus ring, not left to iced"
     );
 }
 

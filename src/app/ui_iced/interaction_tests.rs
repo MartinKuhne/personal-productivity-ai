@@ -75,7 +75,8 @@ use crate::ui_iced::hamburger::{
     RADIO_GROUP_TABLE_WRAP, command_for_activation, hamburger_menu, strategy_key,
 };
 use crate::ui_iced::message::{
-    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, TreeMessage,
+    AgentMessage, DialogMessage, EditorMessage, LayoutMessage, MenuMessage, Message, SearchMessage,
+    TreeMessage,
 };
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::{center_panel, tab_select_command};
@@ -244,6 +245,25 @@ fn state_with_one_file() -> (AppState, tempfile::TempDir) {
     (state, dir)
 }
 
+/// Finds and focuses the left panel's search field by its stable widget id.
+fn focus_search_input(ui: &mut Sim<'_>) -> iced::Rectangle {
+    use iced_test::selector::Candidate;
+
+    let id = iced::widget::Id::from(crate::ui_iced::panels::left::SEARCH_INPUT_ID);
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(candidate_id),
+                bounds,
+                ..
+            } if *candidate_id == id => Some(bounds),
+            _ => None,
+        })
+        .expect("the left panel must mount its stable search input");
+    click_at(ui, bounds.center());
+    bounds
+}
+
 /// The rendered label of the fixture's file row.
 fn alpha_row_label() -> String {
     format!("{} alpha.md", row_icon(false, false))
@@ -252,6 +272,126 @@ fn alpha_row_label() -> String {
 // ---------------------------------------------------------------------------
 // Left panel — tree row interactions
 // ---------------------------------------------------------------------------
+
+/// Enter commits the text in the live field, not a value captured when the
+/// current view was built.
+#[test]
+fn test_left_search_enter_submits_the_live_field_value() {
+    let (state, _dir) = state_with_one_file();
+    let mut ui = sim(left_panel(&state.models.left));
+    focus_search_input(&mut ui);
+    let _ = ui.typewrite("live query");
+    let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+
+    assert_emitted(
+        &messages(ui),
+        &Message::Search(SearchMessage::Submitted {
+            query: "live query".to_string(),
+        }),
+        "Enter must submit the field's current value",
+    );
+}
+
+/// Leaving the search field synchronizes the final edit without submitting it.
+#[test]
+fn test_left_search_blur_synchronizes_without_submitting() {
+    let (state, _dir) = state_with_one_file();
+    let mut ui = sim(left_panel(&state.models.left));
+    focus_search_input(&mut ui);
+    let _ = ui.typewrite("draft");
+    let _ = ui.click(strings::WORKSPACE_HEADER);
+
+    let emitted = messages(ui);
+    assert!(
+        emitted.iter().any(|message| matches!(
+            message,
+            Message::Search(SearchMessage::QueryChanged { text }) if text == "draft"
+        )),
+        "typing and blur must synchronize the draft, got {emitted:?}"
+    );
+    assert!(
+        !emitted
+            .iter()
+            .any(|message| matches!(message, Message::Search(SearchMessage::Submitted { .. }))),
+        "blur must never submit a search, got {emitted:?}"
+    );
+}
+
+/// Escape restores the query from before the focused edit session, and the
+/// production reducer rebuilds the left-panel model from that restored value.
+#[test]
+fn test_left_search_escape_restores_query_through_reducer_rebuild() {
+    let (mut state, _dir) = state_with_one_file();
+    state.overlay.search.set_query("original".to_string());
+    state.rebuild_view_models();
+
+    let mut ui = sim(left_panel(&state.models.left));
+    focus_search_input(&mut ui);
+    let _ = ui.typewrite(" edited");
+    let _ = ui.tap_key(iced::keyboard::key::Named::Escape);
+
+    for message in messages(ui) {
+        let _ = update(&mut state, message);
+    }
+
+    assert_eq!(state.overlay.search.query(), "original");
+    assert_eq!(state.models.left.query.value, "original");
+}
+
+/// The controlled input retains the panel's addressable focus/widget id.
+#[test]
+fn test_left_search_input_keeps_its_stable_id() {
+    use iced_test::selector::Candidate;
+
+    let (state, _dir) = state_with_one_file();
+    let mut ui = sim(left_panel(&state.models.left));
+    let expected = iced::widget::Id::from(crate::ui_iced::panels::left::SEARCH_INPUT_ID);
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput { id: Some(id), .. } if *id == expected => Some(()),
+            _ => None,
+        })
+        .is_ok(),
+        "the search field must keep its stable focus/widget identity"
+    );
+}
+
+/// The compact field geometry leaves its neighbouring magnifier and clear
+/// buttons interactive as distinct controls.
+#[test]
+fn test_left_search_compact_field_keeps_adjacent_controls_usable() {
+    let (mut state, _dir) = state_with_one_file();
+    state.overlay.search.set_query("needle".to_string());
+    state.rebuild_view_models();
+
+    let mut ui = sim(left_panel(&state.models.left));
+    let field_bounds = focus_search_input(&mut ui);
+    assert!(
+        field_bounds.height <= iced_pro::token::size::CONTROL_SM,
+        "the text area must fit inside the compact framework control rung"
+    );
+    let _ = ui.click(strings::ICON_MAGNIFYING_GLASS);
+    assert_emitted(
+        &messages(ui),
+        &Message::Search(SearchMessage::Submitted {
+            query: "needle".to_string(),
+        }),
+        "the separate magnifier must remain clickable beside the compact input",
+    );
+
+    let (mut state, _dir) = state_with_one_file();
+    state.overlay.search.set_query("needle".to_string());
+    state.overlay.search.submit();
+    state.rebuild_view_models();
+
+    let mut ui = sim(left_panel(&state.models.left));
+    let _ = ui.click(strings::ICON_X);
+    assert_emitted(
+        &messages(ui),
+        &Message::Search(SearchMessage::Cleared),
+        "the separate clear button must remain clickable while a search is active",
+    );
+}
 
 /// A left click on a tree row publishes `SelectFile` for that row's path
 /// (UI-017).

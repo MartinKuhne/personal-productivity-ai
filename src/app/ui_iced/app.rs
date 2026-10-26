@@ -1582,7 +1582,7 @@ impl ViewModels {
         let note_skills = crate::ui_iced::panels::left::note_skill_files(app);
 
         let mut left = LeftPanelViewModel::from_app(app);
-        left.query = overlay.search.query().to_string();
+        left.set_query(overlay.search.query());
         left.is_searching = overlay.search.is_filtering();
         left.results = overlay.search.results_arc();
         // UI-022: `from_app` has no modifier input and defaults the field

@@ -115,7 +115,7 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
 | `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
-| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field and agent prompt; callback `TextInput::new` on log/debug search; `InputKind` resolver on left-panel search), `widget::combo_box` |
+| `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field, agent prompt and left-panel search; callback `TextInput::new` on log/debug search), `widget::combo_box` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
 | `attributions.rs` | `widget::hyperlink` |
 | `panels/left.rs` | `composite::tree_row` — row geometry, selection band and the role-based label fill-lock **only** (see *Known integration gaps*) |
@@ -661,9 +661,10 @@ the code:
    decisions, never an `Element` — the gallery's canvas renderer is the
    only code that paints its layers. The app's tree and tab strip consume
    its *geometry* and *colour rules* while still drawing themselves.
-3. **`composite::search_input` does not exist.** The tree's search field
-   stays iced's `text_input` painted with `InputKind::Search`, because
-   `TextInput::new` on the uncontrolled path has no `on_submit`.
+3. **`composite::search_input` does not exist.** The left panel now uses
+   the controlled `iced-pro` `TextInput` atom for its query field so Enter
+   can submit the live value; the surrounding magnifier/clear row remains
+   app-owned because the framework has no search-input composite.
 4. **`ValidationRule::Name` accepts `..`.** `check_basename`
    (`surface/input_dialog.rs:464`) rejects an empty value, leading or
    trailing space, and the eight Windows-illegal characters — but `.` is

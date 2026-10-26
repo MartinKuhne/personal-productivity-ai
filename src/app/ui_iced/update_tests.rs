@@ -1992,7 +1992,7 @@ fn test_search_results_ready_applies_and_reaches_the_left_panel_model() {
         "the rebuilt left-panel model must show the results"
     );
     assert!(state.models.left.is_searching);
-    assert_eq!(state.models.left.query, "needle");
+    assert_eq!(state.models.left.query.value, "needle");
 }
 
 #[test]
