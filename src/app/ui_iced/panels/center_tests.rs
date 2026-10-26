@@ -614,7 +614,7 @@ fn vm_show_thinking_uses_the_gate() {
 fn the_unsaved_dot_is_the_specs_six_pixel_shape_not_a_glyph() {
     use iced_pro::token::typography;
 
-    let dirty = unsaved_dot(true, &Palette::fastmd_dark(), false);
+    let dirty = unsaved_dot(true, &Palette::fastmd_dark(), false, false);
 
     assert_eq!(
         dirty.diameter,
@@ -655,16 +655,16 @@ fn the_unsaved_dot_is_visible_only_for_dirty_documents() {
     let palette = Palette::fastmd_dark();
 
     assert!(
-        unsaved_dot(true, &palette, false).visible,
+        unsaved_dot(true, &palette, false, false).visible,
         "a dirty document must show the marker"
     );
     assert!(
-        !unsaved_dot(false, &palette, false).visible,
+        !unsaved_dot(false, &palette, false, false).visible,
         "a clean document must not"
     );
     assert_eq!(
-        unsaved_dot(false, &palette, false).diameter,
-        unsaved_dot(true, &palette, false).diameter,
+        unsaved_dot(false, &palette, false, false).diameter,
+        unsaved_dot(true, &palette, false, false).diameter,
         "visibility must not change the geometry, or the tab would resize"
     );
 }
@@ -694,7 +694,7 @@ fn the_unsaved_dot_clears_the_chrome_floor_on_the_surface_it_actually_sits_on() 
 
     // Inactive tab: `tab_fill` paints nothing, so the dot sits on the strip's
     // own `surface.base`.
-    let inactive = unsaved_dot(true, &Palette::fastmd_dark(), false);
+    let inactive = unsaved_dot(true, &Palette::fastmd_dark(), false, false);
     assert_eq!(inactive.color, pro.status_warning);
     let on_base = contrast_ratio(inactive.color, pro.surface_base);
     assert!(
@@ -708,7 +708,7 @@ fn the_unsaved_dot_clears_the_chrome_floor_on_the_surface_it_actually_sits_on() 
     );
 
     // Active tab: the dot sits on `accent.fill` and is role-locked.
-    let active = unsaved_dot(true, &Palette::fastmd_dark(), true);
+    let active = unsaved_dot(true, &Palette::fastmd_dark(), true, false);
     assert_eq!(
         active.color, pro.text_strong,
         "a marker painted inside a locked fill must promote by role"
@@ -750,8 +750,8 @@ fn the_unsaved_dot_clears_the_chrome_floor_on_the_surface_it_actually_sits_on() 
 #[test]
 fn the_unsaved_dot_occupies_its_slot_without_moving_tab_content() {
     let palette = Palette::fastmd_dark();
-    let dirty = unsaved_dot(true, &palette, false);
-    let clean = unsaved_dot(false, &palette, false);
+    let dirty = unsaved_dot(true, &palette, false, false);
+    let clean = unsaved_dot(false, &palette, false, false);
 
     assert!(
         dirty.diameter < UNSAVED_MARKER_WIDTH,
@@ -935,12 +935,554 @@ fn the_top_indicator_fits_the_pinned_strip_budget_without_touching_it() {
 #[test]
 fn tab_text_color_uses_distinct_tokens_for_active_and_inactive() {
     let palette = Palette::fastmd_dark();
-    let active = tab_text_color(&palette, true);
-    let inactive = tab_text_color(&palette, false);
+    let active = tab_text_color(&palette, true, false);
+    let inactive = tab_text_color(&palette, false, false);
 
     assert_ne!(active, inactive, "the active tab must be visually distinct");
     assert_eq!(active, palette.text_strong);
     assert_eq!(inactive, palette.text_muted);
+}
+
+// --- INT-16: the §4.4.2 tab visual state matrix -------------------------
+//
+// Every figure below is computed from raw sRGB through
+// `iced_pro::token::contrast::contrast_ratio` at test time. None of the
+// spec's printed ratios is transcribed into an assertion; each is
+// *re-derived* and compared, so a token change that moves a ratio moves this
+// test rather than leaving the ledger asserting a number nothing produces.
+
+/// §4.4.2's label column, all three rows, asserted as resolved colours.
+#[test]
+fn the_label_column_resolves_all_three_matrix_rows() {
+    let palette = Palette::fastmd_dark();
+
+    assert_eq!(tab_text_color(&palette, true, false), palette.text_strong);
+    assert_eq!(tab_text_color(&palette, false, true), palette.text);
+    assert_eq!(tab_text_color(&palette, false, false), palette.text_muted);
+
+    // The hovered row is a *different token*, not a tint of the rest row.
+    assert_ne!(
+        tab_text_color(&palette, false, true),
+        tab_text_color(&palette, false, false),
+        "Inactive (Hovered) must not read the same as Inactive (Rest)"
+    );
+    // Hovering cannot make an inactive label out-rank the active one.
+    assert_ne!(
+        tab_text_color(&palette, false, true),
+        tab_text_color(&palette, true, false),
+        "a hovered inactive label must not collide with the active label"
+    );
+}
+
+/// Hover is **active-blind**: the active tab's label does not move under the
+/// cursor, so activation cannot appear to be lost on mouse-over.
+#[test]
+fn hovering_the_active_tab_changes_its_label_not_at_all() {
+    let palette = Palette::fastmd_dark();
+
+    assert_eq!(
+        tab_text_color(&palette, true, true),
+        tab_text_color(&palette, true, false),
+        "the active label must be hover-inert, or the tab reads as \
+         de-activating under the cursor"
+    );
+    assert_eq!(
+        tab_fill(&palette, true, true),
+        tab_fill(&palette, true, false),
+        "the active fill must be hover-inert for the same reason"
+    );
+}
+
+/// §4.4.2's fill column: the hovered rung is newly wired, the rest rung is
+/// still deliberately not painted, and the three states stay distinguishable.
+#[test]
+fn the_fill_column_resolves_the_hovered_rung_and_leaves_the_rest_rung_empty() {
+    let palette = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    assert_eq!(
+        tab_fill(&palette, false, true),
+        Some(pro.surface_hover),
+        "Inactive (Hovered) must paint `surface.hover`"
+    );
+    assert_eq!(
+        tab_fill(&palette, false, false),
+        None,
+        "Inactive (Rest) is still unwired: §4.4.2 asks for `surface.raised` \
+         here and this increment deliberately does not paint it. If this \
+         assertion starts failing, the rest fill was wired without the ledger \
+         being told."
+    );
+    assert_eq!(
+        tab_fill(&palette, true, false),
+        Some(palette.accent),
+        "the active fill stays `palette.accent` — the INT-11 deviation, \
+         unchanged by INT-16"
+    );
+
+    // Pairwise distinct, which is the property the matrix actually needs.
+    let hovered = tab_fill(&palette, false, true).expect("hovered has a fill");
+    assert_ne!(hovered, palette.accent);
+    assert_ne!(hovered, pro.surface_base);
+}
+
+/// §4.4.2's perimeter column, all three rows.
+///
+/// Before INT-16 this column drew **nothing**: the tab container left
+/// `border` at iced's default zero width. So the column was unwired rather
+/// than partly wrong, and every assertion here is new coverage.
+#[test]
+fn the_perimeter_column_resolves_all_three_matrix_rows() {
+    let pro = Palette::pro();
+
+    assert_eq!(tab_perimeter(true, false), pro.border_strong);
+    assert_eq!(tab_perimeter(false, true), pro.border_strong);
+    assert_eq!(tab_perimeter(false, false), pro.border_subtle);
+    assert_ne!(
+        tab_perimeter(false, true),
+        tab_perimeter(false, false),
+        "hovering an inactive tab must firm its perimeter"
+    );
+}
+
+/// §4.4.2's close `[×]` column: resting glyph and hover sub-state for all
+/// three tab states, asserted as resolved colours.
+#[test]
+fn the_close_glyph_column_resolves_every_state_and_sub_state() {
+    let palette = Palette::fastmd_dark();
+
+    // Resting glyphs.
+    assert_eq!(
+        tab_close_glyph_color(&palette, true, false, false),
+        palette.text_muted
+    );
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, false, false),
+        palette.text_faint
+    );
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, true, false),
+        palette.text
+    );
+
+    // Hover sub-states.
+    assert_eq!(
+        tab_close_glyph_color(&palette, true, false, true),
+        palette.error,
+        "active + close-hover must go `status.danger.text`"
+    );
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, true, true),
+        palette.error,
+        "inactive-hovered + close-hover must go `status.danger.text`"
+    );
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, false, true),
+        palette.text_strong,
+        "inactive-rest + close-hover must go `text.strong`, per §4.4.2"
+    );
+
+    // The resting glyph must never already be the danger colour, or the
+    // hover sub-state would be invisible.
+    for (active, tab_hovered) in [(true, false), (false, false), (false, true)] {
+        assert_ne!(
+            tab_close_glyph_color(&palette, active, tab_hovered, false),
+            palette.error,
+            "a resting close glyph must not read as danger"
+        );
+    }
+}
+
+/// The close button's own hover is a **third axis**, independent of tab hover,
+/// and iced's `button::Status` is what drives it — no app state, no message.
+#[test]
+fn the_close_style_folds_iced_status_into_the_hover_highlight() {
+    let pro = Palette::pro();
+
+    let rest = tab_close_style(false, false, button::Status::Active);
+    assert_eq!(
+        rest.background, None,
+        "an unhovered close button paints no highlight"
+    );
+
+    let hover = tab_close_style(false, false, button::Status::Hovered);
+    assert_eq!(
+        hover.background,
+        Some(Background::Color(pro.surface_hover)),
+        "§4.4.1 slot 4's independent hover highlight is `surface.hover`"
+    );
+    assert_eq!(hover.text_color, pro.text_strong);
+
+    // Pressed keeps the hover paint so the glyph cannot flicker mid-click.
+    let pressed = tab_close_style(false, false, button::Status::Pressed);
+    assert_eq!(
+        pressed.background, hover.background,
+        "press must not drop the highlight"
+    );
+    assert_eq!(pressed.text_color, hover.text_color);
+
+    // Disabled must not light up.
+    let disabled = tab_close_style(false, false, button::Status::Disabled);
+    assert_eq!(
+        disabled.background, None,
+        "a disabled close button must not show the hover highlight"
+    );
+}
+
+/// **Hover must not move a tab.** No state-dependent resolver returns a
+/// length — every one returns `Color` or `Option<Color>`, so a hover change
+/// is a repaint and cannot be a reflow. Pinned structurally, because this
+/// crate has no iced layout harness to measure a real frame with.
+#[test]
+fn hover_changes_colour_only_and_never_tab_geometry() {
+    let palette = Palette::fastmd_dark();
+
+    // The band closure is exactly the pinned arithmetic, with no border term
+    // and no hover term anywhere in it.
+    assert_eq!(
+        STRIP_HEIGHT,
+        STRIP_PADDING + TAB_HEIGHT + STRIP_PADDING,
+        "36 = 4 + 28 + 4 must hold with the perimeter wired"
+    );
+    assert!(
+        STRIP_HEIGHT > 30.0,
+        "the 36 > 30 content floor must survive: got {STRIP_HEIGHT}"
+    );
+    assert_eq!(TAB_HEIGHT, 28.0);
+    assert_eq!(STRIP_HEIGHT, 36.0);
+    assert_eq!(STRIP_PADDING, 4.0);
+
+    // The perimeter is a hairline, and it is not subtracted from the tab.
+    assert_eq!(TAB_BORDER_WIDTH, 1.0);
+    assert_ne!(
+        TAB_HEIGHT,
+        STRIP_HEIGHT - STRIP_PADDING * 2.0 - TAB_BORDER_WIDTH,
+        "if the border were ever folded into the band arithmetic the tab \
+         would shrink by 1px per side"
+    );
+
+    // The dot's geometry is identical in all four postures; only its colour
+    // may differ.
+    for (active, hovered) in [(false, false), (false, true), (true, false), (true, true)] {
+        let dot = unsaved_dot(true, &palette, active, hovered);
+        assert_eq!(dot.diameter, UNSAVED_DOT_SIZE);
+        assert_eq!(dot.radius, UNSAVED_DOT_RADIUS);
+    }
+
+    // The marker slot and the close hit target are state-free constants, so
+    // neither can breathe on hover.
+    assert_eq!(UNSAVED_MARKER_WIDTH, 12.0);
+    assert_eq!(TAB_CLOSE_HIT_TARGET, size::HIT_TARGET_MIN);
+}
+
+/// The active tab must come out of INT-16 exactly as INT-11/INT-12 left it.
+#[test]
+fn the_active_tab_styling_is_unchanged_by_int_16() {
+    use iced_pro::token::typography::Weight;
+
+    let palette = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    assert_eq!(tab_fill(&palette, true, false), Some(palette.accent));
+    assert_eq!(tab_text_color(&palette, true, false), pro.text_strong);
+    assert_eq!(tab_top_indicator(true, false), Some(pro.accent_border));
+    assert_eq!(tab_top_indicator(true, true), Some(pro.accent_border));
+    assert_eq!(tab_label_font(true).weight, Weight::SemiBold.iced());
+    assert_eq!(
+        unsaved_dot(true, &palette, true, false).color,
+        pro.text_strong
+    );
+}
+
+/// Every contrast figure §4.4.2 prints for the cells INT-16 wired, measured
+/// from raw sRGB and compared against the printed value.
+///
+/// **The spec's printed ratios are accurate** for the fills the spec names —
+/// every one lands within `0.005` of its printed value except the hovered
+/// label, which the spec prints `0.018` **low** (measured `10.738035`,
+/// printed `10.72`). The understatement is in the safe direction.
+#[test]
+fn every_wired_matrix_ratio_is_measured_from_raw_srgb() {
+    use iced_pro::token::contrast::contrast_ratio;
+
+    let pro = Palette::pro();
+    let tolerance = 0.005;
+
+    let cases: &[(&str, f32, f32, f32)] = &[
+        (
+            "Active label  text.strong/surface.overlay",
+            17.72,
+            17.716764,
+            tolerance,
+        ),
+        (
+            "Active bar  accent.border/surface.overlay",
+            5.94,
+            5.939438,
+            tolerance,
+        ),
+        (
+            "Active perim  border.strong/surface.overlay",
+            4.01,
+            4.012776,
+            tolerance,
+        ),
+        (
+            "Rest label  text.muted/surface.raised",
+            7.16,
+            7.155255,
+            tolerance,
+        ),
+        (
+            "Hover bar  border.strong/surface.hover",
+            3.68,
+            3.677181,
+            tolerance,
+        ),
+        (
+            "Close hover  danger.text/surface.hover",
+            5.36,
+            5.363298,
+            tolerance,
+        ),
+    ];
+    for (name, printed, measured, tol) in cases {
+        assert!(
+            (printed - measured).abs() <= *tol,
+            "{name}: spec prints {printed}, raw sRGB measures {measured} \
+             (delta {:.6})",
+            (printed - measured).abs()
+        );
+    }
+
+    // The one printed figure that does not match to 2dp.
+    let hovered_label = contrast_ratio(pro.text_primary, pro.surface_hover);
+    assert!(
+        (hovered_label - 10.738035).abs() < 1e-5,
+        "the true hovered-label ratio is {hovered_label:.6}:1"
+    );
+    assert!(
+        hovered_label > 10.72,
+        "§4.4.2 prints 10.72 for text.primary/surface.hover; the real \
+         figure is {hovered_label:.6}:1, i.e. the spec understates it by \
+         {:.6}",
+        hovered_label - 10.72
+    );
+    assert!(
+        hovered_label >= 4.5,
+        "and it clears the text floor regardless"
+    );
+}
+
+/// **The headline deviation, pinned.** §4.4.2 prints `17.72:1` for the active
+/// tab's label. That number is correct arithmetic for `text.strong` on
+/// `surface.overlay` — the fill the spec names. The app paints
+/// `accent.fill`, so the shipped active label is `4.801987:1`.
+///
+/// This test exists so nobody reads `17.72` off the spec and reports the tab
+/// as compliant. It is legal (`> 4.5`) but by `0.3`, not by `13.2`.
+#[test]
+fn the_active_label_is_not_the_specs_printed_17_72() {
+    use iced_pro::token::contrast::{MIN_TEXT_CONTRAST, contrast_ratio};
+
+    let pro = Palette::pro();
+    let spec_fill = contrast_ratio(pro.text_strong, pro.surface_overlay);
+    let actual = contrast_ratio(pro.text_strong, pro.accent_fill);
+
+    assert!(
+        (spec_fill - 17.716764).abs() < 1e-5,
+        "the spec's own pairing does measure {spec_fill:.6}"
+    );
+    assert!(
+        (actual - 4.801987).abs() < 1e-5,
+        "the shipped pairing measures {actual:.6}"
+    );
+    assert!(
+        actual < 5.0,
+        "the active label is {actual:.6}:1, not 17.72:1"
+    );
+    assert!(
+        actual >= MIN_TEXT_CONTRAST,
+        "it still clears the 4.5:1 floor at {actual:.6}:1"
+    );
+    assert!(
+        spec_fill - actual > 12.0,
+        "the fill substitution costs {:.6} points of label contrast",
+        spec_fill - actual
+    );
+}
+
+/// Two of the active tab's three strokes are **effectively invisible** against
+/// the fill the app actually paints, because both were specified against
+/// `surface.overlay`.
+#[test]
+fn the_active_top_bar_and_perimeter_are_invisible_against_the_actual_fill() {
+    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+
+    let pro = Palette::pro();
+
+    let bar_on_spec_fill = contrast_ratio(pro.accent_border, pro.surface_overlay);
+    let bar_on_actual_fill = contrast_ratio(pro.accent_border, pro.accent_fill);
+    let perim_on_spec_fill = contrast_ratio(pro.border_strong, pro.surface_overlay);
+    let perim_on_actual_fill = contrast_ratio(pro.border_strong, pro.accent_fill);
+
+    assert!(
+        bar_on_actual_fill < MIN_CHROME_CONTRAST,
+        "the 2px active top bar measures {bar_on_actual_fill:.6}:1 on \
+         accent.fill — under the {MIN_CHROME_CONTRAST}:1 chrome floor, so it \
+         is painted and does not read. Against the spec's surface.overlay it \
+         would be {bar_on_spec_fill:.6}:1."
+    );
+    assert!(
+        perim_on_actual_fill < 2.0,
+        "the active perimeter measures {perim_on_actual_fill:.6}:1 on \
+         accent.fill — indistinguishable. Against the spec's surface.overlay \
+         it would be {perim_on_spec_fill:.6}:1."
+    );
+}
+
+/// The resting inactive perimeter is **below the chrome floor as specified**.
+/// §4.4.2 prints no figure for this cell, so the spec makes no legibility
+/// claim — but the number is recorded so the gap is not discovered later.
+#[test]
+fn the_resting_inactive_perimeter_is_a_sub_floor_hairline_as_specified() {
+    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+
+    let pro = Palette::pro();
+    let on_raised = contrast_ratio(pro.border_subtle, pro.surface_raised);
+    let on_base = contrast_ratio(pro.border_subtle, pro.surface_base);
+
+    assert!(
+        on_raised < MIN_CHROME_CONTRAST,
+        "border.subtle on the spec's surface.raised is {on_raised:.6}:1, \
+         under the {MIN_CHROME_CONTRAST}:1 chrome floor"
+    );
+    assert!(
+        on_base < MIN_CHROME_CONTRAST,
+        "and on the strip as actually painted (surface.base) it is \
+         {on_base:.6}:1"
+    );
+}
+
+/// The resting close glyph sits inside the disabled-text band, which is the
+/// property that makes it read as a quiet control rather than a dead one.
+#[test]
+fn the_resting_close_glyph_sits_inside_the_disabled_text_band() {
+    use iced_pro::token::contrast::{
+        DISABLED_TEXT_MAX_CONTRAST, DISABLED_TEXT_MIN_CONTRAST, contrast_ratio,
+    };
+
+    let pro = Palette::pro();
+    let on_raised = contrast_ratio(pro.text_disabled, pro.surface_raised);
+    let on_base = contrast_ratio(pro.text_disabled, pro.surface_base);
+
+    let band = DISABLED_TEXT_MIN_CONTRAST..=DISABLED_TEXT_MAX_CONTRAST;
+    for (surface_name, ratio) in [("surface.raised", on_raised), ("surface.base", on_base)] {
+        assert!(
+            band.contains(&ratio),
+            "text.disabled on {surface_name} is {ratio:.6}:1, outside the \
+             {DISABLED_TEXT_MIN_CONTRAST}..{DISABLED_TEXT_MAX_CONTRAST} \
+             disabled band"
+        );
+    }
+}
+
+/// The dirty dot's role lock must survive the hover thread: hovering an
+/// inactive tab changes the surface under the dot but must not unlock it,
+/// and the active tab must stay locked.
+#[test]
+fn the_dirty_dot_role_lock_survives_the_hover_thread() {
+    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+
+    let palette = Palette::fastmd_dark();
+    let pro = Palette::pro();
+
+    // Resting inactive: no fill, dot is plain status.warning.
+    let rest = unsaved_dot(true, &palette, false, false);
+    assert_eq!(rest.color, pro.status_warning);
+
+    // Hovered inactive: the dot now sits on surface.hover, which is NOT one
+    // of the four locked fills, so it stays status.warning.
+    let hovered = unsaved_dot(true, &palette, false, true);
+    assert_eq!(
+        hovered.color, pro.status_warning,
+        "surface.hover must not trip the locked-fill rule"
+    );
+    let on_hover = contrast_ratio(hovered.color, pro.surface_hover);
+    assert!(
+        (on_hover - 5.594287).abs() < 1e-5,
+        "status.warning on surface.hover measures {on_hover:.6}:1"
+    );
+    assert!(
+        on_hover >= MIN_CHROME_CONTRAST,
+        "status.warning on surface.hover is {on_hover:.6}:1"
+    );
+
+    // Active: still role-locked to text.strong over accent.fill.
+    let active = unsaved_dot(true, &palette, true, false);
+    assert_eq!(active.color, pro.text_strong);
+    assert!(
+        contrast_ratio(active.color, pro.accent_fill) >= MIN_CHROME_CONTRAST,
+        "the INT-7c lock must not release"
+    );
+
+    // Hovering the active tab changes nothing.
+    assert_eq!(
+        unsaved_dot(true, &palette, true, true).color,
+        active.color,
+        "the active dot must be hover-inert"
+    );
+}
+
+/// The `×` glyph's own hover must be reachable independently of the tab's
+/// hover, and the two must not be conflated anywhere in the resolver.
+#[test]
+fn tab_hover_and_close_hover_are_independent_axes() {
+    let palette = Palette::fastmd_dark();
+
+    // Tab hovered, close not hovered → the tab-hovered resting glyph.
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, true, false),
+        palette.text
+    );
+    // Close hovered, tab not hovered → the rest-row hover sub-state.
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, false, true),
+        palette.text_strong
+    );
+    // Both → danger.
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, true, true),
+        palette.error
+    );
+    // Neither → plain disabled.
+    assert_eq!(
+        tab_close_glyph_color(&palette, false, false, false),
+        palette.text_faint
+    );
+}
+
+/// The label **weight** must not move on hover: §4.4.2 gives Active SemiBold
+/// and both inactive rows Regular, so hover is a colour change only.
+///
+/// The proof is in the signature — [`tab_label_font`] takes `active` and
+/// nothing else, so there is no channel by which a pointer could reach the
+/// weight. Pinned here so adding a hover parameter to it later is a deliberate
+/// act rather than a silent one.
+#[test]
+fn the_label_weight_does_not_move_on_hover() {
+    use iced_pro::token::typography::Weight;
+
+    assert_eq!(
+        tab_label_font(false).weight,
+        Weight::Regular.iced(),
+        "inactive rests at the rung's regular weight"
+    );
+    assert_eq!(
+        tab_label_font(true).weight,
+        Weight::SemiBold.iced(),
+        "active takes the emphasis rung"
+    );
 }
 
 // --- UI-034 cross-menu parity ------------------------------------------

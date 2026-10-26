@@ -103,8 +103,14 @@ const PIN_APP_COLOUR_DEFINITIONS: usize = 8;
 /// gap counts are written out as repeated `space::SM` terms rather than as
 /// `3.0 *` / `2.0 *`, because a coefficient is a literal and would make
 /// the constant a finding. Neither is registered, neither is allow-listed,
-/// and neither was re-tuned: they pass because every term is a token.
-const PIN_APP_TOKEN_BOUND: usize = 98;
+/// /// and neither was re-tuned: they pass because every term is a token.
+/// 99 as of INT-16, which adds one genuinely token-bound visual constant:
+/// `panels/center.rs:TAB_BORDER_WIDTH = shape::BORDER_HAIRLINE`. It is the
+/// §4.4.2 `1px` perimeter stroke, expressed as the framework's hairline
+/// token with no literal on the right-hand side, so it joins this count
+/// rather than the allow list. Nothing was re-tuned — the other 98 are the
+/// same constants they were, and no existing value moved.
+const PIN_APP_TOKEN_BOUND: usize = 99;
 /// App visual scalars covered by the app's own geometry registry.
 const PIN_APP_SURFACE_BOUND: usize = 3;
 /// Exceptions the app currently takes.

@@ -360,6 +360,21 @@ pub const UNSAVED_DOT_RADIUS: f32 = shape::RADIUS_PILL;
 /// `36 > 30` content-floor pin cannot be disturbed by it.
 pub const TAB_INDICATOR_HEIGHT: f32 = shape::BORDER_FOCUS;
 
+/// Stroke width of a tab's perimeter border — `shape.border.hairline`
+/// (`UIF-TOK-003`), i.e. §4.4.2's `1px` perimeter taken literally.
+///
+/// **Zero-cost to the pinned band closure, for the same reason the top bar is.**
+/// iced 0.14's `container` layout function never receives the border at all:
+/// `Container::layout` hands the layout helper only `width`, `height`,
+/// `max_width`, `max_height`, `padding` and the two alignments
+/// (`iced_widget-0.14.2/src/container.rs:259-276`); the border is read
+/// solely in the paint path (`container.rs:443-449`). A tab therefore does not
+/// grow, shrink or inset its content by this width in any posture, so
+/// `STRIP_HEIGHT (36) = STRIP_PADDING (4) + TAB_HEIGHT (28) + STRIP_PADDING (4)`
+/// and the `36 > 30` content floor are untouched by wiring the perimeter
+/// column.
+pub const TAB_BORDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
 /// Point size of a tab's `×` close glyph — `size.icon.sm` (`UIF-TOK-002`).
 ///
 /// **Movement: 13 → 14 (+1).** §4.4.1 slot 4 names `size.icon.sm` for the
@@ -644,14 +659,19 @@ pub struct UnsavedDot {
 /// [`UNSAVED_MARKER_WIDTH`] slot is allocated either way, so a tab's shape
 /// never changes as it goes dirty (the conditional-rendering rule).
 ///
-/// Purity: pure function of `unsaved`, and of `active` through the fill lock.
+/// `hovered` selects the surface the dot sits on, and therefore whether the
+/// locked-fill rule fires. It changes the dot's **colour** only — never its
+/// diameter, radius or slot, so hovering cannot move tab geometry.
+///
+/// Purity: pure function of `unsaved`, and of `(active, hovered)` through
+/// the fill lock.
 #[must_use]
-pub fn unsaved_dot(unsaved: bool, palette: &Palette, active: bool) -> UnsavedDot {
+pub fn unsaved_dot(unsaved: bool, palette: &Palette, active: bool, hovered: bool) -> UnsavedDot {
     UnsavedDot {
         visible: unsaved,
         diameter: UNSAVED_DOT_SIZE,
         radius: UNSAVED_DOT_RADIUS,
-        color: tab_unsaved_dot_color(palette, active),
+        color: tab_unsaved_dot_color(palette, active, hovered),
     }
 }
 
@@ -709,14 +729,31 @@ pub fn tab_is_hovered(tab: &TabEntry, hovered: Option<&std::path::Path>) -> bool
     hovered == Some(tab.path.as_path())
 }
 
-/// Label colour for a tab: `text_strong` on the active tab, `text_muted` on
-/// the others. Only palette tokens are used; no numeric colour is added.
+/// Label colour for a tab, resolved from §4.4.2's label column.
 ///
-/// Purity: pure function of `active` for a given palette.
+/// | State | Spec label | Resolves to | Measured on the fill this paint puts under it |
+/// | --- | --- | --- | --- |
+/// | Active | `text.strong` | `palette.text_strong` | `4.801987:1` on `accent.fill` |
+/// | Inactive (Hovered) | `text.primary` | `palette.text` | `10.738035:1` on `surface.hover` |
+/// | Inactive (Rest) | `text.muted` | `palette.text_muted` | `7.608225:1` on the unpainted strip |
+///
+/// Only palette tokens are used; no numeric colour is added (§4a).
+///
+/// **The active row is the weakest of the three, and the reason is the fill,
+/// not the label.** §4.4.2 prints `17.72:1` for the active label, and that
+/// figure is arithmetically correct — for `text.strong` on `surface.overlay`,
+/// the fill the spec names. The app does not paint `surface.overlay` on the
+/// active tab (see [`tab_fill`]), so the shipped active label measures
+/// `4.801987:1`, not `17.72:1`. It still clears the `4.5:1` text floor, but
+/// by `0.3` rather than by `13.2`.
+///
+/// Purity: pure function of `(active, hovered)` for a given palette.
 #[must_use]
-pub fn tab_text_color(palette: &Palette, active: bool) -> iced::Color {
+pub fn tab_text_color(palette: &Palette, active: bool, hovered: bool) -> iced::Color {
     if active {
         palette.text_strong
+    } else if hovered {
+        palette.text
     } else {
         palette.text_muted
     }
@@ -744,20 +781,207 @@ pub fn tab_label_font(active: bool) -> iced::Font {
     TAB_RUNG.font(typography::Family::Sans, weight)
 }
 
-/// The fill a tab paints behind its contents: `palette.accent` on the active
-/// tab, nothing on the others.
+/// The fill a tab paints behind its contents, resolved from §4.4.2's fill
+/// column.
+///
+/// | State | Spec fill | What this returns |
+/// | --- | --- | --- |
+/// | Active | `surface.overlay` | `palette.accent` — **recorded deviation** |
+/// | Inactive (Hovered) | `surface.hover` | `pro.surface_hover` (`32,32,36`) |
+/// | Inactive (Rest) | `surface.raised` | `None` — **left unwired, see below** |
 ///
 /// Extracted so the dot-colour rule below can ask *what is behind the dot*
 /// rather than assume — which is exactly what [`contrast::fill_lock`] says a
 /// foreground audit has to do, because the style itself does not know.
 ///
-/// Purity: pure function of `active` for a given palette.
+/// # The active rung is a deviation, not an oversight
+///
+/// §4.4.2 asks for `surface.overlay` (`24,24,27`); the app paints
+/// `palette.accent`, which *is* `color.accent.fill` — one of the four solid
+/// fills `UIF-TOK-006` rule 4 role-locks. That single substitution is what
+/// makes three of this matrix's printed figures stop describing the shipped
+/// UI, because every one of them was computed against `surface.overlay`:
+///
+/// * active label `text.strong` — spec `17.72:1`, actual **`4.801987:1`**
+/// * active top bar `accent.border` — spec `5.94:1`, actual **`1.609837:1`**
+/// * active perimeter `border.strong` — spec `4.01:1`, actual **`1.087631:1`**
+///
+/// The last two are effectively invisible against `accent.fill`. This is
+/// reported rather than changed: the accent fill is a recorded INT-11 decision
+/// and the unsaved-dot role lock hangs off it, so moving it is a spec decision
+/// that cascades, not a local edit.
+///
+/// # The rest rung is deliberately not painted
+///
+/// §4.4.2 names `surface.raised` for a resting inactive tab. Wiring it would
+/// recolour **every** inactive tab in the strip, which is a wider visual change
+/// than this increment was scoped to (its headline was the hovered column), so
+/// the cell is left as the `None` it has always returned and reported as the
+/// one matrix cell still unwired. It is a one-line change —
+/// `Some(palette.surface_variant)` — if that repaint is wanted.
+///
+/// Note the rest fill is also the cell the spec's own track assumption is
+/// missing behind: §4.4.2's `:1298` puts every tab inside a recessed
+/// `surface.sunken` track, and no sunken track is painted anywhere in this
+/// strip, so a `raised` fill would read against `surface.base`
+/// (`1.063306:1`) rather than against a recess.
+///
+/// Purity: pure function of `(active, hovered)` for a given palette.
 #[must_use]
-pub fn tab_fill(palette: &Palette, active: bool) -> Option<iced::Color> {
-    active.then_some(palette.accent)
+pub fn tab_fill(palette: &Palette, active: bool, hovered: bool) -> Option<iced::Color> {
+    if active {
+        Some(palette.accent)
+    } else if hovered {
+        Some(Palette::pro().surface_hover)
+    } else {
+        None
+    }
 }
 
-/// Colour of a tab's unsaved dot, given whether that tab is active.
+/// The perimeter stroke a tab paints, resolved from §4.4.2's perimeter
+/// column: `border.strong` on the active tab and on a hovered inactive tab,
+/// `border.subtle` on a resting inactive tab, always at
+/// [`TAB_BORDER_WIDTH`] (`1px`).
+///
+/// Before this increment **no perimeter at all** was drawn on any tab — the
+/// tab's `container::Style` left `border` at its default zero width — so the
+/// whole column was unwired rather than partly wrong.
+///
+/// # Measured, against the surface each one actually sits on
+///
+/// * hovered inactive: `border.strong` / `surface.hover` = **`3.677181:1`**,
+///   which is the `3.68:1` §4.4.2 prints and clears the `3.0:1` chrome floor.
+/// * resting inactive: `border.subtle` / the unpainted strip
+///   (`surface.base`) = **`1.349455:1`**, and `1.269112:1` against the
+///   `surface.raised` the spec names. §4.4.2 prints *no* figure for this cell,
+///   so it makes no legibility claim — but if the `3.0:1` chrome floor were
+///   read as applying to separators, this cell fails it **as specified**, not
+///   as implemented. Reported as a spec gap rather than quietly upgraded to a
+///   token that would pass.
+/// * active: `border.strong` / `accent.fill` = **`1.087631:1`** — see
+///   [`tab_fill`]. The colour is spec-correct; the fill underneath it is not
+///   what the spec assumed, so this stroke is painted and is invisible.
+///
+/// # The active tab's bottom mask does not exist, and cannot
+///
+/// §4.4.2 asks that the active tab's bottom border "mask the `1px` track
+/// border and open into the viewer". There is no `1px` track border to mask:
+/// the strip paints no `surface.sunken` track and no track border at all
+/// (`tab_strip` applies a plain padded container). The masking behaviour is
+/// therefore **not implemented and is not reachable** until the track itself
+/// is built. A border drawn here today would cover nothing.
+///
+/// Purity: pure function of `(active, hovered)`.
+#[must_use]
+pub fn tab_perimeter(active: bool, hovered: bool) -> iced::Color {
+    let pro = Palette::pro();
+    if active || hovered {
+        pro.border_strong
+    } else {
+        pro.border_subtle
+    }
+}
+
+/// Colour of a tab's `×` close glyph, resolved from §4.4.2's close column.
+///
+/// Both the resting glyph and its own hover sub-state are covered, and the
+/// glyph's hover is the **close button's** hover, not the tab's — the two are
+/// independent, which is what §4.4.1 slot 4's "disjoint hit target" and
+/// "independent hover highlight" require.
+///
+/// | Tab state | Glyph at rest | Glyph on close-hover |
+/// | --- | --- | --- |
+/// | Active | `text.muted` | `status.danger.text` |
+/// | Inactive (Hovered) | `text.primary` | `status.danger.text` |
+/// | Inactive (Rest) | `text.disabled` | `text.strong` |
+///
+/// Before this increment the glyph carried **no colour at all** — it inherited
+/// iced's default button text colour — so the whole column was unwired.
+///
+/// # Measured
+///
+/// * `status.danger.text` / `surface.hover` = **`5.363298:1`**, the `5.36:1`
+///   §4.4.1 slot 4 prints. ✓
+/// * `text.disabled` / the unpainted strip = **`5.916514:1`**, and
+///   `5.564263:1` on the spec's `surface.raised`. Both sit inside
+///   [`contrast::DISABLED_TEXT_MIN_CONTRAST`] ..
+///   [`contrast::DISABLED_TEXT_MAX_CONTRAST`] (`4.0 .. 6.05`), the band a
+///   disabled-looking control is required to fall in — so the resting glyph is
+///   legible without reading as enabled.
+/// * `text.strong` / `surface.hover` = **`16.235083:1`** for the
+///   inactive-rest hover sub-state.
+/// * `text.muted` on the **active** tab = **`1.836338:1`** against
+///   `accent.fill`. §4.4.2 asks for `text.muted` there and that is what is
+///   painted, but against the fill the app actually uses it is close to
+///   invisible — the same `surface.overlay` substitution that flattens the
+///   active label and the active perimeter.
+///
+/// Purity: pure function of `(active, tab_hovered, close_hovered)`.
+#[must_use]
+pub fn tab_close_glyph_color(
+    palette: &Palette,
+    active: bool,
+    tab_hovered: bool,
+    close_hovered: bool,
+) -> iced::Color {
+    if close_hovered {
+        if active || tab_hovered {
+            palette.error
+        } else {
+            palette.text_strong
+        }
+    } else if active {
+        palette.text_muted
+    } else if tab_hovered {
+        palette.text
+    } else {
+        palette.text_faint
+    }
+}
+
+/// The hover highlight behind a tab's `×` close button — `surface.hover`, per
+/// §4.4.1 slot 4's "independent hover highlight".
+///
+/// Read from the framework palette because the app palette has no
+/// `surface.hover` role; no numeric colour is introduced (§4a).
+#[must_use]
+pub fn tab_close_hover_fill() -> iced::Color {
+    Palette::pro().surface_hover
+}
+
+/// Full iced style for a tab's `×` close button, resolved from the tab's own
+/// visual state plus iced's button status.
+///
+/// **Why the status is folded in here rather than tracked as app state.** The
+/// close button's hover is a third hover axis (tab hover, close hover, press)
+/// and none of it needs to reach the reducer: iced already computes it and
+/// hands it to the style closure as `button::Status`, the same way
+/// [`top::tag_trigger_style`](super::top) routes `pick_list::Status`. Keeping
+/// it in the style means no new `OverlayState` field, no new message, and no
+/// chance of a hover report racing a tab reorder.
+///
+/// `Pressed` is treated as hovered so the glyph does not flicker back to its
+/// resting colour during the click that is closing the tab.
+///
+/// Purity: pure function of `(active, tab_hovered, status)`.
+#[must_use]
+pub fn tab_close_style(active: bool, tab_hovered: bool, status: button::Status) -> button::Style {
+    let close_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    button::Style {
+        background: close_hovered.then_some(Background::Color(tab_close_hover_fill())),
+        text_color: tab_close_glyph_color(
+            &Palette::fastmd_dark(),
+            active,
+            tab_hovered,
+            close_hovered,
+        ),
+        border: iced::Border::default(),
+        shadow: iced::Shadow::default(),
+        snap: false,
+    }
+}
+
+/// Colour of a tab's unsaved dot, given that tab's fill state.
 ///
 /// **A real contrast fix, not a rename.** On an inactive tab the dot is
 /// `status.warning` over the pane surface — `6.86:1` on `surface.base`,
@@ -774,11 +998,18 @@ pub fn tab_fill(palette: &Palette, active: bool) -> Option<iced::Color> {
 /// `locked_over` shape INT-7b put on the file tree's row label, so the lock
 /// cannot release on an arithmetic accident.
 ///
-/// Purity: pure function of `active` for a given palette.
+/// `hovered` is threaded through because INT-16 gave the inactive tab a
+/// `surface.hover` fill, which changes *what is behind the dot*. The rule is
+/// unchanged by it — `surface.hover` is not one of the four locked fills, so
+/// the dot stays `status.warning` at `5.594287:1` on the hovered surface —
+/// but the rule must be asked about the real surface rather than the resting
+/// one, which is the entire reason [`tab_fill`] exists.
+///
+/// Purity: pure function of `(active, hovered)` for a given palette.
 #[must_use]
-pub fn tab_unsaved_dot_color(palette: &Palette, active: bool) -> iced::Color {
+pub fn tab_unsaved_dot_color(palette: &Palette, active: bool, hovered: bool) -> iced::Color {
     let pro = Palette::pro();
-    match tab_fill(palette, active) {
+    match tab_fill(palette, active, hovered) {
         Some(fill) if contrast::fill_lock_role(fill, &pro).is_locked_fill() => palette.text_strong,
         _ => palette.warning,
     }
@@ -1071,15 +1302,17 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 /// the full select / middle-close / right-menu / cursor-motion interaction.
 ///
 /// `hovered` is the INT-12 pointer state, resolved by
-/// [`tab_is_hovered`] against the tab's **path**. It reaches §4.4.1 slot
-/// 1's third indicator state and nothing else: the fill, the label and
-/// the perimeter stay as they were, so an active tab's styling cannot
-/// regress and the pinned `STRIP_HEIGHT` / `TAB_HEIGHT` band closure is
-/// untouched — the indicator rides in a `Stack` and takes no layout.
+/// [`tab_is_hovered`] against the tab's **path**. INT-12 routed it to
+/// §4.4.1 slot 1's third indicator state only; INT-16 routes it to the
+/// whole §4.4.2 matrix — fill, label, perimeter and the close glyph's own
+/// hover sub-state. Active-tab styling is still hover-inert, so it cannot
+/// regress, and no hover transition moves geometry: the indicator rides in a
+/// `Stack` and takes no layout, and iced 0.14 never reads a container's
+/// `border` in its layout path at all (see [`TAB_BORDER_WIDTH`]).
 fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
-    let dot = unsaved_dot(tab.unsaved, &palette, tab.active);
+    let dot = unsaved_dot(tab.unsaved, &palette, tab.active, hovered);
     let marker = container(
         container(Space::new())
             .width(Length::Fixed(dot.diameter))
@@ -1107,7 +1340,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
         .size(TAB_TEXT_SIZE)
         .line_height(TAB_RUNG.iced_line_height())
         .font(tab_label_font(tab.active))
-        .color(tab_text_color(&palette, tab.active));
+        .color(tab_text_color(&palette, tab.active, hovered));
 
     let label_row = Row::with_children(vec![marker.into(), label.into()])
         .spacing(TAB_MARKER_SPACING)
@@ -1127,6 +1360,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
         .align_y(Alignment::Center),
     )
     .padding(0.0)
+    .style(move |_theme, status| tab_close_style(tab.active, hovered, status))
     .on_press(tab_close_message(index));
 
     let surface = container(
@@ -1142,7 +1376,12 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
         left: TAB_PADDING_X,
     })
     .style(move |_theme| container::Style {
-        background: tab_fill(&palette, tab.active).map(Background::Color),
+        background: tab_fill(&palette, tab.active, hovered).map(Background::Color),
+        border: iced::Border {
+            width: TAB_BORDER_WIDTH,
+            color: tab_perimeter(tab.active, hovered),
+            ..Default::default()
+        },
         ..container::Style::default()
     });
 

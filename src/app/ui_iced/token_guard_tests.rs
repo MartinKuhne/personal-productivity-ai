@@ -725,8 +725,9 @@ fn the_active_tab_dirty_dot_clears_the_fill_lock() {
 
     let app = Palette::fastmd_dark();
     let pro = Palette::pro();
-    let active = center::tab_unsaved_dot_color(&app, true);
-    let inactive = center::tab_unsaved_dot_color(&app, false);
+    let active = center::tab_unsaved_dot_color(&app, true, false);
+    let inactive = center::tab_unsaved_dot_color(&app, false, false);
+    let inactive_hovered = center::tab_unsaved_dot_color(&app, false, true);
 
     assert_eq!(
         active, pro.text_strong,
@@ -735,6 +736,11 @@ fn the_active_tab_dirty_dot_clears_the_fill_lock() {
     assert_ne!(
         active, inactive,
         "the dot must change between the accent-filled and unfilled tab"
+    );
+    assert_eq!(
+        inactive_hovered, inactive,
+        "INT-16 gave the hovered inactive tab a `surface.hover` fill, which is \
+         not one of the four locked fills — the dot must stay `status.warning`"
     );
 
     let locked = contrast_ratio(active, pro.accent_fill);
