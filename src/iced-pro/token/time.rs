@@ -365,12 +365,7 @@ pub const INSTANT: DurationToken = DurationToken {
 /// appearing. Short enough to read as instant response, long enough that
 /// a fill change is seen as a change rather than a flicker.
 ///
-/// **No consumer exists in this crate yet** — nothing here animates a
-/// fill across frames. The rung is declared anyway, on the
-/// [`size::SPLITTER_GRAB`](super::size::SPLITTER_GRAB) precedent: §2.6
-/// defines it, and the alternative is a widget inventing its own 100ms
-/// for the same interaction, which puts a hole through
-/// **UIF-PRIN-001**.
+/// Consumed by [`switch_thumb_progress`] for `ToggleSwitch` thumb animation.
 pub const FAST: DurationToken = DurationToken {
     name: "time.fast",
     ms: 100,
@@ -385,7 +380,7 @@ pub const FAST: DurationToken = DurationToken {
 /// `SideSheet`. The default for "a thing appeared and it should be seen
 /// to arrive".
 ///
-/// **No consumer exists in this crate yet** — see [`FAST`].
+/// Consumed by [`flyout_arrival_progress`] for flyout cards and drawer sheets.
 pub const NORMAL: DurationToken = DurationToken {
     name: "time.normal",
     ms: 180,
@@ -401,7 +396,7 @@ pub const NORMAL: DurationToken = DurationToken {
 /// rung on the scale on `EaseInOutCubic`, and the only one easing away
 /// from a resting state as well as into one.
 ///
-/// **No consumer exists in this crate yet** — see [`FAST`].
+/// Consumed by [`slow_transition_progress`] and [`rail_width_interpolate`].
 pub const SLOW: DurationToken = DurationToken {
     name: "time.slow",
     ms: 240,
@@ -512,11 +507,7 @@ pub const DELAY_TOOLTIP_WARM: DurationToken = DurationToken {
 /// flicker, short enough that the control is not stuck showing a past
 /// action.
 ///
-/// **No consumer exists in this crate, and neither does the widget.**
-/// `CodeBlock` is a Phase C composite deferred on 2026-10-23
-/// (`UIF-COMP-015`), so nothing here holds a confirmation tick. The
-/// rung is declared so the composite reads a token instead of inventing
-/// a duration when it arrives.
+/// Consumed by [`CodeBlock`](crate::composite::code_block::CodeBlock).
 pub const HOLD_COPIED: DurationToken = DurationToken {
     name: "time.hold.copied",
     ms: 1_500,
@@ -544,6 +535,44 @@ pub const TOAST_AUTO_DISMISS: DurationToken = DurationToken {
     easing: None,
     alias: None,
 };
+
+// ---------------------------------------------------------------------------
+// Transition interpolation helpers (§2.6, UIF-TOK-007)
+// ---------------------------------------------------------------------------
+
+/// Interpolate `ToggleSwitch` thumb travel progress across `time.fast` (100ms, `EaseOutCubic`)
+/// with mandatory reduced-motion fallback to `time.instant` (§2.6, `UIF-TOK-007`).
+#[must_use]
+pub fn switch_thumb_progress(elapsed_ms: u64, reduced_motion: bool) -> f32 {
+    eased_progress(FAST, elapsed_ms, reduced_motion)
+}
+
+/// Interpolate flyout or side sheet open/close arrival progress across `time.normal` (180ms, `EaseOutCubic`)
+/// with mandatory reduced-motion fallback to `time.instant` (§2.6, `UIF-TOK-007`).
+#[must_use]
+pub fn flyout_arrival_progress(elapsed_ms: u64, reduced_motion: bool) -> f32 {
+    eased_progress(NORMAL, elapsed_ms, reduced_motion)
+}
+
+/// Interpolate modal scrim fade or navigation rail width progress across `time.slow` (240ms, `EaseInOutCubic`)
+/// with mandatory reduced-motion fallback to `time.instant` (§2.6, `UIF-TOK-007`).
+#[must_use]
+pub fn slow_transition_progress(elapsed_ms: u64, reduced_motion: bool) -> f32 {
+    eased_progress(SLOW, elapsed_ms, reduced_motion)
+}
+
+/// Compute interpolated `NavigationRail` width between collapsed (48px) and expanded width
+/// across `time.slow` (240ms, `EaseInOutCubic`) (§2.6, §3B.9, `UIF-TOK-007`).
+#[must_use]
+pub fn rail_width_interpolate(
+    from_width: f32,
+    to_width: f32,
+    elapsed_ms: u64,
+    reduced_motion: bool,
+) -> f32 {
+    let t = slow_transition_progress(elapsed_ms, reduced_motion);
+    from_width + (to_width - from_width) * t
+}
 
 #[cfg(test)]
 #[path = "time_tests.rs"]

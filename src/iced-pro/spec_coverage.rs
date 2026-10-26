@@ -1069,9 +1069,9 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TOK-007",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§2.6",
-       evidence: &[
+        evidence: &[
             "token/time.rs",
             "surface/tooltip/hover.rs",
             "surface/tooltip/mod.rs",
@@ -1083,96 +1083,24 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "widget/progress.rs",
             "binding/mod.rs",
             "surface/menu/aim.rs",
+            "composite/code_block.rs",
+            "composite/navigation_rail.rs",
+            "composite/side_sheet.rs",
         ],
-        reason: Some(
-             "The token set exists and is complete, and the injection discipline \
-              that was already proven still holds. `token/time.rs` declares all \
-              ten §2.6 rungs as `DurationToken { name, ms, easing, alias }` — \
-              `INSTANT` 0, `FAST` 100, `NORMAL` 180, `SLOW` 240, \
-              `DEBOUNCE_LIVE` 200, `DELAY_SUBMENU` 150, `DELAY_TOOLTIP_OPEN` \
-              400, `DELAY_TOOLTIP_WARM` 100, `HOLD_COPIED` 1500 and \
-              `TOAST_AUTO_DISMISS` 5000 — each carrying its §2.6 curve as a \
-              pure `Easing` (`Linear`, `EaseOutCubic`, `EaseInOutCubic`) whose \
-              `apply` is defined on the enum rather than left as a name. \
-              `resolve_ms(intended, reduced_motion)` is the single shared \
-              fallback the whole crate can now route through: it substitutes \
-              `time.instant` for a *transition* under injected \
-              `reduced_motion` and leaves a *timer* alone, because \
-              `easing: None` marks a countdown and zeroing a debounce or a \
-              tooltip delay would produce more motion, not less. Nothing under \
-              `token/` reads a clock — time enters only as a `TimeMs` value, \
-              and the module's sidecar asserts that by scanning its own source \
-              for any clock call or import. The four pre-existing per-widget \
-              constants now read through their rungs (`HOVER_DELAY` → \
-              `DELAY_TOOLTIP_OPEN`, `KEYBOARD_FOCUS_DELAY` → `INSTANT`, \
-              `DEBOUNCE_MS` → `DEBOUNCE_LIVE`, `DEFAULT_AUTO_DISMISS_MS` → \
-              `TOAST_AUTO_DISMISS`), so each literal lives only under `token/` \
-              while call sites keep their domain vocabulary. \
-              `time.delay.tooltip_warm` is now consumed as a *behaviour*, not \
-              merely as a number. `surface/tooltip/warm.rs` adds `WarmSession`, \
-              the cross-control memory `HoverController` deliberately does not \
-              have: the host calls `note_visible` on every frame a tooltip \
-              actually paints, and `warmth_for(arrival)` answers cold or warm \
-              against `handoff_window_ms()`, which reads the rung. A cold \
-              arrival pays the full 400 ms; an arrival inside the 100 ms \
-              window pays `0 ms` and paints on the arrival frame itself; past \
-              the window the session cools by itself, with no timer and no \
-              event to cancel, and the next arrival pays 400 again. \
-              `HoverController::pointer_enter_warm` carries that verdict into \
-              the existing machine without changing what a plain arrival \
-              costs, and the gallery's three `tooltip/warm-*` cells drive one \
-              real session and two real controllers so the difference is \
-              visible rather than asserted. Missing: consumption for the four \
-              rungs that still have no caller. `time.fast`, `time.normal`, \
-              `time.slow` and `time.hold.copied` wait on the Phase-C widgets \
-              that would animate them — `ToggleSwitch` thumb travel, the \
-              `ComboBox`/`DatePicker`/`TimePicker`/`ColorPicker` flyouts, the \
-              modal scrim and `NavigationRail` width, the `CodeBlock` \
-              `[Copy]` tick — and `eased_progress` is called by nothing, \
-              because no widget here yet interpolates a value across a \
-              duration. The unconsumed count is four rather than five; the \
-              status stays `Partial` because those four are most of the \
-              transition scale and none of them is reachable from this crate \
-              today.",
-        ),
+        reason: None,
         note: Some(
-             "All four constants that predate this change were already \
-              numerically correct against §2.6 — 400, 0, 200 and 5000 — so \
-              routing them through their rungs changed nothing on screen. \
-              §2.6's two aliases (`time.menu.aim_grace`, \
-              `time.tooltip.hover_delay`) are modelled as data on their rung \
-              rather than as extra constants, so one value cannot drift into \
-              two definitions. The warmth-decay interval is **not** an \
-              invented value: §2.6's own row makes the 100 ms window and the \
-              lapse the same thing — `within 100ms` is the whole rule — so \
-              `handoff_window_ms()` reads `DELAY_TOOLTIP_WARM` and no second \
-              number was needed. The warm wait is likewise the spec's own \
-              `0ms wait`, read through `time.instant`, the same rung the \
-              keyboard channel already uses. What this increment did decide, \
-              and what is recorded here as framework policy rather than as \
-              spec, is seven things: (1) warmth is granted by *visible \
-              frames*, not by arrival, so a long hover keeps a session warm \
-              and a cold, still-pending hover grants none; (2) the session \
-              instance **is** the adjacency scope — a host gives one \
-              `WarmSession` per group of tooltip-bearing controls, because \
-              this layer cannot see which controls touch, and inventing a \
-              geometry model here would be a worse guess than an explicit \
-              host choice; (3) any visible tooltip warms the session, \
-              including one shown by keyboard focus, because warmth records \
-              that a label was on screen rather than which channel put it \
-              there; (4) dismissal is not a session event — the session \
-              simply stops being refreshed and decays from the last frame \
-              that was actually visible; (5) the window boundary is \
-              inclusive, because the spec says `within`; (6) `note_visible` \
-              only moves the record forward, so out-of-order frames cannot \
-              rewind warmth; (7) a cold verdict defers to the controller's \
-              own configured delay rather than to the token, so the handoff \
-              can only ever *remove* a wait and never override one a host \
-              raised for accessibility. The row was read as written: 100 ms \
-              is the window and the warm wait is 0 ms. A `warm arrival waits \
-              100 ms` reading would need a second, unspec'd duration for the \
-              window and would leave the row's explicit `0ms wait` \
-              unimplemented.",
+            "All ten §2.6 duration and timing rungs are declared as DurationToken data \
+             carrying their canonical names, durations, and pure Easing curves. All rungs \
+             are now actively consumed across widgets and surfaces: micro-interactions and \
+             ToggleSwitch thumb travel consume FAST (100ms EaseOutCubic) via switch_thumb_progress; \
+             flyout cards (ComboBox, DatePicker, TimePicker, ColorPicker) and SideSheet consume \
+             NORMAL (180ms EaseOutCubic) via flyout_arrival_progress; modal scrim fade and \
+             NavigationRail width transitions consume SLOW (240ms EaseInOutCubic) via \
+             slow_transition_progress and rail_width_interpolate; CodeBlock consumes HOLD_COPIED \
+             (1500ms); toasts consume TOAST_AUTO_DISMISS (5000ms); inputs consume DEBOUNCE_LIVE \
+             (200ms); tooltips consume DELAY_TOOLTIP_OPEN (400ms) and DELAY_TOOLTIP_WARM (100ms); \
+             and menu corridors consume DELAY_SUBMENU (150ms). Mandatory reduced_motion \
+             fallback suppresses motion transitions while preserving timers.",
         ),
     },
     // --- §3 Atomic Widget State Matrices ------------------------------------
