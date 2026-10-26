@@ -507,7 +507,8 @@ impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
     }
 
     /// Build a button for `variant` that publishes `on_press` when it is
-    /// pressed and released inside its own bounds.
+    /// pressed and released inside its own bounds, or activated with Enter
+    /// or Space while focused (`UIF-ATOM-001`).
     ///
     /// `focus_id` is the identity the focus router knows this button by —
     /// the same [`FocusId`] the host registers in
@@ -1049,6 +1050,14 @@ where
             }
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if focused => {
                 let Some(model) = &self.model else {
+                    if matches!(key, Key::Named(Named::Enter | Named::Space)) {
+                        shell.publish(
+                            self.on_press
+                                .clone()
+                                .expect("a `Button::new` button always carries a press message"),
+                        );
+                        shell.capture_event();
+                    }
                     return;
                 };
                 match key {

@@ -66,6 +66,7 @@ use crate::widget::button::ButtonVariant;
 use crate::widget::button_widget::Button;
 use crate::widget::button_widget::ButtonState;
 use crate::widget::button_widget::background_layer;
+use crate::widget::button_widget::button_state;
 use crate::widget::button_widget::focus_ring_layer;
 use crate::widget::focus::resolve_ring_color_for_background;
 use crate::widget::focusable::FocusableState;
@@ -78,6 +79,7 @@ use iced::Point;
 use iced::Rectangle;
 use iced::Size;
 use iced::Task;
+use iced::advanced::Shell;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
 use iced::advanced::widget::Tree;
@@ -1443,6 +1445,77 @@ fn key_press(name: key::Named) -> Event {
         text: None,
         repeat: false,
     })
+}
+
+#[test]
+fn enter_and_space_on_a_focused_icon_only_legacy_button_activate_and_capture() {
+    for name in [key::Named::Enter, key::Named::Space] {
+        let button = Button::<Msg, Theme, Recorder>::icon_only(
+            ButtonVariant::Ghost,
+            Element::new(Blank::new(Size::new(1.0, 1.0))),
+            Msg::Cancel,
+            "legacy.icon",
+            "Close",
+        );
+        let (mut button, mut tree, node) = laid_out(button);
+        <FocusableState as operation::Focusable>::focus(&mut button_state(&mut tree).focusable);
+
+        let event = key_press(name);
+        let viewport = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: crate::test_helpers::VIEWPORT.width,
+            height: crate::test_helpers::VIEWPORT.height,
+        };
+        let mut clipboard = iced_test::core::clipboard::Null;
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+
+        button.update(
+            &mut tree,
+            &event,
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &Recorder::default(),
+            &mut clipboard,
+            &mut shell,
+            &viewport,
+        );
+
+        let captured = shell.is_event_captured();
+        drop(shell);
+
+        assert_eq!(
+            (messages, captured),
+            (vec![Msg::Cancel], true),
+            "{name:?} must publish on_press once and capture activation"
+        );
+    }
+}
+
+#[test]
+fn activation_keys_do_nothing_on_an_unfocused_legacy_button() {
+    let mut harness = armed_button("legacy.unfocused");
+
+    for name in [key::Named::Enter, key::Named::Space] {
+        assert_eq!(
+            harness.pointer(&[key_press(name)], mouse::Cursor::Unavailable),
+            Vec::new(),
+            "an unfocused legacy button must not activate on {name:?}"
+        );
+    }
+}
+
+#[test]
+fn non_activation_key_does_nothing_on_a_focused_legacy_button() {
+    let mut harness = armed_button("legacy.focused");
+    focus_one(&mut harness, "legacy.focused");
+
+    assert_eq!(
+        harness.pointer(&[key_press(key::Named::Escape)], mouse::Cursor::Unavailable),
+        Vec::new(),
+        "Escape is not an activation key on the legacy callback path"
+    );
 }
 
 #[test]
