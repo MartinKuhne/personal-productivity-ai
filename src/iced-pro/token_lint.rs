@@ -523,6 +523,26 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "FOOTER_HEIGHT",
         spec: "§3B.12 — SideSheet action footer height 48px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "COMPACT_WIDTH",
+        spec: "§3B.9 — NavigationRail compact width 48px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_DEFAULT_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded default width 220px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_MIN_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded min width 180px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/navigation_rail.rs",
+        name: "EXPANDED_MAX_WIDTH",
+        spec: "§3B.9 — NavigationRail expanded max width 320px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.

@@ -2344,30 +2344,26 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-009",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.9",
-        evidence: &["widget/rove.rs", "surface/tooltip/mod.rs", "token/size.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `NavigationRailModel`, \
-             `NavDestination`, compact/expanded mode, collapse toggle or pinned-utility \
-             split exists. Missing: the whole requirement — the 48px compact icon-only rail \
-             whose every cell carries a mandatory right-aligned hover tooltip on the \
-             `time.delay.tooltip_warm` handoff; the 220px expanded rail resizable within \
-             [180px, 320px] with 36px rows, a 16px leading icon, a 13px Medium label and \
-             an optional trailing count pill; the `surface.active` fill with its 2px \
-             `accent.border` leading indicator bar for the selected destination; the \
-             28x28px collapse toggle, the scrollable middle list and the divider above \
-             the pinned bottom utilities; and the `Commit`-based select, expand-toggle and \
-             resize-cancelling callback set. Primitives a builder would reuse are proven — \
-             `widget/rove.rs` for the wrapping single-tab-stop walk over enabled \
-             destinations and `surface::tooltip` for the hover card — but the rail, its \
-             width transition and its cross-session width persistence are unbuilt. `time.slow` (240ms), \
-             the rung that transition is priced at, is a token now (`token::time::SLOW`, \
-             `EaseInOutCubic`), so the token layer is not what blocks a builder: the rail \
-             itself is.",
+        evidence: &[
+            "composite/navigation_rail.rs",
+            "widget/rove.rs",
+            "surface/tooltip/mod.rs",
+            "token/size.rs",
+        ],
+        reason: None,
+        note: Some(
+            "NavigationRail / Collapsible NavigationView composite supporting compact (48px) \
+             and resizable expanded (180–320px) modes. Implements 28x28px header toggle button, \
+             36px destination rows with 16px icons, 13px Medium UI_COMPACT labels, trailing \
+             BadgeModel count pills, surface.active fill (14.29:1 contrast) with 2px accent.border \
+             (4.79:1 contrast) leading indicator bar, full-width 1px hairline divider above pinned \
+             bottom utility destinations, 10px grab handle with GestureSlot<f32> resize engine \
+             emitting live, commit, and cancel callbacks, single Tab stop roving keyboard focus \
+             skipping disabled items and wrapping at edges, and mandatory right-aligned hover \
+             tooltips in compact mode using the time.delay.tooltip_warm handoff window.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-010",

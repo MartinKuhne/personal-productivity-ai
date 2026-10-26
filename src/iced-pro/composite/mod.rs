@@ -92,6 +92,8 @@
 //!   boundary-clamped navigation buttons (`UIF-COMP-011`, `UIF-PRIN-004`)
 //! * [`mod@side_sheet`] — the contextual inspector drawer with Docked, ModelessOverlay and ModalScrim modes,
 //!   10px resize divider, and 36px header (`UIF-COMP-012`, `UIF-PRIN-006`, `UIF-MOD-002`)
+//! * [`mod@navigation_rail`] — the collapsible navigation rail composite supporting compact (48px)
+//!   and resizable expanded (180–320px) modes with roving keyboard focus (`UIF-COMP-009`, `UIF-PRIN-005`, `UIF-PRIN-006`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -106,6 +108,7 @@ pub mod expander;
 pub mod form_field;
 pub mod info_bar;
 pub mod list_tile;
+pub mod navigation_rail;
 pub mod notification;
 pub mod overflow_toolbar;
 pub mod pagination;
@@ -126,6 +129,11 @@ pub mod virtual_list;
 
 pub use empty_state::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
+};
+pub use navigation_rail::{
+    COMPACT_WIDTH, EXPANDED_DEFAULT_WIDTH, EXPANDED_MAX_WIDTH, EXPANDED_MIN_WIDTH, GLYPH_TOGGLE,
+    ICON_SIZE, INDICATOR_WIDTH, LABEL_TOGGLE, NavDestination, NavRailResize, NavigationRail,
+    NavigationRailModel, NavigationRailState, ROW_HEIGHT, TOGGLE_SIZE, navigation_rail,
 };
 pub use pagination::{PaginationBar, PaginationModel, pagination_bar};
 pub use pips_pager::{PipsPager, PipsPagerModel, pips_pager};
