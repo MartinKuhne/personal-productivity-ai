@@ -77,11 +77,13 @@ use std::fmt::Write as _;
 /// has explicitly deferred (`UIF-ATOM-005b`, `010`–`013`,
 /// `UIF-COMP-009`–`015`) and one new gate (`UIF-VER-005`). Every one of
 /// them is classified below; none is `Implemented`, because none is built.
-/// The spec carries 91 numbered `UIF-*` ids.
+/// The spec carries 92 numbered `UIF-*` ids.
 ///
 /// It carried 90 until commit `edbe04a` added `UIF-MOD-004` (scrollable
-/// sub-region height solving) alongside the existing three modal contracts.
-pub const EXPECTED_SPEC_ID_COUNT: usize = 91;
+/// sub-region height solving) alongside the existing three modal contracts,
+/// and 91 until the D-2 boundary review added `UIF-COMP-016`
+/// (SplitDivider composite, `§3B.16`).
+pub const EXPECTED_SPEC_ID_COUNT: usize = 92;
 
 /// Where one `UIF-*` requirement stands against this crate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -2024,6 +2026,31 @@ const SPEC_COVERAGE: &[Coverage] = &[
              accept/reject buttons; and `KeybindRecorder` with 32px height, mono keycap pills, \
              trailing 24x24px clear button, raw chord interception with Escape cancelling without \
              clearing, and conflict surfacing.",
+        ),
+    },
+    Coverage {
+        id: "UIF-COMP-016",
+        status: Status::Partial,
+        section: "§3B.16",
+        evidence: &[
+            "token/size.rs",
+            "binding/pre_rank.rs",
+            "surface/movable.rs",
+            "geometry/clamp.rs",
+        ],
+        reason: Some(
+            "Specified in §3B.16 but Missing from the crate: no splitter module exists, so \
+             the composite has no widget, no resolver and no model behind it. The framework \
+             contributes the pieces it composes from — `size.splitter.grab` and the grip-pill \
+             geometry (token/size.rs), the Pre-Rank drag-cancel coordinator (binding/pre_rank.rs), \
+             and the clamp-from-last-position drag contract (surface/movable.rs, \
+             geometry/clamp.rs) — but the drag lifecycle, paint promotion and resize cursor \
+             contract of §3B.16 are unbuilt.",
+        ),
+        note: Some(
+            "Added by the D-2 boundary review as the only new id: one reusable split handle \
+             for workspace pane splits (§4.3.2), SideSheet edges (§3B.12) and DataTable \
+             column resize (§3B.7), so the three host sites do not re-derive the same handle.",
         ),
     },
     // --- §4.1 Main Window --------------------------------------------------
