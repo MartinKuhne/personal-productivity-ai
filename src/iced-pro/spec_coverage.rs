@@ -905,40 +905,35 @@ const SPEC_COVERAGE: &[Coverage] = &[
         ],
         reason: Some(
             "Two of the three clauses now hold as framework state plus one pure decision; \
-             the third holds in-model only; and none of them has a call site in the \
-             renderer. 'Punish Late' is implemented: `validation::stance::EditStance` \
-             gives a field a real history — `Pristine` until `note_commit`, `note_blur` \
-             or `note_submit`, and provably NOT advanced by a programmatic `value` write, \
-             a `with_validation` call or a `with_selection` request — carried by \
-             `TextInputModel`, `TextAreaModel` and `PasswordInputModel`. \
-             `validation::punish::punish(stance, invalid, disallowed)` is the single \
-             authority a renderer is meant to call: pristine + invalid paints nothing \
-             while still reporting `invalid() == true` so a submit stays blocked, touched \
-             + invalid paints, and a disallowed character paints regardless of stance and \
-             outranks both. The carve-out is modelled as \
-             `DisallowedClass::FilenameBasename` over the eight `FILENAME_ILLEGAL_CHARS` \
-             plus the Unicode `Cc` set — the same rule `surface/input_dialog.rs`'s \
-             basename validator already applied, whose literal now aliases the canonical \
-             constant instead of copying it. 'Reward Early' still holds, and now holds for \
-             a stronger reason than the `Live<T>` repaint path alone: `painted` is a pure \
-             function of this frame's inputs with no latch, no timer and no decay to \
-             clear, so the frame the value becomes valid is the frame the paint stops. \
-             'Non-Destructive Recovery' is widened but not finished: \
-             `validation::recovery::EditSnapshot` carries buffer + selection + scroll \
-             through the existing `binding::snapshot` linear guard, and \
-             `restore_text_input` / `restore_text_area` write all three back, so a \
-             rejected operation no longer loses the selection or the viewport — but the \
-             restore is model-only. `TextInputModel::selection` is documented as a request \
-             the editor may or may not honour, and nothing in this crate pushes it into \
-             iced's editor state, so the caret is NOT put back on screen; \
-             `TextAreaModel`'s scroll offset is the one field a renderer actually reads \
-             back off the model. Missing: the enforcement point. No renderer in this crate \
-             calls `punish` — `widget/text_input.rs` still derives its perimeter from \
-             `state::resolve`'s raw `invalid` input, so a pristine-but-invalid field still \
-             paints red until a host, or a later increment, routes the atom through the \
-             decision. `TextInputEmission::advances_stance()` exists so that routing is \
-             one line at the wiring site rather than a rule each host re-derives and gets \
-             subtly different.",
+             the third holds in-model only. 'Punish Late' is implemented and enforced: \
+             `validation::stance::EditStance` gives a field a real history — `Pristine` until \
+             `note_commit`, `note_blur` or `note_submit`, and provably NOT advanced by a \
+             programmatic `value` write, a `with_validation` call or a `with_selection` request \
+             — carried by `TextInputModel`, `TextAreaModel` and `PasswordInputModel`. \
+             `validation::punish::punish(stance, invalid, disallowed)` is the single authority \
+             called by the renderer: the runtime enforcement point in `widget/text_input.rs` \
+             (`controlled`, `visual`, and `build_editor`) and `widget/text_input_model.rs` \
+             (`slot_for`) is now wired directly to `model.get().punishment().painted()`, \
+             fulfilling both Punish Late and Reward Early in the actual text input widget. \
+             Pristine + invalid withholds error painting and warning glyphs while still reporting \
+             `invalid() == true` to keep submits blocked; touched + invalid paints; and a \
+             disallowed character (`with_disallowed(DisallowedClass)`) paints immediately \
+             regardless of stance. The carve-out is modelled as \
+             `DisallowedClass::FilenameBasename` over the eight `FILENAME_ILLEGAL_CHARS` plus the \
+             Unicode `Cc` set — the same rule `surface/input_dialog.rs`'s basename validator \
+             already applied, whose literal now aliases the canonical constant instead of copying \
+             it. 'Reward Early' holds: `painted` is a pure function of this frame's inputs with \
+             no latch, no timer and no decay to clear, so the frame the value becomes valid is \
+             the frame the paint stops and Rest state is restored. 'Non-Destructive Recovery' is \
+             widened but not finished: `validation::recovery::EditSnapshot` carries buffer + \
+             selection + scroll through the existing `binding::snapshot` linear guard, and \
+             `restore_text_input` / `restore_text_area` write all three back, so a rejected \
+             operation no longer loses the selection or the viewport — but the restore is \
+             model-only. Missing: caret restore into iced's editor state. \
+             `TextInputModel::selection` is documented as a request the editor may \
+             or may not honour, and nothing in this crate pushes it into iced's editor state, \
+             so the caret is NOT put back on screen; `TextAreaModel`'s scroll offset is the \
+             one field a renderer actually reads back off the model.",
         ),
         note: Some(
             "Invented values and judgements, all recorded here. (1) `EditStance`'s two \

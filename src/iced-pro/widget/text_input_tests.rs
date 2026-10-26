@@ -2003,9 +2003,11 @@ fn test_the_inner_editor_style_is_transparent_so_the_wrapper_owns_the_chrome() {
 use crate::binding::Cancel;
 use crate::binding::Commit;
 use crate::binding::Live;
+use crate::validation::disallowed::DisallowedClass;
 use crate::widget::text_input_controller::TextInputEmission;
 use crate::widget::text_input_model::ControlledModel;
 use crate::widget::text_input_model::TextInputModel;
+use iced::advanced::widget::Tree;
 use iced::keyboard;
 use iced::keyboard::Key;
 use iced::keyboard::Location;
@@ -2022,6 +2024,22 @@ type Tiered = Element<'static, TextInputEmission, crate::test_helpers::Theme, He
 /// The same field before it is turned into an `Element`.
 type BoundField =
     TextInput<'static, TextInputEmission, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// A bound field with a local lifetime for stack-allocated model tests.
+type LocalBoundField<'a> =
+    TextInput<'a, TextInputEmission, crate::test_helpers::Theme, HeadlessRenderer>;
+
+/// Construct a widget `Tree` for a local `TextInput`.
+fn bound_tree<'a>(widget: &'a LocalBoundField<'a>) -> Tree {
+    Tree::new(
+        widget
+            as &dyn iced::advanced::Widget<
+                TextInputEmission,
+                crate::test_helpers::Theme,
+                HeadlessRenderer,
+            >,
+    )
+}
 
 /// A host that owns the model a field borrows.
 ///
@@ -2725,4 +2743,140 @@ fn test_reveal_and_clear_are_separate_messages_on_the_same_widget() {
             .on_reveal(SecretMsg::Reveal);
 
     assert_eq!(input.reveal_message(), Some(&SecretMsg::Reveal));
+}
+
+// -------------------------------------------------------------------
+// Punish-late runtime enforcement (`UIF-PRIN-009`)
+// -------------------------------------------------------------------
+
+#[test]
+fn test_pristine_invalid_field_resolves_to_rest_state() {
+    let model = TextInputModel::new("filename").with_validation("name is taken");
+    assert!(model.is_pristine());
+    assert!(model.is_invalid());
+    assert!(!model.punishment().painted());
+
+    let widget: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::TextEntry, model.controlled(), "bound", |_| None);
+    assert!(!widget.is_invalid());
+
+    let tree = bound_tree(&widget);
+    let visual = widget.visual(
+        &tree,
+        outer(240.0, HEIGHT_STANDARD),
+        mouse::Cursor::Unavailable,
+    );
+    assert_eq!(
+        visual.base,
+        BaseState::Rest,
+        "a pristine field with validation error must withhold the error border (UIF-PRIN-009)"
+    );
+}
+
+#[test]
+fn test_pristine_disallowed_field_immediately_resolves_to_invalid_state() {
+    let model = TextInputModel::new("bad/filename")
+        .with_validation("illegal path character")
+        .with_disallowed(DisallowedClass::FilenameBasename);
+    assert!(model.is_pristine());
+    assert!(model.punishment().painted());
+
+    let widget: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::TextEntry, model.controlled(), "bound", |_| None);
+    assert!(widget.is_invalid());
+
+    let tree = bound_tree(&widget);
+    let visual = widget.visual(
+        &tree,
+        outer(240.0, HEIGHT_STANDARD),
+        mouse::Cursor::Unavailable,
+    );
+    assert_eq!(
+        visual.base,
+        BaseState::Invalid,
+        "a field with disallowed character must immediately paint error border even when pristine (UIF-PRIN-009)"
+    );
+}
+
+#[test]
+fn test_touched_invalid_field_resolves_to_invalid_state() {
+    // 1. note_commit transitions to Touched -> paints Invalid
+    let mut model_commit = TextInputModel::new("filename").with_validation("name is taken");
+    model_commit.note_commit();
+    assert!(model_commit.is_touched());
+    assert!(model_commit.punishment().painted());
+
+    let widget_commit: LocalBoundField<'_> = TextInput::controlled(
+        InputKind::TextEntry,
+        model_commit.controlled(),
+        "bound_commit",
+        |_| None,
+    );
+    assert!(widget_commit.is_invalid());
+
+    let tree_commit = bound_tree(&widget_commit);
+    let visual_commit = widget_commit.visual(
+        &tree_commit,
+        outer(240.0, HEIGHT_STANDARD),
+        mouse::Cursor::Unavailable,
+    );
+    assert_eq!(
+        visual_commit.base,
+        BaseState::Invalid,
+        "committing an invalid field must paint the error border (UIF-PRIN-009)"
+    );
+
+    // 2. note_blur transitions to Touched -> paints Invalid
+    let mut model_blur = TextInputModel::new("filename").with_validation("name is taken");
+    model_blur.note_blur();
+    assert!(model_blur.is_touched());
+    assert!(model_blur.punishment().painted());
+
+    let widget_blur: LocalBoundField<'_> = TextInput::controlled(
+        InputKind::TextEntry,
+        model_blur.controlled(),
+        "bound_blur",
+        |_| None,
+    );
+    assert!(widget_blur.is_invalid());
+
+    let tree_blur = bound_tree(&widget_blur);
+    let visual_blur = widget_blur.visual(
+        &tree_blur,
+        outer(240.0, HEIGHT_STANDARD),
+        mouse::Cursor::Unavailable,
+    );
+    assert_eq!(
+        visual_blur.base,
+        BaseState::Invalid,
+        "blurring an invalid field must paint the error border (UIF-PRIN-009)"
+    );
+}
+
+#[test]
+fn test_clearing_error_immediately_restores_rest_state() {
+    let mut model = TextInputModel::new("filename").with_validation("name is taken");
+    model.note_commit();
+    assert!(model.punishment().painted());
+
+    // Clear validation error
+    model.validation = None;
+    assert!(!model.is_invalid());
+    assert!(!model.punishment().painted());
+
+    let widget: LocalBoundField<'_> =
+        TextInput::controlled(InputKind::TextEntry, model.controlled(), "bound", |_| None);
+    assert!(!widget.is_invalid());
+
+    let tree = bound_tree(&widget);
+    let visual = widget.visual(
+        &tree,
+        outer(240.0, HEIGHT_STANDARD),
+        mouse::Cursor::Unavailable,
+    );
+    assert_eq!(
+        visual.base,
+        BaseState::Rest,
+        "clearing the error must immediately restore Rest state without lag (UIF-PRIN-009 reward early)"
+    );
 }
