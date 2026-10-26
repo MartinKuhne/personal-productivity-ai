@@ -23,6 +23,12 @@
 //! cascade clones models and `sync` overwrites local changes — a busy flag on
 //! a row would be erased by the next refresh.
 
+/// Minimum width of a menu surface card in logical pixels (§2.2, §4.8.1).
+pub const MENU_CARD_WIDTH_MIN: f32 = 224.0;
+
+/// Maximum width of a menu surface card in logical pixels (§2.2, §4.8.1).
+pub const MENU_CARD_WIDTH_MAX: f32 = 320.0;
+
 pub mod aim;
 pub mod cascade;
 pub mod model;

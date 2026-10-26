@@ -1195,6 +1195,18 @@ fn test_control_characters_are_rejected() {
 }
 
 #[test]
+fn test_dot_and_dot_dot_are_rejected() {
+    for value in [".", ".."] {
+        let verdict = ValidationRule::Name.check(value);
+        assert_eq!(
+            verdict.message().map(|m| m.code.as_str()),
+            Some(CODE_ILLEGAL_CHAR),
+            "{value:?} must be rejected as an illegal basename"
+        );
+    }
+}
+
+#[test]
 fn test_every_illegal_basename_character_is_rejected() {
     for c in ILLEGAL_BASENAME_CHARS.chars() {
         let value = format!("a{c}b");

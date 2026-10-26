@@ -324,6 +324,16 @@ pub struct SurfaceGeometryConstant {
 /// Every registered Surface Geometry Constant (`UIF-PRIN-001` §1.1).
 pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
     SurfaceGeometryConstant {
+        file: "surface/menu/mod.rs",
+        name: "MENU_CARD_WIDTH_MIN",
+        spec: "§2.2 / §4.8.1 — Menu Surface Card min width 224px",
+    },
+    SurfaceGeometryConstant {
+        file: "surface/menu/mod.rs",
+        name: "MENU_CARD_WIDTH_MAX",
+        spec: "§2.2 / §4.8.1 — Menu Surface Card max width 320px",
+    },
+    SurfaceGeometryConstant {
         file: "surface/input_dialog.rs",
         name: "CARD_WIDTH",
         spec: "§4.5.1 — Input Dialog Card width 320px",

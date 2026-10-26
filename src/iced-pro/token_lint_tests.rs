@@ -449,7 +449,7 @@ const PIN_RATIO: usize = 1;
 /// 55 as of `UIF-ATOM-011`, which registers `time_picker::TIME_FLYOUT_WIDTH` (220px) and `time_picker::TIME_FLYOUT_MAX_HEIGHT` (260px).
 /// 58 as of `UIF-ATOM-012`, which registers `color_picker::COLOR_FLYOUT_WIDTH` (240px), `color_picker::COLOR_WELL_WIDTH` (180px), and `color_picker::COLOR_WELL_HEIGHT` (140px).
 /// 60 as of Increment 25 (`UIF-TAB-003`), which registers `tab_strip::TAB_MIN_WIDTH` (64px) and `tab_strip::TAB_MAX_WIDTH` (240px).
-const PIN_SURFACE_BOUND: usize = 60;
+const PIN_SURFACE_BOUND: usize = 62;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 
@@ -1318,7 +1318,7 @@ fn no_inline_layout_call_hands_iced_a_bare_nonzero_literal() {
                 if trimmed
                     .chars()
                     .next()
-                    .map_or(false, |c| c.is_ascii_digit() && c != '0')
+                    .is_some_and(|c| c.is_ascii_digit() && c != '0')
                 {
                     offenders.push(format!("{rel}: {needle}{trimmed})"));
                 }
@@ -1347,7 +1347,7 @@ fn the_inline_layout_scan_fires_on_a_doctored_literal() {
             .trim()
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_digit() && c != '0')
+            .is_some_and(|c| c.is_ascii_digit() && c != '0')
     );
 }
 
