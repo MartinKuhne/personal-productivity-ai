@@ -1684,6 +1684,20 @@ where
 
                 <EditorState<Renderer::Paragraph> as operation::Focusable>::unfocus(editor);
             }
+        } else if let Some(model) = &self.model
+            && let Some(selection) = model.get().selection
+            && let Some(child) = tree.children.first_mut()
+        {
+            let editor = child
+                .state
+                .downcast_mut::<EditorState<Renderer::Paragraph>>();
+            if selection.is_empty() {
+                editor.move_cursor_to(selection.start);
+            } else if selection.start == 0 && selection.end >= model.get().value.len() {
+                editor.select_all();
+            } else {
+                editor.select_range(selection.start, selection.end);
+            }
         }
 
         operation.traverse(&mut |operation| {
