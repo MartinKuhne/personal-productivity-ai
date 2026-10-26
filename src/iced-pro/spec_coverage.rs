@@ -1376,7 +1376,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-ATOM-001c",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3.1",
         evidence: &[
             "widget/split_button.rs",
@@ -1386,25 +1386,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "surface/menu/",
             "gallery_split_button.rs",
         ],
-        reason: Some(
-            "Built at maximum composition: the primary half contains a real `ButtonModel` \
-             driven by a real `ButtonController`, so `ActionPending` arrives through \
-             `model.pending()` rather than a parallel mechanism, and the flyout is the \
-             **existing** menu engine — `SplitButtonHost` owns exactly one `MenuCascade` \
-             and returns `SplitButtonOutcome { cascade, emissions }`. No second menu was \
-             added; escape-rank **G-13** and roving menu focus **D-7** are the engine's \
-             own. The two zones are independent hit targets with independent hover and \
-             activation, pinned negatively: hovering the label does not light the chevron \
-             and pressing the label does not open the menu. The menu opens on chevron \
-             **release** — §3.1c says a chevron click, which under §3.0.3.3 is \
-             press-and-release. `Escape` after the menu is open calls `close_tree()`, and \
-             `FocusState::pop_trap()` restores the focus recorded before the trap was \
-             pushed, so focus returns to the control without firing the primary action. \
-             `SplitButtonModel<ActionId>` carries the rows and emits \
-             `on_primary_activate()` / `on_menu_toggle(bool)` / `on_menu_select(ActionId)`. \
-             Missing: the **live `iced::Widget`** that paints both halves and routes real \
-             events into the host.",
-        ),
+        reason: None,
         note: Some(
             "Spec gap (§3.1c): the divider is given as one token — `1px border.strong` — \
              for both variants. On a Primary control's `accent.fill` that stroke measures \

@@ -69,13 +69,39 @@
 //!
 //! Unit tests live in the sibling `split_button_tests.rs` sidecar.
 
-use crate::state::VisualState;
+use std::fmt;
+
+use crate::binding::Controlled;
+use crate::focus::{FocusId, FocusState};
+use crate::state::{BaseState, VisualState};
+use crate::surface::menu::cascade::MenuKey;
 use crate::token::color::Palette;
 use crate::token::shape;
 use crate::token::size;
 use crate::token::space;
 use crate::widget::button::{self, ButtonStyle, ButtonVariant};
-use iced::{Color, Point, Rectangle, Size};
+use crate::widget::button_model::ButtonDensity;
+use crate::widget::focusable::FocusableState;
+use crate::widget::split_button_host::{SplitButtonEmission, SplitButtonHost, SplitButtonOutcome};
+use crate::widget::split_button_model::SplitButtonModel;
+
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::text::{self as text_core, LineHeight, Paragraph as _};
+use iced::advanced::widget::operation::{self, Operation};
+use iced::advanced::widget::tree;
+use iced::advanced::widget::{Id, Tree, Widget};
+use iced::advanced::{Clipboard, Shell};
+use iced::alignment;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
+use iced::mouse;
+use iced::{
+    Background, Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Shadow, Size,
+};
+
+pub use crate::bridge::widget_id;
 
 /// The trailing chevron zone's width — the `28px`-wide `▾` zone of
 /// §3.1c (`UIF-ATOM-001c`).
@@ -295,6 +321,499 @@ pub const fn divider_color(variant: ButtonVariant, palette: &Palette) -> Color {
 #[must_use]
 pub fn chevron_color(style: &SplitStyle) -> Color {
     style.menu.foreground
+}
+
+/// A stroke width that draws no stroke at all.
+const NO_STROKE_WIDTH: f32 = 0.0;
+
+/// Snap painted quads to the device pixel grid.
+const SNAP_TO_PIXEL_GRID: bool = true;
+
+/// The trailing chevron glyph (`▾`) painted in the menu zone (§3.1c, `UIF-ATOM-001c`).
+pub const CHEVRON_GLYPH: &str = "▾";
+
+/// The control height for a given [`ButtonDensity`] (§3.1c, `UIF-ATOM-001c`).
+#[must_use]
+pub fn height_for_density(density: ButtonDensity) -> f32 {
+    match density {
+        ButtonDensity::Compact => HEIGHT_COMPACT,
+        ButtonDensity::Standard => HEIGHT_STANDARD,
+    }
+}
+
+/// The persistent interaction state for a [`SplitButton`] widget (§3.1c, `UIF-ATOM-001c`).
+///
+/// Holds the [`SplitButtonHost`] state machine, the focus router's [`FocusableState`],
+/// and the [`FocusState`] required for menu cascade trapping and keyboard navigation.
+#[derive(Debug)]
+pub struct SplitButtonState {
+    /// The host state machine driving the cascade and primary activation controller.
+    pub host: SplitButtonHost,
+    /// The widget's keyboard focus state managed by iced's operation router.
+    pub focusable: FocusableState,
+    /// The menu cascade focus routing state.
+    pub focus: FocusState,
+}
+
+impl SplitButtonState {
+    /// Create a new resting split button state for the given `control` focus id (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn new(control: FocusId) -> Self {
+        let mut focus = FocusState::new();
+        focus.register_group(
+            crate::focus::GroupId::new(format!("split-button:{}", control.as_str())),
+            vec![crate::focus::FocusMember::new(control.as_str())],
+        );
+        Self {
+            host: SplitButtonHost::new(control),
+            focusable: FocusableState::new(),
+            focus,
+        }
+    }
+}
+
+impl Default for SplitButtonState {
+    fn default() -> Self {
+        Self::new(FocusId::new("split-button"))
+    }
+}
+
+/// One painted quad layer of a [`SplitButton`] in draw order (§3.1c, `UIF-ATOM-001c`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layer {
+    /// The rectangle the layer covers.
+    pub bounds: Rectangle,
+    /// What is painted inside [`bounds`](Self::bounds).
+    pub fill: Color,
+    /// The stroke drawn on the inside of [`bounds`](Self::bounds).
+    pub border: Border,
+}
+
+impl Layer {
+    /// The [`renderer::Quad`] this layer becomes.
+    #[must_use]
+    pub fn quad(&self) -> renderer::Quad {
+        renderer::Quad {
+            bounds: self.bounds,
+            border: self.border,
+            shadow: Shadow::default(),
+            snap: SNAP_TO_PIXEL_GRID,
+        }
+    }
+}
+
+/// The primary action half's background layer with left rounded corners (§3.1c, `UIF-ATOM-001c`).
+#[must_use]
+pub fn primary_background_layer(bounds: Rectangle, style: &SplitStyle) -> Layer {
+    Layer {
+        bounds: primary_zone(bounds),
+        fill: style.primary.background,
+        border: Border::default()
+            .color(style.primary.border_color)
+            .width(style.primary.border_width)
+            .rounded(iced::border::Radius {
+                top_left: RADIUS,
+                top_right: 0.0,
+                bottom_right: 0.0,
+                bottom_left: RADIUS,
+            }),
+    }
+}
+
+/// The menu half's background layer with right rounded corners (§3.1c, `UIF-ATOM-001c`).
+#[must_use]
+pub fn menu_background_layer(bounds: Rectangle, style: &SplitStyle) -> Layer {
+    Layer {
+        bounds: menu_zone(bounds),
+        fill: style.menu.background,
+        border: Border::default()
+            .color(style.menu.border_color)
+            .width(style.menu.border_width)
+            .rounded(iced::border::Radius {
+                top_left: 0.0,
+                top_right: RADIUS,
+                bottom_right: RADIUS,
+                bottom_left: 0.0,
+            }),
+    }
+}
+
+/// The vertical divider line layer between the two halves (§3.1c, `UIF-ATOM-001c`).
+#[must_use]
+pub fn divider_layer(bounds: Rectangle, style: &SplitStyle) -> Layer {
+    Layer {
+        bounds: divider_bounds(bounds),
+        fill: style.divider,
+        border: Border::default(),
+    }
+}
+
+/// The outer focus ring layer surrounding the split button, if focused (§3.1c, `UIF-ATOM-001c`).
+#[must_use]
+pub fn focus_ring_layer(bounds: Rectangle, style: &SplitStyle) -> Option<Layer> {
+    if style.primary.focus_ring_width == NO_STROKE_WIDTH {
+        return None;
+    }
+
+    Some(Layer {
+        bounds: bounds.expand(style.primary.focus_ring_width),
+        fill: Color::TRANSPARENT,
+        border: Border::default()
+            .color(style.primary.focus_ring_color)
+            .width(style.primary.focus_ring_width)
+            .rounded(RADIUS + style.primary.focus_ring_width),
+    })
+}
+
+/// A live, interactive split button widget combining a primary action button with
+/// an independent trailing chevron menu trigger (§3.1c, `UIF-ATOM-001c`).
+pub struct SplitButton<'a, Message, ActionId = String> {
+    focus_id: FocusId,
+    widget_id: Id,
+    model: Controlled<'a, SplitButtonModel<ActionId>>,
+    palette: Palette,
+    emit: Box<dyn Fn(SplitButtonEmission<ActionId>) -> Option<Message> + 'a>,
+}
+
+impl<'a, Message, ActionId> SplitButton<'a, Message, ActionId> {
+    /// Build a **controlled** split button over a host-owned [`SplitButtonModel`]
+    /// (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn controlled(
+        model: Controlled<'a, SplitButtonModel<ActionId>>,
+        focus_id: impl Into<FocusId>,
+        emit: impl Fn(SplitButtonEmission<ActionId>) -> Option<Message> + 'a,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = widget_id(&focus_id);
+
+        Self {
+            focus_id,
+            widget_id,
+            model,
+            palette: Palette::dark(),
+            emit: Box::new(emit),
+        }
+    }
+
+    /// Set the palette used to resolve colours (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// Builder alias for [`palette`](Self::palette) (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn with_palette(self, palette: Palette) -> Self {
+        self.palette(palette)
+    }
+
+    /// The focus id registered for this control (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn focus_id(&self) -> &FocusId {
+        &self.focus_id
+    }
+
+    /// The iced widget id corresponding to the focus id (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn widget_id(&self) -> &Id {
+        &self.widget_id
+    }
+
+    /// The model driving this split button (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn model(&self) -> &SplitButtonModel<ActionId> {
+        self.model.get()
+    }
+
+    /// The palette used by this split button (§3.1c, `UIF-ATOM-001c`).
+    #[must_use]
+    pub fn palette_ref(&self) -> &Palette {
+        &self.palette
+    }
+}
+
+/// Send emissions to the host callback and publish resulting messages to the shell.
+fn route_emissions<Message, ActionId>(
+    emit: &(dyn Fn(SplitButtonEmission<ActionId>) -> Option<Message> + '_),
+    emissions: Vec<SplitButtonEmission<ActionId>>,
+    shell: &mut Shell<'_, Message>,
+) {
+    for emission in emissions {
+        if let Some(message) = emit(emission) {
+            shell.publish(message);
+        }
+    }
+}
+
+impl<'a, Message, Theme, Renderer, ActionId> Widget<Message, Theme, Renderer>
+    for SplitButton<'a, Message, ActionId>
+where
+    Message: 'a + Clone,
+    Renderer: renderer::Renderer + text_core::Renderer,
+    ActionId: Clone + fmt::Display + 'a,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<SplitButtonState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(SplitButtonState::new(self.focus_id.clone()))
+    }
+
+    fn size(&self) -> Size<Length> {
+        let height = height_for_density(self.model.get().density());
+        Size::new(Length::Shrink, Length::Fixed(height))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let label = self.model.get().label();
+        let measured_width = {
+            let paragraph =
+                <Renderer::Paragraph as text_core::Paragraph>::with_text(text_core::Text {
+                    content: label,
+                    bounds: Size::INFINITE,
+                    size: renderer.default_size(),
+                    line_height: text_core::LineHeight::default(),
+                    font: renderer.default_font(),
+                    align_x: text_core::Alignment::Left,
+                    align_y: alignment::Vertical::Top,
+                    shaping: text_core::Shaping::default(),
+                    wrapping: text_core::Wrapping::None,
+                });
+            paragraph.min_bounds().width
+        };
+        let label_width = if measured_width > 0.0 {
+            measured_width
+        } else {
+            label.len() as f32 * 8.0
+        };
+        let height = height_for_density(self.model.get().density());
+        let intrinsic = Size::new(control_width(label_width), height);
+        let size = limits.resolve(Length::Shrink, Length::Fixed(height), intrinsic);
+        layout::Node::new(size)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        let state = tree.state.downcast_mut::<SplitButtonState>();
+        if !self.model.get().disabled_flag() {
+            operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
+        } else {
+            <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if !self.model.get().disabled_flag() && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if shell.is_event_captured() {
+            return;
+        }
+
+        let state = tree.state.downcast_mut::<SplitButtonState>();
+        let model = self.model.get();
+
+        state.host.observe(model);
+
+        if state.focus.group_of(&self.focus_id).is_none() {
+            state.focus.register_group(
+                crate::focus::GroupId::new(format!("split-button:{}", self.focus_id.as_str())),
+                vec![crate::focus::FocusMember::new(self.focus_id.as_str())],
+            );
+        }
+
+        let bounds = layout.bounds();
+        let zone = if let Some(pos) = cursor.position_over(bounds) {
+            zone_at(pos.x - bounds.x, bounds.width)
+        } else {
+            SplitZone::Outside
+        };
+
+        state.host.hover(zone);
+
+        if model.disabled_flag() {
+            state.host.reset();
+            return;
+        }
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if zone.is_hit() {
+                    let outcome = state.host.press(zone, model);
+                    route_emissions(&self.emit, outcome.emissions, shell);
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if state.host.pressed_zone().is_some() {
+                    let outcome = state.host.release(zone, model, &mut state.focus);
+                    route_emissions(&self.emit, outcome.emissions, shell);
+                    shell.capture_event();
+                }
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
+                if state.focusable.is_focused() =>
+            {
+                let outcome = match key {
+                    Key::Named(Named::Enter) if state.host.is_menu_open() => {
+                        state.host.menu_key(MenuKey::Enter, model, &mut state.focus)
+                    }
+                    Key::Named(Named::Space) if state.host.is_menu_open() => {
+                        state.host.menu_key(MenuKey::Space, model, &mut state.focus)
+                    }
+                    Key::Named(Named::Enter) | Key::Named(Named::Space) => {
+                        state.host.activate_primary(model)
+                    }
+                    Key::Named(Named::ArrowDown) if state.host.is_menu_open() => {
+                        state.host.menu_key(MenuKey::Down, model, &mut state.focus)
+                    }
+                    Key::Named(Named::ArrowDown) => state.host.open_menu(model, &mut state.focus),
+                    Key::Named(Named::ArrowUp) if state.host.is_menu_open() => {
+                        state.host.menu_key(MenuKey::Up, model, &mut state.focus)
+                    }
+                    Key::Named(Named::Escape) => state.host.escape(model, &mut state.focus),
+                    _ => SplitButtonOutcome::noop(),
+                };
+                if !outcome.is_noop() {
+                    route_emissions(&self.emit, outcome.emissions, shell);
+                    shell.capture_event();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<SplitButtonState>();
+        let model = self.model.get();
+        let bounds = layout.bounds();
+        let focused = state.focusable.is_focused();
+
+        let (primary_state, menu_state) = if model.disabled_flag() {
+            (
+                VisualState {
+                    base: BaseState::Disabled,
+                    focused: false,
+                },
+                VisualState {
+                    base: BaseState::Disabled,
+                    focused: false,
+                },
+            )
+        } else {
+            (
+                state.host.half_state(SplitZone::Primary, focused),
+                state.host.half_state(SplitZone::Menu, focused),
+            )
+        };
+
+        let style = resolve_style(model.variant(), primary_state, menu_state, &self.palette);
+
+        for layer in [
+            Some(primary_background_layer(bounds, &style)),
+            Some(menu_background_layer(bounds, &style)),
+            Some(divider_layer(bounds, &style)),
+            focus_ring_layer(bounds, &style),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            renderer.fill_quad(layer.quad(), Background::Color(layer.fill));
+        }
+
+        let label_rect = label_bounds(primary_zone(bounds));
+        renderer.fill_text(
+            text_core::Text {
+                content: model.label().to_owned(),
+                bounds: label_rect.size(),
+                size: renderer.default_size(),
+                line_height: LineHeight::Absolute(Pixels(label_rect.height)),
+                font: renderer.default_font(),
+                align_x: text_core::Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: text_core::Shaping::default(),
+                wrapping: text_core::Wrapping::None,
+            },
+            label_rect.position(),
+            style.primary.foreground,
+            *viewport,
+        );
+
+        let chev_rect = chevron_bounds(menu_zone(bounds));
+        renderer.fill_text(
+            text_core::Text {
+                content: CHEVRON_GLYPH.to_owned(),
+                bounds: chev_rect.size(),
+                size: renderer.default_size(),
+                line_height: LineHeight::Absolute(Pixels(chev_rect.height)),
+                font: renderer.default_font(),
+                align_x: text_core::Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: text_core::Shaping::default(),
+                wrapping: text_core::Wrapping::None,
+            },
+            chev_rect.position(),
+            chevron_color(&style),
+            *viewport,
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer, ActionId> From<SplitButton<'a, Message, ActionId>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a,
+    Renderer: 'a + renderer::Renderer + text_core::Renderer,
+    ActionId: Clone + fmt::Display + 'a,
+{
+    fn from(button: SplitButton<'a, Message, ActionId>) -> Self {
+        Element::new(button)
+    }
 }
 
 #[cfg(test)]

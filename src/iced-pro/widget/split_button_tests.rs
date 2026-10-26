@@ -16,10 +16,17 @@
 //!    x resolves to the half whose bounds contain it.
 //! 6. **Contrast.** Every ratio the module doc quotes, recomputed from
 //!    the raw sRGB through the crate's own `contrast_ratio`.
+//! 7. **Live widget.** Controlled creation, hover, clicks, menu toggle,
+//!    disabled gating, keyboard navigation, and headless rendering.
 
 use super::*;
 use crate::state::BaseState;
+use crate::test_helpers::{Harness, focus_one};
 use crate::token::contrast::contrast_ratio;
+use crate::widget::split_button_model::SplitMenuRow;
+use iced::advanced::widget::Widget;
+use iced::keyboard::key::{Key, Named};
+use iced_test::renderer::Renderer as HeadlessRenderer;
 
 fn palette() -> Palette {
     Palette::dark()
@@ -403,4 +410,318 @@ fn st(base: BaseState) -> VisualState {
         base,
         focused: false,
     }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Live widget (`UIF-ATOM-001c`)
+// ---------------------------------------------------------------------------
+
+fn leaked<ActionId>(model: SplitButtonModel<ActionId>) -> &'static SplitButtonModel<ActionId> {
+    Box::leak(Box::new(model))
+}
+
+fn sample_rows() -> Vec<SplitMenuRow<String>> {
+    vec![
+        SplitMenuRow::new("save_as".to_string(), "Save As..."),
+        SplitMenuRow::new("export".to_string(), "Export PDF"),
+        SplitMenuRow::new("delete".to_string(), "Delete").destructive(),
+    ]
+}
+
+fn key_press(name: Named) -> Event {
+    Event::Keyboard(keyboard::Event::KeyPressed {
+        key: Key::Named(name),
+        modified_key: Key::Named(name),
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::NONE,
+        text: None,
+        repeat: false,
+    })
+}
+
+fn widget_bounds<M: Send + 'static>(harness: &mut Harness<M, HeadlessRenderer>) -> Rectangle {
+    let recorded = harness.recorded();
+    assert!(
+        !recorded.is_empty(),
+        "a split button registers exactly one focusable node, got {recorded:?}"
+    );
+    recorded[0].1
+}
+
+#[test]
+fn test_controlled_creation_and_state_initialization() {
+    let model = leaked(SplitButtonModel::primary("Save", sample_rows()));
+    let split = SplitButton::<SplitButtonEmission<String>, String>::controlled(
+        Controlled::new(model),
+        "split_save",
+        Some,
+    );
+
+    assert_eq!(split.focus_id().as_str(), "split_save");
+    assert_eq!(split.widget_id(), &widget_id(split.focus_id()));
+    assert_eq!(split.model().label(), "Save");
+    assert_eq!(split.model().variant(), ButtonVariant::Primary);
+
+    let tag = Widget::<SplitButtonEmission<String>, iced::Theme, HeadlessRenderer>::tag(&split);
+    assert_eq!(tag, tree::Tag::of::<SplitButtonState>());
+
+    let state = Widget::<SplitButtonEmission<String>, iced::Theme, HeadlessRenderer>::state(&split);
+    let downcast = state.downcast_ref::<SplitButtonState>();
+    assert_eq!(downcast.host.control().as_str(), "split_save");
+    assert_eq!(downcast.host.hovered_zone(), SplitZone::Outside);
+    assert_eq!(downcast.host.pressed_zone(), None);
+    assert!(!downcast.host.is_menu_open());
+    assert!(!downcast.focusable.is_focused());
+    assert!(
+        downcast
+            .focus
+            .group_of(&FocusId::new("split_save"))
+            .is_some()
+    );
+}
+
+#[test]
+fn test_mouse_hover_primary_vs_menu() {
+    let model = leaked(SplitButtonModel::new("Save", sample_rows()));
+    let mut harness = Harness::headless(move || {
+        SplitButton::controlled(Controlled::new(model), "split_hover", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let primary_pt = Point::new(bounds.x + 10.0, bounds.y + bounds.height / 2.0);
+    let menu_pt = Point::new(
+        bounds.x + bounds.width - 5.0,
+        bounds.y + bounds.height / 2.0,
+    );
+    let outside_pt = Point::new(bounds.x + bounds.width + 50.0, bounds.y + 50.0);
+
+    // Hover is inert and emits no messages
+    let msgs1 = harness.hover(primary_pt);
+    assert!(msgs1.is_empty());
+
+    let msgs2 = harness.hover(menu_pt);
+    assert!(msgs2.is_empty());
+
+    let msgs3 = harness.hover(outside_pt);
+    assert!(msgs3.is_empty());
+}
+
+#[test]
+fn test_click_on_primary_activates_primary_and_publishes_emission() {
+    let model = leaked(SplitButtonModel::primary("Commit", sample_rows()));
+    let mut harness = Harness::headless(move || {
+        SplitButton::controlled(Controlled::new(model), "split_primary_act", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let primary_pt = Point::new(bounds.x + 10.0, bounds.y + bounds.height / 2.0);
+
+    harness.hover(primary_pt);
+    let press_msgs = harness.press(primary_pt);
+    assert!(
+        press_msgs.is_empty(),
+        "press on primary produces no immediate emission"
+    );
+
+    let release_msgs = harness.release(primary_pt);
+    assert_eq!(release_msgs.len(), 1);
+    assert!(matches!(
+        release_msgs[0],
+        SplitButtonEmission::PrimaryActivated(_)
+    ));
+
+    // Drag-out cancels
+    harness.hover(primary_pt);
+    harness.press(primary_pt);
+    let cancel_msgs = harness.release(Point::new(bounds.x + 1000.0, bounds.y + 1000.0));
+    assert_eq!(cancel_msgs.len(), 1);
+    assert!(matches!(
+        cancel_msgs[0],
+        SplitButtonEmission::PrimaryCancelled(_)
+    ));
+}
+
+#[test]
+fn test_click_on_menu_toggles_menu() {
+    let model = leaked(SplitButtonModel::new("Options", sample_rows()));
+    let mut harness = Harness::headless(move || {
+        SplitButton::controlled(Controlled::new(model), "split_menu_toggle", Some).into()
+    });
+
+    let bounds = widget_bounds(&mut harness);
+    let menu_pt = Point::new(
+        bounds.x + bounds.width - 5.0,
+        bounds.y + bounds.height / 2.0,
+    );
+
+    // Press menu zone does nothing on press
+    harness.hover(menu_pt);
+    let press_msgs = harness.press(menu_pt);
+    assert!(press_msgs.is_empty());
+
+    // Release toggles menu open
+    let open_msgs = harness.release(menu_pt);
+    assert_eq!(open_msgs.len(), 1);
+    assert_eq!(open_msgs[0], SplitButtonEmission::MenuToggled(true));
+
+    // Second click on menu toggles it closed
+    harness.press(menu_pt);
+    let close_msgs = harness.release(menu_pt);
+    assert_eq!(close_msgs.len(), 1);
+    assert_eq!(close_msgs[0], SplitButtonEmission::MenuToggled(false));
+}
+
+#[test]
+fn test_disabled_split_button_ignores_events() {
+    let model = leaked(SplitButtonModel::new("Inert", sample_rows()).disabled());
+    let mut harness = Harness::headless(move || {
+        SplitButton::controlled(Controlled::new(model), "split_disabled", Some).into()
+    });
+
+    let primary_pt = Point::new(10.0, 10.0);
+    let menu_pt = Point::new(70.0, 10.0);
+
+    harness.hover(primary_pt);
+    assert!(harness.press(primary_pt).is_empty());
+    assert!(harness.release(primary_pt).is_empty());
+
+    harness.hover(menu_pt);
+    assert!(harness.press(menu_pt).is_empty());
+    assert!(harness.release(menu_pt).is_empty());
+}
+
+#[test]
+fn test_keyboard_primary_activation_and_menu_navigation() {
+    let model = leaked(SplitButtonModel::primary("Actions", sample_rows()));
+    let mut harness = Harness::headless(move || {
+        SplitButton::controlled(Controlled::new(model), "split_kb", Some).into()
+    });
+
+    focus_one(&mut harness, "split_kb");
+
+    // Enter activates primary
+    let enter_msgs = harness.pointer(&[key_press(Named::Enter)], mouse::Cursor::Unavailable);
+    assert_eq!(enter_msgs.len(), 1);
+    assert!(matches!(
+        enter_msgs[0],
+        SplitButtonEmission::PrimaryActivated(_)
+    ));
+
+    // Space activates primary
+    let space_msgs = harness.pointer(&[key_press(Named::Space)], mouse::Cursor::Unavailable);
+    assert_eq!(space_msgs.len(), 1);
+    assert!(matches!(
+        space_msgs[0],
+        SplitButtonEmission::PrimaryActivated(_)
+    ));
+
+    // ArrowDown opens menu
+    let down_msgs = harness.pointer(&[key_press(Named::ArrowDown)], mouse::Cursor::Unavailable);
+    assert_eq!(down_msgs.len(), 1);
+    assert_eq!(down_msgs[0], SplitButtonEmission::MenuToggled(true));
+
+    // Escape closes menu
+    let esc_msgs = harness.pointer(&[key_press(Named::Escape)], mouse::Cursor::Unavailable);
+    assert_eq!(esc_msgs.len(), 1);
+    assert_eq!(esc_msgs[0], SplitButtonEmission::MenuToggled(false));
+}
+
+#[test]
+fn test_headless_draw_across_states() {
+    let p = palette();
+    for variant in [ButtonVariant::Primary, ButtonVariant::Secondary] {
+        for density in [ButtonDensity::Standard, ButtonDensity::Compact] {
+            for disabled in [false, true] {
+                let mut m = SplitButtonModel::new("RenderMe", sample_rows()).with_density(density);
+                if variant == ButtonVariant::Primary {
+                    m = SplitButtonModel::primary("RenderMe", sample_rows()).with_density(density);
+                }
+                if disabled {
+                    m = m.disabled();
+                }
+                let model = leaked(m);
+                let mut harness = Harness::headless(move || {
+                    SplitButton::controlled(Controlled::new(model), "split_render", Some)
+                        .palette(p)
+                        .into()
+                });
+
+                let primary_pt = Point::new(10.0, 10.0);
+                let menu_pt = Point::new(80.0, 10.0);
+
+                // Rest render
+                harness.render();
+
+                // Hover primary
+                harness.hover(primary_pt);
+                harness.render();
+
+                // Press primary
+                harness.press(primary_pt);
+                harness.render();
+                harness.release(primary_pt);
+
+                // Hover menu
+                harness.hover(menu_pt);
+                harness.render();
+
+                // Press menu
+                harness.press(menu_pt);
+                harness.render();
+                harness.release(menu_pt);
+
+                if !disabled {
+                    focus_one(&mut harness, "split_render");
+                    harness.render();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_split_button_layers_and_geometry() {
+    let p = palette();
+    let b = rect(0.0, 0.0, 200.0, HEIGHT_STANDARD);
+
+    let rest_style = resolve_style(ButtonVariant::Primary, REST, REST, &p);
+    let p_layer = primary_background_layer(b, &rest_style);
+    assert_eq!(p_layer.bounds, primary_zone(b));
+    assert_eq!(p_layer.fill, rest_style.primary.background);
+    assert_eq!(p_layer.border.radius.top_left, RADIUS);
+    assert_eq!(p_layer.border.radius.bottom_left, RADIUS);
+    assert_eq!(p_layer.border.radius.top_right, 0.0);
+    assert_eq!(p_layer.border.radius.bottom_right, 0.0);
+
+    let m_layer = menu_background_layer(b, &rest_style);
+    assert_eq!(m_layer.bounds, menu_zone(b));
+    assert_eq!(m_layer.fill, rest_style.menu.background);
+    assert_eq!(m_layer.border.radius.top_left, 0.0);
+    assert_eq!(m_layer.border.radius.bottom_left, 0.0);
+    assert_eq!(m_layer.border.radius.top_right, RADIUS);
+    assert_eq!(m_layer.border.radius.bottom_right, RADIUS);
+
+    let d_layer = divider_layer(b, &rest_style);
+    assert_eq!(d_layer.bounds, divider_bounds(b));
+    assert_eq!(d_layer.fill, rest_style.divider);
+
+    // Unfocused has no focus ring layer
+    assert_eq!(focus_ring_layer(b, &rest_style), None);
+
+    // Focused has focus ring layer
+    let focused_style = resolve_style(ButtonVariant::Primary, REST_FOCUSED, REST_FOCUSED, &p);
+    let ring =
+        focus_ring_layer(b, &focused_style).expect("focused split button must have focus ring");
+    assert_eq!(
+        ring.bounds,
+        b.expand(focused_style.primary.focus_ring_width)
+    );
+    assert_eq!(
+        ring.border.radius.top_left,
+        RADIUS + focused_style.primary.focus_ring_width
+    );
+    assert_eq!(ring.fill, Color::TRANSPARENT);
 }
