@@ -119,7 +119,7 @@ use crate::token_lint::{
 /// code that paints it. The file count moves by eight and
 /// `PIN_RULE_B_FILES` does not move at all — the split added no visual
 /// literal to any scoped directory, and changed no literal in one either.
-const PIN_FILES_SCANNED: usize = 152;
+const PIN_FILES_SCANNED: usize = 153;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

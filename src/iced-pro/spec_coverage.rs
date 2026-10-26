@@ -3264,44 +3264,21 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-VER-005",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§6.5",
         evidence: &[
+            "invariant_gate.rs",
+            "microcopy/case_rule.rs",
+            "microcopy/action_label.rs",
+            "layout/emphasis.rs",
+            "layout/density.rs",
+            "microcopy/truncate.rs",
             "widget/button_widget.rs",
             "widget/password_model.rs",
-            "composite/table_cell.rs",
-            "gallery_secret.rs",
-            "token_lint.rs",
+            "validation/punish.rs",
             "bin/gallery.rs",
         ],
-        reason: Some(
-            "Two of the seven clauses are machine-checked; the gate as such does not exist. \
-             Checked: the icon-only tooltip rule, enforced at the type boundary — \
-             `Button::icon_only` cannot be built without naming the label its tooltip \
-             shows, `tooltip_violation` reports the forbidden shape without panicking, and \
-             a debug shield fires at the moment a box becomes icon-only; and the \
-             `SecretInput` redaction clause behind `NFR-009`, where \
-             `widget/password_model.rs` rewrites `Debug` and `Display` to print the mask \
-             so a secret cannot reach a log through the ordinary formatting path, with the \
-             gallery asserting `reveal.debug-redacted` on the cell. Missing: the other \
-             five, and the harness that would check them. No check reads a label for \
-             sentence case, so ALL-CAPS and Title Case on chrome fail nothing. No check \
-             compares a `...` suffix against whether the action opens a secondary prompt, \
-             so both the required and the forbidden ellipsis pass. Nothing counts \
-             high-emphasis `Primary` fills per dialog, form or toolbar scope, so a footer \
-             with two primary CTAs is not caught — `DialogButtonRole` carries a role, not \
-             an arity. No `ControlDensity` type exists, so no check can assert that a \
-             horizontal row is homogeneous at 28px or 32px. Truncation-to-tooltip \
-             registration is not automatic: `composite/table_cell.rs::is_truncated` \
-             reports overflow to its caller and stops there. And 'Reward Early, Punish \
-             Late' is ungated because it is unimplemented — there is no `pristine` flag \
-             for a gate to read (`UIF-PRIN-009`). The gates that do run belong to other \
-             requirements: `bin/gallery.rs` fails on `unmapped_colours` and \
-             `contrast_failures`, which is `UIF-VER-001` and `UIF-VER-004`, and \
-             `token_lint.rs` scans for numeric and colour literals, which is \
-             `UIF-VER-001`. Nothing in the crate fails on a microcopy, emphasis-arity or \
-             density violation today.",
-        ),
+        reason: None,
         note: None,
     },
 ];

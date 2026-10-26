@@ -304,6 +304,28 @@ pub fn manifest() -> String {
         }
     }
 
+    out.push_str("\n== gate: invariants (UIF-VER-005) ==\n");
+    let invariants = crate::invariant_gate::audit_invariants();
+    if invariants.is_clean() {
+        out.push_str(&format!(
+            "PASS - all 7 automated invariants satisfied ({} checks verified)\n",
+            invariants.total_checked
+        ));
+    } else {
+        out.push_str(&format!(
+            "FAIL - {} violation(s):\n",
+            invariants.violation_count()
+        ));
+        for v in &invariants.violations {
+            out.push_str(&format!(
+                "  [{}] {}: {}\n",
+                v.category.slug(),
+                v.target,
+                v.message
+            ));
+        }
+    }
+
     out.push_str("\n== gate: scope (D-2) ==\n");
     let not_owned: Vec<&Cell> = cells
         .iter()

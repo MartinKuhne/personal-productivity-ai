@@ -19,6 +19,7 @@
 
 use iced_pro::gallery::{self, Cell, CellKind};
 use iced_pro::gallery_audit::{contrast_failures, manifest, unmapped_colours};
+use iced_pro::invariant_gate::audit_invariants;
 
 use std::error::Error;
 use std::fs;
@@ -162,6 +163,7 @@ fn run(output: &Path) -> Result<(), Box<dyn Error>> {
 
     let unmapped = unmapped_colours(&cells);
     let contrast = contrast_failures(&cells);
+    let invariants = audit_invariants();
     let not_owned = cells
         .iter()
         .filter(|cell| cell.kind == CellKind::NotOwned)
@@ -178,12 +180,22 @@ fn run(output: &Path) -> Result<(), Box<dyn Error>> {
     println!("  NotOwned      : {not_owned}");
     println!("  unmapped      : {}", unmapped.len());
     println!("  contrast fails: {}", contrast.len());
+    println!(
+        "  invariants    : {} ({} checks, {} violations)",
+        if invariants.is_clean() {
+            "PASS"
+        } else {
+            "FAIL"
+        },
+        invariants.total_checked,
+        invariants.violation_count()
+    );
     println!("  by subject    :");
     for (subject, count) in subject_counts(&cells) {
         println!("    {subject:<16} {count}");
     }
 
-    if !unmapped.is_empty() || !contrast.is_empty() {
+    if !unmapped.is_empty() || !contrast.is_empty() || !invariants.is_clean() {
         return Err("gallery gates failed; see manifest.txt".into());
     }
 

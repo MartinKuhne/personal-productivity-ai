@@ -48,6 +48,7 @@ pub mod gallery_tooltip;
 pub mod gallery_tree;
 pub mod gallery_warm;
 pub mod geometry;
+pub mod invariant_gate;
 pub mod layout;
 pub mod microcopy;
 pub mod spec_coverage;
