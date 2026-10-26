@@ -2434,35 +2434,26 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-013",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.13",
         evidence: &[
+            "composite/grid_view.rs",
             "composite/virtual_list.rs",
             "composite/table_view.rs",
             "composite/tree_view.rs",
             "composite/scroll_view.rs",
         ],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `GridViewModel`, \
-             `GridTile`, column-count solver or two-dimensional selection state exists. \
-             Missing: the whole requirement — the deterministic column derivation of \
-             `max(1, floor((available + gap) / (min_tile + gap)))` computed over the \
-             width left after the reserved 10px `ScrollView` gutter, at `gap = space.md` \
-             with a 160px minimum tile, and the matching tile-width division; the \
-             virtualized 2D tile window; the `surface.active` plus 2px `accent.border` \
-             selection treatment with its top-left 16x16px checkbox overlay in \
-             `ExtendedMulti`; and the clamped 2D arrow map (`Left`/`Right` of one, \
-             `Up`/`Down` of `cols`, `Home`/`End` to first and last) with `Shift` and \
-             `Ctrl` anchored range and toggle matching §3B.6. The one-dimensional \
-             relatives are built and good: `composite/virtual_list.rs` virtualizes a row \
-             window with overscan and `f64` index arithmetic, `composite/scroll_view.rs` \
-             reserves the gutter, and `composite/table_view.rs` and `tree_view.rs` already \
-             clamp at the ends rather than wrapping and carry the `SelectionMode` the grid \
-             reuses by name. Nothing multiplies those into two dimensions, and the \
-             column-count derivation `UIF-VER-002` names has no solver to test.",
+        reason: None,
+        note: Some(
+            "GridView 2D virtualized tile and card grid composite. Implements deterministic \
+             column solver `solve_columns` deducting 10px ScrollView gutter, space.md gap, and \
+             160px min tile width with symmetric expansion; 2D clamped keyboard navigation (Left/Right \
+             by 1, Up/Down by cols, Home/End) without cross-row wrapping; single and ExtendedMulti \
+             selection modes with Shift-range, Ctrl-toggle, and Ctrl+A; 16x16px checkbox overlay in \
+             ExtendedMulti; card container styling with radius.card, 1px border.subtle at rest, \
+             surface.hover on hover, and surface.active + 2px accent.border (4.79:1) + text.strong \
+             (14.29:1) on selection; and viewport-culled virtualized row drawing.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-014",

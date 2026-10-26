@@ -96,6 +96,8 @@
 //!   and resizable expanded (180–320px) modes with roving keyboard focus (`UIF-COMP-009`, `UIF-PRIN-005`, `UIF-PRIN-006`)
 //! * [`mod@command_palette`] — the quick-open and command palette modal card with prefix modes,
 //!   two-stage Escape, and Rule 4 text.strong subtitle promotion (`UIF-COMP-010`, `UIF-PRIN-003`, `UIF-TOK-006`)
+//! * [`mod@grid_view`] — the 2D virtualized tile and card grid with deterministic column solving
+//!   and 2D boundary clamping (`UIF-COMP-013`, `UIF-VER-002`, `UIF-PRIN-006`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -109,6 +111,7 @@ pub mod command_palette;
 pub mod empty_state;
 pub mod expander;
 pub mod form_field;
+pub mod grid_view;
 pub mod info_bar;
 pub mod list_tile;
 pub mod navigation_rail;
@@ -140,6 +143,11 @@ pub use command_palette::{
 };
 pub use empty_state::{
     EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
+};
+pub use grid_view::{
+    BORDER_REST_WIDTH, BORDER_SELECTED_WIDTH, CHECKBOX_INSET, CHECKBOX_SIZE,
+    DEFAULT_MIN_TILE_WIDTH, DEFAULT_TILE_HEIGHT, GAP, GLYPH_CHECK, GUTTER_WIDTH, GridNavKey,
+    GridTile, GridView, GridViewModel, GridViewState, grid_view, solve_columns, tile_rect,
 };
 pub use navigation_rail::{
     COMPACT_WIDTH, EXPANDED_DEFAULT_WIDTH, EXPANDED_MAX_WIDTH, EXPANDED_MIN_WIDTH, GLYPH_TOGGLE,

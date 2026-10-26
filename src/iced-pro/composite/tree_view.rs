@@ -158,6 +158,9 @@ impl SelectionMode {
     }
 }
 
+/// Type alias for tree selection mode (`UIF-COMP-006`, `UIF-COMP-013`).
+pub type TreeSelectionMode = SelectionMode;
+
 /// The nodes and links of one tree, as the host owns them.
 ///
 /// Built once from a flat `(id, parent)` list in document order and then

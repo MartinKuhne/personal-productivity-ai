@@ -143,7 +143,9 @@ use crate::token_lint::{
 /// 166 as of `UIF-COMP-009`: `composite/navigation_rail.rs`, joining Rule B's visual scope.
 ///
 /// 167 as of `UIF-COMP-010`: `composite/command_palette.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 167;
+///
+/// 168 as of `UIF-COMP-013`: `composite/grid_view.rs`, joining Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 168;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -192,7 +194,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 93 as of `UIF-COMP-012`, whose one addition is `composite/side_sheet.rs`.
 /// 94 as of `UIF-COMP-009`, whose one addition is `composite/navigation_rail.rs`.
 /// 95 as of `UIF-COMP-010`, whose one addition is `composite/command_palette.rs`.
-const PIN_RULE_B_FILES: usize = 95;
+/// 96 as of `UIF-COMP-013`, whose one addition is `composite/grid_view.rs`.
+const PIN_RULE_B_FILES: usize = 96;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -333,7 +336,12 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// 260 as of `UIF-COMP-010`: the 6 token-bound visual constants in
 /// `command_palette::` (`ROW_SINGLE_HEIGHT`, `FOOTER_HEIGHT`, `ICON_SIZE`,
 /// `RADIUS`, `GROUP_HEADER_HEIGHT`, `DIVIDER_STROKE`).
-const PIN_TOKEN_BOUND: usize = 260;
+///
+/// 269 as of `UIF-COMP-013`: the 9 token-bound visual constants in
+/// `grid_view::` (`GAP`, `GUTTER_WIDTH`, `CHECKBOX_SIZE`, `RADIUS`,
+/// `BORDER_SELECTED_WIDTH`, `BORDER_REST_WIDTH`, `CHECKBOX_INSET`,
+/// `TILE_PADDING`, `ICON_SIZE`).
+const PIN_TOKEN_BOUND: usize = 269;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -393,7 +401,9 @@ const PIN_RATIO: usize = 1;
 /// 48 as of `UIF-COMP-010`, which registers the four §3B.10 figures:
 /// `command_palette::CARD_WIDTH` (560px), `command_palette::CARD_HEIGHT` (380px),
 /// `command_palette::SEARCH_HEIGHT` (40px), and `command_palette::ROW_DOUBLE_HEIGHT` (44px).
-const PIN_SURFACE_BOUND: usize = 48;
+/// 50 as of `UIF-COMP-013`, which registers the two §3B.13 figures:
+/// `grid_view::DEFAULT_MIN_TILE_WIDTH` (160px) and `grid_view::DEFAULT_TILE_HEIGHT` (120px).
+const PIN_SURFACE_BOUND: usize = 50;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

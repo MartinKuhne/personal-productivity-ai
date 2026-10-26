@@ -563,6 +563,16 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         name: "ROW_DOUBLE_HEIGHT",
         spec: "§3B.10 — CommandPalette two-line item height 44px",
     },
+    SurfaceGeometryConstant {
+        file: "composite/grid_view.rs",
+        name: "DEFAULT_MIN_TILE_WIDTH",
+        spec: "§3B.13 — GridView default min tile width 160px",
+    },
+    SurfaceGeometryConstant {
+        file: "composite/grid_view.rs",
+        name: "DEFAULT_TILE_HEIGHT",
+        spec: "§3B.13 — GridView default tile height 120px",
+    },
 ];
 
 /// Look up the §1.1 authority for one constant, if it is registered.
