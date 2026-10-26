@@ -1032,12 +1032,11 @@ pub fn recovery_label(error: &ModalError) -> String {
     }
 }
 
-/// The card footer: `Save` and `Cancel` on the left, the line/column
-/// read-out pushed to the right.
+/// The card footer: the line/column read-out on the left and the
+/// right-aligned `[Cancel] [Save]` action group.
 ///
-/// `Save` is `Primary` and `Cancel` is `Secondary`: the forward action is
-/// the accented one, and Cancel is the ordinary "leave without committing"
-/// control the same role `Close` plays on the About card. Neither is
+/// In conformance with the action-row ordering rule (`UIF-PRIN-006`),
+/// `Cancel` is `Secondary` and precedes `Save` (`Primary`). Neither is
 /// `Danger` — discarding here is *not* the destructive act the Danger
 /// variant is reserved for, and the framework keeps that word for the
 /// discard **confirmation**, where the user is actually being asked to
@@ -1071,12 +1070,16 @@ fn editor_footer(vm: &EditorViewModel) -> Element<'_, Message> {
         Palette::fastmd_dark().text,
     );
 
-    // `Row` has no main-axis alignment knob, so a filling `Space` does it.
+    let actions = Row::with_children(vec![cancel, save])
+        .spacing(space::SM)
+        .align_y(Alignment::Center);
+
+    // `Row` has no main-axis alignment knob, so a filling `Space` pushes the
+    // secondary/primary action group to the right while the readout stays left.
     Row::with_children(vec![
-        save,
-        cancel,
-        Space::new().width(Length::Fill).into(),
         status.into(),
+        Space::new().width(Length::Fill).into(),
+        actions.into(),
     ])
     .spacing(space::SM)
     .align_y(Alignment::Center)

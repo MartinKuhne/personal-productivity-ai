@@ -834,6 +834,46 @@ fn editor_card_builds_for_an_empty_buffer() {
 }
 
 #[test]
+fn editor_footer_puts_status_left_of_right_aligned_cancel_then_save_actions() {
+    use iced_test::selector::Candidate;
+
+    type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
+
+    fn text_bounds(ui: &mut Sim<'_>, label: &str) -> iced::Rectangle {
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text {
+                content, bounds, ..
+            } if content == label => Some(bounds),
+            _ => None,
+        })
+        .unwrap_or_else(|error| panic!("footer text {label:?} should be visible: {error:?}"))
+    }
+
+    let vm = open_vm("# Title\n\nbody\n");
+    let width = 800.0;
+    let mut ui = Sim::with_size(
+        iced_test::core::Settings::default(),
+        Size::new(width, 80.0),
+        editor_footer(&vm),
+    );
+
+    let status = text_bounds(&mut ui, &vm.status_text());
+    let cancel = text_bounds(&mut ui, strings::CANCEL_BUTTON);
+    let save = text_bounds(&mut ui, strings::SAVE_BUTTON);
+
+    assert!(status.x < cancel.x, "status should be left of the actions");
+    assert!(
+        cancel.x < save.x,
+        "Cancel should precede the primary Save action"
+    );
+    assert!(
+        save.x > width * 0.75,
+        "the action group should be pinned to the right edge, got Save at x={}",
+        save.x
+    );
+}
+
+#[test]
 fn validation_reason_covers_every_error_kind() {
     assert_eq!(
         validation_reason(MarkdownErrorKind::UnterminatedCodeFence),
