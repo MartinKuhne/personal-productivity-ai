@@ -152,7 +152,8 @@ use crate::token_lint::{
 /// 172 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`, joining Rule B's visual scope.
 /// 173 as of `UIF-ATOM-011`: `widget/time_picker.rs`, joining Rule B's visual scope.
 /// 174 as of `UIF-ATOM-012`: `widget/color_picker.rs`, joining Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 174;
+/// 176 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
+const PIN_FILES_SCANNED: usize = 176;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -207,7 +208,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 100 as of Increment 18 (`UIF-ATOM-010`): `widget/date_picker.rs`.
 /// 101 as of `UIF-ATOM-011`: `widget/time_picker.rs`.
 /// 102 as of `UIF-ATOM-012`: `widget/color_picker.rs`.
-const PIN_RULE_B_FILES: usize = 102;
+/// 104 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
+const PIN_RULE_B_FILES: usize = 104;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -375,7 +377,11 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `SWATCH_SIZE`, `SLIDER_TRACK_HEIGHT`, `THUMB_SIZE`, `CARD_PADDING`, `CARD_RADIUS`,
 /// `INNER_BORDER_WIDTH`, `DUAL_RING_OUTER_WIDTH`, `DUAL_RING_INNER_WIDTH`, `SWATCH_GAP`,
 /// `SECTION_GAP`, `CONTRAST_CHIP_HEIGHT`).
-const PIN_TOKEN_BOUND: usize = 325;
+///
+/// 332 as of Increments 24 & 25: the 7 token-bound visual constants in `navbar::` (`NAVBAR_HEIGHT_STANDARD`,
+/// `NAVBAR_HEIGHT_COMPACT`, `HORIZONTAL_PADDING`, `ACTION_SPACING`, `ITEM_SPACING`, `TEXT_SIZE`)
+/// and `tab_strip::` (`TAB_STRIP_HEIGHT`, `CLOSE_BUTTON_SIZE`).
+const PIN_TOKEN_BOUND: usize = 332;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.
@@ -442,7 +448,8 @@ const PIN_RATIO: usize = 1;
 /// 53 as of Increment 18 (`UIF-ATOM-010`), which registers `date_picker::CALENDAR_FLYOUT_WIDTH` (256px).
 /// 55 as of `UIF-ATOM-011`, which registers `time_picker::TIME_FLYOUT_WIDTH` (220px) and `time_picker::TIME_FLYOUT_MAX_HEIGHT` (260px).
 /// 58 as of `UIF-ATOM-012`, which registers `color_picker::COLOR_FLYOUT_WIDTH` (240px), `color_picker::COLOR_WELL_WIDTH` (180px), and `color_picker::COLOR_WELL_HEIGHT` (140px).
-const PIN_SURFACE_BOUND: usize = 58;
+/// 60 as of Increment 25 (`UIF-TAB-003`), which registers `tab_strip::TAB_MIN_WIDTH` (64px) and `tab_strip::TAB_MAX_WIDTH` (240px).
+const PIN_SURFACE_BOUND: usize = 60;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

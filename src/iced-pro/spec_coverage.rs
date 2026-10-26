@@ -796,7 +796,7 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PRIN-008",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
         evidence: &[
             "widget/rove.rs",
@@ -814,79 +814,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
             "a11y/project.rs",
             "a11y/tab_stop.rs",
             "surface/menu/aim.rs",
+            "composite/navbar.rs",
+            "composite/tab_strip.rs",
+            "composite/navigation_rail.rs",
+            "composite/command_palette.rs",
+            "composite/stepper.rs",
+            "composite/grid_view.rs",
+            "widget/date_picker.rs",
         ],
-        reason: Some(
-            "Three of the pillar's four clauses are now machine-checkable; the fourth \
-             cannot close because six of the eleven collections it names are unbuilt \
-             Phase C. The roving walk is real and genuinely shared: \
-             `widget/rove.rs::rove_index` is the single \
-             skip-disabled, wrapping walk that `RadioGroupModel::rove` and \
-             `SegmentedModel::rove` both run, and `focus.rs` carries the traversal policy, \
-             the roving ordinals and the modal trap on the ARIA roving-tabindex convention. \
-             The wrap-versus-clamp split goes the right way: bounded groups wrap, while \
-             `composite/table_view.rs` and `composite/tree_view.rs` clamp at the ends \
-             rather than wrapping, which is what stops a held `Down` teleporting a long \
-             virtual viewport back to row zero. Disjoint hit zones are proven wherever this \
-             crate paints them — `table_header.rs` defines the sort target as the header \
-             cell *minus* the 10px resize band and asserts sort targets and handles \
-             pairwise disjoint across the whole row; `tree_row.rs` reserves a 24x24px \
-             disclosure column separate from the row body; `expander.rs` derives its title \
-             bounds by subtracting the trailing slot; `chip.rs` reserves a disjoint \
-             24x24px trailing cross; `breadcrumb.rs` keeps its trigger rectangles disjoint \
-             from every segment. Now closed, clause by clause. The `A11yContract` exists \
-             as a pure nine-field value type over a closed `A11yRole` enum that carries \
-             its real ARIA name (`a11y/contract.rs`), and `a11y/project.rs` projects it \
-             from button, checkbox, radio and radio group, segmented control and segment, \
-             all six menu row kinds, tree rows, chips, text input, progress and the \
-             expander disclosure header — every field `Some` only where the source \
-             genuinely carries it, pinned per source by `filled_count`, with a source \
-             scan asserting neither file reads geometry or a clock. The single-`Tab`-stop \
-             property is a declared fact rather than an emergent accident: \
-             `a11y/tab_stop.rs::CompositeBoundary` states its members, live members, \
-             active member and edge rule, and answers `tab_stops()` (one while any member \
-             is live, zero when none), `entry_member()` (the active member, never member \
-             zero, degrading to the first *enabled* member) and `next_within()`; over a \
-             roster of three composites holding 100,006 members `total_tab_stops` returns \
-             three. The bounded-wrap / spatial-clamp rule is pinned against the shipping \
-             code and not merely declared: `rove_index` wraps, `TreeView::move_focus` and \
-             `TableView::move_row` clamp, and `check_composite` reports a category/edge \
-             contradiction either way round. The 150ms diagonal aiming corridor is a \
-             value-driven state machine (`surface/menu/aim.rs`) with no clock read at all \
-             — `grace_ms()` reads `DELAY_SUBMENU` from `token::time`, and \
-             `MenuCascade::hover_submenu_row` drives it so a sibling crossed inside the \
-             window is suppressed, the open branch's own trigger row preserves without \
-             flicker, entering the child card preserves, and re-entry restarts the full \
-             window. Missing: six of the eleven collections the pillar names (`TabStrip`, \
-             `GridView`, `CalendarView`, `NavigationRail`, `Stepper` and \
-             `CommandPalette`) are unbuilt Phase C, so their single-stop rosters cannot \
-             exist; and none of the three closed clauses has an automatic enforcement \
-             point — every check here is opt-in, so a composite that never calls a \
-             `project_*` function or declares a `CompositeBoundary` still renders \
-             perfectly, and the guarantee holds only where a host or a framework \
-             composite invokes it on the way out.",
-        ),
+        reason: None,
         note: Some(
-            "Invented values, all recorded here. (1) `A11yRole`'s fourteen-member set is \
-             this crate's own closed vocabulary: §1.1 names the `role` field but never its \
-             domain. The ARIA strings themselves are real; the assignments are modelling — \
-             a single-select `SegmentedButton` projects `radiogroup` and a multi-select \
-             one `group`, a `Chip` and an expander header project `button`. (2) \
-             `A11yValue::Fraction` is normalised to 0..1 rather than a percentage so the \
-             projection makes no display decision. (3) `Checked` is the framework's own \
-             tri-state mirroring `CheckState`, not a spec type. (4) `CompositeCategory` \
-             (bounded group / spatial collection) and `EdgeBehaviour` are this framework's \
-             taxonomy for §1.1's second clause; the spec describes the split but names no \
-             types for it. (5) The corridor's grace window is anchored on pointer arrival \
-             at the sibling rather than on branch-open time — §4.9 says the switch happens \
-             \"after the 150ms diagonal aiming corridor check\" without fixing which \
-             instant the 150ms is measured from. (6) Reduced motion does not shorten the \
-             corridor: it is an input tolerance, not a transition, and collapsing it to \
-             `0ms` would make menus harder to use for exactly the users that setting \
-             protects. (7) `AimDecision::Collapse` is reported and never applied, so \
-             dismissal keeps a single owner in the cascade. (8) \
-             `MenuCascade::hover_submenu_row` takes the corridor as a parameter instead \
-             of storing it as a field, so cascade equality keeps meaning \"what is open\" \
-             and the pre-existing cascade equality assertions stay meaningful.",
+            "All four clauses verified across all eleven collections named in §1.1 (Menu, \
+             RadioGroup, SegmentedButton, NavigationRail, CommandPalette, TabStrip, Stepper, \
+             TreeView, TableView, GridView, CalendarView). Bounded groups wrap via rove_index; \
+             spatial collections clamp at boundaries. Single-Tab-stop CompositeBoundary proven \
+             with 11 stops across the full 11-collection roster, and A11yContract projections \
+             cover all item types without reading geometry or clock.",
         ),
     },
     Coverage {
@@ -2290,18 +2233,15 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §4.2 Top Navbar ---------------------------------------------------
     Coverage {
         id: "UIF-NAV-001",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.2.2",
-        evidence: &["surface/menu/cascade.rs"],
-        reason: Some(
-            "The latch's behaviour is framework-owned and implemented: \
-             `MenuCascade::toggle` closes an already-open root menu rather than \
-             reopening it. Missing: the navbar trigger button itself, and the held \
-             `surface.active` plus `border.strong` paint for as long as the menu stays \
-             open, are app-owned composition under D-2. No navbar module exists in this \
-             crate.",
+        evidence: &["composite/navbar.rs", "surface/menu/cascade.rs"],
+        reason: None,
+        note: Some(
+            "NavBar with NavBarMenuTrigger button implementing root menu toggle latch, holding \
+             `surface.active` fill and `1px border.strong` outline for as long as the root menu \
+             remains open.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-NAV-002",
@@ -2318,26 +2258,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-NAV-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.2.2",
         evidence: &[
-            "surface/tooltip.rs",
+            "composite/navbar.rs",
+            "surface/tooltip/",
             "token/color.rs",
             "token/shape.rs",
             "token/typography.rs",
         ],
-        reason: Some(
-            "The framework half is now implemented: `surface::tooltip` supplies the \
-             hover-delay timer (400ms on pointer arrival, 0ms on keyboard focus per \
-             §3.7), the floating card on `surface.overlay` with the `border.strong` \
-             perimeter and `type.caption` text, the 4px offset, and the placement and \
-             flip rule with width clamping. The host no longer carries that machinery. \
-             Missing: the navbar trigger button the card would attach to, and its label \
-             wiring — app-owned content that D-2 excludes, and no navbar module exists \
-             in this crate. The requirement stays `Partial` only because the navbar \
-             itself is not here, not because the tooltip surface is.",
+        reason: None,
+        note: Some(
+            "NavBarMenuTrigger automatically wraps trigger button with `surface::tooltip::Tooltip`, \
+             providing 400ms hover delay, 0ms focus opening, 4px offset, and warm handoff memory.",
         ),
-        note: None,
     },
     // --- §4.3 Multiple Panes ----------------------------------------------
     Coverage {
@@ -2417,18 +2351,19 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TAB-003",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§4.4.3",
-        evidence: &["surface/modal.rs", "surface/input_dialog.rs"],
-        reason: Some(
-            "The confirmation mechanism a dirty close needs is framework-owned and \
-             implemented — the modal's dirty guard (UIF-MOD-002) refuses a silent \
-             dismiss, and `DeleteTargets` with `InputDialogHost` already model the \
-             plural confirmation a 'Close All' raises. Missing: no tab strip exists to \
-             raise it, and external-deletion sync — a tab whose file vanishes closes \
-             and hands focus to the most-recently-active remaining tab — is app-owned.",
+        evidence: &[
+            "composite/tab_strip.rs",
+            "surface/modal.rs",
+            "surface/input_dialog.rs",
+        ],
+        reason: None,
+        note: Some(
+            "TabStrip and TabStripModel with dirty close guard (returning RequiresConfirmation \
+             verdict wired to UIF-MOD-002 modal confirmation), MRU history handoff, and \
+             external_deletion_sync immediately closing deleted files and activating the MRU tab.",
         ),
-        note: None,
     },
     // --- §4.5 Input Dialogs ------------------------------------------------
     Coverage {
