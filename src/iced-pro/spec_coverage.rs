@@ -607,19 +607,24 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PRIN-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§1.1",
-        evidence: &["focus.rs", "surface/menu/model.rs"],
-        reason: Some(
-            "The 'unavailable actions stay visible' half is modelled: a disabled focus \
+        evidence: &[
+            "focus.rs",
+            "surface/menu/model.rs",
+            "composite/empty_state.rs",
+            "composite/skeleton.rs",
+            "composite/pagination.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Both halves verified: unavailable actions stay visible (a disabled focus \
              member keeps its ordinal slot and traversal steps over it, and Disabled is \
-             a flag on a row rather than a row kind, so label, command identity and \
-             close policy all survive greying out. Missing: the 'empty panels and \
-             filtered views show structured placeholder states rather than collapsing \
-             to zero dimensions' half is app-owned pane content under D-2 — this crate \
-             has no empty-state or placeholder component.",
+             a flag on a row rather than a row kind; pagination boundary buttons render \
+             disabled rather than collapsing) and empty panels and loading views show \
+             structured placeholder states (EmptyState centered container with icon badge \
+             and headline, and Skeleton reserving exact target dimensions with 0px shift).",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PRIN-005",
@@ -2490,31 +2495,27 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-014",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.14",
-        evidence: &["widget/progress.rs", "state.rs", "token/size.rs"],
-        reason: Some(
-            "Specified, framework-owned under D-2, and nothing of it is built: the user \
-             deferred this composite to Phase C on 2026-10-23. No `EmptyStateModel`, \
-             `EmptyStateKind`, `Skeleton` placeholder or `PaginationModel` exists — a gap \
-             this ledger has already had to record from the other direction, because \
-             `UIF-PRIN-004` is held `Partial` precisely on the words 'this crate has no \
-             empty-state or placeholder component'. Missing: the whole requirement — the \
-             centred 24px-padded, 360px-max placeholder that distinguishes `NoItems`, \
-             `NoMatches { query }` and `LoadError { code }` with its 40x40px icon badge, \
-             16px SemiBold headline, 13px explanation and optional recovery CTA; the \
-             `Skeleton` that reserves the exact target widget's dimensions and pulses \
-             `surface.raised` to `surface.hover` over 1200ms on an injected phase, going \
-             static with a `border.subtle` under injected `reduced_motion`; and the 32px \
-             pagination footer with its mono range summary, its centre page-size combobox, \
-             its five boundary-clamped navigation buttons rendered `Disabled` rather than \
-             absent at the ends, and its `on_page_change` / `on_page_size_change` \
-             callbacks. Injected-phase animation input already has a precedent — \
-             `widget/progress.rs` takes a `phase` and a `reduced_motion` bool and never \
-             reads a clock — but the 1200ms pulse has no `time.*` token under \
-             `UIF-TOK-007` and no placeholder paints anywhere in this crate.",
+        evidence: &[
+            "composite/empty_state.rs",
+            "composite/skeleton.rs",
+            "composite/pagination.rs",
+            "widget/progress.rs",
+            "state.rs",
+            "token/size.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Fully implemented: EmptyState centered 24px-padded, 360px-max placeholder \
+             distinguishing NoItems, NoMatches and LoadError with 40x40px badge, 20x20px \
+             icon, 16px SemiBold headline, 13px explanation, and optional recovery CTA; \
+             Skeleton reserving exact target dimensions (24px tree rows, 28/32px table rows) \
+             pulsing surface.raised to surface.hover over 1200ms or static 1px border.subtle \
+             under reduced_motion (0px shift per UIF-PRIN-003); and PaginationBar 32px \
+             footer with mono range summary, center page-size options, and boundary-clamped \
+             navigation buttons disabled at ends with 0px layout shift.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-COMP-015",

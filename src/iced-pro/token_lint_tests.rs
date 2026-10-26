@@ -127,7 +127,11 @@ use crate::token_lint::{
 /// 157 as of `UIF-ATOM-005b`: `widget/range_slider.rs` and
 /// `widget/range_slider_model.rs`. Both live under `widget/`, so both join
 /// Rule B's visual scope.
-const PIN_FILES_SCANNED: usize = 157;
+///
+/// 160 as of `UIF-COMP-014`: `composite/empty_state.rs`, `composite/skeleton.rs`
+/// and `composite/pagination.rs`. All three live under `composite/`, joining
+/// Rule B's visual scope.
+const PIN_FILES_SCANNED: usize = 160;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -167,7 +171,9 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 83 as of `UIF-ATOM-007`, whose one addition is `surface/tooltip/widget.rs`.
 /// 85 as of `UIF-ATOM-005b`, whose two additions are `widget/range_slider.rs`
 /// and `widget/range_slider_model.rs`.
-const PIN_RULE_B_FILES: usize = 85;
+/// 88 as of `UIF-COMP-014`, whose three additions are `composite/empty_state.rs`,
+/// `composite/skeleton.rs` and `composite/pagination.rs`.
+const PIN_RULE_B_FILES: usize = 88;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -282,7 +288,14 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// `THUMB_RING_WIDTH`, `RAIL_BORDER_WIDTH`, `READOUT_GAP`, `READOUT_RADIUS`,
 /// `READOUT_BORDER_WIDTH`, `READOUT_FONT_SIZE`, `READOUT_PADDING_X`,
 /// `READOUT_PADDING_Y`, `FOCUS_RING_WIDTH`).
-const PIN_TOKEN_BOUND: usize = 207;
+///
+/// 225 as of `UIF-COMP-014`: the 18 token-bound visual constants in
+/// `empty_state::` (`MAX_WIDTH`, `PADDING`, `BADGE_SIZE`, `BADGE_RADIUS`,
+/// `BADGE_BORDER_WIDTH`, `ICON_SIZE`, `BADGE_GAP`, `TEXT_GAP`, `ACTION_GAP`),
+/// `skeleton::` (`DEFAULT_RADIUS`, `BORDER_WIDTH`, `TREE_ROW_HEIGHT`,
+/// `TABLE_ROW_HEIGHT`, `TABLE_ROW_COMPACT_HEIGHT`), and
+/// `pagination::` (`BAR_HEIGHT`, `BORDER_WIDTH`, `BUTTON_SIZE`, `PADDING_X`).
+const PIN_TOKEN_BOUND: usize = 225;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

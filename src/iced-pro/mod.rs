@@ -59,5 +59,10 @@ pub mod token_lint;
 pub mod validation;
 pub mod widget;
 
+pub use composite::{
+    EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, PaginationBar,
+    PaginationModel, Skeleton, SkeletonStyle, empty_state, pagination_bar, skeleton,
+};
+
 #[cfg(test)]
 pub mod test_helpers;

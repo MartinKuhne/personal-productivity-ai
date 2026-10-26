@@ -80,6 +80,12 @@
 //!   cannot see how many items went inline versus into the menu, which is what
 //!   makes the `0px` vertical-shift requirement structural instead of
 //!   observed (`UIF-COMP-008`, `UIF-PRIN-003`)
+//! * [`mod@empty_state`] — the non-collapsing placeholder distinguishing empty,
+//!   zero-match and load-error states with a 40x40px badge and recovery CTA (`UIF-COMP-014`, `UIF-PRIN-004`)
+//! * [`mod@skeleton`] — the loading placeholder reserving exact target widget dimensions
+//!   with a 1200ms shimmer pulse or static subtle border under reduced motion (`UIF-COMP-014`, `UIF-PRIN-003`)
+//! * [`mod@pagination`] — the 32px footer bar with tabular mono range summary, page size
+//!   options, and boundary-clamped navigation buttons (`UIF-COMP-014`)
 //!
 //! Every number comes from [`crate::token`] (`UIF-PRIN-001`). The three
 //! figures §3B prints that no rung carries — the `20px` field header, the
@@ -89,14 +95,17 @@
 
 pub mod breadcrumb;
 pub mod card;
+pub mod empty_state;
 pub mod expander;
 pub mod form_field;
 pub mod info_bar;
 pub mod list_tile;
 pub mod notification;
 pub mod overflow_toolbar;
+pub mod pagination;
 pub mod scroll_view;
 pub mod settings_row;
+pub mod skeleton;
 pub mod table_cell;
 pub mod table_column;
 pub mod table_header;
@@ -105,3 +114,9 @@ pub mod toast;
 pub mod tree_row;
 pub mod tree_view;
 pub mod virtual_list;
+
+pub use empty_state::{
+    EmptyState, EmptyStateKind, EmptyStateModel, EmptyStateStyle, Icon, empty_state,
+};
+pub use pagination::{PaginationBar, PaginationModel, pagination_bar};
+pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
