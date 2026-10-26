@@ -57,18 +57,17 @@
 //! * **Hand-rolled right-alignment.** iced's `Row` lays the Stop button
 //!   out, so neither a magic number nor `available_rect_before_wrap`
 //!   bookkeeping is needed.
-//! * **The command field is the framework's paint on iced's widget, not
-//!   the framework's widget.** [`TextInput`](iced_pro::widget::text_input::TextInput)
-//!   exists and renders, but its uncontrolled constructor takes
-//!   `on_input` only — there is **no submit callback** on that path. Enter
-//!   reaches a host only as the [`Committed`](iced_pro::widget::text_input_controller::TextInputEmission::Committed)
-//!   tier of the *controlled* path, which requires the value to live in an
-//!   app-owned `TextInputModel` rather than in
-//!   `agent_panel_state.command_input`. Submitting a prompt is the band's
-//!   whole job, so the field stays iced's `text_input` styled through
-//!   [`command_field_style`] → [`resolve_input_style`](iced_pro::widget::text_input::resolve_input_style).
-//!   Migrating the model is a state-ownership change and a stated
-//!   follow-on.
+//! * **Controlled command field.** The band's command string remains owned by
+//!   `agent_panel_state.command_input`; [`BottomPanelViewModel`] derives a
+//!   non-clearable [`TextInputModel`]
+//!   snapshot for [`TextInput`]. The
+//!   field routes typing and Escape restoration as
+//!   [`AgentMessage::InputChanged`], Enter's explicit
+//!   [`Committed`](iced_pro::widget::text_input_controller::TextInputEmission::Committed)
+//!   tier as [`AgentMessage::Submit`], and blur's
+//!   [`FocusCommitted`](iced_pro::widget::text_input_controller::TextInputEmission::FocusCommitted)
+//!   tier as `InputChanged` only. Its paint comes from the framework widget
+//!   and [`Palette::pro`], not a hand-built iced style.
 //!
 //! Unit tests live in the sibling `bottom_tests.rs` sidecar.
 
@@ -76,15 +75,16 @@
 #[path = "bottom_tests.rs"]
 mod tests;
 
-use iced::widget::{Column, Row, container, text, text_input};
-use iced::{Alignment, Background, Border, Color, Element, Font, Length};
+use iced::widget::{Column, Row, container, text};
+use iced::{Alignment, Color, Element, Font, Length};
 
-use iced_pro::state::{BaseState, VisualState};
+use iced_pro::token::space;
 use iced_pro::token::typography;
-use iced_pro::token::{shape, space};
 use iced_pro::widget::button::ButtonVariant;
 use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input as pro_text_input;
+use iced_pro::widget::text_input::{InputKind, TextInput};
+use iced_pro::widget::text_input_controller::TextInputEmission;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;
@@ -275,8 +275,9 @@ pub const STOP_BUTTON_ID: &str = "bottom_stop_button";
 /// decoupled from where each field comes from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BottomPanelViewModel {
-    /// The command input's current text (`AgentPanelState::command_input`).
-    pub command_input: String,
+    /// The command input's current text and control settings, snapshotted from
+    /// `AgentPanelState::command_input`.
+    pub command_input: TextInputModel,
     /// Whether the agent is currently running — the gate on the Stop button
     /// and on queue-vs-submit ([`submit_commands`]).
     pub agent_running: bool,
@@ -296,6 +297,7 @@ impl BottomPanelViewModel {
     pub fn from_app(app: &FastMdApp) -> Self {
         let tabs = &app.orchestrator.tabs.tabs;
         let (active_file, _, _) = app.selection().agent_context(tabs);
+        let command_input = app.orchestrator.agent_panel_state.command_input.clone();
 
         let prompt_prefix = compute_prompt_prefix(
             app.selection().prompt_dir(tabs).as_deref(),
@@ -303,7 +305,9 @@ impl BottomPanelViewModel {
         );
 
         Self {
-            command_input: app.orchestrator.agent_panel_state.command_input.clone(),
+            command_input: TextInputModel::new(command_input)
+                .with_placeholder(strings::COMMAND_INPUT_HINT)
+                .with_clearable(false),
             agent_running: app.agent().state().running,
             prompt_prefix: prompt_prefix.clone(),
             file_context: compute_file_context(active_file.as_deref(), &prompt_prefix),
@@ -315,7 +319,7 @@ impl BottomPanelViewModel {
     /// Delegates to [`submit_commands`] with this snapshot's running state.
     #[must_use]
     pub fn submit_commands(&self) -> Vec<UserCommand> {
-        submit_commands(self.agent_running, &self.command_input)
+        submit_commands(self.agent_running, &self.command_input.value)
     }
 }
 
@@ -403,59 +407,17 @@ pub fn stop_button_variant(running: bool) -> ButtonVariant {
     }
 }
 
-/// The command field's paint, resolved through the framework's text-input
-/// atom (`UIF-ATOM-002`).
-///
-/// iced styles a `text_input` from `(Theme, Status)`; the framework
-/// resolves an input from `(InputKind, VisualState, Palette)`. This is the
-/// crossing point — iced's four statuses are translated to the framework's
-/// `(base, focused)` pair and the fill, perimeter, value, placeholder,
-/// icon and selection colours all come from
-/// [`pro_text_input::resolve_input_style`] at
-/// [`InputKind::TextEntry`](pro_text_input::InputKind::TextEntry) rather
-/// than from iced's own theme.
-///
-/// Purity: pure function of `status`.
-#[must_use]
-pub fn command_field_style(
-    status: iced::widget::text_input::Status,
-) -> iced::widget::text_input::Style {
-    use iced::widget::text_input::{Status, Style};
-
-    let palette = Palette::pro();
-    let base = match status {
-        Status::Active => BaseState::Rest,
-        Status::Hovered => BaseState::Hovered,
-        Status::Focused { .. } => BaseState::Rest,
-        Status::Disabled => BaseState::Disabled,
-    };
-    let focused = matches!(status, Status::Focused { .. });
-    let resolved = pro_text_input::resolve_input_style(
-        pro_text_input::InputKind::TextEntry,
-        VisualState { base, focused },
-        &palette,
-    );
-
-    Style {
-        background: Background::Color(resolved.background),
-        border: Border {
-            color: resolved.border_color,
-            width: resolved.border_width,
-            radius: shape::RADIUS_WIDGET.into(),
-        },
-        icon: resolved.icon,
-        placeholder: resolved.placeholder,
-        value: resolved.text,
-        selection: resolved.selection_background,
-    }
-}
-
 /// Renders the bottom command band from a view-model snapshot.
 ///
 /// Emitted messages:
 /// * typing → [`Message::Agent`] [`AgentMessage::InputChanged`]
-/// * Enter → [`Message::Agent`] [`AgentMessage::Submit`] (the reducer runs
+/// * Enter's controlled `Committed` tier → [`Message::Agent`]
+///   [`AgentMessage::Submit`] with the submitted value (the reducer runs
 ///   [`submit_commands`] on it)
+/// * blur's `FocusCommitted` tier → [`Message::Agent`]
+///   [`AgentMessage::InputChanged`] with no submit
+/// * Escape's cancelled edit → [`Message::Agent`]
+///   [`AgentMessage::InputChanged`] with the restored pre-edit value
 /// * Stop while running → [`Message::Command`] [`UserCommand::CancelAgent`]
 ///
 /// Every item is **always allocated**: with no file context the label is an
@@ -491,16 +453,15 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     let context_group = Column::with_children(vec![prompt_prefix.into(), file_label.into()])
         .spacing(CONTEXT_SPACING);
 
-    let command_field = text_input(strings::COMMAND_INPUT_HINT, &view_model.command_input)
-        .id(COMMAND_INPUT_ID)
-        .size(PROMPT_TEXT_SIZE)
-        .line_height(typography::BODY.iced_line_height())
-        .padding(space::XS)
-        .style(|_theme, status| command_field_style(status))
-        .on_input(|text| Message::Agent(AgentMessage::InputChanged { text }))
-        .on_submit(Message::Agent(AgentMessage::Submit {
-            text: view_model.command_input.clone(),
-        }));
+    let command_field = TextInput::controlled(
+        InputKind::TextEntry,
+        view_model.command_input.controlled(),
+        COMMAND_INPUT_ID,
+        command_field_emit,
+    )
+    .width(Length::Fill)
+    .compact()
+    .palette(Palette::pro());
 
     let stop_label = text(strings::STOP_AGENT_BUTTON)
         .size(STOP_BUTTON_TEXT_SIZE)
@@ -534,4 +495,27 @@ pub fn bottom_panel(view_model: &BottomPanelViewModel) -> Element<'_, Message> {
     .padding(BAND_PADDING)
     .align_y(Alignment::Center)
     .into()
+}
+
+/// Routes the command field's framework tiers onto the existing agent
+/// message channel: Enter submits, while blur and Escape only synchronize the
+/// command text.
+fn command_field_emit(emission: TextInputEmission) -> Option<Message> {
+    match emission {
+        TextInputEmission::Changed(live) => Some(Message::Agent(AgentMessage::InputChanged {
+            text: live.value().to_string(),
+        })),
+        TextInputEmission::Committed(commit) => Some(Message::Agent(AgentMessage::Submit {
+            text: commit.value().to_string(),
+        })),
+        TextInputEmission::FocusCommitted(commit) => {
+            Some(Message::Agent(AgentMessage::InputChanged {
+                text: commit.value().to_string(),
+            }))
+        }
+        TextInputEmission::Cancelled(cancel) => Some(Message::Agent(AgentMessage::InputChanged {
+            text: cancel.restored().to_string(),
+        })),
+        TextInputEmission::FocusChanged(_) | TextInputEmission::Cleared(_) => None,
+    }
 }

@@ -677,10 +677,9 @@ fn test_editor_cancel_never_requests_a_save() {
 // Bottom band — command input Enter submit
 // ---------------------------------------------------------------------------
 /// Enter in the command band submits the field's text as
-/// `AgentMessage::Submit`. iced's
-/// `text_input` owns the Enter handling, so the tier-2 assertion is that the
-/// real field really produces the submit message once the reducer has taken
-/// the typed text in.
+/// `AgentMessage::Submit`. The controlled framework field routes Enter as
+/// `Committed`, so the tier-2 assertion is that the real field produces the
+/// submit message once the reducer has taken the typed text in.
 #[test]
 fn test_command_band_enter_submits_the_typed_prompt() {
     let mut state = test_app_state();
@@ -713,7 +712,7 @@ fn test_command_band_enter_submits_the_typed_prompt() {
     }
     state.rebuild_view_models();
     assert_eq!(
-        state.models.bottom.command_input, "/models",
+        state.models.bottom.command_input.value, "/models",
         "the reducer must hold what the field reported"
     );
 

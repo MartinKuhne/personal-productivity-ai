@@ -2091,8 +2091,8 @@ pub const SEARCH_INPUT_ID: &str = "left_panel_search_input";
 /// atom at [`InputKind::Search`](pro_text_input::InputKind::Search)
 /// (`UIF-ATOM-002`).
 ///
-/// The same crossing point as
-/// [`bottom::command_field_style`](super::bottom::command_field_style):
+/// Unlike the bottom band, which uses the framework's controlled
+/// [`TextInput`](pro_text_input::TextInput) directly with its palette:
 /// iced styles a `text_input` from `(Theme, Status)`, the framework
 /// resolves one from `(InputKind, VisualState, Palette)`. Every channel
 /// — fill, perimeter, value, placeholder, icon, selection — comes from

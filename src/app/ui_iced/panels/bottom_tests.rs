@@ -16,26 +16,37 @@ use crate::config::LlmConfig;
 use crate::ui::strings;
 use crate::ui_iced::test_helpers::test_app;
 
-use iced::Background;
+use iced_pro::binding::{Cancel, Commit, Live};
 use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::{shape, size, space, typography};
+use iced_pro::token::{size, space, typography};
 use iced_pro::widget::button::{self, ButtonVariant};
 use iced_pro::widget::text_input as pro_text_input;
+use iced_pro::widget::text_input_controller::TextInputEmission;
+use iced_pro::widget::text_input_model::TextInputModel;
 
 use super::{
     BAND_PADDING, BAND_SPACING, BottomPanelViewModel, COMMAND_INPUT_ID, CONTEXT_SPACING,
     FILE_CONTEXT_BASE_SIZE, FILE_CONTEXT_FALLBACK_SIZE, FILE_CONTEXT_MIN_SIZE, PROMPT_TEXT_SIZE,
-    STOP_BUTTON_ID, STOP_BUTTON_TEXT_SIZE, command_field_style, compute_file_context,
-    compute_prompt_prefix, format_models_list, parse_command_intent, stop_button_color,
-    stop_button_variant, stop_enabled, submit_commands,
+    STOP_BUTTON_ID, STOP_BUTTON_TEXT_SIZE, compute_file_context, compute_prompt_prefix,
+    format_models_list, parse_command_intent, stop_button_color, stop_button_variant, stop_enabled,
+    submit_commands,
 };
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::theme::Palette;
+use crate::ui_iced::message::{AgentMessage, Message};
 
 /// A file path that never touches the filesystem — the band only formats it.
 fn note_path() -> PathBuf {
     PathBuf::from("workspace/notes/note.md")
+}
+
+/// The command band's one field model, including its placeholder and disabled
+/// clear affordance.
+fn command_model(value: &str) -> TextInputModel {
+    TextInputModel::new(value)
+        .with_placeholder(strings::COMMAND_INPUT_HINT)
+        .with_clearable(false)
 }
 
 /// Open `path` as a tab and select it — the state the band reads.
@@ -290,7 +301,7 @@ fn from_app_snapshots_a_bare_band() {
     let app = test_app();
     let view_model = BottomPanelViewModel::from_app(&app);
 
-    assert_eq!(view_model.command_input, "");
+    assert_eq!(view_model.command_input.value, "");
     assert!(!view_model.agent_running);
     assert_eq!(view_model.prompt_prefix, ">");
     assert_eq!(view_model.file_context, None);
@@ -305,7 +316,22 @@ fn from_app_carries_the_command_input_text() {
         .push_str("draft prompt");
 
     let view_model = BottomPanelViewModel::from_app(&app);
-    assert_eq!(view_model.command_input, "draft prompt");
+    assert_eq!(view_model.command_input.value, "draft prompt");
+}
+
+#[test]
+fn command_field_model_tracks_app_state_without_becoming_clearable() {
+    let mut app = test_app();
+    app.orchestrator.agent_panel_state.command_input = "first draft".to_string();
+
+    let first = BottomPanelViewModel::from_app(&app);
+    assert_eq!(first.command_input.value, "first draft");
+    assert_eq!(first.command_input.placeholder, strings::COMMAND_INPUT_HINT);
+    assert!(!first.command_input.clearable);
+
+    app.orchestrator.agent_panel_state.command_input = "authoritative update".to_string();
+    let updated = BottomPanelViewModel::from_app(&app);
+    assert_eq!(updated.command_input.value, "authoritative update");
 }
 
 #[test]
@@ -384,6 +410,31 @@ fn view_model_submit_commands_uses_its_own_running_flag() {
     );
 }
 
+#[test]
+fn rendered_command_input_and_submit_command_share_one_value() {
+    let displayed_value = "displayed value";
+    let view_model = BottomPanelViewModel {
+        command_input: command_model(displayed_value),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let mut ui = iced_test::simulator(super::bottom_panel(&view_model));
+
+    assert!(
+        ui.find(displayed_value).is_ok(),
+        "the command input must render its view-model value"
+    );
+    assert_eq!(
+        view_model.submit_commands(),
+        vec![
+            UserCommand::RunAgent(displayed_value.to_string()),
+            UserCommand::ClearCommandInput,
+        ],
+        "submitting must use the same value shown in the command input"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Framework widget resolution (INT-7a)
 // ---------------------------------------------------------------------------
@@ -431,54 +482,6 @@ fn stop_button_label_colour_matches_the_danger_rest_lock() {
     );
 }
 
-/// The command field's paint resolves through the framework text-input
-/// atom for every iced status, including the focus and disabled cells.
-#[test]
-fn command_field_paint_resolves_through_the_input_atom() {
-    use iced::widget::text_input::Status;
-
-    let pro = Palette::pro();
-    let resolve = |base: BaseState, focused: bool| {
-        pro_text_input::resolve_input_style(
-            pro_text_input::InputKind::TextEntry,
-            VisualState { base, focused },
-            &pro,
-        )
-    };
-
-    let active = command_field_style(Status::Active);
-    let rest = resolve(BaseState::Rest, false);
-    assert_eq!(active.background, Background::Color(rest.background));
-    assert_eq!(active.border.color, rest.border_color);
-    assert_eq!(active.border.width, rest.border_width);
-    assert_eq!(active.value, rest.text);
-    assert_eq!(active.placeholder, rest.placeholder);
-    assert_eq!(active.selection, rest.selection_background);
-    assert_eq!(active.border.radius, shape::RADIUS_WIDGET.into());
-
-    let hover = command_field_style(Status::Hovered);
-    let hovered = resolve(BaseState::Hovered, false);
-    assert_eq!(hover.border.color, hovered.border_color);
-    assert_ne!(
-        hover.border.color, active.border.color,
-        "hover must be distinguishable from rest through the atom"
-    );
-
-    let focused = command_field_style(Status::Focused { is_hovered: false });
-    let focused_resolved = resolve(BaseState::Rest, true);
-    assert_eq!(focused.border.color, focused_resolved.border_color);
-    assert_eq!(focused.border.width, focused_resolved.border_width);
-
-    let disabled = command_field_style(Status::Disabled);
-    let disabled_resolved = resolve(BaseState::Disabled, false);
-    assert_eq!(disabled.border.color, disabled_resolved.border_color);
-    assert_eq!(disabled.value, disabled_resolved.text);
-    assert_ne!(
-        disabled.value, active.value,
-        "a disabled field must not read as live"
-    );
-}
-
 /// The band's scalars resolve from tokens, and the two interactive
 /// controls share one density rung (§1 Row Density Homogeneity).
 #[test]
@@ -494,14 +497,57 @@ fn band_scalars_resolve_from_tokens_and_share_one_density_rung() {
     assert_eq!(STOP_BUTTON_TEXT_SIZE, typography::BODY.size);
     assert_eq!(FILE_CONTEXT_FALLBACK_SIZE, typography::MIN_SIZE);
 
-    // Field: BODY line height + 2 x XS padding lands on CONTROL_SM, the
-    // same rung the Stop button takes via `.compact()`.
+    // The framework field's `.compact()` height remains the old explicit
+    // BODY line box + 2 x XS padding, and matches the Stop button's rung.
     let field_height = typography::BODY.line_height + 2.0 * space::XS;
     assert_eq!(field_height, size::CONTROL_SM);
+    assert_eq!(pro_text_input::HEIGHT_COMPACT, field_height);
     assert_eq!(
-        field_height,
+        pro_text_input::HEIGHT_COMPACT,
         button::HEIGHT_COMPACT,
         "both controls in the band must share one ControlDensity"
+    );
+}
+
+#[test]
+fn command_field_emissions_keep_enter_blur_escape_and_clear_routes_distinct() {
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::Changed(Live::new("typed".to_string()))),
+        Some(Message::Agent(AgentMessage::InputChanged {
+            text: "typed".to_string(),
+        }))
+    );
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::Committed(Commit::new(
+            "submitted".to_string(),
+        ))),
+        Some(Message::Agent(AgentMessage::Submit {
+            text: "submitted".to_string(),
+        }))
+    );
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::FocusCommitted(Commit::new(
+            "blurred".to_string(),
+        ))),
+        Some(Message::Agent(AgentMessage::InputChanged {
+            text: "blurred".to_string(),
+        }))
+    );
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::Cancelled(Cancel::new(
+            "before edit".to_string(),
+        ))),
+        Some(Message::Agent(AgentMessage::InputChanged {
+            text: "before edit".to_string(),
+        }))
+    );
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::FocusChanged(false)),
+        None
+    );
+    assert_eq!(
+        super::command_field_emit(TextInputEmission::Cleared(Commit::new(String::new()))),
+        None
     );
 }
 
@@ -522,13 +568,13 @@ fn band_controls_have_stable_ids() {
 #[test]
 fn bottom_panel_builds_idle_and_running_snapshots() {
     let idle = BottomPanelViewModel {
-        command_input: String::new(),
+        command_input: command_model(""),
         agent_running: false,
         prompt_prefix: ">".to_string(),
         file_context: None,
     };
     let running = BottomPanelViewModel {
-        command_input: "queued".to_string(),
+        command_input: command_model("queued"),
         agent_running: true,
         prompt_prefix: "notes >".to_string(),
         file_context: Some(("note.md".to_string(), 10.0)),
@@ -540,4 +586,197 @@ fn bottom_panel_builds_idle_and_running_snapshots() {
     // (`on_press_maybe` / empty-string label) rather than from a branch.
     let _idle_element = super::bottom_panel(&idle);
     let _running_element = super::bottom_panel(&running);
+}
+
+// ---------------------------------------------------------------------------
+// Live controlled command-field interactions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn live_command_field_typing_emits_input_changed() {
+    use iced_test::selector::Candidate;
+
+    let view_model = BottomPanelViewModel {
+        command_input: command_model(""),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let input_id = iced::widget::Id::from(COMMAND_INPUT_ID);
+    let mut ui = iced_test::simulator(super::bottom_panel(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == input_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the bottom band must mount its stable command input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("x");
+
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Agent(AgentMessage::InputChanged {
+            text: "x".to_string(),
+        })),
+        "typing must continue to emit InputChanged, got {messages:?}"
+    );
+}
+
+#[test]
+fn live_command_field_enter_submits_the_edited_value() {
+    use iced_test::selector::Candidate;
+
+    let view_model = BottomPanelViewModel {
+        command_input: command_model(""),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let input_id = iced::widget::Id::from(COMMAND_INPUT_ID);
+    let mut ui = iced_test::simulator(super::bottom_panel(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == input_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the bottom band must mount its stable command input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("submitted value");
+    let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+
+    let messages: Vec<_> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Agent(AgentMessage::Submit {
+            text: "submitted value".to_string(),
+        })),
+        "Enter must submit the live editor value, got {messages:?}"
+    );
+}
+
+#[test]
+fn live_command_field_escape_restores_the_pre_edit_text() {
+    use iced_test::selector::Candidate;
+
+    let view_model = BottomPanelViewModel {
+        command_input: command_model("original"),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let input_id = iced::widget::Id::from(COMMAND_INPUT_ID);
+    let mut ui = iced_test::simulator(super::bottom_panel(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == input_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the bottom band must mount its stable command input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite(" edited");
+    let _ = ui.tap_key(iced::keyboard::key::Named::Escape);
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Agent(AgentMessage::InputChanged {
+            text: "original".to_string(),
+        })),
+        "Escape must synchronize the pre-edit text, got {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, Message::Agent(AgentMessage::Submit { .. }))),
+        "Escape must never submit, got {messages:?}"
+    );
+}
+
+#[test]
+fn live_command_field_blur_syncs_without_submitting() {
+    use iced_test::selector::Candidate;
+
+    let view_model = BottomPanelViewModel {
+        command_input: command_model(""),
+        agent_running: false,
+        prompt_prefix: ">".to_string(),
+        file_context: None,
+    };
+    let input_id = iced::widget::Id::from(COMMAND_INPUT_ID);
+    let mut ui = iced_test::simulator(super::bottom_panel(&view_model));
+    let bounds = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::TextInput {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == input_id => Some(bounds),
+            _ => None,
+        })
+        .expect("the bottom band must mount its stable command input");
+
+    ui.point_at(bounds.center());
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+    let _ = ui.typewrite("draft");
+    let _ = ui.click(">");
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    let synced_values: Vec<_> = messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Agent(AgentMessage::InputChanged { text }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        synced_values.len() >= 2,
+        "focus loss must synchronize after the keystroke stream, got {synced_values:?}"
+    );
+    assert_eq!(
+        &synced_values[synced_values.len() - 2..],
+        ["draft", "draft"],
+        "the last keystroke and focus-loss commit must both carry the settled value"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|message| matches!(message, Message::Agent(AgentMessage::Submit { .. }))),
+        "blur must never submit, got {messages:?}"
+    );
 }
