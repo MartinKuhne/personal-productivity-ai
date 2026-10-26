@@ -2,7 +2,7 @@
 
 > **Status:** In progress — increment ledger for implementing
 > [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) as a new workspace crate.
-> **Date:** 2026-10-21
+> **Date:** 2026-10-25 (ledger last updated; opened 2026-10-21)
 > **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) (UIF-*
 > requirement IDs). The spec used to live in *this* directory as
 > `ui-framework.md`; commit `edbe04a` moved it inside the crate it governs.
@@ -2408,11 +2408,12 @@ lines**.
 
 ### The INT series — what the integration work established
 
-Nineteen records spanning INT-1 through INT-14; 7724 → 8048 workspace
-tests (+324), every gate independently re-run at every step with
-`--workspace` and doc-warning lines counted explicitly. INT-9 through
-INT-11 alone are 7957 → 8022 (+65); INT-12 through INT-14 are
-8022 → 8048 (+26).
+Twenty-two records spanning INT-1 through INT-15 plus `UIF-MOD-004` and
+the token-lint continuation fix; 7724 → 8083 workspace tests (+359),
+every gate independently re-run at every step with `--workspace` and
+doc-warning lines counted explicitly. INT-9 through INT-11 alone are
+7957 → 8022 (+65); INT-12 through INT-14 are 8022 → 8048 (+26);
+INT-15, MOD-004 and the lint continuation fix are 8048 → 8083 (+35).
 
 **Two headlines from the last round, and they are the same failure in
 different clothes.** First: a spec rewrite landed mid-stream and the
@@ -2455,7 +2456,7 @@ itself rather than at this repo: `iced::widget::empty` and
 `Container::border_radius` do not exist in 0.14, so a snippet written with
 both in it cannot compile.
 
-**Nine user-visible defects were found by the integration work that the
+**Ten user-visible defects were found by the integration work that the
 framework's own test suite did not catch** — because the framework tests
 test resolvers, and the defects only appear when something actually paints:
 blank menus (`bb18c2d`), disabled-`Ok` dismissing a dialog, silent loss
@@ -2465,23 +2466,67 @@ that needed a click because the aiming corridor never ran (INT-9), tree
 rows that never highlighted on hover (INT-10), and the unsaved marker
 rendered at 12px against the spec's 6px with neither the tab-strip accent
 bar nor the tree selection bar and depth guides present at all (INT-11).
+The tenth is different in kind from the other nine: it was **ruled to be
+accepted rather than fixed**. The `[PDF]` chip mounts only where there is
+room, and the room condition reduces to `pane >= 176 + 16 × depth`, so at
+the app's own minimum pane width every *nested* PDF-backed file is
+visually identical to an ordinary file, and at the spec's minimum even the
+top-level ones are (INT-15). It is counted here rather than dropped because
+a user at a narrow pane still cannot tell a PDF-backed file from any other
+whether or not anyone decided that was acceptable; what the ruling changed
+is the response, not the consequence.
 
-**The last three increments found four more defects — but in the spec and in
-the gates rather than in the app.** (1) `spec.md:883`'s mandated chip fill
-measures `1.067676:1` against the selection band it exists to survive, and
-no danger or warning token in the palette reaches `3.00` there — the rule
-asks for something the palette cannot express (INT-12, ruled and built in
-INT-13). (2) The framework's `3.00` coincident-fill obligation is
-**declarative only**: `gallery_audit::judge()` (`gallery_audit.rs:152`)
-returns `true` unconditionally for every class except `Judged`, so nothing
-in the enforcement path ever compares a fill against its mount (INT-13).
-(3) The token-lint gate blessed declarations it could not read as
-compliant (found INT-13, fixed INT-14). (4) That fix surfaced a literal
-that had shipped invisibly inside `TAG_TRIGGER_VERTICAL_PADDING`
-(`top.rs:309`) (INT-14). Three of the four are findings about the checking
-machinery rather than the checked code, and that is the more disturbing
-half: a gate that cannot see does not merely fail to help, it actively
-manufactures confidence.
+**The last six increments found seven more defects — and every one of them
+is in the spec or in the checking machinery rather than in the app.**
+(1) `spec.md:883`'s mandated chip fill measures `1.067676:1` against the
+selection band it exists to survive, and no danger or warning token in the
+palette reaches `3.00` there — the rule asks for something the palette
+cannot express (INT-12, ruled and built in INT-13). (2) The framework's
+`3.00` coincident-fill obligation is **declarative only**:
+`gallery_audit::judge()` (`gallery_audit.rs:152`) returns `true`
+unconditionally for every class except `Judged`, so nothing in the
+enforcement path ever compares a fill against its mount (INT-13). (3) The
+token-lint gate blessed declarations it could not read as compliant (found
+INT-13, fixed INT-14). (4) That fix surfaced a literal that had shipped
+invisibly inside `TAG_TRIGGER_VERTICAL_PADDING` (`top.rs:309`) (INT-14).
+(5) The spec's own two numbers for the attributions card contradict each
+other: the card is pinned at `480px` and the list capped at `200px`, the
+furniture takes 150px, so 130px of a fixed-size dialog is dead space and
+about 4.4 visible rows are given back for nothing (MOD-004). (6) The
+token-lint gate had a **second** unread-expression hole one level deeper
+than (3), and the fix that closed (3) did not find it — `join_continuation`
+returned the first line whenever it was non-empty, so a partial first line
+hid everything below it (lint fix, `e09a94d`). (7) That second hole had
+already let a literal ship unread: `SEARCH_ROW_HEIGHT`
+(`ui_iced/panels/left.rs:481`) carried two `2.0` multipliers that no
+check had ever seen.
+
+A related finding that is neither gate nor spec but belongs with them:
+`pdf_badge_fits` carried a doc comment asserting `UIF-PANE-002` *"normally
+removes the conflict by widening the pane"*. It does not — `auto_fit_width`
+charges `tree_row::content_width` with no badge term at all. A false claim
+inside the code is worse than a missing one, because the next contributor
+reads it as settled (INT-15; corrected in place and now disproved by test).
+
+**The class, generalised — and it has now appeared three times in three
+different subsystems.** A verdict delivered without looking. In INT-9..11
+it was what we *asserted about iced*: four capabilities written off as
+unavailable, all four present, each claim cheaper to repeat than to test.
+In INT-14 and its second half it was written **into the tool**: a
+compliance check that cannot distinguish "compliant" from "unread" reports
+the same number for both, so its green is not evidence of anything — and
+the second half is the damning one, because it survived the fix that was
+supposed to close the first. And in the spec itself it is a number that was
+never checked against the thing it governs: a chip fill the palette cannot
+produce, and a card height and a list cap that were each written down
+without anyone adding them up. The three are the same mistake wearing
+different uniforms, and the second is the one that should worry a reviewer
+most: a person's false claim gets argued with, but a gate's false pass is
+downloaded as fact by everyone who trusts the count. The practical rule
+this ledger now carries is that **a passing check must be shown to be able
+to fail** — every fix in this series is accompanied by a non-vacuity run
+against the reverted code, because a test that only ever sees fixed code
+proves nothing.
 
 **The headline of the last three increments: the "impossible" claims were
 the blocking defect, not the missing code.** Four separate capabilities
@@ -3056,7 +3101,7 @@ not only in a commit message.
 about the framework's enforcement surface, not about this chip.**
 `badge::badge_chrome_class` (`badge.rs:420`) does classify a solid pill
 `ChromeClass::CoincidentWithFill`, and `ChromeClass::minimum_contrast()` does
-return `Some(3.00)` (`contrast.rs:343`). But `gallery_audit::judge()`
+return `Some(3.00)` (`contrast.rs:340`). But `gallery_audit::judge()`
 (`gallery_audit.rs:152`) returns `true` **unconditionally** for every class
 except `Judged`. Nothing in the enforcement path ever compares a badge fill
 against a selection band. The 3.00 coincident-fill obligation is **declarative
@@ -3072,7 +3117,7 @@ unchanged: `the_selection_lock_still_holds_on_a_selected_and_hovered_pdf_row`,
 `the_depth_guides_land_on_indent_step_multiples`.
 
 **Geometry: the chip fills the declared slot edge-to-edge, so charged width equals
-painted width by construction.** `PDF_BADGE_SLOT` (`left.rs:426`) =
+painted width by construction.** `PDF_BADGE_SLOT` (`left.rs:437`) =
 `PDF_BADGE_TEXT_ALLOWANCE` (20 = `space.lg + space.xs`) +
 `PDF_BADGE_CHIP_PADDING_TOTAL` (8 + 8) = **36** — the same 36 as before, so
 `pdf_badge_fits`, `PDF_BADGE_CHARGE` and every downstream floor computation are
@@ -3093,13 +3138,17 @@ it, and the fix are INT-14's record. What belongs here is only the fact that the
 chip work is what surfaced it, and that the workaround was reported instead of
 left as the answer.
 
-**Open deviation, deliberately left.** The row **label** is still danger-tinted at
-rest and on hover via `row_label_colour`'s error tint (`left.rs:2019`). Read
-literally, `:883`'s closing clause — "never in a danger-colored text label" —
-reaches that too, and more broadly than the badge. Changing it is a wider
-behavioural change to every PDF-backed row than the badge rework that was scoped,
-so it is recorded as an open deviation in that function's doc rather than folded
-in here. That doc also falsely claimed the app has no badge at all; corrected.
+**Open deviation, deliberately left — since CLOSED by INT-15.** The row
+**label** was still danger-tinted at rest and on hover via
+`row_label_colour`'s error tint. Read literally, `:883`'s closing clause —
+"never in a danger-colored text label" — reaches that too, and more broadly
+than the badge. Changing it is a wider behavioural change to every
+PDF-backed row than the badge rework that was scoped, so it was recorded
+here as an open deviation rather than folded in. **INT-15 closed it**: the
+tint is gone, the function that produced it (`row_text_color`) is deleted
+rather than neutered, and `row_label_colour` (`left.rs:2080`) takes no
+PDF-backed input at all. That function's doc had also falsely claimed the
+app has no badge at all; corrected during INT-13.
 
 **Correction to this increment's own brief.** `PDF_BADGE_SLOT` was described in
 the brief as `space::XL + space::MD = 28px`. `XL` is 24 and `MD` is 12, so it
@@ -3121,7 +3170,7 @@ lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
 
 ### INT-14 — The token-lint gate was passing code it could not read
 
-**The hole.** `classify_scalar` (`token_lint.rs:1159`) called
+**The hole.** `classify_scalar` (`token_lint.rs:1201`) called
 `numeric_literals(&c.expr)` and returned `TokenBound` — a **pass** — when the
 result was empty. The parser is line-oriented by design, so a `pub const X: f32`
 whose right-hand side wrapped onto a second line yielded an empty expression, and
@@ -3143,7 +3192,7 @@ a pattern-match guess:
 
 The four wraps: `composite/form_field.rs:106` `STACKED_HEIGHT` (token-only),
 `composite/settings_row.rs:80` `MIN_HEIGHT` (token-only),
-`ui_iced/panels/left.rs:314` `ROW_WIDTH_SLACK` (token-only), and
+`ui_iced/panels/left.rs:325` `ROW_WIDTH_SLACK` (token-only), and
 `ui_iced/panels/top.rs:309` `TAG_TRIGGER_VERTICAL_PADDING`
 (**literal-bearing**).
 
@@ -3154,11 +3203,11 @@ wrapped automatically and silently leaves the gate. Nobody has to choose to
 bypass it. Formatting does.
 
 **Treatment: parse the continuation, with `Unreadable` as the backstop.**
-`join_continuation()` (`token_lint.rs:1086`) appends following lines until the
+`join_continuation()` (`token_lint.rs:1123`) appends following lines until the
 terminating semicolon — the same boundary the compiler uses — so the expression
 is actually read. It stops and returns `None` on a blank line or on a line that
 opens a new item (`pub` / `const` / `fn` / `impl` / `struct` / `enum` / `trait` /
-`#`), via `opens_new_item()` (`token_lint.rs:1113`), so a malformed declaration
+`#`), via `opens_new_item()` (`token_lint.rs:1155`), so a malformed declaration
 cannot swallow unrelated code below it. `redact_comments_and_strings` runs first,
 so a semicolon inside a string on a continuation line cannot mis-bind the
 expression boundary.
@@ -3170,10 +3219,10 @@ literals either, so reading the two as one case is exactly how the hole worked.
 seen.
 
 **New `ScalarClass::Unreadable` (`token_lint.rs:183`) is deliberately not
-compliant** — `is_compliant()` returns `false` for it (`token_lint.rs:194`), it
+compliant** — `is_compliant()` returns `false` for it (`token_lint.rs:193`), it
 carries its own label `unreadable-expr`, it emits a distinct Rule B finding, and
 it adds a `ScanStats.unreadable` counter to the report line
-(`token_lint.rs:867`: `…, N unreadable`) so a clean tree can be told apart from
+(`token_lint.rs:872`: `…, N unreadable`) so a clean tree can be told apart from
 an unread one. Without that counter, "nothing to report" and "nothing readable"
 print the same way.
 
@@ -3237,3 +3286,483 @@ Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
 `cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
 lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
+
+---
+
+### INT-15 — The danger tint comes off PDF labels, and a hole is accepted
+
+**The token was literally the one the clause names.** `app.error` maps
+directly to `status.danger.text` (`src/app/ui/theme.rs:202`), and the tree
+painted every PDF-backed row label with `app.error` at rest and on hover.
+`spec.md:883` ends with *"never in a danger-colored text label"*. This is
+not a close analogue of what the rule prohibits — it is the exact token, in
+a text label, carrying the exact distinction the rule exists to govern.
+INT-13 recorded this as an open deviation because the badge rework did not
+scope it. INT-15 closes it.
+
+**`row_text_color` is deleted, not neutered.** The function returned
+`palette.error` for PDF-backed files (the retired `REQ-450`) and the body
+token otherwise. Leaving it in place behind a parameter that ignores it
+would have kept the mechanism reachable: a later call site could pass
+`true` again without anyone having to re-decide anything, and the doc
+comment saying "this parameter is no longer used" is not a barrier anyone
+hits. With the function gone and `pdf_backed` removed from
+`row_label_colour`'s signature (`left.rs:2080`), there is no code path in
+the crate that can put a danger token on a row label.
+`no_posture_resolves_a_row_label_to_any_danger_token` asserts that against
+three tokens — `app.error`, `status.danger.text`, `status.danger.fill` —
+across all four selected/hovered postures, and pins as a fixture that
+`app.error == status.danger.text` while `status_danger_text != status_danger_fill`,
+so the sweep is not sweeping one value three times.
+
+**The suppression hole, and its closed form: the chip shows iff
+`pane >= 176 + 16 × depth`.** The chip mounts only where there is room,
+and the room condition reduces exactly. Derived from the real
+`pdf_badge_fits` (`left.rs:660`) and `tree_row::indent_geometry`, then
+reproduced independently on both sides of the boundary at every depth
+0..=12:
+
+| Pane width | Depths that show a chip |
+|---|---|
+| **150** — spec `LEFT_PANE_MIN_W` | **none, at any depth** |
+| **180** — app `LEFT_PANEL_MIN_WIDTH` (`panel_layout.rs:12`) | 0 only |
+| 192 | 0–1 |
+| 224 | 0–3 |
+| **280** — app default (`panel_layout.rs:9`) | 0–6 |
+| 384 — widest legal at a 1920 viewport | 0–8+ |
+
+So at the app's own minimum pane width **every nested PDF-backed file is
+visually identical to an ordinary file**, and at the spec's minimum even
+the top-level ones are. This is not a degenerate width nobody visits: 180
+is a width a user can drag the panel to and leave there.
+
+**Auto-fit cannot rescue it, and the comment that said otherwise was false.**
+`auto_fit_width` (`left.rs:805`) → `longest_row_width` → `row_width` →
+`tree_row::content_width` (`left.rs:777`) — indent, label, furniture — and
+there is **no badge term anywhere in that chain**. A pane auto-fitted to a
+deep PDF-backed row therefore still suppresses that row's own chip.
+`pdf_badge_fits` carried a doc comment claiming `UIF-PANE-002` *"normally
+removes the conflict by widening the pane"*. That claim is false. It has
+been corrected in place, and `auto_fit_does_not_widen_the_pane_to_keep_the_chip`
+disproves it rather than leaving the sentence in to be re-believed. A false
+claim inside the code costs more than a missing one: the next contributor
+reads it as settled.
+
+**The ruling: accept the hole.** This was brought to the spec author with
+the table above and three alternatives — revert the tint, make
+`auto_fit_width` charge `PDF_BADGE_CHARGE` (`left.rs:450`), or build the
+spec's own icon-shape fallback per `UIF-PRIN-005`. The ruling was
+**accept the hole**. It is therefore recorded rather than fixed, and pinned
+by `a_pdf_backed_row_can_end_up_with_no_visible_distinction_at_all`, which
+asserts the boundary on both sides at every depth 0..=12 so it can neither
+widen silently nor be quietly dropped. The same test proves the suppressed
+posture is *total*, not merely weak: with the chip suppressed the label
+resolves to the ordinary row's colour in all four postures, so a
+suppressed-chip PDF-backed row and an ordinary row share every painted
+pixel.
+
+**How literally the rule requires this — the honesty caveat, kept because
+the hole makes it matter.** The implementer pointed out that `:883`'s
+explicit `MUST NOT` is scoped to *"badge text color"* and the section is
+titled *"Badge on **Selected** Rows"*, while *"never in a danger-colored
+text label"* is the tail of the **fallback** instruction — the branch that
+applies when a host cannot mount a badge chip. On a strict literal reading
+the *resting* tint is not prohibited at all. The change still rests on
+solid ground: the clause's wording is categorical and describes exactly
+what the app was doing; the INT-13 chip makes the tint redundant under any
+reading; and a colour-only cue is precisely what `UIF-PRIN-005` redundant
+cueing exists to prevent. But the case is made by the clause's intent plus
+the redundancy, **not by an unambiguous prohibition** — and with the
+suppression hole accepted, that distinction is not academic. A reader who
+assumes the rule forced this change should know it did not, and should know
+that the tint's removal is what makes the suppressed-chip posture
+undistinct rather than merely differently-coloured.
+
+**The selection lock is still load-bearing, and it would be easy to conclude
+otherwise.** Removing the tint invites "the label no longer needs the
+lock". It does: the body token on the selection band measures **3.176079**
+raw, below the `4.5` text floor. Only the role-based lock lifts it to
+`text.strong` at **4.801987**. Pinned by
+`the_lock_is_load_bearing_for_the_body_token_not_only_the_retired_tint`,
+because "the tint is gone so the lock can go" is exactly the mistake that
+would reintroduce an unreadable label — this time for every selected row,
+not just PDF-backed ones.
+
+**Contrast, all recomputed from raw sRGB via `token::contrast::contrast_ratio`
+— none of it transcribed from the spec.**
+
+| Pair | Measured | Note |
+|---|---|---|
+| `app.text` / `surface.base` | **13.158975** | the new resting label |
+| `app.text` / `surface.hover` | **10.738035** | the new hovered label |
+| `app.text` / `accent.fill` (raw) | **3.176079** | below 4.5 — the lock is required |
+| `text.strong` / `accent.fill` (locked) | **4.801987** | what actually paints when selected |
+| `app.error` / `accent.fill` | **1.586348** | INT-7b's defect — now unreachable **by construction** |
+| `app.error` / `surface.base` | 6.572478 | what the tint used to be |
+| `app.error` / `surface.hover` | 5.363298 | what the tint used to be |
+| chip fill / `accent.fill` | 1.067676 | INT-13's shortfall, unchanged |
+| `text.strong` / chip fill | 5.126966 | the chip's own pair, unchanged |
+
+INT-7b's original defect is now unreachable for a stronger reason than it
+was: `error` is never handed to the label resolver at all, rather than
+being corrected by the lock after the fact. The lock still runs, and still
+has to.
+
+**Tests changed because the rule changed, not to make them green.** Two were
+rewritten outright because they asserted behaviour the clause now
+prohibits — `pdf_backed_rows_use_the_error_token_and_others_the_body_token`
+became `a_pdf_backed_row_label_never_uses_the_error_token`, and
+`an_unselected_row_keeps_the_apps_own_label_rule` became
+`an_unselected_pdf_backed_row_is_labelled_exactly_like_an_ordinary_row`.
+Neither was kept and flipped: the old assertions described the prohibited
+behaviour, so both were rebuilt around the new rule. Five new tests cover
+the never-danger property across four postures and three danger tokens, the
+lock's continued necessity, the chip as sole carrier, the suppression
+hole, and the auto-fit finding.
+
+**Correction to this increment's own commit message.** It records
+"+6 new, 1 removed, 1 renamed" and "four sites were mechanically updated
+for the dropped parameter". The tree says otherwise. `left_tests.rs` went
+from 84 to 89 `#[test]` items — **two rewritten, five new, net +5**, with
+nothing purely removed. And in production there is **one** call site of
+`row_label_colour` (`left.rs:1635`) plus the signature itself; the other
+six de-parameterised sites are in tests. The substance of the increment is
+unchanged; the counts in the commit message are not what the diff contains.
+
+**No pin moved, and three tempting moves were refused.** `iced-pro`
+152 / 81 / 193 and app 158 / 45 / 96 / 13 all stand — no `f32` constant
+was added or removed. Refused: keeping `row_text_color` behind a dead
+parameter for a smaller diff (deleted instead); lowering `PDF_BADGE_CHARGE`
+or raising the pane minimum to make the suppression hole disappear (both
+are pins that encode decisions, and moving one to hide a defect is exactly
+what the no-lowering rule forbids); and leaving the false `UIF-PANE-002`
+claim in place because correcting it was out of scope.
+
+**The chip and the lock are untouched.**
+`the_chip_is_the_sole_pdf_carrier_and_is_unchanged` pins every INT-13 chip
+field — fill `status.danger.fill`, foreground `text.strong`,
+`badge::COUNT_HEIGHT` 18, `shape::RADIUS_PILL`, `badge::CHIP_H_PADDING` 8
+— and the slot identity. All four INT-11/INT-13 selection-lock guard tests
+pass unchanged, and `row_box` still takes no PDF-backed input, so the label
+still cannot shift.
+
+Tests: 8048 → 8053 (+5 net: 2 rewritten, 5 new), all confirmed discovered
+via `cargo nextest list`.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8053 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+and all `SPEC.md` files untouched.
+
+---
+
+### MOD-004 — Sub-region height solving lands, and the spec's own two numbers conflict
+
+**The requirement.** `UIF-MOD-004` (`spec.md:1379`) asks that scrollable
+sub-region heights be solved as a pure function of the card's solved
+bounds — `subregion_max_h = modal_height − (header_band + 2 × body_padding
++ footer_band)` — with every term resolved from tokens, and that a sub-region
+never borrow the card's outer height constant. It was the one requirement
+the spec rewrite added that still stood at `Partial`. It is now
+**`Implemented`** (`spec_coverage.rs:3000`), with the deviations recorded
+alongside the upgrade so the status cannot be mistaken for a clean finish.
+
+**The solver shape: a struct, not three floats.** `SubRegionBands`
+(`surface/modal.rs:510`) carries `header`, `body_padding` and `footer`.
+Three interchangeable `f32` arguments at a call site is a silent
+transposition bug — `solve(card, footer, header, pad)` compiles, runs and
+is wrong — and `ModalFrame` deliberately carries no header or footer
+sub-rectangles because those need measured content, so the frame cannot
+supply them itself. `from_frame` (`modal.rs:540`) seeds the one term the
+frame genuinely owns, `content_padding`, and leaves the two content bands
+empty; `with_header` / `with_footer` set one band each; `total()`
+(`modal.rs:558`) is **the only place in the codebase that writes the
+`2 ×` term**, so the doubling cannot be restated inconsistently somewhere
+else.
+
+**`subregion_max_height` (`modal.rs:593`) is pure**: card minus the bands,
+clamped at zero, non-finite inputs collapsed through the module's existing
+`finite()` helper (`modal.rs:1648`) rather than propagated downstream.
+`subregion_height` (`modal.rs:604`) applies the cap **after** the
+remainder, not instead of it — a card too short to reach the cap still
+gets everything it has rather than being over-capped.
+`the_cap_is_applied_after_the_remainder_not_instead_of_it` and
+`a_card_smaller_than_its_own_furniture_clamps_to_zero_rather_than_going_negative`
+hold both edges; `non_finite_inputs_cannot_poison_the_solved_height` and
+`the_solver_is_pure_and_deterministic` hold the purity claim.
+
+**The named cap, and two deliberate naming decisions.**
+`ATTRIBUTIONS_LIST_MAX_HEIGHT = 200` (`modal.rs:274`), registered in
+`token_lint::SURFACE_GEOMETRY_CONSTANTS`.
+
+* It is `_HEIGHT`, **not** the spec's `_H`. `VISUAL_NAME_MARKERS`
+  (`token_lint.rs:295`) matches `HEIGHT`, not a bare `H`, so a constant
+  named `ATTRIBUTIONS_LIST_MAX_H` would be invisible to the very gate it is
+  supposed to be visible to — the cap would have been unenforceable by
+  construction. The sibling §2.2 entry already made exactly this call: the
+  spec's `FOLDER_LIST_MAX_H` is `FOLDER_LIST_MAX_HEIGHT` at
+  `input_dialog.rs:185`.
+* It lives in `surface/modal.rs`, not `token/size.rs`. `size.rs` holds
+  reusable `size.*` rungs; this is a §2.2 **surface geometry** constant,
+  and this codebase mirrors that table in the owning surface module.
+
+**Measured headless before any change — none of these figures is
+transcribed.**
+
+| Quantity | Value |
+|---|---|
+| catalog | **58 crates** (an old test comment said 57; wrong) |
+| header band | 69 |
+| body padding × 2 | 32 |
+| footer band | 49 |
+| band total | **150** |
+| remainder in a 480px card | **330.0** — matches the retired `Fill` pin exactly |
+| now rendered | **200.0** — the cap binds |
+| row height | 29.3793px |
+| visible rows | **11.23 → 6.81** |
+
+**THE SPEC'S OWN TWO NUMBERS CONFLICT FOR THIS CARD, AND THE COST IS REAL.**
+The spec pins the card at `480px` (`ATTRIBUTIONS_MODAL_SIZE`, `spec.md:111`
+and the §4.6.2 sizing table at `:1376`) **and** caps the list at `200px`.
+The furniture consumes 150px, so the card has 330px to give and the cap
+allows only 200 of it to be used. That leaves **130px of dead card** at
+the bottom of a fixed-size dialog with nothing laid out in it, and costs
+about **4.4 visible rows** — a reader scrolls roughly four more times to
+reach the same place.
+
+The spec was shipped as written rather than quietly picking a side, and the
+cost is pinned by a test named
+`the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows`
+rather than buried in prose. Resolving it means changing a pinned number —
+the card height or the cap — which is a **decision, not an implementation
+detail**, and neither number was touched. The requirement's phrasing is
+conditional (*"when a sub-region needs a stable cap"*), so a reading
+exists in which `200` is illustrative rather than mandatory for this card;
+the §2.2 table names it concretely, so the cap was applied. **This is
+open for the spec author.**
+
+**Overflow safety moved from structural to conditional, which is a new
+risk and is named as one.** `Length::Fill` made overflow structurally
+impossible. A solved `Length::Fixed` is safe only because the band terms
+it was computed from are the same terms the `Column` actually consumes, so
+`solved + bands` equals the card's inner height and the list lands exactly
+where `Fill` put it — never further. **An understated band now over-solves
+through the footer**, which `Fill` could not do. The property went from
+structural to argumentative, so
+`the_credits_list_never_crosses_the_footer_band_at_any_viewport` measures
+list-bottom against footer-top at five viewports instead of trusting the
+argument. This is the cost of replacing a mechanism with a computation, and
+it is the reason the solver's band terms must be updated in lockstep with
+the card's furniture.
+
+**`Length::Fixed(0.0)` is void in iced 0.14 — found by measurement, not
+by reading.** `Size::is_void()` is true if **either** axis is
+`Fixed(0.0)`, and void children are silently dropped from the widget tree.
+At a sub-182px viewport the solved height is 0, the scrollable became
+`SelectorNotFound`, and `ATTRIBUTIONS_LIST_ID` and its scroll position
+were lost — a direct breach of `src/app/AGENTS.md` §5, which requires a
+stateful widget's id to survive rebuilds. Verified against `Fill`, which
+keeps the widget present at 0.0. `credits_list_length`
+(`attributions.rs:231`) therefore falls back to `Fill` when there is no
+room; the cap cannot be breached there because both mechanisms agree the
+height is zero. A solved height of zero is not "nothing to draw", it is
+"nothing exists", and iced means it literally.
+
+**Wiring.** `HEADER_BAND_HEIGHT` (`attributions.rs:170`) = 69 and
+`FOOTER_BAND_HEIGHT` (`attributions.rs:184`) = 49 are composed from tokens
+with the gaps written as repeated `space::SM` terms rather than `3.0 ×`,
+so they are genuinely `TokenBound` under any parser reading rather than
+merely passing one. `credits_list_height` (`:200`) calls `subregion_height`
+with the cap; `credits_list_length` (`:231`) turns the solved height into a
+`Length`; the call site is `attributions.rs:352`.
+
+**Pins moved, all genuine.** `PIN_SURFACE_BOUND` **35 → 36** — the registry
+gained one entry. `PIN_APP_TOKEN_BOUND` **96 → 98** — two new literal-free,
+token-bound band constants. Unchanged: `PIN_TOKEN_BOUND` 193,
+`PIN_FILES_SCANNED` 152, `PIN_RULE_B_FILES` 81 — the new cap classifies
+as `SurfaceBound` rather than `TokenBound`, and the scope counts are
+scope-based rather than content-based.
+
+**A second hole in the token gate was found here, one level deeper than
+INT-14, and deliberately not fixed in this increment** — the record is
+immediately below. The new constants were made literal-free precisely so
+they would pass under either reading while that hole stayed open.
+
+Tests: 8053 → 8073 (+20) — 13 in `surface/modal_tests.rs`
+(`subregion_max_height_is_the_formula_the_requirement_states`,
+`the_body_padding_is_charged_twice_and_only_inside_total`,
+`from_frame_seeds_the_body_padding_and_leaves_the_content_bands_empty`,
+`the_builders_set_one_band_without_touching_the_others`,
+`the_attributions_band_composition_is_every_token_that_is_on_it`,
+`the_attributions_subregion_is_the_measured_remainder_not_the_card_constant`,
+`the_cap_is_applied_after_the_remainder_not_instead_of_it`,
+`the_solved_height_never_exceeds_either_the_remainder_or_the_cap`,
+`a_card_smaller_than_its_own_furniture_clamps_to_zero_rather_than_going_negative`,
+`non_finite_inputs_cannot_poison_the_solved_height`,
+`the_solver_is_pure_and_deterministic`,
+`attributions_list_max_height_is_the_number_the_closed_table_names`,
+`attributions_list_max_height_is_registered_as_a_surface_geometry_constant`)
+and 8 in `attributions_tests.rs`
+(`the_credits_list_is_solved_and_capped_at_the_named_maximum`,
+`the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows`,
+`the_credits_list_never_crosses_the_footer_band_at_any_viewport`,
+`a_viewport_too_short_for_the_cards_own_furniture_clamps_the_list_to_zero`,
+`a_short_card_gives_the_list_its_remainder_not_the_cap`,
+`an_empty_catalog_still_gets_the_capped_list`,
+`a_very_large_catalog_changes_the_scroll_extent_not_the_region`,
+`the_about_card_is_unaffected_and_keeps_its_own_cap`), replacing the
+retired `the_credits_list_fills_the_card_and_scrolls`. All confirmed
+discovered via `cargo nextest list`.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8073 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+and all `SPEC.md` files untouched.
+
+---
+
+### The token-lint continuation hole, second half — a gate that cannot tell "compliant" from "unread"
+
+**One class of failure, two halves.** INT-14 (`a02137a`) is the first half
+and its record above stands; it is not repeated here. This is the second
+half, found while doing MOD-004 and fixed in `e09a94d`. Both halves are
+the same sentence: **the gate reported compliance for an expression it had
+not finished reading.**
+
+**Half one, only as far as half two needs it.** `classify_scalar` returned
+`TokenBound` for an empty expression, so a `pub const X: f32` whose
+right-hand side wrapped onto a second line passed unread. Closed by
+`join_continuation` plus `ScalarClass::Unreadable`.
+
+**Half two: the early return was one condition too broad.**
+`join_continuation` opened with
+
+```rust
+if !first.trim().is_empty() { return Some(first.to_string()); }
+```
+
+so continuation lines were read **only when the first line's right-hand
+side was entirely empty**. A constant written as
+
+```rust
+pub const X: f32 = tree_row::LABEL_RUNG.line_height
+    + typography::CAPTION.line_height * 2.0 + PAD * 2.0;
+```
+
+returned just the first line. No literals in that line → `TokenBound` →
+pass. The `2.0` multipliers underneath were never read by anything.
+
+This is worse than half one. Half one needed the RHS to be *absent* from
+line 1, which only a formatter produces. This fires on the ordinary way a
+developer breaks a long sum across lines — put some of it on line 1,
+continue underneath.
+
+**Survey first, run through the gate's real parser before anything was
+changed** — a scratch harness calling the actual `parse_f32_const` /
+`f32_consts` / `join_continuation` / `classify_scalar` / `is_visual_name` /
+`in_scope`, so the population is measured rather than guessed:
+
+| | iced-pro | app |
+|---|---|---|
+| gated visual `f32` consts | 234 | 114 |
+| single-line (first line carries `;`) | 231 | 109 |
+| empty first-line RHS (half one's case) | 2 | 3 |
+| **partial first-line RHS (newly affected)** | **1** | **2** |
+| **`TokenBound` → `Violation`** | **0** | **1** |
+
+**Exactly one constant was exposed across both trees.** `SEARCH_ROW_HEIGHT`
+(`ui_iced/panels/left.rs:481`) read before the fix as
+`" tree_row::LABEL_RUNG.line_height"` — no literals, `TokenBound`,
+passing. Its real right-hand side carried two `2.0` multipliers that no
+check had ever seen. The other two partial-first constants are token-only
+continuations and stay `TokenBound`, but are now genuinely read rather than
+assumed: `composite/list_tile.rs:130` `TWO_LINE_PARTS_HEIGHT`, and
+`ui_iced/attributions.rs` `HEADER_BAND_HEIGHT` — the latter clean only
+because MOD-004 wrote its gaps as repeated `space::SM` terms.
+
+*Caveat on the app column:* the survey harness could not reach
+`app_scope()` from iced-pro, so it used iced-pro's registry and the
+absolute violation counts are inflated. The `SEARCH_ROW_HEIGHT` flip is
+registry-independent — it is in neither registry — and was cross-checked
+against the real `scan_app()`, which passes at `PIN_APP_TOKEN_BOUND` 98
+after the fix.
+
+*Reconciling the two survey tables.* INT-14's table reads 233 gated consts
+in iced-pro and 112 in the app, with 2 and 2 wrapped; this one reads 234
+and 114, with 2 and 3 empty-first-line. The trees are different, not the
+counts. MOD-004 added `HEADER_BAND_HEIGHT` and `FOOTER_BAND_HEIGHT` to
+`attributions.rs` and `ATTRIBUTIONS_LIST_MAX_HEIGHT` to `modal.rs`, which
+accounts for the extra gated constants and for the app's third wrapped
+declaration. Both tables were produced by the same harness against the tree
+each increment started from.
+
+**Tokenised, not excused.** The doubled terms are written out —
+`CAPTION + CAPTION`, `PADDING + PADDING` — value byte-identical, zero
+literals. Registering it as a Surface Geometry Constant would have claimed
+a §-backed fixed bound that does not exist: it is a derived sum, not a
+spec-pinned measurement. Allow-listing it would have excused exactly the
+thing the rule exists to catch. The repetition also makes the two caption
+lines and the two padding sides countable by eye.
+
+**The fix is terminator-based, not emptiness-based.** A first line carrying
+the terminating `;` is complete and is returned verbatim; otherwise the
+join continues until the `;` arrives, keeping the blank-line and
+`opens_new_item` guards so a malformed declaration still cannot swallow
+unrelated code below it. INT-14's empty-first-line case still joins,
+because `""` carries no terminator. No multi-line declaration is exempted
+— that would have been the same hole with better documentation.
+
+**Correction to the brief's own premise: `rustfmt` does not produce this
+shape.** A probe constant written as one long line was wrapped by
+`cargo fmt` as `pub const X: f32 =` with the terms on the following line
+— i.e. **half one's** empty-first-line shape, not the partial one. What is
+true is that once a developer hand-writes the partial shape, `rustfmt`
+**preserves** it, because every line sits inside `max_width`. That is how
+two constants were living in it at a fmt-clean HEAD. The hole is reachable
+by ordinary hand-wrapping and survives formatting; it is simply not
+generated by it. The premise was wrong in a direction that makes the hole
+slightly narrower than claimed and no less real.
+
+**Non-vacuity proven by reverting the fix, not by asserting the new
+behaviour.** With the shipped `!first.trim().is_empty()` restored, exactly
+five tests fail — `a_literal_below_a_partial_first_line_is_seen_and_fails`,
+`a_multiplier_on_a_continuation_line_is_caught_not_glossed`,
+`a_partial_first_line_that_cannot_reach_a_terminator_is_unreadable`,
+`the_terminator_decides_the_join_and_emptiness_does_not`,
+`where_the_wrap_falls_never_changes_the_verdict_the_value_earns` — and the
+other three new tests pass under **both** versions, which is the correct
+result: they guard behaviour that must *not* change (INT-14's regression
+case, the single-line-untouched case, the token-only-continuation case).
+Fix restored → 48/48 in `token_lint`. The scratch harness was deleted and
+verified gone.
+
+**No pins moved, and that is itself the lesson.** `SEARCH_ROW_HEIGHT` was
+counted `token_bound` falsely before and is counted `token_bound` truly
+after, so `PIN_APP_TOKEN_BOUND` 98 holds either way. **The count was never
+the evidence.** INT-14's record made the same point about `PDF_BADGE_SLOT`
+and it holds again here, on a different constant, for a different reason: a
+compliance counter that cannot distinguish "read and clean" from "unread
+and assumed clean" reports exactly the same number for both states. The
+only way to tell them apart is to make the check demonstrably capable of
+failing.
+
+Tests: 8073 → 8083 (+10) — 8 in `token_lint_tests`
+(`a_literal_below_a_partial_first_line_is_seen_and_fails`,
+`a_token_only_continuation_below_a_partial_first_line_binds`,
+`where_the_wrap_falls_never_changes_the_verdict_the_value_earns`,
+`the_empty_first_line_shape_still_joins_after_the_fix`,
+`a_declaration_ending_on_its_opening_line_is_returned_untouched`,
+`the_terminator_decides_the_join_and_emptiness_does_not`,
+`a_partial_first_line_that_cannot_reach_a_terminator_is_unreadable`,
+`a_multiplier_on_a_continuation_line_is_caught_not_glossed`) and 2 in the
+app gate (`a_partial_first_line_rewrap_cannot_smuggle_a_literal_either`,
+`the_search_row_height_exposure_is_closed_and_reopening_it_trips_the_gate`),
+all confirmed discovered via `cargo nextest list`.
+
+Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
+--workspace` **8083 passed, 6 skipped** · `cargo clippy --workspace
+--all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+and all `SPEC.md` files untouched.
