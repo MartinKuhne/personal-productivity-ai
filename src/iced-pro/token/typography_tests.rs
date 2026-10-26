@@ -1066,6 +1066,148 @@ fn test_rung_font_delegates_to_the_family_it_is_handed() {
     }
 }
 
+/// The [`FontFamily`] type alias matches [`Family`] verbatim (`UIF-TOK-004`).
+#[test]
+fn test_font_family_alias_matches_family() {
+    assert_eq!(FontFamily::Mono, Family::Mono);
+    assert_eq!(FontFamily::Sans, Family::Sans);
+}
+
+/// `TypeRung::mono` and `TypeRung::sans` delegate directly to `TypeRung::font`
+/// with `Family::Mono` and `Family::Sans` across all six rungs and all permitted
+/// weights (`UIF-TOK-004`).
+#[test]
+fn test_rung_mono_and_sans_delegate_to_font() {
+    for row in spec_rows() {
+        for weight in row.allowed {
+            let mono_font = row.rung.mono(*weight);
+            let sans_font = row.rung.sans(*weight);
+
+            assert_eq!(
+                mono_font,
+                row.rung.font(Family::Mono, *weight),
+                "{} .mono({:?}) must delegate to .font(Family::Mono, {:?})",
+                row.token,
+                weight,
+                weight
+            );
+            assert_eq!(
+                sans_font,
+                row.rung.font(Family::Sans, *weight),
+                "{} .sans({:?}) must delegate to .font(Family::Sans, {:?})",
+                row.token,
+                weight,
+                weight
+            );
+            assert_eq!(
+                mono_font.family,
+                iced::font::Family::Monospace,
+                "{} .mono({:?}) must resolve to iced Monospace family",
+                row.token,
+                weight
+            );
+            assert_eq!(
+                sans_font.family,
+                iced::font::Family::SansSerif,
+                "{} .sans({:?}) must resolve to iced SansSerif family",
+                row.token,
+                weight
+            );
+            assert_eq!(
+                mono_font.weight,
+                weight.iced(),
+                "{} .mono({:?}) must carry the requested weight",
+                row.token,
+                weight
+            );
+            assert_eq!(
+                sans_font.weight,
+                weight.iced(),
+                "{} .sans({:?}) must carry the requested weight",
+                row.token,
+                weight
+            );
+        }
+    }
+}
+
+/// `TypeRung::mono_default` and `TypeRung::sans_default` resolve on the rung's
+/// resting weight (`self.weight`) across all six rungs (`UIF-TOK-004`).
+#[test]
+fn test_rung_mono_default_and_sans_default_use_resting_weight() {
+    for row in spec_rows() {
+        let mono_def = row.rung.mono_default();
+        let sans_def = row.rung.sans_default();
+
+        assert_eq!(
+            mono_def,
+            row.rung.mono(row.rung.weight),
+            "{} mono_default must equal mono(self.weight)",
+            row.token
+        );
+        assert_eq!(
+            sans_def,
+            row.rung.sans(row.rung.weight),
+            "{} sans_default must equal sans(self.weight)",
+            row.token
+        );
+        assert_eq!(
+            mono_def,
+            row.rung.font(Family::Mono, row.rung.weight),
+            "{} mono_default must delegate to font(Family::Mono, self.weight)",
+            row.token
+        );
+        assert_eq!(
+            sans_def,
+            row.rung.font(Family::Sans, row.rung.weight),
+            "{} sans_default must delegate to font(Family::Sans, self.weight)",
+            row.token
+        );
+        assert_eq!(
+            mono_def.family,
+            iced::font::Family::Monospace,
+            "{} mono_default must resolve to iced Monospace family",
+            row.token
+        );
+        assert_eq!(
+            sans_def.family,
+            iced::font::Family::SansSerif,
+            "{} sans_default must resolve to iced SansSerif family",
+            row.token
+        );
+        assert_eq!(
+            mono_def.weight,
+            row.rung.weight.iced(),
+            "{} mono_default must carry resting weight {:?}",
+            row.token,
+            row.rung.weight
+        );
+        assert_eq!(
+            sans_def.weight,
+            row.rung.weight.iced(),
+            "{} sans_default must carry resting weight {:?}",
+            row.token,
+            row.rung.weight
+        );
+    }
+}
+
+/// Disallowed weights trigger a debug assertion panic in `TypeRung::mono` (`UIF-TOK-004`).
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic]
+fn test_type_rung_mono_panics_on_disallowed_weight() {
+    let _ = TITLE_LG.mono(Weight::Regular);
+}
+
+/// Disallowed weights trigger a debug assertion panic in `TypeRung::sans` (`UIF-TOK-004`).
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic]
+fn test_type_rung_sans_panics_on_disallowed_weight() {
+    let _ = TITLE_LG.sans(Weight::Regular);
+}
+
 /// **No-visual-change proof for `surface/menu/view.rs`.** The 12px
 /// SemiBold section heading used to build its font by hand as
 /// `iced::Font { weight: Semibold, ..Font::DEFAULT }`. Resolved through

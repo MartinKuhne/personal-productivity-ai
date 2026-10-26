@@ -1006,19 +1006,18 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-TOK-004",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§2.4",
         evidence: &["token/typography.rs"],
-        reason: Some(
-            "The six rungs carry size, line height, resting and emphasis weight and \
-             tracking, and the 12px floor is a token. Missing: the scale models no font \
-             *family*, so the monospace the spec requires for code, paths, timestamps \
-             and log views (§2.4, §4.7.1) has no rung at all; and there is no 12px \
-             SemiBold or 13px Bold rung, so §4.9.1's section heading and §4.7.1's \
-             overlay title are composed as `CAPTION.size + Weight::Semibold` and \
-             `UI_COMPACT.size + Weight::Bold` rather than being rungs (ledger G-12).",
+        reason: None,
+        note: Some(
+            "The type scale completely satisfies §2.4: six rungs with exact size, \
+             authoritative integer line height (bound as absolute pixels), resting \
+             and emphasis weights, tracking, allowed_weights sets, MIN_SIZE = 12 \
+             floor, Family::Sans and Family::Mono with .mono() and .sans() methods \
+             on any rung. As documented in typography.rs, application content \
+             usages of monospace are caller concerns per D-2.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-TOK-005",

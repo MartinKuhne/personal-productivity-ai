@@ -41,11 +41,13 @@
 //!
 //! # Font families
 //!
-//! [`Family`] carries the spec's two `font.family.*` tokens:
-//! [`FAMILY_SANS`] (`font.family.sans`) and [`FAMILY_MONO`]
-//! (`font.family.mono`). A caller asks for a family by role — "the mono
-//! family" — and gets an `iced::Font` through [`Family::font`] or
-//! [`TypeRung::font`]; iced's own family enum stays behind that mapping.
+//! [`Family`] (aliased as [`FontFamily`] for spec parity) carries the spec's two
+//! `font.family.*` tokens: [`FAMILY_SANS`] (`font.family.sans`) and
+//! [`FAMILY_MONO`] (`font.family.mono`). A caller asks for a family by role —
+//! "the mono family" — and gets an `iced::Font` through [`Family::font`],
+//! [`TypeRung::font`], or the rung helpers [`TypeRung::mono`],
+//! [`TypeRung::sans`], [`TypeRung::mono_default`] and [`TypeRung::sans_default`];
+//! iced's own family enum stays behind that mapping.
 //!
 //! Both tokens resolve to iced's *generic* families, `SansSerif` and
 //! `Monospace`, which cosmic-text resolves through the host's system
@@ -190,6 +192,10 @@ pub enum Family {
     /// timestamps, the editor buffer and structured logs.
     Mono,
 }
+
+/// An alias for [`Family`] matching the `FontFamily::Mono` / `FontFamily::Sans`
+/// naming in `spec.md` §2.4 (`UIF-TOK-004`).
+pub type FontFamily = Family;
 
 /// `font.family.sans` — the proportional family, [`Family::Sans`].
 pub const FAMILY_SANS: Family = Family::Sans;
@@ -406,6 +412,44 @@ impl TypeRung {
     pub const fn font(&self, family: Family, weight: Weight) -> iced::Font {
         debug_assert!(self.allows(weight));
         family.font(weight)
+    }
+
+    /// This rung carried on [`Family::Mono`] at `weight`, as an `iced::Font` (`UIF-TOK-004`).
+    ///
+    /// Delegates to [`font`](Self::font) with [`Family::Mono`], validating
+    /// in debug builds that `weight` is permitted by this rung's
+    /// [`allowed_weights`](Self::allowed_weights).
+    #[must_use]
+    pub const fn mono(&self, weight: Weight) -> iced::Font {
+        self.font(Family::Mono, weight)
+    }
+
+    /// This rung carried on [`Family::Sans`] at `weight`, as an `iced::Font` (`UIF-TOK-004`).
+    ///
+    /// Delegates to [`font`](Self::font) with [`Family::Sans`], validating
+    /// in debug builds that `weight` is permitted by this rung's
+    /// [`allowed_weights`](Self::allowed_weights).
+    #[must_use]
+    pub const fn sans(&self, weight: Weight) -> iced::Font {
+        self.font(Family::Sans, weight)
+    }
+
+    /// This rung carried on [`Family::Mono`] at its resting
+    /// [`weight`](Self::weight), as an `iced::Font` (`UIF-TOK-004`).
+    ///
+    /// Delegates to [`font`](Self::font) with [`Family::Mono`] and `self.weight`.
+    #[must_use]
+    pub const fn mono_default(&self) -> iced::Font {
+        self.font(Family::Mono, self.weight)
+    }
+
+    /// This rung carried on [`Family::Sans`] at its resting
+    /// [`weight`](Self::weight), as an `iced::Font` (`UIF-TOK-004`).
+    ///
+    /// Delegates to [`font`](Self::font) with [`Family::Sans`] and `self.weight`.
+    #[must_use]
+    pub const fn sans_default(&self) -> iced::Font {
+        self.font(Family::Sans, self.weight)
     }
 }
 
