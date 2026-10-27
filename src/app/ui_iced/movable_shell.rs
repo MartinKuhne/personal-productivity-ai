@@ -63,6 +63,9 @@ const TITLE_GRIP_GLYPH: &str = "⣿";
 /// The ◢ glyph painted in the footer's resize corner (§4.7.1).
 const RESIZE_GRIP_GLYPH: &str = "◢";
 
+/// The × glyph painted in the title bar's Close button.
+const CLOSE_GLYPH: &str = "×";
+
 /// The recessed fill of the content viewport (§4.7.1 "sunken").
 const VIEWPORT_PADDING: f32 = 4.0;
 
@@ -208,7 +211,7 @@ fn dock_action(card: MovableCard) -> Button<'static, Message> {
 fn close_action(card: MovableCard) -> Button<'static, Message> {
     Button::new(
         ButtonVariant::Ghost,
-        text("×").size(crate::ui_iced::logs::ROW_TEXT_SIZE),
+        text(CLOSE_GLYPH).size(crate::ui_iced::logs::ROW_TEXT_SIZE),
         Message::Movable(MovableMessage::CloseRequested { card }),
         CLOSE_BUTTON_FOCUS_ID,
     )
