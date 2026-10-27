@@ -19,12 +19,12 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::panels::top::phosphor_font;
+use hoarfrost::token::typography;
+use hoarfrost::token::{shape, size, space};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 use iced::widget::{Column, Row, container, text};
 use iced::{Alignment, Background, Element, Font, Length, Padding};
-use iced_pro::token::typography;
-use iced_pro::token::{shape, size, space};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
 
 /// The rung the code body renders on — `type.body` (`UIF-TOK-004`).
 ///

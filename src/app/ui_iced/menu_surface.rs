@@ -1,12 +1,12 @@
 //! Shared card chrome and solved geometry for framework-driven menus.
 //!
-//! Both menu surfaces this application renders on the `iced-pro` menu engine —
+//! Both menu surfaces this application renders on the `hoarfrost` menu engine —
 //! the top-bar hamburger ([the hamburger surface](crate::ui_iced::hamburger)) and the
 //! file-tree / tab [context menu](crate::ui_iced::context_menu) — mount the
 //! same §4.8.1 card around a column of
-//! [`MenuRow`](iced_pro::surface::menu::view::MenuRow) widgets, and both solve
+//! [`MenuRow`](hoarfrost::surface::menu::view::MenuRow) widgets, and both solve
 //! the same "one viewport rectangle per open card, root first" walk that the
-//! [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry) is fed.
+//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) is fed.
 //!
 //! Exactly **two** things differ between the two surfaces, and both are
 //! parameters here rather than copies:
@@ -42,11 +42,11 @@ use std::collections::HashMap;
 use iced::widget::{Column, container, stack};
 use iced::{Element, Length, Padding, Point, Rectangle, Size};
 
-use iced_pro::geometry::anchor::{self, Placement};
-use iced_pro::surface::menu::cascade::{MenuCascade, OpenCard};
-use iced_pro::surface::menu::model::{Menu, MenuId};
-use iced_pro::surface::menu::view::{self, MenuRow, RowEvent};
-use iced_pro::token::space;
+use hoarfrost::geometry::anchor::{self, Placement};
+use hoarfrost::surface::menu::cascade::{MenuCascade, OpenCard};
+use hoarfrost::surface::menu::model::{Menu, MenuId};
+use hoarfrost::surface::menu::view::{self, MenuRow, RowEvent};
+use hoarfrost::token::space;
 
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{MenuMessage, Message};
@@ -58,7 +58,7 @@ pub const CARD_INSET: f32 = space::XS;
 /// Menu card width in logical pixels.
 ///
 /// §4.8.1 gives a menu card a **range** (`224px..320px`) rather than a
-/// value, and `iced-pro` publishes no menu-card width token — the only
+/// value, and `hoarfrost` publishes no menu-card width token — the only
 /// card-width constant in the framework is the Input Dialog's 320. So this is
 /// the application's own choice, pinned at the low end of the spec range and
 /// shared by every menu card the app draws. It is deliberately **not** a
@@ -121,7 +121,7 @@ pub fn positioned<'a>(card: Element<'a, Message>, rect: Rectangle) -> Element<'a
 /// publish [`MenuMessage::RowPicked`] carrying the card path and row index;
 /// the reducer runs
 /// [`MenuCascade::activate_row`] and lets the
-/// row's own [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy)
+/// row's own [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy)
 /// decide whether the menu survives the click.
 ///
 /// The row's two hover reports are mapped alongside them onto
@@ -222,7 +222,7 @@ pub fn overlay<'a>(
 /// of anchoring the two menu surfaces do differently.
 ///
 /// These are the rectangles registered with the
-/// [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry), which is
+/// [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry), which is
 /// what makes a registered menu surface the card the user actually sees rather
 /// than an empty region.
 ///

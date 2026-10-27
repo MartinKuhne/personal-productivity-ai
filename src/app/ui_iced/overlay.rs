@@ -40,7 +40,7 @@
 //! 2. **The built-in `overlay::menu::Menu` is not the application menu.** It
 //!    takes caller-held mutable state and renders plain `ToString` rows, so
 //!    it does not fit the pure-view pattern or the nested row types FastMD
-//!    needs. The `iced-pro` menu engine owns placement and rendering from
+//!    needs. The `hoarfrost` menu engine owns placement and rendering from
 //!    immutable menu data plus reducer state, mounted through
 //!    [`menu_surface::overlay`](crate::ui_iced::menu_surface::overlay).
 //! 3. **Event precedence is already what we want.** `Stack::update` walks
@@ -51,7 +51,7 @@
 //! ## What positioning IS achievable
 //!
 //! * Viewport clamping is no longer this module's job. Every floating card
-//!   here is placed by [`anchor::solve`](iced_pro::geometry::anchor::solve),
+//!   here is placed by [`anchor::solve`](hoarfrost::geometry::anchor::solve),
 //!   which resolves the flip (menu cards) or the cursor-proximal clamp and
 //!   `8px` viewport margin (input dialogs) before the card is laid out.
 //!   The hand-rolled `clamp_anchor` this module used to own was retired in
@@ -74,12 +74,12 @@
 //!   the same coordinate space. Individual row/tab triggers only request
 //!   opening; they do not report local coordinates.
 //! * **The built-in `Menu` has no submenu nesting.** FastMD's reusable
-//!   engine ([`MenuCascade`](iced_pro::surface::menu::cascade::MenuCascade))
+//!   engine ([`MenuCascade`](hoarfrost::surface::menu::cascade::MenuCascade))
 //!   supplies nested parent/child surfaces without adding `iced_aw`; the
 //!   flat helpers in this module remain intentionally single-level.
 //! * **No auto-flip above the anchor.** `Menu::overlay` does flip
 //!   (`menu.rs:244-270`), but we are not using `Menu`. This module clamps
-//!   nothing at all: [`anchor::solve`](iced_pro::geometry::anchor::solve)
+//!   nothing at all: [`anchor::solve`](hoarfrost::geometry::anchor::solve)
 //!   mirrors an axis when the preferred side cannot hold the card, and
 //!   `Anchor::CursorProximal` deliberately never flips.
 //!
@@ -128,12 +128,12 @@ mod tests;
 use iced::widget::{Container, MouseArea, Row, Space, container, mouse_area, rule, stack, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
-use iced_pro::surface::modal::ModalFrame;
-use iced_pro::surface::movable::MovableGeometry;
-use iced_pro::token::shape;
-use iced_pro::token::space;
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
+use hoarfrost::surface::modal::ModalFrame;
+use hoarfrost::surface::movable::MovableGeometry;
+use hoarfrost::token::shape;
+use hoarfrost::token::space;
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -475,7 +475,7 @@ where
 ///
 /// Same scrim + card chrome as [`modal`]; only the placement differs. The
 /// card's top-left corner sits at `position`, which the caller resolves
-/// through [`iced_pro::geometry::anchor::solve`] before mounting — the
+/// through [`hoarfrost::geometry::anchor::solve`] before mounting — the
 /// shape the cursor-anchored small dialogs need.
 ///
 /// # The card's hit-capture boundary (`UIF-INP-002`)
@@ -543,7 +543,7 @@ where
 /// the content's. The frame's padding is subtracted inside that box, so
 /// a caller passing the §4.6.2 `ABOUT_MODAL_W` gets a card that *is*
 /// that wide, with `space::LG` of padding eaten by the frame. This is
-/// the same convention [`iced_pro::surface::input_dialog::InputLayout::solve`]
+/// the same convention [`hoarfrost::surface::input_dialog::InputLayout::solve`]
 /// uses (`inner_width = card.width - 2 * CARD_PADDING`).
 ///
 /// `id` is the card's stable [`iced::widget::Id`] (AGENTS §5). It is a
@@ -683,7 +683,7 @@ where
 /// here.
 ///
 /// `geometry` comes from the card's
-/// [`MovableHost`](iced_pro::surface::movable::MovableHost) and never from
+/// [`MovableHost`](hoarfrost::surface::movable::MovableHost) and never from
 /// a locally-computed rectangle, so the painted card and the rectangle the
 /// registry routes pointer events against are the same rectangle.
 #[must_use]

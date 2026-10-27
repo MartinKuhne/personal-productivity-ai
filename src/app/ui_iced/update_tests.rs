@@ -1167,7 +1167,7 @@ fn test_tab_context_menu_for_a_missing_tab_mounts_nothing() {
 /// one way the tests navigate a level down.
 fn open_windows_submenu(state: &mut AppState) {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     let root = MenuId::new(HAMBURGER_MENU_ID);
     let row = state
@@ -1216,7 +1216,7 @@ fn test_menu_closed_clears_the_flag() {
 #[test]
 fn test_submenu_requires_an_open_tree_and_stacks_rather_than_replacing() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
-    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use hoarfrost::surface::menu::model::{MenuId, submenu_id};
 
     let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
 
@@ -1262,7 +1262,7 @@ fn test_submenu_requires_an_open_tree_and_stacks_rather_than_replacing() {
 #[test]
 fn test_menu_row_activation_routes_the_command_and_closes() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_ABOUT};
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
@@ -1298,7 +1298,7 @@ fn test_menu_toggle_routes_its_new_value_and_stays_open() {
     use crate::ui_iced::hamburger::{
         HAMBURGER_MENU_ID, KEY_BACKGROUND_OPERATIONS, KEY_WINDOWS, hamburger_menu,
     };
-    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use hoarfrost::surface::menu::model::{MenuId, submenu_id};
 
     let (mut state, _storage) = fresh_state();
     let spy = command_spy(&state);
@@ -1405,7 +1405,7 @@ fn test_context_menu_opening_dismisses_the_hamburger() {
 /// Row index of `key` inside the open hamburger root card.
 fn root_row_of(state: &AppState, key: &str) -> usize {
     use crate::ui_iced::hamburger::HAMBURGER_MENU_ID;
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     state
         .overlay
@@ -1420,7 +1420,7 @@ fn root_row_of(state: &AppState, key: &str) -> usize {
 
 /// Reports the pointer arriving at the root card's `key` row.
 fn hover_root(state: &mut AppState, key: &str) -> Task<Message> {
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     let card = MenuId::new(crate::ui_iced::hamburger::HAMBURGER_MENU_ID);
     let row = root_row_of(state, key);
@@ -1430,7 +1430,7 @@ fn hover_root(state: &mut AppState, key: &str) -> Task<Message> {
 #[test]
 fn test_hovering_a_submenu_parent_opens_its_branch_without_a_click() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS};
-    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use hoarfrost::surface::menu::model::{MenuId, submenu_id};
 
     let chat_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_CHAT_MODELS);
     let (mut state, _storage) = fresh_state();
@@ -1504,8 +1504,8 @@ fn test_a_sibling_hover_is_held_and_owes_a_wake_up() {
 #[test]
 fn test_the_held_switch_completes_when_the_deadline_message_lands() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS, KEY_WINDOWS};
-    use iced_pro::surface::menu::aim::grace_ms;
-    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use hoarfrost::surface::menu::aim::grace_ms;
+    use hoarfrost::surface::menu::model::{MenuId, submenu_id};
     use std::time::Duration;
 
     let chat_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_CHAT_MODELS);
@@ -1542,7 +1542,7 @@ fn test_the_held_switch_completes_when_the_deadline_message_lands() {
 #[test]
 fn test_the_pointer_leaving_a_row_never_dismisses_the_menu() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
-    use iced_pro::surface::menu::model::{MenuId, submenu_id};
+    use hoarfrost::surface::menu::model::{MenuId, submenu_id};
 
     let windows_card = submenu_id(&MenuId::new(HAMBURGER_MENU_ID), KEY_WINDOWS);
     let (mut state, _storage) = fresh_state();
@@ -1580,7 +1580,7 @@ fn test_the_pointer_leaving_a_row_never_dismisses_the_menu() {
 #[test]
 fn test_a_deadline_that_lands_after_the_menu_closed_does_nothing() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_CHAT_MODELS, KEY_WINDOWS};
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     let (mut state, _storage) = fresh_state();
     let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
@@ -1606,7 +1606,7 @@ fn test_a_deadline_that_lands_after_the_menu_closed_does_nothing() {
 #[test]
 fn test_the_hamburger_button_is_still_click_to_open_and_hover_cannot_open_it() {
     use crate::ui_iced::hamburger::{HAMBURGER_MENU_ID, KEY_WINDOWS};
-    use iced_pro::surface::menu::model::MenuId;
+    use hoarfrost::surface::menu::model::MenuId;
 
     let (mut state, _storage) = fresh_state();
 
@@ -3372,7 +3372,7 @@ fn scrim_dismiss_on_a_dirty_editor_raises_the_confirmation_instead_of_discarding
     );
     assert_eq!(
         state.overlay.dialog.kind().map(DialogKind::button_intent),
-        Some(iced_pro::surface::input_dialog::ButtonIntent::Danger),
+        Some(hoarfrost::surface::input_dialog::ButtonIntent::Danger),
         "discarding unsaved work must wear the Danger variant, not a neutral one"
     );
 }
@@ -3536,7 +3536,7 @@ fn recovery_focus_control_produces_exactly_one_task() {
     let tasks = run_recovery(
         &mut state,
         &PathBuf::from("M:\\lib\\note.md"),
-        Recovery::FocusControl(iced_pro::focus::FocusId::new(
+        Recovery::FocusControl(hoarfrost::focus::FocusId::new(
             crate::ui_iced::editor::EDITOR_TEXT_ID,
         )),
     );

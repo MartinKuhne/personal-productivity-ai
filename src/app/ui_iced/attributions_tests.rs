@@ -8,8 +8,8 @@
 use super::*;
 use crate::ui::strings;
 use crate::ui_iced::about::{AboutViewModel, LICENSE_MAX_HEIGHT, LICENSE_SCROLL_ID};
+use hoarfrost::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT;
 use iced::Element;
-use iced_pro::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT;
 
 /// A synthetic two-row catalog — never read from disk ([RUST-006]).
 fn fixture_entries() -> Vec<Attribution> {
@@ -177,8 +177,8 @@ fn card_size_is_the_frameworks_attributions_size() {
     // hand-picked 340px list cap; the spec row is a fixed 640×480 card
     // whose list fills the remainder.
     let size = attributions_card_size(ROOMY_VIEWPORT);
-    assert_eq!(size.width, iced_pro::surface::modal::ATTRIBUTIONS_WIDTH);
-    assert_eq!(size.height, iced_pro::surface::modal::ATTRIBUTIONS_HEIGHT);
+    assert_eq!(size.width, hoarfrost::surface::modal::ATTRIBUTIONS_WIDTH);
+    assert_eq!(size.height, hoarfrost::surface::modal::ATTRIBUTIONS_HEIGHT);
     assert_eq!(size, Size::new(640.0, 480.0));
     assert_ne!(
         size.width, 620.0,
@@ -198,7 +198,7 @@ fn card_size_is_independent_of_row_count() {
 
 #[test]
 fn card_size_clamps_to_the_viewport_gutter() {
-    let gutter = iced_pro::surface::modal::VIEWPORT_GUTTER;
+    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
     let small = attributions_card_size(Size::new(600.0, 400.0));
     assert_eq!(small.width, 600.0 - gutter);
     assert_eq!(small.height, 400.0 - gutter);
@@ -559,7 +559,7 @@ fn a_short_viewport_shrinks_the_card_instead_of_overflowing() {
     let card = attributions_view(&vm, viewport);
     let mut ui = laid_out(viewport, card);
     let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    let gutter = iced_pro::surface::modal::VIEWPORT_GUTTER;
+    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
     assert_eq!(bounds.width, 500.0 - gutter);
     assert_eq!(bounds.height, 300.0 - gutter);
     assert!(bounds.width <= viewport.width && bounds.height <= viewport.height);
@@ -605,7 +605,7 @@ fn the_repository_link_hit_box_is_a_real_target() {
         .expect("the link cell container should lay out");
     assert_eq!(
         bounds.height,
-        iced_pro::widget::hyperlink::MIN_HEIGHT,
+        hoarfrost::widget::hyperlink::MIN_HEIGHT,
         "the link must carry the framework's minimum hit target"
     );
     drop(ui);
@@ -619,9 +619,9 @@ fn repository_link_takes_the_frameworks_accent_text() {
     // not the `accent_fill` the cell used before.
     assert_eq!(
         repository_color(),
-        iced_pro::widget::hyperlink::resolve_style(
-            iced_pro::state::VisualState {
-                base: iced_pro::state::BaseState::Rest,
+        hoarfrost::widget::hyperlink::resolve_style(
+            hoarfrost::state::VisualState {
+                base: hoarfrost::state::BaseState::Rest,
                 focused: false,
             },
             crate::ui_iced::about::modal_frame().surface,
@@ -646,7 +646,7 @@ fn repository_link_clears_the_wcag_aa_floor_against_its_real_background() {
     // sRGB of the two colours the cell actually paints — `accent_text`
     // over the modal frame's `surface.overlay`.
     let background = crate::ui_iced::about::modal_frame().surface;
-    let ratio = iced_pro::token::contrast::contrast_ratio(repository_color(), background);
+    let ratio = hoarfrost::token::contrast::contrast_ratio(repository_color(), background);
     assert!(
         ratio >= 4.5,
         "the repository link must clear 4.5:1 (WCAG 2.1 AA normal text); \
@@ -659,7 +659,7 @@ fn the_retired_accent_fill_failed_that_same_floor() {
     // The reason for the change, pinned so nobody "restores" the old
     // colour without seeing what it cost. Same background, same maths.
     let background = crate::ui_iced::about::modal_frame().surface;
-    let ratio = iced_pro::token::contrast::contrast_ratio(
+    let ratio = hoarfrost::token::contrast::contrast_ratio(
         crate::ui::theme::Palette::fastmd_dark().accent,
         background,
     );

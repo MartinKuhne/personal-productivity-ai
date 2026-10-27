@@ -44,7 +44,7 @@ use crate::config::AppConfig;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui_iced::panels::top::{CHAT_USE_CASE, ChatModelEntry};
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 /// The UI-owned panel state — widget toggles and command input — reused
 /// unchanged ([RUST-051]): `src/app/ui/agent/panel_state.rs:13`.

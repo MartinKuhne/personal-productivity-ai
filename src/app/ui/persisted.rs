@@ -62,11 +62,11 @@ pub struct PersistedUiState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about_shown_for_version: Option<String>,
     /// Remembered geometry of the app's movable Band-1 utility overlays
-    /// (`UIF-MOV-001`), keyed by the `iced-pro` storage key
+    /// (`UIF-MOV-001`), keyed by the `hoarfrost` storage key
     /// (`movable:<surface-id>`, see
-    /// [`movable::storage_key`](iced_pro::surface::movable::storage_key))
+    /// [`movable::storage_key`](hoarfrost::surface::movable::storage_key))
     /// and holding that crate's canonical `x,y,width,height` text form
-    /// ([`MovableGeometry::encode`](iced_pro::surface::movable::MovableGeometry::encode)).
+    /// ([`MovableGeometry::encode`](hoarfrost::surface::movable::MovableGeometry::encode)).
     ///
     /// Stored as the framework's own encoded string rather than four loose
     /// numbers so this model does not re-derive a format the framework

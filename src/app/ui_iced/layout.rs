@@ -48,7 +48,7 @@ use iced::widget::pane_grid::{self, Configuration, Pane, Split};
 /// Bound to the framework token `size.splitter.grab` (`UIF-TOK-002`)
 /// rather than a literal, so the app does not own a second number for the
 /// same measurement ([RUST-021]). The value is unchanged at `10.0`.
-pub const RESIZE_LEEWAY_PIXELS: f32 = iced_pro::token::size::SPLITTER_GRAB;
+pub const RESIZE_LEEWAY_PIXELS: f32 = hoarfrost::token::size::SPLITTER_GRAB;
 
 /// Full-on-screen height of the stub top/bottom bands, in logical points —
 /// `size.control.lg` (`UIF-TOK-002`), the rung the live navbar is built
@@ -66,7 +66,7 @@ pub const RESIZE_LEEWAY_PIXELS: f32 = iced_pro::token::size::SPLITTER_GRAB;
 /// the bottom band `Shrink 44px..120px`. Removing the stubs outright is
 /// the cleaner end state and is left as a stated follow-on rather than
 /// folded into a token-alignment increment.
-pub const STUB_BAND_HEIGHT_POINTS: f32 = iced_pro::token::size::CONTROL_LG;
+pub const STUB_BAND_HEIGHT_POINTS: f32 = hoarfrost::token::size::CONTROL_LG;
 
 /// Text rendered inside every stub region: a dev-scaffolding label, not
 /// user-facing copy — kept in exactly one place per [RUST-021].

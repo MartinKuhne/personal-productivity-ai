@@ -50,13 +50,13 @@ use crate::ui_iced::panels::left::left_panel;
 use crate::ui_iced::panels::right::toc_indent_pixels;
 use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
+use hoarfrost::surface::tooltip::{TooltipAnchor, TooltipStyle};
+use hoarfrost::token::color::Palette as ProPalette;
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 use iced::Length;
 use iced::Size;
 use iced::widget::{column, container, mouse_area, scrollable, stack, text};
-use iced_pro::surface::tooltip::{TooltipAnchor, TooltipStyle};
-use iced_pro::token::color::Palette as ProPalette;
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
 
 /// Vertical gap between the three bands, in logical pixels.
 const BAND_SPACING_PIXELS: f32 = 8.0;
@@ -201,7 +201,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// above them, bottom-most first.
 ///
 /// The tree/tab context menu and the top-bar hamburger are both rendered by
-/// the `iced-pro` menu engine and folded into the base here, each with its own
+/// the `hoarfrost` menu engine and folded into the base here, each with its own
 /// click-away blocker and solved card geometry. Higher windows are stacked
 /// above them as full-screen overlays. The reducer keeps the two menus
 /// mutually exclusive, so at most one menu surface is live per frame.
@@ -245,7 +245,7 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
 /// Tooltip presentation layer — mounted above all z-bands (`UIF-ATOM-007`).
 ///
 /// This is a pure presentation layer, not a z-band. It renders the currently
-/// active tooltip (if any) using the iced-pro tooltip subsystem's styling and
+/// active tooltip (if any) using the Hoarfrost tooltip subsystem's styling and
 /// placement. The tooltip subsystem handles:
 /// - Hover delay (400ms pointer, 0ms keyboard focus)
 /// - Warm handoff (100ms window for cross-control immediate show)
@@ -254,7 +254,7 @@ fn overlay_host(state: &AppState) -> iced::Element<'_, Message> {
 fn tooltip_layer(state: &AppState) -> Option<iced::Element<'_, Message>> {
     let tooltip = &state.overlay.tooltip;
     let active_tooltip = tooltip.active_tooltip?;
-    let now = iced_pro::surface::tooltip::TimeMs::now();
+    let now = hoarfrost::surface::tooltip::TimeMs::now();
 
     // Check visibility for the active tooltip
     let is_visible = match active_tooltip {
@@ -403,7 +403,7 @@ fn batch_layer(view_model: &BatchDialogViewModel, viewport: Size) -> iced::Eleme
 fn movable_overlay_layer<'a>(
     card: MovableCard,
     state: &'a AppState,
-    build: impl FnOnce(&'a iced_pro::surface::movable::MovableHost) -> iced::Element<'a, Message>,
+    build: impl FnOnce(&'a hoarfrost::surface::movable::MovableHost) -> iced::Element<'a, Message>,
 ) -> iced::Element<'a, Message> {
     let host = match card {
         MovableCard::Logs => state.overlay.logs_movable.as_ref(),

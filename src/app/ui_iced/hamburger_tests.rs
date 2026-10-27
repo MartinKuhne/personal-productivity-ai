@@ -4,12 +4,12 @@
 use crate::ui::strings;
 use crate::ui_iced::hamburger::*;
 use crate::ui_iced::test_helpers::test_app_state;
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::menu::cascade::{MenuCascade, MenuTreeKind};
+use hoarfrost::surface::menu::model::{Menu, MenuId, RowKind, submenu_id};
+use hoarfrost::surface::menu::view;
+use hoarfrost::token::space;
 use iced::{Point, Rectangle, Size};
-use iced_pro::focus::FocusState;
-use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
-use iced_pro::surface::menu::model::{Menu, MenuId, RowKind, submenu_id};
-use iced_pro::surface::menu::view;
-use iced_pro::token::space;
 
 /// The production tree for the test view model.
 fn tree() -> Menu {
@@ -388,7 +388,7 @@ fn test_submenu_rect_is_anchored_to_its_trigger_row_not_its_card() {
 
 #[test]
 fn test_a_short_viewport_still_yields_a_non_negative_origin() {
-    use iced_pro::geometry::anchor::{self, Anchor, ControlAlignment};
+    use hoarfrost::geometry::anchor::{self, Anchor, ControlAlignment};
 
     let menu = tree();
     let cascade = opened(&menu);

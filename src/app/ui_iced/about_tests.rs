@@ -221,7 +221,7 @@ fn about_card_width_is_the_frameworks_about_width() {
     // keeps the 180px reduction intentional rather than accidental.
     assert_eq!(
         about_card_width(ROOMY_VIEWPORT.width),
-        iced_pro::surface::modal::ABOUT_WIDTH
+        hoarfrost::surface::modal::ABOUT_WIDTH
     );
     assert_eq!(about_card_width(ROOMY_VIEWPORT.width), 440.0);
     assert_ne!(
@@ -236,7 +236,7 @@ fn about_card_width_clamps_to_the_viewport_gutter() {
     // The clamp bites only once the viewport is too narrow to hold 440px
     // plus the gutter: below 472px the card gives way to the viewport and
     // never crosses the gutter the framework declares.
-    let gutter = iced_pro::surface::modal::VIEWPORT_GUTTER;
+    let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
     assert_eq!(about_card_width(440.0 + gutter), 440.0, "exactly roomy");
     assert_eq!(about_card_width(400.0), 400.0 - gutter, "clamped");
     assert_eq!(about_card_width(300.0), 300.0 - gutter, "clamped harder");
@@ -269,11 +269,11 @@ fn about_card_builds_at_every_clamped_width() {
 fn each_window_names_its_own_sizing_policy() {
     assert_eq!(
         AboutWindow::About.sizing(),
-        iced_pro::surface::modal::ModalSizing::about()
+        hoarfrost::surface::modal::ModalSizing::about()
     );
     assert_eq!(
         AboutWindow::Attributions.sizing(),
-        iced_pro::surface::modal::ModalSizing::attributions()
+        hoarfrost::surface::modal::ModalSizing::attributions()
     );
     assert_ne!(
         AboutWindow::About.sizing(),
@@ -287,7 +287,7 @@ fn banner_uses_the_brand_mark_icon_rung() {
     // The banner glyph is sized by `size.icon.lg`, the token whose
     // declared role is the brand mark. The retired value was 48px, which
     // no token covered; 20px is the nearest real rung.
-    assert_eq!(banner_size(), iced_pro::token::size::ICON_LG);
+    assert_eq!(banner_size(), hoarfrost::token::size::ICON_LG);
     assert_eq!(banner_size(), 20.0);
 }
 
@@ -352,7 +352,7 @@ fn the_about_card_content_is_the_width_less_the_frame_padding() {
     let frame = modal_frame();
     let content = about_card_width(ROOMY_VIEWPORT.width) - 2.0 * frame.content_padding;
     assert_eq!(content, 408.0);
-    assert_eq!(frame.content_padding, iced_pro::token::space::LG);
+    assert_eq!(frame.content_padding, hoarfrost::token::space::LG);
 }
 
 #[test]
@@ -502,7 +502,7 @@ fn the_card_renders_inside_a_narrow_viewport_without_clipping_itself() {
     let bounds = framed_card_bounds(&mut ui, ABOUT_CARD_ID);
     assert_eq!(
         bounds.width,
-        300.0 - iced_pro::surface::modal::VIEWPORT_GUTTER
+        300.0 - hoarfrost::surface::modal::VIEWPORT_GUTTER
     );
     assert!(bounds.width > 0.0);
     drop(ui);
@@ -525,7 +525,7 @@ fn the_close_button_survives_the_narrow_card_and_is_not_icon_only() {
         })
         .expect("the footer button should be focusable in the laid-out card");
     assert!(
-        bounds.width >= iced_pro::token::size::CONTROL_SM,
+        bounds.width >= hoarfrost::token::size::CONTROL_SM,
         "the Close button measured {:.0}px wide — at or under CONTROL_SM it \
          would be classed icon-only and needs a tooltip",
         bounds.width

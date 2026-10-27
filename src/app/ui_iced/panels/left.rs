@@ -37,11 +37,11 @@
 //!
 //! # The `tree_row` composite is adopted for geometry and paint, not rendering
 //!
-//! `iced_pro::composite::tree_row` is a **pure geometry-and-style
+//! `hoarfrost::composite::tree_row` is a **pure geometry-and-style
 //! module**. It resolves [`tree_row::TreeRowSlots`], [`tree_row::TreeRowStyle`]
-//! and [`iced_pro::widget::button_widget::Layer`] rectangles; the only
+//! and [`hoarfrost::widget::button_widget::Layer`] rectangles; the only
 //! thing that turns them into pixels is the gallery's canvas renderer
-//! ([`gallery_tree`](iced_pro::gallery_tree)). There is no
+//! ([`gallery_tree`](hoarfrost::gallery_tree)). There is no
 //! `tree_row::view(..)` returning an `iced::Element`, so "use the
 //! composite for row rendering" cannot be done from an iced widget tree
 //! without writing a new widget in the framework.
@@ -161,7 +161,7 @@
 //!   ([`strings::SEARCH_TRIGGER_TOOLTIP`],
 //!   [`strings::SEARCH_CLEAR_TOOLTIP`]) are displayed through iced's native
 //!   hover tooltip. The app does not yet mount the focus-aware shared
-//!   [`iced_pro::surface::tooltip`] host for these controls.
+//!   [`hoarfrost::surface::tooltip`] host for these controls.
 //! * **Search box position.** UI-050 says "at the bottom of the directory
 //!   tree pane"; the panel renders it directly under the header, which is
 //!   the shipped behaviour rather than the spec wording ([RUST-041] drift
@@ -182,20 +182,20 @@ use crate::ui_iced::message::{LayoutMessage, Message};
 use iced::widget::{Column, Row, Space, Stack, container, mouse_area, scrollable, text};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
-use iced_pro::composite::tree_row;
-use iced_pro::state::BaseState;
-use iced_pro::token::contrast;
-use iced_pro::token::shape;
-use iced_pro::token::space;
-use iced_pro::token::typography::{self, FAMILY_SANS};
-use iced_pro::widget::badge;
-use iced_pro::widget::badge_model::BadgeTone;
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input as pro_text_input;
-use iced_pro::widget::text_input::{InputKind, TextInput};
-use iced_pro::widget::text_input_controller::TextInputEmission;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::composite::tree_row;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::contrast;
+use hoarfrost::token::shape;
+use hoarfrost::token::space;
+use hoarfrost::token::typography::{self, FAMILY_SANS};
+use hoarfrost::widget::badge;
+use hoarfrost::widget::badge_model::BadgeTone;
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input as pro_text_input;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
+use hoarfrost::widget::text_input_controller::TextInputEmission;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, SkillFile};
@@ -284,7 +284,7 @@ pub const ROW_INDENT_PER_DEPTH: f32 = tree_row::INDENT_STEP;
 /// Deepest depth the **auto-fit measurement** charges for indentation.
 ///
 /// **App-owned.** It is *not* the same rule as
-/// [`tree_view::MAX_TREE_DEPTH`](iced_pro::composite::tree_view::MAX_TREE_DEPTH)
+/// [`tree_view::MAX_TREE_DEPTH`](hoarfrost::composite::tree_view::MAX_TREE_DEPTH)
 /// (1000), which is a stack-overflow guard on the framework's recursive
 /// flatten.
 ///
@@ -2159,7 +2159,7 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 /// rather than against a remembered answer. It resolves to a **no-op** on
 /// hover, and that is a computed result, not an absence of handling:
 /// `surface_hover` is not a locked fill under
-/// [`fill_lock_role`](iced_pro::token::contrast::fill_lock_role), so
+/// [`fill_lock_role`](hoarfrost::token::contrast::fill_lock_role), so
 /// `locked_over` returns the candidate untouched. The sidecar pins the
 /// measured ratios rather than transcribing them.
 ///
@@ -2183,6 +2183,62 @@ pub fn row_label_colour(selected: bool, hovered: bool) -> Color {
 
 /// Stable id for the tree's search field ([AGENTS §5]).
 pub const SEARCH_INPUT_ID: &str = "left_panel_search_input";
+
+/// The search field's paint, resolved through the framework's text-input
+/// atom at [`InputKind::Search`]
+/// (`UIF-ATOM-002`).
+///
+/// iced styles a `text_input` from `(Theme, Status)`; the framework
+/// resolves the design channels from `(InputKind, VisualState, Palette)`.
+/// Fill, perimeter, value, placeholder, icon, and selection all come from
+/// [`pro_text_input::resolve_input_style`] rather than iced's own theme.
+///
+/// This is the framework's *paint* on iced's *widget*, and that is as
+/// far as the search row can go today:
+/// [`composite::search_input`](hoarfrost::composite) **does not exist**
+/// (the composite directory has breadcrumb, card, expander, form_field,
+/// info_bar, list_tile, notification, overflow_toolbar, scroll_view,
+/// settings_row, table_* , toast, tree_row, tree_view, virtual_list), and
+/// [`TextInput`]'s uncontrolled constructor
+/// takes `on_input` only — Enter reaches a host solely as the
+/// `Committed` tier of the *controlled* path, which needs an app-owned
+/// `TextInputModel`. Submitting a query is the field's whole job, so the
+/// value stays in `app.search()` and the field stays iced's.
+///
+/// Purity: pure function of `status`.
+#[must_use]
+pub fn search_field_style(
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
+    use iced::widget::text_input::{Status, Style};
+
+    let palette = Palette::pro();
+    let base = match status {
+        Status::Active => BaseState::Rest,
+        Status::Hovered => BaseState::Hovered,
+        Status::Focused { .. } => BaseState::Rest,
+        Status::Disabled => BaseState::Disabled,
+    };
+    let focused = matches!(status, Status::Focused { .. });
+    let resolved = pro_text_input::resolve_input_style(
+        pro_text_input::InputKind::Search,
+        VisualState { base, focused },
+        &palette,
+    );
+
+    Style {
+        background: Background::Color(resolved.background),
+        border: Border {
+            color: resolved.border_color,
+            width: resolved.border_width,
+            radius: pro_text_input::RADIUS.into(),
+        },
+        icon: resolved.icon,
+        placeholder: resolved.placeholder,
+        value: resolved.text,
+        selection: resolved.selection_background,
+    }
+}
 
 /// The search-result branch of the panel body (UI-050).
 fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message> {

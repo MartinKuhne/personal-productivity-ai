@@ -98,7 +98,7 @@ use crate::bus::events::{AgentEvent, BackgroundEvent, ConfigArrived};
 use crate::ui_iced::message::{
     BusSource, InboundMessage, MenuMessage, Message, OverlayMessage, WindowMessage,
 };
-use iced_pro::surface::menu::cascade::MenuKey;
+use hoarfrost::surface::menu::cascade::MenuKey;
 
 /// A bus event handed to the pure mapper [`bus_event_to_message`].
 ///
@@ -434,7 +434,7 @@ pub fn menu_keyboard_events() -> iced::Subscription<Message> {
 ///   text editor or `Enter` from a focused button: those arrive
 ///   `Captured` and are not ours. When the menu is open the cascade has
 ///   moved focus onto a menu row, and a
-///   [`MenuRow`](iced_pro::surface::menu::view::MenuRow) handles no key
+///   [`MenuRow`](hoarfrost::surface::menu::view::MenuRow) handles no key
 ///   events of its own, so the navigation keys arrive `Ignored` — which
 ///   is the case this lane exists to catch.
 /// * **`Escape` is deliberately absent.** Dismissal belongs to

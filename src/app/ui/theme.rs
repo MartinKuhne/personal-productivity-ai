@@ -7,14 +7,14 @@
 //!
 //! # Where the values come from
 //!
-//! The `iced-pro` framework crate is the single source of design truth.
+//! The `hoarfrost` framework crate is the single source of design truth.
 //! Every **overlapping** semantic token here is *derived* from
-//! [`iced_pro::token::color::Palette::dark`] (`UIF-TOK-005`) rather than
+//! [`hoarfrost::token::color::Palette::dark`] (`UIF-TOK-005`) rather than
 //! written as a literal — this module keeps the FastMD token *names* the
 //! renderers already speak and adds no colour value of its own. The rename
 //! is one line per field in [`Palette::fastmd_dark`]:
 //!
-//! | FastMD token | `iced-pro` source (`UIF-TOK-005`) |
+//! | FastMD token | `hoarfrost` source (`UIF-TOK-005`) |
 //! |---|---|
 //! | `surface` | `color.surface.base` |
 //! | `surface_variant` | `color.surface.raised` |
@@ -44,8 +44,8 @@
 //! **app-owned literals**. They are FastMD *document and log content*
 //! colours — the sepia of a PDF-backed row, the blue of a YAML key, the
 //! timestamp column of the log viewer — not framework UI roles, so
-//! decision **D-2** (`doc/planning/iced-pro-tasks.md`) keeps them out of
-//! `iced-pro`. They must not be invented there, and they are the only
+//! decision **D-2** (`doc/planning/hoarfrost-tasks.md`) keeps them out of
+//! `hoarfrost`. They must not be invented there, and they are the only
 //! colour literals left in this file.
 //!
 //! Reach the underlying framework palette directly through
@@ -71,15 +71,15 @@
 //!
 //! Unit tests live in the sibling `theme_tests.rs` sidecar.
 
+use hoarfrost::token::color::EditorPalette;
+use hoarfrost::token::color::Palette as ProPalette;
 use iced::Color;
-use iced_pro::token::color::EditorPalette;
-use iced_pro::token::color::Palette as ProPalette;
 
 /// The FastMD dark colour palette (UI-002).
 ///
 /// Every field is a semantic token; call sites should read tokens by role
 /// rather than embedding raw colour literals. The fifteen overlapping
-/// fields are derived from [`iced_pro::token::color::Palette::dark`]
+/// fields are derived from [`hoarfrost::token::color::Palette::dark`]
 /// (`UIF-TOK-005`); the six content tokens are app-owned (decision
 /// **D-2**). See this module's doc comment for the full mapping.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,7 +165,7 @@ pub struct Palette {
 
 impl Palette {
     /// The framework palette this app's tokens are derived from
-    /// (`iced_pro::token::color::Palette::dark`, `UIF-TOK-005`).
+    /// (`hoarfrost::token::color::Palette::dark`, `UIF-TOK-005`).
     ///
     /// Exposed so a consumer that wants the framework's own vocabulary —
     /// `surface_hover`, `accent_border`, `status_danger_fill` — can read
@@ -220,7 +220,7 @@ impl Palette {
 /// black border to make the inverted surface visually obvious.
 ///
 /// The three colours the framework models are delegated to
-/// [`iced_pro::token::color::EditorPalette::inverted`] (`UIF-TOK-005`,
+/// [`hoarfrost::token::color::EditorPalette::inverted`] (`UIF-TOK-005`,
 /// `color.editor.inverted.*`); the app's four-field public shape is kept
 /// unchanged and mapped from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -233,7 +233,7 @@ pub struct EditorColors {
     pub text: Color,
     /// Border stroke colour around the window — `RGB(0, 0, 0)`.
     ///
-    /// **Not a framework delegation:** `iced_pro::token::color::EditorPalette`
+    /// **Not a framework delegation:** `hoarfrost::token::color::EditorPalette`
     /// carries no border token (`UIF-TOK-005` models bg/fg/err only), so
     /// there is nothing to map this from. It stays the named iced
     /// constant `Color::BLACK`, which [`EditorColors::text`] also
@@ -251,7 +251,7 @@ pub struct EditorColors {
     /// Placeholder text on the inverted canvas — `RGB(115, 115, 115)`.
     ///
     /// **Framework token gap, reported not filled blindly:**
-    /// `iced_pro::token::color::EditorPalette` models `bg` / `fg` / `err`
+    /// `hoarfrost::token::color::EditorPalette` models `bg` / `fg` / `err`
     /// only (`UIF-TOK-005`), and a real iced `text_editor` also needs a
     /// placeholder colour. It is pinned here rather than in the editor
     /// module so [AGENTS §4a] holds, and the sidecar asserts it clears the
@@ -265,7 +265,7 @@ pub struct EditorColors {
     /// Same token gap as [`placeholder`](Self::placeholder): the framework
     /// carries no selection colour. Chosen against two measured bounds,
     /// both asserted in the sidecar via
-    /// [`iced_pro::token::contrast`] rather than eyeballed:
+    /// [`hoarfrost::token::contrast`] rather than eyeballed:
     /// * `meets_chrome_contrast` against the white canvas (≥ 3.0) — it
     ///   measured `3.43:1`, so the highlight is actually visible;
     /// * `meets_text_contrast` for the **black buffer text sitting on it**
@@ -280,7 +280,7 @@ pub struct EditorColors {
 impl EditorColors {
     /// Returns the inverted (black text on white) palette required by
     /// UI-046, mapped from the framework's
-    /// [`iced_pro::token::color::EditorPalette::inverted`].
+    /// [`hoarfrost::token::color::EditorPalette::inverted`].
     #[must_use]
     pub const fn inverted() -> Self {
         let pro = EditorPalette::inverted();

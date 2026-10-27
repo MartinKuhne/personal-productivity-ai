@@ -14,17 +14,17 @@ use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui_iced::dialogs::DialogKind;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
-use iced_pro::binding::pre_rank::DragCapture;
-use iced_pro::binding::pre_rank::DragKind;
-use iced_pro::binding::pre_rank::PreRankCoordinator;
-use iced_pro::surface::menu::model::{Menu, Row};
-use iced_pro::surface::movable::MovableGeometry;
-use iced_pro::surface::zorder::SurfaceId;
-use iced_pro::surface::zorder::SurfaceKind;
-use iced_pro::surface::zorder::SurfaceRegistry;
-use iced_pro::surface::zorder::UnwindAnswer;
-use iced_pro::surface::zorder::ZBand;
-use iced_pro::surface::zorder::escape_with_pre_rank;
+use hoarfrost::binding::pre_rank::DragCapture;
+use hoarfrost::binding::pre_rank::DragKind;
+use hoarfrost::binding::pre_rank::PreRankCoordinator;
+use hoarfrost::surface::menu::model::{Menu, Row};
+use hoarfrost::surface::movable::MovableGeometry;
+use hoarfrost::surface::zorder::SurfaceId;
+use hoarfrost::surface::zorder::SurfaceKind;
+use hoarfrost::surface::zorder::SurfaceRegistry;
+use hoarfrost::surface::zorder::UnwindAnswer;
+use hoarfrost::surface::zorder::ZBand;
+use hoarfrost::surface::zorder::escape_with_pre_rank;
 
 /// A config carrying a recognisable marker library so direct-injection is
 /// observable (the marker is NOT the system-library display name, so the
@@ -1226,9 +1226,9 @@ fn host_at(id: &str, x: f32, y: f32, w: f32, h: f32, viewport: Rectangle) -> Mov
     MovableHost::open(
         spec,
         viewport,
-        &mut iced_pro::focus::FocusState::new(),
+        &mut hoarfrost::focus::FocusState::new(),
         &mut SurfaceRegistry::new(),
-        &mut iced_pro::surface::movable::NoopGeometryStorage,
+        &mut hoarfrost::surface::movable::NoopGeometryStorage,
     )
 }
 

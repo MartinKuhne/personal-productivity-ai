@@ -91,9 +91,9 @@ use crate::ui_iced::panels::top::{
 use crate::ui_iced::test_helpers::test_app_state;
 use crate::ui_iced::update::update;
 use crate::ui_iced::view::view;
+use hoarfrost::surface::menu::model::{ActivationEffect, Menu, MenuId, RadioGroupId, submenu_id};
 use iced::Element;
 use iced::mouse;
-use iced_pro::surface::menu::model::{ActivationEffect, Menu, MenuId, RadioGroupId, submenu_id};
 use iced_test::Selector;
 use iced_test::selector::{Candidate, Target};
 use std::path::PathBuf;
@@ -455,7 +455,7 @@ fn test_left_search_compact_field_keeps_adjacent_controls_usable() {
     let mut ui = sim(left_panel(&state.models.left));
     let field_bounds = focus_search_input(&mut ui);
     assert!(
-        field_bounds.height <= iced_pro::token::size::CONTROL_SM,
+        field_bounds.height <= hoarfrost::token::size::CONTROL_SM,
         "the text area must fit inside the compact framework control rung"
     );
     let _ = ui.click(strings::ICON_MAGNIFYING_GLASS);
@@ -1618,7 +1618,7 @@ fn test_canvas_keeps_ten_lines_at_the_policy_floor() {
     );
 
     let canvas = editor_canvas_bounds(&mut ui).expect("canvas laid out");
-    let ten_lines = iced_pro::token::typography::BODY.line_height * 10.0;
+    let ten_lines = hoarfrost::token::typography::BODY.line_height * 10.0;
     assert!(
         canvas.height >= ten_lines,
         "the canvas must keep at least ten body lines ({ten_lines}pt) at the \
@@ -1643,9 +1643,9 @@ fn test_error_banner_does_not_starve_the_canvas_at_the_floor() {
     let mut failing_ui = sim(editor_card(&failing, iced::Size::new(600.0, 420.0)));
     let failing_canvas = editor_canvas_bounds(&mut failing_ui).expect("failing canvas");
 
-    let expected_banner_cost = iced_pro::token::size::CONTROL_MD  // the recovery button
-        + iced_pro::token::space::XS * 2.0                      // the banner's own padding
-        + iced_pro::token::space::SM; // the extra column gap it introduces
+    let expected_banner_cost = hoarfrost::token::size::CONTROL_MD  // the recovery button
+        + hoarfrost::token::space::XS * 2.0                      // the banner's own padding
+        + hoarfrost::token::space::SM; // the extra column gap it introduces
     assert!(
         (clean_canvas.height - failing_canvas.height - expected_banner_cost).abs() < 0.01,
         "the banner must cost exactly what its tokens derive ({expected_banner_cost}pt: \
@@ -1653,7 +1653,7 @@ fn test_error_banner_does_not_starve_the_canvas_at_the_floor() {
         clean_canvas.height - failing_canvas.height
     );
 
-    let ten_lines = iced_pro::token::typography::BODY.line_height * 10.0;
+    let ten_lines = hoarfrost::token::typography::BODY.line_height * 10.0;
     assert!(
         failing_canvas.height >= ten_lines,
         "even with the banner up the canvas must keep ten lines at the floor, \

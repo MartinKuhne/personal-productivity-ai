@@ -12,9 +12,9 @@ use crate::markdown::{InlineElem, heading_plain_text};
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::render::inline::rich_text_element;
+use hoarfrost::token::space;
+use hoarfrost::token::typography;
 use iced::Element;
-use iced_pro::token::space;
-use iced_pro::token::typography;
 use std::path::Path;
 
 /// Point size of an H1 heading — `type.title_lg` (`UIF-TOK-004`).

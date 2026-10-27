@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use crate::config::{AppConfig, LlmConfig};
 use crate::ui::strings;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
     AgentPanelViewModel, TranscriptTurn, TurnRole, chat_model_options, split_user_turn,

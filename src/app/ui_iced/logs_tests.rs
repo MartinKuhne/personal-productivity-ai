@@ -769,7 +769,7 @@ fn scroll_snapshot_reads_the_three_axes_it_needs() {
 
 // ─────────── INT-6: `should_follow` unified with `FollowState::resolve` ───────────
 
-use iced_pro::surface::movable::{AT_BOTTOM_TOLERANCE, AutoScrollSetting, FollowState};
+use hoarfrost::surface::movable::{AT_BOTTOM_TOLERANCE, AutoScrollSetting, FollowState};
 
 /// All four cells of the framework's pause/resume matrix (`UIF-MOV-004`),
 /// reached through the app's own entry point. `should_follow` is now this

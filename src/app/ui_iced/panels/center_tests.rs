@@ -18,7 +18,7 @@
 // on purpose: pinning the band budget and the indicator's weight is the whole
 // point, so a retuned token must fail the suite rather than pass silently.
 // `clippy::assertions_on_constants` cannot tell a spec pin from a tautology
-// (same treatment as `left_tests.rs` and `src/iced-pro/token/*_tests.rs`).
+// (same treatment as `left_tests.rs` and `src/hoarfrost/token/*_tests.rs`).
 #![allow(clippy::assertions_on_constants)]
 
 use super::*;
@@ -612,7 +612,7 @@ fn vm_show_thinking_uses_the_gate() {
 /// applies and no call-site exemption was needed to get the spec's number.
 #[test]
 fn the_unsaved_dot_is_the_specs_six_pixel_shape_not_a_glyph() {
-    use iced_pro::token::typography;
+    use hoarfrost::token::typography;
 
     let dirty = unsaved_dot(true, &Palette::fastmd_dark(), false, false);
 
@@ -688,7 +688,7 @@ fn the_unsaved_dot_is_visible_only_for_dirty_documents() {
 /// change from spending it.
 #[test]
 fn the_unsaved_dot_clears_the_chrome_floor_on_the_surface_it_actually_sits_on() {
-    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio};
 
     let pro = Palette::pro();
 
@@ -842,7 +842,7 @@ fn the_top_indicator_resolves_all_three_states() {
 /// (`3.0:1`), and the measured figure clears it.
 #[test]
 fn the_hovered_top_bar_is_legible_against_the_hovered_tab_surface() {
-    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 
     let pro = Palette::pro();
     let bar = tab_top_indicator(false, true).expect("hovered inactive tab has a bar");
@@ -946,7 +946,7 @@ fn tab_text_color_uses_distinct_tokens_for_active_and_inactive() {
 // --- INT-16: the §4.4.2 tab visual state matrix -------------------------
 //
 // Every figure below is computed from raw sRGB through
-// `iced_pro::token::contrast::contrast_ratio` at test time. None of the
+// `hoarfrost::token::contrast::contrast_ratio` at test time. None of the
 // spec's printed ratios is transcribed into an assertion; each is
 // *re-derived* and compared, so a token change that moves a ratio moves this
 // test rather than leaving the ledger asserting a number nothing produces.
@@ -1178,7 +1178,7 @@ fn hover_changes_colour_only_and_never_tab_geometry() {
 /// The active tab must come out of INT-16 exactly as INT-11/INT-12 left it.
 #[test]
 fn the_active_tab_styling_is_unchanged_by_int_16() {
-    use iced_pro::token::typography::Weight;
+    use hoarfrost::token::typography::Weight;
 
     let palette = Palette::fastmd_dark();
     let pro = Palette::pro();
@@ -1203,7 +1203,7 @@ fn the_active_tab_styling_is_unchanged_by_int_16() {
 /// printed `10.72`). The understatement is in the safe direction.
 #[test]
 fn every_wired_matrix_ratio_is_measured_from_raw_srgb() {
-    use iced_pro::token::contrast::contrast_ratio;
+    use hoarfrost::token::contrast::contrast_ratio;
 
     let pro = Palette::pro();
     let tolerance = 0.005;
@@ -1283,7 +1283,7 @@ fn every_wired_matrix_ratio_is_measured_from_raw_srgb() {
 /// as compliant. It is legal (`> 4.5`) but by `0.3`, not by `13.2`.
 #[test]
 fn the_active_label_is_not_the_specs_printed_17_72() {
-    use iced_pro::token::contrast::{MIN_TEXT_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_TEXT_CONTRAST, contrast_ratio};
 
     let pro = Palette::pro();
     let spec_fill = contrast_ratio(pro.text_strong, pro.surface_overlay);
@@ -1317,7 +1317,7 @@ fn the_active_label_is_not_the_specs_printed_17_72() {
 /// `surface.overlay`.
 #[test]
 fn the_active_top_bar_and_perimeter_are_invisible_against_the_actual_fill() {
-    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 
     let pro = Palette::pro();
 
@@ -1346,7 +1346,7 @@ fn the_active_top_bar_and_perimeter_are_invisible_against_the_actual_fill() {
 /// claim — but the number is recorded so the gap is not discovered later.
 #[test]
 fn the_resting_inactive_perimeter_is_a_sub_floor_hairline_as_specified() {
-    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 
     let pro = Palette::pro();
     let on_raised = contrast_ratio(pro.border_subtle, pro.surface_raised);
@@ -1368,7 +1368,7 @@ fn the_resting_inactive_perimeter_is_a_sub_floor_hairline_as_specified() {
 /// property that makes it read as a quiet control rather than a dead one.
 #[test]
 fn the_resting_close_glyph_sits_inside_the_disabled_text_band() {
-    use iced_pro::token::contrast::{
+    use hoarfrost::token::contrast::{
         DISABLED_TEXT_MAX_CONTRAST, DISABLED_TEXT_MIN_CONTRAST, contrast_ratio,
     };
 
@@ -1392,7 +1392,7 @@ fn the_resting_close_glyph_sits_inside_the_disabled_text_band() {
 /// and the active tab must stay locked.
 #[test]
 fn the_dirty_dot_role_lock_survives_the_hover_thread() {
-    use iced_pro::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
+    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 
     let palette = Palette::fastmd_dark();
     let pro = Palette::pro();
@@ -1471,7 +1471,7 @@ fn tab_hover_and_close_hover_are_independent_axes() {
 /// act rather than a silent one.
 #[test]
 fn the_label_weight_does_not_move_on_hover() {
-    use iced_pro::token::typography::Weight;
+    use hoarfrost::token::typography::Weight;
 
     assert_eq!(
         tab_label_font(false).weight,

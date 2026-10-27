@@ -53,14 +53,14 @@ fn completeness_against_cargo_manifests() {
         "src/agent/Cargo.toml",
         "src/md2pdf/Cargo.toml",
         "src/fastmd-tool-macros/Cargo.toml",
-        // Scanned since INT-1: `fastmd` now depends on `iced-pro`, so its
+        // Scanned since INT-1: `fastmd` now depends on `hoarfrost`, so its
         // third-party deps ride into the `fastmd` binary as well.
-        "src/iced-pro/Cargo.toml",
+        "src/hoarfrost/Cargo.toml",
     ];
 
     // Workspace-internal crates are excluded from the third-party
     // attribution catalog by design (see `attributions.rs` module doc).
-    // `iced-pro` joins the list because INT-1 made it a direct path
+    // `hoarfrost` joins the list because INT-1 made it a direct path
     // dependency of `fastmd`; it is our own crate, not a third party, so
     // it must not appear in the About dialog's third-party list.
     let workspace_members: std::collections::HashSet<String> = [
@@ -68,7 +68,7 @@ fn completeness_against_cargo_manifests() {
         "fastmd-agent",
         "fastmd-pdf",
         "fastmd-tool-macros",
-        "iced-pro",
+        "hoarfrost",
     ]
     .iter()
     .map(|s| s.to_string())

@@ -75,11 +75,11 @@
 #[path = "logs_tests.rs"]
 mod tests;
 
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
 use iced::widget::{Column, Row, checkbox, container, pick_list, rule, scrollable, table, text};
 use iced::{Alignment, Element, Length};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::background::logs::BackgroundLogs;
 use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
@@ -87,10 +87,10 @@ use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{LogsMessage, Message};
-use iced_pro::surface::movable::{AutoScrollSetting, FollowState, ScrollGeometry};
-use iced_pro::token::shape;
-use iced_pro::token::space;
-use iced_pro::token::typography::{self, TypeRung};
+use hoarfrost::surface::movable::{AutoScrollSetting, FollowState, ScrollGeometry};
+use hoarfrost::token::shape;
+use hoarfrost::token::space;
+use hoarfrost::token::typography::{self, TypeRung};
 
 /// Log filter predicate.
 ///
@@ -186,7 +186,7 @@ pub const SEPARATOR_WIDTH: f32 = shape::BORDER_HAIRLINE;
 ///
 /// # Delta against the framework's `AT_BOTTOM_TOLERANCE`
 ///
-/// `iced_pro::surface::movable::AT_BOTTOM_TOLERANCE` is `space::XXS` =
+/// `hoarfrost::surface::movable::AT_BOTTOM_TOLERANCE` is `space::XXS` =
 /// **2.0 pt**. This margin stays **1.0 pt**, deliberately narrower, and the
 /// follow decision therefore uses this value rather than the framework's
 /// `ScrollGeometry::at_bottom`. Adopting 2.0 would widen the band in which
@@ -410,7 +410,7 @@ impl ScrollSnapshot {
     }
 
     /// The same frame as the framework's [`ScrollGeometry`], for handing to
-    /// [`MovableHost::on_scroll`](iced_pro::surface::movable::MovableHost).
+    /// [`MovableHost::on_scroll`](hoarfrost::surface::movable::MovableHost).
     ///
     /// Note the field order differs from this struct's: the framework's
     /// constructor is `(offset, content, viewport)`, not
@@ -443,7 +443,7 @@ pub fn scroll_snapshot(viewport: &scrollable::Viewport) -> ScrollSnapshot {
 /// The auto-scroll preference translated into the framework's vocabulary
 /// (`UIF-MOV-004`).
 ///
-/// The app has carried this as a `bool` since before `iced-pro` named it;
+/// The app has carried this as a `bool` since before `hoarfrost` named it;
 /// going through this one function means the translation exists in exactly
 /// one place ([RUST-021]) and the framework's `AutoScrollSetting` is what
 /// every follow decision is actually made against.
@@ -465,7 +465,7 @@ pub const fn auto_scroll_setting(auto_scroll: bool) -> AutoScrollSetting {
 /// position test still supplied by [`ScrollSnapshot::is_at_bottom`] and its
 /// [`BOTTOM_STICK_TOLERANCE`]. See that constant for why the app's margin
 /// stays tighter than the framework's
-/// [`AT_BOTTOM_TOLERANCE`](iced_pro::surface::movable::AT_BOTTOM_TOLERANCE).
+/// [`AT_BOTTOM_TOLERANCE`](hoarfrost::surface::movable::AT_BOTTOM_TOLERANCE).
 ///
 /// Exposed alongside [`should_follow`] because the two questions are
 /// different: `should_follow` answers "scroll now?", `follow_state` answers

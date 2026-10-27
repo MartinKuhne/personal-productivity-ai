@@ -124,13 +124,13 @@ mod tests;
 
 use std::collections::HashSet;
 
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
 use iced::widget::{
     Column, Row, Space, checkbox, container, mouse_area, pick_list, rule, scrollable, text,
 };
 use iced::{Alignment, Element, Font, Length};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::agent::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
@@ -141,8 +141,8 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 use crate::ui_iced::panels::top::phosphor_font;
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::token::{shape, space};
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::token::{shape, space};
 
 /// Width of the debug card, in logical pixels.
 ///
@@ -1005,7 +1005,7 @@ pub fn agent_debug_viewport(view_model: &AgentDebugViewModel) -> Element<'_, Mes
 /// Purity: pure view over `host` and `view_model`.
 #[must_use]
 pub fn agent_debug_movable_card<'a>(
-    host: &iced_pro::surface::movable::MovableHost,
+    host: &hoarfrost::surface::movable::MovableHost,
     view_model: &'a AgentDebugViewModel,
 ) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();

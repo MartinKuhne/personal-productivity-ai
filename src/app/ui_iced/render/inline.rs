@@ -27,11 +27,11 @@
 use crate::markdown::{InlineElem, TextStyle, image_placeholder};
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
+use hoarfrost::token::space;
+use hoarfrost::token::typography;
 use iced::widget::rich_text;
 use iced::widget::text::{Rich, Span};
 use iced::{Background, Color, Element, Font, Length, Padding};
-use iced_pro::token::space;
-use iced_pro::token::typography;
 use std::path::Path;
 
 /// Point size of body/paragraph inline text — `type.body` (`UIF-TOK-004`).

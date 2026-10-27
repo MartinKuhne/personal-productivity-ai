@@ -18,10 +18,10 @@
 use crate::markdown::parse_yaml_to_pairs;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::Message;
+use hoarfrost::token::space;
+use hoarfrost::token::typography;
 use iced::widget::{Column, container, text};
 use iced::{Alignment, Background, Element, Length};
-use iced_pro::token::space;
-use iced_pro::token::typography;
 
 /// Preferred width of the key column, in logical pixels.
 ///

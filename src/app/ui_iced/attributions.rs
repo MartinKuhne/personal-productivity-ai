@@ -14,15 +14,15 @@
 //! # The framework owns the box, the app owns the rows
 //!
 //! As of integration increment INT-5a this window takes its geometry from
-//! [`iced_pro::surface::modal`] rather than from constants of its own:
+//! [`hoarfrost::surface::modal`] rather than from constants of its own:
 //!
 //! | Concern | Owner |
 //! |---|---|
 //! | Card width (640px) and height (480px), gutter clamp | [`ModalSizing::attributions`] via [`attributions_card_size`] |
-//! | Card surface, border, radius, content padding | [`iced_pro::surface::modal::ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
+//! | Card surface, border, radius, content padding | [`hoarfrost::surface::modal::ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
 //! | Section divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
-//! | Title / cell type sizes, cell padding | `iced_pro::token::{typography, space, shape}` |
-//! | Link colour, underline, hit height | `iced_pro::widget::hyperlink` resolver (`UIF-ATOM-001d`) |
+//! | Title / cell type sizes, cell padding | `hoarfrost::token::{typography, space, shape}` |
+//! | Link colour, underline, hit height | `hoarfrost::widget::hyperlink` resolver (`UIF-ATOM-001d`) |
 //! | Which window is open, what dismisses it | `AboutWindowState` + `OverlayState::close_topmost` |
 //!
 //! The list is no longer a hand-picked `340px` cap. The card is a fixed
@@ -31,7 +31,7 @@
 //! dividers and footer — and it stays 480px total whether the catalog has
 //! two rows or two thousand.
 //!
-//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not**
+//! [`hoarfrost::surface::modal::ModalHost`] is deliberately **not**
 //! used, for the same reason [`crate::ui_iced::about`] does not take it:
 //! the app already owns `SURFACE_ID_ATTRIBUTIONS` in
 //! `crate::ui_iced::app::OverlayState::sync_surfaces` and owns
@@ -81,7 +81,7 @@
 //! ```
 //!
 //! The repository cell is a hyperlink. iced has no `hyperlink_to` and
-//! `iced_pro` ships the hyperlink as a **resolver, not a rendered
+//! `hoarfrost` ships the hyperlink as a **resolver, not a rendered
 //! widget** (`widget/hyperlink.rs` has `resolve_style` and the geometry
 //! but no `Widget` impl), so the cell composes them: the resolver's
 //! resting `foreground` (`color.accent.text`) and `underlined` flag drive
@@ -100,12 +100,12 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Padding, Point, Rectangle, Size};
 
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::surface::modal::{
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::surface::modal::{
     ATTRIBUTIONS_LIST_MAX_HEIGHT, ModalSizing, SubRegionBands, subregion_height,
 };
-use iced_pro::token::{shape, size, space, typography};
-use iced_pro::widget::hyperlink;
+use hoarfrost::token::{shape, size, space, typography};
+use hoarfrost::widget::hyperlink;
 
 use crate::ui::attributions::{Attribution, DIRECT_DEPENDENCIES};
 use crate::ui::strings;
@@ -124,7 +124,7 @@ pub const ATTRIBUTIONS_SIZING: ModalSizing = ModalSizing::attributions();
 /// The Attributions card's **outer** size for a viewport (§4.6.2).
 ///
 /// 640×480, each axis clamped to the viewport minus
-/// [`VIEWPORT_GUTTER`](iced_pro::surface::modal::VIEWPORT_GUTTER). The
+/// [`VIEWPORT_GUTTER`](hoarfrost::surface::modal::VIEWPORT_GUTTER). The
 /// content extent is passed as zero because this policy is *fixed* on
 /// both axes — the card is 480px tall whether the catalog holds two
 /// rows or two thousand, and the list scrolls inside it.
@@ -502,9 +502,9 @@ fn header_cell(label: &'static str) -> Element<'static, Message> {
 /// rendered widget, so the cell composes them itself:
 ///
 /// * the resting
-///   [`HyperlinkStyle::foreground`](iced_pro::widget::hyperlink::HyperlinkStyle::foreground)
+///   [`HyperlinkStyle::foreground`](hoarfrost::widget::hyperlink::HyperlinkStyle::foreground)
 ///   (`color.accent.text`) and
-///   [`HyperlinkStyle::underlined`](iced_pro::widget::hyperlink::HyperlinkStyle::underlined)
+///   [`HyperlinkStyle::underlined`](hoarfrost::widget::hyperlink::HyperlinkStyle::underlined)
 ///   drive the label — **not** the
 ///   `accent_fill` colour the cell used before, which measured below the
 ///   4.5:1 floor against this card's surface;

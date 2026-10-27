@@ -7,10 +7,10 @@
 use super::*;
 use crate::markdown::DocumentContent;
 use crate::ui::strings;
-use iced::widget::text_editor::{Edit, Motion, Position};
-use iced_pro::surface::modal::{
+use hoarfrost::surface::modal::{
     EDITOR_HEIGHT_MAX, EDITOR_HEIGHT_MIN, EDITOR_WIDTH_MAX, EDITOR_WIDTH_MIN,
 };
+use iced::widget::text_editor::{Edit, Motion, Position};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -947,7 +947,7 @@ fn guard_leave_truth_table() {
 /// without inventing a third word for the same thing.
 #[test]
 fn leave_gesture_maps_to_the_framework_dismiss_cause() {
-    use iced_pro::surface::modal::DismissCause;
+    use hoarfrost::surface::modal::DismissCause;
 
     assert_eq!(LeaveGesture::Escape.dismiss_cause(), DismissCause::Escape);
     assert_eq!(LeaveGesture::Scrim.dismiss_cause(), DismissCause::Scrim);
@@ -1094,7 +1094,7 @@ fn a_validation_failure_carries_its_location_and_a_focus_recovery() {
     );
     assert_eq!(
         error.recovery(),
-        &Recovery::FocusControl(iced_pro::focus::FocusId::new(EDITOR_TEXT_ID)),
+        &Recovery::FocusControl(hoarfrost::focus::FocusId::new(EDITOR_TEXT_ID)),
         "the recovery must name the buffer the user has to fix"
     );
     assert!(
@@ -1179,14 +1179,14 @@ fn recovery_labels_name_what_the_button_does() {
 
     let focus_line = ModalError::new("X", "x")
         .at(ErrorLocation::Position { line: 7, column: 2 })
-        .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+        .with_recovery(Recovery::FocusControl(hoarfrost::focus::FocusId::new(
             EDITOR_TEXT_ID,
         )));
     assert_eq!(recovery_label(&focus_line), "Fix line 7");
 
     let focus_region = ModalError::new("X", "x")
         .at(ErrorLocation::Region("front matter".to_string()))
-        .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+        .with_recovery(Recovery::FocusControl(hoarfrost::focus::FocusId::new(
             EDITOR_TEXT_ID,
         )));
     assert_eq!(recovery_label(&focus_region), strings::EDITOR_FIX_LABEL);
@@ -1241,14 +1241,14 @@ fn dismiss_and_recovery_messages_never_mutate_the_buffer() {
 /// framework's own contrast rules, measured from raw sRGB rather than
 /// eyeballed.
 ///
-/// `iced_pro::token::color::EditorPalette` models `bg` / `fg` / `err`
+/// `hoarfrost::token::color::EditorPalette` models `bg` / `fg` / `err`
 /// only (`UIF-TOK-005`), so the placeholder and selection colours the
 /// app had to add are pinned here against
-/// [`iced_pro::token::contrast`] - the same bar that moved the error
+/// [`hoarfrost::token::contrast`] - the same bar that moved the error
 /// colour off pure red.
 #[test]
 fn inverted_editor_palette_meets_its_contrast_bounds() {
-    use iced_pro::token::contrast::{meets_chrome_contrast, meets_text_contrast};
+    use hoarfrost::token::contrast::{meets_chrome_contrast, meets_text_contrast};
 
     let colors = EditorColors::inverted();
 
@@ -1281,7 +1281,7 @@ fn inverted_editor_palette_meets_its_contrast_bounds() {
 /// parallel set of numbers that can drift.
 #[test]
 fn inverted_editor_palette_delegates_to_the_framework_token() {
-    use iced_pro::token::color::EditorPalette;
+    use hoarfrost::token::color::EditorPalette;
 
     let app = EditorColors::inverted();
     let pro = EditorPalette::inverted();

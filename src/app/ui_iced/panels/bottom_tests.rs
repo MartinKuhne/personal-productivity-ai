@@ -16,14 +16,6 @@ use crate::config::LlmConfig;
 use crate::ui::strings;
 use crate::ui_iced::test_helpers::test_app;
 
-use iced_pro::binding::{Cancel, Commit, Live};
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::{size, space, typography};
-use iced_pro::widget::button::{self, ButtonVariant};
-use iced_pro::widget::text_input as pro_text_input;
-use iced_pro::widget::text_input_controller::TextInputEmission;
-use iced_pro::widget::text_input_model::TextInputModel;
-
 use super::{
     BAND_PADDING, BAND_SPACING, BottomPanelViewModel, COMMAND_INPUT_ID, CONTEXT_SPACING,
     FILE_CONTEXT_BASE_SIZE, FILE_CONTEXT_FALLBACK_SIZE, FILE_CONTEXT_MIN_SIZE, PROMPT_TEXT_SIZE,
@@ -31,6 +23,13 @@ use super::{
     format_models_list, parse_command_intent, stop_button_color, stop_button_variant, stop_enabled,
     submit_commands,
 };
+use hoarfrost::binding::{Cancel, Commit, Live};
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::{size, space, typography};
+use hoarfrost::widget::button::{self, ButtonVariant};
+use hoarfrost::widget::text_input as pro_text_input;
+use hoarfrost::widget::text_input_controller::TextInputEmission;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::theme::Palette;

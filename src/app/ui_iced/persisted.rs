@@ -33,9 +33,9 @@
 mod tests;
 
 use crate::ui::{CURRENT_SCHEMA_VERSION, PersistedUiState};
+use hoarfrost::surface::movable::{GeometryStorage, MovableGeometry};
 use iced::window::Position;
 use iced::{Point, Size};
-use iced_pro::surface::movable::{GeometryStorage, MovableGeometry};
 use std::path::{Path, PathBuf};
 
 /// NFR-001/NFR-004 error-code name for failed UI-state saves.
@@ -245,11 +245,11 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
     }
 }
 
-/// The `iced-pro` movable-overlay geometry sink, backed by the live
+/// The `hoarfrost` movable-overlay geometry sink, backed by the live
 /// [`PersistedUiState`] model and the injected [`UiStateStorage`] handler
 /// (`UIF-MOV-001`, [RUST-024]).
 ///
-/// `iced-pro` deliberately owns *that* a card's rectangle should be
+/// `hoarfrost` deliberately owns *that* a card's rectangle should be
 /// remembered and *when* it settled, and nothing about where it lives. This
 /// is the app side of that arrangement: the framework's
 /// [`GeometryStorage`] seam, filled with the app's own storage handler so
@@ -268,7 +268,7 @@ pub fn load_ui_state(handler: &dyn UiStateStorage) -> PersistedUiState {
 ///
 /// # Call cadence
 ///
-/// [`MovableHost`](iced_pro::surface::movable::MovableHost) calls
+/// [`MovableHost`](hoarfrost::surface::movable::MovableHost) calls
 /// [`load`](GeometryStorage::load) once when a card opens and
 /// [`save`](GeometryStorage::save) only when a drag or resize *settles* —
 /// never per frame — so the write-through never lands on a hot path and

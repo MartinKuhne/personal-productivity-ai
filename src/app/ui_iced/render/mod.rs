@@ -64,11 +64,11 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::table_width::TablePadding;
 use crate::ui_iced::table_width::{IcedTextMeasurer, TextMetrics};
+use hoarfrost::token::{shape, space, typography};
+use hoarfrost::widget::toggle_model::CheckState;
+use hoarfrost::widget::toggle_widget::Checkbox;
 use iced::widget::{Column, Space, container, rule, text};
 use iced::{Alignment, Element, Length};
-use iced_pro::token::{shape, space, typography};
-use iced_pro::widget::toggle_model::CheckState;
-use iced_pro::widget::toggle_widget::Checkbox;
 use std::path::PathBuf;
 
 use code::CodeBlockModel;

@@ -85,7 +85,7 @@
 //! # The framework owns the box, the app owns the answer
 //!
 //! As of integration increment **INT-5b** this module is a consumer of
-//! [`iced_pro::surface::modal`] rather than a re-implementation of §4.6.
+//! [`hoarfrost::surface::modal`] rather than a re-implementation of §4.6.
 //! Nothing here carries a card measurement of its own:
 //!
 //! | Concern | Owner |
@@ -93,16 +93,16 @@
 //! | Card width, height, gutter clamp | [`ModalSizing::editor`] via [`editor_size`] |
 //! | Card surface, border, radius, padding | [`ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
 //! | Header / footer divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
-//! | Title, buffer and status type; section gaps | `iced_pro::token::{typography, space}` |
-//! | Footer button geometry and states | [`iced_pro::widget::button_widget::Button`] |
-//! | Inverted canvas colours | [`EditorColors::inverted`] → `iced_pro::token::color::EditorPalette::inverted` |
+//! | Title, buffer and status type; section gaps | `hoarfrost::token::{typography, space}` |
+//! | Footer button geometry and states | [`hoarfrost::widget::button_widget::Button`] |
+//! | Inverted canvas colours | [`EditorColors::inverted`] → `hoarfrost::token::color::EditorPalette::inverted` |
 //! | Which buffer is open, what dismisses it | `OverlayState::editor` + `OverlayState::close_topmost` |
 //!
-//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not** used,
+//! [`hoarfrost::surface::modal::ModalHost`] is deliberately **not** used,
 //! for the same reason [`crate::ui_iced::about`] and
 //! [`crate::ui_iced::dialogs`] did not take it: the host self-registers
 //! its surface into a
-//! [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry) and
+//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) and
 //! pushes its own focus trap, while this app already owns
 //! `SURFACE_ID_EDITOR` in
 //! [`crate::ui_iced::app::OverlayState::sync_surfaces`] and owns
@@ -135,7 +135,7 @@
 //! The confirmation is not a new surface. It reuses the INT-4 small dialog
 //! as [`DiscardEditorChanges`](crate::ui_iced::dialogs::DialogKind::DiscardEditorChanges),
 //! whose control row is the same
-//! [`InputControl::Confirmation`](iced_pro::surface::input_dialog::InputControl::Confirmation)
+//! [`InputControl::Confirmation`](hoarfrost::surface::input_dialog::InputControl::Confirmation)
 //! the delete confirmation uses and whose
 //! primary button is [`ButtonVariant::Danger`] labelled
 //! [`strings::DISCARD_ACTION`]. Composing the two surfaces works because
@@ -144,7 +144,7 @@
 //! `SURFACE_ID_DIALOG`), so:
 //!
 //! * a dirty `Escape` leaves the editor mounted, consumes the key
-//!   ([`UnwindAnswer::Unwound`](iced_pro::surface::zorder::UnwindAnswer::Unwound)) and opens the confirmation centred over
+//!   ([`UnwindAnswer::Unwound`](hoarfrost::surface::zorder::UnwindAnswer::Unwound)) and opens the confirmation centred over
 //!   it;
 //! * `Discard` closes the dialog **and** the buffer;
 //! * `Cancel` closes only the dialog — the editor, and the edits in it,
@@ -172,10 +172,10 @@ use std::path::{Path, PathBuf};
 use iced::widget::{Column, Row, Space, container, text, text_editor};
 use iced::{Alignment, Element, Length, Size};
 
-use iced_pro::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
-use iced_pro::token::{shape, space, typography};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
+use hoarfrost::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
+use hoarfrost::token::{shape, space, typography};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 
 use crate::markdown::{DocumentContent, MarkdownErrorKind, MarkdownParseError, validate_markdown};
 use crate::ui::strings;
@@ -262,16 +262,16 @@ impl LeaveGesture {
     /// the framework's `attempt_dismiss` shape speak the same language.
     ///
     /// `Cancel` maps to
-    /// [`DismissCause::Programmatic`](iced_pro::surface::modal::DismissCause::Programmatic)
+    /// [`DismissCause::Programmatic`](hoarfrost::surface::modal::DismissCause::Programmatic)
     /// because that is the cause the framework's `ModalHost` treats as
     /// "the caller decided, `UIF-MOD-002` does not apply" — which is
     /// precisely what an explicit `Cancel` is.
     #[must_use]
-    pub const fn dismiss_cause(self) -> iced_pro::surface::modal::DismissCause {
+    pub const fn dismiss_cause(self) -> hoarfrost::surface::modal::DismissCause {
         match self {
-            Self::Escape => iced_pro::surface::modal::DismissCause::Escape,
-            Self::Scrim => iced_pro::surface::modal::DismissCause::Scrim,
-            Self::Cancel => iced_pro::surface::modal::DismissCause::Programmatic,
+            Self::Escape => hoarfrost::surface::modal::DismissCause::Escape,
+            Self::Scrim => hoarfrost::surface::modal::DismissCause::Scrim,
+            Self::Cancel => hoarfrost::surface::modal::DismissCause::Programmatic,
         }
     }
 }
@@ -637,7 +637,7 @@ impl EditorViewModel {
     /// Show a save failure, superseding whatever was showing.
     ///
     /// Returns what it replaced, mirroring
-    /// [`ModalHost::set_error`](iced_pro::surface::modal::ModalHost::set_error):
+    /// [`ModalHost::set_error`](hoarfrost::surface::modal::ModalHost::set_error):
     /// the banner changes by exactly two operations, this and
     /// [`clear_save_error`](Self::clear_save_error).
     pub fn set_save_error(&mut self, error: ModalError) -> Option<ModalError> {
@@ -648,7 +648,7 @@ impl EditorViewModel {
     ///
     /// Returns whether the banner **changed**: showing a refusal where none
     /// was showing is a change, re-noting the same refusal is not. That is
-    /// the contract [`ModalHost::set_error`](iced_pro::surface::modal::ModalHost::set_error)
+    /// the contract [`ModalHost::set_error`](hoarfrost::surface::modal::ModalHost::set_error)
     /// keeps, and it is what lets a reducer tell a refusal worth repainting
     /// from a repeat of one already on screen.
     pub fn note_save_failed(&mut self) -> bool {
@@ -694,7 +694,7 @@ impl EditorViewModel {
                 line: error.line as u32,
                 column: error.column as u32,
             })
-            .with_recovery(Recovery::FocusControl(iced_pro::focus::FocusId::new(
+            .with_recovery(Recovery::FocusControl(hoarfrost::focus::FocusId::new(
                 EDITOR_TEXT_ID,
             ))),
         )
@@ -1089,7 +1089,7 @@ fn editor_footer(vm: &EditorViewModel) -> Element<'_, Message> {
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a
@@ -1106,7 +1106,7 @@ fn footer_button(
 ) -> Element<'static, Message> {
     let content = Column::new()
         .width(Length::Fixed(
-            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
         ))
         .align_x(Alignment::Center)
         .push(rung(

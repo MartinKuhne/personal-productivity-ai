@@ -63,9 +63,9 @@
 //!   snapshot for [`TextInput`]. The
 //!   field routes typing and Escape restoration as
 //!   [`AgentMessage::InputChanged`], Enter's explicit
-//!   [`Committed`](iced_pro::widget::text_input_controller::TextInputEmission::Committed)
+//!   [`Committed`](hoarfrost::widget::text_input_controller::TextInputEmission::Committed)
 //!   tier as [`AgentMessage::Submit`], and blur's
-//!   [`FocusCommitted`](iced_pro::widget::text_input_controller::TextInputEmission::FocusCommitted)
+//!   [`FocusCommitted`](hoarfrost::widget::text_input_controller::TextInputEmission::FocusCommitted)
 //!   tier as `InputChanged` only. Its paint comes from the framework widget
 //!   and [`Palette::pro`], not a hand-built iced style.
 //!
@@ -78,13 +78,13 @@ mod tests;
 use iced::widget::{Column, Row, container, text};
 use iced::{Alignment, Color, Element, Font, Length};
 
-use iced_pro::token::space;
-use iced_pro::token::typography;
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input::{InputKind, TextInput};
-use iced_pro::widget::text_input_controller::TextInputEmission;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::token::space;
+use hoarfrost::token::typography;
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
+use hoarfrost::widget::text_input_controller::TextInputEmission;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;

@@ -13,18 +13,18 @@
 //! # The framework owns the box, the app owns the answer
 //!
 //! As of integration increment INT-4 this module is a consumer of
-//! [`iced_pro::surface::input_dialog`] rather than a re-implementation of
+//! [`hoarfrost::surface::input_dialog`] rather than a re-implementation of
 //! §4.5. Nothing here carries a dialog measurement of its own:
 //!
 //! | Concern | Owner |
 //! |---|---|
 //! | Card width, row heights, gaps, padding | `input_dialog` tokens, re-exported below |
 //! | Which control the middle row holds | [`DialogKind::input_control`] producing [`InputControl`] |
-//! | Card size | [`iced_pro::surface::input_dialog::InputLayout::card_size`] via [`dialog_size`] |
-//! | Where the card lands | [`iced_pro::geometry::anchor::solve`] with `Anchor::CursorProximal` |
+//! | Card size | [`hoarfrost::surface::input_dialog::InputLayout::card_size`] via [`dialog_size`] |
+//! | Where the card lands | [`hoarfrost::geometry::anchor::solve`] with `Anchor::CursorProximal` |
 //! | Whether the primary button is destructive | [`DialogKind::button_intent`] producing [`ButtonIntent`] |
-//! | When an invalid field is allowed to *look* invalid | [`iced_pro::validation::punish::punish`] |
-//! | Button and field painting | `iced_pro::widget::button_widget::Button`, `iced_pro::widget::text_input::TextInput` |
+//! | When an invalid field is allowed to *look* invalid | [`hoarfrost::validation::punish::punish`] |
+//! | Button and field painting | `hoarfrost::widget::button_widget::Button`, `hoarfrost::widget::text_input::TextInput` |
 //!
 //! The value, the verdict and the commit history stay here, because the
 //! dialog is the thing that knows what a name means in this application.
@@ -37,7 +37,7 @@
 //! modal, so opening a dialog replaces whatever was open — the same rule
 //! [`crate::ui_iced::overlay::OverlaySlot::open_modal`] enforces.
 //!
-//! The name field is a [`iced_pro::widget::text_input_model::TextInputModel`]
+//! The name field is a [`hoarfrost::widget::text_input_model::TextInputModel`]
 //! rather than a bare `String`. That is not decoration: the field's
 //! *commit history* — whether the user has ever finished with it — is a
 //! fact about the field, and the framework will only carry it on the model
@@ -57,7 +57,7 @@
 //!
 //! *Whether* the value is valid is therefore the app's answer, and it is
 //! recomputed on every keystroke. **When the user is told** is not: that
-//! goes through [`iced_pro::validation::punish::punish`], so a pristine
+//! goes through [`hoarfrost::validation::punish::punish`], so a pristine
 //! field with a bad name keeps its red border withheld while a character
 //! the filesystem can never accept — a `/` in a basename — flags
 //! immediately, before the user has finished typing the whole path
@@ -72,8 +72,8 @@
 //! [`crate::ui_iced::message::LayoutMessage::CursorMoved`] point when it
 //! opens the dialog and passes it to [`dialog_card`], which resolves the
 //! final top-left with [`resolve_dialog_anchor`] — a call to
-//! [`iced_pro::geometry::anchor::solve`] with
-//! [`iced_pro::geometry::anchor::Anchor::CursorProximal`]. This module owns
+//! [`hoarfrost::geometry::anchor::solve`] with
+//! [`hoarfrost::geometry::anchor::Anchor::CursorProximal`]. This module owns
 //! no clamping arithmetic and could not write one if it wanted to: the
 //! `8px` viewport margin and the `+2px, +2px` cursor offset come out of
 //! the shared solver, which is what `UIF-INP-001` asks for and what the
@@ -95,20 +95,20 @@ use std::path::{Path, PathBuf};
 use iced::widget::{Column, container, mouse_area, scrollable, space, text};
 use iced::{Alignment, Background, Element, Length, Padding, Point, Rectangle, Size};
 
-use iced_pro::geometry::anchor::{self, Anchor};
-use iced_pro::surface::input_dialog::{
+use hoarfrost::geometry::anchor::{self, Anchor};
+use hoarfrost::surface::input_dialog::{
     self as input_dialog, BUTTON_MIN_WIDTH, ButtonIntent, CARD_WIDTH, CONTEXT_ROW_HEIGHT,
     DeleteTargets, FOOTER_HEIGHT, InputControl, InputLayout, ROW_GAP, Selection, TITLE_ROW_HEIGHT,
     VALIDATION_SLOT_HEIGHT, folder_list_height,
 };
-use iced_pro::token::typography;
-use iced_pro::validation::disallowed::DisallowedClass;
-use iced_pro::validation::punish::Punishment;
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input::{InputKind, TextInput};
-use iced_pro::widget::text_input_controller::TextInputEmission;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::token::typography;
+use hoarfrost::validation::disallowed::DisallowedClass;
+use hoarfrost::validation::punish::Punishment;
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
+use hoarfrost::widget::text_input_controller::TextInputEmission;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -171,7 +171,7 @@ pub const DIALOG_ERROR_SIZE: f32 = typography::CAPTION.size;
 ///
 /// The last measurement the row needed a home for; naming it here keeps the
 /// row builder free of bare numbers the same way the eight rebinds above do.
-pub const MOVE_ROW_INSET: f32 = iced_pro::token::space::XS;
+pub const MOVE_ROW_INSET: f32 = hoarfrost::token::space::XS;
 
 // ---------------------------------------------------------------------------
 // Stable widget identities (§5 of the app's iced Id rules)
@@ -792,7 +792,7 @@ pub fn validate_name(kind: &DialogKind, name: &str) -> Result<(), String> {
 /// The deterministic rendered size of a dialog card.
 ///
 /// A direct delegation to the framework's box model
-/// ([`iced_pro::surface::input_dialog::InputLayout::card_size`]), so the
+/// ([`hoarfrost::surface::input_dialog::InputLayout::card_size`]), so the
 /// card's size is decided by the same code that decides where every row
 /// inside it goes. The validation slot is in that total whatever the
 /// control is, which is why the size does not change when an error
@@ -809,7 +809,7 @@ pub fn dialog_size(control: &InputControl) -> Size {
 /// `Some(point)` is the cursor position the reducer captured from
 /// [`crate::ui_iced::message::LayoutMessage::CursorMoved`] when the
 /// dialog opened; it is solved as a pointer-invoked
-/// [`iced_pro::geometry::anchor::Anchor::CursorProximal`], which opens the
+/// [`hoarfrost::geometry::anchor::Anchor::CursorProximal`], which opens the
 /// card `+2px, +2px` off the cursor and clamps it to an `8px` margin from
 /// every viewport edge. `None` — no pointer known — is solved as
 /// keyboard-invoked and centres the card.
@@ -856,12 +856,12 @@ pub fn resolve_dialog_anchor(anchor: Option<Point>, size: Size, viewport: Size) 
 ///
 /// * Name-entry kinds ([`DialogKind::CreateDirectory`] /
 ///   [`DialogKind::CreateDocument`] / [`DialogKind::Rename`]): a framework
-///   [`iced_pro::widget::text_input::TextInput`] bound to the state's
+///   [`hoarfrost::widget::text_input::TextInput`] bound to the state's
 ///   [`TextInputModel`], painted invalid only when
 ///   [`DialogState::painted_error`] has something to say.
 /// * [`DialogKind::Move`]: the scrollable destination picker (row press →
 ///   [`DialogMessage::DestinationSelected`]), sized by
-///   [`iced_pro::surface::input_dialog::folder_list_height`].
+///   [`hoarfrost::surface::input_dialog::folder_list_height`].
 /// * [`DialogKind::DeleteConfirm`]: an empty control row — the whole
 ///   message is the context line — and a [`ButtonIntent::Danger`] primary.
 ///
