@@ -626,12 +626,12 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
     SurfaceGeometryConstant {
         file: "composite/tab_strip.rs",
         name: "TAB_MIN_WIDTH",
-        spec: "§4.4.1 — Tab Strip min tab width 64px",
+        spec: "§4.4.1 — Tab Strip min tab width 96px",
     },
     SurfaceGeometryConstant {
         file: "composite/tab_strip.rs",
         name: "TAB_MAX_WIDTH",
-        spec: "§4.4.1 — Tab Strip max tab width 200px",
+        spec: "§4.4.1 — Tab Strip max tab width 220px",
     },
 ];
 

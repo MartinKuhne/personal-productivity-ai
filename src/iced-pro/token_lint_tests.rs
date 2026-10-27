@@ -155,7 +155,8 @@ use crate::token_lint::{
 /// 176 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
 /// 177 as of `UIF-COMP-016`: `composite/split_divider.rs`.
 /// 179 as of `UIF-PANE-002` and `UIF-WIN-001`: `geometry/pane_solver.rs` and `geometry/window_geometry.rs`.
-const PIN_FILES_SCANNED: usize = 179;
+/// 180 as of `UIF-PANE-003`: `widget/search_box.rs`.
+const PIN_FILES_SCANNED: usize = 180;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
@@ -212,7 +213,8 @@ const PIN_RULE_A_FILES: usize = 1;
 /// 102 as of `UIF-ATOM-012`: `widget/color_picker.rs`.
 /// 104 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
 /// 105 as of `UIF-COMP-016`: `composite/split_divider.rs`.
-const PIN_RULE_B_FILES: usize = 105;
+/// 106 as of `UIF-PANE-003`: `widget/search_box.rs`.
+const PIN_RULE_B_FILES: usize = 106;
 /// Colour constructors found inside `token/color.rs`.
 const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// Visual scalars reading a token path.
@@ -384,7 +386,11 @@ const PIN_COLOUR_DEFINITIONS: usize = 26;
 /// 332 as of Increments 24 & 25: the 7 token-bound visual constants in `navbar::` (`NAVBAR_HEIGHT_STANDARD`,
 /// `NAVBAR_HEIGHT_COMPACT`, `HORIZONTAL_PADDING`, `ACTION_SPACING`, `ITEM_SPACING`, `TEXT_SIZE`)
 /// and `tab_strip::` (`TAB_STRIP_HEIGHT`, `CLOSE_BUTTON_SIZE`).
-const PIN_TOKEN_BOUND: usize = 332;
+/// 340 as of `UIF-PANE-003`: the 6 token-bound constants in `tree_view::` (`SEARCH_FOOTER_HEIGHT`,
+/// `SEARCH_INPUT_HEIGHT`, `SEARCH_FOOTER_PADDING_Y`, `SEARCH_FOOTER_PADDING_X`,
+/// `SEARCH_FOOTER_DIVIDER_WIDTH`, `SEARCH_ACTION_SIZE`) and 2 in `search_box::` (`SEARCH_INPUT_HEIGHT`,
+/// `SEARCH_ACTION_SIZE`).
+const PIN_TOKEN_BOUND: usize = 340;
 /// Visual scalars bound to `0.0`.
 const PIN_ZERO: usize = 3;
 /// Visual scalars bound to a sub-unit proportion.

@@ -193,5 +193,12 @@ pub use stepper::{
 };
 pub use tab_strip::{
     CLOSE_BUTTON_SIZE, DIRTY_DOT_DIAMETER, TAB_MAX_WIDTH, TAB_MIN_WIDTH, TAB_STRIP_HEIGHT,
-    TabCloseVerdict, TabItem, TabItemStyle, TabStrip, TabStripModel, resolve_tab_style,
+    TabCloseVerdict, TabContextMenuModel, TabItem, TabItemStyle, TabStrip, TabStripModel,
+    clamp_tab_width, resolve_tab_style, tab_context_menu,
+};
+pub use tree_view::{
+    MAX_TREE_DEPTH, Modifiers, SEARCH_ACTION_SIZE, SEARCH_FOOTER_DIVIDER_WIDTH,
+    SEARCH_FOOTER_HEIGHT, SEARCH_FOOTER_PADDING_X, SEARCH_FOOTER_PADDING_Y, SEARCH_INPUT_HEIGHT,
+    SEARCH_PLACEHOLDER, SearchFooterConfig, SelectionMode, SyncReport, TreeEvent, TreeKey,
+    TreeSelectionMode, TreeStructure, TreeView, VisibleRow, render_tree_with_footer, visible_rows,
 };

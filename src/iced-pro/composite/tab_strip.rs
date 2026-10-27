@@ -1,32 +1,90 @@
-//! Tab strip composite with dirty close guards, MRU focus handoff, and external-deletion sync (`UIF-TAB-003`).
+//! Tab strip composite with dirty close guards, pointer bindings, MRU focus handoff, and external-deletion sync (`UIF-TAB-001`, `UIF-TAB-002`, `UIF-TAB-003`).
 //!
 //! The tab strip manages open document tabs, tracking their active state, unsaved-change ("dirty") status,
 //! and most-recently-used (MRU) activation history. When a tab is closed, a dirty close guard intercepts
 //! tabs with unsaved edits to raise confirmation dialogs, while external file deletions automatically
 //! close the corresponding tab and transfer focus to the most-recently-active remaining document.
+//! Pointer bindings allow selecting tabs with left-click, closing tabs with middle-click or close button,
+//! and opening context menus with right-click. The tabs are wrapped in a horizontal scrollable container
+//! respecting [TAB_MIN_WIDTH, TAB_MAX_WIDTH] and 24x24 close button targets.
 //!
 //! Unit tests live in the sibling `tab_strip_tests.rs` sidecar.
 
 use iced::alignment;
 use iced::{Border, Color, Element, Length, Pixels, Shadow};
 
+use crate::surface::menu::{Menu, Row};
 use crate::surface::tooltip::Tooltip;
 use crate::token::{color::Palette, shape, size, space, typography};
 
 /// Standard height of a tab strip in pixels (`size.control.md` - 32px).
 pub const TAB_STRIP_HEIGHT: f32 = size::CONTROL_MD;
 
-/// Minimum width of an individual tab in pixels (64px).
-pub const TAB_MIN_WIDTH: f32 = 64.0;
+/// Minimum width of an individual tab in pixels (96px, §2.2, §4.4.3).
+pub const TAB_MIN_WIDTH: f32 = 96.0;
 
-/// Maximum width of an individual tab in pixels (200px).
-pub const TAB_MAX_WIDTH: f32 = 200.0;
+/// Maximum width of an individual tab in pixels (220px, §2.2, §4.4.3).
+pub const TAB_MAX_WIDTH: f32 = 220.0;
 
 /// Diameter of the unsaved-state dirty dot in pixels (`size.indicator.dot` - 6px).
 pub const DIRTY_DOT_DIAMETER: f32 = size::INDICATOR_DOT;
 
-/// Size of the tab close button in pixels (`size.icon.md` - 16px).
-pub const CLOSE_BUTTON_SIZE: f32 = size::ICON_MD;
+/// Size of the tab close button target in pixels (`size.hit_target.min` - 24px, §4.4.3).
+pub const CLOSE_BUTTON_SIZE: f32 = size::HIT_TARGET_MIN;
+
+/// Clamp a proposed tab width into [`TAB_MIN_WIDTH`, `TAB_MAX_WIDTH`] (`UIF-TAB-002`).
+#[must_use]
+pub fn clamp_tab_width(width: f32) -> f32 {
+    width.clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH)
+}
+
+/// Standardized context menu model for document tabs (`UIF-TAB-001`, spec §4.9.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabContextMenuModel {
+    /// Identifier / path of the target tab.
+    pub tab_id: String,
+}
+
+impl TabContextMenuModel {
+    /// Create a new tab context menu model for `tab_id`.
+    #[must_use]
+    pub fn new(tab_id: impl Into<String>) -> Self {
+        Self {
+            tab_id: tab_id.into(),
+        }
+    }
+
+    /// Build the standardized [`Menu`] with §4.9.1 functional groups.
+    #[must_use]
+    pub fn build_menu(&self) -> Menu {
+        tab_context_menu(&self.tab_id)
+    }
+}
+
+/// Helper function creating the standardized context menu for a tab (`UIF-TAB-001`, spec §4.9.1).
+#[must_use]
+pub fn tab_context_menu(tab_id: &str) -> Menu {
+    let menu_id = format!("menu:tab:{tab_id}");
+    let rows = vec![
+        // Group 1: Tab Lifecycle
+        Row::action("close", "Close Tab"),
+        Row::action("close_others", "Close Other Tabs"),
+        Row::action("close_all", "Close All Tabs"),
+        // Divider
+        Row::separator(),
+        // Group 2: Edit & Automation
+        Row::action("edit", "Edit"),
+        Row::action("open_in_editor", "Open in System Editor"),
+        Row::action("format_markdown", "Format Markdown"),
+        // Divider
+        Row::separator(),
+        // Group 3: Location
+        Row::action("copy_path", "Copy Relative Path"),
+        Row::action("show_in_explorer", "Show in File Explorer"),
+    ];
+
+    Menu::new(menu_id, rows)
+}
 
 /// Close verdict returned when a tab close is requested (`UIF-TAB-003`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,12 +316,13 @@ pub fn resolve_tab_style(
     }
 }
 
-/// Tab strip widget rendering the horizontal document tabs (`UIF-TAB-003`).
+/// Tab strip widget rendering the horizontal document tabs (`UIF-TAB-001`, `UIF-TAB-002`, `UIF-TAB-003`).
 pub struct TabStrip<'a, Message> {
     model: &'a TabStripModel,
     palette: Palette,
     on_select_tab: Option<Box<dyn Fn(String) -> Message + 'a>>,
     on_close_tab: Option<Box<dyn Fn(String) -> Message + 'a>>,
+    on_context_menu: Option<Box<dyn Fn(String, iced::Point) -> Message + 'a>>,
 }
 
 impl<'a, Message> TabStrip<'a, Message> {
@@ -275,6 +334,7 @@ impl<'a, Message> TabStrip<'a, Message> {
             palette: Palette::dark(),
             on_select_tab: None,
             on_close_tab: None,
+            on_context_menu: None,
         }
     }
 
@@ -285,17 +345,24 @@ impl<'a, Message> TabStrip<'a, Message> {
         self
     }
 
-    /// Callback invoked when a tab is selected.
+    /// Callback invoked when a tab is selected (`UIF-TAB-001`).
     #[must_use]
     pub fn on_select_tab(mut self, f: impl Fn(String) -> Message + 'a) -> Self {
         self.on_select_tab = Some(Box::new(f));
         self
     }
 
-    /// Callback invoked when a tab's close button is clicked.
+    /// Callback invoked when a tab's close button or middle-click is triggered (`UIF-TAB-001`).
     #[must_use]
     pub fn on_close_tab(mut self, f: impl Fn(String) -> Message + 'a) -> Self {
         self.on_close_tab = Some(Box::new(f));
+        self
+    }
+
+    /// Callback invoked when a tab's context menu is requested (`UIF-TAB-001`).
+    #[must_use]
+    pub fn on_context_menu(mut self, f: impl Fn(String, iced::Point) -> Message + 'a) -> Self {
+        self.on_context_menu = Some(Box::new(f));
         self
     }
 }
@@ -336,15 +403,37 @@ impl<'a, Message: 'a + Clone> From<TabStrip<'a, Message>> for Element<'a, Messag
                 let close_msg = on_close(tab.id.clone());
                 tab_content = tab_content.push(
                     iced::widget::button(
-                        iced::widget::text("×").size(Pixels(typography::CAPTION.size)),
+                        iced::widget::container(
+                            iced::widget::text("×")
+                                .size(Pixels(typography::CAPTION.size))
+                                .align_x(alignment::Horizontal::Center)
+                                .align_y(alignment::Vertical::Center),
+                        )
+                        .width(Length::Fixed(CLOSE_BUTTON_SIZE))
+                        .height(Length::Fixed(CLOSE_BUTTON_SIZE))
+                        .align_x(alignment::Horizontal::Center)
+                        .align_y(alignment::Vertical::Center),
                     )
                     .on_press(close_msg)
-                    .padding(iced::Padding::new(space::XXS))
-                    .style(move |_theme, _status| {
+                    .padding(iced::Padding::ZERO)
+                    .width(Length::Fixed(CLOSE_BUTTON_SIZE))
+                    .height(Length::Fixed(CLOSE_BUTTON_SIZE))
+                    .style(move |_theme, status| {
+                        let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
+                        let bg = if is_hovered {
+                            palette.surface_hover
+                        } else {
+                            Color::TRANSPARENT
+                        };
+                        let text_color = if is_hovered {
+                            palette.status_danger_text
+                        } else {
+                            style.text_color
+                        };
                         iced::widget::button::Style {
-                            background: Some(Color::TRANSPARENT.into()),
-                            text_color: style.text_color,
-                            border: Border::default(),
+                            background: Some(bg.into()),
+                            text_color,
+                            border: Border::default().rounded(shape::RADIUS_WIDGET),
                             shadow: Shadow::default(),
                             snap: true,
                         }
@@ -353,25 +442,36 @@ impl<'a, Message: 'a + Clone> From<TabStrip<'a, Message>> for Element<'a, Messag
             }
 
             let tab_id = tab.id.clone();
-            let mut tab_btn = iced::widget::button(tab_content)
-                .padding(iced::Padding::new(space::XS).horizontal(space::SM))
-                .style(move |_theme, status| {
-                    let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
-                    let s = resolve_tab_style(&palette, is_active, is_hovered, false);
-                    iced::widget::button::Style {
-                        background: Some(s.background.into()),
-                        text_color: s.text_color,
-                        border: s.border,
-                        shadow: Shadow::default(),
-                        snap: true,
-                    }
-                });
+            // Width clamping: guarantee at least TAB_MIN_WIDTH (96px) and at most TAB_MAX_WIDTH (220px)
+            let tab_inner = iced::widget::container(iced::widget::stack![
+                iced::widget::Space::new().width(Length::Fixed(TAB_MIN_WIDTH)),
+                tab_content,
+            ])
+            .padding(iced::Padding::new(space::XS).horizontal(space::SM))
+            .max_width(Pixels(TAB_MAX_WIDTH))
+            .style(move |_theme| iced::widget::container::Style {
+                background: Some(style.background.into()),
+                border: style.border,
+                shadow: Shadow::default(),
+                snap: true,
+                text_color: Some(style.text_color),
+            });
+
+            let mut tab_area = iced::widget::mouse_area(tab_inner);
 
             if let Some(on_select) = &tab_strip.on_select_tab {
-                tab_btn = tab_btn.on_press(on_select(tab_id));
+                tab_area = tab_area.on_press(on_select(tab_id.clone()));
             }
 
-            let el: Element<'a, Message> = tab_btn.into();
+            if let Some(on_close) = &tab_strip.on_close_tab {
+                tab_area = tab_area.on_middle_press(on_close(tab_id.clone()));
+            }
+
+            if let Some(on_ctx) = &tab_strip.on_context_menu {
+                tab_area = tab_area.on_right_press(on_ctx(tab_id.clone(), iced::Point::ORIGIN));
+            }
+
+            let el: Element<'a, Message> = tab_area.into();
 
             if let Some(tooltip_text) = &tab.tooltip {
                 row = row.push(Tooltip::new(el, tooltip_text.clone()).with_palette(palette));
@@ -380,7 +480,13 @@ impl<'a, Message: 'a + Clone> From<TabStrip<'a, Message>> for Element<'a, Messag
             }
         }
 
-        iced::widget::container(row)
+        let scroll = iced::widget::scrollable(row).direction(
+            iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::default(),
+            ),
+        );
+
+        iced::widget::container(scroll)
             .width(Length::Fill)
             .height(Length::Fixed(TAB_STRIP_HEIGHT))
             .padding(iced::Padding::new(0.0).horizontal(space::XS))

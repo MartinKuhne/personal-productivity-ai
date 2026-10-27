@@ -2178,50 +2178,43 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PANE-003",
-        status: Status::NotOwned,
+        status: Status::Partial,
         section: "§4.3.2",
         evidence: &[
-            "widget/focusable.rs",
-            "widget/text_input.rs",
-            "token/size.rs",
+            "composite/tree_view.rs",
+            "composite/tree_row.rs",
+            "widget/search_box.rs",
         ],
         reason: Some(
-            "App-owned under D-2: the directory tree, its folder-first ordering and \
-             tag/content filtering, row ergonomics, single and range selection and the \
-             pinned search footer are app content. The framework supplies the pieces a \
-             row is built from — `Focusable` / `FocusableState` for row focusability, \
-             the `Search` input kind with its idle-to-clear glyph swap, and the 24px \
-             row floor — but no tree, no selection model and no filter.",
+            "Framework-owned tree selection model, row geometry, and pinned 40px search-footer mount \
+             implemented; Not covered: host owns tree directory content, ordering, and filter predicates under D-2/D-9.",
         ),
-        note: None,
+        note: Some(
+            "TreeView supports single/range selection, keyboard navigation, and pinned search footer.",
+        ),
     },
     // --- §4.4 Tabbed Windows -----------------------------------------------
     Coverage {
         id: "UIF-TAB-001",
-        status: Status::NotOwned,
+        status: Status::Implemented,
         section: "§4.4.3",
-        evidence: &["surface/menu/", "focus.rs"],
-        reason: Some(
-            "App-owned under D-2: no tab-strip module exists, and a tab is deliberately \
-             not a variant of the §3.1 button. The framework supplies the menu engine a \
-             Tab Context Menu would be built from and the focus plumbing a tab would \
-             register with, but owns no tab body, no middle-click close and no \
-             right-click binding.",
+        evidence: &["composite/tab_strip.rs", "surface/menu/"],
+        reason: None,
+        note: Some(
+            "TabStrip composite binds left-click select, middle-click close via mouse_area, \
+             right-click context menu, and exports TabContextMenuModel.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-TAB-002",
-        status: Status::NotOwned,
+        status: Status::Implemented,
         section: "§4.4.3",
-        evidence: &[],
-        reason: Some(
-            "App-owned under D-2: the strip, its horizontal scroll container, the 96px \
-             minimum tab width and the preserved 24x24 close target are tab-strip \
-             internals this crate was never given, so there is no framework geometry to \
-             satisfy or test.",
+        evidence: &["composite/tab_strip.rs"],
+        reason: None,
+        note: Some(
+            "Horizontal scrollable container preserves TAB_WIDTH [96px, 220px] and \
+             24x24px close target.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-TAB-003",

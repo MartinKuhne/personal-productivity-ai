@@ -128,8 +128,100 @@
 use crate::binding::{Commit, Ephemeral};
 use crate::composite::virtual_list::VirtualMetrics;
 use crate::focus::FocusMember;
-use iced::Point;
+use crate::token::{color::Palette, shape, size, space};
+use iced::{Border, Element, Length, Point};
 use std::collections::BTreeSet;
+
+/// Standard height of the pinned search footer band in pixels (40px, §4.3.2, `UIF-PANE-003`).
+///
+/// Composed of 32px input height ([`SEARCH_INPUT_HEIGHT`]) + 2 × 4px vertical padding ([`SEARCH_FOOTER_PADDING_Y`]).
+pub const SEARCH_FOOTER_HEIGHT: f32 = size::CONTROL_MD + space::XS + space::XS;
+
+/// Standard height of the search input inside the footer in pixels (32px, `size.control.md`, `UIF-PANE-003`).
+pub const SEARCH_INPUT_HEIGHT: f32 = size::CONTROL_MD;
+
+/// Vertical padding of the search footer band in pixels (`space.xs` = 4px, `UIF-PANE-003`).
+pub const SEARCH_FOOTER_PADDING_Y: f32 = space::XS;
+
+/// Horizontal padding of the search footer band in pixels (`space.xs` = 4px, `UIF-PANE-003`).
+pub const SEARCH_FOOTER_PADDING_X: f32 = space::XS;
+
+/// Top divider line stroke width in pixels (`shape.border.hairline` = 1px, `UIF-PANE-003`).
+pub const SEARCH_FOOTER_DIVIDER_WIDTH: f32 = shape::BORDER_HAIRLINE;
+
+/// Default placeholder text for the tree search box (`UIF-PANE-003`).
+pub const SEARCH_PLACEHOLDER: &str = "Search content…";
+
+/// Size of the trailing search / clear action button in pixels (28px, `size.control.sm`, `UIF-PANE-003`).
+pub const SEARCH_ACTION_SIZE: f32 = size::CONTROL_SM;
+
+/// Configuration for the pinned search footer band at the bottom of the tree view (`UIF-PANE-003`, spec §4.3.2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchFooterConfig {
+    /// Current search query string.
+    pub query: String,
+    /// Placeholder text for the input box.
+    pub placeholder: String,
+    /// Whether a search filter is currently active.
+    pub is_active: bool,
+}
+
+impl Default for SearchFooterConfig {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            placeholder: SEARCH_PLACEHOLDER.to_string(),
+            is_active: false,
+        }
+    }
+}
+
+impl SearchFooterConfig {
+    /// Create a new default search footer configuration.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the search query string.
+    #[must_use]
+    pub fn with_query(mut self, query: impl Into<String>) -> Self {
+        self.query = query.into();
+        self
+    }
+
+    /// Set custom placeholder text.
+    #[must_use]
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+
+    /// Set whether a search filter is actively applied.
+    #[must_use]
+    pub fn with_active(mut self, active: bool) -> Self {
+        self.is_active = active;
+        self
+    }
+}
+
+impl From<()> for SearchFooterConfig {
+    fn from(_: ()) -> Self {
+        Self::default()
+    }
+}
+
+impl From<&str> for SearchFooterConfig {
+    fn from(query: &str) -> Self {
+        Self::default().with_query(query)
+    }
+}
+
+impl From<String> for SearchFooterConfig {
+    fn from(query: String) -> Self {
+        Self::default().with_query(query)
+    }
+}
 
 /// The deepest tree this module will flatten.
 ///
@@ -484,6 +576,7 @@ pub struct TreeView<Id> {
     focused: Option<Id>,
     focus_slot: Option<usize>,
     mode: SelectionMode,
+    search_footer: Option<SearchFooterConfig>,
 }
 
 impl<Id: Clone + Ord + core::fmt::Debug> TreeView<Id> {
@@ -498,6 +591,7 @@ impl<Id: Clone + Ord + core::fmt::Debug> TreeView<Id> {
             focused: None,
             focus_slot: None,
             mode,
+            search_footer: None,
         }
     }
 
@@ -1003,6 +1097,81 @@ impl<Id: Clone + Ord + core::fmt::Debug> TreeView<Id> {
             })
             .collect()
     }
+
+    // -- search footer -----------------------------------------------------
+
+    /// Mount the pinned search footer band option at the bottom of the tree view (`UIF-PANE-003`, spec §4.3.2).
+    #[must_use]
+    pub fn with_search_footer(mut self, footer: impl Into<SearchFooterConfig>) -> Self {
+        self.search_footer = Some(footer.into());
+        self
+    }
+
+    /// Whether the pinned search footer is mounted (`UIF-PANE-003`).
+    #[must_use]
+    pub const fn has_search_footer(&self) -> bool {
+        self.search_footer.is_some()
+    }
+
+    /// Access the pinned search footer configuration if mounted (`UIF-PANE-003`).
+    #[must_use]
+    pub const fn search_footer(&self) -> Option<&SearchFooterConfig> {
+        self.search_footer.as_ref()
+    }
+
+    /// Enclose `tree_content` and `footer_input` in a pinned footer container (`UIF-PANE-003`, spec §4.3.2).
+    pub fn render_with_footer<'a, Message: 'a + Clone>(
+        &self,
+        tree_content: Element<'a, Message>,
+        footer_input: Element<'a, Message>,
+        palette: &Palette,
+    ) -> Element<'a, Message> {
+        render_tree_with_footer(tree_content, footer_input, palette)
+    }
+}
+
+/// Render a tree content element with a pinned search footer container at the bottom (`UIF-PANE-003`, spec §4.3.2).
+///
+/// Encloses a distinct pinned footer container at the bottom of the tree view:
+/// - 40px height band (32px search box input + 2 × space::XS = 8px vertical padding).
+/// - Background: `color.surface.raised` (`palette.surface_raised`).
+/// - Top divider line: `1px color.border.subtle` (`palette.border_subtle`).
+/// - Mounts the provided search box or text input.
+///
+/// Pinned at the bottom so scrolling tree items end cleanly above it.
+pub fn render_tree_with_footer<'a, Message: 'a + Clone>(
+    tree_content: Element<'a, Message>,
+    footer_input: Element<'a, Message>,
+    palette: &Palette,
+) -> Element<'a, Message> {
+    let pal = *palette;
+    let footer = iced::widget::container(footer_input)
+        .width(Length::Fill)
+        .height(Length::Fixed(SEARCH_FOOTER_HEIGHT))
+        .padding(iced::Padding {
+            top: SEARCH_FOOTER_PADDING_Y,
+            bottom: SEARCH_FOOTER_PADDING_Y,
+            left: SEARCH_FOOTER_PADDING_X,
+            right: SEARCH_FOOTER_PADDING_X,
+        })
+        .style(move |_theme| iced::widget::container::Style {
+            background: Some(pal.surface_raised.into()),
+            border: Border {
+                color: pal.border_subtle,
+                width: SEARCH_FOOTER_DIVIDER_WIDTH,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
+
+    let body = iced::widget::container(tree_content)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    iced::widget::column![body, footer]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 #[cfg(test)]

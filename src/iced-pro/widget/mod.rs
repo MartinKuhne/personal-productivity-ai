@@ -233,6 +233,7 @@ pub mod range_slider;
 pub mod range_slider_model;
 pub mod rating;
 pub mod rove;
+pub mod search_box;
 pub mod segmented;
 pub mod segmented_model;
 pub mod slider;
@@ -263,5 +264,9 @@ pub use date_picker::{
 pub use range_slider::{RangeSlider, range_slider};
 pub use range_slider_model::{RangeSliderModel, RangeThumb};
 pub use rating::{RatingControl, RatingModel, RatingStep, rating_control};
+pub use search_box::{
+    GLYPH_CLEAR, GLYPH_SEARCH, SEARCH_ACTION_SIZE, SEARCH_INPUT_HEIGHT, SEARCH_PLACEHOLDER,
+    SearchBox, SearchBoxModel,
+};
 pub use time_picker::{AmPm, CivilTime, TimePicker, TimePickerModel, TimeSegment, time_picker};
 pub use toggle_widget::{Checkbox, RadioGroup, ToggleSwitch};

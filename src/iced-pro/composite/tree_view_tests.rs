@@ -3,8 +3,10 @@
 //! underneath the selection (`UIF-COMP-006`).
 
 use crate::composite::tree_view::{
-    MAX_TREE_DEPTH, Modifiers, SelectionMode, SyncReport, TreeEvent, TreeKey, TreeStructure,
-    TreeView, VisibleRow, visible_rows,
+    MAX_TREE_DEPTH, Modifiers, SEARCH_ACTION_SIZE, SEARCH_FOOTER_DIVIDER_WIDTH,
+    SEARCH_FOOTER_HEIGHT, SEARCH_FOOTER_PADDING_X, SEARCH_FOOTER_PADDING_Y, SEARCH_INPUT_HEIGHT,
+    SEARCH_PLACEHOLDER, SearchFooterConfig, SelectionMode, SyncReport, TreeEvent, TreeKey,
+    TreeStructure, TreeView, VisibleRow, visible_rows,
 };
 use crate::focus::{FocusId, FocusState};
 use std::collections::BTreeSet;
@@ -874,4 +876,51 @@ fn a_disabled_member_is_stepped_over_not_reachable() {
         "the disabled root must be stepped over, got {reached:?}"
     );
     let _ = FocusId::new("unused");
+}
+
+// ---------------------------------------------------------------------------
+// 12 - search footer mount option (UIF-PANE-003, spec §4.3.2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_search_footer_constants() {
+    assert_eq!(SEARCH_FOOTER_HEIGHT, 40.0);
+    assert_eq!(SEARCH_INPUT_HEIGHT, 32.0);
+    assert_eq!(SEARCH_FOOTER_PADDING_Y, 4.0);
+    assert_eq!(SEARCH_FOOTER_PADDING_X, 4.0);
+    assert_eq!(SEARCH_FOOTER_DIVIDER_WIDTH, 1.0);
+    assert_eq!(SEARCH_PLACEHOLDER, "Search content…");
+    assert_eq!(SEARCH_ACTION_SIZE, 28.0);
+}
+
+#[test]
+fn test_tree_view_search_footer_mount_option() {
+    let view = TreeView::<Id>::new(SelectionMode::Single);
+    assert!(!view.has_search_footer());
+    assert_eq!(view.search_footer(), None);
+
+    let view_with_footer = TreeView::<Id>::new(SelectionMode::Single)
+        .with_search_footer(SearchFooterConfig::default().with_query("rust"));
+
+    assert!(view_with_footer.has_search_footer());
+    let cfg = view_with_footer.search_footer().unwrap();
+    assert_eq!(cfg.query, "rust");
+    assert_eq!(cfg.placeholder, SEARCH_PLACEHOLDER);
+
+    let view_with_unit = TreeView::<Id>::new(SelectionMode::Single).with_search_footer(());
+    assert!(view_with_unit.has_search_footer());
+}
+
+#[test]
+fn test_tree_view_render_pinned_search_footer() {
+    use crate::token::color::Palette;
+
+    let view = TreeView::<Id>::new(SelectionMode::Single).with_search_footer(());
+    let palette = Palette::dark();
+
+    let dummy_tree = iced::widget::text("Tree items").into();
+    let dummy_search = iced::widget::text("Search input").into();
+
+    let rendered = view.render_with_footer(dummy_tree, dummy_search, &palette);
+    let _el: iced::Element<'_, ()> = rendered;
 }

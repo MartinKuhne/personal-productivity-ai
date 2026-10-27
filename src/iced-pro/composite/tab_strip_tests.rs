@@ -1,15 +1,72 @@
-//! Tests for tab strip model, dirty close guards, and external deletion synchronization (`UIF-TAB-003`).
+//! Tests for tab strip model, dirty close guards, pointer bindings, and external deletion synchronization (`UIF-TAB-001`, `UIF-TAB-002`, `UIF-TAB-003`).
 
 use super::*;
+use crate::surface::menu::RowKind;
 use crate::token::color::Palette;
 
 #[test]
 fn test_tab_strip_constants() {
     assert_eq!(TAB_STRIP_HEIGHT, 32.0);
-    assert_eq!(TAB_MIN_WIDTH, 64.0);
-    assert_eq!(TAB_MAX_WIDTH, 200.0);
+    assert_eq!(TAB_MIN_WIDTH, 96.0);
+    assert_eq!(TAB_MAX_WIDTH, 220.0);
     assert_eq!(DIRTY_DOT_DIAMETER, 6.0);
-    assert_eq!(CLOSE_BUTTON_SIZE, 16.0);
+    assert_eq!(CLOSE_BUTTON_SIZE, 24.0);
+}
+
+#[test]
+fn test_tab_width_clamping() {
+    assert_eq!(clamp_tab_width(50.0), 96.0);
+    assert_eq!(clamp_tab_width(96.0), 96.0);
+    assert_eq!(clamp_tab_width(150.0), 150.0);
+    assert_eq!(clamp_tab_width(220.0), 220.0);
+    assert_eq!(clamp_tab_width(300.0), 220.0);
+}
+
+#[test]
+fn test_tab_context_menu_functional_groups() {
+    let menu = tab_context_menu("doc1.md");
+    let rows = menu.rows();
+
+    // Spec §4.9.1 / UIF-TAB-001: 3 functional groups separated by dividers:
+    // Group 1: Close Tab, Close Other Tabs, Close All Tabs
+    // Separator
+    // Group 2: Edit, Open in System Editor, Format Markdown
+    // Separator
+    // Group 3: Copy Relative Path, Show in File Explorer
+    assert_eq!(rows.len(), 10);
+
+    // Group 1: Tab Lifecycle
+    assert_eq!(rows[0].key(), "close");
+    assert_eq!(rows[0].label(), "Close Tab");
+    assert_eq!(rows[1].key(), "close_others");
+    assert_eq!(rows[1].label(), "Close Other Tabs");
+    assert_eq!(rows[2].key(), "close_all");
+    assert_eq!(rows[2].label(), "Close All Tabs");
+
+    // Divider 1
+    assert!(matches!(rows[3].kind(), RowKind::Separator));
+
+    // Group 2: Edit & Automation
+    assert_eq!(rows[4].key(), "edit");
+    assert_eq!(rows[4].label(), "Edit");
+    assert_eq!(rows[5].key(), "open_in_editor");
+    assert_eq!(rows[5].label(), "Open in System Editor");
+    assert_eq!(rows[6].key(), "format_markdown");
+    assert_eq!(rows[6].label(), "Format Markdown");
+
+    // Divider 2
+    assert!(matches!(rows[7].kind(), RowKind::Separator));
+
+    // Group 3: Location
+    assert_eq!(rows[8].key(), "copy_path");
+    assert_eq!(rows[8].label(), "Copy Relative Path");
+    assert_eq!(rows[9].key(), "show_in_explorer");
+    assert_eq!(rows[9].label(), "Show in File Explorer");
+
+    // Verify TabContextMenuModel wrapper
+    let model = TabContextMenuModel::new("doc1.md");
+    let built = model.build_menu();
+    assert_eq!(built.rows().len(), 10);
 }
 
 #[test]
@@ -109,6 +166,7 @@ fn test_tab_strip_widget_into_element_renders_cleanly() {
     enum Msg {
         Select(String),
         Close(String),
+        ContextMenu(String, iced::Point),
     }
 
     let mut model = TabStripModel::new();
@@ -118,7 +176,8 @@ fn test_tab_strip_widget_into_element_renders_cleanly() {
     let tab_strip = TabStrip::new(&model)
         .with_palette(Palette::dark())
         .on_select_tab(Msg::Select)
-        .on_close_tab(Msg::Close);
+        .on_close_tab(Msg::Close)
+        .on_context_menu(Msg::ContextMenu);
 
     let _el: Element<'_, Msg> = tab_strip.into();
 }
