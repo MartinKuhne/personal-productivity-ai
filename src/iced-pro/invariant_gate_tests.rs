@@ -130,6 +130,57 @@ fn test_action_ellipsis_violations() {
     assert!(res_unicode.unwrap_err().message.contains("U+2026"));
 }
 
+#[test]
+fn test_navbar_trigger_ellipsis_gate_compliance() {
+    // Valid immediate trigger
+    let trig_imm = crate::composite::navbar::NavBarMenuTrigger::new("file", "File");
+    assert!(check_navbar_trigger_ellipsis(&trig_imm).is_ok());
+
+    // Valid dialog trigger
+    let trig_dlg = crate::composite::navbar::NavBarMenuTrigger::new("rename", "Rename...")
+        .with_dialog_prompt(true);
+    assert!(check_navbar_trigger_ellipsis(&trig_dlg).is_ok());
+
+    // Valid icon-only dialog trigger
+    let trig_icon = crate::composite::navbar::NavBarMenuTrigger::new("export", "")
+        .with_tooltip("Export...")
+        .with_dialog_prompt(true);
+    assert!(check_navbar_trigger_ellipsis(&trig_icon).is_ok());
+}
+
+#[test]
+fn test_navbar_trigger_ellipsis_gate_violations() {
+    // Button launching a dialog without `...` is rejected
+    let trig_no_ell = crate::composite::navbar::NavBarMenuTrigger::new("rename", "Rename")
+        .with_dialog_prompt(true);
+    let res_no_ell = check_navbar_trigger_ellipsis(&trig_no_ell);
+    assert!(res_no_ell.is_err());
+    let v_no_ell = res_no_ell.unwrap_err();
+    assert_eq!(v_no_ell.category, InvariantCategory::ActionEllipsis);
+    assert_eq!(v_no_ell.target, "Rename");
+    assert!(v_no_ell.message.contains("opens a secondary prompt"));
+
+    // Immediate button with `...` is rejected
+    let trig_spurious = crate::composite::navbar::NavBarMenuTrigger::new("save", "Save...");
+    let res_spur = check_navbar_trigger_ellipsis(&trig_spurious);
+    assert!(res_spur.is_err());
+    let v_spur = res_spur.unwrap_err();
+    assert_eq!(v_spur.category, InvariantCategory::ActionEllipsis);
+    assert_eq!(v_spur.target, "Save...");
+    assert!(v_spur.message.contains("runs immediately"));
+
+    // Icon-only button tooltip without `...` when opening a dialog is rejected
+    let trig_icon_no_ell = crate::composite::navbar::NavBarMenuTrigger::new("save_as", "")
+        .with_tooltip("Save As")
+        .with_dialog_prompt(true);
+    let res_icon = check_navbar_trigger_ellipsis(&trig_icon_no_ell);
+    assert!(res_icon.is_err());
+    let v_icon = res_icon.unwrap_err();
+    assert_eq!(v_icon.category, InvariantCategory::ActionEllipsis);
+    assert_eq!(v_icon.target, "Save As");
+    assert!(v_icon.message.contains("opens a secondary prompt"));
+}
+
 // ---------------------------------------------------------------------------
 // 3. Single high-emphasis focal point
 // ---------------------------------------------------------------------------

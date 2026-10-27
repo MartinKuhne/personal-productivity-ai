@@ -182,6 +182,21 @@ fn test_not_owned_entries_name_d2_as_the_reason_they_are_out_of_scope() {
 }
 
 #[test]
+fn test_exact_manifest_tallies_agree() {
+    assert_eq!(manifest().len(), EXPECTED_SPEC_ID_COUNT);
+    assert_eq!(EXPECTED_SPEC_ID_COUNT, 92);
+    assert_eq!(implemented().len(), 89);
+    assert_eq!(partial().len(), 3);
+    assert_eq!(not_owned().len(), 0);
+
+    let partial_ids = ids_of(&partial());
+    assert_eq!(
+        partial_ids,
+        vec!["UIF-WIN-001", "UIF-PANE-002", "UIF-PANE-003"]
+    );
+}
+
+#[test]
 fn test_the_three_statuses_partition_the_manifest() {
     let all = manifest().len();
     let done = implemented().len();

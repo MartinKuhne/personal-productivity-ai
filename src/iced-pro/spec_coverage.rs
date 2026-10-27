@@ -2116,16 +2116,18 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-NAV-002",
-        status: Status::NotOwned,
+        status: Status::Implemented,
         section: "§4.2.2",
-        evidence: &[],
-        reason: Some(
-            "App-owned under D-2. The ellipsis convention governs navbar button labels \
-             and icon tooltips, which are app content. This crate renders no navbar \
-             label and validates none, and contributes no text-formatting helper for \
-             the convention.",
+        evidence: &[
+            "composite/navbar.rs",
+            "microcopy/action_label.rs",
+            "invariant_gate.rs",
+        ],
+        reason: None,
+        note: Some(
+            "NavBarMenuTrigger validates label and icon-only tooltips against microcopy ellipsis \
+             biconditional; enforced by UIF-VER-005 invariant gate.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-NAV-003",

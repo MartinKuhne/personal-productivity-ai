@@ -1,4 +1,4 @@
-//! Shell navigation bar with menu triggers, active latch styling, and tooltip integration (`UIF-NAV-001`, `UIF-NAV-003`).
+//! Shell navigation bar with menu triggers, active latch styling, ellipsis convention, and tooltip integration (`UIF-NAV-001`, `UIF-NAV-002`, `UIF-NAV-003`).
 //!
 //! The navigation bar anchors the application shell, hosting top-level menu triggers, optional branding,
 //! and action items. Each trigger coordinates root menu activation through a toggle latch, holding active
@@ -77,7 +77,7 @@ pub fn resolve_trigger_style(
     }
 }
 
-/// A menu trigger definition in the navigation bar (`UIF-NAV-001`, `UIF-NAV-003`).
+/// A menu trigger definition in the navigation bar (`UIF-NAV-001`, `UIF-NAV-002`, `UIF-NAV-003`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct NavBarMenuTrigger {
     /// Unique identifier for this trigger.
@@ -90,6 +90,8 @@ pub struct NavBarMenuTrigger {
     pub is_open: bool,
     /// Whether this trigger button is disabled.
     pub disabled: bool,
+    /// Prompt behaviour describing whether this trigger opens a secondary dialog or prompt (`UIF-NAV-002`, `UIF-PRIN-007`).
+    pub prompt_behaviour: Option<crate::microcopy::action_label::PromptBehaviour>,
 }
 
 impl NavBarMenuTrigger {
@@ -102,6 +104,7 @@ impl NavBarMenuTrigger {
             tooltip: None,
             is_open: false,
             disabled: false,
+            prompt_behaviour: None,
         }
     }
 
@@ -124,6 +127,44 @@ impl NavBarMenuTrigger {
     pub fn with_disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
+    }
+
+    /// Set the trigger's prompt behaviour (`UIF-NAV-002`, `UIF-PRIN-007`).
+    #[must_use]
+    pub fn with_prompt_behaviour(
+        mut self,
+        behaviour: crate::microcopy::action_label::PromptBehaviour,
+    ) -> Self {
+        self.prompt_behaviour = Some(behaviour);
+        self
+    }
+
+    /// Set whether the trigger launches a dialog or prompt (`UIF-NAV-002`, `UIF-PRIN-007`).
+    #[must_use]
+    pub fn with_dialog_prompt(mut self, launches: bool) -> Self {
+        self.prompt_behaviour = Some(if launches {
+            crate::microcopy::action_label::PromptBehaviour::LaunchesPrompt
+        } else {
+            crate::microcopy::action_label::PromptBehaviour::Immediate
+        });
+        self
+    }
+
+    /// Validate the trigger's label or icon tooltip against the ellipsis convention (`UIF-NAV-002`, `UIF-PRIN-007`).
+    ///
+    /// If the trigger has a non-empty label, validates `label` with `check_action_ellipsis(label, behaviour)`.
+    /// If the trigger is icon-only (e.g. empty label) and has a tooltip, validates `tooltip` with `check_action_ellipsis(tooltip, behaviour)`.
+    pub fn validate_ellipsis(&self) -> Result<(), crate::invariant_gate::InvariantViolation> {
+        let behaviour = self
+            .prompt_behaviour
+            .unwrap_or(crate::microcopy::action_label::PromptBehaviour::Immediate);
+        if !self.label.is_empty() {
+            crate::invariant_gate::check_action_ellipsis(&self.label, behaviour)
+        } else if let Some(tooltip) = &self.tooltip {
+            crate::invariant_gate::check_action_ellipsis(tooltip, behaviour)
+        } else {
+            Ok(())
+        }
     }
 }
 

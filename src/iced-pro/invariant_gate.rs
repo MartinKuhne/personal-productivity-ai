@@ -263,6 +263,15 @@ pub fn check_action_ellipsis(
     }
 }
 
+/// Check that a navigation bar menu trigger conforms to the ellipsis biconditional (`UIF-NAV-002`, `UIF-PRIN-007`, `UIF-VER-005`).
+///
+/// Delegates to [`NavBarMenuTrigger::validate_ellipsis`](crate::composite::navbar::NavBarMenuTrigger::validate_ellipsis).
+pub fn check_navbar_trigger_ellipsis(
+    trigger: &crate::composite::navbar::NavBarMenuTrigger,
+) -> Result<(), InvariantViolation> {
+    trigger.validate_ellipsis()
+}
+
 /// Check that a container scope contains at most one high-emphasis control (`UIF-VER-005`, `UIF-PRIN-006`).
 ///
 /// Solid `Primary` (`accent.fill`) and solid `Danger` (`status.danger.fill`) both count
@@ -478,6 +487,16 @@ pub fn audit_invariants() -> InvariantReport {
         "Create Directory ...",
         PromptBehaviour::LaunchesPrompt,
     )); // Pinned
+    let nav_trigger_immediate = crate::composite::navbar::NavBarMenuTrigger::new("file", "File");
+    report.record_result(check_navbar_trigger_ellipsis(&nav_trigger_immediate));
+    let nav_trigger_prompt =
+        crate::composite::navbar::NavBarMenuTrigger::new("rename", "Rename...")
+            .with_dialog_prompt(true);
+    report.record_result(check_navbar_trigger_ellipsis(&nav_trigger_prompt));
+    let nav_trigger_icon = crate::composite::navbar::NavBarMenuTrigger::new("export", "")
+        .with_tooltip("Export...")
+        .with_dialog_prompt(true);
+    report.record_result(check_navbar_trigger_ellipsis(&nav_trigger_icon));
 
     // 3. Emphasis Focal Point
     let modal_slots = [

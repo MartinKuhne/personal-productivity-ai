@@ -690,15 +690,13 @@ the code:
    off-grid values across both trees; that is a deliberate follow-on
    decision, not something the gate quietly hides.
 
-### What it deliberately does not own (decision D-2)
+### What it deliberately does not own (decision D-2, revised by D-8 and D-9)
 
-Framework layer only. These stay with `fastmd` and are recorded as
-`NotOwned` in the ledger rather than quietly skipped: the top navbar's slot
-contents and label conventions, the directory tree and its filtering, the
-pane splitters and pane width policy, the tab strip and tab contents, and
-the business logic of the app-specific dialogs (Batch, Tools &
-Integrations, About, Attributions). Window geometry, UI scale and their
-cross-session persistence are likewise host-owned.
+Framework layer only. Following D-8 (row/cell rendering) and D-9 (composite binding, split
+dividers, tab strip, tree search footer, and microcopy gate absorption), all presentation
+and layout contracts are framework-owned. The remaining app-owned responsibilities that stay
+with `fastmd` are live OS window handles, actual config file persistence, and backend
+business domain logic.
 
 ### Three decisions a future integrator has to know
 
@@ -728,11 +726,11 @@ cross-session persistence are likewise host-owned.
 ### Coverage ledger
 
 `spec_coverage.rs` classifies all 92 numbered `UIF-*` ids
-(`EXPECTED_SPEC_ID_COUNT`): **84 Implemented, 1 Partial (`UIF-COMP-016`,
-specified but unbuilt), 7 NotOwned** —
-the seven `NotOwned` are the app-owned surfaces decision D-2 leaves with
-`fastmd` (navbar slot contents, tree and tab content, the business logic
-of the app-specific dialogs, window-geometry persistence). The sidecar
+(`EXPECTED_SPEC_ID_COUNT`): **89 Implemented, 3 Partial (`UIF-WIN-001`,
+`UIF-PANE-002`, `UIF-PANE-003`), 0 NotOwned** —
+the 3 `Partial` items track host window lifecycle and multi-pane container composition
+while the framework provides pure clamped solvers and split primitives; zero items remain
+`NotOwned` following the D-9 framework boundary absorption. The sidecar
 test reads `CARGO_MANIFEST_DIR/spec.md` at test time — the spec has been
 co-located with the crate it governs since `edbe04a` — and asserts the two
 sets agree in both directions, so adding an id to the spec without

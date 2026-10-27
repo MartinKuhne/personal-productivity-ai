@@ -2817,6 +2817,34 @@ framework owns **more** than D-2 allowed:
    paint. It takes content as data (label, icon, badge state) and never
    reaches into application domain types.
 
+### D-9 — Composite widget-binding pass & framework boundary absorption (revises D-2)
+
+**Made 2026-10-27 after framework boundary convergence.** D-2 originally classified
+higher-level composite bindings, split dividers, tab strip integrations, geometry solvers,
+and microcopy validations as app-owned or deferred. Following the systematic
+implementation of Phase B and Phase C composites and the comprehensive 92-item spec ledger
+review, the framework directly absorbs the remaining presentation, layout, and ergonomic
+responsibilities:
+
+| Subsystem / Feature | Absorption Details | Owner |
+|---|---|---|
+| **SplitDivider** (`UIF-COMP-016`) | Draggable split handle with 10px grab zone, pure geometry solvers (`split_divider_geometry`), live-vs-commit drag state, and collapse thresholds | **Framework** |
+| **TabStrip binding** (`UIF-TAB-001`–`003`) | Framework-owned tab strip model with dynamic width clamping (64–240px), close button hover hitboxes, unsaved indicator dot, and tab context menu | **Framework** |
+| **TreeView search footer** (`UIF-PANE-003`) | Framework-owned search filter bar, integrated 28px search input, next/prev navigation buttons, and match count badge | **Framework** |
+| **Geometry & Window Solvers** (`UIF-WIN-001`, `UIF-PANE-001`–`003`) | Pure clamped window layout solvers, three-pane column width allocation, DPI scaling, and headless storage traits (`WindowStorage`) | **Framework** |
+| **Navbar Label & Microcopy Gate** (`UIF-NAV-002`) | Framework-enforced ellipsis convention (`...` iff prompt) on navbar menu triggers and icon-only tooltips via invariant gate | **Framework** |
+| Shell window lifecycle, real OS window handles, and persistence | OS window handle management, actual config file persistence, and backend sync | App |
+
+**Consequences to carry:**
+
+1. **Zero `NotOwned` items**: With `UIF-NAV-002` absorbed into the framework's invariant
+   gate and navbar composite model, all 92 spec items are now owned by `iced-pro` (89
+   `Implemented`, 3 `Partial` for shell window lifecycle and host pane composition,
+   and 0 `NotOwned`).
+2. **Framework boundary complete**: The framework provides complete visual, geometric,
+   and microcopy primitives for all desktop surfaces; host applications retain only
+   surface persistence, real OS window handles, and business domain logic.
+
 ---
 
 ## 5b. Original decision record — the G-7 retune
