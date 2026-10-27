@@ -100,7 +100,7 @@ Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
 | **D-1** | Rename the two planning ledgers (`iced-pro-tasks.md`, `iced-pro-handoff.md`)? | (a) rename to `hoarfrost-*.md` and fix the 9 links in §3.9; (b) leave as historical artifacts and add a "formerly iced-pro" note |
 | **D-2** | `Cargo.toml` description and keywords | keep the `"iced"` keyword — it *is* an iced widget library; update `description` to name hoarfrost |
 | **D-3** | Temp-dir prefix `iced-pro-gallery` (`src/iced-pro/bin/gallery.rs:124`) | rename to `hoarfrost-gallery` — cosmetic, no persistence across runs; recommended yes |
-| **D-4** | Git history | **Recommend: do not rewrite.** 188 commits ahead of `main`; local branches `feature/iced-pro`, `iced-pro-improvements`, `iced-pro-improvements2`; remote `origin/feature/iced-pro`. Rename forward only |
+| **D-4** | Git history | **Recommend: do not rewrite.** ~190 commits ahead of `main`; local branches `feature/iced-pro`, `iced-pro-improvements`, `iced-pro-improvements2`; remote `origin/feature/iced-pro`. Rename forward only |
 | **D-5** | Checkout folder `D:\ppai.iced.pro` | separate, optional, affects nothing in git |
 
 ---
