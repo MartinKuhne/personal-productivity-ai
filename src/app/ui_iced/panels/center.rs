@@ -508,6 +508,13 @@ pub const VIEWER_SPACING: f32 = space::SM;
 /// the view and the reducer cannot drift (§5 id-stability rule, [RUST-021]).
 pub const DOCUMENT_VIEWER_SCROLLABLE_ID: &str = "document_viewer_scroll";
 
+/// Stable focus id of the agent-session close button in the tab strip.
+///
+/// Named once in the module that owns the widget so the view and anything
+/// addressing the button later cannot drift (§5 id-stability rule,
+/// [RUST-021]).
+pub const AGENT_SESSION_CLOSE_BUTTON_ID: &str = "agent_session_close";
+
 /// The title a tab renders: the file name, or the empty string when the path
 /// has none (e.g. a bare root).
 ///
@@ -1516,7 +1523,7 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
                     .size(TAB_TEXT_SIZE)
                     .line_height(TAB_RUNG.iced_line_height()),
                 agent_session_close_message(),
-                "agent_session_close",
+                AGENT_SESSION_CLOSE_BUTTON_ID,
             )
             .palette(Palette::pro()),
         )

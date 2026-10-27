@@ -156,6 +156,9 @@ pub const BATCH_PROCESS_BUTTON_ID: &str = "batch.process";
 /// Stable focus id of the footer `Cancel` / `Close` button.
 pub const BATCH_CANCEL_BUTTON_ID: &str = "batch.cancel";
 
+/// Stable focus id of the Batch dialog's mode radio group.
+pub const BATCH_MODE_RADIO_FOCUS_ID: &str = "batch.mode";
+
 /// Stable focus/widget id for the Batch dialog's wildcard-pattern input.
 pub const BATCH_PATTERN_INPUT_FOCUS_ID: &str = "batch_dialog_pattern_input";
 
@@ -853,7 +856,7 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
         None,
         {
             let controlled_model = Controlled::new(&view_model.mode_radio_model);
-            RadioGroup::controlled(controlled_model, "batch.mode", move |commit| {
+            RadioGroup::controlled(controlled_model, BATCH_MODE_RADIO_FOCUS_ID, move |commit| {
                 Some(Message::Batch(BatchDialogMessage::ModeChanged(
                     commit.into_value(),
                 )))

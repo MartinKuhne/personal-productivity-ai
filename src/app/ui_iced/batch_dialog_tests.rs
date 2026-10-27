@@ -1070,3 +1070,12 @@ fn absorbed_cannot_open_a_closed_dialog() {
     assert!(!state.apply(BatchDialogMessage::Absorbed));
     assert!(!state.is_open());
 }
+
+// --- Focus-id stability -----------------------------------------------
+
+/// The mode radio group's focus id is named, not an inline literal, and is
+/// pinned to the exact value the widget is addressed by ([RUST-021]).
+#[test]
+fn batch_mode_radio_focus_id_is_stable_and_named() {
+    assert_eq!(BATCH_MODE_RADIO_FOCUS_ID, "batch.mode");
+}

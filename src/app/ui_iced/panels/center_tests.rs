@@ -1587,3 +1587,8 @@ fn from_app_and_the_parameterized_form_agree_apart_from_the_listing() {
 fn document_viewer_scrollable_id_is_stable_and_named() {
     assert_eq!(DOCUMENT_VIEWER_SCROLLABLE_ID, "document_viewer_scroll");
 }
+
+#[test]
+fn agent_session_close_button_id_is_stable_and_named() {
+    assert_eq!(AGENT_SESSION_CLOSE_BUTTON_ID, "agent_session_close");
+}
