@@ -350,3 +350,8 @@ fn test_document_width_ignores_the_right_pane_when_the_toc_is_hidden() {
         "no ToC → the right pane is not mounted, so it takes no width"
     );
 }
+
+#[test]
+fn toc_scrollable_id_is_stable_and_named() {
+    assert_eq!(TOC_SCROLLABLE_ID, "toc_scroll");
+}

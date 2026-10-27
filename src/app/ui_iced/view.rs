@@ -65,6 +65,14 @@ const BAND_SPACING_PIXELS: f32 = 8.0;
 /// gets a non-positive width.
 const MIN_DOCUMENT_WIDTH_PIXELS: f32 = 240.0;
 
+/// Stable iced widget id of the TOC-pane `scrollable`.
+///
+/// The reducer needs a stable id to aim a scroll operation at the pane, and
+/// a widget without an explicit id is re-keyed on every rebuild and loses
+/// its scroll position. Named once so the view and the reducer cannot drift
+/// (§5 id-stability rule, [RUST-021]).
+pub const TOC_SCROLLABLE_ID: &str = "toc_scroll";
+
 /// Renders the three-band layout plus the overlay host (`ViewFn`,
 /// `iced-0.14.0/src/application.rs:628-638`).
 pub fn view(state: &AppState) -> iced::Element<'_, Message> {
@@ -193,6 +201,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
         .collect();
 
     scrollable(column(rows).width(Length::Fill))
+        .id(TOC_SCROLLABLE_ID)
         .height(Length::Fill)
         .into()
 }

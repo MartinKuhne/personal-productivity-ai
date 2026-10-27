@@ -509,6 +509,26 @@ pub const SEARCH_TRIGGER_FOCUS_ID: &str = "left_search_trigger";
 /// Stable focus/widget identity for the left-panel clear button.
 pub const SEARCH_CLEAR_FOCUS_ID: &str = "left_search_clear";
 
+/// Stable id for the file-tree `scrollable` ([AGENTS §5]).
+///
+/// The tree branch of the panel body is a stateful widget: without an
+/// explicit id the reducer cannot aim a scroll operation at it, and the
+/// scroll position is not addressable across tree rebuilds. Named once so
+/// the view and the reducer cannot drift ([RUST-021]).
+///
+/// Distinct from [`SEARCH_RESULTS_SCROLLABLE_ID`] — the tree and the
+/// result list are two different scrollables, and one id may only ever be
+/// live on one widget.
+pub const FILE_TREE_SCROLLABLE_ID: &str = "file_tree_scroll";
+
+/// Stable id for the search-result `scrollable` ([AGENTS §5]).
+///
+/// The panel swaps this in for [`FILE_TREE_SCROLLABLE_ID`] while
+/// `is_searching`, so the two must never share an id: one id, one live
+/// widget. Sharing would hand the result list the tree's scroll state and
+/// leave two widgets claiming the same address in the same build.
+pub const SEARCH_RESULTS_SCROLLABLE_ID: &str = "search_results_scroll";
+
 /// Spacing between the search field and its two trailing controls —
 /// `space.xs` (`UIF-TOK-001`), the compact gap. Value unchanged at `4`,
 /// previously written as a bare literal.
@@ -1703,7 +1723,10 @@ fn tree_body<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message> {
             rows.push(tree_row(row, view_model))
         });
 
-    scrollable(rows).height(Length::Fill).into()
+    scrollable(rows)
+        .id(FILE_TREE_SCROLLABLE_ID)
+        .height(Length::Fill)
+        .into()
 }
 
 /// One tree row: indented label plus the full click / double-click /
@@ -2260,7 +2283,10 @@ fn search_results<'a>(view_model: &'a LeftPanelViewModel) -> Element<'a, Message
         |cards, entry| cards.push(search_result_card(entry)),
     );
 
-    scrollable(cards).height(Length::Fill).into()
+    scrollable(cards)
+        .id(SEARCH_RESULTS_SCROLLABLE_ID)
+        .height(Length::Fill)
+        .into()
 }
 
 /// One search-result card: title + match count, the library-relative path

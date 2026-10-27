@@ -500,6 +500,14 @@ pub const VIEWER_PADDING: f32 = space::SM;
 /// doc says it mirrors this constant — so the two stop drifting apart.
 pub const VIEWER_SPACING: f32 = space::SM;
 
+/// Stable iced widget id of the document-viewer `scrollable`.
+///
+/// The reducer needs a stable id to aim a scroll operation at the viewer
+/// (e.g. a jump to a heading), and a widget without an explicit id is
+/// re-keyed on every rebuild and loses its scroll position. Named once so
+/// the view and the reducer cannot drift (§5 id-stability rule, [RUST-021]).
+pub const DOCUMENT_VIEWER_SCROLLABLE_ID: &str = "document_viewer_scroll";
+
 /// The title a tab renders: the file name, or the empty string when the path
 /// has none (e.g. a bare root).
 ///
@@ -1452,6 +1460,7 @@ fn viewer_area<'a>(
 
     container(
         scrollable(container(body).width(Length::Fill).padding(VIEWER_PADDING))
+            .id(DOCUMENT_VIEWER_SCROLLABLE_ID)
             .height(Length::Fill),
     )
     .width(Length::Fill)

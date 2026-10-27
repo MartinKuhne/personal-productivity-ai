@@ -2728,3 +2728,20 @@ fn the_overlay_widget_cost_is_stated_and_bounded() {
         "the deepest selectable row is the ceiling"
     );
 }
+
+// --- scrollable widget ids (AGENTS §5) ----------------------------------
+
+/// The file-tree scrollable's id is the named constant, not a generated
+/// one, so the reducer can address it across tree rebuilds.
+#[test]
+fn file_tree_scrollable_id_is_stable_and_named() {
+    assert_eq!(FILE_TREE_SCROLLABLE_ID, "file_tree_scroll");
+}
+
+/// The search-result scrollable's id is the named constant, and a
+/// different one from the tree's — the panel swaps one scrollable for the
+/// other on `is_searching`, so they must never share an address.
+#[test]
+fn search_results_scrollable_id_is_stable_and_named() {
+    assert_eq!(SEARCH_RESULTS_SCROLLABLE_ID, "search_results_scroll");
+}
