@@ -4,7 +4,7 @@
 
 > **Status:** In progress — increment ledger for implementing
 > [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) as a new workspace crate.
-> **Date:** 2026-10-25 (ledger last updated; opened 2026-10-21)
+> **Date:** 2026-10-26 (ledger last updated; opened 2026-10-21)
 > **Spec:** [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) (UIF-*
 > requirement IDs). The spec used to live in *this* directory as
 > `ui-framework.md`; commit `edbe04a` moved it inside the crate it governs.
@@ -3796,3 +3796,181 @@ Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
 `cargo doc --workspace --no-deps`: **0 warning lines**. `src/hoarfrost/spec.md`
 and all `SPEC.md` files untouched.
+
+---
+
+## 6. Proposed FastMD adoption follow-on (INT-16+)
+
+> **Status: Proposed, with three sub-increments now implemented.** This
+> sequence records the 2026-10-26 source-level app audit. The items below
+> remain a plan except where marked done: **INT-21a** (stable scrollable ids),
+> **INT-22a** (named focus-id literals) and **INT-22b** (named close glyph)
+> are implemented and committed this session — see "Completed this session"
+> below. Everything else is aspirational, not a claim that the item is already
+> adopted.
+
+### Audit baseline and boundaries
+
+The current framework ledger classifies **92 requirements: 89 Implemented and
+3 Partial** (`UIF-WIN-001`, `UIF-PANE-002`, `UIF-PANE-003`). That is a
+framework-coverage result, not evidence that FastMD uses every available
+composite. FastMD has adopted framework tokens and several controls and
+surfaces, including buttons, menus, modal geometry, movable hosts, tooltip
+support, and tree-row styling. Application data, commands, lifecycle, and
+persistence remain host-owned.
+
+The previous app migration inventory is historical: Hoarfrost now has
+`ComboBox`, checkbox/radio widgets, and tooltip support. The remaining
+ComboBox work is app-side compatibility review, not implementation of another
+framework wrapper. Likewise, keep iced layout primitives and core widgets
+(`pane_grid`, markdown `text_editor`, and `table`) unless a specific reusable
+Hoarfrost component is demonstrated to preserve the app's behavior.
+
+Integration must keep one authoritative owner for app state and surface
+open/close decisions. Do not add a second writer to `OverlayState` or
+`SurfaceRegistry`, and do not move FastMD domain types into Hoarfrost. Where a
+composite is not a fit, record the reason and keep the existing implementation;
+the goal is correct use, not migration by count.
+
+### Ordered proposed increments
+
+- [ ] **INT-16 — Reconcile the adoption matrix and API documentation.**
+      Record per-surface current usage, Hoarfrost API, behavior parity,
+      ownership boundary, and decision (adopt, defer, or keep iced). Include
+      `TabStrip`, `TreeView`/`VirtualList`, `SplitDivider`, `NavBar`, the native
+      `pick_list` sites, and Logs. Correct app-facing integration notes that
+      still describe available APIs as missing. Sources include `src/app/ui_iced/`,
+      `src/hoarfrost/composite/tab_strip.rs`,
+      `src/hoarfrost/composite/tree_view.rs`,
+      `src/hoarfrost/composite/split_divider.rs`, and
+      `src/hoarfrost/composite/navbar.rs`.
+      **Gate:** every proposed migration names its app-owned state and its
+      behavior-preservation tests before implementation starts.
+
+- [ ] **INT-17 — Review native dropdowns against Hoarfrost `ComboBox`.**
+      Assess the tag filter, batch selectors, chat-model selector, Logs
+      category filter, and agent-debug JSON-row selector individually. Adopt
+      only where controlled selection, filtering, disabled/read-only behavior,
+      keyboard navigation, menu dismissal, and current labels match; preserve
+      caller-specific matching and do not imply closed-select type-ahead where
+      the model does not provide it. Add focused integration tests for each
+      migrated site and retain native `pick_list` for any incompatible case.
+      **Gate:** no selection or Escape behavior changes without an explicit
+      decision and regression test.
+
+- [ ] **INT-18 — Evaluate and, if compatible, adopt `TabStrip`.**
+      Compare `src/hoarfrost/composite/tab_strip.rs` with the app strip in
+      `src/app/ui_iced/panels/center.rs`. Preserve path-based tab identity,
+      close/context-menu commands, hover and middle-click behavior, the
+      unsaved indicator, and current layout constraints. Separately resolve
+      the app-side dirty-tab tracking/close-guard gap identified by the audit;
+      an indicator alone is not a dirty-close workflow. **Gate:** cover open,
+      switch, close, external tab removal, dirty state, and pointer/keyboard
+      interaction before removing existing strip logic.
+
+- [ ] **INT-19 — Evaluate `TreeView`/`VirtualList` for the file tree.**
+      Compare the framework composite in
+      `src/hoarfrost/composite/tree_view.rs` with
+      `src/app/ui_iced/panels/left.rs`. Preserve app-owned filesystem
+      filtering and commands, path-keyed selection/hover, context menus,
+      search, PDF badge semantics and the accepted narrow-pane suppression
+      behavior. Measure construction/scroll performance before and after any
+      virtualization. **Gate:** prove stable row identity across filter,
+      expand/collapse, and watcher refresh; preserve scroll state and all
+      existing tree interaction tests. Do not claim virtualization is present
+      in the current app tree until the implementation actually uses it.
+
+- [ ] **INT-20 — Review `SplitDivider` and `NavBar` as separate adoptions.**
+      For `SplitDivider`, compare pane-grid resizing, collapse thresholds,
+      keyboard/pointer behavior, and persisted pane sizes with
+      `src/app/ui_iced/layout.rs`. For `NavBar`, compare the 36px app band,
+      existing menu ownership, trigger behavior, and tooltip placement with
+      `src/app/ui_iced/panels/top.rs`. Adopt each independently so a mismatch
+      in one does not block the other. **Gate:** no changes to pane geometry,
+      menu ownership, or shortcut behavior without explicit regression pins.
+
+- [~] **INT-21 — Finish Logs shell review and stabilize stateful scrollables.**
+      *(scrollable-stabilization clause done as INT-21a, commit `7905bbc`; the
+      Logs shell-review clause remains open — see "Completed this session".)*
+      Logs already participates in framework movable geometry/registration;
+      review the remaining app-owned interior and shell behavior rather than
+      treating it as wholly unmigrated. Preserve its modeless, non-Escape-close
+      policy and background-log state ownership. Audit stable IDs and scroll
+      restoration for the TOC, file tree, document viewer, and agent transcript
+      in `src/app/ui_iced/`; add IDs only where the widget's state must survive
+      rebuilds, with tests for identity and retained position. **Gate:** Logs
+      remains non-Escape-closable and each stateful scrollable retains its
+      intended state across rebuilds.
+
+- [ ] **INT-22 — Resolve integration discrepancies without weakening guards.**
+      *(the naming-consistency siblings INT-22a/22b are done — see "Completed
+      this session" — but the basename-validation and tooltip-path work below
+      remains open.)*
+      Keep FastMD's stricter basename validation: Hoarfrost's
+      `check_basename` does not reject `.` and `..` as whole names, despite the
+      `UIF-INP-003` wording. Track the framework discrepancy for a later
+      framework/coverage correction; do not remove the app guard or edit
+      `src/hoarfrost/spec.md` as part of this plan. Document the distinct
+      framework tooltip and app-managed tooltip paths so call sites and
+      ownership are unambiguous. **Gate:** tests continue to reject traversal
+      basenames, and docs describe the APIs that source actually exposes.
+
+### Completed this session (2026-10-26)
+
+Three small, behaviour-preserving increments landed under the supervisor
+instruction on `feature/iced-pro`, plus one unrelated chore. All gates green
+at each step (`cargo fmt --check` · `cargo nextest run --workspace` ·
+`cargo clippy --workspace --all-targets -- -D warnings` ·
+`cargo doc --workspace --no-deps`).
+
+- [x] **INT-21a — Stable ids for the four single-instance scrollables.**
+      Commit `7905bbc`. The TOC, document viewer, file tree and
+      search-results scrollables had no explicit `iced::widget::Id`, so the
+      reducer could not address them and their scroll position was not stable
+      across tree rebuilds (`src/app/AGENTS.md` §5, `doc/distill/iced.md`
+      rule 5). Each now carries a named `pub const` id and a pin test,
+      following the existing `AGENT_TRANSCRIPT_SCROLLABLE_ID` pattern. The
+      agent transcript already had a stable id — the audit's "missing" note
+      was stale. The repeated markdown-table horizontal scrollable is
+      intentionally left out: a single static id would collide across tables
+      and needs a per-table scheme. **This satisfies the scrollable clause of
+      INT-21; the Logs shell-review clause is not addressed here.**
+
+- [x] **INT-22a — Named the two remaining inline focus-id literals.**
+      Commit `052dbcf`. Every other static focus id in the app is a named
+      `pub const &str` ([RUST-021]); the Batch mode radio group
+      (`"batch.mode"`) and the agent-session close button
+      (`"agent_session_close"`) still passed bare literals to the Hoarfrost
+      focus router. Promoted to `BATCH_MODE_RADIO_FOCUS_ID` and
+      `AGENT_SESSION_CLOSE_BUTTON_ID`, value byte-identical, each with a pin
+      test. This is naming-consistency work and is **distinct from the
+      ledger's INT-22** (basename validation + tooltip-path documentation),
+      which stays open.
+
+- [x] **INT-22b — Named the movable title-bar close glyph.**
+      Commit `458afc3`. `movable_shell.rs` declares its grip glyphs as named
+      consts (`TITLE_GRIP_GLYPH`, `RESIZE_GRIP_GLYPH`) but the Close button
+      rendered a bare `"×"`. Now `CLOSE_GLYPH`, value byte-identical
+      (U+00D7), same font and size — only the literal gains a name.
+
+- [x] **chore — cleared a pre-existing clippy lint.** Commit `eef41d9`.
+      Dropped a needless borrow in the batch-prompt UTF-8 test
+      (`src/app/agent/batch/prompts.rs:448`) that was blocking the workspace
+      `-D warnings` gate; unrelated to the adoption work, isolated as its own
+      commit.
+
+**Remaining unambiguous surface is exhausted.** The other proposed items
+(INT-16..INT-20, the Logs shell-review half of INT-21, and the
+basename/tooltip half of INT-22) each require a product/compatibility or
+visual decision and are not safe to implement without explicit scoping.
+
+### Completion evidence for the follow-on
+
+Each adopted component needs narrow app integration tests for its relevant
+pointer and keyboard paths, plus the applicable Hoarfrost tests. Re-run the
+app token-lint gate and the repository quality gates from the root before
+marking an increment complete. Update
+[`ARCHITECTURE_C4.md`](../technical-context/ARCHITECTURE_C4.md) only if an
+actual module boundary or integration contract changes; keep this section as
+the plan until that work is implemented. No `SPEC.md` is to be changed under
+this plan.
