@@ -3848,6 +3848,11 @@ the goal is correct use, not migration by count.
       behavior-preservation tests before implementation starts.
 
 - [ ] **INT-17 — Review native dropdowns against Hoarfrost `ComboBox`.**
+      *(Analysis 2026-10-26: **not a drop-in** — the flyout has no host
+      (`combo_box.rs:595` pushes an in-flow `Column` gated by
+      `model.is_open()` at `:458`; the `MenuCascade` engine in
+      `combo_host.rs` emits no `Element`). Scoped rewrite at best. See
+      "Adoption-fit analysis" below.)*
       Assess the tag filter, batch selectors, chat-model selector, Logs
       category filter, and agent-debug JSON-row selector individually. Adopt
       only where controlled selection, filtering, disabled/read-only behavior,
@@ -3859,6 +3864,10 @@ the goal is correct use, not migration by count.
       decision and regression test.
 
 - [ ] **INT-18 — Evaluate and, if compatible, adopt `TabStrip`.**
+      *(Analysis 2026-10-26: **non-fit** — the composite hardcodes
+      `is_hovered=false` (`tab_strip.rs:379`) and emits no enter/exit, so the
+      app's hover-driven tab visuals are unreachable without framework
+      changes. See "Adoption-fit analysis" below.)*
       Compare `src/hoarfrost/composite/tab_strip.rs` with the app strip in
       `src/app/ui_iced/panels/center.rs`. Preserve path-based tab identity,
       close/context-menu commands, hover and middle-click behavior, the
@@ -3869,6 +3878,11 @@ the goal is correct use, not migration by count.
       interaction before removing existing strip logic.
 
 - [ ] **INT-19 — Evaluate `TreeView`/`VirtualList` for the file tree.**
+      *(Analysis 2026-10-26: **scoped rewrite, low ROI** — the tree subsystem
+      ships no renderable iced widget (`virtual_list.rs:13` "resolver and not
+      a widget"); expansion ownership is adversarial (framework ephemeral vs
+      app-persisted). Row-level `tree_row` adoption is already done. See
+      "Adoption-fit analysis" below.)*
       Compare the framework composite in
       `src/hoarfrost/composite/tree_view.rs` with
       `src/app/ui_iced/panels/left.rs`. Preserve app-owned filesystem
@@ -3881,6 +3895,10 @@ the goal is correct use, not migration by count.
       in the current app tree until the implementation actually uses it.
 
 - [ ] **INT-20 — Review `SplitDivider` and `NavBar` as separate adoptions.**
+      *(Analysis 2026-10-26: **both non-fits** — `SplitDivider` is a single
+      pairwise handle vs the app's `pane_grid` tree (a whole-layout-engine
+      rewrite); `NavBar` has no region/slot model (one left-aligned `Row`,
+      `navbar.rs:322`). See "Adoption-fit analysis" below.)*
       For `SplitDivider`, compare pane-grid resizing, collapse thresholds,
       keyboard/pointer behavior, and persisted pane sizes with
       `src/app/ui_iced/layout.rs`. For `NavBar`, compare the 36px app band,
@@ -3963,6 +3981,124 @@ at each step (`cargo fmt --check` · `cargo nextest run --workspace` ·
 (INT-16..INT-20, the Logs shell-review half of INT-21, and the
 basename/tooltip half of INT-22) each require a product/compatibility or
 visual decision and are not safe to implement without explicit scoping.
+
+### Adoption-fit analysis — remaining widgets (2026-10-26)
+
+Read-only investigation (four parallel `explore` subagents; every
+load-bearing claim re-verified against source by the supervisor). This
+records *why* the remaining adoption items are not autonomous work, so a
+future pass starts from evidence rather than re-deriving it. No files were
+changed by the investigation.
+
+**Summary**
+
+| Widget | Framework status | Verdict | Biggest blocker (verified) |
+|---|---|---|---|
+| ComboBox | `UIF-ATOM-004` Implemented | Scoped rewrite (near non-fit for navbar) | Flyout has no host: `combo_box.rs:595` pushes an *in-flow* `Column` gated by `model.is_open()` (`:458`); the real `MenuCascade` engine in `combo_host.rs` emits no `Element` |
+| TabStrip | `UIF-TAB-001/2/3` Implemented | Non-fit | Cannot render the app's hover contract — `is_hovered` hardcoded `false` at `tab_strip.rs:379`, no enter/exit emission |
+| TreeView / VirtualList | `UIF-PANE-003` **Partial**, `UIF-COMP-006` Implemented | Scoped rewrite, low ROI | Ships no renderable iced widget — `virtual_list.rs:13` "resolver and not a widget"; `TreeView` is a state model |
+| NavBar | `UIF-NAV-001/2/3` Implemented | Non-fit | No region/slot model — one left-aligned `Row` (`navbar.rs:322`), only item type is a text `NavBarMenuTrigger` (no icon/badge/selected/slot) |
+
+**ComboBox (INT-17).** `pick_list` is self-contained (iced owns open +
+overlay). The framework splits the control into three disconnected parts: a
+style resolver (`combo_box.rs`), a non-rendering `MenuCascade` state machine
+(`combo_host.rs`), and a widget that paints an in-flow flyout nobody wants
+(`combo_box.rs:499/:595`). A real popup needs `ComboHost` + `MenuCascade` +
+`FocusState` + the overlay host + per-frame `sync` — and then the `ComboBox`
+widget is *not used at all* (essentially what `top.rs` already does via
+`resolve_trigger`/`chevron_color`, `top.rs:890-901`). Additional cost: five
+option types need `SelectOption<Id>` adapters; `menu_id`/`id_by_key` collide
+on `Display` (a tag literally named "All" is already guarded at
+`top.rs:442-444`); a 120px min-width floor (`combo_box.rs:276-279`) breaks
+three `Length::Shrink` sites; `Escape`-revert semantics do not exist in the
+app's message channels. Simplest pilot: `batch_dialog.rs:876` (concurrency),
+but only after a `ComboHost`→overlay bridge exists, else it eats modal body
+height.
+
+**TabStrip (INT-18).** The app's §4.4.2 hover matrix (fill / label /
+perimeter / top-bar third state) is reducer-driven (`center.rs:1414-1419`,
+`update.rs:1116-1127`). The composite hardcodes `is_hovered=false`
+(`tab_strip.rs:379`) and emits no enter/exit, so that contract is
+unreachable — no host-side adapter recovers it. Secondary mismatches: fixed
+32px band + text `"×"`/`"•"` glyphs vs the app's token-pinned 36px band +
+Phosphor `ICON_X` + 6px shape dot; `Point::ORIGIN` context-menu anchor
+(`tab_strip.rs:471`) vs the app's cursor-anchored menus; a static 10-row menu
+vs the app's dynamic note-skill rows (`center.rs:1083-1087`). The
+framework's headline value (dirty guard, MRU, close-confirm) targets state the
+app does not track (`center.rs:95-100`). Adoption requires *framework*
+changes first.
+
+**TreeView / VirtualList (INT-19).** The framework tree subsystem is pure
+model + arithmetic; the only code that turns its rectangles into pixels is
+the gallery canvas painter. "Adopt the tree" still leaves the app writing the
+entire windowed render host — the code adoption was meant to replace
+(`left.rs:38-47` says this in the app's own words). Expansion ownership is
+adversarial: the framework mandates *ephemeral, never-read-back* expansion
+(`tree_view.rs:14-19`), but the app persists and re-points `expanded_dirs`
+across restarts and renames (`persisted.rs:57`,
+`command_executor.rs:332-333`). Selection semantics diverge (framework
+ranges/anchor vs the app's dirs-never-selected / Shift-toggle-only,
+`command_executor.rs:115-155`). The keyboard value is stranded — no tree
+focus lane exists (`subscription.rs:417-426`). Note: the **row-level**
+adoption (`tree_row` geometry/paint) is already done and was the part worth
+having.
+
+**NavBar (INT-20).** The composite renders brand + triggers into one
+left-aligned `Row` (`navbar.rs:322`); its only item type is a text
+`NavBarMenuTrigger` with no icon/badge/selected/slot, and `brand` is
+`Option<String>`. The app's bar needs a right-aligned flex region
+(`top.rs:982`), a status readout, a `pick_list`, and a logo `Element` — none
+representable. It also deviates from the spec the app already satisfies:
+padding `[0,8]` vs `[4,12]`, gap 4 vs 8, brand 14px vs 16px Bold,
+four-sided border vs bottom-only. Its latch (`active_menu_id`) would be a
+second writer against the app's documented single authority
+`OverlayState::hamburger_open` (`app.rs:521-523`). Every piece worth owning
+is already owned by a finer atom the app consumes directly
+(`Button::icon_only`, `MenuCascade`, `resolve_trigger`).
+
+**Cross-cutting framework-side drift surfaced (flagged, not touched).** These
+are in `spec_coverage.rs` / `gallery.rs`, **not** `SPEC.md`:
+
+1. `gallery.rs:955-963` still asserts "No navbar module exists in hoarfrost"
+   — contradicted by `composite/navbar.rs` being cited as `UIF-NAV-001`
+   evidence (`spec_coverage.rs:2112`).
+2. `UIF-COMP-006` note calls the app's "15px tree rows" a migration gap —
+   **stale**: the app already moved to 24px (`left.rs:370`); only the
+   vestigial `flatten.rs:56` constant keeps 15 alive.
+3. `UIF-VER-002` note says `TAB_MIN_WIDTH=64 / MAX=200` — actual constants
+   are 96 / 220 (`tab_strip.rs:24,27`).
+4. `navbar.rs` `TRIGGER_HEIGHT_STANDARD=32` is declared/re-exported but never
+   applied in the render path (draws 28 via padding) — latent drift.
+
+**Spec-revision needs (flagged only — RUST-043, `SPEC.md` untouched).**
+
+- ComboBox: `UIF-ATOM-004` bakes in case-insensitive *substring* filtering,
+  no type-ahead on the closed select, no `ActionPending`/busy state, and a
+  `read_only` mode "imported, not specified." App adoption would require
+  reconciling the app's dropdown spec to these — a product decision.
+- TreeView: `UIF-PANE-003` is Partial *by design* (D-2/D-9 leave
+  content/ordering/filter to the host); no spec change makes the widget a
+  drop-in.
+- No drift found in the committed work (INT-21a/22a/22b remain
+  behavior-preserving).
+
+**Clean-pilot options (each carries a caveat — none are "no-ambiguity").**
+
+1. `VirtualMetrics` for the search-results list — reuse the windowing
+   *arithmetic* (`virtual_list.rs:268`) with zero ownership conflict; the app
+   still writes the windowed `Column` + `on_scroll`, and results are small,
+   so ROI is low.
+2. `render_tree_with_footer` — one call (`tree_view.rs:1142`) that also
+   closes the UI-050 drift (search field under header vs spec "bottom"); a
+   visible layout change needing sign-off.
+3. ComboBox concurrency pilot (`batch_dialog.rs:876`) — cleanest combo site,
+   but needs the `ComboHost`→overlay bridge (framework work) first.
+
+**Conclusion.** None of the four is a drop-in. NavBar and TabStrip are
+non-fits (keep the app implementations). ComboBox and TreeView/VirtualList
+are scoped rewrites whose only clean slices each carry a layout/behavior/
+framework-change caveat. The unambiguous, no-framework-change surface remains
+what was shipped as INT-21a/22a/22b.
 
 ### Completion evidence for the follow-on
 
