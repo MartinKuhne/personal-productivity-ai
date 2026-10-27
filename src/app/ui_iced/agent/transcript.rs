@@ -50,10 +50,12 @@
 //!
 //! Unit tests live in the sibling `transcript_tests.rs` sidecar.
 
-use iced::widget::{Column, Row, button, container, scrollable, text};
+use iced::widget::{Column, Row, container, scrollable, text};
 use iced::{Alignment, Element, Length};
 use iced_pro::token::typography::{self, TypeRung};
 use iced_pro::token::{shape, space};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -299,7 +301,7 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 ///
 /// # Why the header is iced's `button`, not the framework's
 ///
-/// [`Button`](iced_pro::widget::button_widget::Button) has no `.width()`
+/// [`Button`] has no `.width()`
 /// builder — its width comes from the content `size_hint` inside a fixed
 /// control band ([`button::HEIGHT_COMPACT`](iced_pro::widget::button::HEIGHT_COMPACT)
 /// / `HEIGHT_STANDARD`), and the only width-shaped constructor is
@@ -320,24 +322,30 @@ pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> 
         strings::ICON_DISCLOSE_COLLAPSED
     };
 
-    let header = button(
-        Row::with_children(vec![
-            text(strings::AGENT_THINKING_PROCESS)
-                .size(TRANSCRIPT_TEXT_SIZE)
-                .line_height(TRANSCRIPT_RUNG.iced_line_height())
-                .color(palette.text_strong)
-                .into(),
-            container(text(chevron).size(TRANSCRIPT_TEXT_SIZE))
-                .width(Length::Fill)
-                .align_right(Length::Shrink)
-                .into(),
-        ])
-        .align_y(Alignment::Center),
+    let header: Element<'_, Message> = container(
+        Button::new(
+            ButtonVariant::Ghost,
+            Row::with_children(vec![
+                text(strings::AGENT_THINKING_PROCESS)
+                    .size(TRANSCRIPT_TEXT_SIZE)
+                    .line_height(TRANSCRIPT_RUNG.iced_line_height())
+                    .color(palette.text_strong)
+                    .into(),
+                container(text(chevron).size(TRANSCRIPT_TEXT_SIZE))
+                    .width(Length::Fill)
+                    .align_right(Length::Shrink)
+                    .into(),
+            ])
+            .align_y(Alignment::Center),
+            Message::Agent(AgentMessage::ThinkingToggled {
+                expanded: !view_model.thinking_expanded,
+            }),
+            "thinking_toggle",
+        )
+        .palette(Palette::pro()),
     )
     .width(Length::Fill)
-    .on_press(Message::Agent(AgentMessage::ThinkingToggled {
-        expanded: !view_model.thinking_expanded,
-    }));
+    .into();
 
     let body: Element<'_, Message> = if view_model.thinking_expanded {
         text(&view_model.thinking)
@@ -350,7 +358,7 @@ pub fn thinking_block(view_model: &AgentPanelViewModel) -> Element<'_, Message> 
         Column::<Message>::new().into()
     };
 
-    Column::with_children(vec![header.into(), body])
+    Column::with_children(vec![header, body])
         .spacing(THINKING_SPACING)
         .into()
 }

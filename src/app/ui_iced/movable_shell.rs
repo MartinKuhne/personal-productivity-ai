@@ -48,6 +48,8 @@ use iced_pro::surface::movable::{
     FILTER_BAR_HEIGHT, FOOTER_HEIGHT, MovableHost, RESIZE_HANDLE_SIZE, TITLE_BAR_HEIGHT,
     TITLE_BAR_PADDING_HORIZONTAL,
 };
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 /// Id string of the log card's content viewport.
 const LOGS_VIEWPORT_ID: &str = "movable.logs.viewport";
@@ -66,6 +68,12 @@ const VIEWPORT_PADDING: f32 = 4.0;
 
 /// Gap between the title grip glyph and the title text.
 const TITLE_GRIP_GAP: f32 = 6.0;
+
+/// Focus id for the Dock button in the title bar.
+const DOCK_BUTTON_FOCUS_ID: &str = "movable.title_bar.dock";
+
+/// Focus id for the Close button in the title bar.
+const CLOSE_BUTTON_FOCUS_ID: &str = "movable.title_bar.close";
 
 /// Stable iced widget id of one movable card's content viewport.
 ///
@@ -186,17 +194,25 @@ fn title_bar(host: &MovableHost, card: MovableCard, palette: Palette) -> Element
 }
 
 /// The title bar's `Dock` trailing action (`UIF-MOV-001`).
-fn dock_action(card: MovableCard) -> Element<'static, Message> {
-    iced::widget::button(text(strings::MOVABLE_DOCK_BUTTON))
-        .on_press(Message::Movable(MovableMessage::DockRequested { card }))
-        .into()
+fn dock_action(card: MovableCard) -> Button<'static, Message> {
+    Button::new(
+        ButtonVariant::Ghost,
+        text(strings::MOVABLE_DOCK_BUTTON).size(crate::ui_iced::logs::ROW_TEXT_SIZE),
+        Message::Movable(MovableMessage::DockRequested { card }),
+        DOCK_BUTTON_FOCUS_ID,
+    )
+    .palette(Palette::pro())
 }
 
 /// The title bar's `Close ×` trailing action (`UIF-MOV-001`).
-fn close_action(card: MovableCard) -> Element<'static, Message> {
-    iced::widget::button(text("×"))
-        .on_press(Message::Movable(MovableMessage::CloseRequested { card }))
-        .into()
+fn close_action(card: MovableCard) -> Button<'static, Message> {
+    Button::new(
+        ButtonVariant::Ghost,
+        text("×").size(crate::ui_iced::logs::ROW_TEXT_SIZE),
+        Message::Movable(MovableMessage::CloseRequested { card }),
+        CLOSE_BUTTON_FOCUS_ID,
+    )
+    .palette(Palette::pro())
 }
 
 /// The §4.7.1 filter / control bar, [`FILTER_BAR_HEIGHT`] tall.

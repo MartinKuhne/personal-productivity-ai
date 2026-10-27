@@ -173,6 +173,8 @@ use iced::{Alignment, Background, Element, Length, Padding};
 use iced_pro::token::contrast;
 use iced_pro::token::typography::{self, TypeRung};
 use iced_pro::token::{shape, size, space};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::SkillFile;
@@ -1348,20 +1350,17 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
 
     // iced's `Button` lays its content at the top-left of its padding box, so
     // the glyph is centred by the container that fills the hit target.
-    let close = button(
-        container(
-            text(strings::ICON_X)
-                .font(phosphor_font())
-                .size(TAB_CLOSE_GLYPH_SIZE),
-        )
-        .width(Length::Fixed(TAB_CLOSE_HIT_TARGET))
-        .height(Length::Fixed(TAB_CLOSE_HIT_TARGET))
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center),
+    let close = Button::icon_only(
+        ButtonVariant::Ghost,
+        text(strings::ICON_X)
+            .font(phosphor_font())
+            .size(TAB_CLOSE_GLYPH_SIZE),
+        tab_close_message(index),
+        format!("tab_close_{}", index),
+        strings::CLOSE_TAB_TOOLTIP,
     )
-    .padding(0.0)
-    .style(move |_theme, status| tab_close_style(tab.active, hovered, status))
-    .on_press(tab_close_message(index));
+    .compact()
+    .palette(Palette::pro());
 
     let surface = container(
         Row::with_children(vec![label_row.into(), close.into()])
@@ -1502,12 +1501,15 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
             .color(palette.accent_text)
             .into(),
         container(
-            button(
+            Button::new(
+                ButtonVariant::Ghost,
                 text(strings::AGENT_SESSION_CLOSE_BUTTON)
                     .size(TAB_TEXT_SIZE)
                     .line_height(TAB_RUNG.iced_line_height()),
+                agent_session_close_message(),
+                "agent_session_close",
             )
-            .on_press(agent_session_close_message()),
+            .palette(Palette::pro()),
         )
         .width(Length::Fill)
         .align_right(Length::Shrink)

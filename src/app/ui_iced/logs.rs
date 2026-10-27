@@ -75,10 +75,10 @@
 #[path = "logs_tests.rs"]
 mod tests;
 
-use iced::widget::{
-    Column, Row, button, checkbox, container, pick_list, rule, scrollable, table, text,
-};
+use iced::widget::{Column, Row, checkbox, container, pick_list, rule, scrollable, table, text};
 use iced::{Alignment, Element, Length};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::background::logs::BackgroundLogs;
@@ -213,6 +213,9 @@ pub const LOG_SCROLLABLE_ID: &str = "background_logs_scroll";
 
 /// Stable focus id for the background-log search input (UI-047).
 pub const LOG_SEARCH_INPUT_FOCUS_ID: &str = "background_logs_search_input";
+
+/// Stable focus id for the Clear button in the log filter row.
+pub const CLEAR_BUTTON_ID: &str = "background_logs_clear_button";
 
 /// Formatted timestamp of a log row ([`TIMESTAMP_FORMAT`]).
 ///
@@ -723,8 +726,15 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
         .label(strings::AUTO_SCROLL_CHECKBOX)
         .on_toggle(|checked| Message::Logs(LogsMessage::AutoScrollToggled(checked)));
 
-    let clear_button =
-        button(text(strings::CLEAR_BUTTON)).on_press(Message::Logs(LogsMessage::Cleared));
+    let clear_button = Button::new(
+        ButtonVariant::Secondary,
+        text(strings::CLEAR_BUTTON)
+            .size(ROW_TEXT_SIZE)
+            .color(palette.text_strong),
+        Message::Logs(LogsMessage::Cleared),
+        CLEAR_BUTTON_ID,
+    )
+    .palette(Palette::pro());
 
     let filter_row = Row::with_children(vec![
         search_label.into(),

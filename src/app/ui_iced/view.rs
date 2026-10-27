@@ -33,6 +33,7 @@
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::parse_markdown_to_events;
 use crate::ui::panel_layout::{LEFT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_DEFAULT_WIDTH};
+use crate::ui::theme::Palette;
 use crate::ui_iced::about::about_card;
 use crate::ui_iced::agent::agent_panel;
 use crate::ui_iced::app::{AppState, OverlayLayer, TooltipId};
@@ -51,9 +52,11 @@ use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use iced::Length;
 use iced::Size;
-use iced::widget::{button, column, container, mouse_area, scrollable, stack, text};
+use iced::widget::{column, container, mouse_area, scrollable, stack, text};
 use iced_pro::surface::tooltip::{TooltipAnchor, TooltipStyle};
-use iced_pro::token::color::Palette;
+use iced_pro::token::color::Palette as ProPalette;
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 /// Vertical gap between the three bands, in logical pixels.
 const BAND_SPACING_PIXELS: f32 = 8.0;
@@ -169,9 +172,15 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
         .iter()
         .map(|entry| {
             let indent = toc_indent_pixels(entry.level);
-            container(button(text(entry.title.clone())).on_press(Message::Command(
-                UserCommand::ScrollToHeader(entry.id.clone()),
-            )))
+            container(
+                Button::new(
+                    ButtonVariant::Ghost,
+                    text(entry.title.clone()),
+                    Message::Command(UserCommand::ScrollToHeader(entry.id.clone())),
+                    format!("toc_entry_{}", entry.id),
+                )
+                .palette(Palette::pro()),
+            )
             .padding(iced::Padding {
                 top: 2.0,
                 right: 4.0,
@@ -270,7 +279,7 @@ fn tooltip_layer(state: &AppState) -> Option<iced::Element<'_, Message>> {
     };
 
     // Resolve tooltip style from palette
-    let palette = Palette::dark();
+    let palette = ProPalette::dark();
     let style = TooltipStyle::resolve(&palette);
 
     // For now, use a simple anchored tooltip at cursor position

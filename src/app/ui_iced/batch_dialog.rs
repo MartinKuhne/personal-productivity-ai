@@ -68,6 +68,7 @@ use std::path::{Path, PathBuf};
 use iced::widget::{Column, Row, Space, container, mouse_area, pick_list, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Size};
 
+use iced_pro::binding::Controlled;
 use iced_pro::composite::{form_field, list_tile};
 use iced_pro::state::BaseState;
 use iced_pro::surface::modal::{CONTENT_HEIGHT_MAX, ModalFrame, ModalSizing};
@@ -78,6 +79,8 @@ use iced_pro::widget::combo_box;
 use iced_pro::widget::progress;
 use iced_pro::widget::progress_model::{ProgressModel, ProgressStatus};
 use iced_pro::widget::text_input::{InputKind, TextInput};
+use iced_pro::widget::toggle_model::{RadioGroupModel, RadioOption, RadioOrientation};
+use iced_pro::widget::toggle_widget::RadioGroup;
 
 use crate::agent::batch::types::{BatchDialogConfig, validate_batch_params};
 use crate::bus::events::user_command::UserCommand;
@@ -281,6 +284,8 @@ pub struct BatchDialogViewModel {
     pub concurrency: u8,
     /// Status of the batch job, if any.
     pub status: BatchRunStatus,
+    /// Radio group model for the mode selection.
+    pub mode_radio_model: RadioGroupModel<BatchMode>,
 }
 
 impl Default for BatchDialogViewModel {
@@ -294,11 +299,23 @@ impl Default for BatchDialogViewModel {
             mode: BatchMode::File,
             concurrency: 4,
             status: BatchRunStatus::idle(),
+            mode_radio_model: Self::create_mode_radio_model(BatchMode::File),
         }
     }
 }
 
 impl BatchDialogViewModel {
+    /// Creates the radio group model for mode selection.
+    fn create_mode_radio_model(selected: BatchMode) -> RadioGroupModel<BatchMode> {
+        let options = vec![
+            RadioOption::new(BatchMode::File, strings::BATCH_MODE_FILE),
+            RadioOption::new(BatchMode::Directory, strings::BATCH_MODE_DIRECTORY),
+        ];
+        RadioGroupModel::new(options)
+            .with_selected(selected)
+            .with_orientation(RadioOrientation::HorizontalWrap)
+    }
+
     /// A snapshot with no candidates, nothing selected and no run in
     /// flight — the state the card shows before the reducer has filled it.
     #[must_use]
@@ -319,6 +336,7 @@ impl BatchDialogViewModel {
             mode: config.mode,
             concurrency: config.concurrency,
             status: BatchRunStatus::idle(),
+            mode_radio_model: Self::create_mode_radio_model(config.mode),
         }
     }
 
@@ -664,7 +682,11 @@ impl BatchDialogState {
             BatchDialogMessage::PatternChanged { text } => {
                 apply_field(&mut self.model.pattern, text)
             }
-            BatchDialogMessage::ModeChanged(mode) => apply_field(&mut self.model.mode, mode),
+            BatchDialogMessage::ModeChanged(mode) => {
+                apply_field(&mut self.model.mode, mode);
+                self.model.mode_radio_model = BatchDialogViewModel::create_mode_radio_model(mode);
+                true
+            }
             BatchDialogMessage::ConcurrencyChanged(concurrency) => {
                 apply_field(&mut self.model.concurrency, concurrency)
             }
@@ -829,25 +851,16 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
         true,
         None,
         None,
-        Row::with_children(vec![
-            iced::widget::radio(
-                strings::BATCH_MODE_FILE,
-                BatchMode::File,
-                Some(view_model.mode),
-                |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
-            )
-            .into(),
-            iced::widget::radio(
-                strings::BATCH_MODE_DIRECTORY,
-                BatchMode::Directory,
-                Some(view_model.mode),
-                |mode| Message::Batch(BatchDialogMessage::ModeChanged(mode)),
-            )
-            .into(),
-        ])
-        .spacing(space::LG)
-        .align_y(Alignment::Center)
-        .into(),
+        {
+            let controlled_model = Controlled::new(&view_model.mode_radio_model);
+            RadioGroup::controlled(controlled_model, "batch.mode", move |commit| {
+                Some(Message::Batch(BatchDialogMessage::ModeChanged(
+                    commit.into_value(),
+                )))
+            })
+            .with_palette(Palette::pro())
+            .into()
+        },
     );
 
     let concurrency = stacked_field(

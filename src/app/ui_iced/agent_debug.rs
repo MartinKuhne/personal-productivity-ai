@@ -125,9 +125,11 @@ mod tests;
 use std::collections::HashSet;
 
 use iced::widget::{
-    Column, Row, Space, button, checkbox, container, mouse_area, pick_list, rule, scrollable, text,
+    Column, Row, Space, checkbox, container, mouse_area, pick_list, rule, scrollable, text,
 };
 use iced::{Alignment, Element, Font, Length};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 use iced_pro::widget::text_input::{InputKind, TextInput};
 
 use crate::agent::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
@@ -230,6 +232,12 @@ pub const DEBUG_SCROLLABLE_ID: &str = "agent_debug_scroll";
 
 /// Stable focus id for the agent-debug search input (UI-048).
 pub const AGENT_DEBUG_SEARCH_INPUT_FOCUS_ID: &str = "agent_debug_search_input";
+
+/// Stable focus id for the Clear button in the agent debug controls.
+pub const AGENT_DEBUG_CLEAR_BUTTON_ID: &str = "agent_debug_clear_button";
+
+/// Stable focus id for the Copy JSON button in expanded debug entries.
+pub const AGENT_DEBUG_COPY_JSON_BUTTON_ID: &str = "agent_debug_copy_json_button";
 
 /// Padding inside the card — `space.md` (`UIF-TOK-001`).
 pub const CARD_PADDING: f32 = space::MD;
@@ -946,7 +954,15 @@ pub fn agent_debug_controls(view_model: &AgentDebugViewModel) -> Row<'_, Message
     .width(Length::Shrink)
     .into();
 
-    let clear = button(text(strings::CLEAR_BUTTON)).on_press(clear_command());
+    let clear = Button::new(
+        ButtonVariant::Secondary,
+        text(strings::CLEAR_BUTTON)
+            .size(ENTRY_TEXT_SIZE)
+            .color(palette.text_strong),
+        clear_command(),
+        AGENT_DEBUG_CLEAR_BUTTON_ID,
+    )
+    .palette(Palette::pro());
 
     Row::with_children(vec![
         search_label.into(),
@@ -1136,8 +1152,15 @@ fn entry_header(row: &DebugEntryView, expanded: bool) -> Element<'_, Message> {
 fn expanded_body(row: &DebugEntryView, json_rows: usize) -> Element<'_, Message> {
     let palette = Palette::fastmd_dark();
 
-    let copy =
-        button(text(strings::DEBUG_COPY_JSON_BUTTON)).on_press(copy_json_command(row.json.clone()));
+    let copy = Button::new(
+        ButtonVariant::Secondary,
+        text(strings::DEBUG_COPY_JSON_BUTTON)
+            .size(JSON_TEXT_SIZE)
+            .color(palette.text_strong),
+        copy_json_command(row.json.clone()),
+        AGENT_DEBUG_COPY_JSON_BUTTON_ID,
+    )
+    .palette(Palette::pro());
 
     let actions = Row::with_children(vec![Space::new().width(Length::Fill).into(), copy.into()])
         .align_y(Alignment::Center);

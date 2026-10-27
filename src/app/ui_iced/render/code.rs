@@ -19,10 +19,12 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::panels::top::phosphor_font;
-use iced::widget::{Column, Row, button, container, text};
+use iced::widget::{Column, Row, container, text};
 use iced::{Alignment, Background, Element, Font, Length, Padding};
 use iced_pro::token::typography;
 use iced_pro::token::{shape, size, space};
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 /// The rung the code body renders on — `type.body` (`UIF-TOK-004`).
 ///
@@ -157,12 +159,17 @@ pub fn code_block(model: &CodeBlockModel) -> Element<'static, Message> {
         .width(Length::Fill)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph);
 
-    let copy = button(
+    let copy = Button::icon_only(
+        ButtonVariant::Ghost,
         text(strings::ICON_COPY)
             .font(phosphor_font())
             .size(CODE_COPY_GLYPH_SIZE),
+        model.copy_message.clone(),
+        "code_copy",
+        strings::CODE_COPY_BUTTON_TOOLTIP,
     )
-    .on_press(model.copy_message.clone());
+    .compact()
+    .palette(Palette::pro());
 
     let row = Row::with_children(vec![body.into(), copy.into()])
         .spacing(CODE_SPACING)

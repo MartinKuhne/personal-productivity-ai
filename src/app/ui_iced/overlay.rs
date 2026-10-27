@@ -125,17 +125,18 @@
 #[path = "overlay_tests.rs"]
 mod tests;
 
-use iced::widget::{
-    Container, MouseArea, Row, Space, button, container, mouse_area, rule, stack, text,
-};
+use iced::widget::{Container, MouseArea, Row, Space, container, mouse_area, rule, stack, text};
 use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 use iced_pro::surface::modal::ModalFrame;
 use iced_pro::surface::movable::MovableGeometry;
 use iced_pro::token::shape;
 use iced_pro::token::space;
+use iced_pro::widget::button::ButtonVariant;
+use iced_pro::widget::button_widget::Button;
 
 use crate::ui::strings;
+use crate::ui::theme::Palette;
 use crate::ui_iced::theme::scrim_color;
 
 /// Padding inside a modal dialog card — `space.lg` (`UIF-TOK-001`).
@@ -149,6 +150,12 @@ pub const CARD_RADIUS: f32 = shape::RADIUS_WIDGET;
 
 /// Horizontal gap between the confirm and cancel buttons.
 pub const CONFIRM_CANCEL_SPACING: f32 = 8.0;
+
+/// Focus id for the confirm button in confirm/cancel dialogs.
+const CONFIRM_BUTTON_FOCUS_ID: &str = "overlay.confirm_cancel.confirm";
+
+/// Focus id for the cancel button in confirm/cancel dialogs.
+const CANCEL_BUTTON_FOCUS_ID: &str = "overlay.confirm_cancel.cancel";
 
 /// Mouse interaction used by the modal scrim while it blocks the UI beneath it.
 const SCRIM_INTERACTION: iced::mouse::Interaction = iced::mouse::Interaction::Idle;
@@ -338,14 +345,31 @@ where
 {
     let (confirm, cancel) = confirm_cancel_pair(&on);
 
-    Row::with_children(vec![
-        button(text(confirm_label))
-            .on_press_maybe(confirm_press(confirm_enabled, confirm))
-            .into(),
-        button(text(strings::CANCEL_BUTTON)).on_press(cancel).into(),
-    ])
-    .spacing(CONFIRM_CANCEL_SPACING)
-    .align_y(Alignment::Center)
+    let confirm_button = Button::new(
+        ButtonVariant::Primary,
+        text(confirm_label),
+        confirm,
+        CONFIRM_BUTTON_FOCUS_ID,
+    )
+    .palette(Palette::pro());
+
+    let cancel_button = Button::new(
+        ButtonVariant::Ghost,
+        text(strings::CANCEL_BUTTON),
+        cancel,
+        CANCEL_BUTTON_FOCUS_ID,
+    )
+    .palette(Palette::pro());
+
+    let confirm_button = if confirm_enabled {
+        confirm_button
+    } else {
+        confirm_button.disabled()
+    };
+
+    Row::with_children(vec![confirm_button.into(), cancel_button.into()])
+        .spacing(CONFIRM_CANCEL_SPACING)
+        .align_y(Alignment::Center)
 }
 
 /// A full-area, transparent layer that swallows the click landing on it.

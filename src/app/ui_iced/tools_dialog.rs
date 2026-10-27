@@ -88,18 +88,18 @@ use std::collections::HashMap;
 use crate::ui_iced::app::TooltipId;
 use crate::ui_iced::message::{LayoutMessage, Message, ToolsDialogMessage};
 use iced::font::Weight;
-use iced::widget::{Column, Row, Space, checkbox, container, mouse_area, scrollable, table, text};
+use iced::widget::{Column, Row, Space, container, mouse_area, scrollable, table, text};
 use iced::{Alignment, Background, Element, Length, Size};
 
 use iced_pro::composite::list_tile;
-use iced_pro::state::{BaseState, VisualState};
 use iced_pro::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
 use iced_pro::token::{shape, space, typography};
 use iced_pro::widget::badge;
 use iced_pro::widget::badge_model::{BadgeModel, BadgeTone, StatusIcon};
 use iced_pro::widget::button::ButtonVariant;
 use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::toggle::{self, ToggleControl, TogglePolarity};
+use iced_pro::widget::toggle_model::CheckState;
+use iced_pro::widget::toggle_widget::Checkbox;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
@@ -942,47 +942,24 @@ fn header_cell(label: &'static str) -> Element<'static, Message> {
     .into()
 }
 
-/// The enable control: iced's checkbox painted from
+/// The enable control: iced-pro's checkbox painted from
 /// [`toggle::resolve_style`] (`UIF-ATOM-003`).
-///
-/// The framework's toggle module resolves the *paint* for a
-/// `(control, polarity)` pair but ships no `Element`-producing builder —
-/// its indicator is described as [`Layer`]s, not a widget — so the
-/// interactive control stays iced's `checkbox` and the resolved
-/// [`ToggleStyle`] is mapped onto iced's own style struct. The colours are
-/// therefore the framework's, including the contrast lock
-/// [`resolve_style`] runs before handing a style back; only the geometry
-/// of the hit target is iced's.
 fn enable_cell(row: &ToolGroupRow) -> Element<'static, Message> {
-    let style = toggle::resolve_style(
-        if row.enabled {
-            TogglePolarity::On
-        } else {
-            TogglePolarity::Off
-        },
-        VisualState {
-            base: BaseState::Rest,
-            focused: false,
-        },
-        &Palette::pro(),
-    );
+    let check_state = if row.enabled {
+        CheckState::Checked
+    } else {
+        CheckState::Unchecked
+    };
 
     let id = row.id.clone();
-    let enabled = row.enabled;
+    let focus_id = format!("tools.enable.{}", row.display_name);
 
-    checkbox(enabled)
-        .on_toggle(move |toggled| set_enabled_command(&id, toggled))
-        .style(move |_theme, _status| iced::widget::checkbox::Style {
-            background: Background::Color(style.indicator_fill),
-            icon_color: style.mark,
-            border: iced::Border {
-                color: style.indicator_border,
-                width: style.indicator_border_width,
-                radius: toggle::indicator_radius(ToggleControl::Checkbox).into(),
-            },
-            text_color: Some(style.label),
-        })
-        .into()
+    Checkbox::standalone("", check_state, focus_id, move |state| {
+        let toggled = matches!(state, CheckState::Checked);
+        Some(set_enabled_command(&id, toggled))
+    })
+    .with_palette(Palette::pro())
+    .into()
 }
 
 /// The Prompt column's cell: the summed char count, followed by the

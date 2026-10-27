@@ -64,9 +64,11 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, RenderMessage};
 use crate::ui_iced::table_width::TablePadding;
 use crate::ui_iced::table_width::{IcedTextMeasurer, TextMetrics};
-use iced::widget::{Column, Space, checkbox, container, rule, text};
+use iced::widget::{Column, Space, container, rule, text};
 use iced::{Alignment, Element, Length};
 use iced_pro::token::{shape, space, typography};
+use iced_pro::widget::toggle_model::CheckState;
+use iced_pro::widget::toggle_widget::Checkbox;
 use std::path::PathBuf;
 
 use code::CodeBlockModel;
@@ -409,11 +411,29 @@ pub fn paragraph_block(
     }
     if let Some(task) = task {
         let toggle = task_toggle_message(ctx.source_file.as_ref(), task, !task.checked);
-        let box_widget = match toggle {
-            Some(message) => checkbox(task.checked).on_toggle(move |_| message.clone()),
-            None => checkbox(task.checked),
+        let check_state = if task.checked {
+            CheckState::Checked
+        } else {
+            CheckState::Unchecked
         };
-        row = row.push(box_widget);
+        let source_name = ctx
+            .source_file
+            .as_ref()
+            .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown"))
+            .unwrap_or("inline");
+        let focus_id = format!("render.task.{}.{}", source_name, task.task_index);
+        let box_widget = match toggle {
+            Some(message) => {
+                Checkbox::standalone("", check_state, focus_id, move |_| Some(message.clone()))
+            }
+            None => Checkbox::standalone(
+                "",
+                check_state,
+                format!("render.task.{}.disabled", task.task_index),
+                |_| None,
+            ),
+        };
+        row = row.push(box_widget.with_palette(Palette::pro()));
     }
 
     row.push(inline::rich_text_block(spans, ctx.source_file.as_deref()))

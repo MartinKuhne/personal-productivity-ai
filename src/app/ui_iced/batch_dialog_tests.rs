@@ -40,6 +40,7 @@ fn valid_model() -> BatchDialogViewModel {
         mode: BatchMode::File,
         concurrency: 4,
         status: BatchRunStatus::idle(),
+        mode_radio_model: BatchDialogViewModel::create_mode_radio_model(BatchMode::File),
     }
 }
 
