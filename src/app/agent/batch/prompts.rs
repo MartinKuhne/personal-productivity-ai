@@ -445,7 +445,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("invalid.md");
         // Write invalid UTF-8
-        std::fs::write(&path, &[0xFF, 0xFE, 0xFD]).unwrap();
+        std::fs::write(&path, [0xFF, 0xFE, 0xFD]).unwrap();
 
         let libs = vec![ContentLibrary {
             root_folder: dir.path().to_string_lossy().to_string(),
