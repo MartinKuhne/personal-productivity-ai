@@ -41,11 +41,15 @@
 //!
 //! Unit tests live in the sibling `combo_box_tests.rs` sidecar.
 
+use std::fmt;
+
 use crate::state::{BaseState, VisualState};
 use crate::token::color::Palette;
-use crate::token::{shape, size, space};
+use crate::token::{shape, size, space, typography};
+use crate::widget::combo_model::{ComboBoxModel, FLYOUT_MAX_HEIGHT};
 use crate::widget::text_input::{self, InputKind, InputStyle};
-use iced::{Color, Point, Rectangle, Size};
+use iced::alignment;
+use iced::{Border, Color, Element, Length, Pixels, Point, Rectangle, Shadow, Size};
 
 /// The standard trigger height — `size.control.md` (§3.4, `UIF-TOK-002`).
 pub const HEIGHT_STANDARD: f32 = size::CONTROL_MD;
@@ -224,3 +228,377 @@ pub fn chevron_color(state: VisualState, open: bool, palette: &Palette) -> Color
         }
     }
 }
+
+/// The maximum height of the dropdown flyout — 280.0px (§3.4, `UIF-ATOM-004`).
+pub const COMBO_FLYOUT_MAX_H: f32 = FLYOUT_MAX_HEIGHT;
+
+/// The checkmark glyph rendered for a selected option row — `"✓"` (§3.4, `UIF-ATOM-004`).
+pub const CHECK_MARK: &str = "✓";
+
+/// The chevron glyph rendered in the trailing trigger slot — `"▾"` (§3.4, `UIF-ATOM-004`).
+pub const CHEVRON_GLYPH: &str = "▾";
+
+/// ComboBox / Select widget conforming to §3.4 (`UIF-ATOM-004`).
+pub struct ComboBox<'a, Message, Id> {
+    model: &'a ComboBoxModel<Id>,
+    rung: ComboRung,
+    width: Length,
+    palette: Palette,
+    on_toggle_open: Option<Message>,
+    on_select: Option<Box<dyn Fn(Id) -> Message + 'a>>,
+}
+
+impl<'a, Message, Id: Clone + fmt::Display + PartialEq> ComboBox<'a, Message, Id> {
+    /// Construct a new [`ComboBox`] wrapping `model` (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn new(model: &'a ComboBoxModel<Id>) -> Self {
+        Self {
+            model,
+            rung: ComboRung::Standard,
+            width: Length::Shrink,
+            palette: Palette::dark(),
+            on_toggle_open: None,
+            on_select: None,
+        }
+    }
+
+    /// Set the vertical sizing rung (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn with_rung(mut self, rung: ComboRung) -> Self {
+        self.rung = rung;
+        self
+    }
+
+    /// Set the width of the control, clamped to at least [`MIN_WIDTH`] (120px) (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn with_width(mut self, width: impl Into<Length>) -> Self {
+        let width = width.into();
+        self.width = match width {
+            Length::Fixed(w) => Length::Fixed(w.max(MIN_WIDTH)),
+            other => other,
+        };
+        self
+    }
+
+    /// Set the design token color palette (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn with_palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// Set the message emitted when the trigger box is clicked to toggle the flyout (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn on_toggle_open(mut self, msg: Message) -> Self {
+        self.on_toggle_open = Some(msg);
+        self
+    }
+
+    /// Convenience alias for [`on_toggle_open`](Self::on_toggle_open) (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn on_press(self, msg: Message) -> Self {
+        self.on_toggle_open(msg)
+    }
+
+    /// Set the callback emitted when an enabled option in the flyout is selected (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn on_select(mut self, f: impl Fn(Id) -> Message + 'a) -> Self {
+        self.on_select = Some(Box::new(f));
+        self
+    }
+
+    /// Reference to the underlying data model (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn model(&self) -> &'a ComboBoxModel<Id> {
+        self.model
+    }
+
+    /// The vertical sizing rung (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn rung(&self) -> ComboRung {
+        self.rung
+    }
+
+    /// The layout width constraint (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn width(&self) -> Length {
+        self.width
+    }
+
+    /// The active color palette (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn palette(&self) -> &Palette {
+        &self.palette
+    }
+
+    /// The message emitted on trigger toggle, if any (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn toggle_open_message(&self) -> Option<&Message> {
+        self.on_toggle_open.as_ref()
+    }
+
+    /// The label the trigger displays (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn display_label(&self) -> &str {
+        self.model.display_label()
+    }
+
+    /// Whether the trigger is displaying placeholder text (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn shows_placeholder(&self) -> bool {
+        self.model.shows_placeholder()
+    }
+
+    /// The chevron color for `visual_state` under the current model openness (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn chevron_color(&self, visual_state: VisualState) -> Color {
+        chevron_color(visual_state, self.model.is_open(), &self.palette)
+    }
+
+    /// The resolved trigger height for the active rung (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub const fn trigger_height(&self) -> f32 {
+        self.rung.height()
+    }
+
+    /// Whether the combobox model is disabled (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn is_disabled(&self) -> bool {
+        self.model.disabled_flag()
+    }
+
+    /// Whether the flyout dropdown card will mount in the element tree (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn is_flyout_mounted(&self) -> bool {
+        self.model.is_open() && !self.model.filtered_items().is_empty()
+    }
+}
+
+/// Helper function to construct a [`ComboBox`] widget wrapper (§3.4, `UIF-ATOM-004`).
+#[must_use]
+pub fn combo_box<'a, Message, Id: Clone + fmt::Display + PartialEq>(
+    model: &'a ComboBoxModel<Id>,
+) -> ComboBox<'a, Message, Id> {
+    ComboBox::new(model)
+}
+
+impl<'a, Message, Id> From<ComboBox<'a, Message, Id>> for Element<'a, Message>
+where
+    Message: 'a + Clone,
+    Id: Clone + PartialEq + fmt::Display + 'a,
+{
+    fn from(combo: ComboBox<'a, Message, Id>) -> Self {
+        let palette = combo.palette;
+        let is_disabled = combo.model.disabled_flag();
+        let is_invalid = combo.model.is_invalid();
+        let rung_height = combo.rung.height();
+
+        let initial_base = if is_disabled {
+            BaseState::Disabled
+        } else if is_invalid {
+            BaseState::Invalid
+        } else {
+            BaseState::Rest
+        };
+        let initial_state = VisualState {
+            base: initial_base,
+            focused: false,
+        };
+        let initial_trigger_style = resolve_trigger(initial_state, &palette);
+        let initial_chevron_color = chevron_color(initial_state, combo.model.is_open(), &palette);
+
+        let (label_text, label_color) = if let Some(selected_opt) = combo.model.selected_option() {
+            (selected_opt.label.as_str(), initial_trigger_style.text)
+        } else {
+            (combo.model.placeholder(), palette.text_muted)
+        };
+
+        let text_size = match combo.rung {
+            ComboRung::Standard => typography::BODY.size,
+            ComboRung::Compact => typography::UI_COMPACT.size,
+        };
+
+        let label_widget = iced::widget::text(label_text)
+            .size(Pixels(text_size))
+            .color(label_color)
+            .width(Length::Fill)
+            .align_y(alignment::Vertical::Center);
+
+        let chevron_widget = iced::widget::container(
+            iced::widget::text(CHEVRON_GLYPH)
+                .size(Pixels(CHEVRON_SIZE))
+                .color(initial_chevron_color)
+                .align_x(alignment::Horizontal::Center)
+                .align_y(alignment::Vertical::Center),
+        )
+        .width(Length::Fixed(TRAILING_SLOT))
+        .height(Length::Fixed(TRAILING_SLOT))
+        .align_x(alignment::Horizontal::Center)
+        .align_y(alignment::Vertical::Center);
+
+        let trigger_row = iced::widget::row![label_widget, chevron_widget]
+            .spacing(SLOT_GAP)
+            .align_y(alignment::Vertical::Center)
+            .width(Length::Fill)
+            .height(Length::Fixed(rung_height));
+
+        let trigger_inner = iced::widget::container(
+            iced::widget::stack![
+                iced::widget::Space::new().width(Length::Fixed(MIN_WIDTH)),
+                trigger_row,
+            ]
+            .width(combo.width)
+            .height(Length::Fixed(rung_height)),
+        )
+        .padding(iced::Padding::new(0.0).horizontal(HORIZONTAL_PADDING))
+        .width(combo.width)
+        .height(Length::Fixed(rung_height))
+        .align_y(alignment::Vertical::Center);
+
+        let is_open = combo.model.is_open();
+        let mut trigger_btn = iced::widget::button(trigger_inner)
+            .padding(iced::Padding::ZERO)
+            .width(combo.width)
+            .height(Length::Fixed(rung_height))
+            .style(move |_theme, status| {
+                let is_hovered = matches!(
+                    status,
+                    iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+                );
+                let current_base = if is_disabled {
+                    BaseState::Disabled
+                } else if is_invalid {
+                    BaseState::Invalid
+                } else if is_hovered {
+                    BaseState::Hovered
+                } else {
+                    BaseState::Rest
+                };
+                let current_state = VisualState {
+                    base: current_base,
+                    focused: false,
+                };
+                let resolved = resolve_trigger(current_state, &palette);
+                iced::widget::button::Style {
+                    background: Some(resolved.background.into()),
+                    border: Border {
+                        color: resolved.border_color,
+                        width: resolved.border_width,
+                        radius: shape::RADIUS_WIDGET.into(),
+                    },
+                    text_color: resolved.text,
+                    shadow: Shadow::default(),
+                    snap: true,
+                }
+            });
+
+        if !is_disabled && let Some(msg) = combo.on_toggle_open {
+            trigger_btn = trigger_btn.on_press(msg);
+        }
+
+        let mut root_col = iced::widget::column![trigger_btn].spacing(space::XS);
+
+        let filtered_items = combo.model.filtered_items();
+        if is_open && !filtered_items.is_empty() {
+            let mut options_col = iced::widget::Column::new().spacing(space::XXS);
+
+            for item in filtered_items {
+                let is_selected = combo.model.selected() == Some(&item.id);
+                let item_enabled = item.enabled && !is_disabled;
+
+                let check_glyph = if is_selected { CHECK_MARK } else { "" };
+                let check_slot = iced::widget::container(
+                    iced::widget::text(check_glyph)
+                        .size(Pixels(typography::UI_COMPACT.size))
+                        .color(if item_enabled {
+                            palette.accent_text
+                        } else {
+                            palette.text_disabled
+                        })
+                        .align_x(alignment::Horizontal::Center)
+                        .align_y(alignment::Vertical::Center),
+                )
+                .width(Length::Fixed(size::CHECKBOX_BOX))
+                .height(Length::Fixed(size::CHECKBOX_BOX))
+                .align_x(alignment::Horizontal::Center)
+                .align_y(alignment::Vertical::Center);
+
+                let label_color = if item_enabled {
+                    palette.text_primary
+                } else {
+                    palette.text_disabled
+                };
+                let row_label = iced::widget::text(&item.label)
+                    .size(Pixels(typography::BODY.size))
+                    .color(label_color)
+                    .width(Length::Fill)
+                    .align_y(alignment::Vertical::Center);
+
+                let row_content = iced::widget::row![check_slot, row_label]
+                    .spacing(space::SM)
+                    .align_y(alignment::Vertical::Center)
+                    .width(Length::Fill)
+                    .height(Length::Fixed(size::CONTROL_MD));
+
+                let mut opt_btn = iced::widget::button(row_content)
+                    .padding(iced::Padding::new(0.0).horizontal(space::SM))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(size::CONTROL_MD))
+                    .style(move |_theme, status| {
+                        let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
+                        let bg = if item_enabled && is_hovered {
+                            palette.surface_hover
+                        } else {
+                            Color::TRANSPARENT
+                        };
+                        iced::widget::button::Style {
+                            background: Some(bg.into()),
+                            text_color: if item_enabled {
+                                palette.text_primary
+                            } else {
+                                palette.text_disabled
+                            },
+                            border: Border::default().rounded(shape::RADIUS_WIDGET),
+                            shadow: Shadow::default(),
+                            snap: true,
+                        }
+                    });
+
+                if item_enabled && let Some(on_select) = &combo.on_select {
+                    opt_btn = opt_btn.on_press(on_select(item.id.clone()));
+                }
+
+                options_col = options_col.push(opt_btn);
+            }
+
+            let scrollable_options = iced::widget::scrollable(options_col).direction(
+                iced::widget::scrollable::Direction::Vertical(
+                    iced::widget::scrollable::Scrollbar::default(),
+                ),
+            );
+
+            let flyout = iced::widget::container(scrollable_options)
+                .width(combo.width)
+                .max_height(Pixels(COMBO_FLYOUT_MAX_H))
+                .padding(iced::Padding::new(space::XS))
+                .style(move |_theme| iced::widget::container::Style {
+                    background: Some(palette.surface_overlay.into()),
+                    border: Border::default()
+                        .color(palette.border_strong)
+                        .width(shape::BORDER_HAIRLINE)
+                        .rounded(shape::RADIUS_WIDGET),
+                    shadow: Shadow::default(),
+                    snap: true,
+                    text_color: Some(palette.text_primary),
+                });
+
+            root_col = root_col.push(flyout);
+        }
+
+        root_col.width(combo.width).into()
+    }
+}
+
+#[cfg(test)]
+#[path = "combo_box_tests.rs"]
+mod combo_box_tests;

@@ -545,6 +545,14 @@ impl<Id: Clone + fmt::Display + PartialEq> ComboBoxModel<Id> {
         self.filtered_with(self.filter_query.as_deref())
     }
 
+    /// Every option visible under the model's current filter (§3.4, `UIF-ATOM-004`).
+    ///
+    /// Alias for [`filtered`](Self::filtered).
+    #[must_use]
+    pub fn filtered_items(&self) -> Vec<&SelectOption<Id>> {
+        self.filtered()
+    }
+
     /// Does `query` leave at least one **pickable** option on screen?
     ///
     /// This is the question the flyout's existence turns on: a list of

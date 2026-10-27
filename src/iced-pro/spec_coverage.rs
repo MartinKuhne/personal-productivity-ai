@@ -1260,7 +1260,10 @@ const SPEC_COVERAGE: &[Coverage] = &[
         ],
         reason: None,
         note: Some(
-            "Built on the existing menu engine rather than a second flyout: \
+            "The `ComboBox` widget wrapper is fully implemented in `widget/combo_box.rs` \
+             conforming to §3.4, featuring trigger rendering across Standard/Compact rungs, \
+             clamped min width (120px), and scrollable dropdown flyout card. \
+             Built on the existing menu engine rather than a second flyout: \
              `ComboHost` owns exactly one `MenuCascade` and one `GestureSlot`, opens \
              through `MenuTreeKind::Fixed`, and inherits `UIF-CMENU-002`'s mutual \
              exclusion, the roving focus, the escape-rank behaviour and the Z-Band 2 \
