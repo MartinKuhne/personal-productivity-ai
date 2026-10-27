@@ -1,14 +1,14 @@
 //! Tests for the app-side token gate in
 //! [`token_lint_gate`](crate::ui_iced::token_lint_gate).
 //!
-//! Same two failure modes the iced-pro sidecar defends against: the gate
+//! Same two failure modes the hoarfrost sidecar defends against: the gate
 //! can let a magic number through, and — more dangerously — it can
 //! *report* that nothing got through because a pattern quietly stopped
 //! matching. The pinned counts are the anti-vacuity half; the injected
 //! fixtures are the proof it still bites.
 //!
 //! The injected-failure tests follow the house pattern from
-//! [`token_lint_tests`](iced_pro::token_lint_tests): the real code path,
+//! [`token_lint_tests`](hoarfrost::token_lint_tests): the real code path,
 //! one doctored input, the guard observed firing on every run rather than
 //! trusted.
 //!
@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
-use iced_pro::token_lint::{self, Rule, is_test_file};
+use hoarfrost::token_lint::{self, Rule, is_test_file};
 
 use crate::ui_iced::token_lint_gate::{
     APP_ALLOW_LIST, APP_COLOUR_DEFINITION_FILE, APP_GEOMETRY_CONSTANTS, APP_VISUAL_SCOPE_PREFIXES,
@@ -347,7 +347,7 @@ fn the_gate_actually_counts_colours_in_the_theme_layer() {
 
 /// The gate must not be a second scanner that has drifted from the first.
 ///
-/// The same fixture text, run under iced-pro's scope and under the app's,
+/// The same fixture text, run under hoarfrost's scope and under the app's,
 /// must produce the *same* finding for the same shape. If the two scopes
 /// ever disagree about what a violation is, the shared implementation has
 /// been forked in practice even though the code is shared.
@@ -430,7 +430,7 @@ fn the_gate_fires_on_a_colour_injected_into_a_real_app_file() {
 }
 
 /// A colour written into the theme layer is not a violation, and is
-/// counted instead — the same asymmetry iced-pro relies on.
+/// counted instead — the same asymmetry hoarfrost relies on.
 #[test]
 fn the_gate_does_not_fire_inside_the_theme_layer() {
     let fixture = "fn f() { let c = iced::Color::from_rgb8(1, 2, 3, 1.0); }\n";

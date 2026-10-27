@@ -1,13 +1,13 @@
 //! Driving the submenu aiming corridor from live row hover (`UIF-PRIN-008`,
 //! `UIF-FMENU-002`).
 //!
-//! [`AimCorridor`](iced_pro::surface::menu::aim::AimCorridor) is a pure
+//! [`AimCorridor`](hoarfrost::surface::menu::aim::AimCorridor) is a pure
 //! state machine that never reads a clock and never touches a cascade.
 //! Something has to sit between it and the running application, and that
 //! something is this module: it turns the raw pointer crossings the
-//! [`MenuRow`](iced_pro::surface::menu::view::MenuRow) widgets report
+//! [`MenuRow`](hoarfrost::surface::menu::view::MenuRow) widgets report
 //! into corridor events, asks the corridor what it concludes, and drives
-//! [`MenuCascade::hover_submenu_row`](iced_pro::surface::menu::cascade::MenuCascade::hover_submenu_row)
+//! [`MenuCascade::hover_submenu_row`](hoarfrost::surface::menu::cascade::MenuCascade::hover_submenu_row)
 //! when the answer permits a switch.
 //!
 //! # The split, and why it is split this way
@@ -33,13 +33,13 @@
 //!    from, once the corridor matures. That is branch retirement, not
 //!    dismissal — see rule 2 for the difference.
 //! 2. **A pointer leaving never dismisses.** The corridor answers
-//!    [`Collapse`](iced_pro::surface::menu::aim::AimDecision::Collapse)
+//!    [`Collapse`](hoarfrost::surface::menu::aim::AimDecision::Collapse)
 //!    when the pointer is outside everything, and that answer is
 //!    *dropped* here. Dismissal belongs to the click-away blocker
 //!    [`menu_surface::overlay`] mounts; a hover path that also closed
 //!    menus would give one surface two owners, and every menu in the app
 //!    would shut when the mouse swept past it.
-//!    [`pointer_left_card`](iced_pro::surface::menu::cascade::MenuCascade::pointer_left_card)
+//!    [`pointer_left_card`](hoarfrost::surface::menu::cascade::MenuCascade::pointer_left_card)
 //!    says the same thing about itself, in the same words.
 //! 3. **A held switch must mature without another event.** iced is
 //!    event-driven; the corridor is not.
@@ -51,7 +51,7 @@
 //! The corridor tracks a single parent card's trigger rows by index, so
 //! this module treats **the root card of the open tree** as the parent
 //! and every card below it as
-//! [`ChildBranch`](iced_pro::surface::menu::aim::AimTarget::ChildBranch).
+//! [`ChildBranch`](hoarfrost::surface::menu::aim::AimTarget::ChildBranch).
 //! That is exactly right for the only menu in this application that has
 //! submenus — the hamburger, which nests one level deep. A menu that
 //! nested two levels would need one corridor per parent card, which is a
@@ -64,12 +64,12 @@
 
 use std::time::Duration;
 
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::menu::aim::{AimCorridor, AimDecision, AimTarget};
+use hoarfrost::surface::menu::cascade::MenuCascade;
+use hoarfrost::surface::menu::model::MenuId;
+use hoarfrost::surface::tooltip::TimeMs;
 use iced::Task;
-use iced_pro::focus::FocusState;
-use iced_pro::surface::menu::aim::{AimCorridor, AimDecision, AimTarget};
-use iced_pro::surface::menu::cascade::MenuCascade;
-use iced_pro::surface::menu::model::MenuId;
-use iced_pro::surface::tooltip::TimeMs;
 
 use crate::ui_iced::message::{MenuMessage, Message};
 
@@ -134,7 +134,7 @@ impl AimStep {
 /// all.
 ///
 /// The check is card-agnostic on purpose. A
-/// [`SubmenuTrigger`](iced_pro::surface::menu::cascade::SubmenuTrigger)
+/// [`SubmenuTrigger`](hoarfrost::surface::menu::cascade::SubmenuTrigger)
 /// records the parent card and the row that opened it,
 /// so "some open card was opened by the guarded row of a card that is
 /// itself still open" is exactly "the guard still means something".
@@ -182,7 +182,7 @@ pub fn target_for(cascade: &MenuCascade, card: &MenuId, row: usize) -> AimTarget
 ///   kind — the corridor needs to see a sibling crossing to time it,
 ///   and a heading is a sibling just as a trigger is;
 /// * opens a branch **only** if the row is a
-///   [`is_submenu_parent`](iced_pro::surface::menu::model::Row::is_submenu_parent)
+///   [`is_submenu_parent`](hoarfrost::surface::menu::model::Row::is_submenu_parent)
 ///   *and* the corridor's decision permits it, which is what
 ///   [`MenuCascade::hover_submenu_row`] encodes;
 /// * reports how long the corridor still wants before it would allow a
@@ -391,7 +391,7 @@ fn retire_deeper_branch(
 /// existing subscription, is to sleep on the worker the task runs on.
 ///
 /// The cost is bounded: one sleep per hover crossing, each at most
-/// [`grace_ms`](iced_pro::surface::menu::aim::grace_ms) (150 ms), on a
+/// [`grace_ms`](hoarfrost::surface::menu::aim::grace_ms) (150 ms), on a
 /// `futures` pool sized to the CPU count — and it is never the UI thread
 /// that sleeps, which is what [FMD-060] and [FMD-061] actually require.
 /// A wake that arrives after its reason has gone is inert: `on_deadline`

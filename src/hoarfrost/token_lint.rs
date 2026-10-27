@@ -647,7 +647,7 @@ pub fn surface_geometry(file: &str, name: &str) -> Option<&'static SurfaceGeomet
 ///
 /// The scanner itself is scope-free: it is the *scope* that says which file
 /// owns colours, which paths carry visual measurements, and which bare
-/// literals somebody has registered as a fixed bound. iced-pro's own tree
+/// literals somebody has registered as a fixed bound. hoarfrost's own tree
 /// is one such scope ([`crate_scope`]); a host crate that wants the same
 /// gate over its own sources supplies a second one instead of writing a
 /// second scanner.
@@ -671,7 +671,7 @@ pub struct Scope<'a> {
 /// The scope of the crate this module is compiled into.
 ///
 /// Built from the existing constants rather than restating them, so
-/// iced-pro's own audit is exactly what it was before this struct existed.
+/// hoarfrost's own audit is exactly what it was before this struct existed.
 #[must_use]
 pub fn crate_scope<'a>() -> Scope<'a> {
     Scope {
@@ -809,7 +809,7 @@ impl Audit {
 /// no allow-list.
 ///
 /// This is the whole scanner. [`scan_source`] is this function with
-/// iced-pro's own scope, and a host crate's gate is this function with its
+/// hoarfrost's own scope, and a host crate's gate is this function with its
 /// own — the same redaction, the same constructor patterns, the same
 /// scalar classifier, the same registry semantics.
 ///
@@ -887,7 +887,7 @@ pub fn scan_source_in(scope: &Scope<'_>, file: &str, text: &str) -> SourceScan {
     scan
 }
 
-/// Scan one file's text under iced-pro's own scope. Pure: no filesystem,
+/// Scan one file's text under hoarfrost's own scope. Pure: no filesystem,
 /// no allow-list.
 ///
 /// `file` is the crate-relative path with forward slashes; it decides
@@ -979,7 +979,7 @@ pub fn audit_crate() -> Audit {
 /// Render the audit as a plain-text report.
 #[must_use]
 pub fn render(audit: &Audit) -> String {
-    render_scoped("iced-pro", COLOUR_DEFINITION_FILE, audit)
+    render_scoped("hoarfrost", COLOUR_DEFINITION_FILE, audit)
 }
 
 /// Render the audit under a caller-supplied label and colour-owner name.
@@ -1085,7 +1085,7 @@ pub fn is_test_file(file: &str) -> bool {
     file.ends_with("_tests.rs") || file.ends_with("test_helpers.rs") || file.starts_with("tests/")
 }
 
-/// Whether Rule B inspects this file under iced-pro's own visual scope.
+/// Whether Rule B inspects this file under hoarfrost's own visual scope.
 #[must_use]
 pub fn in_visual_scope(file: &str) -> bool {
     in_scope(file, &VISUAL_SCOPE_DIRS)
@@ -1326,7 +1326,7 @@ fn parse_f32_const<'a>(trimmed: &'a str) -> Option<Decl<'a>> {
 ///
 /// The four non-violating classes are the ones the spec itself draws (see
 /// the module header); the registry consulted is the scope's, so a host
-/// crate registers *its own* fixed bounds rather than borrowing iced-pro's
+/// crate registers *its own* fixed bounds rather than borrowing hoarfrost's
 /// §-references.
 fn classify_scalar(scope: &Scope<'_>, file: &str, c: &F32Const<'_>) -> ScalarClass {
     // Checked before the empty-literals branch below, and deliberately

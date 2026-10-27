@@ -65,14 +65,14 @@ C4Container
   }
 
   Container(agent_crate, "fastmd-agent", "Separate crate: agent turn loop, LLM client, tool registry + tool implementations")
-  Container(iced_pro, "iced-pro", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
+  Container(hoarfrost, "hoarfrost", "Separate crate: UIF-* design tokens, contrast solver, focus model, menu engine, surface hosts. Since INT-3..INT-8 fastmd renders through its widgets and surfaces, not only its tokens")
   Container(iced_rt, "iced runtime", "winit + wgpu/tiny-skia + cosmic-text under the Elm loop")
 
   Rel(ui_iced, ui_free, "borrows view-models, strings, palette tokens")
   Rel(ui_iced, bus, "publishes UserCommand; reads buses through the subscription bridge")
   Rel(ui_iced, iced_rt, "builds Elements; the runtime paints and dispatches input")
-  Rel(ui_free, iced_pro, "derives overlapping palette tokens from UIF-TOK-005")
-  Rel(ui_iced, iced_pro, "tokens, framework widgets, menu engine, modal frames, movable hosts, z-order bands")
+  Rel(ui_free, hoarfrost, "derives overlapping palette tokens from UIF-TOK-005")
+  Rel(ui_iced, hoarfrost, "tokens, framework widgets, menu engine, modal frames, movable hosts, z-order bands")
   Rel(ui_iced, orch, "reducer drives orchestrator state transitions")
   Rel(orch, ws, "file/tag/directory state")
   Rel(orch, agent_crate, "submits AgentPrompt, observes AgentEvent")
@@ -84,29 +84,29 @@ C4Container
 
 There are three crates in this workspace that matter to the picture above:
 `fastmd` (the application, `src/app/`), `fastmd-agent` (the agent engine,
-`src/agent/`) and `iced-pro` (`src/iced-pro/`). The first two are wired
+`src/agent/`) and `hoarfrost` (`src/hoarfrost/`). The first two are wired
 together — `AppOrchestrator` submits prompts to and observes events from
 `fastmd-agent`.
 
-`iced-pro` is consumed by the application in two distinct ways, and the
+`hoarfrost` is consumed by the application in two distinct ways, and the
 distinction is the one thing a reader should carry away from this section.
 
 **Tokens (since INT-1).**
 
 - `src/app/ui/theme.rs` derives every overlapping semantic palette token
-  from `iced_pro::token::color::Palette::dark()` (`UIF-TOK-005`) instead
+  from `hoarfrost::token::color::Palette::dark()` (`UIF-TOK-005`) instead
   of a literal, and delegates the inverted editor set to
-  `iced_pro::token::color::EditorPalette::inverted()` (decision **D-4**);
+  `hoarfrost::token::color::EditorPalette::inverted()` (decision **D-4**);
 - `src/app/ui_iced/theme.rs` maps the framework palette onto the iced
   theme roles and takes the modal scrim from
-  `iced_pro::surface::zorder::scrim_for`;
+  `hoarfrost::surface::zorder::scrim_for`;
 - `src/app/ui_iced/layout.rs` binds the pane-grid resize leeway to
-  `iced_pro::token::size::SPLITTER_GRAB` (`UIF-TOK-002`).
+  `hoarfrost::token::size::SPLITTER_GRAB` (`UIF-TOK-002`).
 
 **Widgets and surfaces (since INT-3, completed through INT-8).** The
 framework's claim that the app renders "only as the design token source"
 was true at INT-1 and is false now. The table below is the live
-integration surface, read from the `iced_pro::` imports of the production
+integration surface, read from the `hoarfrost::` imports of the production
 modules under `src/app/ui_iced/` — not from an intention list.
 
 | App module(s) | Framework subsystem rendered through |
@@ -129,17 +129,17 @@ agent prompt submits only the explicit event; blur synchronizes its draft
 without starting an agent run. Name dialogs deliberately route both events
 to their existing submit behavior.
 
-No `fastmd` type appears anywhere in `iced-pro`'s API, so the dependency
+No `fastmd` type appears anywhere in `hoarfrost`'s API, so the dependency
 stays strictly one-way.
 
 **Still not consumed:** `ModalHost` and `InputDialogHost` (the app takes
 their frame, sizing and error semantics but keeps dismiss ownership — see
-*The ownership contract* under the `iced-pro` component diagram);
+*The ownership contract* under the `hoarfrost` component diagram);
 `bridge::tab_task`, so framework-driven `Tab` traversal is not wired;
 and the framework's `composite::search_input`, which does not exist. The
 six FastMD document/log content tokens stay app-owned literals under
 decision **D-2**. Porting what remains is the follow-on work decision
-**D-8** describes. See the `iced-pro` component diagram further down for
+**D-8** describes. See the `hoarfrost` component diagram further down for
 what that crate contains, what it deliberately does not own, and where
 the seams between the two still leak.
 
@@ -183,9 +183,9 @@ menu, the blocking modal card, the confirm/cancel button pair, the
 follow-the-stream scroll rule — live in `ui_iced/overlay.rs` and
 `ui_iced/logs.rs`, which the panels, modals, tree and renderers call instead
 of hand-rolling the widget tree. Since INT-3..INT-8 the *geometry, frame
-and band semantics* behind those idioms come from `iced-pro` rather than
+and band semantics* behind those idioms come from `hoarfrost` rather than
 from local arithmetic, while open/close/dismiss ownership stays with
-`OverlayState` — see *The integration contract* under the `iced-pro`
+`OverlayState` — see *The integration contract* under the `hoarfrost`
 component diagram.
 
 ```mermaid
@@ -200,20 +200,20 @@ C4Component
   Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
   Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
   Component(render, "render", "Markdown viewing path: RenderEvent -> RenderBlock descriptors -> iced widgets (heading, inline, code, table, yaml)")
-  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to iced-pro modal::ModalSizing / ModalFrame")
-  Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through iced-pro surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
-  Component(movui, "movable_shell", "Movable card chrome driven by iced-pro movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
+  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to hoarfrost modal::ModalSizing / ModalFrame")
+  Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through hoarfrost surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
+  Component(movui, "movable_shell", "Movable card chrome driven by hoarfrost movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
   Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")
-  Component(agentui, "agent", "Mounted agent panel: header/status, streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, iced-pro controlled prompt field, send/queue/cancel + chat-model pick_list")
+  Component(agentui, "agent", "Mounted agent panel: header/status, streaming transcript through iced's built-in markdown widget, thinking-delimiter gate, hoarfrost controlled prompt field, send/queue/cancel + chat-model pick_list")
   Component(windows, "logs / agent_debug / dialogs / about / attributions / batch_dialog / tools_dialog / search", "The floating-window view-models and pure rules behind each overlay card; logs and agent_debug ride MovableHost")
   Component(persist, "persisted", "PersistedUiState save/restore through the injected UI-state storage handler")
   Component(tablew, "table_width (iced adapter)", "Available width -> FTWA solver inputs -> pinned iced column widths; heuristic text measurer")
-  Component(gate, "token_lint_gate", "App-side token gate: iced-pro's own scanner run over ui_iced under an app Scope (colour owner ui/theme.rs, visual scope ui_iced/, app geometry registry + enumerated allow-list)")
+  Component(gate, "token_lint_gate", "App-side token gate: hoarfrost's own scanner run over ui_iced under an app Scope (colour owner ui/theme.rs, visual scope ui_iced/, app geometry registry + enumerated allow-list)")
   Component(theme, "theme", "Palette token -> iced palette-role mapping; Theme::custom('FastMD Dark'); scrim colour (UI-002/GUD-003)")
   Component(fonts, "fonts", "iced::font::load bootstrap for the embedded icon font + platform symbol fallback")
   Component(osshell, "os_shell", "Framework-free platform wrappers: open-in-system-editor, reveal-in-file-explorer, open-URL")
   Component(logo, "logo", "The single place the shared logo mark element is constructed")
-  Component(pro, "iced-pro (framework crate)", "Tokens, atoms, composites, menu engine, modal frames, movable hosts, z-order bands consumed by the modules above")
+  Component(pro, "hoarfrost (framework crate)", "Tokens, atoms, composites, menu engine, modal frames, movable hosts, z-order bands consumed by the modules above")
   Component(helpers, "test_helpers (cfg(test))", "Framework-free fixtures: test_app / test_app_state over in-memory storage")
 
   Rel(app, update, "boot -> update")
@@ -510,13 +510,13 @@ C4Component
   Rel(msg, ev, "background messages")
 ```
 
-## Component Diagram (Level 3) — `iced-pro` crate (`src/iced-pro/`)
+## Component Diagram (Level 3) — `hoarfrost` crate (`src/hoarfrost/`)
 
-`iced-pro` implements the widget-library specification
-`src/iced-pro/spec.md` — co-located with the crate it governs since commit
+`hoarfrost` implements the widget-library specification
+`src/hoarfrost/spec.md` — co-located with the crate it governs since commit
 `edbe04a` (previously `doc/planning/ui-framework.md`) — whose requirement
 IDs are `UIF-*`.
-Package `iced-pro`, library name `iced_pro`, iced 0.14 with the same
+Package `hoarfrost`, library name `hoarfrost`, iced 0.14 with the same
 renderer features `fastmd` uses plus `advanced` — the only way a custom
 widget can reach `iced_core`'s widget-author surface. The library root is
 `mod.rs`, not `src/lib.rs`, so the gallery binary is declared explicitly
@@ -530,13 +530,13 @@ far more than its tokens. Atoms (`widget::button_widget`, `text_input`,
 (`surface::movable`), the z-order band model (`surface::zorder`), the
 focus model (`focus`, `bridge`) and the geometry solvers (`geometry`) are
 all live in the shipped application. What the crate's own ledger says is
-and is not satisfied lives in `src/iced-pro/spec_coverage.rs`; what the
+and is not satisfied lives in `src/hoarfrost/spec_coverage.rs`; what the
 *integration* does and does not take is recorded below, because the
 ledger describes the framework and nothing in it describes the host.
 
 ```mermaid
 C4Component
-  title iced-pro — Subsystems (all consumed by fastmd: tokens, atoms, composites, menus, modal frames, movable shells)
+  title hoarfrost — Subsystems (all consumed by fastmd: tokens, atoms, composites, menus, modal frames, movable shells)
 
   Component(token, "token/", "Closed design-token set: space, size, shape, typography, color, contrast (UIF-TOK-001..006)")
   Component(st, "state.rs", "Interaction state machine: exclusive BaseState plus an orthogonal focus ring, resolved purely")

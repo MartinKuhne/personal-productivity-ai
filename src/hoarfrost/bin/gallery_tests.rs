@@ -36,7 +36,7 @@ fn refuses_a_subdirectory_of_each_root() {
         let Ok(value) = std::env::var(var) else {
             continue;
         };
-        let nested = PathBuf::from(&value).join("iced-pro-snapshot");
+        let nested = PathBuf::from(&value).join("hoarfrost-snapshot");
         let reason = refusal(&nested);
         assert!(
             reason.is_some(),
@@ -80,7 +80,7 @@ fn refuses_a_fastmd_component_anywhere() {
 fn a_temp_subdirectory_is_allowed() {
     // The default output lives in the temp tree; the rule is about the
     // app's own config roots, not about temp.
-    let temp = std::env::temp_dir().join("iced-pro-gallery");
+    let temp = std::env::temp_dir().join("hoarfrost-gallery");
     assert!(
         refusal(&temp).is_none(),
         "a temp subdirectory must be allowed: {}",
@@ -113,7 +113,7 @@ fn a_root_with_a_trailing_separator_still_nests_correctly() {
         return;
     };
     let nested = format!(
-        "{}{}iced-pro-out",
+        "{}{}hoarfrost-out",
         appdata.trim_end_matches(['/', '\\']),
         "/x"
     );
@@ -127,16 +127,16 @@ fn a_root_with_a_trailing_separator_still_nests_correctly() {
 fn containment_is_component_wise_not_string_wise() {
     // A sibling that merely shares a string prefix is not "below".
     assert!(
-        !at_or_below("/tmp/iced-pro-gallery-evil", "/tmp/iced-pro-gallery"),
+        !at_or_below("/tmp/hoarfrost-gallery-evil", "/tmp/hoarfrost-gallery"),
         "a string-prefix sibling must not count as nested"
     );
     assert!(at_or_below(
-        "/tmp/iced-pro-gallery",
-        "/tmp/iced-pro-gallery"
+        "/tmp/hoarfrost-gallery",
+        "/tmp/hoarfrost-gallery"
     ));
     assert!(at_or_below(
-        "/tmp/iced-pro-gallery/cells",
-        "/tmp/iced-pro-gallery"
+        "/tmp/hoarfrost-gallery/cells",
+        "/tmp/hoarfrost-gallery"
     ));
-    assert!(!at_or_below("/tmp", "/tmp/iced-pro-gallery"));
+    assert!(!at_or_below("/tmp", "/tmp/hoarfrost-gallery"));
 }

@@ -48,9 +48,9 @@ use crate::ui_iced::table_width::{
     CELL_PADDING_X, CELL_PADDING_Y, IcedTextMeasurer, TablePadding, column_length, column_widths,
     solve_table_layout,
 };
+use hoarfrost::token::{shape, typography};
 use iced::widget::{container, scrollable, table, text};
 use iced::{Background, Element, Length};
-use iced_pro::token::{shape, typography};
 
 /// Border width of the table's perimeter frame, in logical pixels —
 /// `border.hairline` (`UIF-TOK-003`). Value unchanged at `1`.

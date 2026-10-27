@@ -13,9 +13,9 @@
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
+use hoarfrost::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
+use hoarfrost::widget::badge_model::BadgeKind;
 use iced::Size;
-use iced_pro::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
-use iced_pro::widget::badge_model::BadgeKind;
 
 /// An internal family group with two tools.
 fn internal_group(family: InternalToolGroup) -> ToolGroupState {
@@ -1067,9 +1067,9 @@ fn the_marker_text_clears_the_contrast_bar_against_its_fill() {
         .with_tone(BadgeTone::Success);
     let style = badge::resolve_style(&model, &palette);
 
-    let ratio = iced_pro::token::contrast::contrast_ratio(style.text, style.fill);
+    let ratio = hoarfrost::token::contrast::contrast_ratio(style.text, style.fill);
     assert!(
-        iced_pro::token::contrast::meets_text_contrast(style.text, style.fill),
+        hoarfrost::token::contrast::meets_text_contrast(style.text, style.fill),
         "success text on the badge fill is {ratio:.4}:1, below the 4.5:1 text bar"
     );
 }

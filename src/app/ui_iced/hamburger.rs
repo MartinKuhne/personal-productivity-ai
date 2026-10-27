@@ -1,11 +1,11 @@
-//! The top-bar hamburger menu rendered by the `iced-pro` menu engine.
+//! The top-bar hamburger menu rendered by the `hoarfrost` menu engine.
 //!
 //! This module replaces the app-side rendering path for the ☰ menu
 //! (integration increment INT-3a). The menu is now an
-//! [`iced_pro::surface::menu::model::Menu`] value, its openness is owned by
-//! [`iced_pro::surface::menu::cascade::MenuCascade`], its placement comes
-//! from [`iced_pro::geometry::anchor::solve`], and each row is an
-//! [`iced_pro::surface::menu::view::MenuRow`] — the first framework
+//! [`hoarfrost::surface::menu::model::Menu`] value, its openness is owned by
+//! [`hoarfrost::surface::menu::cascade::MenuCascade`], its placement comes
+//! from [`hoarfrost::geometry::anchor::solve`], and each row is an
+//! [`hoarfrost::surface::menu::view::MenuRow`] — the first framework
 //! *widget* this application renders rather than a framework token it reads.
 //!
 //! # What moved where
@@ -30,14 +30,14 @@
 //! (`"✓ Model name"`) for the chat-model and table-wrap choices, so a
 //! single-choice group looked identical to an independent toggle. Here the
 //! chat models and the table-wrap strategies are
-//! [`RowKind::Radio`](iced_pro::surface::menu::model::RowKind::Radio)
+//! [`RowKind::Radio`](hoarfrost::surface::menu::model::RowKind::Radio)
 //! members of a named
-//! [`RadioGroupId`](iced_pro::surface::menu::model::RadioGroupId), and
+//! [`RadioGroupId`](hoarfrost::surface::menu::model::RadioGroupId), and
 //! Background operations / Agent debug are
-//! [`RowKind::Check`](iced_pro::surface::menu::model::RowKind::Check) rows.
+//! [`RowKind::Check`](hoarfrost::surface::menu::model::RowKind::Check) rows.
 //! The leading slot glyph (`•` vs `✓`) is the framework's, and mutual
 //! exclusion is enforced by
-//! [`Menu::activate`](iced_pro::surface::menu::model::Menu::activate)
+//! [`Menu::activate`](hoarfrost::surface::menu::model::Menu::activate)
 //! instead of by each row's command.
 //!
 //! # The trigger rectangle is synthesised, not measured
@@ -47,7 +47,7 @@
 //! builds the navbar band truncated at the button's right inset. That is
 //! the same approximation the previous synthetic anchor point encoded,
 //! expressed as a real
-//! [`Anchor::Control`](iced_pro::geometry::anchor::Anchor::Control)
+//! [`Anchor::Control`](hoarfrost::geometry::anchor::Anchor::Control)
 //! rectangle so the framework's quadrant-flip and viewport-clamp rules
 //! now apply to it.
 //!
@@ -59,9 +59,9 @@ mod tests;
 
 use iced::{Element, Point, Rectangle, Size};
 
-use iced_pro::geometry::anchor::{self, Anchor, ControlAlignment, Placement};
-use iced_pro::surface::menu::cascade::MenuCascade;
-use iced_pro::surface::menu::model::{
+use hoarfrost::geometry::anchor::{self, Anchor, ControlAlignment, Placement};
+use hoarfrost::surface::menu::cascade::MenuCascade;
+use hoarfrost::surface::menu::model::{
     ActivationEffect, Menu, MenuId, RadioGroupId, Row, submenu_id,
 };
 
@@ -154,7 +154,7 @@ pub fn hamburger_menu(view_model: &TopBarViewModel) -> Menu {
 
 /// The "Windows" submenu: two independent on/off windows.
 ///
-/// [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) for a
+/// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) for a
 /// [`RowKind::Check`] is `StayOpen`, which is what both of these want —
 /// the user flips one and then the other in a single visit.
 fn windows_menu() -> Menu {
@@ -345,7 +345,7 @@ pub fn root_placement(menu: &Menu, viewport: Size) -> Placement {
 /// hamburger does differently from the context-menu surface.
 ///
 /// These are the rectangles registered with the
-/// [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry), which
+/// [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry), which
 /// is what makes the hamburger's registered region the card the user
 /// actually sees instead of an empty list.
 ///

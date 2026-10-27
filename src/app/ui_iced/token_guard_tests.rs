@@ -5,7 +5,7 @@
 //! Three kinds of check live here, and each is written so that a **scanner
 //! which quietly stopped matching goes red too** -- the found-count is
 //! asserted, never assumed. That shape is copied from
-//! `iced-pro/token_lint_tests.rs::no_line_height_call_hands_iced_a_bare_f32`,
+//! `hoarfrost/token_lint_tests.rs::no_line_height_call_hands_iced_a_bare_f32`,
 //! the only precedent in this repo for auditing source rather than values.
 //!
 //! * **Source scan** -- reads the converted files with comments and string
@@ -23,9 +23,9 @@
 //! point of this file.
 #![allow(clippy::assertions_on_constants)]
 
-use iced_pro::token::typography::{self, MIN_SIZE};
-use iced_pro::token::{shape, size, space};
-use iced_pro::token_lint::{redact_comments_and_strings, source_files};
+use hoarfrost::token::typography::{self, MIN_SIZE};
+use hoarfrost::token::{shape, size, space};
+use hoarfrost::token_lint::{redact_comments_and_strings, source_files};
 
 use std::path::{Path, PathBuf};
 
@@ -719,7 +719,7 @@ fn the_unsaved_marker_is_a_shape_outside_the_type_floor() {
 /// to `text.strong` (`4.80:1`). Recomputed from raw sRGB here.
 #[test]
 fn the_active_tab_dirty_dot_clears_the_fill_lock() {
-    use iced_pro::token::contrast::contrast_ratio;
+    use hoarfrost::token::contrast::contrast_ratio;
 
     use crate::ui::theme::Palette;
 
@@ -762,7 +762,7 @@ fn the_active_tab_dirty_dot_clears_the_fill_lock() {
 /// resting weight (4.4.2).
 #[test]
 fn the_active_tab_label_takes_the_emphasis_weight() {
-    use iced_pro::token::typography::Weight;
+    use hoarfrost::token::typography::Weight;
 
     // Compared through `Weight::iced()`, the framework's own mapping, because
     // `iced::font::Weight` has no reverse conversion into the token enum.

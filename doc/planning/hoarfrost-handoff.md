@@ -1,13 +1,15 @@
-# iced-pro — D-2 Boundary Review Hand-off (Composite Widget-Binding Pass)
+# hoarfrost — D-2 Boundary Review Hand-off (Composite Widget-Binding Pass)
+
+*(Formerly `iced-pro`; renamed to `hoarfrost`)*
 
 > **Status:** Hand-off — verified work queue for the next coding agent.
 > Nothing in the queue below is implemented yet: this document is the
 > review's output, not the pass. Every citation was re-verified against the
 > tree at commit `9318c26` on 2026-10-26.
-> **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) — amended
+> **Spec:** [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) — amended
 > this session (`82c7cde`); needs **no further edits** for this pass. Never
 > modify a `SPEC.md` without explicit instruction (`RUST-043`).
-> **Ledger:** [`iced-pro-tasks.md`](iced-pro-tasks.md) — decisions D-1..D-8
+> **Ledger:** [`hoarfrost-tasks.md`](hoarfrost-tasks.md) — decisions D-1..D-8
 > (D-8 at `### D-8`). This pass records **D-9** (§1 below) when it starts.
 > **Architecture:** [`ARCHITECTURE_C4.md`](../technical-context/ARCHITECTURE_C4.md)
 > — corrected this session (`9318c26`).
@@ -50,7 +52,7 @@ rows in `spec_coverage.rs` are now half factually wrong:
 
 **Verdict, adopted:** composite-enhancement pass (Option A) with the
 MovableHost guardrail — absorb the widget shells of the `NotOwned` surfaces
-into `iced-pro` as composites that bind the existing models. The app keeps
+into `hoarfrost` as composites that bind the existing models. The app keeps
 its content, its policy decisions and all disk I/O.
 
 ### Where the seven `NotOwned` rows land (target end-state)
@@ -132,7 +134,7 @@ from tokens, pinned so tree rows end at a clear boundary. Coverage:
 
 **Q7 — ledger + docs close-out.** Append a `### D-9` record (§1 above,
 house style of the D-5..D-8 sections, after `### D-8`) to
-`iced-pro-tasks.md`; retire the four stale `NotOwned` reasons as their items
+`hoarfrost-tasks.md`; retire the four stale `NotOwned` reasons as their items
 land; keep `ARCHITECTURE_C4.md` ledger prose pointing at the manifest — the
 84 / 1 / 7 tallies live in `spec_coverage.rs`, not the prose.
 
@@ -159,6 +161,6 @@ land; keep `ARCHITECTURE_C4.md` ledger prose pointing at the manifest — the
 `CARGO_MANIFEST_DIR/spec.md` at test time and fails loudly on any spec /
 ledger drift) · `cargo clippy --workspace --all-targets -- -D warnings` (red
 *only* on the two Q0 lints today) · `cargo doc --workspace --no-deps`. New
-code under `src/iced-pro/` only; tests in `<file>_tests.rs` sidecars;
+code under `src/hoarfrost/` only; tests in `<file>_tests.rs` sidecars;
 `//!`/`///` on every module and `pub` item, citing the `UIF-*` ID each one
 implements (`RUST-010`/`RUST-011`, `RUST-040`).

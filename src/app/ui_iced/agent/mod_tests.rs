@@ -10,7 +10,7 @@
 use crate::bus::events::user_command::UserCommand;
 use crate::ui_iced::message::Message;
 use crate::ui_iced::panels::top::ChatModelEntry;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{AgentPanelViewModel, TranscriptTurn, agent_panel, close_message};
 

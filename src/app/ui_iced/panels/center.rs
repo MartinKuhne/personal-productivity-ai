@@ -113,7 +113,7 @@
 //!
 //! # Token binding (INT-7c)
 //!
-//! Every size and gap in this module is bound to a `iced_pro` token; the doc
+//! Every size and gap in this module is bound to a `hoarfrost` token; the doc
 //! comment on each constant records the movement from the literal it replaced.
 //! Three of them were **off the type scale entirely** and had no legal source:
 //! `DOCUMENT_TITLE_SIZE` and `AGENT_HEADER_SIZE` (both `18`, now
@@ -149,7 +149,7 @@
 //!   content box past the 36 px [`STRIP_HEIGHT`] pins. Left as a stated
 //!   follow-on rather than folded in here.
 //!
-//! [`shape::BORDER_FOCUS`]: iced_pro::token::shape::BORDER_FOCUS
+//! [`shape::BORDER_FOCUS`]: hoarfrost::token::shape::BORDER_FOCUS
 //!
 //! One further §4.4.2 deviation is recorded rather than changed: the spec
 //! gives the **active tab** a `surface.overlay` fill, while the app paints
@@ -170,9 +170,9 @@ use std::path::{Path, PathBuf};
 use iced::widget::{Column, Row, Space, Stack, button, container, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Padding};
 
-use iced_pro::token::contrast;
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::token::{shape, size, space};
+use hoarfrost::token::contrast;
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::token::{shape, size, space};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::SkillFile;
@@ -334,7 +334,7 @@ pub const UNSAVED_MARKER_WIDTH: f32 = space::MD;
 /// below 12pt" still means what it says and no 6pt font can hide behind
 /// this call site. What remains here is a diameter, not a point size.
 ///
-/// [`typography::MIN_SIZE`]: iced_pro::token::typography::MIN_SIZE
+/// [`typography::MIN_SIZE`]: hoarfrost::token::typography::MIN_SIZE
 pub const UNSAVED_DOT_SIZE: f32 = size::INDICATOR_DOT;
 
 /// Corner radius of the unsaved dot — `shape.radius.pill` (`UIF-TOK-003`).

@@ -537,7 +537,7 @@ pub fn audit_invariants() -> InvariantReport {
     let truncated_slot = LabelSlot {
         id: "long_path",
         text: "src/…/invariant_gate.rs",
-        tooltip: Some("src/iced-pro/invariant_gate.rs"),
+        tooltip: Some("src/hoarfrost/invariant_gate.rs"),
     };
     report.record_result(check_label_truncation_tooltip(&truncated_slot));
 

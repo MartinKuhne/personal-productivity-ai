@@ -1,7 +1,7 @@
 //! Tests for `ui/theme.rs` (UI-002 dark palette, UI-046 inverted editor).
 //!
 //! Since INT-1 the palette is a *derived* value: the fifteen overlapping
-//! tokens come from `iced_pro::token::color::Palette::dark()`
+//! tokens come from `hoarfrost::token::color::Palette::dark()`
 //! (`UIF-TOK-005`) and only the six app-owned content tokens are
 //! literals (decision **D-2**). The tests therefore assert **parity with
 //! the framework** — the app value IS the framework value — so a future
@@ -11,7 +11,7 @@
 //! no filesystem access.
 
 use super::*;
-use iced_pro::token::color::Palette as ProPalette;
+use hoarfrost::token::color::Palette as ProPalette;
 
 /// Every colour token the framework palette carries, as a flat list.
 ///
@@ -83,7 +83,7 @@ fn test_fastmd_dark_overlapping_tokens_are_the_framework_tokens() {
     for (name, app_value, pro_value) in mapped {
         assert_eq!(
             app_value, pro_value,
-            "app token `{name}` must equal its iced-pro source token, got \
+            "app token `{name}` must equal its hoarfrost source token, got \
              {app_value:?} vs {pro_value:?}"
         );
     }
@@ -267,7 +267,7 @@ fn test_editor_colors_inverted_satisfies_ui046() {
 #[test]
 fn test_editor_colors_delegate_to_the_framework_editor_palette() {
     let app = EditorColors::inverted();
-    let pro = iced_pro::token::color::EditorPalette::inverted();
+    let pro = hoarfrost::token::color::EditorPalette::inverted();
 
     assert_eq!(app.background, pro.background);
     assert_eq!(app.text, pro.text);
@@ -281,14 +281,14 @@ fn test_editor_colors_delegate_to_the_framework_editor_palette() {
 #[test]
 fn test_editor_colors_keep_four_field_shape() {
     let app = EditorColors::inverted();
-    let pro = iced_pro::token::color::EditorPalette::inverted();
+    let pro = hoarfrost::token::color::EditorPalette::inverted();
 
     // Three mapped + one app-side constant = four distinct assignments.
     assert_eq!(app.border, Color::BLACK);
     assert_eq!(
         app.border, app.text,
         "the editor border and text are both black today, but `border` is \
-         NOT delegated: iced-pro's EditorPalette carries no border token \
+         NOT delegated: hoarfrost's EditorPalette carries no border token \
          (UIF-TOK-005 models bg/fg/err only)"
     );
     assert_ne!(

@@ -72,7 +72,7 @@
 //! paths, timestamps, the editor buffer and structured logs. They are
 //! deliberately **not** modelled as tokens. A usage is a property of the
 //! content being drawn, and this framework does not own content —
-//! decision D-2 in `doc/planning/iced-pro-tasks.md` leaves the editor,
+//! decision D-2 in `doc/planning/hoarfrost-tasks.md` leaves the editor,
 //! tree and log views in `fastmd`. A `font.usage.log_entry` token would
 //! name something this crate can never resolve, and would put the burden
 //! of knowing which widget is a log entry on the layer that is told the

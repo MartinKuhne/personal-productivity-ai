@@ -7,9 +7,9 @@
 //! the open-card rectangle walk that feeds the `SurfaceRegistry`.
 
 use super::*;
-use iced_pro::focus::FocusState;
-use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
-use iced_pro::surface::menu::model::{Row, submenu_id};
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::menu::cascade::{MenuCascade, MenuTreeKind};
+use hoarfrost::surface::menu::model::{Row, submenu_id};
 
 /// A root menu holding `keys` as plain action rows.
 fn menu_with(keys: &[&str]) -> Menu {
@@ -185,7 +185,7 @@ const INK_THRESHOLD: u32 = 90;
 
 /// Draw `element` once, headless, and return the RGBA framebuffer.
 ///
-/// Re-implemented here rather than shared from `iced_pro::test_helpers`
+/// Re-implemented here rather than shared from `hoarfrost::test_helpers`
 /// because that module is `#[cfg(test)]` to its own crate and cannot be
 /// reached from this one. Deliberately minimal: one draw, one screenshot.
 fn shoot(size: Size, element: Element<'static, Message>) -> Vec<u8> {
@@ -310,7 +310,7 @@ fn test_the_app_menu_card_paints_every_row_inside_its_own_rect() {
 fn test_card_inset_is_the_framework_token_not_a_restated_number() {
     assert_eq!(
         CARD_INSET,
-        iced_pro::token::space::XS,
+        hoarfrost::token::space::XS,
         "the card inset comes from the token, so it cannot drift from §4.8.1"
     );
 }

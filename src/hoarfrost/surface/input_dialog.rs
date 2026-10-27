@@ -96,7 +96,7 @@
 //! [`escape_rank`](ZBand::escape_rank) for [`ZBand::Menu`] is `3` against
 //! this band's `2`, a menu
 //! open above the dialog is asked **first** and closes before the dialog
-//! is touched (see **G-13** in `doc/planning/iced-pro-tasks.md`). The
+//! is touched (see **G-13** in `doc/planning/hoarfrost-tasks.md`). The
 //! host does not know menus exist; the registry's walk order does.
 //!
 //! A scrim click cancels for the same reason: §5 gives Band 3 a

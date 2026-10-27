@@ -9,9 +9,9 @@
 
 use super::*;
 use crate::ui::strings;
+use hoarfrost::surface::input_dialog::FooterButtons;
+use hoarfrost::validation::punish::PunishReason;
 use iced::{Element, Point, Size};
-use iced_pro::surface::input_dialog::FooterButtons;
-use iced_pro::validation::punish::PunishReason;
 
 /// Synthetic target paths — never opened ([RUST-006]).
 fn sample_dir() -> PathBuf {
@@ -56,8 +56,8 @@ fn delete_state() -> DialogState {
 
 #[test]
 fn a_blurred_name_field_still_submits_before_reporting_blur() {
-    use iced_pro::binding::Commit;
-    use iced_pro::widget::text_input_controller::TextInputEmission;
+    use hoarfrost::binding::Commit;
+    use hoarfrost::widget::text_input_controller::TextInputEmission;
 
     assert_eq!(
         dialog_field_emit(TextInputEmission::FocusCommitted(Commit::new(

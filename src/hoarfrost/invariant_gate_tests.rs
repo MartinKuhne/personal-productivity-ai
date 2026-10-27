@@ -298,7 +298,7 @@ fn test_label_truncation_tooltip_happy_paths() {
     let truncated_with_tip = LabelSlot {
         id: "path_slot",
         text: "src/…/mod.rs",
-        tooltip: Some("src/iced-pro/mod.rs"),
+        tooltip: Some("src/hoarfrost/mod.rs"),
     };
     assert!(check_label_truncation_tooltip(&truncated_with_tip).is_ok());
 

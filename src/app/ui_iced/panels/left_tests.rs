@@ -15,13 +15,13 @@
 // on purpose: pinning a constant is the whole point, so a retuned rung must
 // fail the suite rather than pass silently. `clippy::assertions_on_constants`
 // cannot tell a spec pin from a tautology (same treatment as
-// `src/iced-pro/token/*_tests.rs`).
+// `src/hoarfrost/token/*_tests.rs`).
 #![allow(clippy::assertions_on_constants)]
 
 use super::*;
 use crate::ui_iced::context_menu::{ContextGroup, ContextRow};
 use crate::ui_iced::test_helpers::test_app;
-use iced_pro::token::contrast::meets_text_contrast;
+use hoarfrost::token::contrast::meets_text_contrast;
 use tempfile::TempDir;
 
 // --- fixtures -----------------------------------------------------------
@@ -880,7 +880,7 @@ fn a_pdf_backed_row_label_never_uses_the_error_token() {
     // The retired pairing is still the unreadable one, so the rule this
     // test guards is still a real rule and not a tautology about a
     // palette that has since been fixed.
-    let retired_pairing = iced_pro::token::contrast::contrast_ratio(app.error, pro.accent_fill);
+    let retired_pairing = hoarfrost::token::contrast::contrast_ratio(app.error, pro.accent_fill);
     assert!(
         retired_pairing < 3.0,
         "fixture: the retired danger-on-accent pairing must still be the \
@@ -896,13 +896,13 @@ fn a_pdf_backed_row_label_never_uses_the_error_token() {
 // a retired value fails a test that names the value, not a diff against a
 // constant that would have moved with it.
 
-use iced_pro::composite::tree_row;
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::contrast::ChromeClass;
-use iced_pro::token::contrast::contrast_ratio;
-use iced_pro::token::{size, space, typography};
-use iced_pro::widget::badge_model::BadgeModel;
-use iced_pro::widget::text_input as pro_text_input;
+use hoarfrost::composite::tree_row;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::contrast::ChromeClass;
+use hoarfrost::token::contrast::contrast_ratio;
+use hoarfrost::token::{size, space, typography};
+use hoarfrost::widget::badge_model::BadgeModel;
+use hoarfrost::widget::text_input as pro_text_input;
 
 /// The literal this increment retired for the tree row's label size.
 const RETIRED_ROW_TEXT_SIZE: f32 = 14.0;
@@ -2231,12 +2231,12 @@ fn hover_leaves_the_label_rule_untouched_because_the_hover_band_is_not_locked() 
     // `locked_over` has no reason to promote anything and returns the
     // candidate unchanged.
     assert!(
-        !iced_pro::token::contrast::fill_lock_role(pro.surface_hover, &pro).is_locked_fill(),
+        !hoarfrost::token::contrast::fill_lock_role(pro.surface_hover, &pro).is_locked_fill(),
         "surface_hover must not be a locked fill, or hover would repaint \
          every label white"
     );
     assert!(
-        iced_pro::token::contrast::fill_lock_role(pro.accent_fill, &pro).is_locked_fill(),
+        hoarfrost::token::contrast::fill_lock_role(pro.accent_fill, &pro).is_locked_fill(),
         "while the selection band still is, so the difference between the \
          two cases is real and not an accident of one lookup"
     );
@@ -2391,7 +2391,7 @@ fn the_selection_bar_uses_the_frameworks_bar_width_not_a_new_literal() {
     );
     assert_eq!(
         bar.width,
-        iced_pro::token::shape::BORDER_FOCUS,
+        hoarfrost::token::shape::BORDER_FOCUS,
         "`SELECTION_BAR_WIDTH` is `border.focus`, i.e. the 2px §3B.6 draws"
     );
     assert_eq!(bar.x, 0.0, "the bar is the row's left edge");
@@ -2532,7 +2532,7 @@ fn the_guide_set_matches_the_levels_that_actually_drew() {
 /// measures `1.61:1`. Off the band the resting tokens come back.
 #[test]
 fn every_overlay_stripe_colour_is_the_frameworks_and_clears_the_chrome_floor() {
-    use iced_pro::token::contrast::MIN_CHROME_CONTRAST;
+    use hoarfrost::token::contrast::MIN_CHROME_CONTRAST;
 
     let pro = Palette::pro();
 

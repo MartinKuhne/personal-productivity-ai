@@ -955,7 +955,7 @@ pub fn not_owned_cells() -> Vec<Cell> {
         not_owned_cell(
             "navbar",
             "UIF-NAV-001",
-            "No navbar module exists in iced-pro. The framework contributes the \
+            "No navbar module exists in hoarfrost. The framework contributes the \
              tokens (color.surface.*, space.*, typography) and the atoms \
              (button, text-input) a host composes a navbar from, but the bar's \
              own layout, its item set and its iconography are app-owned content \
@@ -964,7 +964,7 @@ pub fn not_owned_cells() -> Vec<Cell> {
         not_owned_cell(
             "panes",
             "UIF-PANE-001",
-            "No splitter or multi-pane module exists in iced-pro. Pane sizing, \
+            "No splitter or multi-pane module exists in hoarfrost. Pane sizing, \
              the drag-to-resize divider and the pane contents are app-owned \
              under D-2; the framework owns no divider geometry, no min/max pane \
              policy and therefore no cell to render.",
@@ -972,7 +972,7 @@ pub fn not_owned_cells() -> Vec<Cell> {
         not_owned_cell(
             "tabs",
             "UIF-TAB-001",
-            "No tab-strip module exists in iced-pro. A tab is not a variant of \
+            "No tab-strip module exists in hoarfrost. A tab is not a variant of \
              the 3.1 button - the spec's selected/unselected/close affordances \
              are a distinct widget the crate has not been given - so \
              snapshotting a button here would misrepresent coverage rather than \

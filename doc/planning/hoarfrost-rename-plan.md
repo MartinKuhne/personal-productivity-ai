@@ -12,7 +12,7 @@
 > **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) — contains **no**
 > `iced-pro` string, so it moves with the directory and its content is untouched.
 > Never modify a `SPEC.md` without explicit instruction (`RUST-043`).
-> **Ledger:** [`iced-pro-tasks.md`](iced-pro-tasks.md) — decisions D-1..D-9.
+> **Ledger:** [`hoarfrost-tasks.md`](hoarfrost-tasks.md) — decisions D-1..D-9.
 > **Architecture:** [`ARCHITECTURE_C4.md`](../technical-context/ARCHITECTURE_C4.md)
 > — must be updated by this change (`RUST-040`, `RUST-041`).
 >

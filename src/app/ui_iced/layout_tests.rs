@@ -326,8 +326,8 @@ fn test_clamped_width_min_wins_over_degenerate_cap() {
 fn test_resize_leeway_is_the_framework_splitter_grab_token() {
     assert_eq!(
         RESIZE_LEEWAY_PIXELS,
-        iced_pro::token::size::SPLITTER_GRAB,
-        "RESIZE_LEEWAY_PIXELS must be iced_pro::token::size::SPLITTER_GRAB"
+        hoarfrost::token::size::SPLITTER_GRAB,
+        "RESIZE_LEEWAY_PIXELS must be hoarfrost::token::size::SPLITTER_GRAB"
     );
     assert_eq!(RESIZE_LEEWAY_PIXELS, 10.0);
 }
@@ -344,8 +344,8 @@ fn test_resize_leeway_is_the_framework_splitter_grab_token() {
 fn test_stub_band_height_is_the_framework_control_lg_token() {
     assert_eq!(
         STUB_BAND_HEIGHT_POINTS,
-        iced_pro::token::size::CONTROL_LG,
-        "STUB_BAND_HEIGHT_POINTS must be iced_pro::token::size::CONTROL_LG"
+        hoarfrost::token::size::CONTROL_LG,
+        "STUB_BAND_HEIGHT_POINTS must be hoarfrost::token::size::CONTROL_LG"
     );
     assert_eq!(STUB_BAND_HEIGHT_POINTS, 36.0);
     assert_ne!(

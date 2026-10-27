@@ -97,23 +97,23 @@ use crate::ui_iced::view::view;
 use crate::workspace::Tags;
 use crate::workspace::watcher::Workspace;
 use fastmd_agent::AgentSession;
-use iced_pro::binding::pre_rank::DragCapture;
-use iced_pro::binding::pre_rank::PreRankCoordinator;
-use iced_pro::focus::FocusState;
-use iced_pro::surface::menu::aim::AimCorridor;
-use iced_pro::surface::menu::cascade::{MenuCascade, MenuTreeKind};
-use iced_pro::surface::menu::model::MenuId;
-use iced_pro::surface::movable::GeometryStorage;
-use iced_pro::surface::movable::MovableHost;
-use iced_pro::surface::movable::MovableSpec;
-use iced_pro::surface::zorder::DeclineReason;
-use iced_pro::surface::zorder::PreRankedEscape;
-use iced_pro::surface::zorder::Surface;
-use iced_pro::surface::zorder::SurfaceId;
-use iced_pro::surface::zorder::SurfaceKind;
-use iced_pro::surface::zorder::SurfaceRegistry;
-use iced_pro::surface::zorder::UnwindAnswer;
-use iced_pro::surface::zorder::escape_with_pre_rank;
+use hoarfrost::binding::pre_rank::DragCapture;
+use hoarfrost::binding::pre_rank::PreRankCoordinator;
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::menu::aim::AimCorridor;
+use hoarfrost::surface::menu::cascade::{MenuCascade, MenuTreeKind};
+use hoarfrost::surface::menu::model::MenuId;
+use hoarfrost::surface::movable::GeometryStorage;
+use hoarfrost::surface::movable::MovableHost;
+use hoarfrost::surface::movable::MovableSpec;
+use hoarfrost::surface::zorder::DeclineReason;
+use hoarfrost::surface::zorder::PreRankedEscape;
+use hoarfrost::surface::zorder::Surface;
+use hoarfrost::surface::zorder::SurfaceId;
+use hoarfrost::surface::zorder::SurfaceKind;
+use hoarfrost::surface::zorder::SurfaceRegistry;
+use hoarfrost::surface::zorder::UnwindAnswer;
+use hoarfrost::surface::zorder::escape_with_pre_rank;
 
 /// Default window width, in logical points, applied when the persisted state
 /// carries no window size.
@@ -351,7 +351,7 @@ impl AppState {
 /// The rows themselves are owned by the cascade, which clones the model on
 /// open. What this struct keeps beside it is the **routing table** from a row's
 /// key to the self-contained [`Message`] that row publishes ([FMD-068]),
-/// because a framework [`Row`](iced_pro::surface::menu::model::Row) carries
+/// because a framework [`Row`](hoarfrost::surface::menu::model::Row) carries
 /// structure and not intent. Both views are derived from the same
 /// [`ContextRow`] list, so they cannot disagree.
 #[derive(Clone, Debug)]
@@ -415,7 +415,7 @@ impl ContextMenu {
     /// when the card or row is unknown or the row carries no intent.
     ///
     /// Read **before** the row is activated: a row whose
-    /// [`ClosePolicy`](iced_pro::surface::menu::model::ClosePolicy) closes
+    /// [`ClosePolicy`](hoarfrost::surface::menu::model::ClosePolicy) closes
     /// the tree takes its card with it, so looking the key up afterwards would
     /// find nothing.
     #[must_use]
@@ -434,7 +434,7 @@ impl ContextMenu {
 ///
 /// # Framework state (integration increment INT-2)
 ///
-/// [`Self::surfaces`] and [`Self::pre_rank`] are the `iced-pro` band model
+/// [`Self::surfaces`] and [`Self::pre_rank`] are the `hoarfrost` band model
 /// and Pre-Rank ledger. They are a **derived index** of the fields above,
 /// never a second source of truth: the individual window-state fields stay
 /// authoritative for *whether* a surface is open, and
@@ -448,8 +448,8 @@ impl ContextMenu {
 /// The app captures **only** `Escape` off the runtime keyboard stream
 /// (`ui_iced/subscription.rs:442`, `escape_to_message`); `Tab` traversal
 /// is owned exclusively by iced's built-in router today. Introducing
-/// [`iced_pro::focus::FocusState`] plus
-/// [`iced_pro::bridge::tab_task`] here would run a *second* focus model in
+/// [`hoarfrost::focus::FocusState`] plus
+/// [`hoarfrost::bridge::tab_task`] here would run a *second* focus model in
 /// parallel with iced's, with nothing keeping its member set synchronised
 /// against the live widget tree — the app never enumerates its focusables,
 /// so the framework's member set would be fiction. That sync problem
@@ -460,9 +460,9 @@ impl ContextMenu {
 /// Note for the next reader: the original integration plan named
 /// `bridge::advance` / `bridge::sync` / `bridge::apply_transition`. **Those
 /// do not exist.** The real bridge API is
-/// [`iced_pro::bridge::tab_task`]`(model, direction)` /
-/// [`iced_pro::bridge::focus_task`] / [`iced_pro::bridge::focus_operation`]
-/// / [`iced_pro::bridge::widget_id`].
+/// [`hoarfrost::bridge::tab_task`]`(model, direction)` /
+/// [`hoarfrost::bridge::focus_task`] / [`hoarfrost::bridge::focus_operation`]
+/// / [`hoarfrost::bridge::widget_id`].
 #[derive(Debug)]
 pub struct OverlayState {
     /// The small name-entry / move / delete-confirmation dialog.
@@ -475,10 +475,10 @@ pub struct OverlayState {
     /// the shared menu surface is mounted by the overlay host from state every
     /// frame.
     pub hamburger_open: bool,
-    /// The `iced-pro` cascade that owns the hamburger tree's openness
+    /// The `hoarfrost` cascade that owns the hamburger tree's openness
     /// (`UIF-FMENU-001/002`, `UIF-CMENU-002/003`) — INT-3a.
     ///
-    /// It holds a **copy** of each open card's [`Menu`](iced_pro::surface::menu::model::Menu)
+    /// It holds a **copy** of each open card's [`Menu`](hoarfrost::surface::menu::model::Menu)
     /// with the selection the user just made, which is why the view renders
     /// from `open_cards()` rather than rebuilding the tree from the view
     /// model: the view model is still stale for one frame after a pick.
@@ -514,14 +514,14 @@ pub struct OverlayState {
     ///
     /// # Why this exists now, and why it is scoped to the menu
     ///
-    /// [`MenuCascade::on_key`](iced_pro::surface::menu::cascade::MenuCascade::on_key)
+    /// [`MenuCascade::on_key`](hoarfrost::surface::menu::cascade::MenuCascade::on_key)
     /// takes `&mut FocusState`: the cascade cannot rove a keyboard it has
     /// no member list for. Adopting the framework menu engine therefore
     /// forces this state into the app whether or not anyone reads it yet.
     ///
     /// It is scoped to **one surface** — the menu's own focusable rows,
     /// registered by the cascade as one
-    /// [`FocusGroup`](iced_pro::focus::FocusGroup) per open card, with a
+    /// [`FocusGroup`](hoarfrost::focus::FocusGroup) per open card, with a
     /// focus trap pushed on open and popped on close. That is the
     /// condition the INT-2 deferral note at the top of this module asked
     /// for: the member set is not fiction, because the framework itself
@@ -538,10 +538,10 @@ pub struct OverlayState {
     /// the note's stated exit condition, arriving one surface at a time.
     ///
     /// Projected onto iced's router through
-    /// [`bridge::focus_task`](iced_pro::bridge::focus_task) after every
+    /// [`bridge::focus_task`](hoarfrost::bridge::focus_task) after every
     /// cascade transition. `Tab` is not routed by the app; the trap keeps
     /// it inside the card once a host hands `Tab` to
-    /// [`bridge::tab_task`](iced_pro::bridge::tab_task), which the app
+    /// [`bridge::tab_task`](hoarfrost::bridge::tab_task), which the app
     /// still does not do.
     pub menu_focus: FocusState,
     /// Solved viewport rectangles of every open hamburger card, root
@@ -631,7 +631,7 @@ pub struct OverlayState {
     /// and a highlight keyed by one would move to a different tab on its
     /// own.
     pub hovered_tab: Option<PathBuf>,
-    /// The `iced-pro` z-band index of the surfaces currently open
+    /// The `hoarfrost` z-band index of the surfaces currently open
     /// (`UIF-ZORD-*`), derived from the fields above by
     /// [`sync_surfaces`](Self::sync_surfaces).
     ///
@@ -643,7 +643,7 @@ pub struct OverlayState {
     /// [`sync_surfaces`](Self::sync_surfaces) for why that is deliberate
     /// and what has to happen before it changes.
     pub surfaces: SurfaceRegistry,
-    /// The `iced-pro` Pre-Rank ledger (`UIF-WIN-003` step 1, §3.0.4.2):
+    /// The `hoarfrost` Pre-Rank ledger (`UIF-WIN-003` step 1, §3.0.4.2):
     /// which control, if any, holds a pointer-captured drag that `Escape`
     /// must cancel **before** any surface is asked.
     ///
@@ -855,7 +855,7 @@ fn sync_one_movable_host(
 ///
 /// **INT-6 must replace the body** with a dispatch to the capturing
 /// control's own
-/// [`GestureSlot::cancel`](iced_pro::binding::snapshot::GestureSlot::cancel),
+/// [`GestureSlot::cancel`](hoarfrost::binding::snapshot::GestureSlot::cancel),
 /// keyed on [`DragCapture::id`]. Until it does, the Pre-Rank step is a
 /// clean pass-through, which
 /// `test_close_topmost_pre_rank_is_a_clean_pass_through_with_no_capture`
@@ -905,7 +905,7 @@ impl OverlayState {
     /// [`refresh_context_rects`](AppState::refresh_context_rects)), one
     /// region per open card. That closes the INT-2 review area for both menu
     /// surfaces: `route_pointer` now answers
-    /// [`PointerTarget::Surface`](iced_pro::surface::zorder::PointerTarget::Surface)
+    /// [`PointerTarget::Surface`](hoarfrost::surface::zorder::PointerTarget::Surface)
     /// for a point inside either menu card.
     ///
     /// Every **other** surface is still registered with an empty region
@@ -1040,7 +1040,7 @@ impl OverlayState {
     /// One `Esc` dismisses exactly one surface, walking the derived
     /// [`SurfaceRegistry`] through
     /// [`escape_with_pre_rank`] in `UIF-WIN-003` order: the Pre-Rank drag
-    /// ledger first, then by descending [`ZBand::escape_rank`](iced_pro::surface::zorder::ZBand::escape_rank)
+    /// ledger first, then by descending [`ZBand::escape_rank`](hoarfrost::surface::zorder::ZBand::escape_rank)
     /// — and within a rank, the top of the band first.
     ///
     /// `Menu` is rank **3**, `Modal` rank **2**, `UtilityOverlay` rank

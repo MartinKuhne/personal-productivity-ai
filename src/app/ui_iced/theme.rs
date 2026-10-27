@@ -1,8 +1,8 @@
 //! iced theme construction from the framework design tokens.
 //!
-//! The `iced-pro` framework crate is the single source of design truth:
+//! The `hoarfrost` framework crate is the single source of design truth:
 //! [`crate::ui::theme::Palette`] derives its overlapping tokens from
-//! `iced_pro::token::color::Palette::dark` (`UIF-TOK-005`), and this
+//! `hoarfrost::token::color::Palette::dark` (`UIF-TOK-005`), and this
 //! module maps that framework palette onto iced structures. It adds no
 //! colour conversion and no literals of its own:
 //!
@@ -14,7 +14,7 @@
 //!   `iced-0.14.0/src/application.rs:377-392`),
 //! - [`scrim_color`] — the dimmed backdrop the blocking modal overlay
 //!   paints with (`ui_iced/overlay.rs`), delegated to
-//!   [`iced_pro::surface::zorder::scrim_for`] so the scrim alpha lives in
+//!   [`hoarfrost::surface::zorder::scrim_for`] so the scrim alpha lives in
 //!   exactly one place ([RUST-021]).
 //!
 //! No numeric colour literal appears here: every value flows out of the
@@ -28,7 +28,7 @@
 //! Unit tests live in the sibling `theme_tests.rs` sidecar.
 
 use crate::ui::theme::Palette;
-use iced_pro::token::color::Palette as ProPalette;
+use hoarfrost::token::color::Palette as ProPalette;
 
 /// Name under which the FastMD custom iced theme is registered.
 pub const FASTMD_THEME_NAME: &str = "FastMD Dark";
@@ -62,13 +62,13 @@ pub fn iced_theme_palette(pro: &ProPalette) -> iced::theme::palette::Palette {
 
 /// The semi-transparent modal scrim colour.
 ///
-/// Delegated to [`iced_pro::surface::zorder::scrim_for`], which composes
+/// Delegated to [`hoarfrost::surface::zorder::scrim_for`], which composes
 /// `color.surface.base` at the framework's `SCRIM_ALPHA`. The alpha is
-/// **not** restated here ([RUST-021]): `iced-pro` owns the single value,
+/// **not** restated here ([RUST-021]): `hoarfrost` owns the single value,
 /// and this is only the app-side name for the composed result.
 #[must_use]
 pub fn scrim_color() -> iced::Color {
-    iced_pro::surface::zorder::scrim_for(&Palette::pro())
+    hoarfrost::surface::zorder::scrim_for(&Palette::pro())
 }
 
 /// Builds the canned FastMD dark iced theme.

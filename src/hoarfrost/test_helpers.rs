@@ -357,7 +357,7 @@ impl<Message: Send + 'static> Harness<Message, HeadlessRenderer> {
             Pixels(16.0),
             None,
         ))
-        .expect("a headless renderer should be available for iced-pro widget tests");
+        .expect("a headless renderer should be available for hoarfrost widget tests");
 
         Self::new(renderer, view)
     }
@@ -726,7 +726,7 @@ pub fn headless_renderer() -> HeadlessRenderer {
         Pixels(16.0),
         None,
     ))
-    .expect("a headless renderer should be available for iced-pro widget tests")
+    .expect("a headless renderer should be available for hoarfrost widget tests")
 }
 
 /// Draw `root` once at `size` and return the RGBA framebuffer.

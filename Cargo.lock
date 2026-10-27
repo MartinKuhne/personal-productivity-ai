@@ -1535,9 +1535,9 @@ dependencies = [
  "futures",
  "futures-util",
  "glob",
+ "hoarfrost",
  "html-escape",
  "iced",
- "iced-pro",
  "iced_graphics",
  "iced_test",
  "image",
@@ -2216,6 +2216,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hoarfrost"
+version = "0.2.0"
+dependencies = [
+ "iced",
+ "iced_test",
+ "proptest",
+]
+
+[[package]]
 name = "html-escape"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2396,15 +2405,6 @@ dependencies = [
  "iced_widget",
  "iced_winit",
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "iced-pro"
-version = "0.2.0"
-dependencies = [
- "iced",
- "iced_test",
- "proptest",
 ]
 
 [[package]]

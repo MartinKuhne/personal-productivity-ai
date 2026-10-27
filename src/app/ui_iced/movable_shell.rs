@@ -17,7 +17,7 @@
 //! [`TITLE_BAR_HEIGHT`] / [`FILTER_BAR_HEIGHT`] / [`FOOTER_HEIGHT`] rungs.
 //! The host is the single source of truth for where each band is, so the
 //! painted card and the rectangle
-//! [`SurfaceRegistry`](iced_pro::surface::zorder::SurfaceRegistry) routes
+//! [`SurfaceRegistry`](hoarfrost::surface::zorder::SurfaceRegistry) routes
 //! pointer events against cannot disagree.
 //!
 //! # Pointer routing
@@ -41,13 +41,13 @@ mod tests;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{Message, MovableCard, MovableMessage};
-use iced::widget::{Column, Row, container, mouse_area, space, text};
-use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
-use iced_pro::geometry::clamp::ResizeHandle;
-use iced_pro::surface::movable::{
+use hoarfrost::geometry::clamp::ResizeHandle;
+use hoarfrost::surface::movable::{
     FILTER_BAR_HEIGHT, FOOTER_HEIGHT, MovableHost, RESIZE_HANDLE_SIZE, TITLE_BAR_HEIGHT,
     TITLE_BAR_PADDING_HORIZONTAL,
 };
+use iced::widget::{Column, Row, container, mouse_area, space, text};
+use iced::{Alignment, Background, Border, Element, Length, Padding, Point};
 
 /// Id string of the log card's content viewport.
 const LOGS_VIEWPORT_ID: &str = "movable.logs.viewport";

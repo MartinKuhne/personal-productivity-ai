@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use iced::{Point, Size};
 
-use iced_pro::surface::menu::model::{MenuId, MenuViolation, RowKind};
-use iced_pro::token::space;
+use hoarfrost::surface::menu::model::{MenuId, MenuViolation, RowKind};
+use hoarfrost::token::space;
 
 use crate::config::SkillFile;
 use crate::ui::strings;
@@ -362,11 +362,11 @@ fn test_open_card_rects_returns_one_rectangle_per_open_card() {
         ContextRow::new("b", "B", ContextGroup::Management, message_noop()),
     ];
     let menu = menu_from_rows(MenuId::new("t"), &rows);
-    let mut cascade = iced_pro::surface::menu::cascade::MenuCascade::new();
-    let mut focus = iced_pro::focus::FocusState::new();
+    let mut cascade = hoarfrost::surface::menu::cascade::MenuCascade::new();
+    let mut focus = hoarfrost::focus::FocusState::new();
     let _ = cascade.open(
         &menu,
-        iced_pro::surface::menu::cascade::MenuTreeKind::Context,
+        hoarfrost::surface::menu::cascade::MenuTreeKind::Context,
         &mut focus,
     );
 
@@ -379,11 +379,11 @@ fn test_open_card_rects_returns_one_rectangle_per_open_card() {
 #[test]
 fn test_a_target_with_no_rows_opens_nothing() {
     let menu = menu_from_rows(root_id(&ContextTarget::TreeFile { path: file_path() }), &[]);
-    let mut cascade = iced_pro::surface::menu::cascade::MenuCascade::new();
-    let mut focus = iced_pro::focus::FocusState::new();
+    let mut cascade = hoarfrost::surface::menu::cascade::MenuCascade::new();
+    let mut focus = hoarfrost::focus::FocusState::new();
     let outcome = cascade.open(
         &menu,
-        iced_pro::surface::menu::cascade::MenuTreeKind::Context,
+        hoarfrost::surface::menu::cascade::MenuTreeKind::Context,
         &mut focus,
     );
     assert!(

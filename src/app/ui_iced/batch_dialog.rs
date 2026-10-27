@@ -70,15 +70,15 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Element, Length, Size};
 
-use iced_pro::composite::{form_field, list_tile};
-use iced_pro::state::BaseState;
-use iced_pro::surface::modal::{CONTENT_HEIGHT_MAX, ModalFrame, ModalSizing};
-use iced_pro::token::{space, typography};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::combo_box;
-use iced_pro::widget::progress;
-use iced_pro::widget::progress_model::{ProgressModel, ProgressStatus};
+use hoarfrost::composite::{form_field, list_tile};
+use hoarfrost::state::BaseState;
+use hoarfrost::surface::modal::{CONTENT_HEIGHT_MAX, ModalFrame, ModalSizing};
+use hoarfrost::token::{space, typography};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::combo_box;
+use hoarfrost::widget::progress;
+use hoarfrost::widget::progress_model::{ProgressModel, ProgressStatus};
 
 use crate::agent::batch::types::{BatchDialogConfig, validate_batch_params};
 use crate::bus::events::user_command::UserCommand;
@@ -1130,7 +1130,7 @@ fn field_header<'a>(
     label: &'static str,
     required: bool,
     hint: Option<&'static str>,
-    palette: &iced_pro::token::color::Palette,
+    palette: &hoarfrost::token::color::Palette,
 ) -> Element<'a, Message> {
     let parts = form_field::resolve_header(label, required, hint, palette);
 
@@ -1194,7 +1194,7 @@ fn field_caption(parts: form_field::CaptionParts<'_>) -> Element<'static, Messag
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a
@@ -1211,7 +1211,7 @@ fn footer_button(
 ) -> Element<'static, Message> {
     let content = Column::new()
         .width(Length::Fixed(
-            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
         ))
         .align_x(Alignment::Center)
         .push(rung(

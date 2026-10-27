@@ -139,8 +139,8 @@ use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentDebugMessage, Message};
 use crate::ui_iced::panels::top::phosphor_font;
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::token::{shape, space};
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::token::{shape, space};
 
 /// Width of the debug card, in logical pixels.
 ///
@@ -977,7 +977,7 @@ pub fn agent_debug_viewport(view_model: &AgentDebugViewModel) -> Element<'_, Mes
 /// Purity: pure view over `host` and `view_model`.
 #[must_use]
 pub fn agent_debug_movable_card<'a>(
-    host: &iced_pro::surface::movable::MovableHost,
+    host: &hoarfrost::surface::movable::MovableHost,
     view_model: &'a AgentDebugViewModel,
 ) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();

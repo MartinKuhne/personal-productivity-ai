@@ -1,9 +1,11 @@
-# iced-pro — Implementation Task Ledger
+# hoarfrost — Implementation Task Ledger
+
+*(Formerly `iced-pro`; renamed to `hoarfrost`)*
 
 > **Status:** In progress — increment ledger for implementing
-> [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) as a new workspace crate.
+> [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) as a new workspace crate.
 > **Date:** 2026-10-25 (ledger last updated; opened 2026-10-21)
-> **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) (UIF-*
+> **Spec:** [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) (UIF-*
 > requirement IDs). The spec used to live in *this* directory as
 > `ui-framework.md`; commit `edbe04a` moved it inside the crate it governs.
 > Read §3c's opening record before treating any older path in this file as
@@ -16,7 +18,7 @@
 
 | # | Decision | Outcome |
 |---|---|---|
-| D-1 | Crate location & name | `src/iced-pro/`, package `iced-pro`, lib name `iced_pro` |
+| D-1 | Crate location & name | `src/hoarfrost/`, package `iced-pro`, lib name `iced_pro` |
 | D-2 | Scope | **Framework layer only.** Design tokens, atoms, menu engine, dialog/overlay hosts, z-order bands, geometry + contrast solvers. App-specific content (navbar slot contents, tree rows, tab strip contents, Batch/Tools dialogs) stays in `fastmd`. |
 | D-3 | App integration | **Standalone first.** `fastmd`'s `src/app/ui_iced/` and `src/app/ui/` are NOT modified in this effort. Wiring is a later, separate project. |
 | D-4 | Token source of truth | `iced-pro` owns the `UIF-TOK-005` palette exactly as specified. `src/app/ui/theme.rs` is left untouched. |
@@ -24,7 +26,7 @@
 ### Hard constraints for every increment
 
 - **Do not touch** `src/app/**`, `src/agent/**`, `src/md2pdf/**`, or any `SPEC.md`.
-  New code lives under `src/iced-pro/` only. (Exception: the root `Cargo.toml`
+  New code lives under `src/hoarfrost/` only. (Exception: the root `Cargo.toml`
   `[workspace] members` list, touched once in INC-01.)
 - **No raw literals outside the token module.** Per `UIF-PRIN-001` / `UIF-VER-001`,
   widgets read spacing, sizing, radius, stroke, type and colour from `token::*`.
@@ -41,7 +43,7 @@
 - **Docs mandatory** (`RUST-010`, `RUST-011`): `//!` on every module, `///` on
   every `pub` item. Cite the spec ID (`UIF-TOK-001`, `UIF-CMENU-001`, …) in the
   doc comment of the item implementing it.
-- **Read before writing:** `src/iced-pro/spec.md` (the spec),
+- **Read before writing:** `src/hoarfrost/spec.md` (the spec),
   `AGENTS.md` (root), `doc/distill/iced.md` (iced conventions).
 
 ---
@@ -49,7 +51,7 @@
 ## 2. Target crate layout
 
 ```
-src/iced-pro/
+src/hoarfrost/
 ├── Cargo.toml                 # package iced-pro, iced 0.14
 ├── mod.rs                     # facade only — pub use of subsystem APIs (RUST-054)
 ├── token/                     # UIF-TOK-001..006 — the closed token set
@@ -92,7 +94,7 @@ Status legend: `[ ]` queued · `[~]` in flight · `[x]` committed · `[!]` block
 
 ### M0 — Scaffold
 
-- [x] **INC-01** Crate skeleton. `src/iced-pro/Cargo.toml` (package `iced-pro`,
+- [x] **INC-01** Crate skeleton. `src/hoarfrost/Cargo.toml` (package `iced-pro`,
       edition 2024, `iced` 0.14 with the same feature set `fastmd` uses), `mod.rs`
       facade with a module doc comment, added to root `[workspace] members`.
       Gate: `cargo check -p iced-pro` green.
@@ -828,7 +830,7 @@ future increments down a dead end.
       (`UIF-MOD-002` is defined once and cross-referenced once in `UIF-WIN-003`).
       **Disposition: 25 Implemented · 14 Partial · 7 NotOwned = 46**, asserted to
       partition the set exactly.
-      **The audit bites.** A test reads `src/iced-pro/spec.md` at test
+      **The audit bites.** A test reads `src/hoarfrost/spec.md` at test
       time, extracts every numbered ID by regex, and asserts both directions:
       every spec ID is classified, and every manifest entry exists in the spec.
       Verified by injection — adding a fake `UIF-FAKE-999` to the spec produced
@@ -1216,11 +1218,11 @@ later project started here. These increments **do** touch `src/app/**`;
 they are the exception to the M-series constraint, taken under a separate
 supervisor instruction on branch `feature/iced-pro`.
 
-### The spec move — `doc/planning/ui-framework.md` → `src/iced-pro/spec.md`
+### The spec move — `doc/planning/ui-framework.md` → `src/hoarfrost/spec.md`
 
 **This record is here because the spec is no longer where every other record in
 this file says it is.** Commit `edbe04a` ("doc update") moved the spec out of
-`doc/planning/` and into `src/iced-pro/`, the crate it governs, and rewrote it
+`doc/planning/` and into `src/hoarfrost/`, the crate it governs, and rewrote it
 in the same step: 1548 lines to 1597, 138 insertions across 89 deletions. It
 also added a ninety-first requirement. Every reference to the
 old path in this ledger is now wrong; the ones that matter have been repointed,
@@ -2421,7 +2423,7 @@ conformance gate caught the move only by going **fully red** — seven tests,
 one panic message, because every coverage test opens the spec file before it
 can assert anything. That is the gate working, but only after the fact, and
 only because a red gate is loud. The spec now lives inside the crate it
-governs (`src/iced-pro/spec.md`); see the record at the head of §3c.
+governs (`src/hoarfrost/spec.md`); see the record at the head of §3c.
 Second: a lint gate was **passing code it could not read** — a wrapped `f32`
 const was classified `TokenBound` without its value ever being examined, and
 the count of "compliant" constants went up as though nothing had happened.
@@ -3038,7 +3040,7 @@ for `PDF_BADGE_SLOT` and `PDF_BADGE_GAP`; `files_scanned` 158 and
 `rule_b_files` 45 are unchanged because no new app files were added.
 
 **Stale spec-path doc comments repointed: 11.** The move left 12 literal
-`doc/planning/ui-framework.md` hits, all in `src/iced-pro/`. One of them —
+`doc/planning/ui-framework.md` hits, all in `src/hoarfrost/`. One of them —
 `spec_coverage_tests.rs:32` — is deliberate history (*"used to sit at …
 commit `edbe04a` moved it here"*) and was left alone. The other 11 are
 repointed to `spec.md` with no assertion changed: `mod.rs:5`,
@@ -3192,7 +3194,7 @@ Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --workspace` **8040 passed, 6 skipped** · `cargo clippy --workspace
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
 `cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
-lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
+lines**. `src/hoarfrost/spec.md` and all `SPEC.md` files untouched.
 
 ---
 
@@ -3313,7 +3315,7 @@ Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --workspace` **8048 passed, 6 skipped** · `cargo clippy --workspace
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
 `cargo doc --workspace --no-deps` after `cargo clean --doc`: **0 warning
-lines**. `src/iced-pro/spec.md` and all `SPEC.md` files untouched.
+lines**. `src/hoarfrost/spec.md` and all `SPEC.md` files untouched.
 
 ---
 
@@ -3480,7 +3482,7 @@ via `cargo nextest list`.
 Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --workspace` **8053 passed, 6 skipped** · `cargo clippy --workspace
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
-`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/hoarfrost/spec.md`
 and all `SPEC.md` files untouched.
 
 ---
@@ -3646,7 +3648,7 @@ discovered via `cargo nextest list`.
 Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --workspace` **8073 passed, 6 skipped** · `cargo clippy --workspace
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
-`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/hoarfrost/spec.md`
 and all `SPEC.md` files untouched.
 
 ---
@@ -3792,5 +3794,5 @@ all confirmed discovered via `cargo nextest list`.
 Gates: `cargo check --workspace --all-targets` clean · `cargo nextest run
 --workspace` **8083 passed, 6 skipped** · `cargo clippy --workspace
 --all-targets -- -D warnings` clean · `cargo fmt --check` clean ·
-`cargo doc --workspace --no-deps`: **0 warning lines**. `src/iced-pro/spec.md`
+`cargo doc --workspace --no-deps`: **0 warning lines**. `src/hoarfrost/spec.md`
 and all `SPEC.md` files untouched.

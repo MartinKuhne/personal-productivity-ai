@@ -12,7 +12,7 @@
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
-use iced_pro::surface::modal::{BATCH_WIDTH, CONTENT_HEIGHT_MAX, VIEWPORT_GUTTER};
+use hoarfrost::surface::modal::{BATCH_WIDTH, CONTENT_HEIGHT_MAX, VIEWPORT_GUTTER};
 use std::path::PathBuf;
 
 /// A candidate prompt record that is never read off disk.

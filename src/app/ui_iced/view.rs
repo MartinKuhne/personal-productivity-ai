@@ -190,7 +190,7 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
 /// above them, bottom-most first.
 ///
 /// The tree/tab context menu and the top-bar hamburger are both rendered by
-/// the `iced-pro` menu engine and folded into the base here, each with its own
+/// the `hoarfrost` menu engine and folded into the base here, each with its own
 /// click-away blocker and solved card geometry. Higher windows are stacked
 /// above them as full-screen overlays. The reducer keeps the two menus
 /// mutually exclusive, so at most one menu surface is live per frame.
@@ -293,7 +293,7 @@ fn batch_layer(view_model: &BatchDialogViewModel, viewport: Size) -> iced::Eleme
 fn movable_overlay_layer<'a>(
     card: MovableCard,
     state: &'a AppState,
-    build: impl FnOnce(&'a iced_pro::surface::movable::MovableHost) -> iced::Element<'a, Message>,
+    build: impl FnOnce(&'a hoarfrost::surface::movable::MovableHost) -> iced::Element<'a, Message>,
 ) -> iced::Element<'a, Message> {
     let host = match card {
         MovableCard::Logs => state.overlay.logs_movable.as_ref(),

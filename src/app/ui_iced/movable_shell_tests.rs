@@ -12,19 +12,19 @@
 // pinning §4.7.1's band heights is the whole point, so a retuned rung must
 // fail the suite rather than pass silently. `clippy::assertions_on_constants`
 // cannot tell a spec pin from a tautology — the same allowance the
-// `iced_pro::token` test modules use.
+// `hoarfrost::token` test modules use.
 #![allow(clippy::assertions_on_constants)]
 
 use super::content_viewport_id;
 use crate::ui_iced::message::MovableCard;
-use iced::{Point, Rectangle, Size};
-use iced_pro::focus::FocusState;
-use iced_pro::surface::movable::{
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::movable::{
     CHROME_HEIGHT, CONTENT_VIEWPORT_MIN, FOOTER_HEIGHT, MovableGeometry, MovableHost, MovableSpec,
     NoopGeometryStorage, RESIZE_HANDLE_SIZE, TITLE_BAR_HEIGHT, Zone,
 };
-use iced_pro::surface::zorder::SurfaceId;
-use iced_pro::token::size;
+use hoarfrost::surface::zorder::SurfaceId;
+use hoarfrost::token::size;
+use iced::{Point, Rectangle, Size};
 
 /// A host at a comfortable size, opened against throwaway collaborators.
 fn host(width: f32, height: f32, viewport: Rectangle) -> MovableHost {
@@ -35,7 +35,7 @@ fn host(width: f32, height: f32, viewport: Rectangle) -> MovableHost {
         spec,
         viewport,
         &mut FocusState::new(),
-        &mut iced_pro::surface::zorder::SurfaceRegistry::new(),
+        &mut hoarfrost::surface::zorder::SurfaceRegistry::new(),
         &mut NoopGeometryStorage,
     )
 }
@@ -92,7 +92,7 @@ fn the_content_viewport_floor_is_derived_from_the_chrome() {
     assert!(CONTENT_VIEWPORT_MIN > 0.0);
     assert_eq!(
         CONTENT_VIEWPORT_MIN,
-        iced_pro::surface::movable::CARD_MIN_HEIGHT - CHROME_HEIGHT
+        hoarfrost::surface::movable::CARD_MIN_HEIGHT - CHROME_HEIGHT
     );
 }
 
@@ -107,8 +107,8 @@ fn the_trailing_actions_are_excluded_from_the_drag_zone() {
 
     assert_eq!(
         actions.width,
-        iced_pro::surface::movable::ACTION_CONTROL_SIZE * 2.0
-            + iced_pro::surface::movable::ACTION_GAP,
+        hoarfrost::surface::movable::ACTION_CONTROL_SIZE * 2.0
+            + hoarfrost::surface::movable::ACTION_GAP,
         "the exclusion zone is sized from the controls themselves"
     );
 
@@ -131,7 +131,7 @@ fn the_footer_corner_is_the_resize_grip() {
     let host = host(680.0, 440.0, viewport());
     let footer = host.footer();
     let grip = host
-        .resize_grip(iced_pro::geometry::clamp::ResizeHandle::BottomRight)
+        .resize_grip(hoarfrost::geometry::clamp::ResizeHandle::BottomRight)
         .expect("bottom-right grip exists");
 
     assert_eq!(grip.width, RESIZE_HANDLE_SIZE);
@@ -153,9 +153,9 @@ fn the_footer_corner_is_the_resize_grip() {
 fn no_grip_steals_the_title_bars_drag() {
     let host = host(680.0, 440.0, viewport());
     for handle in [
-        iced_pro::geometry::clamp::ResizeHandle::TopLeft,
-        iced_pro::geometry::clamp::ResizeHandle::Top,
-        iced_pro::geometry::clamp::ResizeHandle::TopRight,
+        hoarfrost::geometry::clamp::ResizeHandle::TopLeft,
+        hoarfrost::geometry::clamp::ResizeHandle::Top,
+        hoarfrost::geometry::clamp::ResizeHandle::TopRight,
     ] {
         assert!(
             host.resize_grip(handle).is_none(),

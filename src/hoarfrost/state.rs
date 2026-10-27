@@ -43,7 +43,7 @@
 //! §4.9.2's is `VisualState { base: Hovered, focused: true }` — the two
 //! cells the flat enum could not both express.
 //!
-//! The ledger (`INC-06` in `doc/planning/iced-pro-tasks.md`) writes the chain
+//! The ledger (`INC-06` in `doc/planning/hoarfrost-tasks.md`) writes the chain
 //! as `Disabled > Invalid > Pressed > Focused > Hovered > Rest`, with
 //! `Focused` slotted between `Pressed` and `Hovered`. The split removes that
 //! slot rather than ordering it: focus is a ring, not a rung, so "does focus

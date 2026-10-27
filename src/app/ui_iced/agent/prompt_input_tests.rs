@@ -12,10 +12,10 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui_iced::message::{AgentMessage, Message};
 use crate::ui_iced::panels::top::ChatModelEntry;
-use iced_pro::binding::{Cancel, Commit, Live};
-use iced_pro::widget::text_input_controller::TextInputController;
-use iced_pro::widget::text_input_controller::TextInputEmission;
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::binding::{Cancel, Commit, Live};
+use hoarfrost::widget::text_input_controller::TextInputController;
+use hoarfrost::widget::text_input_controller::TextInputEmission;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
     PROMPT_INPUT_ID, agent_prompt_row, cancel_enabled, clear_session_message, current_model_option,

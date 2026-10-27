@@ -26,7 +26,7 @@
 //!   [`combo_box::resolve_trigger`] — at the compact rung
 //!   [`TAG_TRIGGER_RUNG`], not through iced's own theme.
 //! * **Hamburger** — the framework's own
-//!   [`Button::icon_only`](iced_pro::widget::button_widget::Button::icon_only)
+//!   [`Button::icon_only`](hoarfrost::widget::button_widget::Button::icon_only)
 //!   in the `Ghost` variant at the compact rung, carrying the ☰ from
 //!   [`strings::HAMBURGER_MENU_BUTTON`] plus the label
 //!   [`strings::HAMBURGER_MENU_TOOLTIP`] that `UIF-NAV-003` requires of
@@ -44,11 +44,11 @@
 //!
 //! # Framework adoption is partial for the tag filter, with a reason
 //!
-//! `iced_pro::widget::combo_box` is a **resolver and geometry module**, not
+//! `hoarfrost::widget::combo_box` is a **resolver and geometry module**, not
 //! a widget: it publishes [`combo_box::trigger_bounds`],
 //! [`combo_box::chevron_bounds`] and [`combo_box::resolve_trigger`] for the
 //! gallery's contrast audit, and no `ComboBox` type that renders an
-//! `Element`. The state half, [`ComboHost`](iced_pro::widget::combo_host::ComboHost),
+//! `Element`. The state half, [`ComboHost`](hoarfrost::widget::combo_host::ComboHost),
 //! drives open/filter/commit against a `FocusState` the app does not keep
 //! for this control. So the trigger's paint comes from the framework today
 //! while the flyout stays iced's. Adopting `ComboHost` here means giving the
@@ -64,7 +64,7 @@
 //! therefore kept in the *pure model* — [`build_menu_entries`] returns
 //! every row with its [`MenuSection`], [`MenuEntryKind`] and checked state.
 //! The **render path** is separate: [`hamburger_menu`](crate::ui_iced::hamburger::hamburger_menu)
-//! builds the `iced-pro` [`Menu`](iced_pro::surface::menu::model::Menu) tree
+//! builds the `hoarfrost` [`Menu`](hoarfrost::surface::menu::model::Menu) tree
 //! the framework cascade drives, so the top bar itself only emits
 //! [`MenuMessage::Opened`]).
 //!
@@ -113,12 +113,12 @@ use std::path::PathBuf;
 use iced::widget::{Row, container, pick_list, rule, text};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding, Point, Size};
 
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::typography::{self, FAMILY_SANS};
-use iced_pro::token::{shape, size, space};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::combo_box;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::typography::{self, FAMILY_SANS};
+use hoarfrost::token::{shape, size, space};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::combo_box;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::markdown::table_width::DeficitStrategy;

@@ -12,7 +12,7 @@
 //! design tokens. Raw numeric literals in individual widget definitions are
 //! forbidden; widgets resolve their style through the token modules only.
 //!
-//! Since the INT series (`doc/planning/iced-pro-tasks.md` §3c) the `fastmd`
+//! Since the INT series (`doc/planning/hoarfrost-tasks.md` §3c) the `fastmd`
 //! application consumes this crate as its UI framework: the tokens, atoms,
 //! composites, menu engine, modal frames, movable hosts, z-order band model
 //! and geometry solvers are live in `src/app/ui_iced/` (see the integration

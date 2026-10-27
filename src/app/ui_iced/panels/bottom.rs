@@ -58,15 +58,15 @@
 //!   out, so neither a magic number nor `available_rect_before_wrap`
 //!   bookkeeping is needed.
 //! * **The command field is the framework's paint on iced's widget, not
-//!   the framework's widget.** [`TextInput`](iced_pro::widget::text_input::TextInput)
+//!   the framework's widget.** [`TextInput`](hoarfrost::widget::text_input::TextInput)
 //!   exists and renders, but its uncontrolled constructor takes
 //!   `on_input` only — there is **no submit callback** on that path. Enter
-//!   reaches a host only as the [`Committed`](iced_pro::widget::text_input_controller::TextInputEmission::Committed)
+//!   reaches a host only as the [`Committed`](hoarfrost::widget::text_input_controller::TextInputEmission::Committed)
 //!   tier of the *controlled* path, which requires the value to live in an
 //!   app-owned `TextInputModel` rather than in
 //!   `agent_panel_state.command_input`. Submitting a prompt is the band's
 //!   whole job, so the field stays iced's `text_input` styled through
-//!   [`command_field_style`] → [`resolve_input_style`](iced_pro::widget::text_input::resolve_input_style).
+//!   [`command_field_style`] → [`resolve_input_style`](hoarfrost::widget::text_input::resolve_input_style).
 //!   Migrating the model is a state-ownership change and a stated
 //!   follow-on.
 //!
@@ -79,12 +79,12 @@ mod tests;
 use iced::widget::{Column, Row, container, text, text_input};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length};
 
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::typography;
-use iced_pro::token::{shape, space};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input as pro_text_input;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::typography;
+use hoarfrost::token::{shape, space};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input as pro_text_input;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;

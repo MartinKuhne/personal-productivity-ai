@@ -1,25 +1,25 @@
 //! Runnable visual gallery for the `UIF-VER-004` gate.
 //!
 //! Builds the whole `(Variant × State)` matrix through
-//! [`iced_pro::gallery`], renders every cell's frame through the recording
+//! [`hoarfrost::gallery`], renders every cell's frame through the recording
 //! renderer, and writes an inspectable artifact: one `manifest.txt` with
 //! every cell's resolved-style snapshot plus the gate ledgers, and one
 //! `cells/<id>.txt` per cell for diffing a single cell in isolation.
 //!
 //! The snapshot is resolved style values and the recorded quad list, not a
-//! rasterised image — see the [gallery module docs](iced_pro::gallery) for
+//! rasterised image — see the [gallery module docs](hoarfrost::gallery) for
 //! why. Nothing here opens a window, reads a clock, or touches a real user
 //! configuration path: the output directory is either given on the command
 //! line or defaulted to a subdirectory of the system temp directory, and
 //! [`guard`] refuses the application's own configuration roots outright.
 //!
 //! ```text
-//! cargo run -p iced-pro --bin gallery -- C:\temp\gallery
+//! cargo run -p hoarfrost --bin gallery -- C:\temp\gallery
 //! ```
 
-use iced_pro::gallery::{self, Cell, CellKind};
-use iced_pro::gallery_audit::{contrast_failures, manifest, unmapped_colours};
-use iced_pro::invariant_gate::audit_invariants;
+use hoarfrost::gallery::{self, Cell, CellKind};
+use hoarfrost::gallery_audit::{contrast_failures, manifest, unmapped_colours};
+use hoarfrost::invariant_gate::audit_invariants;
 
 use std::error::Error;
 use std::fs;
@@ -40,8 +40,8 @@ const FASTMD_MARKER: &str = ".fastmd";
 
 /// Is `child` the same path as `root`, or nested beneath it?
 ///
-/// Component-wise, not string-wise: `/tmp/iced-pro-gallery-evil` is not
-/// below `/tmp/iced-pro-gallery` even though one string prefixes the
+/// Component-wise, not string-wise: `/tmp/hoarfrost-gallery-evil` is not
+/// below `/tmp/hoarfrost-gallery` even though one string prefixes the
 /// other. Both sides are expected to be normalised already.
 fn at_or_below(child: &str, root: &str) -> bool {
     child == root || child.starts_with(&format!("{root}/"))
@@ -121,7 +121,7 @@ fn guard(path: &Path) -> Result<PathBuf, Box<dyn Error>> {
 
 /// The directory a run with no argument writes into.
 fn default_output_dir() -> PathBuf {
-    std::env::temp_dir().join("iced-pro-gallery")
+    std::env::temp_dir().join("hoarfrost-gallery")
 }
 
 /// A cell id as a filename: `/` is the id's own hierarchy separator, so
@@ -169,7 +169,7 @@ fn run(output: &Path) -> Result<(), Box<dyn Error>> {
         .filter(|cell| cell.kind == CellKind::NotOwned)
         .count();
 
-    println!("iced-pro visual gallery (UIF-VER-004)");
+    println!("hoarfrost visual gallery (UIF-VER-004)");
     println!("  output        : {}", output.display());
     println!(
         "  manifest      : {}",

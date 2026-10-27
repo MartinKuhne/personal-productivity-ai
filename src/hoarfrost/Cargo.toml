@@ -1,8 +1,8 @@
 [package]
-name = "iced-pro"
+name = "hoarfrost"
 version = "0.2.0"
 edition = "2024"
-description = "Reusable iced widget library implementing the FastMD UI framework specification"
+description = "A design system and widget framework built on Iced"
 license = "MIT"
 repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
 categories = ["gui"]
@@ -32,7 +32,7 @@ path = "bin/gallery.rs"
 # unreachable — a custom widget cannot be written at all. The feature
 # itself is `advanced = []` in both `iced_core` and `iced_widget`, so it
 # compiles in nothing new: it unlocks the re-export module and nothing
-# else. See INC-10 in `doc/planning/iced-pro-tasks.md`.
+# else. See INC-10 in `doc/planning/hoarfrost-tasks.md`.
 iced = { version = "0.14.0", features = [
     "wgpu",
     "tiny-skia",

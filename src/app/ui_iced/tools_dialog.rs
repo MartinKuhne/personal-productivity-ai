@@ -89,15 +89,15 @@ use iced::font::Weight;
 use iced::widget::{Column, Row, Space, checkbox, container, scrollable, table, text, tooltip};
 use iced::{Alignment, Background, Element, Length, Size};
 
-use iced_pro::composite::list_tile;
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
-use iced_pro::token::{shape, space, typography};
-use iced_pro::widget::badge;
-use iced_pro::widget::badge_model::{BadgeModel, BadgeTone, StatusIcon};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::toggle::{self, ToggleControl, TogglePolarity};
+use hoarfrost::composite::list_tile;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
+use hoarfrost::token::{shape, space, typography};
+use hoarfrost::widget::badge;
+use hoarfrost::widget::badge_model::{BadgeModel, BadgeTone, StatusIcon};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::toggle::{self, ToggleControl, TogglePolarity};
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
@@ -113,7 +113,7 @@ pub use crate::agent::tools::registry::{
 
 /// §4.6.2 — the Tools & Integrations card's sizing policy: 720px wide
 /// clamped to the viewport gutter, content-fit at least
-/// [`TOOLS_HEIGHT_MIN`](iced_pro::surface::modal::TOOLS_HEIGHT_MIN) and
+/// [`TOOLS_HEIGHT_MIN`](hoarfrost::surface::modal::TOOLS_HEIGHT_MIN) and
 /// never more than 80% of the viewport.
 ///
 /// Held as the policy object rather than a set of numbers, so the card
@@ -548,7 +548,7 @@ pub const fn tools_content_height(row_count: usize, shows_error: bool) -> f32 {
 /// The Tools card's **outer** height for a viewport and row count.
 ///
 /// The policy is content-fit with a
-/// [`TOOLS_HEIGHT_MIN`](iced_pro::surface::modal::TOOLS_HEIGHT_MIN) floor and
+/// [`TOOLS_HEIGHT_MIN`](hoarfrost::surface::modal::TOOLS_HEIGHT_MIN) floor and
 /// an 80%-of-viewport cap, the gutter
 /// clamp applied last by the framework. This is the change that retired
 /// the app's `MIN_HEIGHT = 200` / `MAX_HEIGHT_HARD_CAP = 1200`: the floor
@@ -1146,7 +1146,7 @@ pub fn action_focus_id(label: &str) -> &'static str {
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a
@@ -1162,7 +1162,7 @@ fn footer_button(
 ) -> Element<'static, Message> {
     let content = Column::new()
         .width(Length::Fixed(
-            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
         ))
         .align_x(Alignment::Center)
         .push(rung(

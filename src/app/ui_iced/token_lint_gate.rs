@@ -3,8 +3,8 @@
 //!
 //! # Why this module exists
 //!
-//! [`iced_pro::token_lint`] shipped as a self-audit: it read
-//! iced-pro's `widget/`, `surface/` and `composite/` and nothing else.
+//! [`hoarfrost::token_lint`] shipped as a self-audit: it read
+//! hoarfrost's `widget/`, `surface/` and `composite/` and nothing else.
 //! That left the half of the interface this crate actually draws entirely
 //! ungated — no rule reached a hard-coded padding, radius, stroke or size
 //! in `src/app/ui_iced`, and no rule reached a colour constructor outside
@@ -14,9 +14,9 @@
 //! This module is that gate. It is **not a second scanner**. The whole
 //! rule set — redaction, the colour-constructor patterns, the visual-name
 //! markers, the scalar classifier, the registry semantics, the
-//! stale-allow-list check — is iced-pro's, reached through
-//! [`scan_tree`](iced_pro::token_lint::scan_tree) with an app-supplied
-//! [`Scope`](iced_pro::token_lint::Scope). A parallel scanner starts
+//! stale-allow-list check — is hoarfrost's, reached through
+//! [`scan_tree`](hoarfrost::token_lint::scan_tree) with an app-supplied
+//! [`Scope`](hoarfrost::token_lint::Scope). A parallel scanner starts
 //! identical and then drifts: fix a false negative in one and the other
 //! keeps reporting what it always reported, and two numbers disagreeing
 //! about the same tree is worse than one number wrong in a known way.
@@ -58,7 +58,7 @@
 
 use std::path::{Path, PathBuf};
 
-use iced_pro::token_lint::{self, AllowEntry, Audit, SurfaceGeometryConstant};
+use hoarfrost::token_lint::{self, AllowEntry, Audit, SurfaceGeometryConstant};
 
 // ---------------------------------------------------------------------------
 // Scope
@@ -69,14 +69,14 @@ use iced_pro::token_lint::{self, AllowEntry, Audit, SurfaceGeometryConstant};
 /// [`Palette`](crate::ui::theme::Palette) and
 /// [`EditorColors`](crate::ui::theme::EditorColors) live
 /// here, and `src/app/AGENTS.md` §4a puts every numeric colour in the
-/// crate behind them. The rule is the same shape iced-pro applies to its
+/// crate behind them. The rule is the same shape hoarfrost applies to its
 /// own `token/color.rs`: a colour either has a token or it does not exist.
 pub const APP_COLOUR_DEFINITION_FILE: &str = "ui/theme.rs";
 
 /// Path prefixes Rule B inspects.
 ///
 /// `ui_iced/` is the whole iced rendering layer, scoped by directory
-/// rather than by content — the same way iced-pro scopes `widget/` and
+/// rather than by content — the same way hoarfrost scopes `widget/` and
 /// `surface/`. A file under it is inspected whether or not it happens to
 /// carry a colour literal, so a file cannot escape the rule by being
 /// quiet about colours.
@@ -85,7 +85,7 @@ pub const APP_VISUAL_SCOPE_PREFIXES: [&str; 1] = ["ui_iced/"];
 /// App-owned layout bounds registered as fixed literals.
 ///
 /// The app-tree analogue of
-/// [`SURFACE_GEOMETRY_CONSTANTS`](iced_pro::token_lint::SURFACE_GEOMETRY_CONSTANTS):
+/// [`SURFACE_GEOMETRY_CONSTANTS`](hoarfrost::token_lint::SURFACE_GEOMETRY_CONSTANTS):
 /// each entry carries the authority for a number no token carries. The
 /// registry is the *only* way a bare literal on a visually-named constant
 /// passes Rule B short of an [`APP_ALLOW_LIST`] entry, and an entry that
@@ -116,7 +116,7 @@ pub const APP_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
 /// Enumerated exceptions to the two rules.
 ///
 /// Every entry carries its own reason, and
-/// [`scan_tree`](iced_pro::token_lint::scan_tree) reports any entry that
+/// [`scan_tree`](hoarfrost::token_lint::scan_tree) reports any entry that
 /// suppresses nothing, so this list cannot quietly grow stale as the tree
 /// moves under it.
 ///

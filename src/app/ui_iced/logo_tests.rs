@@ -4,7 +4,7 @@
 //! shared tokens, and element-construction smoke tests. No renderer, no
 //! window, no filesystem access.
 
-use iced_pro::token::size::ICON_LG;
+use hoarfrost::token::size::ICON_LG;
 
 use super::*;
 

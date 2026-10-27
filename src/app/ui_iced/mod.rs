@@ -24,7 +24,7 @@
 //! - [`menu_surface`] — the shared framework-menu card chrome and solved
 //!   geometry every menu card is painted from.
 //! - [`hamburger`] and [`context_menu`] — the two menu surfaces driven by
-//!   the `iced-pro` menu engine: nested message-driven surfaces
+//!   the `hoarfrost` menu engine: nested message-driven surfaces
 //!   ([MENU-001]..[MENU-015]) and the file-tree / tab context menu
 //!   (§4.9.1).
 //! - [`editor`] — the inline Markdown editor modal with an undo/redo history
@@ -134,13 +134,13 @@ pub mod agent_debug;
 pub mod app;
 pub mod attributions;
 pub mod batch_dialog;
-/// The file-tree and document-tab context menus rendered by the `iced-pro`
+/// The file-tree and document-tab context menus rendered by the `hoarfrost`
 /// menu engine.
 pub mod context_menu;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
-/// The top-bar hamburger menu rendered by the `iced-pro` menu engine.
+/// The top-bar hamburger menu rendered by the `hoarfrost` menu engine.
 pub mod hamburger;
 #[cfg(test)]
 pub mod interaction_tests;

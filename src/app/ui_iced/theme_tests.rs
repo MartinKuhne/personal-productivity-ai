@@ -1,10 +1,10 @@
 //! Unit tests for the iced theme mapping.
 //!
-//! Since INT-1 the values come from the `iced-pro` framework palette
+//! Since INT-1 the values come from the `hoarfrost` framework palette
 //! (`UIF-TOK-005`), reached through
 //! [`crate::ui::theme::Palette::pro`]. These tests assert **parity with
 //! the framework** — the mapped iced role IS the framework token, and
-//! the app scrim IS `iced_pro::surface::zorder::scrim_for(...)` — so a
+//! the app scrim IS `hoarfrost::surface::zorder::scrim_for(...)` — so a
 //! divergence between app and framework fails loudly here.
 //!
 //! [RUST-006]: pure computation only — no window/process spawn, no
@@ -12,8 +12,8 @@
 
 use super::*;
 use crate::ui::theme::Palette;
-use iced_pro::surface::zorder;
-use iced_pro::token::color::Palette as ProPalette;
+use hoarfrost::surface::zorder;
+use hoarfrost::token::color::Palette as ProPalette;
 
 /// One spot-checked palette token: `(token, expected R, G, B)` — the u8
 /// values the `UIF-TOK-005` palette declares.
@@ -97,7 +97,7 @@ fn test_iced_theme_palette_roles_and_values() {
     for (name, iced_color, pro_value, app_value) in roles {
         assert_eq!(
             iced_color, pro_value,
-            "iced role `{name}` must carry the iced-pro source token \
+            "iced role `{name}` must carry the hoarfrost source token \
              {pro_value:?}, got {iced_color:?}"
         );
         assert_eq!(
@@ -118,7 +118,7 @@ fn test_scrim_color_is_the_framework_scrim() {
     assert_eq!(
         scrim_color(),
         expected,
-        "the app scrim must be iced_pro::surface::zorder::scrim_for(&Palette::pro())"
+        "the app scrim must be hoarfrost::surface::zorder::scrim_for(&Palette::pro())"
     );
     assert_eq!(
         scrim_color(),
@@ -130,14 +130,14 @@ fn test_scrim_color_is_the_framework_scrim() {
 
 /// [RUST-021]: the app must not own a second scrim-alpha literal. The
 /// scrim's alpha is read from the framework constant
-/// `iced_pro::surface::zorder::SCRIM_ALPHA`, never restated here — which
+/// `hoarfrost::surface::zorder::SCRIM_ALPHA`, never restated here — which
 /// is why no numeric alpha appears in this file at all.
 #[test]
 fn test_scrim_alpha_is_the_framework_alpha_not_a_second_literal() {
     assert_eq!(
         scrim_color().a,
         zorder::SCRIM_ALPHA,
-        "the app scrim alpha must be iced_pro::surface::zorder::SCRIM_ALPHA"
+        "the app scrim alpha must be hoarfrost::surface::zorder::SCRIM_ALPHA"
     );
 }
 

@@ -10,7 +10,7 @@
 //! # The framework owns the box, the app owns the answer
 //!
 //! As of integration increment INT-5a this module is a consumer of
-//! [`iced_pro::surface::modal`] rather than a re-implementation of
+//! [`hoarfrost::surface::modal`] rather than a re-implementation of
 //! §4.6.2. Nothing here carries a card measurement of its own:
 //!
 //! | Concern | Owner |
@@ -18,14 +18,14 @@
 //! | Card width, gutter clamp | [`ModalSizing::about`] via [`about_card_width`] |
 //! | Card surface, border, radius, padding | [`ModalFrame::resolve`] through [`crate::ui_iced::overlay::modal_card`] |
 //! | Section divider colour and weight | [`crate::ui_iced::overlay::modal_divider`] (`color.border.subtle`) |
-//! | Type sizes, gaps, glyph size | `iced_pro::token::{typography, space, size, shape}` |
-//! | Footer / teaser button geometry and states | [`iced_pro::widget::button_widget::Button`] |
+//! | Type sizes, gaps, glyph size | `hoarfrost::token::{typography, space, size, shape}` |
+//! | Footer / teaser button geometry and states | [`hoarfrost::widget::button_widget::Button`] |
 //! | Which window is open, what dismisses it | [`AboutWindowState`] + `OverlayState::close_topmost` |
 //!
-//! [`iced_pro::surface::modal::ModalHost`] is deliberately **not** used,
+//! [`hoarfrost::surface::modal::ModalHost`] is deliberately **not** used,
 //! for the same reason [`crate::ui_iced::dialogs`] did not take it: the
 //! host self-registers its surface in a
-//! [`iced_pro::surface::zorder::SurfaceRegistry`] and pushes its own
+//! [`hoarfrost::surface::zorder::SurfaceRegistry`] and pushes its own
 //! focus trap, while this app already owns `SURFACE_ID_ABOUT` in
 //! [`crate::ui_iced::app::OverlayState::sync_surfaces`] and owns
 //! dismissal in [`crate::ui_iced::app::OverlayState::close_topmost`].
@@ -117,10 +117,10 @@
 use iced::widget::{Column, Row, Space, mouse_area, scrollable, text};
 use iced::{Alignment, Element, Length, Size};
 
-use iced_pro::surface::modal::{ModalFrame, ModalSizing};
-use iced_pro::token::{size, space, typography};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
+use hoarfrost::surface::modal::{ModalFrame, ModalSizing};
+use hoarfrost::token::{size, space, typography};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 
 use crate::ui::attributions::DIRECT_DEPENDENCIES;
 use crate::ui::strings;
@@ -169,7 +169,7 @@ pub fn modal_frame() -> ModalFrame {
 /// card's 440px width the MIT text runs to roughly 26 lines, so left
 /// uncapped the card would grow past 800px tall. The framework has no
 /// token for "how tall one scroll region inside a card may get" —
-/// [`iced_pro::surface::modal::CONTENT_HEIGHT_MAX`] is the tallest a
+/// [`hoarfrost::surface::modal::CONTENT_HEIGHT_MAX`] is the tallest a
 /// *whole* content-fit card body may be (480px), which would still make
 /// this card ~710px tall.
 ///
@@ -519,7 +519,7 @@ pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON_ID: &str = "about_view_attributions";
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
-/// [`BUTTON_MIN_WIDTH`](iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
 /// box on purpose. `Button::is_icon_only` is a **geometric** test — any
 /// content no wider and no taller than `size::CONTROL_SM` (28px) is
 /// classed icon-only, and an icon-only button without a tooltip trips a
@@ -535,7 +535,7 @@ fn footer_button(
 ) -> Element<'static, Message> {
     let content = Column::new()
         .width(Length::Fixed(
-            iced_pro::surface::input_dialog::BUTTON_MIN_WIDTH,
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
         ))
         .align_x(Alignment::Center)
         .push(rung(

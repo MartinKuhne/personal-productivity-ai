@@ -44,10 +44,10 @@ pub mod transcript;
 use iced::widget::{Column, Row, container, text};
 use iced::{Alignment, Element, Length};
 
-use iced_pro::token::space;
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
+use hoarfrost::token::space;
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;

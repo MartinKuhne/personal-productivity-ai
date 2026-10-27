@@ -463,7 +463,7 @@ const DETAIL_COL: usize = 62;
 pub fn render_table(entries: &[Coverage]) -> String {
     let rule = "-".repeat(ID_COL + STATUS_COL + SECTION_COL + EVIDENCE_COL + DETAIL_COL + 4);
     let mut out = String::new();
-    let _ = writeln!(out, "iced-pro — UIF-* spec coverage ledger");
+    let _ = writeln!(out, "hoarfrost — UIF-* spec coverage ledger");
     let _ = writeln!(out, "entries: {}", entries.len());
     let _ = writeln!(out, "{rule}");
     let _ = writeln!(

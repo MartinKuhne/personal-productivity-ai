@@ -12,7 +12,7 @@
 //! All three helpers are **framework-free by construction**: their
 //! signatures mention only `bool`, `u32`, `f32`,
 //! [`crate::markdown::ToCEntry`] and `String`. The two indent *constants*
-//! are not framework-free — they are bound to `iced_pro` spacing tokens,
+//! are not framework-free — they are bound to `hoarfrost` spacing tokens,
 //! which is the point: the ToC's nesting pitch is now read off the
 //! spacing scale instead of being a pair of numbers the pane invented.
 //!
@@ -26,7 +26,7 @@
 #[path = "right_tests.rs"]
 mod tests;
 
-use iced_pro::token::space;
+use hoarfrost::token::space;
 
 /// Determines if the right panel should be shown based on application state.
 ///
@@ -87,7 +87,7 @@ pub const TOC_BASE_INDENT_PIXELS: f32 = space::XS;
 /// pixels (UI-001) — `space.md` (`UIF-TOK-001`).
 ///
 /// **Movement: none.** `12.0` is exactly `space.md`. Note this is
-/// deliberately *not* [`tree_row::INDENT_STEP`](iced_pro::composite::tree_row::INDENT_STEP)
+/// deliberately *not* [`tree_row::INDENT_STEP`](hoarfrost::composite::tree_row::INDENT_STEP)
 /// (`space.lg`, 16): the ToC pane is the narrowest in the layout
 /// (`RIGHT_PANE_MIN_W = 120px`) and six heading levels at 16px would
 /// spend 80px of it on indentation alone. `space.md` is the nearest rung

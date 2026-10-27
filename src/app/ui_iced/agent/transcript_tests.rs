@@ -17,7 +17,7 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
-use iced_pro::widget::text_input_model::TextInputModel;
+use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
     AGENT_TRANSCRIPT_SCROLLABLE_ID, TRANSCRIPT_SPACING, TRANSCRIPT_TEXT_SIZE,
@@ -106,7 +106,7 @@ fn markdown_style_uses_palette_tokens() {
 /// than quietly re-illegalising every hyperlink.
 #[test]
 fn transcript_link_is_not_painted_with_the_accent_fill() {
-    use iced_pro::token::contrast::contrast_ratio;
+    use hoarfrost::token::contrast::contrast_ratio;
 
     let palette = Palette::fastmd_dark();
     let link = super::transcript_link_color();
@@ -163,7 +163,7 @@ fn markdown_settings_binds_every_size_to_a_rung() {
 /// cannot come back as a convenience call.
 #[test]
 fn markdown_settings_does_not_use_iced_derived_ladder() {
-    use iced_pro::token::typography::MIN_SIZE;
+    use hoarfrost::token::typography::MIN_SIZE;
 
     let settings = markdown_settings();
     let retired =

@@ -50,10 +50,10 @@
 //!
 //! Unit tests live in the sibling `transcript_tests.rs` sidecar.
 
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::token::{shape, space};
 use iced::widget::{Column, Row, button, container, scrollable, text};
 use iced::{Alignment, Element, Length};
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::token::{shape, space};
 
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -160,7 +160,7 @@ pub fn link_activated_message(url: String) -> Message {
 /// paints *on* it moves.
 ///
 /// Ratios recomputed from raw sRGB through
-/// [`contrast::contrast_ratio`](iced_pro::token::contrast::contrast_ratio),
+/// [`contrast::contrast_ratio`](hoarfrost::token::contrast::contrast_ratio),
 /// not transcribed.
 ///
 /// Purity: pure.
@@ -299,11 +299,11 @@ pub fn render_turn(turn: &TranscriptTurn) -> Element<'_, Message> {
 ///
 /// # Why the header is iced's `button`, not the framework's
 ///
-/// [`Button`](iced_pro::widget::button_widget::Button) has no `.width()`
+/// [`Button`](hoarfrost::widget::button_widget::Button) has no `.width()`
 /// builder — its width comes from the content `size_hint` inside a fixed
-/// control band ([`button::HEIGHT_COMPACT`](iced_pro::widget::button::HEIGHT_COMPACT)
+/// control band ([`button::HEIGHT_COMPACT`](hoarfrost::widget::button::HEIGHT_COMPACT)
 /// / `HEIGHT_STANDARD`), and the only width-shaped constructor is
-/// [`icon_only`](iced_pro::widget::button_widget::Button::icon_only). A
+/// [`icon_only`](hoarfrost::widget::button_widget::Button::icon_only). A
 /// disclosure header has to stretch the full pane
 /// width so the whole row is the click target, which the framework control
 /// cannot express. That is a framework gap, not a preference — recorded here

@@ -16,11 +16,11 @@ use crate::config::LlmConfig;
 use crate::ui::strings;
 use crate::ui_iced::test_helpers::test_app;
 
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::{shape, size, space, typography};
+use hoarfrost::widget::button::{self, ButtonVariant};
+use hoarfrost::widget::text_input as pro_text_input;
 use iced::Background;
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::{shape, size, space, typography};
-use iced_pro::widget::button::{self, ButtonVariant};
-use iced_pro::widget::text_input as pro_text_input;
 
 use super::{
     BAND_PADDING, BAND_SPACING, BottomPanelViewModel, COMMAND_INPUT_ID, CONTEXT_SPACING,

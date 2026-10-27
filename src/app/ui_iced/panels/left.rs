@@ -37,11 +37,11 @@
 //!
 //! # The `tree_row` composite is adopted for geometry and paint, not rendering
 //!
-//! `iced_pro::composite::tree_row` is a **pure geometry-and-style
+//! `hoarfrost::composite::tree_row` is a **pure geometry-and-style
 //! module**. It resolves [`tree_row::TreeRowSlots`], [`tree_row::TreeRowStyle`]
-//! and [`iced_pro::widget::button_widget::Layer`] rectangles; the only
+//! and [`hoarfrost::widget::button_widget::Layer`] rectangles; the only
 //! thing that turns them into pixels is the gallery's canvas renderer
-//! ([`gallery_tree`](iced_pro::gallery_tree)). There is no
+//! ([`gallery_tree`](hoarfrost::gallery_tree)). There is no
 //! `tree_row::view(..)` returning an `iced::Element`, so "use the
 //! composite for row rendering" cannot be done from an iced widget tree
 //! without writing a new widget in the framework.
@@ -181,15 +181,15 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding};
 
-use iced_pro::composite::tree_row;
-use iced_pro::state::{BaseState, VisualState};
-use iced_pro::token::contrast;
-use iced_pro::token::shape;
-use iced_pro::token::space;
-use iced_pro::token::typography::{self, FAMILY_SANS};
-use iced_pro::widget::badge;
-use iced_pro::widget::badge_model::BadgeTone;
-use iced_pro::widget::text_input as pro_text_input;
+use hoarfrost::composite::tree_row;
+use hoarfrost::state::{BaseState, VisualState};
+use hoarfrost::token::contrast;
+use hoarfrost::token::shape;
+use hoarfrost::token::space;
+use hoarfrost::token::typography::{self, FAMILY_SANS};
+use hoarfrost::widget::badge;
+use hoarfrost::widget::badge_model::BadgeTone;
+use hoarfrost::widget::text_input as pro_text_input;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, SkillFile};
@@ -278,7 +278,7 @@ pub const ROW_INDENT_PER_DEPTH: f32 = tree_row::INDENT_STEP;
 /// Deepest depth the **auto-fit measurement** charges for indentation.
 ///
 /// **App-owned.** It is *not* the same rule as
-/// [`tree_view::MAX_TREE_DEPTH`](iced_pro::composite::tree_view::MAX_TREE_DEPTH)
+/// [`tree_view::MAX_TREE_DEPTH`](hoarfrost::composite::tree_view::MAX_TREE_DEPTH)
 /// (1000), which is a stack-overflow guard on the framework's recursive
 /// flatten.
 ///
@@ -2062,7 +2062,7 @@ fn stripe_element(stripe: RowStripe, height: f32) -> Element<'static, Message> {
 /// rather than against a remembered answer. It resolves to a **no-op** on
 /// hover, and that is a computed result, not an absence of handling:
 /// `surface_hover` is not a locked fill under
-/// [`fill_lock_role`](iced_pro::token::contrast::fill_lock_role), so
+/// [`fill_lock_role`](hoarfrost::token::contrast::fill_lock_role), so
 /// `locked_over` returns the candidate untouched. The sidecar pins the
 /// measured ratios rather than transcribing them.
 ///
@@ -2101,7 +2101,7 @@ pub const SEARCH_INPUT_ID: &str = "left_panel_search_input";
 ///
 /// This is the framework's *paint* on iced's *widget*, and that is as
 /// far as the search row can go today:
-/// [`composite::search_input`](iced_pro::composite) **does not exist**
+/// [`composite::search_input`](hoarfrost::composite) **does not exist**
 /// (the composite directory has breadcrumb, card, expander, form_field,
 /// info_bar, list_tile, notification, overflow_toolbar, scroll_view,
 /// settings_row, table_* , toast, tree_row, tree_view, virtual_list), and

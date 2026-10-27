@@ -53,7 +53,7 @@ const RATIO_EPS: f32 = 5e-3;
 struct SpecRow {
     /// The spec token, e.g. `type.caption`.
     token: &'static str,
-    /// The `iced-pro` constant implementing it.
+    /// The `hoarfrost` constant implementing it.
     rung: TypeRung,
     /// The `Size (px)` column.
     size: f32,

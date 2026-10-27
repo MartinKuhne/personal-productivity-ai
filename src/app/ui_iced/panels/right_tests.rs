@@ -128,7 +128,7 @@ fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
 fn the_toc_base_indent_is_bound_to_space_xs() {
     assert_eq!(
         TOC_BASE_INDENT_PIXELS,
-        iced_pro::token::space::XS,
+        hoarfrost::token::space::XS,
         "the ToC row's base pad reads off the spacing scale"
     );
 }
@@ -137,7 +137,7 @@ fn the_toc_base_indent_is_bound_to_space_xs() {
 fn the_toc_level_indent_is_bound_to_space_md() {
     assert_eq!(
         TOC_LEVEL_INDENT_PIXELS,
-        iced_pro::token::space::MD,
+        hoarfrost::token::space::MD,
         "one heading level of ToC indent reads off the spacing scale"
     );
 }
@@ -151,12 +151,12 @@ fn the_toc_level_indent_is_deliberately_not_the_tree_indent_step() {
     // `tree_row::INDENT_STEP`.
     assert_ne!(
         TOC_LEVEL_INDENT_PIXELS,
-        iced_pro::composite::tree_row::INDENT_STEP,
+        hoarfrost::composite::tree_row::INDENT_STEP,
         "the ToC indents one rung tighter than the tree on purpose: the pane \
          is half as wide"
     );
     let six_levels = toc_indent_pixels(6);
-    let tree_at_six = iced_pro::composite::tree_row::INDENT_STEP * 5.0;
+    let tree_at_six = hoarfrost::composite::tree_row::INDENT_STEP * 5.0;
     assert!(
         six_levels < tree_at_six,
         "six ToC levels must cost less indent than six tree levels"

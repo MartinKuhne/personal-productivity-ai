@@ -33,12 +33,12 @@
 use iced::widget::{Column, Row, pick_list, text};
 use iced::{Alignment, Element, Length};
 
-use iced_pro::token::space;
-use iced_pro::token::typography::{self, TypeRung};
-use iced_pro::widget::button::ButtonVariant;
-use iced_pro::widget::button_widget::Button;
-use iced_pro::widget::text_input::{InputKind, TextInput};
-use iced_pro::widget::text_input_controller::TextInputEmission;
+use hoarfrost::token::space;
+use hoarfrost::token::typography::{self, TypeRung};
+use hoarfrost::widget::button::ButtonVariant;
+use hoarfrost::widget::button_widget::Button;
+use hoarfrost::widget::text_input::{InputKind, TextInput};
+use hoarfrost::widget::text_input_controller::TextInputEmission;
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;

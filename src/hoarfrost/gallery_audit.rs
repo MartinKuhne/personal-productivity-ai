@@ -273,7 +273,7 @@ pub fn manifest() -> String {
     let cells = matrix();
 
     let mut out = String::new();
-    out.push_str("iced-pro visual gallery - UIF-VER-004\n");
+    out.push_str("hoarfrost visual gallery - UIF-VER-004\n");
     out.push_str("snapshot target: resolved style values + recorded quad list\n");
     out.push_str(&format!("cells: {}\n\n", cells.len()));
 

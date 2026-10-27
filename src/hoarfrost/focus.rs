@@ -3,12 +3,12 @@
 //!
 //! # Why this module exists
 //!
-//! Gap **G-10** in `doc/planning/iced-pro-tasks.md` established that stock
+//! Gap **G-10** in `doc/planning/hoarfrost-tasks.md` established that stock
 //! iced 0.14 cannot give anything except `text_input` and `text_editor` a
 //! keyboard focus path: those two are the only `operation::Focusable`
 //! implementations in the crate, nothing calls `focus_next` /
 //! `focus_previous`, and there is no widget-level focus event at all.
-//! Decision **D-7** answers that by having `iced-pro` own focus outright.
+//! Decision **D-7** answers that by having `hoarfrost` own focus outright.
 //!
 //! The owning half is this module, and it is deliberately kept **free of
 //! iced** — no `Widget`, no `operation`, no `Task`, no colour, no geometry.
