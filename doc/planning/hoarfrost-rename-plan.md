@@ -1,10 +1,13 @@
 # Rename Plan: `iced-pro` Crate → `hoarfrost`
 
-> **Status:** Plan — approved target, **not yet executed**. No files were changed to
-> produce this document; every figure below was read from the tree, not assumed.
+> **Status:** Plan — target agreed, **not yet executed**. No source files were
+> changed to produce this document; every figure below was read from the tree.
 > **Date:** 2026-10-26
-> **Baseline:** branch `iced-pro-improvements2` at commit `c77edcc`, ahead of
-> `origin/iced-pro-improvements2` by 4 and of `main` by 188.
+> **Baseline:** branch `iced-pro-improvements2`. The tree is under active
+> development and moved twice while this plan was written. Do **not** treat any
+> SHA here as the starting point: Phase 0 (§5) is the authoritative snapshot, and
+> the blast-radius counts in §1 must be re-run with `rg` immediately before the
+> sweep.
 > **Target:** package `hoarfrost`, library `hoarfrost`, directory `src/hoarfrost/`.
 > **Spec:** [`src/iced-pro/spec.md`](../../src/iced-pro/spec.md) — contains **no**
 > `iced-pro` string, so it moves with the directory and its content is untouched.
@@ -13,7 +16,7 @@
 > **Architecture:** [`ARCHITECTURE_C4.md`](../technical-context/ARCHITECTURE_C4.md)
 > — must be updated by this change (`RUST-040`, `RUST-041`).
 >
-> Every claim below carries a `file:line` citation verified against the baseline.
+> Every claim below carries a `file:line` citation taken from the surveyed tree.
 
 ---
 
@@ -34,13 +37,16 @@
 
 Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
 
+**Re-run before executing.** New `iced-pro` work lands continuously; take a fresh
+count at Phase 0 and expect this table to move.
+
 ---
 
 ## 2. Name-specific findings for `hoarfrost`
 
 1. **No collision in the repo.** `rg -i 'hoar|frost'` over the working tree returns
-   **0 hits**. The residual-audit gate in §6 stays unambiguous: after the rename,
-   `rg -i 'hoar'` finds only intended hits.
+   **0 hits**. The residual-audit gate in Phase 3 stays unambiguous: after the
+   rename, `rg -i 'hoar'` finds only intended hits.
 2. **crates.io is free.** `GET /api/v1/crates/hoarfrost` → **404**. The fuzzy
    search's single hit is `kylig-style` with `exact_match: false`. No published
    crate means no transitive-dependency shadowing either.
@@ -72,24 +78,26 @@ Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
    block. Satisfies `RUST-043`.
 5. **Persisted user data is safe.** `storage_key()` returns
    `format!("movable:{}", id.as_str())` (`src/iced-pro/surface/movable.rs:616-618`),
-   and `group_for` the same rule (`:625-627`). No crate name appears in on-disk
-   keys, so **no user-config migration is required** — in either direction.
+   and `group_for` follows the same rule (`:625-627`). No crate name appears in
+   on-disk keys, so **no user-config migration is required** — in either direction.
 6. **A test hard-codes the crate name.** `src/app/ui/attributions_tests.rs:58`
    (`"src/iced-pro/Cargo.toml"`) and `:71` (`"iced-pro"` in the workspace-member
    exclusion set). Miss these and the About-dialog attribution test fails.
-7. **Uncommitted work in the tree at baseline** — 3 untracked files:
-   `src/iced-pro/geometry/pane_solver.rs`, `pane_solver_tests.rs`,
-   `window_geometry.rs`. Commit or stash before any `git mv`.
+7. **Uncommitted work in the tree.** The branch carries in-flight `iced-pro` work
+   throughout authoring — modified files plus new untracked ones (e.g.
+   `widget/search_box.rs`, `composite/split_divider.rs`). Commit or stash **all**
+   of it before any `git mv`, and verify with `git status --porcelain` rather than
+   assuming a file list.
 8. **Report/label strings that read as the product name** and should change with it:
    `src/iced-pro/token_lint.rs:982` (`render_scoped("iced-pro", …)`),
    `src/iced-pro/spec_coverage.rs:466` (coverage-ledger header),
    `src/iced-pro/gallery_audit.rs:276`, `src/iced-pro/bin/gallery.rs:172`.
 9. **Doc-comment cross-links to the ledger.** 8 inbound references to
    `doc/planning/iced-pro-tasks.md` from code doc comments (`src/iced-pro/mod.rs:15`,
-   `focus.rs:11`, `state.rs:11`, `Cargo.toml:35`, `token/typography.rs`,
-   `token/contrast.rs`, `surface/input_dialog.rs`, `src/app/ui/theme.rs`) plus one
-   internal cross-link in `iced-pro-handoff.md`. These break silently if D-1 is
-   taken and the links are not fixed.
+   `focus.rs:11`, `state.rs:11`, `src/iced-pro/Cargo.toml:35`,
+   `token/typography.rs`, `token/contrast.rs`, `surface/input_dialog.rs`,
+   `src/app/ui/theme.rs`) plus one internal cross-link in `iced-pro-handoff.md`.
+   These break silently if D-1 is taken and the links are not fixed.
 
 ---
 
@@ -110,10 +118,11 @@ Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
 ### Phase 0 — safety
 
 1. `git switch -c chore/rename-iced-pro-hoarfrost` off the current line.
-2. Commit or stash the 3 untracked `geometry/` files.
+2. Commit or stash **every** in-flight change (modified and untracked).
    **Gate:** `git status --porcelain` is empty.
-3. Record the baseline test count (`cargo nextest run --workspace`) so the
-   post-rename result is comparable rather than merely green.
+3. Re-run the §1 counts (`rg -l -e iced-pro -e iced_pro`) and record the baseline
+   test count (`cargo nextest run --workspace`) so the post-rename result is
+   comparable rather than merely green.
 
 ### Phase 1 — move the directory (structure only, no content edits)
 
@@ -127,7 +136,7 @@ Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
 
 ### Phase 2 — mechanical identifier sweep
 
-8. Repo-wide replace across the 93 files, in this order:
+8. Repo-wide replace across the affected files, in this order:
    mask `iced_program` → placeholder → `iced-pro`→`hoarfrost`,
    `iced_pro`→`hoarfrost` → restore placeholder.
 9. Do **not** touch: `src/hoarfrost/spec.md`, any `SPEC.md`, `target/`, `.git/`.
@@ -144,7 +153,7 @@ Variants checked and **absent** from the tree: `IcedPro`, `ICED_PRO`, `icedpro`.
     `git diff --stat --name-only | rg 'ui_iced|iced_visual'` shows content-only
     edits at most, no renames.
 14. Positive check: `rg -ni 'hoar' --glob '!target/**'` returns only the intended
-    ~93 files.
+    files.
 
 ### Phase 4 — quality gate (repo root, per `AGENTS.md`)
 
@@ -214,3 +223,7 @@ migration.
    About-dialog exclusion is possible if §3.6 is missed.
 3. **`iced_program` corruption** — silent until a dependency-resolution error;
    guarded by the Phase 3 step 12 check.
+
+**Sequencing advice.** Land the in-flight `iced-pro` work first, then do the rename
+as a single isolated, rename-only-plus-sweep commit. Mixing it with feature work
+makes the diff unauditable and the rollback coarse.
