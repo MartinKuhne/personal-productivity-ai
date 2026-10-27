@@ -153,7 +153,9 @@ use crate::token_lint::{
 /// 173 as of `UIF-ATOM-011`: `widget/time_picker.rs`, joining Rule B's visual scope.
 /// 174 as of `UIF-ATOM-012`: `widget/color_picker.rs`, joining Rule B's visual scope.
 /// 176 as of Increments 24 & 25 (`UIF-NAV-001`, `UIF-NAV-003`, `UIF-TAB-003`): `composite/navbar.rs` and `composite/tab_strip.rs`.
-const PIN_FILES_SCANNED: usize = 177;
+/// 177 as of `UIF-COMP-016`: `composite/split_divider.rs`.
+/// 179 as of `UIF-PANE-002` and `UIF-WIN-001`: `geometry/pane_solver.rs` and `geometry/window_geometry.rs`.
+const PIN_FILES_SCANNED: usize = 179;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

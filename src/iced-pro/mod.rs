@@ -81,6 +81,12 @@ pub use composite::{
     diff_viewer, empty_state, grid_view, keybind_recorder, navigation_rail, pagination_bar,
     pips_pager, side_sheet, skeleton, split_divider, stepper, wizard_footer,
 };
+pub use geometry::{
+    CENTER_PANE_MIN_W, LEFT_PANE_MIN_W, MemoryWindowStorage, NoopWindowStorage, RIGHT_PANE_MIN_W,
+    SolvedWindowLayout, UiScale, WINDOW_DEFAULT_HEIGHT, WINDOW_DEFAULT_WIDTH, WINDOW_MIN_HEIGHT,
+    WINDOW_MIN_WIDTH, WindowGeometry, WindowStorage, auto_fit_pane_width, solve_clamped_pane_width,
+    solve_window_layout,
+};
 pub use widget::{
     AmPm, Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
     CivilTime, ColorPicker, ColorPickerModel, ColorSwatchButton, DatePicker, DatePickerModel,

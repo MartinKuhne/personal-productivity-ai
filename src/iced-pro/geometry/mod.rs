@@ -18,6 +18,11 @@
 //!   resized card is clamped so its **title bar**, not its body, can never
 //!   be lost off-screen, plus the min/max size policy a resize is clamped
 //!   against (`UIF-MOV-002`).
+//! * [`pane_solver`] — pure boundary solvers for workspace pane dimensions:
+//!   clamping and auto-fit to visible item labels (`UIF-PANE-002`).
+//! * [`window_geometry`] — window dimensions schema, `UiScale` step math,
+//!   window layout solving preserving central workspace floor, and the
+//!   `WindowStorage` seam (`UIF-WIN-001`).
 //!
 //! All values are `f32` logical pixels in the single root viewport
 //! coordinate space of `UIF-WIN-002`: origin `(0, 0)` at the top-left of
@@ -29,3 +34,14 @@
 
 pub mod anchor;
 pub mod clamp;
+pub mod pane_solver;
+pub mod window_geometry;
+
+pub use pane_solver::{
+    LEFT_PANE_MIN_W, RIGHT_PANE_MIN_W, auto_fit_pane_width, solve_clamped_pane_width,
+};
+pub use window_geometry::{
+    CENTER_PANE_MIN_W, MemoryWindowStorage, NoopWindowStorage, SolvedWindowLayout, UiScale,
+    WINDOW_DEFAULT_HEIGHT, WINDOW_DEFAULT_WIDTH, WINDOW_MIN_HEIGHT, WINDOW_MIN_WIDTH,
+    WindowGeometry, WindowStorage, solve_window_layout,
+};

@@ -2051,19 +2051,19 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §4.1 Main Window --------------------------------------------------
     Coverage {
         id: "UIF-WIN-001",
-        status: Status::NotOwned,
+        status: Status::Partial,
         section: "§4.1.2",
-        evidence: &["geometry/mod.rs", "surface/movable.rs"],
+        evidence: &["geometry/window_geometry.rs", "geometry/mod.rs"],
         reason: Some(
-            "App-owned under D-2. Window dimensions, screen position, split-pane \
-             ratios, the 0.75x-2.00x UI-scale multiplier and their cross-session \
-             persistence belong to the host. The framework contributes the viewport as \
-             a `Rectangle` every solver is written against, so the geometry stays \
-             correct down to the 640x480 floor, and an injected `GeometryStorage` seam \
-             — but that seam is scoped to movable-overlay geometry only. There is no \
-             window-geometry persistence here and no pane-minimum policy.",
+            "Framework-owned geometry schema, UiScale step quantization, clamp solver \
+             (WINDOW_MIN 640x480, CENTER_PANE_MIN_W 240px), and WindowStorage trait \
+             implemented; Not covered: host owns disk I/O and engine resize commands \
+             under D-2/D-9.",
         ),
-        note: None,
+        note: Some(
+            "Clamping guarantees the central workspace never collapses below 240px \
+             down to the 640x480 floor.",
+        ),
     },
     Coverage {
         id: "UIF-WIN-002",
@@ -2164,17 +2164,17 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-PANE-002",
-        status: Status::NotOwned,
+        status: Status::Partial,
         section: "§4.3.2",
-        evidence: &[],
+        evidence: &["geometry/pane_solver.rs"],
         reason: Some(
-            "App-owned under D-2: auto-fit to the longest visible label, the \
-             [150px, 20% viewport] clamp and the conditional mounting of the Table of \
-             Contents pane are workspace policy. `geometry::clamp` solves *overlay \
-             title-bar reachability*, not pane proportions, and this crate owns no pane \
-             width policy at all.",
+            "Framework-owned solvers (solve_clamped_pane_width, auto_fit_pane_width) \
+             implemented; Not covered: host owns TOC mount decision and persistence under D-2/D-9.",
         ),
-        note: None,
+        note: Some(
+            "Pure solvers ensure Left Pane never collapses below 150px and respects \
+             20% viewport cap.",
+        ),
     },
     Coverage {
         id: "UIF-PANE-003",
