@@ -2030,27 +2030,22 @@ const SPEC_COVERAGE: &[Coverage] = &[
     },
     Coverage {
         id: "UIF-COMP-016",
-        status: Status::Partial,
+        status: Status::Implemented,
         section: "§3B.16",
         evidence: &[
+            "composite/split_divider.rs",
             "token/size.rs",
             "binding/pre_rank.rs",
             "surface/movable.rs",
             "geometry/clamp.rs",
         ],
-        reason: Some(
-            "Specified in §3B.16 but Missing from the crate: no splitter module exists, so \
-             the composite has no widget, no resolver and no model behind it. The framework \
-             contributes the pieces it composes from — `size.splitter.grab` and the grip-pill \
-             geometry (token/size.rs), the Pre-Rank drag-cancel coordinator (binding/pre_rank.rs), \
-             and the clamp-from-last-position drag contract (surface/movable.rs, \
-             geometry/clamp.rs) — but the drag lifecycle, paint promotion and resize cursor \
-             contract of §3B.16 are unbuilt.",
-        ),
+        reason: None,
         note: Some(
             "Added by the D-2 boundary review as the only new id: one reusable split handle \
              for workspace pane splits (§4.3.2), SideSheet edges (§3B.12) and DataTable \
-             column resize (§3B.7), so the three host sites do not re-derive the same handle.",
+             column resize (§3B.7), implemented in composite/split_divider.rs with resting \
+             1px subtle stroke, 10px grab zone, 2x24px grip pill, VisualState accent promotion, \
+             and clamp-from-last-position zero-overshoot drag lifecycle.",
         ),
     },
     // --- §4.1 Main Window --------------------------------------------------
@@ -2152,17 +2147,20 @@ const SPEC_COVERAGE: &[Coverage] = &[
     // --- §4.3 Multiple Panes ----------------------------------------------
     Coverage {
         id: "UIF-PANE-001",
-        status: Status::NotOwned,
+        status: Status::Implemented,
         section: "§4.3.2",
-        evidence: &["token/color.rs", "surface/movable.rs"],
-        reason: Some(
-            "App-owned under D-2: no splitter or divider module exists. The framework \
-             contributes the tokens the divider paints with (`border.subtle` at rest, \
-             `accent.primary` on hover and drag) and the drag state-machine pattern \
-             proven in the movable overlay, but no divider widget, no 10px grab-zone \
-             geometry and no resize-cursor contract.",
+        evidence: &[
+            "composite/split_divider.rs",
+            "token/color.rs",
+            "surface/movable.rs",
+        ],
+        reason: None,
+        note: Some(
+            "Split divider affordance implemented in composite/split_divider.rs: 1px resting \
+             stroke in color.border.subtle, centered 2x24px grip pill in color.border.strong, \
+             10px grab zone (size.splitter.grab), horizontal resize cursor, and color.accent.border \
+             promotion on hover or active drag.",
         ),
-        note: None,
     },
     Coverage {
         id: "UIF-PANE-002",

@@ -466,10 +466,7 @@ fn check_basename(value: &str) -> Option<ValidationMessage> {
         return Some(reject(CODE_EMPTY, "A name is required."));
     }
     if value == "." || value == ".." {
-        return Some(reject(
-            CODE_ILLEGAL_CHAR,
-            "A name cannot be '.' or '..'",
-        ));
+        return Some(reject(CODE_ILLEGAL_CHAR, "A name cannot be '.' or '..'"));
     }
     if starts_or_ends_with_space(value) {
         return Some(reject(

@@ -133,6 +133,7 @@ pub mod scroll_view;
 pub mod settings_row;
 pub mod side_sheet;
 pub mod skeleton;
+pub mod split_divider;
 pub mod stepper;
 pub mod tab_strip;
 pub mod table_cell;
@@ -182,6 +183,10 @@ pub use side_sheet::{
     side_sheet,
 };
 pub use skeleton::{Skeleton, SkeletonStyle, skeleton};
+pub use split_divider::{
+    SplitAxis, SplitDivider, SplitDividerModel, SplitDividerResize, SplitDividerState,
+    SplitSnapshot, compute_grab_rect, split_divider, split_divider_geometry, split_divider_layers,
+};
 pub use stepper::{
     StepItem, StepStatus, Stepper, StepperModel, StepperOrientation, WizardFooterConfig, stepper,
     wizard_footer,

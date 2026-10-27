@@ -983,6 +983,86 @@ pub fn not_owned_cells() -> Vec<Cell> {
 }
 
 // ---------------------------------------------------------------------------
+// SplitDivider snapshot quads — UIF-COMP-016, UIF-PANE-001
+// ---------------------------------------------------------------------------
+
+/// Ordered snapshot quads for [`SplitDivider`](crate::composite::SplitDivider)
+/// across resting, hovered, dragged, and disabled states (§3B.16, `UIF-COMP-016`, `UIF-PANE-001`, `UIF-PRIN-006`).
+///
+/// Returns a quad list for each of the four interaction postures:
+/// `[("resting", ...), ("hovered", ...), ("dragged", ...), ("disabled", ...)]`.
+#[must_use]
+pub fn split_divider_snapshot_quads(
+    axis: crate::composite::SplitAxis,
+    bounds: Rectangle,
+    palette: &Palette,
+) -> Vec<(&'static str, Vec<FrameQuad>)> {
+    vec![
+        (
+            "resting",
+            split_divider_quads(
+                VisualState {
+                    base: BaseState::Rest,
+                    focused: false,
+                },
+                axis,
+                bounds,
+                palette,
+            ),
+        ),
+        (
+            "hovered",
+            split_divider_quads(
+                VisualState {
+                    base: BaseState::Hovered,
+                    focused: false,
+                },
+                axis,
+                bounds,
+                palette,
+            ),
+        ),
+        (
+            "dragged",
+            split_divider_quads(
+                VisualState {
+                    base: BaseState::Pressed,
+                    focused: false,
+                },
+                axis,
+                bounds,
+                palette,
+            ),
+        ),
+        (
+            "disabled",
+            split_divider_quads(
+                VisualState {
+                    base: BaseState::Disabled,
+                    focused: false,
+                },
+                axis,
+                bounds,
+                palette,
+            ),
+        ),
+    ]
+}
+
+/// The ordered quad list a [`SplitDivider`](crate::composite::SplitDivider) frame draws in `state`
+/// (§3B.16, `UIF-COMP-016`, `UIF-PANE-001`, `UIF-PRIN-006`).
+#[must_use]
+pub fn split_divider_quads(
+    state: VisualState,
+    axis: crate::composite::SplitAxis,
+    bounds: Rectangle,
+    palette: &Palette,
+) -> Vec<FrameQuad> {
+    let layers = crate::composite::split_divider_layers(bounds, axis, state, palette);
+    paint_frame(Namer::Standard, bounds, &layers).quads
+}
+
+// ---------------------------------------------------------------------------
 // The whole gallery
 // ---------------------------------------------------------------------------
 
