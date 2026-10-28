@@ -101,5 +101,9 @@ pub use widget::{
 pub mod checkbox_ink_probe;
 #[cfg(test)]
 pub mod geometry_gallery;
-#[cfg(test)]
+// Downstream crates get the same headless capture harness this crate's own
+// tests run on, by turning on the `test-helpers` feature. Under `test` it
+// is here regardless, so `cargo test` needs no flag. See the `[features]`
+// note in `Cargo.toml` for why the flag pulls in nothing.
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;

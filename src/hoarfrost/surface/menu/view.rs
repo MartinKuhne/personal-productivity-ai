@@ -135,6 +135,18 @@
 //! rounded column, and the discrepancy is recorded here rather than
 //! smoothed over.
 //!
+//! # A non-navigable row still publishes its own box
+//!
+//! Dropping a row from the focus router says *"Tab cannot stop here"*. It
+//! must not also say *"this row has no position"*. The row's own bounds are
+//! published through `Operation::container` in every state, taken from the
+//! same helper the paint pass fills, so a host can see, measure and route
+//! to a disabled action, a heading or a separator exactly as it can an
+//! enabled one — without any of them becoming a keyboard target.
+//! `container` answers *where the row is* and `focusable` answers *whether
+//! Tab may stop*; the two are never conflated, and consistency across
+//! states beats minimality.
+//!
 //! # What is deliberately not here
 //!
 //! * **The card.** No perimeter, no 6px card padding, no 224–320px width
@@ -1487,6 +1499,51 @@ fn slot_layout<'a>(layout: Layout<'a>, index: usize) -> Layout<'a> {
     layout.children().nth(index).unwrap_or(layout)
 }
 
+/// The row's own box — the rectangle the §4.8.1 grid gave the row itself.
+///
+/// Both passes that need it take it from here: [`draw`](Widget::draw) paints
+/// its fill and its inset outline from it, and [`operate`](Widget::operate)
+/// publishes it. One function, one source, so the box a host reads cannot
+/// drift from the box that was drawn — the same guarantee
+/// [`toggle::indicator_box`](crate::widget::toggle::indicator_box) gives a
+/// toggle's indicator, for the same reason.
+#[must_use]
+fn row_box(layout: Layout<'_>) -> Rectangle {
+    layout.bounds()
+}
+
+/// Publishes the row's own box to the operation stream.
+///
+/// **Fires in every state** — navigable or not. That is the rule the
+/// disabled-toggle fix established, and the reason this is deliberately
+/// *not* tucked into the non-navigable branch of [`operate`](Widget::operate):
+///
+/// * [`Operation::container`](iced::advanced::widget::Operation::container)
+///   answers *"where is this row?"*.
+/// * [`Operation::focusable`](iced::advanced::widget::Operation::focusable)
+///   answers *"can Tab stop here?"*.
+///
+/// Two orthogonal doors. A row that is not navigable closes the second one
+/// and keeps the first open, so a host can still see, measure and route to
+/// a disabled action, a heading or a separator without any of them ever
+/// becoming a keyboard target. Before this, a non-navigable row published
+/// its caption and nothing else — the caption named a row the operation
+/// stream could not find, and the row's position was recoverable only from
+/// the [`size`](Widget::size) it asked for, never from the layout it
+/// actually got.
+///
+/// Exactly one record per row: the box is published once, unconditionally,
+/// and never re-published under a different hook. A navigable row therefore
+/// carries one `container` **and** one `focusable`, both the identical box
+/// — the box and the capability, not two boxes.
+fn publish_row_box(
+    operation: &mut dyn iced::advanced::widget::Operation,
+    id: &Id,
+    layout: Layout<'_>,
+) {
+    operation.container(Some(id), row_box(layout));
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for MenuRow<'_, Message, Theme, Renderer>
 where
@@ -1621,7 +1678,7 @@ where
         let state = tree.state.downcast_mut::<RowTreeState>();
 
         if self.row.navigable() {
-            operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
+            operation.focusable(Some(&self.widget_id), row_box(layout), &mut state.focusable);
         } else {
             // Unregistered, so the router cannot take this focus back —
             // it cannot see the widget at all. Drop it here rather than
@@ -1633,6 +1690,11 @@ where
                 &mut state.focusable,
             );
         }
+
+        // The row's own box, published whatever its navigability — see
+        // [`publish_row_box`] for why the container door stays open while
+        // the one above only opens for a navigable row.
+        publish_row_box(operation, &self.widget_id, layout);
 
         let label_slot = self.slots.index_of(SlotKind::Label);
 
@@ -1791,7 +1853,10 @@ where
     ) {
         let state = tree.state.downcast_ref::<RowTreeState>();
         let paint = self.current_style(state);
-        let bounds = layout.bounds();
+        // The same function `operate` publishes through, so the box a host
+        // reads is the box this pass filled — structural, not maintained by
+        // hand.
+        let bounds = row_box(layout);
 
         for layer in paint_layers(&self.row, bounds, &paint, &self.palette) {
             renderer.fill_quad(layer.quad(), Background::Color(layer.fill));

@@ -2396,9 +2396,7 @@ fn test_hovering_a_slot_reports_the_row_hovered_exactly_once() {
 // changed" control with the check that it would notice if something had.
 // ---------------------------------------------------------------------------
 
-use crate::test_helpers::{Capture, Frame, assert_repainted, pressed};
-use std::any::Any;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use crate::test_helpers::{Capture, Frame, assert_panics, assert_repainted, pressed};
 
 /// The canvas a repaint probe renders into.
 ///
@@ -2409,43 +2407,17 @@ fn repaint_canvas() -> iced::Size {
     crate::test_helpers::VIEWPORT
 }
 
-/// The text a caught assertion produced.
-///
-/// `test_helpers` has this, but it is private to that sidecar, so every
-/// file that wants to prove an assertion is load-bearing writes it out
-/// again.
-fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
-    match outcome {
-        Ok(()) => String::from("<no panic>"),
-        Err(payload) => {
-            if let Some(text) = payload.downcast_ref::<String>() {
-                text.clone()
-            } else if let Some(text) = payload.downcast_ref::<&str>() {
-                (*text).to_owned()
-            } else {
-                String::from("<non-string panic payload>")
-            }
-        }
-    }
-}
-
 /// Prove a repaint claim is load-bearing over `rect`.
 ///
 /// Run against a frame compared with itself — no repaint at all — the
 /// assertion must go red, naming the control and the floor it missed.
 fn repaint_guard_panic(frame: &Frame, rect: Rectangle, what: &str) -> String {
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        assert_repainted(frame, frame, rect, what);
-    }));
-
-    assert!(
-        outcome.is_err(),
-        "{what}: `assert_repainted` PASSED comparing a frame with itself over \
-         {rect:?} — the assertion can never fail, so the repaint claim built on \
-         it proves nothing"
+    let text = assert_panics(
+        &format!("{what} compared with itself over {rect:?}"),
+        || {
+            assert_repainted(frame, frame, rect, what);
+        },
     );
-
-    let text = panic_text(&outcome);
 
     assert!(
         text.contains(what),
@@ -2788,4 +2760,413 @@ fn test_a_disabled_row_repaints_nothing_under_the_pointer() {
         live_rest.differing_pixels(&live_hovered, band),
         "the disabled-row pointer control",
     );
+}
+
+// ===========================================================================
+// The non-navigable row's own box
+//
+// A row that is not navigable — a disabled action, a heading, a separator —
+// drops its focus registration and publishes its caption, and that is all.
+// No `container`, no `focusable`. A geometry consumer traversing the
+// `Operation` stream therefore finds **no box for that row at all**: where
+// the row sits is recoverable only from the `size()` it asked for, never
+// from the layout it actually got. A router cannot answer "where is this
+// disabled row on screen?" and a test cannot measure it.
+//
+// This is the same defect class already fixed for disabled toggles, where
+// [`crate::widget::toggle_widget`] established the rule:
+//
+// * [`Operation::container`](iced::advanced::widget::Operation::container)
+//   answers *"where is this row?"* and fires in every state.
+// * [`Operation::focusable`](iced::advanced::widget::Operation::focusable)
+//   answers *"can Tab stop here?"* and fires only when it genuinely can.
+//
+// Two orthogonal questions. Consistency across states beats minimality.
+// ===========================================================================
+
+use crate::test_helpers::KIND_CONTAINER;
+
+/// The boxes the row itself published through `container`, under its own id.
+fn containers_for(candidates: &[Candidate], id: &iced::widget::Id) -> Vec<Rectangle> {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_CONTAINER && candidate.id.as_ref() == Some(id))
+        .map(|candidate| candidate.bounds)
+        .collect()
+}
+
+/// The boxes the row itself published through `focusable`, under its own id.
+fn focusables_for(candidates: &[Candidate], id: &iced::widget::Id) -> Vec<Rectangle> {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_FOCUSABLE && candidate.id.as_ref() == Some(id))
+        .map(|candidate| candidate.bounds)
+        .collect()
+}
+
+/// The iced [`Id`] a row built under `key` answers to.
+fn row_id(key: &str) -> iced::widget::Id {
+    crate::bridge::widget_id(&crate::focus::FocusId::new(key))
+}
+
+/// The three row kinds that are never a Tab stop.
+fn non_navigable_rows() -> Vec<(&'static str, Row)> {
+    vec![
+        ("disabled action", disabled_action()),
+        ("heading", heading()),
+        ("separator", separator()),
+    ]
+}
+
+/// A body-only row under `key`, so the recording leg sees the row's own
+/// paint and nothing a slot child added.
+fn probe_body_row(key: &'static str, row: Row) -> Vec<Candidate> {
+    let mut harness = Harness::headless(move || {
+        MenuRow::with_body(
+            row.clone(),
+            Element::new(Blank::new(Size::new(80.0, 8.0))),
+            key,
+            grid_messages,
+        )
+        .palette(palette())
+        .into()
+    });
+
+    harness.candidates()
+}
+
+/// The same body-only row over the recording renderer, which reports every
+/// quad the paint pass actually asked for.
+fn recording_body_row(
+    key: &'static str,
+    row: Row,
+) -> Harness<'static, String, crate::test_helpers::Recorder> {
+    Harness::recording(move || {
+        MenuRow::with_body(
+            row.clone(),
+            Element::new(Blank::new(Size::new(80.0, 8.0))),
+            key,
+            grid_messages,
+        )
+        .palette(palette())
+        .into()
+    })
+}
+
+// -- the gap: a non-navigable row publishes no box of its own -----------
+
+#[test]
+fn test_a_non_navigable_row_publishes_a_record_of_its_own_box() {
+    for (name, row) in non_navigable_rows() {
+        let id = probe_widget_id();
+        let candidates = probe_grid(row.clone());
+
+        assert!(!row.navigable(), "precondition: a {name} is not navigable");
+        assert!(
+            !containers_for(&candidates, &id).is_empty(),
+            "a {name} publishes no box of its own: its caption is published and \
+             the row it sits in is invisible to anything traversing the operation \
+             stream — its position is recoverable only from the size() it asked \
+             for, never from the layout it got. Candidates: {:?}",
+            candidates
+                .iter()
+                .map(|c| (c.kind, c.bounds))
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            containers_for(&candidates, &id).len(),
+            1,
+            "a {name} publishes exactly one record of itself — one row, one box, \
+             not one per slot"
+        );
+    }
+}
+
+// -- and publishing the box does not open the Tab door -------------------
+
+#[test]
+fn test_publishing_the_box_does_not_make_a_non_navigable_row_focusable() {
+    for (name, row) in non_navigable_rows() {
+        let id = probe_widget_id();
+        let candidates = probe_grid(row.clone());
+
+        assert_eq!(
+            containers_for(&candidates, &id).len(),
+            1,
+            "precondition: a {name} publishes its own box"
+        );
+        assert!(
+            focusables_for(&candidates, &id).is_empty(),
+            "a {name} published a focusable record under the row id — publishing \
+             its box must not make it a Tab stop"
+        );
+        assert!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.kind == KIND_FOCUSABLE)
+                .all(|candidate| candidate.id.as_ref() != Some(&id)),
+            "no record anywhere in a {name}'s stream may make the row a Tab stop"
+        );
+    }
+}
+
+#[test]
+fn test_a_non_navigable_row_is_still_absent_from_the_focus_router() {
+    for (name, row) in non_navigable_rows() {
+        let key = "row_nonav_router";
+        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        assert_eq!(
+            published.len(),
+            1,
+            "precondition: a {name} publishes its own box"
+        );
+
+        let mut harness = recording_body_row(key, row.clone());
+
+        assert_eq!(
+            harness.focus_count().total,
+            0,
+            "a {name} must not appear in the router's count — publishing a box \
+             answers where the row is, not whether Tab may stop on it"
+        );
+        assert!(
+            harness.registered().is_empty(),
+            "a {name} registered a focus target: {name}"
+        );
+    }
+}
+
+// -- the published box is the painted box ------------------------------
+
+#[test]
+fn test_a_non_navigable_row_publishes_the_box_its_paint_pass_drew_from() {
+    let key = "row_sep_paint";
+    let published = containers_for(&probe_body_row(key, separator()), &row_id(key));
+    assert_eq!(
+        published.len(),
+        1,
+        "precondition: the separator publishes its own box"
+    );
+    let want = published[0];
+
+    let mut harness = recording_body_row(key, separator());
+    let painted = harness.paint();
+
+    assert_eq!(
+        painted.len(),
+        1,
+        "a separator paints exactly one layer — its rule — so the recording leg \
+         isolates the row's own paint"
+    );
+    let rule = painted[0].bounds;
+
+    assert_eq!(
+        want.x, rule.x,
+        "the published box does not start where the rule was drawn across the row"
+    );
+    assert_eq!(
+        want.width, rule.width,
+        "the published box is not as wide as the rule drawn across the row"
+    );
+    assert_eq!(
+        want.center().y,
+        rule.center().y,
+        "the published box is not the band the rule was centred in"
+    );
+    assert_eq!(
+        want.height, SEPARATOR_HEIGHT,
+        "the published box is not the row's own height"
+    );
+}
+
+#[test]
+fn test_the_published_box_is_the_box_the_paint_pass_filled() {
+    let key = "row_fill_paint";
+    let id = row_id(key);
+    let published = containers_for(&probe_body_row(key, action()), &id);
+    assert_eq!(
+        published.len(),
+        1,
+        "precondition: a navigable row publishes its own box"
+    );
+    let want = published[0];
+
+    let mut harness = recording_body_row(key, action());
+    harness.hover(Point::new(
+        crate::test_helpers::VIEWPORT.width / 2.0,
+        ROW_HEIGHT / 2.0,
+    ));
+    let painted = harness.paint();
+
+    assert_eq!(
+        painted.len(),
+        1,
+        "a hovered row paints exactly its own fill layer"
+    );
+    assert_eq!(
+        want, painted[0].bounds,
+        "the box published through `container` is not the box `draw` filled — the \
+         identity has drifted from the paint"
+    );
+}
+
+/// The published box and the row's real bounds agree to within half a pixel on
+/// every edge.
+///
+/// The row's own hit box *is* the `layout.bounds()` its `draw` pass paints
+/// from, and `update` tests it with `cursor.is_over`. Probing the crossing
+/// either side of each published edge therefore brackets the true edge inside
+/// ±0.5px of the published one, which is as close as a cursor can get.
+#[test]
+fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a_pixel() {
+    const HALF_PIXEL: f32 = 0.5;
+
+    for (name, row) in non_navigable_rows() {
+        let key = "row_nonav_hit";
+        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        assert_eq!(
+            published.len(),
+            1,
+            "precondition: a {name} publishes its own box"
+        );
+        let want = published[0];
+
+        let mut harness = recording_body_row(key, row.clone());
+        let inside = want.center();
+        // A point clear of the row, used to park the pointer between probes.
+        // The hover report is an edge, not a level, so every probe has to
+        // start from a known "not hovering" or the crossing never fires.
+        let park = Point::new(inside.x, want.y + want.height + 50.0);
+
+        assert_eq!(
+            harness.hover(inside),
+            vec!["hovered".to_owned()],
+            "the centre of the published box is not inside a {name}"
+        );
+
+        let edges = [
+            (
+                "left",
+                Point::new(want.x + HALF_PIXEL, inside.y),
+                Point::new(want.x - HALF_PIXEL, inside.y),
+            ),
+            (
+                "right",
+                Point::new(want.x + want.width - HALF_PIXEL, inside.y),
+                Point::new(want.x + want.width + HALF_PIXEL, inside.y),
+            ),
+            (
+                "top",
+                Point::new(inside.x, want.y + HALF_PIXEL),
+                Point::new(inside.x, want.y - HALF_PIXEL),
+            ),
+            (
+                "bottom",
+                Point::new(inside.x, want.y + want.height - HALF_PIXEL),
+                Point::new(inside.x, want.y + want.height + HALF_PIXEL),
+            ),
+        ];
+
+        for (edge, just_inside, just_outside) in edges {
+            harness.hover(park);
+            assert_eq!(
+                harness.hover(just_inside),
+                vec!["hovered".to_owned()],
+                "a {name}'s real bounds do not reach the {edge} edge of the box it \
+                 published: {HALF_PIXEL}px inside that edge is already outside the row"
+            );
+            assert_eq!(
+                harness.hover(just_outside),
+                vec!["unhovered".to_owned()],
+                "a {name}'s real bounds reach past the {edge} edge of the box it \
+                 published: {HALF_PIXEL}px outside that edge is still inside the row"
+            );
+        }
+    }
+}
+
+// -- the measured geometry --------------------------------------------
+
+#[test]
+fn test_the_published_non_navigable_box_is_the_band_the_grid_declares() {
+    for (name, key, row, height) in [
+        (
+            "disabled action",
+            "row_dis_band",
+            disabled_action(),
+            ROW_HEIGHT,
+        ),
+        ("heading", "row_head_band", heading(), HEADING_HEIGHT),
+        ("separator", "row_sep_band", separator(), SEPARATOR_HEIGHT),
+    ] {
+        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        assert_eq!(
+            published.len(),
+            1,
+            "precondition: a {name} publishes its own box"
+        );
+        assert_eq!(
+            published[0],
+            Rectangle::new(
+                Point::new(0.0, 0.0),
+                Size::new(crate::test_helpers::VIEWPORT.width, height)
+            ),
+            "a {name} must publish the full-width band §4.8.1 declares for it, \
+             not a box of some other height"
+        );
+    }
+}
+
+// -- the navigable path is untouched ------------------------------------
+
+#[test]
+fn test_the_navigable_row_publishes_the_same_box_it_always_did() {
+    let id = probe_widget_id();
+    let candidates = probe_grid(full_row());
+
+    let focus = focusables_for(&candidates, &id);
+    let containers = containers_for(&candidates, &id);
+
+    assert_eq!(
+        focus.len(),
+        1,
+        "precondition: a navigable row is exactly one Tab stop"
+    );
+    assert_eq!(
+        focus[0],
+        Rectangle::new(
+            Point::new(0.0, 0.0),
+            Size::new(crate::test_helpers::VIEWPORT.width, ROW_HEIGHT)
+        ),
+        "the box a navigable row registers is still the whole row, unchanged by \
+         anything added for the non-navigable case"
+    );
+    assert_eq!(
+        containers, focus,
+        "the container a navigable row carries must be the identical box it has \
+         always registered — additive, not a perturbation"
+    );
+}
+
+#[test]
+fn test_a_navigable_row_publishes_its_box_and_exactly_one_tab_stop() {
+    for (name, row) in [
+        ("action", action()),
+        ("checked toggle", checked()),
+        ("submenu parent", submenu_parent()),
+    ] {
+        let id = probe_widget_id();
+        let candidates = probe_grid(row.clone());
+
+        assert_eq!(
+            containers_for(&candidates, &id).len(),
+            1,
+            "a navigable {name} publishes exactly one box of itself"
+        );
+        assert_eq!(
+            focusables_for(&candidates, &id).len(),
+            1,
+            "a navigable {name} is still exactly one Tab stop"
+        );
+    }
 }

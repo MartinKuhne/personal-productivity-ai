@@ -96,6 +96,21 @@
 //! first place; there is nothing to amortise, and therefore no reason for
 //! one to outlive the test that paid for it.
 //!
+//! # Shipping to other crates
+//!
+//! This module is gated on `any(test, feature = "test-helpers")`. Under
+//! `cargo test` it is here with no flag; a downstream crate gets the same
+//! harness by turning the feature on. The feature selects **nothing** —
+//! every crate the harness needs is already compiled as part of `iced`, so
+//! a consumer that turns it on adds no dependency and no code to anything
+//! that did not. See the `[features]` note in `Cargo.toml`.
+//!
+//! It is spelled against `iced_core`, `iced_runtime`, `iced_renderer` and
+//! `iced_futures` directly rather than against `iced_test`, because
+//! `iced_test` is a dev-dependency and a dev-dependency is not there when
+//! somebody else's crate is being built. Every item the harness uses is a
+//! re-export of one of those four anyway.
+//!
 //! Unit tests live in the sibling `test_helpers_tests.rs` sidecar.
 
 use crate::focus::FocusId;
@@ -126,18 +141,20 @@ use iced::mouse;
 use iced::widget::column;
 use iced::widget::text;
 
-use iced_test::core::Background;
-use iced_test::core::Border;
-use iced_test::core::Transformation;
-use iced_test::core::clipboard::Null;
-use iced_test::core::widget::Id;
-use iced_test::futures::futures::executor::block_on;
-use iced_test::renderer::Renderer as HeadlessRenderer;
-use iced_test::runtime::UserInterface;
-use iced_test::runtime::user_interface;
+use iced_core::Background;
+use iced_core::Border;
+use iced_core::Transformation;
+use iced_core::clipboard::Null;
+use iced_core::widget::Id;
+use iced_futures::futures::executor::block_on;
+use iced_renderer::Renderer as HeadlessRenderer;
+use iced_runtime::UserInterface;
+use iced_runtime::user_interface;
 
 use std::any::Any;
 use std::cell::RefCell;
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 
 /// The theme every harness builds with.
 pub type Theme = iced::Theme;
@@ -190,12 +207,12 @@ pub type El<'a, Message, Renderer> = Element<'a, Message, Theme, Renderer>;
 ///
 /// That is why the lifetime is spelled out on the field, on every
 /// constructor's `impl Fn() -> El<'a, ..> + 'a` bound, and on
-/// [`begin`](Self::begin)/[`commit`](Self::commit) rather than being left to
-/// elision. Drop any one of those annotations and the compiler rewrites the
-/// bound back to `'static`, the borrowed-model closures stop coercing, and
-/// the error lands far from its cause — it reads as "closure outlives its
-/// capture" inside `UserInterface::build` rather than "this harness was
-/// pinned to `'static`".
+/// `begin`/`commit` rather than being left to elision. Drop any one of those
+/// annotations and the compiler rewrites the bound back to `'static`, the
+/// borrowed-model closures stop coercing, and the error lands far from its
+/// cause — it reads as "closure outlives its capture" inside
+/// `UserInterface::build` rather than "this harness was pinned to
+/// `'static`".
 pub struct Harness<'a, Message, Renderer> {
     renderer: Renderer,
     cache: user_interface::Cache,
@@ -1123,7 +1140,7 @@ impl Capture {
         background: Color,
         root: Element<'_, Message>,
     ) -> Frame {
-        self.render(
+        self.drive(
             viewport,
             scale,
             background,
@@ -1131,6 +1148,7 @@ impl Capture {
             &[],
             mouse::Cursor::Unavailable,
         )
+        .0
     }
 
     /// Rasterise `root` after delivering `events` with the cursor parked
@@ -1161,14 +1179,15 @@ impl Capture {
         events: &[Event],
         cursor: mouse::Cursor,
     ) -> Frame {
-        self.render(
+        self.drive(
             viewport,
             PIXEL_SCALE,
             CAPTURE_BACKGROUND,
             root,
-            events,
+            &[events],
             cursor,
         )
+        .0
     }
 
     /// Deliver a move, a press and a release at `at` and report what the
@@ -1183,62 +1202,154 @@ impl Capture {
         root: Element<'_, Message>,
         at: Point,
     ) -> Vec<Message> {
-        let mut ui: UserInterface<'_, Message, Theme, HeadlessRenderer> = UserInterface::build(
-            root,
-            VIEWPORT,
-            user_interface::Cache::default(),
-            &mut self.renderer,
-        );
-        let mut clipboard = Null;
-        let mut messages = Vec::new();
         let cursor = mouse::Cursor::Available(at);
-
-        ui.update(
-            &[moved(at), pressed()],
+        let (_ui, messages) = self.deliver(
+            VIEWPORT,
+            root,
+            &[&[moved(at), pressed()], &[released()]],
             cursor,
-            &mut self.renderer,
-            &mut clipboard,
-            &mut messages,
-        );
-        ui.update(
-            &[released()],
-            cursor,
-            &mut self.renderer,
-            &mut clipboard,
-            &mut messages,
         );
 
         messages
     }
 
-    /// The one draw path every capture goes through.
-    fn render<Message: 'static>(
+    /// Click at `at` and report **both** the messages the tree produced and
+    /// the frame the click left painted.
+    ///
+    /// The one-pass form of the claim a click test actually wants to make.
+    /// Split across two calls it can only ever be half-made: [`Self::click`]
+    /// returns the messages but never draws, [`Self::frame_after`] draws
+    /// but throws the messages away — and re-delivering the click through
+    /// the second call is not the same click, because the two paths batch
+    /// the press and the release differently. Here the click is delivered
+    /// once, in the same two batches [`Self::click`] uses, and the very next
+    /// thing that happens is a raster of the state it produced.    ///
+    /// A test then asserts both halves over the one session:
+    /// `assert!(!messages.is_empty())` proves the widget answered, and
+    /// [`assert_repainted`] over the frame before and the frame after
+    /// proves the answer was visible.
+    #[must_use]
+    pub fn click_and_frame<Message: 'static>(
         &mut self,
         viewport: Size,
-        scale: f32,
-        background: Color,
+        root: Element<'_, Message>,
+        at: Point,
+    ) -> (Frame, Vec<Message>) {
+        let cursor = mouse::Cursor::Available(at);
+
+        self.drive(
+            viewport,
+            PIXEL_SCALE,
+            CAPTURE_BACKGROUND,
+            root,
+            &[&[moved(at), pressed()], &[released()]],
+            cursor,
+        )
+    }
+
+    /// [`frame_after_at`](Self::frame_after_at) plus the messages the
+    /// events produced.
+    ///
+    /// The general, non-pointer form of [`click_and_frame`](Self::click_and_frame):
+    /// whatever events a test injects, it gets the picture and the reply
+    /// from the same drive rather than running the injection twice and
+    /// hoping it lands the same way.
+    #[must_use]
+    pub fn frame_and_messages_after<Message: 'static>(
+        &mut self,
+        viewport: Size,
         root: Element<'_, Message>,
         events: &[Event],
         cursor: mouse::Cursor,
-    ) -> Frame {
-        let mut ui: UserInterface<'_, Message, Theme, HeadlessRenderer> = UserInterface::build(
+    ) -> (Frame, Vec<Message>) {
+        self.drive(
+            viewport,
+            PIXEL_SCALE,
+            CAPTURE_BACKGROUND,
+            root,
+            &[events],
+            cursor,
+        )
+    }
+
+    /// The renderer this session owns.
+    ///
+    /// A probe that wants renderer-level reads alongside its frames takes
+    /// them from here. Building a second headless renderer to measure text
+    /// next to a captured frame costs the ~620 ms build again and, worse,
+    /// measures a renderer that is not the one that drew the picture.
+    #[must_use]
+    pub fn renderer(&self) -> &HeadlessRenderer {
+        &self.renderer
+    }
+
+    /// Mutable access to the session's renderer.
+    ///
+    /// For the calls that need it — [`Headless::screenshot`] among them —
+    /// so a caller can rasterise from the exact renderer these frames came
+    /// out of without going through a [`Frame`].
+    ///
+    /// [`Headless::screenshot`]: iced_core::renderer::Headless::screenshot
+    #[must_use]
+    pub fn renderer_mut(&mut self) -> &mut HeadlessRenderer {
+        &mut self.renderer
+    }
+
+    /// Build an interface over `root` and deliver `batches` against it,
+    /// one `update` call per batch.
+    ///
+    /// The batching is the point: a real pointer's press and its release
+    /// arrive on different frames, and a widget that latches on press reads
+    /// differently when both land in one `update`. Every event-delivering
+    /// path in this session goes through here so they cannot disagree about
+    /// what the tree was made to see.
+    fn deliver<'el, Message: 'static>(
+        &mut self,
+        viewport: Size,
+        root: Element<'el, Message>,
+        batches: &[&[Event]],
+        cursor: mouse::Cursor,
+    ) -> (
+        UserInterface<'el, Message, Theme, HeadlessRenderer>,
+        Vec<Message>,
+    ) {
+        let mut ui = UserInterface::build(
             root,
             viewport,
             user_interface::Cache::default(),
             &mut self.renderer,
         );
+        let mut clipboard = Null;
+        let mut messages = Vec::new();
 
-        if !events.is_empty() {
-            let mut clipboard = Null;
-            let mut messages = Vec::new();
+        for batch in batches {
+            if batch.is_empty() {
+                continue;
+            }
+
             ui.update(
-                events,
+                batch,
                 cursor,
                 &mut self.renderer,
                 &mut clipboard,
                 &mut messages,
             );
         }
+
+        (ui, messages)
+    }
+
+    /// The one drive-and-rasterise path every capture goes through.
+    fn drive<'el, Message: 'static>(
+        &mut self,
+        viewport: Size,
+        scale: f32,
+        background: Color,
+        root: Element<'el, Message>,
+        batches: &[&[Event]],
+        cursor: mouse::Cursor,
+    ) -> (Frame, Vec<Message>) {
+        let (mut ui, messages) = self.deliver(viewport, root, batches, cursor);
 
         ui.draw(
             &mut self.renderer,
@@ -1254,10 +1365,13 @@ impl Capture {
             (viewport.height * scale).round() as u32,
         );
 
-        Frame::new(
-            self.renderer.screenshot(physical, scale, background),
-            viewport,
-            scale,
+        (
+            Frame::new(
+                self.renderer.screenshot(physical, scale, background),
+                viewport,
+                scale,
+            ),
+            messages,
         )
     }
 }
@@ -1315,6 +1429,63 @@ impl Frame {
     #[must_use]
     pub fn physical_size(&self) -> Size<u32> {
         Size::new(self.width_px, self.height_px)
+    }
+
+    /// The physical pixels per logical pixel this frame was rasterised at.
+    ///
+    /// The last piece a reader needs to turn a physical index back into a
+    /// logical coordinate. [`viewport`](Self::viewport) and
+    /// [`physical_size`](Self::physical_size) give it away only by
+    /// division, and a reader working from a raw buffer or a
+    /// [`mask_against`](Self::mask_against) result works from physical
+    /// indices throughout.
+    #[must_use]
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// The RGBA framebuffer exactly as the renderer produced it.
+    ///
+    /// `width_px * height_px * 4` bytes, row-major, channel order R, G,
+    /// B, A. Every other reader on [`Frame`] is a window over this buffer;
+    /// this is the buffer itself, for the probe whose question none of
+    /// those readers asks. Reading it is the caller's business — nothing
+    /// here is copied, so the slice lives as long as the frame.
+    #[must_use]
+    pub fn pixels(&self) -> &[u8] {
+        &self.rgba
+    }
+
+    /// A `true` per physical pixel for everything that differs from
+    /// `reference` by more than `tolerance` on some channel.
+    ///
+    /// Row-major, `width_px * height_px` long, pixel `(x, y)` at
+    /// `y * width_px + x`. The primitive for cutting a mask no fixed
+    /// reader expresses — ink outside its own box, the ring minus the
+    /// fill, everything but the caption — which a caller then composes
+    /// from the bits instead of re-walking the framebuffer by hand.
+    ///
+    /// `reference` is an iced [`Color`] rather than a `[u8; 3]` so the
+    /// very token a widget paints can be the surface the mask is cut
+    /// against; [`to_rgb`] is the 8-bit form it becomes. `tolerance` is
+    /// spelled out for the same reason [`painted_count`](Self::painted_count)
+    /// takes it: the honest number depends on how far the reference sits
+    /// from the renderer's blending noise, and only the caller knows that.
+    #[must_use]
+    pub fn mask_against(&self, reference: Color, tolerance: u8) -> Vec<bool> {
+        let reference = to_rgb(reference);
+
+        let mut mask = Vec::with_capacity((self.width_px * self.height_px) as usize);
+
+        for y in 0..self.height_px {
+            for x in 0..self.width_px {
+                mask.push(
+                    channel_delta(&self.pixel_at(x as usize, y as usize), &reference) > tolerance,
+                );
+            }
+        }
+
+        mask
     }
 
     /// The RGB channels painted at logical point `(x, y)`.
@@ -1565,6 +1736,65 @@ pub fn assert_repainted(before: &Frame, after: &Frame, rect: Rectangle, what: &s
          ({moved} moved, {MIN_CHANGED_PIXELS} required) — the model moved but \
          the frame did not repaint"
     );
+}
+
+/// The message a caught panic carried, whatever shape the payload arrived
+/// in.
+///
+/// A panic payload is a `Box<dyn Any + Send>`: `assert!` hands over a
+/// `String`, `panic!("literal")` hands over a `&str`, and a library that
+/// panics with its own error type hands over that. This flattens all three
+/// into one `String` so a caller can pin the wording it fired on without
+/// rewriting the downcast ladder every time.
+///
+/// An `Ok` outcome reads as `<no panic>` rather than an empty string, so a
+/// guard that forgot to check `is_err` first still says what happened
+/// instead of looking like an assertion that fired with no message.
+#[must_use]
+pub fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
+    match outcome {
+        Ok(()) => String::from("<no panic>"),
+        Err(payload) => {
+            if let Some(text) = payload.downcast_ref::<String>() {
+                text.clone()
+            } else if let Some(text) = payload.downcast_ref::<&str>() {
+                (*text).to_owned()
+            } else {
+                String::from("<non-string panic payload>")
+            }
+        }
+    }
+}
+
+/// Run `probe` and prove it genuinely panicked, returning its message.
+///
+/// The pair every load-bearing assertion needs. An assertion that cannot
+/// fail is worse than no assertion at all — it reads as coverage while the
+/// thing it was supposed to catch stays broken — so the guard runs the
+/// assertion against inputs deliberately chosen to make it fail. A pass
+/// here means the assertion fires, which is what makes a pass *elsewhere*
+/// on the same assertion mean something.
+///
+/// The message comes back through [`panic_text`] so the caller can pin the
+/// wording it expects — the control's name, the threshold it missed — and
+/// a guard that only ever checked "something panicked" cannot be satisfied
+/// by an unrelated crash.
+///
+/// # Panics
+/// Panics when `probe` returns normally, which means the assertion under
+/// test can never fail on the inputs given to it.
+#[must_use]
+#[track_caller]
+pub fn assert_panics(what: &str, probe: impl FnOnce()) -> String {
+    let outcome = catch_unwind(AssertUnwindSafe(probe));
+
+    assert!(
+        outcome.is_err(),
+        "{what}: the assertion PASSED on inputs chosen to make it fail — it can \
+         never fail, so every claim built on it proves nothing"
+    );
+
+    panic_text(&outcome)
 }
 
 #[cfg(test)]

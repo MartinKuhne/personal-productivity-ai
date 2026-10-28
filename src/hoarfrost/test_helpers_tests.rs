@@ -34,8 +34,11 @@ use crate::test_helpers::KIND_TEXT;
 use crate::test_helpers::MIN_CHANGED_PIXELS;
 use crate::test_helpers::PIXEL_SCALE;
 use crate::test_helpers::SURFACE_TOLERANCE;
+use crate::test_helpers::assert_panics;
 use crate::test_helpers::assert_repainted;
 use crate::test_helpers::iced_id;
+use crate::test_helpers::moved;
+use crate::test_helpers::panic_text;
 use crate::test_helpers::screenshot;
 use crate::test_helpers::to_rgb;
 use crate::test_helpers::wrapped;
@@ -67,6 +70,7 @@ use iced::Rectangle;
 use iced::Size;
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::renderer;
+use iced::advanced::renderer::Headless as _;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::Tree;
 use iced::advanced::widget::Widget;
@@ -147,22 +151,6 @@ fn hooked(hook: &'static str, label: &'static str) -> Element<'static, ()> {
 /// A controlled checkbox over a borrowed model.
 fn checkbox<'a>(model: &'a CheckboxModel) -> Element<'a, ()> {
     Checkbox::controlled(Controlled::new(model), "capture_leg_checkbox", |_| None).into()
-}
-
-/// Pull the message out of a caught panic, whatever shape the payload came in.
-fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
-    match outcome {
-        Ok(()) => String::from("<no panic>"),
-        Err(payload) => {
-            if let Some(text) = payload.downcast_ref::<String>() {
-                text.clone()
-            } else if let Some(text) = payload.downcast_ref::<&str>() {
-                (*text).to_owned()
-            } else {
-                String::from("<non-string panic payload>")
-            }
-        }
-    }
 }
 
 /// Run the candidate recorder over a tree and report the kinds it saw.
@@ -389,17 +377,10 @@ fn test_assert_repainted_panics_when_the_frames_are_identical() {
     let before = capture.frame(CANVAS, flat_mark());
     let after = capture.frame(CANVAS, flat_mark());
 
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
+    let message = assert_panics("two identical frames against the repaint assertion", || {
         assert_repainted(&before, &after, whole(CANVAS), "the checkbox mark");
-    }));
+    });
 
-    assert!(
-        outcome.is_err(),
-        "two identical frames must not satisfy the repaint assertion — if this \
-         passes, every repaint test built on it is vacuous"
-    );
-
-    let message = panic_text(&outcome);
     let required = format!("0 moved, {MIN_CHANGED_PIXELS} required");
 
     assert!(
@@ -986,4 +967,247 @@ fn test_a_borrowing_harness_rebuilds_the_same_model_twice() {
         !first.is_empty(),
         "the borrowed model must reach the real renderer at all"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Gap-closer 1 — the renderer behind a capture session
+// ---------------------------------------------------------------------------
+
+/// A session hands out the renderer it owns, read-only and read-write.
+///
+/// A probe that wants renderer-level facts next to its frames used to have
+/// to build a second headless renderer to get them — paying the build
+/// cost again and, worse, measuring a renderer that was not the one that
+/// drew the picture. Both halves of the protocol are reachable here:
+/// `name()` for the `&self` read, `screenshot()` for the `&mut self`
+/// raster, and the buffer it returns is exactly the geometry asked for.
+#[test]
+fn test_a_capture_session_exposes_the_renderer_it_owns() {
+    let mut capture = Capture::new();
+    let frame = capture.frame(CANVAS, flat_mark());
+    let physical = frame.physical_size();
+
+    let name = capture.renderer().name();
+    assert!(
+        !name.is_empty(),
+        "`renderer()` must hand back a live renderer that identifies itself"
+    );
+
+    let raw = capture
+        .renderer_mut()
+        .screenshot(physical, PIXEL_SCALE, Color::BLACK);
+    let expected = physical.width as usize * physical.height as usize * 4;
+
+    assert_eq!(
+        raw.len(),
+        expected,
+        "`renderer_mut()` must drive an offscreen raster of exactly the \
+         geometry handed to it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Gap-closer 2 — the raw buffer and an arbitrary mask
+// ---------------------------------------------------------------------------
+
+/// The raw framebuffer lines up with the geometry the frame claims.
+#[test]
+fn test_a_frame_exposes_its_raw_buffer_at_its_own_geometry() {
+    let mut capture = Capture::new();
+    let frame = capture.frame(CANVAS, flat_mark());
+    let physical = frame.physical_size();
+
+    assert_eq!(
+        frame.scale(),
+        PIXEL_SCALE,
+        "the frame must report the scale it was rasterised at"
+    );
+    assert_eq!(
+        frame.pixels().len(),
+        physical.width as usize * physical.height as usize * 4,
+        "the raw buffer must be RGBA over the whole physical frame"
+    );
+}
+
+/// The mask is not a new reading that can drift — it agrees with the
+/// reader that already existed, over the same reference and tolerance.
+#[test]
+fn test_a_mask_against_a_reference_matches_the_painted_count() {
+    let mut capture = Capture::new();
+    let frame = capture.frame(CANVAS, flat_mark());
+
+    let marked = frame
+        .mask_against(Color::BLACK, SURFACE_TOLERANCE)
+        .iter()
+        .filter(|pixel| **pixel)
+        .count();
+
+    assert_eq!(
+        marked,
+        frame.painted_count(whole(CANVAS), to_rgb(Color::BLACK), SURFACE_TOLERANCE),
+        "the mask and `painted_count` must disagree about nothing, or one of \
+         them is measuring a different picture"
+    );
+    assert!(
+        marked > 0,
+        "a white mark over a black surface must mark something"
+    );
+}
+
+/// The reference is load-bearing, and so is the pixel it is read at.
+///
+/// Four readings over one frame — mark against the surface, mark against
+/// the mark's own colour, and the same two over bare surface — pin that
+/// `mask_against` actually compares rather than reporting brightness no
+/// matter what it was handed.
+#[test]
+fn test_the_reference_a_mask_is_cut_against_actually_matters() {
+    let mut capture = Capture::new();
+    let frame = capture.frame(CANVAS, fill(Size::new(24.0, 24.0), Color::WHITE));
+    let physical = frame.physical_size();
+
+    let against_surface = frame.mask_against(Color::BLACK, SURFACE_TOLERANCE);
+    let against_mark = frame.mask_against(Color::WHITE, SURFACE_TOLERANCE);
+
+    let in_mark = |mask: &[bool]| mask[4 * physical.width as usize + 4];
+    let on_surface = |mask: &[bool]| {
+        mask[(physical.height as usize - 4) * physical.width as usize
+            + (physical.width as usize - 4)]
+    };
+
+    assert!(
+        in_mark(&against_surface),
+        "the white mark differs from the black surface"
+    );
+    assert!(
+        !in_mark(&against_mark),
+        "the white mark does not differ from white — the reference is being read"
+    );
+    assert!(
+        !on_surface(&against_surface),
+        "the bare surface IS the black reference, so it must not be marked"
+    );
+    assert!(
+        on_surface(&against_mark),
+        "the bare surface differs from white"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Gap-closer 3 — the shared panic reader and its guard
+// ---------------------------------------------------------------------------
+
+/// A panic payload is `Box<dyn Any + Send>` and arrives in whichever shape
+/// the panicking side liked. All four shapes read back the same way.
+#[test]
+fn test_panic_text_flattens_every_payload_shape() {
+    let string_payload: Result<(), Box<dyn Any + Send>> =
+        Err(Box::new(String::from("a String payload")));
+    let str_payload: Result<(), Box<dyn Any + Send>> = Err(Box::new("a &str payload"));
+    let opaque_payload: Result<(), Box<dyn Any + Send>> = Err(Box::new(0xdead_beef_u32));
+    let no_panic: Result<(), Box<dyn Any + Send>> = Ok(());
+
+    assert_eq!(panic_text(&string_payload), "a String payload");
+    assert_eq!(panic_text(&str_payload), "a &str payload");
+    assert_eq!(panic_text(&opaque_payload), "<non-string panic payload>");
+    assert_eq!(panic_text(&no_panic), "<no panic>");
+}
+
+/// The guard is load-bearing in both directions: it returns the message
+/// when the probe fires, and refuses to pass a probe that stayed quiet.
+#[test]
+fn test_assert_panics_returns_the_message_and_refuses_a_quiet_probe() {
+    let message = assert_panics("a deliberate panic", || panic!("the message it carries"));
+
+    assert!(
+        message.contains("the message it carries"),
+        "the guard must hand the caller the wording to pin, got {message}"
+    );
+
+    let guard = catch_unwind(AssertUnwindSafe(|| {
+        let _ = assert_panics("a guard over a quiet closure", || {});
+    }));
+
+    assert!(
+        guard.is_err(),
+        "a probe that never panicked must not satisfy the guard, or every \
+         load-bearing claim built on it is vacuous"
+    );
+    assert!(
+        panic_text(&guard).contains("a guard over a quiet closure"),
+        "the guard's own failure must name what it was guarding"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Gap-closer 4 — one delivery, both halves of the claim
+// ---------------------------------------------------------------------------
+
+/// Focus id the click-and-frame fixtures register under.
+const CLICK_FOCUS_ID: &str = "capture_click_frame";
+
+/// A point the checkbox's own hit target certainly covers.
+fn click_target() -> Point {
+    Point::new(12.0, 12.0)
+}
+
+/// A checkbox that reports its toggle instead of swallowing it.
+fn clicky_checkbox(model: &CheckboxModel) -> Element<'_, String> {
+    Checkbox::controlled(Controlled::new(model), CLICK_FOCUS_ID, |_| {
+        Some(String::from("toggled"))
+    })
+    .into()
+}
+
+/// A click reports the message it produced **and** the frame it left,
+/// from one delivery.
+///
+/// The half-claim this replaces: `click` gave the messages and never drew,
+/// `frame_after` drew and threw the messages away, so proving "the click
+/// fired and the widget repainted" meant running the gesture twice and
+/// hoping both halves described the same run. Here they cannot diverge.
+#[test]
+fn test_a_click_returns_its_message_and_its_frame_from_one_delivery() {
+    let model = CheckboxModel::new("Click and frame");
+    let at = click_target();
+
+    let mut capture = Capture::new();
+    let rest = capture.frame(CANVAS, clicky_checkbox(&model));
+    let (clicked, messages) = capture.click_and_frame(CANVAS, clicky_checkbox(&model), at);
+
+    assert_eq!(
+        messages,
+        vec![String::from("toggled")],
+        "the click must produce exactly the widget's toggle message"
+    );
+    assert_repainted(&rest, &clicked, whole(CANVAS), "clicking the checkbox");
+}
+
+/// The general event path returns the same pair, and its message list is
+/// the tree's own — cross-checked against the harness over identical
+/// events rather than asserted against a number that would pass on an
+/// empty vector either way.
+#[test]
+fn test_an_injected_event_returns_the_frame_and_the_tree_s_own_messages() {
+    let model = CheckboxModel::new("Injected hover");
+    let at = click_target();
+
+    let mut capture = Capture::new();
+    let rest = capture.frame(CANVAS, clicky_checkbox(&model));
+    let (hovered, messages) = capture.frame_and_messages_after(
+        CANVAS,
+        clicky_checkbox(&model),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
+
+    let mut harness = Harness::<String, HeadlessRenderer>::headless(|| clicky_checkbox(&model));
+    let via_harness = harness.hover(at);
+
+    assert_eq!(
+        messages, via_harness,
+        "the capture path and the harness must report the same reply to the \
+         same event, or one of them is not delivering it"
+    );
+    assert_repainted(&rest, &hovered, whole(CANVAS), "hovering the checkbox");
 }

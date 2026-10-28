@@ -1148,11 +1148,9 @@ fn test_the_published_box_is_the_indicator_not_the_label_inclusive_row() {
 // ===========================================================================
 
 use crate::test_helpers::{
-    Capture, Frame, MIN_CHANGED_PIXELS, assert_repainted, centre, moved, pressed,
+    Capture, Frame, MIN_CHANGED_PIXELS, assert_panics, assert_repainted, centre, moved, pressed,
 };
 use crate::widget::toggle;
-use std::any::Any;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// The canvas a single toggle row is rasterised into.
 ///
@@ -1168,26 +1166,6 @@ fn radio_canvas() -> Size {
     Size::new(240.0, size::HIT_TARGET_MIN * 2.0)
 }
 
-/// The text a caught assertion produced.
-///
-/// `test_helpers` has an equivalent, but it is private to that sidecar,
-/// so every file that wants to prove an assertion is load-bearing has to
-/// write this down again.
-fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
-    match outcome {
-        Ok(()) => String::from("<no panic>"),
-        Err(payload) => {
-            if let Some(text) = payload.downcast_ref::<String>() {
-                text.clone()
-            } else if let Some(text) = payload.downcast_ref::<&str>() {
-                (*text).to_owned()
-            } else {
-                String::from("<non-string panic payload>")
-            }
-        }
-    }
-}
-
 /// Prove a repaint claim is load-bearing over `rect`.
 ///
 /// Run against a frame compared with itself — no repaint whatsoever — the
@@ -1195,18 +1173,12 @@ fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
 /// floor it missed. Returns the panic text so the caller can pin the
 /// wording it fired on.
 fn repaint_guard_panic(frame: &Frame, rect: Rectangle, what: &str) -> String {
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        assert_repainted(frame, frame, rect, what);
-    }));
-
-    assert!(
-        outcome.is_err(),
-        "{what}: `assert_repainted` PASSED comparing a frame with itself over \
-         {rect:?} — the assertion can never fail, so the repaint claim built on \
-         it proves nothing"
+    let text = assert_panics(
+        &format!("{what} compared with itself over {rect:?}"),
+        || {
+            assert_repainted(frame, frame, rect, what);
+        },
     );
-
-    let text = panic_text(&outcome);
 
     assert!(
         text.contains(what),
