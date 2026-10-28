@@ -104,6 +104,30 @@ fn switching_to_a_sibling_before_150ms_is_suppressed() {
 }
 
 #[test]
+fn branch_opened_at_protects_sibling_switch_even_if_pointer_was_reported_earlier() {
+    let mut aim = AimCorridor::new();
+    // Pointer was reported on a sibling row before the branch was marked open
+    aim.pointer_enter(AimTarget::ParentRow { row: SIBLING }, t(50));
+    // The branch actually opens at t(200)
+    aim.branch_opened(TRIGGER, t(200));
+
+    // At t(210), 10ms after branch opened, the grace window must hold
+    let decision = aim.decision(t(210));
+    assert_eq!(
+        decision,
+        AimDecision::Hold {
+            row: SIBLING,
+            remaining_ms: 140,
+        },
+        "grace window must measure from branch_opened when pointer was set earlier"
+    );
+    assert!(aim.is_aiming(t(210)));
+
+    // At t(350), 150ms after branch opened, switch is permitted
+    assert_eq!(aim.decision(t(350)), AimDecision::Switch { row: SIBLING });
+}
+
+#[test]
 fn the_hold_counts_down_exactly() {
     let mut aim = corridor_with_open_branch();
     aim.pointer_enter(AimTarget::ParentRow { row: SIBLING }, t(0));

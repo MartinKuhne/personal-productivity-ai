@@ -199,7 +199,7 @@ pub fn primary_zone(box_: Rectangle) -> Rectangle {
 pub fn menu_zone(box_: Rectangle) -> Rectangle {
     let x = divider_x(box_.width);
     Rectangle::new(
-        Point::new(x, box_.y),
+        Point::new(box_.x + x, box_.y),
         Size::new(box_.width - x, box_.height),
     )
 }
@@ -208,7 +208,7 @@ pub fn menu_zone(box_: Rectangle) -> Rectangle {
 #[must_use]
 pub fn divider_bounds(box_: Rectangle) -> Rectangle {
     Rectangle::new(
-        Point::new(divider_x(box_.width), box_.y),
+        Point::new(box_.x + divider_x(box_.width), box_.y),
         Size::new(DIVIDER_WIDTH, box_.height),
     )
 }
@@ -778,7 +778,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            label_rect.position(),
+            label_rect.center(),
             style.primary.foreground,
             *viewport,
         );
@@ -796,7 +796,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            chev_rect.position(),
+            chev_rect.center(),
             chevron_color(&style),
             *viewport,
         );

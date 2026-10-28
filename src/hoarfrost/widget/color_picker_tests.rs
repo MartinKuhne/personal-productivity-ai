@@ -415,3 +415,69 @@ fn test_headless_render_color_swatch_button_across_states() {
     let mut h3 = Harness::<(), _>::headless(move || color_swatch_button::<()>(&m3).into());
     h3.render();
 }
+
+fn key_press(name: iced::keyboard::key::Named) -> iced::Event {
+    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Named(name),
+        modified_key: iced::keyboard::Key::Named(name),
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::NONE,
+        text: None,
+        repeat: false,
+    })
+}
+
+fn char_press(c: &'static str) -> iced::Event {
+    iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        key: iced::keyboard::Key::Character(c.into()),
+        modified_key: iced::keyboard::Key::Character(c.into()),
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::NONE,
+        text: Some(c.into()),
+        repeat: false,
+    })
+}
+
+#[test]
+fn test_hex_input_focus_and_typing() {
+    let initial = Rgba8::from_rgb(0, 0, 0);
+    let model = ColorPickerModel::new(initial).with_open(true);
+    let flyout_origin = Point::new(0.0, TRIGGER_HEIGHT_MD + space::XS);
+    let flyout_layout = ColorFlyoutLayout::compute(flyout_origin, &model);
+    let hex_center = flyout_layout.hex_input_bounds.center();
+
+    let mut harness = Harness::headless(move || {
+        ColorPicker::new(model.clone())
+            .on_change(|live| live.into_value())
+            .into()
+    });
+
+    // 1. Click on hex input bounds to focus it
+    harness.press(hex_center);
+    harness.release(hex_center);
+
+    // 2. Clear out existing hex string with backspaces
+    for _ in 0..7 {
+        harness.pointer(
+            &[key_press(iced::keyboard::key::Named::Backspace)],
+            iced::mouse::Cursor::Unavailable,
+        );
+    }
+
+    // 3. Type new valid hex "#FFFFFF"
+    for ch in ["#", "F", "F", "F", "F", "F"] {
+        harness.pointer(&[char_press(ch)], iced::mouse::Cursor::Unavailable);
+    }
+    let msgs = harness.pointer(&[char_press("F")], iced::mouse::Cursor::Unavailable);
+
+    assert!(
+        msgs.iter().any(|&c| c == Rgba8::from_rgb(255, 255, 255)),
+        "typing #FFFFFF into focused hex input must emit Rgba8 white, got: {msgs:?}"
+    );
+}

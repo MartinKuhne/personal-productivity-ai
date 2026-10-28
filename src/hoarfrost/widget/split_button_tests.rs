@@ -72,6 +72,25 @@ fn the_chevron_zone_is_the_trailing_28_pixels() {
 }
 
 #[test]
+fn zones_and_divider_translate_correctly_when_box_has_non_zero_origin() {
+    let box_ = rect(100.0, 50.0, 200.0, 32.0);
+    assert_eq!(primary_zone(box_), rect(100.0, 50.0, 172.0, 32.0));
+    assert_eq!(menu_zone(box_), rect(272.0, 50.0, 28.0, 32.0));
+    assert_eq!(divider_bounds(box_), rect(272.0, 50.0, 1.0, 32.0));
+
+    let p = palette();
+    let style = resolve_style(ButtonVariant::Primary, REST, REST, &p);
+    assert_eq!(
+        menu_background_layer(box_, &style).bounds,
+        rect(272.0, 50.0, 28.0, 32.0)
+    );
+    assert_eq!(
+        divider_layer(box_, &style).bounds,
+        rect(272.0, 50.0, 1.0, 32.0)
+    );
+}
+
+#[test]
 fn a_point_left_of_the_divider_is_the_primary_half() {
     assert_eq!(zone_at(0.0, 200.0), SplitZone::Primary);
     assert_eq!(zone_at(100.0, 200.0), SplitZone::Primary);
@@ -416,10 +435,6 @@ fn st(base: BaseState) -> VisualState {
 // 7. Live widget (`UIF-ATOM-001c`)
 // ---------------------------------------------------------------------------
 
-fn leaked<ActionId>(model: SplitButtonModel<ActionId>) -> &'static SplitButtonModel<ActionId> {
-    Box::leak(Box::new(model))
-}
-
 fn sample_rows() -> Vec<SplitMenuRow<String>> {
     vec![
         SplitMenuRow::new("save_as".to_string(), "Save As..."),
@@ -453,9 +468,9 @@ fn widget_bounds<M: Send + 'static>(harness: &mut Harness<M, HeadlessRenderer>) 
 
 #[test]
 fn test_controlled_creation_and_state_initialization() {
-    let model = leaked(SplitButtonModel::primary("Save", sample_rows()));
+    let model = SplitButtonModel::primary("Save", sample_rows());
     let split = SplitButton::<SplitButtonEmission<String>, String>::controlled(
-        Controlled::new(model),
+        Controlled::new(&model),
         "split_save",
         Some,
     );
@@ -485,9 +500,9 @@ fn test_controlled_creation_and_state_initialization() {
 
 #[test]
 fn test_mouse_hover_primary_vs_menu() {
-    let model = leaked(SplitButtonModel::new("Save", sample_rows()));
-    let mut harness = Harness::headless(move || {
-        SplitButton::controlled(Controlled::new(model), "split_hover", Some).into()
+    let model = SplitButtonModel::new("Save", sample_rows());
+    let mut harness = Harness::headless(|| {
+        SplitButton::controlled(Controlled::new(&model), "split_hover", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -511,9 +526,9 @@ fn test_mouse_hover_primary_vs_menu() {
 
 #[test]
 fn test_click_on_primary_activates_primary_and_publishes_emission() {
-    let model = leaked(SplitButtonModel::primary("Commit", sample_rows()));
-    let mut harness = Harness::headless(move || {
-        SplitButton::controlled(Controlled::new(model), "split_primary_act", Some).into()
+    let model = SplitButtonModel::primary("Commit", sample_rows());
+    let mut harness = Harness::headless(|| {
+        SplitButton::controlled(Controlled::new(&model), "split_primary_act", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -546,9 +561,9 @@ fn test_click_on_primary_activates_primary_and_publishes_emission() {
 
 #[test]
 fn test_click_on_menu_toggles_menu() {
-    let model = leaked(SplitButtonModel::new("Options", sample_rows()));
-    let mut harness = Harness::headless(move || {
-        SplitButton::controlled(Controlled::new(model), "split_menu_toggle", Some).into()
+    let model = SplitButtonModel::new("Options", sample_rows());
+    let mut harness = Harness::headless(|| {
+        SplitButton::controlled(Controlled::new(&model), "split_menu_toggle", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -576,9 +591,9 @@ fn test_click_on_menu_toggles_menu() {
 
 #[test]
 fn test_disabled_split_button_ignores_events() {
-    let model = leaked(SplitButtonModel::new("Inert", sample_rows()).disabled());
-    let mut harness = Harness::headless(move || {
-        SplitButton::controlled(Controlled::new(model), "split_disabled", Some).into()
+    let model = SplitButtonModel::new("Inert", sample_rows()).disabled();
+    let mut harness = Harness::headless(|| {
+        SplitButton::controlled(Controlled::new(&model), "split_disabled", Some).into()
     });
 
     let primary_pt = Point::new(10.0, 10.0);
@@ -595,9 +610,9 @@ fn test_disabled_split_button_ignores_events() {
 
 #[test]
 fn test_keyboard_primary_activation_and_menu_navigation() {
-    let model = leaked(SplitButtonModel::primary("Actions", sample_rows()));
-    let mut harness = Harness::headless(move || {
-        SplitButton::controlled(Controlled::new(model), "split_kb", Some).into()
+    let model = SplitButtonModel::primary("Actions", sample_rows());
+    let mut harness = Harness::headless(|| {
+        SplitButton::controlled(Controlled::new(&model), "split_kb", Some).into()
     });
 
     focus_one(&mut harness, "split_kb");
@@ -635,16 +650,17 @@ fn test_headless_draw_across_states() {
     for variant in [ButtonVariant::Primary, ButtonVariant::Secondary] {
         for density in [ButtonDensity::Standard, ButtonDensity::Compact] {
             for disabled in [false, true] {
-                let mut m = SplitButtonModel::new("RenderMe", sample_rows()).with_density(density);
+                let mut model =
+                    SplitButtonModel::new("RenderMe", sample_rows()).with_density(density);
                 if variant == ButtonVariant::Primary {
-                    m = SplitButtonModel::primary("RenderMe", sample_rows()).with_density(density);
+                    model =
+                        SplitButtonModel::primary("RenderMe", sample_rows()).with_density(density);
                 }
                 if disabled {
-                    m = m.disabled();
+                    model = model.disabled();
                 }
-                let model = leaked(m);
-                let mut harness = Harness::headless(move || {
-                    SplitButton::controlled(Controlled::new(model), "split_render", Some)
+                let mut harness = Harness::headless(|| {
+                    SplitButton::controlled(Controlled::new(&model), "split_render", Some)
                         .palette(p)
                         .into()
                 });

@@ -1098,7 +1098,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            text_area.position(),
+            Point::new(text_area.x, text_area.center_y()),
             text_color,
             *viewport,
         );
@@ -1133,7 +1133,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            chevron_bounds.position(),
+            chevron_bounds.center(),
             chevron_color,
             *viewport,
         );
@@ -1186,6 +1186,10 @@ pub struct ColorPickerState {
     pub pre_open_snapshot: Option<Rgba8>,
     /// Gesture slot for Live/Commit/Cancel transitions.
     pub gesture: GestureSlot<Rgba8>,
+    /// Whether the hex text input field currently has keyboard focus.
+    pub focused_hex: bool,
+    /// In-progress hex input string buffer while editing.
+    pub hex_buffer: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1460,6 +1464,8 @@ where
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position() {
                     if trigger_bounds.contains(pos) {
+                        state.focused_hex = false;
+                        state.hex_buffer = None;
                         if self.model.open {
                             self.model.close_flyout();
                             if let Some(cb) = &self.on_open_change {
@@ -1474,90 +1480,102 @@ where
                         }
                         shell.request_redraw();
                     } else if self.model.open && flyout_layout.card_bounds.contains(pos) {
-                        if flyout_layout.cancel_button_bounds.contains(pos) {
-                            let restored = self.model.cancel();
-                            if let Some(cb) = &self.on_cancel {
-                                shell.publish(cb(Cancel::new(restored)));
-                            }
-                            if let Some(cb) = &self.on_open_change {
-                                shell.publish(cb(Live::new(false)));
-                            }
-                            shell.request_redraw();
-                        } else if flyout_layout.apply_button_bounds.contains(pos) {
-                            let committed = self.model.commit();
-                            if let Some(cb) = &self.on_commit {
-                                shell.publish(cb(Commit::new(committed)));
-                            }
-                            if let Some(cb) = &self.on_open_change {
-                                shell.publish(cb(Live::new(false)));
-                            }
-                            shell.request_redraw();
-                        } else if flyout_layout.sv_well_bounds.contains(pos) {
-                            state.dragging = Some(DragTarget::SvCanvas);
-                            let s = ((pos.x - flyout_layout.sv_well_bounds.x) / COLOR_WELL_WIDTH)
-                                .clamp(0.0, 1.0);
-                            let v = (1.0
-                                - (pos.y - flyout_layout.sv_well_bounds.y) / COLOR_WELL_HEIGHT)
-                                .clamp(0.0, 1.0);
-                            self.model.set_hsva(Hsva::new(
-                                self.model.hsv.h,
-                                s,
-                                v,
-                                self.model.hsv.a,
-                            ));
-                            if let Some(cb) = &self.on_change {
-                                shell.publish(cb(Live::new(self.model.value)));
-                            }
-                            shell.request_redraw();
-                        } else if flyout_layout.hue_track_bounds.contains(pos) {
-                            state.dragging = Some(DragTarget::HueSlider);
-                            let h = (((pos.x - flyout_layout.hue_track_bounds.x)
-                                / flyout_layout.hue_track_bounds.width)
-                                * 360.0)
-                                .clamp(0.0, 360.0);
-                            self.model.set_hsva(Hsva::new(
-                                h,
-                                self.model.hsv.s,
-                                self.model.hsv.v,
-                                self.model.hsv.a,
-                            ));
-                            if let Some(cb) = &self.on_change {
-                                shell.publish(cb(Live::new(self.model.value)));
-                            }
-                            shell.request_redraw();
-                        } else if let Some(alpha_bounds) = flyout_layout.alpha_track_bounds
-                            && alpha_bounds.contains(pos)
-                        {
-                            state.dragging = Some(DragTarget::AlphaSlider);
-                            let a = ((pos.x - alpha_bounds.x) / alpha_bounds.width).clamp(0.0, 1.0);
-                            self.model.set_hsva(Hsva::new(
-                                self.model.hsv.h,
-                                self.model.hsv.s,
-                                self.model.hsv.v,
-                                a,
-                            ));
-                            if let Some(cb) = &self.on_change {
-                                shell.publish(cb(Live::new(self.model.value)));
-                            }
+                        if flyout_layout.hex_input_bounds.contains(pos) {
+                            state.focused_hex = true;
+                            state.hex_buffer = Some(self.model.hex_input.clone());
                             shell.request_redraw();
                         } else {
-                            // Check preset swatches
-                            for (idx, sb) in flyout_layout.swatches.iter().enumerate() {
-                                if sb.contains(pos) && idx < self.model.preset_swatches.len() {
-                                    let swatch = self.model.preset_swatches[idx];
-                                    self.model.set_rgba(swatch);
-                                    if let Some(cb) = &self.on_change {
-                                        shell.publish(cb(Live::new(swatch)));
+                            state.focused_hex = false;
+                            state.hex_buffer = None;
+                            if flyout_layout.cancel_button_bounds.contains(pos) {
+                                let restored = self.model.cancel();
+                                if let Some(cb) = &self.on_cancel {
+                                    shell.publish(cb(Cancel::new(restored)));
+                                }
+                                if let Some(cb) = &self.on_open_change {
+                                    shell.publish(cb(Live::new(false)));
+                                }
+                                shell.request_redraw();
+                            } else if flyout_layout.apply_button_bounds.contains(pos) {
+                                let committed = self.model.commit();
+                                if let Some(cb) = &self.on_commit {
+                                    shell.publish(cb(Commit::new(committed)));
+                                }
+                                if let Some(cb) = &self.on_open_change {
+                                    shell.publish(cb(Live::new(false)));
+                                }
+                                shell.request_redraw();
+                            } else if flyout_layout.sv_well_bounds.contains(pos) {
+                                state.dragging = Some(DragTarget::SvCanvas);
+                                let s = ((pos.x - flyout_layout.sv_well_bounds.x)
+                                    / COLOR_WELL_WIDTH)
+                                    .clamp(0.0, 1.0);
+                                let v = (1.0
+                                    - (pos.y - flyout_layout.sv_well_bounds.y) / COLOR_WELL_HEIGHT)
+                                    .clamp(0.0, 1.0);
+                                self.model.set_hsva(Hsva::new(
+                                    self.model.hsv.h,
+                                    s,
+                                    v,
+                                    self.model.hsv.a,
+                                ));
+                                if let Some(cb) = &self.on_change {
+                                    shell.publish(cb(Live::new(self.model.value)));
+                                }
+                                shell.request_redraw();
+                            } else if flyout_layout.hue_track_bounds.contains(pos) {
+                                state.dragging = Some(DragTarget::HueSlider);
+                                let h = (((pos.x - flyout_layout.hue_track_bounds.x)
+                                    / flyout_layout.hue_track_bounds.width)
+                                    * 360.0)
+                                    .clamp(0.0, 360.0);
+                                self.model.set_hsva(Hsva::new(
+                                    h,
+                                    self.model.hsv.s,
+                                    self.model.hsv.v,
+                                    self.model.hsv.a,
+                                ));
+                                if let Some(cb) = &self.on_change {
+                                    shell.publish(cb(Live::new(self.model.value)));
+                                }
+                                shell.request_redraw();
+                            } else if let Some(alpha_bounds) = flyout_layout.alpha_track_bounds
+                                && alpha_bounds.contains(pos)
+                            {
+                                state.dragging = Some(DragTarget::AlphaSlider);
+                                let a =
+                                    ((pos.x - alpha_bounds.x) / alpha_bounds.width).clamp(0.0, 1.0);
+                                self.model.set_hsva(Hsva::new(
+                                    self.model.hsv.h,
+                                    self.model.hsv.s,
+                                    self.model.hsv.v,
+                                    a,
+                                ));
+                                if let Some(cb) = &self.on_change {
+                                    shell.publish(cb(Live::new(self.model.value)));
+                                }
+                                shell.request_redraw();
+                            } else {
+                                // Check preset swatches
+                                for (idx, sb) in flyout_layout.swatches.iter().enumerate() {
+                                    if sb.contains(pos) && idx < self.model.preset_swatches.len() {
+                                        let swatch = self.model.preset_swatches[idx];
+                                        self.model.set_rgba(swatch);
+                                        if let Some(cb) = &self.on_change {
+                                            shell.publish(cb(Live::new(swatch)));
+                                        }
+                                        if let Some(cb) = &self.on_commit {
+                                            shell.publish(cb(Commit::new(swatch)));
+                                        }
+                                        shell.request_redraw();
+                                        break;
                                     }
-                                    if let Some(cb) = &self.on_commit {
-                                        shell.publish(cb(Commit::new(swatch)));
-                                    }
-                                    shell.request_redraw();
-                                    break;
                                 }
                             }
                         }
                     } else if self.model.open {
+                        state.focused_hex = false;
+                        state.hex_buffer = None;
                         // Click outside card closes and cancels
                         let restored = self.model.cancel();
                         if let Some(cb) = &self.on_cancel {
@@ -1584,6 +1602,89 @@ where
             Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
                 if state.focusable.is_focused() || self.model.open =>
             {
+                if state.focused_hex {
+                    match key {
+                        Key::Named(Named::Escape) => {
+                            state.focused_hex = false;
+                            state.hex_buffer = None;
+                            if self.model.open {
+                                let restored = self.model.cancel();
+                                if let Some(cb) = &self.on_cancel {
+                                    shell.publish(cb(Cancel::new(restored)));
+                                }
+                                if let Some(cb) = &self.on_open_change {
+                                    shell.publish(cb(Live::new(false)));
+                                }
+                                shell.request_redraw();
+                            }
+                        }
+                        Key::Named(Named::Enter) => {
+                            state.focused_hex = false;
+                            state.hex_buffer = None;
+                            if self.model.open {
+                                let committed = self.model.commit();
+                                if let Some(cb) = &self.on_commit {
+                                    shell.publish(cb(Commit::new(committed)));
+                                }
+                                if let Some(cb) = &self.on_open_change {
+                                    shell.publish(cb(Live::new(false)));
+                                }
+                                shell.request_redraw();
+                            }
+                        }
+                        Key::Named(Named::Tab) => {
+                            state.focused_hex = false;
+                            state.hex_buffer = None;
+                            shell.request_redraw();
+                        }
+                        Key::Named(Named::Backspace) => {
+                            let mut buf = state
+                                .hex_buffer
+                                .take()
+                                .unwrap_or_else(|| self.model.hex_input.clone());
+                            if !buf.is_empty() {
+                                buf.pop();
+                                if buf.is_empty() {
+                                    buf = "#".to_string();
+                                }
+                            }
+                            let ok = self.model.set_hex_input(&buf);
+                            state.hex_buffer = Some(buf);
+                            if ok && let Some(cb) = &self.on_change {
+                                shell.publish(cb(Live::new(self.model.value)));
+                            }
+                            shell.request_redraw();
+                        }
+                        Key::Character(ch_str) => {
+                            let max_len = if self.model.alpha_enabled { 9 } else { 7 };
+                            let mut buf = state
+                                .hex_buffer
+                                .take()
+                                .unwrap_or_else(|| self.model.hex_input.clone());
+                            let mut changed = false;
+                            for ch in ch_str.chars() {
+                                if (ch.is_ascii_hexdigit() || ch == '#') && buf.len() < max_len {
+                                    if ch == '#' && buf.contains('#') {
+                                        continue;
+                                    }
+                                    buf.push(ch);
+                                    changed = true;
+                                }
+                            }
+                            if changed {
+                                let ok = self.model.set_hex_input(&buf);
+                                if ok && let Some(cb) = &self.on_change {
+                                    shell.publish(cb(Live::new(self.model.value)));
+                                }
+                                shell.request_redraw();
+                            }
+                            state.hex_buffer = Some(buf);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+
                 match key {
                     Key::Named(Named::Escape) => {
                         if self.model.open {
@@ -1806,7 +1907,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            text_area.position(),
+            Point::new(text_area.x, text_area.center_y()),
             text_color,
             *viewport,
         );
@@ -1841,7 +1942,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            chevron_bounds.position(),
+            chevron_bounds.center(),
             chevron_color,
             *viewport,
         );
@@ -2080,6 +2181,8 @@ where
 
         let hex_border_color = if self.model.validation_error.is_some() {
             self.palette.status_danger_text
+        } else if state.focused_hex {
+            self.palette.accent_fill
         } else {
             self.palette.border_subtle
         };
@@ -2097,9 +2200,17 @@ where
             Background::Color(self.palette.surface_active),
         );
 
+        let hex_display = if state.focused_hex
+            && let Some(ref buf) = state.hex_buffer
+        {
+            buf.clone()
+        } else {
+            self.model.hex_input.clone()
+        };
+
         renderer.fill_text(
             text_core::Text {
-                content: self.model.hex_input.clone(),
+                content: hex_display,
                 bounds: flyout.hex_input_bounds.size(),
                 size: Pixels(typography::BODY.size),
                 line_height: text_core::LineHeight::Absolute(Pixels(
@@ -2111,7 +2222,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            flyout.hex_input_bounds.position(),
+            flyout.hex_input_bounds.center(),
             self.palette.text_strong,
             *viewport,
         );
@@ -2197,7 +2308,7 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                contrast_bounds.position(),
+                contrast_bounds.center(),
                 status_color,
                 *viewport,
             );
@@ -2238,7 +2349,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            flyout.cancel_button_bounds.position(),
+            flyout.cancel_button_bounds.center(),
             self.palette.text_muted,
             *viewport,
         );
@@ -2275,7 +2386,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            flyout.apply_button_bounds.position(),
+            flyout.apply_button_bounds.center(),
             self.palette.text_strong,
             *viewport,
         );

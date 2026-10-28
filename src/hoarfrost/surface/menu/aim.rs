@@ -236,6 +236,12 @@ impl AimCorridor {
         self.open_trigger
     }
 
+    /// When the currently open branch was opened.
+    #[must_use]
+    pub const fn opened_at(&self) -> TimeMs {
+        self.opened_at
+    }
+
     /// Where the pointer is, as last reported.
     #[must_use]
     pub const fn target(&self) -> Option<AimTarget> {
@@ -300,11 +306,13 @@ impl AimCorridor {
         }
     }
 
-    /// Elapsed time since the pointer reached its current target,
-    /// clamped so a clock that went backwards cannot produce a
-    /// negative wait.
+    /// Elapsed time since the aiming corridor began protecting this target.
+    ///
+    /// The window is measured from the later of when the branch was opened
+    /// or when the pointer arrived at the sibling row (§4.9, `UIF-PRIN-008`).
     fn elapsed(&self, now: TimeMs) -> u64 {
-        now.elapsed_since(self.target_at)
+        let reference = self.target_at.max(self.opened_at);
+        now.elapsed_since(reference)
     }
 }
 
