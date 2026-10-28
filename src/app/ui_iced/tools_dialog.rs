@@ -1177,7 +1177,10 @@ fn rung(
     rung: typography::TypeRung,
     color: iced::Color,
 ) -> text::Text<'static> {
-    rung_weighted(value, rung, color, typography::Weight::Regular)
+    text(value.into())
+        .size(rung.size)
+        .line_height(rung.iced_line_height())
+        .color(color)
 }
 
 /// [`rung`] at an explicit framework weight.
@@ -1198,7 +1201,7 @@ fn rung_weighted(
         .line_height(rung.iced_line_height())
         .font(iced::Font {
             weight: iced_weight(weight),
-            ..Default::default()
+            ..iced::Font::with_name("Fira Sans")
         })
         .color(color)
 }

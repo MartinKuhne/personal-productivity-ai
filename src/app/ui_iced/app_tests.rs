@@ -11,8 +11,12 @@
 use super::*;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::config::{InMemoryConfigStorage, NoopConfigStorage};
+use crate::error_codes::menu as menu_codes;
 use crate::ui::CURRENT_SCHEMA_VERSION;
+use crate::ui_iced::context_menu::{ContextGroup, ContextRow, ContextTarget};
 use crate::ui_iced::dialogs::DialogKind;
+use crate::ui_iced::menu_surface::log_capture::{Capture, with_capture};
+use crate::ui_iced::message::MenuMessage;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
 use hoarfrost::binding::pre_rank::DragCapture;
 use hoarfrost::binding::pre_rank::DragKind;
@@ -1484,5 +1488,110 @@ fn closing_the_authoritative_field_drops_the_movable_surface() {
             .surfaces
             .contains(&SurfaceId::new(SURFACE_ID_AGENT_DEBUG)),
         "the index must not outlive the field it is derived from"
+    );
+}
+
+// ------------------------- observability (NFR-001 / NFR-004) -----------------
+//
+// `ContextMenu::open` used to return a bare `None` and drop the cascade's
+// reason with it. These tests force the refusal and assert the code, the level
+// and the diagnostic context carried on the line.
+
+#[test]
+fn test_context_menu_open_refusal_reports_menu_2003_with_context() {
+    let target = ContextTarget::TreeFile {
+        path: PathBuf::from("/notes/empty.md"),
+    };
+
+    let capture = Capture::new();
+    let opened = with_capture(&capture, || {
+        ContextMenu::open(
+            target,
+            Point::new(15.0, 25.0),
+            &[],
+            Size::new(1024.0, 768.0),
+        )
+    });
+
+    assert!(opened.is_none(), "an empty row set cannot open a menu");
+    let event = capture
+        .with_code(menu_codes::CONTEXT_OPEN_REFUSED)
+        .expect("a refused context-menu open must report ERROR ([NFR-001])");
+    assert_eq!(event.level, tracing::Level::ERROR);
+    assert_eq!(event.field("surface"), Some("context_menu"));
+    assert_eq!(event.field("trigger"), Some("context_menu.open"));
+    assert_eq!(event.field("target_kind"), Some("tree_file"));
+    assert_eq!(event.field("row_count"), Some("0"));
+    assert_eq!(event.field("anchor_x"), Some("15.0"));
+    assert_eq!(event.field("anchor_y"), Some("25.0"));
+    assert_eq!(event.field("viewport_w"), Some("1024.0"));
+    assert_eq!(event.field("viewport_h"), Some("768.0"));
+    assert_eq!(
+        event.field("reason"),
+        Some("no_focusable_rows"),
+        "the cascade's own reason must be carried through as a stable label \
+         (the raw variant carries a `MenuId`, which embeds the user's path)"
+    );
+    assert_eq!(
+        event.field("reason_row"),
+        Some("None"),
+        "this refusal addresses no particular row"
+    );
+}
+
+#[test]
+fn test_context_menu_open_refusal_names_the_target_variant_not_its_path() {
+    // [NFR-009]: the line identifies *which kind* of target failed without
+    // shipping the user's filesystem path out of the app boundary.
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        ContextMenu::open(
+            ContextTarget::TreeDirectory {
+                path: PathBuf::from("/Users/secret-person/notes"),
+            },
+            Point::ORIGIN,
+            &[],
+            Size::new(800.0, 600.0),
+        )
+    });
+
+    let event = capture
+        .with_code(menu_codes::CONTEXT_OPEN_REFUSED)
+        .expect("the refusal must report");
+    assert_eq!(event.field("target_kind"), Some("tree_directory"));
+    let rendered = format!("{} {:?}", event.message, event.fields);
+    assert!(
+        !rendered.contains("secret-person"),
+        "the user's path must not appear on the log line, got {rendered}"
+    );
+}
+
+#[test]
+fn test_context_menu_successful_open_logs_no_error_code() {
+    let rows = vec![ContextRow::new(
+        "open",
+        "Open",
+        ContextGroup::Primary,
+        Message::Menu(MenuMessage::InteractionIgnored),
+    )];
+
+    let capture = Capture::new();
+    let opened = with_capture(&capture, || {
+        ContextMenu::open(
+            ContextTarget::Tab {
+                index: 0,
+                path: PathBuf::from("/notes/a.md"),
+            },
+            Point::new(4.0, 8.0),
+            &rows,
+            Size::new(1024.0, 768.0),
+        )
+    });
+
+    assert!(opened.is_some(), "a populated row set opens");
+    assert!(
+        capture.codes().is_empty(),
+        "a successful open must log no error code, got {:?}",
+        capture.codes()
     );
 }

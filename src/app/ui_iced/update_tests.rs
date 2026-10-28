@@ -18,13 +18,16 @@ use crate::bus::events::messages::LogCategory;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, InMemoryConfigStorage};
+use crate::error_codes::menu as menu_codes;
 use crate::ui::CURRENT_SCHEMA_VERSION;
 use crate::ui::tree::flatten::FlatRow;
 use crate::ui_iced::app::{AppState, OverlayLayer, ViewModels, build_state};
 use crate::ui_iced::batch_dialog::BatchDialogViewModel;
 use crate::ui_iced::dialogs::DialogKind;
+use crate::ui_iced::menu_surface::log_capture::{Capture, with_capture};
 use crate::ui_iced::message::BootMessage;
 use crate::ui_iced::persisted::InMemoryUiStateStorage;
+use hoarfrost::surface::menu::model::{Row, submenu_id};
 use iced::widget::pane_grid::ResizeEvent;
 use iced::{Point, Size};
 use std::path::{Path, PathBuf};
@@ -4017,5 +4020,529 @@ fn hovering_a_tab_does_not_change_which_tab_is_active() {
     assert_eq!(
         state.models.center.active_tab, None,
         "hover is not activation"
+    );
+}
+
+// ------------------------- observability (NFR-001 / NFR-004) -----------------
+//
+// Each test forces one menu failure route and asserts the [NFR-004] code and the
+// level it was chosen at. The level is part of the contract: [NFR-001] demands
+// ERROR for failures, and a benign refusal logged at ERROR would be spam.
+
+/// The trigger label the hamburger open route is expected to report.
+const HAMBURGER_TRIGGER: &str = TRIGGER_HAMBURGER_OPEN;
+
+#[test]
+fn test_hamburger_open_success_logs_no_error_code() {
+    let (mut state, _storage) = fresh_state();
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    });
+    assert!(
+        state.overlay.hamburger_open,
+        "the hamburger must actually open for this to prove silence-on-success"
+    );
+    assert!(
+        capture.codes().is_empty(),
+        "a successful open must log no error code, got {:?}",
+        capture.codes()
+    );
+}
+
+#[test]
+fn test_hamburger_reopen_is_reported_as_already_open_at_debug() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    assert!(state.overlay.hamburger_open);
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        let _ = update(&mut state, Message::Menu(MenuMessage::Opened));
+    });
+
+    let event = capture
+        .with_code(menu_codes::HAMBURGER_ALREADY_OPEN)
+        .expect("a refused re-open must name itself");
+    assert_eq!(
+        event.level,
+        tracing::Level::DEBUG,
+        "an idempotent re-open is not a failure; ERROR here would be spam"
+    );
+    assert_eq!(event.field("trigger"), Some(HAMBURGER_TRIGGER));
+    assert_eq!(event.field("surface"), Some("hamburger"));
+    assert!(
+        event.field("row_count").is_some(),
+        "the line must report how many rows the menu had"
+    );
+    assert!(
+        state.overlay.hamburger_open,
+        "the refusal must leave the already-open menu mounted"
+    );
+}
+
+#[test]
+fn test_hamburger_open_with_no_focusable_row_is_reported_as_error() {
+    // A real cascade refusal: a card whose every row is a heading or a
+    // separator cannot hold the keyboard, so `open` refuses it.
+    let menu = Menu::new(
+        "menu.obs.no_rows",
+        vec![Row::heading("Section"), Row::separator()],
+    );
+    let mut cascade = MenuCascade::new();
+    let mut focus = FocusState::new();
+    let outcome = cascade.open(&menu, MenuTreeKind::Fixed, &mut focus);
+    assert!(
+        !cascade.is_open(),
+        "precondition: the cascade must actually refuse this menu"
+    );
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        log_hamburger_open(&menu, &outcome, Size::new(1200.0, 800.0));
+    });
+
+    let event = capture
+        .with_code(menu_codes::HAMBURGER_NO_FOCUSABLE_ROWS)
+        .expect("a menu that cannot mount must report ERROR ([NFR-001])");
+    assert_eq!(event.level, tracing::Level::ERROR);
+    assert_eq!(event.field("trigger"), Some(HAMBURGER_TRIGGER));
+    assert_eq!(event.field("viewport_w"), Some("1200.0"));
+    assert_eq!(event.field("viewport_h"), Some("800.0"));
+    assert_eq!(event.field("row_count"), Some("2"));
+}
+
+#[test]
+fn test_hamburger_open_refused_by_an_unexpected_reason_is_reported_as_error() {
+    // MENU-1003: the builder and the cascade disagree. `open` itself only
+    // returns AlreadyOpen / NoFocusableRows, so anything else reaching the
+    // reporter is a contradiction and must be loud.
+    let menu = Menu::new("menu.obs.contradiction", vec![Row::action("a", "A")]);
+    for (reason, label, row) in [
+        (
+            IgnoredReason::UnknownCard {
+                card: MenuId::new("menu.obs.gone"),
+            },
+            "unknown_card",
+            "None",
+        ),
+        (
+            IgnoredReason::RowOutOfRange {
+                card: MenuId::new("menu.obs.contradiction"),
+                row: 7,
+            },
+            "row_out_of_range",
+            "Some(7)",
+        ),
+    ] {
+        let capture = Capture::new();
+        with_capture(&capture, || {
+            log_hamburger_open(&menu, &CascadeOutcome::ignored(reason), Size::new(1.0, 1.0));
+        });
+        let event = capture
+            .with_code(menu_codes::HAMBURGER_OPEN_REFUSED)
+            .expect("an unexpected refusal must report ERROR ([NFR-001])");
+        assert_eq!(event.level, tracing::Level::ERROR);
+        assert_eq!(
+            event.field("reason"),
+            Some(label),
+            "the reason must arrive as a stable label"
+        );
+        assert_eq!(event.field("reason_row"), Some(row));
+    }
+}
+
+#[test]
+fn test_hamburger_open_refusal_never_prints_a_path_bearing_id() {
+    // The reporter is menu-agnostic: if a context-menu id ever reaches it,
+    // the [NFR-009] redaction still has to hold.
+    let marker = "secret-person";
+    let menu = Menu::new(
+        format!(
+            "{}.dir.C:\\Users\\{marker}\\notes",
+            crate::ui_iced::context_menu::CONTEXT_MENU_ID_PREFIX
+        ),
+        vec![Row::action("a", "A")],
+    );
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        log_hamburger_open(
+            &menu,
+            &CascadeOutcome::ignored(IgnoredReason::NothingFocused {
+                card: menu.id().clone(),
+            }),
+            Size::new(1.0, 1.0),
+        );
+    });
+    let rendered = capture
+        .events()
+        .iter()
+        .map(|event| format!("{} {:?}", event.message, event.fields))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        capture
+            .with_code(menu_codes::HAMBURGER_OPEN_REFUSED)
+            .is_some(),
+        "the route under test must actually have fired"
+    );
+    assert!(
+        !rendered.contains(marker),
+        "no hamburger log line may carry the user's path, got {rendered}"
+    );
+}
+
+#[test]
+fn test_tree_context_menu_for_unknown_path_is_reported_as_error() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(40.0, 90.0),
+        }),
+    );
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        open_tree_context_menu(&mut state, &PathBuf::from("/notes/ghost.md"));
+    });
+
+    let event = capture
+        .with_code(menu_codes::CONTEXT_TREE_ROW_MISSING)
+        .expect("a context menu requested for a missing row must report ERROR");
+    assert_eq!(event.level, tracing::Level::ERROR);
+    assert_eq!(event.field("trigger"), Some(TRIGGER_TREE_CONTEXT_MENU));
+    assert_eq!(event.field("path"), Some("/notes/ghost.md"));
+    assert_eq!(event.field("anchor_x"), Some("40.0"));
+    assert_eq!(event.field("anchor_y"), Some("90.0"));
+    assert!(state.overlay.context_menu.is_none());
+}
+
+#[test]
+fn test_tab_context_menu_for_unknown_index_is_reported_as_error() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(12.0, 34.0),
+        }),
+    );
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        reduce_tab(&mut state, TabMessage::ContextMenuOpened { index: 42 });
+    });
+
+    let event = capture
+        .with_code(menu_codes::CONTEXT_TAB_MISSING)
+        .expect("a tab menu for an out-of-range index must report ERROR");
+    assert_eq!(event.level, tracing::Level::ERROR);
+    assert_eq!(event.field("trigger"), Some(TRIGGER_TAB_CONTEXT_MENU));
+    assert_eq!(event.field("index"), Some("42"));
+    assert_eq!(event.field("tab_count"), Some("0"));
+}
+
+#[test]
+fn test_missing_cursor_anchor_is_reported_as_warn_not_error() {
+    let (mut state, _storage) = fresh_state();
+    state.overlay.cursor = None;
+
+    let capture = Capture::new();
+    let anchor = with_capture(&capture, || {
+        anchored_cursor_or_origin(&state, TRIGGER_TREE_CONTEXT_MENU)
+    });
+
+    assert_eq!(anchor, Point::default(), "the fallback is unchanged");
+    let event = capture
+        .with_code(menu_codes::CONTEXT_ANCHOR_MISSING)
+        .expect("taking the origin fallback must be visible");
+    assert_eq!(
+        event.level,
+        tracing::Level::WARN,
+        "the menu still opens, so this is degraded rather than broken"
+    );
+    assert_eq!(event.field("trigger"), Some(TRIGGER_TREE_CONTEXT_MENU));
+}
+
+#[test]
+fn test_reported_cursor_anchor_logs_nothing() {
+    let (mut state, _storage) = fresh_state();
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(7.0, 11.0),
+        }),
+    );
+    let capture = Capture::new();
+    let anchor = with_capture(&capture, || {
+        anchored_cursor_or_origin(&state, TRIGGER_TREE_CONTEXT_MENU)
+    });
+    assert_eq!(anchor, Point::new(7.0, 11.0));
+    assert!(
+        capture.codes().is_empty(),
+        "a reported cursor must not warn, got {:?}",
+        capture.codes()
+    );
+}
+
+#[test]
+fn test_row_pick_with_no_context_menu_is_reported_as_warn() {
+    let (mut state, _storage) = fresh_state();
+    state.overlay.hamburger_open = false;
+    state.overlay.context_menu = None;
+
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || {
+        route_context_row(&mut state, &MenuId::new("menu.ghost"), 3)
+    });
+
+    assert!(tasks.is_empty(), "behaviour unchanged: nothing is routed");
+    let event = capture
+        .with_code(menu_codes::ROW_PICK_NO_SURFACE)
+        .expect("a pick against a dismissed surface must name itself");
+    assert_eq!(
+        event.level,
+        tracing::Level::WARN,
+        "a stale click during the dismiss race is racy, not broken"
+    );
+    assert_eq!(event.field("trigger"), Some(TRIGGER_ROW_PICKED));
+    assert_eq!(event.field("row"), Some("3"));
+}
+
+#[test]
+fn test_context_row_missing_from_the_routing_table_is_reported_as_error() {
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row("/notes/a.md")]);
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(20.0, 30.0),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from("/notes/a.md"),
+        }),
+    );
+
+    // Force the builder gap: a live card whose routing table cannot answer.
+    let mut menu = state.overlay.context_menu.take().expect("the menu opened");
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
+    assert!(
+        !menu.routes.is_empty(),
+        "precondition: a real menu has routes to strip"
+    );
+    menu.routes.clear();
+    state.overlay.context_menu = Some(menu);
+
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || route_context_row(&mut state, &root, 0));
+
+    assert!(tasks.is_empty(), "behaviour unchanged: nothing is routed");
+    let event = capture
+        .with_code(menu_codes::ROW_INTENT_MISSING)
+        .expect("a live row that resolves to no intent must report ERROR");
+    assert_eq!(
+        event.level,
+        tracing::Level::ERROR,
+        "the user clicked a live row and nothing happened: a failure"
+    );
+    assert_eq!(event.field("trigger"), Some(TRIGGER_ROW_PICKED));
+    assert_eq!(event.field("row"), Some("0"));
+}
+
+#[test]
+fn test_key_navigation_with_no_context_menu_is_reported_as_warn() {
+    let (mut state, _storage) = fresh_state();
+    state.overlay.context_menu = None;
+
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || {
+        route_context_key(&mut state, hoarfrost::surface::menu::cascade::MenuKey::Down)
+    });
+
+    assert!(tasks.is_empty(), "behaviour unchanged: the key is dropped");
+    let event = capture
+        .with_code(menu_codes::KEY_NAV_NO_SURFACE)
+        .expect("key nav against a dismissed surface must name itself");
+    assert_eq!(event.level, tracing::Level::WARN);
+    assert_eq!(event.field("trigger"), Some(TRIGGER_KEY));
+}
+
+#[test]
+fn test_hamburger_activation_that_resolves_to_no_command_is_reported_as_error() {
+    let (mut state, _storage) = fresh_state();
+    let menu = Menu::new(
+        "menu.obs.dead_row",
+        vec![Row::action("no_such_command_key", "Dead row")],
+    );
+    let mut cascade = MenuCascade::new();
+    let mut focus = FocusState::new();
+    cascade.open(&menu, MenuTreeKind::Fixed, &mut focus);
+    let card = menu.id().clone();
+    let outcome = cascade.activate_row(&card, 0, &mut focus);
+    assert!(
+        outcome.activation().is_some(),
+        "precondition: the row must actually activate"
+    );
+
+    let snapshot = Some(menu.clone());
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || {
+        dispatch_activation(&mut state, &snapshot, &outcome, TRIGGER_ROW_PICKED)
+    });
+
+    assert!(
+        tasks.is_empty(),
+        "behaviour unchanged: no command is routed"
+    );
+    let event = capture
+        .with_code(menu_codes::ACTIVATION_UNRESOLVED)
+        .expect("an activation with no command must report ERROR");
+    assert_eq!(event.level, tracing::Level::ERROR);
+    assert_eq!(event.field("trigger"), Some(TRIGGER_ROW_PICKED));
+    assert_eq!(event.field("row"), Some("0"));
+    assert_eq!(event.field("card_snapshot_present"), Some("true"));
+}
+
+#[test]
+fn test_non_activating_key_logs_no_unresolved_activation() {
+    // The companion guard: `dispatch_activation` must not cry wolf when the
+    // outcome simply carried no activation.
+    let (mut state, _storage) = fresh_state();
+    let outcome = CascadeOutcome::noop();
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || {
+        dispatch_activation(&mut state, &None, &outcome, TRIGGER_KEY)
+    });
+    assert!(tasks.is_empty());
+    assert!(
+        capture.codes().is_empty(),
+        "a no-op outcome must log nothing, got {:?}",
+        capture.codes()
+    );
+}
+
+#[test]
+fn test_hover_while_hamburger_is_closed_is_reported_as_debug() {
+    let (mut state, _storage) = fresh_state();
+    state.overlay.hamburger_open = false;
+
+    let capture = Capture::new();
+    let tasks = with_capture(&capture, || {
+        reduce_menu(
+            &mut state,
+            MenuMessage::RowEntered {
+                card: MenuId::new("menu.ghost"),
+                row: 0,
+            },
+        )
+    });
+
+    assert!(
+        tasks.is_empty(),
+        "behaviour unchanged: the hover is ignored"
+    );
+    assert!(
+        capture.has_code_at(menu_codes::HOVER_WHEN_MENU_CLOSED, tracing::Level::DEBUG),
+        "expected a DEBUG {} for the ignored hover, got {:?}",
+        menu_codes::HOVER_WHEN_MENU_CLOSED,
+        capture.codes()
+    );
+}
+
+#[test]
+fn test_submenu_hover_that_opens_nothing_is_reported_as_debug() {
+    let root = MenuId::new("aim.obs");
+    let child = Menu::new(submenu_id(&root, "child"), vec![Row::action("c1", "C1")]);
+    let menu = Menu::new(
+        root.clone(),
+        vec![
+            Row::action("first", "First"),
+            Row::submenu("child", "Child", child),
+        ],
+    );
+    let mut cascade = MenuCascade::new();
+    let mut focus = FocusState::new();
+    cascade.open(&menu, MenuTreeKind::Fixed, &mut focus);
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        // A submenu parent whose branch did not open: logs.
+        log_submenu_hover(&cascade, &root, 1, false, TRIGGER_ROW_ENTERED);
+        // A plain action row: nothing to report.
+        log_submenu_hover(&cascade, &root, 0, false, TRIGGER_ROW_ENTERED);
+        // A submenu parent that did switch: nothing to report.
+        log_submenu_hover(&cascade, &root, 1, true, TRIGGER_ROW_ENTERED);
+    });
+
+    let codes = capture.codes();
+    assert_eq!(
+        codes,
+        vec![menu_codes::SUBMENU_HOVER_NOT_OPENED.to_string()],
+        "only the unopened submenu-parent hover may log"
+    );
+    assert!(capture.has_code_at(menu_codes::SUBMENU_HOVER_NOT_OPENED, tracing::Level::DEBUG));
+    let event = capture
+        .with_code(menu_codes::SUBMENU_HOVER_NOT_OPENED)
+        .expect("recorded above");
+    assert_eq!(event.field("row"), Some("1"));
+    assert_eq!(event.field("trigger"), Some(TRIGGER_ROW_ENTERED));
+}
+#[test]
+fn test_context_menu_failure_logs_do_not_leak_the_user_path() {
+    // Context-menu `MenuId`s are built as `file.<path>` / `dir.<path>`, so a
+    // line that prints the card id verbatim ships the user's path out of the
+    // app boundary ([NFR-009]). Every context-menu route must identify the
+    // failure without it.
+    let marker = "PII-CANARY-should-not-appear";
+    let path = format!("/Users/{marker}/a.md");
+    let (mut state, _storage) = fresh_state();
+    seed_rows(&mut state, vec![file_row(&path)]);
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(1.0, 2.0),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tree(TreeMessage::ContextMenuOpened {
+            path: PathBuf::from(&path),
+        }),
+    );
+
+    let mut menu = state.overlay.context_menu.take().expect("the menu opened");
+    let root = crate::ui_iced::context_menu::root_id(&menu.target);
+    assert!(
+        root.to_string().contains(marker),
+        "precondition: the card id itself carries the user's path"
+    );
+    menu.routes.clear();
+    state.overlay.context_menu = Some(menu);
+
+    let capture = Capture::new();
+    with_capture(&capture, || {
+        let _ = route_context_row(&mut state, &root, 0);
+        state.overlay.context_menu = None;
+        let _ = route_context_row(&mut state, &root, 1);
+        let _ = route_context_key(&mut state, MenuKey::Down);
+    });
+
+    let rendered = capture
+        .events()
+        .iter()
+        .map(|event| format!("{} {:?}", event.message, event.fields))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        capture.codes().len() >= 2,
+        "the routes under test must actually have fired, got {:?}",
+        capture.codes()
+    );
+    assert!(
+        !rendered.contains(marker),
+        "no context-menu failure route may print the user's path, got:\n{rendered}"
     );
 }

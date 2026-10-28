@@ -187,7 +187,7 @@ use hoarfrost::state::{BaseState, VisualState};
 use hoarfrost::token::contrast;
 use hoarfrost::token::shape;
 use hoarfrost::token::space;
-use hoarfrost::token::typography::{self, FAMILY_SANS};
+use hoarfrost::token::typography;
 use hoarfrost::widget::badge;
 use hoarfrost::widget::badge_model::BadgeTone;
 use hoarfrost::widget::button::ButtonVariant;
@@ -1578,7 +1578,10 @@ pub fn left_panel(view_model: &LeftPanelViewModel) -> Element<'_, Message> {
     let header = text(strings::WORKSPACE_HEADER)
         .size(HEADER_SIZE)
         .line_height(typography::TITLE_SM.iced_line_height())
-        .font(typography::TITLE_SM.font(FAMILY_SANS, typography::TITLE_SM.weight))
+        .font(iced::Font {
+            weight: typography::TITLE_SM.weight.iced(),
+            ..iced::Font::with_name("Fira Sans")
+        })
         .color(palette.text_strong);
 
     let search_field = TextInput::controlled(

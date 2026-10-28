@@ -795,7 +795,10 @@ pub fn tab_label_font(active: bool) -> iced::Font {
     } else {
         TAB_RUNG.weight
     };
-    TAB_RUNG.font(typography::Family::Sans, weight)
+    iced::Font {
+        weight: weight.iced(),
+        ..iced::Font::with_name("Fira Sans")
+    }
 }
 
 /// The fill a tab paints behind its contents, resolved from §4.4.2's fill
@@ -1492,7 +1495,10 @@ fn document_preview<'a>(tab: &'a TabEntry) -> Element<'a, Message> {
         text(&tab.title)
             .size(DOCUMENT_TITLE_SIZE)
             .line_height(HEADER_RUNG.iced_line_height())
-            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
+            .font(iced::Font {
+                weight: HEADER_RUNG.weight.iced(),
+                ..iced::Font::with_name("Fira Sans")
+            })
             .color(palette.text_strong)
             .into(),
     ])
@@ -1513,7 +1519,10 @@ fn agent_session_area(view_model: &CenterPanelViewModel) -> Element<'_, Message>
         text(strings::AGENT_SESSION_HEADER)
             .size(AGENT_HEADER_SIZE)
             .line_height(HEADER_RUNG.iced_line_height())
-            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
+            .font(iced::Font {
+                weight: HEADER_RUNG.weight.iced(),
+                ..iced::Font::with_name("Fira Sans")
+            })
             .color(palette.accent_text)
             .into(),
         container(

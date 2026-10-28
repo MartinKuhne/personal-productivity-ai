@@ -42,8 +42,9 @@ fn test_collections_are_in_registration_order_and_nonempty() {
 #[test]
 fn test_phosphor_font_name_is_the_registration_key() {
     assert_eq!(
-        PHOSPHOR_FONT_NAME, "phosphor",
-        "iced family name must be the 'phosphor' registration key"
+        PHOSPHOR_FONT_NAME, "Phosphor",
+        "the key must equal the family the TTF declares (name records 1/4/6); \
+         cosmic-text matches case-sensitively"
     );
 }
 

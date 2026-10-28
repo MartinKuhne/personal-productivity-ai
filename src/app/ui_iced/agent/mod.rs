@@ -158,7 +158,10 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
         text(strings::AGENT_SESSION_HEADER)
             .size(HEADER_TEXT_SIZE)
             .line_height(HEADER_RUNG.iced_line_height())
-            .font(HEADER_RUNG.font(typography::Family::Sans, HEADER_RUNG.weight))
+            .font(iced::Font {
+                weight: HEADER_RUNG.weight.iced(),
+                ..iced::Font::with_name("Fira Sans")
+            })
             .color(palette.accent_text)
             .into(),
         container(close_button)

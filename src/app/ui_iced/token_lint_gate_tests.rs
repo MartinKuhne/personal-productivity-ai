@@ -41,15 +41,20 @@ use crate::ui_iced::token_lint_gate::{
 /// number is the `u64` millisecond count it hands to the sleeper, which
 /// is a duration read from `time.delay.submenu`, not a measurement), so
 /// `PIN_APP_TOKEN_BOUND` and `PIN_APP_SURFACE_BOUND` do not move with it.
-const PIN_APP_FILES_SCANNED: usize = 158;
+/// 159 after the font-bootstrap work added `ui_iced/glyph_resolution.rs`,
+/// a `#[cfg(test)]` glyph probe that declares only shaping metrics and no
+/// colour, so neither bound moves with it either.
+const PIN_APP_FILES_SCANNED: usize = 159;
 /// Files treated as the app's colour-definition layer.
 const PIN_APP_RULE_A_FILES: usize = 1;
 /// Files under the app's visual scope, i.e. everything in `ui_iced/`.
 ///
 /// 44 through INT-8, 45 after INT-9's `ui_iced/menu_aim.rs` landed in
 /// the scope. The count is files-in-scope, not files-with-findings: the
-/// new module contributes a scanned file and no violation.
-const PIN_APP_RULE_B_FILES: usize = 45;
+/// new module contributes a scanned file and no violation. 46 after
+/// `ui_iced/glyph_resolution.rs` landed in the same scope, again with no
+/// violation.
+const PIN_APP_RULE_B_FILES: usize = 46;
 /// Colour constructors found inside `ui/theme.rs`.
 ///
 /// The anti-vacuity half of Rule A: without this, "zero colour literals

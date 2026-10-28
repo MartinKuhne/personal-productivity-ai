@@ -53,7 +53,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hoarfrost::focus::FocusState;
-use hoarfrost::surface::menu::cascade::{CascadeOutcome, MenuKey, MenuTreeKind};
+use hoarfrost::surface::menu::cascade::{
+    CascadeOutcome, IgnoredReason, MenuCascade, MenuKey, MenuTreeKind,
+};
 use hoarfrost::surface::menu::model::{Menu, MenuId};
 use hoarfrost::surface::modal::Recovery;
 use hoarfrost::surface::movable::PointerPhase;
@@ -61,10 +63,12 @@ use hoarfrost::surface::movable::SurfaceTarget;
 use hoarfrost::surface::tooltip::{DismissReason, TimeMs};
 use iced::Task;
 use iced::widget::operation;
+use iced::{Point, Size};
 
 use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::bus::events::user_command::UserCommand;
 use crate::config::AppConfig;
+use crate::error_codes::menu as menu_codes;
 use crate::markdown::document::DocumentContent;
 use crate::ui::tree_search::find_search_results_scoped;
 use crate::ui_iced::agent::transcript::AGENT_TRANSCRIPT_SCROLLABLE_ID;
@@ -77,6 +81,7 @@ use crate::ui_iced::editor::{self, EditorViewModel, LeaveGesture, apply_editor_m
 use crate::ui_iced::hamburger::{command_for_activation, hamburger_menu};
 use crate::ui_iced::logs::{self, LOG_SCROLLABLE_ID, ScrollSnapshot};
 use crate::ui_iced::menu_aim;
+use crate::ui_iced::menu_surface::{refusal_label, refusal_row, safe_menu_id};
 use crate::ui_iced::message::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
     DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, MenuMessage, Message,
@@ -95,6 +100,25 @@ const FONT_LOAD_ERROR_CODE: &str = "ui_iced.boot.font_load_failed";
 
 /// NFR-004 error-code name for a print request with no background channel.
 const PRINT_NO_CHANNEL_ERROR_CODE: &str = "ui_iced.file.print_no_channel";
+
+// Log `trigger` labels for the menu routes ([RUST-021]). These name *who asked*
+// for the menu operation, so one log line identifies the caller as well as the
+// failure — the two menus share codes and helpers, and without the label a
+// `MENU-4001` would not say whether the tree, the tab strip or the ☰ card
+// produced it.
+
+/// Trigger: the ☰ card reported a row pick.
+const TRIGGER_ROW_PICKED: &str = "menu.row_picked";
+/// Trigger: a menu card received a keyboard event.
+const TRIGGER_KEY: &str = "menu.key";
+/// Trigger: the pointer entered a menu row.
+const TRIGGER_ROW_ENTERED: &str = "menu.row_entered";
+/// Trigger: the file tree asked for a row's context menu.
+const TRIGGER_TREE_CONTEXT_MENU: &str = "tree.context_menu_opened";
+/// Trigger: the tab strip asked for a tab's context menu.
+const TRIGGER_TAB_CONTEXT_MENU: &str = "tab.context_menu_opened";
+/// Trigger: the top bar asked for the hamburger menu.
+const TRIGGER_HAMBURGER_OPEN: &str = "menu.opened";
 
 /// Top-level iced reducer.
 ///
@@ -1028,7 +1052,7 @@ fn reduce_tree(state: &mut AppState, message: TreeMessage) -> Vec<Task<Message>>
 /// cascade pushed on open, so the two menu surfaces cannot leave a stale trap
 /// behind in [`OverlayState::menu_focus`].
 fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
-    let anchor = state.overlay.cursor.unwrap_or_default();
+    let anchor = anchored_cursor_or_origin(state, TRIGGER_TREE_CONTEXT_MENU);
     let viewport = state.viewport;
     let opened = state
         .models
@@ -1044,8 +1068,55 @@ fn open_tree_context_menu(state: &mut AppState, path: &PathBuf) {
         });
 
     close_hamburger_tree(state);
-    state.overlay.context_menu =
-        opened.and_then(|(target, rows)| ContextMenu::open(target, anchor, &rows, viewport));
+
+    let menu = match opened {
+        Some((target, rows)) => ContextMenu::open(target, anchor, &rows, viewport),
+        None => {
+            tracing::error!(
+                error_code = menu_codes::CONTEXT_TREE_ROW_MISSING,
+                surface = "context_menu",
+                trigger = TRIGGER_TREE_CONTEXT_MENU,
+                path = %path.display(),
+                row_count = state.models.left.rows.len(),
+                anchor_x = anchor.x,
+                anchor_y = anchor.y,
+                viewport_w = viewport.width,
+                viewport_h = viewport.height,
+                "Context-menu open refused: the left-panel view-model has no row for this path"
+            );
+            None
+        }
+    };
+    state.overlay.context_menu = menu;
+}
+
+/// The last reported cursor position, or the window origin when none exists.
+///
+/// The fallback itself is the pre-existing behaviour, unchanged. What is new is
+/// that *taking* it is now visible: a pointer-anchored menu that lands at
+/// `(0,0)` is a menu in the wrong place, and silently substituting the origin
+/// is how that became invisible in the log.
+///
+/// `WARN` rather than `ERROR`: the menu still opens and is still usable, so the
+/// request was served — just not where the user pointed. [NFR-001] reserves
+/// `ERROR` for failures, and a menu that opens in the wrong corner is a
+/// degradation, not a refusal.
+fn anchored_cursor_or_origin(state: &AppState, trigger: &'static str) -> Point {
+    if let Some(cursor) = state.overlay.cursor {
+        return cursor;
+    }
+    let viewport = state.viewport;
+    tracing::warn!(
+        error_code = menu_codes::CONTEXT_ANCHOR_MISSING,
+        surface = "context_menu",
+        trigger,
+        anchor_x = 0.0f32,
+        anchor_y = 0.0f32,
+        viewport_w = viewport.width,
+        viewport_h = viewport.height,
+        "No cursor position reported; anchoring the pointer-menu at the window origin"
+    );
+    Point::default()
 }
 
 /// Takes the hamburger tree down completely: cascade, focus trap, bool and
@@ -1094,7 +1165,7 @@ fn print_task(state: &AppState, path: PathBuf) -> Task<Message> {
 fn reduce_tab(state: &mut AppState, message: TabMessage) {
     match message {
         TabMessage::ContextMenuOpened { index } => {
-            let anchor = state.overlay.cursor.unwrap_or_default();
+            let anchor = anchored_cursor_or_origin(state, TRIGGER_TAB_CONTEXT_MENU);
             let viewport = state.viewport;
             let opened = state.models.center.tabs.get(index).map(|tab| {
                 (
@@ -1107,8 +1178,25 @@ fn reduce_tab(state: &mut AppState, message: TabMessage) {
             });
 
             close_hamburger_tree(state);
-            state.overlay.context_menu = opened
-                .and_then(|(target, rows)| ContextMenu::open(target, anchor, &rows, viewport));
+            let menu = match opened {
+                Some((target, rows)) => ContextMenu::open(target, anchor, &rows, viewport),
+                None => {
+                    tracing::error!(
+                        error_code = menu_codes::CONTEXT_TAB_MISSING,
+                        surface = "context_menu",
+                        trigger = TRIGGER_TAB_CONTEXT_MENU,
+                        index,
+                        tab_count = state.models.center.tabs.len(),
+                        anchor_x = anchor.x,
+                        anchor_y = anchor.y,
+                        viewport_w = viewport.width,
+                        viewport_h = viewport.height,
+                        "Context-menu open refused: the tab strip has no tab at this index"
+                    );
+                    None
+                }
+            };
+            state.overlay.context_menu = menu;
         }
         TabMessage::ContextMenuClosed => {
             close_context_menu(state);
@@ -1167,11 +1255,12 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
             // dismisses any live tree/tab context menu.
             close_context_menu(state);
             let menu = hamburger_menu(&state.models.top);
-            state.overlay.hamburger_cascade.open(
+            let outcome = state.overlay.hamburger_cascade.open(
                 &menu,
                 MenuTreeKind::Fixed,
                 &mut state.overlay.menu_focus,
             );
+            log_hamburger_open(&menu, &outcome, state.viewport);
             // A fresh tree starts with a fresh corridor. Its trigger
             // indices described whatever cards were up last, and a stale
             // one landing on the same row of the new tree would answer
@@ -1198,8 +1287,7 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                     row,
                     &mut state.overlay.menu_focus,
                 );
-                let tasks = activation_command(&snapshot, &outcome)
-                    .map_or_else(Vec::new, |command| route_command(state, command));
+                let tasks = dispatch_activation(state, &snapshot, &outcome, TRIGGER_ROW_PICKED);
                 settle(state, tasks)
             } else {
                 route_context_row(state, &card, row)
@@ -1224,8 +1312,7 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                     .overlay
                     .hamburger_cascade
                     .on_key(key, &mut state.overlay.menu_focus);
-                let tasks = activation_command(&snapshot, &outcome)
-                    .map_or_else(Vec::new, |command| route_command(state, command));
+                let tasks = dispatch_activation(state, &snapshot, &outcome, TRIGGER_KEY);
                 settle(state, tasks)
             } else {
                 route_context_key(state, key)
@@ -1247,6 +1334,13 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                     now,
                     &mut state.overlay.menu_focus,
                 );
+                log_submenu_hover(
+                    &state.overlay.hamburger_cascade,
+                    &card,
+                    row,
+                    step.switched,
+                    TRIGGER_ROW_ENTERED,
+                );
                 settle(
                     state,
                     menu_aim::wake_task(&card, step.wake_after_ms)
@@ -1254,6 +1348,13 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
                         .collect(),
                 )
             } else {
+                tracing::debug!(
+                    error_code = menu_codes::HOVER_WHEN_MENU_CLOSED,
+                    menu = %safe_menu_id(&card),
+                    trigger = TRIGGER_ROW_ENTERED,
+                    row,
+                    "Row hover report arrived while no hamburger menu is open; ignored"
+                );
                 Vec::new()
             }
         }
@@ -1312,6 +1413,17 @@ fn reduce_menu(state: &mut AppState, message: MenuMessage) -> Vec<Task<Message>>
 /// when the message is known, so a row that merely absorbs a click leaves the
 /// card mounted (`UIF-CMENU-002`).
 fn route_context_row(state: &mut AppState, card: &MenuId, row: usize) -> Vec<Task<Message>> {
+    if state.overlay.context_menu.is_none() {
+        tracing::warn!(
+            error_code = menu_codes::ROW_PICK_NO_SURFACE,
+            surface = "context_menu",
+            trigger = TRIGGER_ROW_PICKED,
+            row,
+            "Context-menu row pick arrived with no context menu mounted; the intent was dropped"
+        );
+        return Vec::new();
+    }
+
     let message = state
         .overlay
         .context_menu
@@ -1328,7 +1440,20 @@ fn route_context_row(state: &mut AppState, card: &MenuId, row: usize) -> Vec<Tas
     if closes_tree {
         close_context_menu(state);
     }
-    message.map_or_else(Vec::new, |message| route_row_message(state, message))
+
+    match message {
+        Some(message) => route_row_message(state, message),
+        None => {
+            tracing::error!(
+                error_code = menu_codes::ROW_INTENT_MISSING,
+                surface = "context_menu",
+                trigger = TRIGGER_ROW_PICKED,
+                row,
+                "Context-menu row is live but carries no entry in the routing table: the click resolves to nothing"
+            );
+            Vec::new()
+        }
+    }
 }
 
 /// Runs a context-menu keyboard navigation step (`UIF-CMENU-003`).
@@ -1337,11 +1462,32 @@ fn route_context_row(state: &mut AppState, card: &MenuId, row: usize) -> Vec<Tas
 /// transition so an `Enter` on a row resolves against the card the user was
 /// actually in.
 fn route_context_key(state: &mut AppState, key: MenuKey) -> Vec<Task<Message>> {
+    if state.overlay.context_menu.is_none() {
+        tracing::warn!(
+            error_code = menu_codes::KEY_NAV_NO_SURFACE,
+            surface = "context_menu",
+            trigger = TRIGGER_KEY,
+            key = ?key,
+            "Context-menu key navigation arrived with no context menu mounted; the key was dropped"
+        );
+        return Vec::new();
+    }
+
     let message = state.overlay.context_menu.as_mut().and_then(|menu| {
         let active = menu.cascade.active_card().map(|card| card.id().clone())?;
         let outcome = menu.cascade.on_key(key, &mut menu.focus);
         let activation = outcome.activation()?;
-        menu.row_message(&active, activation.row)
+        let message = menu.row_message(&active, activation.row);
+        if message.is_none() {
+            tracing::error!(
+                error_code = menu_codes::ROW_INTENT_MISSING,
+                surface = "context_menu",
+                trigger = TRIGGER_KEY,
+                row = activation.row,
+                "Context-menu row activated by keyboard but carries no entry in the routing table"
+            );
+        }
+        message
     });
 
     if state
@@ -1417,6 +1563,144 @@ fn activation_command(card: &Option<Menu>, outcome: &CascadeOutcome) -> Option<U
     let activation = outcome.activation()?;
     let key = card.as_ref()?.row(activation.row)?.key().to_owned();
     command_for_activation(&key, &activation.effect)
+}
+
+/// Drives a hamburger activation and reports the ones that go nowhere.
+///
+/// The behaviour is exactly what the two call sites did inline — resolve the
+/// command and route it, otherwise return no tasks. What is new is the middle
+/// case: an activation that produced **no** command. With
+/// `map_or_else(Vec::new, …)` a dead row and a non-activating key were
+/// indistinguishable, so a menu row that swallowed the user's click left no
+/// trace in the log.
+///
+/// Only an activation that *did* activate and still resolved to no command is
+/// an `ERROR`. An outcome with no activation at all — an arrow key on a card
+/// with nothing focused — is the normal shape of that input and logs nothing.
+fn dispatch_activation(
+    state: &mut AppState,
+    snapshot: &Option<Menu>,
+    outcome: &CascadeOutcome,
+    trigger: &'static str,
+) -> Vec<Task<Message>> {
+    if let Some(command) = activation_command(snapshot, outcome) {
+        return route_command(state, command);
+    }
+    if let Some(activation) = outcome.activation() {
+        tracing::error!(
+            error_code = menu_codes::ACTIVATION_UNRESOLVED,
+            menu = %snapshot
+                .as_ref()
+                .map(|menu| safe_menu_id(menu.id()))
+                .unwrap_or_else(|| "<card already gone>".to_string()),
+            surface = "hamburger",
+            trigger,
+            row = activation.row,
+            card_snapshot_present = snapshot.is_some(),
+            closes_menu = activation.closes_menu,
+            "Hamburger row activated but resolved to no UserCommand: the click is dead"
+        );
+    }
+    Vec::new()
+}
+
+/// Reports the hamburger open request's outcome ([NFR-001], [NFR-004]).
+///
+/// Two refusals, and they are not the same thing:
+///
+/// * `AlreadyOpen` is the cascade correctly absorbing a repeated "open" so
+///   the card cannot flicker closed-and-open. The user still sees the menu
+///   they asked for, so this is `DEBUG` — not a failure, and `ERROR` here
+///   would be spam on any caller that re-issues the open.
+/// * `NoFocusableRows` means the built menu has nothing the keyboard can
+///   enter, so **no card mounts at all** and the ☰ click does nothing. That
+///   is a failure: `ERROR`.
+///
+/// Any other reason `open` can return is a contradiction between the menu
+/// builder and the cascade, and is `ERROR` carrying the reason's label and
+/// row index — never the raw variant, whose [`MenuId`] payload is redacted
+/// ([NFR-009]).
+fn log_hamburger_open(menu: &Menu, outcome: &CascadeOutcome, viewport: Size) {
+    let Some(reason) = outcome.ignored_reason() else {
+        return;
+    };
+    match reason {
+        IgnoredReason::AlreadyOpen { card } => {
+            tracing::debug!(
+                error_code = menu_codes::HAMBURGER_ALREADY_OPEN,
+                menu = %safe_menu_id(card),
+                surface = "hamburger",
+                trigger = TRIGGER_HAMBURGER_OPEN,
+                row_count = menu.rows().len(),
+                viewport_w = viewport.width,
+                viewport_h = viewport.height,
+                "Hamburger open request was a no-op: this tree is already showing"
+            );
+        }
+        IgnoredReason::NoFocusableRows { card } => {
+            tracing::error!(
+                error_code = menu_codes::HAMBURGER_NO_FOCUSABLE_ROWS,
+                menu = %safe_menu_id(card),
+                surface = "hamburger",
+                trigger = TRIGGER_HAMBURGER_OPEN,
+                row_count = menu.rows().len(),
+                viewport_w = viewport.width,
+                viewport_h = viewport.height,
+                "Hamburger open refused: the built menu has no keyboard-navigable row, so no card can mount"
+            );
+        }
+        other => {
+            tracing::error!(
+                error_code = menu_codes::HAMBURGER_OPEN_REFUSED,
+                menu = %safe_menu_id(menu.id()),
+                surface = "hamburger",
+                trigger = TRIGGER_HAMBURGER_OPEN,
+                reason = refusal_label(Some(other)),
+                reason_row = ?refusal_row(Some(other)),
+                row_count = menu.rows().len(),
+                viewport_w = viewport.width,
+                viewport_h = viewport.height,
+                "Hamburger open refused for a reason `open` should never return: builder and cascade disagree"
+            );
+        }
+    }
+}
+
+/// Reports a hover on a submenu parent that opened nothing ([NFR-004]).
+///
+/// `DEBUG`, not `ERROR`: the corridor deliberately holds a switch for its
+/// grace window (§4.8.2), so "not yet" is the normal answer and a later
+/// deadline may still land it. It is logged because when a submenu *never*
+/// opens, this is the line proving the hover reached the reducer and the
+/// cascade declined rather than the event never arriving at all.
+///
+/// Non-parent rows and successful switches log nothing.
+fn log_submenu_hover(
+    cascade: &MenuCascade,
+    card: &MenuId,
+    row: usize,
+    switched: bool,
+    trigger: &'static str,
+) {
+    if switched {
+        return;
+    }
+    let is_parent = cascade
+        .card_menu(card)
+        .and_then(|menu| menu.row(row))
+        .is_some_and(|row| row.is_submenu_parent());
+    if !is_parent {
+        return;
+    }
+    tracing::debug!(
+        error_code = menu_codes::SUBMENU_HOVER_NOT_OPENED,
+        menu = %safe_menu_id(card),
+        surface = "hamburger",
+        trigger,
+        row,
+        open_cards = cascade.open_cards().len(),
+        "Hover on a submenu parent opened no card (aim corridor held, or the branch declined to open)"
+    );
 }
 
 // ───────────────────────────── editor ─────────────────────────────

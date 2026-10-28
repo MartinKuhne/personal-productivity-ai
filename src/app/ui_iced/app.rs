@@ -67,6 +67,7 @@ use crate::background::logs::BackgroundLogs;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::{AppConfig, ConfigStorageHandler, ContentLibrary};
+use crate::error_codes::menu as menu_codes;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::app::FastMdApp;
@@ -83,6 +84,7 @@ use crate::ui_iced::editor::EditorViewModel;
 use crate::ui_iced::fonts;
 use crate::ui_iced::layout;
 use crate::ui_iced::logs::{BackgroundLogsViewModel, ScrollSnapshot};
+use crate::ui_iced::menu_surface::{refusal_label, refusal_row};
 use crate::ui_iced::message::{BootMessage, Message, WindowMessage};
 use crate::ui_iced::panels::bottom::BottomPanelViewModel;
 use crate::ui_iced::panels::center::CenterPanelViewModel;
@@ -101,8 +103,8 @@ use hoarfrost::binding::pre_rank::DragCapture;
 use hoarfrost::binding::pre_rank::PreRankCoordinator;
 use hoarfrost::focus::FocusState;
 use hoarfrost::surface::menu::aim::AimCorridor;
-use hoarfrost::surface::menu::cascade::{MenuCascade, MenuTreeKind};
-use hoarfrost::surface::menu::model::MenuId;
+use hoarfrost::surface::menu::cascade::{IgnoredReason, MenuCascade, MenuTreeKind};
+use hoarfrost::surface::menu::model::{Menu, MenuId};
 use hoarfrost::surface::movable::GeometryStorage;
 use hoarfrost::surface::movable::MovableHost;
 use hoarfrost::surface::movable::MovableSpec;
@@ -397,8 +399,16 @@ impl ContextMenu {
         let menu = context_menu::menu_from_rows(context_menu::root_id(&target), rows);
         let mut cascade = MenuCascade::new();
         let mut focus = FocusState::new();
-        cascade.open(&menu, MenuTreeKind::Context, &mut focus);
+        let outcome = cascade.open(&menu, MenuTreeKind::Context, &mut focus);
         if !cascade.is_open() {
+            log_context_open_refused(
+                &target,
+                &menu,
+                outcome.ignored_reason(),
+                anchor,
+                viewport,
+                rows.len(),
+            );
             return None;
         }
 
@@ -423,6 +433,74 @@ impl ContextMenu {
     pub fn row_message(&self, card: &MenuId, row: usize) -> Option<Message> {
         let key = self.cascade.card_menu(card)?.row(row)?.key();
         self.routes.get(key).cloned()
+    }
+}
+
+/// Reports a context-menu open the cascade refused ([NFR-001], [NFR-004]).
+///
+/// Before this, [`ContextMenu::open`] returned a bare `None` and whatever the
+/// cascade said about *why* went with it, which is one reason a
+/// right-click-that-did-nothing left no trace in the live log. The
+/// [`IgnoredReason`] is carried straight through from
+/// [`MenuCascade::open`], so the line names the guard that fired rather than
+/// only that a guard fired.
+///
+/// Always `ERROR`. Unlike the hamburger's idempotent re-open — where a
+/// refusal is the *correct* answer to a repeated request — a refused
+/// context-menu open has no benign reading: the user asked for a menu at a
+/// point and no surface exists to show one.
+///
+/// [NFR-009]: the target is named by its **variant** and the geometry is the
+/// anchor point and viewport. Two things are deliberately absent:
+///
+/// * the target's filesystem path, and
+/// * the [`MenuId`] itself — because
+///   [`context_menu::root_id`](crate::ui_iced::context_menu::root_id) builds
+///   it as `context.dir.<path>` / `context.file.<path>`, so logging the id
+///   verbatim would ship the user's path out of the app boundary anyway.
+///
+/// The reason is mapped through
+/// [`refusal_label`](crate::ui_iced::menu_surface::refusal_label) for the same
+/// reason: every [`IgnoredReason`] variant carries a [`MenuId`], so `?reason`
+/// leaked the path even after the `menu` field was dropped.
+///
+/// `surface` + `target_kind` + the labelled reason identify the route just as
+/// well without the payload.
+fn log_context_open_refused(
+    target: &ContextTarget,
+    menu: &Menu,
+    reason: Option<&IgnoredReason>,
+    anchor: Point,
+    viewport: Size,
+    rows: usize,
+) {
+    tracing::error!(
+        error_code = menu_codes::CONTEXT_OPEN_REFUSED,
+        surface = "context_menu",
+        trigger = "context_menu.open",
+        target_kind = context_target_kind(target),
+        reason = refusal_label(reason),
+        reason_row = ?refusal_row(reason),
+        row_count = rows,
+        built_rows = menu.rows().len(),
+        anchor_x = anchor.x,
+        anchor_y = anchor.y,
+        viewport_w = viewport.width,
+        viewport_h = viewport.height,
+        "Context-menu open refused by the cascade: no surface was mounted"
+    );
+}
+
+/// The [`ContextTarget`] variant name, for the log's `target_kind` field.
+///
+/// Spelled as a short label rather than `?target` so the field stays a stable,
+/// groupable token instead of a debug dump that changes shape with the payload.
+fn context_target_kind(target: &ContextTarget) -> &'static str {
+    match target {
+        ContextTarget::TreeDirectory { .. } => "tree_directory",
+        ContextTarget::TreeFile { .. } => "tree_file",
+        ContextTarget::TreeMultiSelect { .. } => "tree_multi_select",
+        ContextTarget::Tab { .. } => "tab",
     }
 }
 
@@ -1751,13 +1829,15 @@ pub struct LaunchInputs {
 ///    bridge, so the orchestrator's own `rx` drain is unused and gets an
 ///    inert, never-fed channel. The bridge is the single inbound path.
 ///
-/// Side effects at construction: spawns the background worker thread
-/// (`BackgroundTask::new`), the MCP config-subscriber thread
+/// Side effects at construction: the FastMD font collections are
+/// registered synchronously into the shared iced font system (first thing,
+/// so no glyph can resolve before the faces exist), then the background
+/// worker thread (`BackgroundTask::new`), the MCP config-subscriber thread
 /// (`spawn_config_subscription`) and the `std::sync::mpsc` → async
-/// forwarding thread (inside [`BusReceivers`]). The startup `ConfigArrived`
-/// is published synchronously right before returning, after every subscriber
-/// above is registered, so the `CONFIG_ARRIVAL_TIMEOUT` waits never miss it.
-/// Until then, none of them touch the filesystem.
+/// forwarding thread (inside [`BusReceivers`]) are spawned. The startup
+/// `ConfigArrived` is published synchronously right before returning, after
+/// every subscriber above is registered, so the `CONFIG_ARRIVAL_TIMEOUT`
+/// waits never miss it. Until then, none of them touch the filesystem.
 pub fn build_state(
     config: AppConfig,
     config_bus: &Bus<ConfigArrived>,
@@ -1765,6 +1845,18 @@ pub fn build_state(
     ui_state_storage: Arc<dyn UiStateStorage>,
     persisted: PersistedUiState,
 ) -> AppState {
+    // Font registration, performed **synchronously** and first: the faces
+    // must be in the shared iced font system before anything resolves a
+    // glyph. `iced::font::load` would defer the same work to the iced
+    // scheduler (`Action::LoadFont` is only handled by the winit event loop,
+    // after `boot` returns), leaving the first frames shaping against a
+    // database without the FastMD collections. Same reasoning as the
+    // `ConfigArrived` publish below. The outcome is not logged here — it is
+    // latched, and [`fonts::font_boot_task`] replays it into
+    // `BootMessage::FontLoadFinished`, where `reduce_boot` raises the ERROR
+    // ([NFR-001]).
+    let _ = fonts::register_fonts();
+
     // Background worker + event channel.
     let background_task = BackgroundTask::new(config_bus.clone());
     // The tools manager subscribes to the same bus and performs the one-time

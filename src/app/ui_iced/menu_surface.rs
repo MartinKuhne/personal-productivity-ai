@@ -37,20 +37,162 @@
 #[path = "menu_surface_tests.rs"]
 mod tests;
 
+/// Shared log-capture harness for the menu observability tests in
+/// `menu_surface_tests`, `update_tests` and `app_tests`.
+///
+/// The file carries the `_tests` suffix so
+/// [`token_lint::is_test_file`](hoarfrost::token_lint::is_test_file) treats it
+/// as fixture rather than shipped code: it is compiled only under `cfg(test)`
+/// and defines no visual tokens, so counting it as a production file would
+/// inflate the gate's scope without anything to check.
+#[cfg(test)]
+#[path = "menu_log_capture_tests.rs"]
+pub(crate) mod log_capture;
+
 use std::collections::HashMap;
 
 use iced::widget::{Column, container, stack};
 use iced::{Element, Length, Padding, Point, Rectangle, Size};
 
 use hoarfrost::geometry::anchor::{self, Placement};
-use hoarfrost::surface::menu::cascade::{MenuCascade, OpenCard};
+use hoarfrost::surface::menu::cascade::{IgnoredReason, MenuCascade, OpenCard};
 use hoarfrost::surface::menu::model::{Menu, MenuId};
 use hoarfrost::surface::menu::view::{self, MenuRow, RowEvent};
 use hoarfrost::token::space;
 
+use crate::error_codes::menu as menu_codes;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{MenuMessage, Message};
 use crate::ui_iced::overlay;
+
+/// Why [`open_card_rects`] dropped an open card instead of solving a rectangle
+/// for it, and the [NFR-004] code that names it in the log.
+///
+/// Every variant means the same thing to the user — a card that is open in the
+/// cascade but never appears on screen — so each is an `ERROR`. What differs is
+/// *which* link in the anchor chain broke, which is the whole value of
+/// separating them: without the reason the only way to tell is a debugger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardDropReason {
+    /// The card's parent never received a rectangle, so the trigger row inside
+    /// it cannot be derived.
+    ParentRectMissing,
+    /// The trigger names a parent card the cascade does not hold.
+    ParentMenuMissing,
+    /// The trigger row index is past the end of the parent menu.
+    RowRectMissing,
+}
+
+impl CardDropReason {
+    /// The [NFR-004] error code for this drop reason.
+    #[must_use]
+    pub const fn error_code(self) -> &'static str {
+        match self {
+            Self::ParentRectMissing => menu_codes::CARD_PARENT_RECT_MISSING,
+            Self::ParentMenuMissing => menu_codes::CARD_PARENT_MENU_MISSING,
+            Self::RowRectMissing => menu_codes::CARD_ROW_RECT_MISSING,
+        }
+    }
+
+    /// The broken link, phrased for the log line.
+    #[must_use]
+    pub const fn detail(self) -> &'static str {
+        match self {
+            Self::ParentRectMissing => "parent card was never solved to a rectangle",
+            Self::ParentMenuMissing => "cascade does not hold the trigger's parent card",
+            Self::RowRectMissing => "trigger row index is past the end of the parent menu",
+        }
+    }
+}
+
+/// A [NFR-009]-safe rendering of a [`MenuId`] for a log field.
+///
+/// Context-menu ids are **built from the user's filesystem path**:
+/// [`context_menu::root_id`](crate::ui_iced::context_menu::root_id) emits
+/// `context.dir.<path>`, `context.file.<path>`, `context.multi.<paths>` and
+/// `context.tab.<index>.<path>`, and every submenu under one inherits that
+/// prefix. Printing such an id verbatim would ship the user's directory
+/// structure out of the application boundary, which [NFR-009] forbids.
+///
+/// Only the *kind* segment survives: `context.dir.<redacted>` still says
+/// which builder produced the card and which menu family it belongs to, which
+/// is all the log needs to identify the route. Hamburger ids are static
+/// (`hamburger`, `hamburger.<section>`) and pass through untouched, because
+/// there the id is the diagnostic and carries nothing personal.
+///
+/// Redaction is keyed on the prefix rather than on a per-call-site decision so
+/// a new path-bearing id cannot leak by forgetting to redact at a new site.
+#[must_use]
+pub(crate) fn safe_menu_id(id: &MenuId) -> String {
+    use crate::ui_iced::context_menu::CONTEXT_MENU_ID_PREFIX;
+
+    let raw = id.as_str();
+    let Some(rest) = raw.strip_prefix(&format!("{CONTEXT_MENU_ID_PREFIX}.")) else {
+        return raw.to_string();
+    };
+    let kind = rest.split('.').next().unwrap_or("");
+    format!("{CONTEXT_MENU_ID_PREFIX}.{kind}.<redacted>")
+}
+
+/// The [`IgnoredReason`] discriminant as a stable, groupable log token.
+///
+/// The reason is never rendered with `?`: every variant carries a
+/// [`MenuId`], and a context-menu id embeds the user's path
+/// ([`safe_menu_id`]). A label is also better for alerting than a debug dump
+/// whose shape changes with the payload.
+#[must_use]
+pub(crate) fn refusal_label(reason: Option<&IgnoredReason>) -> &'static str {
+    match reason {
+        None => "none",
+        Some(IgnoredReason::NotOpen) => "not_open",
+        Some(IgnoredReason::AlreadyOpen { .. }) => "already_open",
+        Some(IgnoredReason::UnknownCard { .. }) => "unknown_card",
+        Some(IgnoredReason::NotSubmenu { .. }) => "not_submenu",
+        Some(IgnoredReason::NoFocusableRows { .. }) => "no_focusable_rows",
+        Some(IgnoredReason::RowOutOfRange { .. }) => "row_out_of_range",
+        Some(IgnoredReason::NothingFocused { .. }) => "nothing_focused",
+    }
+}
+
+/// The row index a refusal addressed, when its variant carries one.
+#[must_use]
+pub(crate) fn refusal_row(reason: Option<&IgnoredReason>) -> Option<usize> {
+    match reason {
+        Some(IgnoredReason::NotSubmenu { row, .. })
+        | Some(IgnoredReason::RowOutOfRange { row, .. }) => Some(*row),
+        _ => None,
+    }
+}
+
+/// Reports an open card that cannot be painted ([NFR-001], [NFR-004]).
+///
+/// This is the loud half of [`open_card_rects`]'s `continue`: the card stays
+/// open in the cascade, so nothing else in the app will ever mention it again,
+/// and a menu that silently fails to appear is otherwise undiagnosable.
+///
+/// [NFR-009]: ids go through [`safe_menu_id`]; the rest are row indices and
+/// viewport geometry — no paths, no user content.
+fn log_card_dropped(
+    card: &MenuId,
+    parent: &MenuId,
+    row: usize,
+    reason: CardDropReason,
+    viewport: Size,
+    open_cards: usize,
+) {
+    tracing::error!(
+        error_code = reason.error_code(),
+        menu = %safe_menu_id(card),
+        trigger = "menu.open_card_rects",
+        parent = %safe_menu_id(parent),
+        row,
+        detail = reason.detail(),
+        open_cards,
+        viewport_w = viewport.width,
+        viewport_h = viewport.height,
+        "Menu card is open in the cascade but was dropped from the solved rect list and will never paint"
+    );
+}
 
 /// Card inset between the card edge and its rows (`space.xs`, §4.8.1).
 pub const CARD_INSET: f32 = space::XS;
@@ -236,18 +378,43 @@ pub fn open_card_rects(
     let view = Rectangle::new(Point::ORIGIN, viewport);
     let mut placed: HashMap<MenuId, Rectangle> = HashMap::new();
     let mut rects = Vec::new();
+    let open_cards = cascade.open_cards();
 
-    for card in cascade.open_cards() {
+    for card in open_cards {
         let rect = match card.trigger() {
             None => root_placement(card.menu()).rect(),
             Some(trigger) => {
                 let Some(parent_rect) = placed.get(&trigger.parent).copied() else {
+                    log_card_dropped(
+                        card.id(),
+                        &trigger.parent,
+                        trigger.row,
+                        CardDropReason::ParentRectMissing,
+                        viewport,
+                        open_cards.len(),
+                    );
                     continue;
                 };
                 let Some(parent_menu) = cascade.card_menu(&trigger.parent) else {
+                    log_card_dropped(
+                        card.id(),
+                        &trigger.parent,
+                        trigger.row,
+                        CardDropReason::ParentMenuMissing,
+                        viewport,
+                        open_cards.len(),
+                    );
                     continue;
                 };
                 let Some(row_rect) = row_rect(parent_menu, parent_rect, trigger.row) else {
+                    log_card_dropped(
+                        card.id(),
+                        &trigger.parent,
+                        trigger.row,
+                        CardDropReason::RowRectMissing,
+                        viewport,
+                        open_cards.len(),
+                    );
                     continue;
                 };
                 anchor::solve(
@@ -266,5 +433,39 @@ pub fn open_card_rects(
         rects.push(rect);
     }
 
+    report_rect_alignment(open_cards, &rects);
     rects
+}
+
+/// Reports the rect/open-card alignment invariant that
+/// [`overlay`](crate::ui_iced::menu_surface::overlay) depends on, and returns
+/// whether the two lists are aligned.
+///
+/// `overlay` zips `rects` with `open_cards()` index-for-index. A shortfall
+/// therefore does not merely drop the last card — it shifts every later card
+/// onto **another card's rectangle**, so the visible menu lands in the wrong
+/// places rather than simply missing one entry. Each drop in the walk above
+/// already named itself; this catches any other way the two lists can come
+/// apart before the paint path trusts them.
+///
+/// Extracted from [`open_card_rects`] so the invariant can be forced directly
+/// in a test — the walk itself only produces a shortfall through the drops,
+/// which need a cascade the framework will not build.
+fn report_rect_alignment(open_cards: &[OpenCard], rects: &[Rectangle]) -> bool {
+    if rects.len() == open_cards.len() {
+        return true;
+    }
+    tracing::error!(
+        error_code = menu_codes::RECT_COUNT_MISMATCH,
+        menu = %open_cards
+            .first()
+            .map(|card| safe_menu_id(card.id()))
+            .unwrap_or_else(|| "<no open card>".to_string()),
+        trigger = "menu.open_card_rects",
+        open_cards = open_cards.len(),
+        rects = rects.len(),
+        painted = rects.len().min(open_cards.len()),
+        "Solved rect list disagrees with the cascade's open-card list; zipped index-for-index, cards past the shortfall never paint and those before it paint at the wrong rectangle"
+    );
+    false
 }

@@ -114,7 +114,7 @@ use iced::widget::{Row, container, pick_list, rule, text};
 use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding, Point, Size};
 
 use hoarfrost::state::{BaseState, VisualState};
-use hoarfrost::token::typography::{self, FAMILY_SANS};
+use hoarfrost::token::typography;
 use hoarfrost::token::{shape, size, space};
 use hoarfrost::widget::button::ButtonVariant;
 use hoarfrost::widget::button_widget::Button;
@@ -914,7 +914,10 @@ fn brand_title<'a>() -> text::Text<'a> {
     text(strings::APP_TITLE)
         .size(rung.size)
         .line_height(rung.iced_line_height())
-        .font(rung.font(FAMILY_SANS, rung.emphasis_weight))
+        .font(iced::Font {
+            weight: rung.emphasis_weight.iced(),
+            ..iced::Font::with_name("Fira Sans")
+        })
         .color(Palette::fastmd_dark().accent_text)
 }
 

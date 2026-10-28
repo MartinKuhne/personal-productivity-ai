@@ -140,6 +140,10 @@ pub mod context_menu;
 pub mod dialogs;
 pub mod editor;
 pub mod fonts;
+/// Test-only glyph-resolution probe: which physical face each symbol the UI
+/// renders actually lands on, and whether font registration changed it.
+#[cfg(test)]
+pub mod glyph_resolution;
 /// The top-bar hamburger menu rendered by the `hoarfrost` menu engine.
 pub mod hamburger;
 #[cfg(test)]
