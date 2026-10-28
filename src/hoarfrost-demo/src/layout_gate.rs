@@ -59,7 +59,12 @@ const MIN_WIDGET_EDGE: f32 = 8.0;
 /// The registry is checked **both ways**: an id in this list that the
 /// probe cannot find is dead weight, and an id the probe finds that is not
 /// in this list is an unregistered widget that no test is watching.
-const REGISTRY: [&str; 158] = [
+///
+/// Menu rows carry their own `container` record now that `MenuRow`
+/// publishes its own box, and the two separators are registered under
+/// their declared `m-sep-1` / `m-sep-2` keys rather than the empty-key
+/// id a keyless separator used to produce.
+const REGISTRY: [&str; 160] = [
     "demo.atoms.button.Danger.busy",
     "demo.atoms.button.Danger.live",
     "demo.atoms.button.Ghost.busy",
@@ -115,6 +120,8 @@ const REGISTRY: [&str; 158] = [
     "demo.composites.menu.m-new.label",
     "demo.composites.menu.m-save",
     "demo.composites.menu.m-save.label",
+    "demo.composites.menu.m-sep-1",
+    "demo.composites.menu.m-sep-2",
     "demo.composites.menu.m-wrap",
     "demo.composites.menu.m-wrap.label",
     "demo.composites.scroll",

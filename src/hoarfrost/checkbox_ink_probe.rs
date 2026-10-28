@@ -36,6 +36,15 @@
 //!    displacement reaches them. It does not, and these say so with pixels
 //!    rather than by inspection: they are `fill_quad` geometry, so no text
 //!    anchor is involved.
+//! 5. **The symbol-face ledger (`G-6`)** — every symbol codepoint this
+//!    crate emits, classified as typographic, icon or test fixture, each
+//!    with its guarantee status read live from the cmap, plus the measured
+//!    candidate-face matrix. It lives here rather than in a module of its
+//!    own because it is the same question the cmap reader already answers
+//!    — "does the render font have this glyph?" — asked of the whole
+//!    inventory at once. See the
+//!    `The symbol-face ledger (G-6)` section near the end of this file for
+//!    the findings and what they decide.
 //!
 //! # Committed-test safety
 //!
@@ -1335,6 +1344,10 @@ pub fn resolving_face(cp: char) -> Option<String> {
 // The glyph-constant scanner
 // ---------------------------------------------------------------------------
 
+/// The `match` arm separator, named because the scanner looks for it in
+/// three places and a bare `"=>"` in each of them says nothing about why.
+const MATCH_FAT_ARROW: &str = "=>";
+
 /// A non-ASCII glyph constant discovered in this crate's sources.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlyphConst {
@@ -1384,19 +1397,19 @@ pub fn is_symbol_codepoint(ch: char) -> bool {
 
 /// Every non-ASCII glyph constant declared in this crate's own sources.
 ///
-/// Walks `env!("CARGO_MANIFEST_DIR")` for `.rs` files and reads
-/// `const NAME: &str = "…"` / `const NAME: char = '…'` declarations.
-/// Test sidecars and the gallery binary are included — a gallery glyph is
-/// still a glyph the crate emits.
+/// Walks `env!("CARGO_MANIFEST_DIR")` for `.rs` files and reads both
+/// shapes a glyph is emitted from — `const` declarations and `match`
+/// arms returning a literal (see [`glyph_literals_on`]). Test sidecars and
+/// the gallery binary are included — a gallery glyph is still a glyph the
+/// crate emits.
 #[must_use]
 pub fn scan_glyph_constants() -> Vec<GlyphConst> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let font = render_font_bytes();
-    let mut out = Vec::new();
     let mut files = Vec::new();
     collect_rust_files(&root, &mut files);
     files.sort();
 
+    let mut out = Vec::new();
     for file in files {
         let Ok(src) = fs::read_to_string(&file) else {
             continue;
@@ -1406,11 +1419,24 @@ pub fn scan_glyph_constants() -> Vec<GlyphConst> {
             .unwrap_or(file.as_path())
             .to_string_lossy()
             .replace('\\', "/");
+        out.extend(scan_glyph_source(&rel, &src));
+    }
+    out
+}
 
-        for (idx, line) in src.lines().enumerate() {
-            let Some((name, literal)) = parse_glyph_const(line) else {
-                continue;
-            };
+/// Every glyph constant declared in one file's source text.
+///
+/// The pure half of [`scan_glyph_constants`]. `rel` is carried only to
+/// label findings, which is what lets a test run the real pipeline over
+/// synthetic source and prove a glyph that does not exist yet would be
+/// caught rather than waved through.
+#[must_use]
+pub fn scan_glyph_source(rel: &str, src: &str) -> Vec<GlyphConst> {
+    let font = render_font_bytes();
+    let mut out = Vec::new();
+
+    for (idx, line) in src.lines().enumerate() {
+        for (name, literal) in glyph_literals_on(line) {
             for ch in literal.chars() {
                 if !is_symbol_codepoint(ch) {
                     continue;
@@ -1427,6 +1453,73 @@ pub fn scan_glyph_constants() -> Vec<GlyphConst> {
         }
     }
     out
+}
+
+/// Every `(name, literal)` pair one source line declares.
+///
+/// Two shapes are read, and they are mutually exclusive per line:
+///
+/// * a `const` declaration — `const CHECK_MARK: &str = "✓";`;
+/// * a `match` arm whose body is a literal — `Self::Danger => "✕",`.
+///
+/// The second shape is not a nicety. Not every icon the framework emits
+/// is a `const`: the notification kinds and badge kinds pick their glyph
+/// in an arm (`Self::Info => "ⓘ"`, `Self::Info => '●'`), and so does the
+/// table header's sort arrow. A scanner reading only `const`s reports
+/// those codepoints as never emitted — which is worse than silence,
+/// because it tells the reader the ledger is clean when it never looked
+/// at the line the icon lives on.
+///
+/// A line already parsed as a `const` is never re-read for arms, so the
+/// `=>` inside `const S: &str = "a=>b";` cannot invent a finding.
+///
+/// Two limits, both deliberate and both worth knowing before trusting a
+/// clean result: the literal must **begin** the arm's body, so
+/// `Some("✓")` is not seen; and the scanner is line-based, so an arm
+/// whose literal sits on the following line is not seen either.
+fn glyph_literals_on(line: &str) -> Vec<(String, String)> {
+    if let Some(pair) = parse_glyph_const(line) {
+        return vec![pair];
+    }
+    parse_match_arm_glyphs(line)
+}
+
+/// The `match` arms on one line that return a string or char literal.
+///
+/// Every `=>` on the line is tried, so several arms on one line are all
+/// seen. Comment lines are skipped, because a doc comment quoting an arm
+/// is prose about code, not code that emits anything.
+fn parse_match_arm_glyphs(line: &str) -> Vec<(String, String)> {
+    let t = line.trim_start();
+    if t.starts_with("//") || t.starts_with("/*") || t.starts_with('*') || t.starts_with('#') {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let mut at = 0usize;
+    while let Some(rel) = line[at..].find(MATCH_FAT_ARROW) {
+        let arrow = at + rel;
+        let body = line[arrow + MATCH_FAT_ARROW.len()..].trim_start();
+        if let Some(literal) = parse_literal(body) {
+            let pattern = arm_pattern(&line[..arrow]);
+            if !pattern.is_empty() {
+                out.push((pattern, literal));
+            }
+        }
+        at = arrow + MATCH_FAT_ARROW.len();
+    }
+    out
+}
+
+/// The arm a literal belongs to, as the text immediately left of its
+/// `=>`, cut back at the nearest thing that starts a new arm.
+fn arm_pattern(before: &str) -> String {
+    let cut = [MATCH_FAT_ARROW, "{", ";", ","]
+        .iter()
+        .filter_map(|sep| before.rfind(sep).map(|i| i + sep.len()))
+        .max()
+        .unwrap_or(0);
+    before[cut..].trim().to_string()
 }
 
 /// The gate: every glyph constant the render font cannot supply.
@@ -1570,6 +1663,558 @@ fn parse_quoted(s: &str, quote: u8) -> Option<String> {
 #[must_use]
 pub fn manifest_dir() -> String {
     env::var("CARGO_MANIFEST_DIR").unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// The symbol-face ledger (`G-6`)
+// ---------------------------------------------------------------------------
+//
+// The probe already answers "does the render font have this glyph?". The
+// ledger is what you build once you stop asking it one glyph at a time:
+// every symbol codepoint hoarfrost emits, classified by the role it plays,
+// each with its guarantee status read live from the cmap rather than from a
+// README.
+//
+// A generic family is not a face. `Family::Sans` resolves to iced's generic
+// `Family::SansSerif` and `Family::Mono` to `Family::Monospace`, and
+// cosmic-text answers a generic from whatever the host has installed. For
+// prose that is fine. For a `✓` or a `⚠` it means the framework cannot say
+// which face will paint, and therefore cannot say *whether* it will paint —
+// the same widget is a checkmark on one machine and a tofu box on another.
+//
+// # Measured findings — why bundling a face cannot close `G-6`
+//
+// Every figure below is a cmap read, not an estimate. The inventory is the
+// twenty-six codepoints in [`ICON_SYMBOLS`]; the render font is
+// [`render_font_bytes`], the exact blob iced registers as "Fira Sans".
+//
+// 1. **The bundled face covers 0 of the 26 icon codepoints.** Not one of
+//    the checkmarks, warnings, chevrons, triangles, stars or emoji that
+//    *are* the affordance is in `FiraSans-Regular.ttf`'s own cmap. Every
+//    icon hoarfrost emits today reaches the screen through host fallback.
+// 2. **The only face covering all 26 is `seguisym.ttf`** (Segoe UI
+//    Symbol), and its own `name` table forbids shipping it: *"You may use
+//    this font to create, display and print content as permitted by the
+//    license terms … of the Microsoft product"*. It is not redistributable.
+// 3. **The best OFL candidate cannot carry the labels its own icons live
+//    in.** Noto Sans Symbols 2 reaches 19 of 26 — the best any permissive
+//    face manages — but it has **no Latin letters at all**: 0 of the 52
+//    `A–Z`/`a–z` codepoints are in its cmap. hoarfrost's icons are not
+//    standalone runs, they sit inside strings — `"✓ Apply"`, `"Finish ✓"`,
+//    `"↑↓ Navigate · ↵ Run · Esc Close"`. Naming a letterless face for
+//    those runs strands the *prose* on host fallback, which is worse than
+//    the status quo, not better.
+// 4. **The remaining gaps have no permissive replacement worth naming.**
+//    `ⓘ` (U+24D8) survives in exactly one redistributable face, Noto Sans
+//    Symbols, which covers 1 of 26 overall. `📍` (U+1F4CD) survives only
+//    in Noto Emoji, which covers none of the geometric icons at all. There
+//    is nothing to substitute them with inside a face this crate is allowed
+//    to ship.
+//
+// Therefore **bundling a face cannot close `G-6`**. The correct fix is
+// **drawn geometry**: an icon becomes a stroked path inside the widget's
+// own `draw`, sized and coloured from the same tokens that size the text
+// beside it. That removes the font dependency for the whole icon class
+// rather than narrowing it — identical on every host because there is no
+// fallback to fall through, tintable from the palette (`status.danger.text`
+// on a warning, `text.muted` on a chevron) where a colour-emoji face makes
+// tinting impossible, exact metrics per rung instead of per-face advance
+// widths, and no licence surface at all.
+//
+// The typographic codepoints — `– — … ← ↑ → ↓ −` — stay exactly as they
+// are. They are punctuation, they are already inside Fira Sans, and they
+// are therefore already guaranteed. Only the icon class moves.
+//
+// That migration is a separate feature, not this module. What this module
+// owns is the machine-visible version of the gap: it fails when a new raw
+// icon glyph is added without a decision about how the framework will
+// guarantee it.
+
+/// The role a symbol plays, which decides whether it needs a face at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SymbolClass {
+    /// Punctuation that reads as part of a sentence or label — dashes,
+    /// ellipses, prose arrows, the minus sign. Owned by the text face.
+    Typographic,
+    /// A pictogram that *is* the affordance: a checkmark, a warning, a
+    /// chevron, a star, an emoji. The class the framework must guarantee,
+    /// and the class drawn geometry replaces.
+    Icon,
+    /// A codepoint that exists only in a test fixture — the text a test
+    /// truncates or measures, never something the framework paints.
+    ///
+    /// Classified rather than filtered out of the scan, because the scan
+    /// deliberately covers test sidecars too and a reader of the ledger is
+    /// entitled to see *why* an entry is not debt.
+    Fixture,
+}
+
+/// The codepoints iced's own bundled `Fira Sans` face carries.
+///
+/// These need no guarantee: they never reach fallback, because the blob
+/// iced ships draws them. Verified live rather than asserted from
+/// documentation.
+pub const RENDER_FONT_COVERS: [char; 10] = [
+    '\u{00D7}', // ×  clear / close affordance
+    '\u{2013}', // –  en dash, "Showing 1–25 of 300"
+    '\u{2014}', // —  em dash, report prose and the empty-field placeholder
+    '\u{2022}', // •  dot indicator
+    '\u{2026}', // …  ellipsis, truncation and elision
+    '\u{2190}', // ←  "← Previous"
+    '\u{2191}', // ↑  keyboard legend
+    '\u{2192}', // →  "Next →"
+    '\u{2193}', // ↓  keyboard legend
+    '\u{2212}', // −  minus sign
+];
+
+/// The icon codepoints the render font does **not** carry — the full
+/// measured inventory: 26 codepoints, 0 of them bundled.
+///
+/// This is what drawn geometry replaces, one glyph at a time.
+pub const ICON_SYMBOLS: [char; 26] = [
+    '\u{21B5}',  // ↵  return, command-palette legend
+    '\u{22EF}',  // ⋯  overflow trigger
+    '\u{23ED}',  // ⏭  pagination last
+    '\u{23EE}',  // ⏮  pagination first
+    '\u{24D8}',  // ⓘ  notification / badge info  (declared in a match arm)
+    '\u{25B2}',  // ▲  sort ascending
+    '\u{25B4}',  // ▴  picker chevron up
+    '\u{25B6}',  // ▶  pagination next
+    '\u{25BC}',  // ▼  sort descending
+    '\u{25BE}',  // ▾  combobox / split-button chevron
+    '\u{25C0}',  // ◀  pagination previous
+    '\u{25CF}',  // ●  status dot                 (declared in a match arm)
+    '\u{2605}',  // ★  rating filled
+    '\u{2606}',  // ☆  rating empty
+    '\u{2630}',  // ☰  navigation-rail toggle
+    '\u{26A0}',  // ⚠  warning
+    '\u{2713}',  // ✓  check mark
+    '\u{2715}',  // ✕  multiplication X          (declared in a match arm)
+    '\u{1F441}', // 👁  password reveal
+    '\u{1F464}', // 👤 avatar person
+    '\u{1F4C5}', // 📅 calendar
+    '\u{1F4CB}', // 📋 copy
+    '\u{1F4CC}', // 📌 pinned
+    '\u{1F4CD}', // 📍 unpinned
+    '\u{1F50D}', // 🔍 search
+    '\u{1F552}', // 🕒 clock
+];
+
+/// The typographic codepoints the render font does **not** carry.
+///
+/// One entry, and it is not a control: `⇒` appears only inside a
+/// coverage-report sentence. Recorded rather than waved away, because a
+/// report that renders as tofu is still a report nobody can read.
+pub const TYPOGRAPHIC_SYMBOLS_UNCOVERED: [char; 1] = [
+    '\u{21D2}', // ⇒  implication, spec_coverage prose
+];
+
+/// The codepoints that live only in a test fixture.
+///
+/// The seven of `microcopy/truncate_tests.rs`'s `"テスト日本語"` — three
+/// kanji and four katakana, a string chosen precisely because it is wide
+/// and has no spaces to break on. It is what the truncation test
+/// *measures*, never something hoarfrost paints, and it is CJK script
+/// rather than a symbol block, so no icon decision applies to it.
+///
+/// Classified rather than filtered out of the scan, so the ledger says out
+/// loud why the entry is not debt instead of leaving it to look like a glyph
+/// nobody dealt with.
+pub const FIXTURE_SYMBOLS: [char; 7] = [
+    '\u{65E5}', // 日  CJK ideograph, truncate fixture
+    '\u{672C}', // 本  CJK ideograph, truncate fixture
+    '\u{8A9E}', // 語  CJK ideograph, truncate fixture
+    '\u{30C6}', // テ  katakana, truncate fixture
+    '\u{30AD}', // キ  katakana, truncate fixture
+    '\u{30B9}', // ス  katakana, truncate fixture
+    '\u{30C8}', // ト  katakana, truncate fixture
+];
+
+/// Classify `ch` against the declared inventory.
+///
+/// `None` means the codepoint is not in the ledger, which is the case the
+/// guard test treats as a finding rather than as silence.
+#[must_use]
+pub fn class_of(ch: char) -> Option<SymbolClass> {
+    if ICON_SYMBOLS.contains(&ch) {
+        return Some(SymbolClass::Icon);
+    }
+    if FIXTURE_SYMBOLS.contains(&ch) {
+        return Some(SymbolClass::Fixture);
+    }
+    if RENDER_FONT_COVERS.contains(&ch) || TYPOGRAPHIC_SYMBOLS_UNCOVERED.contains(&ch) {
+        return Some(SymbolClass::Typographic);
+    }
+    None
+}
+
+/// Whether `ch` is one of the icon pictograms.
+#[must_use]
+pub fn is_icon(ch: char) -> bool {
+    ICON_SYMBOLS.contains(&ch)
+}
+
+/// Whether the face iced bundles can draw `ch` without falling back.
+#[must_use]
+pub fn render_font_has(ch: char) -> bool {
+    present_in_render_font(render_font_bytes(), ch)
+}
+
+/// One candidate face measured against [`ICON_SYMBOLS`].
+///
+/// The numbers are measurements, not estimates: each row is the face's
+/// own `cmap` read against the same twenty-six-codepoint inventory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaceMeasurement {
+    /// Human-readable face name.
+    pub face: &'static str,
+    /// The licence the asset actually ships under.
+    pub licence: &'static str,
+    /// Whether the crate would be permitted to redistribute it.
+    pub redistributable: bool,
+    /// How many of [`ICON_SYMBOLS`] the face's cmap carries.
+    pub icons_covered: usize,
+    /// Whether the face carries Latin letters at all — the property that
+    /// decides whether it can serve a mixed label like `"✓ Apply"`.
+    pub has_latin: bool,
+    /// The icon codepoints this face lacks.
+    pub icon_gaps: &'static [char],
+}
+
+impl FaceMeasurement {
+    /// Whether this row could close the gap on its own: permissive, and
+    /// no icon left uncovered.
+    #[must_use]
+    pub fn closes_the_gap(self) -> bool {
+        self.redistributable && self.icon_gaps.is_empty()
+    }
+}
+
+/// The measured candidate matrix. See the ledger section doc for what it
+/// decides.
+pub const COVERAGE_MATRIX: [FaceMeasurement; 10] = [
+    FaceMeasurement {
+        face: "Segoe UI Symbol",
+        licence: "Microsoft supplied font",
+        redistributable: false,
+        icons_covered: 26,
+        has_latin: true,
+        icon_gaps: &[],
+    },
+    FaceMeasurement {
+        face: "Noto Sans Symbols 2",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 19,
+        has_latin: false,
+        icon_gaps: &[
+            '\u{21B5}',
+            '\u{22EF}',
+            '\u{24D8}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+        ],
+    },
+    FaceMeasurement {
+        face: "DejaVu Sans",
+        licence: "Bitstream Vera + public domain",
+        redistributable: true,
+        icons_covered: 15,
+        has_latin: true,
+        icon_gaps: &[
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{24D8}',
+            '\u{1F441}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CB}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+            '\u{1F50D}',
+            '\u{1F552}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Noto Emoji",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 10,
+        has_latin: false,
+        icon_gaps: &[
+            '\u{21B5}',
+            '\u{22EF}',
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{24D8}',
+            '\u{25B2}',
+            '\u{25B4}',
+            '\u{25BC}',
+            '\u{25BE}',
+            '\u{25CF}',
+            '\u{2605}',
+            '\u{2606}',
+            '\u{2630}',
+            '\u{2713}',
+            '\u{2715}',
+            '\u{1F441}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Inter",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 10,
+        has_latin: true,
+        icon_gaps: &[
+            '\u{22EF}',
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{24D8}',
+            '\u{25B4}',
+            '\u{25BE}',
+            '\u{2630}',
+            '\u{2715}',
+            '\u{1F441}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CB}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+            '\u{1F50D}',
+            '\u{1F552}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Hack",
+        licence: "MIT",
+        redistributable: true,
+        icons_covered: 9,
+        has_latin: true,
+        icon_gaps: &[
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{24D8}',
+            '\u{2605}',
+            '\u{2606}',
+            '\u{2630}',
+            '\u{26A0}',
+            '\u{2713}',
+            '\u{2715}',
+            '\u{1F441}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CB}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+            '\u{1F50D}',
+            '\u{1F552}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Noto Sans Symbols",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 1,
+        has_latin: true,
+        icon_gaps: &[
+            '\u{21B5}',
+            '\u{22EF}',
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{25B2}',
+            '\u{25B4}',
+            '\u{25B6}',
+            '\u{25BC}',
+            '\u{25BE}',
+            '\u{25C0}',
+            '\u{25CF}',
+            '\u{2605}',
+            '\u{2606}',
+            '\u{2630}',
+            '\u{26A0}',
+            '\u{2713}',
+            '\u{2715}',
+            '\u{1F441}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CB}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+            '\u{1F50D}',
+            '\u{1F552}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Symbols Nerd Font Mono",
+        licence: "MIT",
+        redistributable: true,
+        icons_covered: 1,
+        has_latin: false,
+        icon_gaps: &[
+            '\u{21B5}',
+            '\u{22EF}',
+            '\u{23ED}',
+            '\u{23EE}',
+            '\u{24D8}',
+            '\u{25B2}',
+            '\u{25B4}',
+            '\u{25B6}',
+            '\u{25BC}',
+            '\u{25BE}',
+            '\u{25C0}',
+            '\u{25CF}',
+            '\u{2605}',
+            '\u{2606}',
+            '\u{26A0}',
+            '\u{2713}',
+            '\u{2715}',
+            '\u{1F441}',
+            '\u{1F464}',
+            '\u{1F4C5}',
+            '\u{1F4CB}',
+            '\u{1F4CC}',
+            '\u{1F4CD}',
+            '\u{1F50D}',
+            '\u{1F552}',
+        ],
+    },
+    FaceMeasurement {
+        face: "Fira Sans (bundled today)",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 0,
+        has_latin: true,
+        icon_gaps: &ICON_SYMBOLS,
+    },
+    FaceMeasurement {
+        face: "Iced Icons",
+        licence: "SIL OFL 1.1",
+        redistributable: true,
+        icons_covered: 0,
+        has_latin: false,
+        icon_gaps: &ICON_SYMBOLS,
+    },
+];
+
+/// One emitted symbol and its guarantee status, read live from the cmap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LedgerEntry {
+    /// `U+2713`-style label.
+    pub codepoint: String,
+    /// The character itself.
+    pub ch: char,
+    /// The role the ledger assigns it.
+    pub class: Option<SymbolClass>,
+    /// The `const` name or `match` arm pattern that declares it, e.g.
+    /// `CHECK_MARK` or `Self::Danger`.
+    pub constant: String,
+    /// `file:line` of the declaration.
+    pub location: String,
+    /// Whether the bundled render font draws it without falling back.
+    pub render_font_has: bool,
+}
+
+impl LedgerEntry {
+    /// A printable row for reports.
+    #[must_use]
+    pub fn row(&self) -> String {
+        format!(
+            "{:<8} {:<12} {:<22} {:<34} face={}",
+            self.codepoint,
+            class_label(self.class),
+            self.constant,
+            self.location,
+            if self.render_font_has {
+                "bundled"
+            } else {
+                "HOST FALLBACK"
+            },
+        )
+    }
+}
+
+/// The class column text for a possibly-unclassified codepoint.
+#[must_use]
+pub fn class_label(class: Option<SymbolClass>) -> &'static str {
+    match class {
+        Some(SymbolClass::Typographic) => "typographic",
+        Some(SymbolClass::Icon) => "icon",
+        Some(SymbolClass::Fixture) => "fixture",
+        None => "UNCLASSIFIED",
+    }
+}
+
+/// Every symbol hoarfrost declares, with its live guarantee status.
+///
+/// Built from [`scan_glyph_constants`], so it tracks the sources rather
+/// than a transcription of them.
+#[must_use]
+pub fn ledger() -> Vec<LedgerEntry> {
+    ledger_from(scan_glyph_constants())
+}
+
+/// The ledger over an already-scanned set of glyph constants.
+///
+/// Split out so a test can feed it synthetic source — that is how "adding
+/// an icon turns the suite red" is proven without adding an icon to the
+/// real crate.
+#[must_use]
+pub fn ledger_from(glyphs: Vec<GlyphConst>) -> Vec<LedgerEntry> {
+    glyphs
+        .into_iter()
+        .map(|g| LedgerEntry {
+            codepoint: g.codepoint.clone(),
+            ch: g.ch,
+            class: class_of(g.ch),
+            constant: g.name,
+            location: g.location,
+            render_font_has: g.in_render_font,
+        })
+        .collect()
+}
+
+/// The entries in `entries` the ledger has no class for.
+///
+/// A non-empty result means a raw symbol glyph was added without a
+/// decision about how the framework will guarantee it.
+#[must_use]
+pub fn unclassified_among(entries: &[LedgerEntry]) -> Vec<char> {
+    let mut out: Vec<char> = entries
+        .iter()
+        .filter(|e| e.class.is_none())
+        .map(|e| e.ch)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Symbols found in the sources that the ledger has no class for.
+#[must_use]
+pub fn unclassified_symbols() -> Vec<char> {
+    unclassified_among(&ledger())
+}
+
+/// The icon symbols the framework cannot guarantee today.
+#[must_use]
+pub fn unguaranteed_icons() -> Vec<LedgerEntry> {
+    ledger()
+        .into_iter()
+        .filter(|e| e.class == Some(SymbolClass::Icon) && !e.render_font_has)
+        .collect()
+}
+
+/// Every redistributable row in [`COVERAGE_MATRIX`] that still leaves an
+/// icon uncovered — i.e. every face that fails to close the gap.
+#[must_use]
+pub fn permissive_faces_that_fail() -> Vec<&'static FaceMeasurement> {
+    COVERAGE_MATRIX
+        .iter()
+        .filter(|m| m.redistributable && !m.closes_the_gap())
+        .collect()
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use hoarfrost::token::color::Palette;
 
 use super::*;
 use crate::app::Message;
-use crate::section::Section;
+use crate::section::{PaneBody, Section};
 
 /// Builds and lays out `element` in a headless viewport.
 fn laid_out<'a>(viewport: Size, element: impl Into<Element<'a, Message>>) {
@@ -80,13 +80,31 @@ fn every_preview_reports_zero_widgets() {
 
 #[test]
 fn previews_do_not_change_a_panes_widget_total() {
-    // The pane totals come from PaneBody::new summing its sections. Adding
-    // the previews must be arithmetically invisible.
-    let with_previews: usize = atom_preview_sections()
-        .into_iter()
-        .map(|s: Section<'static>| s.widgets)
-        .sum();
-    assert_eq!(0, with_previews);
+    // The pane total comes from `PaneBody::new` summing its sections, so
+    // what is actually being claimed is that appending the previews to a
+    // real pane's live sections leaves that sum exactly where the pane
+    // without previews put it. Build both sides and compare the totals.
+    let state = crate::pane_atoms::AtomsState::new();
+
+    let live_only = PaneBody::new(crate::pane_atoms::live_sections(&state)).widgets;
+    assert!(
+        live_only > 0,
+        "the live atoms sections must carry widgets, or this comparison proves nothing"
+    );
+
+    let mut extended = crate::pane_atoms::live_sections(&state);
+    extended.extend(atom_preview_sections());
+    let with_previews = PaneBody::new(extended).widgets;
+
+    assert_eq!(
+        live_only, with_previews,
+        "appending the atoms previews changed the pane's widget total"
+    );
+    assert_eq!(
+        with_previews,
+        crate::pane_atoms::atoms_pane(&state).widgets,
+        "the hand-built live+previews body must total what the real `atoms_pane` reports"
+    );
 }
 
 // ---------------------------------------------------------------------------

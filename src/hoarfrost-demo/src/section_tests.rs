@@ -18,6 +18,21 @@ fn empty_body() -> Column<'static, Message> {
     Column::new()
 }
 
+/// Lays one labelled rung out on its own and returns its recorded entry.
+///
+/// The wrapper carries no padding, no background and no width policy, so
+/// what the probe records is the rung's own line box.
+fn rung_box(rung_rung: typography::TypeRung, id: &str) -> crate::layout_probe::Entry {
+    let probe = crate::layout_probe::Probe::capture(
+        Size::new(400.0, 400.0),
+        labeled("Hg", rung_rung, Palette::dark().text_primary, id),
+    );
+    probe
+        .find(id)
+        .unwrap_or_else(|| panic!("`{id}` must be addressable"))
+        .clone()
+}
+
 #[test]
 fn section_carries_its_widget_count() {
     assert_eq!(section("Buttons", 3, empty_body()).widgets, 3);
@@ -38,10 +53,38 @@ fn a_zero_count_section_omits_the_badge() {
 
 #[test]
 fn rung_paints_at_the_declared_size() {
-    let painted = rung("x", typography::BODY, Palette::dark().text_primary);
-    // `Text` exposes no size getter; the contract we can assert headlessly is
-    // that the rung builds and lays out on its own.
-    laid_out(Size::new(80.0, 40.0), painted);
+    // `Text` exposes no size getter, so the rung's declared geometry is
+    // read back off the layout tree instead: `labeled` wraps the rung in
+    // a padding-free container whose recorded box is the text's own, so
+    // the height the probe reports *is* the line box `rung` asked iced
+    // for.
+    let body = rung_box(typography::BODY, "test.rung.body");
+
+    assert!(
+        (body.bounds.height - typography::BODY.line_height).abs() <= 0.5,
+        "a BODY rung must occupy its declared {}px line box, got {}",
+        typography::BODY.line_height,
+        body.bounds.height
+    );
+
+    // A larger rung has to actually render larger. This is the guard
+    // against the `LineHeight::Relative` mistake: handing iced a bare
+    // pixel `f32` means "that many times the font size", so every rung
+    // lands in a line many times its declared height.
+    let title = rung_box(typography::TITLE_SM, "test.rung.title");
+
+    assert!(
+        (title.bounds.height - typography::TITLE_SM.line_height).abs() <= 0.5,
+        "a TITLE_SM rung must occupy its declared {}px line box, got {}",
+        typography::TITLE_SM.line_height,
+        title.bounds.height
+    );
+    assert!(
+        title.bounds.height > body.bounds.height,
+        "the larger rung must render taller: {} vs {}",
+        title.bounds.height,
+        body.bounds.height
+    );
 }
 
 #[test]

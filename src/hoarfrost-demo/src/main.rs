@@ -27,8 +27,6 @@ mod previews;
 #[cfg(test)]
 mod render_atoms;
 #[cfg(test)]
-mod render_capture;
-#[cfg(test)]
 mod render_composites;
 #[cfg(test)]
 mod render_section;

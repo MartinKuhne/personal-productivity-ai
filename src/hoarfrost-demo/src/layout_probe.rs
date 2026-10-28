@@ -121,7 +121,8 @@ impl Probe {
     /// than the layout pass and the raster put together — so anything that
     /// takes several snapshots should build one and hand it to this
     /// method rather than paying for a fresh renderer per snapshot.
-    /// [`crate::render_capture::Studio`] exists to do exactly that.
+    /// [`capture_session`] exists to do exactly that for the crate's ink
+    /// tests, which read geometry and pixels off the same renderer.
     #[must_use]
     pub fn capture_with(
         renderer: &mut HeadlessRenderer,
@@ -356,6 +357,36 @@ pub fn headless_renderer() -> HeadlessRenderer {
         None,
     ))
     .expect("a headless renderer should be available for demo layout probes")
+}
+
+/// The whole-window reference viewport the headless captures run at.
+///
+/// Same size the demo window opens at, so a rect measured here is the rect
+/// the user would see.
+pub const VIEWPORT: Size = Size::new(1400.0, 900.0);
+
+/// A single-pane viewport, tall enough that any one section fits.
+///
+/// Sections are captured on their own rather than inside the live
+/// scrollable so that nothing sits below the fold while its ink is being
+/// counted.
+pub const PANE_VIEWPORT: Size = Size::new(700.0, 1600.0);
+
+/// A frame-capture session that shapes text against the demo's font database.
+///
+/// [`hoarfrost::test_helpers::Capture::new`] mints its own headless
+/// renderer and does not register this crate's symbol fallback, so a frame
+/// captured through it would glyph-shape differently from the user's
+/// window. Registering the fallback first gives the capture the same
+/// guarantee [`headless_renderer`] gives the probe, and the two readings
+/// stay comparable because they come out of one session.
+///
+/// [`hoarfrost::test_helpers::Capture::new`]: hoarfrost::test_helpers::Capture::new
+#[must_use]
+pub fn capture_session() -> hoarfrost::test_helpers::Capture {
+    crate::font_fallback::register();
+
+    hoarfrost::test_helpers::Capture::new()
 }
 
 /// Runs `selector` over `ui`'s whole widget tree, driving the operation

@@ -25,6 +25,7 @@ use std::collections::BTreeSet;
 
 use iced::{Point, Rectangle, Size};
 
+use hoarfrost::test_helpers::{MIN_CHANGED_PIXELS, SURFACE_TOLERANCE, assert_repainted};
 use hoarfrost::widget::range_slider_model::RangeSliderModel;
 use hoarfrost::widget::text_input_model::TextInputModel;
 use hoarfrost::widget::toggle::ToggleControl;
@@ -32,10 +33,8 @@ use hoarfrost::widget::toggle::{self};
 use hoarfrost::widget::toggle_model::CheckState;
 
 use crate::data;
+use crate::layout_probe::{PANE_VIEWPORT, Probe, capture_session};
 use crate::pane_atoms::{self, AtomsState};
-use crate::render_capture::{
-    MIN_CHANGED_PIXELS, PANE_VIEWPORT, SURFACE_TOLERANCE, Studio, assert_repainted,
-};
 use crate::render_section::{self, Captured, assert_body_painted, capture_diff};
 use crate::section::Section;
 
@@ -126,10 +125,10 @@ fn range_with(lower: f64, upper: f64) -> RangeSliderModel {
 #[test]
 fn every_atoms_section_paints_inside_its_own_body() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in atom_builders() {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert_body_painted(&captured);
         assert_eq!(
             captured.id,
@@ -142,10 +141,10 @@ fn every_atoms_section_paints_inside_its_own_body() {
 #[test]
 fn no_atoms_section_is_a_flat_rectangle() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in atom_builders() {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert!(
             !captured.frame.is_uniform(captured.body, SURFACE_TOLERANCE),
             "section {name}'s body {:?} is one flat colour — nothing was drawn \
@@ -162,8 +161,8 @@ fn no_atoms_section_is_a_flat_rectangle() {
 #[test]
 fn every_button_paints_over_the_card_at_its_own_rect() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::buttons_section(&state)
     });
 
@@ -184,8 +183,8 @@ fn every_button_paints_over_the_card_at_its_own_rect() {
 #[test]
 fn every_button_row_label_paints_inside_its_own_box() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::buttons_section(&state)
     });
 
@@ -211,8 +210,8 @@ fn every_button_row_label_paints_inside_its_own_box() {
 #[test]
 fn the_disabled_button_is_still_visible_though_it_registers_nothing() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::buttons_section(&state)
     });
 
@@ -253,8 +252,8 @@ fn the_disabled_button_is_still_visible_though_it_registers_nothing() {
 #[test]
 fn the_checked_mark_paints_inside_its_own_box() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::checkbox_section(&state)
     });
 
@@ -288,8 +287,8 @@ fn the_checked_mark_paints_inside_its_own_box() {
 #[test]
 fn a_marked_box_paints_more_ink_than_an_empty_one() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::checkbox_section(&state)
     });
 
@@ -316,7 +315,7 @@ fn a_marked_box_paints_more_ink_than_an_empty_one() {
 
 #[test]
 fn ticking_a_checkbox_changes_the_pixels_in_its_box() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let off = AtomsState {
         checkboxes: vec![CheckState::Unchecked; data::CHECKBOX_ROWS.len()],
@@ -327,14 +326,18 @@ fn ticking_a_checkbox_changes_the_pixels_in_its_box() {
         ..AtomsState::new()
     };
 
-    let probe = studio.probe(PANE_VIEWPORT, pane_atoms::checkbox_section(&off).element);
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
+        PANE_VIEWPORT,
+        pane_atoms::checkbox_section(&off).element,
+    );
     let row = probe
         .find("demo.atoms.checkbox.0")
         .expect("the first checkbox row must be addressable")
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::checkbox_section as AtomBuilder,
         &off,
@@ -356,8 +359,8 @@ fn ticking_a_checkbox_changes_the_pixels_in_its_box() {
 #[test]
 fn the_radio_group_paints_every_option_it_carries() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::radio_section(&state)
     });
 
@@ -381,7 +384,7 @@ fn the_radio_group_paints_every_option_it_carries() {
 
 #[test]
 fn flipping_the_live_switch_repaints_its_row() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let on = AtomsState {
         switch_on: true,
@@ -392,14 +395,18 @@ fn flipping_the_live_switch_repaints_its_row() {
         ..AtomsState::new()
     };
 
-    let probe = studio.probe(PANE_VIEWPORT, pane_atoms::switch_section(&on).element);
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
+        PANE_VIEWPORT,
+        pane_atoms::switch_section(&on).element,
+    );
     let row = probe
         .find("demo.atoms.switch.live")
         .expect("the live switch must be addressable")
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::switch_section as AtomBuilder,
         &on,
@@ -416,7 +423,7 @@ fn flipping_the_live_switch_repaints_its_row() {
 
 #[test]
 fn selecting_a_different_segment_repaints_the_strip() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -430,7 +437,8 @@ fn selecting_a_different_segment_repaints_the_strip() {
         ..AtomsState::new()
     };
 
-    let probe = studio.probe(
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
         PANE_VIEWPORT,
         pane_atoms::segmented_section(&before).element,
     );
@@ -440,7 +448,7 @@ fn selecting_a_different_segment_repaints_the_strip() {
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::segmented_section as AtomBuilder,
         &before,
@@ -458,8 +466,8 @@ fn selecting_a_different_segment_repaints_the_strip() {
 #[test]
 fn the_split_button_paints_across_its_whole_control() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::split_button_section(&state)
     });
 
@@ -481,8 +489,8 @@ fn the_split_button_paints_across_its_whole_control() {
 
 #[test]
 fn every_hyperlink_paints_its_label_inside_its_own_box() {
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, pane_atoms::hyperlink_section);
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, pane_atoms::hyperlink_section);
 
     for id in ["demo.atoms.link.internal", "demo.atoms.link.external"] {
         let bounds = captured.control(id);
@@ -505,8 +513,8 @@ fn every_hyperlink_paints_its_label_inside_its_own_box() {
 #[test]
 fn every_text_field_paints_at_its_recorded_rect() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::text_input_section(&state)
     });
 
@@ -530,7 +538,7 @@ fn every_text_field_paints_at_its_recorded_rect() {
 
 #[test]
 fn an_invalid_field_paints_differently_from_a_clean_one() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -539,7 +547,7 @@ fn an_invalid_field_paints_differently_from_a_clean_one() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::text_input_section as AtomBuilder,
         &before,
@@ -556,7 +564,7 @@ fn an_invalid_field_paints_differently_from_a_clean_one() {
 
 #[test]
 fn revealing_the_password_changes_the_painted_pixels() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let masked = AtomsState {
         revealed: false,
@@ -569,14 +577,18 @@ fn revealing_the_password_changes_the_painted_pixels() {
         ..AtomsState::new()
     };
 
-    let probe = studio.probe(PANE_VIEWPORT, pane_atoms::password_section(&masked).element);
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
+        PANE_VIEWPORT,
+        pane_atoms::password_section(&masked).element,
+    );
     let field = probe
         .find("demo.atoms.password.live")
         .expect("the live password field must be addressable")
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::password_section as AtomBuilder,
         &masked,
@@ -598,8 +610,8 @@ fn revealing_the_password_changes_the_painted_pixels() {
 #[test]
 fn each_range_thumb_paints_at_its_recorded_rect() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_atoms::range_slider_section(&state)
     });
 
@@ -623,7 +635,7 @@ fn each_range_thumb_paints_at_its_recorded_rect() {
 
 #[test]
 fn moving_the_range_thumbs_moves_the_ink() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -632,7 +644,7 @@ fn moving_the_range_thumbs_moves_the_ink() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::range_slider_section as AtomBuilder,
         &before,
@@ -653,8 +665,8 @@ fn moving_the_range_thumbs_moves_the_ink() {
 
 #[test]
 fn the_avatar_row_paints_a_patch_per_roster_member() {
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, pane_atoms::avatar_section);
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, pane_atoms::avatar_section);
 
     // The avatars are a left-packed `Row` at three different sizes, not
     // an even grid, so the bands are taken from the span the row actually
@@ -683,7 +695,7 @@ fn the_avatar_row_paints_a_patch_per_roster_member() {
 #[test]
 fn the_picker_sections_paint_their_closed_fields() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in [
         (
@@ -699,7 +711,7 @@ fn the_picker_sections_paint_their_closed_fields() {
             pane_atoms::color_picker_section as AtomBuilder,
         ),
     ] {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert!(
             captured.body_paint() >= MIN_CHANGED_PIXELS * 4,
             "the {name} section paints almost nothing in its body {:?} — the \
@@ -711,7 +723,7 @@ fn the_picker_sections_paint_their_closed_fields() {
 
 #[test]
 fn clearing_the_search_query_repaints_the_box() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -720,7 +732,7 @@ fn clearing_the_search_query_repaints_the_box() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::search_box_section as AtomBuilder,
         &before,
@@ -737,7 +749,7 @@ fn clearing_the_search_query_repaints_the_box() {
 
 #[test]
 fn clearing_the_rating_repaints_the_pips() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -746,7 +758,7 @@ fn clearing_the_rating_repaints_the_pips() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::rating_section as AtomBuilder,
         &before,
@@ -763,7 +775,7 @@ fn clearing_the_rating_repaints_the_pips() {
 
 #[test]
 fn opening_the_combo_box_repaints_the_section() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -772,7 +784,7 @@ fn opening_the_combo_box_repaints_the_section() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_atoms::combo_box_section as AtomBuilder,
         &before,
@@ -789,8 +801,8 @@ fn opening_the_combo_box_repaints_the_section() {
 
 #[test]
 fn the_tooltip_targets_paint_their_labels() {
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, pane_atoms::tooltip_section);
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, pane_atoms::tooltip_section);
 
     assert!(
         captured.body_ink() >= MIN_CHANGED_PIXELS,
@@ -803,13 +815,13 @@ fn the_tooltip_targets_paint_their_labels() {
 #[test]
 fn the_search_box_and_combo_box_paint_their_closed_fields() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in [
         ("search box", pane_atoms::search_box_section as AtomBuilder),
         ("combo box", pane_atoms::combo_box_section as AtomBuilder),
     ] {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert!(
             captured.body_paint() >= MIN_CHANGED_PIXELS * 4,
             "the {name} paints almost nothing in its body {:?} — the closed \
@@ -821,7 +833,7 @@ fn the_search_box_and_combo_box_paint_their_closed_fields() {
 
 #[test]
 fn every_atoms_section_still_paints_after_its_state_moves() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = AtomsState::new();
     let after = AtomsState {
@@ -833,7 +845,7 @@ fn every_atoms_section_still_paints_after_its_state_moves() {
     };
 
     for (name, build) in atom_builders() {
-        let diff = capture_diff(&mut studio, PANE_VIEWPORT, build, &before, &after);
+        let diff = capture_diff(&mut capture, PANE_VIEWPORT, build, &before, &after);
         assert!(
             diff.after.ink_count(diff.body) >= render_section::MIN_BODY_INK,
             "section {name} went blank after the pane's state moved: body {:?} \

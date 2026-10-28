@@ -17,12 +17,13 @@
 use iced::widget::{Column, scrollable};
 use iced::{Length, Point, Rectangle, Size};
 
+use hoarfrost::test_helpers::{SURFACE_TOLERANCE, to_rgb};
 use hoarfrost::token::color::Palette;
 
 use crate::app::{DemoApp, Message};
 use crate::chrome;
+use crate::layout_probe::{Probe, VIEWPORT, capture_session};
 use crate::pane_atoms::{self, AtomsState};
-use crate::render_capture::{SURFACE_TOLERANCE, Studio, VIEWPORT, to_rgb};
 
 /// A rectangle covering the whole viewport.
 fn ground(viewport: Size) -> Rectangle {
@@ -83,9 +84,9 @@ fn divider_strip(probe: &crate::layout_probe::Probe) -> Rectangle {
 #[test]
 fn the_window_paints_four_distinct_bands() {
     let app = DemoApp::boot().0;
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
-    let probe = studio.probe(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
+    let probe = Probe::capture_with(capture.renderer_mut(), VIEWPORT, app.view());
 
     let navbar = navbar_band(&probe);
     let status = probe
@@ -125,9 +126,9 @@ fn the_window_paints_four_distinct_bands() {
 #[test]
 fn the_close_button_paints_inside_its_recorded_rect() {
     let app = DemoApp::boot().0;
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
-    let probe = studio.probe(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
+    let probe = Probe::capture_with(capture.renderer_mut(), VIEWPORT, app.view());
 
     let close = probe
         .find(chrome::CLOSE_FOCUS_ID)
@@ -149,9 +150,9 @@ fn the_close_button_paints_inside_its_recorded_rect() {
 #[test]
 fn the_split_divider_paints_a_grip_not_a_blank_strip() {
     let app = DemoApp::boot().0;
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
-    let probe = studio.probe(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
+    let probe = Probe::capture_with(capture.renderer_mut(), VIEWPORT, app.view());
 
     let strip = divider_strip(&probe);
     let palette = Palette::dark();
@@ -175,9 +176,9 @@ fn the_split_divider_paints_a_grip_not_a_blank_strip() {
 #[test]
 fn the_status_bar_band_is_its_own_surface() {
     let app = DemoApp::boot().0;
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
-    let probe = studio.probe(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
+    let probe = Probe::capture_with(capture.renderer_mut(), VIEWPORT, app.view());
 
     let status = probe
         .find(chrome::STATUS_BAR_ID)
@@ -214,17 +215,16 @@ fn the_status_bar_band_is_its_own_surface() {
 #[test]
 fn a_changed_event_repaints_the_status_bar_readout() {
     let mut app = DemoApp::boot().0;
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
-    let before = studio.frame(VIEWPORT, app.view());
-    let status = studio
-        .probe(VIEWPORT, app.view())
+    let before = capture.frame(VIEWPORT, app.view());
+    let status = Probe::capture_with(capture.renderer_mut(), VIEWPORT, app.view())
         .find(chrome::STATUS_BAR_ID)
         .map(|e| e.bounds)
         .expect("the chrome registers its status bar");
 
     let _task = app.update(Message::SplitCommitted(0.42));
-    let after = studio.frame(VIEWPORT, app.view());
+    let after = capture.frame(VIEWPORT, app.view());
 
     let changed = after.differing_pixels(&before, status);
     assert!(
@@ -241,15 +241,19 @@ fn a_changed_event_repaints_the_status_bar_readout() {
 #[test]
 fn moving_the_panes_leaves_the_navbar_band_byte_identical() {
     let mut app = DemoApp::boot().0;
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
-    let before = studio.frame(VIEWPORT, app.view());
-    let navbar = navbar_band(&studio.probe(VIEWPORT, app.view()));
+    let before = capture.frame(VIEWPORT, app.view());
+    let navbar = navbar_band(&Probe::capture_with(
+        capture.renderer_mut(),
+        VIEWPORT,
+        app.view(),
+    ));
 
     // A committed split moves both panes' widths, so the pane region must
     // change; the navbar occupies a band above that region and must not.
     let _task = app.update(Message::SplitCommitted(0.72));
-    let after = studio.frame(VIEWPORT, app.view());
+    let after = capture.frame(VIEWPORT, app.view());
 
     let over_navbar = after.differing_pixels(&before, navbar);
     assert_eq!(
@@ -262,13 +266,17 @@ fn moving_the_panes_leaves_the_navbar_band_byte_identical() {
 #[test]
 fn moving_the_panes_actually_moves_them() {
     let mut app = DemoApp::boot().0;
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
-    let before = studio.frame(VIEWPORT, app.view());
-    let divider = divider_strip(&studio.probe(VIEWPORT, app.view()));
+    let before = capture.frame(VIEWPORT, app.view());
+    let divider = divider_strip(&Probe::capture_with(
+        capture.renderer_mut(),
+        VIEWPORT,
+        app.view(),
+    ));
 
     let _task = app.update(Message::SplitCommitted(0.72));
-    let after = studio.frame(VIEWPORT, app.view());
+    let after = capture.frame(VIEWPORT, app.view());
 
     let moved = after.differing_pixels(&before, divider);
     assert!(
@@ -308,11 +316,11 @@ fn folded_pane(state: &AtomsState, fold: f32) -> iced::Element<'_, Message> {
 #[test]
 fn nothing_paints_below_the_scrollable_fold() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let viewport = Size::new(700.0, 1600.0);
     let fold = 420.0;
 
-    let frame = studio.frame(viewport, folded_pane(&state, fold));
+    let frame = capture.frame(viewport, folded_pane(&state, fold));
     let below = band(viewport, fold + 1.0, viewport.height - fold - 1.0);
 
     assert_eq!(
@@ -337,15 +345,15 @@ fn nothing_paints_below_the_scrollable_fold() {
 #[test]
 fn the_fold_hides_content_that_really_was_there() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let viewport = Size::new(700.0, 1600.0);
     let fold = 420.0;
 
     // Same content, same width, but a viewport tall enough to hold all of it:
     // the band that was empty above must fill with ink. Without this control
     // the zero below the fold would be indistinguishable from an empty pane.
-    let folded = studio.frame(viewport, folded_pane(&state, fold));
-    let unfolded = studio.frame(viewport, folded_pane(&state, viewport.height));
+    let folded = capture.frame(viewport, folded_pane(&state, fold));
+    let unfolded = capture.frame(viewport, folded_pane(&state, viewport.height));
 
     let below = band(viewport, fold + 1.0, viewport.height - fold - 1.0);
     assert!(
@@ -363,11 +371,11 @@ fn the_fold_hides_content_that_really_was_there() {
 #[test]
 fn the_fold_clips_at_the_viewport_edge_not_earlier() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let viewport = Size::new(700.0, 1600.0);
     let fold = 420.0;
 
-    let frame = studio.frame(viewport, folded_pane(&state, fold));
+    let frame = capture.frame(viewport, folded_pane(&state, fold));
     let above = band(viewport, 0.0, fold);
 
     assert!(
@@ -390,11 +398,11 @@ fn below_fold(viewport: Size, fold: f32) -> Rectangle {
 #[test]
 fn a_shorter_fold_hides_more_than_a_taller_one() {
     let state = AtomsState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let viewport = Size::new(700.0, 1600.0);
 
-    let short = studio.frame(viewport, folded_pane(&state, 200.0));
-    let tall = studio.frame(viewport, folded_pane(&state, 600.0));
+    let short = capture.frame(viewport, folded_pane(&state, 200.0));
+    let tall = capture.frame(viewport, folded_pane(&state, 600.0));
 
     let short_only = band(viewport, 201.0, 399.0);
     assert_eq!(

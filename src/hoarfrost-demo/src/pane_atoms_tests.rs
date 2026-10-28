@@ -195,11 +195,42 @@ fn whole_atoms_pane_lays_out_at_a_narrow_viewport() {
 #[test]
 fn checkbox_message_updates_the_stored_state() {
     let mut state = AtomsState::new();
+    let before = state.checkboxes.clone();
+    assert_eq!(
+        data::CHECKBOX_ROWS.len(),
+        before.len(),
+        "one stored slot per fixture row"
+    );
+    assert_eq!(
+        CheckState::Unchecked,
+        before[0],
+        "the fixture's first row must start unchecked for this to be a change"
+    );
+
     state.apply(&AtomsMessage::Checkbox(0, CheckState::Checked));
+    assert_eq!(
+        CheckState::Checked,
+        state.checkboxes[0],
+        "the message must land in the slot it names"
+    );
+    assert_ne!(
+        before, state.checkboxes,
+        "applying a check must actually move the stored state"
+    );
     laid_out(PANE, checkbox_section(&state));
 
     // An out-of-range index must be ignored rather than panic.
     state.apply(&AtomsMessage::Checkbox(99, CheckState::Unchecked));
+    assert_eq!(
+        before.len(),
+        state.checkboxes.len(),
+        "an out-of-range index must not grow or shrink the stored state"
+    );
+    assert_eq!(
+        CheckState::Checked,
+        state.checkboxes[0],
+        "an out-of-range index must leave the slots that do exist untouched"
+    );
 }
 
 #[test]

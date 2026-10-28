@@ -24,8 +24,8 @@ use hoarfrost::composite::card;
 use hoarfrost::token::color::Palette;
 
 use crate::layout_probe::Probe;
-use crate::render_capture::{Frame, SURFACE_TOLERANCE, Studio, to_rgb};
 use crate::section::{HEADING_GAP, Section};
+use hoarfrost::test_helpers::{Capture, Frame, SURFACE_TOLERANCE, to_rgb};
 
 /// The fewest ink pixels a section body may show and still count as painted.
 ///
@@ -67,12 +67,12 @@ impl Captured {
     /// When the section's card or caption is not addressable in the probe.
     #[must_use]
     pub fn capture<'a>(
-        studio: &mut Studio,
+        capture: &mut Capture,
         viewport: Size,
         build: impl Fn() -> Section<'a>,
     ) -> Self {
-        let probe = studio.probe(viewport, build().element);
-        let frame = studio.frame(viewport, build().element);
+        let probe = Probe::capture_with(capture.renderer_mut(), viewport, build().element);
+        let frame = capture.frame(viewport, build().element);
         let (id, card, caption) = section_geometry(&probe);
 
         Self {
@@ -173,17 +173,17 @@ pub struct Diff {
 /// both build sections as pure functions of that struct.
 #[must_use]
 pub fn capture_diff<S>(
-    studio: &mut Studio,
+    capture: &mut Capture,
     viewport: Size,
     build: impl for<'a> Fn(&'a S) -> Section<'a>,
     before: &S,
     after: &S,
 ) -> Diff {
-    let probe = studio.probe(viewport, build(before).element);
+    let probe = Probe::capture_with(capture.renderer_mut(), viewport, build(before).element);
     let (_id, card, caption) = section_geometry(&probe);
 
-    let before_frame = studio.frame(viewport, build(before).element);
-    let after_frame = studio.frame(viewport, build(after).element);
+    let before_frame = capture.frame(viewport, build(before).element);
+    let after_frame = capture.frame(viewport, build(after).element);
 
     Diff {
         body: body_region(card, caption),

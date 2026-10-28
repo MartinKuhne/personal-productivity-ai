@@ -56,8 +56,21 @@ fn status_bar_renders_without_panic() {
 
 #[test]
 fn status_bar_reports_the_count_in_its_text() {
-    let rendered = format!("{} widgets rendered", 7);
-    assert_eq!(rendered, "7 widgets rendered");
+    // Read the string the widget actually draws, not one this test wrote.
+    let rendered = crate::layout_probe::text_of(status_bar("ready", 7));
+
+    assert!(
+        rendered.contains("7 widgets rendered"),
+        "the status bar must render the count it was handed; rendered text was: {rendered}"
+    );
+    assert!(
+        rendered.contains("ready"),
+        "the status bar must still carry the event text alongside the count: {rendered}"
+    );
+    assert!(
+        !rendered.contains("8 widgets rendered"),
+        "the count must be the one passed in, not some other number: {rendered}"
+    );
 }
 
 #[test]

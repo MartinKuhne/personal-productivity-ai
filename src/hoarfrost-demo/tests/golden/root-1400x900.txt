@@ -1,5 +1,5 @@
 # viewport 1400.00 x 900.00
-# named 176 / anonymous 1823
+# named 183 / anonymous 1823
 demo.atoms.button.Danger.busy [focusable] | 280.00 192.00 88.00 32.00 | 280.00 192.00 88.00 32.00
 demo.atoms.button.Danger.live [focusable] | 88.00 192.00 88.00 32.00 | 88.00 192.00 88.00 32.00
 demo.atoms.button.Ghost.busy [focusable] | 280.00 156.00 88.00 32.00 | 280.00 156.00 88.00 32.00
@@ -64,14 +64,21 @@ demo.composites.form.valid [focusable] | 721.00 3796.00 78.93 24.00 | -
 demo.composites.form.valid [container] | 721.00 3798.00 36.00 20.00 | -
 demo.composites.form.valid.label [text] | 765.00 3796.00 34.93 24.00 | -
 demo.composites.menu.m-dark [focusable] | 721.00 4306.00 663.00 32.00 | -
+demo.composites.menu.m-dark [container] | 721.00 4306.00 663.00 32.00 | -
 demo.composites.menu.m-dark.label [text] | 755.00 4306.00 619.00 32.00 | -
 demo.composites.menu.m-light [focusable] | 721.00 4274.00 663.00 32.00 | -
+demo.composites.menu.m-light [container] | 721.00 4274.00 663.00 32.00 | -
 demo.composites.menu.m-light.label [text] | 755.00 4274.00 619.00 32.00 | -
 demo.composites.menu.m-new [focusable] | 721.00 4160.00 663.00 32.00 | -
+demo.composites.menu.m-new [container] | 721.00 4160.00 663.00 32.00 | -
 demo.composites.menu.m-new.label [text] | 755.00 4160.00 578.10 32.00 | -
 demo.composites.menu.m-save [focusable] | 721.00 4192.00 663.00 32.00 | -
+demo.composites.menu.m-save [container] | 721.00 4192.00 663.00 32.00 | -
 demo.composites.menu.m-save.label [text] | 755.00 4192.00 580.23 32.00 | -
+demo.composites.menu.m-sep-1 [container] | 721.00 4224.00 663.00 9.00 | -
+demo.composites.menu.m-sep-2 [container] | 721.00 4265.00 663.00 9.00 | -
 demo.composites.menu.m-wrap [focusable] | 721.00 4233.00 663.00 32.00 | -
+demo.composites.menu.m-wrap [container] | 721.00 4233.00 663.00 32.00 | -
 demo.composites.menu.m-wrap.label [text] | 755.00 4233.00 584.01 32.00 | -
 demo.composites.scroll [scrollable] | 705.00 36.00 695.00 836.00 | 705.00 36.00 695.00 836.00
 demo.composites.setting-row.0.row [container] | 721.00 3896.00 663.00 60.00 | -

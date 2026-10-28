@@ -28,10 +28,10 @@ use iced::Rectangle;
 use hoarfrost::composite::stepper::{BAR_HEIGHT, FOOTER_BUTTON_HEIGHT, NODE_SIZE, StepStatus};
 use hoarfrost::token::color::Palette;
 
-use crate::layout_probe::Probe;
+use crate::layout_probe::{PANE_VIEWPORT, Probe, capture_session};
 use crate::pane_composites::{self, CompositesMessage, CompositesState};
-use crate::render_capture::{Frame, PANE_VIEWPORT, Studio, assert_repainted, to_rgb};
 use crate::render_section::{Captured, capture_diff};
+use hoarfrost::test_helpers::{Capture, Frame, assert_repainted, to_rgb};
 
 /// How far a pixel may sit from a status fill and still count as that fill.
 ///
@@ -154,17 +154,18 @@ fn walked(state: &CompositesState, message: CompositesMessage, times: usize) -> 
 }
 
 /// The stepper section's layout, as the probe recorded it.
-fn stepper_probe(studio: &mut Studio, state: &CompositesState) -> Probe {
-    studio.probe(
+fn stepper_probe(capture: &mut Capture, state: &CompositesState) -> Probe {
+    Probe::capture_with(
+        capture.renderer_mut(),
         PANE_VIEWPORT,
         pane_composites::stepper_section(state).element,
     )
 }
 
 /// The status each step node actually paints, left to right.
-fn painted_ladder(studio: &mut Studio, state: &CompositesState) -> Vec<Option<Painted>> {
-    let probe = stepper_probe(studio, state);
-    let frame = studio.frame(
+fn painted_ladder(capture: &mut Capture, state: &CompositesState) -> Vec<Option<Painted>> {
+    let probe = stepper_probe(capture, state);
+    let frame = capture.frame(
         PANE_VIEWPORT,
         pane_composites::stepper_section(state).element,
     );
@@ -187,13 +188,13 @@ fn with_error(state: &CompositesState, index: usize) -> CompositesState {
 
 #[test]
 fn pressing_next_repaints_the_nodes_the_ladder_moves() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let before = CompositesState::new();
     let after = driven(&before, CompositesMessage::StepNext);
-    let nodes = step_nodes(&stepper_probe(&mut studio, &before));
+    let nodes = step_nodes(&stepper_probe(&mut capture, &before));
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::stepper_section,
         &before,
@@ -232,12 +233,12 @@ fn pressing_next_repaints_the_nodes_the_ladder_moves() {
 
 #[test]
 fn the_step_left_paints_completed_and_the_step_entered_paints_current() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let before = CompositesState::new();
     let after = driven(&before, CompositesMessage::StepNext);
 
-    let fixture = painted_ladder(&mut studio, &before);
-    let advanced = painted_ladder(&mut studio, &after);
+    let fixture = painted_ladder(&mut capture, &before);
+    let advanced = painted_ladder(&mut capture, &after);
 
     assert_eq!(
         fixture,
@@ -268,13 +269,13 @@ fn the_step_left_paints_completed_and_the_step_entered_paints_current() {
 
 #[test]
 fn pressing_back_reverses_what_the_indicator_shows() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let at_three = driven(&CompositesState::new(), CompositesMessage::StepNext);
     let back_to_two = driven(&at_three, CompositesMessage::StepPrevious);
-    let nodes = step_nodes(&stepper_probe(&mut studio, &at_three));
+    let nodes = step_nodes(&stepper_probe(&mut capture, &at_three));
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::stepper_section,
         &at_three,
@@ -295,7 +296,7 @@ fn pressing_back_reverses_what_the_indicator_shows() {
     );
 
     assert_eq!(
-        painted_ladder(&mut studio, &back_to_two),
+        painted_ladder(&mut capture, &back_to_two),
         vec![
             Some(Painted::Completed),
             Some(Painted::Current),
@@ -312,7 +313,7 @@ fn pressing_back_reverses_what_the_indicator_shows() {
 
 #[test]
 fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let base = CompositesState::new();
 
     // Pinned at the last step: another Next is a no-op and the frame
@@ -321,7 +322,7 @@ fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
     let at_last = walked(&base, CompositesMessage::StepNext, 4);
     let past_last = driven(&at_last, CompositesMessage::StepNext);
     let last_diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::stepper_section,
         &at_last,
@@ -335,7 +336,7 @@ fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
         "Next past the last step repainted the wizard"
     );
     assert_eq!(
-        painted_ladder(&mut studio, &at_last),
+        painted_ladder(&mut capture, &at_last),
         vec![
             Some(Painted::Completed),
             Some(Painted::Completed),
@@ -350,7 +351,7 @@ fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
     let at_first = walked(&base, CompositesMessage::StepPrevious, 4);
     let past_first = driven(&at_first, CompositesMessage::StepPrevious);
     let first_diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::stepper_section,
         &at_first,
@@ -364,7 +365,7 @@ fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
         "Back before the first step repainted the wizard"
     );
     assert_eq!(
-        painted_ladder(&mut studio, &at_first),
+        painted_ladder(&mut capture, &at_first),
         vec![
             Some(Painted::Current),
             Some(Painted::Pending),
@@ -381,12 +382,12 @@ fn stepping_past_either_end_leaves_the_indicator_byte_identical() {
 
 #[test]
 fn the_indicator_neither_grows_nor_jumps_when_the_ladder_moves() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let before = CompositesState::new();
     let after = driven(&before, CompositesMessage::StepNext);
 
-    let before_nodes = step_nodes(&stepper_probe(&mut studio, &before));
-    let after_nodes = step_nodes(&stepper_probe(&mut studio, &after));
+    let before_nodes = step_nodes(&stepper_probe(&mut capture, &before));
+    let after_nodes = step_nodes(&stepper_probe(&mut capture, &after));
 
     // Same number of steps, so the ladder cannot add or drop a node.
     assert_eq!(
@@ -424,20 +425,20 @@ fn the_indicator_neither_grows_nor_jumps_when_the_ladder_moves() {
         "the last step node's trailing edge moved from {before_tail} to {after_tail}"
     );
     assert_eq!(
-        bar_rect(&stepper_probe(&mut studio, &before)),
-        bar_rect(&stepper_probe(&mut studio, &after))
+        bar_rect(&stepper_probe(&mut capture, &before)),
+        bar_rect(&stepper_probe(&mut capture, &after))
     );
     assert_eq!(
-        footer_rect(&stepper_probe(&mut studio, &before)),
-        footer_rect(&stepper_probe(&mut studio, &after))
+        footer_rect(&stepper_probe(&mut capture, &before)),
+        footer_rect(&stepper_probe(&mut capture, &after))
     );
 
     // And the section's own card and body region are unmoved, so nothing
     // below the stepper shifts when a status changes either.
-    let before_card = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let before_card = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::stepper_section(&before)
     });
-    let after_card = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let after_card = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::stepper_section(&after)
     });
     assert_eq!(before_card.card, after_card.card);
@@ -450,14 +451,14 @@ fn the_indicator_neither_grows_nor_jumps_when_the_ladder_moves() {
 
 #[test]
 fn an_error_step_keeps_its_ink_until_the_wizard_returns_to_it() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let broken = with_error(&CompositesState::new(), 0);
 
     // Navigating *away* from a failed step must not launder it: step 0
     // keeps the danger fill while the cursor sits on step 3.
     let onward = driven(&broken, CompositesMessage::StepNext);
     assert_eq!(
-        painted_ladder(&mut studio, &onward),
+        painted_ladder(&mut capture, &onward),
         vec![
             Some(Painted::Error),
             Some(Painted::Completed),
@@ -471,7 +472,7 @@ fn an_error_step_keeps_its_ink_until_the_wizard_returns_to_it() {
     // the failed step: the badge stays while the cursor is anywhere else.
     let one_back = walked(&onward, CompositesMessage::StepPrevious, 1);
     assert_eq!(
-        painted_ladder(&mut studio, &one_back),
+        painted_ladder(&mut capture, &one_back),
         vec![
             Some(Painted::Error),
             Some(Painted::Current),
@@ -485,7 +486,7 @@ fn an_error_step_keeps_its_ink_until_the_wizard_returns_to_it() {
     // released and the node paints as the current step.
     let returned = walked(&onward, CompositesMessage::StepPrevious, 2);
     assert_eq!(
-        painted_ladder(&mut studio, &returned),
+        painted_ladder(&mut capture, &returned),
         vec![
             Some(Painted::Current),
             Some(Painted::Pending),
@@ -498,12 +499,12 @@ fn an_error_step_keeps_its_ink_until_the_wizard_returns_to_it() {
 
 #[test]
 fn an_error_step_still_paints_error_when_the_wizard_jumps_to_the_end() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let broken = with_error(&CompositesState::new(), 0);
 
     let jumped = driven(&broken, CompositesMessage::StepSelected(3));
     assert_eq!(
-        painted_ladder(&mut studio, &jumped),
+        painted_ladder(&mut capture, &jumped),
         vec![
             Some(Painted::Error),
             Some(Painted::Completed),

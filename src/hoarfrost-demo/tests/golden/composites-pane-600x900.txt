@@ -1,17 +1,24 @@
 # viewport 600.00 x 900.00
-# named 69 / anonymous 840
+# named 76 / anonymous 840
 demo.composites.form.valid [focusable] | 16.00 3760.00 78.93 24.00 | -
 demo.composites.form.valid [container] | 16.00 3762.00 36.00 20.00 | -
 demo.composites.form.valid.label [text] | 60.00 3760.00 34.93 24.00 | -
 demo.composites.menu.m-dark [focusable] | 16.00 4270.00 568.00 32.00 | -
+demo.composites.menu.m-dark [container] | 16.00 4270.00 568.00 32.00 | -
 demo.composites.menu.m-dark.label [text] | 50.00 4270.00 524.00 32.00 | -
 demo.composites.menu.m-light [focusable] | 16.00 4238.00 568.00 32.00 | -
+demo.composites.menu.m-light [container] | 16.00 4238.00 568.00 32.00 | -
 demo.composites.menu.m-light.label [text] | 50.00 4238.00 524.00 32.00 | -
 demo.composites.menu.m-new [focusable] | 16.00 4124.00 568.00 32.00 | -
+demo.composites.menu.m-new [container] | 16.00 4124.00 568.00 32.00 | -
 demo.composites.menu.m-new.label [text] | 50.00 4124.00 483.10 32.00 | -
 demo.composites.menu.m-save [focusable] | 16.00 4156.00 568.00 32.00 | -
+demo.composites.menu.m-save [container] | 16.00 4156.00 568.00 32.00 | -
 demo.composites.menu.m-save.label [text] | 50.00 4156.00 485.23 32.00 | -
+demo.composites.menu.m-sep-1 [container] | 16.00 4188.00 568.00 9.00 | -
+demo.composites.menu.m-sep-2 [container] | 16.00 4229.00 568.00 9.00 | -
 demo.composites.menu.m-wrap [focusable] | 16.00 4197.00 568.00 32.00 | -
+demo.composites.menu.m-wrap [container] | 16.00 4197.00 568.00 32.00 | -
 demo.composites.menu.m-wrap.label [text] | 50.00 4197.00 489.01 32.00 | -
 demo.composites.scroll [scrollable] | 0.00 0.00 600.00 900.00 | 0.00 0.00 600.00 900.00
 demo.composites.setting-row.0.row [container] | 16.00 3860.00 568.00 60.00 | -

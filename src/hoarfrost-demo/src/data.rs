@@ -649,6 +649,24 @@ pub const MENU_ID: &str = "demo.file.menu";
 /// The radio group the two theme rows belong to.
 pub const MENU_RADIO_GROUP: &str = "theme";
 
+/// The demo's declared key for the menu row at `index`, or `None` when
+/// there is no row there or it carries no key.
+///
+/// `Row::separator()` is the framework's only separator constructor and
+/// it takes no key — `Row` exposes no key setter either — so a
+/// separator's identity lives in [`MENU_ROWS`], not in the `Row` built
+/// from it. Every site that publishes a menu-row id reads the key from
+/// here rather than from [`Row::key`], so the id's final segment is
+/// never empty: a separator publishes
+/// `demo.composites.menu.m-sep-1`, never `demo.composites.menu.`.
+#[must_use]
+pub fn menu_row_key(index: usize) -> Option<&'static str> {
+    MENU_ROWS
+        .get(index)
+        .map(|(key, _, _)| *key)
+        .filter(|key| !key.is_empty())
+}
+
 /// Builds the menu tree from [`MENU_ROWS`].
 #[must_use]
 pub fn menu_model() -> Menu {

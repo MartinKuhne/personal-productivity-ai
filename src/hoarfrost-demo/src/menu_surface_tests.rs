@@ -5,13 +5,16 @@
 //! painted; every test here asks the framebuffer or the laid-out widget
 //! tree what the user would actually see.
 
+use std::collections::BTreeSet;
+
 use iced::{Point, Rectangle};
+
+use hoarfrost::test_helpers::to_rgb;
 
 use crate::app::{DemoApp, Message};
 use crate::data;
-use crate::layout_probe::Probe;
+use crate::layout_probe::{Entry, Probe, VIEWPORT, capture_session};
 use crate::menu_surface;
-use crate::render_capture::{Studio, VIEWPORT, to_rgb};
 
 /// The menu card's fill as the channels it must produce on screen.
 ///
@@ -106,8 +109,8 @@ fn the_card_is_painted_not_just_laid_out() {
     let app = booted_with(Message::NavbarToggled("file".to_string()));
     let bounds = card_bounds(&app, "file").expect("the open menu must render a card");
 
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
     assert!(
         frame.has_ink(bounds),
         "nothing was painted inside the card's own bounds {bounds:?}"
@@ -118,11 +121,13 @@ fn the_card_is_painted_not_just_laid_out() {
 // Rows are present and hit-testable
 // ---------------------------------------------------------------------------
 
-/// The `MENU_ROWS` entries that carry a key.
+/// The `MENU_ROWS` entries that carry a key — the navigable rows.
 ///
-/// `Row::separator()` is built without a key, so separators are laid out
-/// and painted but never register a named widget. The keyed rows are the
-/// ones a test can address by id.
+/// These are the rows a test addresses by id. Separators are excluded
+/// because they are not navigable, **not** because they are unnamed: the
+/// demo publishes them under their declared `m-sep-1` / `m-sep-2` keys
+/// (see [`data::menu_row_key`]), so they take part in the id set even
+/// though no Tab stop ever lands on them.
 fn keyed_rows() -> Vec<(&'static str, &'static str)> {
     data::MENU_ROWS
         .iter()
@@ -136,7 +141,13 @@ fn every_keyed_menu_row_is_rendered_as_a_non_degenerate_rect() {
     let app = booted_with(Message::NavbarToggled("file".to_string()));
     let probe = Probe::capture(VIEWPORT, app.view());
 
-    let rendered: Vec<_> = probe
+    // Count DISTINCT ROW IDS, never records. A navigable row publishes
+    // two records under the one id it was built with — its `focusable`
+    // box ("can Tab stop here?") and its own `container` box ("where is
+    // this row?") — so the record count says 12 for a menu that mounts
+    // seven rows. The claim under test is about rows, so the count has to
+    // be over the ids the records are published under.
+    let rendered: BTreeSet<String> = probe
         .with_prefix(menu_surface::ROW_ID_PREFIX)
         .into_iter()
         // A row's published caption carries the row's own id as its prefix
@@ -144,40 +155,108 @@ fn every_keyed_menu_row_is_rendered_as_a_non_degenerate_rect() {
         // second row. Ask whether the tail is a role, not whether the head
         // matches.
         .filter(|entry| !hoarfrost::identity::is_sub_part_name(&entry.id))
+        .map(|entry| entry.id.clone())
         .collect();
+
+    // Nothing may be published under an id whose final segment is empty:
+    // that is the malformed `demo.menu.row.` a keyless separator used to
+    // produce, and an id like that addresses no row at all.
+    let malformed: Vec<&String> = rendered
+        .iter()
+        .filter(|id| id.ends_with(hoarfrost::identity::ROLE_SEPARATOR))
+        .collect();
+    assert!(
+        malformed.is_empty(),
+        "a menu row published an id with an empty final segment: {malformed:?}"
+    );
+
     let keyed = keyed_rows();
+    let keyed_rendered: BTreeSet<String> = keyed
+        .iter()
+        .map(|(key, _)| menu_surface::row_id(key))
+        .filter(|id| rendered.contains(id))
+        .collect();
     assert_eq!(
         keyed.len(),
-        rendered.len(),
-        "the render must carry one named row widget per keyed menu row"
+        keyed_rendered.len(),
+        "the render must carry one named row widget per keyed menu row; \
+         distinct row ids rendered: {rendered:?}"
     );
 
     for (key, label) in keyed {
-        let entry = probe
-            .find(&menu_surface::row_id(key))
-            .unwrap_or_else(|| panic!("row {key} ({label}) is missing from the render"));
+        let id = menu_surface::row_id(key);
+        // Every record the row publishes — focusable and container both —
+        // has to be a real box, not just the first one `find` happens to
+        // return.
+        let records: Vec<&Entry> = probe
+            .entries()
+            .iter()
+            .filter(|entry| entry.id == id)
+            .collect();
+        assert!(
+            !records.is_empty(),
+            "row {key} ({label}) publishes no record under `{id}`"
+        );
 
-        assert!(
-            entry.bounds.width > 0.0 && entry.bounds.height > 0.0,
-            "row {key} ({label}) rendered degenerate: {:?}",
-            entry.bounds
-        );
-        assert!(
-            crate::layout_probe::is_finite_rect(&entry.bounds),
-            "row {key} ({label}) has non-finite bounds: {:?}",
-            entry.bounds
-        );
-        assert!(
-            entry.bounds.x >= 0.0 && entry.bounds.x + entry.bounds.width <= VIEWPORT.width,
-            "row {key} ({label}) falls outside the viewport: {:?}",
-            entry.bounds
-        );
+        for entry in records {
+            assert!(
+                entry.bounds.width > 0.0 && entry.bounds.height > 0.0,
+                "row {key} ({label}) [{}] rendered degenerate: {:?}",
+                entry.kind,
+                entry.bounds
+            );
+            assert!(
+                crate::layout_probe::is_finite_rect(&entry.bounds),
+                "row {key} ({label}) [{}] has non-finite bounds: {:?}",
+                entry.kind,
+                entry.bounds
+            );
+            assert!(
+                entry.bounds.x >= 0.0 && entry.bounds.x + entry.bounds.width <= VIEWPORT.width,
+                "row {key} ({label}) [{}] falls outside the viewport: {:?}",
+                entry.kind,
+                entry.bounds
+            );
+        }
     }
 }
 
 #[test]
+fn the_card_publishes_exactly_one_distinct_row_id_per_declared_menu_row() {
+    // The record-level mirror of the keyed-row test, checked both ways.
+    // The fixture declares seven rows — five keyed, two separators — and
+    // the mounted card must publish seven distinct row ids: no row
+    // missing, no id invented, and no two rows collapsed onto one.
+    // A keyless separator would collapse both of them into the malformed
+    // `demo.menu.row.` and fail this on the spot.
+    let app = booted_with(Message::NavbarToggled("file".to_string()));
+    let probe = Probe::capture(VIEWPORT, app.view());
+
+    let rendered: BTreeSet<String> = probe
+        .with_prefix(menu_surface::ROW_ID_PREFIX)
+        .into_iter()
+        .filter(|entry| !hoarfrost::identity::is_sub_part_name(&entry.id))
+        .map(|entry| entry.id.clone())
+        .collect();
+    let declared: BTreeSet<String> = data::MENU_ROWS
+        .iter()
+        .map(|(key, _, _)| menu_surface::row_id(key))
+        .collect();
+
+    assert_eq!(
+        data::MENU_ROWS.len(),
+        declared.len(),
+        "the fixture's rows must map to distinct ids"
+    );
+    assert_eq!(
+        declared, rendered,
+        "the card must publish exactly one distinct row id per declared menu row"
+    );
+}
+
+#[test]
 fn the_separators_still_take_vertical_space_in_the_card() {
-    // Separators paint no named widget, but the card's height must still
+    // Separators are not navigable, but the card's height must still
     // account for them or the rows below would be drawn over them.
     let menu = data::menu_model();
     let separators = menu.rows().iter().filter(|row| row.is_separator()).count();
@@ -212,8 +291,11 @@ fn clicking_a_rendered_row_publishes_a_message() {
         entry.bounds.y + entry.bounds.height / 2.0,
     );
 
-    let mut studio = Studio::new();
-    let messages = studio.click(app.view(), centre);
+    let mut capture = capture_session();
+    // `click_and_frame` rather than `click`: the bare helper clicks against
+    // the library's own 400x300 test viewport, which would move the card out
+    // from under `centre` before the press ever landed.
+    let (_, messages) = capture.click_and_frame(VIEWPORT, app.view(), centre);
     assert!(
         messages
             .iter()
@@ -229,8 +311,8 @@ fn clicking_outside_the_card_does_not_activate_a_row() {
 
     // Well clear of the card, in the middle of the pane area.
     let far = Point::new(bounds.x + bounds.width + 400.0, bounds.y + 300.0);
-    let mut studio = Studio::new();
-    let messages = studio.click(app.view(), far);
+    let mut capture = capture_session();
+    let (_, messages) = capture.click_and_frame(VIEWPORT, app.view(), far);
 
     assert!(
         !messages
@@ -306,8 +388,8 @@ fn the_card_paints_over_the_panes_instead_of_under_them() {
     ];
     let expected = menu_card_fill_rgb();
 
-    let mut studio = Studio::new();
-    let frame = studio.frame(VIEWPORT, app.view());
+    let mut capture = capture_session();
+    let frame = capture.frame(VIEWPORT, app.view());
     for (x, y) in band {
         let painted = frame.pixel(x, y);
         assert_eq!(
@@ -321,12 +403,12 @@ fn the_card_paints_over_the_panes_instead_of_under_them() {
 #[test]
 fn opening_the_menu_changes_the_pixels_at_the_card_rect() {
     let (closed_app, _) = DemoApp::boot();
-    let mut studio = Studio::new();
-    let closed = studio.frame(VIEWPORT, closed_app.view());
+    let mut capture = capture_session();
+    let closed = capture.frame(VIEWPORT, closed_app.view());
 
     let open_app = booted_with(Message::NavbarToggled("file".to_string()));
     let bounds = card_bounds(&open_app, "file").expect("the open menu must render a card");
-    let open = studio.frame(VIEWPORT, open_app.view());
+    let open = capture.frame(VIEWPORT, open_app.view());
 
     // Same inset-band points as the z-order test: the closed frame shows
     // pane content there, the open frame must show the card's fill.

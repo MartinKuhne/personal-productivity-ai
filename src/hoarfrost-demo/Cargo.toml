@@ -12,7 +12,7 @@ publish = false
 [workspace]
 
 [dependencies]
-hoarfrost = { path = "../hoarfrost" }
+hoarfrost = { path = "../hoarfrost", features = ["test-helpers"] }
 # Feature set MUST match `hoarfrost`'s exactly (PLAN C3) or the re-exported
 # iced types on the two sides of the boundary do not line up. See
 # `src/hoarfrost/Cargo.toml`.

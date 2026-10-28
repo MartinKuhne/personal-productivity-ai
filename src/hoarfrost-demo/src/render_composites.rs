@@ -19,13 +19,12 @@
 use iced::{Point, Rectangle, Size};
 
 use crate::data;
+use crate::layout_probe::{PANE_VIEWPORT, Probe, capture_session};
 use crate::pane_composites::{self, CompositesMessage, CompositesState, GRID_AVAILABLE_WIDTH};
-use crate::render_capture::{
-    MIN_CHANGED_PIXELS, PANE_VIEWPORT, SURFACE_TOLERANCE, Studio, assert_repainted,
-};
 use crate::render_section::{self, Captured, assert_body_painted, capture_diff};
 use crate::section::Section;
 use hoarfrost::composite::grid_view::{GAP, GUTTER_WIDTH, solve_columns, tile_rect};
+use hoarfrost::test_helpers::{MIN_CHANGED_PIXELS, SURFACE_TOLERANCE, assert_repainted};
 
 /// A composite section builder addressable by name in a sweep.
 type CompositeBuilder = for<'a> fn(&'a CompositesState) -> Section<'a>;
@@ -123,10 +122,10 @@ fn rows(rect: Rectangle, parts: usize) -> Vec<Rectangle> {
 #[test]
 fn every_composite_section_paints_inside_its_own_body() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in composite_builders() {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert_body_painted(&captured);
         assert_eq!(
             captured.id,
@@ -139,10 +138,10 @@ fn every_composite_section_paints_inside_its_own_body() {
 #[test]
 fn no_composite_section_is_a_flat_rectangle() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     for (name, build) in composite_builders() {
-        let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || build(&state));
+        let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || build(&state));
         assert!(
             !captured.frame.is_uniform(captured.body, SURFACE_TOLERANCE),
             "section {name}'s body {:?} is one flat colour — nothing was drawn \
@@ -154,9 +153,9 @@ fn no_composite_section_is_a_flat_rectangle() {
 
 #[test]
 fn the_skeleton_paints_although_it_counts_as_zero_widgets() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
     let captured = Captured::capture(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::skeleton_section,
     );
@@ -180,8 +179,8 @@ fn the_skeleton_paints_although_it_counts_as_zero_widgets() {
 #[test]
 fn every_declared_settings_row_paints_across_its_whole_box() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::settings_rows_section(&state)
     });
 
@@ -226,8 +225,8 @@ fn every_declared_settings_row_paints_across_its_whole_box() {
 #[test]
 fn the_three_settings_rows_stack_without_overlapping() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::settings_rows_section(&state)
     });
 
@@ -250,7 +249,7 @@ fn the_three_settings_rows_stack_without_overlapping() {
 
 #[test]
 fn toggling_a_setting_repaints_its_own_row_only() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -258,7 +257,8 @@ fn toggling_a_setting_repaints_its_own_row_only() {
         ..CompositesState::new()
     };
 
-    let probe = studio.probe(
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
         PANE_VIEWPORT,
         pane_composites::settings_rows_section(&before).element,
     );
@@ -272,7 +272,7 @@ fn toggling_a_setting_repaints_its_own_row_only() {
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::settings_rows_section as CompositeBuilder,
         &before,
@@ -300,8 +300,8 @@ fn toggling_a_setting_repaints_its_own_row_only() {
 #[test]
 fn every_keyed_menu_row_paints_its_label() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::menu_section(&state)
     });
 
@@ -318,7 +318,7 @@ fn every_keyed_menu_row_paints_its_label() {
 
 #[test]
 fn activating_a_checkable_menu_row_repaints_it() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -332,7 +332,8 @@ fn activating_a_checkable_menu_row_repaints_it() {
         ..CompositesState::new()
     };
 
-    let probe = studio.probe(
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
         PANE_VIEWPORT,
         pane_composites::menu_section(&before).element,
     );
@@ -342,7 +343,7 @@ fn activating_a_checkable_menu_row_repaints_it() {
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::menu_section as CompositeBuilder,
         &before,
@@ -363,7 +364,7 @@ fn activating_a_checkable_menu_row_repaints_it() {
 
 #[test]
 fn activating_a_different_tab_repaints_the_strip() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let target = before
@@ -383,7 +384,7 @@ fn activating_a_different_tab_repaints_the_strip() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::tab_strip_section as CompositeBuilder,
         &before,
@@ -400,7 +401,7 @@ fn activating_a_different_tab_repaints_the_strip() {
 
 #[test]
 fn expanding_the_rail_repaints_it() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -413,7 +414,7 @@ fn expanding_the_rail_repaints_it() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::navigation_rail_section as CompositeBuilder,
         &before,
@@ -442,13 +443,13 @@ fn driven(before: &CompositesState, message: CompositesMessage) -> CompositesSta
 
 #[test]
 fn stepping_the_wizard_repaints_the_indicator_and_its_footer() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = driven(&before, CompositesMessage::StepNext);
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::stepper_section as CompositeBuilder,
         &before,
@@ -465,7 +466,7 @@ fn stepping_the_wizard_repaints_the_indicator_and_its_footer() {
 
 #[test]
 fn turning_the_page_repaints_the_pagination_bar() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let target = before.pagination.page + 4;
@@ -479,7 +480,7 @@ fn turning_the_page_repaints_the_pagination_bar() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::pagination_section as CompositeBuilder,
         &before,
@@ -496,7 +497,7 @@ fn turning_the_page_repaints_the_pagination_bar() {
 
 #[test]
 fn moving_a_pip_repaints_the_pager() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -509,7 +510,7 @@ fn moving_a_pip_repaints_the_pager() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::pips_pager_section as CompositeBuilder,
         &before,
@@ -527,8 +528,8 @@ fn moving_a_pip_repaints_the_pager() {
 #[test]
 fn the_pips_pager_draws_one_mark_per_page() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::pips_pager_section(&state)
     });
 
@@ -563,8 +564,8 @@ fn the_pips_pager_draws_one_mark_per_page() {
 #[test]
 fn the_code_block_paints_its_listing_not_just_its_frame() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::code_block_section(&state)
     });
 
@@ -579,7 +580,7 @@ fn the_code_block_paints_its_listing_not_just_its_frame() {
 
 #[test]
 fn switching_the_diff_mode_repaints_the_viewer() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -592,7 +593,7 @@ fn switching_the_diff_mode_repaints_the_viewer() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::diff_viewer_section as CompositeBuilder,
         &before,
@@ -610,8 +611,8 @@ fn switching_the_diff_mode_repaints_the_viewer() {
 #[test]
 fn the_empty_states_paint_three_distinct_blocks() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::empty_state_section(&state)
     });
 
@@ -628,7 +629,7 @@ fn the_empty_states_paint_three_distinct_blocks() {
 
 #[test]
 fn selecting_a_grid_tile_repaints_the_grid() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -643,7 +644,7 @@ fn selecting_a_grid_tile_repaints_the_grid() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::grid_view_section as CompositeBuilder,
         &before,
@@ -712,8 +713,8 @@ fn grid_tile_rects(state: &CompositesState, body: Rectangle) -> Vec<Rectangle> {
 #[test]
 fn the_grid_paints_a_tile_per_item() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::grid_view_section(&state)
     });
 
@@ -757,8 +758,8 @@ fn the_grid_paints_a_tile_per_item() {
 #[test]
 fn the_keybind_recorder_paints_its_chord() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::keybind_section(&state)
     });
 
@@ -772,7 +773,7 @@ fn the_keybind_recorder_paints_its_chord() {
 
 #[test]
 fn flipping_the_form_validity_repaints_the_caption_band() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -780,7 +781,8 @@ fn flipping_the_form_validity_repaints_the_caption_band() {
         ..CompositesState::new()
     };
 
-    let probe = studio.probe(
+    let probe = Probe::capture_with(
+        capture.renderer_mut(),
         PANE_VIEWPORT,
         pane_composites::form_field_section(&before).element,
     );
@@ -790,7 +792,7 @@ fn flipping_the_form_validity_repaints_the_caption_band() {
         .bounds;
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::form_field_section as CompositeBuilder,
         &before,
@@ -814,8 +816,8 @@ fn flipping_the_form_validity_repaints_the_caption_band() {
 #[test]
 fn the_side_sheet_paints_its_panel_and_close_affordance() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::side_sheet_section(&state)
     });
 
@@ -828,7 +830,7 @@ fn the_side_sheet_paints_its_panel_and_close_affordance() {
 
 #[test]
 fn closing_the_side_sheet_repaints_the_section() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -841,7 +843,7 @@ fn closing_the_side_sheet_repaints_the_section() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::side_sheet_section as CompositeBuilder,
         &before,
@@ -859,8 +861,8 @@ fn closing_the_side_sheet_repaints_the_section() {
 #[test]
 fn the_command_palette_paints_its_card_and_items() {
     let state = CompositesState::new();
-    let mut studio = Studio::new();
-    let captured = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let mut capture = capture_session();
+    let captured = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::command_palette_section(&state)
     });
 
@@ -874,7 +876,7 @@ fn the_command_palette_paints_its_card_and_items() {
 
 #[test]
 fn typing_in_the_palette_repaints_it() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -887,7 +889,7 @@ fn typing_in_the_palette_repaints_it() {
     };
 
     let diff = capture_diff(
-        &mut studio,
+        &mut capture,
         PANE_VIEWPORT,
         pane_composites::command_palette_section as CompositeBuilder,
         &before,
@@ -908,7 +910,7 @@ fn typing_in_the_palette_repaints_it() {
 
 #[test]
 fn a_change_to_one_composite_leaves_its_neighbours_untouched() {
-    let mut studio = Studio::new();
+    let mut capture = capture_session();
 
     let before = CompositesState::new();
     let after = CompositesState {
@@ -920,15 +922,15 @@ fn a_change_to_one_composite_leaves_its_neighbours_untouched() {
         ..CompositesState::new()
     };
 
-    let before_frame = studio.frame(
+    let before_frame = capture.frame(
         PANE_VIEWPORT,
         pane_composites::pagination_section(&before).element,
     );
-    let after_frame = studio.frame(
+    let after_frame = capture.frame(
         PANE_VIEWPORT,
         pane_composites::pagination_section(&after).element,
     );
-    let body = Captured::capture(&mut studio, PANE_VIEWPORT, || {
+    let body = Captured::capture(&mut capture, PANE_VIEWPORT, || {
         pane_composites::pagination_section(&before)
     })
     .body;

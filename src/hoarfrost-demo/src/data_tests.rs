@@ -159,3 +159,71 @@ fn the_avatar_roster_has_unique_names() {
     names.dedup();
     assert_eq!(names.len(), before, "avatar display names must be unique");
 }
+
+#[test]
+fn menu_row_keys_are_unique() {
+    let mut keys: Vec<&str> = MENU_ROWS.iter().map(|(key, _, _)| *key).collect();
+    keys.sort_unstable();
+    let before = keys.len();
+    keys.dedup();
+    assert_eq!(keys.len(), before, "menu row keys must be unique");
+}
+
+#[test]
+fn every_menu_row_carries_a_declared_key() {
+    // The publish sites build `<prefix><menu_row_key(i)>`, so a `None` or
+    // an empty string here would surface as an id with an empty final
+    // segment: the malformed `demo.composites.menu.` a keyless separator
+    // used to produce. This is the guard that keeps that unreachable.
+    let menu = menu_model();
+    assert_eq!(
+        menu.rows().len(),
+        MENU_ROWS.len(),
+        "the model must have one row per declared fixture entry"
+    );
+
+    for index in 0..menu.rows().len() {
+        let key = menu_row_key(index).unwrap_or_else(|| {
+            panic!("menu row {index} has no declared key; publishing it would name nothing")
+        });
+        assert!(
+            !key.is_empty(),
+            "menu row {index} declares an empty key; publishing it would leave the \
+             id's final segment empty"
+        );
+    }
+}
+
+#[test]
+fn separators_carry_their_declared_keys_through_the_model() {
+    // `Row::separator()` is built keyless, so `Row::key()` is empty for a
+    // separator. The demo's declared key is what the published id uses.
+    let menu = menu_model();
+    for (index, key) in [(2usize, "m-sep-1"), (4usize, "m-sep-2")] {
+        assert_eq!(
+            menu_row_key(index),
+            Some(key),
+            "the separator at {index} must publish under {key}"
+        );
+        let row = menu
+            .rows()
+            .get(index)
+            .expect("the separator index is inside the model");
+        assert!(
+            row.is_separator(),
+            "the fixture entry at {index} must be the separator {key}"
+        );
+        assert_eq!(
+            row.key(),
+            "",
+            "the framework's separator is keyless, so the declared key rather \
+             than `Row::key()` is what carries the separator's identity"
+        );
+    }
+}
+
+#[test]
+fn menu_row_key_is_none_outside_the_fixture() {
+    assert_eq!(menu_row_key(MENU_ROWS.len()), None);
+    assert_eq!(menu_row_key(usize::MAX), None);
+}

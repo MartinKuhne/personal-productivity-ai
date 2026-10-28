@@ -6,8 +6,9 @@
 //! away.
 
 use crate::checkbox_ink_probe::{
-    self as probe, BOX_AA_MARGIN_PHYS, CheckboxInkReport, INDICATOR_BOX, PROBE_SCALE,
-    PROBE_VIEWPORT,
+    self as probe, BOX_AA_MARGIN_PHYS, COVERAGE_MATRIX, CheckboxInkReport, FIXTURE_SYMBOLS,
+    FaceMeasurement, ICON_SYMBOLS, INDICATOR_BOX, PROBE_SCALE, PROBE_VIEWPORT, RENDER_FONT_COVERS,
+    SymbolClass, TYPOGRAPHIC_SYMBOLS_UNCOVERED,
 };
 use crate::state::{BaseState, VisualState};
 use crate::token::color::Palette;
@@ -543,7 +544,14 @@ fn test_checkbox_ink_glyph_coverage_full_table() {
 /// modules, and the pin covers the *debt*, not each copy of it. Fixing one
 /// of three copies leaves the pair missing; fixing all three heals it and
 /// the ratchet fails so the entry is removed.
-const KNOWN_MISSING_GLYPHS: [&str; 40] = [
+///
+/// The `Self::*` entries are the icons the framework emits from a `match`
+/// arm rather than a `const` — the notification and badge kinds, and the
+/// table header's sort arrows. They are in this list because the scanner
+/// reads arms as well as declarations now; before it did, the gate was
+/// silently blind to seven real gaps, and a clean report meant only that
+/// it had never looked at the line the glyph lives on.
+const KNOWN_MISSING_GLYPHS: [&str; 47] = [
     "CALENDAR_ICON U+1F4C5",
     "CHECK_MARK U+2713",
     "CHEVRON_DOWN U+25BE",
@@ -580,6 +588,13 @@ const KNOWN_MISSING_GLYPHS: [&str; 40] = [
     "LABEL_FINISH U+2713",
     "LEGEND_KEYBOARD U+21B5",
     "PERSON_GLYPH U+1F464",
+    "Self::Ascending U+25B2",
+    "Self::Danger U+2715",
+    "Self::Descending U+25BC",
+    "Self::Info U+24D8",
+    "Self::Info U+25CF",
+    "Self::Success U+2713",
+    "Self::Warning U+26A0",
     "STAR_EMPTY U+2606",
     "STAR_FILLED U+2605",
     "TRIGGER_LABEL U+22EF",
@@ -706,4 +721,470 @@ fn test_checkbox_ink_check_mark_codepoint_is_not_in_render_font() {
         dash, '\u{2212}',
         "INDETERMINATE_MARK must be U+2212 MINUS SIGN"
     );
+}
+
+// ---------------------------------------------------------------------------
+// The symbol-face ledger (`G-6`)
+// ---------------------------------------------------------------------------
+
+/// The icon inventory is twenty-six codepoints, and the bundled face
+/// carries none of them.
+const LEDGER_ICON_COUNT: usize = 26;
+
+/// Message shared by the live-cmap icon assertions.
+const ICONS_ABSENT: &str = "every icon in `ICON_SYMBOLS` must be absent from the bundled \
+                           render font, or the geometry migration has a glyph it does not \
+                           need to redraw";
+
+/// The render font covers every symbol the ledger says it covers.
+///
+/// Checked against the live cmap rather than against the doc table, so a
+/// declared-but-wrong entry cannot hide.
+#[test]
+fn test_glyph_ledger_render_font_actually_covers_every_declared_covered_symbol() {
+    let missing: Vec<String> = RENDER_FONT_COVERS
+        .iter()
+        .filter(|ch| !probe::render_font_has(**ch))
+        .map(|ch| probe::codepoint_label(*ch))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "RENDER_FONT_COVERS claims the bundled face draws these, but its cmap does not: {}",
+        missing.join(", ")
+    );
+}
+
+/// The bundled face draws **none** of the icon inventory — the headline
+/// `G-6` measurement: 0 of 26.
+#[test]
+fn test_glyph_ledger_bundled_face_covers_none_of_the_icon_inventory() {
+    let present: Vec<String> = ICON_SYMBOLS
+        .iter()
+        .filter(|ch| probe::render_font_has(**ch))
+        .map(|ch| probe::codepoint_label(*ch))
+        .collect();
+    println!(
+        "bundled render font covers {} of {} icon codepoints",
+        ICON_SYMBOLS.len() - present.len(),
+        ICON_SYMBOLS.len()
+    );
+    assert!(
+        present.is_empty(),
+        "{ICONS_ABSENT}. Present but should not be: {}",
+        present.join(", ")
+    );
+}
+
+#[test]
+fn test_glyph_ledger_icon_inventory_is_the_expected_size() {
+    assert_eq!(
+        ICON_SYMBOLS.len(),
+        LEDGER_ICON_COUNT,
+        "the coverage matrix is measured against a {LEDGER_ICON_COUNT}-codepoint icon inventory"
+    );
+    let unique = ICON_SYMBOLS
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        unique.len(),
+        ICON_SYMBOLS.len(),
+        "ICON_SYMBOLS must not list a codepoint twice"
+    );
+}
+
+#[test]
+fn test_glyph_ledger_declared_sets_are_disjoint() {
+    for ch in ICON_SYMBOLS {
+        assert!(
+            !RENDER_FONT_COVERS.contains(&ch),
+            "{} is declared both covered and an icon",
+            probe::codepoint_label(ch)
+        );
+        assert!(
+            !TYPOGRAPHIC_SYMBOLS_UNCOVERED.contains(&ch),
+            "{} is declared both an icon and typographic",
+            probe::codepoint_label(ch)
+        );
+        assert!(
+            !FIXTURE_SYMBOLS.contains(&ch),
+            "{} is declared both an icon and a fixture",
+            probe::codepoint_label(ch)
+        );
+    }
+    for ch in TYPOGRAPHIC_SYMBOLS_UNCOVERED {
+        assert!(
+            !RENDER_FONT_COVERS.contains(&ch),
+            "{} is declared both covered and uncovered",
+            probe::codepoint_label(ch)
+        );
+        assert!(
+            !FIXTURE_SYMBOLS.contains(&ch),
+            "{} is declared both typographic and a fixture",
+            probe::codepoint_label(ch)
+        );
+    }
+}
+
+/// Nothing in hoarfrost's sources is a raw symbol the ledger has no answer
+/// for.
+///
+/// This is the guard that makes `G-6` machine-visible: add a symbol glyph
+/// without deciding how the framework guarantees it and this goes red.
+#[test]
+fn test_glyph_ledger_every_symbol_found_in_the_sources_is_classified() {
+    let unclassified = probe::unclassified_symbols();
+    let labels: Vec<String> = unclassified
+        .iter()
+        .map(|ch| format!("{} ({})", probe::codepoint_label(*ch), *ch))
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "a raw symbol glyph was added to hoarfrost's sources with no face decision: {}.\n\
+         Classify it in `ICON_SYMBOLS` (needs drawn geometry), in the typographic set \
+         (punctuation the text face owns), or in `FIXTURE_SYMBOLS` (test-only text the \
+         framework never paints).",
+        labels.join(", ")
+    );
+}
+
+/// The three classes route apart, and an unknown codepoint is still `None`.
+///
+/// The `None` arm is asserted deliberately: a classifier that grew a
+/// default would pass the guard test forever while classifying nothing.
+#[test]
+fn test_glyph_ledger_classification_routes_each_role_apart() {
+    assert_eq!(probe::class_of('\u{2713}'), Some(SymbolClass::Icon));
+    assert_eq!(probe::class_of('\u{26A0}'), Some(SymbolClass::Icon));
+    assert_eq!(probe::class_of('\u{1F50D}'), Some(SymbolClass::Icon));
+    assert_eq!(probe::class_of('\u{1F441}'), Some(SymbolClass::Icon));
+    assert_eq!(probe::class_of('\u{24D8}'), Some(SymbolClass::Icon));
+    assert_eq!(probe::class_of('\u{2014}'), Some(SymbolClass::Typographic));
+    assert_eq!(probe::class_of('\u{21D2}'), Some(SymbolClass::Typographic));
+    assert_eq!(probe::class_of('\u{65E5}'), Some(SymbolClass::Fixture));
+    assert_eq!(probe::class_of('\u{30C6}'), Some(SymbolClass::Fixture));
+    assert_eq!(probe::class_of('a'), None);
+    assert_eq!(probe::class_of('\u{1F980}'), None);
+    assert_eq!(probe::class_label(None), "UNCLASSIFIED");
+    assert_eq!(probe::class_label(Some(SymbolClass::Fixture)), "fixture");
+}
+
+/// The CJK fixture is a fixture, not debt.
+///
+/// `microcopy/truncate_tests.rs` truncates `"テスト日本語"`. The scanner
+/// reads test sidecars on purpose, so those seven codepoints arrive here;
+/// they are CJK script and test input, not icon output, and classing them
+/// `Fixture` records that rather than leaving them looking unhandled.
+#[test]
+fn test_glyph_ledger_the_cjk_truncate_fixture_is_not_icon_debt() {
+    let entries: Vec<_> = probe::ledger()
+        .into_iter()
+        .filter(|e| FIXTURE_SYMBOLS.contains(&e.ch))
+        .collect();
+    assert!(
+        !entries.is_empty(),
+        "the truncate fixture's codepoints are no longer in the scan; if the fixture \
+         moved, this test and FIXTURE_SYMBOLS should move with it"
+    );
+    for e in &entries {
+        assert_eq!(
+            e.class,
+            Some(SymbolClass::Fixture),
+            "{} reached the ledger from {} but is not classed as a fixture",
+            e.codepoint,
+            e.location
+        );
+        assert!(
+            !probe::is_icon(e.ch),
+            "{} is CJK script from a test fixture and must not be in the icon inventory",
+            e.codepoint
+        );
+    }
+    println!(
+        "fixture codepoints in the ledger: {}",
+        entries
+            .iter()
+            .map(|e| e.codepoint.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+#[test]
+fn test_glyph_ledger_marks_every_icon_as_host_fallback() {
+    let entries = probe::ledger();
+    assert!(
+        !entries.is_empty(),
+        "the source scan found no glyph constants at all; the ledger is blind"
+    );
+    let bad: Vec<String> = entries
+        .iter()
+        .filter(|e| e.class == Some(SymbolClass::Icon) && e.render_font_has)
+        .map(|e| format!("{} {}", e.codepoint, e.constant))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "{ICONS_ABSENT}. Bundled-but-classed-as-icon: {}",
+        bad.join(", ")
+    );
+}
+
+/// Every icon in the inventory is reported as unguaranteed.
+///
+/// The assertion is only honest because the scanner reaches every
+/// declaration shape. Three of these icons — `ⓘ`, `●` and `✕` — exist
+/// **only** in `match` arms, so a `const`-only scanner could never have
+/// produced them and this test would have failed for a reason that was the
+/// scanner's, not the framework's.
+#[test]
+fn test_glyph_ledger_unguaranteed_icons_cover_the_whole_inventory() {
+    let got: Vec<String> = probe::unguaranteed_icons()
+        .iter()
+        .map(|e| e.codepoint.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    println!("unguaranteed icons reported: {}", got.len());
+    for ch in ICON_SYMBOLS {
+        let label = probe::codepoint_label(ch);
+        assert!(
+            got.contains(&label),
+            "{label} is an emitted icon but the ledger does not report it as unguaranteed; \
+             the scan may not reach its declaration"
+        );
+    }
+}
+
+/// The three match-arm-only icons are reached **through their arm**.
+///
+/// Pins the scanner extension itself rather than leaving it inferred: if
+/// arm scanning were ever dropped these three would vanish from the ledger
+/// and the coverage test above would fail with a message pointing at the
+/// wrong thing.
+#[test]
+fn test_glyph_ledger_reaches_the_match_arm_icons() {
+    let entries = probe::ledger();
+    for ch in ['\u{24D8}', '\u{25CF}', '\u{2715}'] {
+        let label = probe::codepoint_label(ch);
+        let reached: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.ch == ch && e.constant.starts_with("Self::"))
+            .map(|e| e.constant.as_str())
+            .collect();
+        assert!(
+            !reached.is_empty(),
+            "{label} is declared only in a `match` arm; the scanner must reach it there, \
+             but no `Self::*` entry carries it"
+        );
+        println!("{label} reached through: {}", reached.join(", "));
+    }
+}
+
+#[test]
+fn test_glyph_ledger_every_matrix_row_is_internally_consistent() {
+    for m in COVERAGE_MATRIX {
+        assert_eq!(
+            m.icons_covered + m.icon_gaps.len(),
+            LEDGER_ICON_COUNT,
+            "{}: icons_covered + icon_gaps must equal the {}-codepoint inventory",
+            m.face,
+            LEDGER_ICON_COUNT
+        );
+        let unique = m.icon_gaps.iter().collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            unique.len(),
+            m.icon_gaps.len(),
+            "{}: icon_gaps lists a codepoint twice",
+            m.face
+        );
+        for gap in m.icon_gaps {
+            assert!(
+                ICON_SYMBOLS.contains(gap),
+                "{}: gap {} is not in the inventory",
+                m.face,
+                probe::codepoint_label(*gap)
+            );
+        }
+    }
+}
+
+#[test]
+fn test_glyph_ledger_fira_row_matches_the_live_cmap() {
+    let fira = COVERAGE_MATRIX
+        .iter()
+        .find(|m| m.face == "Fira Sans (bundled today)")
+        .expect("the matrix must carry the row for the face iced bundles");
+    assert_eq!(
+        fira.icons_covered, 0,
+        "Fira Sans draws none of the icon inventory"
+    );
+    for ch in ICON_SYMBOLS {
+        assert!(
+            !probe::render_font_has(ch),
+            "matrix says Fira Sans lacks {} but the live cmap has it",
+            probe::codepoint_label(ch)
+        );
+    }
+}
+
+/// The measurement that decides the framework does not ship a symbol font.
+///
+/// If a permissive face ever reaches full coverage this test fires, and the
+/// decision should be revisited with it.
+#[test]
+fn test_glyph_ledger_no_redistributable_face_closes_the_gap() {
+    let closing: Vec<&FaceMeasurement> = COVERAGE_MATRIX
+        .iter()
+        .filter(|m| m.closes_the_gap())
+        .collect();
+    assert!(
+        closing.is_empty(),
+        "a redistributable face now covers the whole icon inventory: {:?}. \
+         Re-run the bundle evaluation before assuming geometry is still the right call.",
+        closing
+            .iter()
+            .map(|m| (m.face, m.licence))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_glyph_ledger_only_full_face_is_the_one_we_may_not_ship() {
+    let full: Vec<&FaceMeasurement> = COVERAGE_MATRIX
+        .iter()
+        .filter(|m| m.icon_gaps.is_empty())
+        .collect();
+    assert_eq!(
+        full.len(),
+        1,
+        "exactly one face covers all {LEDGER_ICON_COUNT} icons"
+    );
+    assert!(
+        !full[0].redistributable,
+        "the only complete face must be non-redistributable, else bundling is viable"
+    );
+    assert_eq!(full[0].face, "Segoe UI Symbol");
+}
+
+#[test]
+fn test_glyph_ledger_best_permissive_face_leaves_seven_icons_on_the_host() {
+    let best = COVERAGE_MATRIX
+        .iter()
+        .filter(|m| m.redistributable)
+        .max_by_key(|m| m.icons_covered)
+        .expect("at least one redistributable row");
+    assert_eq!(best.face, "Noto Sans Symbols 2");
+    assert_eq!(best.icons_covered, 19);
+    assert_eq!(
+        best.icon_gaps.len(),
+        7,
+        "the best OFL face leaves ↵ ⋯ ⓘ 👤 📅 📌 📍 uncovered"
+    );
+}
+
+/// Noto Sans Symbols 2 is the strongest OFL candidate and carries no
+/// Latin letters at all, so naming it for `"✓ Apply"` would strand
+/// `"Apply"`.
+#[test]
+fn test_glyph_ledger_best_permissive_face_cannot_serve_a_mixed_label() {
+    let best = COVERAGE_MATRIX
+        .iter()
+        .filter(|m| m.redistributable)
+        .max_by_key(|m| m.icons_covered)
+        .expect("at least one redistributable row");
+    assert!(
+        !best.has_latin,
+        "{} unexpectedly carries Latin; re-check whether a bundle could serve mixed labels",
+        best.face
+    );
+}
+
+#[test]
+fn test_glyph_ledger_every_permissive_face_leaves_at_least_one_gap() {
+    let failing = probe::permissive_faces_that_fail();
+    let redistributable = COVERAGE_MATRIX.iter().filter(|m| m.redistributable).count();
+    assert_eq!(
+        failing.len(),
+        redistributable,
+        "every redistributable face in the matrix must fail to close the gap"
+    );
+}
+
+/// The property the whole ledger exists to hold: **adding an icon turns
+/// the suite red.**
+///
+/// Proven end to end rather than asserted. A glyph hoarfrost does not emit
+/// today — `U+1F980` CRAB — is pushed through the real pipeline in both
+/// declaration shapes, and the ledger must reject it as unclassified on
+/// both. The codepoint is supplied as a number and formatted at runtime so
+/// this file's own text never contains a `const … = '🦀'` line the real
+/// scan could pick up and blame on the crate.
+#[test]
+fn test_glyph_ledger_a_new_icon_turns_the_ledger_red() {
+    const INJECTED: u32 = 0x1F980; // 🦀 CRAB — in no declared set
+    let glyph = char::from_u32(INJECTED).expect("0x1F980 is a valid codepoint");
+    let label = probe::codepoint_label(glyph);
+
+    // The real crate is clean first, so any red below is attributable to
+    // the injection and not to something already there.
+    assert!(
+        probe::unclassified_symbols().is_empty(),
+        "precondition: the real sources already carry an unclassified glyph"
+    );
+    assert!(
+        probe::class_of(glyph).is_none(),
+        "precondition: {label} must not already be in the ledger"
+    );
+
+    let const_src = format!("pub const GLYPH_BRAND_NEW: char = {glyph:?};\n");
+    let arm_src = format!("            Self::BrandNew => {glyph:?},\n");
+
+    let mut injected = probe::scan_glyph_source("widget/injected_probe.rs", &const_src);
+    injected.extend(probe::scan_glyph_source(
+        "composite/injected_probe.rs",
+        &arm_src,
+    ));
+    let entries = probe::ledger_from(injected);
+
+    println!("injected {label} through the ledger pipeline:");
+    for e in &entries {
+        println!("  {}", e.row());
+    }
+
+    assert_eq!(
+        entries.len(),
+        2,
+        "both the `const` and the `match` arm must be scanned; got {} entries",
+        entries.len()
+    );
+    assert_eq!(
+        entries[0].constant, "GLYPH_BRAND_NEW",
+        "the const declaration must be scanned"
+    );
+    assert_eq!(
+        entries[1].constant, "Self::BrandNew",
+        "the match arm must be scanned"
+    );
+
+    let unclassified = probe::unclassified_among(&entries);
+    assert_eq!(
+        unclassified,
+        vec![glyph],
+        "a brand-new icon must reach the ledger unclassified on every declaration \
+         shape — this is the guard that makes adding an icon visible"
+    );
+    for e in &entries {
+        assert!(
+            !e.render_font_has,
+            "{} unexpectedly bundled, so the coverage gate would miss it too",
+            e.codepoint
+        );
+    }
+
+    // And the real crate is still clean afterwards: the injection never
+    // touched it.
+    assert!(
+        probe::unclassified_symbols().is_empty(),
+        "the synthetic injection leaked into the real ledger"
+    );
+    println!("GUARD OK: a new icon is caught unclassified in both declaration shapes");
 }

@@ -1237,6 +1237,10 @@ name = "hoarfrost"
 version = "0.2.0"
 dependencies = [
  "iced",
+ "iced_core",
+ "iced_futures",
+ "iced_renderer",
+ "iced_runtime",
 ]
 
 [[package]]
