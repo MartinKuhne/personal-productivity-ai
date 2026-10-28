@@ -1,0 +1,107 @@
+# viewport 600.00 x 900.00
+# named 105 / anonymous 963
+demo.atoms.button.Danger.busy [focusable] | 280.00 156.00 88.00 32.00 | 280.00 156.00 88.00 32.00
+demo.atoms.button.Danger.live [focusable] | 88.00 156.00 88.00 32.00 | 88.00 156.00 88.00 32.00
+demo.atoms.button.Ghost.busy [focusable] | 280.00 120.00 88.00 32.00 | 280.00 120.00 88.00 32.00
+demo.atoms.button.Ghost.live [focusable] | 88.00 120.00 88.00 32.00 | 88.00 120.00 88.00 32.00
+demo.atoms.button.Primary.busy [focusable] | 280.00 48.00 88.00 32.00 | 280.00 48.00 88.00 32.00
+demo.atoms.button.Primary.live [focusable] | 88.00 48.00 88.00 32.00 | 88.00 48.00 88.00 32.00
+demo.atoms.button.Secondary.busy [focusable] | 280.00 84.00 88.00 32.00 | 280.00 84.00 88.00 32.00
+demo.atoms.button.Secondary.live [focusable] | 88.00 84.00 88.00 32.00 | 88.00 84.00 88.00 32.00
+demo.atoms.buttons.danger.demo-label [container] | 16.00 163.00 64.00 18.00 | 16.00 163.00 64.00 18.00
+demo.atoms.buttons.ghost.demo-label [container] | 16.00 127.00 64.00 18.00 | 16.00 127.00 64.00 18.00
+demo.atoms.buttons.primary.demo-label [container] | 16.00 55.00 64.00 18.00 | 16.00 55.00 64.00 18.00
+demo.atoms.buttons.secondary.demo-label [container] | 16.00 91.00 64.00 18.00 | 16.00 91.00 64.00 18.00
+demo.atoms.checkbox.0 [focusable] | 16.00 264.00 103.70 24.00 | 16.00 264.00 103.70 24.00
+demo.atoms.checkbox.0 [container] | 16.00 268.00 16.00 16.00 | 16.00 268.00 16.00 16.00
+demo.atoms.checkbox.0.label [text] | 40.00 264.00 79.70 24.00 | 40.00 264.00 79.70 24.00
+demo.atoms.checkbox.1 [focusable] | 16.00 292.00 84.88 24.00 | 16.00 292.00 84.88 24.00
+demo.atoms.checkbox.1 [container] | 16.00 296.00 16.00 16.00 | 16.00 296.00 16.00 16.00
+demo.atoms.checkbox.1.label [text] | 40.00 292.00 60.88 24.00 | 40.00 292.00 60.88 24.00
+demo.atoms.checkbox.2 [focusable] | 16.00 320.00 127.38 24.00 | 16.00 320.00 127.38 24.00
+demo.atoms.checkbox.2 [container] | 16.00 324.00 16.00 16.00 | 16.00 324.00 16.00 16.00
+demo.atoms.checkbox.2.label [text] | 40.00 320.00 103.38 24.00 | 40.00 320.00 103.38 24.00
+demo.atoms.checkbox.3 [container] | 16.00 352.00 16.00 16.00 | 16.00 352.00 16.00 16.00
+demo.atoms.checkbox.3.label [text] | 40.00 348.00 63.23 24.00 | 40.00 348.00 63.23 24.00
+demo.atoms.link.external [focusable] | 16.00 948.00 94.37 24.00 | -
+demo.atoms.link.internal [focusable] | 16.00 920.00 92.14 24.00 | -
+demo.atoms.password.disabled [text_input] | 28.00 1370.00 512.00 20.00 | -
+demo.atoms.password.disabled [focusable] | 28.00 1370.00 512.00 20.00 | -
+demo.atoms.password.live [text_input] | 28.00 1334.00 512.00 20.00 | -
+demo.atoms.password.live [focusable] | 28.00 1334.00 512.00 20.00 | -
+demo.atoms.radio [focusable] | 16.00 448.00 313.84 24.00 | 16.00 448.00 313.84 24.00
+demo.atoms.radio [container] | 16.00 452.00 16.00 16.00 | 16.00 452.00 16.00 16.00
+demo.atoms.radio [container] | 115.17 452.00 16.00 16.00 | 115.17 452.00 16.00 16.00
+demo.atoms.radio [container] | 240.78 452.00 16.00 16.00 | 240.78 452.00 16.00 16.00
+demo.atoms.radio.label-0 [text] | 40.00 448.00 63.17 24.00 | 40.00 448.00 63.17 24.00
+demo.atoms.radio.label-1 [text] | 139.17 448.00 89.62 24.00 | 139.17 448.00 89.62 24.00
+demo.atoms.radio.label-2 [text] | 264.78 448.00 65.06 24.00 | 264.78 448.00 65.06 24.00
+demo.atoms.range.live.lower [focusable] | 150.00 1916.00 24.00 24.00 | -
+demo.atoms.range.live.upper [focusable] | 288.00 1916.00 24.00 24.00 | -
+demo.atoms.segmented [focusable] | 16.00 704.00 249.49 32.00 | 16.00 704.00 249.49 32.00
+demo.atoms.split.control [focusable] | 16.00 812.00 135.26 32.00 | 16.00 812.00 135.26 32.00
+demo.atoms.switch.busy [focusable] | 16.00 576.00 128.26 24.00 | 16.00 576.00 128.26 24.00
+demo.atoms.switch.busy [container] | 16.00 578.00 36.00 20.00 | 16.00 578.00 36.00 20.00
+demo.atoms.switch.busy.label [text] | 60.00 576.00 84.26 24.00 | 60.00 576.00 84.26 24.00
+demo.atoms.switch.disabled [container] | 16.00 606.00 36.00 20.00 | 16.00 606.00 36.00 20.00
+demo.atoms.switch.disabled.label [text] | 60.00 604.00 113.38 24.00 | 60.00 604.00 113.38 24.00
+demo.atoms.switch.live [focusable] | 16.00 548.00 123.15 24.00 | 16.00 548.00 123.15 24.00
+demo.atoms.switch.live [container] | 16.00 550.00 36.00 20.00 | 16.00 550.00 36.00 20.00
+demo.atoms.switch.live.label [text] | 60.00 548.00 79.15 24.00 | 60.00 548.00 79.15 24.00
+demo.atoms.text.controlled [text_input] | 28.00 1226.00 512.00 20.00 | -
+demo.atoms.text.controlled [focusable] | 28.00 1226.00 512.00 20.00 | -
+demo.atoms.text.disabled [text_input] | 28.00 1154.00 512.00 20.00 | -
+demo.atoms.text.disabled [focusable] | 28.00 1154.00 512.00 20.00 | -
+demo.atoms.text.invalid [text_input] | 28.00 1190.00 512.00 20.00 | -
+demo.atoms.text.invalid [focusable] | 28.00 1190.00 512.00 20.00 | -
+demo.atoms.text.live [text_input] | 28.00 1082.00 512.00 20.00 | -
+demo.atoms.text.live [focusable] | 28.00 1082.00 512.00 20.00 | -
+demo.atoms.text.readonly [text_input] | 28.00 1118.00 512.00 20.00 | -
+demo.atoms.text.readonly [focusable] | 28.00 1118.00 512.00 20.00 | -
+demo.pane.atoms.scroll [scrollable] | 0.00 0.00 600.00 900.00 | 0.00 0.00 600.00 900.00
+demo.section.avatar [container] | 0.00 1996.00 600.00 100.00 | -
+demo.section.avatar.caption [container] | 16.00 2012.00 46.03 24.00 | -
+demo.section.badge-resolver-uif-atom-008 [container] | 0.00 3862.00 600.00 424.00 | -
+demo.section.badge-resolver-uif-atom-008.caption [container] | 16.00 3878.00 224.16 24.00 | -
+demo.section.buttons [container] | 0.00 0.00 600.00 204.00 | 0.00 0.00 600.00 204.00
+demo.section.buttons.caption [container] | 16.00 16.00 56.54 24.00 | 16.00 16.00 56.54 24.00
+demo.section.checkbox [container] | 0.00 216.00 600.00 172.00 | 0.00 216.00 600.00 172.00
+demo.section.checkbox.caption [container] | 16.00 232.00 69.20 24.00 | 16.00 232.00 69.20 24.00
+demo.section.chip-resolver-uif-atom-006 [container] | 0.00 2652.00 600.00 1198.00 | -
+demo.section.chip-resolver-uif-atom-006.caption [container] | 16.00 2668.00 211.28 24.00 | -
+demo.section.colour-picker [container] | 0.00 2396.00 600.00 132.00 | -
+demo.section.colour-picker.caption [container] | 16.00 2412.00 96.27 24.00 | -
+demo.section.combo-box [container] | 0.00 1424.00 600.00 168.00 | -
+demo.section.combo-box.caption [container] | 16.00 1440.00 81.25 24.00 | -
+demo.section.date-picker [container] | 0.00 2108.00 600.00 132.00 | -
+demo.section.date-picker.caption [container] | 16.00 2124.00 81.95 24.00 | -
+demo.section.hyperlink [container] | 0.00 872.00 600.00 144.00 | 0.00 872.00 600.00 28.00
+demo.section.hyperlink.caption [container] | 16.00 888.00 69.92 24.00 | 16.00 888.00 69.92 12.00
+demo.section.number-box-resolver-uif-atom-011 [container] | 0.00 5256.00 600.00 510.00 | -
+demo.section.number-box-resolver-uif-atom-011.caption [container] | 16.00 5272.00 263.92 24.00 | -
+demo.section.password [container] | 0.00 1280.00 600.00 132.00 | -
+demo.section.password.caption [container] | 16.00 1296.00 67.71 24.00 | -
+demo.section.progress-resolver-uif-atom-009 [container] | 0.00 4298.00 600.00 424.00 | -
+demo.section.progress-resolver-uif-atom-009.caption [container] | 16.00 4314.00 240.34 24.00 | -
+demo.section.radio-group [container] | 0.00 400.00 600.00 88.00 | 0.00 400.00 600.00 88.00
+demo.section.radio-group.caption [container] | 16.00 416.00 88.06 24.00 | 16.00 416.00 88.06 24.00
+demo.section.range-slider [container] | 0.00 1868.00 600.00 116.00 | -
+demo.section.range-slider.caption [container] | 16.00 1884.00 89.76 24.00 | -
+demo.section.rating [container] | 0.00 1712.00 600.00 144.00 | -
+demo.section.rating.caption [container] | 16.00 1728.00 46.21 24.00 | -
+demo.section.search-box [container] | 0.00 1604.00 600.00 96.00 | -
+demo.section.search-box.caption [container] | 16.00 1620.00 79.41 24.00 | -
+demo.section.segmented [container] | 0.00 656.00 600.00 96.00 | 0.00 656.00 600.00 96.00
+demo.section.segmented.caption [container] | 16.00 672.00 81.39 24.00 | 16.00 672.00 81.39 24.00
+demo.section.slider-resolver-uif-atom-010 [container] | 0.00 4734.00 600.00 510.00 | -
+demo.section.slider-resolver-uif-atom-010.caption [container] | 16.00 4750.00 219.47 24.00 | -
+demo.section.split-button [container] | 0.00 764.00 600.00 96.00 | 0.00 764.00 600.00 96.00
+demo.section.split-button.caption [container] | 16.00 780.00 86.29 24.00 | 16.00 780.00 86.29 24.00
+demo.section.text-input [container] | 0.00 1028.00 600.00 240.00 | -
+demo.section.text-input.caption [container] | 16.00 1044.00 72.22 24.00 | -
+demo.section.time-picker [container] | 0.00 2252.00 600.00 132.00 | -
+demo.section.time-picker.caption [container] | 16.00 2268.00 84.06 24.00 | -
+demo.section.toggle-switch [container] | 0.00 500.00 600.00 144.00 | 0.00 500.00 600.00 144.00
+demo.section.toggle-switch.caption [container] | 16.00 516.00 96.85 24.00 | 16.00 516.00 96.85 24.00
+demo.section.tooltip [container] | 0.00 2540.00 600.00 100.00 | -
+demo.section.tooltip.caption [container] | 16.00 2556.00 50.56 24.00 | -
