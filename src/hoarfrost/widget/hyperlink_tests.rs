@@ -357,10 +357,6 @@ enum TestMsg {
     Emitted(HyperlinkEmission),
 }
 
-fn leaked(model: HyperlinkModel) -> &'static HyperlinkModel {
-    Box::leak(Box::new(model))
-}
-
 fn key_press(name: Named) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: Key::Named(name),
@@ -408,9 +404,9 @@ fn test_standalone_and_controlled_creation() {
     assert_eq!(link.widget_id(), &crate::bridge::widget_id(link.focus_id()));
 
     // Controlled
-    let model = leaked(HyperlinkModel::external("About", "/about").disabled());
+    let model = HyperlinkModel::external("About", "/about").disabled();
     let ctl_link =
-        Hyperlink::<TestMsg>::controlled(Controlled::new(model), "link_about", |emission| {
+        Hyperlink::<TestMsg>::controlled(Controlled::new(&model), "link_about", |emission| {
             Some(TestMsg::Emitted(emission))
         });
 
@@ -477,9 +473,9 @@ fn test_mouse_drag_out_cancels_activation() {
 
 #[test]
 fn test_controlled_mouse_activation() {
-    let model = leaked(HyperlinkModel::external("Open External", "https://iced.rs"));
-    let mut harness = Harness::headless(move || {
-        Hyperlink::controlled(Controlled::new(model), "link_ext", |emission| {
+    let model = HyperlinkModel::external("Open External", "https://iced.rs");
+    let mut harness = Harness::headless(|| {
+        Hyperlink::controlled(Controlled::new(&model), "link_ext", |emission| {
             Some(TestMsg::Emitted(emission))
         })
         .into()
@@ -604,9 +600,9 @@ fn test_disabled_link_ignores_clicks_and_keyboard() {
 
 #[test]
 fn test_hover_emits_uri_on_enter_and_none_on_exit() {
-    let model = leaked(HyperlinkModel::new("Hover me", "https://preview.url"));
-    let mut harness = Harness::headless(move || {
-        Hyperlink::controlled(Controlled::new(model), "link_hover", |emission| {
+    let model = HyperlinkModel::new("Hover me", "https://preview.url");
+    let mut harness = Harness::headless(|| {
+        Hyperlink::controlled(Controlled::new(&model), "link_hover", |emission| {
             Some(TestMsg::Emitted(emission))
         })
         .into()
@@ -634,9 +630,9 @@ fn test_hover_emits_uri_on_enter_and_none_on_exit() {
 
 #[test]
 fn test_disabled_controlled_link_does_not_emit_hover() {
-    let model = leaked(HyperlinkModel::new("Disabled hover", "https://disabled.url").disabled());
-    let mut harness = Harness::headless(move || {
-        Hyperlink::controlled(Controlled::new(model), "link_dis_hover", |emission| {
+    let model = HyperlinkModel::new("Disabled hover", "https://disabled.url").disabled();
+    let mut harness = Harness::headless(|| {
+        Hyperlink::controlled(Controlled::new(&model), "link_dis_hover", |emission| {
             Some(TestMsg::Emitted(emission))
         })
         .into()

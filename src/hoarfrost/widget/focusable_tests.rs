@@ -61,14 +61,14 @@ use iced_test::core::widget::operation;
 type Wrapped = Focusable<'static, (), Theme, iced_test::renderer::Renderer>;
 
 /// A headless harness over a view of focusable wrappers.
-fn harness(labels: &'static [&'static str]) -> Harness<(), iced_test::renderer::Renderer> {
+fn harness(labels: &'static [&'static str]) -> Harness<'static, (), iced_test::renderer::Renderer> {
     Harness::headless(move || focusable_tree(labels))
 }
 
 /// A headless harness whose members carry their own enabled flags.
 fn mixed_harness(
     entries: &'static [(&'static str, bool)],
-) -> Harness<(), iced_test::renderer::Renderer> {
+) -> Harness<'static, (), iced_test::renderer::Renderer> {
     Harness::headless(move || mixed_focusable_tree(entries))
 }
 

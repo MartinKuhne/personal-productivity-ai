@@ -156,7 +156,23 @@ use crate::token_lint::{
 /// 177 as of `UIF-COMP-016`: `composite/split_divider.rs`.
 /// 179 as of `UIF-PANE-002` and `UIF-WIN-001`: `geometry/pane_solver.rs` and `geometry/window_geometry.rs`.
 /// 180 as of `UIF-PANE-003`: `widget/search_box.rs`.
-const PIN_FILES_SCANNED: usize = 180;
+/// 181 as of the standalone geometry harness: `geometry_gallery.rs` joins the
+/// scan. It is a `#[cfg(test)]` measurement harness rather than a shipped
+/// widget, but Rule B counts scope membership and the file introduces no
+/// visual constants, so the honest move is to raise the pin rather than
+/// special-case the walker.
+/// 182 as of the checkbox ink probe: `checkbox_ink_probe.rs` joins the scan on
+/// the same basis as `geometry_gallery.rs` — a measurement harness, not a
+/// shipped widget, and outside `widget/`, `surface/` and the other visual-scope
+/// dirs, so it adds a scanned file without adding a governed one. Its magenta
+/// `PROBE_BACKGROUND` is deliberately outside every token so the probe can
+/// tell ink from background; it is not a palette entry and Rule B does not
+/// reach it.
+/// 183 as of `identity`: the sub-part identity convention joins the scan at
+/// the crate root. It is pure id/string plumbing — no colour literal anywhere —
+/// and sits outside `widget/`, `surface/` and `composite/`, so like the two
+/// harnesses above it adds a scanned file without adding a governed one.
+const PIN_FILES_SCANNED: usize = 183;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

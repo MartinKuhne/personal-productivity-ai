@@ -892,14 +892,13 @@ where
                 bounds: toggle_rect.size(),
                 size: Pixels(ICON_SIZE),
                 line_height: LineHeight::Absolute(Pixels(TOGGLE_SIZE)),
-                font: typography::CAPTION
-                    .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                font: renderer.default_font(),
                 align_x: text_core::Alignment::Center,
                 align_y: alignment::Vertical::Center,
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            toggle_rect.position(),
+            toggle_rect.center(),
             palette.text_primary,
             *viewport,
         );
@@ -1008,14 +1007,13 @@ where
                         bounds: Size::new(ICON_SIZE, ICON_SIZE),
                         size: Pixels(ICON_SIZE),
                         line_height: LineHeight::Absolute(Pixels(ICON_SIZE)),
-                        font: typography::CAPTION
-                            .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                        font: renderer.default_font(),
                         align_x: text_core::Alignment::Center,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    Point::new(icon_x, icon_y),
+                    Point::new(icon_x + ICON_SIZE / 2.0, icon_y + ICON_SIZE / 2.0),
                     fg_color,
                     clip_rect,
                 );
@@ -1029,14 +1027,16 @@ where
                         bounds: Size::new(label_w, ROW_HEIGHT),
                         size: Pixels(typography::UI_COMPACT.size),
                         line_height: LineHeight::Absolute(Pixels(ROW_HEIGHT)),
-                        font: typography::UI_COMPACT
-                            .font(typography::FAMILY_SANS, typography::Weight::Medium),
+                        font: iced::Font {
+                            weight: iced::font::Weight::Medium,
+                            ..renderer.default_font()
+                        },
                         align_x: text_core::Alignment::Left,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    Point::new(label_x, item_rect.y),
+                    Point::new(label_x, item_rect.center_y()),
                     fg_color,
                     clip_rect,
                 );
@@ -1047,8 +1047,10 @@ where
                 {
                     let b_style = resolve_badge_style(badge, &palette);
                     let badge_text = badge.text().unwrap_or_default();
-                    let font = typography::CAPTION
-                        .font(typography::FAMILY_SANS, typography::Weight::Medium);
+                    let font = iced::Font {
+                        weight: iced::font::Weight::Medium,
+                        ..renderer.default_font()
+                    };
                     let text_w =
                         measure_text_width(renderer, &badge_text, typography::CAPTION.size, font);
                     let pill_w = (text_w + space::SM * 2.0).max(b_style.height);
@@ -1086,7 +1088,7 @@ where
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        Point::new(badge_x, badge_y),
+                        Point::new(badge_x + pill_w / 2.0, badge_y + b_style.height / 2.0),
                         b_style.text,
                         clip_rect,
                     );
@@ -1101,14 +1103,13 @@ where
                         bounds: Size::new(ICON_SIZE, ICON_SIZE),
                         size: Pixels(ICON_SIZE),
                         line_height: LineHeight::Absolute(Pixels(ICON_SIZE)),
-                        font: typography::CAPTION
-                            .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                        font: renderer.default_font(),
                         align_x: text_core::Alignment::Center,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    Point::new(icon_x, icon_y),
+                    Point::new(icon_x + ICON_SIZE / 2.0, icon_y + ICON_SIZE / 2.0),
                     fg_color,
                     clip_rect,
                 );
@@ -1189,8 +1190,7 @@ where
             && state.hover_controller.tick(now).is_visible()
             && let Some(item) = self.model.all_items().find(|item| &item.id == hovered_id)
         {
-            let font =
-                typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::Regular);
+            let font = renderer.default_font();
             let text_w = measure_text_width(renderer, &item.label, typography::CAPTION.size, font);
             let card_w = text_w + space::SM * 2.0;
             let card_h = typography::CAPTION.line_height + space::XS * 2.0;
@@ -1248,7 +1248,7 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                Point::new(card_x + space::SM, card_y),
+                Point::new(card_x + space::SM, card_y + card_h / 2.0),
                 palette.text_primary,
                 *viewport,
             );

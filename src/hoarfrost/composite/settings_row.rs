@@ -45,12 +45,25 @@
 //! column's width is never allowed to go negative when a host passes a
 //! control wider than the row.
 //!
+//! # The builder reads the same numbers as the geometry
+//!
+//! [`bands`] is the pure answer and [`horizontal`] is the widget, and the
+//! two are not permitted to be written down twice. Every dimension the
+//! builder sets is one the geometry already reads: the card's padding is
+//! [`row_padding`], made of [`PADDING_VERTICAL`] over
+//! [`PADDING_HORIZONTAL`]; the split is [`COLUMN_GAP`]; and the floor is
+//! [`floor_slack`], which is [`MIN_HEIGHT`] minus the padding it cannot
+//! reach with words alone. The text column is a [`Column`], so a
+//! description lands *under* the title at [`text_column_height`] rather
+//! than beside it on one baseline, and the built row measures what
+//! [`row_height`] returns instead of `max(title, control)`.
+//!
 //! Unit tests live in the sibling `settings_row_tests.rs` sidecar.
 
 use crate::token::color::Palette;
 use crate::token::{shape, size, space, typography};
-use iced::widget::{Container, Row, text};
-use iced::{Color, Length, Rectangle};
+use iced::widget::{Column, Container, Row, Space, text};
+use iced::{Color, Length, Padding, Rectangle};
 
 /// The `4px` border/inset reserve §3.1's settings-row floor carries on
 /// top of its padding and its title line.
@@ -140,6 +153,39 @@ pub fn text_column_height(has_description: bool) -> f32 {
 pub fn row_height(has_description: bool, control_height: f32) -> f32 {
     let content = text_column_height(has_description).max(control_height);
     (content + PADDING_VERTICAL + PADDING_VERTICAL).max(MIN_HEIGHT)
+}
+
+/// The height the row's interior must carry so the padded row never falls
+/// below [`MIN_HEIGHT`].
+///
+/// The floor is paid for by the text column, because the text column is
+/// the filling column: whatever it cannot fill with words it fills with
+/// the [`BORDER_INSET_RESERVE`] slack the floor already counts. It is
+/// derived from [`MIN_HEIGHT`] rather than restated as `24.0` so the
+/// builder and [`bands`] answer to one number.
+#[must_use]
+pub fn interior_floor() -> f32 {
+    (MIN_HEIGHT - PADDING_VERTICAL - PADDING_VERTICAL).max(0.0)
+}
+
+/// The slack the text column carries so a short row still reaches the floor.
+///
+/// A title alone is `20` against a `24` interior floor, so it carries
+/// `4`; a title with a description is already `36`, so it carries
+/// nothing. A reserve, never a cap — a description that wraps simply
+/// grows past it, and the row grows with it.
+#[must_use]
+pub fn floor_slack(has_description: bool) -> f32 {
+    (interior_floor() - text_column_height(has_description)).max(0.0)
+}
+
+/// The row's declared padding pair, built from the two constants so the
+/// builder cannot invent a third figure.
+#[must_use]
+pub fn row_padding() -> Padding {
+    Padding::ZERO
+        .vertical(PADDING_VERTICAL)
+        .horizontal(PADDING_HORIZONTAL)
 }
 
 /// The two columns a settings row divides its bounds into.
@@ -250,8 +296,74 @@ pub fn card_layer(
     }
 }
 
+/// The filling text side of the row: the title with its description
+/// stacked *beneath* it.
+///
+/// A [`Column`], not a [`Row`] — the whole point of the pair is that the
+/// explanation sits under the name. The two lines carry no gap between
+/// them because [`text_column_height`] models them as `20 + 16`; spacing
+/// here would put the built widget out of step with the figure the row is
+/// sized from.
+#[must_use]
+pub fn text_column<'a, Message>(
+    title: &'a str,
+    description: Option<&'a str>,
+    style: &SettingsRowStyle,
+) -> Column<'a, Message>
+where
+    Message: 'a,
+{
+    let column = Column::new()
+        .width(Length::Fill)
+        .push(title_line(title, style));
+
+    match present(description) {
+        Some(description) => column.push(description_line(description, style)),
+        None => column,
+    }
+}
+
+/// The title's line — `type.body` at `Medium`, in the strong voice.
+fn title_line<'a, Message>(title: &'a str, style: &SettingsRowStyle) -> iced::Element<'a, Message>
+where
+    Message: 'a,
+{
+    text(title.to_string())
+        .size(TITLE_RUNG.size)
+        .line_height(TITLE_RUNG.iced_line_height())
+        .font(iced::Font {
+            weight: iced::font::Weight::Medium,
+            ..iced::Font::with_name("Fira Sans")
+        })
+        .color(style.title_colour)
+        .into()
+}
+
+/// The description's line — `type.caption` at `Regular`, in the muted voice.
+fn description_line<'a, Message>(
+    description: &'a str,
+    style: &SettingsRowStyle,
+) -> iced::Element<'a, Message>
+where
+    Message: 'a,
+{
+    text(description.to_string())
+        .size(DESCRIPTION_RUNG.size)
+        .line_height(DESCRIPTION_RUNG.iced_line_height())
+        .color(style.description_colour)
+        .into()
+}
+
 /// The settings row: a filling title/description column and a shrinking
-/// control column, laid out to [`bands`].
+/// control column, laid out to [`bands`] and padded to [`row_padding`].
+///
+/// The text column fills and the control column shrinks, and the text
+/// column carries [`floor_slack`] so a row with nothing tall in it still
+/// stands at [`MIN_HEIGHT`]. The height that comes back is [`row_height`]
+/// for the shape on show — the floor when nothing else reaches it,
+/// otherwise the taller of the text column and the hosted control, plus
+/// the padding — and the widths are the ones [`bands`] would reserve for
+/// the same control.
 #[must_use]
 pub fn horizontal<'a, Message>(
     title: &'a str,
@@ -262,33 +374,19 @@ pub fn horizontal<'a, Message>(
 where
     Message: 'a,
 {
-    let mut column = Row::new()
-        .width(Length::Fill)
-        .align_y(iced::alignment::Vertical::Center);
+    let mut text = text_column(title, description, style);
 
-    column = column.push(
-        text(title.to_string())
-            .size(TITLE_RUNG.size)
-            .line_height(TITLE_RUNG.iced_line_height())
-            .font(TITLE_RUNG.font(typography::FAMILY_SANS, typography::Weight::Medium))
-            .color(style.title_colour),
-    );
-
-    if let Some(description) = present(description) {
-        column = column.push(
-            text(description.to_string())
-                .size(DESCRIPTION_RUNG.size)
-                .line_height(DESCRIPTION_RUNG.iced_line_height())
-                .font(DESCRIPTION_RUNG.font(typography::FAMILY_SANS, typography::Weight::Regular))
-                .color(style.description_colour),
-        );
+    let slack = floor_slack(description_present(description));
+    if slack > 0.0 {
+        text = text.push(Space::new().height(Length::Fixed(slack)));
     }
 
     Row::new()
         .width(Length::Fill)
+        .padding(row_padding())
         .spacing(COLUMN_GAP)
         .align_y(iced::alignment::Vertical::Center)
-        .push(Container::new(column).width(Length::Fill))
+        .push(text)
         .push(Container::new(control).width(Length::Shrink))
         .into()
 }

@@ -882,14 +882,16 @@ where
                 bounds: title_rect.size(),
                 size: Pixels(typography::TITLE_SM.size),
                 line_height: LineHeight::Absolute(Pixels(HEADER_HEIGHT)),
-                font: typography::TITLE_SM
-                    .font(typography::FAMILY_SANS, typography::Weight::SemiBold),
+                font: iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..renderer.default_font()
+                },
                 align_x: text_core::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            title_rect.position(),
+            Point::new(title_rect.x, title_rect.center_y()),
             palette.text_strong,
             *viewport,
         );
@@ -966,7 +968,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            pin_rect.position(),
+            pin_rect.center(),
             palette.text_strong,
             *viewport,
         );
@@ -989,7 +991,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            close_rect.position(),
+            close_rect.center(),
             close_color,
             *viewport,
         );

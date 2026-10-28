@@ -503,10 +503,6 @@ fn the_strip_heights_are_the_two_spec_rungs() {
 // 7. Live widget
 // ---------------------------------------------------------------------------
 
-fn leaked<Id: Clone + Ord>(model: SegmentedModel<Id>) -> &'static SegmentedModel<Id> {
-    Box::leak(Box::new(model))
-}
-
 fn key_press(key: Named) -> Event {
     Event::Keyboard(keyboard::Event::KeyPressed {
         key: Key::Named(key),
@@ -540,9 +536,9 @@ fn sample_segments() -> Vec<SegmentItem<&'static str>> {
 
 #[test]
 fn test_controlled_creation_and_state_initialization() {
-    let model = leaked(SegmentedModel::new(sample_segments()));
+    let model = SegmentedModel::new(sample_segments());
     let btn = SegmentedButton::<BTreeSet<&'static str>, &'static str>::controlled(
-        Controlled::new(model),
+        Controlled::new(&model),
         "seg_btn",
         Some,
     );
@@ -576,9 +572,9 @@ fn test_controlled_creation_and_state_initialization() {
 
 #[test]
 fn test_mouse_hover_over_different_segments() {
-    let model = leaked(SegmentedModel::new(sample_segments()));
-    let mut harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(model), "seg_hover", Some).into()
+    let model = SegmentedModel::new(sample_segments());
+    let mut harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&model), "seg_hover", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -613,9 +609,9 @@ fn test_mouse_hover_over_different_segments() {
 
 #[test]
 fn test_click_unselected_segment_toggles_selection_single_select() {
-    let model = leaked(SegmentedModel::new(sample_segments()).with_selected("left"));
-    let mut harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(model), "seg_click_single", Some).into()
+    let model = SegmentedModel::new(sample_segments()).with_selected("left");
+    let mut harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&model), "seg_click_single", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -659,9 +655,9 @@ fn test_click_unselected_segment_toggles_selection_single_select() {
 
 #[test]
 fn test_click_unselected_segment_toggles_selection_multi_select() {
-    let model = leaked(SegmentedModel::multi(sample_segments()).with_selected("left"));
-    let mut harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(model), "seg_click_multi", Some).into()
+    let model = SegmentedModel::multi(sample_segments()).with_selected("left");
+    let mut harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&model), "seg_click_multi", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -699,9 +695,9 @@ fn test_click_disabled_segment_produces_no_emission() {
         SegmentItem::new("b", "Beta").disabled(),
         SegmentItem::new("c", "Gamma"),
     ];
-    let model = leaked(SegmentedModel::new(segments));
-    let mut harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(model), "seg_disabled_item", Some).into()
+    let model = SegmentedModel::new(segments);
+    let mut harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&model), "seg_disabled_item", Some).into()
     });
 
     let bounds = widget_bounds(&mut harness);
@@ -719,9 +715,9 @@ fn test_click_disabled_segment_produces_no_emission() {
     assert!(harness.release(pt1).is_empty());
 
     // Whole strip disabled
-    let inert_model = leaked(SegmentedModel::new(sample_segments()).disabled());
-    let mut inert_harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(inert_model), "seg_inert", Some).into()
+    let inert_model = SegmentedModel::new(sample_segments()).disabled();
+    let mut inert_harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&inert_model), "seg_inert", Some).into()
     });
 
     let b0 = Point::new(10.0, 10.0);
@@ -732,9 +728,9 @@ fn test_click_disabled_segment_produces_no_emission() {
 
 #[test]
 fn test_keyboard_arrow_roving_and_selection() {
-    let model = leaked(SegmentedModel::new(sample_segments()));
-    let mut harness = Harness::headless(move || {
-        SegmentedButton::controlled(Controlled::new(model), "seg_kb", Some).into()
+    let model = SegmentedModel::new(sample_segments());
+    let mut harness = Harness::headless(|| {
+        SegmentedButton::controlled(Controlled::new(&model), "seg_kb", Some).into()
     });
 
     focus_one(&mut harness, "seg_kb");
@@ -795,16 +791,15 @@ fn test_headless_draw_across_states() {
     for density in [ButtonDensity::Standard, ButtonDensity::Compact] {
         for mode in [SelectionMode::SingleSelect, SelectionMode::MultiSelect] {
             for disabled in [false, true] {
-                let mut m = SegmentedModel::new(sample_segments())
+                let mut model = SegmentedModel::new(sample_segments())
                     .with_mode(mode)
                     .with_density(density)
                     .with_selected("left");
                 if disabled {
-                    m = m.disabled();
+                    model = model.disabled();
                 }
-                let model = leaked(m);
-                let mut harness = Harness::headless(move || {
-                    SegmentedButton::controlled(Controlled::new(model), "seg_render", Some)
+                let mut harness = Harness::headless(|| {
+                    SegmentedButton::controlled(Controlled::new(&model), "seg_render", Some)
                         .palette(p)
                         .into()
                 });

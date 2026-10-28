@@ -134,7 +134,7 @@ use crate::token::size;
 use crate::token::space;
 use crate::widget::button_widget::Layer;
 use crate::widget::focus;
-use iced::{Border, Color, Point, Rectangle};
+use iced::{Border, Color, Point, Rectangle, Size};
 
 /// Resting border width of a toggle indicator — `border.hairline`
 /// (§3.3, `UIF-TOK-003`).
@@ -488,6 +488,28 @@ pub fn hit_size(control: ToggleControl, label_width: f32) -> (f32, f32) {
     )
 }
 
+/// The box the row's caption occupies, given the row's own bounds.
+///
+/// Every toggle control paints its label immediately right of the
+/// indicator, spanning the row's full height. Both the paint pass and the
+/// [`operate`](iced::advanced::widget::Widget::operate) pass that
+/// publishes the caption's identity go through this one function, so the
+/// bounds a host reads are byte-identical to the box the glyphs were
+/// drawn into — the identity cannot drift from the paint.
+///
+/// The width is clamped at zero: a row narrower than the indicator plus
+/// [`LABEL_GAP`] yields an empty box rather than a negative one.
+#[must_use]
+pub fn label_box(control: ToggleControl, row: Rectangle) -> Rectangle {
+    let (indicator_w, _) = indicator_size(control);
+    let inset = indicator_w + LABEL_GAP;
+
+    Rectangle::new(
+        Point::new(row.x + inset, row.y),
+        Size::new((row.width - inset).max(0.0), row.height),
+    )
+}
+
 /// The horizontal travel of a `ToggleSwitch` thumb — the distance its
 /// left edge moves between off and on.
 ///
@@ -537,6 +559,34 @@ pub fn indicator_rect(control: ToggleControl, origin: Point) -> Rectangle {
     Rectangle::new(origin, iced::Size::new(width, height))
 }
 
+/// The indicator's own box, placed inside the control's row bounds.
+///
+/// The row is at least [`size::HIT_TARGET_MIN`] tall and the indicator is
+/// smaller, so the box is centred vertically on the row and flush to its
+/// left edge — the same placement every control's paint pass uses.
+///
+/// Both the paint pass and the
+/// [`operate`](iced::advanced::widget::Widget::operate) pass that
+/// publishes the control's identity go through this one function, so the
+/// box a host reads is byte-identical to the box the indicator was drawn
+/// into. That is the same guarantee [`label_box`] gives the caption, and
+/// for the same reason: a control's published geometry must not be able
+/// to drift from its painted geometry.
+///
+/// The published box is deliberately the indicator and **not** the whole
+/// widget. The row includes the label, and a host that was handed the
+/// label-inclusive box would be told the control is wider than the thing
+/// it can actually see and click.
+#[must_use]
+pub fn indicator_box(control: ToggleControl, row: Rectangle) -> Rectangle {
+    let (_, height) = indicator_size(control);
+
+    indicator_rect(
+        control,
+        Point::new(row.x, row.y + (row.height - height) / 2.0),
+    )
+}
+
 /// The indicator's fill-and-border layer.
 #[must_use]
 pub fn indicator_layer(indicator: Rectangle, control: ToggleControl, style: &ToggleStyle) -> Layer {
@@ -548,6 +598,41 @@ pub fn indicator_layer(indicator: Rectangle, control: ToggleControl, style: &Tog
             .width(style.indicator_border_width)
             .rounded(indicator_radius(control)),
     }
+}
+
+/// The anchor a `fill_text` mark must be drawn at to sit centred inside
+/// `indicator` (`UIF-ATOM-003`, §3.3).
+///
+/// iced 0.14's `fill_text` does **not** take the text box's top-left.
+/// `iced_tiny_skia::layer::draw_text` rebuilds the box as
+/// `Rectangle::new(position, text.bounds)`, discarding whatever origin the
+/// caller passed in `bounds` and keeping only its size, and
+/// `Pipeline::draw_cached` then resolves `Alignment::Center` as
+/// `bounds.x - min_bounds.width / 2.0` (same for `y`). `position` is
+/// therefore the point the text is **hung from**, not the corner it is
+/// measured from — so handing it the indicator's top-left hangs the whole
+/// glyph half a box up and left, which is exactly the `(-8.000, -8.000)`
+/// = `-(size::CHECKBOX_BOX / 2)` displacement the ink probe measures.
+///
+/// The centre is what iced's own `Checkbox` passes: `iced_widget::checkbox`
+/// draws its tick with `bounds: bounds.size()` and `position: bounds.center()`.
+/// Hand-copying that call but keeping `position` at the box origin is how the
+/// defect was introduced; routing both through here keeps them locked.
+#[must_use]
+pub fn mark_anchor(indicator: Rectangle) -> Point {
+    indicator.center()
+}
+
+/// The anchor a left-aligned, vertically-centred `fill_text` label must be drawn at
+/// to sit centred vertically inside `label_box` (`UIF-ATOM-003`, §3.3).
+///
+/// Like [`mark_anchor`], this compensates for iced 0.14's `fill_text` hanging
+/// `alignment::Vertical::Center` text around `position.y` (`bounds.y - height / 2.0`).
+/// For horizontal alignment, `Alignment::Left` hangs directly from `position.x`, so `x`
+/// remains `label_box.x` while `y` becomes `label_box.center_y()`.
+#[must_use]
+pub fn label_anchor(label_box: Rectangle) -> Point {
+    Point::new(label_box.x, label_box.center_y())
 }
 
 /// The mark layer — the switch thumb or the radio's inner dot — if the

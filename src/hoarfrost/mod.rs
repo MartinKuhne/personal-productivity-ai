@@ -57,6 +57,7 @@ pub mod gallery_tooltip;
 pub mod gallery_tree;
 pub mod gallery_warm;
 pub mod geometry;
+pub mod identity;
 pub mod invariant_gate;
 pub mod layout;
 pub mod microcopy;
@@ -96,5 +97,9 @@ pub use widget::{
     date_picker, date_range_picker, rating_control, time_picker,
 };
 
+#[cfg(test)]
+pub mod checkbox_ink_probe;
+#[cfg(test)]
+pub mod geometry_gallery;
 #[cfg(test)]
 pub mod test_helpers;

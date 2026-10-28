@@ -157,6 +157,7 @@
 //! Unit tests live in the sibling `view_tests.rs` sidecar.
 
 use crate::focus::FocusId;
+use crate::identity::{publish_text, role};
 use crate::state::{self, BaseState, InteractionInput, VisualState};
 use crate::surface::menu::model::{LeadingSlot, Row, RowKind, TrailingSlot};
 use crate::token::color::Palette;
@@ -1154,7 +1155,10 @@ where
     text(content)
         .size(TRAILING_TYPE)
         .line_height(typography::CAPTION.iced_line_height())
-        .font(typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::SemiBold))
+        .font(iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::with_name("Fira Sans")
+        })
         .align_y(iced::alignment::Vertical::Center)
         .into()
 }
@@ -1462,6 +1466,27 @@ fn centre_y(band_height: f32, child_height: f32) -> f32 {
     ((band_height - child_height) / 2.0).max(NO_SPACE)
 }
 
+/// The layout node slot `index` was given, falling back to the row's own.
+///
+/// [`MenuRow::layout`] builds one child node per slot and [`children`]
+/// builds one [`Tree`] per slot, so for every row this widget assembles
+/// the two counts agree and `nth(index)` always lands. The fallback
+/// covers a row that somehow disagrees — a host that rebuilt part of the
+/// tree, or a future slot kind the grid does not place yet.
+///
+/// Falling back rather than skipping is deliberate. Skipping would take
+/// the child's focus registration, its published boxes and its events
+/// away with it: a control that silently stops existing to the router is
+/// a worse failure than one reporting a box that is too large, and it
+/// is exactly the state the row was in before per-slot layouts were
+/// threaded through at all. A mismatch is therefore degraded, never
+/// dropped.
+///
+/// [`children`]: iced::advanced::widget::Widget::children
+fn slot_layout<'a>(layout: Layout<'a>, index: usize) -> Layout<'a> {
+    layout.children().nth(index).unwrap_or(layout)
+}
+
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for MenuRow<'_, Message, Theme, Renderer>
 where
@@ -1609,11 +1634,34 @@ where
             );
         }
 
+        let label_slot = self.slots.index_of(SlotKind::Label);
+
+        // The caption is published here, under the row's derived id, and
+        // is deliberately left out of the traversal below. Its own
+        // `Text` widget can only report itself anonymously, so publishing
+        // it here is the only way to name it — and doing so reports the
+        // box the §4.8.1 grid actually gave the label, the same node
+        // `draw` paints it into (`UIF-CMENU-*`).
+        if let Some(index) = label_slot
+            && let Some(child) = layout.children().nth(index)
+        {
+            publish_text(
+                operation,
+                &self.widget_id,
+                role::LABEL,
+                child.bounds(),
+                self.row.label(),
+            );
+        }
+
         operation.traverse(&mut |operation| {
             for (index, element) in self.slots.elements_mut().iter_mut().enumerate() {
+                if Some(index) == label_slot {
+                    continue;
+                }
                 element.as_widget_mut().operate(
                     &mut tree.children[index],
-                    layout,
+                    slot_layout(layout, index),
                     renderer,
                     operation,
                 );
@@ -1636,7 +1684,7 @@ where
             element.as_widget_mut().update(
                 &mut tree.children[index],
                 event,
-                layout,
+                slot_layout(layout, index),
                 cursor,
                 renderer,
                 clipboard,

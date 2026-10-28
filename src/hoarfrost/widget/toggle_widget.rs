@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use crate::binding::{Commit, Controlled};
 use crate::bridge::widget_id;
 use crate::focus::FocusId;
+use crate::identity::{indexed_role, publish_text, role};
 use crate::state::{BaseState, VisualState};
 use crate::token::color::Palette;
 use crate::token::shape;
@@ -80,6 +81,44 @@ fn measure_text_width<Renderer: text_core::Renderer>(text: &str, renderer: &Rend
     } else {
         text.len() as f32 * size::INDICATOR_DOT
     }
+}
+
+// ===========================================================================
+// Identity publishing (`UIF-ATOM-003`)
+// ===========================================================================
+
+/// Publishes a toggle control's own box to the operation stream.
+///
+/// **Fires in every state** — enabled, disabled, busy. This is the rule
+/// the three toggle `operate` impls share, and it is deliberately not
+/// conditioned on `is_enabled`:
+///
+/// * [`Operation::container`] answers *"where is this control?"*.
+/// * [`Operation::focusable`] answers *"can Tab stop here?"*.
+///
+/// Two orthogonal doors. Disabling a control closes the second one and
+/// leaves the first open, so a host can still see, measure and route to
+/// a disabled control without it ever becoming a keyboard target. Before
+/// this existed a disabled control published its caption and nothing
+/// else, which left the caption naming a control the operation stream
+/// could not find.
+///
+/// Exactly one record per control per state: the box is published once,
+/// unconditionally, and never re-published under a different hook. An
+/// enabled control therefore carries one `container` **and** one
+/// `focusable` — the box and the capability, not two boxes — because a
+/// host that has to special-case "disabled controls are absent" to read
+/// the stream consistently is the failure this rule removes.
+///
+/// The box is [`toggle::indicator_box`], the same function the paint pass
+/// is built on, so the published box is the box that was drawn.
+fn publish_control_box(
+    operation: &mut dyn Operation,
+    id: &WidgetId,
+    control: ToggleControl,
+    row: Rectangle,
+) {
+    operation.container(Some(id), toggle::indicator_box(control, row));
 }
 
 // ===========================================================================
@@ -286,6 +325,31 @@ where
         } else {
             <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
         }
+
+        // The control's own box, published whatever its enabled state —
+        // see [`publish_control_box`] for why the two hooks are separate
+        // and why this one never closes (`UIF-ATOM-003`).
+        publish_control_box(
+            operation,
+            &self.widget_id,
+            ToggleControl::Checkbox,
+            layout.bounds(),
+        );
+
+        // The caption is painted with `fill_text`, a paint-time call that
+        // never reaches `operation.text` on its own — so without this the
+        // label is invisible to any host that addresses widgets by `Id`.
+        // Publishing happens on the read-only side of the widget: neither
+        // `layout` nor `draw` is touched, so no bound can move.
+        // [`toggle::label_box`] is the same function the paint pass uses,
+        // so the published box is the drawn box (`UIF-ATOM-003`).
+        publish_text(
+            operation,
+            &self.widget_id,
+            role::LABEL,
+            toggle::label_box(ToggleControl::Checkbox, layout.bounds()),
+            self.label_text(),
+        );
     }
 
     fn update(
@@ -381,9 +445,7 @@ where
         let style = toggle::resolve_style(polarity, visual, &self.palette);
         let bounds = layout.bounds();
 
-        let (ind_w, ind_h) = toggle::indicator_size(ToggleControl::Checkbox);
-        let ind_origin = Point::new(bounds.x, bounds.y + (bounds.height - ind_h) / 2.0);
-        let indicator = Rectangle::new(ind_origin, Size::new(ind_w, ind_h));
+        let indicator = toggle::indicator_box(ToggleControl::Checkbox, bounds);
 
         // 1. Indicator box layer
         let ind_layer = toggle::indicator_layer(indicator, ToggleControl::Checkbox, &style);
@@ -408,7 +470,9 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                indicator.position(),
+                // `fill_text` hangs centred text from its `position`, so the
+                // anchor is the box's centre — see [`toggle::mark_anchor`].
+                toggle::mark_anchor(indicator),
                 style.mark,
                 *viewport,
             );
@@ -422,23 +486,20 @@ where
         // 4. Label text
         let label = self.label_text();
         if !label.is_empty() {
-            let label_x = indicator.x + ind_w + toggle::LABEL_GAP;
-            let label_y = bounds.y;
-            let label_w = (bounds.width - (ind_w + toggle::LABEL_GAP)).max(0.0);
-            let label_h = bounds.height;
+            let label_box = toggle::label_box(ToggleControl::Checkbox, bounds);
             renderer.fill_text(
                 text_core::Text {
                     content: label.to_owned(),
-                    bounds: Size::new(label_w, label_h),
+                    bounds: label_box.size(),
                     size: renderer.default_size(),
-                    line_height: LineHeight::Absolute(Pixels(label_h)),
+                    line_height: LineHeight::Absolute(Pixels(label_box.height)),
                     font: renderer.default_font(),
                     align_x: text_core::Alignment::Left,
                     align_y: alignment::Vertical::Center,
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                Point::new(label_x, label_y),
+                toggle::label_anchor(label_box),
                 style.label,
                 *viewport,
             );
@@ -638,7 +699,7 @@ where
         &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        _renderer: &Renderer,
+        renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         let state = tree.state.downcast_mut::<RadioGroupState>();
@@ -647,6 +708,47 @@ where
             operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
         } else {
             <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
+        }
+
+        // One caption per option, each under its own ordinal role, so a
+        // host can address `…label-2` without knowing anything about how
+        // the group is laid out. The option boxes come from the same
+        // [`option_rectangles`] the paint pass walks and the caption box
+        // from the same [`toggle::label_box`], so a published caption is
+        // the drawn caption (`UIF-ATOM-003`).
+        let label_widths: Vec<f32> = model
+            .options
+            .iter()
+            .map(|option| measure_text_width(&option.label, renderer))
+            .collect();
+        let option_rects = option_rectangles(
+            layout.bounds(),
+            model.orientation,
+            &model.options,
+            &label_widths,
+        );
+
+        for (index, option) in model.options.iter().enumerate() {
+            // One record per option, in every state. The group is one
+            // widget with one id but N controls, and each option's circle
+            // is the thing a host needs to find — the same granularity
+            // the per-option captions below already use. Disabled takes
+            // the group's Tab stop away and leaves every option's box
+            // published (`UIF-ATOM-003`).
+            publish_control_box(
+                operation,
+                &self.widget_id,
+                ToggleControl::Radio,
+                option_rects[index],
+            );
+
+            publish_text(
+                operation,
+                &self.widget_id,
+                &indexed_role(role::LABEL, index),
+                toggle::label_box(ToggleControl::Radio, option_rects[index]),
+                &option.label,
+            );
         }
     }
 
@@ -832,12 +934,7 @@ where
             };
             let style = toggle::resolve_style(polarity, visual, &self.palette);
 
-            let (ind_w, ind_h) = toggle::indicator_size(ToggleControl::Radio);
-            let ind_origin = Point::new(
-                opt_bounds.x,
-                opt_bounds.y + (opt_bounds.height - ind_h) / 2.0,
-            );
-            let indicator = Rectangle::new(ind_origin, Size::new(ind_w, ind_h));
+            let indicator = toggle::indicator_box(ToggleControl::Radio, opt_bounds);
 
             // 1. Circular indicator layer
             let ind_layer = toggle::indicator_layer(indicator, ToggleControl::Radio, &style);
@@ -859,23 +956,20 @@ where
 
             // 4. Label text
             if !option.label.is_empty() {
-                let label_x = indicator.x + ind_w + toggle::LABEL_GAP;
-                let label_y = opt_bounds.y;
-                let label_w = (opt_bounds.width - (ind_w + toggle::LABEL_GAP)).max(0.0);
-                let label_h = opt_bounds.height;
+                let label_box = toggle::label_box(ToggleControl::Radio, opt_bounds);
                 renderer.fill_text(
                     text_core::Text {
                         content: option.label.clone(),
-                        bounds: Size::new(label_w, label_h),
+                        bounds: label_box.size(),
                         size: renderer.default_size(),
-                        line_height: LineHeight::Absolute(Pixels(label_h)),
+                        line_height: LineHeight::Absolute(Pixels(label_box.height)),
                         font: renderer.default_font(),
                         align_x: text_core::Alignment::Left,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    Point::new(label_x, label_y),
+                    toggle::label_anchor(label_box),
                     style.label,
                     *viewport,
                 );
@@ -1067,6 +1161,24 @@ impl<'a, Message, Theme, Renderer> ToggleSwitch<'a, Message, Theme, Renderer> {
         }
     }
 
+    /// The full caption the switch paints beside its track: the label,
+    /// with the current position's text carried along in parentheses when
+    /// both are present (`UIF-ATOM-003`).
+    ///
+    /// Layout, paint and identity all read this one function, so the
+    /// string a host addresses is the string that was measured and drawn.
+    #[must_use]
+    pub fn display_text(&self) -> String {
+        let label = self.label_text();
+        let aux = self.state_text().unwrap_or("");
+        match (label.is_empty(), aux.is_empty()) {
+            (false, false) => format!("{label} ({aux})"),
+            (false, true) => label.to_owned(),
+            (true, false) => aux.to_owned(),
+            (true, true) => String::new(),
+        }
+    }
+
     fn perform_toggle(&self, shell: &mut Shell<'_, Message>) {
         if !self.is_enabled() || self.is_busy() {
             return;
@@ -1118,15 +1230,7 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let label = self.label_text();
-        let aux = self.state_text().unwrap_or("");
-        let display = match (label.is_empty(), aux.is_empty()) {
-            (false, false) => format!("{label} ({aux})"),
-            (false, true) => label.to_owned(),
-            (true, false) => aux.to_owned(),
-            (true, true) => String::new(),
-        };
-
+        let display = self.display_text();
         let label_w = measure_text_width(&display, renderer);
         let (w, h) = toggle::hit_size(ToggleControl::Switch, label_w);
         let size = limits.resolve(Length::Shrink, Length::Fixed(h), Size::new(w, h));
@@ -1146,6 +1250,27 @@ where
         } else {
             <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
         }
+
+        // The track's own box, published in every state including busy —
+        // see [`publish_control_box`] (`UIF-ATOM-003`).
+        publish_control_box(
+            operation,
+            &self.widget_id,
+            ToggleControl::Switch,
+            layout.bounds(),
+        );
+
+        // The caption carries the position text too, because that is what
+        // the switch actually paints; publishing the bare label would
+        // name a string nobody can see. Same box as the paint pass
+        // (`UIF-ATOM-003`).
+        publish_text(
+            operation,
+            &self.widget_id,
+            role::LABEL,
+            toggle::label_box(ToggleControl::Switch, layout.bounds()),
+            &self.display_text(),
+        );
     }
 
     fn update(
@@ -1246,9 +1371,7 @@ where
         let style = toggle::resolve_style(polarity, visual, &self.palette);
         let bounds = layout.bounds();
 
-        let (track_w, track_h) = toggle::indicator_size(ToggleControl::Switch);
-        let track_origin = Point::new(bounds.x, bounds.y + (bounds.height - track_h) / 2.0);
-        let indicator = Rectangle::new(track_origin, Size::new(track_w, track_h));
+        let indicator = toggle::indicator_box(ToggleControl::Switch, bounds);
 
         // 1. Pill track layer
         let track_layer = toggle::indicator_layer(indicator, ToggleControl::Switch, &style);
@@ -1268,33 +1391,23 @@ where
         }
 
         // 4. Label text & optional position text
-        let label = self.label_text();
-        let aux = self.state_text().unwrap_or("");
-        let display = match (label.is_empty(), aux.is_empty()) {
-            (false, false) => format!("{label} ({aux})"),
-            (false, true) => label.to_owned(),
-            (true, false) => aux.to_owned(),
-            (true, true) => String::new(),
-        };
+        let display = self.display_text();
 
         if !display.is_empty() {
-            let label_x = indicator.x + track_w + toggle::LABEL_GAP;
-            let label_y = bounds.y;
-            let label_w = (bounds.width - (track_w + toggle::LABEL_GAP)).max(0.0);
-            let label_h = bounds.height;
+            let label_box = toggle::label_box(ToggleControl::Switch, bounds);
             renderer.fill_text(
                 text_core::Text {
                     content: display,
-                    bounds: Size::new(label_w, label_h),
+                    bounds: label_box.size(),
                     size: renderer.default_size(),
-                    line_height: LineHeight::Absolute(Pixels(label_h)),
+                    line_height: LineHeight::Absolute(Pixels(label_box.height)),
                     font: renderer.default_font(),
                     align_x: text_core::Alignment::Left,
                     align_y: alignment::Vertical::Center,
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                Point::new(label_x, label_y),
+                toggle::label_anchor(label_box),
                 style.label,
                 *viewport,
             );

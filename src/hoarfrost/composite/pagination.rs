@@ -221,7 +221,10 @@ impl<'a, Message: 'a + Clone> PaginationBar<'a, Message, iced::Theme, iced::Rend
             let opt_text = iced::widget::text(opt.to_string())
                 .size(typography::CAPTION.size)
                 .line_height(typography::CAPTION.iced_line_height())
-                .font(typography::CAPTION.font(typography::FAMILY_MONO, typography::Weight::Medium))
+                .font(iced::Font {
+                    weight: iced::font::Weight::Medium,
+                    ..iced::Font::with_name("Fira Sans")
+                })
                 .color(if is_selected {
                     palette.text_strong
                 } else {

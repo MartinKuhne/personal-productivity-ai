@@ -804,7 +804,7 @@ where
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    slot.position(),
+                    slot.center(),
                     seg_style.check,
                     *viewport,
                 );
@@ -823,7 +823,7 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                lbl_bounds.position(),
+                Point::new(lbl_bounds.x, lbl_bounds.center_y()),
                 seg_style.paint.foreground,
                 *viewport,
             );

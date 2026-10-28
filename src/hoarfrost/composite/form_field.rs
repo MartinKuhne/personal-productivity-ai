@@ -411,7 +411,10 @@ where
         parts.label_colour,
         typography::UI_COMPACT.size,
         typography::UI_COMPACT.iced_line_height(),
-        typography::UI_COMPACT.font(typography::FAMILY_SANS, typography::Weight::Medium),
+        iced::Font {
+            weight: iced::font::Weight::Medium,
+            ..iced::Font::with_name("Fira Sans")
+        },
         parts.label.to_string(),
     )]);
 
@@ -420,7 +423,10 @@ where
             parts.marker_colour,
             typography::UI_COMPACT.size,
             typography::UI_COMPACT.iced_line_height(),
-            typography::UI_COMPACT.font(typography::FAMILY_SANS, typography::Weight::Medium),
+            iced::Font {
+                weight: iced::font::Weight::Medium,
+                ..iced::Font::with_name("Fira Sans")
+            },
             marker.to_string(),
         ));
     }
@@ -435,7 +441,7 @@ where
                 parts.hint_colour,
                 typography::CAPTION.size,
                 typography::CAPTION.iced_line_height(),
-                typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::Regular),
+                iced::Font::with_name("Fira Sans"),
                 hint.to_string(),
             ))
             .width(Length::Fill)
@@ -461,7 +467,7 @@ where
             parts.colour,
             typography::CAPTION.size,
             typography::CAPTION.iced_line_height(),
-            typography::CAPTION.font(typography::FAMILY_SANS, typography::Weight::Regular),
+            iced::Font::with_name("Fira Sans"),
             text_value,
         ));
     }

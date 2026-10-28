@@ -18,7 +18,7 @@ use iced::{Background, Border, Color, Element, Length, Pixels, Rectangle, Shadow
 use crate::token::color::Palette;
 use crate::token::shape;
 use crate::token::size;
-use crate::token::typography::{self, Weight};
+use crate::token::typography;
 use crate::widget::badge_model::BadgeTone;
 
 /// Generic fallback person glyph optical character (`UIF-ATOM-013`, §3.13).
@@ -324,7 +324,10 @@ where
                     AvatarSize::Sm => typography::CAPTION.size,
                     AvatarSize::Md | AvatarSize::Lg => typography::UI_COMPACT.size,
                 };
-                let font = typography::CAPTION.sans(Weight::SemiBold);
+                let font = iced::Font {
+                    weight: iced::font::Weight::Semibold,
+                    ..renderer.default_font()
+                };
 
                 renderer.fill_text(
                     text_core::Text {
@@ -338,7 +341,7 @@ where
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    bounds.position(),
+                    bounds.center(),
                     self.palette.text_strong,
                     *viewport,
                 );
@@ -369,7 +372,7 @@ where
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    bounds.position(),
+                    bounds.center(),
                     self.palette.text_primary,
                     *viewport,
                 );

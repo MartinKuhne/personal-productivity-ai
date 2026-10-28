@@ -927,7 +927,7 @@ fn draw_readout_pill<Renderer: renderer::Renderer + text_core::Renderer<Font = i
             shaping: text_core::Shaping::default(),
             wrapping: text_core::Wrapping::None,
         },
-        pill_box.position(),
+        pill_box.center(),
         style.readout_text,
         *viewport,
     );

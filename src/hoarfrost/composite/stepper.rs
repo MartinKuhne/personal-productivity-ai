@@ -692,7 +692,10 @@ fn render_step_node<'a, Message: 'a, StepId>(
     let text_widget = iced::widget::text(glyph_str)
         .size(typography::CAPTION.size)
         .line_height(typography::CAPTION.iced_line_height())
-        .font(typography::CAPTION.font(typography::FAMILY_SANS, font_weight))
+        .font(iced::Font {
+            weight: font_weight.iced(),
+            ..iced::Font::with_name("Fira Sans")
+        })
         .color(fg_color)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center);
@@ -734,7 +737,10 @@ fn render_step_label<'a, Message: 'a, StepId>(
     iced::widget::text(step.label.clone())
         .size(typography::CAPTION.size)
         .line_height(typography::CAPTION.iced_line_height())
-        .font(typography::CAPTION.font(typography::FAMILY_SANS, font_weight))
+        .font(iced::Font {
+            weight: font_weight.iced(),
+            ..iced::Font::with_name("Fira Sans")
+        })
         .color(text_color)
         .align_y(iced::alignment::Vertical::Center)
         .into()

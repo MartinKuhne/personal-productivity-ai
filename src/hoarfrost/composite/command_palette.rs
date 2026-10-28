@@ -18,7 +18,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Shell, Widget};
 use iced::keyboard::Key;
 use iced::keyboard::key::Named;
-use iced::{Element, Event, Length, Pixels, Rectangle, Size, alignment, mouse};
+use iced::{Element, Event, Length, Pixels, Point, Rectangle, Size, alignment, mouse};
 
 use crate::binding::{Cancel, Commit, Live};
 use crate::token::{color::Palette, shape, size, space, typography};
@@ -1040,14 +1040,13 @@ where
                 bounds: icon_rect.size(),
                 size: Pixels(ICON_SIZE),
                 line_height: LineHeight::Absolute(Pixels(ICON_SIZE)),
-                font: typography::CAPTION
-                    .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                font: renderer.default_font(),
                 align_x: text_core::Alignment::Center,
                 align_y: alignment::Vertical::Center,
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            icon_rect.position(),
+            icon_rect.center(),
             palette.text_muted,
             *viewport,
         );
@@ -1095,7 +1094,7 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                chip_rect.position(),
+                chip_rect.center(),
                 palette.accent_text,
                 *viewport,
             );
@@ -1142,7 +1141,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            esc_rect.position(),
+            esc_rect.center(),
             palette.text_muted,
             *viewport,
         );
@@ -1168,14 +1167,13 @@ where
                 bounds: query_rect.size(),
                 size: Pixels(typography::UI_COMPACT.size),
                 line_height: LineHeight::Absolute(Pixels(SEARCH_HEIGHT)),
-                font: typography::UI_COMPACT
-                    .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                font: renderer.default_font(),
                 align_x: text_core::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            query_rect.position(),
+            Point::new(query_rect.x, query_rect.center_y()),
             text_color,
             *viewport,
         );
@@ -1226,14 +1224,13 @@ where
                 bounds: footer_text_rect.size(),
                 size: Pixels(typography::CAPTION.size),
                 line_height: LineHeight::Absolute(Pixels(FOOTER_HEIGHT)),
-                font: typography::CAPTION
-                    .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                font: renderer.default_font(),
                 align_x: text_core::Alignment::Left,
                 align_y: alignment::Vertical::Center,
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            footer_text_rect.position(),
+            Point::new(footer_text_rect.x, footer_text_rect.center_y()),
             palette.text_muted,
             *viewport,
         );
@@ -1253,14 +1250,13 @@ where
                     bounds: results_clip.size(),
                     size: Pixels(typography::CAPTION.size),
                     line_height: LineHeight::Absolute(Pixels(results_clip.height)),
-                    font: typography::CAPTION
-                        .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                    font: renderer.default_font(),
                     align_x: text_core::Alignment::Center,
                     align_y: alignment::Vertical::Center,
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                results_clip.position(),
+                results_clip.center(),
                 palette.text_muted,
                 results_clip,
             );
@@ -1274,14 +1270,13 @@ where
                     bounds: results_clip.size(),
                     size: Pixels(typography::CAPTION.size),
                     line_height: LineHeight::Absolute(Pixels(results_clip.height)),
-                    font: typography::CAPTION
-                        .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                    font: renderer.default_font(),
                     align_x: text_core::Alignment::Center,
                     align_y: alignment::Vertical::Center,
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                results_clip.position(),
+                results_clip.center(),
                 palette.text_muted,
                 results_clip,
             );
@@ -1307,14 +1302,16 @@ where
                             bounds: header_rect.size(),
                             size: Pixels(typography::CAPTION.size),
                             line_height: LineHeight::Absolute(Pixels(GROUP_HEADER_HEIGHT)),
-                            font: typography::CAPTION
-                                .font(typography::FAMILY_SANS, typography::Weight::SemiBold),
+                            font: iced::Font {
+                                weight: iced::font::Weight::Semibold,
+                                ..renderer.default_font()
+                            },
                             align_x: text_core::Alignment::Left,
                             align_y: alignment::Vertical::Center,
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        header_rect.position(),
+                        Point::new(header_rect.x, header_rect.center_y()),
                         palette.text_muted,
                         results_clip,
                     );
@@ -1414,7 +1411,7 @@ where
                                 shaping: text_core::Shaping::default(),
                                 wrapping: text_core::Wrapping::None,
                             },
-                            sc_rect.position(),
+                            Point::new(sc_rect.x + sc_rect.width, sc_rect.center_y()),
                             shortcut_fg,
                             results_clip,
                         );
@@ -1440,8 +1437,10 @@ where
                             } else {
                                 (typography::Weight::Regular, title_fg)
                             };
-                            let font =
-                                typography::UI_COMPACT.font(typography::FAMILY_SANS, f_weight);
+                            let font = iced::Font {
+                                weight: f_weight.iced(),
+                                ..renderer.default_font()
+                            };
                             let span_w = measure_text_width(
                                 renderer,
                                 slice,
@@ -1466,7 +1465,7 @@ where
                                     shaping: text_core::Shaping::default(),
                                     wrapping: text_core::Wrapping::None,
                                 },
-                                span_rect.position(),
+                                Point::new(span_rect.x, span_rect.center_y()),
                                 f_color,
                                 results_clip,
                             );
@@ -1486,14 +1485,13 @@ where
                                 bounds: sub_rect.size(),
                                 size: Pixels(typography::CAPTION.size),
                                 line_height: LineHeight::Absolute(Pixels(sub_h)),
-                                font: typography::CAPTION
-                                    .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                                font: renderer.default_font(),
                                 align_x: text_core::Alignment::Left,
                                 align_y: alignment::Vertical::Center,
                                 shaping: text_core::Shaping::default(),
                                 wrapping: text_core::Wrapping::None,
                             },
-                            sub_rect.position(),
+                            Point::new(sub_rect.x, sub_rect.center_y()),
                             subtitle_fg,
                             results_clip,
                         );
@@ -1507,8 +1505,10 @@ where
                             } else {
                                 (typography::Weight::Regular, title_fg)
                             };
-                            let font =
-                                typography::UI_COMPACT.font(typography::FAMILY_SANS, f_weight);
+                            let font = iced::Font {
+                                weight: f_weight.iced(),
+                                ..renderer.default_font()
+                            };
                             let span_w = measure_text_width(
                                 renderer,
                                 slice,
@@ -1533,7 +1533,7 @@ where
                                     shaping: text_core::Shaping::default(),
                                     wrapping: text_core::Wrapping::None,
                                 },
-                                span_rect.position(),
+                                Point::new(span_rect.x, span_rect.center_y()),
                                 f_color,
                                 results_clip,
                             );

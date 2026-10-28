@@ -27,7 +27,7 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
 use iced::mouse;
 use iced::widget;
-use iced::{Background, Border, Color, Element, Length, Pixels, Rectangle, Shadow, Size};
+use iced::{Background, Border, Color, Element, Length, Pixels, Point, Rectangle, Shadow, Size};
 
 use crate::binding::snapshot::GestureSlot;
 use crate::binding::{Cancel, Commit, Live};
@@ -1763,7 +1763,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            text_area.position(),
+            Point::new(text_area.x, text_area.center_y()),
             text_color,
             *viewport,
         );
@@ -1796,7 +1796,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            trailing_bounds.position(),
+            trailing_bounds.center(),
             icon_color,
             *viewport,
         );
@@ -1872,7 +1872,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            nav_prev_bounds.position(),
+            nav_prev_bounds.center(),
             self.palette.text_primary,
             *viewport,
         );
@@ -1901,7 +1901,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            nav_next_bounds.position(),
+            nav_next_bounds.center(),
             self.palette.text_primary,
             *viewport,
         );
@@ -1940,7 +1940,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            title_bounds.position(),
+            title_bounds.center(),
             self.palette.text_strong,
             *viewport,
         );
@@ -1973,7 +1973,7 @@ where
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        w_bounds.position(),
+                        w_bounds.center(),
                         self.palette.text_muted,
                         *viewport,
                     );
@@ -2143,7 +2143,7 @@ where
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        cell_rect.position(),
+                        cell_rect.center(),
                         text_color,
                         *viewport,
                     );
@@ -2228,7 +2228,7 @@ where
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        m_rect.position(),
+                        m_rect.center(),
                         color,
                         *viewport,
                     );
@@ -2295,7 +2295,7 @@ where
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        y_rect.position(),
+                        y_rect.center(),
                         color,
                         *viewport,
                     );

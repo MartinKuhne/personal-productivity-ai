@@ -223,14 +223,16 @@ impl<'a, Message: 'a + Clone, ActionId: Clone + 'a>
         let title_text = iced::widget::text(model.title.clone())
             .size(typography::TITLE_SM.size)
             .line_height(typography::TITLE_SM.iced_line_height())
-            .font(typography::TITLE_SM.font(typography::FAMILY_SANS, typography::Weight::SemiBold))
+            .font(iced::Font {
+                weight: iced::font::Weight::Semibold,
+                ..iced::Font::with_name("Fira Sans")
+            })
             .color(style.title_color)
             .align_x(iced::alignment::Horizontal::Center);
 
         let desc_text = iced::widget::text(model.description.clone())
             .size(typography::UI_COMPACT.size)
             .line_height(typography::UI_COMPACT.iced_line_height())
-            .font(typography::UI_COMPACT.font(typography::FAMILY_SANS, typography::Weight::Regular))
             .color(style.description_color)
             .align_x(iced::alignment::Horizontal::Center);
 
@@ -244,10 +246,10 @@ impl<'a, Message: 'a + Clone, ActionId: Clone + 'a>
             let btn_text = iced::widget::text(label.clone())
                 .size(typography::UI_COMPACT.size)
                 .line_height(typography::UI_COMPACT.iced_line_height())
-                .font(
-                    typography::UI_COMPACT
-                        .font(typography::FAMILY_SANS, typography::Weight::Medium),
-                );
+                .font(iced::Font {
+                    weight: iced::font::Weight::Medium,
+                    ..iced::Font::with_name("Fira Sans")
+                });
             let btn = iced::widget::button(btn_text)
                 .on_press(msg)
                 .padding(iced::Padding {

@@ -712,7 +712,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            text_bounds.position(),
+            text_bounds.center(),
             style.foreground,
             *viewport,
         );

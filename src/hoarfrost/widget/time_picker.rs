@@ -24,7 +24,7 @@ use iced::keyboard::key::Named;
 use iced::keyboard::{self, Key};
 use iced::mouse;
 use iced::widget;
-use iced::{Background, Border, Color, Element, Length, Pixels, Rectangle, Shadow, Size};
+use iced::{Background, Border, Color, Element, Length, Pixels, Point, Rectangle, Shadow, Size};
 
 use crate::binding::snapshot::GestureSlot;
 use crate::binding::{Cancel, Commit, Live};
@@ -1336,7 +1336,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            text_area.position(),
+            Point::new(text_area.x, text_area.center_y()),
             text_color,
             *viewport,
         );
@@ -1369,7 +1369,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            trailing_bounds.position(),
+            trailing_bounds.center(),
             icon_color,
             *viewport,
         );
@@ -1446,7 +1446,7 @@ where
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                col_header_bounds.position(),
+                col_header_bounds.center(),
                 self.palette.text_muted,
                 *viewport,
             );
@@ -1557,7 +1557,7 @@ where
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    cell_bounds.position(),
+                    cell_bounds.center(),
                     cell_color,
                     *viewport,
                 );
@@ -1629,7 +1629,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            cancel_bounds.position(),
+            cancel_bounds.center(),
             if state.hovered_cancel {
                 self.palette.text_strong
             } else {
@@ -1668,7 +1668,7 @@ where
                 shaping: text_core::Shaping::default(),
                 wrapping: text_core::Wrapping::None,
             },
-            apply_bounds.position(),
+            apply_bounds.center(),
             self.palette.text_strong,
             *viewport,
         );

@@ -942,14 +942,13 @@ where
                             bounds: cb_rect.size(),
                             size: Pixels(typography::CAPTION.size),
                             line_height: LineHeight::Absolute(Pixels(CHECKBOX_SIZE)),
-                            font: typography::CAPTION
-                                .font(typography::FAMILY_SANS, typography::Weight::Bold),
+                            font: renderer.default_font(),
                             align_x: text_core::Alignment::Center,
                             align_y: alignment::Vertical::Center,
                             shaping: text_core::Shaping::default(),
                             wrapping: text_core::Wrapping::None,
                         },
-                        cb_rect.position(),
+                        cb_rect.center(),
                         palette.surface_base,
                         *viewport,
                     );
@@ -972,14 +971,13 @@ where
                         bounds: icon_rect.size(),
                         size: Pixels(ICON_SIZE),
                         line_height: LineHeight::Absolute(Pixels(ICON_SIZE)),
-                        font: typography::CAPTION
-                            .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                        font: renderer.default_font(),
                         align_x: text_core::Alignment::Center,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    icon_rect.position(),
+                    icon_rect.center(),
                     if is_disabled {
                         palette.text_disabled
                     } else if is_selected {
@@ -1016,13 +1014,16 @@ where
                     bounds: title_rect.size(),
                     size: Pixels(typography::CAPTION.size),
                     line_height: LineHeight::Absolute(Pixels(title_line_h)),
-                    font: typography::CAPTION.font(typography::FAMILY_SANS, title_weight),
+                    font: iced::Font {
+                        weight: title_weight.iced(),
+                        ..renderer.default_font()
+                    },
                     align_x: text_core::Alignment::Center,
                     align_y: alignment::Vertical::Center,
                     shaping: text_core::Shaping::default(),
                     wrapping: text_core::Wrapping::None,
                 },
-                title_rect.position(),
+                title_rect.center(),
                 title_color,
                 *viewport,
             );
@@ -1048,14 +1049,13 @@ where
                         bounds: sub_rect.size(),
                         size: Pixels(typography::CAPTION.size),
                         line_height: LineHeight::Absolute(Pixels(title_line_h)),
-                        font: typography::CAPTION
-                            .font(typography::FAMILY_SANS, typography::Weight::Regular),
+                        font: renderer.default_font(),
                         align_x: text_core::Alignment::Center,
                         align_y: alignment::Vertical::Center,
                         shaping: text_core::Shaping::default(),
                         wrapping: text_core::Wrapping::None,
                     },
-                    sub_rect.position(),
+                    sub_rect.center(),
                     sub_color,
                     *viewport,
                 );

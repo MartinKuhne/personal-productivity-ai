@@ -24,7 +24,6 @@ use iced::mouse;
 use iced::{Background, Border, Element, Event, Pixels, Point, Rectangle, Shadow, Size};
 
 use crate::token::color::Palette;
-use crate::token::typography;
 
 use super::hover::{DismissReason, HoverController, TimeMs, Visibility};
 use super::place::TooltipAnchor;
@@ -386,9 +385,10 @@ where
         }
 
         let tooltip_style = TooltipStyle::resolve(&self.palette);
-        let label_font = tooltip_style
-            .font
-            .font(typography::Family::Sans, tooltip_style.font.weight);
+        let label_font = iced::Font {
+            weight: tooltip_style.font.weight.iced(),
+            ..renderer.default_font()
+        };
         let label_size = tooltip_style.font.size;
         let label_width = measure_text_width(renderer, &self.tooltip.label, label_size, label_font);
 

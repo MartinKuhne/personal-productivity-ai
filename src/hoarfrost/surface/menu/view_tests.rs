@@ -1253,7 +1253,7 @@ fn test_the_two_focused_cells_paint_as_the_spec_matrix_states() {
 /// the only thing the frame contains beyond empty content, and the row is
 /// driven through the real iced build/layout/operate/update path rather than
 /// a stand-in for it.
-fn headless_row(row: Row) -> (Harness<String, HeadlessRenderer>, Id) {
+fn headless_row(row: Row) -> (Harness<'static, String, HeadlessRenderer>, Id) {
     let focus_id = crate::focus::FocusId::new("row-under-test");
     let widget_id = crate::bridge::widget_id(&focus_id);
 
@@ -2005,5 +2005,787 @@ fn test_a_destructive_row_paints_the_danger_fill_and_never_the_text_red() {
     assert_ne!(
         layers[0].fill, p.status_danger_text,
         "G-11 trap 1: the fill token is not the text token"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Slot identity — the box a slot child reports is the slot's own
+//
+// `iced_core::widget::Text` reads `layout.bounds()` for *both* its paint
+// (`iced_core-0.14.0/src/widget/text.rs:250`) and its publication
+// (`text.rs:264`). Whatever `Layout` the row hands a slot is therefore
+// the box that slot both draws into and reports to a host. `draw` already
+// hands each slot its own child node; `operate` must agree with it, or
+// the box a host reads is not the box the glyph was painted at.
+// ---------------------------------------------------------------------------
+
+use crate::test_helpers::{Candidate, KIND_FOCUSABLE, KIND_TEXT};
+
+/// The leading box the §4.8.1 grid gives `row`, derived from the row's
+/// own grid functions rather than written down.
+fn expected_leading_box(row: &Row) -> Rectangle {
+    let height = row_height(row);
+    let content = (height - row_padding_y(row) * 2.0).max(NO_SPACE);
+
+    Rectangle::new(
+        Point::new(ROW_PADDING_X, centre_y(height, content)),
+        Size::new(LEADING_SLOT, LEADING_SLOT),
+    )
+}
+
+/// A row carrying content in every slot, so each one is observable.
+fn full_row() -> Row {
+    Row::action("edit", "Edit document")
+        .with_shortcut("Ctrl+E")
+        .with_icon("\u{270e}")
+}
+
+/// The focus id every slot probe builds its row under.
+const SLOT_PROBE_FOCUS: &str = "slot_probe";
+
+/// The iced [`Id`] the probed row answers to.
+fn probe_widget_id() -> iced::widget::Id {
+    crate::bridge::widget_id(&crate::focus::FocusId::new(SLOT_PROBE_FOCUS))
+}
+
+/// The row's caption id, derived from the probed row's own id.
+fn probe_label_id() -> iced::widget::Id {
+    crate::identity::sub_part_id(&probe_widget_id(), crate::identity::role::LABEL)
+        .expect("a named focus id yields a caption id")
+}
+
+/// Reads back every candidate a real grid row and its slots publish.
+fn probe_grid(row: Row) -> Vec<Candidate> {
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    harness.candidates()
+}
+
+/// The same probe, plus the row's own bounds.
+///
+/// An activatable row registers itself with `layout.bounds()`, which is
+/// the box every slot must be compared against.
+fn probe_slots(row: Row) -> (Vec<Candidate>, Rectangle) {
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    let row_bounds = harness
+        .recorded()
+        .into_iter()
+        .find(|(id, _)| id.is_some())
+        .map(|(_, bounds)| bounds)
+        .expect("an activatable row registers its own bounds");
+
+    (harness.candidates(), row_bounds)
+}
+
+/// The boxes a row's **slot children** publish for themselves.
+///
+/// A slot child is a plain `iced` `Text`, which reports anonymously —
+/// `text.rs:264` passes `None` as its id. The row's own caption is the
+/// only text record carrying a derived id, so filtering on that separates
+/// the children's boxes from the caption the row publishes for itself.
+fn slot_child_boxes(candidates: &[Candidate]) -> Vec<Rectangle> {
+    candidates
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_TEXT && candidate.id.is_none())
+        .map(|candidate| candidate.bounds)
+        .collect()
+}
+
+/// The row-level event mapping, shared by the grid probes.
+fn grid_messages(event: RowEvent) -> String {
+    match event {
+        RowEvent::Activated => "activated".to_owned(),
+        RowEvent::Absorbed => "absorbed".to_owned(),
+        RowEvent::Hovered => "hovered".to_owned(),
+        RowEvent::Unhovered => "unhovered".to_owned(),
+    }
+}
+
+#[test]
+fn test_a_slot_child_reports_its_own_box_not_the_rows() {
+    let row = full_row();
+    let (candidates, row_bounds) = probe_slots(row.clone());
+
+    let inflated: Vec<&Candidate> = candidates
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_TEXT && candidate.bounds == row_bounds)
+        .collect();
+
+    assert!(
+        inflated.is_empty(),
+        "{} slot child(ren) published the ROW's bounds {row_bounds:?} as their own. \
+         A slot must report the box the grid gave it, not the row it sits in.",
+        inflated.len(),
+    );
+}
+
+#[test]
+fn test_the_leading_glyph_reports_the_leading_slots_own_box() {
+    let row = full_row();
+    let expected = expected_leading_box(&row);
+
+    assert!(
+        slot_child_boxes(&probe_grid(row.clone())).contains(&expected),
+        "no slot child reported the leading box {expected:?} the §4.8.1 grid \
+         assigns it — the leading glyph is reporting someone else's bounds"
+    );
+}
+
+#[test]
+fn test_the_trailing_slot_reports_its_own_box_flush_to_the_rows_padding() {
+    let row = full_row();
+    let (candidates, row_bounds) = probe_slots(row.clone());
+    let right_edge = row_bounds.x + row_bounds.width - ROW_PADDING_X;
+
+    let trailing = slot_child_boxes(&candidates)
+        .into_iter()
+        .filter(|bounds| bounds.width < row_bounds.width)
+        .find(|bounds| (bounds.x + bounds.width - right_edge).abs() < 0.001)
+        .unwrap_or_else(|| {
+            panic!(
+                "no slot child reported a right-aligned box of its own; the row is \
+                 {row_bounds:?} and the slot boxes are {:?}",
+                slot_child_boxes(&candidates)
+            )
+        });
+
+    assert!(
+        trailing.width < LEADING_SLOT * 4.0,
+        "the trailing box is {:?} wide — a shortcut column shrinks to its content, \
+         so this is not the trailing slot's own box",
+        trailing.width,
+    );
+}
+
+#[test]
+fn test_the_published_label_box_is_not_the_box_a_slot_child_inherits() {
+    let row = full_row();
+    let (candidates, row_bounds) = probe_slots(row.clone());
+
+    let label = candidates
+        .iter()
+        .find(|candidate| candidate.id.as_ref() == Some(&probe_label_id()))
+        .expect("the row publishes its caption under a derived id");
+
+    assert_ne!(
+        label.bounds, row_bounds,
+        "the caption is published from the label slot's own node and must not be \
+         the row's box"
+    );
+    assert!(
+        label.bounds.x > row_bounds.x,
+        "the caption starts at the label column, past the leading slot"
+    );
+    assert!(
+        !slot_child_boxes(&candidates).contains(&label.bounds),
+        "the caption's box must belong to the caption alone; a slot child must not \
+         be reporting it as its own"
+    );
+}
+
+// -- no competing focus targets -----------------------------------------
+
+#[test]
+fn test_a_grid_row_is_exactly_one_focus_target() {
+    let candidates = probe_grid(full_row());
+
+    let focus: Vec<&Candidate> = candidates
+        .iter()
+        .filter(|candidate| candidate.kind == KIND_FOCUSABLE)
+        .collect();
+
+    assert_eq!(
+        focus.len(),
+        1,
+        "one row is one Tab stop. Threading each slot's own layout through \
+         `operate` must not turn the leading box or the shortcut column into \
+         additional focus targets: {:?}",
+        focus.iter().map(|c| c.bounds).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        focus[0].id.as_ref(),
+        Some(&probe_widget_id()),
+        "the single focus target is the row itself, under the id the bridge \
+         derives from its FocusId"
+    );
+}
+
+#[test]
+fn test_the_rows_focus_box_is_the_whole_row_not_a_slot() {
+    let row = full_row();
+    let candidates = probe_grid(row.clone());
+    let focus = candidates
+        .iter()
+        .find(|candidate| candidate.kind == KIND_FOCUSABLE)
+        .expect("an activatable row registers itself");
+
+    assert!(
+        !slot_child_boxes(&candidates).contains(&focus.bounds),
+        "the row's focus box must be the row, not one of the slot boxes \
+         now threaded through `operate`"
+    );
+    assert!(
+        focus.bounds.width > LEADING_SLOT,
+        "the row spans its full width, so Tab and the pointer agree on \
+         what the row is"
+    );
+}
+
+#[test]
+fn test_a_non_navigable_grid_row_registers_no_focus_target() {
+    for (name, row) in [
+        ("heading", heading()),
+        ("separator", separator()),
+        ("disabled action", disabled_action()),
+    ] {
+        let focus = probe_grid(row.clone())
+            .into_iter()
+            .filter(|candidate| candidate.kind == KIND_FOCUSABLE)
+            .collect::<Vec<_>>();
+
+        assert!(
+            focus.is_empty(),
+            "a {name} must not be a Tab stop, and threading slot layouts \
+             through `operate` must not have introduced one: {:?}",
+            focus
+                .iter()
+                .map(|c| (c.id.clone(), c.bounds))
+                .collect::<Vec<_>>(),
+        );
+    }
+}
+
+#[test]
+fn test_a_non_navigable_row_still_publishes_its_caption_in_its_own_box() {
+    // Dropping the row's focus registration says nothing about its
+    // caption: a heading's label is still published, and still reports
+    // the box it was drawn into rather than the full-width row.
+    let candidates = probe_grid(heading());
+
+    let caption = candidates
+        .iter()
+        .find(|candidate| candidate.id.as_ref() == Some(&probe_label_id()))
+        .expect("a heading still publishes its caption under the derived id");
+
+    assert!(
+        caption.bounds.x >= ROW_PADDING_X,
+        "the heading's caption starts at the row's padding, got {:?}",
+        caption.bounds
+    );
+    assert!(
+        caption.bounds.width < crate::test_helpers::VIEWPORT.width,
+        "the caption reports the label column it was drawn into, not the \
+         full-width row: {:?}",
+        caption.bounds
+    );
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.kind != KIND_FOCUSABLE),
+        "publishing a caption must not make a heading focusable"
+    );
+}
+
+// -- pointer behaviour across the slots ---------------------------------
+
+#[test]
+fn test_a_press_on_the_leading_box_still_activates_the_row() {
+    let row = full_row();
+    let leading = expected_leading_box(&row);
+    let at = leading.center();
+
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    harness.press(at);
+
+    assert_eq!(
+        harness.release(at),
+        vec!["activated".to_owned()],
+        "the leading box is inside the row: clicking it clicks the row"
+    );
+}
+
+#[test]
+fn test_a_press_on_the_trailing_column_still_activates_the_row() {
+    let row = full_row();
+    let (candidates, row_bounds) = probe_slots(row.clone());
+    let right_edge = row_bounds.x + row_bounds.width - ROW_PADDING_X;
+
+    let trailing = slot_child_boxes(&candidates)
+        .into_iter()
+        .find(|bounds| (bounds.x + bounds.width - right_edge).abs() < 0.001)
+        .expect("the trailing slot reports a right-aligned box of its own");
+
+    let at = trailing.center();
+
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    harness.press(at);
+
+    assert_eq!(
+        harness.release(at),
+        vec!["activated".to_owned()],
+        "the shortcut column is part of the row: a click there must still \
+         activate it, exactly as a click on the label does"
+    );
+}
+
+#[test]
+fn test_hovering_a_slot_reports_the_row_hovered_exactly_once() {
+    let row = full_row();
+    let leading = expected_leading_box(&row);
+    let below = row_height(&row) + 50.0;
+
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    assert_eq!(
+        harness.hover(leading.center()),
+        vec!["hovered".to_owned()],
+        "entering through the leading box enters the row once"
+    );
+    assert_eq!(
+        harness.hover(leading.center()),
+        Vec::<String>::new(),
+        "staying inside the row reports no new edge, whichever slot holds \
+         the pointer"
+    );
+    assert_eq!(
+        harness.hover(Point::new(crate::test_helpers::VIEWPORT.width - 1.0, below)),
+        vec!["unhovered".to_owned()],
+        "leaving the row reports the pointer gone"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Repaint: the row's pixels have to follow its state (§4.9.2)
+//
+// The matrix tests above prove the resolver picks the right token triple,
+// and the layer tests prove that output becomes the right quads. Neither
+// proves the row, drawn twice in two states, actually looks different. A
+// draw path that ignored its resolved style would pass every test above
+// and ship a menu that never lights up.
+//
+// These probes rasterise the real widget through the real iced tree and
+// diff the row's **own** box — the one it registered with the focus
+// router, cross-checked against the box its declared size produces. Never
+// the canvas: a whole-frame sweep would credit a dead row with ink its
+// caption drew.
+//
+// Each claim is paired with the check that it can fail, and each "nothing
+// changed" control with the check that it would notice if something had.
+// ---------------------------------------------------------------------------
+
+use crate::test_helpers::{Capture, Frame, assert_repainted, pressed};
+use std::any::Any;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+/// The canvas a repaint probe renders into.
+///
+/// The shared `VIEWPORT`, because the row's box is read from a harness
+/// laid out in exactly that viewport — a different canvas would slide the
+/// row out from under the rectangle being diffed.
+fn repaint_canvas() -> iced::Size {
+    crate::test_helpers::VIEWPORT
+}
+
+/// The text a caught assertion produced.
+///
+/// `test_helpers` has this, but it is private to that sidecar, so every
+/// file that wants to prove an assertion is load-bearing writes it out
+/// again.
+fn panic_text(outcome: &Result<(), Box<dyn Any + Send>>) -> String {
+    match outcome {
+        Ok(()) => String::from("<no panic>"),
+        Err(payload) => {
+            if let Some(text) = payload.downcast_ref::<String>() {
+                text.clone()
+            } else if let Some(text) = payload.downcast_ref::<&str>() {
+                (*text).to_owned()
+            } else {
+                String::from("<non-string panic payload>")
+            }
+        }
+    }
+}
+
+/// Prove a repaint claim is load-bearing over `rect`.
+///
+/// Run against a frame compared with itself — no repaint at all — the
+/// assertion must go red, naming the control and the floor it missed.
+fn repaint_guard_panic(frame: &Frame, rect: Rectangle, what: &str) -> String {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        assert_repainted(frame, frame, rect, what);
+    }));
+
+    assert!(
+        outcome.is_err(),
+        "{what}: `assert_repainted` PASSED comparing a frame with itself over \
+         {rect:?} — the assertion can never fail, so the repaint claim built on \
+         it proves nothing"
+    );
+
+    let text = panic_text(&outcome);
+
+    assert!(
+        text.contains(what),
+        "the panic should name {what:?}, got {text}"
+    );
+    assert!(
+        text.contains(&crate::test_helpers::MIN_CHANGED_PIXELS.to_string()),
+        "the panic should state the changed-pixel floor it missed, got {text}"
+    );
+    assert!(
+        text.contains("repaint"),
+        "the panic should say the frame failed to repaint, got {text}"
+    );
+
+    text
+}
+
+/// Prove a "nothing changed" control is load-bearing.
+fn zero_diff_guard(moved_pixels: usize, what: &str) {
+    assert!(
+        moved_pixels > 0,
+        "{what}: the comparison pair also shows zero movement — the 'nothing \
+         changed' control is measuring a dead canvas, not a stable row"
+    );
+}
+
+/// Build the widget under a probe's own focus id.
+fn repaint_tree(
+    row: Row,
+    focus: &'static str,
+    submenu_open: bool,
+) -> iced::Element<'static, String> {
+    MenuRow::new(row, focus, grid_messages)
+        .palette(palette())
+        .submenu_open(submenu_open)
+        .into()
+}
+
+/// The band a row occupies, from the size the row itself declares.
+///
+/// `Length::Fill` width over the viewport and a fixed `row_height` — the
+/// widget's own box, not the frame it was drawn in.
+fn declared_band(row: &Row) -> Rectangle {
+    Rectangle::new(
+        iced::Point::new(0.0, 0.0),
+        iced::Size::new(repaint_canvas().width, row_height(row)),
+    )
+}
+
+/// The row's own box, read from a real `operate` pass and cross-checked
+/// against the band its declared size produces.
+///
+/// A row that registered a box disagreeing with its own `size()` is a
+/// widget lying about where it sits, and every repaint rect downstream
+/// would be wrong with it.
+fn published_band(row: Row, focus: &'static str) -> Rectangle {
+    let sized = row.clone();
+    let mut harness = Harness::headless(move || {
+        MenuRow::new(row.clone(), focus, grid_messages)
+            .palette(palette())
+            .into()
+    });
+
+    let band = harness
+        .recorded()
+        .into_iter()
+        .find(|(id, _)| id.is_some())
+        .map(|(_, bounds)| bounds)
+        .expect("a navigable row registers its own bounds");
+
+    assert_eq!(
+        band,
+        declared_band(&sized),
+        "the box the row registered disagrees with the box its own size() \
+         declares"
+    );
+
+    band
+}
+
+/// Two frames of one row — at rest, then with the pointer driven onto it.
+fn rest_and_hover(row: Row, focus: &'static str) -> (Frame, Frame, Rectangle) {
+    let band = published_band(row.clone(), focus);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (rest, hovered) = {
+        let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+        let hovered = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+
+        (rest, hovered)
+    };
+
+    (rest, hovered, band)
+}
+
+#[test]
+fn test_hovering_a_row_repaints_its_own_band() {
+    let (rest, hovered, band) = rest_and_hover(action(), "row_rp_hover");
+
+    assert_repainted(&rest, &hovered, band, "hovering a menu row");
+}
+
+#[test]
+fn test_the_menu_hover_repaint_claim_fails_on_a_frame_that_never_moved() {
+    let (rest, _hovered, band) = rest_and_hover(action(), "row_rp_hover_vac");
+
+    repaint_guard_panic(&rest, band, "hovering a menu row");
+}
+
+#[test]
+fn test_pressing_a_row_repaints_it_again_after_the_hover() {
+    let row = action();
+    let focus = "row_rp_press";
+    let band = published_band(row.clone(), focus);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (hovered, pressed_frame) = {
+        let hovered = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+        let pressed_frame = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at), pressed()],
+            mouse::Cursor::Available(at),
+        );
+
+        (hovered, pressed_frame)
+    };
+
+    assert_repainted(
+        &hovered,
+        &pressed_frame,
+        band,
+        "pressing a hovered menu row",
+    );
+}
+
+#[test]
+fn test_the_menu_press_repaint_claim_fails_on_a_frame_that_never_moved() {
+    let row = action();
+    let focus = "row_rp_press_vac";
+    let band = published_band(row.clone(), focus);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (hovered, _pressed_frame) = {
+        let hovered = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+        let pressed_frame = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at), pressed()],
+            mouse::Cursor::Available(at),
+        );
+
+        (hovered, pressed_frame)
+    };
+
+    repaint_guard_panic(&hovered, band, "pressing a hovered menu row");
+}
+
+#[test]
+fn test_a_submenu_opening_under_an_attended_parent_repaints_the_row() {
+    let row = submenu_parent();
+    let focus = "row_rp_cascade";
+    let band = published_band(row.clone(), focus);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (closed, open) = {
+        let closed = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+        let open = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, true),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+
+        (closed, open)
+    };
+
+    assert_repainted(
+        &closed,
+        &open,
+        band,
+        "a submenu opening under its hovered parent",
+    );
+}
+
+#[test]
+fn test_the_submenu_cascade_repaint_claim_fails_on_a_frame_that_never_moved() {
+    let row = submenu_parent();
+    let focus = "row_rp_cascade_vac";
+    let band = published_band(row.clone(), focus);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (closed, _open) = {
+        let closed = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+        let open = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, true),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+
+        (closed, open)
+    };
+
+    repaint_guard_panic(&closed, band, "a submenu opening under its hovered parent");
+}
+
+/// The mirror of the cascade claim: §4.9.2 keeps an **unattended** row at
+/// REST no matter what its child is doing, so opening the submenu must
+/// change nothing on screen.
+#[test]
+fn test_a_submenu_opening_over_an_unattended_row_changes_no_pixels() {
+    let row = submenu_parent();
+    let focus = "row_rp_unattended";
+    let band = published_band(row.clone(), focus);
+
+    let mut capture = Capture::new();
+    let (closed, open) = {
+        let closed = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+        let open = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, true));
+
+        (closed, open)
+    };
+
+    assert_eq!(
+        closed.differing_pixels(&open, band),
+        0,
+        "an unattended row repainted itself because its child opened — §4.9.2 \
+         leaves it at REST"
+    );
+
+    // …and the same pair, attended, does move, so the zero above is the
+    // rule and not a dead renderer.
+    let at = inside(&row);
+    let mut capture = Capture::new();
+    let (attended_closed, attended_open) = {
+        let closed = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+        let open = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, true),
+            &[moved(at)],
+            mouse::Cursor::Available(at),
+        );
+
+        (closed, open)
+    };
+
+    zero_diff_guard(
+        attended_closed.differing_pixels(&attended_open, band),
+        "the unattended-submenu control",
+    );
+}
+
+/// A disabled row has no hover skin, so the pointer must leave its band
+/// exactly as it found it.
+///
+/// The rect here is the band the row's own `size()` declares rather than a
+/// registered box: a non-navigable row registers nothing at all, so its
+/// geometry is only recoverable from the size it asked for.
+#[test]
+fn test_a_disabled_row_repaints_nothing_under_the_pointer() {
+    let row = disabled_action();
+    let focus = "row_rp_disabled";
+    let band = declared_band(&row);
+    let at = inside(&row);
+
+    let mut capture = Capture::new();
+    let (rest, hovered) = {
+        let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+        let hovered = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(row.clone(), focus, false),
+            &[moved(at), pressed()],
+            mouse::Cursor::Available(at),
+        );
+
+        (rest, hovered)
+    };
+
+    assert_eq!(
+        rest.differing_pixels(&hovered, band),
+        0,
+        "a disabled row painted a hover or press fill under the pointer"
+    );
+
+    // …and the same probe over an enabled row does move pixels.
+    let enabled = action();
+    let mut capture = Capture::new();
+    let (live_rest, live_hovered) = {
+        let rest = capture.frame(
+            repaint_canvas(),
+            repaint_tree(enabled.clone(), focus, false),
+        );
+        let hovered = capture.frame_after_at(
+            repaint_canvas(),
+            repaint_tree(enabled.clone(), focus, false),
+            &[moved(at), pressed()],
+            mouse::Cursor::Available(at),
+        );
+
+        (rest, hovered)
+    };
+
+    zero_diff_guard(
+        live_rest.differing_pixels(&live_hovered, band),
+        "the disabled-row pointer control",
     );
 }

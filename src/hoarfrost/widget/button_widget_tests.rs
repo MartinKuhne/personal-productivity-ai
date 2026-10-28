@@ -48,6 +48,7 @@ use crate::focus::GroupId;
 use crate::state::BaseState;
 use crate::state::VisualState;
 use crate::test_helpers::Blank;
+use crate::test_helpers::Capture;
 use crate::test_helpers::Harness;
 use crate::test_helpers::Recorder;
 use crate::test_helpers::assert_agree;
@@ -141,7 +142,7 @@ fn recorder_button(
     label: &'static str,
     configure: impl Fn(Button<'static, Msg, Theme, Recorder>) -> Button<'static, Msg, Theme, Recorder>
     + 'static,
-) -> Harness<Msg, Recorder> {
+) -> Harness<'static, Msg, Recorder> {
     Harness::recording(move || {
         configure(Button::new(
             variant,
@@ -156,7 +157,7 @@ fn recorder_button(
 /// A recording harness around one button that publishes a message
 /// distinguishable from the fixtures' default, so "fired" and "did not
 /// fire" cannot be confused with a fixture wiring mistake.
-fn armed_button(label: &'static str) -> Harness<Msg, Recorder> {
+fn armed_button(label: &'static str) -> Harness<'static, Msg, Recorder> {
     Harness::recording(move || {
         Button::new(
             ButtonVariant::Primary,
@@ -169,7 +170,7 @@ fn armed_button(label: &'static str) -> Harness<Msg, Recorder> {
 }
 
 /// A recording harness around one disabled button.
-fn disabled_button(label: &'static str) -> Harness<Msg, Recorder> {
+fn disabled_button(label: &'static str) -> Harness<'static, Msg, Recorder> {
     Harness::recording(move || {
         Button::new(
             ButtonVariant::Primary,
@@ -393,34 +394,90 @@ fn every_variant_and_state_paints_what_the_resolver_resolved() {
     }
 }
 
+/// The label one `(variant, case)` cell paints, so a report can name the
+/// cell that failed rather than only its index.
+fn cell_label(variant: ButtonVariant, case: &Case) -> String {
+    format!("{} {}", variant_name(variant), case.label)
+}
+
+/// Every `(variant, case)` label, in the order the matrix walks them.
+fn all_cell_labels() -> Vec<String> {
+    VARIANTS
+        .iter()
+        .flat_map(|variant| CASES.iter().map(move |case| cell_label(*variant, case)))
+        .collect()
+}
+
+/// Build one cell of the real-renderer matrix.
+///
+/// Split out so the two passes below stay a call each rather than a
+/// twenty-line block nested three deep (`RUST-023`).
+fn real_renderer_cell<'a>(variant: ButtonVariant, case: &'a Case) -> Element<'a, Msg> {
+    let mut button = Button::new(variant, text(cell_label(variant, case)), Msg::Save, "btn");
+    if !case.enabled {
+        button = button.disabled();
+    }
+    if case.invalid {
+        button = button.invalid();
+    }
+    button.into()
+}
+
 #[test]
 fn the_button_paints_through_a_real_renderer_in_every_state() {
     // The same matrix through iced's real headless renderer rather than a
     // recorder: real quads, real text, real layer calls. Nothing is
     // asserted about pixels — that the pass completes for every cell is
     // the claim.
+    //
+    // One `Capture` for the whole matrix rather than a `Harness::headless`
+    // per cell. Each `headless` mints its own renderer at roughly 620 ms,
+    // so 20 cells cost ~10.6 s of pure setup against a total of ~32 ms of
+    // actual drawing; the capture pays that setup once and drives every
+    // cell through the same renderer.
+    let mut capture = Capture::new();
+    let mut painted: Vec<String> = Vec::new();
     for variant in VARIANTS {
         for case in CASES {
-            let mut harness = Harness::headless(move || {
-                let mut button = Button::new(
-                    variant,
-                    text(format!("{} {}", variant_name(variant), case.label)),
-                    Msg::Save,
-                    "btn",
-                );
-                if !case.enabled {
-                    button = button.disabled();
-                }
-                if case.invalid {
-                    button = button.invalid();
-                }
-                button.into()
-            });
-
-            harness.render();
-            harness.render();
+            // Two passes per cell, exactly as before: the first builds
+            // the tree, the second re-renders whatever the first left.
+            let first = capture.frame(
+                crate::test_helpers::VIEWPORT,
+                real_renderer_cell(variant, &case),
+            );
+            let second = capture.frame(
+                crate::test_helpers::VIEWPORT,
+                real_renderer_cell(variant, &case),
+            );
+            // The one thing the frames are worth reading here: the cell
+            // is deterministic across passes, so a diff elsewhere in
+            // this file can treat a zero as a real zero.
+            assert_eq!(
+                first
+                    .differing_pixels(&second, Rectangle::with_size(crate::test_helpers::VIEWPORT)),
+                0,
+                "{}: the same cell drawn twice through one renderer must be \
+                 pixel-identical",
+                cell_label(variant, &case),
+            );
+            painted.push(cell_label(variant, &case));
         }
     }
+
+    // The coverage proof: every cell of the 4 × 5 matrix drew, in matrix
+    // order, with no cell silently skipped or duplicated.
+    assert_eq!(
+        painted,
+        all_cell_labels(),
+        "the real-renderer matrix must draw every variant × case cell"
+    );
+    assert_eq!(
+        painted.len(),
+        VARIANTS.len() * CASES.len(),
+        "the matrix is {} variants × {} cases",
+        VARIANTS.len(),
+        CASES.len(),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,15 +1463,12 @@ enum Ctl {
     StopRequested,
 }
 
-/// A controlled-button harness.
+/// A controlled harness over a model borrowed from the caller's stack.
 ///
-/// The model is leaked deliberately: the harness's view closure must return
-/// an `Element<'static, ..>`, and `Controlled<'a, ButtonModel>` borrows the
-/// model for `'a`. One leaked struct per test stands in for the long-lived,
-/// application-owned model a real host hands the button every frame — which
-/// is exactly the ownership shape `UIF-ATOM-001a` requires, and the reason
-/// the button takes a `Controlled` rather than a `ButtonModel`.
-fn controlled(model: &'static ButtonModel, label: &'static str) -> Harness<Ctl, Recorder> {
+/// `Controlled<'a, ButtonModel>` borrows the model, the element it builds
+/// borrows in turn, and `Harness<'a, ..>` carries that lifetime — so the
+/// model a test builds is dropped with the test rather than outliving it.
+fn controlled<'a>(model: &'a ButtonModel, label: &'static str) -> Harness<'a, Ctl, Recorder> {
     Harness::recording(move || {
         Button::controlled(
             Controlled::new(model),
@@ -1428,10 +1482,6 @@ fn controlled(model: &'static ButtonModel, label: &'static str) -> Harness<Ctl, 
         )
         .into()
     })
-}
-
-fn leaked(model: ButtonModel) -> &'static ButtonModel {
-    Box::leak(Box::new(model))
 }
 
 /// A `KeyPressed` for a named key, every other field at its neutral value.
@@ -1520,7 +1570,8 @@ fn non_activation_key_does_nothing_on_a_focused_legacy_button() {
 
 #[test]
 fn releasing_inside_a_controlled_button_publishes_the_activated_tier() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1532,7 +1583,8 @@ fn releasing_inside_a_controlled_button_publishes_the_activated_tier() {
 
 #[test]
 fn releasing_outside_publishes_the_cancelled_tier_and_no_activation() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1548,10 +1600,8 @@ fn releasing_outside_publishes_the_cancelled_tier_and_no_activation() {
 
 #[test]
 fn pressing_a_busy_cancellable_button_asks_to_stop_instead_of_activating() {
-    let mut harness = controlled(
-        leaked(ButtonModel::new("Saving").busy().cancellable()),
-        "btn",
-    );
+    let model = ButtonModel::new("Saving").busy().cancellable();
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1567,7 +1617,8 @@ fn pressing_a_busy_cancellable_button_asks_to_stop_instead_of_activating() {
 
 #[test]
 fn a_busy_fire_and_forget_button_offers_no_stop_affordance() {
-    let mut harness = controlled(leaked(ButtonModel::new("Saving").busy()), "btn");
+    let model = ButtonModel::new("Saving").busy();
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1577,7 +1628,8 @@ fn a_busy_fire_and_forget_button_offers_no_stop_affordance() {
 
 #[test]
 fn enter_on_a_focused_controlled_button_activates() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
     focus_one(&mut harness, "btn");
 
     let messages = harness.pointer(&[key_press(key::Named::Enter)], mouse::Cursor::Unavailable);
@@ -1592,7 +1644,8 @@ fn enter_on_a_focused_controlled_button_activates() {
 
 #[test]
 fn space_on_a_focused_controlled_button_activates() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
     focus_one(&mut harness, "btn");
 
     let messages = harness.pointer(&[key_press(key::Named::Space)], mouse::Cursor::Unavailable);
@@ -1602,7 +1655,8 @@ fn space_on_a_focused_controlled_button_activates() {
 
 #[test]
 fn keys_do_nothing_on_a_button_that_does_not_hold_focus() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
 
     for name in [key::Named::Enter, key::Named::Space, key::Named::Escape] {
         assert_eq!(
@@ -1615,7 +1669,8 @@ fn keys_do_nothing_on_a_button_that_does_not_hold_focus() {
 
 #[test]
 fn escape_cancels_a_gesture_the_pointer_still_holds_open() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save")), "btn");
+    let model = ButtonModel::new("Save");
+    let mut harness = controlled(&model, "btn");
     focus_one(&mut harness, "btn");
     let over = centre(harness.first_bounds());
 
@@ -1636,10 +1691,8 @@ fn escape_cancels_a_gesture_the_pointer_still_holds_open() {
 
 #[test]
 fn escape_with_an_action_already_running_asks_to_stop() {
-    let mut harness = controlled(
-        leaked(ButtonModel::new("Saving").busy().cancellable()),
-        "btn",
-    );
+    let model = ButtonModel::new("Saving").busy().cancellable();
+    let mut harness = controlled(&model, "btn");
     focus_one(&mut harness, "btn");
 
     // No press: the action was already running before the user pressed Escape.
@@ -1654,7 +1707,8 @@ fn escape_with_an_action_already_running_asks_to_stop() {
 
 #[test]
 fn the_double_click_window_is_closed_through_the_widget() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save").cancellable()), "btn");
+    let model = ButtonModel::new("Save").cancellable();
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1673,14 +1727,10 @@ fn the_double_click_window_is_closed_through_the_widget() {
 
 #[test]
 fn a_controlled_button_takes_its_variant_from_the_model() {
-    let mut harness = controlled(
-        leaked(
-            ButtonModel::new("Delete")
-                .with_variant(ButtonVariant::Danger)
-                .with_tooltip("Delete this permanently"),
-        ),
-        "btn",
-    );
+    let model = ButtonModel::new("Delete")
+        .with_variant(ButtonVariant::Danger)
+        .with_tooltip("Delete this permanently");
+    let mut harness = controlled(&model, "btn");
 
     assert_eq!(
         harness.paint()[0].background,
@@ -1691,7 +1741,8 @@ fn a_controlled_button_takes_its_variant_from_the_model() {
 
 #[test]
 fn a_disabled_model_makes_the_button_inert_and_absent_from_the_router() {
-    let mut harness = controlled(leaked(ButtonModel::new("Save").disabled()), "btn");
+    let model = ButtonModel::new("Save").disabled();
+    let mut harness = controlled(&model, "btn");
     let over = centre(harness.first_bounds());
 
     harness.hover(over);
@@ -1733,11 +1784,10 @@ fn collapsing_the_density_does_not_move_the_button_vertically() {
     // §3.0.4.4's "0px vertical layout shift", proven at the widget: the
     // compact rung changes the rung the layout resolves through, and nothing
     // about where the box sits.
-    let mut standard = controlled(leaked(ButtonModel::new("Save")), "btn");
-    let mut compact = controlled(
-        leaked(ButtonModel::new("Save").with_density(ButtonDensity::Compact)),
-        "btn",
-    );
+    let standard_model = ButtonModel::new("Save");
+    let compact_model = ButtonModel::new("Save").with_density(ButtonDensity::Compact);
+    let mut standard = controlled(&standard_model, "btn");
+    let mut compact = controlled(&compact_model, "btn");
 
     let a = standard.first_bounds();
     let b = compact.first_bounds();
@@ -1754,10 +1804,8 @@ fn a_controlled_button_paints_the_same_layers_a_legacy_one_of_the_same_variant_p
     // script, identical paint.
     for base in [BaseState::Rest, BaseState::Hovered, BaseState::Pressed] {
         let mut legacy = recorder_button(ButtonVariant::Primary, "btn", |b| b);
-        let mut ctl = controlled(
-            leaked(ButtonModel::new("Save").with_variant(ButtonVariant::Primary)),
-            "btn",
-        );
+        let model = ButtonModel::new("Save").with_variant(ButtonVariant::Primary);
+        let mut ctl = controlled(&model, "btn");
         let over = centre(legacy.first_bounds());
         drive(&mut legacy, base, over);
         drive(&mut ctl, base, over);
