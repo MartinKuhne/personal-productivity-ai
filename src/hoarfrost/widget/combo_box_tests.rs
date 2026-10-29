@@ -1,4 +1,4 @@
-//! Tests for the combobox trigger's geometry and paint — `UIF-ATOM-004`, §3.4.
+//! Tests for the combobox trigger's geometry and paint â€” `UIF-ATOM-004`, Â§3.4.
 //!
 //! Three groups, in order:
 //!
@@ -7,9 +7,9 @@
 //! 2. **The trailing slot.** The slot is a hit target, not a glyph: it
 //!    is 24px, flush right, vertically centred, and the 14px chevron
 //!    sits inside it rather than filling it.
-//! 3. **The chevron's colour.** §3.4's two named states, and the
+//! 3. **The chevron's colour.** Â§3.4's two named states, and the
 //!    fall-through to the dropdown-trigger atom's own icon channel for
-//!    every state §3.4 leaves alone — including the proof that no
+//!    every state Â§3.4 leaves alone â€” including the proof that no
 //!    reachable trigger fill is a locked solid fill, which is what keeps
 //!    `text.muted` from ever becoming the `1.84:1` pairing `INC-40`
 //!    established is unusable.
@@ -40,7 +40,7 @@ fn every_state() -> Vec<VisualState> {
 }
 
 // ---------------------------------------------------------------------------
-// 1 — the rungs and the box
+// 1 â€” the rungs and the box
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -81,7 +81,7 @@ fn the_padding_and_slot_constants_are_tokens() {
 }
 
 // ---------------------------------------------------------------------------
-// 2 — the trailing slot is a hit target
+// 2 â€” the trailing slot is a hit target
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -173,7 +173,7 @@ fn a_trigger_too_narrow_for_both_cannot_produce_an_inverted_value_area() {
 }
 
 // ---------------------------------------------------------------------------
-// 3 — the chevron's colour
+// 3 â€” the chevron's colour
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -209,7 +209,7 @@ fn an_open_flyout_makes_the_chevron_strong_from_any_live_state() {
 
 #[test]
 fn focused_but_closed_takes_the_atoms_own_focused_icon_not_the_hover_rule() {
-    // §3.4 names hover and open. A tabbed-to select with its flyout shut
+    // Â§3.4 names hover and open. A tabbed-to select with its flyout shut
     // is neither, so it falls through to the DropdownTrigger icon channel.
     let palette = Palette::dark();
     let focused = VisualState {
@@ -274,8 +274,8 @@ fn the_chevron_never_resolves_to_an_unmapped_or_transparent_colour() {
 
 #[test]
 fn no_reachable_trigger_fill_is_a_locked_solid_fill() {
-    // The safety proof behind §3.4's `text.muted` chevron. `text.muted`
-    // on `accent.fill` is 1.8363:1 — the unusable pairing `INC-40`
+    // The safety proof behind Â§3.4's `text.muted` chevron. `text.muted`
+    // on `accent.fill` is 1.8363:1 â€” the unusable pairing `INC-40`
     // established. If any state ever resolved the trigger onto a locked
     // solid fill, the muted glyph would silently become that pairing.
     let palette = Palette::dark();
@@ -305,7 +305,7 @@ fn the_trigger_resolves_through_the_dropdown_trigger_input_row() {
 
 #[test]
 fn the_resting_chevron_agrees_with_the_atom_and_the_spec() {
-    // The one state where §3.4 and the input atom's icon channel agree,
+    // The one state where Â§3.4 and the input atom's icon channel agree,
     // stated as a test so a change to either side has to notice.
     let palette = Palette::dark();
     let rest = VisualState {
@@ -320,7 +320,7 @@ fn the_resting_chevron_agrees_with_the_atom_and_the_spec() {
 
 #[test]
 fn the_hover_chevron_deliberately_differs_from_the_atoms_icon_channel() {
-    // §3.4 says `text.strong` on hover; the input atom's icon goes
+    // Â§3.4 says `text.strong` on hover; the input atom's icon goes
     // `text_primary`. The override is the point, so the difference is
     // asserted rather than allowed to drift back into agreement.
     let palette = Palette::dark();
@@ -336,7 +336,7 @@ fn the_hover_chevron_deliberately_differs_from_the_atoms_icon_channel() {
 }
 
 // ---------------------------------------------------------------------------
-// 4 — the ComboBox widget wrapper (§3.4, UIF-ATOM-004)
+// 4 â€” the ComboBox widget wrapper (Â§3.4, UIF-ATOM-004)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -481,9 +481,9 @@ fn test_combobox_element_conversion_and_flyout_mounting() {
 // The rewrite at `a74e143` turned the ComboBox into a custom-drawn widget and,
 // in doing so, dropped the anonymous `container` record the control used to put
 // on the operation stream. Measured against the demo's own probe: 3 ComboBox
-// instances, `anonymous 1823` → `1820` at the root manifest and `963` → `960`
+// instances, `anonymous 1823` â†’ `1820` at the root manifest and `963` â†’ `960`
 // in the atoms pane, with the named count unchanged at 183 / 105. The control
-// drew a full trigger and no host could see it. `Select` was worse — no
+// drew a full trigger and no host could see it. `Select` was worse â€” no
 // `operate` at all, so `RecordCandidates` came back empty.
 //
 // These tests pin the restored publish and, just as importantly, pin that it is
@@ -495,9 +495,9 @@ fn test_combobox_element_conversion_and_flyout_mounting() {
 /// A trigger stand-in whose own box is **inset** from the wrapper's.
 ///
 /// The whole point of the inset is that the wrapper's box and the trigger's box
-/// are then different rectangles. Against the real trigger they coincide — the
+/// are then different rectangles. Against the real trigger they coincide â€” the
 /// wrapper delegates `layout` to the button, so both publish at the same
-/// bounds — and a duplicate at one rectangle is indistinguishable from the
+/// bounds â€” and a duplicate at one rectangle is indistinguishable from the
 /// original. Give the two boxes different geometry and "did the wrapper add one
 /// record or two?" becomes a count anyone can read.
 struct InsetTrigger {
@@ -558,7 +558,7 @@ fn at(rect: Rectangle, cands: &[crate::test_helpers::Candidate]) -> usize {
     cands.iter().filter(|c| c.bounds == rect).count()
 }
 
-/// The wrapper publishes its own box — exactly one, ahead of the trigger.
+/// The wrapper publishes its own box â€” exactly one, ahead of the trigger.
 ///
 /// Built over [`InsetTrigger`] so the wrapper's rectangle and the trigger's are
 /// not the same box. The whole tree must publish exactly two records: the
@@ -606,7 +606,7 @@ fn the_wrapper_publishes_exactly_one_box_of_its_own() {
     assert_eq!(
         at(own_box, &cands),
         1,
-        "exactly one record at the wrapper's own box — a second one is the \
+        "exactly one record at the wrapper's own box â€” a second one is the \
          double-publish this test exists to catch"
     );
 }
@@ -614,7 +614,7 @@ fn the_wrapper_publishes_exactly_one_box_of_its_own() {
 /// A live ComboBox publishes its own box, at the trigger's real bounds.
 ///
 /// The wrapper's record and the iced `button`'s own record are the same
-/// rectangle because the wrapper delegates `layout` to the button — that is the
+/// rectangle because the wrapper delegates `layout` to the button â€” that is the
 /// single-source guarantee, not an accident of the fixture.
 #[test]
 fn the_live_combobox_publishes_its_own_box_at_the_trigger_bounds() {
@@ -643,6 +643,20 @@ fn the_live_combobox_publishes_its_own_box_at_the_trigger_bounds() {
         ComboRung::Standard.height(),
         "the published box is the standard control rung"
     );
+    // The discriminating count. Three records sit at the trigger's box: the
+    // wrapper's own, iced's `button`, and the inner `container` â€” the latter
+    // two because the wrapper delegates `layout` to the button and the
+    // button's padding is `ZERO`, so all three rectangles coincide. Two means
+    // the wrapper published nothing of its own. The `cands[0] == cands[1]`
+    // check above cannot see that: with the wrapper's record gone, `cands[0]`
+    // and `cands[1]` become the button and the inner container, and they are
+    // still the same rectangle.
+    assert_eq!(
+        at(cands[0].bounds, &cands),
+        3,
+        "the wrapper must contribute one of the three records at the trigger's \
+         box; two means it published nothing of its own"
+    );
     assert!(
         cands[0].id.is_none(),
         "the control publishes under no Id: naming is a host concern, and a name \
@@ -653,7 +667,7 @@ fn the_live_combobox_publishes_its_own_box_at_the_trigger_bounds() {
 /// A **disabled** ComboBox still publishes its own box.
 ///
 /// The fires-in-every-state rule. A disabled trigger carries no `on_press`, so
-/// iced never registers a focus target for it — but the box is still where the
+/// iced never registers a focus target for it â€” but the box is still where the
 /// control is, and a host that cannot see a disabled control cannot grey out a
 /// menu item pointing at it or report where it sits.
 #[test]
@@ -675,6 +689,16 @@ fn the_disabled_combobox_still_publishes_its_own_box() {
         cands[0].bounds.height,
         ComboRung::Standard.height(),
         "a disabled trigger publishes the same box it draws"
+    );
+    // Same absolute count as the live control: the box is published in every
+    // state, disabled included. A disabled trigger carries no `on_press`, so
+    // nothing else in the tree is obliged to put a record at that rectangle on
+    // the wrapper's behalf â€” drop the wrapper's publish and this reads two.
+    assert_eq!(
+        at(cands[0].bounds, &cands),
+        3,
+        "a disabled ComboBox still contributes its own box: three records at \
+         the trigger rectangle, same as the live control"
     );
     assert!(
         !cands
@@ -722,6 +746,22 @@ fn opening_the_flyout_publishes_the_flyout_once_and_not_the_trigger_twice() {
     };
 
     let trigger_box = closed[0].bounds;
+    // Absolute on both sides, not merely equal. A purely relative check passes
+    // when the wrapper publishes nothing at all, because closed and open are
+    // then short by the very same record and still match each other. Pinning
+    // three at the trigger box in each state is what makes "the flyout added a
+    // box" and "the wrapper never published one" two different failures.
+    assert_eq!(
+        at(trigger_box, &closed),
+        3,
+        "closed: the wrapper's own box plus iced's button and inner container"
+    );
+    assert_eq!(
+        at(trigger_box, &open),
+        3,
+        "open: the wrapper still contributes its own box, and opening the \
+         flyout adds nothing at the trigger's rectangle"
+    );
     assert_eq!(
         at(trigger_box, &closed),
         at(trigger_box, &open),
@@ -731,7 +771,7 @@ fn opening_the_flyout_publishes_the_flyout_once_and_not_the_trigger_twice() {
     // The flyout sits flush against the trigger's bottom edge, so its `y`
     // *equals* the trigger's height rather than exceeding it. Probing with
     // `>` lands on the `scrollable` inside the flyout instead, which the
-    // flyout's own `container` also covers — two records at one rectangle,
+    // flyout's own `container` also covers â€” two records at one rectangle,
     // and the count reads as a double-publish that never happened.
     let flyout = open
         .iter()
@@ -756,7 +796,7 @@ fn opening_the_flyout_publishes_the_flyout_once_and_not_the_trigger_twice() {
 /// is an empty method, so the probe came back with `count=0`: no `container`,
 /// no `text`, no `focusable`. A control that published nothing through every
 /// hook is a strictly worse case than the ComboBox's missing own-box record, and
-/// it is fixed the same way — same [`trigger_box`], same single source, and
+/// it is fixed the same way â€” same [`trigger_box`], same single source, and
 /// `Select::draw` now paints from that same call.
 #[test]
 fn the_select_publishes_its_own_box() {
