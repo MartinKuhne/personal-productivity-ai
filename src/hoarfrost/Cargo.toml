@@ -25,7 +25,7 @@ path = "bin/gallery.rs"
 # through the real paint path in its own tests.
 #
 # The flag gates *nothing* extra. Every crate the harness needs —
-# `iced_core`, `iced_runtime`, `iced_renderer`, `iced_futures` — is
+# `iced_runtime`, `iced_renderer`, `iced_futures` — is
 # already compiled as part of `iced`, so turning this on adds no crate,
 # no feature and no code to a build that does not ask for it. It exists
 # only to keep the harness out of the public surface of a consumer that
@@ -59,7 +59,7 @@ iced = { version = "0.14.0", features = [
     "advanced",
 ] }
 
-# The four crates `iced` is assembled from, named directly because
+# The three crates `iced` is assembled from, named directly because
 # `test_helpers` needs three things `iced`'s public surface does not
 # reach, and `iced::advanced` is not one of them:
 #
@@ -72,14 +72,13 @@ iced = { version = "0.14.0", features = [
 #   * `iced_futures::futures::executor::block_on` — building that
 #     renderer is async, and `iced` exposes no executor.
 #
-# These are **non-optional on purpose**. All four are already in this
+# These are **non-optional on purpose**. All three are already in this
 # crate's required graph as `iced`'s own dependencies, so optionality
 # would buy zero bytes and create one trap: a `#[cfg(test)]` module cannot
 # use an *optional* dependency under a plain `cargo test`, because the
 # feature selecting it is off. Naming them plainly makes the harness build
 # under `test`, under `test-helpers`, and under both at once, and leaves
 # `cargo tree -e normal` exactly as wide as it was.
-iced_core = "0.14.0"
 iced_futures = "0.14.0"
 iced_renderer = "0.14.0"
 iced_runtime = "0.14.0"

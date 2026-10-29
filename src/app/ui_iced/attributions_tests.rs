@@ -338,7 +338,7 @@ fn the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows() {
     drop(ui);
 
     let rows = vm.count() as f32;
-    assert_eq!(rows, 58.0, "fixture: the shipped catalog is 58 crates");
+    assert_eq!(rows, 61.0, "fixture: the shipped catalog is 61 crates");
     let row_h = content.height / rows;
     let uncapped = 330.0;
 

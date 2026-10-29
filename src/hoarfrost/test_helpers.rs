@@ -141,11 +141,11 @@ use iced::mouse;
 use iced::widget::column;
 use iced::widget::text;
 
-use iced_core::Background;
-use iced_core::Border;
-use iced_core::Transformation;
-use iced_core::clipboard::Null;
-use iced_core::widget::Id;
+use iced::Background;
+use iced::Border;
+use iced::Transformation;
+use iced::advanced::clipboard::Null;
+use iced::advanced::widget::Id;
 use iced_futures::futures::executor::block_on;
 use iced_renderer::Renderer as HeadlessRenderer;
 use iced_runtime::UserInterface;

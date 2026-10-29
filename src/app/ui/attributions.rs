@@ -123,7 +123,22 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/iced-rs/iced",
     },
     Attribution {
+        name: "iced_futures",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
         name: "iced_graphics",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_renderer",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_runtime",
         authors: "Héctor Ramón Jiménez, iced contributors",
         github_url: "https://github.com/iced-rs/iced",
     },
