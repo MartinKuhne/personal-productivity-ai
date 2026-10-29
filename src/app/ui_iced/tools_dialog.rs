@@ -93,7 +93,10 @@ use iced::widget::{Column, Row, Space, container, mouse_area, scrollable, table,
 use iced::{Alignment, Background, Element, Length, Size};
 
 use hoarfrost::composite::list_tile;
-use hoarfrost::surface::modal::{ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery};
+use hoarfrost::surface::modal::{
+    AxisPolicy, Cap, Desired, ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery,
+    TOOLS_HEIGHT_MIN,
+};
 use hoarfrost::token::{shape, space, typography};
 use hoarfrost::widget::badge;
 use hoarfrost::widget::badge_model::{BadgeModel, BadgeTone, StatusIcon};
@@ -113,19 +116,50 @@ pub use crate::agent::tools::registry::{
     InternalToolGroup, ToolErrorKind, ToolGroupError, ToolGroupId, ToolGroupKind, ToolGroupState,
 };
 
-/// §4.6.2 — the Tools & Integrations card's sizing policy: 720px wide
-/// clamped to the viewport gutter, content-fit at least
-/// [`TOOLS_HEIGHT_MIN`](hoarfrost::surface::modal::TOOLS_HEIGHT_MIN) and
-/// never more than 80% of the viewport.
+/// The fraction of the viewport the Tools card fills on **both** axes
+/// (defect #4 — "use 80% of the viewport").
+///
+/// Named rather than inlined ([RUST-021]): the one ratio drives the width
+/// policy, the height policy, and every test that pins the measured card.
+pub const VIEWPORT_FILL: f32 = 0.8;
+
+/// The Tools card's sizing policy: [`VIEWPORT_FILL`] of the window on
+/// **both** axes (defect #4 — "use 80% of the viewport").
 ///
 /// Held as the policy object rather than a set of numbers, so the card
-/// states *which* modal it is and the framework does the clamping. This
-/// replaced the app's own `DEFAULT_WIDTH` / `MIN_HEIGHT = 200` /
-/// `MAX_HEIGHT_HARD_CAP = 1200` triple: the width was already the spec's,
-/// but the height policy was the app's invention — a 200px floor the spec
-/// does not have and a 1200px hard cap that let the card grow past any
-/// sane reading of §4.6.2 on a large monitor.
-pub const TOOLS_SIZING: ModalSizing = ModalSizing::tools_and_integrations();
+/// states what it wants and the framework does the clamping.
+///
+/// **This is an app-side override of §4.6.2, not a restatement of it.**
+/// The framework's [`ModalSizing::tools_and_integrations`] still describes
+/// the spec table verbatim — 720px wide, content-fit tall — and the
+/// owner's decision on defect #4 replaces that with a viewport-driven box.
+/// The override is assembled here from the framework's own
+/// [`AxisPolicy`] parts rather than by editing the spec table in
+/// `hoarfrost`, so the framework keeps saying what the spec says while
+/// this card says what its owner asked for.
+///
+/// * **Width** — 80% of the window, no floor: the retired 720px figure
+///   was the card's *target*, never a minimum, and a floor would let it
+///   silently win at ordinary window sizes.
+/// * **Height** — 80% of the window, floored at
+///   [`TOOLS_HEIGHT_MIN`]. The floor still means something: below a
+///   ~400px-tall window 80% is less than 320, and the floor holds the
+///   card at the spec's minimum until the gutter takes over.
+/// * **Both axes** — capped at the same ratio and then clamped by the
+///   framework's `VIEWPORT_GUTTER`, which is applied last and always
+///   wins, so 80% of a tiny viewport cannot overflow or clip.
+pub const TOOLS_SIZING: ModalSizing = ModalSizing::new(
+    AxisPolicy {
+        desired: Desired::Viewport(VIEWPORT_FILL),
+        min: 0.0,
+        max: Cap::Viewport(VIEWPORT_FILL),
+    },
+    AxisPolicy {
+        desired: Desired::Viewport(VIEWPORT_FILL),
+        min: TOOLS_HEIGHT_MIN,
+        max: Cap::Viewport(VIEWPORT_FILL),
+    },
+);
 
 /// Stable id of the Tools card box itself, so a layout test can address
 /// the rendered card rather than only its contents (AGENTS §5).
@@ -519,19 +553,25 @@ pub fn row_label_color() -> iced::Color {
     Palette::fastmd_dark().text_strong
 }
 
-/// The Tools card's **outer** width for a viewport width (§4.6.2).
+/// The Tools card's **outer** width for a viewport width.
 ///
-/// 720px on any viewport wide enough to hold it, clamped to
-/// `viewport.width - VIEWPORT_GUTTER` (`space::XXL`, 32px) below that.
-/// The card's padding is *inside* this figure — see
+/// [`VIEWPORT_FILL`] — 80% — of the window (defect #4), clamped to
+/// `viewport.width - VIEWPORT_GUTTER` (`space::XXL`, 32px) on a window
+/// too narrow to hold it. The card's padding is *inside* this figure — see
 /// [`crate::ui_iced::overlay::modal_card`].
 #[must_use]
 pub fn tools_card_width(viewport_width: f32) -> f32 {
     TOOLS_SIZING.width.resolve(viewport_width, 0.0)
 }
 
-/// The content height the card's table region asks the policy for, for
-/// `row_count` groups plus a header row and an optional error banner.
+/// The natural height of the card's table region for `row_count` groups
+/// plus a header row and an optional error banner.
+///
+/// Since defect #4 the card is sized by the viewport, **not** by this
+/// figure. What remains is the content's own extent: the room the list
+/// *would* need if it were allowed to lay every row out at rest, which is
+/// how the tests say "the list got more space than its content needs"
+/// without restating the arithmetic.
 ///
 /// Every figure is a framework constant rather than a card-local number:
 /// the row height is [`list_tile`]'s single-line tile — the same
@@ -553,29 +593,28 @@ pub const fn tools_content_height(row_count: usize, shows_error: bool) -> f32 {
         + banner
 }
 
-/// The Tools card's **outer** height for a viewport and row count.
+/// The Tools card's **outer** height for a viewport (defect #4).
 ///
-/// The policy is content-fit with a
-/// [`TOOLS_HEIGHT_MIN`](hoarfrost::surface::modal::TOOLS_HEIGHT_MIN) floor and
-/// an 80%-of-viewport cap, the gutter
-/// clamp applied last by the framework. This is the change that retired
-/// the app's `MIN_HEIGHT = 200` / `MAX_HEIGHT_HARD_CAP = 1200`: the floor
-/// is now the spec's 320 and the ceiling is the viewport's own 80%, so
-/// the card can no longer outgrow the screen it is on.
+/// [`VIEWPORT_FILL`] of the window, floored at [`TOOLS_HEIGHT_MIN`] and
+/// clamped last by the framework's `VIEWPORT_GUTTER` so a tiny window can
+/// never be overflowed. The card no longer fits its content: the row
+/// count is irrelevant to the box, which is the whole point of the
+/// decision — a two-group list and a forty-group list get the same card,
+/// and the list scrolls inside it.
 #[must_use]
-pub fn tools_card_height(viewport: Size, row_count: usize, shows_error: bool) -> f32 {
-    TOOLS_SIZING.height.resolve(
-        viewport.height,
-        tools_content_height(row_count, shows_error),
-    )
+pub fn tools_card_height(viewport: Size) -> f32 {
+    // `Desired::Viewport` ignores the content extent; `0.0` is passed so
+    // the policy's floor and gutter are the only things that can move it.
+    TOOLS_SIZING.height.resolve(viewport.height, 0.0)
 }
 
-/// The Tools card's outer size for a viewport and row count (§4.6.2).
+/// The Tools card's outer size for a viewport (defect #4: [`VIEWPORT_FILL`]
+/// on both axes).
 #[must_use]
-pub fn tools_card_size(viewport: Size, row_count: usize, shows_error: bool) -> Size {
+pub fn tools_card_size(viewport: Size) -> Size {
     Size::new(
         tools_card_width(viewport.width),
-        tools_card_height(viewport, row_count, shows_error),
+        tools_card_height(viewport),
     )
 }
 
@@ -737,10 +776,12 @@ impl ToolsDialogViewModel {
         Some(start_auth_command(row.mcp_server().unwrap_or_default()))
     }
 
-    /// The card's outer size for the current row count (§4.6.2).
+    /// The card's outer size for a viewport — the window's
+    /// [`VIEWPORT_FILL`], independent of how many rows this snapshot
+    /// holds (defect #4).
     #[must_use]
     pub fn size_for(&self, viewport: Size) -> Size {
-        tools_card_size(viewport, self.count(), self.shows_error())
+        tools_card_size(viewport)
     }
 
     /// Renders this snapshot as the tools card ([`tools_dialog_card`]).
@@ -750,10 +791,10 @@ impl ToolsDialogViewModel {
     }
 }
 
-/// Renders the tools card at its §4.6.2 size.
+/// Renders the tools card at [`VIEWPORT_FILL`] of the viewport.
 ///
 /// ```text
-/// ┌─ Tools card · ModalSizing::tools_and_integrations() · radius 8 ──┐
+/// ┌─ Tools card · 80% of the viewport · radius 8 ───────────────────┐
 /// │ Tools                                                        × │
 /// │ 9 groups                                                       │
 /// │ ─────────────────────────────────────────────────────────────── │
@@ -802,6 +843,10 @@ pub fn tools_dialog_card(
         .height(Length::Fill)
         .width(Length::Fill);
 
+    // The body spans the card's inner width rather than shrinking to its
+    // widest band, so the list and the footer ride the card's own edges
+    // instead of leaving the old 720px block centred inside a bigger box
+    // (defect #4).
     let body = Column::with_children(vec![
         title_band(),
         rung(
@@ -816,6 +861,7 @@ pub fn tools_dialog_card(
         modal_divider(frame).into(),
         footer(),
     ])
+    .width(Length::Fill)
     .spacing(space::SM);
 
     modal_card(
@@ -823,11 +869,7 @@ pub fn tools_dialog_card(
         frame,
         TOOLS_CARD_ID,
         Length::Fixed(tools_card_width(viewport.width)),
-        Length::Fixed(tools_card_height(
-            viewport,
-            view_model.count(),
-            view_model.shows_error(),
-        )),
+        Length::Fixed(tools_card_height(viewport)),
     )
     .into()
 }

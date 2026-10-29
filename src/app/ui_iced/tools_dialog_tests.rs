@@ -6,16 +6,18 @@
 //! ([RUST-006]); the only app-level read is one `FastMdApp::empty_state`
 //! smoke test.
 //!
-//! The `tools_card_*` cases pin the §4.6.2 sizing policy across the
-//! row-count and viewport range the dialog can face, and the `modal_error`
-//! cases pin `UIF-MOD-003`'s auth-failure banner and its `Recovery`.
+//! The `tools_card_*` / defect #4 cases pin the card's viewport-fill
+//! policy by measurement — the real mount laid out headless at
+//! 1200x800, 1600x1000 and a stubby window, plus the inner list and
+//! title band spanning the card — and the `modal_error` cases pin
+//! `UIF-MOD-003`'s auth-failure banner and its `Recovery`.
 
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use hoarfrost::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
 use hoarfrost::widget::badge_model::BadgeKind;
-use iced::Size;
+use iced::{Rectangle, Size};
 use iced_test::selector::Candidate;
 
 /// An internal family group with two tools.
@@ -775,52 +777,261 @@ fn card_and_table_build_for_a_populated_and_an_empty_model() {
     assert!(std::mem::size_of_val(&tools_table(empty.rows())) > 0);
 }
 
-// --- §4.6.2 sizing ---------------------------------------------------------
+// --- §4.6.2 sizing / defect #4: 80% of the viewport -----------------------
 //
-// Each case below replaces one `compute_dialog_size` pin. The reason each
-// pin moved is stated on the case, because the policy changed on both
-// ends: the app's `MIN_HEIGHT = 200` became the spec's
-// `TOOLS_HEIGHT_MIN = 320`, and its `MAX_HEIGHT_HARD_CAP = 1200` became
-// the framework's 80%-of-viewport cap with the `VIEWPORT_GUTTER` clamp
-// applied last.
+// The card used to be a 720px block with a content-fit height, which left
+// most of a 1200px window empty — defect #4, "the Tools dialog doesn't
+// use the real estate". The owner's decision is *"#4 use 80% of the
+// viewport"*, so the card is now [`VIEWPORT_FILL`] of the window on both
+// axes. Every measured case below lays the **real mount** out headless
+// through [`tools_modal`] — the same element `view::overlay_element`
+// stacks — and asserts the card's own bounds, so the policy is pinned by
+// geometry rather than by reading a number back out of the policy object.
 
 /// A roomy viewport, so the unclamped branch is what is being measured.
 const ROOMY: Size = Size::new(1920.0, 1080.0);
 
-/// The width is the framework's `TOOLS_WIDTH` and no longer the app's
-/// `DEFAULT_WIDTH` — the two agreed at 720, so the value is unchanged and
-/// only the owner moved.
-#[test]
-fn card_width_is_the_frameworks_720_until_the_gutter_clamps() {
-    assert_eq!(tools_card_width(1920.0), TOOLS_WIDTH);
-    assert_eq!(TOOLS_WIDTH, 720.0);
-    assert_eq!(tools_card_width(752.0), TOOLS_WIDTH);
-    assert_eq!(tools_card_width(700.0), 700.0 - VIEWPORT_GUTTER);
+/// Lays the real modal mount out headless in a window of `viewport` and
+/// returns the measured bounds of the widget registered under `id`.
+fn mounted_bounds(
+    id: &'static str,
+    view_model: &ToolsDialogViewModel,
+    viewport: Size,
+) -> Rectangle {
+    let mut ui = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        viewport,
+        tools_modal(view_model, viewport),
+    );
+    let bounds = ui
+        .find(iced::widget::Id::from(id))
+        .unwrap_or_else(|err| panic!("widget {id:?} should be reachable: {err:?}"))
+        .bounds();
+    drop(ui);
+    bounds
 }
 
-/// Seven groups on a 1080p screen: the content wants 301px and the
-/// policy's **floor** lifts it to 320.
-///
-/// This is where the old `MIN_HEIGHT = 200` pin moved. The retired rule
-/// produced 252 and called it a fit; the framework's floor is 320, so the
-/// card is 68px taller than the old rule asked for and 320 rather than
-/// the old test's "≥ 250". The floor is the spec's, not the app's.
+/// The measured card box, as mounted and centred.
+fn mounted_card_bounds(view_model: &ToolsDialogViewModel, viewport: Size) -> Rectangle {
+    mounted_bounds(TOOLS_CARD_ID, view_model, viewport)
+}
+
+/// The measured scrollable group list inside the mounted card.
+fn mounted_list_bounds(view_model: &ToolsDialogViewModel, viewport: Size) -> Rectangle {
+    mounted_bounds(TOOLS_LIST_ID, view_model, viewport)
+}
+
+/// A view model over `n` synthetic groups.
+fn model_with_rows(n: usize) -> ToolsDialogViewModel {
+    ToolsDialogViewModel::with_rows(rows_n(n))
+}
+
+/// The width a card of `card_width` leaves its content, once the frame's
+/// padding is spent.
+fn inner_width(card_width: f32) -> f32 {
+    card_width - 2.0 * modal_frame().content_padding
+}
+
+/// The ratio is a named policy constant driving **both** axes, not a
+/// literal sprinkled through the card.
 #[test]
-fn few_rows_on_a_large_screen_sit_on_the_policy_floor() {
+fn the_fill_ratio_is_a_named_constant_on_both_axes() {
+    assert_eq!(
+        VIEWPORT_FILL, 0.8,
+        "defect #4: the card fills 80% of the viewport, and the ratio is named, not inlined"
+    );
+    assert_eq!(
+        TOOLS_SIZING.width.desired,
+        Desired::Viewport(VIEWPORT_FILL),
+        "the width must be viewport-driven, not the retired fixed 720"
+    );
+    assert_eq!(
+        TOOLS_SIZING.height.desired,
+        Desired::Viewport(VIEWPORT_FILL),
+        "the height must be viewport-driven, not content-fit"
+    );
+}
+
+/// The width is 80% of the window until the framework's gutter — applied
+/// last, and the one thing that outranks the floor — has to take over.
+#[test]
+fn card_width_is_eighty_percent_until_the_gutter_clamps() {
+    assert_eq!(tools_card_width(1200.0), 960.0);
+    assert_eq!(tools_card_width(1600.0), 1280.0);
+    assert_eq!(tools_card_width(1920.0), 1536.0);
+    assert_ne!(
+        tools_card_width(1920.0),
+        TOOLS_WIDTH,
+        "defect #4: the retired 720px block must not come back"
+    );
+    // Below 160px wide, 80% is wider than `viewport - VIEWPORT_GUTTER`.
+    assert_eq!(tools_card_width(120.0), 120.0 - VIEWPORT_GUTTER);
+}
+
+/// A 1200x800 window gets a 960x640 card, centred.
+#[test]
+fn a_1200x800_viewport_measures_a_960x640_card() {
+    let viewport = Size::new(1200.0, 800.0);
+    let bounds = mounted_card_bounds(&model_with_rows(9), viewport);
+
+    assert_eq!(
+        bounds.size(),
+        Size::new(960.0, 640.0),
+        "defect #4: 80% of a 1200x800 viewport is 960x640"
+    );
+    assert_eq!(bounds.x, 120.0, "the card must stay centred horizontally");
+    assert_eq!(bounds.y, 80.0, "the card must stay centred vertically");
+}
+
+/// A 1600x1000 window gets a 1280x800 card, centred.
+#[test]
+fn a_1600x1000_viewport_measures_a_1280x800_card() {
+    let viewport = Size::new(1600.0, 1000.0);
+    let bounds = mounted_card_bounds(&model_with_rows(9), viewport);
+
+    assert_eq!(
+        bounds.size(),
+        Size::new(1280.0, 800.0),
+        "defect #4: 80% of a 1600x1000 viewport is 1280x800"
+    );
+    assert_eq!(bounds.x, 160.0, "the card must stay centred horizontally");
+    assert_eq!(bounds.y, 100.0, "the card must stay centred vertically");
+}
+
+/// The list spans the card's inner width instead of sitting inside it as
+/// the old 720px block — the second half of "use the real estate".
+#[test]
+fn the_group_list_spans_the_card_instead_of_a_720_block_inside_it() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(9);
+    let card = mounted_card_bounds(&view_model, viewport);
+    let list = mounted_list_bounds(&view_model, viewport);
+
+    assert_eq!(
+        list.width,
+        inner_width(card.width),
+        "defect #4: the list must span the card's inner width, not a stale fixed block \
+         (list={:.1}, inner={:.1})",
+        list.width,
+        inner_width(card.width)
+    );
+    assert!(
+        list.width > inner_width(TOOLS_WIDTH),
+        "defect #4: the list must be wider than the retired 720px card ever gave it \
+         (list={:.1}, retired inner={:.1})",
+        list.width,
+        inner_width(TOOLS_WIDTH)
+    );
+}
+
+/// The title band rides the card's trailing edge as well: the `×` sits at
+/// the card's inner right, and that edge is further right than the retired
+/// 720px block ever reached — otherwise the band would still be parked in
+/// the middle of the card's new real estate.
+#[test]
+fn the_title_band_rides_the_cards_trailing_edge() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(9);
+    let card = mounted_card_bounds(&view_model, viewport);
+    let close = mounted_bounds(TOOLS_CLOSE_BUTTON_ID, &view_model, viewport);
+    let inner_right = card.x + card.width - modal_frame().content_padding;
+    // Where the `×` would have landed on the retired 720px card, centred
+    // in this same window.
+    let retired_inner_right =
+        (viewport.width - TOOLS_WIDTH) / 2.0 + TOOLS_WIDTH - modal_frame().content_padding;
+
+    assert_eq!(
+        close.x + close.width,
+        inner_right,
+        "defect #4: the `×` must sit at the card's inner right edge (close={:.1}, \
+         inner right={:.1})",
+        close.x + close.width,
+        inner_right
+    );
+    assert!(
+        close.x + close.width > retired_inner_right,
+        "defect #4: the `×` must ride the new card edge, not the retired 720px one \
+         (close right={:.1}, retired inner right={:.1})",
+        close.x + close.width,
+        retired_inner_right
+    );
+}
+
+/// A short list expands into the vertical slack the card gained instead of
+/// collapsing back to the height its two rows need.
+#[test]
+fn the_group_list_expands_into_the_vertical_slack_it_was_given() {
+    let viewport = Size::new(1200.0, 800.0);
+    let view_model = model_with_rows(2);
+    let list = mounted_list_bounds(&view_model, viewport);
+    let content = tools_content_height(2, false);
+
+    assert!(
+        list.height > content,
+        "defect #4: with two groups the list must take the space the card gained rather \
+         than shrink to its content (list={:.1}, content={:.1})",
+        list.height,
+        content
+    );
+}
+
+/// 80% of a tiny viewport must not overflow or clip: the gutter clamp is
+/// applied after the floor, so the window always wins.
+#[test]
+fn eighty_percent_of_a_tiny_viewport_still_fits_the_window() {
+    let viewport = Size::new(200.0, 120.0);
+    let bounds = mounted_card_bounds(&ToolsDialogViewModel::empty(), viewport);
+
+    assert!(
+        bounds.width <= viewport.width - VIEWPORT_GUTTER,
+        "the gutter must keep the card inside a tiny window (width={:.1})",
+        bounds.width
+    );
+    assert!(
+        bounds.height <= viewport.height - VIEWPORT_GUTTER,
+        "the height floor must never push the card past the window edge (height={:.1})",
+        bounds.height
+    );
+    assert!(
+        bounds.x >= 0.0 && bounds.y >= 0.0,
+        "the card must not be placed off-screen ({:.1}, {:.1})",
+        bounds.x,
+        bounds.y
+    );
+    assert!(
+        bounds.x + bounds.width <= viewport.width && bounds.y + bounds.height <= viewport.height,
+        "the card must not extend past the window ({:.1}x{:.1} at {:.1},{:.1})",
+        bounds.width,
+        bounds.height,
+        bounds.x,
+        bounds.y
+    );
+}
+
+/// Seven groups on a 1080p screen: the content only wants 301px, but the
+/// card is 80% of the screen (864px) and the list takes the slack.
+///
+/// This is where the old "few rows sit on the floor" pin moved. The card
+/// no longer shrinks to its content: defect #4 made the viewport the
+/// authority, so the same 864px box is handed to two groups and to
+/// twenty.
+#[test]
+fn few_rows_still_get_the_whole_viewport_fill() {
     let viewport = Size::new(1920.0, 1080.0);
     let content = tools_content_height(7, false);
     assert_eq!(content, 301.0, "24 + 20 + 1 + 32*8");
 
-    let height = tools_card_height(viewport, 7, false);
-    assert_eq!(height, TOOLS_HEIGHT_MIN);
+    let height = tools_card_height(viewport);
+    assert_eq!(height, 1080.0 * VIEWPORT_FILL);
     assert!(
-        height > 252.0,
-        "the retired rule produced 252; the framework floor must be taller"
+        height > content,
+        "the card must be taller than its content so the list owns the slack \
+         (card={height}, content={content})"
     );
 }
 
 /// Thirty groups on a 1080p screen: the content wants 1037px and the
-/// **80%-of-viewport cap** pulls it back to 864, so the list scrolls.
+/// **80%-of-viewport cap** holds the card at 864, so the list scrolls.
 ///
 /// The old pin said 804 fits inside a 918 cap (0.85 of the viewport).
 /// The framework caps at 0.80, so the card is 40px shorter and the
@@ -831,17 +1042,17 @@ fn many_rows_are_capped_at_eighty_percent_of_the_viewport() {
     let viewport = Size::new(1920.0, 1080.0);
     assert_eq!(tools_content_height(30, false), 1037.0);
 
-    let height = tools_card_height(viewport, 30, false);
+    let height = tools_card_height(viewport);
     assert_eq!(height, 1080.0 * 0.8);
     assert!(height < 918.0, "the retired 0.85 cap must not return");
 }
 
-/// A small screen with a hundred groups: the 320 floor and the 80% cap
+/// A small screen with a hundred groups: the 320 floor and the 80% fill
 /// agree at 320, and the gutter leaves room for it.
 #[test]
 fn a_small_screen_still_holds_the_floor() {
     let viewport = Size::new(800.0, 400.0);
-    let height = tools_card_height(viewport, 100, false);
+    let height = tools_card_height(viewport);
     assert_eq!(height, TOOLS_HEIGHT_MIN);
     assert!(height < viewport.height - VIEWPORT_GUTTER);
 }
@@ -855,7 +1066,7 @@ fn a_small_screen_still_holds_the_floor() {
 #[test]
 fn the_gutter_beats_the_floor_on_a_stubby_viewport() {
     let viewport = Size::new(800.0, 100.0);
-    let height = tools_card_height(viewport, 0, false);
+    let height = tools_card_height(viewport);
     assert_eq!(height, 100.0 - VIEWPORT_GUTTER);
     assert!(
         height < TOOLS_HEIGHT_MIN,
@@ -874,8 +1085,8 @@ fn the_gutter_beats_the_floor_on_a_stubby_viewport() {
 #[test]
 fn a_giant_viewport_caps_at_the_viewport_not_a_hard_cap() {
     let viewport = Size::new(3840.0, 2160.0);
-    let height = tools_card_height(viewport, 500, false);
-    assert_eq!(height, 2160.0 * 0.8);
+    let height = tools_card_height(viewport);
+    assert_eq!(height, 2160.0 * VIEWPORT_FILL);
     assert_ne!(height, 1200.0, "the retired hard cap must not return");
 }
 
@@ -893,21 +1104,25 @@ fn the_error_banner_band_is_reserved_in_the_height() {
     assert_eq!(failing - clean, 20.0 + 8.0, "BODY line + space.SM");
 }
 
-/// `size_for` is the policy applied to this snapshot's own row count and
-/// error state, not a fixed figure.
+/// `size_for` is the viewport fill applied to the window it is handed —
+/// since defect #4 the row count no longer moves the card.
 #[test]
-fn view_model_size_for_uses_its_own_row_count_and_error_state() {
-    let view_model = ToolsDialogViewModel::with_rows(vec![row_from_group(
+fn view_model_size_for_is_the_viewport_fill_not_the_row_count() {
+    let one = ToolsDialogViewModel::with_rows(vec![row_from_group(
         &internal_group(InternalToolGroup::Trello),
         McpAuthFacts::default(),
         &name_len,
     )]);
-    let viewport = Size::new(1920.0, 1080.0);
+    let many = model_with_rows(40);
+    let viewport = Size::new(1200.0, 800.0);
+
+    assert_eq!(one.size_for(viewport), tools_card_size(viewport));
     assert_eq!(
-        view_model.size_for(viewport),
-        tools_card_size(viewport, 1, view_model.shows_error())
+        one.size_for(viewport),
+        many.size_for(viewport),
+        "defect #4: the window sizes the card, so a longer list cannot shrink it"
     );
-    assert_eq!(view_model.size_for(viewport).width, TOOLS_WIDTH);
+    assert_eq!(one.size_for(viewport), Size::new(960.0, 640.0));
 }
 
 // --- window state transitions ------------------------------------------
