@@ -45,6 +45,7 @@ impl FastMdApp {
             orchestrator,
             layout,
             cached_tree_rows: None,
+            workspace_tree_cache: super::WorkspaceTreeCache::default(),
             persisted_ui_state,
             search: crate::ui::TreeSearch::new(),
         }
@@ -198,6 +199,7 @@ impl FastMdApp {
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,
+            workspace_tree_cache: super::WorkspaceTreeCache::default(),
             persisted_ui_state: PersistedUiState::default(),
             search: crate::ui::TreeSearch::new(),
         }

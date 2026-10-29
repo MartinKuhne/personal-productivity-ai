@@ -51,12 +51,34 @@ impl TreeNode {
     }
 }
 
+/// Persistent directory hierarchy and cursors for incremental workspace-tree
+/// additions. The UI reducer rebuilds this index only after removals or
+/// content-library changes.
+#[derive(Default)]
+pub(crate) struct WorkspaceTreeCache {
+    /// Unfiltered hierarchy; additions are inserted into this tree in place.
+    pub(crate) root: Option<Box<TreeNode>>,
+    /// Number of workspace files represented by `root`.
+    pub(crate) indexed_file_count: usize,
+    /// Number of workspace directories represented by `root`.
+    pub(crate) indexed_dir_count: usize,
+    /// Workspace removal revision represented by `root`.
+    pub(crate) reset_revision: Option<u64>,
+    /// Library names and roots represented by `root`.
+    pub(crate) library_roots: Vec<(String, PathBuf)>,
+    /// Tag filter represented by the flattened-row snapshot.
+    pub(crate) row_tag_filter: Option<String>,
+}
+
 pub struct FastMdApp {
     pub orchestrator: crate::orchestrator::AppOrchestrator,
     pub layout: PanelLayout,
     /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
     /// Invalidated when selection.tree_dirty is true.
     pub cached_tree_rows: Option<Arc<Vec<crate::ui::tree::FlatRow>>>,
+    /// Persistent tree hierarchy used to add newly discovered paths without
+    /// reconstructing all previously indexed paths.
+    pub(crate) workspace_tree_cache: WorkspaceTreeCache,
     pub persisted_ui_state: PersistedUiState,
     /// Workspace content search state (UI-050).
     pub search: crate::ui::TreeSearch,

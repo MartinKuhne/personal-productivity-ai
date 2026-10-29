@@ -245,6 +245,42 @@ fn test_directory_deleted_unknown_is_noop() {
 }
 
 #[test]
+fn test_tree_reset_revision_advances_only_for_successful_removals() {
+    let mut h = TestHarness::new();
+    let initial_revision = h.workspace.tree_reset_revision();
+
+    assert!(!h.workspace.remove_file(Path::new("missing.md")));
+    assert!(!h.workspace.remove_dir(Path::new("missing")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision);
+
+    h.workspace.add_file(PathBuf::from("note.md"));
+    assert!(h.workspace.remove_file(Path::new("note.md")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 1);
+    assert!(!h.workspace.remove_file(Path::new("note.md")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 1);
+
+    h.workspace.add_dir(PathBuf::from("docs"));
+    assert!(h.workspace.remove_dir(Path::new("docs")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 2);
+    assert!(!h.workspace.remove_dir(Path::new("docs")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 2);
+}
+
+#[test]
+fn test_tree_reset_revision_advances_once_for_a_removed_subtree() {
+    let mut h = TestHarness::new();
+    h.workspace.add_dir(PathBuf::from("/docs"));
+    h.workspace.add_dir(PathBuf::from("/docs/sub"));
+    h.workspace.add_file(PathBuf::from("/docs/sub/note.md"));
+    let initial_revision = h.workspace.tree_reset_revision();
+
+    assert!(h.workspace.remove_dir_and_descendants(Path::new("/docs")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 1);
+    assert!(!h.workspace.remove_dir_and_descendants(Path::new("/docs")));
+    assert_eq!(h.workspace.tree_reset_revision(), initial_revision + 1);
+}
+
+#[test]
 fn test_event_producers_round_trip() {
     // Producers → buses → drains: the full publication path for one
     // Added and one Deleted event per bus.

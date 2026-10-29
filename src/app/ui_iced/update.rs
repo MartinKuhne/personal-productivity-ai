@@ -445,23 +445,132 @@ fn prune_hovered_row(state: &mut AppState) {
     }
 }
 
-/// Tree-row cache transition: rebuild the flattened rows only while the tree
-/// is dirty (or nothing is cached yet), then publish them as the cache and
-/// clear the flag.
+/// Tree-row cache transition: incrementally add newly discovered paths to the
+/// persistent hierarchy, flatten it while the visible tree is dirty, and
+/// rebuild the hierarchy only after removals or library-root changes.
 ///
-/// Without this the iced build re-walks the whole workspace on **every**
-/// message: nothing else in the iced path ever fills
-/// [`FastMdApp::cached_tree_rows`], so `panels::left::tree_rows` always falls
-/// through to `build_workspace_tree`. Running the transition here also makes the
-/// rows the reducer renders the authoritative cache, which is what the
-/// context-menu and move-destination reductions read back.
+/// The workspace's file and directory vectors append on additions. Their
+/// lengths therefore act as cursors: only the suffix added since the last
+/// refresh is inserted into the cached tree. A removal revision or changed
+/// library roots invalidates that append-only assumption. Tag-filtered rows
+/// keep using the existing filtered projection so pruning behavior is
+/// unchanged.
 fn refresh_tree_cache(state: &mut AppState) {
-    if !state.app.orchestrator.selection.tree_dirty && state.app.cached_tree_rows.is_some() {
+    let selected_tag = state.app.tags().selected_tag.clone();
+    let filter_changed = state.app.workspace_tree_cache.row_tag_filter != selected_tag;
+    if !state.app.orchestrator.selection.tree_dirty
+        && state.app.cached_tree_rows.is_some()
+        && !filter_changed
+    {
         return;
     }
-    let rows = crate::ui_iced::panels::left::tree_rows(&state.app);
+
+    let library_roots: Vec<(String, PathBuf)> = state
+        .app
+        .content_libraries()
+        .iter()
+        .map(|library| (library.name.clone(), PathBuf::from(&library.root_folder)))
+        .collect();
+    let (file_count, dir_count, reset_revision) = {
+        let workspace = &state.app.orchestrator.workspace;
+        (
+            workspace.all_files.len(),
+            workspace.all_dirs.len(),
+            workspace.tree_reset_revision(),
+        )
+    };
+
+    let rebuild_index = {
+        let cache = &state.app.workspace_tree_cache;
+        cache.root.is_none()
+            || cache.reset_revision != Some(reset_revision)
+            || cache.indexed_file_count > file_count
+            || cache.indexed_dir_count > dir_count
+            || cache.library_roots != library_roots
+    };
+
+    if rebuild_index {
+        let root = crate::ui_iced::panels::left::build_workspace_tree_index(&state.app);
+        let cache = &mut state.app.workspace_tree_cache;
+        cache.root = Some(Box::new(root));
+    } else {
+        let (indexed_file_count, indexed_dir_count) = {
+            let cache = &state.app.workspace_tree_cache;
+            (cache.indexed_file_count, cache.indexed_dir_count)
+        };
+        let new_files: Vec<PathBuf> = state
+            .app
+            .orchestrator
+            .workspace
+            .all_files
+            .iter()
+            .skip(indexed_file_count)
+            .cloned()
+            .collect();
+        let new_dirs: Vec<PathBuf> = state
+            .app
+            .orchestrator
+            .workspace
+            .all_dirs
+            .iter()
+            .skip(indexed_dir_count)
+            .cloned()
+            .collect();
+        if !new_files.is_empty() || !new_dirs.is_empty() {
+            let libraries = state.app.content_libraries().to_vec();
+            let root = state
+                .app
+                .workspace_tree_cache
+                .root
+                .as_mut()
+                .expect("the tree index exists when it is not being rebuilt");
+            for path in &new_files {
+                crate::ui_iced::panels::left::insert_path_into_tree(root, &libraries, path, false);
+            }
+            for path in &new_dirs {
+                crate::ui_iced::panels::left::insert_path_into_tree(root, &libraries, path, true);
+            }
+        }
+    }
+
+    {
+        let cache = &mut state.app.workspace_tree_cache;
+        cache.indexed_file_count = file_count;
+        cache.indexed_dir_count = dir_count;
+        cache.reset_revision = Some(reset_revision);
+        cache.library_roots = library_roots;
+    }
+
+    let rows = if selected_tag.is_some() {
+        let filtered_tree = crate::ui_iced::panels::left::build_workspace_tree(&state.app);
+        flatten_workspace_tree(
+            &filtered_tree,
+            &state.app.orchestrator.selection.expanded_dirs,
+        )
+    } else {
+        let root = state
+            .app
+            .workspace_tree_cache
+            .root
+            .as_deref()
+            .expect("the tree index was built above");
+        flatten_workspace_tree(root, &state.app.orchestrator.selection.expanded_dirs)
+    };
+
     state.app.cached_tree_rows = Some(rows);
+    state.app.workspace_tree_cache.row_tag_filter = selected_tag;
     state.app.orchestrator.selection.tree_dirty = false;
+}
+
+fn flatten_workspace_tree(
+    root: &crate::ui::TreeNode,
+    expanded_dirs: &std::collections::HashSet<PathBuf>,
+) -> Arc<Vec<crate::ui::tree::FlatRow>> {
+    let mut rows = Vec::new();
+    if !root.children.is_empty() {
+        crate::ui::tree::flatten_tree(root, 0, expanded_dirs, &mut rows);
+    }
+    Arc::new(rows)
 }
 
 /// Join a batch thread that has finished and drop its cancel flag.

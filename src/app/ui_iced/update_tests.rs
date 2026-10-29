@@ -2981,6 +2981,121 @@ fn test_frame_tail_populates_the_tree_cache_and_clears_the_dirty_flag() {
 }
 
 #[test]
+fn test_frame_tail_adds_new_paths_to_the_existing_tree_index() {
+    let (mut state, _storage) = fresh_state();
+    let library_root = PathBuf::from("/virtual/library");
+    state.app.orchestrator.content_libraries = vec![ContentLibrary {
+        root_folder: library_root.to_string_lossy().into_owned(),
+        name: "Library".to_string(),
+        kind: "text".to_string(),
+        readonly: true,
+        priority: 0,
+    }];
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(library_root.clone());
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let initial_tree = state
+        .app
+        .workspace_tree_cache
+        .root
+        .as_deref()
+        .expect("the frame tail builds the tree index") as *const _;
+
+    let docs = library_root.join("docs");
+    let note = docs.join("new.md");
+    assert!(state.app.orchestrator.workspace.add_dir(docs.clone()));
+    assert!(state.app.orchestrator.workspace.add_file(note.clone()));
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(docs.clone());
+    state.app.orchestrator.selection.tree_dirty = true;
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+
+    let updated_tree = state
+        .app
+        .workspace_tree_cache
+        .root
+        .as_deref()
+        .expect("the tree index remains available") as *const _;
+    assert_eq!(
+        initial_tree, updated_tree,
+        "additions must preserve the tree index"
+    );
+    assert!(state.models.left.rows.iter().any(|row| row.path == docs));
+    assert!(state.models.left.rows.iter().any(|row| row.path == note));
+}
+
+#[test]
+fn test_frame_tail_rebuilds_the_tree_index_after_a_file_removal() {
+    let (mut state, _storage) = fresh_state();
+    let library_root = PathBuf::from("/virtual/library");
+    state.app.orchestrator.content_libraries = vec![ContentLibrary {
+        root_folder: library_root.to_string_lossy().into_owned(),
+        name: "Library".to_string(),
+        kind: "text".to_string(),
+        readonly: true,
+        priority: 0,
+    }];
+    let note = library_root.join("old.md");
+    assert!(state.app.orchestrator.workspace.add_file(note.clone()));
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(library_root.clone());
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let initial_reset_revision = state
+        .app
+        .workspace_tree_cache
+        .reset_revision
+        .expect("the frame tail records the tree index revision");
+    let initial_file_count = state.app.workspace_tree_cache.indexed_file_count;
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::FileChanged(
+            crate::bus::events::file::FileChanged::removed_one(note.clone()),
+        )),
+    );
+
+    assert_eq!(state.app.workspace_tree_cache.indexed_file_count, 0);
+    assert_ne!(
+        state.app.workspace_tree_cache.reset_revision,
+        Some(initial_reset_revision)
+    );
+    assert_eq!(initial_file_count, 1);
+    assert!(
+        state.models.left.rows.iter().all(|row| row.path != note),
+        "removed files must not remain in the flattened tree"
+    );
+}
+
+#[test]
 fn test_frame_tail_does_not_rebuild_the_tree_while_it_is_clean() {
     let (mut state, _storage) = fresh_state();
     seed_rows(&mut state, vec![file_row("/notes/a.md")]);
