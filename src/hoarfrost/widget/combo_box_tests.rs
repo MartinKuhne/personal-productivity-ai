@@ -475,6 +475,378 @@ fn test_combobox_element_conversion_and_flyout_mounting() {
     let _el_empty: Element<'_, Msg> = combo_empty.into();
 }
 
+// ---------------------------------------------------------------------------
+// Publishing the control's own box (UIF-ATOM-004)
+//
+// The rewrite at `a74e143` turned the ComboBox into a custom-drawn widget and,
+// in doing so, dropped the anonymous `container` record the control used to put
+// on the operation stream. Measured against the demo's own probe: 3 ComboBox
+// instances, `anonymous 1823` → `1820` at the root manifest and `963` → `960`
+// in the atoms pane, with the named count unchanged at 183 / 105. The control
+// drew a full trigger and no host could see it. `Select` was worse — no
+// `operate` at all, so `RecordCandidates` came back empty.
+//
+// These tests pin the restored publish and, just as importantly, pin that it is
+// exactly one record: the wrapper sits on top of an iced `button` that publishes
+// itself through the pass-through, so a careless fix lands two boxes where one
+// belongs.
+// ---------------------------------------------------------------------------
+
+/// A trigger stand-in whose own box is **inset** from the wrapper's.
+///
+/// The whole point of the inset is that the wrapper's box and the trigger's box
+/// are then different rectangles. Against the real trigger they coincide — the
+/// wrapper delegates `layout` to the button, so both publish at the same
+/// bounds — and a duplicate at one rectangle is indistinguishable from the
+/// original. Give the two boxes different geometry and "did the wrapper add one
+/// record or two?" becomes a count anyone can read.
+struct InsetTrigger {
+    inset: f32,
+    node_size: Size,
+}
+
+impl<Message> Widget<Message, iced::Theme, iced::Renderer> for InsetTrigger {
+    fn size(&self) -> Size<Length> {
+        Size::new(
+            Length::Fixed(self.node_size.width),
+            Length::Fixed(self.node_size.height),
+        )
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        _limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(self.node_size)
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+
+    fn operate(
+        &mut self,
+        _tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        operation.container(None, inset(layout.bounds(), self.inset));
+    }
+}
+
+/// `rect` shrunk by `by` on every side.
+fn inset(rect: Rectangle, by: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(rect.x + by, rect.y + by),
+        Size::new(rect.width - by * 2.0, rect.height - by * 2.0),
+    )
+}
+
+/// How many records were published at exactly `rect`.
+fn at(rect: Rectangle, cands: &[crate::test_helpers::Candidate]) -> usize {
+    cands.iter().filter(|c| c.bounds == rect).count()
+}
+
+/// The wrapper publishes its own box — exactly one, ahead of the trigger.
+///
+/// Built over [`InsetTrigger`] so the wrapper's rectangle and the trigger's are
+/// not the same box. The whole tree must publish exactly two records: the
+/// wrapper's at the outer rectangle and the trigger's at the inset one. A
+/// wrapper that published twice would show three, or two at the outer rectangle;
+/// a wrapper that published nothing would show one.
+#[test]
+fn the_wrapper_publishes_exactly_one_box_of_its_own() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let own = Size::new(200.0, 32.0);
+    let inset_by = 4.0;
+    let own_box = Rectangle::new(Point::new(0.0, 0.0), own);
+    let trigger_box = inset(own_box, inset_by);
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        Element::new(ComboBoxWidget {
+            trigger: Element::new(InsetTrigger {
+                inset: inset_by,
+                node_size: own,
+            }),
+            flyout: None,
+            is_open: false,
+            width: Length::Fixed(own.width),
+            height: own.height,
+            on_dismiss: None,
+        })
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(
+        cands.len(),
+        2,
+        "the wrapper plus its trigger must publish exactly two records, got {cands:?}"
+    );
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(
+        cands[0].bounds, own_box,
+        "the wrapper publishes its own box, first, before the trigger subtree"
+    );
+    assert_eq!(cands[1].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(cands[1].bounds, trigger_box);
+    assert_eq!(
+        at(own_box, &cands),
+        1,
+        "exactly one record at the wrapper's own box — a second one is the \
+         double-publish this test exists to catch"
+    );
+}
+
+/// A live ComboBox publishes its own box, at the trigger's real bounds.
+///
+/// The wrapper's record and the iced `button`'s own record are the same
+/// rectangle because the wrapper delegates `layout` to the button — that is the
+/// single-source guarantee, not an accident of the fixture.
+#[test]
+fn the_live_combobox_publishes_its_own_box_at_the_trigger_bounds() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let items = vec![SelectOption::new("1", "One"), SelectOption::new("2", "Two")];
+    let model = ComboBoxModel::new(items, "Pick").with_open(false);
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        ComboBox::new(&model)
+            .with_width(Length::Fill)
+            .on_toggle_open(Msg)
+            .into()
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(
+        cands[0].bounds, cands[1].bounds,
+        "the wrapper's box must be the trigger's real box, not a box of similar size"
+    );
+    assert_eq!(
+        cands[0].bounds.height,
+        ComboRung::Standard.height(),
+        "the published box is the standard control rung"
+    );
+    assert!(
+        cands[0].id.is_none(),
+        "the control publishes under no Id: naming is a host concern, and a name \
+         invented here would move the demo's named count without the host asking"
+    );
+}
+
+/// A **disabled** ComboBox still publishes its own box.
+///
+/// The fires-in-every-state rule. A disabled trigger carries no `on_press`, so
+/// iced never registers a focus target for it — but the box is still where the
+/// control is, and a host that cannot see a disabled control cannot grey out a
+/// menu item pointing at it or report where it sits.
+#[test]
+fn the_disabled_combobox_still_publishes_its_own_box() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let items = vec![SelectOption::new("1", "One")];
+    let model = ComboBoxModel::new(items, "Pick").disabled();
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        ComboBox::new(&model).with_width(Length::Fill).into()
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(
+        cands[0].bounds.height,
+        ComboRung::Standard.height(),
+        "a disabled trigger publishes the same box it draws"
+    );
+    assert!(
+        !cands
+            .iter()
+            .any(|c| c.kind == crate::test_helpers::KIND_FOCUSABLE),
+        "a disabled trigger must not become a Tab stop just because it now \
+         publishes a box: {cands:?}"
+    );
+}
+
+/// Opening the flyout does not add a second box at the trigger, and the flyout
+/// itself is published exactly once.
+///
+/// The overlay is the one place in this module that must **not** publish its own
+/// box: `ComboOverlay::layout` returns the flyout content's own node moved into
+/// position, so the overlay's rectangle and the flyout container's rectangle are
+/// the same node, and iced's `container` already publishes it.
+#[test]
+fn opening_the_flyout_publishes_the_flyout_once_and_not_the_trigger_twice() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let items = vec![SelectOption::new("1", "One"), SelectOption::new("2", "Two")];
+
+    let closed_model = ComboBoxModel::new(items.clone(), "Pick").with_open(false);
+    let closed: Vec<crate::test_helpers::Candidate> = {
+        let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+            ComboBox::new(&closed_model)
+                .with_width(Length::Fill)
+                .on_toggle_open(Msg)
+                .into()
+        });
+        harness.candidates()
+    };
+
+    let open_model = ComboBoxModel::new(items, "Pick").with_open(true);
+    let open: Vec<crate::test_helpers::Candidate> = {
+        let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+            ComboBox::new(&open_model)
+                .with_width(Length::Fill)
+                .on_toggle_open(Msg)
+                .into()
+        });
+        harness.candidates()
+    };
+
+    let trigger_box = closed[0].bounds;
+    assert_eq!(
+        at(trigger_box, &closed),
+        at(trigger_box, &open),
+        "opening the flyout must not add a record at the trigger's box"
+    );
+
+    // The flyout sits flush against the trigger's bottom edge, so its `y`
+    // *equals* the trigger's height rather than exceeding it. Probing with
+    // `>` lands on the `scrollable` inside the flyout instead, which the
+    // flyout's own `container` also covers — two records at one rectangle,
+    // and the count reads as a double-publish that never happened.
+    let flyout = open
+        .iter()
+        .map(|c| c.bounds)
+        .find(|b| b.y >= trigger_box.height)
+        .expect("an open combo must publish something below the trigger");
+    assert_eq!(
+        at(flyout, &open),
+        1,
+        "the flyout box is published once, by the flyout's own container; the \
+         overlay adding a second one is the double-publish this pins out"
+    );
+    assert!(
+        open.len() > closed.len(),
+        "the open tree must publish more than the closed one"
+    );
+}
+
+/// `Select` publishes its own box.
+///
+/// Before this, `Select` had **no `operate` method at all** and iced's default
+/// is an empty method, so the probe came back with `count=0`: no `container`,
+/// no `text`, no `focusable`. A control that published nothing through every
+/// hook is a strictly worse case than the ComboBox's missing own-box record, and
+/// it is fixed the same way — same [`trigger_box`], same single source, and
+/// `Select::draw` now paints from that same call.
+#[test]
+fn the_select_publishes_its_own_box() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let opts = vec![String::from("Alpha"), String::from("Beta")];
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        let sel: Option<&String> = None;
+        Select::new(&opts, sel, |_| Msg)
+            .with_width(Length::Fill)
+            .into()
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(
+        cands.len(),
+        1,
+        "a Select publishes exactly one record, got {cands:?}"
+    );
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(
+        cands[0].bounds.height,
+        ComboRung::Standard.height(),
+        "the published box is the rung the trigger paints"
+    );
+    assert!(cands[0].id.is_none(), "no invented name");
+}
+
+/// A `Select` with no options still publishes its box.
+///
+/// An empty option list means the control can never be pressed and never opens a
+/// flyout. It still occupies a rectangle, and that rectangle still has to be
+/// findable.
+#[test]
+fn an_empty_select_still_publishes_its_own_box() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let opts: Vec<String> = Vec::new();
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        let sel: Option<&String> = None;
+        Select::new(&opts, sel, |_| Msg)
+            .with_width(Length::Fill)
+            .into()
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(
+        cands.len(),
+        1,
+        "an empty Select is still a control at a real box, got {cands:?}"
+    );
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+}
+
+/// The compact rung publishes the compact box.
+///
+/// Guards that the published rectangle follows the rung rather than being pinned
+/// to the standard height.
+#[test]
+fn the_compact_rung_publishes_the_compact_box() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Msg;
+
+    let opts = vec![String::from("Alpha")];
+
+    let mut harness = crate::test_helpers::Harness::<Msg, _>::headless(|| {
+        let sel: Option<&String> = None;
+        Select::new(&opts, sel, |_| Msg)
+            .with_rung(ComboRung::Compact)
+            .with_width(Length::Fill)
+            .into()
+    });
+
+    let cands = harness.candidates();
+
+    assert_eq!(cands.len(), 1);
+    assert_eq!(cands[0].kind, crate::test_helpers::KIND_CONTAINER);
+    assert_eq!(
+        cands[0].bounds.height,
+        ComboRung::Compact.height(),
+        "the published box follows the rung"
+    );
+}
+
 #[test]
 fn test_combobox_disabled_suppresses_interaction() {
     #[derive(Clone, Debug, PartialEq)]

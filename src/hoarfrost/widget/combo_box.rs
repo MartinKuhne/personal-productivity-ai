@@ -39,6 +39,16 @@
 //! the 14px mark the user sees is deliberately smaller than the area
 //! that responds to them.
 //!
+//! # The control publishes its own box
+//!
+//! A drawn control that the operation stream cannot see is a control a host
+//! cannot measure or route to. `trigger_box` is the single source for
+//! that box — the same function paints it and publishes it — and
+//! `publish_trigger_box` puts it on the stream once, in every state,
+//! under no `Id`. `ComboBoxWidget::operate` and `Select`'s `operate`
+//! both call it; `ComboOverlay` deliberately does not, because its node
+//! *is* the flyout container's node and that container already publishes it.
+//!
 //! Unit tests live in the sibling `combo_box_tests.rs` sidecar.
 
 use std::fmt;
@@ -655,6 +665,54 @@ pub struct ComboBoxWidget<'a, Message> {
     on_dismiss: Option<Message>,
 }
 
+/// The trigger's own box — the rectangle the layout pass gave the control.
+///
+/// Both passes that need it take it from here, so the box a host reads
+/// cannot drift from the box that was drawn:
+///
+/// * [`ComboBoxWidget::draw`] hands this exact [`Layout`] node straight to
+///   the trigger, so the fill, border and label the user sees are painted
+///   inside it and never outside it.
+/// * [`ComboBoxWidget::operate`] and [`Select`]'s `operate` publish it.
+/// * [`Select::draw`] paints its quad and its glyphs from it as well, so
+///   for the stateless helper the drawn box and the published box are the
+///   same call, not two calls that happen to agree.
+///
+/// The same single-source guarantee
+/// `crate::surface::menu::view::row_box` gives a menu row, for the same
+/// reason: a box computed twice is a box that can disagree.
+#[must_use]
+fn trigger_box(layout: Layout<'_>) -> Rectangle {
+    layout.bounds()
+}
+
+/// Publishes the control's own box to the operation stream.
+///
+/// **Fires in every state** — enabled, invalid or disabled. That is the
+/// rule the disabled-toggle and menu-row fixes established, and the reason
+/// this is not tucked inside a non-disabled branch:
+///
+/// * [`Operation::container`] answers *"where is this control?"*.
+/// * [`Operation::focusable`] answers *"can Tab stop here?"*.
+///
+/// Two orthogonal doors. A disabled trigger closes the second — it carries
+/// no `on_press`, so iced's button never registers a focus target — and
+/// keeps the first open, so a host can still see, measure and route to a
+/// disabled combo rather than finding a blank gap where one was drawn.
+///
+/// Published under **no `Id`**. [`ComboBox`] and [`Select`] carry no
+/// stable identity field, and inventing one here would move the named
+/// count without the host asking for it: naming is a host concern, made
+/// with `Id`s the host owns. What this fix restores is *existence* — an
+/// anonymous `container` record at the real bounds, which is exactly the
+/// record the pre-rewrite widget published and the demo goldens count.
+///
+/// Exactly one record per control: published once, unconditionally, and
+/// never re-published under a second hook.
+fn publish_trigger_box(operation: &mut dyn Operation, layout: Layout<'_>) {
+    operation.container(None, trigger_box(layout));
+}
+
 impl<Message: Clone> Widget<Message, iced::Theme, iced::Renderer> for ComboBoxWidget<'_, Message> {
     fn size(&self) -> Size<Length> {
         Size::new(self.width, Length::Fixed(self.height))
@@ -726,6 +784,22 @@ impl<Message: Clone> Widget<Message, iced::Theme, iced::Renderer> for ComboBoxWi
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
+        // The control's own box first, then the trigger's subtree.
+        //
+        // Before this, `operate` was a pure pass-through and the
+        // `ComboBoxWidget` published nothing of its own: the control drew
+        // a 568x32 trigger in the atoms pane and was invisible to the
+        // operation stream at that box. Measured against the demo's own
+        // probe, the rewrite at `a74e143` dropped exactly one anonymous
+        // `container` per instance — 3 instances, `anonymous 1823` down
+        // to `1820` at the root manifest and `963` down to `960` in the
+        // atoms pane.
+        //
+        // The pass-through below is kept because the trigger owns the
+        // events and the focus target; this adds the box the wrapper owes
+        // the host, not a second copy of the trigger's.
+        publish_trigger_box(operation, layout);
+
         self.trigger
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
@@ -945,6 +1019,28 @@ impl<Message: Clone> overlay::Overlay<Message, iced::Theme, iced::Renderer>
         }
     }
 
+    /// Passes the operation through to the flyout content — and
+    /// deliberately publishes **nothing of its own**.
+    ///
+    /// This is the one place in the module where the gap the trigger had
+    /// does not exist, and adding a publish here would make it a bug rather
+    /// than a fix. `ComboOverlay::layout` returns the *content's own*
+    /// node, moved to the flyout position:
+    ///
+    /// ```text
+    /// let node = self.content.as_widget_mut().layout(self.tree, renderer, &limits);
+    /// node.move_to(Point::new(x_pos, y_pos))
+    /// ```
+    ///
+    /// So the overlay's box and the flyout container's box are the same
+    /// node, and that container already publishes itself through
+    /// `iced::widget::container`'s own `operate`. Measured through
+    /// `RecordCandidates` on an open two-option combo, the flyout region
+    /// carries exactly one record at the overlay's box —
+    /// `container 0.00,32.00 400.00x74.00` — followed by the
+    /// `scrollable` inside it. A second `container` at that rectangle
+    /// would be a duplicate of a box the host can already read, which is
+    /// the opposite of what `publish_trigger_box` does for the trigger.
     fn operate(
         &mut self,
         layout: Layout<'_>,
@@ -1113,7 +1209,10 @@ where
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_ref::<SelectState>();
-        let bounds = layout.bounds();
+        // Painted from the same function that publishes the box, so the
+        // rectangle a host reads is the rectangle this drew, by
+        // construction rather than by coincidence.
+        let bounds = trigger_box(layout);
 
         let visual_base = if state.is_hovered {
             BaseState::Hovered
@@ -1190,6 +1289,31 @@ where
             text_col,
             *viewport,
         );
+    }
+
+    /// Publishes the select's own box.
+    ///
+    /// The `Widget` impl had **no `operate` at all** before this, which
+    /// made the gap worse than the [`ComboBoxWidget`] one rather than
+    /// merely the same: iced's default `operate` is an empty method, so a
+    /// `Select` published *nothing* through *any* hook. Measured through
+    /// `test_helpers::RecordCandidates`, a two-option `Select` at
+    /// `Length::Fill` produced `count=0` — no `container`, no `text`, no
+    /// `focusable`. It drew a full trigger and was entirely absent from
+    /// the operation stream, not merely missing its own box.
+    ///
+    /// Same single source as the ComboBox: `trigger_box`, which is also
+    /// the rectangle [`Select::draw`] paints, and the same
+    /// fires-in-every-state rule — a `Select` with an empty option list
+    /// still cannot be pressed, and still reports where it is.
+    fn operate(
+        &mut self,
+        _tree: &mut Tree,
+        layout: Layout<'_>,
+        _renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        publish_trigger_box(operation, layout);
     }
 
     fn update(
