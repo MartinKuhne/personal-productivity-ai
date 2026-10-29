@@ -301,6 +301,151 @@ fn heading_and_separator_stay_inert_under_every_modifier() {
     }
 }
 
+// -- with_key: identity for addressability, not for focus -------------------
+
+#[test]
+fn with_key_gives_a_keyless_row_an_identity() {
+    assert_eq!(Row::separator().with_key("sep-1").key(), "sep-1");
+    assert_eq!(Row::heading("Section").with_key("h-1").key(), "h-1");
+    assert_eq!(Row::separator().key(), "");
+    assert_eq!(Row::heading("Section").key(), "");
+}
+
+#[test]
+fn with_key_replaces_the_key_a_constructor_set() {
+    assert_eq!(
+        Row::action("first", "First").with_key("second").key(),
+        "second"
+    );
+    assert_eq!(
+        Row::checkable("first", "First", true)
+            .with_key("second")
+            .key(),
+        "second"
+    );
+    assert_eq!(
+        Row::radio("first", "First", "g", false)
+            .with_key("second")
+            .key(),
+        "second"
+    );
+    assert_eq!(
+        Row::submenu("first", "First", Menu::empty("kid"))
+            .with_key("second")
+            .key(),
+        "second"
+    );
+}
+
+#[test]
+fn a_key_gives_a_furniture_row_no_capabilities() {
+    // The key is for addressability only. Kind still decides what the row
+    // may do, and heading and separator are excluded by kind — so a keyed
+    // separator must not leak into the focus roster.
+    for row in [
+        Row::separator().with_key("sep"),
+        Row::heading("H").with_key("head"),
+    ] {
+        assert!(!row.interactive());
+        assert!(!row.activatable());
+        assert!(!row.navigable());
+    }
+
+    let menu = Menu::new(
+        "ctx",
+        vec![
+            Row::separator().with_key("sep"),
+            Row::heading("H").with_key("head"),
+        ],
+    );
+    assert!(
+        menu.navigable_indices().is_empty() && menu.focus_members().is_empty(),
+        "a keyed furniture row must not join the focus roster"
+    );
+}
+
+#[test]
+fn a_keyed_furniture_row_is_addressable_through_its_menu() {
+    let menu = Menu::new(
+        "root",
+        vec![
+            Row::separator().with_key("sep-1"),
+            Row::heading("H").with_key("head"),
+        ],
+    );
+
+    assert_eq!(
+        menu.row_focus_id(menu.row(0).unwrap()).as_str(),
+        "menu:root#sep-1"
+    );
+    assert_eq!(
+        menu.row_focus_id(menu.row(1).unwrap()).as_str(),
+        "menu:root#head"
+    );
+
+    for index in 0..2 {
+        let id = menu.focus_id(index).unwrap();
+        assert!(
+            !id.as_str().ends_with('#'),
+            "row {index} published an id with an empty final segment: {id}"
+        );
+        assert_eq!(
+            menu.index_of_focus_id(&id),
+            Some(index),
+            "the keyed furniture row must resolve back to itself"
+        );
+    }
+}
+
+#[test]
+fn a_keyless_furniture_row_derives_an_id_that_names_nothing() {
+    // The counter-case `with_key` exists to fix: the id is still derived,
+    // it just ends in an empty segment and resolves to no row.
+    let menu = Menu::new("root", vec![Row::separator()]);
+    let id = menu.row_focus_id(menu.row(0).unwrap());
+
+    assert_eq!(id.as_str(), "menu:root#");
+    assert_eq!(
+        menu.index_of_focus_id(&id),
+        None,
+        "an empty final segment addresses no row"
+    );
+}
+
+#[test]
+fn validate_does_not_check_a_furniture_key_against_the_interactive_ones() {
+    // Pins the current scope of `Menu::validate`: its missing- and
+    // duplicate-key rules skip non-interactive rows outright, so a
+    // separator keyed like an action is NOT reported. Widening that rule
+    // is a deliberate change, and this is the test that notices it.
+    let menu = Menu::new(
+        "root",
+        vec![
+            Row::action("dup", "Action"),
+            Row::separator().with_key("dup"),
+            Row::heading("Heading").with_key("dup"),
+        ],
+    );
+
+    assert!(
+        menu.validate().is_empty(),
+        "validate() is scoped to interactive rows: {:?}",
+        menu.validate()
+    );
+}
+
+#[test]
+fn a_key_set_before_attaching_binds_the_submenu_child_under_it() {
+    let row = Row::submenu("first", "More...", Menu::empty("kid")).with_key("other");
+    let menu = Menu::new("root", vec![row]);
+
+    assert_eq!(
+        menu.row(0).unwrap().child_id().unwrap().as_str(),
+        "root/other",
+        "the child is bound from the key the row carries at attach time"
+    );
+}
+
 #[test]
 fn destructive_is_orthogonal_to_kind() {
     let destructive_action = Row::action("del", "Delete").destructive();

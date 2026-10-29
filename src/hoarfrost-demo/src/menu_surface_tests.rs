@@ -121,13 +121,13 @@ fn the_card_is_painted_not_just_laid_out() {
 // Rows are present and hit-testable
 // ---------------------------------------------------------------------------
 
-/// The `MENU_ROWS` entries that carry a key — the navigable rows.
+/// The `MENU_ROWS` entries that are navigable.
 ///
 /// These are the rows a test addresses by id. Separators are excluded
 /// because they are not navigable, **not** because they are unnamed: the
-/// demo publishes them under their declared `m-sep-1` / `m-sep-2` keys
-/// (see [`data::menu_row_key`]), so they take part in the id set even
-/// though no Tab stop ever lands on them.
+/// fixture declares `m-sep-1` / `m-sep-2` for them and `menu_model`
+/// attaches those keys with `Row::with_key`, so separators take part in
+/// the published id set even though no Tab stop ever lands on them.
 fn keyed_rows() -> Vec<(&'static str, &'static str)> {
     data::MENU_ROWS
         .iter()

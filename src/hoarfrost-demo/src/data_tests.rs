@@ -170,11 +170,11 @@ fn menu_row_keys_are_unique() {
 }
 
 #[test]
-fn every_menu_row_carries_a_declared_key() {
-    // The publish sites build `<prefix><menu_row_key(i)>`, so a `None` or
-    // an empty string here would surface as an id with an empty final
-    // segment: the malformed `demo.composites.menu.` a keyless separator
-    // used to produce. This is the guard that keeps that unreachable.
+fn every_menu_row_carries_its_declared_key() {
+    // The publish sites build `<prefix><row.key()>`, so a `Row` carrying
+    // an empty key would surface as an id with an empty final segment:
+    // the malformed `demo.composites.menu.` a keyless separator used to
+    // produce. This is the guard that keeps that unreachable.
     let menu = menu_model();
     assert_eq!(
         menu.rows().len(),
@@ -182,29 +182,29 @@ fn every_menu_row_carries_a_declared_key() {
         "the model must have one row per declared fixture entry"
     );
 
-    for index in 0..menu.rows().len() {
-        let key = menu_row_key(index).unwrap_or_else(|| {
-            panic!("menu row {index} has no declared key; publishing it would name nothing")
-        });
+    for (index, row) in menu.rows().iter().enumerate() {
+        let (declared, _, _) = MENU_ROWS[index];
         assert!(
-            !key.is_empty(),
-            "menu row {index} declares an empty key; publishing it would leave the \
+            !row.key().is_empty(),
+            "menu row {index} carries an empty key; publishing it would leave the \
              id's final segment empty"
+        );
+        assert_eq!(
+            row.key(),
+            declared,
+            "menu row {index} must carry the key the fixture declares for it"
         );
     }
 }
 
 #[test]
 fn separators_carry_their_declared_keys_through_the_model() {
-    // `Row::separator()` is built keyless, so `Row::key()` is empty for a
-    // separator. The demo's declared key is what the published id uses.
+    // The separator is the row that could not carry a key until
+    // `Row::with_key`, and `menu_model` is the single place the fixture's
+    // key is attached to it. Asserting the pair here means a separator that
+    // loses its key fails at the model rather than at some publish site.
     let menu = menu_model();
     for (index, key) in [(2usize, "m-sep-1"), (4usize, "m-sep-2")] {
-        assert_eq!(
-            menu_row_key(index),
-            Some(key),
-            "the separator at {index} must publish under {key}"
-        );
         let row = menu
             .rows()
             .get(index)
@@ -215,15 +215,8 @@ fn separators_carry_their_declared_keys_through_the_model() {
         );
         assert_eq!(
             row.key(),
-            "",
-            "the framework's separator is keyless, so the declared key rather \
-             than `Row::key()` is what carries the separator's identity"
+            key,
+            "the separator at {index} must publish under {key}"
         );
     }
-}
-
-#[test]
-fn menu_row_key_is_none_outside_the_fixture() {
-    assert_eq!(menu_row_key(MENU_ROWS.len()), None);
-    assert_eq!(menu_row_key(usize::MAX), None);
 }

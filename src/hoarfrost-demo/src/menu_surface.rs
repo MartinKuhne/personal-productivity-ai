@@ -35,7 +35,6 @@ use hoarfrost::token::color::Palette;
 use hoarfrost::token::{shape, space};
 
 use crate::app::Message;
-use crate::data;
 
 /// Prefix of the rendered menu card's stable widget id.
 pub const CARD_ID_PREFIX: &str = "demo.menu.card.";
@@ -115,18 +114,17 @@ pub fn card_container<'a>(rows: Column<'a, Message>, id: String) -> Element<'a, 
 
 /// One rendered row of the mounted card.
 ///
-/// `key` is the row's **demo-declared** key rather than `Row::key()`:
-/// the framework builds a separator keyless, so reading the `Row` alone
-/// would publish `demo.menu.row.` — an id with an empty final segment —
-/// for both separators. [`crate::data::menu_row_key`] is what carries
-/// `m-sep-1` / `m-sep-2` through to the published id.
+/// The row is published under its **own** key. Every `Row` kind carries
+/// one — separators through `Row::with_key`, the interactive kinds from
+/// their constructor — so `Row::key()` is enough to build the id and the
+/// final segment is never empty.
 ///
 /// Every `RowEvent` is folded into the same demo message, which is how the
 /// demo's existing menu preview (`pane_composites::menu_section`) already
 /// treats its rows: the card is a showcase, not a live command surface.
 #[must_use]
-pub fn card_row<'a>(row: Row, key: &str) -> Element<'a, Message> {
-    let key = key.to_string();
+pub fn card_row<'a>(row: Row) -> Element<'a, Message> {
+    let key = row.key().to_string();
 
     MenuRow::new(row, row_id(&key), move |_event| {
         Message::MenuRowActivated(key.clone())
@@ -148,9 +146,8 @@ pub fn mount<'a>(
     let rect = card_rect(menu);
 
     let mut rows = Column::<Message>::new().width(Length::Fill);
-    for (index, row) in menu.rows().iter().enumerate() {
-        let key = data::menu_row_key(index).unwrap_or_else(|| row.key());
-        rows = rows.push(card_row(row.clone(), key));
+    for row in menu.rows() {
+        rows = rows.push(card_row(row.clone()));
     }
 
     let card = card_container(rows.width(Length::Fill), card_id(trigger_id));

@@ -69,9 +69,9 @@ const SETTINGS_ROW_ID_PREFIX: &str = "demo.composites.setting-row.";
 
 /// Prefix of every rendered menu-row id.
 ///
-/// The final segment is the row's **demo-declared** key from
-/// [`data::MENU_ROWS`], which is what keeps a separator's id well-formed.
-/// See [`menu_section`].
+/// The final segment is the row's own key — declared in
+/// [`data::MENU_ROWS`] and carried on the `Row` itself, separators
+/// included. See [`menu_section`].
 const MENU_ROW_ID_PREFIX: &str = "demo.composites.menu.";
 
 /// Width the grid section lays its tiles out against.
@@ -1057,18 +1057,15 @@ fn declared_row<'a>(row: Element<'a, Message>, id: &str) -> Element<'a, Message>
 
 /// The menu's rows, rendered as a flat stack of real menu rows.
 ///
-/// The row's published id comes from [`data::menu_row_key`], not from
-/// `Row::key()`: the framework builds a separator keyless, so reading
-/// the `Row` alone would publish `demo.composites.menu.` — an id with an
-/// empty final segment — for both separators.
+/// Each row is published under its own key: every `Row` kind carries one,
+/// the separators through `Row::with_key`, so the id's final segment is
+/// never the empty string a keyless separator used to leave behind.
 #[must_use]
 pub fn menu_section(state: &CompositesState) -> Section<'_> {
     let mut rows = Column::new().width(Length::Fill);
 
-    for (index, row) in state.menu.rows().to_vec().into_iter().enumerate() {
-        let key = data::menu_row_key(index)
-            .unwrap_or_else(|| row.key())
-            .to_string();
+    for row in state.menu.rows().to_vec() {
+        let key = row.key().to_string();
         let menu_row = MenuRow::new(row, format!("{MENU_ROW_ID_PREFIX}{key}"), move |_event| {
             Message::Composites(CompositesMessage::MenuRowActivated(key.clone()))
         })

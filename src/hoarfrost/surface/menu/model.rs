@@ -88,6 +88,15 @@
 //! rebuilding an equivalent menu produces the same ids and the focus model
 //! can hold a position across a `view` rebuild.
 //!
+//! Two kinds are built without a key: [`Row::separator`] and
+//! [`Row::heading`]. Nothing the model *decides* about them needs a name —
+//! they are never interactive, never navigable, never a focus member. A
+//! host that **publishes** them does. `MenuRow` reports each row's own
+//! container box under that row's derived id whatever its kind, so a
+//! keyless published row yields an id whose final segment is empty and
+//! which therefore addresses nothing. [`Row::with_key`] exists for that
+//! case: identity for addressability, not for focus.
+//!
 //! Attaching a child menu **rebases** its path: `Menu::new(parent, rows)`
 //! rewrites every submenu child's [`MenuId`] to `<parent path>/<row key>`,
 //! recursively. Whatever id the child was built with is discarded. That is
@@ -463,14 +472,26 @@ impl Row {
 
     /// A non-interactive section heading.
     ///
-    /// Carries no key: a heading is never focusable, so there is no
-    /// identity it needs to keep stable.
+    /// Built keyless, because nothing the *model* does with a heading needs
+    /// to name it: it never activates and is never focusable. The host
+    /// painting it does need a name. `MenuRow` publishes every row's own
+    /// container box under that row's derived id whatever its kind — see
+    /// `publish_row_box` in [`super::view`] — so a heading left keyless
+    /// publishes an id whose final segment is empty (`menu:root#` through
+    /// [`Menu::row_focus_id`), and an id like that addresses nothing.
+    /// Give the heading a [`with_key`](Self::with_key) when it has to be
+    /// addressable.
     #[must_use]
     pub fn heading(label: impl Into<String>) -> Self {
         Self::new(String::new(), label, RowKind::Heading)
     }
 
     /// A non-interactive `1px border.subtle` separator (§4.9.1).
+    ///
+    /// Keyless for the same reason [`heading`](Self::heading) is, with the
+    /// same consequence for a host that publishes it: use
+    /// [`with_key`](Self::with_key) or the published id ends in an empty
+    /// segment.
     #[must_use]
     pub fn separator() -> Self {
         Self::new(String::new(), String::new(), RowKind::Separator)
@@ -491,6 +512,41 @@ impl Row {
     }
 
     // -- modifiers ---------------------------------------------------------
+
+    /// Attach (or replace) this row's stable key.
+    ///
+    /// The four kinds that carry a command take their key as a constructor
+    /// argument; [`separator`](Self::separator) and [`heading`](Self::heading)
+    /// are built without one. This modifier is how a host gives those rows
+    /// an identity anyway, without any constructor changing signature.
+    ///
+    /// A key matters to a non-interactive row for **addressability**, not
+    /// focus. Every `MenuRow` publishes its own container box under the
+    /// row's derived id in every state, navigable or not (`publish_row_box`
+    /// in [`super::view`]). A row with no key therefore publishes an id
+    /// whose final segment is empty — `menu:root#` under
+    /// [`Menu::row_focus_id`], or `<prefix>.` for a host that joins on a
+    /// dot. Such an id cannot be looked up, measured or routed to, and
+    /// every keyless row in the same namespace collides on it.
+    ///
+    /// What a key does *not* buy:
+    ///
+    /// * **navigability** — [`navigable`](Self::navigable) excludes heading
+    ///   and separator by kind, so a keyed separator is still never a Tab
+    ///   stop and never enters [`Menu::focus_members`];
+    /// * **validation** — [`Menu::validate`]'s missing- and duplicate-key
+    ///   rules cover interactive rows only, so a separator key that
+    ///   collides with an action's key is not reported. Uniqueness across
+    ///   every published row is the host's job;
+    /// * **a re-derived submenu path** — a child's path is fixed once, by
+    ///   the [`Menu::new`] that binds it. Set the key *before* attaching,
+    ///   or the child is bound under whatever key the row carried at
+    ///   attach time.
+    #[must_use]
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = key.into();
+        self
+    }
 
     /// Mark the row inert: it renders, absorbs the click, and does not
     /// close the menu (`UIF-CMENU-002`).
@@ -570,6 +626,11 @@ impl Row {
     // -- identity ----------------------------------------------------------
 
     /// The row's stable key within its menu.
+    ///
+    /// Empty on a [`separator`](Self::separator) or [`heading`](Self::heading)
+    /// that was never given a [`with_key`](Self::with_key) — which is what
+    /// makes the id derived from it unaddressable, see
+    /// [`with_key`](Self::with_key).
     #[must_use]
     pub fn key(&self) -> &str {
         &self.key
