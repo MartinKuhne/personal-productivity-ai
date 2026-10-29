@@ -1072,7 +1072,13 @@ fn auto_fit_tree(state: &mut AppState) {
     });
     state.app.layout.set_width(Some(width));
     state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
-    let ratio = width / viewport;
+    // The gutter-aware conversion, so the auto-fitted width is the width the
+    // grid actually lays out (defect #12).
+    let ratio = crate::ui_iced::layout::split_ratio_for_width(
+        width,
+        viewport,
+        crate::ui_iced::layout::PANE_SPACING_PIXELS,
+    );
     state.panes.resize(state.band.left_split, ratio);
 }
 

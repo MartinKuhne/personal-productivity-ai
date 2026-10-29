@@ -22,9 +22,20 @@
 //!   reduce 1:1 onto `crate::ui::PanelLayout` widths (`ui/panel_layout.rs:
 //!   26-30`), clamped by the UI-016 constants re-verified at
 //!   `ui/panel_layout.rs:5-23`;
-//! - the widget itself assumes zero intra-pane spacing (the [`pane_grid::PaneGrid`]
-//!   default, `pane_grid.rs:202`), so pixel widths convert to split ratios
-//!   via `ratio = width / viewport_width` without a spacing term.
+//! - the widget runs with a real intra-pane gutter ([`PANE_SPACING_PIXELS`],
+//!   defect #12), so a split no longer sits at `ratio * viewport_width`: iced
+//!   centres a `spacing`-wide gap on the split line, which means the leading
+//!   pane claims `ratio * region_width - spacing / 2` and the trailing pane
+//!   claims the mirror image (`iced_widget-0.14.2/src/pane_grid/axis.rs:48-71`).
+//!   Every pixel↔ratio conversion therefore carries the half-spacing term —
+//!   [`split_ratio_for_width`] and [`pane_width_from_ratio`] are the only two
+//!   places that arithmetic lives — and the nested (centre | right) region is
+//!   [`nested_region_width`], i.e. the viewport minus the left pane minus the
+//!   gutter the left split consumed.
+//! - the gutter is painted [`pane_gutter_fill`] (`color.border.subtle`, the
+//!   framework's designated pane-split-line colour) by the container that
+//!   backs the grid, so the seam reads as a divider rather than as the panes'
+//!   own canvas showing through (`UIF-PRIN-006` visible-divider clause).
 //!
 //! Widget construction is exercised by the running app; the pieces here are
 //! the unit-testable state reductions.
@@ -39,16 +50,57 @@ use crate::ui::panel_layout::{
     LEFT_PANEL_DEFAULT_WIDTH, LEFT_PANEL_MAX_WIDTH_FRACTION, LEFT_PANEL_MIN_WIDTH, PanelLayout,
     RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH,
 };
+use crate::ui::theme::Palette;
+use iced::Background;
 use iced::Length;
+use iced::widget::container::Style as ContainerStyle;
 use iced::widget::pane_grid::{self, Configuration, Pane, Split};
+
+/// Intra-pane gutter width (logical pixels) the [`pane_grid::PaneGrid`] is
+/// built with (defect #12, "there is no visual separation between the three
+/// window panes").
+///
+/// Bound to the framework rung `space.2xs` (`hoarfrost::token::space::XXS`)
+/// rather than a literal ([RUST-021]). `space.2xs` is the rung hoarfrost
+/// itself uses for a visible separation gap between adjacent sibling
+/// surfaces — `UIF-PRIN-006` puts a `space.2xs` gap between sibling tab
+/// cards on the recessed track — and it is the rung nearest the `1px`
+/// pane-split stroke `UIF-PANE-001` describes, so the seam stays a divider
+/// rather than turning into a margin.
+///
+/// The gutter is not free: iced centres it on the split line, so every
+/// pixel↔ratio conversion carries a half-spacing term (see
+/// [`split_ratio_for_width`]) and the resize leeway shrinks by exactly this
+/// much ([`RESIZE_LEEWAY_PIXELS`]).
+pub const PANE_SPACING_PIXELS: f32 = hoarfrost::token::space::XXS;
+
 /// Grab-leeway (logical pixels) around each split line for resize drags,
 /// passed to `PaneGrid::on_resize` (`iced_widget-0.14.2/src/pane_grid.rs:
-/// 258-266`: the grab area length is `spacing + leeway`).
+/// 258-266`: the grab area length is `spacing + leeway`, centred on the
+/// split line).
 ///
-/// Bound to the framework token `size.splitter.grab` (`UIF-TOK-002`)
-/// rather than a literal, so the app does not own a second number for the
-/// same measurement ([RUST-021]). The value is unchanged at `10.0`.
-pub const RESIZE_LEEWAY_PIXELS: f32 = hoarfrost::token::size::SPLITTER_GRAB;
+/// `UIF-PANE-001` mandates a `10px` grab band reaching `5px` to each side of
+/// the divider line. iced reaches that total as `spacing + leeway`, so the
+/// leeway is the framework token `size.splitter.grab` (`UIF-TOK-002`) MINUS
+/// the gutter the grid already paints ([`PANE_SPACING_PIXELS`]). The two
+/// together stay at `10.0`, and the app still owns no second number for the
+/// same measurement ([RUST-021]).
+pub const RESIZE_LEEWAY_PIXELS: f32 = hoarfrost::token::size::SPLITTER_GRAB - PANE_SPACING_PIXELS;
+
+/// The fill the inter-pane gutter shows through with — `color.border.subtle`,
+/// the framework's designated colour for pane split lines (`UIF-TOK-005`,
+/// `UIF-PANE-001`).
+///
+/// The panes themselves are transparent containers over the window canvas, and
+/// that canvas is `color.surface.base` — so an unpainted gutter would be the
+/// same colour as the panes it exists to separate. Painting the grid's backing
+/// with the pane-split colour is what makes the seam visible
+/// (`UIF-PRIN-006`: adjacent containers must differ in surface token or carry
+/// a visible divider). Resolved from the palette; no literal here.
+#[must_use]
+pub fn pane_gutter_fill() -> iced::Color {
+    Palette::fastmd_dark().border
+}
 
 /// Full-on-screen height of the stub top/bottom bands, in logical points —
 /// `size.control.lg` (`UIF-TOK-002`), the rung the live navbar is built
@@ -121,6 +173,19 @@ pub struct MiddleBandPanes {
     pub right_split: Split,
 }
 
+/// Root `(left | centre-group)` split ratio the middle band is seeded with.
+///
+/// Only a seed: [`apply_pane_widths`] overrides it with the remembered width
+/// whenever one exists, and a user drag overrides it after that. Named rather
+/// than inlined so the startup replay can compute the region the nested split
+/// will actually get when no left width has been remembered ([RUST-021]).
+pub const DEFAULT_ROOT_SPLIT_RATIO: f32 = 0.25;
+
+/// Nested `(centre | right)` split ratio the middle band is seeded with.
+///
+/// See [`DEFAULT_ROOT_SPLIT_RATIO`].
+pub const DEFAULT_NESTED_SPLIT_RATIO: f32 = 0.5;
+
 /// Builds the middle-band pane tree: a vertical split of (left | (center |
 /// right)) (UI-001).
 ///
@@ -131,11 +196,11 @@ pub fn middle_band_configuration() -> Configuration<PaneKind> {
         // Axis::Vertical divides left/right (`axis.rs:48-71`); a: left,
         // b: the nested center|right split (`node.rs:11-27`).
         axis: pane_grid::Axis::Vertical,
-        ratio: 0.25,
+        ratio: DEFAULT_ROOT_SPLIT_RATIO,
         a: Box::new(Configuration::Pane(PaneKind::Left)),
         b: Box::new(Configuration::Split {
             axis: pane_grid::Axis::Vertical,
-            ratio: 0.5,
+            ratio: DEFAULT_NESTED_SPLIT_RATIO,
             a: Box::new(Configuration::Pane(PaneKind::Center)),
             b: Box::new(Configuration::Pane(PaneKind::Right)),
         }),
@@ -207,6 +272,48 @@ pub fn split_side(panes: &MiddleBandPanes, split: Split) -> Option<PaneSide> {
     }
 }
 
+/// Pixel width the LEADING (left) side of a split claims at `ratio`.
+///
+/// iced splits a region of width `region_width` by rounding
+/// `ratio * region_width - spacing / 2` for the leading side and handing the
+/// remainder minus the gutter to the trailing side
+/// (`iced_widget-0.14.2/src/pane_grid/axis.rs:48-71`): the `spacing`-wide gap
+/// is CENTRED on the split line, so half of it is charged to each neighbour.
+///
+/// [RUST-020]: pure. This is the forward half of the conversion;
+/// [`split_ratio_for_width`] is its exact inverse.
+#[must_use]
+pub fn pane_width_from_ratio(ratio: f32, region_width: f32, spacing: f32) -> f32 {
+    ratio * region_width - spacing / 2.0
+}
+
+/// Split ratio that reproduces a leading-side `width` inside `region_width`.
+///
+/// Inverse of [`pane_width_from_ratio`]: `ratio = (width + spacing / 2) /
+/// region_width`. Feeding this to `pane_grid::State::resize` puts the split
+/// line at the centre of the gutter that surrounds the requested width.
+///
+/// [RUST-020]: pure.
+#[must_use]
+pub fn split_ratio_for_width(width: f32, region_width: f32, spacing: f32) -> f32 {
+    (width + spacing / 2.0) / region_width
+}
+
+/// Width of the nested (centre | right) region once the left pane and the
+/// gutter the left split consumed are subtracted from the viewport.
+///
+/// The right split does not operate on the viewport: it operates on the region
+/// the root split handed it, which is `viewport_width - left_width - spacing`
+/// (`axis.rs:54-55`: the trailing region starts `spacing` past the leading
+/// one). Treating it as `viewport_width - left_width` — the zero-spacing
+/// premise defect #12 removes — overstates the right pane by one gutter.
+///
+/// [RUST-020]: pure.
+#[must_use]
+pub fn nested_region_width(viewport_width: f32, left_width: f32, spacing: f32) -> f32 {
+    viewport_width - left_width - spacing
+}
+
 /// Reduces a `PaneGrid` resize event onto the panel widths (UI-016
 /// clamping).
 ///
@@ -216,17 +323,27 @@ pub fn split_side(panes: &MiddleBandPanes, split: Split) -> Option<PaneSide> {
 /// drag position. On `None` the caller must leave both the pane grid and
 /// the [`PanelLayout`] untouched.
 ///
-/// Semantics ([RUST-020]: pure apart from the `layout` parameter):
-/// - LEFT split: `ratio * viewport_width` pixels, clamped to
-///   `LEFT_PANEL_MIN_WIDTH`..=`viewport * LEFT_PANEL_MAX_WIDTH_FRACTION`;
-/// - RIGHT split: `(1 - ratio) * available` pixels where
-///   `available = viewport_width - left_width`, clamped to
-///   `RIGHT_PANEL_MIN_WIDTH`..=`viewport * RIGHT_PANEL_MAX_WIDTH_FRACTION`;
-///   an unpersisted left width falls back to `LEFT_PANEL_DEFAULT_WIDTH`
-///   (all constants from the crate-internal `ui::panel_layout`, UI-016);
+/// Semantics ([RUST-020]: pure apart from the `layout` parameter), with the
+/// gutter of [`PANE_SPACING_PIXELS`] carried through every conversion:
+/// - LEFT split — the split's region IS the viewport, so the drag asks for
+///   `ratio * viewport_width - spacing / 2` pixels of left pane; that is
+///   clamped to `LEFT_PANEL_MIN_WIDTH`..=`viewport * LEFT_PANEL_MAX_WIDTH_FRACTION`
+///   and replayed as `(width + spacing / 2) / viewport_width`;
+/// - RIGHT split — the split's region is [`nested_region_width`]
+///   (`viewport_width - left_width - spacing`), and the right pane is the
+///   TRAILING side, so the drag asks for `(1 - ratio) * region - spacing / 2`
+///   pixels; that is clamped to
+///   `RIGHT_PANEL_MIN_WIDTH`..=`viewport * RIGHT_PANEL_MAX_WIDTH_FRACTION` and
+///   replayed as `1 - (width + spacing / 2) / region`;
+/// - an unpersisted left width falls back to `LEFT_PANEL_DEFAULT_WIDTH` (all
+///   constants from the crate-internal `ui::panel_layout`, UI-016);
 /// - when the 20%/30% viewport cap is BELOW the panel minimum (tiny
 ///   viewports), the minimum wins so both side panels stay draggable;
 /// - non-positive viewports reject the event (no zero-division).
+///
+/// Because the replay ratio is the exact inverse of the width conversion, a
+/// drag that is not clamped round-trips: the width the reducer stores is the
+/// width the grid lays out.
 pub fn apply_pane_resize(
     panes: &MiddleBandPanes,
     event: pane_grid::ResizeEvent,
@@ -239,31 +356,98 @@ pub fn apply_pane_resize(
 
     match split_side(panes, event.split) {
         Some(PaneSide::Left) => {
-            let desired = event.ratio * viewport_width;
+            let desired = pane_width_from_ratio(event.ratio, viewport_width, PANE_SPACING_PIXELS);
             let width = clamped_width(
                 desired,
                 LEFT_PANEL_MIN_WIDTH,
                 viewport_width * LEFT_PANEL_MAX_WIDTH_FRACTION,
             );
             layout.set_width(Some(width));
-            Some((event.split, width / viewport_width))
+            Some((
+                event.split,
+                split_ratio_for_width(width, viewport_width, PANE_SPACING_PIXELS),
+            ))
         }
         Some(PaneSide::Right) => {
             let left_width = layout.left_panel_width.unwrap_or(LEFT_PANEL_DEFAULT_WIDTH);
-            let available = viewport_width - left_width;
-            if available <= 0.0 {
+            let region = nested_region_width(viewport_width, left_width, PANE_SPACING_PIXELS);
+            if region <= 0.0 {
                 return None;
             }
-            let desired = (1.0 - event.ratio) * available;
+            let desired = pane_width_from_ratio(1.0 - event.ratio, region, PANE_SPACING_PIXELS);
             let width = clamped_width(
                 desired,
                 RIGHT_PANEL_MIN_WIDTH,
                 viewport_width * RIGHT_PANEL_MAX_WIDTH_FRACTION,
             );
             layout.set_right_width(Some(width));
-            Some((event.split, 1.0 - width / available))
+            Some((
+                event.split,
+                1.0 - split_ratio_for_width(width, region, PANE_SPACING_PIXELS),
+            ))
         }
         None => None,
+    }
+}
+
+/// Replays remembered panel widths into a freshly built pane grid (defect #12,
+/// follow-up F-2).
+///
+/// At startup the grid boots at the hardcoded ratios of
+/// [`middle_band_configuration`]; without this the widths restored from the
+/// persisted snapshot reach [`PanelLayout`] but never reach the widget, so the
+/// first frame always shows the default geometry.
+///
+/// Only widths that were actually remembered are replayed — a first run with
+/// `None` widths keeps the configuration's own ratios. A remembered width is
+/// replayed **verbatim**: [`PanelLayout`] is the single owner of the numbers the
+/// grid must show (the `PanelLayout` ownership rule of src/app/AGENTS.md §3),
+/// and a restore that silently resized the panels would not be the restore the
+/// user made. The UI-016 bounds stay where they belong, on the *drag*
+/// ([`apply_pane_resize`]) and on the tree auto-fit
+/// ([`crate::ui_iced::update`]), never on the replay.
+///
+/// The nested split is replayed second, from the region the replayed left
+/// width leaves behind, because that is the region iced will actually hand it.
+///
+/// [RUST-020]: mutates only `panes`; `layout` and `band` are read-only.
+pub fn apply_pane_widths(
+    panes: &mut pane_grid::State<PaneKind>,
+    band: &MiddleBandPanes,
+    layout: &PanelLayout,
+    viewport_width: f32,
+) {
+    if viewport_width <= 0.0 {
+        return;
+    }
+
+    let left_width = match layout.left_panel_width {
+        Some(width) => {
+            panes.resize(
+                band.left_split,
+                split_ratio_for_width(width, viewport_width, PANE_SPACING_PIXELS),
+            );
+            width
+        }
+        // Nothing remembered: the grid keeps its seeded ratio, and the nested
+        // region has to be derived from THAT, not from
+        // `LEFT_PANEL_DEFAULT_WIDTH`, or the right ratio would be replayed
+        // against a region iced never hands it.
+        None => pane_width_from_ratio(
+            DEFAULT_ROOT_SPLIT_RATIO,
+            viewport_width,
+            PANE_SPACING_PIXELS,
+        ),
+    };
+
+    let region = nested_region_width(viewport_width, left_width, PANE_SPACING_PIXELS);
+    if region <= 0.0 {
+        return;
+    }
+
+    if let Some(width) = layout.right_panel_width {
+        let ratio = 1.0 - split_ratio_for_width(width, region, PANE_SPACING_PIXELS);
+        panes.resize(band.right_split, ratio.clamp(0.0, 1.0));
     }
 }
 
@@ -298,7 +482,14 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
 ///
 /// `on_resize` maps a [`pane_grid::ResizeEvent`] into the caller's message
 /// type (`on_resize` contract verified at
-/// `iced_widget-0.14.2/src/pane_grid.rs:267-275`).
+/// `iced_widget-0.14.2/src/pane_grid.rs:267-275`). The leeway handed to it is
+/// [`RESIZE_LEEWAY_PIXELS`], i.e. the `UIF-PANE-001` grab band minus the
+/// gutter this grid now paints.
+///
+/// The grid is backed by a container painted [`pane_gutter_fill`], so the
+/// [`PANE_SPACING_PIXELS`] gap iced leaves between panes reads as the
+/// pane-split divider instead of as more of the panes' own canvas
+/// (defect #12).
 pub fn middle_band<'a, Message: 'a>(
     panes: &'a pane_grid::State<PaneKind>,
     left: impl Fn() -> iced::Element<'a, Message> + 'a,
@@ -309,11 +500,29 @@ pub fn middle_band<'a, Message: 'a>(
     on_resize: impl Fn(pane_grid::ResizeEvent) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
     let toc_visible = should_show_panel(has_toc, has_selected_file);
-    pane_grid::PaneGrid::new(panes, move |_pane, kind, _is_maximized| {
-        pane_grid::Content::new(pane_body(kind, left(), center(), right(), toc_visible))
-    })
-    .on_resize(RESIZE_LEEWAY_PIXELS, on_resize)
-    .into()
+    let grid: iced::Element<'a, Message> =
+        pane_grid::PaneGrid::new(panes, move |_pane, kind, _is_maximized| {
+            pane_grid::Content::new(pane_body(kind, left(), center(), right(), toc_visible))
+        })
+        .spacing(PANE_SPACING_PIXELS)
+        .on_resize(RESIZE_LEEWAY_PIXELS, on_resize)
+        .into();
+
+    iced::widget::container(grid)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(gutter_style)
+        .into()
+}
+
+/// Styles the container backing the pane grid so the inter-pane gutter paints
+/// in [`pane_gutter_fill`]. Panes are drawn on top of it, so only the gutter
+/// is ever visible.
+fn gutter_style(_theme: &iced::Theme) -> ContainerStyle {
+    ContainerStyle {
+        background: Some(Background::Color(pane_gutter_fill())),
+        ..ContainerStyle::default()
+    }
 }
 
 /// Renders the body of one middle-band pane. Both branches of the TOC gate
