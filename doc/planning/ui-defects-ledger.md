@@ -1,8 +1,9 @@
 # UI Defect Ledger — 18 reported defects (branch `more-iced`)
 
-> **Status:** In progress — 13 of 18 landed, 5 open. This ledger is the single
-> record of the reported defect list, the owner's rulings on the ambiguous
-> ones, what has actually landed, and what remains.
+> **Status:** In progress — **16 of 18 landed, 2 open** (#6 Tools resize, #14
+> content-sized ToC). This ledger is the single record of the reported defect
+> list, the owner's rulings on the ambiguous ones, what has actually landed, and
+> what remains.
 > **Branch:** `more-iced`. Baseline commit at ledger creation: `06e8f9c`.
 > **Specs:** [`src/app/ui/SPEC.md`](../../src/app/ui/SPEC.md) (`UI-xxx`) and
 > [`src/hoarfrost/spec.md`](../../src/hoarfrost/spec.md) (`UIF-xxx`).
@@ -95,7 +96,7 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 | # | Defect | Status | Evidence |
 |---|--------|--------|----------|
 | 1 | Batch dir list → virtual labels | **Landed** `06e8f9c` | `ui_iced/batch_dialog.rs:284` `available_dir_labels`; `:452` `directory_options()`; populated at `update.rs:2523`, `ui/app/init.rs:157`, `orchestrator.rs:368`, `ui_iced/app.rs:1960`. Tests `batch_dialog_tests.rs:204,232,277` |
-| 2 | Batch vertical spacing | **Open** | see §4 |
+| 2 | Batch vertical spacing | **Landed** `86a2343` | `batch_dialog.rs:988` body column `space::MD` → `space::SM`; tests `config_body_rows_are_spaced_on_the_form_row_rung`, `the_empty_run_between_two_rows_is_one_row_gap_wide`, `the_measured_row_gap_is_the_form_row_rung_not_a_wider_one` |
 | 3 | 'mode' before 'pattern' | **Landed** `06e8f9c` | `batch_dialog.rs:850` `config_body_order(mode)`; tests `batch_dialog_tests.rs:308,324,338` |
 | 4 | Tools card at 80% of viewport | **Landed** (this branch, §5) | `tools_dialog.rs:124` `VIEWPORT_FILL`; `:151` `TOOLS_SIZING`; tests `tools_dialog_tests.rs:838-1130` |
 | 5 | "10 groups" | **Landed** `06e8f9c` | `ui/strings.rs:160` `tools_group_count()`; test `tools_dialog_tests.rs:735` |
@@ -105,12 +106,12 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 | 9 | Background Ops opaque | **Landed** `06e8f9c` | `logs.rs:895` routed through `movable_shell`; opaque fill `movable_shell.rs:160`; test `logs_tests.rs:994` |
 | 10 | Background Ops 'x' | **Landed** `06e8f9c` | `movable_shell.rs:221` `close_action`; test `logs_tests.rs:1037` |
 | 11 | Background Ops 'Close' | **Landed** `06e8f9c` | `logs.rs:848` `logs_close_button_widget()`; tests `logs_tests.rs:1063,1088,1125,1172` |
-| 12 | Pane separation | **Open** | see §4 |
+| 12 | Pane separation | **Landed** `47fb203` | `layout.rs:75` `PANE_SPACING_PIXELS` = `space::XXS`; grid `.spacing()` at `layout.rs:511`; gutter painted `pane_gutter_fill()`; ratio math via `pane_width_from_ratio` / `split_ratio_for_width` / `nested_region_width`; `RESIZE_LEEWAY_PIXELS` rebalanced to keep the `UIF-PANE-001` 10px grab; F-2 replay in `apply_pane_widths` (`layout.rs:414`) |
 | 13 | ToC font rung | **Landed** `06e8f9c` | `view.rs:93` `TOC_TEXT_RUNG` = `UI_COMPACT` (13px/18px); tests `view_tests.rs:406,421,452` |
 | 14 | Content-sized ToC panel | **Open** | see §4 |
 | 15 | Selected-tab fill conforms | **Landed** `06e8f9c` | `center.rs:1541` slot is `Length::Shrink`, fill painted on the content-sized `surface` (`:1468`) — box and fill are one rectangle by construction; tests `center_tests.rs:1707,1739` |
 | 16 | Tab overflow overlap | **Landed** `06e8f9c` | `center.rs:1391` strip rides a horizontal scrollable; tests `center_tests.rs:1791,1822,1871,1908` |
-| 17 | Table renders empty | **Open** | see §4 |
+| 17 | Table renders empty | **Landed** `0c492e2` | `render/table.rs:370` `cell_element` declares its own column's `Length` instead of `Length::Fill`; `grid_element` refuses a zero-column model; `scroll_width` adds the outer padding bands; layout-level tests restored in `render/table_tests.rs` |
 | 18 | Agent Debug crash | **Landed** `06e8f9c` | `movable_shell.rs:221` close carries `MOVABLE_CLOSE_TOOLTIP`; tests `movable_shell_tests.rs:206,245` |
 
 ### Follow-ups found while verifying landed items
@@ -127,15 +128,35 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 - **F-3 (#12, spec drift):** hoarfrost §4.3.1 states `RIGHT_PANE_MIN_W = 120px`
   and a 25% max; the app uses 150px / 30% (`ui/panel_layout.rs:16,23`).
   Flagged under `RUST-041`; not silently changed.
+- **F-4 (#2, open — needs an owner decision):** in **File** mode the Batch
+  card's prompt scrollable measures **0px** and its candidate rows paint
+  **over the footer buttons** (measured: candidate rows at y=418/450,
+  Cancel/Process at y=438). Directory mode is healthy (62px viewport, rows
+  inside). This is the opposite failure to #2 and was not in the reported 18.
+  The arithmetic is spec-bound: §3B.1 fixes each field at
+  `20+4+32+4+16 = 76px` and reserves the caption band *permanently* so a
+  validation message cannot move the rows (`UIF-PRIN-003`) — 3 of 5 rows
+  render an empty band and must keep it — while §4.6.2 caps the card at
+  `560x480` and `batch_card_height` is pinned to `CONTENT_HEIGHT_MAX` by an
+  existing test. Chrome + 4 fixed rows + the 44px minimum prompt section
+  already exceed 480 before any row gap. Closing it needs one of: gaps of
+  ~2px (off the spacing scale), dropping a reserved band (spec violation),
+  raising `BATCH_MODAL_MAX` (spec change), or restructuring the card (e.g.
+  folding Pattern into the Mode row). Recorded, **not** forced.
+- **F-5 (ledger correction):** §4 of this ledger originally cited the
+  form-field contract as `UIF-COMP-004`. That id is §3B.4 *ScrollView*. The
+  form field is **`UIF-COMP-001`** (§3B.1, `src/hoarfrost/spec.md:734`).
 
 ---
 
 ## 4. Open work
 
 Each item states the measured cause and the change sites, so the work is
-actionable without re-deriving it.
+actionable without re-deriving it. Items marked **CLOSED** are kept with their
+cause analysis as the record of what was decided; see §3 for the landed
+evidence.
 
-### #2 — Batch dialog vertical spacing
+### #2 — Batch dialog vertical spacing — **CLOSED** `86a2343`
 
 The card reserves a fixed band per form row whether or not that row has a
 caption: hoarfrost `form_field` reserves `HEADER_HEIGHT` 20 + `BAND_GAP` 4 +
@@ -143,9 +164,15 @@ caption: hoarfrost `form_field` reserves `HEADER_HEIGHT` 20 + `BAND_GAP` 4 +
 row**, and the body column adds `space::MD` (12px) between rows — about 438px
 for five rows in File mode, most of it empty reserved space.
 
-Change sites: `ui_iced/batch_dialog.rs:988` (body spacing), `:1003` (card
-spacing), and the reserved empty caption band. No test pins the current
-spacing, so the negative test comes first.
+**Resolution.** The reserved bands are not the bug and are not reducible:
+§3B.1 (`UIF-COMP-001`) fixes them and `UIF-PRIN-003` requires the caption band
+to stay reserved so a validation message cannot shove the rows below it. The
+actual defect was that the body column stacked rows on `space::MD`, which the
+spacing scale documents as the *horizontal* padding inside a control, when the
+rung it documents as **form row spacing** is `space::SM`. One rung change:
+row pitch 88px → 84px, inter-row gap 12px → 8px. Two contract guards were added
+so the compaction cannot later be "paid for" by dropping a reserved band.
+hoarfrost untouched. The residual overflow in File mode is tracked as **F-4**.
 
 ### #6 — Tools card resize (D-3)
 
@@ -157,19 +184,34 @@ movable-card stack (`hoarfrost/surface/movable.rs`, `movable_shell.rs:259`,
 `update.rs:216`) is the reference implementation for the gesture, not a thing
 to reuse directly.
 
-### #12 — Pane separation (D-2)
+### #12 — Pane separation (D-2) — **CLOSED** `47fb203`
 
-`layout.rs:302` `middle_band()` builds the `PaneGrid` with no `.spacing(..)`,
-so iced's default `0.0` applies, and all three panes paint the same
-`surface.base` — nothing separates them. The module doc at `layout.rs:25-27`
-states the zero-spacing premise the decision removes.
+`layout.rs` `middle_band()` built the `PaneGrid` with no `.spacing(..)`, so
+iced's default `0.0` applied, and all three panes paint the same
+`surface.base` — nothing separates them. The module doc stated the
+zero-spacing premise the decision removes.
 
-Change sites: `.spacing()` on the grid; `apply_pane_resize` (`layout.rs:230`)
-left ratio `width / viewport` and right `available = viewport - left`;
-`auto_fit_tree` (`update.rs:1075`); `RESIZE_LEEWAY_PIXELS` (`layout.rs:51`),
-because iced's grab area is `spacing + leeway` and `UIF-PANE-001` mandates a
-10px grab; the ratio expectations pinned in `layout_tests.rs:133-300`; and
-F-2's startup replay.
+**Resolution.** `PANE_SPACING_PIXELS = space::XXS` (2px) — the rung hoarfrost
+itself uses for a visible separation between adjacent sibling surfaces. Three
+named conversions carry the gutter through every pixel↔ratio conversion, and
+because the replay ratio is the *exact inverse* of the forward one, an
+unclamped drag round-trips. `RESIZE_LEEWAY_PIXELS` became
+`size.splitter.grab − PANE_SPACING_PIXELS`, because iced's grab area is
+`spacing + leeway`; the two together stay at exactly 10.0, so `UIF-PANE-001`'s
+mandated band is preserved rather than widened by the fix.
+
+Two judgement calls made during this work, both accepted on review:
+
+1. **The gutter is painted.** iced's default container class is transparent and
+   the canvas is `surface.base`, so an unpainted 2px gap is invisible against
+   the panes it separates — spacing alone would not have fixed the reported
+   defect. The container backing the grid now paints `color.border.subtle`,
+   the framework's designated pane-split colour. `UIF-PRIN-006` is satisfied
+   via its *visible divider* branch, not the differing-surface-token branch.
+2. **Startup replay is verbatim, not re-clamped.** Re-clamping remembered widths
+   against the restored viewport was tried first; it broke the pinned
+   "project persisted widths verbatim" contract and meant a restore from a
+   larger window silently lost its widths.
 
 ### #14 — Content-sized ToC panel
 
@@ -184,7 +226,7 @@ ToC equivalent — max over entries of indent + measured title at
 `TOC_TEXT_RUNG` + row padding + scrollbar allowance — clamped through
 `layout::clamped_width` and replayed onto `band.right_split`.
 
-### #17 — Table renders empty
+### #17 — Table renders empty — **CLOSED** `0c492e2`
 
 Parsing is not the cause: pulldown-cmark 0.13.4 accepts the all-empty header
 as 4 columns and reads `|||||` as an ordinary 4-empty-cell body row, and the
@@ -194,8 +236,8 @@ non-finite input and clamps a zero-measured column to 1px at
 
 The collapse is downstream, in iced's `Table` layout:
 
-1. `render/table.rs:305` wraps every cell in `container(..).width(Length::Fill)`.
-2. `render/table.rs:252` pins every column to `Length::Fixed(w)`.
+1. `render/table.rs` wrapped every cell in `container(..).width(Length::Fill)`.
+2. Every column was pinned to `Length::Fixed(w)`.
 3. iced's `Table::new` folds the column widths with `Length::enclose`; an
    all-`Fixed` table folds to `Shrink`, so iced **rewrites the first column
    to `Length::Fill`** (`iced_widget-0.14.2/src/table.rs:129`).
@@ -207,10 +249,23 @@ The collapse is downstream, in iced's `Table` layout:
    recorded max of 0 — so columns 1..n get 0px and column 0 absorbs the
    viewport.
 
-Fix direction: stop declaring `Fill` on cells whose column is fixed, so the
-first pass measures them. Per D-4, the layout-level render tests are restored
-alongside it, covering empty header cells, an empty mid-table row, all-empty
-columns, and narrow viewports.
+**Resolution.** A cell now declares its own column's `Length` rather than
+`Fill`, so the first pass measures it; the `Length` is computed once per
+column and shared with its cells so the two passes cannot disagree. Two
+further corrections surfaced: a zero-column model must never reach the widget
+(`Table::layout` divides by the column count and panics — proven by test), and
+the scroll fallback must add back the two outer padding bands, because
+`total_width` excludes them and column 0 was being laid out 10px narrower than
+solved. The module doc's false premise was corrected (RUST-041).
+
+Measured on the owner's table at 900×600, before → after:
+`col0 860.0 → 20.0`, `col1 0.0 → 15.0`, `col2 0.0 → 100.0`, `col3 0.0 → 120.0`
+— exactly the FTWA solve.
+
+Per D-4 the layout-level tests came back: the owner's exact table, empty header
+cells, an all-empty column, a 200→1200px viewport fuzz, the wide-table scroll
+fallback, and the two `test/wiki` fixtures that had been referenced by no test
+at all since the egui deletion.
 
 ---
 
@@ -223,7 +278,10 @@ set), test-first, with the quality gate passing.
 |--------|---------|---------|
 | `06e8f9c` | 1, 3, 5, 7, 8, 9, 10, 11, 13, 15, 16, 18 | Dialog, overlay, ToC and tab-strip repairs (pre-ledger baseline) |
 | `a49eaf5` | 4 | Tools card sized to 80% of the viewport on both axes (D-1) |
-| — | — | *(ledger opened)* |
+| `0c492e2` | 17 | Table cells declare their own column's `Length`; layout-level table tests restored (D-4) |
+| `47fb203` | 12, F-2 | Pane grid gutter + gutter-aware ratio math; persisted widths replayed at startup (D-2) |
+| `86a2343` | 2 | Batch card rows stacked on the form-row rung (`space::SM`) |
+| — | — | *(ledger updated after wave 1)* |
 
 ### Note on the `a49eaf5` baseline
 
