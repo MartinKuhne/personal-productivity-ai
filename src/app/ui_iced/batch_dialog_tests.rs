@@ -1273,3 +1273,169 @@ fn absorbed_cannot_open_a_closed_dialog() {
 fn batch_mode_radio_focus_id_is_stable_and_named() {
     assert_eq!(BATCH_MODE_RADIO_FOCUS_ID, "batch.mode");
 }
+
+// --- Vertical rhythm (defect #2: rows sit too far apart) -------------
+//
+// Every figure below is **measured** off a headless layout of the real
+// card, never read back out of the policy object. The measurement rests on
+// one property of the framework's field: the header band is a fixed
+// [`HEADER_HEIGHT`](form_field::HEADER_HEIGHT) container that top-aligns
+// its label, so a row label's `y` *is* the row's top edge. The difference
+// between two consecutive labels is therefore the row pitch, and
+// `pitch - stacked_height()` is the gap the card itself chose — the only
+// vertical term this module owns. Everything inside a row (20px header,
+// 4px band gap, 32px control slot, 4px band gap, 16px reserved caption)
+// is `UIF-COMP-001`'s and is pinned as intact by
+// [`compacting_the_rows_left_the_reserved_bands_intact`] rather than
+// changed.
+
+/// The header label a body row key renders.
+fn row_header_label(key: &'static str) -> &'static str {
+    match key {
+        ROW_DIRECTORY => strings::BATCH_DIALOG_DIRECTORY_LABEL,
+        ROW_PATTERN => strings::BATCH_DIALOG_PATTERN_LABEL,
+        ROW_MODE => strings::BATCH_DIALOG_MODE_LABEL,
+        ROW_CONCURRENCY => strings::BATCH_DIALOG_CONCURRENCY_LABEL,
+        ROW_PROMPT => strings::BATCH_DIALOG_PROMPT_LABEL,
+        other => panic!("{other:?} is not a Batch body row key"),
+    }
+}
+
+/// The rendered top edge of every body row, in the order the card stacks
+/// them ([`config_body_order`]).
+fn rendered_row_tops(view_model: &BatchDialogViewModel) -> Vec<(&'static str, f32)> {
+    let mut ui = iced_test::simulator(batch_dialog_card(view_model, ROOMY));
+    config_body_order(view_model.mode)
+        .iter()
+        .map(|key| (*key, text_label_bounds(&mut ui, row_header_label(key)).y))
+        .collect()
+}
+
+/// The gap the card puts between two adjacent body rows, measured from the
+/// rendered card rather than from the spacing call site.
+fn measured_row_gap(view_model: &BatchDialogViewModel) -> f32 {
+    let tops = rendered_row_tops(view_model);
+    assert!(
+        tops.len() >= 2,
+        "a card with fewer than two rows cannot show a row gap"
+    );
+    tops[1].1 - tops[0].1 - form_field::stacked_height()
+}
+
+/// Defect #2: the form rows were stacked on `space.md` — the rung the scale
+/// documents as *horizontal padding inside a button, input, tab or menu
+/// row* — while `space.sm` is the rung it documents as **form row
+/// spacing**. The pitch between consecutive rows must therefore be the
+/// framework's fixed field height plus one `space.sm`, on every adjacent
+/// pair, in both modes.
+#[test]
+fn config_body_rows_are_spaced_on_the_form_row_rung() {
+    let expected_pitch = form_field::stacked_height() + space::SM;
+
+    for mode in [BatchMode::File, BatchMode::Directory] {
+        let model = BatchDialogViewModel {
+            mode,
+            ..valid_model()
+        };
+        let tops = rendered_row_tops(&model);
+
+        for pair in tops.windows(2) {
+            let ((upper, upper_y), (lower, lower_y)) = (pair[0], pair[1]);
+            let pitch = lower_y - upper_y;
+            assert!(
+                (pitch - expected_pitch).abs() <= 1.0,
+                "defect #2: the {upper:?} → {lower:?} row pitch measures {pitch}px, expected \
+                 {expected_pitch}px ({}px UIF-COMP-001 field + space.sm = {space}px row gap) \
+                 in {mode:?} mode",
+                form_field::stacked_height(),
+                space = space::SM,
+            );
+        }
+    }
+}
+
+/// The same defect read as what the user actually sees: the empty vertical
+/// run between the bottom of one row's caption band and the top of the
+/// next row's label. Only the row gap is the card's to own, so that run
+/// must be one `space.sm` wide — not wider.
+#[test]
+fn the_empty_run_between_two_rows_is_one_row_gap_wide() {
+    let model = valid_model();
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+
+    let caption = text_label_bounds(&mut ui, strings::BATCH_PATTERN_FIELD_HELPER);
+    let next_row = text_label_bounds(&mut ui, strings::BATCH_DIALOG_CONCURRENCY_LABEL);
+    let empty_run = next_row.y - (caption.y + caption.height);
+
+    assert!(
+        (empty_run - space::SM).abs() <= 1.0,
+        "defect #2: {empty_run}px of empty space sits between the Pattern row's caption band \
+         and the Concurrency row's label; the only gap the card owns is space.sm \
+         ({space}px)",
+        space = space::SM,
+    );
+}
+
+/// The measured gap is the row-gap rung, stated once as a number so a
+/// future edit that quietly moves the rows onto a wider rung fails with the
+/// two rungs named instead of a bare geometry mismatch.
+#[test]
+fn the_measured_row_gap_is_the_form_row_rung_not_a_wider_one() {
+    let gap = measured_row_gap(&valid_model());
+    assert!(
+        (gap - space::SM).abs() <= 1.0,
+        "defect #2: the rendered card separates form rows by {gap}px; `space.sm` ({sm}px) is \
+         the rung the spacing scale documents as form row spacing, and `space.md` ({md}px) is \
+         documented as horizontal padding inside a control",
+        sm = space::SM,
+        md = space::MD,
+    );
+}
+
+/// The compaction must come out of the gap **between** rows and nowhere
+/// else: `UIF-COMP-001` reserves the caption band permanently so a
+/// validation message cannot move the control (`UIF-PRIN-003`), so a row
+/// with nothing to say still renders a full-height band. Pinning it here
+/// means a future "make it compact" edit that deletes the reservation fails
+/// loudly instead of shipping a zero-shift regression.
+#[test]
+fn compacting_the_rows_left_the_reserved_bands_intact() {
+    assert_eq!(
+        form_field::stacked_height(),
+        form_field::HEADER_HEIGHT
+            + form_field::BAND_GAP
+            + form_field::CONTROL_SLOT_HEIGHT
+            + form_field::BAND_GAP
+            + form_field::CAPTION_SLOT_HEIGHT,
+    );
+
+    let model = valid_model();
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+    let caption = text_label_bounds(&mut ui, strings::BATCH_PATTERN_FIELD_HELPER);
+    assert_eq!(
+        caption.height,
+        form_field::CAPTION_SLOT_HEIGHT,
+        "the caption band must keep its reserved height so a validation error cannot shift the rows"
+    );
+}
+
+/// The card-level rhythm (title / divider / body / divider / footer) stays
+/// on `space.sm`, the rung every other modal card in this app uses
+/// (`tools_dialog`, `editor`, `attributions`, `about`). Compacting the
+/// *rows* must not be paid for by squeezing the card chrome off-scale.
+#[test]
+fn the_card_keeps_the_modal_rhythm_every_other_dialog_uses() {
+    let model = valid_model();
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+
+    let title = text_label_bounds(&mut ui, strings::BATCH_DIALOG_WINDOW);
+    let first_row = text_label_bounds(&mut ui, strings::BATCH_DIALOG_DIRECTORY_LABEL);
+    let chrome = first_row.y - (title.y + title.height);
+    let expected = space::SM * 2.0 + hoarfrost::token::shape::BORDER_HAIRLINE;
+
+    assert!(
+        (chrome - expected).abs() <= 1.0,
+        "the title band, one divider and the footer band are separated by {chrome}px, expected \
+         {expected}px (two space.sm gaps either side of a hairline rule)",
+    );
+}

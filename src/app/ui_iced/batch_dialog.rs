@@ -985,7 +985,21 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
             .filter_map(|key| take_row(&mut body_slots, key))
             .collect::<Vec<_>>(),
     )
-    .spacing(space::MD);
+    // The rows are stacked on `space.sm` — the rung the spacing scale
+    // documents as *form row spacing* (`token::space::SM`). The card used
+    // to spend `space.md` here, which the same scale documents as the
+    // *horizontal* padding inside a button, input, tab or menu row, so the
+    // rows were sitting on a rung that describes something else entirely
+    // and the dialog read as puffed-up next to the rest of the UI.
+    //
+    // This gap is the only vertical term this card owns. Everything inside
+    // a row — `20px` header, `4px` band gap, `32px` control slot, `4px`
+    // band gap, `16px` reserved caption band — is fixed by
+    // [`form_field`] and §3B.1, and the caption band stays reserved even on
+    // a row with nothing to say because `UIF-PRIN-003` forbids a validation
+    // message from moving the rows below it. See
+    // `compacting_the_rows_left_the_reserved_bands_intact`.
+    .spacing(space::SM);
     debug_assert!(
         body_slots.is_empty(),
         "a Batch card row was assembled but never mounted: {:?}",
