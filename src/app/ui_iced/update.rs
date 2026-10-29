@@ -913,6 +913,9 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
         LayoutMessage::TreeAutoFit => {
             auto_fit_tree(state);
         }
+        LayoutMessage::TocAutoFit => {
+            auto_fit_toc(state);
+        }
         LayoutMessage::CursorMoved { point } => {
             state.overlay.cursor = Some(point);
         }
@@ -1080,6 +1083,65 @@ fn auto_fit_tree(state: &mut AppState) {
         crate::ui_iced::layout::PANE_SPACING_PIXELS,
     );
     state.panes.resize(state.band.left_split, ratio);
+}
+
+/// The right (ToC) panel's content-fit transition (defect #14), reduced from
+/// an explicit [`LayoutMessage::TocAutoFit`] so the width change is replayable.
+///
+/// **Why the document load and not the startup replay.** [`apply_pane_widths`]
+/// (`crate::ui_iced::layout`) replays *remembered* widths onto a freshly built
+/// grid; at that moment no document is open, so the heading set is empty and a
+/// fit there could only ever measure zero entries and pin the pane to its
+/// minimum. The content exists the moment `ProcessEvent::FileLoaded` lands —
+/// `AppOrchestrator::handle_process_event` builds `tabs.toc` from the bytes it
+/// just read — so the fit belongs to the reducer that applies that event, and
+/// it re-fits per document rather than once per process.
+///
+/// The measurement uses the same production measurer as [`auto_fit_tree`]:
+/// [`fira_sans_width`] shapes against the Fira Sans bytes iced renders with,
+/// at [`TOC_TEXT_RUNG`] — the rung `view::toc_entry_label` paints the entry at.
+///
+/// The replay is the gutter-aware one defect #12 established: the right split
+/// operates on [`nested_region_width`], not on the viewport, and the ToC is
+/// its TRAILING side, so the ratio is `1 - split_ratio_for_width(..)`.
+///
+/// Purity: mutates `state.app.layout`, the persisted width and the pane grid
+/// only; publishes nothing.
+fn auto_fit_toc(state: &mut AppState) {
+    let viewport = state.viewport.width;
+    if viewport <= 0.0 {
+        return;
+    }
+    let left = crate::ui_iced::layout::current_left_width(&state.app.layout, viewport);
+    let region = crate::ui_iced::layout::nested_region_width(
+        viewport,
+        left,
+        crate::ui_iced::layout::PANE_SPACING_PIXELS,
+    );
+    if region <= 0.0 {
+        return;
+    }
+
+    let entries = state.app.orchestrator.tabs.toc.clone();
+    let width = crate::ui_iced::panels::right::auto_fit_width(&entries, viewport, |text: &str| {
+        fira_sans_width(
+            text,
+            iced::Font::DEFAULT,
+            crate::ui_iced::view::TOC_TEXT_RUNG.size,
+        )
+    });
+    state.app.layout.set_right_width(Some(width));
+    state.app.persisted_ui_state.right_panel_width = state.app.layout.right_panel_width;
+
+    let ratio = 1.0
+        - crate::ui_iced::layout::split_ratio_for_width(
+            width,
+            region,
+            crate::ui_iced::layout::PANE_SPACING_PIXELS,
+        );
+    state
+        .panes
+        .resize(state.band.right_split, ratio.clamp(0.0, 1.0));
 }
 
 // ───────────────────────────── tree / tab ─────────────────────────────
@@ -2489,6 +2551,20 @@ fn apply_background_event(state: &mut AppState, event: &BackgroundEvent) {
                 .app
                 .orchestrator
                 .handle_process_event(process_event.clone());
+            // Defect #14: a document load is the first moment the heading set
+            // exists, so it is the moment a content-sized right pane can be
+            // solved. Fitting here (rather than at startup) also means each
+            // document gets the width *its own* headings need.
+            //
+            // The fit is gated on the load having actually landed:
+            // `handle_process_event` drops a `FileLoaded` for a file the user
+            // has already moved on from, and re-fitting from an unchanged
+            // heading set would resize the pane behind the document on screen.
+            if let ProcessEvent::FileLoaded { path, .. } = process_event
+                && state.app.orchestrator.tabs.loaded_path.as_deref() == Some(path.as_path())
+            {
+                auto_fit_toc(state);
+            }
         }
         BackgroundEvent::McpAuth(auth_event) => {
             state

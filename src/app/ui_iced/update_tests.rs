@@ -20,6 +20,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, InMemoryConfigStorage};
 use crate::error_codes::menu as menu_codes;
 use crate::ui::CURRENT_SCHEMA_VERSION;
+use crate::ui::panel_layout::{RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH};
 use crate::ui::tree::flatten::FlatRow;
 use crate::ui_iced::app::{AppState, OverlayLayer, ViewModels, build_state};
 use crate::ui_iced::batch_dialog::BatchDialogViewModel;
@@ -340,6 +341,132 @@ fn test_tree_auto_fit_is_a_noop_on_a_non_positive_viewport() {
         state.app.layout().left_panel_width,
         Some(222.0),
         "a zero-width viewport must not clobber the remembered width"
+    );
+}
+
+// ─────────────────────── right (ToC) panel auto-fit, defect #14 ───────────────
+
+/// A ToC whose single heading is short enough that the fit lands on the
+/// right-panel minimum rather than on the content width.
+fn short_toc(state: &mut AppState) {
+    state.app.orchestrator.tabs.toc = vec![crate::markdown::ToCEntry::new("Intro", 1, "Intro")];
+}
+
+#[test]
+fn test_toc_auto_fit_sets_and_persists_the_right_panel_width() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    short_toc(&mut state);
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    let width = state
+        .app
+        .layout()
+        .right_panel_width
+        .expect("auto-fit must set a width");
+    assert!(
+        (width - RIGHT_PANEL_MIN_WIDTH).abs() < 1.0,
+        "a one-word ToC should land on the {RIGHT_PANEL_MIN_WIDTH}px floor, got {width}"
+    );
+    assert_eq!(state.app.persisted_ui_state.right_panel_width, Some(width));
+}
+
+#[test]
+fn test_toc_auto_fit_respects_the_ui_016_cap() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.orchestrator.tabs.toc = vec![crate::markdown::ToCEntry::new(
+        "Implementing the Fair Table Width Algorithm across every renderer in the workspace",
+        1,
+        "long",
+    )];
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    let width = state.app.layout().right_panel_width.unwrap_or_default();
+    assert!(
+        width <= VIEWPORT * RIGHT_PANEL_MAX_WIDTH_FRACTION + f32::EPSILON,
+        "auto-fit must not exceed the 30% cap, got {width}"
+    );
+}
+
+#[test]
+fn test_toc_auto_fit_is_a_noop_on_a_non_positive_viewport() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(0.0, 0.0);
+    state.app.layout.set_right_width(Some(222.0));
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(222.0),
+        "a zero-width viewport must not clobber the remembered width"
+    );
+}
+
+/// Defect #14 — the production trigger: landing a `FileLoaded` result re-fits
+/// the right pane to the headings that document produced, without the caller
+/// having to ask for it.
+#[test]
+fn test_document_load_fits_the_right_panel_to_its_headings() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.layout.set_right_width(Some(400.0));
+    let path = PathBuf::from("/notes/short.md");
+    state.app.orchestrator.selection.select_file(path.clone());
+
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path,
+        content: Ok("# Intro".to_string()),
+    });
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(RIGHT_PANEL_MIN_WIDTH),
+        "a one-heading document must shrink the pane to the floor it actually needs"
+    );
+}
+
+/// A load the orchestrator drops — a file the user has already moved on from —
+/// must not re-fit: the fit follows the heading set that is actually on screen,
+/// not the mere arrival of a message.
+#[test]
+fn test_a_dropped_document_load_does_not_refit_the_right_panel() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.layout.set_right_width(Some(400.0));
+
+    let current = PathBuf::from("/notes/current.md");
+    state
+        .app
+        .orchestrator
+        .selection
+        .select_file(current.clone());
+    state.app.orchestrator.pending_file_load = Some(current);
+
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path: PathBuf::from("/notes/abandoned.md"),
+        content: Ok("# Intro".to_string()),
+    });
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+
+    assert!(
+        state.app.orchestrator.tabs.toc.is_empty(),
+        "the fixture assumes the orchestrator dropped this load"
+    );
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(400.0),
+        "a dropped load changes no headings, so it must not move the pane"
     );
 }
 

@@ -3,18 +3,43 @@
 //! There is no `ui_iced/panels/right.rs` **view** — the ToC pane body is
 //! rendered inline by [`view::toc_body`](crate::ui_iced::view) — so this
 //! module owns the *pure* rules that pane is built from: the visibility
-//! gate, the anchor → heading-id resolver and the per-level row indent.
+//! gate, the anchor → heading-id resolver, the per-level row indent and the
+//! content-width auto-fit.
 //!
 //! [`toc_indent_pixels`] lifts the indent arithmetic out of
 //! `view::toc_body` so the rule is a named, testable function rather than
 //! an inline expression.
 //!
-//! All three helpers are **framework-free by construction**: their
-//! signatures mention only `bool`, `u32`, `f32`,
-//! [`crate::markdown::ToCEntry`] and `String`. The two indent *constants*
-//! are not framework-free — they are bound to `hoarfrost` spacing tokens,
-//! which is the point: the ToC's nesting pitch is now read off the
-//! spacing scale instead of being a pair of numbers the pane invented.
+//! # The content-sized width (defect #14)
+//!
+//! The right split used to be a bare `ratio: 0.5`, so the pane opened at
+//! roughly 37.5% of the viewport whether its longest entry was "Intro" or a
+//! 90-character heading. [`auto_fit_width`] is the ToC's counterpart of the
+//! left pane's [`auto_fit_width`](crate::ui_iced::panels::left::auto_fit_width):
+//! it measures every entry the way the row is actually built — level indent,
+//! the hoarfrost button's own padding, the row container's right pad and the
+//! permanently reserved scrollbar gutter — and clamps the widest of them
+//! through [`clamped_width`], the same UI-016 rule the pane resize and the
+//! tree auto-fit share.
+//!
+//! The measurement is **injected**, exactly as the tree's is: iced only hands
+//! a text renderer to `Widget::layout`, so neither `view` nor the reducer can
+//! measure from inside the widget tree. The reducer passes
+//! [`fira_sans_width`](crate::ui_iced::table_width::fira_sans_width), the
+//! production measurer that shapes against the same Fira Sans bytes iced
+//! renders with.
+//!
+//! The *furniture* terms are not invented here either: they are the same
+//! hoarfrost constants the row composite is built from
+//! ([`button::HORIZONTAL_PADDING`], [`button::ICON_ONLY_MIN_WIDTH`],
+//! [`space::XS`] and [`scroll_view::TRACK_WIDTH_RESERVED`]), so the solver
+//! and [`view::toc_body`](crate::ui_iced::view) cannot disagree about what a
+//! row costs ([RUST-021]).
+//!
+//! The two indent *constants* are not framework-free — they are bound to
+//! `hoarfrost` spacing tokens, which is the point: the ToC's nesting pitch is
+//! now read off the spacing scale instead of being a pair of numbers the pane
+//! invented.
 //!
 //! [`should_show_panel`] is re-exported from [`crate::ui_iced::layout`] so
 //! [`view`](crate::ui_iced::view) and the pane-grid gate resolve through
@@ -26,7 +51,12 @@
 #[path = "right_tests.rs"]
 mod tests;
 
+use crate::markdown::ToCEntry;
+use crate::ui::panel_layout::{RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH};
+use crate::ui_iced::layout::clamped_width;
+use hoarfrost::composite::scroll_view;
 use hoarfrost::token::space;
+use hoarfrost::widget::button;
 
 /// Determines if the right panel should be shown based on application state.
 ///
@@ -112,4 +142,123 @@ pub const TOC_LEVEL_INDENT_PIXELS: f32 = space::MD;
 #[must_use]
 pub fn toc_indent_pixels(level: u32) -> f32 {
     TOC_BASE_INDENT_PIXELS + level.saturating_sub(1) as f32 * TOC_LEVEL_INDENT_PIXELS
+}
+
+/// Right padding every ToC row gets after its label, in logical pixels
+/// (UI-001, defect #14) — `space.xs` (`UIF-TOK-001`).
+///
+/// **Movement: none.** The retired literal `4.0` *is* `space.xs`. It is named
+/// here rather than left inline in
+/// [`view::toc_body`](crate::ui_iced::view) because the width solver
+/// below has to charge the same padding to the row it is measuring: a row
+/// that pads its right edge by 4px needs 4px more pane than its label alone
+/// would ([RUST-021]).
+pub const TOC_ROW_RIGHT_PAD_PIXELS: f32 = space::XS;
+
+/// Vertical padding above and below every ToC row, in logical pixels
+/// (UI-001) — `space.2xs` (`UIF-TOK-001`).
+///
+/// **Movement: none.** The retired literal `2.0` *is* `space.2xs`. Named for
+/// the same reason as [`TOC_ROW_RIGHT_PAD_PIXELS`]: the row's furniture has
+/// one home, even though only the vertical axis reads this one.
+pub const TOC_ROW_VERTICAL_PAD_PIXELS: f32 = space::XXS;
+
+/// Horizontal padding the entry's
+/// [`Button`](hoarfrost::widget::button_widget::Button) costs on **each** side, in
+/// logical pixels — `button.horizontal_padding` (`UIF-TOK-002`,
+/// `hoarfrost::widget::button::HORIZONTAL_PADDING`).
+///
+/// The ToC row's label is not painted bare: `view::toc_entry_button` wraps it
+/// in a hoarfrost ghost button, and `Button::new`
+/// (`button_widget.rs:535`) gives every button
+/// [`button::HORIZONTAL_PADDING`] on both sides. A solver that measured only
+/// the label would under-size every row by twice this much and truncate the
+/// heading it was supposed to be sizing for.
+pub const TOC_BUTTON_H_PAD_PIXELS: f32 = button::HORIZONTAL_PADDING;
+
+/// Scrollbar gutter the ToC pane must reserve, in logical pixels —
+/// `size.splitter.grab` via [`scroll_view::TRACK_WIDTH_RESERVED`]
+/// (`UIF-COMP-004`).
+///
+/// The pane is a `scrollable`
+/// ([`TOC_SCROLLABLE_ID`](crate::ui_iced::view::TOC_SCROLLABLE_ID)), and §3B.4
+/// requires the gutter to be **permanently reserved** at the widest thumb
+/// phase so a hover that expands the thumb causes `0px` content reflow. A
+/// width solve that ignores it produces a heading that fits at rest and is
+/// clipped the moment the pointer enters the pane.
+pub const TOC_SCROLLBAR_GUTTER_PIXELS: f32 = scroll_view::TRACK_WIDTH_RESERVED;
+
+/// Width the entry's button needs around a label of `label_width`.
+///
+/// This is `Button::outer_size`'s width clause
+/// (`hoarfrost/widget/button_widget.rs:808-811`) restated for a solver that
+/// has no renderer: label + [`TOC_BUTTON_H_PAD_PIXELS`] on each side, floored
+/// at the icon-only minimum `button::ICON_ONLY_MIN_WIDTH` that the same
+/// function applies. A one-character heading (`# A`) therefore still costs the
+/// 28px floor instead of collapsing to the glyph.
+///
+/// Purity: pure.
+#[must_use]
+pub fn toc_button_width(label_width: f32) -> f32 {
+    (label_width.max(0.0) + 2.0 * TOC_BUTTON_H_PAD_PIXELS).max(button::ICON_ONLY_MIN_WIDTH)
+}
+
+/// Width a single ToC row needs: `level indent + button + right pad +
+/// reserved scrollbar gutter` (defect #14).
+///
+/// `measure` is the injected label measurer — see the module header for why
+/// measurement cannot come from inside the view. It is called with the entry's
+/// title at [`TOC_TEXT_RUNG`](crate::ui_iced::view::TOC_TEXT_RUNG)'s point
+/// size by the reducer, which is the rung `view::toc_entry_label` paints at.
+///
+/// Purity: pure for a pure `measure`.
+#[must_use]
+pub fn entry_width(entry: &ToCEntry, measure: impl Fn(&str) -> f32) -> f32 {
+    toc_indent_pixels(entry.level)
+        + toc_button_width(measure(&entry.title))
+        + TOC_ROW_RIGHT_PAD_PIXELS
+        + TOC_SCROLLBAR_GUTTER_PIXELS
+}
+
+/// Width of the widest row in `entries`; `0.0` for an empty ToC.
+///
+/// Purity: pure for a pure `measure`.
+#[must_use]
+pub fn longest_entry_width<'a>(
+    entries: impl IntoIterator<Item = &'a ToCEntry>,
+    measure: impl Fn(&str) -> f32,
+) -> f32 {
+    entries
+        .into_iter()
+        .map(|entry| entry_width(entry, &measure))
+        .fold(0.0_f32, f32::max)
+}
+
+/// UI-016 auto-fit for the right pane: the width that fits the longest ToC
+/// entry, clamped to
+/// `[RIGHT_PANEL_MIN_WIDTH, viewport_width × RIGHT_PANEL_MAX_WIDTH_FRACTION]`
+/// (defect #14).
+///
+/// Shares [`clamped_width`] with the pane-grid resize reduction and the tree
+/// auto-fit, so the degenerate tiny-viewport case behaves identically in all
+/// three paths: when the 30% cap falls *below* the minimum, the minimum wins.
+///
+/// **The 30% cap can win.** A heading long enough to need more than
+/// `viewport × 0.30` is truncated rather than given more room, because the
+/// clamp is the UI-016 contract this solve is not allowed to renegotiate. The
+/// pane then scrolls horizontally-free and clips; that is the clamp doing
+/// what it says, not a sizing bug.
+///
+/// Purity: pure for a pure `measure`.
+#[must_use]
+pub fn auto_fit_width(
+    entries: &[ToCEntry],
+    viewport_width: f32,
+    measure: impl Fn(&str) -> f32,
+) -> f32 {
+    clamped_width(
+        longest_entry_width(entries, &measure),
+        RIGHT_PANEL_MIN_WIDTH,
+        viewport_width * RIGHT_PANEL_MAX_WIDTH_FRACTION,
+    )
 }

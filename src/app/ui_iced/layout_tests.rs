@@ -1,18 +1,24 @@
 //! Unit tests for `layout.rs` — pane/split id mapping, the pure
 //! `PanelLayout` resize reductions ([RUST-003]), the spacing-aware
-//! pixel↔ratio conversions introduced by defect #12, and headless
+//! pixel↔ratio conversions introduced by defect #12, the content-sized
+//! right (ToC) pane of defect #14, and headless
 //! (`iced_test::Simulator`) measurements of the real `middle_band` widget's
 //! gutters.
 
 use super::*;
+use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
 use crate::config::AppConfig;
 use crate::ui::PersistedUiState;
 use crate::ui::panel_layout::PanelLayout;
-use crate::ui_iced::message::{LayoutMessage, Message};
+use crate::ui_iced::app::AppState;
+use crate::ui_iced::message::{InboundMessage, LayoutMessage, Message};
 use crate::ui_iced::test_helpers::test_app_state_with;
+use crate::ui_iced::update::update;
 use iced::Size;
 use iced::widget::{container, text};
 use iced_test::selector::Candidate;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Reference viewport width used throughout the width-clamping cases.
 const VIEWPORT: f32 = 1000.0;
@@ -359,14 +365,20 @@ fn test_right_resize_min_clamp() {
 }
 
 #[test]
-fn test_right_resize_without_persisted_left_width_uses_default() {
+fn test_right_resize_without_persisted_left_width_uses_the_seeded_ratio() {
     let (_state, band_panes) = middle_band_state();
     let mut layout = PanelLayout::new();
     assert!(layout.left_panel_width.is_none());
 
-    // region = 1000 - default 280 - spacing = 718; ratio 0.5 → 358px →
-    // clamped to 300 (30% cap).
-    let region = VIEWPORT - LEFT_PANEL_DEFAULT_WIDTH - PANE_SPACING_PIXELS;
+    // Nothing is remembered, so the grid holds DEFAULT_ROOT_SPLIT_RATIO's width,
+    // not LEFT_PANEL_DEFAULT_WIDTH. At a 1000px viewport that is 249px, not 280,
+    // so region = 1000 - 249 - 2 = 749; ratio 0.5 -> 373.5px -> clamped to the
+    // 300px (30%) cap.
+    let region = nested_region_width(
+        VIEWPORT,
+        current_left_width(&layout, VIEWPORT),
+        PANE_SPACING_PIXELS,
+    );
     let replay = apply_pane_resize(
         &band_panes,
         resize_event(band_panes.right_split, 0.5),
@@ -381,7 +393,49 @@ fn test_right_resize_without_persisted_left_width_uses_default() {
             1.0 - split_ratio_for_width(300.0, region, PANE_SPACING_PIXELS)
         ))
     );
-    assert_eq!(region, 718.0);
+    assert_eq!(region, 749.0);
+}
+
+/// Defect #12 follow-on: a right-split drag must round-trip even before any
+/// left width has been remembered.
+///
+/// `apply_pane_resize` solves the right split against the nested region iced
+/// actually hands it. While `PanelLayout.left_panel_width` is `None` the grid is
+/// sitting at [`DEFAULT_ROOT_SPLIT_RATIO`], so that region has to be derived from
+/// the seeded ratio's width. Deriving it from `LEFT_PANEL_DEFAULT_WIDTH` instead
+/// sizes the split against a region iced never receives, and the replayed ratio
+/// lands the pane somewhere other than the width the reducer just stored.
+///
+/// A drag replay is a ratio replay, so it reads the same
+/// [`current_left_width`] rule as [`apply_pane_widths`] and the ToC auto-fit.
+#[test]
+fn defect_12_a_right_drag_round_trips_before_any_left_width_is_remembered() {
+    let (mut panes, band_panes) = middle_band_state();
+    let mut layout = PanelLayout::new();
+    assert!(layout.left_panel_width.is_none());
+
+    // Ratio 0.7 at a 1000px viewport lands the right pane inside the
+    // [150, 300] clamp, so nothing is clamped and the round trip is observable.
+    let replay = apply_pane_resize(
+        &band_panes,
+        resize_event(band_panes.right_split, 0.7),
+        VIEWPORT,
+        &mut layout,
+    )
+    .expect("a right-split resize is accepted");
+    let stored = layout
+        .right_panel_width
+        .expect("the reducer stored a right width");
+
+    panes.resize(replay.0, replay.1);
+    let laid_out = laid_out_grid_widths(&panes, VIEWPORT)[2];
+
+    assert!(
+        (laid_out - stored).abs() <= 1.0,
+        "defect #12: the reducer stored a right width of {stored}px but the grid \
+         laid it out at {laid_out}px — the nested region was derived from a left \
+         width the grid does not hold"
+    );
 }
 
 #[test]
@@ -877,5 +931,171 @@ fn test_stub_band_height_is_the_framework_control_lg_token() {
     assert_ne!(
         STUB_BAND_HEIGHT_POINTS, 28.0,
         "the retired off-token 28 must not come back"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Defect #14 — "the table of contents takes up more horizontal space than it
+// needs to display its contents"
+//
+// The right split was a bare `ratio: 0.5` with no content awareness, so the
+// ToC opened at roughly 37.5% of the viewport whether its longest entry was
+// "Intro" or a 90-character heading. The owner's ruling is a **content-sized
+// right panel**, so the tests below drive a real document load through the
+// real reducer and measure the pane's own laid-out rectangle — the same
+// gutter-aware measurement defect #12 introduced.
+// ---------------------------------------------------------------------------
+
+/// A markdown document whose only heading is as short as a heading gets.
+const SHORT_TOC_DOC: &str = "# Intro\n";
+
+/// A markdown document with a genuinely long heading that the UI-016 30% cap
+/// still leaves room for at the viewports it is measured at.
+const LONG_TOC_DOC: &str = "# Getting Started With The FastMD Workspace\n";
+
+/// A markdown document whose heading runs to ~90 characters — far more than
+/// the UI-016 30% cap can ever hold at a normal window width.
+const OVERLONG_TOC_DOC: &str =
+    "# Implementing the Fair Table Width Algorithm across every renderer in the workspace\n";
+
+/// A booted state at `viewport` with **no** remembered panel widths, so the
+/// seeded split ratios are the baseline being measured against.
+fn booted_at(viewport: f32) -> AppState {
+    let mut state = test_app_state_with(AppConfig::default(), PersistedUiState::default());
+    state.viewport = Size::new(viewport, 800.0);
+    state
+}
+
+/// Loads `markdown` the way the application does: select the file, then land
+/// the background `FileLoaded` result through the real reducer, so the ToC the
+/// pane is fitted from is the one `AppOrchestrator` built.
+fn load_document(state: &mut AppState, markdown: &str) {
+    let path = PathBuf::from("/notes/defect14.md");
+    state.app.orchestrator.selection.select_file(path.clone());
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path,
+        content: Ok(markdown.to_string()),
+    });
+    let _ = update(
+        state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+}
+
+/// Defect #14 — a ToC whose longest entry is `Intro` must not be handed more
+/// width than the entry needs. The floor it lands on is the UI-016 right-panel
+/// minimum, which is the smallest width the pane is allowed to have at all.
+#[test]
+fn defect_14_a_short_toc_is_not_given_more_width_than_it_needs() {
+    for viewport in [800.0f32, 1200.0, 2000.0] {
+        let mut state = booted_at(viewport);
+        load_document(&mut state, SHORT_TOC_DOC);
+
+        let widths = laid_out_grid_widths(&state.panes, viewport);
+        assert!(
+            widths[2] <= RIGHT_PANEL_MIN_WIDTH + 1.0,
+            "defect #14: at viewport {viewport} a ToC whose only heading is \"Intro\" was \
+             laid out {:.1}px wide; the entry needs at most the {RIGHT_PANEL_MIN_WIDTH}px \
+             panel minimum, so the pane is taking space it does not display",
+            widths[2],
+        );
+    }
+}
+
+/// The width the widest row of `entries` actually needs, measured with the
+/// production measurer at the rung the pane paints at.
+fn needed_toc_width(entries: &[crate::markdown::ToCEntry]) -> f32 {
+    crate::ui_iced::panels::right::longest_entry_width(entries, |text| {
+        crate::ui_iced::table_width::fira_sans_width(
+            text,
+            iced::Font::DEFAULT,
+            crate::ui_iced::view::TOC_TEXT_RUNG.size,
+        )
+    })
+}
+
+/// Defect #14 — the fit must not just be *narrower*, a long heading still has
+/// to fit inside the pane it is given. Measured at two viewports against the
+/// row's own required width, computed with the same real metrics the solver
+/// uses.
+#[test]
+fn defect_14_a_long_heading_still_fits_inside_the_pane() {
+    for viewport in [1200.0f32, 2000.0] {
+        let mut state = booted_at(viewport);
+        load_document(&mut state, LONG_TOC_DOC);
+
+        let entries = &state.app.orchestrator.tabs.toc;
+        assert!(
+            !entries.is_empty(),
+            "the fixture document must produce a ToC at all"
+        );
+        let needed = needed_toc_width(entries);
+        let cap = viewport * RIGHT_PANEL_MAX_WIDTH_FRACTION;
+        assert!(
+            needed < cap,
+            "fixture: this heading needs {needed:.1}px, which is above the {cap:.1}px \
+             UI-016 cap — the case is unmeasurable here",
+        );
+
+        let widths = laid_out_grid_widths(&state.panes, viewport);
+        assert!(
+            widths[2] + LAYOUT_TOLERANCE >= needed,
+            "defect #14: at viewport {viewport} the widest ToC row needs {needed:.1}px but \
+             the pane was laid out at {:.1}px — the heading would be truncated",
+            widths[2],
+        );
+    }
+}
+
+/// Defect #14 — an honest statement of what the UI-016 clamp does to a heading
+/// it cannot hold: the pane stops at `viewport × 30%` and the heading is
+/// clipped. The clamp is the contract, so the solver does not fight it. This
+/// test pins the ceiling — `laid out == min(needed, cap)` — at a viewport where
+/// the cap genuinely binds and one where it does not.
+#[test]
+fn defect_14_a_heading_beyond_the_ui_016_cap_is_clamped_not_overflowed() {
+    for viewport in [1200.0f32, 2000.0] {
+        let mut state = booted_at(viewport);
+        load_document(&mut state, OVERLONG_TOC_DOC);
+
+        let needed = needed_toc_width(&state.app.orchestrator.tabs.toc);
+        let cap = viewport * RIGHT_PANEL_MAX_WIDTH_FRACTION;
+        let widths = laid_out_grid_widths(&state.panes, viewport);
+
+        assert!(
+            (widths[2] - needed.min(cap)).abs() <= 1.0,
+            "defect #14: at viewport {viewport} a heading needing {needed:.1}px should land \
+             at min(needed, {cap:.1}px) = {:.1}px, but the pane measured {:.1}px",
+            needed.min(cap),
+            widths[2],
+        );
+
+        if needed > cap {
+            // The clamp is fighting real content: record it rather than hide it.
+            assert!(
+                widths[2] + LAYOUT_TOLERANCE < needed,
+                "fixture: at viewport {viewport} the cap should bind ({needed:.1}px needed, \
+                 {cap:.1}px allowed), so the pane must be short of the content"
+            );
+        }
+    }
+}
+
+/// Defect #14 — the fit is per document: loading a short-heading document
+/// after a long one shrinks the pane again instead of leaving the widest
+/// width latched for the session.
+#[test]
+fn defect_14_the_fit_follows_the_document_being_loaded() {
+    let mut state = booted_at(1200.0);
+    load_document(&mut state, OVERLONG_TOC_DOC);
+    let wide = laid_out_grid_widths(&state.panes, 1200.0)[2];
+
+    load_document(&mut state, SHORT_TOC_DOC);
+    let narrow = laid_out_grid_widths(&state.panes, 1200.0)[2];
+
+    assert!(
+        narrow < wide,
+        "the pane must re-fit per document, not latch the widest heading \
+         (long {wide:.1}px, short {narrow:.1}px)"
     );
 }

@@ -216,6 +216,16 @@ pub enum LayoutMessage {
     /// (UI-016). In the Elm loop this is an explicit message so the width
     /// change is replayable.
     TreeAutoFit,
+    /// The right (ToC) panel should re-fit its width to the longest heading
+    /// the open document produced (defect #14, UI-016).
+    ///
+    /// The production trigger is the document load itself — the reducer fits
+    /// the pane as it lands `ProcessEvent::FileLoaded`, because that is the
+    /// first moment the heading set exists. This variant is the replayable
+    /// form of the same transition, mirroring [`Self::TreeAutoFit`]: a
+    /// recorded session, or any host that wants to re-fit without reloading,
+    /// asks for it by name instead of restating the arithmetic.
+    TocAutoFit,
     /// The pointer moved to `point`.
     ///
     /// The reducer stores this and reads it back when a
@@ -274,6 +284,7 @@ impl PartialEq for LayoutMessage {
                 a.split == b.split && a.ratio == b.ratio
             }
             (Self::TreeAutoFit, Self::TreeAutoFit) => true,
+            (Self::TocAutoFit, Self::TocAutoFit) => true,
             (Self::CursorMoved { point: a }, Self::CursorMoved { point: b }) => a == b,
             (
                 Self::TooltipHoverEnter {

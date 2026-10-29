@@ -47,7 +47,7 @@
 mod tests;
 
 use crate::ui::panel_layout::{
-    LEFT_PANEL_DEFAULT_WIDTH, LEFT_PANEL_MAX_WIDTH_FRACTION, LEFT_PANEL_MIN_WIDTH, PanelLayout,
+    LEFT_PANEL_MAX_WIDTH_FRACTION, LEFT_PANEL_MIN_WIDTH, PanelLayout,
     RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH,
 };
 use crate::ui::theme::Palette;
@@ -314,6 +314,37 @@ pub fn nested_region_width(viewport_width: f32, left_width: f32, spacing: f32) -
     viewport_width - left_width - spacing
 }
 
+/// The left-pane width a freshly replayed grid actually holds.
+///
+/// `PanelLayout.left_panel_width` is `None` until the user drags or the tree
+/// auto-fits, and while it is `None` the grid sits at
+/// [`DEFAULT_ROOT_SPLIT_RATIO`] — [`apply_pane_widths`] deliberately does not
+/// resize a split it has no remembered width for. Deriving the nested region
+/// from `LEFT_PANEL_DEFAULT_WIDTH` in that state would therefore size the right
+/// split against a region iced never hands it (defect #14: the fit landed 24px
+/// wide of the mark at an 800px viewport for exactly this reason).
+///
+/// This is the single home of that rule for anything that has to **replay a
+/// ratio into the grid** — [`apply_pane_resize`]'s right arm,
+/// [`apply_pane_widths`] and the ToC auto-fit
+/// ([`crate::ui_iced::panels::right::auto_fit_width`]) all read it
+/// ([RUST-021]). A drag is a replay like any other: solving it against a
+/// different left width than the grid holds makes the first right-drag land the
+/// pane somewhere other than the width the reducer just stored (measured 9.6px
+/// off at a 1000px viewport before this rule was applied to the drag arm).
+///
+/// [RUST-020]: pure.
+#[must_use]
+pub fn current_left_width(layout: &PanelLayout, viewport_width: f32) -> f32 {
+    layout.left_panel_width.unwrap_or_else(|| {
+        pane_width_from_ratio(
+            DEFAULT_ROOT_SPLIT_RATIO,
+            viewport_width,
+            PANE_SPACING_PIXELS,
+        )
+    })
+}
+
 /// Reduces a `PaneGrid` resize event onto the panel widths (UI-016
 /// clamping).
 ///
@@ -335,8 +366,9 @@ pub fn nested_region_width(viewport_width: f32, left_width: f32, spacing: f32) -
 ///   pixels; that is clamped to
 ///   `RIGHT_PANEL_MIN_WIDTH`..=`viewport * RIGHT_PANEL_MAX_WIDTH_FRACTION` and
 ///   replayed as `1 - (width + spacing / 2) / region`;
-/// - an unpersisted left width falls back to `LEFT_PANEL_DEFAULT_WIDTH` (all
-///   constants from the crate-internal `ui::panel_layout`, UI-016);
+/// - an unpersisted left width falls back to the width the grid actually holds
+///   — the seeded [`DEFAULT_ROOT_SPLIT_RATIO`] — via [`current_left_width`]
+///   (all constants from the crate-internal `ui::panel_layout`, UI-016);
 /// - when the 20%/30% viewport cap is BELOW the panel minimum (tiny
 ///   viewports), the minimum wins so both side panels stay draggable;
 /// - non-positive viewports reject the event (no zero-division).
@@ -369,7 +401,7 @@ pub fn apply_pane_resize(
             ))
         }
         Some(PaneSide::Right) => {
-            let left_width = layout.left_panel_width.unwrap_or(LEFT_PANEL_DEFAULT_WIDTH);
+            let left_width = current_left_width(layout, viewport_width);
             let region = nested_region_width(viewport_width, left_width, PANE_SPACING_PIXELS);
             if region <= 0.0 {
                 return None;
@@ -421,24 +453,16 @@ pub fn apply_pane_widths(
         return;
     }
 
-    let left_width = match layout.left_panel_width {
-        Some(width) => {
-            panes.resize(
-                band.left_split,
-                split_ratio_for_width(width, viewport_width, PANE_SPACING_PIXELS),
-            );
-            width
-        }
-        // Nothing remembered: the grid keeps its seeded ratio, and the nested
-        // region has to be derived from THAT, not from
-        // `LEFT_PANEL_DEFAULT_WIDTH`, or the right ratio would be replayed
-        // against a region iced never hands it.
-        None => pane_width_from_ratio(
-            DEFAULT_ROOT_SPLIT_RATIO,
-            viewport_width,
-            PANE_SPACING_PIXELS,
-        ),
-    };
+    // Only a remembered width is replayed; with none the grid keeps its seeded
+    // ratio, and `current_left_width` reports THAT ratio's width so the nested
+    // region below is the one iced actually hands the right split.
+    let left_width = current_left_width(layout, viewport_width);
+    if layout.left_panel_width.is_some() {
+        panes.resize(
+            band.left_split,
+            split_ratio_for_width(left_width, viewport_width, PANE_SPACING_PIXELS),
+        );
+    }
 
     let region = nested_region_width(viewport_width, left_width, PANE_SPACING_PIXELS);
     if region <= 0.0 {

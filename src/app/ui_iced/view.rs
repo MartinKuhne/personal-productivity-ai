@@ -48,7 +48,9 @@ use crate::ui_iced::overlay::modal_centered;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
-use crate::ui_iced::panels::right::toc_indent_pixels;
+use crate::ui_iced::panels::right::{
+    TOC_ROW_RIGHT_PAD_PIXELS, TOC_ROW_VERTICAL_PAD_PIXELS, toc_indent_pixels,
+};
 use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use hoarfrost::surface::tooltip::{TooltipAnchor, TooltipStyle};
@@ -190,6 +192,12 @@ fn document_width(state: &AppState) -> f32 {
 /// The right (TOC) pane body: one button per heading, each publishing a
 /// [`UserCommand::ScrollToHeader`]. The per-level left pad comes from
 /// [`toc_indent_pixels`].
+///
+/// The row's furniture — [`TOC_ROW_RIGHT_PAD_PIXELS`],
+/// [`TOC_ROW_VERTICAL_PAD_PIXELS`] and the button's own padding — is stated
+/// once, in [`crate::ui_iced::panels::right`], because
+/// [`auto_fit_width`](crate::ui_iced::panels::right::auto_fit_width) has to
+/// charge the pane for exactly what this function builds (defect #14).
 fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
     let rows: Vec<iced::Element<'_, Message>> = state
         .app
@@ -201,9 +209,9 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
             let indent = toc_indent_pixels(entry.level);
             container(toc_entry_button(entry))
                 .padding(iced::Padding {
-                    top: 2.0,
-                    right: 4.0,
-                    bottom: 2.0,
+                    top: TOC_ROW_VERTICAL_PAD_PIXELS,
+                    right: TOC_ROW_RIGHT_PAD_PIXELS,
+                    bottom: TOC_ROW_VERTICAL_PAD_PIXELS,
                     left: indent,
                 })
                 .width(Length::Fill)
