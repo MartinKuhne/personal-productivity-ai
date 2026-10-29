@@ -15,7 +15,8 @@
 // `hoarfrost::token` test modules use.
 #![allow(clippy::assertions_on_constants)]
 
-use super::content_viewport_id;
+use super::{close_action, content_viewport_id, dock_action};
+use crate::ui::strings;
 use crate::ui_iced::message::MovableCard;
 use hoarfrost::focus::FocusState;
 use hoarfrost::surface::movable::{
@@ -182,5 +183,78 @@ fn viewport_ids_are_stable_and_distinct_per_card() {
         content_viewport_id(MovableCard::Logs),
         content_viewport_id(MovableCard::AgentDebug),
         "one id, one live widget"
+    );
+}
+
+/// A content box the size of the title bar's `×` glyph: narrower and shorter
+/// than §3.1's icon-only floor of [`size::CONTROL_SM`] (28 px) on both axes.
+fn glyph_content() -> Size {
+    Size::new(8.0, 16.0)
+}
+
+/// Defect #18 — "Selecting Windows -> Agent Debug from the menu crashes the
+/// application".
+///
+/// The title bar's Close action is a single narrow glyph, so its measured
+/// content is icon-only: `Button::outer_size` then hits the `debug_assert!`
+/// behind [`Button::tooltip_violation`] and the app panics the moment a
+/// movable card — the Agent Debug window — is laid out.
+///
+/// Asserted through the non-panicking predicate rather than the assert itself,
+/// so the defect is pinned without a window and without a crash handler.
+#[test]
+fn close_action_carries_a_tooltip_so_icon_only_layout_is_legal() {
+    let button = close_action(MovableCard::AgentDebug);
+    let glyph = glyph_content();
+
+    // The rule must actually be engaged: below the 28 px floor on both axes
+    // the box is the icon-only minimum, not a box around a readable label.
+    assert!(
+        glyph.width <= hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH
+            && glyph.height <= hoarfrost::widget::button::ICON_ONLY_MIN_HEIGHT,
+        "the glyph content box must sit at or below the icon-only floor, otherwise \
+         this test pins nothing"
+    );
+    assert!(
+        button.is_icon_only(glyph),
+        "defect #18: the Close button's `×` content must measure icon-only, otherwise \
+         the tooltip rule is not exercised"
+    );
+
+    // …and the button must satisfy it.
+    assert_eq!(
+        button.tooltip_violation(glyph),
+        None,
+        "defect #18: the movable shell's Close button was built icon-only with no \
+         tooltip, which trips `Button::outer_size`'s debug_assert and crashes the app \
+         when the Agent Debug window opens. Attach `strings::MOVABLE_CLOSE_TOOLTIP` \
+         via `Button::with_tooltip`."
+    );
+    assert_eq!(
+        button.tooltip_text(),
+        Some(strings::MOVABLE_CLOSE_TOOLTIP),
+        "the tooltip must come from the shared string table, not an inline literal"
+    );
+}
+
+/// Sibling guard for the other trailing action in the same bar: `Dock` is a
+/// readable label, so its content box clears the icon-only floor and the
+/// tooltip rule never engages. Pinned so a later change to the label, the
+/// rung, or the floor cannot silently make this control the next defect #18.
+#[test]
+fn dock_action_stays_legal_because_it_is_a_labelled_button() {
+    let button = dock_action(MovableCard::Logs);
+
+    // "Dock" at the body rung is comfortably wider than the 28 px floor.
+    let labelled = Size::new(32.0, 16.0);
+    assert!(
+        !button.is_icon_only(labelled),
+        "a labelled control wider than the icon-only floor must not read as icon-only"
+    );
+    assert_eq!(
+        button.tooltip_violation(labelled),
+        None,
+        "defect #18 regression guard: the Dock action must stay legal at its real \
+         content size"
     );
 }

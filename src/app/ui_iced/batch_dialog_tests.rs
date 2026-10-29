@@ -14,7 +14,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use hoarfrost::surface::modal::{BATCH_WIDTH, CONTENT_HEIGHT_MAX, VIEWPORT_GUTTER};
 use iced_test::selector::Candidate;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A candidate prompt record that is never read off disk.
 fn prompt(name: &str) -> PromptInfo {
@@ -27,12 +27,17 @@ fn prompt(name: &str) -> PromptInfo {
 }
 
 /// A fully valid, idle configuration.
+///
+/// Deliberately carries **no** virtual directory labels: every existing
+/// assertion about the combo's labels runs against the real-path fallback,
+/// so that path stays pinned. The labelled cases build their own model.
 fn valid_model() -> BatchDialogViewModel {
     BatchDialogViewModel {
         available_dirs: vec![
             PathBuf::from(r"C:\fixture\one"),
             PathBuf::from(r"C:\fixture\two"),
         ],
+        available_dir_labels: Vec::new(),
         available_prompts: vec![prompt("Alpha"), prompt("Beta")],
         selected_dir_idx: Some(1),
         selected_prompt_idx: Some(0),
@@ -41,6 +46,20 @@ fn valid_model() -> BatchDialogViewModel {
         concurrency: 4,
         status: BatchRunStatus::idle(),
         mode_radio_model: BatchDialogViewModel::create_mode_radio_model(BatchMode::File),
+    }
+}
+
+/// A model whose candidate roots are **real** filesystem paths and whose
+/// labels are the content-library names that own them — the shape every
+/// population site produces from `AppConfig::content_libraries`.
+fn labelled_model() -> BatchDialogViewModel {
+    BatchDialogViewModel {
+        available_dirs: vec![
+            PathBuf::from(r"C:\Users\someone\Documents\MyNotes"),
+            PathBuf::from(r"D:\vault\work"),
+        ],
+        available_dir_labels: vec!["MyNotes".to_string(), "Work Vault".to_string()],
+        ..valid_model()
     }
 }
 
@@ -172,6 +191,178 @@ fn directory_options_carry_index_and_display_label() {
     assert_eq!(options[1].to_string(), options[1].label);
 }
 
+// --- Virtual directory labels ----------------------------------------
+//
+// The app addresses content by *virtual* path (`LibraryName/relative`),
+// so the Batch dialog must never show a real filesystem location. The
+// real `PathBuf` stays behind the scenes: it is what `BatchConfig` carries
+// to the batch runner, which globs the disk.
+
+/// The pick list shows the library name and never the drive path it stands
+/// for.
+#[test]
+fn directory_options_show_the_virtual_label_and_never_a_drive_path() {
+    let model = labelled_model();
+    let options = model.directory_options();
+
+    let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
+    assert_eq!(labels, vec!["MyNotes", "Work Vault"]);
+
+    for option in &options {
+        assert!(
+            !option.label.contains(":\\") && !option.label.contains(':'),
+            "a virtual label must not carry a drive-letter prefix: {:?}",
+            option.label,
+        );
+        assert!(
+            !option.label.starts_with('\\') && !option.label.starts_with('/'),
+            "a virtual label must not be an absolute path: {:?}",
+            option.label,
+        );
+    }
+
+    // The index still addresses the real entry behind the label.
+    assert_eq!(options[0].index, 0);
+    assert_eq!(options[1].index, 1);
+}
+
+/// With no virtual name known the option falls back to the real path, so
+/// an un-populated label list cannot render a blank row.
+#[test]
+fn directory_options_fall_back_to_the_real_path_when_no_label_is_known() {
+    let real: Vec<String> = labelled_model()
+        .available_dirs
+        .iter()
+        .map(|dir| dir.display().to_string())
+        .collect();
+    let labels_of = |model: &BatchDialogViewModel| -> Vec<String> {
+        model
+            .directory_options()
+            .iter()
+            .map(|option| option.label.clone())
+            .collect()
+    };
+
+    // No labels at all: every row shows the real path, as before.
+    let unlabelled = BatchDialogViewModel {
+        available_dir_labels: Vec::new(),
+        ..labelled_model()
+    };
+    assert_eq!(labels_of(&unlabelled), real);
+
+    // A short label list: only the trailing entry falls back.
+    let short = BatchDialogViewModel {
+        available_dir_labels: vec!["MyNotes".to_string()],
+        ..labelled_model()
+    };
+    assert_eq!(
+        labels_of(&short),
+        vec!["MyNotes".to_string(), real[1].clone()]
+    );
+
+    // An empty label means "unknown", not a blank row.
+    let blank = BatchDialogViewModel {
+        available_dir_labels: vec![String::new(), "Work Vault".to_string()],
+        ..labelled_model()
+    };
+    assert_eq!(
+        labels_of(&blank),
+        vec![real[0].clone(), "Work Vault".to_string()]
+    );
+}
+
+/// Only the **display** changed: the composed `BatchConfig` still carries
+/// the real `PathBuf` for the selected index.
+#[test]
+fn build_batch_config_still_carries_the_real_path_behind_a_virtual_label() {
+    let model = BatchDialogViewModel {
+        selected_dir_idx: Some(1),
+        ..labelled_model()
+    };
+
+    assert_eq!(
+        model.directory_options()[1].label,
+        "Work Vault",
+        "the user sees the virtual name"
+    );
+    assert_eq!(
+        model.selected_directory(),
+        Some(Path::new(r"D:\vault\work")),
+        "the model still resolves the real path"
+    );
+
+    let config = model.build_batch_config().expect("a valid composition");
+    assert_eq!(config.directory, PathBuf::from(r"D:\vault\work"));
+    assert_ne!(
+        config.directory,
+        PathBuf::from("Work Vault"),
+        "the batch runner globs the filesystem, so it must receive the real path"
+    );
+}
+
+// --- Body row order ---------------------------------------------------
+
+/// The mode control decides *whether* the pattern row exists at all, so
+/// it must be stacked before the field it governs.
+#[test]
+fn config_body_order_puts_mode_before_the_pattern_it_governs() {
+    assert_eq!(
+        config_body_order(BatchMode::File),
+        &[
+            ROW_DIRECTORY,
+            ROW_MODE,
+            ROW_PATTERN,
+            ROW_CONCURRENCY,
+            ROW_PROMPT
+        ][..],
+        "the control that governs the pattern row's visibility must precede it"
+    );
+}
+
+/// Directory mode has no pattern field, so the row is absent from the order.
+#[test]
+fn config_body_order_drops_the_pattern_row_in_directory_mode() {
+    assert_eq!(
+        config_body_order(BatchMode::Directory),
+        &[ROW_DIRECTORY, ROW_MODE, ROW_CONCURRENCY, ROW_PROMPT][..]
+    );
+    assert!(
+        !config_body_order(BatchMode::Directory).contains(&ROW_PATTERN),
+        "Directory mode must not mount a pattern row"
+    );
+}
+
+/// The rendered card really stacks `Mode:` above `Pattern:` — the tier-2
+/// geometry check that pins the view rather than only the helper.
+#[test]
+fn rendered_config_card_stacks_mode_above_the_pattern_it_governs() {
+    let model = valid_model();
+    let mut ui = iced_test::simulator(batch_dialog_card(&model, ROOMY));
+    let mode = text_label_bounds(&mut ui, strings::BATCH_DIALOG_MODE_LABEL);
+    let pattern = text_label_bounds(&mut ui, strings::BATCH_DIALOG_PATTERN_LABEL);
+
+    assert!(
+        mode.y < pattern.y,
+        "the Mode row must render above the Pattern row (mode y = {}, pattern y = {})",
+        mode.y,
+        pattern.y,
+    );
+}
+
+/// Bounds of the first rendered text widget whose content is exactly `label`.
+fn text_label_bounds(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    label: &str,
+) -> iced::Rectangle {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Text {
+            content, bounds, ..
+        } if *content == *label => Some(bounds),
+        _ => None,
+    })
+    .unwrap_or_else(|err| panic!("the Batch card must render the {label:?} label: {err:?}"))
+}
+
 #[test]
 fn prompt_options_are_labelled_from_the_candidate_display_name() {
     let model = valid_model();
@@ -248,6 +439,7 @@ fn concurrency_options_are_the_one_to_eight_range() {
 fn from_config_copies_every_config_field() {
     let config = BatchDialogConfig {
         available_dirs: vec![PathBuf::from(r"C:\fixture\a")],
+        available_dir_labels: vec!["Alpha".to_string()],
         available_prompts: vec![prompt("Alpha")],
         selected_dir_idx: Some(0),
         selected_prompt_idx: Some(0),
@@ -258,6 +450,7 @@ fn from_config_copies_every_config_field() {
     let model = BatchDialogViewModel::from_config(&config);
 
     assert_eq!(model.available_dirs, config.available_dirs);
+    assert_eq!(model.available_dir_labels, vec!["Alpha".to_string()]);
     assert_eq!(model.available_prompts.len(), 1);
     assert_eq!(model.selected_dir_idx, Some(0));
     assert_eq!(model.selected_prompt_idx, Some(0));
@@ -274,6 +467,7 @@ fn from_config_copies_every_config_field() {
 fn default_snapshot_matches_the_config_defaults() {
     let model = BatchDialogViewModel::default();
     assert!(model.available_dirs.is_empty());
+    assert!(model.available_dir_labels.is_empty());
     assert!(model.available_prompts.is_empty());
     assert_eq!(model.pattern, DEFAULT_PATTERN);
     assert_eq!(model.mode, BatchMode::File);

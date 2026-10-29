@@ -1592,3 +1592,374 @@ fn document_viewer_scrollable_id_is_stable_and_named() {
 fn agent_session_close_button_id_is_stable_and_named() {
     assert_eq!(AGENT_SESSION_CLOSE_BUTTON_ID, "agent_session_close");
 }
+
+// --- defect #15 / #16: tab-strip geometry, measured headlessly ---------
+//
+// Both defects are layout facts, not style facts, so they are proven with
+// `iced_test`'s headless layout instead of by asserting what the builders
+// were meant to do:
+//
+// * **#15** — the tab's outer `Stack` was `Length::Fill` while the painted
+//   `surface` inside it is content-sized, so the two were only accidentally
+//   the same rectangle. **Measured before the change, the fill already
+//   conformed**: in a 1200px strip the tab's box, its fill and its accent
+//   bar all measured 169.300px. The reason is that the strip's `Row` is
+//   `Length::Shrink`, and iced turns that into a *compression* flag which
+//   forces a `Fill` child down to its intrinsic size
+//   (`iced_core-0.14.0/src/layout/limits.rs:160-170`) — so the stretch the
+//   defect described never happened. It was one `Row::width(Fill)` away from
+//   happening, though, which is why the box is now `Shrink` by construction
+//   and these tests guard it.
+// * **#16** — the strip had no `scrollable`, so once the tabs' combined
+//   minimum exceeded the band the surplus tabs were laid out past its right
+//   edge and painted over the neighbouring pane.
+//
+// Every expectation is written against the module's own constants
+// (`STRIP_HEIGHT` / `TAB_HEIGHT` / `STRIP_PADDING`) or against another
+// *measured* rectangle; no geometry literal is re-typed into an expectation
+// except the viewport the test itself supplies.
+
+use iced_test::selector::Candidate;
+
+/// Sub-pixel tolerance for comparing measured layout rectangles.
+const LAYOUT_TOLERANCE: f32 = 0.001;
+
+/// A headless iced driver over the app's `Message` (tier 2).
+type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
+
+/// Lays `element` out in a window of `size`, headless.
+fn laid_out(size: iced::Size, element: iced::Element<'_, Message>) -> Sim<'_> {
+    iced_test::Simulator::with_size(iced_test::core::Settings::default(), size, element)
+}
+
+/// The laid-out bounds of the container carrying `id`.
+fn bounds_of(ui: &mut Sim<'_>, id: iced::widget::Id) -> iced::Rectangle {
+    let for_selector = id.clone();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(found),
+            bounds,
+            ..
+        } if *found == for_selector => Some(bounds),
+        _ => None,
+    })
+    .unwrap_or_else(|err| panic!("container {id:?} should be reachable: {err:?}"))
+}
+
+/// The *visible* (clipped) bounds of the container carrying `id`.
+///
+/// The outer `Option` is "was the widget found at all"; the inner one is
+/// "did any of it survive the enclosing scrollable's viewport".
+fn visible_bounds_of(ui: &mut Sim<'_>, id: iced::widget::Id) -> Option<Option<iced::Rectangle>> {
+    let expected = id.clone();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(found),
+            visible_bounds,
+            ..
+        } if *found == expected => Some(visible_bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// `(viewport bounds, content bounds)` of the scrollable carrying `id`.
+fn scrollable_bounds(
+    ui: &mut Sim<'_>,
+    id: &'static str,
+) -> Option<(iced::Rectangle, iced::Rectangle)> {
+    let expected = iced::widget::Id::from(id);
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Scrollable {
+            id: Some(found),
+            bounds,
+            content_bounds,
+            ..
+        } if *found == expected => Some((bounds, content_bounds)),
+        _ => None,
+    })
+    .ok()
+}
+
+/// A tab-strip snapshot with `count` tabs, the one at `active` selected.
+fn strip_with_tabs(count: usize, active: Option<usize>) -> CenterPanelViewModel {
+    CenterPanelViewModel {
+        tabs: (0..count)
+            .map(|index| entry(&format!("docs/document-{index}.md"), Some(index) == active))
+            .collect(),
+        active_tab: active,
+        show_agent_session: false,
+        agent_status: String::new(),
+        agent_running: false,
+        thinking: String::new(),
+        active_pdf_backed: false,
+        note_skills: Vec::new(),
+        hovered_tab: None,
+    }
+}
+
+/// Defect #15 — "the blue selected-tab background does not conform to the
+/// size of the tab".
+///
+/// Laid out in a strip far wider than the tab needs, the tab's own layout
+/// box and the surface its fill is painted on must be the same width.
+#[test]
+fn defect_15_the_selected_tab_fill_conforms_to_the_tab_layout_box() {
+    let vm = strip_with_tabs(1, Some(0));
+    let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    let slot = bounds_of(&mut ui, tab_slot_id(0));
+    let surface = bounds_of(&mut ui, tab_surface_id(0));
+    let delta = (slot.width - surface.width).abs();
+
+    // The probe needs slack: if the tab already filled the strip, a `Fill`
+    // box and a shrink-wrapped fill would coincide and this pinned nothing.
+    assert!(
+        band.width > slot.width * 2.0,
+        "the strip ({band:?}) must leave the tab ({slot:?}) room to stretch, \
+         otherwise this test cannot see the defect"
+    );
+
+    assert!(
+        delta <= LAYOUT_TOLERANCE,
+        "defect #15: the tab's layout box is {:.3}px wide but the fill it paints is \
+         {:.3}px wide (delta {:.3}px) — the selected-tab background does not conform \
+         to the tab (slot {slot:?}, surface {surface:?})",
+        slot.width,
+        surface.width,
+        delta
+    );
+}
+
+/// Defect #15, second half — making the tab stop stretching must not cut
+/// the top accent bar short: it rides the tab at `Length::Fill`, so it has
+/// to resolve to the tab's own width.
+#[test]
+fn defect_15_the_top_accent_indicator_still_spans_the_whole_tab() {
+    let vm = strip_with_tabs(1, Some(0));
+    let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
+
+    let slot = bounds_of(&mut ui, tab_slot_id(0));
+    let indicator = bounds_of(&mut ui, tab_indicator_id(0));
+
+    assert!(
+        (indicator.width - slot.width).abs() <= LAYOUT_TOLERANCE,
+        "defect #15: the top accent bar is {:.3}px wide against a {:.3}px tab — it \
+         must still span the whole tab (indicator {indicator:?}, slot {slot:?})",
+        indicator.width,
+        slot.width
+    );
+    assert_eq!(
+        indicator.x, slot.x,
+        "the accent bar must start at the tab's own left edge"
+    );
+    assert_eq!(
+        indicator.height, TAB_INDICATOR_HEIGHT,
+        "the bar keeps its token height"
+    );
+}
+
+/// The band's pinned height must survive both a single tab and an
+/// overflowing stack of them — the scrollable must not grow the band.
+#[test]
+fn the_tab_strip_band_keeps_its_pinned_height_with_one_tab_and_with_many() {
+    assert_eq!(
+        STRIP_HEIGHT,
+        STRIP_PADDING + TAB_HEIGHT + STRIP_PADDING,
+        "the 36 = 4 + 28 + 4 closure the other tests pin must hold"
+    );
+
+    for count in [1usize, 8usize] {
+        let vm = strip_with_tabs(count, Some(0));
+        let mut ui = laid_out(iced::Size::new(900.0, 200.0), tab_strip(&vm));
+        let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+
+        assert_eq!(
+            band.height, STRIP_HEIGHT,
+            "the {count}-tab strip band measured {band:?}; its height must stay at \
+             STRIP_HEIGHT ({STRIP_HEIGHT}) and the scrollable must not add a rail to it"
+        );
+    }
+}
+
+/// Defect #16 — "with more tabs than fit, they render over each other".
+///
+/// The overflow must be carried by a horizontal `scrollable` with a stable
+/// id, whose scroll extent is the tabs' real total width.
+#[test]
+fn defect_16_overflowing_tabs_are_carried_by_a_named_horizontal_scrollable() {
+    let viewport_width = 300.0;
+    let vm = strip_with_tabs(8, Some(0));
+    let mut ui = laid_out(iced::Size::new(viewport_width, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    assert_eq!(
+        band.width, viewport_width,
+        "the band must take exactly the width it is given, not the tabs' total"
+    );
+
+    let (scroll, content) = scrollable_bounds(&mut ui, TAB_STRIP_SCROLL_ID).expect(
+        "defect #16: the tab strip must be wrapped in a scrollable carrying TAB_STRIP_SCROLL_ID",
+    );
+
+    assert_eq!(
+        scroll.width,
+        viewport_width - STRIP_PADDING - STRIP_PADDING,
+        "the scrollable must fill the band's content box"
+    );
+    assert!(
+        content.width > scroll.width,
+        "defect #16: 8 tabs must actually overflow the viewport (content {:.1}px vs \
+         viewport {:.1}px), otherwise this test pins nothing",
+        content.width,
+        scroll.width
+    );
+}
+
+/// Defect #16 — nothing of a tab may be painted outside the strip band.
+#[test]
+fn defect_16_no_tab_paints_past_the_strip_band() {
+    let vm = strip_with_tabs(8, Some(0));
+    let mut ui = laid_out(iced::Size::new(300.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    let band_right = band.x + band.width;
+
+    for index in 0..8 {
+        let visible = visible_bounds_of(&mut ui, tab_slot_id(index))
+            .unwrap_or_else(|| panic!("defect #16: tab {index} must be laid out and addressable"));
+
+        // A `scrollable` lays its inner `Row` out at the tabs' full width,
+        // so an off-screen tab's *raw* layout bounds legitimately extend
+        // past the band — that overflow is exactly what makes scrolling
+        // possible. What must never happen is any of it being *painted*
+        // outside the band, so this asserts against `visible_bounds`: the
+        // clip iced computes against the enclosing scrollable viewport.
+        // With no scrollable in the tree there is no viewport at all, so
+        // `visible_bounds` is the raw rectangle and the surplus tabs fail
+        // here — which is the pre-fix red.
+        let Some(visible) = visible else {
+            continue; // fully clipped out of the viewport: nothing painted
+        };
+
+        assert!(
+            visible.x + visible.width <= band_right + LAYOUT_TOLERANCE,
+            "defect #16: tab {index} paints out to x={:.1}, past the strip band's \
+             right edge at x={:.1} (visible {visible:?}, band {band:?})",
+            visible.x + visible.width,
+            band_right
+        );
+    }
+}
+
+/// The width a tab claims when it is the only thing in the strip — its
+/// intrinsic, unsquashed width, measured rather than assumed.
+fn intrinsic_tab_width(path: &str) -> f32 {
+    let mut vm = strip_with_tabs(0, None);
+    vm.tabs.push(entry(path, false));
+    let mut ui = laid_out(iced::Size::new(1200.0, STRIP_HEIGHT), tab_strip(&vm));
+    bounds_of(&mut ui, tab_slot_id(0)).width
+}
+
+/// Defect #16, the half the overpaint came from: with more tabs than fit,
+/// the strip did not merely spill past the edge — it **squeezed** the last
+/// tab down to whatever slack was left, crushing its label and its fill
+/// with it. The horizontal `scrollable` hands the row an unbounded maximum
+/// width, so every tab keeps the width it has on its own.
+#[test]
+fn defect_16_a_crowded_strip_never_squashes_a_tab_below_its_own_width() {
+    let intrinsic = intrinsic_tab_width("docs/document-2.md");
+    let vm = strip_with_tabs(3, Some(1));
+    let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
+
+    let last = bounds_of(&mut ui, tab_slot_id(2));
+    assert!(
+        last.width >= intrinsic - LAYOUT_TOLERANCE,
+        "defect #16: the last tab of a crowded strip measured {:.3}px against the \
+         {:.3}px it claims on its own — the strip squeezed it instead of scrolling it",
+        last.width,
+        intrinsic
+    );
+}
+
+/// The laid-out bounds of the rendered text `content`, wherever it sits.
+fn text_bounds(ui: &mut Sim<'_>, content: &str) -> Option<iced::Rectangle> {
+    let needle = content.to_owned();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Text {
+            content: found,
+            bounds,
+            ..
+        } if *found == needle => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// A crowded tab's painted label must stay inside its own tab rather than
+/// spilling onto its neighbour.
+///
+/// **Measured before the change this already held** — iced squeezed the tab's
+/// content along with its box instead of letting the label run over. It is
+/// kept as a guard, not as the red: the pre-fix symptom was the squash the
+/// test above measures, not an overflowing label.
+#[test]
+fn defect_16_a_crowded_tabs_label_does_not_paint_over_its_neighbour() {
+    let vm = strip_with_tabs(3, Some(1));
+    let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
+
+    let slot = bounds_of(&mut ui, tab_slot_id(2));
+    let label = text_bounds(&mut ui, "document-2.md")
+        .expect("the third tab's title must be rendered in the strip");
+
+    assert!(
+        label.x + label.width <= slot.x + slot.width + LAYOUT_TOLERANCE,
+        "defect #16: the third tab's label paints out to x={:.1} while the tab's own \
+         box ends at x={:.1} — the label is painted over the neighbouring tab",
+        label.x + label.width,
+        slot.x + slot.width
+    );
+}
+
+/// AGENTS §6 — the empty strip keeps the same widget tree, only its
+/// content is empty.
+#[test]
+fn the_strip_band_is_still_allocated_with_no_tabs() {
+    let vm = strip_with_tabs(0, None);
+    let mut ui = laid_out(iced::Size::new(300.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    assert_eq!(
+        band.height, STRIP_HEIGHT,
+        "the empty strip must not collapse: it measured {band:?}"
+    );
+    assert_eq!(band.width, 300.0, "the empty strip still fills the pane");
+    assert!(
+        scrollable_bounds(&mut ui, TAB_STRIP_SCROLL_ID).is_some(),
+        "the empty strip must still carry the same widget tree, scrollable included"
+    );
+}
+
+/// The strip's ids must be named, stable across rebuilds, and never shared
+/// (§5 id-stability rule).
+#[test]
+fn the_tab_strip_ids_are_named_stable_and_unshared() {
+    assert_eq!(TAB_STRIP_SCROLL_ID, "center.tab_strip.scroll");
+    assert_eq!(TAB_STRIP_BAND_ID, "center.tab_strip.band");
+    assert_eq!(
+        tab_slot_id(3),
+        tab_slot_id(3),
+        "an id rebuilt every frame must be the same id, or the widget loses its state"
+    );
+    assert_ne!(
+        tab_slot_id(0),
+        tab_slot_id(1),
+        "one id, one live widget: two tabs must not share a slot id"
+    );
+    assert_ne!(
+        tab_surface_id(1),
+        tab_indicator_id(1),
+        "a tab's own regions must not share an id either"
+    );
+}

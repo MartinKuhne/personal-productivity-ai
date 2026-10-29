@@ -16,6 +16,7 @@ use crate::ui::strings;
 use hoarfrost::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
 use hoarfrost::widget::badge_model::BadgeKind;
 use iced::Size;
+use iced_test::selector::Candidate;
 
 /// An internal family group with two tools.
 fn internal_group(family: InternalToolGroup) -> ToolGroupState {
@@ -53,6 +54,23 @@ fn name_len(name: &str) -> Option<usize> {
 /// A lookup that reports nothing, mirroring an unknown tool.
 fn unknown_size(_name: &str) -> Option<usize> {
     None
+}
+
+/// `n` synthetic group rows, so count-driven text can be tested at any size.
+fn rows_n(n: usize) -> Vec<ToolGroupRow> {
+    (0..n)
+        .map(|index| {
+            row_from_group(
+                &internal_group(match index % 3 {
+                    0 => InternalToolGroup::Filesystem,
+                    1 => InternalToolGroup::Web,
+                    _ => InternalToolGroup::Weather,
+                }),
+                McpAuthFacts::default(),
+                &name_len,
+            )
+        })
+        .collect()
 }
 
 // --- group -> row mapping ---------------------------------------------
@@ -706,6 +724,25 @@ fn summary_counts_the_groups() {
     assert!(view_model.summary().starts_with('2'));
 }
 
+/// Defect #5 — the summary line read `"10 Group"`.
+///
+/// It was built from [`strings::TOOLS_GROUP_COLUMN`], which is the table's
+/// *column header*, not a pluralisable noun. The count now rides
+/// [`strings::tools_group_count`], which pluralises.
+#[test]
+fn summary_pluralises_the_group_count() {
+    assert_eq!(
+        ToolsDialogViewModel::with_rows(rows_n(1)).summary(),
+        "1 group",
+        "one group must read as a single group, not `1 Group`"
+    );
+    assert_eq!(
+        ToolsDialogViewModel::with_rows(rows_n(10)).summary(),
+        "10 groups",
+        "defect #5: ten groups must read `10 groups`, not `10 Group`"
+    );
+}
+
 #[test]
 fn an_empty_view_model_summarises_with_the_empty_state_line() {
     let view_model = ToolsDialogViewModel::empty();
@@ -1293,7 +1330,188 @@ fn absorbed_cannot_open_a_closed_dialog() {
     assert!(!state.is_open());
 }
 
+// --- Defect #7: the title band's `×` dismiss control -------------------
+
+/// A content box the size of the title band's `×` glyph: narrower and
+/// shorter than §3.1's icon-only floor of `CONTROL_SM` (28px) on both
+/// axes.
+fn close_glyph_content() -> Size {
+    Size::new(8.0, 16.0)
+}
+
+/// The `×` is icon-only, so the tooltip rule engages — and the button must
+/// satisfy it. Without the tooltip, `Button::outer_size`'s `debug_assert!`
+/// fires the moment the Tools card is laid out, i.e. the app crashes on
+/// open. Asserted through the non-panicking predicate so the defect is
+/// pinned without a window and without a crash handler.
+#[test]
+fn the_title_close_button_is_icon_only_and_carries_its_tooltip() {
+    let button = close_button();
+    let glyph = close_glyph_content();
+
+    assert!(
+        glyph.width <= hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH
+            && glyph.height <= hoarfrost::widget::button::ICON_ONLY_MIN_HEIGHT,
+        "the glyph content box must sit at or below the icon-only floor, otherwise \
+         this test pins nothing"
+    );
+    assert!(
+        button.is_icon_only(glyph),
+        "defect #7: the `×` content must measure icon-only, otherwise the tooltip \
+         rule is never exercised"
+    );
+    assert_eq!(
+        button.tooltip_violation(glyph),
+        None,
+        "defect #7: an icon-only close with no tooltip trips `Button::outer_size`'s \
+         debug_assert and crashes the app when the Tools card opens"
+    );
+    assert_eq!(
+        button.tooltip_text(),
+        Some(strings::TOOLS_CLOSE_TOOLTIP),
+        "the tooltip must come from the shared string table, not an inline literal"
+    );
+    assert_eq!(
+        button.variant(),
+        ButtonVariant::Ghost,
+        "the trailing title-band action wears the ghost skin, like every other \
+         dismiss in this app"
+    );
+    assert_eq!(button.focus_id().as_str(), TOOLS_CLOSE_BUTTON_ID);
+}
+
+/// The `×` is mounted in the real card's title band and actually dismisses
+/// the dialog — same message the scrim click and Escape emit, so no second
+/// dismiss vocabulary exists.
+#[test]
+fn the_title_close_control_is_mounted_and_dismisses_the_dialog() {
+    let view_model = ToolsDialogViewModel::empty();
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    let bounds = focusable_bounds(&mut ui, TOOLS_CLOSE_BUTTON_ID)
+        .expect("defect #7: the title band must mount the `×` dismiss control");
+    assert!(bounds.width > 0.0 && bounds.height > 0.0);
+
+    click_at(&mut ui, bounds.center());
+
+    let emitted = ui.into_messages().collect::<Vec<_>>();
+    assert!(
+        emitted.contains(&dismiss_message()),
+        "the `×` must emit the same dismiss Escape uses; got {emitted:?}"
+    );
+}
+
+// --- Defect #8: the footer `Close` button ------------------------------
+
+/// The footer control is a labelled button that is always live.
+#[test]
+fn the_footer_close_button_is_enabled_and_secondary() {
+    let button = footer_close_button();
+
+    assert!(
+        button.is_enabled(),
+        "defect #8: the footer Close must accept a press on every frame — a disabled \
+         dismiss would trap the user in a modal whose only other exit is the scrim"
+    );
+    assert_eq!(
+        button.variant(),
+        ButtonVariant::Secondary,
+        "leaving the card destroys nothing, so it must not wear the danger skin"
+    );
+    assert_eq!(button.focus_id().as_str(), TOOLS_FOOTER_CLOSE_BUTTON_ID);
+
+    // The `footer_button` min-width box keeps the label clear of the
+    // icon-only floor, so this control needs no tooltip to be legal.
+    let labelled = Size::new(
+        hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
+        typography::BODY.line_height,
+    );
+    assert!(
+        !button.is_icon_only(labelled),
+        "the footer label must never measure icon-only"
+    );
+    assert_eq!(button.tooltip_violation(labelled), None);
+}
+
+/// The footer renders the shared `Close` label — read off the laid-out tree
+/// rather than a re-typed literal, so a change to `strings::CLOSE_BUTTON`
+/// moves the card and the assertion together.
+#[test]
+fn the_footer_close_button_renders_the_shared_close_label() {
+    let view_model = ToolsDialogViewModel::empty();
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    assert!(
+        ui.find(strings::CLOSE_BUTTON).is_ok(),
+        "defect #8: the footer must render `strings::CLOSE_BUTTON`"
+    );
+}
+
+/// The footer button is mounted in the real card and dismisses it.
+#[test]
+fn the_footer_close_control_is_mounted_and_dismisses_the_dialog() {
+    let view_model = ToolsDialogViewModel::empty();
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    let bounds = focusable_bounds(&mut ui, TOOLS_FOOTER_CLOSE_BUTTON_ID)
+        .expect("defect #8: the footer must mount its Close button");
+
+    click_at(&mut ui, bounds.center());
+
+    let emitted = ui.into_messages().collect::<Vec<_>>();
+    assert!(
+        emitted.contains(&dismiss_message()),
+        "the footer Close must emit the same dismiss Escape uses; got {emitted:?}"
+    );
+}
+
+/// The two dismiss controls are distinct live widgets (AGENTS §5: one id,
+/// one live widget), so neither can shadow the other's focus.
+#[test]
+fn the_two_close_controls_do_not_share_an_id() {
+    assert_ne!(TOOLS_CLOSE_BUTTON_ID, TOOLS_FOOTER_CLOSE_BUTTON_ID);
+    assert_ne!(
+        close_button().widget_id(),
+        footer_close_button().widget_id()
+    );
+}
+
 // --- fixtures ---------------------------------------------------------
+
+/// The layout bounds of the focusable control registered under `focus_id`.
+///
+/// Hoarfrost registers a button's iced `Id` from its focus id (see
+/// `hoarfrost::bridge::widget_id`), and a *disabled* button deliberately
+/// does not register at all — so "found here" also means "live here".
+fn focusable_bounds(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    focus_id: &'static str,
+) -> Option<iced::Rectangle> {
+    let expected = iced::widget::Id::from(focus_id);
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable {
+            id: Some(id),
+            bounds,
+            ..
+        } if *id == expected => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// Points the cursor at `position` and left-clicks it.
+fn click_at(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    position: iced::Point,
+) {
+    ui.point_at(position);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position,
+    })]);
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+}
 
 /// An MCP row whose last recorded error is a failed authentication.
 fn auth_failing_row(server: &str) -> ToolGroupRow {

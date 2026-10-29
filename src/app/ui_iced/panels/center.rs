@@ -128,6 +128,16 @@
 //! `STRIP_HEIGHT (36) = STRIP_PADDING (4) + HIT_TARGET_MIN (24) + 2 × TAB_PADDING_Y (2) + STRIP_PADDING (4)`,
 //! with [`TAB_HEIGHT`] = `28` = `size.control.sm` as the tab's own rung.
 //!
+//! The band's content is a horizontal `iced::widget::scrollable`
+//! ([`TAB_STRIP_SCROLL_ID`])
+//! carrying one **shrink-wrapped** tab box per open document. The scrollable
+//! is what keeps a crowded strip inside the band: iced's `Row` neither wraps
+//! nor clips, so measured without it the strip absorbed the overflow by
+//! crushing its last tab to a third of the width that same tab claims on its
+//! own. Each tab box is `Length::Shrink` rather than `Fill` so the box and the
+//! painted selected-tab fill are the same rectangle by construction instead
+//! of by the accident of the parent `Row`'s length.
+//!
 //! Two §4.4.1 details sit outside the band, and an earlier note here said
 //! both were blocked because they "need a layer the current widget tree
 //! cannot paint". **That premise was wrong** — INT-10's Part C audit found a
@@ -514,6 +524,54 @@ pub const DOCUMENT_VIEWER_SCROLLABLE_ID: &str = "document_viewer_scroll";
 /// addressing the button later cannot drift (§5 id-stability rule,
 /// [RUST-021]).
 pub const AGENT_SESSION_CLOSE_BUTTON_ID: &str = "agent_session_close";
+
+/// Stable iced widget id of the tab-strip **band** container.
+///
+/// The band is the box whose laid-out height every geometry test measures
+/// against [`STRIP_HEIGHT`], and whose laid-out right edge is the line the
+/// strip must never paint past (defect #16). Named once so the view and
+/// anything addressing it later cannot drift (§5 id-stability rule,
+/// [RUST-021]).
+pub const TAB_STRIP_BAND_ID: &str = "center.tab_strip.band";
+
+/// Stable iced widget id of the tab-strip's horizontal `scrollable`
+/// (defect #16).
+///
+/// Overflowing tabs must scroll instead of overpainting the neighbouring
+/// pane, and a `scrollable` only keeps its scroll position across the
+/// per-frame rebuild when it carries an explicit id — never
+/// `Id::unique()` (§5 id-stability rule).
+pub const TAB_STRIP_SCROLL_ID: &str = "center.tab_strip.scroll";
+
+/// Stable id of the tab at `index`'s **outer layout box** — the rectangle
+/// the strip's `Row` allocates to that tab.
+///
+/// iced 0.14's `Stack` exposes no `id` builder, so the tab's outer box is a
+/// shrink-wrapped `container` around it. The container reports the same
+/// rectangle the `Stack` occupies, which is what a headless layout test
+/// needs in order to *measure* "how wide is this tab" rather than assert
+/// the intent (defect #15).
+pub fn tab_slot_id(index: usize) -> iced::widget::Id {
+    iced::widget::Id::from(format!("center.tab.slot.{index}"))
+}
+
+/// Stable id of the tab at `index`'s **painted surface** — the container
+/// the selected-tab background fill is actually painted on.
+///
+/// Defect #15 is precisely the gap between this rectangle and
+/// [`tab_slot_id`]'s; both are addressable so the gap is measurable.
+pub fn tab_surface_id(index: usize) -> iced::widget::Id {
+    iced::widget::Id::from(format!("center.tab.surface.{index}"))
+}
+
+/// Stable id of the tab at `index`'s top accent indicator.
+///
+/// The indicator rides in the tab's `Stack` at `Length::Fill`, so its
+/// laid-out width is the measurement of "does the accent bar still cover
+/// the whole tab" once the tab stops stretching (defect #15).
+pub fn tab_indicator_id(index: usize) -> iced::widget::Id {
+    iced::widget::Id::from(format!("center.tab.indicator.{index}"))
+}
 
 /// The title a tab renders: the file name, or the empty string when the path
 /// has none (e.g. a bare root).
@@ -1310,7 +1368,34 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
         },
     );
 
-    container(tabs)
+    // The tabs ride a horizontal `scrollable` (defect #16). iced's `Row`
+    // never wraps and layout never clips, so once the tabs' combined minimum
+    // exceeded the band the surplus tabs were laid out past its right edge
+    // and painted over the neighbouring pane.
+    //
+    // `Scrollable::horizontal` sets `Direction::Horizontal`
+    // (`iced_widget-0.14.2/src/scrollable.rs:133-135`), which hands the
+    // content an unbounded maximum width
+    // (`scrollable.rs:449-464`). The inner `Row` is already
+    // content-sized (`Row::from_vec` defaults to `Length::Shrink`), so it
+    // shrink-wraps to the tabs' real total width and that becomes the
+    // scroll extent.
+    //
+    // The height is pinned to `TAB_HEIGHT` rather than left to `Fill` so the
+    // band's own closure — `STRIP_HEIGHT (36) = STRIP_PADDING (4) +
+    // TAB_HEIGHT (28) + STRIP_PADDING (4)` — cannot be moved by a scrollbar
+    // rail. With the default `Scrollbar` (`spacing: None`,
+    // `scrollable.rs:330-340`) the rail floats over the content and
+    // consumes no layout anyway; the explicit height keeps that guarantee
+    // from depending on a theme default.
+    let scroller = scrollable(tabs)
+        .id(TAB_STRIP_SCROLL_ID)
+        .horizontal()
+        .width(Length::Fill)
+        .height(Length::Fixed(TAB_HEIGHT));
+
+    container(scroller)
+        .id(TAB_STRIP_BAND_ID)
         .width(Length::Fill)
         .height(Length::Fixed(STRIP_HEIGHT))
         .padding(STRIP_PADDING)
@@ -1385,6 +1470,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
             .spacing(TAB_CLOSE_SPACING)
             .align_y(Alignment::Center),
     )
+    .id(tab_surface_id(index))
     .height(Length::Fixed(TAB_HEIGHT))
     .padding(Padding {
         top: TAB_PADDING_Y,
@@ -1434,6 +1520,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
     // carries no handler of its own, so select, middle-close and the
     // right-click menu still land on the area underneath.
     let indicator = container(Space::new())
+        .id(tab_indicator_id(index))
         .width(Length::Fill)
         .height(Length::Fixed(TAB_INDICATOR_HEIGHT))
         .style(move |_theme| container::Style {
@@ -1441,10 +1528,25 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
             ..container::Style::default()
         });
 
-    Stack::with_children(vec![tab_body.into(), indicator.into()])
-        .width(Length::Fill)
-        .height(Length::Fixed(TAB_HEIGHT))
-        .into()
+    // The tab's own box is **shrink-wrapped**, not `Fill` (defect #15). The
+    // `surface` inside it is content-sized, so a `Fill` box would let the
+    // tab claim width the painted fill cannot follow. Today the strip's
+    // `Row` is itself `Length::Shrink`, and iced propagates that as a
+    // *compression* flag which already forces a `Fill` child down to its
+    // intrinsic size (`iced_core-0.14.0/src/layout/limits.rs:160-170`), so
+    // the two measure identical here — but that conformance was an accident
+    // of the parent's length, not of this widget. Naming `Shrink` makes the
+    // tab's box and its fill the same rectangle by construction, whatever
+    // the strip above it decides to do.
+    container(
+        Stack::with_children(vec![tab_body.into(), indicator.into()])
+            .width(Length::Shrink)
+            .height(Length::Fixed(TAB_HEIGHT)),
+    )
+    .id(tab_slot_id(index))
+    .width(Length::Shrink)
+    .height(Length::Fixed(TAB_HEIGHT))
+    .into()
 }
 
 /// The document-viewer area below the strip.

@@ -73,9 +73,10 @@
 //! or server name, so the intent is self-contained and replayable from the
 //! command alone. The dialog keeps **no view-local state** — no search box,
 //! no selection, no expansion — so nothing else needs a channel. The single
-//! exception is dismissal: an in-window modal has no window-frame `X`, so
-//! the scrim click / Escape emits
-//! [`ToolsDialogMessage::CloseRequested`].
+//! exception is dismissal: the card carries its own `×` and footer
+//! `Close`, and both ride
+//! [`ToolsDialogMessage::CloseRequested`] — the same single close
+//! transition the scrim click and Escape emit.
 //!
 //! Unit tests live in the sibling `tools_dialog_tests.rs` sidecar.
 
@@ -139,6 +140,12 @@ pub const TOOLS_LIST_ID: &str = "tools.list";
 
 /// Stable focus id of the error banner's `Retry` control.
 pub const TOOLS_ERROR_RETRY_ID: &str = "tools.error.retry";
+
+/// Stable focus id of the title band's `×` dismiss control.
+pub const TOOLS_CLOSE_BUTTON_ID: &str = "tools_dialog_close";
+
+/// Stable focus id of the footer's `Close` button.
+pub const TOOLS_FOOTER_CLOSE_BUTTON_ID: &str = "tools_dialog_footer_close";
 
 /// `NFR-004` error code for a failed MCP authentication surfaced in the
 /// card's error banner (`UIF-MOD-003`).
@@ -661,12 +668,17 @@ impl ToolsDialogViewModel {
     /// The summary line under the title: the count, or the empty-state
     /// line. Folding the empty state into the text rather than swapping in
     /// a different widget keeps the card's shape constant (AGENTS §6).
+    ///
+    /// The count text comes from [`strings::tools_group_count`], which
+    /// pluralises. It used to be `format!("{} {}", count,
+    /// strings::TOOLS_GROUP_COLUMN)` — the *column header* — so ten groups
+    /// read "10 Group".
     #[must_use]
     pub fn summary(&self) -> String {
         if self.is_empty() {
             strings::TOOLS_EMPTY_STATE.to_string()
         } else {
-            format!("{} {}", self.count(), strings::TOOLS_GROUP_COLUMN)
+            strings::tools_group_count(self.count())
         }
     }
 
@@ -742,15 +754,17 @@ impl ToolsDialogViewModel {
 ///
 /// ```text
 /// ┌─ Tools card · ModalSizing::tools_and_integrations() · radius 8 ──┐
-/// │ Tools                                                            │
-/// │ 9 Group                                                          │
-/// │ ──────────────────────────────────────────────────────────────── │
-/// │ [!] MCP authentication failed for `srv`.        [ Retry ]         │
-/// │ ──────────────────────────────────────────────────────────────── │
-/// │ ☑ │ Group      │ Kind        │ Tools  │ Prompt      │ Actions     │
-/// │ ☑ │ Filesystem │ Internal    │ read…  │ 1204 (✓)  │             │
-/// │ ☑ │ my-server  │ MCP (remote)│ fetch  │  612       │ ⚠ [Auth]…  │
-/// └──────────────────────────────────────────────────────────────────┘
+/// │ Tools                                                        × │
+/// │ 9 groups                                                       │
+/// │ ─────────────────────────────────────────────────────────────── │
+/// │ [!] MCP authentication failed for `srv`.        [ Retry ]       │
+/// │ ─────────────────────────────────────────────────────────────── │
+/// │ ☑ │ Group      │ Kind        │ Tools  │ Prompt      │ Actions    │
+/// │ ☑ │ Filesystem │ Internal    │ read…  │ 1204 (✓)  │            │
+/// │ ☑ │ my-server  │ MCP (remote)│ fetch  │  612       │ ⚠ [Auth]… │
+/// │ ─────────────────────────────────────────────────────────────── │
+/// │                                                    [ Close ]    │
+/// └─────────────────────────────────────────────────────────────────┘
 /// ```
 ///
 /// The parallel-safe marker renders only on `parallel_safe` rows
@@ -768,6 +782,7 @@ impl ToolsDialogViewModel {
 /// * Authenticate → [`UserCommand::StartMcpAuth`] (inert while running)
 /// * Forget → [`UserCommand::ForgetMcpAuth`]
 /// * Retry → [`UserCommand::StartMcpAuth`] for the failed server
+/// * title-band `×` and footer `Close` → [`dismiss_message()`]
 ///
 /// Purity: pure view over `view_model` and `viewport`.
 #[must_use]
@@ -788,12 +803,7 @@ pub fn tools_dialog_card(
         .width(Length::Fill);
 
     let body = Column::with_children(vec![
-        rung(
-            strings::TOOLS_DIALOG_TITLE,
-            typography::TITLE_SM,
-            Palette::fastmd_dark().text_strong,
-        )
-        .into(),
+        title_band(),
         rung(
             view_model.summary(),
             typography::BODY,
@@ -803,6 +813,8 @@ pub fn tools_dialog_card(
         modal_divider(frame).into(),
         banner,
         list.into(),
+        modal_divider(frame).into(),
+        footer(),
     ])
     .spacing(space::SM);
 
@@ -818,6 +830,91 @@ pub fn tools_dialog_card(
         )),
     )
     .into()
+}
+
+/// The card's title band: the title on the leading edge and the `×`
+/// dismiss control on the trailing edge, on one row (defect #7).
+///
+/// Kept out of [`tools_dialog_card`] so the card stays a short list of
+/// bands ([RUST-023]) and the close control can be asserted on its own.
+///
+/// Purity: pure.
+#[must_use]
+fn title_band() -> Element<'static, Message> {
+    Row::with_children(vec![
+        rung(
+            strings::TOOLS_DIALOG_TITLE,
+            typography::TITLE_SM,
+            Palette::fastmd_dark().text_strong,
+        )
+        .into(),
+        Space::new().width(Length::Fill).into(),
+        close_button().into(),
+    ])
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The title band's `×` dismiss control (defect #7).
+///
+/// The [`strings::ICON_CLOSE`] glyph measures below §3.1's icon-only floor,
+/// so this control *is* an icon-only button and `UIF-ATOM-001`'s icon-only
+/// cell makes the tooltip mandatory — it is the only place the label
+/// exists. Built with [`Button::with_tooltip`] carrying
+/// [`strings::TOOLS_CLOSE_TOOLTIP`], the same shape that retired the
+/// identical crash on the movable card's Close button; the pinned test in
+/// the sidecar asserts the icon-only rule is both engaged and satisfied.
+///
+/// Wired to [`dismiss_message()`] — the same single close transition the
+/// scrim click and Escape use, so no second dismiss vocabulary exists.
+///
+/// Purity: pure.
+#[must_use]
+fn close_button() -> Button<'static, Message> {
+    Button::new(
+        ButtonVariant::Ghost,
+        rung(
+            strings::ICON_CLOSE,
+            typography::TITLE_SM,
+            Palette::fastmd_dark().text_muted,
+        ),
+        dismiss_message(),
+        TOOLS_CLOSE_BUTTON_ID,
+    )
+    .palette(Palette::pro())
+    .with_tooltip(strings::TOOLS_CLOSE_TOOLTIP)
+}
+
+/// The card's footer: the `Close` button on the trailing edge (defect #8),
+/// the same `[ Space Fill, button ]` shape the Batch card's footer uses.
+///
+/// Purity: pure.
+#[must_use]
+fn footer() -> Element<'static, Message> {
+    Row::with_children(vec![
+        Space::new().width(Length::Fill).into(),
+        footer_close_button().into(),
+    ])
+    .spacing(space::SM)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The footer's `Close` button (defect #8).
+///
+/// Always enabled: leaving the card is never conditional on the rows, and a
+/// disabled dismiss would trap the user in a modal whose only other exit is
+/// the scrim.
+///
+/// Purity: pure.
+#[must_use]
+fn footer_close_button() -> Button<'static, Message> {
+    footer_button_widget(
+        ButtonVariant::Secondary,
+        strings::CLOSE_BUTTON,
+        dismiss_message(),
+        TOOLS_FOOTER_CLOSE_BUTTON_ID,
+    )
 }
 
 /// The card-level structured failure banner (`UIF-MOD-003`).
@@ -1124,6 +1221,38 @@ pub fn action_focus_id(label: &str) -> &'static str {
     }
 }
 
+/// A footer-width framework button carrying `label`, **before** its enabled
+/// state is applied.
+///
+/// Split out of [`footer_button`] so a test can read the control's own
+/// reported state — `is_enabled`, `variant`, `focus_id`, `tooltip_text` —
+/// instead of digging it back out of an [`Element`], which exposes no such
+/// accessors.
+///
+/// The label is mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box for the reason [`footer_button`] states: the content can never
+/// measure icon-only.
+fn footer_button_widget(
+    variant: ButtonVariant,
+    label: impl Into<String>,
+    on_press: Message,
+    focus_id: &'static str,
+) -> Button<'static, Message> {
+    let content = Column::new()
+        .width(Length::Fixed(
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(rung(
+            label,
+            typography::BODY,
+            Palette::fastmd_dark().text_strong,
+        ));
+
+    Button::new(variant, content, on_press, focus_id).palette(Palette::pro())
+}
+
 /// A footer-width framework button carrying `label`.
 ///
 /// The label is mounted in a fixed
@@ -1141,18 +1270,7 @@ fn footer_button(
     focus_id: &'static str,
     enabled: bool,
 ) -> Element<'static, Message> {
-    let content = Column::new()
-        .width(Length::Fixed(
-            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
-        ))
-        .align_x(Alignment::Center)
-        .push(rung(
-            label,
-            typography::BODY,
-            Palette::fastmd_dark().text_strong,
-        ));
-
-    let button = Button::new(variant, content, on_press, focus_id).palette(Palette::pro());
+    let button = footer_button_widget(variant, label, on_press, focus_id);
 
     if enabled {
         button.into()

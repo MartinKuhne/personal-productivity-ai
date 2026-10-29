@@ -2515,6 +2515,21 @@ fn apply_config_arrival(state: &mut AppState, config: &AppConfig) {
         .iter()
         .map(|lib| PathBuf::from(&lib.root_folder))
         .collect();
+    // The dialog shows the *virtual* label — the library's own name, which
+    // is what `ContentLibraryExt::display_label_for` returns for that
+    // library's root — while `available_dirs` keeps the real path the batch
+    // runner globs. Same iterator order as above, so the two lists stay
+    // index-aligned.
+    state
+        .app
+        .orchestrator
+        .dialogs
+        .batch_dialog_config
+        .available_dir_labels = config
+        .content_libraries
+        .iter()
+        .map(|lib| lib.name.clone())
+        .collect();
     state.app.orchestrator.config = config.clone();
     tracing::info!(
         name = "config.arrived",

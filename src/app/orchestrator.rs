@@ -360,6 +360,16 @@ impl AppOrchestrator {
             .iter()
             .map(|lib| PathBuf::from(&lib.root_folder))
             .collect();
+        // The dialog shows the *virtual* label — the library's own name,
+        // which is what `ContentLibraryExt::display_label_for` returns for
+        // that library's root — while `available_dirs` keeps the real path
+        // the batch runner globs. Same iterator order as above, so the two
+        // lists stay index-aligned.
+        self.dialogs.batch_dialog_config.available_dir_labels = config
+            .content_libraries
+            .iter()
+            .map(|lib| lib.name.clone())
+            .collect();
         self.config = config;
         tracing::info!(
             name = "config.arrived",

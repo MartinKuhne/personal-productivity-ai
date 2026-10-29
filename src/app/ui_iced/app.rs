@@ -1955,6 +1955,13 @@ pub fn build_state(
             .iter()
             .map(|lib| PathBuf::from(&lib.root_folder))
             .collect(),
+        // Virtual label per root, taken from the same iterator order so the
+        // index alignment holds.
+        available_dir_labels: config
+            .content_libraries
+            .iter()
+            .map(|lib| lib.name.clone())
+            .collect(),
         ..Default::default()
     };
     // First-run auto-show of the About window.

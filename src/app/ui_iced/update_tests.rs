@@ -2773,6 +2773,56 @@ fn test_config_arrival_projects_onto_the_orchestrator_and_the_agent() {
 }
 
 #[test]
+fn test_config_arrival_labels_the_batch_dirs_with_the_library_names_in_order() {
+    // The Batch dialog must show the virtual library name, so the arrival
+    // projection has to carry the names alongside the real roots, in the
+    // same order, for every library.
+    let (mut state, _storage) = fresh_state();
+    let config = AppConfig {
+        content_libraries: vec![
+            ContentLibrary {
+                root_folder: r"C:\Users\someone\Documents\MyNotes".to_string(),
+                name: "MyNotes".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            },
+            ContentLibrary {
+                root_folder: r"D:\vault\work".to_string(),
+                name: "Work Vault".to_string(),
+                kind: "text".to_string(),
+                readonly: true,
+                priority: 1,
+            },
+        ],
+        ..Default::default()
+    };
+
+    apply_config_arrival(&mut state, &config);
+
+    let dialog = &state.app.orchestrator.dialogs.batch_dialog_config;
+    assert_eq!(
+        dialog.available_dirs,
+        vec![
+            PathBuf::from(r"C:\Users\someone\Documents\MyNotes"),
+            PathBuf::from(r"D:\vault\work"),
+        ],
+        "the real roots still travel with the labels"
+    );
+    assert_eq!(
+        dialog.available_dir_labels.len(),
+        dialog.available_dirs.len(),
+        "labels must stay index-aligned with the directories"
+    );
+    for (index, library) in config.content_libraries.iter().enumerate() {
+        assert_eq!(
+            dialog.available_dir_labels[index], library.name,
+            "label {index} must be the name of content library {index}"
+        );
+    }
+}
+
+#[test]
 fn test_config_arrival_marks_the_tree_dirty() {
     // The projection itself, isolated from the frame tail that consumes the flag.
     let (mut state, _storage) = fresh_state();

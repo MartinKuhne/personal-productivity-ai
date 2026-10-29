@@ -880,3 +880,329 @@ fn to_geometry_maps_the_fields_in_the_frameworks_order() {
     assert_eq!(geometry.viewport, 200.0);
     assert_eq!(geometry.max_offset(), snapshot.max_offset());
 }
+
+// ─────────── §4.7.1 shell routing: defects #9, #10 and #11 ───────────
+//
+// The Background Operations Log used to mount its bare pre-INT-6 body: no
+// background container at all (defect #9 — transparent), no `Close ×`
+// (defect #10) and no footer `Close` button (defect #11). Routing the card
+// through the shared `movable_shell` supplies the first two; the footer
+// status element supplies the third.
+
+use crate::bus::events::user_command::UserCommand;
+use crate::ui_iced::message::{MovableCard, MovableMessage};
+use crate::ui_iced::movable_shell::{CLOSE_BUTTON_FOCUS_ID, content_viewport_id};
+use hoarfrost::focus::FocusState;
+use hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH;
+use hoarfrost::surface::movable::{MovableGeometry, MovableHost, MovableSpec, NoopGeometryStorage};
+use hoarfrost::surface::zorder::{SurfaceId, SurfaceRegistry};
+use hoarfrost::widget::button::{self, ButtonVariant};
+use iced::{Element, Point, Rectangle, Size};
+use iced_test::selector::Candidate;
+
+use super::{
+    LOGS_CLOSE_BUTTON_ID, ROW_TEXT_SIZE, background_logs_movable_card, close_button_label_box,
+    footer_status, logs_close_button_widget, logs_close_command, logs_controls, logs_viewport,
+};
+
+/// A headless iced driver over the app's `Message` (tier 2).
+type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
+
+/// Builds a [`Sim`] over a rendered element.
+fn sim(element: Element<'_, Message>) -> Sim<'_> {
+    iced_test::simulator(element)
+}
+
+/// The window the movable-card fixtures are laid out in.
+fn card_viewport() -> Rectangle {
+    Rectangle::new(Point::ORIGIN, Size::new(1600.0, 1200.0))
+}
+
+/// A `Logs` [`MovableHost`] at `width` x `height`, opened against
+/// throwaway collaborators — no live focus router, no persisted geometry
+/// and no user path ([RUST-006]).
+fn logs_host(width: f32, height: f32) -> MovableHost {
+    let spec = MovableSpec::new(
+        SurfaceId::new("test.logs.movable"),
+        strings::BACKGROUND_LOGS_WINDOW,
+    )
+    .with_geometry(MovableGeometry::new(
+        Point::new(50.0, 50.0),
+        Size::new(width, height),
+    ));
+    MovableHost::open(
+        spec,
+        card_viewport(),
+        &mut FocusState::new(),
+        &mut SurfaceRegistry::new(),
+        &mut NoopGeometryStorage,
+    )
+}
+
+/// A visible, populated snapshot to render the card from.
+fn populated_view_model() -> BackgroundLogsViewModel {
+    let mut logs = buffer_with(&[
+        stamped(LogCategory::Indexer, "Indexing workspace...", 1),
+        stamped(LogCategory::Watcher, "File modified: note.md", 2),
+    ]);
+    logs.show_background_logs = true;
+    BackgroundLogsViewModel::from_logs(&logs)
+}
+
+/// The laid-out bounds of the focusable control registered under `focus_id`.
+fn focusable_bounds(ui: &mut Sim<'_>, focus_id: &'static str) -> Option<Rectangle> {
+    let expected = iced::widget::Id::from(focus_id);
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable {
+            id: Some(id),
+            bounds,
+            ..
+        } if *id == expected => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// Points the cursor at `position` and left-clicks it.
+fn click_at(ui: &mut Sim<'_>, position: Point) {
+    ui.point_at(position);
+    let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+        position,
+    })]);
+    let _ = ui.simulate([
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        )),
+    ]);
+}
+
+/// Defect #9 — "the background operations window has a transparent
+/// background".
+///
+/// Proved in two halves, because iced exposes no style accessor on a
+/// laid-out `Element`:
+///
+/// 1. **Structurally** — the card is mounted through `movable_shell`, which
+///    is the only thing that stamps [`content_viewport_id`] on its outer
+///    container. That container is the one carrying the opaque card fill and
+///    the `border_strong` edge (`movable_shell.rs:153-167`).
+/// 2. **On the token** — the fill that container paints is
+///    `Palette::fastmd_dark().table_surface`, whose alpha is `1.0`, so the
+///    card cannot be transparent.
+#[test]
+fn movable_logs_card_is_built_by_the_shell_that_paints_an_opaque_card() {
+    let host = logs_host(680.0, 440.0);
+    let view_model = populated_view_model();
+    let mut ui = sim(background_logs_movable_card(&host, &view_model));
+
+    let expected = content_viewport_id(MovableCard::Logs);
+    let bounds = ui
+        .find(move |candidate: Candidate<'_>| match candidate {
+            Candidate::Container {
+                id: Some(id),
+                bounds,
+                ..
+            } if *id == expected => Some(bounds),
+            _ => None,
+        })
+        .expect(
+            "defect #9: the Logs card must render through `movable_shell`, whose outer \
+             container is the opaque card background",
+        );
+
+    // The shell sizes itself from the host, so this is the host's own box.
+    assert_eq!(bounds.width, 680.0);
+    assert_eq!(bounds.height, 440.0);
+
+    let card_fill = Palette::fastmd_dark().table_surface;
+    assert_eq!(
+        card_fill.a, 1.0,
+        "defect #9: the token `movable_shell` paints its card with must be fully opaque"
+    );
+    assert_ne!(
+        card_fill,
+        iced::Color::TRANSPARENT,
+        "defect #9: the card background must not be the transparent colour"
+    );
+}
+
+/// Defect #10 — "it has no 'x' to close it".
+///
+/// The shell's title bar carries the `Close ×` control under
+/// [`CLOSE_BUTTON_FOCUS_ID`]; pressing it must raise
+/// `MovableMessage::CloseRequested { card: Logs }`, which the reducer turns
+/// into the same `UserCommand` the menu entry uses.
+#[test]
+fn movable_logs_card_title_bar_close_raises_close_requested() {
+    let host = logs_host(680.0, 440.0);
+    let view_model = populated_view_model();
+    let mut ui = sim(background_logs_movable_card(&host, &view_model));
+
+    let bounds = focusable_bounds(&mut ui, CLOSE_BUTTON_FOCUS_ID)
+        .expect("defect #10: the Logs card must carry the shell's title-bar `Close ×` control");
+    click_at(&mut ui, bounds.center());
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert!(
+        messages.contains(&Message::Movable(MovableMessage::CloseRequested {
+            card: MovableCard::Logs,
+        })),
+        "defect #10: clicking the title-bar `Close ×` must emit \
+         `MovableMessage::CloseRequested {{ card: Logs }}`, got {messages:?}"
+    );
+}
+
+/// Defect #11 — "it has no 'Close' button".
+///
+/// The footer status line carries a labelled `Close` button wired to the
+/// Logs dismiss path that already exists: `UserCommand::ToggleBackgroundLogs(false)`,
+/// the same command the menu entry and the title-bar `Close ×` resolve to
+/// ([FMD-068]). No new message vocabulary is invented for it.
+#[test]
+fn logs_footer_status_close_button_emits_the_logs_dismiss_command() {
+    assert_eq!(
+        logs_close_command(),
+        Message::Command(UserCommand::ToggleBackgroundLogs(false)),
+        "the footer Close must ride the existing dismiss path, not a new variant"
+    );
+
+    let view_model = populated_view_model();
+    let mut ui = sim(footer_status(&view_model));
+
+    let bounds = focusable_bounds(&mut ui, LOGS_CLOSE_BUTTON_ID)
+        .expect("defect #11: the footer must carry a `Close` button");
+    click_at(&mut ui, bounds.center());
+
+    let messages: Vec<Message> = ui.into_messages().collect();
+    assert_eq!(
+        messages,
+        vec![Message::Command(UserCommand::ToggleBackgroundLogs(false))],
+        "clicking the footer `Close` must emit exactly the Logs dismiss command"
+    );
+}
+
+/// The footer `Close` is a *labelled* control: its label comes from
+/// [`strings::CLOSE_BUTTON`] and it is a `Secondary` framework button.
+#[test]
+fn logs_footer_close_button_is_labelled_from_the_string_table() {
+    let button = logs_close_button_widget();
+
+    assert_eq!(button.variant(), ButtonVariant::Secondary);
+    assert_eq!(button.focus_id().as_str(), LOGS_CLOSE_BUTTON_ID);
+    assert!(button.is_enabled());
+
+    let view_model = populated_view_model();
+    let mut ui = sim(footer_status(&view_model));
+    assert!(
+        ui.find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Text { content, .. } if content == strings::CLOSE_BUTTON => Some(()),
+            _ => None,
+        })
+        .is_ok(),
+        "defect #11: the footer must render the `Close` label from `strings::CLOSE_BUTTON`"
+    );
+}
+
+/// The footer `Close` must **not** be icon-only-unsafe.
+///
+/// `Button::outer_size` carries a `debug_assert!` that fires for any button
+/// whose content measures at or below `size::CONTROL_SM` (28 pt) on both
+/// axes with no tooltip. Proving safety here is a matter of pinning the
+/// *content* width, not the label's glyph width: the label is mounted in a
+/// fixed [`BUTTON_MIN_WIDTH`] box, so the content can never fall to the
+/// icon-only floor no matter how the font measures.
+///
+/// This is the assertion that genuinely proves it — `tooltip_violation`
+/// alone would also be satisfied by bolting a tooltip onto an icon, which is
+/// not what this control is.
+#[test]
+// The `BUTTON_MIN_WIDTH > ICON_ONLY_MIN_WIDTH` pin below targets two
+// compile-time rungs on purpose: the guard only holds while the dialog
+// minimum clears the icon-only floor, so a retuned rung must fail the suite
+// rather than pass silently. Same allowance the `movable_shell` sidecar uses.
+#[allow(clippy::assertions_on_constants)]
+fn logs_close_button_label_box_is_mounted_at_the_dialog_minimum_width() {
+    let mut ui = sim(container_probe(close_button_label_box().into()));
+    let width = ui
+        .find(|candidate: Candidate<'_>| match candidate {
+            Candidate::Container { bounds, .. } => Some(bounds.width),
+            _ => None,
+        })
+        .expect("the label box must lay out");
+    assert_eq!(
+        width, BUTTON_MIN_WIDTH,
+        "the `Close` label must sit in a fixed `BUTTON_MIN_WIDTH` box"
+    );
+
+    let button = logs_close_button_widget();
+
+    // The rule really is engaged: a glyph-sized content with no tooltip is
+    // exactly the shape that trips the `debug_assert!` (defect #18's shape).
+    assert!(
+        button.is_icon_only(Size::new(8.0, 16.0)),
+        "an 8x16 content box must read as icon-only, otherwise this test pins nothing"
+    );
+    assert_eq!(
+        button.tooltip_text(),
+        None,
+        "the footer `Close` is a labelled button, not a tooltip-carried icon"
+    );
+
+    // …and the fixed-width box defeats the rule at the real content size.
+    assert!(
+        BUTTON_MIN_WIDTH > button::ICON_ONLY_MIN_WIDTH,
+        "the dialog minimum must clear the icon-only floor for this guard to hold"
+    );
+    assert!(
+        !button.is_icon_only(Size::new(BUTTON_MIN_WIDTH, ROW_TEXT_SIZE)),
+        "defect #11: at its real content width the footer `Close` must not read icon-only"
+    );
+    assert_eq!(
+        button.tooltip_violation(Size::new(BUTTON_MIN_WIDTH, ROW_TEXT_SIZE)),
+        None,
+        "defect #11: the footer `Close` must never trip `Button::outer_size`'s \
+         icon-only debug_assert"
+    );
+}
+
+/// Laid-out inside the real footer, the `Close` control keeps a box at
+/// least the dialog minimum wide — the geometry the guard above promises.
+#[test]
+fn logs_footer_close_button_lays_out_wider_than_the_icon_only_floor() {
+    let view_model = populated_view_model();
+    let mut ui = sim(footer_status(&view_model));
+
+    let bounds = focusable_bounds(&mut ui, LOGS_CLOSE_BUTTON_ID)
+        .expect("defect #11: the footer must carry a `Close` button");
+    assert!(
+        bounds.width >= BUTTON_MIN_WIDTH,
+        "defect #11: the laid-out `Close` box ({bounds:?}) must be at least \
+         BUTTON_MIN_WIDTH wide so it can never measure icon-only"
+    );
+}
+
+/// Wraps a probe element so its own bounds become a [`Candidate::Container`].
+fn container_probe<'a>(content: Element<'a, Message>) -> Element<'a, Message> {
+    iced::widget::container(content)
+        .id(iced::widget::Id::new("test.logs.close_label_probe"))
+        .into()
+}
+
+/// The extracted builders must reproduce the pre-refactor shape: the filter
+/// row and the viewport are still both present, and the viewport still
+/// branches on the view-model rather than the widget state.
+#[test]
+fn the_extracted_builders_reproduce_the_legacy_view_shape() {
+    let populated = populated_view_model();
+    let _controls = logs_controls(&populated);
+    let _viewport = logs_viewport(&populated);
+
+    let errored = BackgroundLogsViewModel::unavailable();
+    let _controls = logs_controls(&errored);
+    let _viewport = logs_viewport(&errored);
+
+    let empty = BackgroundLogsViewModel::from_logs(&buffer_with(&[]));
+    let _controls = logs_controls(&empty);
+    let _viewport = logs_viewport(&empty);
+}

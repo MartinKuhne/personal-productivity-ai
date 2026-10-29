@@ -41,6 +41,50 @@ fn test_empty_state_preserves_content_libraries() {
 }
 
 #[test]
+fn test_empty_state_labels_batch_dirs_with_library_names_in_order() {
+    let config = crate::config::AppConfig {
+        content_libraries: vec![
+            crate::config::ContentLibrary {
+                root_folder: r"C:\notes\alpha".to_string(),
+                name: "Alpha".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            },
+            crate::config::ContentLibrary {
+                root_folder: r"D:\vault\beta".to_string(),
+                name: "Beta".to_string(),
+                kind: "text".to_string(),
+                readonly: true,
+                priority: 1,
+            },
+        ],
+        ..Default::default()
+    };
+    let app = FastMdApp::empty_state(config.clone());
+    let dialog = &app.orchestrator.dialogs.batch_dialog_config;
+
+    assert_eq!(
+        dialog.available_dirs,
+        vec![
+            std::path::PathBuf::from(r"C:\notes\alpha"),
+            std::path::PathBuf::from(r"D:\vault\beta"),
+        ]
+    );
+    assert_eq!(
+        dialog.available_dir_labels.len(),
+        dialog.available_dirs.len(),
+        "labels must stay index-aligned with the directories"
+    );
+    for (index, library) in config.content_libraries.iter().enumerate() {
+        assert_eq!(
+            dialog.available_dir_labels[index], library.name,
+            "label {index} must be the name of content library {index}"
+        );
+    }
+}
+
+#[test]
 fn test_init_rs_does_not_recreate_tool_context() {
     let content = std::fs::read_to_string("src/app/ui/app/init.rs").unwrap();
     // Strip whitespace to avoid formatting issues
