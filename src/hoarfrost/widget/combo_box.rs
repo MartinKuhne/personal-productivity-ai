@@ -48,8 +48,22 @@ use crate::token::color::Palette;
 use crate::token::{shape, size, space, typography};
 use crate::widget::combo_model::{ComboBoxModel, FLYOUT_MAX_HEIGHT};
 use crate::widget::text_input::{self, InputKind, InputStyle};
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::overlay;
+use iced::advanced::renderer;
+use iced::advanced::text::Renderer as _;
+use iced::advanced::widget::Widget;
+use iced::advanced::widget::operation::Operation;
+use iced::advanced::widget::tree::{self, Tree};
+use iced::advanced::{Clipboard, Renderer as _, Shell};
 use iced::alignment;
-use iced::{Border, Color, Element, Length, Pixels, Point, Rectangle, Shadow, Size};
+use iced::keyboard;
+use iced::mouse;
+use iced::touch;
+use iced::{
+    Background, Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Shadow, Size,
+    Vector,
+};
 
 /// The standard trigger height — `size.control.md` (§3.4, `UIF-TOK-002`).
 pub const HEIGHT_STANDARD: f32 = size::CONTROL_MD;
@@ -90,6 +104,9 @@ pub const RADIUS: f32 = shape::RADIUS_WIDGET;
 /// the figure inline; the token lint's carve-out registry carries the
 /// §-reference.
 pub const MIN_WIDTH: f32 = 120.0;
+
+/// The smallest width a compact trigger may take — `min_width = 64px` (§2.2, §3.4).
+pub const MIN_WIDTH_COMPACT: f32 = 64.0;
 
 /// The two height rungs §3.4 prices for a select, in the order the
 /// gallery samples them.
@@ -269,12 +286,27 @@ impl<'a, Message, Id: Clone + fmt::Display + PartialEq> ComboBox<'a, Message, Id
         self
     }
 
-    /// Set the width of the control, clamped to at least [`MIN_WIDTH`] (120px) (§3.4, `UIF-ATOM-004`).
+    /// Set the width of the control, clamped to at least [`MIN_WIDTH`] (120px) or [`MIN_WIDTH_COMPACT`] (64px) for compact rung (§3.4, `UIF-ATOM-004`).
     #[must_use]
     pub fn with_width(mut self, width: impl Into<Length>) -> Self {
         let width = width.into();
+        let min_w = match self.rung {
+            ComboRung::Standard => MIN_WIDTH,
+            ComboRung::Compact => MIN_WIDTH_COMPACT,
+        };
         self.width = match width {
-            Length::Fixed(w) => Length::Fixed(w.max(MIN_WIDTH)),
+            Length::Fixed(w) => Length::Fixed(w.max(min_w)),
+            other => other,
+        };
+        self
+    }
+
+    /// Set the width with explicit compact min-width clamp (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn with_compact_width(mut self, width: impl Into<Length>) -> Self {
+        let width = width.into();
+        self.width = match width {
+            Length::Fixed(w) => Length::Fixed(w.max(MIN_WIDTH_COMPACT)),
             other => other,
         };
         self
@@ -442,9 +474,14 @@ where
             .width(Length::Fill)
             .height(Length::Fixed(rung_height));
 
+        let min_w = match combo.rung {
+            ComboRung::Standard => MIN_WIDTH,
+            ComboRung::Compact => MIN_WIDTH_COMPACT,
+        };
+
         let trigger_inner = iced::widget::container(
             iced::widget::stack![
-                iced::widget::Space::new().width(Length::Fixed(MIN_WIDTH)),
+                iced::widget::Space::new().width(Length::Fixed(min_w)),
                 trigger_row,
             ]
             .width(combo.width)
@@ -492,14 +529,12 @@ where
                 }
             });
 
-        if !is_disabled && let Some(msg) = combo.on_toggle_open {
+        if !is_disabled && let Some(msg) = combo.on_toggle_open.clone() {
             trigger_btn = trigger_btn.on_press(msg);
         }
 
-        let mut root_col = iced::widget::column![trigger_btn].spacing(space::XS);
-
         let filtered_items = combo.model.filtered_items();
-        if is_open && !filtered_items.is_empty() {
+        let flyout_element = if is_open && !filtered_items.is_empty() {
             let mut options_col = iced::widget::Column::new().spacing(space::XXS);
 
             for item in filtered_items {
@@ -578,7 +613,7 @@ where
             );
 
             let flyout = iced::widget::container(scrollable_options)
-                .width(combo.width)
+                .width(Length::Fill)
                 .max_height(Pixels(COMBO_FLYOUT_MAX_H))
                 .padding(iced::Padding::new(space::XS))
                 .style(move |_theme| iced::widget::container::Style {
@@ -592,10 +627,754 @@ where
                     text_color: Some(palette.text_primary),
                 });
 
-            root_col = root_col.push(flyout);
+            Some(Element::new(flyout))
+        } else {
+            None
+        };
+
+        let widget = ComboBoxWidget {
+            trigger: Element::new(trigger_btn),
+            flyout: flyout_element,
+            is_open,
+            width: combo.width,
+            height: rung_height,
+            on_dismiss: combo.on_toggle_open.clone(),
+        };
+
+        Element::new(widget)
+    }
+}
+
+/// Internal widget wrapping trigger and floating overlay flyout for [`ComboBox`] (`UIF-ATOM-004`).
+pub struct ComboBoxWidget<'a, Message> {
+    trigger: Element<'a, Message>,
+    flyout: Option<Element<'a, Message>>,
+    is_open: bool,
+    width: Length,
+    height: f32,
+    on_dismiss: Option<Message>,
+}
+
+impl<Message: Clone> Widget<Message, iced::Theme, iced::Renderer> for ComboBoxWidget<'_, Message> {
+    fn size(&self) -> Size<Length> {
+        Size::new(self.width, Length::Fixed(self.height))
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.trigger
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.trigger.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![
+            Tree::new(&self.trigger),
+            self.flyout
+                .as_ref()
+                .map(Tree::new)
+                .unwrap_or_else(Tree::empty),
+        ]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        if tree.children.len() < 2 {
+            tree.children = vec![
+                Tree::new(&self.trigger),
+                self.flyout
+                    .as_ref()
+                    .map(Tree::new)
+                    .unwrap_or_else(Tree::empty),
+            ];
+        } else {
+            tree.children[0].diff(&self.trigger);
+            if let Some(flyout) = &self.flyout {
+                tree.children[1].diff(flyout);
+            }
+        }
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.trigger
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.trigger.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.trigger.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        _renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        if !self.is_open || self.flyout.is_none() {
+            return None;
+        }
+        let flyout = self.flyout.take().unwrap();
+        let trigger_bounds = layout.bounds();
+        let position = layout.position() + translation;
+
+        Some(overlay::Element::new(Box::new(ComboOverlay {
+            content: flyout,
+            tree: &mut tree.children[1],
+            position,
+            trigger_size: trigger_bounds.size(),
+            trigger_width: trigger_bounds.width,
+            viewport: *viewport,
+            on_dismiss: self.on_dismiss.clone(),
+            is_open_flag: None,
+        })))
+    }
+}
+
+/// The floating overlay for dropdown flyouts (`UIF-ATOM-004`).
+pub struct ComboOverlay<'a, Message> {
+    content: Element<'a, Message>,
+    tree: &'a mut Tree,
+    position: Point,
+    trigger_size: Size,
+    trigger_width: f32,
+    viewport: Rectangle,
+    on_dismiss: Option<Message>,
+    is_open_flag: Option<&'a mut bool>,
+}
+
+impl<Message: Clone> overlay::Overlay<Message, iced::Theme, iced::Renderer>
+    for ComboOverlay<'_, Message>
+{
+    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
+        let space_below = bounds.height - (self.position.y + self.trigger_size.height);
+        let space_above = self.position.y;
+
+        let flyout_width = self
+            .trigger_width
+            .max(224.0)
+            .min(320.0_f32.max(self.trigger_width));
+
+        let available_height = if space_below < COMBO_FLYOUT_MAX_H && space_above > space_below {
+            space_above.min(COMBO_FLYOUT_MAX_H)
+        } else {
+            space_below.min(COMBO_FLYOUT_MAX_H)
+        };
+
+        let limits = layout::Limits::new(Size::ZERO, Size::new(flyout_width, available_height))
+            .width(Length::Fixed(flyout_width))
+            .max_height(COMBO_FLYOUT_MAX_H);
+
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(self.tree, renderer, &limits);
+        let size = node.size();
+
+        let should_flip = space_below < size.height && space_above > space_below;
+        let y_pos = if should_flip {
+            self.position.y - size.height
+        } else {
+            self.position.y + self.trigger_size.height
+        };
+
+        let x_pos = self.position.x.min(bounds.width - size.width).max(0.0);
+        let y_pos = y_pos.min(bounds.height - size.height).max(0.0);
+
+        node.move_to(Point::new(x_pos, y_pos))
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        self.content.as_widget().draw(
+            self.tree,
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            &self.viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            self.tree,
+            layout,
+            cursor,
+            &self.viewport,
+            renderer,
+        )
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let bounds = layout.bounds();
+        let is_over = cursor.is_over(bounds);
+
+        self.content.as_widget_mut().update(
+            self.tree,
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            &self.viewport,
+        );
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            | Event::Touch(touch::Event::FingerPressed { .. }) => {
+                if is_over {
+                    if let Some(flag) = &mut self.is_open_flag {
+                        **flag = false;
+                        shell.request_redraw();
+                    }
+                } else {
+                    if let Some(flag) = &mut self.is_open_flag {
+                        **flag = false;
+                        shell.request_redraw();
+                    }
+                    if let Some(on_dismiss) = &self.on_dismiss {
+                        shell.publish(on_dismiss.clone());
+                    }
+                    shell.capture_event();
+                }
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) => {
+                if let Some(flag) = &mut self.is_open_flag {
+                    **flag = false;
+                    shell.request_redraw();
+                }
+                if let Some(on_dismiss) = &self.on_dismiss {
+                    shell.publish(on_dismiss.clone());
+                }
+                shell.capture_event();
+            }
+            _ => {}
+        }
+    }
+
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(self.tree, layout, renderer, operation);
+    }
+}
+
+/// Persistent widget state for the stateless [`Select`] helper (`UIF-ATOM-004`).
+#[derive(Debug, Default, Clone)]
+pub struct SelectState {
+    /// Whether the flyout is currently open.
+    pub is_open: bool,
+    /// Whether the trigger is hovered.
+    pub is_hovered: bool,
+}
+
+/// A stateless, overlay-capable single-selection picker (`UIF-ATOM-004`).
+pub struct Select<'a, T, Message> {
+    options: &'a [T],
+    selected: Option<&'a T>,
+    on_select: Box<dyn Fn(T) -> Message + 'a>,
+    placeholder: &'a str,
+    rung: ComboRung,
+    width: Length,
+    palette: Palette,
+    phantom: std::marker::PhantomData<Message>,
+}
+
+impl<'a, T, Message> Select<'a, T, Message>
+where
+    T: Clone + PartialEq + fmt::Display + 'a,
+    Message: Clone + 'a,
+{
+    /// Construct a new stateless [`Select`] helper widget (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn new(
+        options: &'a [T],
+        selected: Option<&'a T>,
+        on_select: impl Fn(T) -> Message + 'a,
+    ) -> Self {
+        Self {
+            options,
+            selected,
+            on_select: Box::new(on_select),
+            placeholder: "Select...",
+            rung: ComboRung::Standard,
+            width: Length::Shrink,
+            palette: Palette::dark(),
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Set placeholder text shown when no option is selected (`UIF-ATOM-004`).
+    #[must_use]
+    pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
+        self.placeholder = placeholder;
+        self
+    }
+
+    /// Set vertical sizing rung (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn with_rung(mut self, rung: ComboRung) -> Self {
+        self.rung = rung;
+        self
+    }
+
+    /// Set width constraint, clamped to at least [`MIN_WIDTH`] (120px) or [`MIN_WIDTH_COMPACT`] (64px) (§3.4, `UIF-ATOM-004`).
+    #[must_use]
+    pub fn with_width(mut self, width: impl Into<Length>) -> Self {
+        let width = width.into();
+        let min_w = match self.rung {
+            ComboRung::Standard => MIN_WIDTH,
+            ComboRung::Compact => MIN_WIDTH_COMPACT,
+        };
+        self.width = match width {
+            Length::Fixed(w) => Length::Fixed(w.max(min_w)),
+            other => other,
+        };
+        self
+    }
+
+    /// Set design token palette (`UIF-ATOM-004`).
+    #[must_use]
+    pub const fn with_palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
+    }
+}
+
+/// Convenience builder for a stateless, overlay-capable single-selection dropdown (`UIF-ATOM-004`).
+#[must_use]
+pub fn select<'a, T, Message>(
+    options: &'a [T],
+    selected: Option<&'a T>,
+    on_select: impl Fn(T) -> Message + 'a,
+) -> Select<'a, T, Message>
+where
+    T: Clone + PartialEq + fmt::Display + 'a,
+    Message: Clone + 'a,
+{
+    Select::new(options, selected, on_select)
+}
+
+impl<'a, T, Message> Widget<Message, iced::Theme, iced::Renderer> for Select<'a, T, Message>
+where
+    T: Clone + PartialEq + fmt::Display + 'a,
+    Message: Clone + 'a,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<SelectState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(SelectState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::empty()]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        if tree.children.is_empty() {
+            tree.children.push(Tree::empty());
+        }
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(self.width, Length::Fixed(self.rung.height()))
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let rung_height = self.rung.height();
+        let min_w = match self.rung {
+            ComboRung::Standard => MIN_WIDTH,
+            ComboRung::Compact => MIN_WIDTH_COMPACT,
+        };
+        let size = limits
+            .width(self.width)
+            .height(Length::Fixed(rung_height))
+            .resolve(
+                self.width,
+                Length::Fixed(rung_height),
+                Size::new(min_w, rung_height),
+            );
+        layout::Node::new(size)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<SelectState>();
+        let bounds = layout.bounds();
+
+        let visual_base = if state.is_hovered {
+            BaseState::Hovered
+        } else {
+            BaseState::Rest
+        };
+        let visual_state = VisualState {
+            base: visual_base,
+            focused: false,
+        };
+        let resolved = resolve_trigger(visual_state, &self.palette);
+        let chevron_col = chevron_color(visual_state, state.is_open, &self.palette);
+
+        // Background & border
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                border: Border {
+                    color: resolved.border_color,
+                    width: resolved.border_width,
+                    radius: shape::RADIUS_WIDGET.into(),
+                },
+                shadow: Shadow::default(),
+                snap: true,
+            },
+            Background::Color(resolved.background),
+        );
+
+        // Chevron
+        let chevron_rect = chevron_bounds(bounds);
+        let font = renderer.default_font();
+        renderer.fill_text(
+            iced::advanced::text::Text {
+                content: CHEVRON_GLYPH.to_string(),
+                bounds: Size::new(chevron_rect.width, chevron_rect.height),
+                size: Pixels(CHEVRON_SIZE),
+                line_height: iced::advanced::text::LineHeight::default(),
+                font,
+                align_x: iced::advanced::text::Alignment::Center,
+                align_y: alignment::Vertical::Center,
+                shaping: iced::advanced::text::Shaping::default(),
+                wrapping: iced::advanced::text::Wrapping::None,
+            },
+            Point::new(chevron_rect.x, chevron_rect.y),
+            chevron_col,
+            *viewport,
+        );
+
+        // Text label or placeholder
+        let val_rect = value_bounds(bounds);
+        let text_size = match self.rung {
+            ComboRung::Standard => typography::BODY.size,
+            ComboRung::Compact => typography::UI_COMPACT.size,
+        };
+        let (label_content, text_col) = if let Some(sel) = self.selected {
+            (sel.to_string(), resolved.text)
+        } else {
+            (self.placeholder.to_string(), self.palette.text_muted)
+        };
+
+        renderer.fill_text(
+            iced::advanced::text::Text {
+                content: label_content,
+                bounds: Size::new(val_rect.width, val_rect.height),
+                size: Pixels(text_size),
+                line_height: iced::advanced::text::LineHeight::default(),
+                font,
+                align_x: iced::advanced::text::Alignment::Left,
+                align_y: alignment::Vertical::Center,
+                shaping: iced::advanced::text::Shaping::default(),
+                wrapping: iced::advanced::text::Wrapping::None,
+            },
+            Point::new(val_rect.x, val_rect.y),
+            text_col,
+            *viewport,
+        );
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &iced::Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_mut::<SelectState>();
+        let bounds = layout.bounds();
+        let is_over = cursor.is_over(bounds);
+        state.is_hovered = is_over;
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            | Event::Touch(touch::Event::FingerPressed { .. }) => {
+                if is_over {
+                    state.is_open = !state.is_open;
+                    shell.request_redraw();
+                    shell.capture_event();
+                }
+            }
+            // Closed-select prefix type-ahead (PrefixTypeAhead)
+            Event::Keyboard(keyboard::Event::KeyPressed { text: Some(c), .. })
+                if !state.is_open =>
+            {
+                if let Some(ch) = c.chars().next()
+                    && ch.is_ascii_alphanumeric()
+                {
+                    let target_prefix = ch.to_ascii_lowercase();
+                    let current_idx = self
+                        .selected
+                        .and_then(|sel| self.options.iter().position(|opt| opt == sel));
+                    let start = current_idx.map(|i| i + 1).unwrap_or(0);
+                    let found = (0..self.options.len())
+                        .map(|offset| (start + offset) % self.options.len())
+                        .find(|&idx| {
+                            self.options[idx]
+                                .to_string()
+                                .to_ascii_lowercase()
+                                .starts_with(target_prefix)
+                        });
+
+                    if let Some(idx) = found {
+                        shell.publish((self.on_select)(self.options[idx].clone()));
+                        shell.request_redraw();
+                        shell.capture_event();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        if cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        _renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        let state = tree.state.downcast_mut::<SelectState>();
+        if !state.is_open || self.options.is_empty() {
+            return None;
         }
 
-        root_col.width(combo.width).into()
+        let palette = self.palette;
+        let mut options_col = iced::widget::Column::new().spacing(space::XXS);
+
+        for item in self.options {
+            let is_selected = self.selected == Some(item);
+            let check_glyph = if is_selected { CHECK_MARK } else { "" };
+            let check_slot = iced::widget::container(
+                iced::widget::text(check_glyph)
+                    .size(Pixels(typography::UI_COMPACT.size))
+                    .color(palette.accent_text)
+                    .align_x(alignment::Horizontal::Center)
+                    .align_y(alignment::Vertical::Center),
+            )
+            .width(Length::Fixed(size::CHECKBOX_BOX))
+            .height(Length::Fixed(size::CHECKBOX_BOX))
+            .align_x(alignment::Horizontal::Center)
+            .align_y(alignment::Vertical::Center);
+
+            let row_label = iced::widget::text(item.to_string())
+                .size(Pixels(typography::BODY.size))
+                .color(palette.text_primary)
+                .width(Length::Fill)
+                .align_y(alignment::Vertical::Center);
+
+            let row_content = iced::widget::row![check_slot, row_label]
+                .spacing(space::SM)
+                .align_y(alignment::Vertical::Center)
+                .width(Length::Fill)
+                .height(Length::Fixed(size::CONTROL_MD));
+
+            let opt_btn = iced::widget::button(row_content)
+                .padding(iced::Padding::new(0.0).horizontal(space::SM))
+                .width(Length::Fill)
+                .height(Length::Fixed(size::CONTROL_MD))
+                .on_press((self.on_select)(item.clone()))
+                .style(move |_theme, status| {
+                    let is_hovered = matches!(status, iced::widget::button::Status::Hovered);
+                    let bg = if is_hovered {
+                        palette.surface_hover
+                    } else {
+                        Color::TRANSPARENT
+                    };
+                    iced::widget::button::Style {
+                        background: Some(bg.into()),
+                        text_color: palette.text_primary,
+                        border: Border::default().rounded(shape::RADIUS_WIDGET),
+                        shadow: Shadow::default(),
+                        snap: true,
+                    }
+                });
+
+            options_col = options_col.push(opt_btn);
+        }
+
+        let scrollable_options = iced::widget::scrollable(options_col).direction(
+            iced::widget::scrollable::Direction::Vertical(
+                iced::widget::scrollable::Scrollbar::default(),
+            ),
+        );
+
+        let flyout = iced::widget::container(scrollable_options)
+            .width(Length::Fill)
+            .max_height(Pixels(COMBO_FLYOUT_MAX_H))
+            .padding(iced::Padding::new(space::XS))
+            .style(move |_theme| iced::widget::container::Style {
+                background: Some(palette.surface_overlay.into()),
+                border: Border::default()
+                    .color(palette.border_strong)
+                    .width(shape::BORDER_HAIRLINE)
+                    .rounded(shape::RADIUS_WIDGET),
+                shadow: Shadow::default(),
+                snap: true,
+                text_color: Some(palette.text_primary),
+            });
+
+        let trigger_bounds = layout.bounds();
+        let position = layout.position() + translation;
+
+        Some(overlay::Element::new(Box::new(ComboOverlay {
+            content: Element::new(flyout),
+            tree: &mut tree.children[0],
+            position,
+            trigger_size: trigger_bounds.size(),
+            trigger_width: trigger_bounds.width,
+            viewport: *viewport,
+            on_dismiss: None,
+            is_open_flag: Some(&mut state.is_open),
+        })))
+    }
+}
+
+impl<'a, T, Message> From<Select<'a, T, Message>> for Element<'a, Message>
+where
+    T: Clone + PartialEq + fmt::Display + 'a,
+    Message: Clone + 'a,
+{
+    fn from(select: Select<'a, T, Message>) -> Self {
+        Element::new(select)
     }
 }
 

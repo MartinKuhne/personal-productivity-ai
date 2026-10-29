@@ -110,7 +110,7 @@ All padding, gaps, margins, and alignment offsets use a base-4px spatial grid (w
   * **Input Dialog (`§4.5`):** `INPUT_DIALOG_WIDTH = 320`, `FOLDER_LIST_MAX_H = 200`.
   * **Modal Dialogs (`§4.6`):** `EDITOR_MODAL_MIN = 520 × 380`, `EDITOR_MODAL_MAX = 960 × 760`, `TOOLS_MODAL_W = 720`, `TOOLS_MODAL_MIN_H = 320`, `BATCH_MODAL_MAX = 560 × 480`, `ABOUT_MODAL_W = 440`, `ATTRIBUTIONS_MODAL_SIZE = 640 × 480`, `ATTRIBUTIONS_LIST_MAX_H = 200` (scrollable license list cap per `UIF-MOD-004`).
   * **Movable Overlay (`§4.7`):** `MOVABLE_DEFAULT = 680 × 440`, `MOVABLE_MIN = 420 × 260`, `TITLE_REACHABLE_MIN_W = 120`.
-  * **Menus, Popovers & Pickers (`§3.4`, `§3.7`, `§3.10`, `§4.8`):** `MENU_CARD_WIDTH = 224..320`, `TOOLTIP_MAX_W = 280`, `POPOVER_WIDTH = 280..360`, `COMBO_FLYOUT_MAX_H = 280`, `AUTOSUGGEST_FLYOUT_MAX_H = 240`, `CALENDAR_FLYOUT_W = 256`, `TIME_FLYOUT_W = 200..240`, `COLOR_FLYOUT_W = 240`.
+  * **Menus, Popovers & Pickers (`§3.4`, `§3.7`, `§3.10`, `§4.8`):** `MENU_CARD_WIDTH = 224..320`, `TOOLTIP_MAX_W = 280`, `POPOVER_WIDTH = 280..360`, `COMBO_MIN_WIDTH = 120`, `COMBO_MIN_WIDTH_COMPACT = 64`, `COMBO_FLYOUT_MAX_H = 280`, `AUTOSUGGEST_FLYOUT_MAX_H = 240`, `CALENDAR_FLYOUT_W = 256`, `TIME_FLYOUT_W = 200..240`, `COLOR_FLYOUT_W = 240`.
 
 ### 2.3 Corner Radii & Stroke Weights (`UIF-TOK-003`)
 
@@ -440,11 +440,15 @@ Geometry: All three controls share one `TogglePolarity` (`Unchecked/Off` vs `Che
 
 ### 3.4 Selection Pickers: `ComboBox` / `Select` (`UIF-ATOM-004`)
 
-* **Geometry & Visuals:** Trigger resolves through `InputKind::DropdownTrigger` (`height: 28px` toolbars or `32px` forms/dialogs; horizontal padding `space.md = 12px`; reserved `24×24px` trailing slot with `14px` `▾` chevron in `text.muted` at rest and `text.strong` on hover/open).
+* **Geometry & Visuals:** Trigger resolves through `InputKind::DropdownTrigger` (`height: 28px` toolbars or `32px` forms/dialogs; horizontal padding `space.md = 12px` standard or `space.sm = 8px` compact; reserved `24×24px` trailing slot with `14px` `▾` chevron in `text.muted` at rest and `text.strong` on hover/open). Trigger width honors `COMBO_MIN_WIDTH = 120px` by default (`COMBO_MIN_WIDTH_COMPACT = 64px` in compact toolbar or `Length::Shrink` postures).
+* **Overlay Presentation Contract (`UIF-PRIN-003` Enforced):**
+  * **Floating Overlay Requirement:** An open flyout MUST render as a floating overlay via `iced::advanced::Widget::overlay` (or a framework-owned overlay host in Z-Band 2). The flyout MUST NEVER take in-flow layout space in the parent container or displace sibling widgets when transitioning between open and closed states.
+  * **Anchor & Clamping:** The flyout anchors to the bottom-left of the trigger (`anchor::Anchor::ControlRectangle`), matching `trigger.width` (clamped to `MENU_CARD_WIDTH = 224..320px` if trigger width is smaller). It executes quadrant flip (`Placement::FlippedY`) if bottom room is less than `COMBO_FLYOUT_MAX_H` (`280px`) and is clamped to the viewport per `UIF-VER-002`.
+  * **Click-Outside Dismissal:** The overlay captures pointer presses outside the flyout rectangle to dismiss the flyout (`on_open_change(Live(false))`) without propagating the click into underlying controls.
 * **Flyout Engine, Filter Policy & Keyboard Contract:**
   * `ComboHost` reuses `MenuCascade` (`MenuTreeKind::Fixed`, `Z-Band 2`, `Escape Rank 3`, `min_width = trigger.width`, `COMBO_FLYOUT_MAX_H = 280px`) with `menu_id` derived from the **control identity** (never the filter string) and a `✓` (`accent.text`) in the `16×16px` leading slot of the selected row.
   * **Filter Matching (`FilterPolicy`):** Defaults to `FilterPolicy::ByWidgetSubstring` (case-insensitive substring match that keeps the currently selected option row visible in the list) or `FilterPolicy::ByCaller`. When `0` enabled rows match, the flyout card is refused (`IgnoredReason::NoFocusableRows`) while `on_filter_change(Live<String>)` continues firing.
-  * **Open/Close & Snapshot Rules:** From a closed trigger, `Down` opens onto the first enabled row and `Up` opens onto the last enabled row (`Home`/`End` jump to first/last enabled row). Non-editable (`editable == false`) selects own no text buffer and ignore printable keys. Clicking the trigger chevron while open closes the flyout without reverting (`on_open_change(Live(false))`). Pressing `Escape` while open closes the flyout and restores the pre-open snapshot of **both** `selected` and `filter_query` (`on_cancel`). When `read_only == true`, options remain browsable but never commit.
+  * **Open/Close & Snapshot Rules:** From a closed trigger, `Down` opens onto the first enabled row and `Up` opens onto the last enabled row (`Home`/`End` jump to first/last enabled row). When closed and focused, typing an alphanumeric character commits the next enabled option matching that ASCII prefix (`PrefixTypeAhead`) without opening the flyout. Clicking the trigger chevron while open closes the flyout without reverting (`on_open_change(Live(false))`). Pressing `Escape` while open closes the flyout and restores the pre-open snapshot of **both** `selected` and `filter_query` (`on_cancel`). When `read_only == true`, options remain browsable but never commit.
 * **Data Model & Callbacks:**
   ```rust
   pub struct SelectOption<Id> { pub id: Id, pub label: String, pub disabled: bool }
@@ -464,6 +468,16 @@ Geometry: All three controls share one `TogglePolarity` (`Unchecked/Off` vs `Che
   }
   ```
   Callbacks: `on_open_change(Live<bool>)`, `on_filter_change(Live<String>)`, `on_commit(Commit<Id>)`, `on_cancel(Cancel<Option<Id>>)`.
+* **Stateless View Ergonomics (`Select` Helper):**
+  To support simple view-model usage without requiring persistent `ComboBoxModel` allocations on host state, the framework MUST expose a convenience builder:
+  ```rust
+  pub fn select<'a, T, Message>(
+      options: &'a [T],
+      selected: Option<&T>,
+      on_select: impl Fn(T) -> Message + 'a,
+  ) -> Element<'a, Message>;
+  ```
+  where `T: Clone + PartialEq + Display`. The helper manages ephemeral open/hover state internally and mounts via the floating overlay contract.
 
 ### 3.5 Continuous, Stepped & Dual-Thumb Range Controls: `Slider`, `RangeSlider` & `NumberBox` (`UIF-ATOM-005`)
 

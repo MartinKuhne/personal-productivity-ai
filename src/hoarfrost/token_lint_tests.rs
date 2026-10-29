@@ -474,7 +474,8 @@ const PIN_RATIO: usize = 1;
 /// 55 as of `UIF-ATOM-011`, which registers `time_picker::TIME_FLYOUT_WIDTH` (220px) and `time_picker::TIME_FLYOUT_MAX_HEIGHT` (260px).
 /// 58 as of `UIF-ATOM-012`, which registers `color_picker::COLOR_FLYOUT_WIDTH` (240px), `color_picker::COLOR_WELL_WIDTH` (180px), and `color_picker::COLOR_WELL_HEIGHT` (140px).
 /// 60 as of Increment 25 (`UIF-TAB-003`), which registers `tab_strip::TAB_MIN_WIDTH` (64px) and `tab_strip::TAB_MAX_WIDTH` (240px).
-const PIN_SURFACE_BOUND: usize = 62;
+/// 63 as of UIF-ATOM-004 ComboBox overlay update, registering combo_box::MIN_WIDTH_COMPACT (64px).
+const PIN_SURFACE_BOUND: usize = 63;
 /// Exceptions the crate currently takes.
 const PIN_ALLOW_ENTRIES: usize = 1;
 

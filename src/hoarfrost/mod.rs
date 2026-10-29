@@ -91,10 +91,11 @@ pub use geometry::{
 pub use widget::{
     AmPm, Avatar, AvatarModel, AvatarShape, AvatarSize, CalendarView, CalendarViewMode, CivilDate,
     CivilTime, ColorPicker, ColorPickerModel, ColorSwatchButton, ComboBox, ComboBoxModel,
-    ComboRung, DatePicker, DatePickerModel, DateRangePicker, DateSelection, Hsva, RatingControl,
-    RatingModel, RatingStep, Rgba8, SelectOption, TimePicker, TimePickerModel, TimeSegment,
-    Weekday, YearMonth, avatar, calendar_view, color_picker, color_swatch_button, combo_box,
-    date_picker, date_range_picker, rating_control, time_picker,
+    ComboRung, DatePicker, DatePickerModel, DateRangePicker, DateSelection, Hsva,
+    MIN_WIDTH_COMPACT, RatingControl, RatingModel, RatingStep, Rgba8, Select, SelectOption,
+    TimePicker, TimePickerModel, TimeSegment, Weekday, YearMonth, avatar, calendar_view,
+    color_picker, color_swatch_button, combo_box, date_picker, date_range_picker, rating_control,
+    select, time_picker,
 };
 
 #[cfg(test)]

@@ -449,6 +449,11 @@ pub const SURFACE_GEOMETRY_CONSTANTS: &[SurfaceGeometryConstant] = &[
         spec: "§3.4 — ComboBox / Select trigger min width 120px",
     },
     SurfaceGeometryConstant {
+        file: "widget/combo_box.rs",
+        name: "MIN_WIDTH_COMPACT",
+        spec: "§2.2 / §3.4 — ComboBox / Select compact trigger min width 64px",
+    },
+    SurfaceGeometryConstant {
         file: "composite/form_field.rs",
         name: "HEADER_HEIGHT",
         spec: "§3B.1 — Stacked form field header row height 20px",

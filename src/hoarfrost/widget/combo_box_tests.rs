@@ -487,3 +487,59 @@ fn test_combobox_disabled_suppresses_interaction() {
     assert!(combo.is_disabled());
     let _el: Element<'_, Msg> = combo.into();
 }
+
+#[test]
+fn test_combobox_compact_min_width_clamping() {
+    assert_eq!(MIN_WIDTH_COMPACT, 64.0);
+
+    let items = vec![SelectOption::new("1", "One")];
+    let model = ComboBoxModel::new(items, "Select...");
+
+    let combo = ComboBox::<(), _>::new(&model).with_rung(ComboRung::Compact);
+
+    // Clamps below MIN_WIDTH_COMPACT (64px)
+    let clamped = combo.with_width(Length::Fixed(40.0));
+    assert_eq!(clamped.width(), Length::Fixed(MIN_WIDTH_COMPACT));
+    assert_eq!(clamped.width(), Length::Fixed(64.0));
+
+    // Above 64px is retained
+    let retained = combo.with_width(Length::Fixed(80.0));
+    assert_eq!(retained.width(), Length::Fixed(80.0));
+
+    // Explicit with_compact_width
+    let explicit = ComboBox::<(), _>::new(&model).with_compact_width(Length::Fixed(30.0));
+    assert_eq!(explicit.width(), Length::Fixed(64.0));
+}
+
+#[test]
+fn test_stateless_select_helper_ergonomics() {
+    #[derive(Clone, Debug, PartialEq)]
+    enum Msg {
+        Chosen(String),
+    }
+
+    let options = vec!["Rust".to_string(), "Go".to_string(), "C++".to_string()];
+    let selected = Some(&options[0]);
+
+    let widget = select(&options, selected, Msg::Chosen)
+        .with_placeholder("Pick language...")
+        .with_rung(ComboRung::Compact)
+        .with_width(Length::Fixed(96.0));
+
+    let _el: Element<'_, Msg> = widget.into();
+}
+
+#[test]
+fn test_combobox_zero_content_shift_contract() {
+    // Both open and closed ComboBox elements produce the exact same trigger height (UIF-PRIN-003)
+    let items = vec![SelectOption::new("1", "One"), SelectOption::new("2", "Two")];
+
+    let model_closed = ComboBoxModel::new(items.clone(), "Select...").with_open(false);
+    let combo_closed = ComboBox::<(), _>::new(&model_closed);
+    assert_eq!(combo_closed.trigger_height(), 32.0);
+
+    let model_open = ComboBoxModel::new(items, "Select...").with_open(true);
+    let combo_open = ComboBox::<(), _>::new(&model_open);
+    assert_eq!(combo_open.trigger_height(), 32.0);
+    assert_eq!(combo_closed.trigger_height(), combo_open.trigger_height());
+}

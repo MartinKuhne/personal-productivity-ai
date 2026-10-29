@@ -257,7 +257,7 @@ pub use color_picker::{
     ColorPicker, ColorPickerModel, ColorSwatchButton, Hsva, Rgba8, color_picker,
     color_swatch_button,
 };
-pub use combo_box::{ComboBox, ComboRung, combo_box};
+pub use combo_box::{ComboBox, ComboRung, MIN_WIDTH_COMPACT, Select, combo_box, select};
 pub use combo_model::{ComboBoxModel, SelectOption};
 pub use date_picker::{
     CalendarView, CalendarViewMode, CivilDate, DatePicker, DatePickerModel, DateRangePicker,
