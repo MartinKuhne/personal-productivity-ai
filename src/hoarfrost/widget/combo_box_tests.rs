@@ -503,7 +503,9 @@ fn test_combobox_compact_min_width_clamping() {
     assert_eq!(clamped.width(), Length::Fixed(64.0));
 
     // Above 64px is retained
-    let retained = combo.with_width(Length::Fixed(80.0));
+    let retained = ComboBox::<(), _>::new(&model)
+        .with_rung(ComboRung::Compact)
+        .with_width(Length::Fixed(80.0));
     assert_eq!(retained.width(), Length::Fixed(80.0));
 
     // Explicit with_compact_width
