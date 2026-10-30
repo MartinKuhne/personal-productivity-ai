@@ -108,7 +108,7 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 | 9 | Background Ops opaque | **Landed** `06e8f9c` | `logs.rs:895` routed through `movable_shell`; opaque fill `movable_shell.rs:160`; test `logs_tests.rs:994` |
 | 10 | Background Ops 'x' | **Landed** `06e8f9c` | `movable_shell.rs:221` `close_action`; test `logs_tests.rs:1037` |
 | 11 | Background Ops 'Close' | **Landed** `06e8f9c` | `logs.rs:848` `logs_close_button_widget()`; tests `logs_tests.rs:1063,1088,1125,1172` |
-| 12 | Pane separation | **Landed** `47fb203` | `layout.rs:75` `PANE_SPACING_PIXELS` = `space::XXS`; grid `.spacing()` at `layout.rs:511`; gutter painted `pane_gutter_fill()`; ratio math via `pane_width_from_ratio` / `split_ratio_for_width` / `nested_region_width`; `RESIZE_LEEWAY_PIXELS` rebalanced to keep the `UIF-PANE-001` 10px grab; F-2 replay in `apply_pane_widths` (`layout.rs:414`) |
+| 12 | Pane separation | **Landed** `47fb203`, regression fixed `03ecc96` | `layout.rs:75` `PANE_SPACING_PIXELS` = `space::XXS`; grid `.spacing()` at `layout.rs:511`; gutter painted `pane_gutter_fill()` **and** panes painted `pane_canvas_fill()` — the pair, see §4; ratio math via `pane_width_from_ratio` / `split_ratio_for_width` / `nested_region_width`; `RESIZE_LEEWAY_PIXELS` rebalanced to keep the `UIF-PANE-001` 10px grab; F-2 replay in `apply_pane_widths` (`layout.rs:414`) |
 | 13 | ToC font rung | **Landed** `06e8f9c` | `view.rs:93` `TOC_TEXT_RUNG` = `UI_COMPACT` (13px/18px); tests `view_tests.rs:406,421,452` |
 | 14 | Content-sized ToC panel | **Landed** `f962051` | `panels/right.rs:254` `auto_fit_width` (indent + `fira_sans_width` title + button padding + row pad + scrollbar gutter, clamped); fired on a landed `FileLoaded` from `update.rs:2554`; `LayoutMessage::TocAutoFit` |
 | 15 | Selected-tab fill conforms | **Landed** `06e8f9c` | `center.rs:1541` slot is `Length::Shrink`, fill painted on the content-sized `surface` (`:1468`) — box and fill are one rectangle by construction; tests `center_tests.rs:1707,1739` |
@@ -259,6 +259,29 @@ Two judgement calls made during this work, both accepted on review:
    "project persisted widths verbatim" contract and meant a restore from a
    larger window silently lost its widths.
 
+**Regression shipped and fixed — `03ecc96`.** Judgement call 1 grayed out the
+middle band. `gutter_style` painted the grid's backing `color.border.subtle`
+(`RGB(40,40,40)`) and its doc asserted that "panes are drawn on top of it, so
+only the gutter is ever visible". That assertion was false: iced hands a pane no
+background of its own, and `fill_pane` was an unstyled container, so the divider
+colour read through every pane — the canvas went from `surface.base`
+`RGB(9,9,11)` to `border.subtle` across the whole band, not just in the seams.
+
+Fixed by making the panes opaque rather than by dropping the gutter fill:
+`pane_canvas_style` paints each pane with `pane_canvas_fill`, which is asserted
+to *be* iced's own `background` role, so an opaque pane is a visual no-op
+against the window and the band looks exactly as it did before #12. Both
+`fill_pane` and the TOC-hidden branch of `pane_body` apply it — the hidden-TOC
+branch sits over the same backing. The two fills are now documented as a pair,
+because the gutter only reads as a divider while the panes occlude it.
+
+Why the landed test missed it: `test_pane_gutter_fill_differs_from_the_canvas_it_divides`
+compares two *tokens*, and the gutter token was always correct. The bug was a
+missing `.style(..)` call, which no token comparison can observe. The three
+replacement tests make that explicit, and were verified to discriminate: with
+`.style(pane_canvas_style)` removed from `fill_pane`, the pixel test **fails**
+while both token tests still **pass**.
+
 ### #14 — Content-sized ToC panel — **CLOSED** `f962051`
 
 The right pane's width was a pure ratio: `middle_band_configuration()` gives
@@ -369,6 +392,7 @@ set), test-first, with the quality gate passing.
 | `86a2343` | 2 | Batch card rows stacked on the form-row rung (`space::SM`) |
 | `f962051` | 14 | ToC pane auto-fits to its content; nested-region derivation unified (drag arm follow-on) |
 | `b913bef` | 6 | Centred modals are user-resizable: `ResizeFloors` + grip + gesture lane (D-3) |
+| `03ecc96` | 12 (regression) | Panes painted opaque so `border.subtle` stays in the seams; baseline-free pixel guard |
 | — | — | *(ledger closed)* |
 
 ### Gate at close
@@ -376,14 +400,14 @@ set), test-first, with the quality gate passing.
 | Command | Result |
 |---|---|
 | `cargo check --quiet` | exit 0, no warnings |
-| `cargo nextest run --workspace --status-level fail --show-progress none` | **8930 passed**, 7 skipped, 0 failed |
+| `cargo nextest run --workspace --status-level fail --show-progress none` | **8933 passed**, 7 skipped, 0 failed |
 | `cargo clippy --all-targets -- -D warnings` | exit 0 |
 | `cargo fmt --check` | exit 0 |
 | `cargo doc --no-deps --quiet` | exit 0 — 3 warnings, all pre-existing at `06e8f9c` (`fonts.rs` ×2, `app.rs` ×1) |
 
-Test count moved `8847 → 8930` (+83) across the six closed defects. Every
-layout claim is a measurement from `iced_test::Simulator`, not an inference from
-reading the widget tree.
+Test count moved `8847 → 8930 → 8933` (+86) across the six closed defects and
+the #12 regression. Every layout claim is a measurement from
+`iced_test::Simulator`, not an inference from reading the widget tree.
 
 ### Note on the `a49eaf5` baseline
 
