@@ -10,7 +10,7 @@
 //! Unit tests live in the sibling `file_tests.rs` sidecar.
 
 use crate::bus::core::Bus;
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 /// The `Kind` property of a `[FileChanged]` event ([REQ-332]): one kind per
 /// event, describing every file in the `[Files]` list.
@@ -38,10 +38,17 @@ impl FileEntry {
     /// Builds an entry deriving `file_name` from `path` ([REQ-334]); a path
     /// with no final component (a filesystem root) yields an empty string.
     pub fn from_path(path: PathBuf) -> Self {
-        let file_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let is_root = path.has_root()
+            && path
+                .components()
+                .all(|component| matches!(component, Component::Prefix(_) | Component::RootDir));
+        let file_name = if is_root {
+            String::new()
+        } else {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
         Self { path, file_name }
     }
 }
