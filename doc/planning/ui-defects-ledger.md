@@ -1,7 +1,9 @@
 # UI Defect Ledger — 18 reported defects (branch `more-iced`)
 
-> **Status:** In progress — **16 of 18 landed, 2 open** (#6 Tools resize, #14
-> content-sized ToC). This ledger is the single record of the reported defect
+> **Status:** **Complete — 18 of 18 landed.** Five defects were closed on this
+> branch (`#2`, `#4`, `#6`, `#12`, `#14`, `#17`); the rest landed before the
+> ledger opened. Six follow-ups are recorded in §3, of which **F-4 needs an
+> owner decision**. This ledger is the single record of the reported defect
 > list, the owner's rulings on the ambiguous ones, what has actually landed, and
 > what remains.
 > **Branch:** `more-iced`. Baseline commit at ledger creation: `06e8f9c`.
@@ -100,7 +102,7 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 | 3 | 'mode' before 'pattern' | **Landed** `06e8f9c` | `batch_dialog.rs:850` `config_body_order(mode)`; tests `batch_dialog_tests.rs:308,324,338` |
 | 4 | Tools card at 80% of viewport | **Landed** (this branch, §5) | `tools_dialog.rs:124` `VIEWPORT_FILL`; `:151` `TOOLS_SIZING`; tests `tools_dialog_tests.rs:838-1130` |
 | 5 | "10 groups" | **Landed** `06e8f9c` | `ui/strings.rs:160` `tools_group_count()`; test `tools_dialog_tests.rs:735` |
-| 6 | Tools card resizable | **Open** | see §4 |
+| 6 | Tools card resizable | **Landed** (this branch, §5) | `hoarfrost/surface/modal.rs` `ResizeFloors::resolve`; `overlay.rs` `modal_resize_grip` / `modal_resize_capture_layer`; `tools_dialog.rs` `TOOLS_RESIZE_FLOORS`, `tools_card_size(viewport, user)`, `ToolsDialogState::apply_resize`; persisted under `modal:overlay.tools` via `UiStateGeometryStorage`. Tests `tools_dialog_tests.rs` (defect #6 group), `update_tests.rs` (`test_a_settled_tools_resize_*`, `test_a_reopened_tools_dialog_*`, `test_a_corrupt_stored_tools_*`), `modal_tests.rs` group 10 |
 | 7 | Tools title-bar 'x' | **Landed** `06e8f9c` | `tools_dialog.rs:915` `close_button()`; tests `:1563,1602,1683` |
 | 8 | Tools footer 'Close' | **Landed** `06e8f9c` | `tools_dialog.rs:953` `footer_close_button()`; tests `:1622,1654,1665` |
 | 9 | Background Ops opaque | **Landed** `06e8f9c` | `logs.rs:895` routed through `movable_shell`; opaque fill `movable_shell.rs:160`; test `logs_tests.rs:994` |
@@ -108,7 +110,7 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 | 11 | Background Ops 'Close' | **Landed** `06e8f9c` | `logs.rs:848` `logs_close_button_widget()`; tests `logs_tests.rs:1063,1088,1125,1172` |
 | 12 | Pane separation | **Landed** `47fb203` | `layout.rs:75` `PANE_SPACING_PIXELS` = `space::XXS`; grid `.spacing()` at `layout.rs:511`; gutter painted `pane_gutter_fill()`; ratio math via `pane_width_from_ratio` / `split_ratio_for_width` / `nested_region_width`; `RESIZE_LEEWAY_PIXELS` rebalanced to keep the `UIF-PANE-001` 10px grab; F-2 replay in `apply_pane_widths` (`layout.rs:414`) |
 | 13 | ToC font rung | **Landed** `06e8f9c` | `view.rs:93` `TOC_TEXT_RUNG` = `UI_COMPACT` (13px/18px); tests `view_tests.rs:406,421,452` |
-| 14 | Content-sized ToC panel | **Open** | see §4 |
+| 14 | Content-sized ToC panel | **Landed** `f962051` | `panels/right.rs:254` `auto_fit_width` (indent + `fira_sans_width` title + button padding + row pad + scrollbar gutter, clamped); fired on a landed `FileLoaded` from `update.rs:2554`; `LayoutMessage::TocAutoFit` |
 | 15 | Selected-tab fill conforms | **Landed** `06e8f9c` | `center.rs:1541` slot is `Length::Shrink`, fill painted on the content-sized `surface` (`:1468`) — box and fill are one rectangle by construction; tests `center_tests.rs:1707,1739` |
 | 16 | Tab overflow overlap | **Landed** `06e8f9c` | `center.rs:1391` strip rides a horizontal scrollable; tests `center_tests.rs:1791,1822,1871,1908` |
 | 17 | Table renders empty | **Landed** `0c492e2` | `render/table.rs:370` `cell_element` declares its own column's `Length` instead of `Length::Fill`; `grid_element` refuses a zero-column model; `scroll_width` adds the outer padding bands; layout-level tests restored in `render/table_tests.rs` |
@@ -146,15 +148,20 @@ then deleted; permanent coverage lands in the existing test sidecars instead.
 - **F-5 (ledger correction):** §4 of this ledger originally cited the
   form-field contract as `UIF-COMP-004`. That id is §3B.4 *ScrollView*. The
   form field is **`UIF-COMP-001`** (§3B.1, `src/hoarfrost/spec.md:734`).
+- **F-6 (#6, spec drift):** hoarfrost §4.6.2 has no concept of a **user-set**
+  modal size — it describes modal sizing as a policy the application declares
+  per surface kind. `ResizeFloors` (added for #6) is therefore a framework
+  primitive the spec does not name. Flagged under `RUST-041`; `SPEC.md` was not
+  touched.
 
 ---
 
-## 4. Open work
+## 4. How the six defects closed on this branch
 
-Each item states the measured cause and the change sites, so the work is
-actionable without re-deriving it. Items marked **CLOSED** are kept with their
-cause analysis as the record of what was decided; see §3 for the landed
-evidence.
+Each item records the measured cause as it was first written, then the
+resolution — including where the original cause analysis turned out to be
+wrong. Keeping both halves is the point: the gap between "what we thought" and
+"what it was" is the useful part.
 
 ### #2 — Batch dialog vertical spacing — **CLOSED** `86a2343`
 
@@ -174,15 +181,54 @@ row pitch 88px → 84px, inter-row gap 12px → 8px. Two contract guards were ad
 so the compaction cannot later be "paid for" by dropping a reserved band.
 hoarfrost untouched. The residual overflow in File mode is tracked as **F-4**.
 
-### #6 — Tools card resize (D-3)
+### #6 — Tools card resize (D-3) — **CLOSED**
 
-Nothing exists to extend: `modal_card` (`overlay.rs:556`) is a styled
-`Container` and `modal_centered` (`overlay.rs:618`) is scrim + centred card.
-Needs a corner grip, per-surface user geometry on the overlay slot, a gesture
-lane in the reducer, and clamping through hoarfrost `clamp::resize`. The
-movable-card stack (`hoarfrost/surface/movable.rs`, `movable_shell.rs:259`,
-`update.rs:216`) is the reference implementation for the gesture, not a thing
-to reuse directly.
+Nothing existed to extend: `modal_card` (`overlay.rs:556`) is a styled
+`Container` and `modal_centered` is scrim + centred card. Needs a corner grip,
+per-surface user geometry on the overlay slot, a gesture lane in the reducer,
+and clamping through hoarfrost `clamp::resize`. The movable-card stack
+(`hoarfrost/surface/movable.rs`, `movable_shell.rs`, `update.rs`) is the
+reference implementation for the gesture, not a thing to reuse directly.
+
+**Resolution.** D-3 stands: the card stays a centred scrim modal and the
+**modal layer** was extended, so position is never user-controlled — the grip
+changes width and height only.
+
+* **hoarfrost** gained one pure primitive, `surface::modal::ResizeFloors`, which
+  resolves a wanted size against a viewport using the framework's own
+  `AxisPolicy` machinery: floors from below, `Cap::None`, and `VIEWPORT_GUTTER`
+  applied last so it always wins. It lives in `modal.rs` because the gutter order
+  is §4.6.2 sizing machinery, not app policy.
+* **The app** owns the widgets and the gesture, because `modal.rs` documents
+  itself as a frame and not a widget — it builds no `Element`s.
+  `overlay::modal_resize_grip` (the movable footer grip's shape: a
+  `RESIZE_HANDLE_SIZE` square, `strings::ICON_RESIZE_GRIP`,
+  `Interaction::ResizingDiagonallyDown`) and
+  `overlay::modal_resize_capture_layer` (the full-area move/release lane, mounted
+  only while the button is held) are the reusable capability; Tools is its first
+  consumer.
+* **Correction to the note above:** hoarfrost `clamp::resize` is **not** the right
+  primitive here. It is the movable card's position+size clamp, keyed to
+  `ResizeHandle` zones and a card the user is allowed to move; a centred modal has
+  no position to clamp and no handle zones. Reusing it would have imported movable
+  semantics the ruling explicitly excludes.
+* The 80% fill from #4 is now the **initial** size, not a ceiling — a drag may
+  exceed it, and only the gutter stops it. Floors are the framework's own
+  `EDITOR_WIDTH_MIN` (width) and `TOOLS_HEIGHT_MIN` (height); the app invents no
+  number of its own.
+* A drag is measured absolutely, from the pointer to the viewport centre
+  (`tools_dialog::centred_size`), because a centred card's corner sits at
+  `centre + size / 2`. That makes the corner track the pointer one for one and
+  removes any dependence on a press position, which `mouse_area::on_press` does
+  not carry in iced 0.14.
+* Transient drag state is never persisted; the settled size is, through the
+  existing `UiStateGeometryStorage` seam under `modal:overlay.tools`, written
+  **only** when a drag settles ([NFR-002]).
+
+**Spec drift (F-6, flagged under `RUST-041`, not silently changed):** hoarfrost
+§4.6.2 describes modal sizing as a policy the *application* declares per surface
+kind. It has no concept of a user-set modal size at all, so `ResizeFloors` is a
+framework addition the spec does not yet name. `SPEC.md` was not modified.
 
 ### #12 — Pane separation (D-2) — **CLOSED** `47fb203`
 
@@ -213,18 +259,58 @@ Two judgement calls made during this work, both accepted on review:
    "project persisted widths verbatim" contract and meant a restore from a
    larger window silently lost its widths.
 
-### #14 — Content-sized ToC panel
+### #14 — Content-sized ToC panel — **CLOSED** `f962051`
 
-The right pane's width is a pure ratio: `middle_band_configuration()`
-(`layout.rs:136`) gives the centre|right split `ratio: 0.5`, so the ToC opens
-at roughly 37.5% of the viewport regardless of its contents.
+The right pane's width was a pure ratio: `middle_band_configuration()` gives
+the centre|right split `ratio: 0.5`, so the ToC opened at roughly 37.5% of the
+viewport regardless of its contents.
 
-The pattern to copy already exists for the left pane: `left::auto_fit_width`
-(`panels/left.rs:837`) driven by `update.rs:1064` `auto_fit_tree`, measured
-with `table_width::fira_sans_width` (real cosmic-text metrics). Needs the
-ToC equivalent — max over entries of indent + measured title at
-`TOC_TEXT_RUNG` + row padding + scrollbar allowance — clamped through
-`layout::clamped_width` and replayed onto `band.right_split`.
+**Resolution.** A ToC auto-fit modelled on the left pane's existing
+`auto_fit_width` / `auto_fit_tree` pair, not a new mechanism:
+
+```
+entry = indent(level) + measured title + 2 x button h-pad
+        + row right pad + reserved scrollbar gutter
+width = clamped(max over entries, RIGHT_PANEL_MIN_WIDTH,
+                viewport x RIGHT_PANEL_MAX_WIDTH_FRACTION)
+```
+
+Measured with `table_width::fira_sans_width` — real cosmic-text metrics against
+`FIRA_SANS_REGULAR` — **not** hoarfrost `pane_solver::auto_fit_pane_width`, whose
+`chars x 0.6` heuristic is not a measurement. Every furniture term is the same
+token `view::toc_body` builds the row from (the view's own `2.0/4.0/2.0` padding
+literals were replaced with those tokens for the same reason), so solver and view
+cannot drift.
+
+The fit fires on a **landed document load**, not at startup replay: at boot no
+document is open, so a fit there could only measure zero entries and pin the pane
+to its floor. A `FileLoaded` the orchestrator drops for a de-selected file must
+not move the pane, and that is tested.
+
+Measured pane width, before → after: `"# Intro"` at 1200px `448.5 → 150.0`
+(floor); a 41-char heading at 1200px `448.5 → 298.6` (exact fit); a 90-char
+heading at 2000px `748.5 → 539.8` (exact fit).
+
+**The clamps genuinely fight long content, and this was reported rather than
+worked around.** A 90-char heading needs 539.8px; at a 1200px window the 30% cap
+allows 360px, so it is truncated, and at 800px even an ordinary 41-char heading
+is truncated at the 240px cap. `RIGHT_PANEL_MIN_WIDTH` and
+`RIGHT_PANEL_MAX_WIDTH_FRACTION` were left alone — that is decision **F-3**, not
+a solver change. The test pins `min(needed, cap)` instead of pretending the
+content fits.
+
+**Follow-on found and fixed in the same commit.** While wiring the fit it emerged
+that `apply_pane_resize`'s right arm still derived its nested region from
+`LEFT_PANEL_DEFAULT_WIDTH` when no left width had been remembered, while the grid
+actually sits at the seeded ratio's width — 249px vs 280px at a 1000px viewport.
+The first right-drag therefore landed the pane **9.6px** away from the width the
+reducer had just stored (measured: stored 214.4, laid out 224.0). That is the
+same bug class #12 and #14 fix, and it undercut the round-trip claim committed in
+`47fb203`. A drag replay is a ratio replay like any other, so the drag arm now
+reads `current_left_width`, making it the single home of that rule for all three
+callers (drag, startup replay, ToC auto-fit) rather than two of three.
+`test_right_resize_without_persisted_left_width_uses_default` pinned the old
+behaviour and was corrected, not deleted.
 
 ### #17 — Table renders empty — **CLOSED** `0c492e2`
 
@@ -281,7 +367,23 @@ set), test-first, with the quality gate passing.
 | `0c492e2` | 17 | Table cells declare their own column's `Length`; layout-level table tests restored (D-4) |
 | `47fb203` | 12, F-2 | Pane grid gutter + gutter-aware ratio math; persisted widths replayed at startup (D-2) |
 | `86a2343` | 2 | Batch card rows stacked on the form-row rung (`space::SM`) |
-| — | — | *(ledger updated after wave 1)* |
+| `f962051` | 14 | ToC pane auto-fits to its content; nested-region derivation unified (drag arm follow-on) |
+| `b913bef` | 6 | Centred modals are user-resizable: `ResizeFloors` + grip + gesture lane (D-3) |
+| — | — | *(ledger closed)* |
+
+### Gate at close
+
+| Command | Result |
+|---|---|
+| `cargo check --quiet` | exit 0, no warnings |
+| `cargo nextest run --workspace --status-level fail --show-progress none` | **8930 passed**, 7 skipped, 0 failed |
+| `cargo clippy --all-targets -- -D warnings` | exit 0 |
+| `cargo fmt --check` | exit 0 |
+| `cargo doc --no-deps --quiet` | exit 0 — 3 warnings, all pre-existing at `06e8f9c` (`fonts.rs` ×2, `app.rs` ×1) |
+
+Test count moved `8847 → 8930` (+83) across the six closed defects. Every
+layout claim is a measurement from `iced_test::Simulator`, not an inference from
+reading the widget tree.
 
 ### Note on the `a49eaf5` baseline
 
