@@ -89,13 +89,13 @@ use std::collections::HashMap;
 use crate::ui_iced::app::TooltipId;
 use crate::ui_iced::message::{LayoutMessage, Message, ToolsDialogMessage};
 use iced::font::Weight;
-use iced::widget::{Column, Row, Space, container, mouse_area, scrollable, table, text};
-use iced::{Alignment, Background, Element, Length, Size};
+use iced::widget::{Column, Row, Space, container, mouse_area, scrollable, stack, table, text};
+use iced::{Alignment, Background, Element, Length, Point, Size};
 
 use hoarfrost::composite::list_tile;
 use hoarfrost::surface::modal::{
-    AxisPolicy, Cap, Desired, ErrorLocation, ModalError, ModalFrame, ModalSizing, Recovery,
-    TOOLS_HEIGHT_MIN,
+    AxisPolicy, Cap, Desired, EDITOR_WIDTH_MIN, ErrorLocation, ModalError, ModalFrame, ModalSizing,
+    Recovery, ResizeFloors, TOOLS_HEIGHT_MIN,
 };
 use hoarfrost::token::{shape, space, typography};
 use hoarfrost::widget::badge;
@@ -108,7 +108,9 @@ use hoarfrost::widget::toggle_widget::Checkbox;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
-use crate::ui_iced::overlay::{modal_card, modal_centered, modal_divider};
+use crate::ui_iced::overlay::{
+    modal_card, modal_centered, modal_divider, modal_resize_capture_layer, modal_resize_grip,
+};
 
 /// Tool-group identity, kind and state — reused unchanged from the tool
 /// registry ([RUST-051]); the same types the `UserCommand`s carry.
@@ -180,6 +182,57 @@ pub const TOOLS_CLOSE_BUTTON_ID: &str = "tools_dialog_close";
 
 /// Stable focus id of the footer's `Close` button.
 pub const TOOLS_FOOTER_CLOSE_BUTTON_ID: &str = "tools_dialog_footer_close";
+
+/// Stable id of the footer's resize grip (defect #6, owner ruling D-3).
+pub const TOOLS_RESIZE_GRIP_ID: &str = "tools.resize.grip";
+
+/// Stable id of the full-area layer that carries a resize while the grip is
+/// held.
+///
+/// It is mounted only for as long as the button is down, so this id is never
+/// live beside a second copy of itself (AGENTS §5).
+pub const TOOLS_RESIZE_CAPTURE_ID: &str = "tools.resize.capture";
+
+/// Key prefix under which a centred modal remembers a user-set size in
+/// [`PersistedUiState::overlay_geometry`](crate::ui::persisted::PersistedUiState::overlay_geometry).
+///
+/// The map's keys name the *kind* of surface, the same way
+/// [`movable::storage_key`](hoarfrost::surface::movable::storage_key) names a
+/// movable one with `movable:`. A centred modal is not movable — it has no
+/// position the user controls — so it does not borrow that prefix.
+pub const MODAL_GEOMETRY_KEY_PREFIX: &str = "modal:";
+
+/// The geometry key the dragged Tools card size is remembered under.
+///
+/// Derived from [`SURFACE_ID_TOOLS`](crate::ui_iced::app::SURFACE_ID_TOOLS)
+/// rather than spelled out, so the key cannot drift from the surface it names.
+#[must_use]
+pub fn resize_storage_key() -> String {
+    format!(
+        "{MODAL_GEOMETRY_KEY_PREFIX}{}",
+        crate::ui_iced::app::SURFACE_ID_TOOLS
+    )
+}
+
+/// The bounds a **user-dragged** Tools card may not pass (defect #6, owner
+/// ruling D-3).
+///
+/// * **Width floor** — [`EDITOR_WIDTH_MIN`], the framework's own §4.6.2 modal
+///   width floor. It is used rather than a card-local number because the card
+///   has no width minimum of its own to defend: the retired 720px figure was a
+///   target, never a floor (see [`TOOLS_SIZING`]), and a drag needs *some*
+///   floor so a flick of the grip cannot collapse the card to nothing.
+///   `EDITOR_WIDTH_MIN` is the only modal width floor the framework offers, and
+///   it is wider than the card's own content needs, so it is the conservative
+///   choice.
+/// * **Height floor** — [`TOOLS_HEIGHT_MIN`], unchanged from the initial-fill
+///   policy: the same 320px that keeps the list legible.
+/// * **Ceiling** — none of the card's own. [`TOOLS_SIZING`]'s
+///   `Cap::Viewport(VIEWPORT_FILL)` is the *initial* fill and must not become
+///   a maximum, or a card that was opened at 80% could never be dragged past
+///   80%. The only ceiling is the framework's `VIEWPORT_GUTTER`, which
+///   [`ResizeFloors`] applies last and which always wins.
+pub const TOOLS_RESIZE_FLOORS: ResizeFloors = ResizeFloors::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN);
 
 /// `NFR-004` error code for a failed MCP authentication surfaced in the
 /// card's error banner (`UIF-MOD-003`).
@@ -528,6 +581,15 @@ pub fn dismiss_message() -> Message {
     Message::Tools(ToolsDialogMessage::CloseRequested)
 }
 
+/// The message the corner grip emits when it is taken (defect #6).
+///
+/// Named rather than inlined so the grip, the reducer and the tests all speak
+/// about the same transition ([RUST-021]).
+#[must_use]
+pub fn resize_press_message() -> Message {
+    Message::Tools(ToolsDialogMessage::ResizeGripPressed)
+}
+
 /// The token the `⚠` error marker is painted with — `Palette::warning`.
 #[must_use]
 pub fn error_marker_color() -> iced::Color {
@@ -608,14 +670,30 @@ pub fn tools_card_height(viewport: Size) -> f32 {
     TOOLS_SIZING.height.resolve(viewport.height, 0.0)
 }
 
-/// The Tools card's outer size for a viewport (defect #4: [`VIEWPORT_FILL`]
-/// on both axes).
+/// The Tools card's outer size for a viewport, and the size the user dragged
+/// it to if there is one (defect #4 sets the fill, defect #6 the override).
+///
+/// `user == None` is the policy from defect #4, unchanged: [`VIEWPORT_FILL`] on
+/// both axes, so a card that has never been dragged still measures exactly 80%
+/// of the window.
+///
+/// `user == Some(size)` is a drag. The wanted size is the user's, and only the
+/// two framework bounds remain — [`TOOLS_RESIZE_FLOORS`] from below and the
+/// `VIEWPORT_GUTTER` from above, applied last so the card can never overflow
+/// the window (owner ruling D-3: the 80% fill is the *initial* size, not a
+/// ceiling).
+///
+/// The card's position is never a parameter: a centred modal is centred, and
+/// the grip changes width and height only.
 #[must_use]
-pub fn tools_card_size(viewport: Size) -> Size {
-    Size::new(
-        tools_card_width(viewport.width),
-        tools_card_height(viewport),
-    )
+pub fn tools_card_size(viewport: Size, user: Option<Size>) -> Size {
+    match user {
+        None => Size::new(
+            tools_card_width(viewport.width),
+            tools_card_height(viewport),
+        ),
+        Some(wanted) => TOOLS_RESIZE_FLOORS.resolve(wanted, viewport),
+    }
 }
 
 /// Everything the tools card renders: the mapped group rows.
@@ -776,22 +854,27 @@ impl ToolsDialogViewModel {
         Some(start_auth_command(row.mcp_server().unwrap_or_default()))
     }
 
-    /// The card's outer size for a viewport — the window's
-    /// [`VIEWPORT_FILL`], independent of how many rows this snapshot
-    /// holds (defect #4).
+    /// The card's outer size for a viewport **when it has never been
+    /// dragged** — the window's [`VIEWPORT_FILL`], independent of how many
+    /// rows this snapshot holds (defect #4).
+    ///
+    /// A dragged size is overlay state, not snapshot state, so it is not
+    /// reachable from here; see [`tools_card_size`] for the full rule.
     #[must_use]
     pub fn size_for(&self, viewport: Size) -> Size {
-        tools_card_size(viewport)
+        tools_card_size(viewport, None)
     }
 
-    /// Renders this snapshot as the tools card ([`tools_dialog_card`]).
+    /// Renders this snapshot as the tools card ([`tools_dialog_card`]), at the
+    /// undragged fill.
     #[must_use]
     pub fn view(&self, viewport: Size) -> Element<'_, Message> {
-        tools_dialog_card(self, viewport)
+        tools_dialog_card(self, viewport, None)
     }
 }
 
-/// Renders the tools card at [`VIEWPORT_FILL`] of the viewport.
+/// Renders the tools card: at [`VIEWPORT_FILL`] of the viewport when `user` is
+/// `None`, and at the size the user dragged it to when it is `Some` (defect #6).
 ///
 /// ```text
 /// ┌─ Tools card · 80% of the viewport · radius 8 ───────────────────┐
@@ -804,9 +887,12 @@ impl ToolsDialogViewModel {
 /// │ ☑ │ Filesystem │ Internal    │ read…  │ 1204 (✓)  │            │
 /// │ ☑ │ my-server  │ MCP (remote)│ fetch  │  612       │ ⚠ [Auth]… │
 /// │ ─────────────────────────────────────────────────────────────── │
-/// │                                                    [ Close ]    │
+/// │                                                    [ Close ]  ◢ │
 /// └─────────────────────────────────────────────────────────────────┘
 /// ```
+///
+/// The `◢` in the last row is [`modal_resize_grip`]: the card's only resize
+/// affordance, and the only cell of the footer that is not a button.
 ///
 /// The parallel-safe marker renders only on `parallel_safe` rows
 /// ([UI-058]); the row-level error text renders only inside the `⚠`
@@ -830,8 +916,12 @@ impl ToolsDialogViewModel {
 pub fn tools_dialog_card(
     view_model: &ToolsDialogViewModel,
     viewport: Size,
+    user: Option<Size>,
 ) -> Element<'_, Message> {
     let frame = modal_frame();
+    // One solve for both axes, so the width and the height can never be
+    // measured against two different policies (defect #6).
+    let size = tools_card_size(viewport, user);
 
     let banner = view_model
         .modal_error()
@@ -868,8 +958,8 @@ pub fn tools_dialog_card(
         body,
         frame,
         TOOLS_CARD_ID,
-        Length::Fixed(tools_card_width(viewport.width)),
-        Length::Fixed(tools_card_height(viewport)),
+        Length::Fixed(size.width),
+        Length::Fixed(size.height),
     )
     .into()
 }
@@ -927,8 +1017,15 @@ fn close_button() -> Button<'static, Message> {
     .with_tooltip(strings::TOOLS_CLOSE_TOOLTIP)
 }
 
-/// The card's footer: the `Close` button on the trailing edge (defect #8),
-/// the same `[ Space Fill, button ]` shape the Batch card's footer uses.
+/// The card's footer: the `Close` button and the resize grip on the trailing
+/// edge (defect #8, defect #6), the same `[ Space Fill, button ]` shape the
+/// Batch card's footer uses with the grip appended.
+///
+/// The grip is the last cell, so it sits at the card's bottom-right corner —
+/// where a resize handle is expected, and where the movable shells put theirs.
+/// Being a child of the card it is inside the card's own hit boundary, so a
+/// press on it is absorbed by the card and never reaches the scrim
+/// (`UIF-VER-003`).
 ///
 /// Purity: pure.
 #[must_use]
@@ -936,6 +1033,7 @@ fn footer() -> Element<'static, Message> {
     Row::with_children(vec![
         Space::new().width(Length::Fill).into(),
         footer_close_button().into(),
+        modal_resize_grip(TOOLS_RESIZE_GRIP_ID, resize_press_message()),
     ])
     .spacing(space::SM)
     .align_y(Alignment::Center)
@@ -1399,13 +1497,108 @@ pub fn modal_frame() -> ModalFrame {
 /// through the older `overlay::modal`, which had **no absorb boundary at
 /// all**, so a press on dead space inside the card fell through and closed
 /// the dialog.
+///
+/// # While a resize is in flight
+///
+/// `user` is the size the card has reached (the live drag, or the remembered
+/// size — see [`ToolsDialogState::size_override`]), and `resizing` says whether
+/// the grip is currently held. While it is, [`modal_resize_capture_layer`] is
+/// stacked above the modal so the moves and the release keep arriving: a drag
+/// that left the 16px grip would otherwise freeze, and releasing outside the
+/// card would land on the scrim and dismiss the very card being resized.
+/// The lane is mounted for no other frame.
 #[must_use]
-pub fn tools_modal(view_model: &ToolsDialogViewModel, viewport: Size) -> Element<'_, Message> {
-    modal_centered(
-        tools_dialog_card(view_model, viewport),
+pub fn tools_modal(
+    view_model: &ToolsDialogViewModel,
+    viewport: Size,
+    user: Option<Size>,
+    resizing: bool,
+) -> Element<'_, Message> {
+    let modal = modal_centered(
+        tools_dialog_card(view_model, viewport, user),
         Message::Tools(ToolsDialogMessage::Absorbed),
         dismiss_message(),
+    );
+
+    if !resizing {
+        return modal;
+    }
+
+    stack(vec![
+        modal,
+        modal_resize_capture_layer(
+            TOOLS_RESIZE_CAPTURE_ID,
+            |at| Message::Tools(ToolsDialogMessage::ResizeMoved { at }),
+            Message::Tools(ToolsDialogMessage::ResizeReleased),
+        ),
+    ])
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// The size a pointer at `pointer` asks a **centred** card for.
+///
+/// A centred card's bottom-right corner sits at `centre + size / 2`, so the
+/// size that puts the corner under the pointer is twice the pointer's distance
+/// from the centre. Stating the rule this way — rather than as a delta from
+/// where the press began — is what makes the grip track the pointer one for
+/// one: the corner is already under the pointer when it is taken, so the first
+/// pixel of movement moves the corner that same pixel, and nothing has to be
+/// remembered about the press.
+///
+/// It also keeps the card centred by construction, which is the whole of owner
+/// ruling D-3: the grip changes width and height, never position.
+///
+/// The result can be negative (a pointer dragged left of centre); that is
+/// deliberate — [`tools_card_size`] raises it to the floor, so an over-drag
+/// shrinks the card to its minimum instead of inverting it.
+#[must_use]
+pub fn centred_size(pointer: Point, viewport: Size) -> Size {
+    Size::new(
+        2.0 * (pointer.x - viewport.width / 2.0),
+        2.0 * (pointer.y - viewport.height / 2.0),
     )
+}
+
+/// One grip drag in flight: what the card measured when the grip was taken, and
+/// what it measures now.
+///
+/// Transient by design (owner ruling D-3) — it is a gesture, not application
+/// state, so it is never persisted and a half-finished drag that is abandoned
+/// leaves nothing behind. `live` is the clamped size the card is showing right
+/// now, so the view and the eventual settle agree on one number, and `start` is
+/// what lets a press that never moved be recognised as not a resize.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ToolsResizeDrag {
+    /// The card's size when the grip was taken.
+    start: Size,
+    /// The clamped size the drag has reached so far.
+    live: Size,
+}
+
+/// What one resize message did to the card's geometry.
+///
+/// The reducer needs to know whether a drag *settled*, because that is the only
+/// moment worth writing to storage ([NFR-002]); the view needs to know a drag is
+/// moving. This is the difference, stated once instead of being re-derived at
+/// each call site.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ToolsResizeEffect {
+    /// Nothing to persist: not a resize message, a drag that has not settled,
+    /// or a grip press that never turned into a drag.
+    Idle,
+    /// The drag moved the card to `size`. Render it; write nothing.
+    Dragging {
+        /// The clamped size the card now shows.
+        size: Size,
+    },
+    /// The drag ended at `size` — this is the user's size now, and the one
+    /// moment the reducer persists it.
+    Settled {
+        /// The size the drag ended on.
+        size: Size,
+    },
 }
 
 /// Which tools dialog is open — the pure state the reducer holds.
@@ -1415,9 +1608,21 @@ pub fn tools_modal(view_model: &ToolsDialogViewModel, viewport: Size) -> Element
 /// consumed key from a no-op. Opening is user intent and rides
 /// [`UserCommand::OpenToolsDialog`]; only the dismiss needs a message of
 /// its own (see the module header).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// # Size
+///
+/// The card also remembers the size the user dragged it to
+/// ([`user_size`](Self::user_size)), and carries the drag itself while it is in
+/// flight (its private `drag` field). Position is not here at all, and must not
+/// be added: this card is a centred modal, so the grip changes width and height
+/// only (owner ruling D-3).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ToolsDialogState {
     open: bool,
+    /// The size the user dragged the card to, if they ever did.
+    user_size: Option<Size>,
+    /// The grip drag in flight, if the button is down.
+    drag: Option<ToolsResizeDrag>,
 }
 
 impl ToolsDialogState {
@@ -1434,7 +1639,11 @@ impl ToolsDialogState {
     }
 
     /// Shows the dialog. Returns whether the visible state changed.
+    ///
+    /// A drag left over from a previous showing is dropped: it belongs to a
+    /// gesture the user finished (or abandoned) last time.
     pub fn open(&mut self) -> bool {
+        self.drag = None;
         if self.open {
             return false;
         }
@@ -1445,24 +1654,127 @@ impl ToolsDialogState {
     /// Hides the dialog. Returns whether one was open — the same
     /// "was anything consumed" contract as
     /// [`crate::ui_iced::overlay::OverlaySlot::close`].
+    ///
+    /// The in-flight drag is dropped with it: a release that never arrived must
+    /// not leave the next showing mounted behind a capture lane. The remembered
+    /// size survives — it is the user's, not the gesture's.
     pub fn close(&mut self) -> bool {
         let was_open = self.open;
         self.open = false;
+        self.drag = None;
         was_open
     }
 
     /// Flips the visible state, returning the new state.
     pub fn toggle(&mut self) -> bool {
-        self.open = !self.open;
+        if self.open {
+            self.close();
+        } else {
+            self.open();
+        }
         self.open
     }
 
-    /// Applies one [`ToolsDialogMessage`] to the window state and reports
-    /// whether the visible state changed.
+    /// The size the user dragged the card to, if any.
+    #[must_use]
+    pub fn user_size(&self) -> Option<Size> {
+        self.user_size
+    }
+
+    /// Adopts a remembered size, on open. `None` means "never dragged", which
+    /// puts the card back on the viewport fill.
+    pub fn set_user_size(&mut self, size: Option<Size>) {
+        self.user_size = size;
+    }
+
+    /// Whether a grip drag is in flight — the only frame the capture lane is
+    /// mounted for.
+    #[must_use]
+    pub fn is_resizing(&self) -> bool {
+        self.drag.is_some()
+    }
+
+    /// The size the view should hand the card: the live drag while it runs,
+    /// otherwise the remembered size, otherwise `None` for the viewport fill.
+    #[must_use]
+    pub fn size_override(&self) -> Option<Size> {
+        self.drag.map(|drag| drag.live).or(self.user_size)
+    }
+
+    /// The size the card measures at right now for `viewport` — the same solve
+    /// the view performs, exposed so the reducer and the tests measure one
+    /// number rather than restating it.
+    #[must_use]
+    pub fn card_size(&self, viewport: Size) -> Size {
+        tools_card_size(viewport, self.size_override())
+    }
+
+    /// Applies one [`ToolsDialogMessage`] to the **visibility** of the window
+    /// and reports whether that changed.
+    ///
+    /// The resize events are deliberately inert here: they change geometry, not
+    /// visibility, and are reduced by [`apply_resize`](Self::apply_resize).
     pub fn apply(&mut self, message: ToolsDialogMessage) -> bool {
         match message {
             ToolsDialogMessage::CloseRequested => self.close(),
-            ToolsDialogMessage::Absorbed => false,
+            ToolsDialogMessage::Absorbed
+            | ToolsDialogMessage::ResizeGripPressed
+            | ToolsDialogMessage::ResizeMoved { .. }
+            | ToolsDialogMessage::ResizeReleased => false,
+        }
+    }
+
+    /// Applies one [`ToolsDialogMessage`] to the card's **geometry** and reports
+    /// what it did.
+    ///
+    /// Only the three resize events mean anything here; every other message of
+    /// the channel is inert, so the reducer can hand this state the whole
+    /// channel without deciding what belongs to it.
+    ///
+    /// A move carries its own pointer position, and that is the only coordinate
+    /// the drag needs: [`centred_size`] turns a pointer into a size outright, so
+    /// nothing has to be remembered about where the press began — which matters,
+    /// because `mouse_area::on_press` carries no point in iced 0.14 and a
+    /// remembered cursor can be stale by the time a grip is taken.
+    ///
+    /// Every size that leaves here has been through [`tools_card_size`], so the
+    /// floors and the viewport gutter are applied before the view ever sees a
+    /// number — and before anything is persisted.
+    ///
+    /// A press that never moves is *not* a resize: releasing without changing the
+    /// size leaves the card on the viewport policy rather than pinning it at
+    /// whatever the window happened to be.
+    pub fn apply_resize(
+        &mut self,
+        message: ToolsDialogMessage,
+        viewport: Size,
+    ) -> ToolsResizeEffect {
+        match message {
+            ToolsDialogMessage::ResizeGripPressed => {
+                let start = self.card_size(viewport);
+                self.drag = Some(ToolsResizeDrag { start, live: start });
+                ToolsResizeEffect::Idle
+            }
+            ToolsDialogMessage::ResizeMoved { at } => {
+                let Some(drag) = self.drag.as_mut() else {
+                    return ToolsResizeEffect::Idle;
+                };
+                drag.live = tools_card_size(viewport, Some(centred_size(at, viewport)));
+                ToolsResizeEffect::Dragging { size: drag.live }
+            }
+            ToolsDialogMessage::ResizeReleased => {
+                let Some(drag) = self.drag.take() else {
+                    return ToolsResizeEffect::Idle;
+                };
+                if drag.live == drag.start {
+                    return ToolsResizeEffect::Idle;
+                }
+                self.user_size = Some(drag.live);
+                ToolsResizeEffect::Settled { size: drag.live }
+            }
+            ToolsDialogMessage::CloseRequested | ToolsDialogMessage::Absorbed => {
+                ToolsResizeEffect::Idle
+            }
         }
     }
 }

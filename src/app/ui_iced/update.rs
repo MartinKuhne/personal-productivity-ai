@@ -58,6 +58,8 @@ use hoarfrost::surface::menu::cascade::{
 };
 use hoarfrost::surface::menu::model::{Menu, MenuId};
 use hoarfrost::surface::modal::Recovery;
+use hoarfrost::surface::movable::GeometryStorage;
+use hoarfrost::surface::movable::MovableGeometry;
 use hoarfrost::surface::movable::PointerPhase;
 use hoarfrost::surface::movable::SurfaceTarget;
 use hoarfrost::surface::tooltip::{DismissReason, TimeMs};
@@ -722,6 +724,19 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
         UserCommand::OpenToolsDialog => {
             publish_and_drain(state, UserCommand::OpenToolsDialog);
             state.overlay.tools.open();
+            // Restore the size the user dragged the card to, if they ever did
+            // (defect #6). The read goes through the same injected seam the
+            // movable cards use and touches the live model only, so opening
+            // never blocks on the storage backend ([NFR-003]); a value that
+            // will not decode reads as `None`, which is "never dragged".
+            let key = crate::ui_iced::tools_dialog::resize_storage_key();
+            let remembered = UiStateGeometryStorage::new(
+                &mut state.app.persisted_ui_state,
+                state.storage.as_ref(),
+            )
+            .load(&key)
+            .map(|geometry| geometry.size);
+            state.overlay.tools.set_user_size(remembered);
             Vec::new()
         }
         UserCommand::OpenAboutDialog => {
@@ -2393,9 +2408,40 @@ fn reduce_batch(state: &mut AppState, message: BatchDialogMessage) {
     }
 }
 
-/// Tools dialog dismiss reduction (UI-051..UI-060).
+/// Tools dialog reduction (UI-051..UI-060, defect #6).
+///
+/// Two passes over the same message, because the channel carries two kinds of
+/// event and each owner ignores what it does not hold:
+/// [`apply`](crate::ui_iced::tools_dialog::ToolsDialogState::apply) decides
+/// visibility,
+/// [`apply_resize`](crate::ui_iced::tools_dialog::ToolsDialogState::apply_resize)
+/// decides geometry. Neither can be folded into the other without one of them
+/// having to know the other's business.
+///
+/// # Persistence
+///
+/// The size is written **only when a drag settles**, never per frame
+/// ([NFR-002]), and only through the injected handler ([RUST-024]) — the same
+/// [`UiStateGeometryStorage`] seam the movable cards write through, so there is
+/// one place that decides when overlay geometry reaches disk.
+///
+/// The value is stored in the framework's own encoded geometry form under
+/// [`resize_storage_key`](crate::ui_iced::tools_dialog::resize_storage_key),
+/// with the position half pinned to the origin: a centred modal has no
+/// user-set position, and reusing [`MovableGeometry`] rather than inventing a
+/// second encoding is what keeps the app out of the serialisation business.
 fn reduce_tools(state: &mut AppState, message: ToolsDialogMessage) {
+    let viewport = state.viewport;
+
     state.overlay.tools.apply(message);
+    let effect = state.overlay.tools.apply_resize(message, viewport);
+
+    if let crate::ui_iced::tools_dialog::ToolsResizeEffect::Settled { size } = effect {
+        let key = crate::ui_iced::tools_dialog::resize_storage_key();
+        let mut storage =
+            UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, state.storage.as_ref());
+        storage.save(&key, MovableGeometry::new(Point::ORIGIN, size));
+    }
 }
 
 /// Agent debug window reductions (UI-048).

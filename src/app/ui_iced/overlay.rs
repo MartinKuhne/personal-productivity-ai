@@ -637,6 +637,86 @@ where
     .into()
 }
 
+/// The grip in the corner of a centred modal card that lets the user drag the
+/// card to a new **size** (defect #6, owner ruling D-3).
+///
+/// A modal has no title bar, so the grip is the only affordance it gets: the
+/// same `RESIZE_HANDLE_SIZE` square, the same
+/// [`ICON_RESIZE_GRIP`](crate::ui::strings::ICON_RESIZE_GRIP) mark and the same
+/// [`iced::mouse::Interaction::ResizingDiagonallyDown`] cursor as the movable
+/// shells' footer grip, so a card that can be resized looks and behaves like
+/// every surface that already could be.
+///
+/// It reports **only the press**. A move is not carried by the grip's own mouse
+/// area: iced reports a `mouse_area` position relative to that widget, so a grip
+/// that measured the drag itself would restart the measurement the moment the
+/// pointer left its 16px square. The caller pairs this grip with
+/// [`modal_resize_capture_layer`], which owns the moves and the release for as
+/// long as the button is held.
+///
+/// The grip is a child of the card, so it sits inside the card's own hit
+/// boundary: a press on it is absorbed by the card and can never reach the scrim
+/// (`UIF-VER-003`).
+#[must_use]
+pub fn modal_resize_grip<'a, Message>(id: &'static str, on_press: Message) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    use hoarfrost::surface::movable::RESIZE_HANDLE_SIZE;
+
+    let glyph = text(strings::ICON_RESIZE_GRIP).color(Palette::fastmd_dark().text_muted);
+
+    // The id goes on the container rather than the mouse area — iced 0.14's
+    // `MouseArea` has no `id` builder — and because `MouseArea::size` and
+    // `::layout` delegate straight to their content, the container's bounds
+    // *are* the grip's bounds. A test that measures this id measures the grip.
+    mouse_area(
+        container(glyph)
+            .id(id)
+            .width(Length::Fixed(RESIZE_HANDLE_SIZE))
+            .height(Length::Fixed(RESIZE_HANDLE_SIZE))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+    )
+    .interaction(iced::mouse::Interaction::ResizingDiagonallyDown)
+    .on_press(on_press)
+    .into()
+}
+
+/// The transparent full-area layer that carries a modal resize **while the grip
+/// is held** — the same lane the movable shells use for a gesture (§3.0.4.2),
+/// and for the same reason.
+///
+/// A drag leaves the 16px grip within a few pixels, and once the pointer is off
+/// it the grip's own mouse area stops reporting moves: the drag would freeze,
+/// and a release outside the card would land on the scrim and dismiss the modal
+/// the user is resizing. This layer spans the whole overlay while the button is
+/// down, so every move and the release are reported and nothing else can take
+/// the click.
+///
+/// Mount it **only while a drag is in flight**, above the modal it belongs to.
+/// It is deliberately not mounted otherwise: a full-area mouse area would
+/// otherwise absorb every click in the application.
+#[must_use]
+pub fn modal_resize_capture_layer<'a, Message>(
+    id: &'static str,
+    on_move: impl Fn(iced::Point) -> Message + 'a,
+    on_release: Message,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    mouse_area(
+        container(Space::new())
+            .id(id)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .on_move(on_move)
+    .on_release(on_release)
+    .into()
+}
+
 /// Wraps `content` as a context-menu trigger.
 ///
 /// `MouseArea::on_right_press` cannot carry the cursor position

@@ -295,6 +295,16 @@ pub const ICON_DISCLOSE_COLLAPSED: &str = "\u{25B8}";
 /// carry a tooltip — see [`TOOLS_CLOSE_TOOLTIP`].
 pub const ICON_CLOSE: &str = "\u{00D7}";
 
+/// The resize-grip glyph (U+25E2 BLACK LOWER LEFT TRIANGLE) that marks a
+/// corner you can drag to change a surface's size.
+///
+/// A plain Unicode geometric shape rather than a Phosphor glyph, so it
+/// resolves through the text font the surrounding footer already uses. It is
+/// the same mark the movable shells draw ([`crate::ui_iced::movable_shell`])
+/// and the centred modals' footers, so a card that can be resized looks like
+/// every other surface that can be resized.
+pub const ICON_RESIZE_GRIP: &str = "\u{25E2}";
+
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = "☰";
 

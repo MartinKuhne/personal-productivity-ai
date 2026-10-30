@@ -945,18 +945,19 @@ pub enum BatchDialogMessage {
 
 /// Tools dialog window channel (UI-051..UI-060).
 ///
-/// Deliberately a **single-variant** channel. Every action the tools dialog
-/// performs is already a self-contained [`UserCommand`] —
+/// A deliberately **thin** channel. Every action the tools dialog performs is
+/// already a self-contained [`UserCommand`] —
 /// `SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` /
 /// `ForgetMcpAuth` (`user_command.rs:80-88`) — and the card emits those
-/// through [`Message::Command`]. The dialog keeps **no view-local state at
-/// all**: no search box, no selection, no expansion.
+/// through [`Message::Command`]. What stays here is what no [`UserCommand`] can
+/// express: dismissing the card, absorbing a press on its boundary, and the
+/// three events of a corner resize (defect #6, owner ruling D-3).
 ///
-/// The one thing with no [`UserCommand`] equivalent is *closing* it. An
-/// in-window iced modal has no title-bar `X`, so the scrim click / Escape
-/// needs its own dismiss message. Opening is
-/// `UserCommand::OpenToolsDialog` (`:66`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Opening is `UserCommand::OpenToolsDialog` (`:66`).
+///
+/// The resize variants carry an [`iced::Point`], which is `f32`-based and
+/// therefore not `Eq` — hence `PartialEq` on this enum and not `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ToolsDialogMessage {
     /// The scrim was clicked or Escape pressed — hide the tools dialog.
     CloseRequested,
@@ -972,6 +973,21 @@ pub enum ToolsDialogMessage {
     ///
     /// It changes nothing: its whole job is to have arrived.
     Absorbed,
+    /// The corner grip was pressed — a resize is about to begin. No point
+    /// travels with it: the reducer takes the origin from its own cursor,
+    /// because a grip-local move is reported relative to the grip and would
+    /// restart the measurement the moment the pointer leaves its 16px square.
+    ResizeGripPressed,
+    /// The pointer moved while the grip was held, in root (viewport)
+    /// coordinates. The reducer clamps the resulting size to the framework's
+    /// modal bounds before applying it (§4.6.2, owner ruling D-3).
+    ResizeMoved {
+        /// Where the pointer is, in root (viewport) coordinates.
+        at: iced::Point,
+    },
+    /// The button was released — the resize is over, and the size just reached
+    /// becomes the user's own: persisted, and restored on the next open.
+    ResizeReleased,
 }
 
 /// Agent debug window channel (UI-048).

@@ -2769,6 +2769,106 @@ fn test_tools_close_requested_hides_the_dialog() {
     assert!(!state.overlay.tools.is_open());
 }
 
+/// Defect #6 (owner ruling D-3): a drag that settles is written through the
+/// injected geometry sink — and only when it settles.
+#[test]
+fn test_a_settled_tools_resize_is_persisted_through_the_injected_handler() {
+    let (mut state, storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+    let start = state.overlay.tools.card_size(state.viewport);
+
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeGripPressed),
+    );
+    // Mid-drag nothing has been written: a write per frame is exactly what
+    // [NFR-002] forbids.
+    assert!(
+        storage.saved_json().is_none(),
+        "a move must not touch the storage backend"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1_150.0, 780.0),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeReleased),
+    );
+
+    let size = state
+        .overlay
+        .tools
+        .user_size()
+        .expect("the settled drag becomes the user's size");
+    assert_ne!(size, start, "the drag must have changed the size");
+    assert!(
+        size.width <= state.viewport.width - hoarfrost::surface::modal::VIEWPORT_GUTTER,
+        "and stayed inside the gutter: {size:?}"
+    );
+
+    let key = crate::ui_iced::tools_dialog::resize_storage_key();
+    let stored = UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, storage.as_ref())
+        .load(&key)
+        .expect("the settled size must be in the live model");
+    assert_eq!(stored.size, size);
+    assert_eq!(
+        stored.position,
+        Point::ORIGIN,
+        "a centred modal has no user-set position"
+    );
+    let json = storage.saved_json().expect("the settle must write through");
+    assert!(
+        json.contains(&key),
+        "the write must reach the injected handler: {json}"
+    );
+}
+
+/// The remembered size comes back on the next open, so the card does not jump
+/// back to the fill every time the user opens it.
+#[test]
+fn test_a_reopened_tools_dialog_restores_the_dragged_size() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    let remembered = Size::new(700.0, 500.0);
+    let key = crate::ui_iced::tools_dialog::resize_storage_key();
+    state.app.persisted_ui_state.overlay_geometry.insert(
+        key,
+        MovableGeometry::new(Point::ORIGIN, remembered).encode(),
+    );
+
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+
+    assert_eq!(state.overlay.tools.user_size(), Some(remembered));
+    assert_eq!(state.overlay.tools.card_size(state.viewport), remembered);
+}
+
+/// A stored value that cannot be decoded reads as "never dragged", which is the
+/// same state a first launch is in — the card opens at the fill rather than
+/// collapsing on a corrupt number.
+#[test]
+fn test_a_corrupt_stored_tools_size_reads_as_never_dragged() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    state.app.persisted_ui_state.overlay_geometry.insert(
+        crate::ui_iced::tools_dialog::resize_storage_key(),
+        "nonsense,,,".to_owned(),
+    );
+
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+
+    assert_eq!(state.overlay.tools.user_size(), None);
+    assert_eq!(
+        state.overlay.tools.card_size(state.viewport),
+        Size::new(960.0, 640.0),
+        "and the card is back on the defect #4 fill"
+    );
+}
+
 #[test]
 fn test_debug_entry_toggle_flips_one_row_only() {
     let (mut state, _storage) = fresh_state();

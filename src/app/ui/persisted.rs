@@ -61,11 +61,18 @@ pub struct PersistedUiState {
     /// open the dialog once; the same version stays quiet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about_shown_for_version: Option<String>,
-    /// Remembered geometry of the app's movable Band-1 utility overlays
-    /// (`UIF-MOV-001`), keyed by the `hoarfrost` storage key
-    /// (`movable:<surface-id>`, see
-    /// [`movable::storage_key`](hoarfrost::surface::movable::storage_key))
-    /// and holding that crate's canonical `x,y,width,height` text form
+    /// Remembered geometry of the app's overlays — the movable Band-1 utility
+    /// cards (`UIF-MOV-001`) and, since defect #6, the size a user dragged a
+    /// centred modal to.
+    ///
+    /// Keyed by the surface's kind and id: `movable:<surface-id>` for a movable
+    /// card (see
+    /// [`movable::storage_key`](hoarfrost::surface::movable::storage_key)) and
+    /// `modal:<surface-id>` for a centred modal (see
+    /// [`MODAL_GEOMETRY_KEY_PREFIX`](crate::ui_iced::tools_dialog::MODAL_GEOMETRY_KEY_PREFIX)).
+    /// The prefix names the kind because the two kinds remember different things:
+    /// a movable card remembers where it is, a centred modal only how big it is.
+    /// Each holds that crate's canonical `x,y,width,height` text form
     /// ([`MovableGeometry::encode`](hoarfrost::surface::movable::MovableGeometry::encode)).
     ///
     /// Stored as the framework's own encoded string rather than four loose

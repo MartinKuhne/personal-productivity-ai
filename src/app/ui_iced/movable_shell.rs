@@ -60,8 +60,9 @@ const DEBUG_VIEWPORT_ID: &str = "movable.agent_debug.viewport";
 /// The grip glyph shown at the leading edge of a movable title bar.
 const TITLE_GRIP_GLYPH: &str = "⣿";
 
-/// The ◢ glyph painted in the footer's resize corner (§4.7.1).
-const RESIZE_GRIP_GLYPH: &str = "◢";
+// The footer's resize corner draws [`strings::ICON_RESIZE_GRIP`], the same
+// mark the centred modals' grips draw (defect #6) — one constant, so a surface
+// that can be resized always looks like every other one that can.
 
 /// The × glyph painted in the title bar's Close button.
 const CLOSE_GLYPH: &str = "×";
@@ -257,7 +258,7 @@ fn footer<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let grip = mouse_area(
-        container(text(RESIZE_GRIP_GLYPH).color(palette.text_muted))
+        container(text(strings::ICON_RESIZE_GRIP).color(palette.text_muted))
             .width(Length::Fixed(RESIZE_HANDLE_SIZE))
             .height(Length::Fixed(RESIZE_HANDLE_SIZE))
             .align_x(Alignment::Center)

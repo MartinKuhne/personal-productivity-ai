@@ -15,7 +15,9 @@
 use super::*;
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
-use hoarfrost::surface::modal::{TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
+use crate::ui_iced::app::SURFACE_ID_TOOLS;
+use hoarfrost::surface::modal::{EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN, TOOLS_WIDTH, VIEWPORT_GUTTER};
+use hoarfrost::surface::movable::RESIZE_HANDLE_SIZE;
 use hoarfrost::widget::badge_model::BadgeKind;
 use iced::{Rectangle, Size};
 use iced_test::selector::Candidate;
@@ -768,11 +770,11 @@ fn card_and_table_build_for_a_populated_and_an_empty_model() {
             &name_len,
         ),
     ]);
-    assert!(std::mem::size_of_val(&tools_dialog_card(&populated, ROOMY)) > 0);
+    assert!(std::mem::size_of_val(&tools_dialog_card(&populated, ROOMY, None)) > 0);
     assert!(std::mem::size_of_val(&tools_table(populated.rows())) > 0);
 
     let empty = ToolsDialogViewModel::empty();
-    assert!(std::mem::size_of_val(&tools_dialog_card(&empty, ROOMY)) > 0);
+    assert!(std::mem::size_of_val(&tools_dialog_card(&empty, ROOMY, None)) > 0);
     // The header still renders with zero rows, so no extra widget is needed.
     assert!(std::mem::size_of_val(&tools_table(empty.rows())) > 0);
 }
@@ -801,7 +803,7 @@ fn mounted_bounds(
     let mut ui = iced_test::Simulator::with_size(
         iced_test::core::Settings::default(),
         viewport,
-        tools_modal(view_model, viewport),
+        tools_modal(view_model, viewport, None, false),
     );
     let bounds = ui
         .find(iced::widget::Id::from(id))
@@ -1116,13 +1118,603 @@ fn view_model_size_for_is_the_viewport_fill_not_the_row_count() {
     let many = model_with_rows(40);
     let viewport = Size::new(1200.0, 800.0);
 
-    assert_eq!(one.size_for(viewport), tools_card_size(viewport));
+    assert_eq!(one.size_for(viewport), tools_card_size(viewport, None));
     assert_eq!(
         one.size_for(viewport),
         many.size_for(viewport),
         "defect #4: the window sizes the card, so a longer list cannot shrink it"
     );
     assert_eq!(one.size_for(viewport), Size::new(960.0, 640.0));
+}
+
+// --- Defect #6: the card is resizable (owner ruling D-3) ----------------
+//
+// D-3 keeps the card a centred scrim modal and extends the **modal layer**
+// instead of demoting the card to a Band-1 movable surface, so the
+// affordance has to live inside the card's own hit boundary, and the size it
+// produces has to stay inside the framework's §4.6.2 bounds.
+//
+// Three layers are pinned here, in this order: the pure size rule, the
+// measured mount, and the gesture as iced actually reports it. The last one
+// is split into two stages because `iced_test` does not rebuild a tree from
+// state — the capture lane only exists in the tree the reducer builds *while*
+// the grip is held, so stage B mounts that tree and replays what it emits
+// back through the same reducer path `reduce_tools` uses.
+
+/// The viewport the resize cases are measured in: big enough that the fill is
+/// unclamped, small enough that the gutter is reachable.
+const RESIZE_VIEWPORT: Size = Size::new(1200.0, 800.0);
+
+/// A second viewport, so a clamp is never pinned at only one window size.
+const WIDE_VIEWPORT: Size = Size::new(1600.0, 1000.0);
+
+/// The bounds of `id` inside an already-built simulator.
+fn bounds_in(
+    ui: &mut iced_test::Simulator<'_, Message, iced::Theme, iced::Renderer>,
+    id: &'static str,
+) -> Rectangle {
+    ui.find(iced::widget::Id::from(id))
+        .unwrap_or_else(|err| panic!("widget {id:?} should be reachable: {err:?}"))
+        .bounds()
+}
+
+/// Lays the real mount out headless with a user size and a drag flag, and
+/// returns the measured bounds of `id`.
+fn mounted_bounds_with(
+    id: &'static str,
+    view_model: &ToolsDialogViewModel,
+    viewport: Size,
+    user: Option<Size>,
+    resizing: bool,
+) -> Rectangle {
+    let mut ui = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        viewport,
+        tools_modal(view_model, viewport, user, resizing),
+    );
+    let bounds = bounds_in(&mut ui, id);
+    drop(ui);
+    bounds
+}
+
+/// The measured card box at a user size.
+fn mounted_card_at(viewport: Size, user: Option<Size>) -> Rectangle {
+    mounted_bounds_with(TOOLS_CARD_ID, &model_with_rows(9), viewport, user, false)
+}
+
+/// The size a measured rectangle describes.
+fn measured(rect: Rectangle) -> Size {
+    Size::new(rect.width, rect.height)
+}
+
+/// Defect #6 - "the tools dialog can not be resized": the mounted card must
+/// carry a resize grip, or there is nothing for a pointer to grab.
+#[test]
+fn the_tools_card_mounts_a_resize_grip() {
+    let bounds = mounted_bounds(TOOLS_RESIZE_GRIP_ID, &model_with_rows(9), RESIZE_VIEWPORT);
+
+    assert!(
+        bounds.width > 0.0 && bounds.height > 0.0,
+        "defect #6: the grip must be laid out with a real hit area ({bounds:?})"
+    );
+    assert_eq!(
+        measured(bounds),
+        Size::new(RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE),
+        "the grip is the framework's own handle square, not a card-local size"
+    );
+}
+
+/// The grip is a child of the card, so its press is absorbed by the card and
+/// can never reach the scrim (`UIF-VER-003`).
+#[test]
+fn the_grip_sits_inside_the_card_hit_boundary() {
+    let model = model_with_rows(9);
+    let card = mounted_bounds(TOOLS_CARD_ID, &model, RESIZE_VIEWPORT);
+    let grip = mounted_bounds(TOOLS_RESIZE_GRIP_ID, &model, RESIZE_VIEWPORT);
+
+    assert!(
+        card.contains(grip.center()) && grip.is_within(&card),
+        "the grip must be inside the card's own hit boundary: card {card:?}, grip {grip:?}"
+    );
+}
+
+/// Pressing the grip reports the press — and nothing else, so a press cannot
+/// dismiss the card it is on.
+#[test]
+fn pressing_the_grip_reports_a_resize_press_and_nothing_else() {
+    let model = model_with_rows(9);
+    let mut ui = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        RESIZE_VIEWPORT,
+        tools_modal(&model, RESIZE_VIEWPORT, None, false),
+    );
+    let grip = bounds_in(&mut ui, TOOLS_RESIZE_GRIP_ID).center();
+
+    click_at(&mut ui, grip);
+
+    let emitted = ui.into_messages().collect::<Vec<_>>();
+    assert!(
+        emitted.contains(&resize_press_message()),
+        "the grip must report the press; got {emitted:?}"
+    );
+    assert!(
+        !emitted.contains(&dismiss_message()),
+        "taking the grip must not dismiss the card (UIF-VER-003); got {emitted:?}"
+    );
+}
+
+/// A user size is what the mounted card measures — the override reaches the
+/// box, not just the policy object.
+#[test]
+fn a_user_size_is_what_the_mounted_card_measures() {
+    let wanted = Size::new(700.0, 500.0);
+
+    let card = mounted_card_at(RESIZE_VIEWPORT, Some(wanted));
+
+    assert_eq!(measured(card), wanted);
+}
+
+/// An undragged card still measures exactly the fill: the resize rule did not
+/// disturb defect #4's policy.
+#[test]
+fn an_undragged_card_still_measures_exactly_the_fill() {
+    let card = mounted_card_at(RESIZE_VIEWPORT, None);
+
+    assert_eq!(
+        measured(card),
+        Size::new(960.0, 640.0),
+        "80% of 1200x800, unchanged by the resize increment"
+    );
+    assert_eq!(
+        tools_card_size(RESIZE_VIEWPORT, None),
+        Size::new(960.0, 640.0)
+    );
+}
+
+/// A drag below the floors is raised to them, at two window sizes.
+#[test]
+fn a_drag_below_the_floors_is_raised_to_them() {
+    for viewport in [RESIZE_VIEWPORT, WIDE_VIEWPORT] {
+        let size = tools_card_size(viewport, Some(Size::new(40.0, 20.0)));
+
+        assert_eq!(
+            size,
+            Size::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN),
+            "a flick of the grip cannot collapse the card on {viewport:?}"
+        );
+        assert_eq!(
+            measured(mounted_card_at(viewport, Some(Size::new(40.0, 20.0)))),
+            size,
+            "and the measured card agrees with the rule on {viewport:?}"
+        );
+    }
+}
+
+/// A drag beyond the gutter never overflows the window, at two window sizes —
+/// the gutter is applied last and outranks everything above it.
+#[test]
+fn a_drag_past_the_gutter_never_overflows_the_viewport() {
+    for viewport in [RESIZE_VIEWPORT, WIDE_VIEWPORT] {
+        let size = tools_card_size(viewport, Some(Size::new(9_000.0, 9_000.0)));
+        let card = mounted_card_at(viewport, Some(Size::new(9_000.0, 9_000.0)));
+
+        assert_eq!(
+            size,
+            Size::new(
+                viewport.width - VIEWPORT_GUTTER,
+                viewport.height - VIEWPORT_GUTTER
+            ),
+            "the gutter is the only ceiling on a drag, on {viewport:?}"
+        );
+        assert!(
+            measured(card).width <= viewport.width - VIEWPORT_GUTTER
+                && measured(card).height <= viewport.height - VIEWPORT_GUTTER,
+            "the measured card must never exceed viewport - gutter on {viewport:?}: {card:?}"
+        );
+    }
+}
+
+/// The gutter outranks the floor when the window cannot hold it — the card
+/// shrinks rather than overflowing (§4.6.2).
+#[test]
+fn the_gutter_outranks_the_floor_on_a_tiny_window() {
+    let tiny = Size::new(540.0, 300.0);
+
+    let size = tools_card_size(tiny, Some(Size::new(1_000.0, 1_000.0)));
+
+    assert_eq!(size, Size::new(508.0, 268.0));
+    assert!(size.width < EDITOR_WIDTH_MIN && size.height < TOOLS_HEIGHT_MIN);
+}
+
+/// The 80% fill is the *initial* size, not a ceiling: a drag past it is
+/// honoured (owner ruling D-3).
+#[test]
+fn the_fill_is_the_initial_size_and_not_a_ceiling() {
+    let fill = tools_card_size(RESIZE_VIEWPORT, None);
+    let beyond = Size::new(fill.width + 100.0, fill.height - 40.0);
+
+    let size = tools_card_size(RESIZE_VIEWPORT, Some(beyond));
+
+    assert_eq!(
+        size, beyond,
+        "a dragged card may exceed the fill on both axes"
+    );
+    assert!(size.width > fill.width);
+}
+
+/// The floors the card names are the framework's own modal floors — the app
+/// invents no number of its own.
+#[test]
+fn the_floors_are_the_frameworks_own_modal_tokens() {
+    assert_eq!(TOOLS_RESIZE_FLOORS.width, EDITOR_WIDTH_MIN);
+    assert_eq!(TOOLS_RESIZE_FLOORS.height, TOOLS_HEIGHT_MIN);
+}
+
+/// The card stays centred at every size, because the grip changes size and
+/// never position (owner ruling D-3).
+#[test]
+fn the_card_stays_centred_at_every_size() {
+    for user in [
+        None,
+        Some(Size::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN)),
+        Some(Size::new(1_100.0, 760.0)),
+        Some(Size::new(9_000.0, 9_000.0)),
+    ] {
+        let card = mounted_card_at(RESIZE_VIEWPORT, user);
+        let centre = card.center();
+
+        assert!(
+            (centre.x - RESIZE_VIEWPORT.width / 2.0).abs() < 1.0,
+            "the card must stay centred horizontally at {user:?}: {card:?}"
+        );
+        assert!(
+            (centre.y - RESIZE_VIEWPORT.height / 2.0).abs() < 1.0,
+            "the card must stay centred vertically at {user:?}: {card:?}"
+        );
+    }
+}
+
+/// The pointer-to-size rule tracks the corner one for one: a corner already
+/// under the pointer does not jump when the drag begins, and one pixel of
+/// movement is one pixel of corner.
+#[test]
+fn the_pointer_to_size_rule_tracks_the_corner_one_for_one() {
+    let viewport = RESIZE_VIEWPORT;
+    let start = tools_card_size(viewport, None);
+    // The bottom-right corner of a centred card of `start`.
+    let corner = Point::new(
+        viewport.width / 2.0 + start.width / 2.0,
+        viewport.height / 2.0 + start.height / 2.0,
+    );
+
+    assert_eq!(
+        tools_card_size(viewport, Some(centred_size(corner, viewport))),
+        start,
+        "taking the corner must not move it"
+    );
+    assert_eq!(
+        tools_card_size(
+            viewport,
+            Some(centred_size(
+                Point::new(corner.x + 1.0, corner.y + 1.0),
+                viewport
+            ))
+        ),
+        Size::new(start.width + 2.0, start.height + 2.0),
+        "the size grows by twice the pointer's distance from the centre, which is what puts \
+         the corner under the pointer"
+    );
+}
+
+/// The capture lane exists only while a drag is in flight: a full-area mouse
+/// area mounted any other frame would swallow every click in the app.
+#[test]
+fn the_capture_lane_is_mounted_only_while_a_drag_is_in_flight() {
+    let model = model_with_rows(9);
+
+    let lane = mounted_bounds_with(
+        TOOLS_RESIZE_CAPTURE_ID,
+        &model,
+        RESIZE_VIEWPORT,
+        Some(tools_card_size(RESIZE_VIEWPORT, None)),
+        true,
+    );
+    assert_eq!(
+        measured(lane),
+        RESIZE_VIEWPORT,
+        "the lane must span the window so a drag cannot outrun it"
+    );
+
+    let mut ui = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        RESIZE_VIEWPORT,
+        tools_modal(&model, RESIZE_VIEWPORT, None, false),
+    );
+    assert!(
+        ui.find(iced::widget::Id::from(TOOLS_RESIZE_CAPTURE_ID))
+            .is_err(),
+        "an idle card must not mount the capture lane"
+    );
+}
+
+/// The gesture, end to end: a real press on a real grip, real moves and a real
+/// release on the lane the reducer mounts while held, replayed through the same
+/// reducer path — and the card that comes out the other side is measurably
+/// bigger.
+#[test]
+fn a_simulated_grip_drag_changes_the_measured_card_size() {
+    let viewport = RESIZE_VIEWPORT;
+    let model = model_with_rows(9);
+    let start = tools_card_size(viewport, None);
+    let mut emitted: Vec<Message> = Vec::new();
+
+    // Stage A — the card as it stands before the drag: take the grip.
+    {
+        let mut ui = iced_test::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            viewport,
+            tools_modal(&model, viewport, None, false),
+        );
+        let grip = bounds_in(&mut ui, TOOLS_RESIZE_GRIP_ID).center();
+        ui.point_at(grip);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: grip,
+        })]);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Left,
+        ))]);
+        emitted.extend(ui.into_messages());
+    }
+
+    // Stage B — the tree the reducer builds while the grip is held: the moves
+    // and the release arrive from the lane, not from the 16px grip.
+    let target = Point::new(1_150.0, 780.0);
+    {
+        let mut ui = iced_test::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            viewport,
+            tools_modal(&model, viewport, Some(start), true),
+        );
+        ui.point_at(target);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: target,
+        })]);
+        let _ = ui.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ))]);
+        emitted.extend(ui.into_messages());
+    }
+
+    assert!(
+        emitted.contains(&resize_press_message()),
+        "the grip press must arrive: {emitted:?}"
+    );
+    assert!(
+        emitted.contains(&Message::Tools(ToolsDialogMessage::ResizeMoved {
+            at: target
+        })),
+        "the lane must report the move at the pointer it was given: {emitted:?}"
+    );
+    assert!(
+        emitted.contains(&Message::Tools(ToolsDialogMessage::ResizeReleased)),
+        "the lane must report the release: {emitted:?}"
+    );
+
+    // Replay exactly what iced reported, exactly as `reduce_tools` does.
+    let mut state = ToolsDialogState::new();
+    state.open();
+    let mut settled = None;
+    for message in &emitted {
+        let Message::Tools(tools) = message else {
+            continue;
+        };
+        if let ToolsResizeEffect::Settled { size } = state.apply_resize(*tools, viewport) {
+            settled = Some(size);
+        }
+    }
+
+    let size = settled.expect("the drag must settle");
+    assert_ne!(size, start, "a drag that moved must change the size");
+    assert!(size.width > start.width && size.height > start.height);
+    assert!(
+        size.width <= viewport.width - VIEWPORT_GUTTER
+            && size.height <= viewport.height - VIEWPORT_GUTTER,
+        "a drag toward the window edge must stop at the gutter: {size:?}"
+    );
+    assert_eq!(state.user_size(), Some(size));
+
+    let card = mounted_card_at(viewport, state.size_override());
+    assert_eq!(
+        measured(card),
+        size,
+        "the settled size must be what the mounted card measures"
+    );
+}
+
+/// A drag that runs off the window edge is clamped mid-gesture, not just at the
+/// settle — the view never sees an oversized number.
+#[test]
+fn a_drag_toward_the_window_edge_is_clamped_as_it_moves() {
+    let viewport = RESIZE_VIEWPORT;
+    let mut state = ToolsDialogState::new();
+    state.open();
+    state.apply_resize(ToolsDialogMessage::ResizeGripPressed, viewport);
+
+    let effect = state.apply_resize(
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(4_000.0, 4_000.0),
+        },
+        viewport,
+    );
+
+    let ToolsResizeEffect::Dragging { size } = effect else {
+        panic!("a move during a drag must report the size it reached");
+    };
+    assert_eq!(
+        size,
+        Size::new(
+            viewport.width - VIEWPORT_GUTTER,
+            viewport.height - VIEWPORT_GUTTER
+        )
+    );
+    assert_eq!(
+        state.size_override(),
+        Some(size),
+        "the live drag is what the view shows"
+    );
+}
+
+/// A press that never moves is not a resize: the card stays on the viewport
+/// policy instead of being pinned at whatever the window happened to be.
+#[test]
+fn a_press_that_never_moves_is_not_a_resize() {
+    let viewport = RESIZE_VIEWPORT;
+    let mut state = ToolsDialogState::new();
+    state.open();
+
+    state.apply_resize(ToolsDialogMessage::ResizeGripPressed, viewport);
+    assert!(state.is_resizing());
+    let effect = state.apply_resize(ToolsDialogMessage::ResizeReleased, viewport);
+
+    assert_eq!(effect, ToolsResizeEffect::Idle);
+    assert!(!state.is_resizing());
+    assert_eq!(
+        state.user_size(),
+        None,
+        "a click on the grip must not pin the size"
+    );
+}
+
+/// A move without a press is inert — the lane cannot invent a drag.
+#[test]
+fn a_move_without_a_press_is_inert() {
+    let mut state = ToolsDialogState::new();
+    state.open();
+
+    let effect = state.apply_resize(
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(900.0, 700.0),
+        },
+        RESIZE_VIEWPORT,
+    );
+
+    assert_eq!(effect, ToolsResizeEffect::Idle);
+    assert_eq!(state.user_size(), None);
+    assert!(!state.is_resizing());
+}
+
+/// The live drag outranks the remembered size while it runs, and hands back to
+/// it when it ends.
+#[test]
+fn the_live_drag_wins_over_the_remembered_size() {
+    let viewport = RESIZE_VIEWPORT;
+    let remembered = Size::new(600.0, 400.0);
+    let mut state = ToolsDialogState::new();
+    state.open();
+    state.set_user_size(Some(remembered));
+    assert_eq!(state.size_override(), Some(remembered));
+
+    state.apply_resize(ToolsDialogMessage::ResizeGripPressed, viewport);
+    state.apply_resize(
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1_000.0, 700.0),
+        },
+        viewport,
+    );
+
+    let dragging = state.size_override().expect("the live size is shown");
+    assert_eq!(state.card_size(viewport), dragging);
+    assert_ne!(dragging, remembered);
+
+    state.close();
+    assert_eq!(
+        state.size_override(),
+        Some(remembered),
+        "abandoning a drag leaves the remembered size standing"
+    );
+}
+
+/// Closing drops an in-flight drag but keeps the size the user chose — the
+/// gesture is transient, the choice is not (owner ruling D-3).
+#[test]
+fn closing_drops_the_drag_and_keeps_the_chosen_size() {
+    let viewport = RESIZE_VIEWPORT;
+    let mut state = ToolsDialogState::new();
+    state.open();
+    state.apply_resize(ToolsDialogMessage::ResizeGripPressed, viewport);
+    state.apply_resize(
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1_100.0, 760.0),
+        },
+        viewport,
+    );
+    let dragged = state.size_override().expect("a drag is in flight");
+
+    assert!(state.close());
+
+    assert!(
+        !state.is_resizing(),
+        "a release that never arrived must not leak"
+    );
+    assert_eq!(
+        state.size_override(),
+        None,
+        "an unsettled drag is not a choice"
+    );
+    state.open();
+    assert_eq!(state.size_override(), None);
+
+    // And a settled drag does survive the close.
+    state.apply_resize(ToolsDialogMessage::ResizeGripPressed, viewport);
+    state.apply_resize(
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1_100.0, 760.0),
+        },
+        viewport,
+    );
+    state.apply_resize(ToolsDialogMessage::ResizeReleased, viewport);
+    state.close();
+
+    assert_eq!(state.user_size(), Some(dragged));
+    state.open();
+    assert_eq!(state.size_override(), Some(dragged));
+}
+
+/// A resize message never changes whether the dialog is visible — the two
+/// reductions of the same channel stay independent.
+#[test]
+fn a_resize_message_never_changes_visibility() {
+    let mut state = ToolsDialogState::new();
+    state.open();
+
+    for message in [
+        ToolsDialogMessage::ResizeGripPressed,
+        ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1.0, 1.0),
+        },
+        ToolsDialogMessage::ResizeReleased,
+        ToolsDialogMessage::Absorbed,
+    ] {
+        assert!(
+            !state.apply(message),
+            "{message:?} must not change visibility"
+        );
+        assert!(state.is_open());
+    }
+}
+
+/// The storage key names the surface it belongs to, derived from the surface id
+/// rather than spelled out a second time.
+#[test]
+fn the_resize_storage_key_names_the_surface() {
+    assert_eq!(
+        resize_storage_key(),
+        format!("{MODAL_GEOMETRY_KEY_PREFIX}{SURFACE_ID_TOOLS}"),
+    );
+    assert!(
+        !resize_storage_key().starts_with("movable:"),
+        "a centred modal is not a movable card and must not borrow its key space"
+    );
 }
 
 // --- window state transitions ------------------------------------------
@@ -1601,7 +2193,7 @@ fn the_title_close_button_is_icon_only_and_carries_its_tooltip() {
 #[test]
 fn the_title_close_control_is_mounted_and_dismisses_the_dialog() {
     let view_model = ToolsDialogViewModel::empty();
-    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY, None));
     let bounds = focusable_bounds(&mut ui, TOOLS_CLOSE_BUTTON_ID)
         .expect("defect #7: the title band must mount the `×` dismiss control");
     assert!(bounds.width > 0.0 && bounds.height > 0.0);
@@ -1653,7 +2245,7 @@ fn the_footer_close_button_is_enabled_and_secondary() {
 #[test]
 fn the_footer_close_button_renders_the_shared_close_label() {
     let view_model = ToolsDialogViewModel::empty();
-    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY, None));
     assert!(
         ui.find(strings::CLOSE_BUTTON).is_ok(),
         "defect #8: the footer must render `strings::CLOSE_BUTTON`"
@@ -1664,7 +2256,7 @@ fn the_footer_close_button_renders_the_shared_close_label() {
 #[test]
 fn the_footer_close_control_is_mounted_and_dismisses_the_dialog() {
     let view_model = ToolsDialogViewModel::empty();
-    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY));
+    let mut ui = iced_test::simulator(tools_dialog_card(&view_model, ROOMY, None));
     let bounds = focusable_bounds(&mut ui, TOOLS_FOOTER_CLOSE_BUTTON_ID)
         .expect("defect #8: the footer must mount its Close button");
 

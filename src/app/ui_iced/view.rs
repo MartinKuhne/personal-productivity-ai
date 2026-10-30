@@ -423,9 +423,12 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
         OverlayLayer::AgentDebug => movable_overlay_layer(MovableCard::AgentDebug, state, |host| {
             crate::ui_iced::agent_debug::agent_debug_movable_card(host, &state.models.debug)
         }),
-        OverlayLayer::Tools => {
-            crate::ui_iced::tools_dialog::tools_modal(&state.models.tools, state.viewport)
-        }
+        OverlayLayer::Tools => crate::ui_iced::tools_dialog::tools_modal(
+            &state.models.tools,
+            state.viewport,
+            state.overlay.tools.size_override(),
+            state.overlay.tools.is_resizing(),
+        ),
         OverlayLayer::About => modal_centered(
             about_card(&state.models.about, state.viewport),
             Message::About(crate::ui_iced::message::AboutMessage::Absorbed),
