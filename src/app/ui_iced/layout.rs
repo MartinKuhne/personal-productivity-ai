@@ -344,8 +344,28 @@ pub fn nested_region_width(viewport_width: f32, left_width: f32, spacing: f32) -
 /// [`DEFAULT_ROOT_SPLIT_RATIO`] — [`apply_pane_widths`] deliberately does not
 /// resize a split it has no remembered width for. Deriving the nested region
 /// from `LEFT_PANEL_DEFAULT_WIDTH` in that state would therefore size the right
-/// split against a region iced never hands it (defect #14: the fit landed 24px
-/// wide of the mark at an 800px viewport for exactly this reason).
+/// split against a region iced never hands it.
+///
+/// The error is a **ratio**, not a fixed number of pixels, because the two left
+/// widths cross over as the window grows: `DEFAULT_ROOT_SPLIT_RATIO` gives
+/// `0.25 × viewport − 1`, while the nominal default is a flat 280. So the
+/// assumed region is too small at narrow viewports, exactly equal at
+/// `viewport = 1124` (`0.25 × 1124 − 1 = 280`), and too large beyond it:
+///
+/// | viewport | left the grid holds | left assumed | true region / assumed |
+/// |----------|--------------------|--------------|-----------------------|
+/// | 800      | 199                | 280          | 599 / 518 = +15.6%    |
+/// | 1000     | 249                | 280          | 749 / 718 = +4.3%     |
+/// | 1200     | 299                | 280          | 899 / 918 = −2.1%     |
+///
+/// A replayed right pane therefore lands that multiple past the width the
+/// reducer stored. Measured, by breaking this rule and reading the round-trip
+/// guard `defect_12_a_right_drag_round_trips_before_any_left_width_is_remembered`
+/// fail: at its 1000px viewport the reducer stored 214.4px and the grid laid the
+/// pane out at 224px — **9.6px** off. The figure is a hair above the 9.3px the
+/// region arithmetic alone predicts because iced rounds a laid-out width to a
+/// whole pixel, so the number quoted here is the measured one, not the derived
+/// one.
 ///
 /// This is the single home of that rule for anything that has to **replay a
 /// ratio into the grid** — [`apply_pane_resize`]'s right arm,
@@ -353,8 +373,7 @@ pub fn nested_region_width(viewport_width: f32, left_width: f32, spacing: f32) -
 /// ([`crate::ui_iced::panels::right::auto_fit_width`]) all read it
 /// ([RUST-021]). A drag is a replay like any other: solving it against a
 /// different left width than the grid holds makes the first right-drag land the
-/// pane somewhere other than the width the reducer just stored (measured 9.6px
-/// off at a 1000px viewport before this rule was applied to the drag arm).
+/// pane somewhere other than the width the reducer just stored.
 ///
 /// [RUST-020]: pure.
 #[must_use]
@@ -539,7 +558,7 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
 /// (defect #12).
 ///
 /// **The two fills are a pair.** iced gives a pane no background, so the
-/// panes must paint [`pane_canvas_fill`] themselves ([`fill_pane`]) or the
+/// panes must paint [`pane_canvas_fill`] themselves (in `fill_pane`) or the
 /// gutter backing shows through the whole band instead of only in the seams.
 /// That is the regression this branch shipped and fixed;
 /// `defect_12_followup_the_middle_band_renders_canvas_with_gutter_seams_only`
@@ -588,7 +607,7 @@ fn gutter_style(_theme: &iced::Theme) -> ContainerStyle {
 }
 
 /// Styles a pane so it paints the window canvas ([`pane_canvas_fill`]) behind its
-/// body, occluding the gutter backing that [`gutter_style`] paints beneath it.
+/// body, occluding the gutter backing that `gutter_style` paints beneath it.
 ///
 /// Without this the gutter colour reads through every pane and the whole middle
 /// band turns gray. With it, the only place the gutter colour can appear is the

@@ -393,6 +393,8 @@ set), test-first, with the quality gate passing.
 | `f962051` | 14 | ToC pane auto-fits to its content; nested-region derivation unified (drag arm follow-on) |
 | `b913bef` | 6 | Centred modals are user-resizable: `ResizeFloors` + grip + gesture lane (D-3) |
 | `03ecc96` | 12 (regression) | Panes painted opaque so `border.subtle` stays in the seams; baseline-free pixel guard |
+| `4afe450` | tab strip | Unsaved marker removed, `TAB_PADDING_X` → `space.xs` (owner ruling D-1); chrome 42 → 12px/tab |
+| — | — | `docs(layout)`: dangling private doc links from `03ecc96`, unverified figures in `current_left_width` replaced with measured ones |
 | — | — | *(ledger closed)* |
 
 ### Gate at close
@@ -403,11 +405,32 @@ set), test-first, with the quality gate passing.
 | `cargo nextest run --workspace --status-level fail --show-progress none` | **8933 passed**, 7 skipped, 0 failed |
 | `cargo clippy --all-targets -- -D warnings` | exit 0 |
 | `cargo fmt --check` | exit 0 |
-| `cargo doc --no-deps --quiet` | exit 0 — 3 warnings, all pre-existing at `06e8f9c` (`fonts.rs` ×2, `app.rs` ×1) |
+| `cargo doc --no-deps --quiet` | exit 0 — **this row was wrong when written.** It claimed 3 warnings, all pre-existing. There were 5: the #12 regression fix (`03ecc96`) had added two dangling intra-doc links from public items onto private ones (`fill_pane`, `gutter_style`). Fixed in `docs(layout)` below; the 3 genuine pre-existing warnings are `fonts.rs` ×2 and `app.rs` ×1. |
 
 Test count moved `8847 → 8930 → 8933` (+86) across the six closed defects and
 the #12 regression. Every layout claim is a measurement from
 `iced_test::Simulator`, not an inference from reading the widget tree.
+
+### Gate after the tab-strip increment
+
+The owner ruling from `tab-strip-dead-space.md` (remove the dirty marker, pad
+tabs on `space.xs`) landed afterwards and moved the gate:
+
+| Command | Result |
+|---|---|
+| `cargo nextest run --workspace --status-level fail --show-progress none` | **8929 passed**, 7 skipped, 0 failed |
+| `cargo doc --no-deps --quiet` | exit 0 — 3 warnings, all genuinely pre-existing |
+
+Test count `8933 → 8929` (−4): 8 marker tests removed, 4 added. The drop is
+expected and is not coverage loss — the removed tests pinned a widget that no
+code path could reach. The fill-lock rule one of them exercised is still pinned,
+now on the tab label (`the_active_tab_foreground_stays_role_locked`).
+
+`PIN_APP_TOKEN_BOUND` moved `99 → 96`. Worth recording why that number is *not*
+evidence about this change: `token_lint` reads whether a visual constant names a
+token, not which token it named, so `space.md → space.xs` classifies as
+`TokenBound` either way and passes silently. The padding is policed by measured
+chrome in `center_tests.rs` instead.
 
 ### Note on the `a49eaf5` baseline
 

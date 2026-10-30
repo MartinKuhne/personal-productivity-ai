@@ -1,6 +1,8 @@
 # Tab Strip Dead Width — Reduction Proposal
 
-**Status: PROPOSED — needs owner rulings on D-1 and D-2 before implementation.**
+**Status: PARTIALLY LANDED - D-1 and D-3 answered and implemented in `4afe450`
+(marker removed outright, horizontal padding ruled to `space.xs`). D-2 and D-4
+remain open; P2, P3 and P4 are not implemented.**
 No code has been changed on the strength of this document.
 
 Measures the horizontal space a tab in `src/app/ui_iced/panels/center.rs` renders
@@ -322,20 +324,36 @@ modal's own `UIF-MOD-002` guard already prevents the close it describes.
 
 ## 7. Decisions needed from the owner
 
-- **D-1 (P1):** confirm removal. §4.4.1 slot 2 is specified and the app would stop
-  implementing it. The argument for removal is §2's state table — there is no
-  reachable dirty state the dot could describe. The alternative is keeping a
-  reserved 12px box purely to stay literally conformant to a clause the editing
-  model makes moot, at 14px per tab.
-- **D-2 (P4):** end-truncation or middle-truncation for the tab title, given
-  §4.4.1 slot 3 and `UIF-PRIN-007` disagree about filenames?
-- **D-3:** is a docked (non-modal) editor on the roadmap? If yes, P1 should ship as
-  "slot stops costing layout, field retained" and the `Stack`-painted dot comes
-  back with that editor; if no, P1 ships as full removal and `UIF-TAB-003`'s
-  dirty-close guard should be recorded as satisfied-by-substitution by
-  `UIF-MOD-002`.
-- **D-4:** is the 96px floor accepted as the limit on short-tab recovery (§5), or
-  does the owner want a spec amendment against §2.2?
+- **D-1 (P1): ANSWERED - remove it outright.** Implemented in `4afe450`. The
+  field, its slot, its dot, its radius and its role-locked colour are all gone,
+  not merely un-laid-out.
+- **D-2 (P4): OPEN.** End-truncation or middle-truncation for the tab title,
+  given §4.4.1 slot 3 and `UIF-PRIN-007` disagree about filenames?
+- **D-3: ANSWERED by implication.** The owner ruled full removal rather than
+  "slot stops costing layout, field retained", which is the answer that only
+  makes sense if a docked editor is *not* on the roadmap. Recorded as such:
+  `UIF-TAB-003`'s dirty-close guard is satisfied-by-substitution through
+  `UIF-MOD-002`, and the contingency for a future docked editor is left in the
+  `panels/center.rs` module header so the reasoning survives with the code. If a
+  docked editor does land, this ruling has to be revisited, not just re-opened.
+- **D-4: OPEN.** Is the 96px floor accepted as the limit on short-tab recovery
+  (§5), or does the owner want a spec amendment against §2.2?
+
+### Ruling that overrode this document
+
+The owner additionally ruled **`TAB_PADDING_X` down to 4px (`space.xs`)**. §6
+rejected narrowing the tab padding, and §3 records that spec.md:68 binds
+`space.md` to tabs by name - so this is an owner override of a written spec
+binding, not a reading of it. It is implemented because the owner outranks the
+spec here, and it is flagged as drift in the constant's own doc comment per
+[RUST-041]. The rung is still on the base-4 grid, so `UIF-TOK-001`'s "no off-rung
+spacing in layout code" rule is honoured even though the role binding is not.
+
+Measured effect, from laid-out bounds rather than arithmetic: chrome outside the
+title and close button fell **42.000 -> 12.000px** per tab. The marker accounted
+for 14 of that (12 slot + 2 spacing) and the padding for 16 (8 per side). P2,
+P3 and P4 would have reached 50.000 total non-title width by a different route;
+the ruling recovered comparable space on the padding alone.
 
 ## 8. Test plan
 
