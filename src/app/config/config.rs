@@ -41,7 +41,13 @@ fn default_table_width_strategy() -> String {
 }
 
 /// Discord bot configuration.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+///
+/// `Debug` is hand-written, not derived: the bot token is a credential and must
+/// never reach a log line, panic payload or diagnostic dump ([NFR-009]). It is
+/// rendered as the repo-wide `[REDACTED]` placeholder — the same convention the
+/// other credential fields in [`crate::config`] use — while every non-secret
+/// field stays readable so diagnostics remain useful.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct DiscordConfig {
     /// Bot token from the Discord Developer Portal.
     #[serde(default)]
@@ -68,6 +74,23 @@ pub struct DiscordConfig {
     /// Matching is case-insensitive. Empty by default.
     #[serde(default)]
     pub blocked_patterns: Vec<String>,
+}
+
+impl std::fmt::Debug for DiscordConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiscordConfig")
+            // Presence is preserved, the secret is not: `Some("[REDACTED]")`
+            // tells an operator the token is configured without revealing it.
+            .field("bot_token", &self.bot_token.as_ref().map(|_| "[REDACTED]"))
+            .field("allowed_channels", &self.allowed_channels)
+            .field("allowed_guilds", &self.allowed_guilds)
+            .field("register_commands", &self.register_commands)
+            .field("system_prompt", &self.system_prompt)
+            .field("max_history", &self.max_history)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
+            .field("blocked_patterns", &self.blocked_patterns)
+            .finish()
+    }
 }
 
 fn default_discord_history_len() -> usize {
@@ -563,15 +586,20 @@ impl AppConfig {
     }
 
     /// Find the best model for a given use_case (lowest cost among matches).
+    ///
+    /// A model with no configured price ranks *after* every priced model: an
+    /// unknown price is not a free price (see [`LlmConfig::cost_rank`]).
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
-            .min_by_key(|(_, cfg)| cfg.get_cost())
+            .min_by_key(|(_, cfg)| cfg.cost_rank())
     }
 
     /// Find all models tied for the minimum cost for a given use_case.
+    ///
+    /// Unpriced models only win when *no* priced model matches the use case.
     pub fn models_for_use_case_min_cost(
         &self,
         use_case: impl AsRef<str>,
@@ -587,12 +615,12 @@ impl AppConfig {
         }
         let min_cost = candidates
             .iter()
-            .map(|(_, cfg)| cfg.get_cost())
+            .map(|(_, cfg)| cfg.cost_rank())
             .min()
             .unwrap();
         candidates
             .into_iter()
-            .filter(|(_, cfg)| cfg.get_cost() == min_cost)
+            .filter(|(_, cfg)| cfg.cost_rank() == min_cost)
             .collect()
     }
 

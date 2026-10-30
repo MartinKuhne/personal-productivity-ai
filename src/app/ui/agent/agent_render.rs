@@ -4,6 +4,16 @@
 
 use crate::agent::events::DelegateToolCall;
 
+/// Split an assistant message into its thinking block and its visible content.
+///
+/// The model wraps its reasoning in a pair of `U+1F914` (THINKING FACE)
+/// delimiters: the text between the **first** pair becomes the thinking block,
+/// and the text before the opening delimiter plus the text after the closing
+/// delimiter are concatenated back into the returned content.
+///
+/// Precondition: `text` is the raw assistant message. When it contains fewer
+/// than two delimiters the split is a no-op and the result is `("", text)` —
+/// an empty thinking block and the message unchanged.
 pub fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "\u{1f914}";
     if let Some(start_idx) = text.find(delim)
@@ -17,6 +27,13 @@ pub fn split_thinking_and_content(text: &str) -> (String, String) {
     (String::new(), text.to_string())
 }
 
+/// Render a tool invocation as a markdown block-quote for the chat transcript.
+///
+/// `func_args_str` is the raw JSON argument string the model emitted. For
+/// `create_note` only the `path` argument is surfaced, and only when the
+/// arguments parse as a JSON object carrying a string `path`; every other tool
+/// gets its arguments pretty-printed with a `> ` prefix on each line, falling
+/// back to the raw string when it is not valid JSON.
 pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String {
     if func_name == "create_note" {
         let mut msg = format!("> **Executing tool `{}`**\n", func_name);
@@ -73,6 +90,16 @@ fn count_from_data(data: &serde_json::Value, field: &str) -> usize {
         .unwrap_or(0)
 }
 
+/// Render a tool result as a markdown block-quote for the chat transcript.
+///
+/// `result` is the tool's JSON envelope, `{"status": "success" | "error", …}`.
+/// An `error` envelope short-circuits to its `message` (or `Unknown error` when
+/// absent); only a `success` envelope contributes its `data` payload, so a
+/// payload attached to any other status is ignored. A string that does not parse
+/// as such an envelope is summarised from the raw text: a short single-line
+/// result is echoed verbatim, anything longer renders a generic
+/// "completed successfully" line. Recognised tools get a purpose-built summary
+/// (counts, read lines, paging cursors) built from `data`.
 pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
     let mut is_error = false;
     let mut error_msg = String::new();
@@ -218,6 +245,26 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
     }
 }
 
+/// Split a `search_notes` match line into the path it was found in.
+///
+/// `search_notes` renders one match per line as `{path}:{line} - {text}`
+/// (see `crate::tools::filesystem::tool_search_notes`), so the path ends at
+/// the **first `':'` that is followed by an ASCII digit** — the line-number
+/// separator.
+///
+/// Splitting on the first `':'` instead truncates a Windows path to its drive
+/// letter (`C:\notes\n.md:12` → `C`), and splitting on the last `.md:`
+/// occurrence swallows a `other.md:9` reference quoted inside the matching
+/// text. A line without a line-number separator is a bare path.
+fn match_path_part(line: &str) -> &str {
+    for (idx, _) in line.match_indices(':') {
+        if line[idx + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+            return &line[..idx];
+        }
+    }
+    line
+}
+
 fn format_search_notes_result(func_name: &str, data: &serde_json::Value) -> String {
     let content = data.get("matches").and_then(|f| f.as_str()).unwrap_or("");
     if content == "No matches found." || content.is_empty() {
@@ -225,12 +272,9 @@ fn format_search_notes_result(func_name: &str, data: &serde_json::Value) -> Stri
     }
     let mut files = std::collections::HashSet::new();
     for line in content.lines() {
-        if let Some(idx) = line.rfind(".md:") {
-            files.insert(&line[..idx + 3]);
-        } else if let Some(idx) = line.rfind(".markdown:") {
-            files.insert(&line[..idx + 9]);
-        } else if let Some(idx) = line.find(':') {
-            files.insert(&line[..idx]);
+        let path = match_path_part(line);
+        if !path.is_empty() {
+            files.insert(path);
         }
     }
     let total = data

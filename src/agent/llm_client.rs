@@ -115,7 +115,7 @@ impl LLMClient {
             .models()
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case("chat"))
-            .min_by_key(|(_, cfg)| cfg.get_cost())
+            .min_by_key(|(_, cfg)| cfg.cost_rank())
         {
             cfg.clone()
         } else {

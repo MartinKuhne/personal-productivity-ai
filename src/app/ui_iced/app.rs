@@ -936,9 +936,19 @@ fn sync_surface_with_regions(
 ///
 /// The host self-registers into `registry` on open. That is deliberate here
 /// rather than a collision: `MovableHost` registers its control roster but
-/// focuses nothing, so nothing is stolen from the workspace, and
-/// [`OverlayState::sync_surfaces`] re-registers the same live rectangle on
-/// every pass so the index cannot drift from the host.
+/// focuses nothing, so nothing is stolen from the workspace.
+///
+/// Keeping the **rectangle** honest is the host's job as well, and by design:
+/// `MovableHost` republishes its own card on every geometry change it makes
+/// — open, viewport re-clamp, drag settle, resize settle, programmatic set —
+/// because a card that moved without republishing keeps owning the ground it
+/// left and cannot be reached where it landed. Nothing is published
+/// mid-drag, which is also why an `Escape` that rolls a drag back needs no
+/// repair: the index still holds the rectangle the card is returning to.
+/// [`OverlayState::sync_surfaces`] is the repair pass that re-mirrors the
+/// same live rectangle, but it runs only from
+/// [`OverlayState::close_topmost`], not from every update, so it must never
+/// be relied on to correct a drag the user has just finished.
 #[allow(clippy::too_many_arguments)]
 fn sync_one_movable_host(
     slot: &mut Option<MovableHost>,

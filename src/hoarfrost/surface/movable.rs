@@ -168,6 +168,18 @@
 //!   `escape_rank` `1`, below `Modal` (`2`) and `Menu` (`3`), so the
 //!   registry's walk asks those first and the card never steals the key
 //!   from a surface above it (**G-13**).
+//! * **The surface index is republished at every settled geometry.** The
+//!   registry answers `UIF-MOV-003` — what a card owns — from the rectangle
+//!   it was last handed, which makes it a derived index and not a second
+//!   source of truth. `sync_region` is the single place the host writes it,
+//!   and every geometry change ends there: open, viewport re-clamp, drag
+//!   settle, resize settle and programmatic set. A card that moves without
+//!   republishing keeps owning the ground it left, and cannot be grabbed on
+//!   the ground it now occupies.
+//!   Nothing is published *mid-flight* — a drag's per-frame `Live` tick
+//!   leaves the index alone, exactly as it leaves the sink alone — which is
+//!   also why an `Escape` that rolls a drag back owes no repair: the index
+//!   still holds the very rectangle the card is returning to.
 //! * **Persistence happens at settled geometry** — drag release, resize
 //!   release, close, programmatic set, viewport re-clamp — and never per
 //!   frame. A save per frame would turn the injected sink into an I/O hot
@@ -998,6 +1010,10 @@ pub enum MovableNoOp {
     NotFocused,
     /// The card is already being dragged or resized.
     AlreadyCapturing,
+    /// `Escape` cancelled the in-flight drag or resize: the card rolled back to
+    /// its pre-gesture geometry and **stays open**. Distinct from a dismiss,
+    /// which closes the card.
+    GestureCancelled,
     /// The card is already open.
     AlreadyOpen,
     /// The event arrived with no gesture in progress — a move or a release
@@ -1717,7 +1733,7 @@ impl MovableHost {
         let action = match phase {
             PointerPhase::Pressed => self.on_press(at, target, focus, registry, storage),
             PointerPhase::Moved => self.on_move(at),
-            PointerPhase::Released => self.on_release(at, storage),
+            PointerPhase::Released => self.on_release(at, registry, storage),
         };
 
         let cursor = self.cursor_at(at);
@@ -1826,29 +1842,43 @@ impl MovableHost {
         MovableAction::NoOp(MovableNoOp::Idle)
     }
 
-    /// A button release: end whatever gesture was captured and settle the
-    /// geometry.
-    fn on_release(&mut self, at: Point, storage: &mut dyn GeometryStorage) -> MovableAction {
+    /// A button release: end whatever gesture was captured, settle the
+    /// geometry, and hand the settled rectangle to the surface index.
+    ///
+    /// The publish is unconditional, and that is the point: whatever route
+    /// the release took — a drag commit, a resize settle, or nothing at all —
+    /// the index leaves this call agreeing with the card. A drag that was
+    /// never republished mid-flight is republished here, which is the only
+    /// moment `UIF-MOV-003` needs the answer to be exact.
+    fn on_release(
+        &mut self,
+        at: Point,
+        registry: &mut SurfaceRegistry,
+        storage: &mut dyn GeometryStorage,
+    ) -> MovableAction {
         self.pointer = at;
 
         // `commit` *takes* the open gesture, so this branch can run at most
         // once per drag: the `Commit` tier — the spec's `on_drag_settle` —
         // is the only thing that persists, and a second release has nothing
         // left to settle.
-        if self.drag.commit(self.geometry).is_some() {
+        let action = if self.drag.commit(self.geometry).is_some() {
             self.persist(storage);
-            return MovableAction::DragEnded {
+            MovableAction::DragEnded {
                 geometry: self.geometry,
-            };
-        }
-        if let Some(capture) = self.resize.take() {
+            }
+        } else if let Some(capture) = self.resize.take() {
             self.persist(storage);
-            return MovableAction::ResizeEnded {
+            MovableAction::ResizeEnded {
                 handle: capture.handle,
                 geometry: self.geometry,
-            };
-        }
-        MovableAction::NoOp(MovableNoOp::Idle)
+            }
+        } else {
+            MovableAction::NoOp(MovableNoOp::Idle)
+        };
+
+        self.sync_region(registry);
+        action
     }
 
     // -- drag / resize frames ----------------------------------------------
@@ -1916,18 +1946,37 @@ impl MovableHost {
     ///
     /// Settles *through* the gesture, so the `Commit` tier is what closes
     /// the drag and the persist stays on the settle path exactly as before.
-    pub fn end_drag(&mut self, storage: &mut dyn GeometryStorage) -> MovableAction {
+    ///
+    /// `registry` is required because the settle is the moment the card's
+    /// rectangle becomes its real one: the index is republished here, the
+    /// same way [`on_pointer`](Self::on_pointer) republishes it when the
+    /// release comes through the pointer lane. A host that drives its own
+    /// gestures through this API has no other way to keep the index honest.
+    pub fn end_drag(
+        &mut self,
+        registry: &mut SurfaceRegistry,
+        storage: &mut dyn GeometryStorage,
+    ) -> MovableAction {
         self.drag.commit(self.geometry);
         self.persist(storage);
+        self.sync_region(registry);
         MovableAction::DragEnded {
             geometry: self.geometry,
         }
     }
 
     /// End a resize and settle its geometry.
-    pub fn end_resize(&mut self, storage: &mut dyn GeometryStorage) -> MovableAction {
+    ///
+    /// Republishes the settled rectangle for the same reason
+    /// [`end_drag`](Self::end_drag) does.
+    pub fn end_resize(
+        &mut self,
+        registry: &mut SurfaceRegistry,
+        storage: &mut dyn GeometryStorage,
+    ) -> MovableAction {
         let handle = self.resize.take().map(|capture| capture.handle);
         self.persist(storage);
+        self.sync_region(registry);
         match handle {
             Some(handle) => MovableAction::ResizeEnded {
                 handle,
@@ -1941,16 +1990,18 @@ impl MovableHost {
     ///
     /// The value goes through the same clamp every other geometry change
     /// does, so a caller cannot place a card somewhere its title bar would
-    /// be lost.
+    /// be lost. The index is republished with the result, clamped or not.
     pub fn set_geometry(
         &mut self,
         geometry: MovableGeometry,
+        registry: &mut SurfaceRegistry,
         storage: &mut dyn GeometryStorage,
     ) -> MovableAction {
         let adjusted = self.apply_geometry(geometry);
         if adjusted {
             self.persist(storage);
         }
+        self.sync_region(registry);
         MovableAction::Reclamped {
             geometry: self.geometry,
             adjusted,
@@ -1970,15 +2021,41 @@ impl MovableHost {
     ) -> MovableAction {
         self.viewport = viewport;
         let adjusted = self.apply_geometry(self.geometry);
-        if self.open {
-            registry.register(self.id.clone(), self.kind, vec![self.card()]);
-        }
+        self.sync_region(registry);
         if adjusted {
             self.persist(storage);
         }
         MovableAction::Reclamped {
             geometry: self.geometry,
             adjusted,
+        }
+    }
+
+    /// Bring the surface index in line with the card's current rectangle.
+    ///
+    /// The registry is an *index* of the card's geometry, never a second
+    /// source of truth: [`SurfaceRegistry::route_pointer`] decides what the
+    /// card owns from the rectangle it was last handed. So every geometry
+    /// change this host makes has to end here, or the card goes on owning
+    /// the ground it moved off — and stays a stranger on the ground it now
+    /// occupies. That drift is what `defect_01` … `defect_03` pin.
+    ///
+    /// Re-registering is the idiom this module already uses on the way in
+    /// ([`open`](Self::open)), and it is safe to repeat:
+    /// [`SurfaceRegistry::register`] replaces the regions but **keeps the
+    /// band position**, so republishing can never reorder the stack the user
+    /// arranged.
+    ///
+    /// A drag that `Escape` rolls back needs no call here, and cannot get
+    /// one: the frames of a drag never publish, so while a drag is open the
+    /// index still holds the very rectangle the card is handing back.
+    ///
+    /// A closed card is deliberately left out of the index. `close`
+    /// unregistered it, and a settle that arrives afterwards must not
+    /// resurrect it (`defect_11`).
+    fn sync_region(&self, registry: &mut SurfaceRegistry) {
+        if self.open {
+            registry.register(self.id.clone(), self.kind, vec![self.card()]);
         }
     }
 
@@ -2205,6 +2282,12 @@ impl MovableHost {
     /// **Must not mutate the registry** — the caller is normally
     /// [`SurfaceRegistry::escape`], which indexes the surface list and
     /// removes the entry it was told closed.
+    ///
+    /// The revert itself needs no index repair, which is what makes that
+    /// restriction survivable: a drag's frames never publish their
+    /// rectangle, so the registry still holds the very snapshot this method
+    /// hands back, and the index and the card agree the moment the revert is
+    /// done.
     pub fn unwind_answer(
         &mut self,
         focus: &mut FocusState,
@@ -2268,9 +2351,17 @@ impl MovableHost {
         let outcome = self.escape_via(registry, focus, storage);
 
         if outcome.consumed_by() == Some(&self.id) {
-            return MovableResponse::new(MovableAction::Closed {
-                geometry: self.geometry,
-            });
+            // The card answered for itself. A dismiss closes it; an unwind only
+            // rolls the in-flight gesture back and leaves the card open, so the
+            // two answers must not collapse into one another. Reporting `Closed`
+            // for an unwind tells the host to tear down a card the user can
+            // still see and keep using.
+            if outcome.dismissed() {
+                return MovableResponse::new(MovableAction::Closed {
+                    geometry: self.geometry,
+                });
+            }
+            return MovableResponse::no_op(MovableNoOp::GestureCancelled);
         }
         // Nothing above the card can take the key *on the card's behalf*: the
         // closure [`Self::escape_via`] installs answers every other surface
@@ -2330,9 +2421,14 @@ impl MovableHost {
 
         self.viewport = viewport;
         let adjusted = self.apply_geometry(self.geometry);
-        registry.register(self.id.clone(), self.kind, vec![self.card()]);
-        focus.register_group(self.group.clone(), self.controls.clone());
+        // The flag goes up *before* the publish, because `sync_region`
+        // declines to index a closed card and this card is opening now.
+        // Nothing between the two reads `open`, so this is a naming choice
+        // rather than a behaviour change — and it keeps `sync_region` the
+        // only place the host writes its rectangle into the index.
         self.open = true;
+        self.sync_region(registry);
+        focus.register_group(self.group.clone(), self.controls.clone());
         let follow = self.refresh_follow();
         if adjusted {
             self.persist(storage);

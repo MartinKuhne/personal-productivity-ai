@@ -381,16 +381,15 @@ impl AppOrchestrator {
                     );
                 }
                 self.config = new_config;
-                self.tool_context.rcu(|bundle| {
-                    let new_bundle = (**bundle).clone();
-                    // Just mutating registry to match, wait, set_group_enabled takes agent config
-                    // Let's pass the new config converted
-                    let mut agent_cfg = self.config.to_agent_config();
-                    new_bundle
-                        .registry
-                        .set_group_enabled(&mut agent_cfg, &id, enabled);
-                    new_bundle
-                });
+                // The registry stores no enabled state of its own: `groups()`,
+                // `group()` and `get_schema()` all derive it from the
+                // `AgentConfig` they are handed (`group_enabled`). The live
+                // carrier of that projection is the agent session's config
+                // provider, so swapping it in is what makes the toggle take
+                // effect on the next turn — the same propagation
+                // `SelectChatModel` performs. Mutating a throwaway copy of the
+                // projection inside `tool_context.rcu` changed nothing.
+                self.agent.set_agent_config(self.config.to_agent_config());
             }
             UserCommand::ClearToolGroupError(id) => {
                 self.tool_context.rcu(|bundle| {

@@ -32,6 +32,10 @@
 //! 9. **Lifecycle** — open, close, reopen, roster rebuild.
 //! 10. **The frame** — determinism, and the router agreeing with the model
 //!     through the shared harness.
+//! 11. **The surface index follows the card** — the `defect_` regressions:
+//!     every gesture that moves the card must republish its rectangle, so
+//!     the index never hands the card ground it has left or denies it ground
+//!     it now owns.
 //!
 //! # Why sweeps rather than a handful of points
 //!
@@ -550,7 +554,9 @@ fn test_a_saved_geometry_is_still_clamped_on_the_way_in() {
 fn test_a_restart_through_the_sink_restores_where_the_user_left_the_card() {
     let mut scenario = Scenario::open("logs");
     scenario.host.drag_by(vec(123.0, 45.0));
-    scenario.host.end_drag(&mut scenario.storage);
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
     let settled = scenario.host.geometry();
 
     let mut focus = FocusState::new();
@@ -583,7 +589,9 @@ fn test_persistence_happens_at_settled_geometry_and_not_during_the_drag() {
     );
 
     scenario.host.drag_by(vec(50.0, 0.0));
-    scenario.host.end_drag(&mut scenario.storage);
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
     assert_eq!(
         scenario.saved(),
         Some(scenario.host.geometry()),
@@ -623,7 +631,7 @@ fn test_the_noop_sink_absorbs_every_write_and_reads_nothing_back() {
         &mut storage,
     );
     host.drag_by(vec(40.0, 40.0));
-    host.end_drag(&mut storage);
+    host.end_drag(&mut registry, &mut storage);
     host.persist(&mut storage);
     host.close(&mut focus, &mut registry, &mut storage);
 
@@ -780,7 +788,9 @@ fn test_a_press_on_the_grip_glyph_or_the_title_text_still_drags() {
             matches!(response.action, MovableAction::DragStarted { .. }),
             "a press on {target:?} inside the draggable title bar must drag"
         );
-        scenario.host.end_drag(&mut scenario.storage);
+        scenario
+            .host
+            .end_drag(&mut scenario.registry, &mut scenario.storage);
     }
 }
 
@@ -1017,7 +1027,9 @@ fn test_the_cursor_follows_the_drag_state() {
     assert_eq!(scenario.host.cursor_at(title), mouse::Interaction::Grabbing);
     assert_eq!(scenario.host.cursor(), mouse::Interaction::Grabbing);
 
-    scenario.host.end_drag(&mut scenario.storage);
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
     assert_eq!(scenario.host.cursor(), mouse::Interaction::None);
     assert_eq!(scenario.host.cursor_at(title), mouse::Interaction::Grab);
 }
@@ -1333,7 +1345,9 @@ fn test_a_resize_release_persists_the_settled_size() {
 fn test_end_resize_without_an_active_resize_is_idle() {
     let mut scenario = Scenario::at(200.0, 200.0);
     assert_eq!(
-        scenario.host.end_resize(&mut scenario.storage),
+        scenario
+            .host
+            .end_resize(&mut scenario.registry, &mut scenario.storage),
         MovableAction::NoOp(MovableNoOp::Idle)
     );
 }
@@ -1342,9 +1356,11 @@ fn test_end_resize_without_an_active_resize_is_idle() {
 fn test_a_programmatic_geometry_is_clamped_and_reports_whether_it_moved() {
     let mut scenario = Scenario::at(200.0, 200.0);
 
-    let legal = scenario
-        .host
-        .set_geometry(geo(300.0, 300.0, 680.0, 440.0), &mut scenario.storage);
+    let legal = scenario.host.set_geometry(
+        geo(300.0, 300.0, 680.0, 440.0),
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
     assert_eq!(
         legal,
         MovableAction::Reclamped {
@@ -1355,6 +1371,7 @@ fn test_a_programmatic_geometry_is_clamped_and_reports_whether_it_moved() {
 
     let illegal = scenario.host.set_geometry(
         geo(99_999.0, -99_999.0, 680.0, 440.0),
+        &mut scenario.registry,
         &mut scenario.storage,
     );
     match illegal {
@@ -1420,6 +1437,7 @@ fn test_no_requested_geometry_can_produce_an_unreachable_card() {
                     let mut scenario = Scenario::open_in("logs", view, None);
                     scenario.host.set_geometry(
                         geo(view.x + dx, view.y + dy, size.width, size.height),
+                        &mut scenario.registry,
                         &mut scenario.storage,
                     );
                     assert!(
@@ -1784,7 +1802,9 @@ fn test_promotion_moves_no_focus_and_changes_no_geometry() {
         pt(400.0, 216.0),
         SurfaceTarget::TitleBar,
     );
-    scenario.host.end_drag(&mut scenario.storage);
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
 
     assert_eq!(scenario.focus.current(), Some(&fid("ws.editor")));
     assert_eq!(
@@ -2354,6 +2374,64 @@ fn test_escape_during_a_drag_restores_the_grab_geometry_and_keeps_the_card_open(
         scenario.saved(),
         saved_before,
         "a revert persists nothing — the sink already holds this geometry"
+    );
+}
+
+/// **Defect, fixed.** `unwind_answer` answers `Unwound` for a cancelled drag and
+/// the registry reports that as consumed with `dismissed: false`.
+/// `escape_outcome` treated *any* consumption by this card as a close, so
+/// `on_key(Escape)` during a drag reported `MovableAction::Closed` while the
+/// card stayed open — the host was told to tear down a card the user could still
+/// see and keep using. The tests above prove the revert through `unwind_answer`
+/// directly; this one drives the real key entry point, which nothing covered.
+#[test]
+fn defect_12_escape_during_a_drag_reports_the_cancel_not_a_close() {
+    let mut scenario = Scenario::at(120.0, 90.0);
+    scenario.focus_card();
+    let grabbed = scenario.host.geometry();
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(200.0, 100.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(400.0, 300.0),
+        SurfaceTarget::TitleBar,
+    );
+    assert_ne!(
+        scenario.host.geometry(),
+        grabbed,
+        "precondition: the drag must actually have moved the card"
+    );
+
+    let response = scenario.host.on_key(
+        KeyClass::Escape,
+        &mut scenario.focus,
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
+
+    assert!(
+        matches!(
+            response.action,
+            MovableAction::NoOp(MovableNoOp::GestureCancelled)
+        ),
+        "the key cancelled the gesture, so the response must say so"
+    );
+    assert!(
+        !matches!(response.action, MovableAction::Closed { .. }),
+        "a cancelled drag must never be reported as a close"
+    );
+    assert!(
+        scenario.host.is_open(),
+        "the card is still open, so a `Closed` response would have been a lie"
+    );
+    assert_eq!(
+        scenario.host.geometry(),
+        grabbed,
+        "and the card sits back at the geometry it was grabbed at"
     );
 }
 
@@ -3020,4 +3098,537 @@ fn test_a_closed_response_is_neither_drag_nor_resize() {
     assert!(!response.is_drag());
     assert!(!response.is_resize());
     assert!(!response.stays_open());
+}
+
+// ---------------------------------------------------------------------------
+// 11. DEFECT — the surface index follows the card
+// ---------------------------------------------------------------------------
+
+/// The rectangle the surface index believes the card occupies.
+///
+/// The index is a *derived* index of the host's geometry, not a second
+/// source of truth, so after any gesture that moves the card this must
+/// equal `host.card()`. Every `defect_` case below is a different way of
+/// proving that equality holds — or, before the fix, of proving it did not.
+fn indexed_rect(registry: &SurfaceRegistry, name: &str) -> Rectangle {
+    let surface = registry
+        .get(&sid(name))
+        .unwrap_or_else(|| panic!("the card {name:?} must still be registered"));
+
+    assert_eq!(
+        surface.regions().len(),
+        1,
+        "[{name}] a movable card publishes exactly one region, got {:?}",
+        surface.regions()
+    );
+    surface.regions()[0]
+}
+
+/// `UIF-MOV-003` says the registry decides what a card owns, so a card that
+/// moved without republishing its rectangle owns the ground it left and is a
+/// stranger where it landed. This is the drag form of that defect: the index
+/// is checked against the host, and the point that proves the drift is the
+/// centre of the card's *new* home — a point the stale index routes past the
+/// card to the workspace.
+#[test]
+fn defect_01_a_dragged_card_owns_the_ground_it_moved_to() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    let before = scenario.host.card();
+    assert_eq!(
+        before,
+        rect(200.0, 200.0, 680.0, 440.0),
+        "[defect_01] precondition: the card opens where the fixture put it"
+    );
+
+    scenario.drag_gesture(pt(400.0, 216.0), &[pt(700.0, 516.0)]);
+    let after = scenario.host.card();
+
+    assert_eq!(
+        after,
+        rect(500.0, 500.0, 680.0, 440.0),
+        "[defect_01] the drag must actually have moved the card, or the \
+         index claim below proves nothing"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        after,
+        "[defect_01] after a drag the surface index must hold the card's NEW \
+         rectangle; it still holds the pre-drag {before:?}"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(centre_of(after)).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_01] the centre of the ground the card moved onto must route \
+         to the card, not fall through to the workspace"
+    );
+}
+
+/// The other half of the same defect, and the half the user feels: the ground
+/// the card vacated keeps resolving to it, so a surface that was always
+/// underneath stays unreachable there. A workspace-band pane is placed under
+/// the card to make "unreachable" observable rather than rhetorical.
+#[test]
+fn defect_02_the_ground_a_card_vacated_stops_belonging_to_it() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    scenario.registry.register(
+        sid("pane"),
+        SurfaceKind::Workspace,
+        vec![rect(0.0, 0.0, 1600.0, 1000.0)],
+    );
+    let vacated = centre_of(scenario.host.card());
+
+    // Underneath the card, the pane cannot be reached — that is correct, and
+    // the precondition the rest of the case is measured against.
+    assert_eq!(
+        scenario.registry.route_pointer(vacated).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_02] precondition: before the drag the card covers this \
+         point and outranks the pane"
+    );
+
+    scenario.drag_gesture(pt(400.0, 216.0), &[pt(700.0, 516.0)]);
+
+    assert_eq!(
+        scenario.registry.route_pointer(vacated).target(),
+        &PointerTarget::Surface(sid("pane")),
+        "[defect_02] the card has left this point: the pane beneath it must \
+         become reachable again instead of being shadowed by a card that is \
+         no longer there"
+    );
+}
+
+/// The resize form of the defect: growing the card onto new ground never
+/// handed that ground to the card, so the newly covered area kept routing
+/// past it.
+#[test]
+fn defect_03_a_resized_card_owns_the_ground_it_grew_onto() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(872.0, 632.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(1072.0, 832.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    let released = scenario.pointer(
+        PointerPhase::Released,
+        pt(1072.0, 832.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    assert!(
+        matches!(released.action, MovableAction::ResizeEnded { .. }),
+        "[defect_03] the release must settle the resize or the index claim \
+         below proves nothing"
+    );
+
+    let after = scenario.host.card();
+    assert_eq!(
+        after,
+        rect(200.0, 200.0, 880.0, 640.0),
+        "[defect_03] the resize must actually have grown the card"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        after,
+        "[defect_03] after a resize the surface index must hold the card's \
+         NEW rectangle"
+    );
+
+    let newly_covered = pt(1000.0, 780.0);
+    assert!(
+        scenario.host.is_inside_card(newly_covered),
+        "[defect_03] precondition: {newly_covered:?} must be inside the \
+         grown card"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(newly_covered).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_03] {newly_covered:?} is ground the card grew onto and \
+         must belong to it"
+    );
+}
+
+/// Corner case: the pointer is released far outside the viewport. The card
+/// itself is clamped back inside, and the index must publish the clamped
+/// rectangle — not the off-screen position the pointer ended at, and not the
+/// position the drag started from.
+#[test]
+fn defect_04_a_drag_released_outside_the_viewport_still_settles_the_index() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    let before = scenario.host.card();
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(400.0, 216.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(1200.0, 900.0),
+        SurfaceTarget::TitleBar,
+    );
+    let released = scenario.pointer(
+        PointerPhase::Released,
+        pt(2400.0, 1800.0),
+        SurfaceTarget::Outside,
+    );
+    assert!(
+        matches!(released.action, MovableAction::DragEnded { .. }),
+        "[defect_04] a release outside the viewport still ends the drag: \
+         pointer capture keeps the gesture"
+    );
+
+    let after = scenario.host.card();
+    assert!(
+        scenario.host.is_reachable(),
+        "[defect_04] the clamp must have kept the card reachable"
+    );
+    assert_ne!(
+        after, before,
+        "[defect_04] the card must have moved or the case proves nothing"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        after,
+        "[defect_04] the index must publish the clamped rectangle the card \
+         settled at"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(centre_of(after)).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_04] the card must be grabbable where it actually is"
+    );
+}
+
+/// Corner case: press and release without moving. Nothing moved, so the index
+/// must be byte-for-byte what it was — the fix must not turn a no-op release
+/// into a re-publish that changes anything.
+#[test]
+fn defect_05_a_zero_movement_drag_leaves_the_index_exactly_where_it_was() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    let untouched = scenario.host.card();
+    scenario.registry.register(
+        sid("pane"),
+        SurfaceKind::Workspace,
+        vec![rect(0.0, 0.0, 1600.0, 1000.0)],
+    );
+
+    scenario.drag_gesture(pt(400.0, 216.0), &[]);
+
+    assert_eq!(
+        scenario.host.card(),
+        untouched,
+        "[defect_05] a drag with no move must not move the card"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        untouched,
+        "[defect_05] the index must still hold the same rectangle"
+    );
+    assert_eq!(
+        scenario
+            .registry
+            .route_pointer(centre_of(untouched))
+            .target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_05] the card must still own its own centre"
+    );
+}
+
+/// Corner case: a resize driven past the size floor. The card stops at the
+/// policy minimum, and the index must publish that minimum rectangle rather
+/// than the opening one.
+#[test]
+fn defect_06_a_resize_held_at_the_size_floor_publishes_the_minimum_rect() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(872.0, 632.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(100.0, 100.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    scenario.pointer(
+        PointerPhase::Released,
+        pt(100.0, 100.0),
+        SurfaceTarget::Resize(ResizeHandle::BottomRight),
+    );
+    let settled = scenario.host.card();
+
+    assert_eq!(
+        settled.size(),
+        Size::new(CARD_MIN_WIDTH, CARD_MIN_HEIGHT),
+        "[defect_06] the card must stop exactly at the policy floor"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        settled,
+        "[defect_06] the index must publish the floored rectangle, not the \
+         680x440 the card opened with"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(centre_of(settled)).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_06] the card must own its own floored centre"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(pt(860.0, 620.0)).target(),
+        &PointerTarget::Workspace,
+        "[defect_06] the ground the card shrank away from must stop being \
+         the card's; the stale 680x440 index still claims it"
+    );
+}
+
+/// Corner case: a card dragged on top of a second card. The card that moved
+/// must end up owning the overlap (the press promoted it), the card beneath
+/// must stay reachable wherever it is still uncovered, and the ground the
+/// moving card vacated must belong to neither.
+#[test]
+fn defect_07_a_card_dragged_onto_another_card_leaves_the_one_beneath_reachable() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    scenario.registry.register(
+        sid("debug"),
+        SurfaceKind::MovableCard,
+        vec![rect(700.0, 450.0, 400.0, 300.0)],
+    );
+    scenario.registry.register(
+        sid("pane"),
+        SurfaceKind::Workspace,
+        vec![rect(0.0, 0.0, 1600.0, 1000.0)],
+    );
+
+    scenario.drag_gesture(pt(400.0, 216.0), &[pt(760.0, 560.0)]);
+    let moved = scenario.host.card();
+    assert_eq!(
+        moved,
+        rect(560.0, 544.0, 680.0, 440.0),
+        "[defect_07] the card must land overlapping the second card"
+    );
+
+    // The overlap: the press promoted `logs`, so it is the topmost Band 1
+    // surface over this point and must answer for it.
+    let overlap = pt(900.0, 600.0);
+    assert!(
+        scenario.host.is_inside_card(overlap) && rect(700.0, 450.0, 400.0, 300.0).contains(overlap),
+        "[defect_07] precondition: {overlap:?} must sit in both cards"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(overlap).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_07] the card that moved on top must own the overlap"
+    );
+
+    // The card beneath, where the moved card does not cover it.
+    let uncovered = pt(750.0, 470.0);
+    assert!(
+        !scenario.host.is_inside_card(uncovered),
+        "[defect_07] precondition: {uncovered:?} must be clear of the \
+         moved card"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(uncovered).target(),
+        &PointerTarget::Surface(sid("debug")),
+        "[defect_07] the card beneath must still be reachable where it is \
+         not covered"
+    );
+
+    // The ground the moved card vacated belongs to neither card.
+    assert_eq!(
+        scenario.registry.route_pointer(pt(300.0, 300.0)).target(),
+        &PointerTarget::Surface(sid("pane")),
+        "[defect_07] the vacated ground must fall through to the pane, not \
+         stay claimed by the card that left it"
+    );
+}
+
+/// Corner case: the drag is rolled back with `Escape` instead of committed.
+/// The card returns to the rectangle it was grabbed at, and the index must
+/// agree with the restored card. That agreement is only possible because a
+/// drag's frames never published a rectangle in the first place, so there is
+/// nothing for the rollback to undo in the index.
+#[test]
+fn defect_08_a_cancelled_drag_leaves_the_index_with_the_restored_card() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    let grabbed = scenario.host.card();
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(400.0, 216.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(700.0, 516.0),
+        SurfaceTarget::TitleBar,
+    );
+    assert_ne!(
+        scenario.host.card(),
+        grabbed,
+        "[defect_08] the drag must have moved the card before it is undone"
+    );
+
+    let outcome = scenario.host.escape_via(
+        &mut scenario.registry,
+        &mut scenario.focus,
+        &mut scenario.storage,
+    );
+    assert!(outcome.is_consumed(), "[defect_08] the key was spent");
+    assert!(
+        !outcome.dismissed(),
+        "[defect_08] the card handed the rectangle back, it did not close"
+    );
+    assert_eq!(
+        scenario.host.card(),
+        grabbed,
+        "[defect_08] the card is back where it was grabbed"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        grabbed,
+        "[defect_08] after a rollback the index must hold the restored \
+         rectangle"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(centre_of(grabbed)).target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_08] the restored card must own its own centre again"
+    );
+}
+
+/// The same rollback reached through the chain's answer directly, which is
+/// how the escape walk calls it. Called on its own — with no caller to repair
+/// anything — it must leave the index still agreeing with the card, and must
+/// neither add a region nor drop the card's own.
+#[test]
+fn defect_09_unwinding_the_answer_alone_never_touches_the_registry() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    let grabbed = scenario.host.card();
+
+    scenario.pointer(
+        PointerPhase::Pressed,
+        pt(400.0, 216.0),
+        SurfaceTarget::TitleBar,
+    );
+    scenario.pointer(
+        PointerPhase::Moved,
+        pt(700.0, 516.0),
+        SurfaceTarget::TitleBar,
+    );
+
+    let answer = scenario
+        .host
+        .unwind_answer(&mut scenario.focus, &mut scenario.storage);
+
+    assert_eq!(
+        answer,
+        UnwindAnswer::Unwound,
+        "[defect_09] an open drag answers the unwind with a revert"
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        scenario.host.card(),
+        "[defect_09] whatever the answer does to the card, the index and \
+         the card must still agree"
+    );
+    assert_eq!(
+        scenario.host.card(),
+        grabbed,
+        "[defect_09] and the card is where it was grabbed"
+    );
+}
+
+/// The direct gesture API — the entry points a host that drives its own
+/// pointer events uses instead of [`on_pointer`](MovableHost::on_pointer) —
+/// owes the same invariant: every settle republishes the rectangle.
+#[test]
+fn defect_10_a_settled_gesture_publishes_through_the_direct_api() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+
+    scenario.host.drag_by(vec(150.0, 90.0));
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        scenario.host.card(),
+        "[defect_10] `end_drag` must publish the rectangle it settled on"
+    );
+
+    scenario
+        .host
+        .resize_by(ResizeHandle::BottomRight, vec(60.0, 40.0));
+    scenario
+        .host
+        .end_resize(&mut scenario.registry, &mut scenario.storage);
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        scenario.host.card(),
+        "[defect_10] `end_resize` must publish the rectangle it settled on"
+    );
+
+    scenario.host.set_geometry(
+        geo(60.0, 80.0, 680.0, 440.0),
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
+    assert_eq!(
+        indexed_rect(&scenario.registry, "logs"),
+        scenario.host.card(),
+        "[defect_10] `set_geometry` must publish the rectangle it moved to"
+    );
+    assert_eq!(
+        scenario
+            .registry
+            .route_pointer(centre_of(scenario.host.card()))
+            .target(),
+        &PointerTarget::Surface(sid("logs")),
+        "[defect_10] and the card must be routable where it was placed"
+    );
+}
+
+/// Failure mode for the publish guard: a card that is no longer open must
+/// never be put back into the index by a stray settle. `close` unregisters,
+/// and every later geometry call has to respect that.
+#[test]
+fn defect_11_a_closed_card_is_never_published_back_into_the_index() {
+    let mut scenario = Scenario::at(200.0, 200.0);
+    scenario.host.close(
+        &mut scenario.focus,
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
+    assert!(
+        !scenario.registry.contains(&sid("logs")),
+        "[defect_11] precondition: closing unregisters the card"
+    );
+
+    scenario.host.set_geometry(
+        geo(300.0, 300.0, 680.0, 440.0),
+        &mut scenario.registry,
+        &mut scenario.storage,
+    );
+    scenario
+        .host
+        .end_drag(&mut scenario.registry, &mut scenario.storage);
+    scenario
+        .host
+        .end_resize(&mut scenario.registry, &mut scenario.storage);
+
+    assert!(
+        !scenario.registry.contains(&sid("logs")),
+        "[defect_11] a settled gesture on a closed card must not resurrect \
+         its surface"
+    );
+    assert_eq!(
+        scenario.registry.route_pointer(pt(400.0, 400.0)).target(),
+        &PointerTarget::Workspace,
+        "[defect_11] the closed card's old ground must be the workspace's"
+    );
 }

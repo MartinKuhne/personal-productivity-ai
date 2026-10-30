@@ -2,6 +2,7 @@
 //! Unit tests live in the sibling `orchestrator_tests.rs` sidecar.
 
 use crate::agent::AgentSession;
+use crate::agent::events::ToolSideEffect;
 use crate::background::logs::SharedBackgroundLogs;
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::background::{UserFileOperation, UserFileOperationResult, UserFileOperationWorker};
@@ -28,6 +29,10 @@ use std::sync::{Arc, Mutex};
 /// behind the agent's broadcast bus and `BusReader` reports `Lagged(n)`
 /// (research.md §1, quickstart scenario 5).
 pub const LAG_TRUNCATION_MARKER: &str = "[output truncated — UI fell behind the agent]";
+
+/// Error code for the log line emitted when a tool's file side effect cannot be
+/// re-published as `FsEvent::FileModified` ([NFR-004]).
+const SIDE_EFFECT_PUBLISH_ERROR_CODE: &str = "FILE-4013";
 
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
@@ -404,9 +409,12 @@ impl AppOrchestrator {
     /// `AgentState` (lifecycle: `running`, `status`, `history`,
     /// `token_usage`, `debug_entries`) and builds the `AgentTranscript`
     /// view model from `ContentDelta`/`Thinking`/`ToolCallStarted`/
-    /// `ToolResult` deltas. File-side effects flow through the file-change
-    /// bus, and tag extraction is delegated to the background tag manager.
-    /// Handles `Lagged(n)` by emitting a visible
+    /// `ToolResult` deltas. A `ToolSideEffect` is re-issued as
+    /// `FsEvent::FileModified` on the background channel once the drain has
+    /// finished, so the UI's tag and workspace index catch up ([FR-007]); the
+    /// observer that produced it also told the file-change bus about the path,
+    /// and authoritative tag extraction stays delegated to the background tag
+    /// manager. Handles `Lagged(n)` by emitting a visible
     /// truncation marker into the transcript.
     #[tracing::instrument(skip_all, name = "orchestrator.drain_agent_event_bus", level = "debug")]
     pub fn drain_agent_event_bus(&mut self) {
@@ -416,6 +424,10 @@ impl AppOrchestrator {
         // Collect events into a buffer so we can release the reader borrow
         // before calling `self.handle_fs_event` (which needs `&mut self`).
         let mut next_prompt: Option<String> = None;
+        // Tool side effects are buffered for the same reason: publishing them
+        // needs `&self`, which the `agent_event_reader` borrow forbids until the
+        // drain has finished ([FR-007]).
+        let mut side_effects: Vec<ToolSideEffect> = Vec::new();
         loop {
             match reader.try_recv_exposing_lag() {
                 Ok(event) => {
@@ -455,7 +467,9 @@ impl AppOrchestrator {
                         SeamAgentEvent::DebugEntry { entry, .. } => {
                             self.agent.push_debug_entry(entry.clone());
                         }
-                        SeamAgentEvent::ToolSideEffect { .. } => {}
+                        SeamAgentEvent::ToolSideEffect { effect, .. } => {
+                            side_effects.push(effect.clone());
+                        }
                         // Transcript-building events:
                         SeamAgentEvent::ContentDelta { .. }
                         | SeamAgentEvent::Thinking { .. }
@@ -487,8 +501,44 @@ impl AppOrchestrator {
                 }
             }
         }
+        for effect in &side_effects {
+            self.publish_tool_side_effect(effect);
+        }
         if let Some(prompt) = next_prompt {
             self.start_agent_session(prompt);
+        }
+    }
+
+    /// Re-issue one tool file side effect as `FsEvent::FileModified` ([FR-007]).
+    ///
+    /// The observer that produced the event already told the *file* bus about the
+    /// path, so the background tag manager will deliver authoritative tags a
+    /// moment later. This closes the other half of the documented contract: the
+    /// UI's own tag and workspace index catch up through the same handler that
+    /// serves watcher changes, instead of the event being dropped on the floor.
+    ///
+    /// `FileCreated` carries the tags the tool read from the new file's front
+    /// matter. `FileChanged` carries none, and [`Tags::add_tags`] *replaces* the
+    /// entry a path already has — so the tags currently known to the index are
+    /// carried forward rather than wiped by an empty list.
+    fn publish_tool_side_effect(&self, effect: &ToolSideEffect) {
+        let (path, tags) = match effect {
+            ToolSideEffect::FileCreated { path, tags } => (path.clone(), tags.clone()),
+            ToolSideEffect::FileChanged { path } => (
+                path.clone(),
+                self.tags.file_tags().get(path).cloned().unwrap_or_default(),
+            ),
+        };
+
+        if let Err(error) = self
+            .tx
+            .send(BackgroundEvent::Fs(FsEvent::FileModified { path, tags }))
+        {
+            self.log_file_operation_error(
+                SIDE_EFFECT_PUBLISH_ERROR_CODE,
+                "Failed to publish tool file side effect as a file-modified event",
+                &error.to_string(),
+            );
         }
     }
 

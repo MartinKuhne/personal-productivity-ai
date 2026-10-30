@@ -897,6 +897,15 @@ pub type OnCommit<'a, Message> = Box<dyn Fn(Commit<DateSelection>) -> Message + 
 /// Callback invoked when interaction is cancelled (§3.10, `UIF-ATOM-010`).
 pub type OnCancel<'a, Message> = Box<dyn Fn(Cancel<DateSelection>) -> Message + 'a>;
 
+/// The focus-registration name a [`DatePicker`] claims when its host does not
+/// name it.
+///
+/// Stable by construction, so the router keeps addressing the same control
+/// across rebuilds. A host with more than one picker on screen must give each
+/// one its own name through [`DatePicker::with_id`] — two controls sharing an
+/// id cannot be told apart by an id-addressed focus request.
+const DEFAULT_DATE_PICKER_ID: &str = "hoarfrost.date_picker";
+
 /// Interactive DatePicker & Calendar widget (§3.10, `UIF-ATOM-010`).
 pub struct DatePicker<'a, Message> {
     widget_id: widget::Id,
@@ -913,10 +922,14 @@ pub struct DatePicker<'a, Message> {
 
 impl<'a, Message> DatePicker<'a, Message> {
     /// Construct a new DatePicker from a model (§3.10, `UIF-ATOM-010`).
+    ///
+    /// The trigger registers with the focus router under
+    /// [`DEFAULT_DATE_PICKER_ID`]; call [`with_id`](Self::with_id) to name it
+    /// when more than one picker shares a screen.
     #[must_use]
     pub fn new(model: DatePickerModel) -> Self {
         Self {
-            widget_id: widget::Id::unique(),
+            widget_id: widget::Id::new(DEFAULT_DATE_PICKER_ID),
             model,
             palette: Palette::dark(),
             today: None,
@@ -927,6 +940,24 @@ impl<'a, Message> DatePicker<'a, Message> {
             on_commit: None,
             on_cancel: None,
         }
+    }
+
+    /// Name the control the focus router addresses (§3.10, `UIF-ATOM-010`).
+    ///
+    /// The id is fixed for the lifetime of the built widget, so a host that
+    /// passes the same name on every rebuild keeps addressing the same trigger
+    /// — which is what makes `focus(id)` and `is_focused(id)` mean anything
+    /// once the tree has been rebuilt underneath them.
+    #[must_use]
+    pub fn with_id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.widget_id = id.into();
+        self
+    }
+
+    /// The id this picker registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &widget::Id {
+        &self.widget_id
     }
 
     /// Set today's date for rendering the accent cue bar (§3.10, `UIF-PRIN-005`).

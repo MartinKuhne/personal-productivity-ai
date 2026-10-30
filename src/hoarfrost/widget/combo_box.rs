@@ -986,12 +986,10 @@ impl<Message: Clone> overlay::Overlay<Message, iced::Theme, iced::Renderer>
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
-                if is_over {
-                    if let Some(flag) = &mut self.is_open_flag {
-                        **flag = false;
-                        shell.request_redraw();
-                    }
-                } else {
+                if !is_over {
+                    // A press outside the card belongs to the card alone: it
+                    // dismisses, and it is captured so whatever sits underneath
+                    // does not act on the same click.
                     if let Some(flag) = &mut self.is_open_flag {
                         **flag = false;
                         shell.request_redraw();
@@ -1000,6 +998,31 @@ impl<Message: Clone> overlay::Overlay<Message, iced::Theme, iced::Renderer>
                         shell.publish(on_dismiss.clone());
                     }
                     shell.capture_event();
+                }
+                // A press *inside* the card deliberately closes nothing. An
+                // iced button fires on release, so a card that fell on the
+                // press was gone before the release arrived and the row's own
+                // message was never published — the pick was swallowed. Closing
+                // is deferred to the release arm below.
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            | Event::Touch(touch::Event::FingerLifted { .. }) => {
+                // The content has already had this release, and a button inside
+                // the card consumes one only when it was pressed on that very
+                // row — so a captured release is a row that completed its click,
+                // and the card has served its purpose. Whether the content took
+                // the event is the signal, not whether it published a message:
+                // the message buffer is shared across the events of a frame,
+                // while the capture flag belongs to this event's `Shell` alone.
+                // A release nothing consumed — the card's padding, a gap between
+                // rows, a scrollbar gesture — leaves the card open, which is what
+                // a dropdown the user is still working through needs.
+                if is_over
+                    && shell.is_event_captured()
+                    && let Some(flag) = &mut self.is_open_flag
+                {
+                    **flag = false;
+                    shell.request_redraw();
                 }
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
@@ -1162,6 +1185,14 @@ where
         tree::State::new(SelectState::default())
     }
 
+    /// One slot, reserved for the flyout card.
+    ///
+    /// The card cannot be built here — it is assembled from `self.options`
+    /// inside [`Select::overlay`], which is also where the slot is filled with
+    /// a tree built from the real card. Handing back no slot at all would make
+    /// `overlay` index a child that does not exist; handing back a tree built
+    /// from *nothing* would let the card's `scrollable` index a child of its
+    /// own that does not exist.
     fn children(&self) -> Vec<Tree> {
         vec![Tree::empty()]
     }
@@ -1476,11 +1507,33 @@ where
                 text_color: Some(palette.text_primary),
             });
 
+        let card = Element::new(flyout);
+
+        // The card's tree has to be built *from the card*.
+        //
+        // `Select::children()` can only hand back `Tree::empty()`, because the
+        // card is assembled here from `self.options` and does not exist when
+        // iced asks the widget for its children. An empty tree has no children
+        // at all, and the card's `scrollable` takes `tree.children[0]` as its
+        // content's tree — so laying the mounted card out panicked with
+        // "index out of bounds" before a single row could be read, pressed, or
+        // dismissed. `UserInterface::operate` lays the overlay out on the
+        // first read-back, which is why even measuring an open `Select` died.
+        //
+        // `Tree::diff` recreates the tree when the tag does not match (the
+        // first open, and any open after the option list changed shape) and
+        // reconciles in place when it does, so a scroll position the user set
+        // inside the card survives a rebuild.
+        if tree.children.is_empty() {
+            tree.children.push(Tree::empty());
+        }
+        tree.children[0].diff(&card);
+
         let trigger_bounds = layout.bounds();
         let position = layout.position() + translation;
 
         Some(overlay::Element::new(Box::new(ComboOverlay {
-            content: Element::new(flyout),
+            content: card,
             tree: &mut tree.children[0],
             position,
             trigger_size: trigger_bounds.size(),

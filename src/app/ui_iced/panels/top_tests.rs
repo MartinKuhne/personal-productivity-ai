@@ -267,12 +267,37 @@ fn tag_filter_option_named_all_is_still_a_real_tag_filter() {
 fn chat_model_entry_label_matches_ui_064_format() {
     let model = ChatModelEntry {
         name: "gpt-x".to_string(),
-        cost: 7,
+        cost: Some(7),
     };
     assert_eq!(model.label(), "gpt-x (Cost: 7)");
     assert_eq!(
         model.command(),
         UserCommand::SelectChatModel("gpt-x".to_string())
+    );
+}
+
+/// A model with no configured price must not read as free: the dropdown names
+/// the price `unknown`, while a genuinely free model still shows its real `0`.
+#[test]
+fn chat_model_entry_labels_an_unpriced_model_as_unknown() {
+    let unpriced = ChatModelEntry {
+        name: "gpt-x".to_string(),
+        cost: None,
+    };
+    assert_eq!(
+        unpriced.label(),
+        format!("gpt-x (Cost: {})", strings::COST_LABEL_UNKNOWN),
+        "an unpriced model must not render as `(Cost: 0)`"
+    );
+
+    let free = ChatModelEntry {
+        name: "gpt-x".to_string(),
+        cost: Some(0),
+    };
+    assert_eq!(
+        free.label(),
+        "gpt-x (Cost: 0)",
+        "an explicit price of 0 is a price, not an unknown"
     );
 }
 
@@ -626,8 +651,8 @@ fn view_model_lists_chat_models_sorted_by_name() {
     let vm = view_model_with_models();
     let names: Vec<&str> = vm.chat_models.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, vec!["model-a", "model-b"]);
-    assert_eq!(vm.chat_models[0].cost, 10);
-    assert_eq!(vm.chat_models[1].cost, 20);
+    assert_eq!(vm.chat_models[0].cost, Some(10));
+    assert_eq!(vm.chat_models[1].cost, Some(20));
     assert_eq!(vm.current_chat_model.as_deref(), Some("model-a"));
 }
 

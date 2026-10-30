@@ -1279,6 +1279,14 @@ pub enum BusSource {
 ///   channel and its payload exactly" rule needs; two independently
 ///   delivered events are *two deliveries* and never compare equal, which
 ///   is the correct answer for a dedup check on notifications.
+/// * The batch variants follow their single-event counterpart:
+///   [`InboundMessage::FileChangedBatch`] and
+///   [`InboundMessage::DirectoryChangedBatch`] compare the vectors by value,
+///   [`InboundMessage::AgentBatch`] and [`InboundMessage::BackgroundBatch`]
+///   element-wise by delivery identity (same length, each pair the same
+///   shared instance). Every variant must therefore compare equal to a clone
+///   of itself — an arm that is missing entirely would silently break that
+///   reflexivity.
 #[derive(Debug, Clone)]
 pub enum InboundMessage {
     /// The application configuration has been loaded and published on
@@ -1345,6 +1353,9 @@ impl PartialEq for InboundMessage {
             (Self::DirectoryChanged(a), Self::DirectoryChanged(b)) => a == b,
             (Self::DirectoryChangedBatch(a), Self::DirectoryChangedBatch(b)) => a == b,
             (Self::Agent(a), Self::Agent(b)) => Arc::ptr_eq(a, b),
+            (Self::AgentBatch(a), Self::AgentBatch(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| Arc::ptr_eq(x, y))
+            }
             (Self::Background(a), Self::Background(b)) => Arc::ptr_eq(a, b),
             (Self::BackgroundBatch(a), Self::BackgroundBatch(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| Arc::ptr_eq(x, y))

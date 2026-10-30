@@ -536,9 +536,18 @@ impl TimePickerModel {
     }
 
     /// Set whether the flyout card is open (§3.11).
+    ///
+    /// Opening through this builder captures the pre-open snapshot exactly as
+    /// [`open_flyout`](Self::open_flyout) does, so a card the host declares
+    /// open can still be cancelled: without the snapshot there would be nothing
+    /// for `cancel` to roll back to, and the edit would silently survive the
+    /// Cancel the user just pressed.
     #[must_use]
     pub fn with_open(mut self, open: bool) -> Self {
         self.open = open;
+        if open {
+            self.pre_open_snapshot = Some(self.value);
+        }
         self
     }
 
@@ -688,6 +697,14 @@ pub type OnCommit<'a, Message> = Box<dyn Fn(Commit<CivilTime>) -> Message + 'a>;
 /// Callback closure type for time cancellations.
 pub type OnCancel<'a, Message> = Box<dyn Fn(Cancel<Option<CivilTime>>) -> Message + 'a>;
 
+/// The focus-registration name a [`TimePicker`] claims when its host does not
+/// name it.
+///
+/// Stable by construction, so the router keeps addressing the same control
+/// across rebuilds. A host with more than one picker on screen must give each
+/// one its own name through [`TimePicker::with_id`].
+const DEFAULT_TIME_PICKER_ID: &str = "hoarfrost.time_picker";
+
 /// Interactive segmented TimePicker widget (§3.11, `UIF-ATOM-011`).
 pub struct TimePicker<'a, Message> {
     widget_id: widget::Id,
@@ -701,10 +718,14 @@ pub struct TimePicker<'a, Message> {
 
 impl<'a, Message> TimePicker<'a, Message> {
     /// Construct a new TimePicker from a model (§3.11, `UIF-ATOM-011`).
+    ///
+    /// The trigger registers with the focus router under
+    /// [`DEFAULT_TIME_PICKER_ID`]; call [`with_id`](Self::with_id) to name it
+    /// when more than one picker shares a screen.
     #[must_use]
     pub fn new(model: TimePickerModel) -> Self {
         Self {
-            widget_id: widget::Id::unique(),
+            widget_id: widget::Id::new(DEFAULT_TIME_PICKER_ID),
             model,
             palette: Palette::dark(),
             on_open_change: None,
@@ -712,6 +733,24 @@ impl<'a, Message> TimePicker<'a, Message> {
             on_commit: None,
             on_cancel: None,
         }
+    }
+
+    /// Name the control the focus router addresses (§3.11, `UIF-ATOM-011`).
+    ///
+    /// The id is fixed for the lifetime of the built widget, so a host that
+    /// passes the same name on every rebuild keeps addressing the same trigger
+    /// — which is what makes `focus(id)` and `is_focused(id)` mean anything
+    /// once the tree has been rebuilt underneath them.
+    #[must_use]
+    pub fn with_id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.widget_id = id.into();
+        self
+    }
+
+    /// The id this picker registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &widget::Id {
+        &self.widget_id
     }
 
     /// Set theme color palette (§3.11).

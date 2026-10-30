@@ -157,11 +157,15 @@ pub fn format_models_list(
     for name in sorted_names {
         let model_cfg = &models[name];
         let use_cases = model_cfg.use_case.join(", ");
+        // An unconfigured price is "unknown", never 0: a model with no declared
+        // price must not read as a free one.
+        let cost = match model_cfg.cost {
+            Some(cost) => cost.to_string(),
+            None => crate::ui::strings::COST_LABEL_UNKNOWN.to_string(),
+        };
         output.push_str(&format!(
             "- {} [cost: {}, use_case: {}]\n",
-            name,
-            model_cfg.get_cost(),
-            use_cases
+            name, cost, use_cases
         ));
     }
     if models.is_empty() {

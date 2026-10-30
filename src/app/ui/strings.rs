@@ -372,9 +372,21 @@ pub const NO_CHAT_MODELS_CONFIGURED: &str = "No models configured";
 /// `on_click` event name fired when the user selects a chat model from the menu.
 pub const CHAT_MODEL_SELECTION_EVENT: &str = "chat_model_selection";
 
+/// Placeholder shown where a model's price is not configured (`cost: None`).
+///
+/// A missing price means "unknown", not "free"; printing `0` for it reads as a
+/// model that costs nothing.
+pub const COST_LABEL_UNKNOWN: &str = "unknown";
+
 /// Formats a model entry for the Chat Models dropdown menu.
-pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
-    format!("{} (Cost: {})", name, cost)
+///
+/// A model with no configured price is labelled [`COST_LABEL_UNKNOWN`] rather
+/// than `0`, so an unpriced model never reads as a free one.
+pub fn format_chat_model_menu_label(name: &str, cost: Option<i32>) -> String {
+    match cost {
+        Some(cost) => format!("{name} (Cost: {cost})"),
+        None => format!("{name} (Cost: {COST_LABEL_UNKNOWN})"),
+    }
 }
 
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
@@ -1161,9 +1173,15 @@ mod tests {
         assert_eq!(CHAT_MODEL_SELECTION_EVENT, "chat_model_selection");
         assert_eq!(format_menu_submenu_label(MENU_WINDOWS), "Windows... >");
         assert_eq!(
-            format_chat_model_menu_label("gpt-4o", 15),
+            format_chat_model_menu_label("gpt-4o", Some(15)),
             "gpt-4o (Cost: 15)"
         );
+        assert_eq!(
+            format_chat_model_menu_label("gpt-4o", None),
+            "gpt-4o (Cost: unknown)",
+            "an unconfigured price is unknown, never 0"
+        );
+        assert_eq!(COST_LABEL_UNKNOWN, "unknown");
     }
 
     #[test]

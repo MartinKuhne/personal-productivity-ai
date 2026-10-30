@@ -178,10 +178,26 @@ impl Rgba8 {
     }
 
     /// Parse an [`Rgba8`] from a hex string format (`#RRGGBB`, `#RRGGBBAA`, `RRGGBB`, `RRGGBBAA`) (§3.12).
+    ///
+    /// Anything that is not a run of ASCII hex digits is rejected with `None`,
+    /// never panicked on. Two reasons, both decided before any slicing:
+    ///
+    /// * **Non-ASCII.** The shape is chosen by `str::len()` — a **byte** count —
+    ///   and the channels are then sliced by **byte index**. A six-byte string
+    ///   holding a multi-byte character passes the length test and `&hex[0..2]`
+    ///   cuts through the middle of that character, so `str` slicing panics
+    ///   rather than reporting a bad colour.
+    /// * **Signs.** `u8::from_str_radix` accepts a leading `+`, so `"+A2B3C"`
+    ///   would otherwise parse as a colour even though `+` is not a hex digit.
+    ///
+    /// Surrounding whitespace is trimmed, and one leading `#` is allowed.
     #[must_use]
     pub fn from_hex(s: &str) -> Option<Self> {
         let trimmed = s.trim();
         let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+        if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
         match hex.len() {
             6 => {
                 let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
@@ -836,6 +852,14 @@ fn draw_preview_well<Renderer>(
 // Standalone ColorSwatchButton Widget (§3.12, UIF-ATOM-012)
 // ---------------------------------------------------------------------------
 
+/// The focus-registration name a [`ColorSwatchButton`] claims when its host
+/// does not name it.
+///
+/// Stable by construction, so the router keeps addressing the same control
+/// across rebuilds. A host with more than one swatch button on screen must
+/// give each one its own name through [`ColorSwatchButton::with_id`].
+const DEFAULT_COLOR_SWATCH_BUTTON_ID: &str = "hoarfrost.color_swatch_button";
+
 /// Standalone trigger button displaying a color swatch preview with hex label (§3.12, `UIF-ATOM-012`).
 pub struct ColorSwatchButton<'a, Message> {
     widget_id: iced::advanced::widget::Id,
@@ -847,15 +871,37 @@ pub struct ColorSwatchButton<'a, Message> {
 
 impl<'a, Message> ColorSwatchButton<'a, Message> {
     /// Construct a new [`ColorSwatchButton`] for a given model (§3.12).
+    ///
+    /// The button registers with the focus router under
+    /// [`DEFAULT_COLOR_SWATCH_BUTTON_ID`]; call [`with_id`](Self::with_id) to
+    /// name it when more than one swatch shares a screen.
     #[must_use]
     pub fn new(model: ColorPickerModel) -> Self {
         Self {
-            widget_id: iced::advanced::widget::Id::unique(),
+            widget_id: iced::advanced::widget::Id::new(DEFAULT_COLOR_SWATCH_BUTTON_ID),
             model,
             palette: Palette::dark(),
             height: TRIGGER_HEIGHT_MD,
             on_press: None,
         }
+    }
+
+    /// Name the control the focus router addresses (§3.12).
+    ///
+    /// The id is fixed for the lifetime of the built widget, so a host that
+    /// passes the same name on every rebuild keeps addressing the same button
+    /// — which is what makes `focus(id)` and `is_focused(id)` mean anything
+    /// once the tree has been rebuilt underneath them.
+    #[must_use]
+    pub fn with_id(mut self, id: impl Into<iced::advanced::widget::Id>) -> Self {
+        self.widget_id = id.into();
+        self
+    }
+
+    /// The id this button registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &iced::advanced::widget::Id {
+        &self.widget_id
     }
 
     /// Set control trigger height (e.g. 28px `size::CONTROL_SM` or 32px `size::CONTROL_MD`) (§3.12).
@@ -1196,6 +1242,14 @@ pub struct ColorPickerState {
 // ColorPicker Widget (§3.12, UIF-ATOM-012)
 // ---------------------------------------------------------------------------
 
+/// The focus-registration name a [`ColorPicker`] claims when its host does not
+/// name it.
+///
+/// Stable by construction, so the router keeps addressing the same control
+/// across rebuilds. A host with more than one picker on screen must give each
+/// one its own name through [`ColorPicker::with_id`].
+const DEFAULT_COLOR_PICKER_ID: &str = "hoarfrost.color_picker";
+
 /// Interactive color picker widget combining trigger button and modal flyout (§3.12, `UIF-ATOM-012`).
 pub struct ColorPicker<'a, Message> {
     widget_id: iced::advanced::widget::Id,
@@ -1210,10 +1264,14 @@ pub struct ColorPicker<'a, Message> {
 
 impl<'a, Message> ColorPicker<'a, Message> {
     /// Construct a new [`ColorPicker`] widget (§3.12).
+    ///
+    /// The trigger registers with the focus router under
+    /// [`DEFAULT_COLOR_PICKER_ID`]; call [`with_id`](Self::with_id) to name it
+    /// when more than one picker shares a screen.
     #[must_use]
     pub fn new(model: ColorPickerModel) -> Self {
         Self {
-            widget_id: iced::advanced::widget::Id::unique(),
+            widget_id: iced::advanced::widget::Id::new(DEFAULT_COLOR_PICKER_ID),
             model,
             palette: Palette::dark(),
             trigger_height: TRIGGER_HEIGHT_MD,
@@ -1222,6 +1280,24 @@ impl<'a, Message> ColorPicker<'a, Message> {
             on_cancel: None,
             on_open_change: None,
         }
+    }
+
+    /// Name the control the focus router addresses (§3.12).
+    ///
+    /// The id is fixed for the lifetime of the built widget, so a host that
+    /// passes the same name on every rebuild keeps addressing the same trigger
+    /// — which is what makes `focus(id)` and `is_focused(id)` mean anything
+    /// once the tree has been rebuilt underneath them.
+    #[must_use]
+    pub fn with_id(mut self, id: impl Into<iced::advanced::widget::Id>) -> Self {
+        self.widget_id = id.into();
+        self
+    }
+
+    /// The id this picker registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &iced::advanced::widget::Id {
+        &self.widget_id
     }
 
     /// Set control trigger height (e.g. 28px `size::CONTROL_SM` or 32px `size::CONTROL_MD`) (§3.12).

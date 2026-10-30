@@ -2263,6 +2263,12 @@ fn open_link(state: &mut AppState, link: &str, source_file: Option<PathBuf>) {
         crate::ui::LinkAction::OpenExternal(url) => {
             os_shell::open_url(&url);
         }
+        crate::ui::LinkAction::NotFound { path } => {
+            tracing::warn!(
+                path = %path.display(),
+                "link target does not exist; nothing opened"
+            );
+        }
     }
 }
 

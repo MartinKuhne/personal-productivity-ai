@@ -789,20 +789,41 @@ fn cell_breakpoints(token_widths: &[f32], space_width: f32) -> Vec<Breakpoint> {
 }
 
 /// Simulate greedy left-to-right line packing and return the line count.
-fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> i32 {
+///
+/// A token joins the current line while `line + space + token` still fits;
+/// otherwise the packer starts a new line. Two rules keep the count physical:
+///
+/// * only a line that **already holds a token** may wrap, so a token wider than
+///   `col_width` overflows the single line it sits on instead of being charged
+///   a phantom empty line before it (an unbreakable token is exactly one line);
+/// * a token pays the inter-token space only when the line already holds a
+///   token, so the first token of every line is measured without a leading
+///   space.
+///
+/// An empty token list is defined as one (empty) line so callers can subtract
+/// 1 for an extra-line count without a special case.
+///
+/// This is the single line-counting rule for the whole table subsystem: the row
+/// heights in [`crate::markdown::table_layout`] are measured with it too, so the
+/// wrap-cost curve the solver optimises and the height actually rendered cannot
+/// drift apart.
+pub(crate) fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> i32 {
     if token_widths.is_empty() {
         return 1;
     }
     let mut lines = 1;
     let mut line_w = 0.0;
-    for (i, &tw) in token_widths.iter().enumerate() {
-        let token_w = if i == 0 { tw } else { space_width + tw };
-        if line_w + token_w > col_width + 1e-6 {
-            // Start a new line.
+    let mut line_used = false;
+    for &tw in token_widths {
+        if line_used && line_w + space_width + tw > col_width + 1e-6 {
+            // Start a new line: the token lands on it without a leading space.
             lines += 1;
-            line_w = tw; // First token on new line has no leading space.
+            line_w = tw;
+        } else if line_used {
+            line_w += space_width + tw;
         } else {
-            line_w += token_w;
+            line_w = tw;
+            line_used = true;
         }
     }
     lines

@@ -485,8 +485,9 @@ impl fmt::Display for TagFilterOption {
 pub struct ChatModelEntry {
     /// Config key / display name of the model.
     pub name: String,
-    /// Cost figure reported by `LlmConfig::get_cost`.
-    pub cost: i32,
+    /// Configured price, or `None` when the user never declared one. Rendered as
+    /// [`strings::COST_LABEL_UNKNOWN`], never as `0`.
+    pub cost: Option<i32>,
 }
 
 impl ChatModelEntry {
@@ -790,7 +791,7 @@ impl TopBarViewModel {
 
         let to_entry = |name: &str, cfg: &crate::config::LlmConfig| ChatModelEntry {
             name: name.to_string(),
-            cost: cfg.get_cost(),
+            cost: cfg.cost,
         };
 
         let mut chat_models: Vec<ChatModelEntry> = app

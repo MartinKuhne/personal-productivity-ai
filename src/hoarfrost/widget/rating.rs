@@ -232,6 +232,15 @@ pub type OnCommit<'a, Message> = Box<dyn Fn(Commit<Option<f32>>) -> Message + 'a
 pub type OnCancel<'a, Message> = Box<dyn Fn(Cancel<Option<f32>>) -> Message + 'a>;
 
 /// The interactive RatingControl widget (`UIF-ATOM-013`, §3.13).
+/// The focus-registration name a [`RatingControl`] claims when its host does
+/// not name it.
+///
+/// Stable by construction, so the router keeps addressing the same control
+/// across rebuilds. A host with more than one rating on screen must give each
+/// one its own name through [`RatingControl::id`] — two controls sharing an id
+/// cannot be told apart by an id-addressed focus request.
+const DEFAULT_RATING_CONTROL_ID: &str = "hoarfrost.rating";
+
 pub struct RatingControl<'a, Message> {
     model: RatingModel,
     palette: Palette,
@@ -248,7 +257,7 @@ impl<'a, Message> RatingControl<'a, Message> {
         Self {
             model,
             palette: Palette::dark(),
-            widget_id: widget::Id::unique(),
+            widget_id: widget::Id::new(DEFAULT_RATING_CONTROL_ID),
             on_hover_preview: None,
             on_commit: None,
             on_cancel: None,
@@ -287,10 +296,19 @@ impl<'a, Message> RatingControl<'a, Message> {
     }
 
     /// Set an explicit widget ID for keyboard focus targeting.
+    ///
+    /// Without this the control claims [`DEFAULT_RATING_CONTROL_ID`], which is
+    /// stable across rebuilds; name it when more than one rating shares a screen.
     #[must_use]
     pub fn id(mut self, id: widget::Id) -> Self {
         self.widget_id = id;
         self
+    }
+
+    /// The id this control registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &widget::Id {
+        &self.widget_id
     }
 
     /// Layout size of the rating control in logical pixels (`UIF-ATOM-013`).

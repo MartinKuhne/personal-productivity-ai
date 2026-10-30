@@ -6,18 +6,24 @@
 
 use super::{
     AboutMessage, AgentDebugMessage, AgentMessage, BatchDialogMessage, BootMessage, BusSource,
-    DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message,
-    RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage, TooltipId,
-    TreeMessage, WindowMessage, WindowSnapshot,
+    DialogMessage, EditorMessage, InboundMessage, LayoutMessage, LogsMessage, Message, MovableCard,
+    MovableMessage, RenderMessage, SearchMessage, TabMessage, ThemeMessage, ToolsDialogMessage,
+    TooltipId, TreeMessage, WindowMessage, WindowSnapshot,
 };
 use crate::agent::batch::types::BatchMode;
 use crate::bus::events::messages::LogCategory;
 use crate::bus::events::user_command::UserCommand;
+use crate::bus::events::{
+    AgentEvent, BackgroundEvent, DirectoryChanged, DirectoryChangedKind, FileChanged, FsEvent,
+};
+use crate::config::AppConfig;
 use crate::ui::tree_search::SearchResultEntry;
 use crate::ui_iced::layout::middle_band_state;
+use hoarfrost::geometry::clamp::ResizeHandle;
 use iced::widget::text_editor::{Action, Edit};
 use std::path::PathBuf;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Synthetic path used by the payload fixtures — never opened ([RUST-006]).
 fn sample_path() -> PathBuf {
@@ -876,4 +882,795 @@ fn test_bus_source_is_copy_comparable_and_hashable() {
     assert_ne!(BusSource::Config, BusSource::File);
     assert_ne!(BusSource::File, BusSource::Agent);
     assert_ne!(BusSource::Agent, BusSource::Background);
+}
+
+// ---------------------------------------------------------------------------
+// Hand-written `PartialEq` arms
+// ---------------------------------------------------------------------------
+//
+// `LayoutMessage` and `InboundMessage` cannot derive `PartialEq` (see the impl
+// docs in `message.rs`), so every arm of the two comparisons is behaviour no
+// compiler check protects — including the `_ => false` fall-through that keeps
+// two structurally similar variants apart. Each arm is pinned below with its
+// equal case and its field-mismatch case, and the fall-through is swept
+// pairwise across the whole channel.
+
+/// One arm of a hand-written `PartialEq`: the case label, the two messages and
+/// whether the impl is expected to call them equal.
+type EqualityCase<M> = (&'static str, M, M, bool);
+
+/// The middle band's two splits. `pane_grid::Split` is not publicly
+/// constructable, so a `PaneResized` fixture has to take real ids off an
+/// in-memory pane-grid state ([RUST-006]: built in memory, nothing read).
+fn band_splits() -> (
+    iced::widget::pane_grid::Split,
+    iced::widget::pane_grid::Split,
+) {
+    let (_panes, band) = middle_band_state();
+    (band.left_split, band.right_split)
+}
+
+/// A pane-resize report on `split` at `ratio`.
+fn pane_resized(split: iced::widget::pane_grid::Split, ratio: f32) -> LayoutMessage {
+    LayoutMessage::PaneResized(iced::widget::pane_grid::ResizeEvent { split, ratio })
+}
+
+/// A cursor report at `(x, y)`.
+fn cursor(x: f32, y: f32) -> LayoutMessage {
+    LayoutMessage::CursorMoved {
+        point: iced::Point::new(x, y),
+    }
+}
+
+/// A tooltip pointer-enter for `id` carrying optional dynamic `text`.
+fn hover_enter(id: TooltipId, text: Option<&str>) -> LayoutMessage {
+    LayoutMessage::TooltipHoverEnter {
+        id,
+        tooltip_text: text.map(str::to_string),
+    }
+}
+
+/// A tooltip keyboard-focus-enter for `id` carrying optional dynamic `text`.
+fn focus_enter(id: TooltipId, text: Option<&str>) -> LayoutMessage {
+    LayoutMessage::TooltipFocusEnter {
+        id,
+        tooltip_text: text.map(str::to_string),
+    }
+}
+
+/// `(case, left, right, are_equal)` for every arm of
+/// `PartialEq for LayoutMessage`.
+fn layout_equality_cases() -> Vec<EqualityCase<LayoutMessage>> {
+    let (left, right) = band_splits();
+    vec![
+        (
+            "PaneResized on the same split at the same ratio",
+            pane_resized(left, 0.4),
+            pane_resized(left, 0.4),
+            true,
+        ),
+        (
+            "PaneResized on the same split at another ratio",
+            pane_resized(left, 0.4),
+            pane_resized(left, 0.45),
+            false,
+        ),
+        (
+            "PaneResized on the other split at the same ratio",
+            pane_resized(left, 0.4),
+            pane_resized(right, 0.4),
+            false,
+        ),
+        (
+            "TreeAutoFit against itself",
+            LayoutMessage::TreeAutoFit,
+            LayoutMessage::TreeAutoFit,
+            true,
+        ),
+        (
+            "TocAutoFit against itself",
+            LayoutMessage::TocAutoFit,
+            LayoutMessage::TocAutoFit,
+            true,
+        ),
+        (
+            "CursorMoved to the same point",
+            cursor(12.0, 34.0),
+            cursor(12.0, 34.0),
+            true,
+        ),
+        (
+            "CursorMoved to another point",
+            cursor(12.0, 34.0),
+            cursor(12.0, 35.0),
+            false,
+        ),
+        (
+            "TooltipHoverEnter same id, no dynamic text",
+            hover_enter(TooltipId::SearchTrigger, None),
+            hover_enter(TooltipId::SearchTrigger, None),
+            true,
+        ),
+        (
+            "TooltipHoverEnter same id, same dynamic text",
+            hover_enter(TooltipId::ToolsError, Some("auth failed")),
+            hover_enter(TooltipId::ToolsError, Some("auth failed")),
+            true,
+        ),
+        (
+            "TooltipHoverEnter same id, another dynamic text",
+            hover_enter(TooltipId::ToolsError, Some("auth failed")),
+            hover_enter(TooltipId::ToolsError, Some("timeout")),
+            false,
+        ),
+        (
+            "TooltipHoverEnter same text, another id",
+            hover_enter(TooltipId::ToolsError, Some("auth failed")),
+            hover_enter(TooltipId::SearchTrigger, Some("auth failed")),
+            false,
+        ),
+        (
+            "TooltipHoverEnter one side carries text",
+            hover_enter(TooltipId::ToolsError, Some("auth failed")),
+            hover_enter(TooltipId::ToolsError, None),
+            false,
+        ),
+        (
+            "TooltipHoverExit same id",
+            LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchClear,
+            },
+            LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchClear,
+            },
+            true,
+        ),
+        (
+            "TooltipHoverExit another id",
+            LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchClear,
+            },
+            LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchTrigger,
+            },
+            false,
+        ),
+        (
+            "TooltipFocusEnter same id and text",
+            focus_enter(TooltipId::ToolsError, Some("auth failed")),
+            focus_enter(TooltipId::ToolsError, Some("auth failed")),
+            true,
+        ),
+        (
+            "TooltipFocusEnter another text",
+            focus_enter(TooltipId::ToolsError, Some("auth failed")),
+            focus_enter(TooltipId::ToolsError, Some("timeout")),
+            false,
+        ),
+        (
+            "TooltipFocusExit same id",
+            LayoutMessage::TooltipFocusExit {
+                id: TooltipId::ToolsError,
+            },
+            LayoutMessage::TooltipFocusExit {
+                id: TooltipId::ToolsError,
+            },
+            true,
+        ),
+        (
+            "TooltipFocusExit another id",
+            LayoutMessage::TooltipFocusExit {
+                id: TooltipId::ToolsError,
+            },
+            LayoutMessage::TooltipFocusExit {
+                id: TooltipId::SearchTrigger,
+            },
+            false,
+        ),
+        (
+            "TooltipHoverExit against TooltipFocusExit on the same id",
+            LayoutMessage::TooltipHoverExit {
+                id: TooltipId::SearchTrigger,
+            },
+            LayoutMessage::TooltipFocusExit {
+                id: TooltipId::SearchTrigger,
+            },
+            false,
+        ),
+        (
+            "TooltipHoverEnter against TooltipFocusEnter on the same id",
+            hover_enter(TooltipId::SearchTrigger, None),
+            focus_enter(TooltipId::SearchTrigger, None),
+            false,
+        ),
+        (
+            "TreeAutoFit against TocAutoFit",
+            LayoutMessage::TreeAutoFit,
+            LayoutMessage::TocAutoFit,
+            false,
+        ),
+    ]
+}
+
+#[test]
+fn test_layout_channel_equality_is_field_wise_in_every_arm() {
+    for (case, left, right, expected) in layout_equality_cases() {
+        let forward = left.clone() == right;
+        // The impl matches on the tuple, so the answer must not depend on
+        // which side each message is handed in from.
+        let backward = right == left;
+        assert_eq!(
+            forward, expected,
+            "LayoutMessage equality, {case}: forward comparison disagreed"
+        );
+        assert_eq!(
+            backward, expected,
+            "LayoutMessage equality, {case}: swapping the operands changed the answer"
+        );
+    }
+}
+
+#[test]
+fn test_layout_channel_variants_are_pairwise_distinct() {
+    // One representative per variant, all three tooltip ids deliberately the
+    // same so the sweep cannot pass by accident: the hover and focus lanes
+    // differ only in the variant, and the impl keeps them apart through its
+    // `_ => false` arm.
+    let (first_split, _second_split) = band_splits();
+    let representatives = [
+        pane_resized(first_split, 0.4),
+        LayoutMessage::TreeAutoFit,
+        LayoutMessage::TocAutoFit,
+        cursor(1.0, 2.0),
+        hover_enter(TooltipId::SearchTrigger, None),
+        LayoutMessage::TooltipHoverExit {
+            id: TooltipId::SearchTrigger,
+        },
+        focus_enter(TooltipId::SearchTrigger, None),
+        LayoutMessage::TooltipFocusExit {
+            id: TooltipId::SearchTrigger,
+        },
+    ];
+
+    for (index, left) in representatives.iter().enumerate() {
+        let replay = (*left).clone();
+        assert_eq!(
+            replay, *left,
+            "a cloned LayoutMessage must compare equal to its original: {left:?}"
+        );
+        for (other, right) in representatives.iter().enumerate() {
+            assert_eq!(
+                left == right,
+                index == other,
+                "two different LayoutMessage variants must never compare equal: \
+                 {left:?} against {right:?}"
+            );
+        }
+    }
+}
+
+/// A synthetic file-change notification for `name`; the path is never opened
+/// ([RUST-006]).
+fn file_changed(name: &str) -> FileChanged {
+    FileChanged::discovered_one(PathBuf::from("fixture-workspace").join(name))
+}
+
+/// A synthetic directory-change notification for `name` ([RUST-006]).
+fn directory_changed(name: &str) -> DirectoryChanged {
+    DirectoryChanged {
+        path: PathBuf::from("fixture-workspace").join(name),
+        kind: DirectoryChangedKind::Added,
+    }
+}
+
+/// A synthetic agent notification with a fixed session id, so two of them can
+/// carry byte-identical payloads.
+fn agent_event(session: Uuid, text: &str) -> AgentEvent {
+    AgentEvent::Thinking {
+        session_id: session,
+        text: text.to_string(),
+    }
+}
+
+/// A synthetic typed background notification.
+fn background_event() -> BackgroundEvent {
+    BackgroundEvent::Fs(FsEvent::Finished)
+}
+
+#[test]
+fn test_inbound_value_bearing_variants_compare_by_value() {
+    let cases: Vec<EqualityCase<InboundMessage>> = vec![
+        (
+            "FileChanged same path and kind",
+            InboundMessage::FileChanged(file_changed("a.md")),
+            InboundMessage::FileChanged(file_changed("a.md")),
+            true,
+        ),
+        (
+            "FileChanged another path",
+            InboundMessage::FileChanged(file_changed("a.md")),
+            InboundMessage::FileChanged(file_changed("b.md")),
+            false,
+        ),
+        (
+            "FileChanged same path, another kind",
+            InboundMessage::FileChanged(FileChanged::discovered_one(sample_path())),
+            InboundMessage::FileChanged(FileChanged::updated_one(sample_path())),
+            false,
+        ),
+        (
+            "FileChangedBatch same list in the same order",
+            InboundMessage::FileChangedBatch(vec![file_changed("a.md"), file_changed("b.md")]),
+            InboundMessage::FileChangedBatch(vec![file_changed("a.md"), file_changed("b.md")]),
+            true,
+        ),
+        (
+            "FileChangedBatch reordered",
+            InboundMessage::FileChangedBatch(vec![file_changed("a.md"), file_changed("b.md")]),
+            InboundMessage::FileChangedBatch(vec![file_changed("b.md"), file_changed("a.md")]),
+            false,
+        ),
+        (
+            "FileChangedBatch one event short",
+            InboundMessage::FileChangedBatch(vec![file_changed("a.md")]),
+            InboundMessage::FileChangedBatch(vec![file_changed("a.md"), file_changed("b.md")]),
+            false,
+        ),
+        (
+            "DirectoryChanged same path and kind",
+            InboundMessage::DirectoryChanged(directory_changed("docs")),
+            InboundMessage::DirectoryChanged(directory_changed("docs")),
+            true,
+        ),
+        (
+            "DirectoryChanged same path, another kind",
+            InboundMessage::DirectoryChanged(directory_changed("docs")),
+            InboundMessage::DirectoryChanged(DirectoryChanged {
+                path: PathBuf::from("fixture-workspace").join("docs"),
+                kind: DirectoryChangedKind::Deleted,
+            }),
+            false,
+        ),
+        (
+            "DirectoryChangedBatch same list",
+            InboundMessage::DirectoryChangedBatch(vec![directory_changed("docs")]),
+            InboundMessage::DirectoryChangedBatch(vec![directory_changed("docs")]),
+            true,
+        ),
+        (
+            "DirectoryChangedBatch another path",
+            InboundMessage::DirectoryChangedBatch(vec![directory_changed("docs")]),
+            InboundMessage::DirectoryChangedBatch(vec![directory_changed("notes")]),
+            false,
+        ),
+        (
+            "EventsDropped same source and count",
+            InboundMessage::EventsDropped {
+                source: BusSource::File,
+                count: 2,
+            },
+            InboundMessage::EventsDropped {
+                source: BusSource::File,
+                count: 2,
+            },
+            true,
+        ),
+        (
+            "EventsDropped another count",
+            InboundMessage::EventsDropped {
+                source: BusSource::File,
+                count: 2,
+            },
+            InboundMessage::EventsDropped {
+                source: BusSource::File,
+                count: 3,
+            },
+            false,
+        ),
+        (
+            "EventsDropped another source",
+            InboundMessage::EventsDropped {
+                source: BusSource::File,
+                count: 2,
+            },
+            InboundMessage::EventsDropped {
+                source: BusSource::Agent,
+                count: 2,
+            },
+            false,
+        ),
+    ];
+
+    for (case, left, right, expected) in cases {
+        let equal = left == right;
+        assert_eq!(
+            equal, expected,
+            "InboundMessage equality, {case}: expected {expected}, got {equal}"
+        );
+        assert_eq!(
+            right == left,
+            expected,
+            "InboundMessage equality, {case}: swapping the operands changed the answer"
+        );
+    }
+}
+
+#[test]
+fn test_inbound_opaque_payloads_compare_by_delivery_identity() {
+    // `AppConfig`, `AgentEvent` and `BackgroundEvent` do not support `PartialEq`,
+    // so the impl compares the `Arc` instead: two messages are equal iff they
+    // carry the same shared delivery.
+    let config = Arc::new(AppConfig::default());
+    let session = Uuid::new_v4();
+    let thinking = Arc::new(agent_event(session, "planning"));
+    let fs = Arc::new(background_event());
+
+    let pairs: Vec<EqualityCase<InboundMessage>> = vec![
+        (
+            "ConfigArrived: the same delivery",
+            InboundMessage::ConfigArrived(Arc::clone(&config)),
+            InboundMessage::ConfigArrived(Arc::clone(&config)),
+            true,
+        ),
+        (
+            "ConfigArrived: two deliveries of an identical config",
+            InboundMessage::ConfigArrived(Arc::new(AppConfig::default())),
+            InboundMessage::ConfigArrived(Arc::new(AppConfig::default())),
+            false,
+        ),
+        (
+            "Agent: the same delivery",
+            InboundMessage::Agent(Arc::clone(&thinking)),
+            InboundMessage::Agent(Arc::clone(&thinking)),
+            true,
+        ),
+        (
+            "Agent: two byte-identical deliveries",
+            InboundMessage::Agent(Arc::new(agent_event(session, "planning"))),
+            InboundMessage::Agent(Arc::new(agent_event(session, "planning"))),
+            false,
+        ),
+        (
+            "Background: the same delivery",
+            InboundMessage::Background(Arc::clone(&fs)),
+            InboundMessage::Background(Arc::clone(&fs)),
+            true,
+        ),
+        (
+            "Background: two byte-identical deliveries",
+            InboundMessage::Background(Arc::new(background_event())),
+            InboundMessage::Background(Arc::new(background_event())),
+            false,
+        ),
+    ];
+
+    for (case, left, right, expected) in pairs {
+        if expected {
+            assert_eq!(
+                left, right,
+                "InboundMessage equality, {case}: a clone of the same Arc must compare equal"
+            );
+            assert_eq!(
+                left.clone(),
+                right.clone(),
+                "InboundMessage equality, {case}: cloning must preserve delivery identity"
+            );
+        } else {
+            assert_ne!(
+                left, right,
+                "InboundMessage equality, {case}: two independent deliveries are two deliveries"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_inbound_background_batch_is_compared_arc_by_arc() {
+    let first = Arc::new(background_event());
+    let second = Arc::new(background_event());
+    let batch = InboundMessage::BackgroundBatch(vec![Arc::clone(&first), Arc::clone(&second)]);
+
+    assert_eq!(
+        batch,
+        InboundMessage::BackgroundBatch(vec![Arc::clone(&first), Arc::clone(&second)]),
+        "the same two deliveries in the same order are the same batch"
+    );
+    assert_ne!(
+        batch,
+        InboundMessage::BackgroundBatch(vec![Arc::clone(&second), Arc::clone(&first)]),
+        "the batch is compared position by position, so a reorder is a different batch"
+    );
+    assert_ne!(
+        batch,
+        InboundMessage::BackgroundBatch(vec![Arc::clone(&first)]),
+        "a batch of two is not a batch of one"
+    );
+    assert_ne!(
+        batch,
+        InboundMessage::BackgroundBatch(vec![
+            Arc::new(background_event()),
+            Arc::new(background_event())
+        ]),
+        "look-alike payloads are not the same deliveries"
+    );
+    assert_eq!(
+        batch.clone(),
+        batch,
+        "cloning a batch must preserve every delivery identity"
+    );
+}
+
+/// **Regression test for the missing `AgentBatch` equality arm (defect D3).**
+///
+/// `PartialEq for InboundMessage` had an arm for `BackgroundBatch` but none for
+/// `AgentBatch`, so every pair of agent batches fell through to `_ => false` —
+/// the comparison was not even reflexive, and a clone of a batch did not equal
+/// its original. The arm now mirrors `BackgroundBatch`: same length, each pair
+/// the same shared delivery.
+#[test]
+fn defect_03_inbound_agent_batch_compares_by_delivery_identity() {
+    let event = Arc::new(agent_event(Uuid::new_v4(), "planning"));
+    let batch = InboundMessage::AgentBatch(vec![Arc::clone(&event)]);
+    let replay = InboundMessage::AgentBatch(vec![Arc::clone(&event)]);
+
+    assert_eq!(
+        batch, replay,
+        "two batches carrying the same deliveries must compare equal"
+    );
+    assert_eq!(replay, batch, "the arm must be symmetric");
+    assert!(
+        batch.eq(&batch),
+        "an AgentBatch must compare equal to itself (the missing arm broke reflexivity)"
+    );
+    assert_eq!(
+        batch,
+        batch.clone(),
+        "cloning an AgentBatch must preserve every delivery pointer and stay equal"
+    );
+
+    // A different delivery is a different batch, even when the payloads are
+    // byte-identical: agent events are compared by delivery identity.
+    let other = InboundMessage::AgentBatch(vec![Arc::new(agent_event(Uuid::nil(), "planning"))]);
+    assert_ne!(
+        batch, other,
+        "an independently delivered event is a second delivery, not the same one"
+    );
+
+    // Same deliveries, different length.
+    let longer = InboundMessage::AgentBatch(vec![Arc::clone(&event), Arc::clone(&event)]);
+    assert_ne!(
+        batch, longer,
+        "a batch with one more delivery is not the same batch"
+    );
+    assert_ne!(
+        longer, batch,
+        "the length check must hold in both directions"
+    );
+
+    // Two batches that are both empty are equal — the arm must not special-case
+    // an empty burst.
+    assert_eq!(
+        InboundMessage::AgentBatch(Vec::new()),
+        InboundMessage::AgentBatch(Vec::new()),
+        "two empty bursts are the same (empty) burst"
+    );
+
+    // Cross-variant: an AgentBatch is never equal to a single Agent carrying the
+    // very same delivery, nor to any other variant.
+    assert_ne!(
+        batch,
+        InboundMessage::Agent(Arc::clone(&event)),
+        "a burst of one is not the same message as the single delivery"
+    );
+    assert_ne!(
+        batch,
+        InboundMessage::BackgroundBatch(Vec::new()),
+        "an agent burst must never compare equal to a background burst"
+    );
+    assert_ne!(
+        batch,
+        InboundMessage::EventsDropped {
+            source: BusSource::Agent,
+            count: 1,
+        },
+        "an agent burst must never compare equal to a lag report"
+    );
+}
+
+#[test]
+fn test_inbound_variants_are_pairwise_distinct() {
+    // `AgentBatch` now has its equality arm (see
+    // [`defect_03_inbound_agent_batch_compares_by_delivery_identity`]) and takes
+    // part in the sweep like every other variant.
+    let representatives = [
+        InboundMessage::ConfigArrived(Arc::new(AppConfig::default())),
+        InboundMessage::FileChanged(file_changed("a.md")),
+        InboundMessage::FileChangedBatch(vec![file_changed("a.md")]),
+        InboundMessage::DirectoryChanged(directory_changed("docs")),
+        InboundMessage::DirectoryChangedBatch(vec![directory_changed("docs")]),
+        InboundMessage::Agent(Arc::new(agent_event(Uuid::new_v4(), "planning"))),
+        InboundMessage::AgentBatch(vec![Arc::new(agent_event(Uuid::new_v4(), "planning"))]),
+        InboundMessage::Background(Arc::new(background_event())),
+        InboundMessage::BackgroundBatch(vec![Arc::new(background_event())]),
+        InboundMessage::EventsDropped {
+            source: BusSource::Background,
+            count: 1,
+        },
+    ];
+
+    for (index, left) in representatives.iter().enumerate() {
+        let replay = (*left).clone();
+        assert_eq!(
+            replay, *left,
+            "a cloned InboundMessage must compare equal to its original: {left:?}"
+        );
+        for (other, right) in representatives.iter().enumerate() {
+            assert_eq!(
+                left == right,
+                index == other,
+                "two different InboundMessage variants must never compare equal: \
+                 {left:?} against {right:?}"
+            );
+        }
+    }
+}
+
+// --- the movable-card pointer channel -------------------------------------
+
+#[test]
+fn test_movable_channel_names_its_card_in_every_variant() {
+    assert_copy::<MovableCard>();
+    assert_clone::<MovableMessage>();
+
+    for card in [MovableCard::Logs, MovableCard::AgentDebug] {
+        let events: [(&str, MovableMessage); 7] = [
+            (
+                "Moved",
+                MovableMessage::Moved {
+                    card,
+                    at: iced::Point::new(4.0, 8.0),
+                },
+            ),
+            ("TitlePressed", MovableMessage::TitlePressed { card }),
+            ("BodyPressed", MovableMessage::BodyPressed { card }),
+            (
+                "GripPressed",
+                MovableMessage::GripPressed {
+                    card,
+                    handle: ResizeHandle::BottomRight,
+                },
+            ),
+            ("DockRequested", MovableMessage::DockRequested { card }),
+            ("CloseRequested", MovableMessage::CloseRequested { card }),
+            ("Released", MovableMessage::Released { card }),
+        ];
+
+        for (name, event) in events {
+            assert_eq!(
+                event.card_kind(),
+                card,
+                "{name} must report the card it was produced for, or the reducer \
+                 drives the wrong host"
+            );
+            assert_eq!(event.clone(), event, "{name} must survive a clone exactly");
+        }
+    }
+}
+
+#[test]
+fn test_movable_events_for_different_cards_are_never_equal() {
+    // The reducer picks the host from the message alone, so a Logs gesture must
+    // never be mistaken for the same gesture on the Agent Debug card.
+    let pairs: [(&str, MovableMessage, MovableMessage); 7] = [
+        (
+            "Moved",
+            MovableMessage::Moved {
+                card: MovableCard::Logs,
+                at: iced::Point::new(4.0, 8.0),
+            },
+            MovableMessage::Moved {
+                card: MovableCard::AgentDebug,
+                at: iced::Point::new(4.0, 8.0),
+            },
+        ),
+        (
+            "TitlePressed",
+            MovableMessage::TitlePressed {
+                card: MovableCard::Logs,
+            },
+            MovableMessage::TitlePressed {
+                card: MovableCard::AgentDebug,
+            },
+        ),
+        (
+            "BodyPressed",
+            MovableMessage::BodyPressed {
+                card: MovableCard::Logs,
+            },
+            MovableMessage::BodyPressed {
+                card: MovableCard::AgentDebug,
+            },
+        ),
+        (
+            "GripPressed",
+            MovableMessage::GripPressed {
+                card: MovableCard::Logs,
+                handle: ResizeHandle::Right,
+            },
+            MovableMessage::GripPressed {
+                card: MovableCard::AgentDebug,
+                handle: ResizeHandle::Right,
+            },
+        ),
+        (
+            "DockRequested",
+            MovableMessage::DockRequested {
+                card: MovableCard::Logs,
+            },
+            MovableMessage::DockRequested {
+                card: MovableCard::AgentDebug,
+            },
+        ),
+        (
+            "CloseRequested",
+            MovableMessage::CloseRequested {
+                card: MovableCard::Logs,
+            },
+            MovableMessage::CloseRequested {
+                card: MovableCard::AgentDebug,
+            },
+        ),
+        (
+            "Released",
+            MovableMessage::Released {
+                card: MovableCard::Logs,
+            },
+            MovableMessage::Released {
+                card: MovableCard::AgentDebug,
+            },
+        ),
+    ];
+
+    for (name, logs, debug) in pairs {
+        assert_ne!(
+            logs, debug,
+            "{name} on the Logs card must not equal the same {name} on the \
+             Agent Debug card"
+        );
+    }
+}
+
+#[test]
+fn test_movable_grip_presses_are_distinguished_by_handle() {
+    // Every grip drives a different edge of the host, so two presses on two
+    // grips of one card are two different gestures.
+    let grips = [
+        ResizeHandle::TopLeft,
+        ResizeHandle::Top,
+        ResizeHandle::TopRight,
+        ResizeHandle::Right,
+        ResizeHandle::BottomRight,
+        ResizeHandle::Bottom,
+        ResizeHandle::BottomLeft,
+        ResizeHandle::Left,
+    ];
+    let events: Vec<MovableMessage> = grips
+        .iter()
+        .map(|handle| MovableMessage::GripPressed {
+            card: MovableCard::Logs,
+            handle: *handle,
+        })
+        .collect();
+
+    for (index, left) in events.iter().enumerate() {
+        for (other, right) in events.iter().enumerate() {
+            assert_eq!(
+                left == right,
+                index == other,
+                "a grip press must be distinguishable per handle: {:?} against {:?}",
+                grips[index],
+                grips[other]
+            );
+        }
+    }
 }

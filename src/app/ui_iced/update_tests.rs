@@ -329,19 +329,59 @@ fn test_tree_auto_fit_sets_and_persists_the_left_panel_width() {
     assert_eq!(state.app.persisted_ui_state.left_panel_width, Some(width));
 }
 
-#[test]
-fn test_tree_auto_fit_is_a_noop_on_a_non_positive_viewport() {
-    let (mut state, _storage) = fresh_state();
-    state.viewport = Size::new(0.0, 0.0);
+// The four helpers below pair each auto-fit request with the panel width it
+// must not clobber when there is nothing to measure against.
+
+/// Remembers the left panel's width.
+fn remember_left_width(state: &mut AppState) {
     state.app.layout.set_width(Some(222.0));
+}
 
-    let _ = update(&mut state, Message::Layout(LayoutMessage::TreeAutoFit));
+/// Remembers the right panel's width.
+fn remember_right_width(state: &mut AppState) {
+    state.app.layout.set_right_width(Some(222.0));
+}
 
-    assert_eq!(
-        state.app.layout().left_panel_width,
-        Some(222.0),
-        "a zero-width viewport must not clobber the remembered width"
-    );
+/// Reads the left panel's width back.
+fn left_panel_width(state: &AppState) -> Option<f32> {
+    state.app.layout().left_panel_width
+}
+
+/// Reads the right panel's width back.
+fn right_panel_width(state: &AppState) -> Option<f32> {
+    state.app.layout().right_panel_width
+}
+
+/// Neither auto-fit may clobber a remembered width when there is no viewport to
+/// measure against.
+#[test]
+fn test_auto_fit_on_a_non_positive_viewport_keeps_the_remembered_width() {
+    for (case, message, remember, remembered_width) in [
+        (
+            "tree auto-fit",
+            LayoutMessage::TreeAutoFit,
+            remember_left_width as fn(&mut AppState),
+            left_panel_width as fn(&AppState) -> Option<f32>,
+        ),
+        (
+            "ToC auto-fit",
+            LayoutMessage::TocAutoFit,
+            remember_right_width as fn(&mut AppState),
+            right_panel_width as fn(&AppState) -> Option<f32>,
+        ),
+    ] {
+        let (mut state, _storage) = fresh_state();
+        state.viewport = Size::new(0.0, 0.0);
+        remember(&mut state);
+
+        let _ = update(&mut state, Message::Layout(message));
+
+        assert_eq!(
+            remembered_width(&state),
+            Some(222.0),
+            "{case}: a zero-width viewport must not clobber the remembered width"
+        );
+    }
 }
 
 // ─────────────────────── right (ToC) panel auto-fit, defect #14 ───────────────
@@ -388,21 +428,6 @@ fn test_toc_auto_fit_respects_the_ui_016_cap() {
     assert!(
         width <= VIEWPORT * RIGHT_PANEL_MAX_WIDTH_FRACTION + f32::EPSILON,
         "auto-fit must not exceed the 30% cap, got {width}"
-    );
-}
-
-#[test]
-fn test_toc_auto_fit_is_a_noop_on_a_non_positive_viewport() {
-    let (mut state, _storage) = fresh_state();
-    state.viewport = Size::new(0.0, 0.0);
-    state.app.layout.set_right_width(Some(222.0));
-
-    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
-
-    assert_eq!(
-        state.app.layout().right_panel_width,
-        Some(222.0),
-        "a zero-width viewport must not clobber the remembered width"
     );
 }
 
@@ -2311,40 +2336,27 @@ fn test_logs_scroll_report_is_stored() {
 
 // ───────────────────────────── Theme ─────────────────────────────
 
+/// One table for every `ScaleChanged` outcome: a usable multiplier is persisted
+/// verbatim, while a near-unity value and every unusable value collapse to
+/// `None` so a fresh install is never misread.
 #[test]
-fn test_scale_changed_stores_a_multiplier_in_range() {
-    let (mut state, _storage) = fresh_state();
-    let _ = update(
-        &mut state,
-        Message::Theme(ThemeMessage::ScaleChanged { multiplier: 1.4 }),
-    );
-    assert_eq!(state.app.persisted_ui_state.font_size_scale, Some(1.4));
-}
-
-#[test]
-fn test_near_unity_scale_is_stored_as_none() {
-    let (mut state, _storage) = fresh_state();
-    let _ = update(
-        &mut state,
-        Message::Theme(ThemeMessage::ScaleChanged { multiplier: 1.0 }),
-    );
-    assert_eq!(
-        state.app.persisted_ui_state.font_size_scale, None,
-        "a fresh install's 1.0 scale is stored as None so it is never misread"
-    );
-}
-
-#[test]
-fn test_out_of_range_and_non_finite_scale_self_heal_to_none() {
-    for value in [0.1_f32, 9.0, f32::NAN, f32::INFINITY] {
+fn test_scale_changed_persists_only_a_usable_multiplier() {
+    for (case, multiplier, expected) in [
+        ("in range", 1.4_f32, Some(1.4_f32)),
+        ("near unity", 1.0_f32, None),
+        ("below range", 0.1_f32, None),
+        ("above range", 9.0_f32, None),
+        ("not a number", f32::NAN, None),
+        ("infinite", f32::INFINITY, None),
+    ] {
         let (mut state, _storage) = fresh_state();
         let _ = update(
             &mut state,
-            Message::Theme(ThemeMessage::ScaleChanged { multiplier: value }),
+            Message::Theme(ThemeMessage::ScaleChanged { multiplier }),
         );
         assert_eq!(
-            state.app.persisted_ui_state.font_size_scale, None,
-            "{value} is outside the persisted range"
+            state.app.persisted_ui_state.font_size_scale, expected,
+            "{case}: a {multiplier} scale must persist as {expected:?}"
         );
     }
 }
@@ -3566,39 +3578,42 @@ fn test_escape_pressed_does_not_close_the_docked_logs_panel() {
     );
 }
 
-/// Reducing `ModifiersChanged { shift: true }` sets the `SHIFT` bit.
+/// Reducing `ModifiersChanged` tracks the reported state in both directions: a
+/// press sets the `SHIFT` bit, a release clears it.
 #[test]
-fn test_modifiers_changed_sets_the_shift_bit_when_held() {
-    let (mut state, _storage) = fresh_state();
-    assert!(!state.overlay.modifiers.shift());
+fn test_modifiers_changed_tracks_the_shift_bit_in_both_directions() {
+    for (case, primed, reported, expected) in [
+        ("a press sets the bit", false, true, true),
+        ("a release clears the bit", true, false, false),
+    ] {
+        let (mut state, _storage) = fresh_state();
+        if primed {
+            let _ = update(
+                &mut state,
+                Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
+            );
+            assert!(
+                state.overlay.modifiers.shift(),
+                "{case}: priming must set the bit first"
+            );
+        } else {
+            assert!(
+                !state.overlay.modifiers.shift(),
+                "{case}: a fresh overlay carries no SHIFT bit"
+            );
+        }
 
-    let _ = update(
-        &mut state,
-        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
-    );
+        let _ = update(
+            &mut state,
+            Message::Overlay(OverlayMessage::ModifiersChanged { shift: reported }),
+        );
 
-    assert!(state.overlay.modifiers.shift(), "the SHIFT bit must be set");
-}
-
-/// Reducing `ModifiersChanged { shift: false }` clears the `SHIFT` bit.
-#[test]
-fn test_modifiers_changed_clears_the_shift_bit_when_released() {
-    let (mut state, _storage) = fresh_state();
-    let _ = update(
-        &mut state,
-        Message::Overlay(OverlayMessage::ModifiersChanged { shift: true }),
-    );
-    assert!(state.overlay.modifiers.shift());
-
-    let _ = update(
-        &mut state,
-        Message::Overlay(OverlayMessage::ModifiersChanged { shift: false }),
-    );
-
-    assert!(
-        !state.overlay.modifiers.shift(),
-        "the SHIFT bit must be cleared on release"
-    );
+        assert_eq!(
+            state.overlay.modifiers.shift(),
+            expected,
+            "{case}: reporting shift={reported} must leave the SHIFT bit {expected}"
+        );
+    }
 }
 
 /// Only the `SHIFT` bit is touched: a modifier the lane does not observe is
@@ -4936,5 +4951,628 @@ fn test_context_menu_failure_logs_do_not_leak_the_user_path() {
     assert!(
         !rendered.contains(marker),
         "no context-menu failure route may print the user's path, got:\n{rendered}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `Message::Movable` — the Band-1 utility-card pointer lane
+// ---------------------------------------------------------------------------
+//
+// `reduce_movable` owns no drag arithmetic: it picks the host from the
+// message, pairs a press with the last cursor the view reported, and hands the
+// frame to `MovableHost::on_pointer`. What these tests pin is exactly that
+// wiring — which host a gesture drives, that a press is positioned by the move
+// lane, and that the only way out of a card is the deferred `UserCommand`.
+
+use hoarfrost::geometry::clamp::ResizeHandle;
+use hoarfrost::surface::zorder::SurfaceId;
+
+/// A viewport large enough that a utility card has slack on every side, so a
+/// drag or resize is measured against the gesture and not against the clamp.
+const ROOMY_VIEWPORT: Size = Size::new(2400.0, 1800.0);
+
+/// Opens the Background Operations Log and syncs its movable host.
+fn open_logs_card(state: &mut AppState) {
+    if let Ok(mut manager) = state.app.orchestrator.background_manager.lock() {
+        manager.show_background_logs = true;
+    }
+    state.rebuild_view_models();
+    assert!(
+        state.overlay.logs_movable.is_some(),
+        "the fixture must open the log card's host"
+    );
+}
+
+/// Opens the Agent Debug Inspector and syncs its movable host.
+fn open_debug_card(state: &mut AppState) {
+    state.app.orchestrator.agent_panel_state.show_debug_window = true;
+    state.rebuild_view_models();
+    assert!(
+        state.overlay.debug_movable.is_some(),
+        "the fixture must open the debug card's host"
+    );
+}
+
+/// The log card's own host, for a test that has just opened it.
+fn logs_host(state: &AppState) -> &hoarfrost::surface::movable::MovableHost {
+    state
+        .overlay
+        .logs_movable
+        .as_ref()
+        .expect("the log card is open")
+}
+
+/// The agent-debug card's own host, for a test that has just opened it.
+fn debug_host(state: &AppState) -> &hoarfrost::surface::movable::MovableHost {
+    state
+        .overlay
+        .debug_movable
+        .as_ref()
+        .expect("the inspector card is open")
+}
+
+/// One frame of the pointer lane.
+fn pointer(state: &mut AppState, message: MovableMessage) -> Task<Message> {
+    update(state, Message::Movable(message))
+}
+
+/// Reports a pointer position the way the root mouse area does.
+///
+/// [`reduce_movable`] takes every press and move coordinate from the overlay's
+/// own `cursor` field and never from the `MovableMessage::Moved` payload —
+/// `mouse_area::on_press` carries no point in iced 0.14 — so a gesture test has
+/// to drive this lane exactly as the live view does, or the host never sees the
+/// coordinate the test thinks it sent.
+fn report_pointer(state: &mut AppState, at: Point) {
+    let _ = update(
+        state,
+        Message::Layout(LayoutMessage::CursorMoved { point: at }),
+    );
+}
+
+#[test]
+fn test_a_movable_event_for_a_card_with_no_host_is_a_no_op() {
+    let (mut state, _storage) = fresh_state();
+    assert!(
+        state.overlay.logs_movable.is_none(),
+        "a booted app shows no utility card"
+    );
+
+    let baseline = pointer(
+        &mut state,
+        MovableMessage::Released {
+            card: MovableCard::Logs,
+        },
+    )
+    .units();
+    let probe = pointer(
+        &mut state,
+        MovableMessage::TitlePressed {
+            card: MovableCard::Logs,
+        },
+    )
+    .units();
+
+    assert_eq!(
+        probe, baseline,
+        "a gesture for a card that is not open must schedule nothing extra"
+    );
+    assert!(
+        state.overlay.logs_movable.is_none(),
+        "and it must not conjure a host for a hidden card"
+    );
+}
+
+#[test]
+fn test_a_move_without_a_press_only_records_the_cursor() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+    let inside = Point::new(before.x + 400.0, before.y + 300.0);
+
+    report_pointer(&mut state, inside);
+    // A bare move reduces in place: it schedules nothing.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::Moved {
+            card: MovableCard::Logs,
+            at: inside,
+        },
+    );
+
+    assert_eq!(
+        logs_host(&state).card(),
+        before,
+        "a bare move inside the card moves nothing: it only feeds the press lane"
+    );
+    assert!(
+        !logs_host(&state).is_dragging(),
+        "a move alone must not arm a gesture"
+    );
+}
+
+#[test]
+fn test_a_press_outside_the_card_never_reaches_the_host() {
+    // The band's own hit-test is the gate (`UIF-MOV-003`): a press the registry
+    // routes to the workspace must not start a drag even though the message is
+    // addressed to the card.
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+
+    report_pointer(&mut state, Point::new(5.0, 5.0));
+    // A press the routing refuses reduces in place: it schedules nothing.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::TitlePressed {
+            card: MovableCard::Logs,
+        },
+    );
+
+    assert!(
+        !logs_host(&state).is_dragging(),
+        "a title press the registry routes away must not arm a drag"
+    );
+    assert_eq!(
+        logs_host(&state).card(),
+        before,
+        "and it must not move the card it was addressed to"
+    );
+}
+
+#[test]
+fn test_a_title_bar_drag_moves_the_log_card() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+    // The host owns the anatomy, so the fixture asks it where the draggable
+    // part of the title bar is instead of guessing a pixel height.
+    let bar = logs_host(&state).title_bar();
+    let grab = Point::new(bar.x + 40.0, bar.y + bar.height / 2.0);
+
+    report_pointer(&mut state, grab);
+    // The press arms the drag in place; the gesture is state, not a task.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::TitlePressed {
+            card: MovableCard::Logs,
+        },
+    );
+    assert!(
+        logs_host(&state).is_dragging(),
+        "a title-bar press must arm the drag"
+    );
+
+    report_pointer(&mut state, Point::new(grab.x + 100.0, grab.y + 80.0));
+    // Each move reduces in place: the card follows the pointer, nothing is scheduled.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::Moved {
+            card: MovableCard::Logs,
+            at: Point::new(grab.x + 100.0, grab.y + 80.0),
+        },
+    );
+    let mid_drag = logs_host(&state).card();
+    assert!(
+        mid_drag.x > before.x && mid_drag.y > before.y,
+        "the card must follow the pointer while the gesture holds, {before:?} -> {mid_drag:?}"
+    );
+
+    // The release settles the drag in place; the geometry is already applied.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::Released {
+            card: MovableCard::Logs,
+        },
+    );
+
+    let after = logs_host(&state).card();
+    assert!(
+        after.x > before.x && after.y > before.y,
+        "dragging the title bar down-right must move the card there, {before:?} -> {after:?}"
+    );
+    assert_eq!(
+        after.size(),
+        before.size(),
+        "a title-bar drag moves the card, it does not resize it"
+    );
+    assert!(
+        !logs_host(&state).is_dragging() && !logs_host(&state).is_capturing(),
+        "the release must end the gesture and drop the pointer capture"
+    );
+}
+
+#[test]
+fn test_a_grip_drag_resizes_the_card_on_its_named_edge() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+    // Asked of the host, so the point is provably on the grip band rather than
+    // a guessed offset from the card's (exclusive) right edge.
+    let grip_band = logs_host(&state)
+        .resize_grip(ResizeHandle::Right)
+        .expect("the right edge exposes a resize grip");
+    let grip = Point::new(grip_band.x + 1.0, grip_band.y + grip_band.height / 2.0);
+
+    report_pointer(&mut state, grip);
+    // The grip press arms the resize in place; nothing is scheduled.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::GripPressed {
+            card: MovableCard::Logs,
+            handle: ResizeHandle::Right,
+        },
+    );
+    assert_eq!(
+        logs_host(&state).resizing_handle(),
+        Some(ResizeHandle::Right),
+        "the grip press must arm exactly the edge the message names"
+    );
+
+    report_pointer(&mut state, Point::new(grip.x + 80.0, grip.y));
+    // Each move reduces in place: the card resizes, nothing is scheduled.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::Moved {
+            card: MovableCard::Logs,
+            at: Point::new(grip.x + 80.0, grip.y),
+        },
+    );
+    // The release settles the resize in place.
+    let _ = pointer(
+        &mut state,
+        MovableMessage::Released {
+            card: MovableCard::Logs,
+        },
+    );
+
+    let after = logs_host(&state).card();
+    assert!(
+        after.width > before.width,
+        "dragging the right grip outward must widen the card, {before:?} -> {after:?}"
+    );
+    assert_eq!(
+        after.height, before.height,
+        "the right grip moves the right edge only"
+    );
+    assert_eq!(after.x, before.x, "the left edge must stay put");
+    assert!(
+        logs_host(&state).resizing_handle().is_none(),
+        "the release must clear the armed grip"
+    );
+}
+
+#[test]
+fn test_a_body_press_moves_nothing_and_arms_no_gesture() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+    let body = logs_host(&state).content_viewport();
+    report_pointer(
+        &mut state,
+        Point::new(body.x + body.width / 2.0, body.y + body.height / 2.0),
+    );
+
+    let task = pointer(
+        &mut state,
+        MovableMessage::BodyPressed {
+            card: MovableCard::Logs,
+        },
+    );
+
+    assert_eq!(task.units(), 0, "a body press is fully reduced in place");
+    assert_eq!(
+        logs_host(&state).card(),
+        before,
+        "UIF-MOV-003 click-promotion must not move the card it promotes"
+    );
+    assert!(
+        !logs_host(&state).is_dragging(),
+        "a body press claimed by no control is not a drag"
+    );
+}
+
+#[test]
+fn test_a_dock_press_leaves_the_card_geometry_alone() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    let before = logs_host(&state).card();
+    let actions = logs_host(&state).trailing_actions();
+    report_pointer(&mut state, Point::new(actions.x + 5.0, actions.y + 5.0));
+
+    let task = pointer(
+        &mut state,
+        MovableMessage::DockRequested {
+            card: MovableCard::Logs,
+        },
+    );
+
+    assert_eq!(task.units(), 0, "a dock press schedules nothing");
+    assert_eq!(
+        logs_host(&state).card(),
+        before,
+        "the dock action is a title-bar control, not a geometry gesture"
+    );
+    assert!(
+        !logs_host(&state).is_dragging() && !logs_host(&state).is_capturing(),
+        "a dock press must not arm a gesture"
+    );
+}
+
+/// The host of `card`, so one gesture helper can drive either card.
+fn movable_host(state: &AppState, card: MovableCard) -> &hoarfrost::surface::movable::MovableHost {
+    match card {
+        MovableCard::Logs => logs_host(state),
+        MovableCard::AgentDebug => debug_host(state),
+    }
+}
+
+/// The other utility card, for the isolation assertions.
+fn other_card(card: MovableCard) -> MovableCard {
+    match card {
+        MovableCard::Logs => MovableCard::AgentDebug,
+        MovableCard::AgentDebug => MovableCard::Logs,
+    }
+}
+
+/// The card the registry itself says owns `at`.
+///
+/// Routing is the registry's decision and not the host's (`UIF-MOV-003`: the
+/// card owns its inside and nothing outside it), so a gesture test that
+/// addresses a card the registry handed to someone else is simply refused.
+/// Asking keeps the test honest about the real stacking order instead of
+/// hard-coding a guess about it.
+fn card_owning(state: &AppState, at: Point) -> Option<MovableCard> {
+    let id = state
+        .overlay
+        .surfaces
+        .route_pointer(at)
+        .target()
+        .surface_id()
+        .cloned()?;
+    if id == SurfaceId::new(crate::ui_iced::app::SURFACE_ID_LOGS) {
+        Some(MovableCard::Logs)
+    } else if id == SurfaceId::new(crate::ui_iced::app::SURFACE_ID_AGENT_DEBUG) {
+        Some(MovableCard::AgentDebug)
+    } else {
+        None
+    }
+}
+
+/// The centre of `card`'s own rectangle — a point that lies inside it.
+fn card_centre(state: &AppState, card: MovableCard) -> Point {
+    let rect = movable_host(state, card).card();
+    Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0)
+}
+
+/// A point on `card`'s own title bar, far enough from its left edge to be a
+/// drag handle and not a control.
+fn title_grab(state: &AppState, card: MovableCard) -> Point {
+    let bar = movable_host(state, card).title_bar();
+    Point::new(bar.x + 40.0, bar.y + bar.height / 2.0)
+}
+
+/// Drag `card` by its own title bar through the two lanes the live view uses:
+/// the cursor report first, then the press, move and release.
+fn drag_title(state: &mut AppState, card: MovableCard, dx: f32, dy: f32) {
+    let grab = title_grab(state, card);
+    report_pointer(state, grab);
+    let _ = update(
+        state,
+        Message::Movable(MovableMessage::TitlePressed { card }),
+    );
+    let to = Point::new(grab.x + dx, grab.y + dy);
+    report_pointer(state, to);
+    let _ = update(
+        state,
+        Message::Movable(MovableMessage::Moved { card, at: to }),
+    );
+    let _ = update(state, Message::Movable(MovableMessage::Released { card }));
+}
+
+/// Opens both utility cards with the log card **on top** of the inspector.
+///
+/// Both cards default to the same rectangle, and within a z-band the surface
+/// registered last is the topmost one — a host registers when its card is
+/// first opened. Opening the inspector first therefore leaves the log card
+/// topmost, which is the only arrangement in which a press on the log card's
+/// own anatomy is routed to it while both cards are mounted.
+fn open_both_cards_logs_on_top(state: &mut AppState) {
+    open_debug_card(state);
+    open_logs_card(state);
+    assert_eq!(
+        logs_host(state).card(),
+        debug_host(state).card(),
+        "precondition: both cards default to the same rectangle, so they overlap completely"
+    );
+}
+
+/// Two utility cards opened on a fresh viewport default to the *same*
+/// rectangle, so the registry — not the reducer — decides which one a press
+/// belongs to. The test therefore drives the card the registry itself names,
+/// and asserts the card it did not address stayed exactly where it was.
+#[test]
+fn test_a_gesture_on_one_card_never_moves_the_other() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_both_cards_logs_on_top(&mut state);
+
+    let owner = card_owning(&state, card_centre(&state, MovableCard::Logs))
+        .expect("both utility cards are registered over the overlap");
+    let hidden = other_card(owner);
+    let owner_before = movable_host(&state, owner).card();
+    let hidden_before = movable_host(&state, hidden).card();
+
+    drag_title(&mut state, owner, 500.0, 400.0);
+
+    let owner_after = movable_host(&state, owner).card();
+    assert!(
+        owner_after.x > owner_before.x && owner_after.y > owner_before.y,
+        "the addressed card must follow its own gesture, \
+         {owner_before:?} -> {owner_after:?}"
+    );
+    assert_eq!(
+        movable_host(&state, hidden).card(),
+        hidden_before,
+        "the reducer picks the host from `card_kind()` alone: a gesture on one \
+         card must never drive the other"
+    );
+}
+
+/// **DEFECT — the routing index drifts after a gesture.**
+///
+/// A `MovableHost` re-registers its rectangle with the [`SurfaceRegistry`]
+/// whenever its geometry settles: on open, on `set_viewport`, on `reopen`, and
+/// now also at the end of a drag or a resize (`sync_region`). The index therefore
+/// always mirrors `host.card()`.
+///
+/// The user-visible consequence of the fix: a card that has been dragged away
+/// releases the area it vacated, so a card underneath it becomes reachable
+/// again. (Before the fix the index kept the **pre-drag** rectangle, the vacated
+/// area kept pointing at the card that had moved, and the card beneath was
+/// ungrabbable for the rest of the session.)
+#[test]
+fn defect_01_a_dragged_card_releases_the_ground_it_vacated() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_logs_card(&mut state);
+    open_debug_card(&mut state);
+    assert_eq!(
+        card_owning(&state, card_centre(&state, MovableCard::Logs)),
+        Some(MovableCard::AgentDebug),
+        "precondition: the inspector was registered last, so it owns the overlap"
+    );
+    let vacated = title_grab(&state, MovableCard::Logs);
+    let debug_before = debug_host(&state).card();
+
+    drag_title(&mut state, MovableCard::AgentDebug, 500.0, 400.0);
+
+    assert!(
+        debug_host(&state).card().x > debug_before.x,
+        "precondition: the inspector must actually have moved away"
+    );
+    assert_eq!(
+        card_owning(&state, vacated),
+        Some(MovableCard::Logs),
+        "the inspector has left this area and the index followed it, so the log \
+         card underneath now owns the ground it vacated"
+    );
+    report_pointer(&mut state, vacated);
+    let _ = update(
+        &mut state,
+        Message::Movable(MovableMessage::TitlePressed {
+            card: MovableCard::Logs,
+        }),
+    );
+    assert!(
+        logs_host(&state).is_dragging(),
+        "because the index routes this press to the card that actually owns it, \
+         the log card underneath can be grabbed"
+    );
+}
+
+/// A `Close ×` is only honoured where the registry routes the press to that
+/// card, so this fixture stacks the log card on top of the inspector.
+#[test]
+fn test_a_close_request_defers_the_log_toggle_instead_of_closing_the_card() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_both_cards_logs_on_top(&mut state);
+    let debug_before = debug_host(&state).card();
+    // The `Close x` only fires where the host's own anatomy puts the action
+    // cluster: anywhere else in the title bar the same message would be read
+    // as the start of a drag and the card would stay open.
+    let actions = logs_host(&state).trailing_actions();
+    let close_at = Point::new(actions.x + 5.0, actions.y + 5.0);
+    assert_eq!(
+        card_owning(&state, close_at),
+        Some(MovableCard::Logs),
+        "precondition: the close press must be routed to the log card, or the \
+         host refuses it as another surface's point"
+    );
+    report_pointer(&mut state, close_at);
+
+    let baseline = pointer(
+        &mut state,
+        MovableMessage::Released {
+            card: MovableCard::Logs,
+        },
+    )
+    .units();
+    let task = pointer(
+        &mut state,
+        MovableMessage::CloseRequested {
+            card: MovableCard::Logs,
+        },
+    );
+
+    assert_eq!(
+        task.units(),
+        baseline + 1,
+        "the close must schedule exactly one deferred command, not reduce in place"
+    );
+    assert!(
+        state.overlay.logs_movable.is_some(),
+        "the card stays mounted until the command lands, so the menu entry and the \
+         title-bar close share one path out"
+    );
+
+    // Feeding the deferred message back is exactly what the runtime does with
+    // the returned task.
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::ToggleBackgroundLogs(false)),
+    );
+    assert!(
+        state.overlay.logs_movable.is_none(),
+        "the toggle command must drop the host on the next rebuild"
+    );
+    assert_eq!(
+        debug_host(&state).card(),
+        debug_before,
+        "closing the log card must leave the inspector's host where it was"
+    );
+}
+
+#[test]
+fn test_a_close_request_defers_the_debug_toggle_for_the_debug_card() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = ROOMY_VIEWPORT;
+    open_debug_card(&mut state);
+    let actions = debug_host(&state).trailing_actions();
+    report_pointer(&mut state, Point::new(actions.x + 5.0, actions.y + 5.0));
+
+    let task = pointer(
+        &mut state,
+        MovableMessage::CloseRequested {
+            card: MovableCard::AgentDebug,
+        },
+    );
+    assert!(
+        task.units() >= 1,
+        "the debug close must schedule its own deferred command"
+    );
+    assert!(
+        state.overlay.debug_movable.is_some(),
+        "the debug card stays mounted until its command lands"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Command(UserCommand::ToggleDebugWindow(false)),
+    );
+    assert!(
+        state.overlay.debug_movable.is_none(),
+        "the debug toggle must drop the debug host"
+    );
+    assert!(
+        state.overlay.logs_movable.is_none(),
+        "a card that was never opened must not be conjured by the other card's close"
     );
 }

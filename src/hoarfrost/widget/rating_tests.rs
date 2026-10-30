@@ -469,3 +469,56 @@ fn test_from_rating_control_for_element() {
     let ctrl = rating_control::<()>(model);
     let _element: Element<'_, ()> = ctrl.into();
 }
+
+/// **Defect 03, fixed.** `RatingControl::new` minted `Id::unique()` on every
+/// construction, so an id read in one frame addressed nothing in the next and
+/// `focus(id)` landed nowhere. It now claims a stable default name, like the
+/// pickers do.
+#[test]
+fn defect_03_the_rating_control_keeps_one_id_across_rebuilds() {
+    let mut harness = Harness::<(), _>::headless(|| {
+        rating_control::<()>(RatingModel::new(5).with_value(Some(3.0))).into()
+    });
+
+    let first = harness.registered();
+    let second = harness.registered();
+    assert_eq!(
+        first, second,
+        "defect 03: two rebuilds of the same rating must register the same id"
+    );
+
+    let expected = iced::advanced::widget::Id::new(DEFAULT_RATING_CONTROL_ID);
+    assert_eq!(
+        first,
+        vec![Some(expected.clone())],
+        "defect 03: the control registers under the documented default name"
+    );
+
+    // A control built somewhere else claims the same name, so a bridge can
+    // address it without holding a handle to the original.
+    let mut other = Harness::<(), _>::headless(|| {
+        rating_control::<()>(RatingModel::new(5).with_value(Some(3.0))).into()
+    });
+    assert_eq!(
+        other.registered(),
+        first,
+        "defect 03: the default name is derived, not randomly minted per build"
+    );
+}
+
+#[test]
+fn defect_03_id_names_the_rating_control_for_the_focus_router() {
+    assert_eq!(
+        rating_control::<()>(RatingModel::new(5)).widget_id(),
+        &iced::advanced::widget::Id::new(DEFAULT_RATING_CONTROL_ID),
+        "defect 03: widget_id reports the id the router sees"
+    );
+
+    let named = rating_control::<()>(RatingModel::new(5))
+        .id(iced::advanced::widget::Id::new("rating.review"));
+    assert_eq!(
+        named.widget_id(),
+        &iced::advanced::widget::Id::new("rating.review"),
+        "defect 03: the router must see the name the host chose"
+    );
+}
