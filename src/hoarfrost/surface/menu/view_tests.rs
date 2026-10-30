@@ -10,12 +10,22 @@
 //!    pinned at their measured values — not waived.
 //! 3. **The widget.** Layout, paint layers, focus registration and
 //!    pointer behaviour, driven through the real iced tree.
+//!
+//! Minting iced's headless renderer costs roughly 620 ms, so the widget leg
+//! shares sessions: a group of claims takes **one** [`Harness`] (or one
+//! [`Capture`] for the repaint probes) and swaps the row under test with
+//! [`Harness::set_view`]. Each case mounts its row under its own focus id,
+//! which is what keeps the carried widget state — hover, press, focus — from
+//! crossing from one case into the next. Every claim still runs: a table-driven
+//! group checks each of its cases on every pass, so what drops is the number of
+//! renderers and of repeated `assert!` sites, never the number of checks made.
+//! Each check names the case it belongs to.
 
 use super::*;
 
 use crate::state::{InteractionInput, VisualState, resolve};
 use crate::surface::menu::Menu;
-use crate::test_helpers::{Blank, Harness, moved};
+use crate::test_helpers::{Blank, El, Harness, moved};
 use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, composite_over, contrast_ratio,
 };
@@ -1247,33 +1257,15 @@ fn test_the_two_focused_cells_paint_as_the_spec_matrix_states() {
 // Fixtures for the widget leg
 // ---------------------------------------------------------------------------
 
-/// A headless harness around one row.
+/// One headless session, shared by a group of claims.
 ///
-/// The body is [`Blank`] so the widget's own paint — fill, ring, rule — is
-/// the only thing the frame contains beyond empty content, and the row is
-/// driven through the real iced build/layout/operate/update path rather than
-/// a stand-in for it.
-fn headless_row(row: Row) -> (Harness<'static, String, HeadlessRenderer>, Id) {
-    let focus_id = crate::focus::FocusId::new("row-under-test");
-    let widget_id = crate::bridge::widget_id(&focus_id);
-
-    let harness = Harness::headless(move || {
-        MenuRow::with_body(
-            row.clone(),
-            Element::new(Blank::new(Size::new(80.0, 16.0))),
-            focus_id.clone(),
-            |event| match event {
-                RowEvent::Activated => "activated".to_owned(),
-                RowEvent::Absorbed => "absorbed".to_owned(),
-                RowEvent::Hovered => "hovered".to_owned(),
-                RowEvent::Unhovered => "unhovered".to_owned(),
-            },
-        )
-        .into()
-    });
-
-    (harness, widget_id)
-}
+/// Minting iced's headless renderer costs roughly 620 ms, so the widget-leg
+/// claims share a session and swap the row under test with
+/// [`Harness::set_view`] rather than paying a build each. Every case mounts
+/// its row under its own focus id (see [`mount_row`]), which is what keeps
+/// the carried widget state — hover, press, focus — from crossing from one
+/// case into the next.
+type ProbeHarness = Harness<'static, String, HeadlessRenderer>;
 
 /// A point the row definitely covers: it fills the viewport width and its
 /// own height band starts at the top of the frame.
@@ -1296,68 +1288,93 @@ fn outside(row: &Row) -> Point {
 // Focus registration
 // ---------------------------------------------------------------------------
 
+/// The body-only row tree the shared sessions mount.
+///
+/// The body is [`Blank`] so the widget's own paint — fill, ring, rule — is
+/// the only thing the frame contains beyond empty content, and the row is
+/// driven through the real iced build/layout/operate/update path rather than
+/// a stand-in for it.
+fn row_tree(row: Row, focus_id: crate::focus::FocusId) -> El<'static, String, HeadlessRenderer> {
+    MenuRow::with_body(
+        row,
+        Element::new(Blank::new(Size::new(80.0, 16.0))),
+        focus_id,
+        grid_messages,
+    )
+    .into()
+}
+
+/// Open a headless session with `row` mounted under a case-scoped focus id.
+fn mounted_session(scope: &str, row: Row) -> (ProbeHarness, Id) {
+    let focus_id = crate::focus::FocusId::new(format!("{scope}_row"));
+    let widget_id = crate::bridge::widget_id(&focus_id);
+
+    let harness = Harness::headless(move || row_tree(row.clone(), focus_id.clone()));
+
+    (harness, widget_id)
+}
+
+/// Mount `row` in a shared session under a case-scoped focus id and report
+/// the iced [`Id`] it answers to.
+///
+/// Hover, press and focus state live in the carried widget tree under each
+/// widget's own `Id`, so naming every case's row is what makes one harness
+/// safe to share: a case can never inherit the state the case before it left
+/// behind.
+fn mount_row(harness: &mut ProbeHarness, scope: &str, row: Row) -> Id {
+    let focus_id = crate::focus::FocusId::new(format!("{scope}_row"));
+    let widget_id = crate::bridge::widget_id(&focus_id);
+
+    harness.set_view(move || row_tree(row.clone(), focus_id.clone()));
+
+    widget_id
+}
+
+/// Only a row Tab can stop on is in the router, and a row that loses its
+/// navigability while it holds focus drops the registration with it.
+///
+/// Five claims, one headless session: each row is mounted under its own
+/// focus id, so the focus the fourth case pushes cannot be seen by any other.
 #[test]
-fn test_an_activatable_row_registers_itself_with_the_focus_router() {
-    let (mut harness, widget_id) = headless_row(action());
+fn test_only_a_navigable_row_is_a_tab_stop() {
+    let (mut harness, widget_id) = mounted_session("reg_action", action());
 
     assert_eq!(
         harness.registered(),
         vec![Some(widget_id)],
-        "the row must be reachable by Tab, under the id the bridge derives \
-         from its FocusId"
+        "an activatable row must be reachable by Tab, under the id the bridge \
+         derives from its FocusId"
     );
-}
 
-#[test]
-fn test_a_separator_registers_nothing() {
-    let (mut harness, _id) = headless_row(separator());
-
+    mount_row(&mut harness, "reg_separator", separator());
     assert!(
         harness.registered().is_empty(),
         "a separator is not a thing Tab can stop on"
     );
-}
 
-#[test]
-fn test_a_heading_registers_nothing() {
-    let (mut harness, _id) = headless_row(heading());
-
+    mount_row(&mut harness, "reg_heading", heading());
     assert!(
         harness.registered().is_empty(),
         "a heading labels the rows under it; it is not itself a target"
     );
-}
 
-#[test]
-fn test_a_disabled_row_registers_nothing() {
-    let (mut harness, _id) = headless_row(disabled_action());
-
+    mount_row(&mut harness, "reg_disabled", disabled_action());
     assert!(
         harness.registered().is_empty(),
         "a row that cannot act must not be a Tab stop — the keyboard would \
          land on a dead control"
     );
-}
-
-#[test]
-fn test_a_focused_row_that_stops_being_navigable_loses_its_registration() {
-    let (mut harness, widget_id) = headless_row(action());
-    harness.focus(&widget_id);
-    assert!(harness.is_focused(&widget_id));
 
     // The same slot now holds a separator. The row cannot hold focus for a
     // widget the router can no longer traverse to.
-    let separator = separator();
-    let focus_id = crate::focus::FocusId::new("row-under-test");
-    harness.set_view(move || {
-        MenuRow::with_body(
-            separator.clone(),
-            Element::new(Blank::new(Size::new(80.0, 16.0))),
-            focus_id.clone(),
-            |_| "unused".to_owned(),
-        )
-        .into()
-    });
+    let widget_id = mount_row(&mut harness, "reg_dropped", action());
+    harness.focus(&widget_id);
+    assert!(
+        harness.is_focused(&widget_id),
+        "precondition: the row must hold focus before it stops being navigable"
+    );
+
+    mount_row(&mut harness, "reg_dropped", separator());
 
     assert!(
         !harness.is_focused(&widget_id),
@@ -1370,165 +1387,211 @@ fn test_a_focused_row_that_stops_being_navigable_loses_its_registration() {
 // Pointer: press, release, and the walk-off
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_a_press_inside_the_row_fires_nothing_until_the_release() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
-
-    // The press event carries the cursor into the row, so the hover edge
-    // lands on this same frame. What must **not** appear is the
-    // activation — that belongs to the release alone.
-    assert_eq!(
-        harness.press(at),
-        vec!["hovered".to_owned()],
-        "the press is held: firing on press would take the menu's dismissal \
-         away from the release"
-    );
+/// Where a pointer leg puts the button down and lifts it.
+enum Spot {
+    Inside,
+    Outside,
 }
 
-#[test]
-fn test_a_release_still_inside_an_activatable_row_activates_it() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
-
-    harness.press(at);
-
-    assert_eq!(harness.release(at), vec!["activated".to_owned()]);
+impl Spot {
+    fn point(&self, row: &Row) -> Point {
+        match self {
+            Spot::Inside => inside(row),
+            Spot::Outside => outside(row),
+        }
+    }
 }
 
-#[test]
-fn test_a_press_walked_off_the_row_before_the_release_never_activates() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-
-    harness.press(inside(&row));
-
-    assert_eq!(
-        harness.release(outside(&row)),
-        vec!["unhovered".to_owned()],
-        "walking the pointer off the row must cancel the activation: the \
-         only thing this frame reports is the pointer leaving"
-    );
+/// One press/release leg: the row it runs over, where the button goes down,
+/// what that press is allowed to report (if the claim pins it), where the
+/// button comes up, what the release must report, and the rule the leg pins.
+struct PointerLeg {
+    what: &'static str,
+    why: &'static str,
+    row: Row,
+    press_at: Spot,
+    press_says: Option<Vec<String>>,
+    release_at: Spot,
+    release_says: Vec<String>,
 }
 
+/// The press/release table, and the activation rule each leg pins.
+///
+/// Eight claims, one headless session: every leg mounts its row under its own
+/// focus id, so the pointer state one leg leaves behind cannot answer for
+/// the next.
 #[test]
-fn test_a_press_started_outside_the_row_is_never_activated_by_a_release_inside() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
+fn test_a_row_acts_on_the_release_and_only_on_the_release() {
+    let legs = [
+        PointerLeg {
+            what: "a press inside the row fires nothing until the release",
+            why: "the release still inside an activatable row is what activates it",
+            row: action(),
+            press_at: Spot::Inside,
+            // The press event carries the cursor into the row, so the hover
+            // edge lands on this same frame. What must **not** appear is the
+            // activation — that belongs to the release alone.
+            press_says: Some(vec!["hovered".to_owned()]),
+            release_at: Spot::Inside,
+            release_says: vec!["activated".to_owned()],
+        },
+        PointerLeg {
+            what: "a press walked off the row before the release never activates",
+            why: "walking the pointer off the row must cancel the activation: the \
+                  only thing this frame reports is the pointer leaving",
+            row: action(),
+            press_at: Spot::Inside,
+            press_says: None,
+            release_at: Spot::Outside,
+            release_says: vec!["unhovered".to_owned()],
+        },
+        PointerLeg {
+            what: "a press started outside the row is never activated by a release inside",
+            why: "the row never saw the press, so the release inside it is not its \
+                  business — the frame reports only that the pointer has arrived",
+            row: action(),
+            press_at: Spot::Outside,
+            press_says: None,
+            release_at: Spot::Inside,
+            release_says: vec!["hovered".to_owned()],
+        },
+        PointerLeg {
+            what: "a release over a heading reports only that it absorbed the press",
+            why: "a heading takes the press so the card behind it does not treat it \
+                  as a click-away, and reports nothing else",
+            row: heading(),
+            press_at: Spot::Inside,
+            press_says: None,
+            release_at: Spot::Inside,
+            release_says: vec!["absorbed".to_owned()],
+        },
+        PointerLeg {
+            what: "a release over a separator reports only that it absorbed the press",
+            why: "a separator must not dismiss the menu when it is clicked, and must \
+                  not report an activation",
+            row: separator(),
+            press_at: Spot::Inside,
+            press_says: None,
+            release_at: Spot::Inside,
+            release_says: vec!["absorbed".to_owned()],
+        },
+        PointerLeg {
+            what: "a release over a disabled row reports only that it absorbed the press",
+            why: "a disabled row swallows the click instead of falling through to \
+                  whatever is behind it",
+            row: disabled_action(),
+            press_at: Spot::Inside,
+            press_says: None,
+            release_at: Spot::Inside,
+            release_says: vec!["absorbed".to_owned()],
+        },
+        PointerLeg {
+            what: "a destructive row activates on release like any other",
+            why: "destructive is a colour, not a different activation rule",
+            row: destructive(),
+            press_at: Spot::Inside,
+            press_says: None,
+            release_at: Spot::Inside,
+            release_says: vec!["activated".to_owned()],
+        },
+    ];
 
-    harness.press(outside(&row));
+    let (mut harness, _) = mounted_session("press_first", legs[0].row.clone());
 
-    assert_eq!(
-        harness.release(inside(&row)),
-        vec!["hovered".to_owned()],
-        "the row never saw the press, so the release inside it is not its \
-         business — the frame reports only that the pointer has arrived"
-    );
-}
+    for (index, leg) in legs.iter().enumerate() {
+        mount_row(&mut harness, &format!("press_{index}"), leg.row.clone());
 
-#[test]
-fn test_a_release_over_a_heading_reports_only_that_it_absorbed_the_press() {
-    let row = heading();
-    let (mut harness, _) = headless_row(row.clone());
+        let pressed_at = leg.press_at.point(&leg.row);
+        let press_says = harness.press(pressed_at);
 
-    harness.press(inside(&row));
+        if let Some(want) = &leg.press_says {
+            assert_eq!(
+                press_says, *want,
+                "{}: the press is held: firing on press would take the menu's \
+                 dismissal away from the release",
+                leg.what
+            );
+        }
 
-    assert_eq!(
-        harness.release(inside(&row)),
-        vec!["absorbed".to_owned()],
-        "a heading takes the press so the card behind it does not treat it \
-         as a click-away, and reports nothing else"
-    );
-}
+        let released_at = leg.release_at.point(&leg.row);
 
-#[test]
-fn test_a_release_over_a_separator_reports_only_that_it_absorbed_the_press() {
-    let row = separator();
-    let (mut harness, _) = headless_row(row.clone());
-
-    harness.press(inside(&row));
-
-    assert_eq!(
-        harness.release(inside(&row)),
-        vec!["absorbed".to_owned()],
-        "a separator must not dismiss the menu when it is clicked, and must \
-         not report an activation"
-    );
-}
-
-#[test]
-fn test_a_release_over_a_disabled_row_reports_only_that_it_absorbed_the_press() {
-    let row = disabled_action();
-    let (mut harness, _) = headless_row(row.clone());
-
-    harness.press(inside(&row));
-
-    assert_eq!(
-        harness.release(inside(&row)),
-        vec!["absorbed".to_owned()],
-        "a disabled row swallows the click instead of falling through to \
-         whatever is behind it"
-    );
-}
-
-#[test]
-fn test_a_destructive_row_activates_on_release_like_any_other() {
-    let row = destructive();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
-
-    harness.press(at);
-
-    assert_eq!(
-        harness.release(at),
-        vec!["activated".to_owned()],
-        "destructive is a colour, not a different activation rule"
-    );
+        assert_eq!(
+            harness.release(released_at),
+            leg.release_says,
+            "{}: {}",
+            leg.what,
+            leg.why
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Pointer: the hover edge (`UIF-PRIN-008` plumbing)
 // ---------------------------------------------------------------------------
 
+/// Every hover claim the row makes, from one headless session.
+///
+/// The row reports raw observations and the host judges them, so the corridor
+/// can see a pointer sitting on a heading or a disabled row exactly as plainly
+/// as one on a submenu trigger. Each leg mounts its row under its own focus
+/// id, so the edge each leg reports is genuinely a crossing and not state the
+/// leg before it left in the tree.
 #[test]
-fn test_entering_a_row_reports_hovered_exactly_once() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
+fn test_the_hover_edge_reports_each_crossing_exactly_once() {
+    let (mut harness, _) = mounted_session("hover_enter", action());
+    let at = inside(&action());
 
-    assert_eq!(harness.hover(at), vec!["hovered".to_owned()]);
+    // Entering reports once, and the guard is non-vacuous: three more frames
+    // with the cursor in the same place must add nothing. A level report here
+    // would publish on every frame the pointer sat still and re-solve the
+    // host forever.
+    assert_eq!(
+        harness.hover(at),
+        vec!["hovered".to_owned()],
+        "entering a row must report the pointer arriving, once"
+    );
+    assert_eq!(
+        harness.hover(at),
+        Vec::<String>::new(),
+        "staying on the row must not report again (frame 1 of 3)"
+    );
+    assert_eq!(
+        harness.hover(at),
+        Vec::<String>::new(),
+        "staying on the row must not report again (frame 2 of 3)"
+    );
+    assert_eq!(
+        harness.hover(at),
+        Vec::<String>::new(),
+        "staying on the row must not report again (frame 3 of 3)"
+    );
 
-    // The guard is non-vacuous: three more frames with the cursor in the
-    // same place must add nothing. A level report here would publish on
-    // every frame the pointer sat still and re-solve the host forever.
-    assert_eq!(harness.hover(at), Vec::<String>::new());
-    assert_eq!(harness.hover(at), Vec::<String>::new());
-    assert_eq!(harness.hover(at), Vec::<String>::new());
-}
+    // Leaving reports once, for the same reason.
+    mount_row(&mut harness, "hover_leave", action());
+    harness.hover(inside(&action()));
 
-#[test]
-fn test_leaving_the_row_reports_unhovered_exactly_once() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
+    assert_eq!(
+        harness.hover(outside(&action())),
+        vec!["unhovered".to_owned()],
+        "leaving the row must report the pointer gone, once"
+    );
+    assert_eq!(
+        harness.hover(outside(&action())),
+        Vec::<String>::new(),
+        "staying off the row must not report again (frame 1 of 2)"
+    );
+    assert_eq!(
+        harness.hover(outside(&action())),
+        Vec::<String>::new(),
+        "staying off the row must not report again (frame 2 of 2)"
+    );
 
-    harness.hover(inside(&row));
-
-    assert_eq!(harness.hover(outside(&row)), vec!["unhovered".to_owned()]);
-    assert_eq!(harness.hover(outside(&row)), Vec::<String>::new());
-    assert_eq!(harness.hover(outside(&row)), Vec::<String>::new());
-}
-
-#[test]
-fn test_re_entering_the_row_reports_the_crossing_again() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-
+    // And the edge resets on the way out, so a second visit reports again.
+    mount_row(&mut harness, "hover_reenter", action());
     let mut seen = Vec::new();
     for _ in 0..2 {
-        seen.extend(harness.hover(inside(&row)));
-        seen.extend(harness.hover(outside(&row)));
+        seen.extend(harness.hover(inside(&action())));
+        seen.extend(harness.hover(outside(&action())));
     }
 
     assert_eq!(
@@ -1541,22 +1604,20 @@ fn test_re_entering_the_row_reports_the_crossing_again() {
         ],
         "each crossing reports once and the edge resets on the way out"
     );
-}
 
-#[test]
-fn test_hover_is_reported_for_every_row_kind_not_just_the_interactive_ones() {
-    // The widget reports raw observations and the host judges them, so
-    // the corridor can see a pointer sitting on a heading or a disabled
-    // row exactly as plainly as one on a submenu trigger.
-    for (name, row) in [
+    // Every row kind reports, not just the interactive ones.
+    for (index, (name, row)) in [
         ("action", action()),
         ("submenu parent", submenu_parent()),
         ("heading", heading()),
         ("separator", separator()),
         ("disabled", disabled_action()),
         ("destructive", destructive()),
-    ] {
-        let (mut harness, _) = headless_row(row.clone());
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        mount_row(&mut harness, &format!("hover_kind_{index}"), row.clone());
 
         assert_eq!(
             harness.hover(inside(&row)),
@@ -1569,39 +1630,44 @@ fn test_hover_is_reported_for_every_row_kind_not_just_the_interactive_ones() {
             "a {name} must report the pointer leaving"
         );
     }
-}
 
-#[test]
-fn test_a_hover_report_does_not_disturb_the_activation_sequence() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
+    // A hover report does not disturb the activation sequence: the pointer
+    // arrives, then the click happens inside it. The hover edge is the only
+    // thing the arrival says, and the click half is untouched — press still
+    // says nothing, release still says activated.
+    mount_row(&mut harness, "hover_then_click", action());
+    let at = inside(&action());
 
-    // The pointer arrives, then the click happens inside it. The hover
-    // edge is the only thing the arrival says, and the click half is
-    // untouched: press still says nothing, release still says activated.
-    assert_eq!(harness.hover(at), vec!["hovered".to_owned()]);
-    assert_eq!(harness.press(at), Vec::<String>::new());
-    assert_eq!(harness.release(at), vec!["activated".to_owned()]);
-}
+    assert_eq!(
+        harness.hover(at),
+        vec!["hovered".to_owned()],
+        "the arrival reports the hover edge and nothing else"
+    );
+    assert_eq!(
+        harness.press(at),
+        Vec::<String>::new(),
+        "the press inside a hover says nothing"
+    );
+    assert_eq!(
+        harness.release(at),
+        vec!["activated".to_owned()],
+        "the release inside a hover still activates"
+    );
 
-#[test]
-fn test_an_unavailable_cursor_is_reported_as_leaving_the_row() {
-    let row = action();
-    let (mut harness, _) = headless_row(row.clone());
-    let at = inside(&row);
-
+    // `Cursor::Unavailable` is `is_over == false`, so a pointer that vanishes
+    // mid-hover — window blur, capture taken elsewhere — reads as leaving on
+    // the next event through, rather than the row believing it is still
+    // hovered forever. The event itself is irrelevant; the harness passes the
+    // cursor separately precisely so a test can say "the tree must read the
+    // cursor as gone".
+    mount_row(&mut harness, "hover_unavailable", action());
+    let at = inside(&action());
     harness.hover(at);
 
-    // `Cursor::Unavailable` is `is_over == false`, so a pointer that
-    // vanishes mid-hover — window blur, capture taken elsewhere — reads
-    // as leaving on the next event through, rather than the row believing
-    // it is still hovered forever. The event itself is irrelevant; the
-    // harness passes the cursor separately precisely so a test can say
-    // "the tree must read the cursor as gone".
     assert_eq!(
         harness.pointer(&[moved(at)], mouse::Cursor::Unavailable),
-        vec!["unhovered".to_owned()]
+        vec!["unhovered".to_owned()],
+        "a cursor that is no longer over the tree must read as leaving the row"
     );
 }
 
@@ -1612,7 +1678,7 @@ fn test_an_unavailable_cursor_is_reported_as_leaving_the_row() {
 #[test]
 fn test_the_row_draws_through_a_real_renderer_in_every_state_it_can_be_put_in() {
     let row = action();
-    let (mut harness, widget_id) = headless_row(row.clone());
+    let (mut harness, widget_id) = mounted_session("paint_action", row.clone());
     let at = inside(&row);
 
     harness.render();
@@ -1623,12 +1689,10 @@ fn test_the_row_draws_through_a_real_renderer_in_every_state_it_can_be_put_in() 
     harness.release(at);
     harness.focus(&widget_id);
     harness.render();
-}
 
-#[test]
-fn test_a_separator_draws_through_a_real_renderer() {
-    let (mut harness, _) = headless_row(separator());
-
+    // A separator is the row kind with the least to draw, and the pointer
+    // still lands on it.
+    mount_row(&mut harness, "paint_separator", separator());
     harness.hover(Point::new(200.0, 4.0));
     harness.render();
 }
@@ -1825,7 +1889,10 @@ fn intrinsic_height(child: PixelEl) -> f32 {
 
 /// The vertical band of ink when `root` is placed in a slot of
 /// `slot_height` whose top sits at [`SLOT_TOP`].
-fn ink_over_slot(root: PixelEl, slot_height: f32) -> Option<(f32, f32)> {
+///
+/// The frame comes out of a shared [`Capture`]: each probe is a different
+/// picture, but they do not each need a renderer.
+fn ink_over_slot(capture: &mut Capture, root: PixelEl, slot_height: f32) -> Option<(f32, f32)> {
     let viewport = Size::new(300.0, SLOT_TOP + CANVAS_HEIGHT);
     let tree: PixelEl = iced::widget::column![
         iced::widget::Space::new().height(SLOT_TOP),
@@ -1835,15 +1902,11 @@ fn ink_over_slot(root: PixelEl, slot_height: f32) -> Option<(f32, f32)> {
     ]
     .into();
 
-    let rgba = crate::test_helpers::screenshot(
-        viewport,
-        crate::test_helpers::PIXEL_SCALE,
-        Color::BLACK,
-        tree,
-    );
+    let frame = capture.frame(viewport, tree);
+
     crate::test_helpers::ink_band(
-        &rgba,
-        crate::test_helpers::physical_width(viewport, crate::test_helpers::PIXEL_SCALE),
+        frame.pixels(),
+        frame.physical_size().width,
         crate::test_helpers::PIXEL_SCALE,
     )
 }
@@ -1898,18 +1961,26 @@ fn test_every_menu_slot_lays_out_on_its_declared_line_grid() {
     }
 }
 
-/// Each slot paints its glyph inside the box the row actually gives it.
+/// Each slot paints its glyph inside the box the row actually gives it, the
+/// whole rest row paints inside its 32px slot, and the pixel leg itself is
+/// trustworthy — all from one capture session.
 ///
 /// Per-slot rather than per-row on purpose: a row-level check can be
-/// satisfied by the leading glyph while the label paints nothing, and
-/// that is exactly how the original defect hid behind a row that still
-/// looked populated from a distance.
+/// satisfied by the leading glyph while the label paints nothing, and that is
+/// exactly how the original defect hid behind a row that still looked
+/// populated from a distance.
 ///
-/// Before `iced_line_height` existed every case here produced an empty
-/// frame: the paragraph was clipped to the box it was handed while its
-/// glyphs were being laid out `line_height × size` pixels down.
+/// Before `iced_line_height` existed every case here produced an empty frame:
+/// the paragraph was clipped to the box it was handed while its glyphs were
+/// being laid out `line_height × size` pixels down.
+///
+/// The known-good text control is the load-bearing half: a widget that is
+/// known to render must produce ink, so a `None` band above means a real
+/// defect rather than a harness that never painted anything.
 #[test]
 fn test_each_menu_slot_paints_its_glyph_inside_its_own_box() {
+    let mut capture = Capture::new();
+
     let action_row = action();
     let content_box = ROW_HEIGHT - 2.0 * row_padding_y(&action_row);
     let heading_row = Row::heading("SECTION");
@@ -1939,7 +2010,7 @@ fn test_each_menu_slot_paints_its_glyph_inside_its_own_box() {
     ];
 
     for (name, element, box_height) in cases {
-        let band = ink_over_slot(element, box_height).unwrap_or_else(|| {
+        let band = ink_over_slot(&mut capture, element, box_height).unwrap_or_else(|| {
             panic!(
                 "the {name} slot painted nothing in its {box_height}px box — \
                  an empty frame means the paragraph clipped its own text away"
@@ -1951,13 +2022,10 @@ fn test_each_menu_slot_paints_its_glyph_inside_its_own_box() {
             SLOT_TOP + box_height
         );
     }
-}
 
-/// A whole rest row paints inside its 32px slot — the assembled view of
-/// the per-slot guarantee above, kept so a regression in the row's own
-/// composition is caught and not only in a helper.
-#[test]
-fn test_a_rest_row_paints_its_text_inside_its_own_slot() {
+    // A whole rest row paints inside its 32px slot — the assembled view of
+    // the per-slot guarantee above, kept so a regression in the row's own
+    // composition is caught and not only in a helper.
     let row = Row::action("edit", "Edit document")
         .with_shortcut("Ctrl+E")
         .with_icon("\u{270e}");
@@ -1965,7 +2033,7 @@ fn test_a_rest_row_paints_its_text_inside_its_own_slot() {
         .palette(palette())
         .into();
 
-    let band = ink_over_slot(widget, ROW_HEIGHT)
+    let band = ink_over_slot(&mut capture, widget, ROW_HEIGHT)
         .expect("a rest row must paint; an empty frame means clipped text");
 
     assert!(
@@ -1973,20 +2041,17 @@ fn test_a_rest_row_paints_its_text_inside_its_own_slot() {
         "row ink landed at {band:?}, outside the slot {SLOT_TOP}..{:.1}",
         SLOT_TOP + ROW_HEIGHT
     );
-}
 
-/// The pixel leg itself is trustworthy: a control that is known to render
-/// must produce ink, so a `None` band above means a real defect rather
-/// than a harness that never painted anything.
-#[test]
-fn test_the_pixel_leg_renders_a_known_good_text_widget() {
+    // The pixel leg itself: a control that is known to render must produce
+    // ink, so a `None` band above means a real defect rather than a harness
+    // that never painted anything.
     let control: PixelEl = iced::widget::text("Ag")
         .size(typography::UI_COMPACT.size)
         .line_height(typography::UI_COMPACT.iced_line_height())
         .color(Color::WHITE)
         .into();
 
-    let band = ink_over_slot(control, ROW_HEIGHT).expect("the control must paint");
+    let band = ink_over_slot(&mut capture, control, ROW_HEIGHT).expect("the control must paint");
     assert!(
         band.0 >= SLOT_TOP && band.1 <= SLOT_TOP + ROW_HEIGHT,
         "control ink landed at {band:?}, outside the slot"
@@ -2054,13 +2119,34 @@ fn probe_label_id() -> iced::widget::Id {
         .expect("a named focus id yields a caption id")
 }
 
+/// The tree every slot probe reads back: the real grid row under the probe's
+/// own focus id, with nothing wrapped around it.
+fn grid_tree(row: Row) -> El<'static, String, HeadlessRenderer> {
+    MenuRow::new(row, SLOT_PROBE_FOCUS, grid_messages)
+        .palette(palette())
+        .into()
+}
+
+/// The same grid row under a focus id the caller names.
+///
+/// A probe that only reads the operation stream does not care what the row is
+/// called; a probe that drives the pointer does, because hover and press state
+/// is remembered per widget id.
+fn grid_tree_under(row: Row, focus: &str) -> El<'static, String, HeadlessRenderer> {
+    MenuRow::new(row, focus.to_owned(), grid_messages)
+        .palette(palette())
+        .into()
+}
+
+/// Open a probe session on `row` so a group of slot claims shares one
+/// headless renderer.
+fn probe_session(row: Row) -> ProbeHarness {
+    Harness::headless(move || grid_tree(row.clone()))
+}
+
 /// Reads back every candidate a real grid row and its slots publish.
-fn probe_grid(row: Row) -> Vec<Candidate> {
-    let mut harness = Harness::headless(move || {
-        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
-            .palette(palette())
-            .into()
-    });
+fn probe_grid(harness: &mut ProbeHarness, row: Row) -> Vec<Candidate> {
+    harness.set_view(move || grid_tree(row.clone()));
 
     harness.candidates()
 }
@@ -2069,12 +2155,8 @@ fn probe_grid(row: Row) -> Vec<Candidate> {
 ///
 /// An activatable row registers itself with `layout.bounds()`, which is
 /// the box every slot must be compared against.
-fn probe_slots(row: Row) -> (Vec<Candidate>, Rectangle) {
-    let mut harness = Harness::headless(move || {
-        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
-            .palette(palette())
-            .into()
-    });
+fn probe_slots(harness: &mut ProbeHarness, row: Row) -> (Vec<Candidate>, Rectangle) {
+    harness.set_view(move || grid_tree(row.clone()));
 
     let row_bounds = harness
         .recorded()
@@ -2110,11 +2192,19 @@ fn grid_messages(event: RowEvent) -> String {
     }
 }
 
+/// Everything the operation stream says about a full grid row, read out of
+/// **one** probe session: no slot child borrows the row's box, the leading
+/// and trailing slots report their own, the published caption is the label
+/// column's own box, and the row is exactly one focus target spanning its
+/// full width.
 #[test]
-fn test_a_slot_child_reports_its_own_box_not_the_rows() {
+fn test_a_grid_row_publishes_each_slots_own_box_and_one_focus_target() {
     let row = full_row();
-    let (candidates, row_bounds) = probe_slots(row.clone());
+    let mut harness = probe_session(row.clone());
+    let (candidates, row_bounds) = probe_slots(&mut harness, row.clone());
+    let children = slot_child_boxes(&candidates);
 
+    // A slot child reports its own box, not the row's.
     let inflated: Vec<&Candidate> = candidates
         .iter()
         .filter(|candidate| candidate.kind == KIND_TEXT && candidate.bounds == row_bounds)
@@ -2126,35 +2216,28 @@ fn test_a_slot_child_reports_its_own_box_not_the_rows() {
          A slot must report the box the grid gave it, not the row it sits in.",
         inflated.len(),
     );
-}
 
-#[test]
-fn test_the_leading_glyph_reports_the_leading_slots_own_box() {
-    let row = full_row();
+    // The leading glyph reports the leading slot's own box.
     let expected = expected_leading_box(&row);
 
     assert!(
-        slot_child_boxes(&probe_grid(row.clone())).contains(&expected),
+        children.contains(&expected),
         "no slot child reported the leading box {expected:?} the §4.8.1 grid \
          assigns it — the leading glyph is reporting someone else's bounds"
     );
-}
 
-#[test]
-fn test_the_trailing_slot_reports_its_own_box_flush_to_the_rows_padding() {
-    let row = full_row();
-    let (candidates, row_bounds) = probe_slots(row.clone());
+    // The trailing slot reports a right-aligned box of its own.
     let right_edge = row_bounds.x + row_bounds.width - ROW_PADDING_X;
 
-    let trailing = slot_child_boxes(&candidates)
-        .into_iter()
+    let trailing = children
+        .iter()
+        .copied()
         .filter(|bounds| bounds.width < row_bounds.width)
         .find(|bounds| (bounds.x + bounds.width - right_edge).abs() < 0.001)
         .unwrap_or_else(|| {
             panic!(
                 "no slot child reported a right-aligned box of its own; the row is \
-                 {row_bounds:?} and the slot boxes are {:?}",
-                slot_child_boxes(&candidates)
+                 {row_bounds:?} and the slot boxes are {children:?}"
             )
         });
 
@@ -2164,13 +2247,8 @@ fn test_the_trailing_slot_reports_its_own_box_flush_to_the_rows_padding() {
          so this is not the trailing slot's own box",
         trailing.width,
     );
-}
 
-#[test]
-fn test_the_published_label_box_is_not_the_box_a_slot_child_inherits() {
-    let row = full_row();
-    let (candidates, row_bounds) = probe_slots(row.clone());
-
+    // The published label box is not the box a slot child inherits.
     let label = candidates
         .iter()
         .find(|candidate| candidate.id.as_ref() == Some(&probe_label_id()))
@@ -2186,18 +2264,14 @@ fn test_the_published_label_box_is_not_the_box_a_slot_child_inherits() {
         "the caption starts at the label column, past the leading slot"
     );
     assert!(
-        !slot_child_boxes(&candidates).contains(&label.bounds),
+        !children.contains(&label.bounds),
         "the caption's box must belong to the caption alone; a slot child must not \
          be reporting it as its own"
     );
-}
 
-// -- no competing focus targets -----------------------------------------
-
-#[test]
-fn test_a_grid_row_is_exactly_one_focus_target() {
-    let candidates = probe_grid(full_row());
-
+    // One row is one Tab stop. Threading each slot's own layout through
+    // `operate` must not turn the leading box or the shortcut column into
+    // additional focus targets.
     let focus: Vec<&Candidate> = candidates
         .iter()
         .filter(|candidate| candidate.kind == KIND_FOCUSABLE)
@@ -2217,37 +2291,36 @@ fn test_a_grid_row_is_exactly_one_focus_target() {
         "the single focus target is the row itself, under the id the bridge \
          derives from its FocusId"
     );
-}
 
-#[test]
-fn test_the_rows_focus_box_is_the_whole_row_not_a_slot() {
-    let row = full_row();
-    let candidates = probe_grid(row.clone());
-    let focus = candidates
-        .iter()
-        .find(|candidate| candidate.kind == KIND_FOCUSABLE)
-        .expect("an activatable row registers itself");
-
+    // And that focus box is the whole row, not one of the slots.
     assert!(
-        !slot_child_boxes(&candidates).contains(&focus.bounds),
+        !children.contains(&focus[0].bounds),
         "the row's focus box must be the row, not one of the slot boxes \
          now threaded through `operate`"
     );
     assert!(
-        focus.bounds.width > LEADING_SLOT,
+        focus[0].bounds.width > LEADING_SLOT,
         "the row spans its full width, so Tab and the pointer agree on \
          what the row is"
     );
 }
 
+// -- no competing focus targets -----------------------------------------
+
+/// A row that is not navigable stays out of the router entirely, and a
+/// heading still publishes its caption in the box it was drawn into.
+///
+/// Four rows, one probe session.
 #[test]
-fn test_a_non_navigable_grid_row_registers_no_focus_target() {
+fn test_a_non_navigable_grid_row_registers_nothing_and_still_publishes_its_caption() {
+    let mut harness = probe_session(heading());
+
     for (name, row) in [
         ("heading", heading()),
         ("separator", separator()),
         ("disabled action", disabled_action()),
     ] {
-        let focus = probe_grid(row.clone())
+        let focus = probe_grid(&mut harness, row)
             .into_iter()
             .filter(|candidate| candidate.kind == KIND_FOCUSABLE)
             .collect::<Vec<_>>();
@@ -2262,14 +2335,11 @@ fn test_a_non_navigable_grid_row_registers_no_focus_target() {
                 .collect::<Vec<_>>(),
         );
     }
-}
 
-#[test]
-fn test_a_non_navigable_row_still_publishes_its_caption_in_its_own_box() {
     // Dropping the row's focus registration says nothing about its
     // caption: a heading's label is still published, and still reports
     // the box it was drawn into rather than the full-width row.
-    let candidates = probe_grid(heading());
+    let candidates = probe_grid(&mut harness, heading());
 
     let caption = candidates
         .iter()
@@ -2297,17 +2367,19 @@ fn test_a_non_navigable_row_still_publishes_its_caption_in_its_own_box() {
 
 // -- pointer behaviour across the slots ---------------------------------
 
+/// Wherever in the row the pointer lands, the row is what answers.
+///
+/// Three legs, one probe session; each leg mounts the row under its own
+/// focus id so the hover the previous leg left behind cannot answer for this
+/// one.
 #[test]
-fn test_a_press_on_the_leading_box_still_activates_the_row() {
-    let row = full_row();
-    let leading = expected_leading_box(&row);
-    let at = leading.center();
+fn test_a_press_or_hover_anywhere_in_the_row_belongs_to_the_row() {
+    let mut harness = probe_session(full_row());
+    let leading = expected_leading_box(&full_row());
 
-    let mut harness = Harness::headless(move || {
-        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
-            .palette(palette())
-            .into()
-    });
+    // A press on the leading box still activates the row.
+    let at = leading.center();
+    harness.set_view(move || grid_tree_under(full_row(), "slot_press_leading"));
 
     harness.press(at);
 
@@ -2316,12 +2388,9 @@ fn test_a_press_on_the_leading_box_still_activates_the_row() {
         vec!["activated".to_owned()],
         "the leading box is inside the row: clicking it clicks the row"
     );
-}
 
-#[test]
-fn test_a_press_on_the_trailing_column_still_activates_the_row() {
-    let row = full_row();
-    let (candidates, row_bounds) = probe_slots(row.clone());
+    // A press on the trailing column still activates the row.
+    let (candidates, row_bounds) = probe_slots(&mut harness, full_row());
     let right_edge = row_bounds.x + row_bounds.width - ROW_PADDING_X;
 
     let trailing = slot_child_boxes(&candidates)
@@ -2330,12 +2399,7 @@ fn test_a_press_on_the_trailing_column_still_activates_the_row() {
         .expect("the trailing slot reports a right-aligned box of its own");
 
     let at = trailing.center();
-
-    let mut harness = Harness::headless(move || {
-        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
-            .palette(palette())
-            .into()
-    });
+    harness.set_view(move || grid_tree_under(full_row(), "slot_press_trailing"));
 
     harness.press(at);
 
@@ -2345,27 +2409,25 @@ fn test_a_press_on_the_trailing_column_still_activates_the_row() {
         "the shortcut column is part of the row: a click there must still \
          activate it, exactly as a click on the label does"
     );
-}
 
-#[test]
-fn test_hovering_a_slot_reports_the_row_hovered_exactly_once() {
-    let row = full_row();
-    let leading = expected_leading_box(&row);
-    let below = row_height(&row) + 50.0;
+    // Hovering a slot reports the row hovered exactly once.
+    let below = row_height(&full_row()) + 50.0;
+    let leading_at = expected_leading_box(&full_row()).center();
+    harness.set_view(move || grid_tree_under(full_row(), "slot_hover"));
 
-    let mut harness = Harness::headless(move || {
-        MenuRow::new(row.clone(), SLOT_PROBE_FOCUS, grid_messages)
-            .palette(palette())
-            .into()
-    });
+    // The hover report is an edge, not a level, and the two press legs above
+    // left the cursor inside the row. Park it clear first so the entering
+    // assertion below is a genuine crossing and not a report the previous
+    // leg already made.
+    harness.hover(Point::new(crate::test_helpers::VIEWPORT.width - 1.0, below));
 
     assert_eq!(
-        harness.hover(leading.center()),
+        harness.hover(leading_at),
         vec!["hovered".to_owned()],
         "entering through the leading box enters the row once"
     );
     assert_eq!(
-        harness.hover(leading.center()),
+        harness.hover(leading_at),
         Vec::<String>::new(),
         "staying inside the row reports no new edge, whichever slot holds \
          the pointer"
@@ -2472,10 +2534,12 @@ fn declared_band(row: &Row) -> Rectangle {
 ///
 /// A row that registered a box disagreeing with its own `size()` is a
 /// widget lying about where it sits, and every repaint rect downstream
-/// would be wrong with it.
-fn published_band(row: Row, focus: &'static str) -> Rectangle {
-    let sized = row.clone();
-    let mut harness = Harness::headless(move || {
+/// would be wrong with it. The read comes out of a shared session: a repaint
+/// probe does not need a renderer of its own just to learn where the row sits.
+fn published_band(harness: &mut ProbeHarness, row: Row, focus: &'static str) -> Rectangle {
+    let sized = declared_band(&row);
+
+    harness.set_view(move || {
         MenuRow::new(row.clone(), focus, grid_messages)
             .palette(palette())
             .into()
@@ -2489,8 +2553,7 @@ fn published_band(row: Row, focus: &'static str) -> Rectangle {
         .expect("a navigable row registers its own bounds");
 
     assert_eq!(
-        band,
-        declared_band(&sized),
+        band, sized,
         "the box the row registered disagrees with the box its own size() \
          declares"
     );
@@ -2498,126 +2561,90 @@ fn published_band(row: Row, focus: &'static str) -> Rectangle {
     band
 }
 
-/// Two frames of one row — at rest, then with the pointer driven onto it.
-fn rest_and_hover(row: Row, focus: &'static str) -> (Frame, Frame, Rectangle) {
-    let band = published_band(row.clone(), focus);
+/// Two frames of one row — at rest, then with the pointer driven onto it —
+/// out of a shared capture session and a shared band probe.
+fn rest_and_hover(
+    capture: &mut Capture,
+    bands: &mut ProbeHarness,
+    row: Row,
+    focus: &'static str,
+) -> (Frame, Frame, Rectangle) {
+    let band = published_band(bands, row.clone(), focus);
     let at = inside(&row);
 
-    let mut capture = Capture::new();
-    let (rest, hovered) = {
-        let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
-        let hovered = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-
-        (rest, hovered)
-    };
+    let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+    let hovered = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
 
     (rest, hovered, band)
 }
 
+/// Every repaint claim the row makes, and the check that each one can fail.
+///
+/// Three state changes — the pointer arriving, the button going down on top of
+/// it, and a submenu opening under an attended parent — out of **one** capture
+/// session, each paired with the guard that goes red when the same assertion is
+/// run against a frame that never moved.
 #[test]
-fn test_hovering_a_row_repaints_its_own_band() {
-    let (rest, hovered, band) = rest_and_hover(action(), "row_rp_hover");
+fn test_a_row_repaints_when_its_state_changes_and_the_claim_can_fail() {
+    let mut capture = Capture::new();
+    let mut bands = probe_session(action());
+
+    // --- hovering a row repaints its own band ---
+    let (rest, hovered, band) = rest_and_hover(&mut capture, &mut bands, action(), "row_rp_hover");
 
     assert_repainted(&rest, &hovered, band, "hovering a menu row");
-}
-
-#[test]
-fn test_the_menu_hover_repaint_claim_fails_on_a_frame_that_never_moved() {
-    let (rest, _hovered, band) = rest_and_hover(action(), "row_rp_hover_vac");
-
     repaint_guard_panic(&rest, band, "hovering a menu row");
-}
 
-#[test]
-fn test_pressing_a_row_repaints_it_again_after_the_hover() {
+    // --- pressing repaints it again, after the hover ---
     let row = action();
     let focus = "row_rp_press";
-    let band = published_band(row.clone(), focus);
+    let band = published_band(&mut bands, row.clone(), focus);
     let at = inside(&row);
 
-    let mut capture = Capture::new();
-    let (hovered, pressed_frame) = {
-        let hovered = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-        let pressed_frame = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at), pressed()],
-            mouse::Cursor::Available(at),
-        );
-
-        (hovered, pressed_frame)
-    };
+    let hovered_frame = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
+    let pressed_frame = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at), pressed()],
+        mouse::Cursor::Available(at),
+    );
 
     assert_repainted(
-        &hovered,
+        &hovered_frame,
         &pressed_frame,
         band,
         "pressing a hovered menu row",
     );
-}
+    repaint_guard_panic(&hovered_frame, band, "pressing a hovered menu row");
 
-#[test]
-fn test_the_menu_press_repaint_claim_fails_on_a_frame_that_never_moved() {
-    let row = action();
-    let focus = "row_rp_press_vac";
-    let band = published_band(row.clone(), focus);
-    let at = inside(&row);
-
-    let mut capture = Capture::new();
-    let (hovered, _pressed_frame) = {
-        let hovered = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-        let pressed_frame = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at), pressed()],
-            mouse::Cursor::Available(at),
-        );
-
-        (hovered, pressed_frame)
-    };
-
-    repaint_guard_panic(&hovered, band, "pressing a hovered menu row");
-}
-
-#[test]
-fn test_a_submenu_opening_under_an_attended_parent_repaints_the_row() {
+    // --- a submenu opening under an attended parent repaints the row ---
     let row = submenu_parent();
     let focus = "row_rp_cascade";
-    let band = published_band(row.clone(), focus);
+    let band = published_band(&mut bands, row.clone(), focus);
     let at = inside(&row);
 
-    let mut capture = Capture::new();
-    let (closed, open) = {
-        let closed = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-        let open = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, true),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-
-        (closed, open)
-    };
+    let closed = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
+    let open = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, true),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
 
     assert_repainted(
         &closed,
@@ -2625,33 +2652,6 @@ fn test_a_submenu_opening_under_an_attended_parent_repaints_the_row() {
         band,
         "a submenu opening under its hovered parent",
     );
-}
-
-#[test]
-fn test_the_submenu_cascade_repaint_claim_fails_on_a_frame_that_never_moved() {
-    let row = submenu_parent();
-    let focus = "row_rp_cascade_vac";
-    let band = published_band(row.clone(), focus);
-    let at = inside(&row);
-
-    let mut capture = Capture::new();
-    let (closed, _open) = {
-        let closed = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-        let open = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, true),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-
-        (closed, open)
-    };
-
     repaint_guard_panic(&closed, band, "a submenu opening under its hovered parent");
 }
 
@@ -2662,15 +2662,12 @@ fn test_the_submenu_cascade_repaint_claim_fails_on_a_frame_that_never_moved() {
 fn test_a_submenu_opening_over_an_unattended_row_changes_no_pixels() {
     let row = submenu_parent();
     let focus = "row_rp_unattended";
-    let band = published_band(row.clone(), focus);
+    let mut bands = probe_session(row.clone());
+    let band = published_band(&mut bands, row.clone(), focus);
 
     let mut capture = Capture::new();
-    let (closed, open) = {
-        let closed = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
-        let open = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, true));
-
-        (closed, open)
-    };
+    let closed = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+    let open = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, true));
 
     assert_eq!(
         closed.differing_pixels(&open, band),
@@ -2682,23 +2679,18 @@ fn test_a_submenu_opening_over_an_unattended_row_changes_no_pixels() {
     // …and the same pair, attended, does move, so the zero above is the
     // rule and not a dead renderer.
     let at = inside(&row);
-    let mut capture = Capture::new();
-    let (attended_closed, attended_open) = {
-        let closed = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-        let open = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, true),
-            &[moved(at)],
-            mouse::Cursor::Available(at),
-        );
-
-        (closed, open)
-    };
+    let attended_closed = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
+    let attended_open = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, true),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
+    );
 
     zero_diff_guard(
         attended_closed.differing_pixels(&attended_open, band),
@@ -2720,17 +2712,13 @@ fn test_a_disabled_row_repaints_nothing_under_the_pointer() {
     let at = inside(&row);
 
     let mut capture = Capture::new();
-    let (rest, hovered) = {
-        let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
-        let hovered = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(row.clone(), focus, false),
-            &[moved(at), pressed()],
-            mouse::Cursor::Available(at),
-        );
-
-        (rest, hovered)
-    };
+    let rest = capture.frame(repaint_canvas(), repaint_tree(row.clone(), focus, false));
+    let hovered = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(row.clone(), focus, false),
+        &[moved(at), pressed()],
+        mouse::Cursor::Available(at),
+    );
 
     assert_eq!(
         rest.differing_pixels(&hovered, band),
@@ -2740,21 +2728,16 @@ fn test_a_disabled_row_repaints_nothing_under_the_pointer() {
 
     // …and the same probe over an enabled row does move pixels.
     let enabled = action();
-    let mut capture = Capture::new();
-    let (live_rest, live_hovered) = {
-        let rest = capture.frame(
-            repaint_canvas(),
-            repaint_tree(enabled.clone(), focus, false),
-        );
-        let hovered = capture.frame_after_at(
-            repaint_canvas(),
-            repaint_tree(enabled.clone(), focus, false),
-            &[moved(at), pressed()],
-            mouse::Cursor::Available(at),
-        );
-
-        (rest, hovered)
-    };
+    let live_rest = capture.frame(
+        repaint_canvas(),
+        repaint_tree(enabled.clone(), focus, false),
+    );
+    let live_hovered = capture.frame_after_at(
+        repaint_canvas(),
+        repaint_tree(enabled.clone(), focus, false),
+        &[moved(at), pressed()],
+        mouse::Cursor::Available(at),
+    );
 
     zero_diff_guard(
         live_rest.differing_pixels(&live_hovered, band),
@@ -2818,10 +2801,10 @@ fn non_navigable_rows() -> Vec<(&'static str, Row)> {
     ]
 }
 
-/// A body-only row under `key`, so the recording leg sees the row's own
-/// paint and nothing a slot child added.
-fn probe_body_row(key: &'static str, row: Row) -> Vec<Candidate> {
-    let mut harness = Harness::headless(move || {
+/// A body-only row under `key`, mounted in a shared session, so the recording
+/// leg sees the row's own paint and nothing a slot child added.
+fn probe_body_row(harness: &mut ProbeHarness, key: &'static str, row: Row) -> Vec<Candidate> {
+    harness.set_view(move || {
         MenuRow::with_body(
             row.clone(),
             Element::new(Blank::new(Size::new(80.0, 8.0))),
@@ -2855,11 +2838,18 @@ fn recording_body_row(
 
 // -- the gap: a non-navigable row publishes no box of its own -----------
 
+/// The gap and the guard together, over one probe session.
+///
+/// A non-navigable row publishes exactly one record of its own box — the gap
+/// this closes — and publishing that box does not open the Tab door: no
+/// record anywhere in its stream makes it focusable.
 #[test]
-fn test_a_non_navigable_row_publishes_a_record_of_its_own_box() {
+fn test_a_non_navigable_row_publishes_its_own_box_without_becoming_a_tab_stop() {
+    let mut harness = probe_session(disabled_action());
+    let id = probe_widget_id();
+
     for (name, row) in non_navigable_rows() {
-        let id = probe_widget_id();
-        let candidates = probe_grid(row.clone());
+        let candidates = probe_grid(&mut harness, row.clone());
 
         assert!(!row.navigable(), "precondition: a {name} is not navigable");
         assert!(
@@ -2879,17 +2869,8 @@ fn test_a_non_navigable_row_publishes_a_record_of_its_own_box() {
             "a {name} publishes exactly one record of itself — one row, one box, \
              not one per slot"
         );
-    }
-}
 
-// -- and publishing the box does not open the Tab door -------------------
-
-#[test]
-fn test_publishing_the_box_does_not_make_a_non_navigable_row_focusable() {
-    for (name, row) in non_navigable_rows() {
-        let id = probe_widget_id();
-        let candidates = probe_grid(row.clone());
-
+        // Publishing the box must not make the row a Tab stop.
         assert_eq!(
             containers_for(&candidates, &id).len(),
             1,
@@ -2910,11 +2891,18 @@ fn test_publishing_the_box_does_not_make_a_non_navigable_row_focusable() {
     }
 }
 
+// -- and publishing the box does not open the Tab door -------------------
+
 #[test]
 fn test_a_non_navigable_row_is_still_absent_from_the_focus_router() {
+    let mut harness = probe_session(disabled_action());
+
     for (name, row) in non_navigable_rows() {
         let key = "row_nonav_router";
-        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        let published = containers_for(
+            &probe_body_row(&mut harness, key, row.clone()),
+            &row_id(key),
+        );
         assert_eq!(
             published.len(),
             1,
@@ -2938,10 +2926,21 @@ fn test_a_non_navigable_row_is_still_absent_from_the_focus_router() {
 
 // -- the published box is the painted box ------------------------------
 
+/// The published box is the box the paint pass actually drew, for both the
+/// row that paints a rule and the row that paints a fill.
+///
+/// Two fixtures, one probe session: the separator isolates the row's own
+/// paint to one layer, and a hovered row isolates it to its own fill.
 #[test]
-fn test_a_non_navigable_row_publishes_the_box_its_paint_pass_drew_from() {
+fn test_the_published_box_is_the_box_the_paint_pass_drew() {
+    let mut harness = probe_session(separator());
+
+    // --- the separator: the published box is the band the rule was drawn in ---
     let key = "row_sep_paint";
-    let published = containers_for(&probe_body_row(key, separator()), &row_id(key));
+    let published = containers_for(
+        &probe_body_row(&mut harness, key, separator()),
+        &row_id(key),
+    );
     assert_eq!(
         published.len(),
         1,
@@ -2949,8 +2948,8 @@ fn test_a_non_navigable_row_publishes_the_box_its_paint_pass_drew_from() {
     );
     let want = published[0];
 
-    let mut harness = recording_body_row(key, separator());
-    let painted = harness.paint();
+    let mut recorder = recording_body_row(key, separator());
+    let painted = recorder.paint();
 
     assert_eq!(
         painted.len(),
@@ -2977,13 +2976,11 @@ fn test_a_non_navigable_row_publishes_the_box_its_paint_pass_drew_from() {
         want.height, SEPARATOR_HEIGHT,
         "the published box is not the row's own height"
     );
-}
 
-#[test]
-fn test_the_published_box_is_the_box_the_paint_pass_filled() {
+    // --- the hovered row: the published box is the box the fill was laid in ---
     let key = "row_fill_paint";
     let id = row_id(key);
-    let published = containers_for(&probe_body_row(key, action()), &id);
+    let published = containers_for(&probe_body_row(&mut harness, key, action()), &id);
     assert_eq!(
         published.len(),
         1,
@@ -2991,12 +2988,12 @@ fn test_the_published_box_is_the_box_the_paint_pass_filled() {
     );
     let want = published[0];
 
-    let mut harness = recording_body_row(key, action());
-    harness.hover(Point::new(
+    let mut recorder = recording_body_row(key, action());
+    recorder.hover(Point::new(
         crate::test_helpers::VIEWPORT.width / 2.0,
         ROW_HEIGHT / 2.0,
     ));
-    let painted = harness.paint();
+    let painted = recorder.paint();
 
     assert_eq!(
         painted.len(),
@@ -3021,9 +3018,14 @@ fn test_the_published_box_is_the_box_the_paint_pass_filled() {
 fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a_pixel() {
     const HALF_PIXEL: f32 = 0.5;
 
+    let mut harness = probe_session(disabled_action());
+
     for (name, row) in non_navigable_rows() {
         let key = "row_nonav_hit";
-        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        let published = containers_for(
+            &probe_body_row(&mut harness, key, row.clone()),
+            &row_id(key),
+        );
         assert_eq!(
             published.len(),
             1,
@@ -3031,7 +3033,7 @@ fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a
         );
         let want = published[0];
 
-        let mut harness = recording_body_row(key, row.clone());
+        let mut recorder = recording_body_row(key, row.clone());
         let inside = want.center();
         // A point clear of the row, used to park the pointer between probes.
         // The hover report is an edge, not a level, so every probe has to
@@ -3039,7 +3041,7 @@ fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a
         let park = Point::new(inside.x, want.y + want.height + 50.0);
 
         assert_eq!(
-            harness.hover(inside),
+            recorder.hover(inside),
             vec!["hovered".to_owned()],
             "the centre of the published box is not inside a {name}"
         );
@@ -3068,15 +3070,15 @@ fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a
         ];
 
         for (edge, just_inside, just_outside) in edges {
-            harness.hover(park);
+            recorder.hover(park);
             assert_eq!(
-                harness.hover(just_inside),
+                recorder.hover(just_inside),
                 vec!["hovered".to_owned()],
                 "a {name}'s real bounds do not reach the {edge} edge of the box it \
                  published: {HALF_PIXEL}px inside that edge is already outside the row"
             );
             assert_eq!(
-                harness.hover(just_outside),
+                recorder.hover(just_outside),
                 vec!["unhovered".to_owned()],
                 "a {name}'s real bounds reach past the {edge} edge of the box it \
                  published: {HALF_PIXEL}px outside that edge is still inside the row"
@@ -3089,6 +3091,8 @@ fn test_the_published_non_navigable_box_is_the_rows_real_bounds_to_within_half_a
 
 #[test]
 fn test_the_published_non_navigable_box_is_the_band_the_grid_declares() {
+    let mut harness = probe_session(disabled_action());
+
     for (name, key, row, height) in [
         (
             "disabled action",
@@ -3099,7 +3103,10 @@ fn test_the_published_non_navigable_box_is_the_band_the_grid_declares() {
         ("heading", "row_head_band", heading(), HEADING_HEIGHT),
         ("separator", "row_sep_band", separator(), SEPARATOR_HEIGHT),
     ] {
-        let published = containers_for(&probe_body_row(key, row.clone()), &row_id(key));
+        let published = containers_for(
+            &probe_body_row(&mut harness, key, row.clone()),
+            &row_id(key),
+        );
         assert_eq!(
             published.len(),
             1,
@@ -3119,10 +3126,15 @@ fn test_the_published_non_navigable_box_is_the_band_the_grid_declares() {
 
 // -- the navigable path is untouched ------------------------------------
 
+/// The navigable row is unchanged by everything added for the non-navigable
+/// case: the same box it always registered, and still exactly one Tab stop.
+///
+/// Four rows, one probe session.
 #[test]
-fn test_the_navigable_row_publishes_the_same_box_it_always_did() {
+fn test_a_navigable_row_publishes_the_same_box_and_exactly_one_tab_stop() {
+    let mut harness = probe_session(full_row());
     let id = probe_widget_id();
-    let candidates = probe_grid(full_row());
+    let candidates = probe_grid(&mut harness, full_row());
 
     let focus = focusables_for(&candidates, &id);
     let containers = containers_for(&candidates, &id);
@@ -3146,17 +3158,13 @@ fn test_the_navigable_row_publishes_the_same_box_it_always_did() {
         "the container a navigable row carries must be the identical box it has \
          always registered — additive, not a perturbation"
     );
-}
 
-#[test]
-fn test_a_navigable_row_publishes_its_box_and_exactly_one_tab_stop() {
     for (name, row) in [
         ("action", action()),
         ("checked toggle", checked()),
         ("submenu parent", submenu_parent()),
     ] {
-        let id = probe_widget_id();
-        let candidates = probe_grid(row.clone());
+        let candidates = probe_grid(&mut harness, row);
 
         assert_eq!(
             containers_for(&candidates, &id).len(),

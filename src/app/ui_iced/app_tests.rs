@@ -1595,3 +1595,276 @@ fn test_context_menu_successful_open_logs_no_error_code() {
         capture.codes()
     );
 }
+
+// ---------------------------------------------------------------------------
+// `sync_movable_hosts` — the reconciliation between "the view-model says this
+// card is visible" and "a host exists to draw it and clamp it"
+// ---------------------------------------------------------------------------
+
+/// Opens the Background Operations Log the way its `UserCommand` does.
+fn show_logs(state: &mut AppState) {
+    if let Ok(mut manager) = state.app.orchestrator.background_manager.lock() {
+        manager.show_background_logs = true;
+    }
+}
+
+/// Opens the Agent Debug Inspector the way its `UserCommand` does.
+fn show_debug(state: &mut AppState) {
+    state.app.orchestrator.agent_panel_state.show_debug_window = true;
+}
+
+/// Hides both Band-1 cards again.
+fn hide_utility_cards(state: &mut AppState) {
+    if let Ok(mut manager) = state.app.orchestrator.background_manager.lock() {
+        manager.show_background_logs = false;
+    }
+    state.app.orchestrator.agent_panel_state.show_debug_window = false;
+}
+
+#[test]
+fn test_sync_movable_hosts_opens_a_host_for_each_visible_card() {
+    let mut state = fresh_state(PersistedUiState::default());
+    assert!(
+        state.overlay.logs_movable.is_none() && state.overlay.debug_movable.is_none(),
+        "a booted app shows neither card and must not build a host for one"
+    );
+
+    show_logs(&mut state);
+    show_debug(&mut state);
+    state.rebuild_view_models();
+
+    assert!(
+        state.overlay.logs_movable.is_some(),
+        "the log card becoming visible must open its host"
+    );
+    assert!(
+        state.overlay.debug_movable.is_some(),
+        "the debug card becoming visible must open its host"
+    );
+    assert!(
+        state.overlay.logs_visible,
+        "the overlay's own visibility flag must follow the view-model it is derived from"
+    );
+}
+
+#[test]
+fn test_sync_movable_hosts_drops_the_host_when_its_card_is_hidden() {
+    let mut state = fresh_state(PersistedUiState::default());
+    show_logs(&mut state);
+    show_debug(&mut state);
+    state.rebuild_view_models();
+    assert!(
+        state.overlay.logs_movable.is_some() && state.overlay.debug_movable.is_some(),
+        "the fixture must open both cards before closing them"
+    );
+
+    hide_utility_cards(&mut state);
+    state.rebuild_view_models();
+
+    assert!(
+        state.overlay.logs_movable.is_none(),
+        "a hidden card must lose its host, or the view keeps drawing a closed window"
+    );
+    assert!(
+        state.overlay.debug_movable.is_none(),
+        "a hidden card must lose its host, or the view keeps drawing a closed window"
+    );
+    assert!(
+        !state.overlay.logs_visible,
+        "the overlay flag must fall back with the view-model"
+    );
+
+    state.overlay.sync_surfaces();
+    assert_eq!(
+        state.overlay.surfaces.count_in(ZBand::UtilityOverlay),
+        0,
+        "a dropped host must leave the z-order registry as well"
+    );
+}
+
+#[test]
+fn test_sync_movable_hosts_is_idempotent() {
+    let mut state = fresh_state(PersistedUiState::default());
+    show_logs(&mut state);
+    state.rebuild_view_models();
+    let first = state
+        .overlay
+        .logs_movable
+        .as_ref()
+        .expect("the log card is open")
+        .card();
+
+    // `rebuild_view_models` runs the sync on every reduction, so re-syncing an
+    // already-open card has to be a no-op or the card would drift per frame.
+    state.sync_movable_hosts();
+    state.sync_movable_hosts();
+
+    let again = state
+        .overlay
+        .logs_movable
+        .as_ref()
+        .expect("still open")
+        .card();
+    assert_eq!(
+        first, again,
+        "re-opening an open card must not move or resize it"
+    );
+}
+
+/// `UIF-MOV-002`: a card that outlives a window shrink has to be pulled back
+/// into reach, or its title bar ends up off-screen and unreachable.
+#[test]
+fn test_sync_movable_hosts_pulls_the_cards_back_after_a_viewport_shrink() {
+    let mut state = fresh_state(PersistedUiState::default());
+    show_logs(&mut state);
+    show_debug(&mut state);
+    state.rebuild_view_models();
+
+    let tiny = Size::new(120.0, 90.0);
+    state.viewport = tiny;
+    state.sync_movable_hosts();
+
+    let hosts = [
+        (
+            "logs",
+            state
+                .overlay
+                .logs_movable
+                .as_ref()
+                .expect("the log card is still visible"),
+        ),
+        (
+            "debug",
+            state
+                .overlay
+                .debug_movable
+                .as_ref()
+                .expect("the debug card is still visible"),
+        ),
+    ];
+    for (name, host) in hosts {
+        let card = host.card();
+        assert!(
+            card.x >= 0.0 && card.y >= 0.0,
+            "{name}: a clamped card must not be pushed off the top-left, got {card:?}"
+        );
+        assert!(
+            card.x < tiny.width && card.y < tiny.height,
+            "{name}: after a shrink to {tiny:?} the title bar must still be inside the \
+             window, got {card:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The pure helpers behind two log fields and the two rect refreshes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_context_target_kind_names_each_variant_as_a_stable_token() {
+    // The field is a groupable token for log tooling, so each variant must map
+    // to one fixed string rather than a debug dump that changes shape.
+    let cases: Vec<(ContextTarget, &'static str)> = vec![
+        (
+            ContextTarget::TreeDirectory {
+                path: PathBuf::from("M:\\lib"),
+            },
+            "tree_directory",
+        ),
+        (
+            ContextTarget::TreeFile {
+                path: PathBuf::from("M:\\lib\\note.md"),
+            },
+            "tree_file",
+        ),
+        (
+            ContextTarget::TreeMultiSelect {
+                paths: vec![PathBuf::from("M:\\lib\\note.md")],
+            },
+            "tree_multi_select",
+        ),
+        (
+            ContextTarget::Tab {
+                index: 2,
+                path: PathBuf::from("M:\\lib\\note.md"),
+            },
+            "tab",
+        ),
+    ];
+
+    for (target, expected) in cases {
+        assert_eq!(
+            context_target_kind(&target),
+            expected,
+            "the log's target_kind field must name the variant, not its payload"
+        );
+    }
+}
+
+#[test]
+fn test_refresh_hamburger_rects_clears_a_closed_menu() {
+    let mut state = fresh_state(PersistedUiState::default());
+    state.overlay.hamburger_open = false;
+    state.overlay.hamburger_rects = vec![Rectangle::new(Point::new(1.0, 2.0), Size::new(3.0, 4.0))];
+
+    state.refresh_hamburger_rects();
+
+    assert!(
+        state.overlay.hamburger_rects.is_empty(),
+        "a closed menu must not keep a stale region in the registry"
+    );
+}
+
+#[test]
+fn test_refresh_context_rects_moves_an_open_card_with_the_viewport() {
+    let mut state = fresh_state(PersistedUiState::default());
+    state.viewport = Size::new(1200.0, 800.0);
+
+    // Anchored against the bottom-right corner so the solver has to clamp it,
+    // which is the placement a viewport change can actually move.
+    let path = PathBuf::from("M:\\lib\\note.md");
+    let rows = crate::ui_iced::panels::left::file_menu_items(&path, &[], false);
+    state.overlay.context_menu = ContextMenu::open(
+        ContextTarget::TreeFile { path },
+        Point::new(1180.0, 780.0),
+        &rows,
+        state.viewport,
+    );
+    let before = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .expect("the fixture must open a card")
+        .rects
+        .clone();
+    assert!(
+        !before.is_empty(),
+        "an open menu must solve at least one card rect"
+    );
+
+    state.viewport = Size::new(600.0, 500.0);
+    state.refresh_context_rects();
+
+    let after = state
+        .overlay
+        .context_menu
+        .as_ref()
+        .expect("the refresh must not close the menu")
+        .rects
+        .clone();
+    assert_eq!(
+        before.len(),
+        after.len(),
+        "the same cards are solved, only placed differently"
+    );
+    assert_ne!(
+        before, after,
+        "a viewport change that lands while a menu is open must re-solve its placement"
+    );
+    for rect in &after {
+        assert!(
+            rect.x >= 0.0 && rect.y >= 0.0,
+            "a re-solved card must stay on screen, got {rect:?}"
+        );
+    }
+}

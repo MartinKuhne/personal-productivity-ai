@@ -13,6 +13,15 @@
 //! which is what the ink readers have to be measured against; the
 //! scrollable is iced's own, because the point is that a widget shipped by
 //! somebody else now reaches the recorder.
+//!
+//! Building iced's headless renderer costs roughly 620 ms, so every claim
+//! that only needs a picture shares **one** [`Capture`] per group and reads
+//! several frames out of it, and every claim that only needs the operation
+//! stream shares one [`Harness`] and swaps the tree with
+//! [`Harness::set_view`]. Frames do not share widget state and the candidate
+//! recorder is a pure read, so nothing a case observes can come from the case
+//! before it. The assertions themselves are unchanged in number and in kind;
+//! each one names the claim it belongs to.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
@@ -94,6 +103,9 @@ const DIM_FILL: Color = Color::from_rgb(0.05, 0.05, 0.05);
 /// The value a [`HookPublisher`] pushes through [`Operation::custom`].
 const CUSTOM_STATE: u32 = 0x00c0_ffee;
 
+/// One headless session, shared by every candidate probe in this file.
+type ProbeHarness = Harness<'static, (), HeadlessRenderer>;
+
 /// The rectangle covering a whole frame.
 fn whole(size: Size) -> Rectangle {
     Rectangle::with_size(size)
@@ -153,9 +165,25 @@ fn checkbox<'a>(model: &'a CheckboxModel) -> Element<'a, ()> {
     Checkbox::controlled(Controlled::new(model), "capture_leg_checkbox", |_| None).into()
 }
 
-/// Run the candidate recorder over a tree and report the kinds it saw.
-fn kinds_in(build: impl Fn() -> El<'static, (), HeadlessRenderer> + 'static) -> Vec<&'static str> {
-    let mut harness = Harness::<(), HeadlessRenderer>::headless(build);
+/// Open one candidate-recording session on `first`.
+///
+/// The session is built once per group of claims and each later tree is
+/// swapped in through [`kinds_in`], so a file that used to pay for a
+/// renderer per hook now pays for one.
+fn probe_session(first: impl Fn() -> El<'static, (), HeadlessRenderer> + 'static) -> ProbeHarness {
+    Harness::<(), HeadlessRenderer>::headless(first)
+}
+
+/// Point the shared session at `build`'s tree and report the kinds it saw.
+///
+/// [`Harness::candidates`] is a read of the tree that is currently mounted,
+/// so re-pointing the session cannot carry a fact from one probe into the
+/// next.
+fn kinds_in(
+    harness: &mut ProbeHarness,
+    build: impl Fn() -> El<'static, (), HeadlessRenderer> + 'static,
+) -> Vec<&'static str> {
+    harness.set_view(build);
 
     harness
         .candidates()
@@ -309,8 +337,11 @@ where
 /// `model` is a stack local and `Controlled` borrows it, so the element is
 /// `Element<'_>` and cannot be coerced to `'static`. Under the old
 /// `Element<'static, M>` signature this file does not compile.
+///
+/// Both legs are checked from one test because both had to be widened: the
+/// one-shot [`screenshot`] and the many-frame [`Capture`].
 #[test]
-fn test_screenshot_takes_an_element_borrowing_a_stack_local_model() {
+fn test_a_borrowing_element_reaches_both_capture_legs() {
     let model = CheckboxModel::new("").with_state(CheckState::Checked);
     let root: Element<'_, ()> = checkbox(&model);
 
@@ -319,64 +350,71 @@ fn test_screenshot_takes_an_element_borrowing_a_stack_local_model() {
     assert_eq!(
         rgba.len(),
         physical_pixels(CANVAS, PIXEL_SCALE) * 4,
-        "the framebuffer must cover the whole canvas"
+        "screenshot: the framebuffer must cover the whole canvas"
     );
     assert!(
         Frame::new(rgba, CANVAS, PIXEL_SCALE).has_ink(whole(CANVAS)),
-        "the borrowed-model checkbox must actually have painted"
+        "screenshot: the borrowed-model checkbox must actually have painted"
     );
     assert_eq!(
         model.state,
         CheckState::Checked,
-        "the model must still be readable by its owner after the capture"
+        "screenshot: the model must still be readable by its owner after the capture"
     );
-}
 
-/// The same claim through the many-frame path.
-#[test]
-fn test_capture_frame_takes_a_borrowing_element() {
-    let model = CheckboxModel::new("").with_state(CheckState::Unchecked);
-    let root: Element<'_, ()> = checkbox(&model);
+    // The same claim through the many-frame path.
+    let second = CheckboxModel::new("").with_state(CheckState::Unchecked);
+    let root: Element<'_, ()> = checkbox(&second);
 
     let mut capture = Capture::new();
     let frame = capture.frame(CANVAS, root);
 
-    assert_eq!(frame.viewport(), CANVAS);
+    assert_eq!(
+        frame.viewport(),
+        CANVAS,
+        "Capture: the frame must report the canvas it was asked for"
+    );
     assert_eq!(
         frame.physical_size(),
         Size::new(240, 96),
-        "the frame must be rasterised at PIXEL_SCALE"
+        "Capture: the frame must be rasterised at PIXEL_SCALE"
     );
 }
 
 // ---------------------------------------------------------------------------
-// The frame diff — anti-vacuity
+// The frame diff — anti-vacuity, and everything else a frame reads
 // ---------------------------------------------------------------------------
 
+/// Every claim a captured frame makes, driven out of **one** session and
+/// the two identical flat-mark frames it produces.
+///
+/// The frames are deliberately the same picture: the diff has to report
+/// zero, the repaint assertion has to go red over them, and the pixel,
+/// buffer, mask and renderer reads all have a known answer on a mark whose
+/// box is known. One renderer therefore serves all of it.
 #[test]
-fn test_two_frames_of_one_element_differ_by_zero_pixels() {
+fn test_one_session_answers_every_frame_read_and_the_repaint_guard() {
     let mut capture = Capture::new();
 
     let before = capture.frame(CANVAS, flat_mark());
     let after = capture.frame(CANVAS, flat_mark());
 
+    // Two frames of one element are pixel-identical, and one session
+    // renders the same element the same way twice.
     assert_eq!(
         before.differing_pixels(&after, whole(CANVAS)),
         0,
         "the same element rendered twice must be pixel-identical, or the diff \
          is counting noise and cannot prove anything"
     );
-}
+    assert_eq!(
+        before.differing_pixels(&after, whole(CANVAS)),
+        0,
+        "one session must render the same element the same way twice"
+    );
 
-/// The load-bearing test of the whole leg: the repaint assertion must
-/// **fail** when nothing moved.
-#[test]
-fn test_assert_repainted_panics_when_the_frames_are_identical() {
-    let mut capture = Capture::new();
-
-    let before = capture.frame(CANVAS, flat_mark());
-    let after = capture.frame(CANVAS, flat_mark());
-
+    // The load-bearing anti-vacuity claim: the repaint assertion must
+    // **fail** when nothing moved.
     let message = assert_panics("two identical frames against the repaint assertion", || {
         assert_repainted(&before, &after, whole(CANVAS), "the checkbox mark");
     });
@@ -399,40 +437,203 @@ fn test_assert_repainted_panics_when_the_frames_are_identical() {
         message.contains("Rectangle"),
         "the failure must name the rect, got: {message}"
     );
+
+    // The raw pixel read, at a point that was painted and one that was not.
+    assert_eq!(
+        before.pixel(110.0, 44.0),
+        [0, 0, 0],
+        "the pixel read must report the background where nothing is painted"
+    );
+    assert_eq!(
+        before.pixel(12.0, 12.0),
+        [255, 255, 255],
+        "the pixel read must report the mark where it was painted"
+    );
+
+    // The raw buffer lines up with the geometry the frame claims.
+    let physical = before.physical_size();
+    assert_eq!(
+        before.scale(),
+        PIXEL_SCALE,
+        "the frame must report the scale it was rasterised at"
+    );
+    assert_eq!(
+        before.pixels().len(),
+        physical.width as usize * physical.height as usize * 4,
+        "the raw buffer must be RGBA over the whole physical frame"
+    );
+
+    // The mask is not a new reading that can drift — it agrees with the
+    // reader that already existed, over the same reference and tolerance.
+    let marked = before
+        .mask_against(Color::BLACK, SURFACE_TOLERANCE)
+        .iter()
+        .filter(|pixel| **pixel)
+        .count();
+
+    assert_eq!(
+        marked,
+        before.painted_count(whole(CANVAS), to_rgb(Color::BLACK), SURFACE_TOLERANCE),
+        "the mask and `painted_count` must disagree about nothing, or one of \
+         them is measuring a different picture"
+    );
+    assert!(
+        marked > 0,
+        "a white mark over a black surface must mark something"
+    );
+
+    // The reference is load-bearing, and so is the pixel it is read at.
+    // Four readings over one frame pin that `mask_against` actually
+    // compares rather than reporting brightness no matter what it was handed.
+    let against_surface = before.mask_against(Color::BLACK, SURFACE_TOLERANCE);
+    let against_mark = before.mask_against(Color::WHITE, SURFACE_TOLERANCE);
+
+    let in_mark = |mask: &[bool]| mask[4 * physical.width as usize + 4];
+    let on_surface = |mask: &[bool]| {
+        mask[(physical.height as usize - 4) * physical.width as usize
+            + (physical.width as usize - 4)]
+    };
+
+    assert!(
+        in_mark(&against_surface),
+        "the white mark differs from the black surface"
+    );
+    assert!(
+        !in_mark(&against_mark),
+        "the white mark does not differ from white — the reference is being read"
+    );
+    assert!(
+        !on_surface(&against_surface),
+        "the bare surface IS the black reference, so it must not be marked"
+    );
+    assert!(
+        on_surface(&against_mark),
+        "the bare surface differs from white"
+    );
+
+    // The session hands out the renderer it owns, read-only and read-write.
+    // Last, so an offscreen raster cannot sit between a frame and the
+    // picture it was asked to draw.
+    let name = capture.renderer().name();
+    assert!(
+        !name.is_empty(),
+        "`renderer()` must hand back a live renderer that identifies itself"
+    );
+
+    let raw = capture
+        .renderer_mut()
+        .screenshot(physical, PIXEL_SCALE, Color::BLACK);
+
+    assert_eq!(
+        raw.len(),
+        physical.width as usize * physical.height as usize * 4,
+        "`renderer_mut()` must drive an offscreen raster of exactly the \
+         geometry handed to it"
+    );
 }
 
-/// Positive detection: a real control, toggled, really moves pixels.
+/// Positive detection: a real control, toggled, really moves pixels, and a
+/// reader that compares against a reference sees fills the brightness
+/// reading has to wave through.
+///
+/// Five frames, one session: the two checkbox states, the dim fill, a flat
+/// grey canvas and a lone glyph.
 #[test]
-fn test_checking_a_box_moves_pixels_inside_its_own_box() {
+fn test_the_paint_readers_see_what_their_fixture_painted() {
     let mut capture = Capture::new();
 
+    // --- checking a box moves pixels inside its own box ---
     let unchecked = CheckboxModel::new("");
     let checked = CheckboxModel::new("").with_state(CheckState::Checked);
 
-    let before = capture.frame(CANVAS, checkbox(&unchecked));
-    let after = capture.frame(CANVAS, checkbox(&checked));
+    let box_rest = capture.frame(CANVAS, checkbox(&unchecked));
+    let box_checked = capture.frame(CANVAS, checkbox(&checked));
 
-    let indicator = after
+    let indicator = box_checked
         .ink_bounds(whole(CANVAS))
         .expect("a checked box paints an indicator and a mark");
 
-    assert_repainted(&before, &after, indicator, "checking the box");
-    assert_repainted(&before, &after, whole(CANVAS), "checking the box");
+    assert_repainted(
+        &box_rest,
+        &box_checked,
+        indicator,
+        "checking the box (indicator)",
+    );
+    assert_repainted(
+        &box_rest,
+        &box_checked,
+        whole(CANVAS),
+        "checking the box (whole frame)",
+    );
 
-    let moved = after.differing_pixels(&before, indicator);
+    let moved = box_checked.differing_pixels(&box_rest, indicator);
     assert!(
         moved >= MIN_CHANGED_PIXELS,
         "a polarity flip must move at least {MIN_CHANGED_PIXELS} pixels of the \
          indicator, moved {moved}"
     );
+
+    // --- a dim fill the brightness reading misses but the reference sees ---
+    let region = inset(CANVAS, 4.0);
+    let area = physical_pixels(region.size(), PIXEL_SCALE);
+
+    let dim = capture.frame_at(CANVAS, PIXEL_SCALE, Color::BLACK, fill(CANVAS, DIM_FILL));
+
+    assert_eq!(
+        dim.ink_count(region),
+        0,
+        "a fill under the ink threshold must not read as ink by brightness"
+    );
+    assert_eq!(
+        dim.painted_count(region, to_rgb(Color::BLACK), SURFACE_TOLERANCE),
+        area,
+        "every pixel of the dim fill must differ from the black reference"
+    );
+    assert_eq!(
+        dim.matching_count(region, to_rgb(DIM_FILL), SURFACE_TOLERANCE),
+        area,
+        "every pixel of the fill must match its own colour"
+    );
+    assert_eq!(
+        dim.matching_count(region, to_rgb(Color::WHITE), SURFACE_TOLERANCE),
+        0,
+        "a dim fill must not match white"
+    );
+
+    // --- uniformity: a flat fill is, a glyph is not ---
+    let flat = capture.frame_at(CANVAS, PIXEL_SCALE, FLAT_GREY, fill(CANVAS, FLAT_GREY));
+    assert!(
+        flat.is_uniform(region, SURFACE_TOLERANCE),
+        "a flat fill over the same background must read as uniform"
+    );
+
+    let glyph_mark: Element<'static, ()> = iced::widget::text("X")
+        .size(32.0)
+        .color(Color::WHITE)
+        .into();
+    let glyph = capture.frame(CANVAS, glyph_mark);
+    let glyph_box = glyph
+        .ink_bounds(whole(CANVAS))
+        .expect("the glyph paints, so its bounds must exist");
+
+    assert!(
+        !glyph.is_uniform(glyph_box, SURFACE_TOLERANCE),
+        "a box with a glyph in it must not read as uniform"
+    );
+
+    let quiet = Rectangle::new(Point::new(90.0, 4.0), Size::new(24.0, 24.0));
+    assert!(
+        glyph.is_uniform(quiet, SURFACE_TOLERANCE),
+        "a region of the glyph frame away from the ink must still be uniform"
+    );
 }
 
-// ---------------------------------------------------------------------------
-// The ink readers
-// ---------------------------------------------------------------------------
-
+/// Both ink readers over one frame of a mark whose box is known exactly:
+/// the count over the mark and over bare surface, and the bounds that wrap
+/// it, read over the whole frame, over an empty region and over a rect that
+/// is not on the canvas at all.
 #[test]
-fn test_ink_count_counts_a_known_mark_and_reports_zero_over_an_empty_region() {
+fn test_the_ink_readers_count_and_wrap_a_known_mark() {
     let mut capture = Capture::new();
     let mark = Rectangle::new(Point::new(10.0, 10.0), Size::new(20.0, 20.0));
 
@@ -441,6 +642,7 @@ fn test_ink_count_counts_a_known_mark_and_reports_zero_over_an_empty_region() {
         placed(fill(mark.size(), Color::WHITE), mark.position()),
     );
 
+    // ink_count / has_ink
     let inside = frame.ink_count(mark);
     let area = physical_pixels(mark.size(), PIXEL_SCALE);
 
@@ -458,18 +660,8 @@ fn test_ink_count_counts_a_known_mark_and_reports_zero_over_an_empty_region() {
         "a region with nothing painted in it must report zero ink"
     );
     assert!(!frame.has_ink(empty));
-}
 
-#[test]
-fn test_ink_bounds_wraps_the_mark_and_is_none_over_an_empty_region() {
-    let mut capture = Capture::new();
-    let mark = Rectangle::new(Point::new(10.0, 10.0), Size::new(20.0, 20.0));
-
-    let frame = capture.frame(
-        CANVAS,
-        placed(fill(mark.size(), Color::WHITE), mark.position()),
-    );
-
+    // ink_bounds
     let bounds = frame
         .ink_bounds(whole(CANVAS))
         .expect("the mark paints, so bounds must exist");
@@ -500,7 +692,6 @@ fn test_ink_bounds_wraps_the_mark_and_is_none_over_an_empty_region() {
         mark.height
     );
 
-    let empty = Rectangle::new(Point::new(60.0, 10.0), Size::new(20.0, 20.0));
     assert!(
         frame.ink_bounds(empty).is_none(),
         "an empty region must report no ink bounds"
@@ -511,77 +702,6 @@ fn test_ink_bounds_wraps_the_mark_and_is_none_over_an_empty_region() {
         frame.ink_bounds(offscreen).is_none(),
         "a rect wholly outside the frame must read as empty rather than panic"
     );
-}
-
-#[test]
-fn test_painted_count_sees_a_dim_fill_the_brightness_reading_misses() {
-    let mut capture = Capture::new();
-    let region = inset(CANVAS, 4.0);
-    let area = physical_pixels(region.size(), PIXEL_SCALE);
-
-    let frame = capture.frame_at(CANVAS, PIXEL_SCALE, Color::BLACK, fill(CANVAS, DIM_FILL));
-
-    assert_eq!(
-        frame.ink_count(region),
-        0,
-        "a fill under the ink threshold must not read as ink by brightness"
-    );
-    assert_eq!(
-        frame.painted_count(region, to_rgb(Color::BLACK), SURFACE_TOLERANCE),
-        area,
-        "every pixel of the dim fill must differ from the black reference"
-    );
-    assert_eq!(
-        frame.matching_count(region, to_rgb(DIM_FILL), SURFACE_TOLERANCE),
-        area,
-        "every pixel of the fill must match its own colour"
-    );
-    assert_eq!(
-        frame.matching_count(region, to_rgb(Color::WHITE), SURFACE_TOLERANCE),
-        0,
-        "a dim fill must not match white"
-    );
-}
-
-#[test]
-fn test_is_uniform_is_true_on_a_flat_fill_and_false_where_a_glyph_sits() {
-    let mut capture = Capture::new();
-    let region = inset(CANVAS, 4.0);
-
-    let flat = capture.frame_at(CANVAS, PIXEL_SCALE, FLAT_GREY, fill(CANVAS, FLAT_GREY));
-    assert!(
-        flat.is_uniform(region, SURFACE_TOLERANCE),
-        "a flat fill over the same background must read as uniform"
-    );
-
-    let glyph_mark: Element<'static, ()> = iced::widget::text("X")
-        .size(32.0)
-        .color(Color::WHITE)
-        .into();
-    let glyph = capture.frame(CANVAS, glyph_mark);
-    let glyph_box = glyph
-        .ink_bounds(whole(CANVAS))
-        .expect("the glyph paints, so its bounds must exist");
-
-    assert!(
-        !glyph.is_uniform(glyph_box, SURFACE_TOLERANCE),
-        "a box with a glyph in it must not read as uniform"
-    );
-
-    let quiet = Rectangle::new(Point::new(90.0, 4.0), Size::new(24.0, 24.0));
-    assert!(
-        glyph.is_uniform(quiet, SURFACE_TOLERANCE),
-        "a region of the glyph frame away from the ink must still be uniform"
-    );
-}
-
-#[test]
-fn test_pixel_reads_the_background_where_nothing_is_painted() {
-    let mut capture = Capture::new();
-    let frame = capture.frame(CANVAS, flat_mark());
-
-    assert_eq!(frame.pixel(110.0, 44.0), [0, 0, 0]);
-    assert_eq!(frame.pixel(12.0, 12.0), [255, 255, 255]);
 }
 
 #[test]
@@ -608,33 +728,6 @@ fn test_differing_pixels_rejects_frames_of_different_sizes() {
 // RecordCandidates — the two doors that used to be invisible
 // ---------------------------------------------------------------------------
 
-/// A real iced `scrollable` registers through [`Operation::scrollable`].
-/// Until that hook was implemented the trait's default no-op swallowed it,
-/// so every test built on `RecordCandidates` was blind to every scrollable
-/// in the tree.
-#[test]
-fn test_a_scrollable_arrives_as_a_scrollable_record() {
-    let kinds = kinds_in(|| iced::widget::scrollable(iced::widget::text("scroll me")).into());
-
-    assert!(
-        kinds.contains(&KIND_SCROLLABLE),
-        "a scrollable must be visible to the candidate recorder, saw {kinds:?}"
-    );
-}
-
-/// No shipped iced widget calls [`Operation::custom`], so this was the
-/// door that went entirely unmonitored.
-#[test]
-fn test_a_custom_registration_arrives_as_a_custom_record() {
-    let kinds = kinds_in(|| hooked(KIND_CUSTOM, "custom_probe"));
-
-    assert_eq!(
-        kinds,
-        vec![KIND_CUSTOM],
-        "a widget publishing through `custom` must produce exactly one `custom` record"
-    );
-}
-
 /// One row per publishing hook, so the completeness gate can demand all six.
 fn all_kinds_rows() -> Vec<El<'static, (), HeadlessRenderer>> {
     vec![
@@ -647,11 +740,44 @@ fn all_kinds_rows() -> Vec<El<'static, (), HeadlessRenderer>> {
     ]
 }
 
-/// The completeness gate: every hook [`Operation`] declares has to be
-/// implemented, because an omitted one fails silently rather than loudly.
+/// Every door [`Operation`] declares has to reach the recorder, and the two
+/// that were added late must not have disturbed the ones that already worked.
+///
+/// Four trees, one session: a real iced `scrollable` (which registers
+/// through [`Operation::scrollable`] — until that hook was implemented the
+/// trait's default no-op swallowed it), a widget publishing through
+/// [`Operation::custom`] (a door no shipped iced widget ever used, so it
+/// went entirely unmonitored), the full six-row completeness gate, and a
+/// focusable/custom pair.
 #[test]
 fn test_the_recorder_opens_every_hook_the_operation_trait_declares() {
-    let kinds = kinds_in(|| iced::widget::column(all_kinds_rows()).into());
+    let mut harness =
+        probe_session(|| iced::widget::scrollable(iced::widget::text("scroll me")).into());
+
+    // A scrollable must be visible to the candidate recorder.
+    let kinds = kinds_in(&mut harness, || {
+        iced::widget::scrollable(iced::widget::text("scroll me")).into()
+    });
+
+    assert!(
+        kinds.contains(&KIND_SCROLLABLE),
+        "a scrollable must be visible to the candidate recorder, saw {kinds:?}"
+    );
+
+    // A widget publishing through `custom` must produce exactly one record.
+    let kinds = kinds_in(&mut harness, || hooked(KIND_CUSTOM, "custom_probe"));
+
+    assert_eq!(
+        kinds,
+        vec![KIND_CUSTOM],
+        "a widget publishing through `custom` must produce exactly one `custom` record"
+    );
+
+    // The completeness gate: every hook [`Operation`] declares has to be
+    // implemented, because an omitted one fails silently rather than loudly.
+    let kinds = kinds_in(&mut harness, || {
+        iced::widget::column(all_kinds_rows()).into()
+    });
 
     for kind in ALL_KINDS {
         assert!(
@@ -660,12 +786,9 @@ fn test_the_recorder_opens_every_hook_the_operation_trait_declares() {
              Saw {kinds:?}"
         );
     }
-}
 
-/// The two new doors must not swallow the ones that already worked.
-#[test]
-fn test_the_new_hooks_do_not_disturb_the_records_that_already_worked() {
-    let kinds = kinds_in(|| {
+    // The two new doors must not swallow the ones that already worked.
+    let kinds = kinds_in(&mut harness, || {
         let rows: Vec<El<'static, (), HeadlessRenderer>> =
             vec![wrapped("alpha", true), hooked(KIND_CUSTOM, "custom")];
 
@@ -685,20 +808,6 @@ fn test_the_new_hooks_do_not_disturb_the_records_that_already_worked() {
 // ---------------------------------------------------------------------------
 // One renderer, many frames
 // ---------------------------------------------------------------------------
-
-#[test]
-fn test_one_session_renders_the_same_frame_identically_across_calls() {
-    let mut capture = Capture::new();
-
-    let first = capture.frame(CANVAS, flat_mark());
-    let second = capture.frame(CANVAS, flat_mark());
-
-    assert_eq!(
-        first.differing_pixels(&second, whole(CANVAS)),
-        0,
-        "one session must render the same element the same way twice"
-    );
-}
 
 /// A measurement, not an assertion — asserted timings are flaky on a loaded
 /// machine, and the number this exists to produce is the one the report
@@ -773,7 +882,8 @@ fn measure_capture_amortisation() {
     );
 }
 
-/// Every controlled shape the suite currently leaks, built **borrowed** instead.
+/// Every controlled shape the suite currently leaks, built **borrowed**
+/// instead, and all five through one harness.
 ///
 /// Each block is the construction the matching `leaked()` helper performs,
 /// with the leak replaced by a stack local and the model handed straight to
@@ -781,6 +891,11 @@ fn measure_capture_amortisation() {
 /// helpers can go: if any block stopped compiling, the widening had
 /// regressed for that widget family and its `leaked()` helper would have to
 /// come back.
+///
+/// Every model is declared **before** the harness, because the harness's
+/// `'a` is fixed at construction and each [`Harness::set_view`] has to
+/// satisfy it. The models outlive the session, so nothing is leaked and
+/// nothing is borrowed past its owner.
 ///
 /// `text_input_tests`' `Host` is deliberately **not** here. Its leak is not
 /// the harness's `'static` view bound — it is the need for one model to be
@@ -790,6 +905,23 @@ fn measure_capture_amortisation() {
 fn test_every_controlled_shape_borrows_into_a_harness() {
     // `hyperlink_tests::leaked`
     let link_model = HyperlinkModel::external("About", "/about");
+    // `segmented_tests::leaked`
+    let segment_model: SegmentedModel<&'static str> = SegmentedModel::new(vec![
+        SegmentItem::new("left", "Left"),
+        SegmentItem::new("right", "Right"),
+    ]);
+    // `split_button_tests::leaked`
+    let split_model = SplitButtonModel::primary(
+        "Save",
+        vec![SplitMenuRow::new("export".to_string(), "Export PDF")],
+    );
+    // `toggle_widget_tests::leaked` — radio group
+    let radio_id = String::from("a");
+    let radio_model =
+        RadioGroupModel::new(vec![RadioOption::new(radio_id.clone(), "A")]).with_selected(radio_id);
+    // `toggle_widget_tests::leaked` — switch
+    let switch_model = SwitchModel::new("Switch").with_on(true);
+
     let mut harness = Harness::<(), HeadlessRenderer>::headless(|| {
         Hyperlink::controlled(Controlled::new(&link_model), BORROW_FOCUS_ID, |_| None).into()
     });
@@ -798,12 +930,7 @@ fn test_every_controlled_shape_borrows_into_a_harness() {
         "a borrowed hyperlink model must reach the router"
     );
 
-    // `segmented_tests::leaked`
-    let segment_model: SegmentedModel<&'static str> = SegmentedModel::new(vec![
-        SegmentItem::new("left", "Left"),
-        SegmentItem::new("right", "Right"),
-    ]);
-    let mut harness = Harness::<(), HeadlessRenderer>::headless(|| {
+    harness.set_view(|| {
         SegmentedButton::<(), &'static str>::controlled(
             Controlled::new(&segment_model),
             BORROW_FOCUS_ID,
@@ -816,12 +943,7 @@ fn test_every_controlled_shape_borrows_into_a_harness() {
         "a borrowed segmented model must reach the router"
     );
 
-    // `split_button_tests::leaked`
-    let split_model = SplitButtonModel::primary(
-        "Save",
-        vec![SplitMenuRow::new("export".to_string(), "Export PDF")],
-    );
-    let mut harness = Harness::<(), HeadlessRenderer>::headless(|| {
+    harness.set_view(|| {
         SplitButton::<(), String>::controlled(
             Controlled::new(&split_model),
             BORROW_FOCUS_ID,
@@ -834,11 +956,7 @@ fn test_every_controlled_shape_borrows_into_a_harness() {
         "a borrowed split-button model must reach the router"
     );
 
-    // `toggle_widget_tests::leaked` — radio group
-    let radio_id = String::from("a");
-    let radio_model =
-        RadioGroupModel::new(vec![RadioOption::new(radio_id.clone(), "A")]).with_selected(radio_id);
-    let mut harness = Harness::<(), HeadlessRenderer>::headless(|| {
+    harness.set_view(|| {
         RadioGroup::<(), String>::controlled(Controlled::new(&radio_model), BORROW_FOCUS_ID, |_| {
             None
         })
@@ -849,9 +967,7 @@ fn test_every_controlled_shape_borrows_into_a_harness() {
         "a borrowed radio-group model must reach the router"
     );
 
-    // `toggle_widget_tests::leaked` — switch
-    let switch_model = SwitchModel::new("Switch").with_on(true);
-    let mut harness = Harness::<(), HeadlessRenderer>::headless(|| {
+    harness.set_view(|| {
         ToggleSwitch::controlled(Controlled::new(&switch_model), BORROW_FOCUS_ID, |_| None).into()
     });
     assert!(
@@ -970,126 +1086,79 @@ fn test_a_borrowing_harness_rebuilds_the_same_model_twice() {
 }
 
 // ---------------------------------------------------------------------------
-// Gap-closer 1 — the renderer behind a capture session
+// Gap-closer 4 — one delivery, both halves of the claim
 // ---------------------------------------------------------------------------
 
-/// A session hands out the renderer it owns, read-only and read-write.
+/// Focus id the click-and-frame fixtures register under.
+const CLICK_FOCUS_ID: &str = "capture_click_frame";
+
+/// A point the checkbox's own hit target certainly covers.
+fn click_target() -> Point {
+    Point::new(12.0, 12.0)
+}
+
+/// A checkbox that reports its toggle instead of swallowing it.
+fn clicky_checkbox(model: &CheckboxModel) -> Element<'_, String> {
+    Checkbox::controlled(Controlled::new(model), CLICK_FOCUS_ID, |_| {
+        Some(String::from("toggled"))
+    })
+    .into()
+}
+
+/// Both event-delivery paths, from one session: the click that reports the
+/// message it produced **and** the frame it left, and the general event path
+/// that reports the same pair.
 ///
-/// A probe that wants renderer-level facts next to its frames used to have
-/// to build a second headless renderer to get them — paying the build
-/// cost again and, worse, measuring a renderer that was not the one that
-/// drew the picture. Both halves of the protocol are reachable here:
-/// `name()` for the `&self` read, `screenshot()` for the `&mut self`
-/// raster, and the buffer it returns is exactly the geometry asked for.
-#[test]
-fn test_a_capture_session_exposes_the_renderer_it_owns() {
-    let mut capture = Capture::new();
-    let frame = capture.frame(CANVAS, flat_mark());
-    let physical = frame.physical_size();
-
-    let name = capture.renderer().name();
-    assert!(
-        !name.is_empty(),
-        "`renderer()` must hand back a live renderer that identifies itself"
-    );
-
-    let raw = capture
-        .renderer_mut()
-        .screenshot(physical, PIXEL_SCALE, Color::BLACK);
-    let expected = physical.width as usize * physical.height as usize * 4;
-
-    assert_eq!(
-        raw.len(),
-        expected,
-        "`renderer_mut()` must drive an offscreen raster of exactly the \
-         geometry handed to it"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Gap-closer 2 — the raw buffer and an arbitrary mask
-// ---------------------------------------------------------------------------
-
-/// The raw framebuffer lines up with the geometry the frame claims.
-#[test]
-fn test_a_frame_exposes_its_raw_buffer_at_its_own_geometry() {
-    let mut capture = Capture::new();
-    let frame = capture.frame(CANVAS, flat_mark());
-    let physical = frame.physical_size();
-
-    assert_eq!(
-        frame.scale(),
-        PIXEL_SCALE,
-        "the frame must report the scale it was rasterised at"
-    );
-    assert_eq!(
-        frame.pixels().len(),
-        physical.width as usize * physical.height as usize * 4,
-        "the raw buffer must be RGBA over the whole physical frame"
-    );
-}
-
-/// The mask is not a new reading that can drift — it agrees with the
-/// reader that already existed, over the same reference and tolerance.
-#[test]
-fn test_a_mask_against_a_reference_matches_the_painted_count() {
-    let mut capture = Capture::new();
-    let frame = capture.frame(CANVAS, flat_mark());
-
-    let marked = frame
-        .mask_against(Color::BLACK, SURFACE_TOLERANCE)
-        .iter()
-        .filter(|pixel| **pixel)
-        .count();
-
-    assert_eq!(
-        marked,
-        frame.painted_count(whole(CANVAS), to_rgb(Color::BLACK), SURFACE_TOLERANCE),
-        "the mask and `painted_count` must disagree about nothing, or one of \
-         them is measuring a different picture"
-    );
-    assert!(
-        marked > 0,
-        "a white mark over a black surface must mark something"
-    );
-}
-
-/// The reference is load-bearing, and so is the pixel it is read at.
+/// The half-claim this replaces: `click` gave the messages and never drew,
+/// `frame_after` drew and threw the messages away, so proving "the click
+/// fired and the widget repainted" meant running the gesture twice and
+/// hoping both halves described the same run. Here they cannot diverge.
 ///
-/// Four readings over one frame — mark against the surface, mark against
-/// the mark's own colour, and the same two over bare surface — pin that
-/// `mask_against` actually compares rather than reporting brightness no
-/// matter what it was handed.
+/// The general path's message list is the tree's own — cross-checked against
+/// the harness over identical events rather than asserted against a number
+/// that would pass on an empty vector either way. Each half diffs against a
+/// rest frame taken from **its own** model, so a repaint can only be credited
+/// to the gesture and never to a caption that differs between the two.
 #[test]
-fn test_the_reference_a_mask_is_cut_against_actually_matters() {
+fn test_one_delivery_reports_its_message_and_its_frame() {
+    let at = click_target();
     let mut capture = Capture::new();
-    let frame = capture.frame(CANVAS, fill(Size::new(24.0, 24.0), Color::WHITE));
-    let physical = frame.physical_size();
 
-    let against_surface = frame.mask_against(Color::BLACK, SURFACE_TOLERANCE);
-    let against_mark = frame.mask_against(Color::WHITE, SURFACE_TOLERANCE);
+    // --- the click: message and frame from one delivery ---
+    let model = CheckboxModel::new("Click and frame");
+    let rest = capture.frame(CANVAS, clicky_checkbox(&model));
+    let (clicked, messages) = capture.click_and_frame(CANVAS, clicky_checkbox(&model), at);
 
-    let in_mark = |mask: &[bool]| mask[4 * physical.width as usize + 4];
-    let on_surface = |mask: &[bool]| {
-        mask[(physical.height as usize - 4) * physical.width as usize
-            + (physical.width as usize - 4)]
-    };
+    assert_eq!(
+        messages,
+        vec![String::from("toggled")],
+        "the click must produce exactly the widget's toggle message"
+    );
+    assert_repainted(&rest, &clicked, whole(CANVAS), "clicking the checkbox");
 
-    assert!(
-        in_mark(&against_surface),
-        "the white mark differs from the black surface"
+    // --- the general event path: the same pair ---
+    let injected = CheckboxModel::new("Injected hover");
+    let injected_rest = capture.frame(CANVAS, clicky_checkbox(&injected));
+    let (hovered, messages) = capture.frame_and_messages_after(
+        CANVAS,
+        clicky_checkbox(&injected),
+        &[moved(at)],
+        mouse::Cursor::Available(at),
     );
-    assert!(
-        !in_mark(&against_mark),
-        "the white mark does not differ from white — the reference is being read"
+
+    let mut harness = Harness::<String, HeadlessRenderer>::headless(|| clicky_checkbox(&injected));
+    let via_harness = harness.hover(at);
+
+    assert_eq!(
+        messages, via_harness,
+        "the capture path and the harness must report the same reply to the \
+         same event, or one of them is not delivering it"
     );
-    assert!(
-        !on_surface(&against_surface),
-        "the bare surface IS the black reference, so it must not be marked"
-    );
-    assert!(
-        on_surface(&against_mark),
-        "the bare surface differs from white"
+    assert_repainted(
+        &injected_rest,
+        &hovered,
+        whole(CANVAS),
+        "hovering the checkbox",
     );
 }
 
@@ -1097,10 +1166,14 @@ fn test_the_reference_a_mask_is_cut_against_actually_matters() {
 // Gap-closer 3 — the shared panic reader and its guard
 // ---------------------------------------------------------------------------
 
+/// The panic reader and the guard that uses it, both directions.
+///
 /// A panic payload is `Box<dyn Any + Send>` and arrives in whichever shape
-/// the panicking side liked. All four shapes read back the same way.
+/// the panicking side liked; all four shapes read back the same way. And the
+/// guard is load-bearing in both directions: it returns the message when the
+/// probe fires, and refuses to pass a probe that stayed quiet.
 #[test]
-fn test_panic_text_flattens_every_payload_shape() {
+fn test_the_panic_reader_and_its_guard_hold_in_both_directions() {
     let string_payload: Result<(), Box<dyn Any + Send>> =
         Err(Box::new(String::from("a String payload")));
     let str_payload: Result<(), Box<dyn Any + Send>> = Err(Box::new("a &str payload"));
@@ -1111,12 +1184,7 @@ fn test_panic_text_flattens_every_payload_shape() {
     assert_eq!(panic_text(&str_payload), "a &str payload");
     assert_eq!(panic_text(&opaque_payload), "<non-string panic payload>");
     assert_eq!(panic_text(&no_panic), "<no panic>");
-}
 
-/// The guard is load-bearing in both directions: it returns the message
-/// when the probe fires, and refuses to pass a probe that stayed quiet.
-#[test]
-fn test_assert_panics_returns_the_message_and_refuses_a_quiet_probe() {
     let message = assert_panics("a deliberate panic", || panic!("the message it carries"));
 
     assert!(
@@ -1137,77 +1205,4 @@ fn test_assert_panics_returns_the_message_and_refuses_a_quiet_probe() {
         panic_text(&guard).contains("a guard over a quiet closure"),
         "the guard's own failure must name what it was guarding"
     );
-}
-
-// ---------------------------------------------------------------------------
-// Gap-closer 4 — one delivery, both halves of the claim
-// ---------------------------------------------------------------------------
-
-/// Focus id the click-and-frame fixtures register under.
-const CLICK_FOCUS_ID: &str = "capture_click_frame";
-
-/// A point the checkbox's own hit target certainly covers.
-fn click_target() -> Point {
-    Point::new(12.0, 12.0)
-}
-
-/// A checkbox that reports its toggle instead of swallowing it.
-fn clicky_checkbox(model: &CheckboxModel) -> Element<'_, String> {
-    Checkbox::controlled(Controlled::new(model), CLICK_FOCUS_ID, |_| {
-        Some(String::from("toggled"))
-    })
-    .into()
-}
-
-/// A click reports the message it produced **and** the frame it left,
-/// from one delivery.
-///
-/// The half-claim this replaces: `click` gave the messages and never drew,
-/// `frame_after` drew and threw the messages away, so proving "the click
-/// fired and the widget repainted" meant running the gesture twice and
-/// hoping both halves described the same run. Here they cannot diverge.
-#[test]
-fn test_a_click_returns_its_message_and_its_frame_from_one_delivery() {
-    let model = CheckboxModel::new("Click and frame");
-    let at = click_target();
-
-    let mut capture = Capture::new();
-    let rest = capture.frame(CANVAS, clicky_checkbox(&model));
-    let (clicked, messages) = capture.click_and_frame(CANVAS, clicky_checkbox(&model), at);
-
-    assert_eq!(
-        messages,
-        vec![String::from("toggled")],
-        "the click must produce exactly the widget's toggle message"
-    );
-    assert_repainted(&rest, &clicked, whole(CANVAS), "clicking the checkbox");
-}
-
-/// The general event path returns the same pair, and its message list is
-/// the tree's own — cross-checked against the harness over identical
-/// events rather than asserted against a number that would pass on an
-/// empty vector either way.
-#[test]
-fn test_an_injected_event_returns_the_frame_and_the_tree_s_own_messages() {
-    let model = CheckboxModel::new("Injected hover");
-    let at = click_target();
-
-    let mut capture = Capture::new();
-    let rest = capture.frame(CANVAS, clicky_checkbox(&model));
-    let (hovered, messages) = capture.frame_and_messages_after(
-        CANVAS,
-        clicky_checkbox(&model),
-        &[moved(at)],
-        mouse::Cursor::Available(at),
-    );
-
-    let mut harness = Harness::<String, HeadlessRenderer>::headless(|| clicky_checkbox(&model));
-    let via_harness = harness.hover(at);
-
-    assert_eq!(
-        messages, via_harness,
-        "the capture path and the harness must report the same reply to the \
-         same event, or one of them is not delivering it"
-    );
-    assert_repainted(&rest, &hovered, whole(CANVAS), "hovering the checkbox");
 }

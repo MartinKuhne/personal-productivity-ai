@@ -4,9 +4,13 @@ use super::*;
 use crate::binding::GestureStart;
 use crate::surface::zorder::ZBand;
 use crate::test_helpers::Harness;
+use crate::test_helpers::headless_renderer;
 use crate::token::color::Palette;
 use crate::token::contrast::contrast_ratio;
+use iced::Event;
 use iced::advanced::Widget;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
 
 // ---------------------------------------------------------------------------
 // 1. Data Model Tests
@@ -356,50 +360,101 @@ fn test_side_sheet_widget_size_open_vs_closed() {
 }
 
 #[test]
-fn test_side_sheet_widget_headless_render() {
-    let model = SideSheetModel::new("Headless Sheet").with_width(360.0);
-    let mut harness = Harness::<(), _>::headless(move || {
-        side_sheet(model.clone(), iced::widget::text("Inner Content")).into()
-    });
-    harness.render();
-}
+fn test_side_sheet_widget_headless_render_and_layout_geometry() {
+    // (case label, model, footer, expected node width, expected child nodes)
+    let cases = [
+        (
+            "open docked",
+            SideSheetModel::new("Headless Sheet").with_width(360.0),
+            false,
+            DEFAULT_WIDTH,
+            1,
+        ),
+        (
+            "modeless overlay with footer, left placement",
+            SideSheetModel::new("Footer Sheet")
+                .with_width(400.0)
+                .with_mode(SheetMode::ModelessOverlay)
+                .with_placement(SheetPlacement::Left),
+            true,
+            400.0,
+            2,
+        ),
+        (
+            "modal scrim, busy and dirty",
+            SideSheetModel::new("Modal Scrim Sheet")
+                .with_width(500.0)
+                .with_mode(SheetMode::ModalScrim)
+                .with_busy(true)
+                .with_dirty(true),
+            false,
+            500.0,
+            1,
+        ),
+        (
+            "closed",
+            SideSheetModel::new("Closed Sheet")
+                .with_width(360.0)
+                .with_open(false),
+            false,
+            0.0,
+            0,
+        ),
+    ];
 
-#[test]
-fn test_side_sheet_widget_headless_render_with_footer() {
-    let model = SideSheetModel::new("Footer Sheet")
-        .with_width(400.0)
-        .with_mode(SheetMode::ModelessOverlay)
-        .with_placement(SheetPlacement::Left);
-    let mut harness = Harness::<(), _>::headless(move || {
-        side_sheet(model.clone(), iced::widget::text("Body Content"))
-            .footer(iced::widget::text("Action Buttons"))
-            .into()
-    });
-    harness.render();
-}
+    let renderer = headless_renderer();
+    let limits = layout::Limits::new(Size::ZERO, Size::new(1200.0, 400.0));
 
-#[test]
-fn test_side_sheet_widget_headless_render_modal_scrim_busy() {
-    let model = SideSheetModel::new("Modal Scrim Sheet")
-        .with_width(500.0)
-        .with_mode(SheetMode::ModalScrim)
-        .with_busy(true)
-        .with_dirty(true);
-    let mut harness = Harness::<(), _>::headless(move || {
-        side_sheet(model.clone(), iced::widget::text("Modal Body")).into()
-    });
-    harness.render();
-}
+    for (label, model, with_footer, expected_width, expected_children) in cases {
+        let mut sheet: SideSheet<'_, ()> =
+            side_sheet(model.clone(), iced::widget::text("Body Content"));
+        if with_footer {
+            sheet = sheet.footer(iced::widget::text("Action Buttons"));
+        }
 
-#[test]
-fn test_side_sheet_widget_headless_render_closed() {
-    let model = SideSheetModel::new("Closed Sheet")
-        .with_width(360.0)
-        .with_open(false);
-    let mut harness = Harness::<(), _>::headless(move || {
-        side_sheet(model.clone(), iced::widget::text("Hidden Content")).into()
-    });
-    harness.render();
+        let mut tree = Tree::new(&sheet as &dyn Widget<(), iced::Theme, iced::Renderer>);
+        let node = sheet.layout(&mut tree, &renderer, &limits);
+
+        assert_eq!(
+            node.size().width,
+            expected_width,
+            "[{label}] the layout node must be as wide as the model allows"
+        );
+        assert_eq!(
+            node.children().len(),
+            expected_children,
+            "[{label}] the layout must hand out one node per child element"
+        );
+        if expected_children == 0 {
+            assert_eq!(
+                node.size(),
+                Size::ZERO,
+                "[{label}] a closed sheet must take up no space at all"
+            );
+        } else {
+            assert_eq!(
+                node.size().height,
+                400.0,
+                "[{label}] the sheet fills the height it is offered"
+            );
+            let content = node.children()[0].bounds();
+            assert_eq!(
+                content.x, BODY_PADDING,
+                "[{label}] the body must be padded in from the sheet edge"
+            );
+            assert_eq!(
+                content.y,
+                HEADER_HEIGHT + BODY_PADDING,
+                "[{label}] the body must be padded below the header"
+            );
+        }
+
+        // The full render path must survive every mode combination.
+        let mut harness = Harness::<(), _>::headless(move || {
+            side_sheet(model.clone(), iced::widget::text("Body Content")).into()
+        });
+        harness.render();
+    }
 }
 
 #[test]
@@ -426,4 +481,786 @@ fn test_side_sheet_element_conversion() {
     let model = SideSheetModel::new("Convert");
     let sheet: SideSheet<'_, ()> = side_sheet(model, iced::widget::text("Body"));
     let _element: Element<'_, ()> = sheet.into();
+}
+
+#[test]
+fn test_side_sheet_children_and_diff_track_the_footer() {
+    let plain: SideSheet<'_, ()> =
+        side_sheet(SideSheetModel::new("Plain"), iced::widget::text("Body"));
+    let mut plain_tree = Tree::new(&plain as &dyn Widget<(), iced::Theme, iced::Renderer>);
+    assert_eq!(
+        plain.children().len(),
+        1,
+        "a sheet without a footer owns exactly one child element"
+    );
+    assert_eq!(
+        plain_tree.children.len(),
+        1,
+        "the tree must be seeded with one child state"
+    );
+    plain.diff(&mut plain_tree);
+    assert_eq!(
+        plain_tree.children.len(),
+        1,
+        "diffing an unchanged sheet must not grow the tree"
+    );
+
+    let footed: SideSheet<'_, ()> =
+        side_sheet(SideSheetModel::new("Footed"), iced::widget::text("Body"))
+            .footer(iced::widget::text("Actions"));
+    let mut footed_tree = Tree::new(&footed as &dyn Widget<(), iced::Theme, iced::Renderer>);
+    assert_eq!(
+        footed.children().len(),
+        2,
+        "a sheet with a footer owns a body and a footer element"
+    );
+    footed.diff(&mut footed_tree);
+    assert_eq!(
+        footed_tree.children.len(),
+        2,
+        "diffing must keep both child states"
+    );
+}
+
+#[test]
+fn test_side_sheet_state_carries_placement_into_resize() {
+    let left = SideSheetState::new(SheetPlacement::Left);
+    assert_eq!(
+        left.resize.placement(),
+        SheetPlacement::Left,
+        "the resize gesture must inherit the sheet placement"
+    );
+    assert!(!left.resize.is_active());
+    assert!(!left.is_hovered_grab);
+    assert!(!left.is_hovered_pin);
+    assert!(!left.is_hovered_close);
+
+    assert_eq!(
+        SideSheetState::default().resize.placement(),
+        SheetPlacement::Right,
+        "the default state must default to the right-hand drag direction"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 5. Resize Gesture Edge Cases (UIF-PRIN-006)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_side_sheet_resize_idle_gesture_emits_nothing() {
+    let mut gesture = SideSheetResize::new(SheetPlacement::Left);
+
+    assert!(
+        gesture.update(400.0).is_none(),
+        "a tick with no open gesture must emit no live value"
+    );
+    assert!(
+        gesture.commit().is_none(),
+        "committing an idle gesture must emit nothing"
+    );
+    assert!(
+        gesture.cancel().is_none(),
+        "cancelling an idle gesture must emit nothing"
+    );
+    assert!(!gesture.is_active(), "the slot must stay closed");
+}
+
+#[test]
+fn test_side_sheet_resize_begin_clamps_start_width() {
+    // (case label, requested start width, expected clamped start width)
+    let cases = [
+        ("past maximum", 900.0, MAX_WIDTH),
+        ("past minimum", 100.0, MIN_WIDTH),
+    ];
+
+    for (label, requested, expected) in cases {
+        let mut gesture = SideSheetResize::new(SheetPlacement::Right);
+        assert_eq!(
+            gesture.begin(requested, requested),
+            GestureStart::Started,
+            "[{label}] begin must open the slot"
+        );
+        assert_eq!(
+            gesture.start_width(),
+            expected,
+            "[{label}] the captured start width must be clamped into the spec range"
+        );
+        assert_eq!(
+            gesture.current_width(),
+            expected,
+            "[{label}] the live width must start at the clamped width"
+        );
+
+        let live = gesture
+            .update(requested)
+            .unwrap_or_else(|| panic!("[{label}] an open slot must emit a live value"));
+        assert_eq!(
+            *live.value(),
+            expected,
+            "[{label}] a zero-travel tick must report the clamped width"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Direct Widget::update Event Tests
+// ---------------------------------------------------------------------------
+
+/// Host message emitted by the driven sheet.
+#[derive(Debug, Clone, PartialEq)]
+enum TestMsg {
+    /// Live resize width.
+    ResizeLive(f32),
+    /// Settled resize width.
+    ResizeCommit(f32),
+    /// Reverted resize width.
+    ResizeCancel(f32),
+    /// The pin button requested a mode change.
+    Mode(SheetMode),
+    /// Dismissal was requested.
+    CloseRequested,
+    /// The body element received a press the sheet did not claim.
+    ContentPressed,
+}
+
+/// A body element that reports what the sheet forwards to it.
+///
+/// It fills whatever box the sheet offers, so a test can press anywhere in the
+/// body without depending on how wide a glyph measured.
+struct Probe;
+
+impl Widget<TestMsg, iced::Theme, iced::Renderer> for Probe {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &iced::Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.max())
+    }
+
+    fn update(
+        &mut self,
+        _tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &iced::Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, TestMsg>,
+        _viewport: &Rectangle,
+    ) {
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        ) && cursor.is_over(layout.bounds())
+        {
+            shell.publish(TestMsg::ContentPressed);
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        if cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Grabbing
+        } else {
+            mouse::Interaction::None
+        }
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut iced::Renderer,
+        _theme: &iced::Theme,
+        _style: &renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+}
+
+impl From<Probe> for Element<'_, TestMsg, iced::Theme, iced::Renderer> {
+    fn from(widget: Probe) -> Self {
+        Element::new(widget)
+    }
+}
+
+/// Build a `KeyPressed` event for a named key.
+fn key_event(named: Named) -> Event {
+    let key = Key::Named(named);
+    Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: iced::keyboard::key::Physical::Unidentified(
+            iced::keyboard::key::NativeCode::Unidentified,
+        ),
+        location: iced::keyboard::Location::Standard,
+        modifiers: iced::keyboard::Modifiers::default(),
+        repeat: false,
+        text: None,
+    })
+}
+
+/// Drives [`SideSheet`] through the real `Widget::update` entry point so a test
+/// can read the widget's internal state back out of its [`Tree`].
+struct SheetDriver<'a> {
+    widget: SideSheet<'a, TestMsg>,
+    tree: Tree,
+    renderer: iced::Renderer,
+    node: layout::Node,
+    offset: Vector,
+    bounds: Rectangle,
+    messages: Vec<TestMsg>,
+}
+
+impl<'a> SheetDriver<'a> {
+    /// Lay `widget` out at `offset` and keep the resulting node for every event.
+    fn build(mut widget: SideSheet<'a, TestMsg>, offset: Vector) -> Self {
+        let mut tree = Tree::new(&widget as &dyn Widget<TestMsg, iced::Theme, iced::Renderer>);
+        let renderer = headless_renderer();
+        let limits = layout::Limits::new(Size::ZERO, Size::new(1200.0, 400.0));
+        let node = widget.layout(&mut tree, &renderer, &limits);
+        let bounds = Rectangle::new(Point::new(offset.x, offset.y), node.size());
+        Self {
+            widget,
+            tree,
+            renderer,
+            node,
+            offset,
+            bounds,
+            messages: Vec::new(),
+        }
+    }
+
+    /// Attach every host callback so the sheet's live, settled, reverted, mode
+    /// and dismissal messages are all observable from a test.
+    fn wired(sheet: SideSheet<'a, TestMsg>) -> SideSheet<'a, TestMsg> {
+        sheet
+            .on_resize_change(|live| TestMsg::ResizeLive(*live.value()))
+            .on_resize_commit(|commit| TestMsg::ResizeCommit(*commit.value()))
+            .on_resize_cancel(|cancel| TestMsg::ResizeCancel(*cancel.restored()))
+            .on_mode_toggle(|commit| TestMsg::Mode(*commit.value()))
+            .on_close_request(|_| TestMsg::CloseRequested)
+    }
+
+    /// A right-docked sheet whose body is a [`Probe`].
+    fn right(model: SideSheetModel) -> Self {
+        let model = model.with_placement(SheetPlacement::Right);
+        Self::build(
+            Self::wired(side_sheet(model, Probe)),
+            Vector::new(600.0, 20.0),
+        )
+    }
+
+    /// A left-docked sheet whose body is a [`Probe`].
+    fn left(model: SideSheetModel) -> Self {
+        let model = model.with_placement(SheetPlacement::Left);
+        Self::build(
+            Self::wired(side_sheet(model, Probe)),
+            Vector::new(20.0, 20.0),
+        )
+    }
+
+    /// A point on the resize edge, which sits outside the sheet for a
+    /// right-docked drawer and on its inner edge for a left-docked one.
+    fn grab_point(&self) -> Point {
+        let x = match self.widget.model().placement {
+            SheetPlacement::Right => self.bounds.x,
+            SheetPlacement::Left => self.bounds.x + self.bounds.width - 1.0,
+        };
+        Point::new(x, self.bounds.y + 200.0)
+    }
+
+    /// Centre of the `[Pin/Unpin]` button.
+    fn pin_point(&self) -> Point {
+        Point::new(
+            self.bounds.x + self.bounds.width - space::MD - HEADER_BUTTON_SIZE * 1.5 - space::XS,
+            self.bounds.y + (HEADER_HEIGHT - HEADER_BUTTON_SIZE) / 2.0 + HEADER_BUTTON_SIZE / 2.0,
+        )
+    }
+
+    /// Centre of the `[Close ×]` button.
+    fn close_point(&self) -> Point {
+        Point::new(
+            self.bounds.x + self.bounds.width - space::MD - HEADER_BUTTON_SIZE / 2.0,
+            self.bounds.y + (HEADER_HEIGHT - HEADER_BUTTON_SIZE) / 2.0 + HEADER_BUTTON_SIZE / 2.0,
+        )
+    }
+
+    /// A point inside the padded body, clear of the header and the grab band.
+    fn body_point(&self) -> Point {
+        Point::new(
+            self.bounds.x + BODY_PADDING + 20.0,
+            self.bounds.y + HEADER_HEIGHT + BODY_PADDING + 20.0,
+        )
+    }
+
+    /// Deliver `event` with the pointer at `cursor`; report whether the widget
+    /// claimed the event.
+    fn drive(&mut self, event: &Event, cursor: mouse::Cursor) -> bool {
+        let Self {
+            widget,
+            tree,
+            renderer,
+            node,
+            offset,
+            bounds,
+            messages,
+        } = self;
+
+        let layout = Layout::with_offset(*offset, node);
+        let mut clipboard = iced::advanced::clipboard::Null;
+        let mut shell = Shell::new(messages);
+        widget.update(
+            tree,
+            event,
+            layout,
+            cursor,
+            renderer,
+            &mut clipboard,
+            &mut shell,
+            bounds,
+        );
+        shell.is_event_captured()
+    }
+
+    /// Left button press with the pointer at `at`.
+    fn press(&mut self, at: Point) -> bool {
+        self.drive(
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            mouse::Cursor::Available(at),
+        )
+    }
+
+    /// Left button release with the pointer at `at`.
+    fn release(&mut self, at: Point) -> bool {
+        self.drive(
+            &Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            mouse::Cursor::Available(at),
+        )
+    }
+
+    /// Pointer move with the pointer at `at`.
+    fn hover(&mut self, at: Point) -> bool {
+        self.drive(
+            &Event::Mouse(mouse::Event::CursorMoved { position: at }),
+            mouse::Cursor::Available(at),
+        )
+    }
+
+    /// Key press with no pointer position reported to the widget.
+    fn key(&mut self, named: Named) -> bool {
+        self.drive(&key_event(named), mouse::Cursor::Unavailable)
+    }
+
+    /// The widget's live internal state.
+    fn state(&self) -> &SideSheetState {
+        self.tree.state.downcast_ref::<SideSheetState>()
+    }
+
+    /// Take every message emitted so far.
+    fn take_messages(&mut self) -> Vec<TestMsg> {
+        std::mem::take(&mut self.messages)
+    }
+
+    /// Ask the widget what cursor shape it wants at `at`.
+    fn interaction(&self, at: Point) -> mouse::Interaction {
+        let layout = Layout::with_offset(self.offset, &self.node);
+        self.widget.mouse_interaction(
+            &self.tree,
+            layout,
+            mouse::Cursor::Available(at),
+            &self.bounds,
+            &self.renderer,
+        )
+    }
+}
+
+#[test]
+fn test_right_docked_resize_drag_commits() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector").with_width(360.0));
+    let start = driver.grab_point();
+
+    assert!(
+        driver.press(start),
+        "a press on the resize edge must claim the event"
+    );
+    assert!(
+        driver.state().resize.is_active(),
+        "the gesture slot must open on the edge press"
+    );
+    assert!(
+        driver.state().is_hovered_grab,
+        "the grab band must report itself hovered"
+    );
+
+    // Dragging a right-docked sheet leftwards widens it: 360 - (-20) = 380.
+    assert!(driver.hover(Point::new(start.x - 20.0, start.y)));
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ResizeLive(380.0)],
+        "the drag must emit the live width"
+    );
+
+    assert!(driver.release(Point::new(start.x - 20.0, start.y)));
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ResizeCommit(380.0)],
+        "release must commit the settled width exactly once"
+    );
+    assert!(
+        !driver.state().resize.is_active(),
+        "the gesture slot must close after commit"
+    );
+}
+
+#[test]
+fn test_left_docked_resize_drag_grows_rightwards() {
+    let mut driver = SheetDriver::left(SideSheetModel::new("Inspector").with_width(360.0));
+    let start = driver.grab_point();
+
+    assert!(driver.press(start), "the left edge press must be claimed");
+    assert_eq!(
+        driver.state().resize.placement(),
+        SheetPlacement::Left,
+        "the gesture must inherit the placement on every event"
+    );
+
+    // Dragging a left-docked sheet rightwards widens it: 360 + 20 = 380.
+    assert!(driver.hover(Point::new(start.x + 20.0, start.y)));
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ResizeLive(380.0)],
+        "a left-docked drag must grow the sheet towards the workspace"
+    );
+
+    assert!(driver.release(Point::new(start.x + 20.0, start.y)));
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ResizeCommit(380.0)],
+        "release must commit the settled width"
+    );
+}
+
+#[test]
+fn test_escape_cancels_active_resize() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector").with_width(360.0));
+    let start = driver.grab_point();
+
+    assert!(driver.press(start));
+    assert!(driver.hover(Point::new(start.x - 40.0, start.y)));
+    driver.take_messages();
+
+    assert!(
+        driver.key(Named::Escape),
+        "Escape must claim the event while a resize is open"
+    );
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ResizeCancel(360.0)],
+        "Escape must restore the pre-drag width"
+    );
+    assert!(!driver.state().resize.is_active());
+    assert!(
+        !driver.state().is_hovered_grab,
+        "cancel with no pointer over the band must drop the grab hover"
+    );
+}
+
+#[test]
+fn test_escape_requests_close_only_when_the_sheet_can_close() {
+    // (case label, model, expected message)
+    let cases = [
+        (
+            "clean sheet",
+            SideSheetModel::new("Clean"),
+            Some(TestMsg::CloseRequested),
+        ),
+        (
+            "dirty sheet needs confirmation",
+            SideSheetModel::new("Dirty").with_dirty(true),
+            None,
+        ),
+        (
+            "busy sheet refuses dismissal",
+            SideSheetModel::new("Busy").with_busy(true),
+            None,
+        ),
+    ];
+
+    for (label, model, expected) in cases {
+        let mut driver = SheetDriver::right(model);
+        let captured = driver.key(Named::Escape);
+        let messages = driver.take_messages();
+        assert_eq!(
+            messages.first().cloned(),
+            expected,
+            "[{label}] Escape emitted the wrong message"
+        );
+        assert_eq!(
+            captured,
+            expected.is_some(),
+            "[{label}] Escape must only be claimed when dismissal was requested"
+        );
+    }
+}
+
+#[test]
+fn test_close_button_requests_close_unless_busy() {
+    // (case label, model, expected message)
+    let cases = [
+        (
+            "idle sheet",
+            SideSheetModel::new("Clean"),
+            Some(TestMsg::CloseRequested),
+        ),
+        (
+            "busy sheet ignores the close button",
+            SideSheetModel::new("Busy").with_busy(true),
+            None,
+        ),
+    ];
+
+    for (label, model, expected) in cases {
+        let mut driver = SheetDriver::right(model);
+        let point = driver.close_point();
+        let captured = driver.press(point);
+        let messages = driver.take_messages();
+        assert_eq!(
+            messages.first().cloned(),
+            expected,
+            "[{label}] the close button emitted the wrong message"
+        );
+        assert_eq!(
+            captured,
+            expected.is_some(),
+            "[{label}] the close press must only be claimed when it fired"
+        );
+        assert!(
+            driver.state().is_hovered_close,
+            "[{label}] hovering the close button must be tracked"
+        );
+    }
+}
+
+#[test]
+fn test_pin_button_commits_toggled_mode() {
+    // (case label, configured mode, expected commit)
+    let cases = [
+        (
+            "docked unpins",
+            SheetMode::Docked,
+            SheetMode::ModelessOverlay,
+        ),
+        (
+            "modeless overlay pins",
+            SheetMode::ModelessOverlay,
+            SheetMode::Docked,
+        ),
+        (
+            "modal sheet docks",
+            SheetMode::ModalScrim,
+            SheetMode::Docked,
+        ),
+    ];
+
+    for (label, mode, expected) in cases {
+        let mut driver = SheetDriver::right(SideSheetModel::new("Inspector").with_mode(mode));
+        let point = driver.pin_point();
+        assert!(
+            driver.press(point),
+            "[{label}] a press on the pin button must claim the event"
+        );
+        assert_eq!(
+            driver.take_messages(),
+            vec![TestMsg::Mode(expected)],
+            "[{label}] the pin button must commit the toggled mode"
+        );
+        assert!(
+            driver.state().is_hovered_pin,
+            "[{label}] hovering the pin button must be tracked"
+        );
+    }
+}
+
+#[test]
+fn test_header_buttons_without_callbacks_emit_nothing() {
+    let model = SideSheetModel::new("No Callbacks");
+    let mut driver = SheetDriver::build(side_sheet(model, Probe), Vector::new(600.0, 20.0));
+
+    driver.press(driver.pin_point());
+    driver.press(driver.close_point());
+    driver.key(Named::Escape);
+
+    assert!(
+        driver.take_messages().is_empty(),
+        "a sheet with no host callbacks must not invent messages"
+    );
+}
+
+#[test]
+fn test_body_events_forward_to_the_content_element() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector"));
+    let body = driver.body_point();
+
+    driver.press(body);
+    assert_eq!(
+        driver.take_messages(),
+        vec![TestMsg::ContentPressed],
+        "a press inside the body must reach the content element"
+    );
+}
+
+#[test]
+fn test_closed_sheet_handles_no_events_at_all() {
+    let mut driver = SheetDriver::right(
+        SideSheetModel::new("Closed")
+            .with_width(360.0)
+            .with_open(false),
+    );
+
+    assert!(
+        !driver.press(driver.grab_point()),
+        "a closed sheet must not claim an edge press"
+    );
+    assert!(
+        !driver.press(driver.close_point()),
+        "a closed sheet must not claim a close press"
+    );
+    assert!(
+        !driver.press(driver.body_point()),
+        "a closed sheet must not forward events to hidden content"
+    );
+    assert!(
+        !driver.key(Named::Escape),
+        "a closed sheet must not claim Escape"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "a closed sheet must emit nothing"
+    );
+    assert_eq!(
+        driver.interaction(driver.grab_point()),
+        mouse::Interaction::None,
+        "a closed sheet must not offer a resize cursor"
+    );
+}
+
+#[test]
+fn test_move_and_release_without_active_resize_are_ignored() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector"));
+
+    assert!(
+        !driver.hover(Point::new(500.0, 200.0)),
+        "a move with no open gesture must not claim the event"
+    );
+    assert!(
+        !driver.release(Point::new(600.0, 200.0)),
+        "a release with no open gesture must not claim the event"
+    );
+    assert!(
+        driver.take_messages().is_empty(),
+        "an idle sheet must not emit resize traffic"
+    );
+}
+
+#[test]
+fn test_mouse_interaction_per_region() {
+    let driver = SheetDriver::right(SideSheetModel::new("Inspector"));
+
+    // (case label, cursor, expected interaction)
+    let cases = [
+        (
+            "resize edge",
+            driver.grab_point(),
+            mouse::Interaction::ResizingHorizontally,
+        ),
+        (
+            "pin button",
+            driver.pin_point(),
+            mouse::Interaction::Pointer,
+        ),
+        (
+            "close button",
+            driver.close_point(),
+            mouse::Interaction::Pointer,
+        ),
+        (
+            "body forwards the child's own cursor",
+            driver.body_point(),
+            mouse::Interaction::Grabbing,
+        ),
+        (
+            "header title area",
+            Point::new(driver.bounds.x + 40.0, driver.bounds.y + 18.0),
+            mouse::Interaction::None,
+        ),
+    ];
+
+    for (label, at, expected) in cases {
+        assert_eq!(
+            driver.interaction(at),
+            expected,
+            "[{label}] reported the wrong cursor at {at:?}"
+        );
+    }
+}
+
+#[test]
+fn test_busy_sheet_shows_no_pointer_over_the_close_button() {
+    let driver = SheetDriver::right(SideSheetModel::new("Busy").with_busy(true));
+
+    assert_eq!(
+        driver.interaction(driver.close_point()),
+        mouse::Interaction::None,
+        "a busy sheet must not invite a click it will refuse"
+    );
+    assert_eq!(
+        driver.interaction(driver.pin_point()),
+        mouse::Interaction::Pointer,
+        "busy must not disable the pin button's cursor"
+    );
+}
+
+#[test]
+fn test_mouse_interaction_keeps_resize_cursor_while_dragging() {
+    let mut driver = SheetDriver::right(SideSheetModel::new("Inspector"));
+    assert!(driver.press(driver.grab_point()));
+
+    assert_eq!(
+        driver.interaction(driver.body_point()),
+        mouse::Interaction::ResizingHorizontally,
+        "an open resize gesture must keep the resize cursor everywhere"
+    );
+}
+
+#[test]
+fn test_operate_forwards_focusables_only_while_open() {
+    // (case label, open, expected focusable count)
+    let cases = [("open sheet", true, 1usize), ("closed sheet", false, 0)];
+
+    for (label, open, expected) in cases {
+        let model = SideSheetModel::new("Inspector").with_open(open);
+        let mut harness = Harness::<(), _>::headless(move || {
+            side_sheet(model.clone(), iced::widget::text_input("Filter", "value")).into()
+        });
+
+        assert_eq!(
+            harness.focus_count().total,
+            expected,
+            "[{label}] the sheet must forward focus registration to its body"
+        );
+    }
 }

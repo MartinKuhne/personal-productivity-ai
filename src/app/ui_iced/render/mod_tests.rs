@@ -4,6 +4,10 @@
 //! kind, the task-index counter, the blank-heading rule and the
 //! search first-match marking — plus widget construction for each block
 //! kind and one narrow integration pass over the real parser.
+//!
+//! Related cases are grouped into one process and each case names itself in
+//! its failure message, so a merged failure still reports which event kind or
+//! which decoration broke.
 
 use super::*;
 use crate::markdown::model::{InlineElem, RenderEvent, TextStyle};
@@ -28,29 +32,58 @@ fn mapped(events: &[RenderEvent], width: f32) -> Vec<RenderBlock> {
     blocks_from_events(events, width, &plain_ctx(None))
 }
 
+/// A `FlushInline` event, the shape most mapping cases need.
+fn flush(
+    elems: Vec<InlineElem>,
+    needs_bullet: bool,
+    task_checked: Option<bool>,
+    indent: usize,
+    list_ordinal: Option<u64>,
+) -> RenderEvent {
+    RenderEvent::FlushInline {
+        elems,
+        needs_bullet,
+        task_checked,
+        indent,
+        list_ordinal,
+    }
+}
+
+/// The indices of the blocks the search marked.
+fn marked_indices(blocks: &[RenderBlock]) -> Vec<usize> {
+    blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, block)| block.scroll_to_me)
+        .map(|(index, _)| index)
+        .collect()
+}
+
 // --- list markers ---------------------------------------------------------
 
 #[test]
-fn test_bullet_marker_text_uses_the_strings_constant() {
+fn test_marker_text_uses_the_strings_constants() {
     assert_eq!(
         ListMarker::Bullet.text(),
-        format!("{} ", strings::LIST_BULLET)
+        format!("{} ", strings::LIST_BULLET),
+        "bullet: the glyph comes from the strings module"
     );
-}
-
-#[test]
-fn test_ordinal_marker_text_uses_the_suffix_constant() {
     assert_eq!(
         ListMarker::Ordinal(1).text(),
-        format!("1{}", strings::ORDERED_LIST_MARKER_SUFFIX)
+        format!("1{}", strings::ORDERED_LIST_MARKER_SUFFIX),
+        "ordinal: the suffix comes from the strings module"
     );
-    assert_eq!(ListMarker::Ordinal(42).text(), "42. ");
+    assert_eq!(
+        ListMarker::Ordinal(42).text(),
+        "42. ",
+        "ordinal: a two-digit ordinal renders as `\"<n>. \"`"
+    );
 }
 
 // --- task toggle intent ----------------------------------------------------
 
 #[test]
-fn test_task_toggle_message_carries_document_and_index() {
+fn test_task_toggle_message_carries_the_document_only_when_there_is_one() {
     let message = task_toggle_message(
         Some(&PathBuf::from("/tmp/note.md")),
         TaskCheckbox {
@@ -65,12 +98,10 @@ fn test_task_toggle_message_carries_document_and_index() {
             document: PathBuf::from("/tmp/note.md"),
             task_index: 3,
             checked: true,
-        }))
+        })),
+        "with a source file: the toggle carries the document and the index"
     );
-}
 
-#[test]
-fn test_task_toggle_without_a_source_file_is_none() {
     // Nothing to write the toggle back to, so the checkbox renders inert.
     let message = task_toggle_message(
         None,
@@ -80,195 +111,170 @@ fn test_task_toggle_without_a_source_file_is_none() {
         },
         false,
     );
-    assert_eq!(message, None);
+    assert_eq!(
+        message, None,
+        "without a source file: no intent can be emitted"
+    );
 }
 
 // --- search matching --------------------------------------------------------
 
 #[test]
-fn test_inline_elems_contain_matches_text_link_and_html_only() {
-    assert!(inline_elems_contain(&[text("Hello World")], "world"));
-    assert!(inline_elems_contain(
-        &[InlineElem::Link("u".into(), "Label".into())],
-        "label"
-    ));
-    assert!(inline_elems_contain(
-        &[InlineElem::Html("<em>note</em>".into())],
-        "note"
-    ));
+fn test_the_search_predicates_match_rendered_text_only() {
+    // Inline elements: text, link labels and raw HTML are searchable; image
+    // placeholders and breaks are not.
+    assert!(
+        inline_elems_contain(&[text("Hello World")], "world"),
+        "inline text is searchable"
+    );
+    assert!(
+        inline_elems_contain(&[InlineElem::Link("u".into(), "Label".into())], "label"),
+        "a link label is searchable"
+    );
+    assert!(
+        inline_elems_contain(&[InlineElem::Html("<em>note</em>".into())], "note"),
+        "raw HTML is searchable"
+    );
     assert!(
         !inline_elems_contain(&[InlineElem::Image("needle.png".into())], "needle"),
         "image placeholders are not searchable"
     );
-    assert!(!inline_elems_contain(&[InlineElem::SoftBreak], "x"));
-    assert!(!inline_elems_contain(&[], "x"));
-}
+    assert!(
+        !inline_elems_contain(&[InlineElem::SoftBreak], "x"),
+        "a soft break carries no text"
+    );
+    assert!(
+        !inline_elems_contain(&[], "x"),
+        "an empty run carries no text"
+    );
 
-#[test]
-fn test_event_contains_per_event_kind() {
+    // Events: each content-bearing kind is searched through its own text.
     let table = RenderEvent::Table(vec![vec![vec![text("cellvalue")]]]);
-    assert!(event_contains(
-        &RenderEvent::FlushInline {
-            elems: vec![text("find me")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
-        "find"
-    ));
-    assert!(event_contains(
-        &RenderEvent::CodeBlock {
-            language: None,
-            content: "SECRET = 1".to_string(),
-        },
-        "secret"
-    ));
-    assert!(event_contains(
-        &RenderEvent::Heading {
-            level: 1,
-            elems: vec![text("Chapter")],
-        },
-        "chapter"
-    ));
-    assert!(event_contains(&table, "cellvalue"));
-    assert!(!event_contains(&RenderEvent::Space(10.0), "x"));
-    assert!(!event_contains(&RenderEvent::Separator, "x"));
+    assert!(
+        event_contains(&flush(vec![text("find me")], false, None, 0, None), "find"),
+        "a flushed inline run is searched through its spans"
+    );
+    assert!(
+        event_contains(
+            &RenderEvent::CodeBlock {
+                language: None,
+                content: "SECRET = 1".to_string(),
+            },
+            "secret"
+        ),
+        "a code block is searched through its content"
+    );
+    assert!(
+        event_contains(
+            &RenderEvent::Heading {
+                level: 1,
+                elems: vec![text("Chapter")],
+            },
+            "chapter"
+        ),
+        "a heading is searched through its runs"
+    );
+    assert!(
+        event_contains(&table, "cellvalue"),
+        "a table is searched through its cells"
+    );
+    assert!(
+        !event_contains(&RenderEvent::Space(10.0), "x"),
+        "a spacer carries no text"
+    );
+    assert!(
+        !event_contains(&RenderEvent::Separator, "x"),
+        "a separator carries no text"
+    );
 }
 
 #[test]
 fn test_only_the_first_matching_block_is_marked() {
     let events = vec![
-        RenderEvent::FlushInline {
-            elems: vec![text("nothing here")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
-        RenderEvent::FlushInline {
-            elems: vec![text("first needle")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
-        RenderEvent::FlushInline {
-            elems: vec![text("second needle")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
+        flush(vec![text("nothing here")], false, None, 0, None),
+        flush(vec![text("first needle")], false, None, 0, None),
+        flush(vec![text("second needle")], false, None, 0, None),
     ];
     let ctx = plain_ctx(None).with_search("needle");
     let blocks = blocks_from_events(&events, 800.0, &ctx);
-    let marked: Vec<usize> = blocks
-        .iter()
-        .enumerate()
-        .filter(|(_, block)| block.scroll_to_me)
-        .map(|(index, _)| index)
-        .collect();
-    assert_eq!(marked, vec![1], "the search clears after the first hit");
-}
+    assert_eq!(
+        marked_indices(&blocks),
+        vec![1],
+        "with a search term: the search clears after the first hit"
+    );
 
-#[test]
-fn test_no_search_marks_nothing() {
-    let events = vec![RenderEvent::FlushInline {
-        elems: vec![text("needle")],
-        needs_bullet: false,
-        task_checked: None,
-        indent: 0,
-        list_ordinal: None,
-    }];
+    let events = vec![flush(vec![text("needle")], false, None, 0, None)];
     let blocks = mapped(&events, 800.0);
-    assert!(blocks.iter().all(|block| !block.scroll_to_me));
+    assert!(
+        blocks.iter().all(|block| !block.scroll_to_me),
+        "without a search term: nothing is marked"
+    );
 }
 
 // --- event mapping -----------------------------------------------------------
 
 #[test]
-fn test_paragraph_event_maps_to_a_plain_paragraph() {
-    let events = vec![RenderEvent::FlushInline {
-        elems: vec![text("body text")],
-        needs_bullet: false,
-        task_checked: None,
-        indent: 0,
-        list_ordinal: None,
-    }];
-    let blocks = mapped(&events, 800.0);
-    assert_eq!(blocks.len(), 1);
-    match &blocks[0].kind {
-        BlockKind::Paragraph {
-            spans,
-            indent,
-            marker,
-            task,
-        } => {
-            assert_eq!(spans.len(), 1);
-            assert_eq!(spans[0].text, "body text");
-            assert_eq!(*indent, 0);
-            assert!(marker.is_none());
-            assert!(task.is_none());
+fn test_flush_inline_events_map_to_paragraphs_with_their_decoration() {
+    let cases: Vec<(&str, RenderEvent, &str, Option<ListMarker>, usize)> = vec![
+        (
+            "plain paragraph",
+            flush(vec![text("body text")], false, None, 0, None),
+            "body text",
+            None,
+            0,
+        ),
+        (
+            "unordered list item",
+            flush(vec![text("item")], true, None, 0, None),
+            "item",
+            Some(ListMarker::Bullet),
+            0,
+        ),
+        (
+            "ordered list item",
+            flush(vec![text("step")], true, None, 1, Some(7)),
+            "step",
+            Some(ListMarker::Ordinal(7)),
+            1,
+        ),
+    ];
+
+    for (label, event, expected_text, expected_marker, expected_indent) in &cases {
+        let blocks = mapped(std::slice::from_ref(event), 800.0);
+        assert_eq!(blocks.len(), 1, "{label}: one event maps to one block");
+        match &blocks[0].kind {
+            BlockKind::Paragraph {
+                spans,
+                indent,
+                marker,
+                task,
+            } => {
+                assert_eq!(spans.len(), 1, "{label}: one span per inline run");
+                assert_eq!(
+                    spans[0].text, *expected_text,
+                    "{label}: the span carries the event's text"
+                );
+                assert_eq!(
+                    *indent, *expected_indent,
+                    "{label}: the list indent maps through"
+                );
+                assert_eq!(
+                    *marker, *expected_marker,
+                    "{label}: the marker maps from the event's bullet or ordinal"
+                );
+                assert!(task.is_none(), "{label}: a non-task item has no checkbox");
+            }
+            other => panic!("{label}: expected a paragraph, got {other:?}"),
         }
-        other => panic!("expected a paragraph, got {other:?}"),
     }
 }
 
 #[test]
-fn test_unordered_list_item_gets_a_bullet() {
-    let events = vec![RenderEvent::FlushInline {
-        elems: vec![text("item")],
-        needs_bullet: true,
-        task_checked: None,
-        indent: 0,
-        list_ordinal: None,
-    }];
-    let blocks = mapped(&events, 800.0);
-    match &blocks[0].kind {
-        BlockKind::Paragraph { marker, .. } => {
-            assert_eq!(*marker, Some(ListMarker::Bullet))
-        }
-        other => panic!("expected a paragraph, got {other:?}"),
-    }
-}
-
-#[test]
-fn test_ordered_list_item_gets_its_ordinal() {
-    let events = vec![RenderEvent::FlushInline {
-        elems: vec![text("step")],
-        needs_bullet: true,
-        task_checked: None,
-        indent: 1,
-        list_ordinal: Some(7),
-    }];
-    let blocks = mapped(&events, 800.0);
-    match &blocks[0].kind {
-        BlockKind::Paragraph { marker, indent, .. } => {
-            assert_eq!(*marker, Some(ListMarker::Ordinal(7)));
-            assert_eq!(*indent, 1);
-        }
-        other => panic!("expected a paragraph, got {other:?}"),
-    }
-}
-
-#[test]
-fn test_task_item_gets_a_checkbox_with_its_document_index() {
+fn test_the_task_counter_counts_task_items_in_document_order() {
+    // Two task items get consecutive indices in document order.
     let events = vec![
-        RenderEvent::FlushInline {
-            elems: vec![text("first")],
-            needs_bullet: true,
-            task_checked: Some(false),
-            indent: 0,
-            list_ordinal: None,
-        },
-        RenderEvent::FlushInline {
-            elems: vec![text("second")],
-            needs_bullet: true,
-            task_checked: Some(true),
-            indent: 0,
-            list_ordinal: None,
-        },
+        flush(vec![text("first")], true, Some(false), 0, None),
+        flush(vec![text("second")], true, Some(true), 0, None),
     ];
     let blocks = mapped(&events, 800.0);
     let tasks: Vec<TaskCheckbox> = blocks
@@ -290,39 +296,26 @@ fn test_task_item_gets_a_checkbox_with_its_document_index() {
                 checked: true
             }
         ],
-        "task indices count in document order"
+        "task items: task indices count in document order"
     );
-}
 
-#[test]
-fn test_non_task_items_do_not_advance_the_task_counter() {
+    // A plain item in front of a task item must not consume an index.
     let events = vec![
-        RenderEvent::FlushInline {
-            elems: vec![text("plain")],
-            needs_bullet: true,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
-        RenderEvent::FlushInline {
-            elems: vec![text("task")],
-            needs_bullet: true,
-            task_checked: Some(false),
-            indent: 0,
-            list_ordinal: None,
-        },
+        flush(vec![text("plain")], true, None, 0, None),
+        flush(vec![text("task")], true, Some(false), 0, None),
     ];
     let blocks = mapped(&events, 800.0);
     match &blocks[1].kind {
         BlockKind::Paragraph {
             task: Some(task), ..
-        } => assert_eq!(task.task_index, 0, "only task items count"),
-        other => panic!("expected a task paragraph, got {other:?}"),
+        } => assert_eq!(task.task_index, 0, "plain items: only task items count"),
+        other => panic!("plain items: expected a task paragraph, got {other:?}"),
     }
 }
 
 #[test]
-fn test_code_block_event_maps_to_a_code_model() {
+fn test_non_paragraph_events_map_to_their_own_block_kinds() {
+    // A fenced code block becomes a code model carrying its own copy intent.
     let events = vec![RenderEvent::CodeBlock {
         language: Some("rust".to_string()),
         content: "fn main() {}".to_string(),
@@ -330,21 +323,27 @@ fn test_code_block_event_maps_to_a_code_model() {
     let blocks = mapped(&events, 800.0);
     match &blocks[0].kind {
         BlockKind::Code(model) => {
-            assert_eq!(model.language.as_deref(), Some("rust"));
-            assert_eq!(model.content, "fn main() {}");
+            assert_eq!(
+                model.language.as_deref(),
+                Some("rust"),
+                "code block: the info string carries the language"
+            );
+            assert_eq!(
+                model.content, "fn main() {}",
+                "code block: the body maps verbatim"
+            );
             assert_eq!(
                 model.copy_message,
                 Message::Render(RenderMessage::CopyCodeRequested {
                     content: "fn main() {}".to_string()
-                })
+                }),
+                "code block: the copy button carries the block's own content"
             );
         }
-        other => panic!("expected a code block, got {other:?}"),
+        other => panic!("code block: expected a code block, got {other:?}"),
     }
-}
 
-#[test]
-fn test_heading_event_maps_at_its_level_size() {
+    // A heading maps at its level's rung size.
     let events = vec![RenderEvent::Heading {
         level: 2,
         elems: vec![text("Title")],
@@ -352,44 +351,51 @@ fn test_heading_event_maps_at_its_level_size() {
     let blocks = mapped(&events, 800.0);
     match &blocks[0].kind {
         BlockKind::Heading { level, spans } => {
-            assert_eq!(*level, 2);
-            assert_eq!(spans[0].size, heading::H2_SIZE);
+            assert_eq!(*level, 2, "heading: the level maps through");
+            assert_eq!(
+                spans[0].size,
+                heading::H2_SIZE,
+                "heading: the run takes the level's own size"
+            );
         }
-        other => panic!("expected a heading, got {other:?}"),
+        other => panic!("heading: expected a heading, got {other:?}"),
     }
-}
 
-#[test]
-fn test_blank_heading_is_dropped() {
+    // A heading with no visible text produces no block at all.
     let events = vec![
         RenderEvent::Heading {
             level: 1,
             elems: vec![text("   ")],
         },
-        RenderEvent::FlushInline {
-            elems: vec![text("body")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 0,
-            list_ordinal: None,
-        },
+        flush(vec![text("body")], false, None, 0, None),
     ];
     let blocks = mapped(&events, 800.0);
-    assert_eq!(blocks.len(), 1, "the empty heading produces no block");
-    assert!(matches!(blocks[0].kind, BlockKind::Paragraph { .. }));
-}
+    assert_eq!(
+        blocks.len(),
+        1,
+        "blank heading: the empty heading produces no block"
+    );
+    assert!(
+        matches!(blocks[0].kind, BlockKind::Paragraph { .. }),
+        "blank heading: only the body survives"
+    );
 
-#[test]
-fn test_space_and_separator_events_map_through() {
+    // Spacers and rules map straight through.
     let events = vec![RenderEvent::Space(12.0), RenderEvent::Separator];
     let blocks = mapped(&events, 800.0);
-    assert_eq!(blocks.len(), 2);
-    assert!(matches!(blocks[0].kind, BlockKind::Spacer(12.0)));
-    assert!(matches!(blocks[1].kind, BlockKind::Separator));
+    assert_eq!(blocks.len(), 2, "spacer and separator: both map through");
+    assert!(
+        matches!(blocks[0].kind, BlockKind::Spacer(12.0)),
+        "spacer: the pixel extent maps through"
+    );
+    assert!(
+        matches!(blocks[1].kind, BlockKind::Separator),
+        "separator: the rule maps through"
+    );
 }
 
 #[test]
-fn test_table_event_is_solved_during_mapping() {
+fn test_table_events_are_solved_during_mapping() {
     let events = vec![RenderEvent::Table(vec![
         vec![vec![text("a")], vec![text("b")]],
         vec![vec![text("c")], vec![text("d")]],
@@ -397,16 +403,16 @@ fn test_table_event_is_solved_during_mapping() {
     let blocks = mapped(&events, 1000.0);
     match &blocks[0].kind {
         BlockKind::Table(model) => {
-            assert_eq!(model.column_count(), 2);
-            assert_eq!(model.rows.len(), 2);
-            assert!(!model.needs_horizontal_scroll);
+            assert_eq!(model.column_count(), 2, "roomy table: two columns");
+            assert_eq!(model.rows.len(), 2, "roomy table: header plus one data row");
+            assert!(
+                !model.needs_horizontal_scroll,
+                "roomy table: 1000 px holds the content"
+            );
         }
-        other => panic!("expected a table, got {other:?}"),
+        other => panic!("roomy table: expected a table, got {other:?}"),
     }
-}
 
-#[test]
-fn test_table_narrower_than_its_tokens_falls_back_to_scroll() {
     let events = vec![RenderEvent::Table(vec![vec![
         vec![text("unbreakabletokenone")],
         vec![text("unbreakabletokentwo")],
@@ -415,9 +421,9 @@ fn test_table_narrower_than_its_tokens_falls_back_to_scroll() {
     match &blocks[0].kind {
         BlockKind::Table(model) => assert!(
             model.needs_horizontal_scroll,
-            "20 px cannot hold two long tokens"
+            "narrow table: 20 px cannot hold two long tokens"
         ),
-        other => panic!("expected a table, got {other:?}"),
+        other => panic!("narrow table: expected a table, got {other:?}"),
     }
 }
 
@@ -456,20 +462,8 @@ fn test_every_block_kind_renders() {
             level: 1,
             elems: vec![text("H")],
         },
-        RenderEvent::FlushInline {
-            elems: vec![text("p")],
-            needs_bullet: false,
-            task_checked: None,
-            indent: 2,
-            list_ordinal: None,
-        },
-        RenderEvent::FlushInline {
-            elems: vec![text("t")],
-            needs_bullet: true,
-            task_checked: Some(true),
-            indent: 0,
-            list_ordinal: Some(3),
-        },
+        flush(vec![text("p")], false, None, 2, None),
+        flush(vec![text("t")], true, Some(true), 0, Some(3)),
         RenderEvent::CodeBlock {
             language: Some("md".to_string()),
             content: "x".to_string(),
@@ -505,58 +499,63 @@ fn test_paragraph_block_renders_without_a_source_file() {
 }
 
 #[test]
-fn test_render_markdown_builds_a_column() {
-    let events = parse_markdown_to_events("# H\n\npara\n\n- item\n");
-    let element = render_markdown(&events, 800.0, &plain_ctx(None));
-    assert_eq!(element.as_widget().size().width, Length::Fill);
+fn test_render_markdown_builds_a_fill_width_column() {
+    let element = render_markdown(
+        &parse_markdown_to_events("# H\n\npara\n\n- item\n"),
+        800.0,
+        &plain_ctx(None),
+    );
+    assert_eq!(
+        element.as_widget().size().width,
+        Length::Fill,
+        "a populated document fills the available width"
+    );
+
+    // An empty event stream still builds a column rather than panicking.
+    let empty = render_markdown(&[], 800.0, &plain_ctx(None));
+    let _ = empty;
 }
 
 #[test]
-fn test_render_markdown_of_no_events_builds() {
-    let element = render_markdown(&[], 800.0, &plain_ctx(None));
-    let _ = element;
-}
-
-#[test]
-fn test_render_document_with_front_matter_prepends_the_table() {
+fn test_render_document_tolerates_every_front_matter_shape() {
     let mut map = Mapping::new();
     map.insert(
         Value::String("title".to_string()),
         Value::String("Doc".to_string()),
     );
-    let events = parse_markdown_to_events("body");
-    let element = render_document(
-        &events,
-        Some(&Value::Mapping(map)),
-        800.0,
-        &plain_ctx(Some(PathBuf::from("/tmp/doc.md"))),
-    );
-    let _ = element;
-}
 
-#[test]
-fn test_render_document_without_front_matter_builds() {
-    let events = parse_markdown_to_events("body");
-    let element = render_document(&events, None, 800.0, &plain_ctx(None));
-    let _ = element;
-}
+    let cases: Vec<(&str, Option<Value>, Option<PathBuf>)> = vec![
+        (
+            "a mapping prepends the table",
+            Some(Value::Mapping(map)),
+            Some(PathBuf::from("/tmp/doc.md")),
+        ),
+        ("no front matter", None, None),
+        (
+            "a non-mapping scalar is ignored",
+            Some(Value::String("not a mapping".to_string())),
+            None,
+        ),
+    ];
 
-#[test]
-fn test_render_document_ignores_non_mapping_front_matter() {
     let events = parse_markdown_to_events("body");
-    let element = render_document(
-        &events,
-        Some(&Value::String("not a mapping".to_string())),
-        800.0,
-        &plain_ctx(None),
-    );
-    let _ = element;
+    for (label, front_matter, source) in &cases {
+        let element = render_document(
+            &events,
+            front_matter.as_ref(),
+            800.0,
+            &plain_ctx(source.clone()),
+        );
+        // Reaching here at all is the assertion: none of the three shapes
+        // may panic or reject the document.
+        let _ = (element, label);
+    }
 }
 
 // --- narrow integration over the real parser --------------------------------
 
 #[test]
-fn test_real_document_maps_to_the_expected_block_sequence() {
+fn test_real_documents_map_to_the_expected_blocks() {
     let markdown = concat!(
         "# Title\n",
         "\n",
@@ -588,10 +587,23 @@ fn test_real_document_maps_to_the_expected_block_sequence() {
         })
         .collect();
 
-    assert_eq!(kinds.first().copied(), Some("heading"));
-    assert!(kinds.contains(&"paragraph"));
-    assert!(kinds.contains(&"code"));
-    assert!(kinds.contains(&"table"));
+    assert_eq!(
+        kinds.first().copied(),
+        Some("heading"),
+        "real document: the heading opens the page"
+    );
+    assert!(
+        kinds.contains(&"paragraph"),
+        "real document: the paragraph is rendered"
+    );
+    assert!(
+        kinds.contains(&"code"),
+        "real document: the fence is rendered as code"
+    );
+    assert!(
+        kinds.contains(&"table"),
+        "real document: the table is rendered"
+    );
 
     let link = blocks
         .iter()
@@ -601,7 +613,11 @@ fn test_real_document_maps_to_the_expected_block_sequence() {
         })
         .flatten()
         .find(|span| span.link.is_some());
-    assert_eq!(link.unwrap().link.as_deref(), Some("https://x.test"));
+    assert_eq!(
+        link.unwrap().link.as_deref(),
+        Some("https://x.test"),
+        "real document: the inline link carries its target"
+    );
 
     let task = blocks
         .iter()
@@ -615,22 +631,30 @@ fn test_real_document_maps_to_the_expected_block_sequence() {
         Some(TaskCheckbox {
             task_index: 0,
             checked: true
-        })
+        }),
+        "real document: the checked task is index 0"
     );
-}
 
-#[test]
-fn test_alignment_row_is_not_a_rendered_row() {
     // The parser consumes `| --- | --- |`; the model never carries it.
     let events = parse_markdown_to_events("| a | b |\n|:---|---:|\n| 1 | 2 |\n");
     let blocks = mapped(&events, 1200.0);
     match &blocks[0].kind {
         BlockKind::Table(model) => {
-            assert_eq!(model.rows.len(), 2, "header + 1 data row only");
-            assert_eq!(model.rows[0][0].spans[0].text, "a");
-            assert_eq!(model.rows[1][0].spans[0].text, "1");
+            assert_eq!(
+                model.rows.len(),
+                2,
+                "alignment row: header + 1 data row only"
+            );
+            assert_eq!(
+                model.rows[0][0].spans[0].text, "a",
+                "alignment row: the header cell is the first row"
+            );
+            assert_eq!(
+                model.rows[1][0].spans[0].text, "1",
+                "alignment row: the data cell follows it"
+            );
         }
-        other => panic!("expected a table, got {other:?}"),
+        other => panic!("alignment row: expected a table, got {other:?}"),
     }
 }
 

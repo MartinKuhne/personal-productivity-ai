@@ -3,9 +3,9 @@
 //! iced elements are not inspectable without a renderer, so the view is
 //! tested two ways:
 //!
-//! * **smoke** — the full tree builds for every state that changes its
+//! * **smoke** â€” the full tree builds for every state that changes its
 //!   shape (no file / file selected / every overlay mounted);
-//! * **selector** — [`AppState::mounted_layers`] is the pure "what is
+//! * **selector** â€” [`AppState::mounted_layers`] is the pure "what is
 //!   mounted, in what order" decision the host renders, so asserting on it
 //!   asserts the z-order without needing a renderer.
 
@@ -347,7 +347,7 @@ fn test_document_width_ignores_the_right_pane_when_the_toc_is_hidden() {
     assert_eq!(
         document_width(&state),
         700.0,
-        "no ToC → the right pane is not mounted, so it takes no width"
+        "no ToC â†’ the right pane is not mounted, so it takes no width"
     );
 }
 
@@ -371,7 +371,7 @@ fn toc_scrollable_id_is_stable_and_named() {
 //   icon-only button carries a tooltip, so simply scrolling a document that
 //   opened with a short heading crashed the app.
 
-/// The string every ToC typography probe measures — long enough that a 13px
+/// The string every ToC typography probe measures â€” long enough that a 13px
 /// and a 16px rendering of it cannot land on the same width.
 const TOC_PROBE_TEXT: &str = "Getting Started With FastMD";
 
@@ -385,8 +385,8 @@ fn laid_out(viewport: iced::Size, element: iced::Element<'_, Message>) -> Sim<'_
 /// The laid-out bounds of `label`, measured through a shrink-wrapped
 /// container carrying `id`.
 ///
-/// iced 0.14's `Text` exposes `size` and `line_height` only as *builders* —
-/// `format` is a private field with no reader — so the rung a label actually
+/// iced 0.14's `Text` exposes `size` and `line_height` only as *builders* â€”
+/// `format` is a private field with no reader â€” so the rung a label actually
 /// carries is proven by measurement rather than by reading it back.
 fn measured_label(id: &'static str, label: iced::widget::Text<'static>) -> iced::Rectangle {
     let probe = iced::widget::container(label)
@@ -413,7 +413,7 @@ fn toc_text_rung_is_the_same_ui_compact_rung_the_file_tree_paints() {
     assert_eq!(TOC_TEXT_RUNG.size, 13.0);
     assert_ne!(
         TOC_TEXT_RUNG.size, 16.0,
-        "16px is iced's own default text size — painting at it was the defect"
+        "16px is iced's own default text size â€” painting at it was the defect"
     );
 }
 
@@ -489,7 +489,7 @@ fn a_one_character_toc_entry_engages_the_icon_only_rule_and_satisfies_it() {
     assert_eq!(
         button.tooltip_text(),
         Some("A"),
-        "the tooltip is the entry's own heading — no new user-facing copy is invented"
+        "the tooltip is the entry's own heading â€” no new user-facing copy is invented"
     );
 }
 
@@ -531,5 +531,347 @@ fn the_live_view_lays_out_a_one_character_toc_entry_without_crashing() {
     assert!(
         bounds.width > 0.0 && bounds.height > 0.0,
         "the mounted ToC pane must receive usable bounds, got {bounds:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The tooltip presentation layer (`UIF-ATOM-007`)
+// ---------------------------------------------------------------------------
+//
+// `tooltip_layer` is the only part of the view that reads the hover-delay
+// state machine, so it is driven through the real reducer rather than by
+// hand-built state: the reducer arms the controller, the layer decides whether
+// anything is visible, and the two have to agree.
+
+use crate::ui::strings;
+use crate::ui_iced::agent_debug::DEBUG_SCROLLABLE_ID;
+use crate::ui_iced::batch_dialog::BATCH_CARD_ID;
+use crate::ui_iced::logs::LOG_SCROLLABLE_ID;
+use crate::ui_iced::message::LayoutMessage;
+use crate::ui_iced::update::update;
+
+/// A dynamic tooltip payload, for the one control that carries one.
+fn payload(text: &str) -> Option<String> {
+    Some(text.to_string())
+}
+
+#[test]
+fn test_the_tooltip_layer_is_absent_while_nothing_is_active() {
+    let state = fresh_state();
+    assert!(
+        tooltip_layer(&state).is_none(),
+        "a booted app has no tooltip to present"
+    );
+}
+
+#[test]
+fn test_the_tooltip_layer_defers_to_its_controller_not_the_selector() {
+    let mut state = fresh_state();
+    // The selector names an active tooltip but no enter ever armed the
+    // controller. The layer must stay down rather than paint an un-timed
+    // tooltip: the controller owns visibility, the selector only owns *which*.
+    state.overlay.tooltip.active_tooltip = Some(TooltipId::SearchTrigger);
+    assert!(
+        tooltip_layer(&state).is_none(),
+        "an active selector over an unarmed controller must not mount the layer"
+    );
+}
+
+#[test]
+fn test_keyboard_focus_mounts_each_tooltip_with_its_own_text() {
+    // `UIF-ATOM-007`: keyboard focus shows with a 0 ms delay, so every control
+    // must be legible on the very frame it is reached by `Tab`.
+    let cases: Vec<(&'static str, TooltipId, String)> = vec![
+        (
+            "SearchTrigger",
+            TooltipId::SearchTrigger,
+            strings::SEARCH_TRIGGER_TOOLTIP.to_string(),
+        ),
+        (
+            "SearchClear",
+            TooltipId::SearchClear,
+            strings::SEARCH_CLEAR_TOOLTIP.to_string(),
+        ),
+        (
+            "ToolsError",
+            TooltipId::ToolsError,
+            "Authentication: invalid credentials".to_string(),
+        ),
+    ];
+
+    for (case, id, text) in cases {
+        let mut state = fresh_state();
+        let dynamic = (id == TooltipId::ToolsError).then(|| text.clone());
+        // The tooltip lane mutates the overlay only and returns no task.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusEnter {
+                id,
+                tooltip_text: dynamic,
+            }),
+        );
+
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip,
+            Some(id),
+            "{case}: focus must make this the active tooltip"
+        );
+        let element = tooltip_layer(&state).unwrap_or_else(|| {
+            panic!("{case}: keyboard focus has no delay, so the layer must mount")
+        });
+        let mut ui = iced_test::simulator(element);
+        assert!(
+            ui.find(text.as_str()).is_ok(),
+            "{case}: the mounted layer must paint {text:?}"
+        );
+    }
+}
+
+#[test]
+fn test_the_tools_error_layer_mounts_on_the_empty_fallback_text() {
+    // The marker's text is dynamic; with no payload the layer still mounts and
+    // paints the `unwrap_or_default()` fallback rather than vanishing.
+    let mut state = fresh_state();
+    // The tooltip lane mutates the overlay only and returns no task.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipFocusEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: None,
+        }),
+    );
+    assert!(
+        state.overlay.tooltip.tools_error_tooltip.is_none(),
+        "a focus enter with no payload must not invent text"
+    );
+    assert!(
+        tooltip_layer(&state).is_some(),
+        "the tools-error layer still mounts with the empty fallback"
+    );
+}
+
+#[test]
+fn test_every_tooltip_lane_is_closed_by_its_matching_exit() {
+    for id in [
+        TooltipId::SearchTrigger,
+        TooltipId::SearchClear,
+        TooltipId::ToolsError,
+    ] {
+        let mut state = fresh_state();
+        // The tooltip lane mutates the overlay only and returns no task.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusEnter {
+                id,
+                tooltip_text: payload("boom"),
+            }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip,
+            Some(id),
+            "the focus fixture must be open before it can be closed"
+        );
+        // The tooltip lane mutates the overlay only and returns no task.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipFocusExit { id }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip, None,
+            "a focus exit on the active tooltip must clear it"
+        );
+        assert!(
+            tooltip_layer(&state).is_none(),
+            "the layer must come down with the tooltip it was presenting"
+        );
+
+        let mut state = fresh_state();
+        // The tooltip lane mutates the overlay only and returns no task.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipHoverEnter {
+                id,
+                tooltip_text: payload("boom"),
+            }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip,
+            Some(id),
+            "the hover fixture must be open before it can be closed"
+        );
+        // The tooltip lane mutates the overlay only and returns no task.
+        let _ = update(
+            &mut state,
+            Message::Layout(LayoutMessage::TooltipHoverExit { id }),
+        );
+        assert_eq!(
+            state.overlay.tooltip.active_tooltip, None,
+            "a hover exit on the active tooltip must clear it"
+        );
+    }
+}
+
+#[test]
+fn test_an_exit_for_another_control_leaves_the_active_tooltip_alone() {
+    let mut state = fresh_state();
+    // The tooltip lane mutates the overlay only and returns no task.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipFocusEnter {
+            id: TooltipId::SearchTrigger,
+            tooltip_text: None,
+        }),
+    );
+    // The tooltip lane mutates the overlay only and returns no task.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::SearchClear,
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.active_tooltip,
+        Some(TooltipId::SearchTrigger),
+        "an exit for a control that is not the active one must not dismiss it"
+    );
+}
+
+#[test]
+fn test_the_tools_error_payload_is_stored_on_enter_and_dropped_on_exit() {
+    let mut state = fresh_state();
+    // The tooltip lane mutates the overlay only and returns no task.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverEnter {
+            id: TooltipId::ToolsError,
+            tooltip_text: payload("invalid credentials"),
+        }),
+    );
+    assert_eq!(
+        state.overlay.tooltip.tools_error_tooltip.as_deref(),
+        Some("invalid credentials"),
+        "the dynamic text has to reach the state the layer reads back"
+    );
+
+    // The tooltip lane mutates the overlay only and returns no task.
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::TooltipHoverExit {
+            id: TooltipId::ToolsError,
+        }),
+    );
+    assert!(
+        state.overlay.tooltip.tools_error_tooltip.is_none(),
+        "leaving the marker must drop its text"
+    );
+    assert!(
+        state.overlay.tooltip.tools_error_anchor.is_none(),
+        "and the anchor it was placed against"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The overlay host's per-layer build
+// ---------------------------------------------------------------------------
+
+/// Whether the log card's own host exists after a sync.
+fn logs_host_synced(state: &AppState) -> bool {
+    state.overlay.logs_movable.is_some()
+}
+
+/// Whether the debug card's own host exists after a sync.
+fn debug_host_synced(state: &AppState) -> bool {
+    state.overlay.debug_movable.is_some()
+}
+
+/// Each movable utility layer draws the card its host owns, once
+/// `rebuild_view_models` has synced that host.
+#[test]
+fn test_each_movable_utility_layer_mounts_its_synced_hosts_card() {
+    for (case, open_card, host_synced, layer, scrollable_id) in [
+        (
+            "logs",
+            show_logs as fn(&mut AppState),
+            logs_host_synced as fn(&AppState) -> bool,
+            OverlayLayer::Logs,
+            LOG_SCROLLABLE_ID,
+        ),
+        (
+            "agent debug",
+            show_debug as fn(&mut AppState),
+            debug_host_synced as fn(&AppState) -> bool,
+            OverlayLayer::AgentDebug,
+            DEBUG_SCROLLABLE_ID,
+        ),
+    ] {
+        let mut state = fresh_state();
+        open_card(&mut state);
+        state.rebuild_view_models();
+        assert!(
+            host_synced(&state),
+            "{case}: the sync must open the host this layer draws"
+        );
+
+        let mut ui = iced_test::simulator(overlay_element(layer, &state));
+        assert!(
+            ui.find(iced::widget::Id::from(scrollable_id)).is_ok(),
+            "{case}: the mounted card must carry its named scrollable"
+        );
+    }
+}
+
+/// The fallback the docs promise: a selector that still says "mounted" over a
+/// host the reducer has dropped must not panic inside a frame.
+#[test]
+fn test_a_movable_layer_without_its_host_degrades_to_an_empty_layer() {
+    for (layer, scrollable_id, title) in [
+        (
+            OverlayLayer::Logs,
+            LOG_SCROLLABLE_ID,
+            strings::BACKGROUND_LOGS_WINDOW,
+        ),
+        (
+            OverlayLayer::AgentDebug,
+            DEBUG_SCROLLABLE_ID,
+            strings::AGENT_DEBUG_WINDOW,
+        ),
+    ] {
+        let mut state = fresh_state();
+        show_logs(&mut state);
+        show_debug(&mut state);
+        state.rebuild_view_models();
+        state.overlay.logs_movable = None;
+        state.overlay.debug_movable = None;
+
+        let mut ui = iced_test::simulator(overlay_element(layer, &state));
+        assert!(
+            ui.find(iced::widget::Id::from(scrollable_id)).is_err(),
+            "the stand-in layer must not pretend to be the {layer:?} card"
+        );
+        assert!(
+            ui.find(title).is_err(),
+            "the stand-in layer must not paint the {layer:?} title"
+        );
+    }
+}
+
+#[test]
+fn test_the_batch_layer_mounts_the_framed_card() {
+    let mut state = fresh_state();
+    state.overlay.batch.open(state.models.batch.clone());
+    state.rebuild_view_models();
+    assert!(
+        state.mounted_layers().contains(&OverlayLayer::Batch),
+        "the fixture must actually mount the batch layer"
+    );
+
+    let mut ui = iced_test::simulator(overlay_element(OverlayLayer::Batch, &state));
+    assert!(
+        ui.find(strings::BATCH_DIALOG_WINDOW).is_ok(),
+        "the batch layer must paint the dialog's own title"
+    );
+    assert!(
+        ui.find(iced::widget::Id::from(BATCH_CARD_ID)).is_ok(),
+        "and carry the framed card's own id"
     );
 }

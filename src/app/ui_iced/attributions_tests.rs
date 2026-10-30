@@ -4,12 +4,19 @@
 //! is compile-time data, so these tests read it directly and assert the
 //! snapshot preserves it exactly — no renderer, no bus, no filesystem
 //! ([RUST-006]).
+//!
+//! Cases that share a fixture are grouped into one process: the catalog
+//! integrity checks read one snapshot, the sizing cases solve one table of
+//! viewports, and each headless-layout group lays the card out once and then
+//! measures everything that layout can answer. Every check names its case in
+//! the failure message.
 
 use super::*;
 use crate::ui::strings;
 use crate::ui_iced::about::{AboutViewModel, LICENSE_MAX_HEIGHT, LICENSE_SCROLL_ID};
 use hoarfrost::surface::modal::ATTRIBUTIONS_LIST_MAX_HEIGHT;
 use iced::Element;
+use iced_test::selector::{Candidate, Target};
 
 /// A synthetic two-row catalog — never read from disk ([RUST-006]).
 fn fixture_entries() -> Vec<Attribution> {
@@ -32,186 +39,210 @@ fn fixture_entries() -> Vec<Attribution> {
 /// A viewport large enough that no gutter clamp bites.
 const ROOMY_VIEWPORT: Size = Size::new(1280.0, 800.0);
 
+/// The snapshot carries the shared catalog exactly as it is: same rows, same
+/// order, no duplicates, every row complete, and independent of the next read.
 #[test]
 fn from_catalog_is_the_shared_catalog_verbatim() {
     let vm = AttributionsViewModel::from_catalog();
+
     assert_eq!(
         vm.entries(),
         DIRECT_DEPENDENCIES,
-        "the view must show the shared catalog unchanged"
+        "verbatim: the view must show the shared catalog unchanged"
     );
-}
-
-#[test]
-fn catalog_is_non_empty() {
-    let vm = AttributionsViewModel::from_catalog();
     assert!(
         !vm.is_empty() && vm.count() == DIRECT_DEPENDENCIES.len(),
-        "the attribution catalog must carry rows"
+        "non-empty: the attribution catalog must carry rows"
     );
-}
 
-#[test]
-fn every_entry_carries_name_authors_and_repository() {
     // The catalog's row shape is `name` / `authors` / `github_url` — there
-    // is no per-crate license or version field, so these three are what
-    // the window can show.
-    for entry in AttributionsViewModel::from_catalog().entries() {
-        assert!(!entry.name.is_empty(), "empty crate name in {entry:?}");
+    // is no per-crate license or version field, so these three are what the
+    // window can show.
+    for entry in vm.entries() {
+        assert!(
+            !entry.name.is_empty(),
+            "row shape: empty crate name in {entry:?}"
+        );
         assert!(
             !entry.authors.is_empty(),
-            "empty authors for {}",
+            "row shape: empty authors for {}",
             entry.name
         );
         assert!(
             entry.github_url.starts_with("https://github.com/"),
-            "repository URL for {} must be an https GitHub link, got {}",
+            "row shape: repository URL for {} must be an https GitHub link, got {}",
             entry.name,
             entry.github_url
         );
     }
-}
 
-#[test]
-fn ordering_is_deterministic_and_alphabetical() {
     // Mirrors `ui::attributions_tests::slice_is_sorted_and_unique`: the
     // snapshot must not reorder anything, so two runs render identically.
-    let names: Vec<&str> = AttributionsViewModel::from_catalog()
-        .entries()
-        .iter()
-        .map(|entry| entry.name)
-        .collect();
+    let names: Vec<&str> = vm.entries().iter().map(|entry| entry.name).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(
         names, sorted,
-        "the rendered order must be the catalog order"
+        "ordering: the rendered order must be the catalog order"
     );
-}
 
-#[test]
-fn catalog_has_no_duplicate_crate_names() {
     let mut seen = std::collections::HashSet::new();
-    for entry in AttributionsViewModel::from_catalog().entries() {
+    for entry in vm.entries() {
         assert!(
             seen.insert(entry.name),
-            "duplicate crate name {}",
+            "uniqueness: duplicate crate name {}",
             entry.name
         );
     }
-}
 
-#[test]
-fn snapshot_is_independent_of_later_catalog_reads() {
     // The snapshot owns its `Vec`, so two snapshots are equal but not
     // aliasing the same allocation-dependent state.
-    let a = AttributionsViewModel::from_catalog();
-    let b = AttributionsViewModel::from_catalog();
-    assert_eq!(a, b);
-    assert_eq!(a.count(), b.count());
+    let other = AttributionsViewModel::from_catalog();
+    assert_eq!(
+        vm, other,
+        "snapshot independence: two reads of the catalog are equal"
+    );
+    assert_eq!(
+        vm.count(),
+        other.count(),
+        "snapshot independence: and they carry the same number of rows"
+    );
 }
 
 // --- Summary line --------------------------------------------------------
 
+/// The summary line is the count when there are rows and the empty-state line
+/// when there are none — whichever empty construction produced the model.
 #[test]
-fn summary_counts_the_entries() {
-    let vm = AttributionsViewModel::with_entries(fixture_entries());
-    assert_eq!(vm.count(), 2);
-    assert_eq!(vm.summary(), strings::format_attribution_count(2));
-    assert!(vm.summary().contains("2"));
-}
+fn summary_counts_the_entries_or_reports_the_empty_state() {
+    let populated = AttributionsViewModel::with_entries(fixture_entries());
+    assert_eq!(
+        populated.count(),
+        2,
+        "two-row catalog: the count is the row count"
+    );
+    assert_eq!(
+        populated.summary(),
+        strings::format_attribution_count(2),
+        "two-row catalog: the summary names the count"
+    );
+    assert!(
+        populated.summary().contains("2"),
+        "two-row catalog: the summary carries the digit"
+    );
 
-#[test]
-fn empty_catalog_reports_the_empty_state_line() {
-    let vm = AttributionsViewModel::with_entries(Vec::new());
-    assert!(vm.is_empty());
-    assert_eq!(vm.summary(), strings::ABOUT_ATTRIBUTIONS_EMPTY);
-}
-
-#[test]
-fn default_view_model_is_empty() {
-    let vm = AttributionsViewModel::default();
-    assert!(vm.is_empty());
-    assert_eq!(vm.summary(), strings::ABOUT_ATTRIBUTIONS_EMPTY);
+    let empty_cases = [
+        (
+            "with_entries(vec![])",
+            AttributionsViewModel::with_entries(Vec::new()),
+        ),
+        (
+            "AttributionsViewModel::default()",
+            AttributionsViewModel::default(),
+        ),
+    ];
+    for (label, vm) in &empty_cases {
+        assert!(
+            vm.is_empty(),
+            "{label}: an empty catalog reports itself as empty"
+        );
+        assert_eq!(
+            vm.summary(),
+            strings::ABOUT_ATTRIBUTIONS_EMPTY,
+            "{label}: the empty catalog reports the empty-state line"
+        );
+    }
 }
 
 // --- Widget construction --------------------------------------------------
 
+/// The table and the framed card build for every catalog shape — empty,
+/// synthetic and the shipped catalog — through both view entry points.
+///
+/// The empty state renders the same table widget (header only), so the card's
+/// widget tree never changes (AGENTS §6).
 #[test]
-fn attribution_table_builds_for_empty_and_populated_catalogs() {
-    // The empty state renders the same table widget (header only), so the
-    // card's widget tree never changes (AGENTS §6).
-    let empty: Element<'static, Message> = attribution_table(&[]);
-    let full: Element<'static, Message> = attribution_table(&fixture_entries());
-    let catalog: Element<'static, Message> =
-        attribution_table(AttributionsViewModel::from_catalog().entries());
-    let _ = (empty, full, catalog);
-}
+fn the_table_and_the_view_build_for_every_catalog_shape() {
+    let models = [
+        (
+            "empty catalog",
+            AttributionsViewModel::with_entries(Vec::new()),
+        ),
+        (
+            "two-row catalog",
+            AttributionsViewModel::with_entries(fixture_entries()),
+        ),
+        ("the shipped catalog", AttributionsViewModel::from_catalog()),
+    ];
 
-#[test]
-fn attributions_view_builds_for_empty_and_populated_catalogs() {
-    let empty_vm = AttributionsViewModel::with_entries(vec![]);
-    let full_vm = AttributionsViewModel::with_entries(fixture_entries());
-    let catalog_vm = AttributionsViewModel::from_catalog();
-
-    let empty: Element<'_, Message> = attributions_view(&empty_vm, ROOMY_VIEWPORT);
-    let full: Element<'_, Message> = attributions_view(&full_vm, ROOMY_VIEWPORT);
-    let catalog: Element<'_, Message> = attributions_view(&catalog_vm, ROOMY_VIEWPORT);
-    let _ = (empty, full, catalog);
-}
-
-#[test]
-fn view_model_view_matches_the_free_function() {
-    let vm = AttributionsViewModel::from_catalog();
-    // Both entry points construct the same card; neither panics.
-    let _via_method: Element<'_, Message> = vm.view(ROOMY_VIEWPORT);
-    let _via_function: Element<'_, Message> = attributions_view(&vm, ROOMY_VIEWPORT);
+    for (label, vm) in &models {
+        let table: Element<'static, Message> = attribution_table(vm.entries());
+        let view: Element<'_, Message> = attributions_view(vm, ROOMY_VIEWPORT);
+        // Both entry points construct the same card; neither panics.
+        let via_method: Element<'_, Message> = vm.view(ROOMY_VIEWPORT);
+        let _ = (label, table, view, via_method);
+    }
 }
 
 // --- Sizing: the framework owns the box (§4.6.2, INT-5a) -----------------
 
+/// The card is 640×480 straight out of `ModalSizing::attributions()`, clamped
+/// to the viewport gutter and never negative. The retired app values were
+/// 620px wide with a content-driven height and a hand-picked 340px list cap;
+/// the spec row is a fixed 640×480 card whose list fills the remainder.
 #[test]
-fn card_size_is_the_frameworks_attributions_size() {
-    // 640×480 straight out of `ModalSizing::attributions()`. The retired
-    // app values were 620px wide with a content-driven height and a
-    // hand-picked 340px list cap; the spec row is a fixed 640×480 card
-    // whose list fills the remainder.
-    let size = attributions_card_size(ROOMY_VIEWPORT);
-    assert_eq!(size.width, hoarfrost::surface::modal::ATTRIBUTIONS_WIDTH);
-    assert_eq!(size.height, hoarfrost::surface::modal::ATTRIBUTIONS_HEIGHT);
-    assert_eq!(size, Size::new(640.0, 480.0));
-    assert_ne!(
-        size.width, 620.0,
-        "the retired ATTRIBUTIONS_CARD_WIDTH must not come back"
-    );
-}
-
-#[test]
-fn card_size_is_independent_of_row_count() {
-    // The height is the frame's, not the content's: two rows or the whole
-    // catalog render the same 480px box, because the list scrolls.
-    let few = attributions_card_size(ROOMY_VIEWPORT);
-    let many = attributions_card_size(ROOMY_VIEWPORT);
-    assert_eq!(few, many);
-    let _ = AttributionsViewModel::from_catalog().count();
-}
-
-#[test]
-fn card_size_clamps_to_the_viewport_gutter() {
+fn card_size_is_the_frameworks_attributions_size_clamped_to_the_viewport() {
     let gutter = hoarfrost::surface::modal::VIEWPORT_GUTTER;
+    let cases = [
+        ("roomy viewport", ROOMY_VIEWPORT, Size::new(640.0, 480.0)),
+        (
+            "small viewport",
+            Size::new(600.0, 400.0),
+            Size::new(600.0 - gutter, 400.0 - gutter),
+        ),
+        (
+            "a viewport smaller than the card",
+            Size::new(16.0, 16.0),
+            Size::ZERO,
+        ),
+    ];
+
+    for (label, viewport, expected) in &cases {
+        let size = attributions_card_size(*viewport);
+        assert_eq!(
+            size, *expected,
+            "{label}: the solved box must be the framework policy clamped to the viewport"
+        );
+        // The height is the frame's, not the content's: two rows or the whole
+        // catalog render the same box, because the list scrolls.
+        assert_eq!(
+            attributions_card_size(*viewport),
+            size,
+            "{label}: the policy is deterministic across repeated solves"
+        );
+    }
+
+    let roomy = attributions_card_size(ROOMY_VIEWPORT);
+    assert_eq!(
+        roomy.width,
+        hoarfrost::surface::modal::ATTRIBUTIONS_WIDTH,
+        "roomy viewport: the width is the framework's own constant"
+    );
+    assert_eq!(
+        roomy.height,
+        hoarfrost::surface::modal::ATTRIBUTIONS_HEIGHT,
+        "roomy viewport: the height is the framework's own constant"
+    );
+    assert_ne!(
+        roomy.width, 620.0,
+        "roomy viewport: the retired ATTRIBUTIONS_CARD_WIDTH must not come back"
+    );
+
     let small = attributions_card_size(Size::new(600.0, 400.0));
-    assert_eq!(small.width, 600.0 - gutter);
-    assert_eq!(small.height, 400.0 - gutter);
     assert!(
         small.width <= 640.0 && small.height <= 480.0,
-        "a small viewport must shrink the card, never grow it"
+        "small viewport: a small viewport must shrink the card, never grow it"
     );
-}
-
-#[test]
-fn card_size_never_goes_negative() {
-    let size = attributions_card_size(Size::new(16.0, 16.0));
-    assert_eq!(size, Size::ZERO);
 }
 
 #[test]
@@ -232,8 +263,6 @@ fn the_view_builds_at_every_clamped_size() {
 // The card is a fixed 640x480 box and the credits list takes the
 // remainder, so what these measure is that the box really is that size
 // and that the list really does fill and scroll inside it.
-
-use iced_test::selector::{Candidate, Target};
 
 type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
 
@@ -264,20 +293,6 @@ fn scroll_bounds(ui: &mut Sim<'_>, id: &'static str) -> (iced::Rectangle, iced::
     }
 }
 
-#[test]
-fn the_attributions_card_renders_640x480() {
-    let vm = AttributionsViewModel::from_catalog();
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    assert_eq!(
-        bounds.width, 640.0,
-        "the rendered box must be the §4.6.2 width, not the retired 620"
-    );
-    assert_eq!(bounds.height, 480.0);
-    drop(ui);
-}
-
 /// **Replaces `the_credits_list_fills_the_card_and_scrolls`.**
 ///
 /// The retired test pinned the list at `330.0` — the uncapped `Length::Fill`
@@ -285,57 +300,56 @@ fn the_attributions_card_renders_640x480() {
 /// capped*, at `ATTRIBUTIONS_LIST_MAX_HEIGHT = 200`, so that pin recorded
 /// a height 130px above the number the §2.2 closed table names. The test
 /// is rewritten around the cap rather than its number quietly edited: what
-/// is asserted now is that the cap binds, that it arrived from the solver
-/// rather than being restated by the view, and that the list still scrolls.
+/// is asserted now is that the box is 640×480, that the cap binds, that it
+/// arrived from the solver rather than being restated by the view, that the
+/// list still scrolls, and what the cap costs.
+///
+/// **The cost of the cap, measured and recorded rather than buried.** The spec
+/// pins the card at 480px *and* caps the list at 200px. Those two numbers are
+/// in tension for this card: the furniture is 150px, so the card has 330px to
+/// give and the cap only lets 200 of it be used. The remaining **130px is dead
+/// card** — nothing is laid out there — and the list loses roughly **4.4
+/// visible rows**. That trade-off is asserted here as a pinned, visible fact
+/// rather than something a reader has to recompute to notice; if the spec
+/// author resolves it (by shrinking the card, raising the cap, or letting the
+/// card content-fit), this is the test that changes.
 #[test]
-fn the_credits_list_is_solved_and_capped_at_the_named_maximum() {
+fn the_card_and_credits_list_measure_the_solved_geometry() {
     let vm = AttributionsViewModel::from_catalog();
     let card = attributions_view(&vm, ROOMY_VIEWPORT);
     let mut ui = laid_out(ROOMY_VIEWPORT, card);
+    let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
     let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    drop(ui);
+
+    assert_eq!(
+        bounds.width, 640.0,
+        "rendered box: must be the §4.6.2 width, not the retired 620"
+    );
+    assert_eq!(
+        bounds.height, 480.0,
+        "rendered box: must be the §4.6.2 height"
+    );
 
     assert_eq!(
         region.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "the card leaves 330px of remainder; §2.2 caps the list at 200, so \
+        "credits list: the card leaves 330px of remainder; §2.2 caps the list at 200, so \
          the rendered region must be the cap"
     );
     assert_eq!(
         region.height,
         credits_list_height(attributions_card_size(ROOMY_VIEWPORT).height),
-        "the rendered height is the solver's answer, not a number the view \
+        "credits list: the rendered height is the solver's answer, not a number the view \
          restates"
     );
     assert!(
         content.height > region.height,
-        "the {}-row catalog overflows the capped region, so the list still \
+        "credits list: the {}-row catalog overflows the capped region, so the list still \
          scrolls: content {:.1}px vs region {:.1}px",
         vm.count(),
         content.height,
         region.height,
     );
-    drop(ui);
-}
-
-/// **The cost of the cap, measured and recorded rather than buried.**
-///
-/// The spec pins the card at 480px *and* caps the list at 200px. Those
-/// two numbers are in tension for this card: the furniture is 150px, so
-/// the card has 330px to give and the cap only lets 200 of it be used.
-/// The remaining **130px is dead card** — nothing is laid out there — and
-/// the list loses roughly **4.4 visible rows**.
-///
-/// This test exists so the trade-off is a pinned, visible fact rather than
-/// something a reader has to recompute to notice. It asserts the tension
-/// rather than a desirable outcome; if the spec author resolves it (by
-/// shrinking the card, raising the cap, or letting the card content-fit),
-/// this test is the one that changes.
-#[test]
-fn the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows() {
-    let vm = AttributionsViewModel::from_catalog();
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let (region, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    drop(ui);
 
     let rows = vm.count() as f32;
     assert_eq!(rows, 61.0, "fixture: the shipped catalog is 61 crates");
@@ -344,7 +358,10 @@ fn the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows() {
 
     // The dead space the cap creates inside the fixed 480px card.
     let dead = uncapped - region.height;
-    assert_eq!(dead, 130.0, "330px remainder - 200px cap = 130px unused");
+    assert_eq!(
+        dead, 130.0,
+        "dead card: 330px remainder - 200px cap = 130px unused"
+    );
 
     // What that costs in visible rows.
     let rows_before = uncapped / row_h;
@@ -352,7 +369,7 @@ fn the_cap_leaves_130px_of_dead_card_and_costs_about_four_and_a_half_rows() {
     let lost = rows_before - rows_after;
     assert!(
         lost > 4.0 && lost < 5.0,
-        "the cap costs {lost:.2} visible rows ({rows_before:.2} -> {rows_after:.2} \
+        "visible rows: the cap costs {lost:.2} visible rows ({rows_before:.2} -> {rows_after:.2} \
          at {row_h:.2}px/row) — a real regression in what a reader can see \
          without scrolling, recorded deliberately"
     );
@@ -416,8 +433,10 @@ fn the_credits_list_never_crosses_the_footer_band_at_any_viewport() {
     }
 }
 
-/// A viewport too short to hold the card's own furniture clamps the list
-/// to zero rather than producing a negative height or panicking.
+/// The two short-viewport branches of the solver: a viewport too short for the
+/// card's own furniture clamps the list to zero rather than producing a
+/// negative height or panicking, and a short-but-viable card gives the list its
+/// remainder instead of the cap.
 ///
 /// The card's furniture is `150px` and its padding `32px`, so below a
 /// `214px` viewport the card cannot hold itself. That condition is
@@ -425,68 +444,44 @@ fn the_credits_list_never_crosses_the_footer_band_at_any_viewport() {
 /// too — but the solver is now the thing that decides what the list gets
 /// there, so its clamp needs its own pin.
 #[test]
-fn a_viewport_too_short_for_the_cards_own_furniture_clamps_the_list_to_zero() {
-    let viewport = Size::new(360.0, 180.0);
-    let vm = AttributionsViewModel::from_catalog();
-    let card = attributions_view(&vm, viewport);
-    let mut ui = laid_out(viewport, card);
-    let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    drop(ui);
+fn the_solver_clamps_the_list_on_short_viewports() {
+    // 360x180: below the card's own furniture.
+    {
+        let viewport = Size::new(360.0, 180.0);
+        let vm = AttributionsViewModel::from_catalog();
+        let card = attributions_view(&vm, viewport);
+        let mut ui = laid_out(viewport, card);
+        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+        drop(ui);
 
-    assert_eq!(
-        list.height, 0.0,
-        "148px of card cannot hold 150px of furniture; the solver clamps to \
-         zero rather than handing iced a negative extent"
-    );
-}
+        assert_eq!(
+            list.height, 0.0,
+            "360x180: 148px of card cannot hold 150px of furniture; the solver clamps to \
+             zero rather than handing iced a negative extent"
+        );
+    }
 
-/// The remainder binds below the cap, so the cap never invents space.
-#[test]
-fn a_short_card_gives_the_list_its_remainder_not_the_cap() {
     // 300px viewport -> 268px card -> 118px remainder, under the 200 cap.
-    let viewport = Size::new(900.0, 300.0);
-    let vm = AttributionsViewModel::from_catalog();
-    let card = attributions_view(&vm, viewport);
-    let mut ui = laid_out(viewport, card);
-    let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    drop(ui);
+    {
+        let viewport = Size::new(900.0, 300.0);
+        let vm = AttributionsViewModel::from_catalog();
+        let card = attributions_view(&vm, viewport);
+        let mut ui = laid_out(viewport, card);
+        let (list, _) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+        drop(ui);
 
-    let card_h = attributions_card_size(viewport).height;
-    let expected =
-        card_h - (HEADER_BAND_HEIGHT + 2.0 * modal_frame().content_padding + FOOTER_BAND_HEIGHT);
-    assert!(
-        expected < ATTRIBUTIONS_LIST_MAX_HEIGHT,
-        "fixture: this card is below the cap"
-    );
-    assert_eq!(
-        list.height, expected,
-        "below the cap the list gets everything the card has left"
-    );
-}
-
-/// Empty catalog: the list is still allocated, still capped, and the card
-/// does not collapse.
-#[test]
-fn an_empty_catalog_still_gets_the_capped_list() {
-    let vm = AttributionsViewModel::with_entries(vec![]);
-    let card = attributions_view(&vm, ROOMY_VIEWPORT);
-    let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
-    let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    drop(ui);
-
-    assert_eq!(list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT);
-    assert_eq!(
-        card_b.height, 480.0,
-        "the empty state must not resize the card"
-    );
-    assert!(
-        content.height <= list.height,
-        "an empty table must not overflow the region: content {:.1} vs \
-         region {:.1}",
-        content.height,
-        list.height
-    );
+        let card_h = attributions_card_size(viewport).height;
+        let expected = card_h
+            - (HEADER_BAND_HEIGHT + 2.0 * modal_frame().content_padding + FOOTER_BAND_HEIGHT);
+        assert!(
+            expected < ATTRIBUTIONS_LIST_MAX_HEIGHT,
+            "900x300: fixture: this card is below the cap"
+        );
+        assert_eq!(
+            list.height, expected,
+            "900x300: below the cap the list gets everything the card has left"
+        );
+    }
 }
 
 /// A very large catalog does not change the region, only the scroll extent.
@@ -538,16 +533,37 @@ fn the_about_card_is_unaffected_and_keeps_its_own_cap() {
     );
 }
 
+/// Empty catalog: the list is still allocated, still capped, the card does not
+/// collapse, and the empty table does not overflow its region.
 #[test]
-fn the_empty_catalog_keeps_the_card_at_640x480() {
+fn an_empty_catalog_keeps_the_card_and_the_capped_list() {
     // The empty state changes the summary line, not the box.
     let vm = AttributionsViewModel::with_entries(vec![]);
     let card = attributions_view(&vm, ROOMY_VIEWPORT);
     let mut ui = laid_out(ROOMY_VIEWPORT, card);
-    let bounds = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
-    assert_eq!(bounds.width, 640.0);
-    assert_eq!(bounds.height, 480.0);
+    let (list, content) = scroll_bounds(&mut ui, ATTRIBUTIONS_LIST_ID);
+    let card_b = framed_card_bounds(&mut ui, ATTRIBUTIONS_CARD_ID);
     drop(ui);
+
+    assert_eq!(
+        list.height, ATTRIBUTIONS_LIST_MAX_HEIGHT,
+        "empty catalog: the list is still allocated and still capped"
+    );
+    assert_eq!(
+        card_b.width, 640.0,
+        "empty catalog: the empty state must not resize the card"
+    );
+    assert_eq!(
+        card_b.height, 480.0,
+        "empty catalog: the empty state must not resize the card"
+    );
+    assert!(
+        content.height <= list.height,
+        "empty catalog: an empty table must not overflow the region: content {:.1} vs \
+         region {:.1}",
+        content.height,
+        list.height
+    );
 }
 
 #[test]
@@ -613,8 +629,40 @@ fn the_repository_link_hit_box_is_a_real_target() {
 
 // --- The repository link (UIF-ATOM-001d) ---------------------------------
 
+/// Every column colour is a palette token, the link takes the resolver's
+/// resting foreground rather than the accent fill, and the three columns are
+/// distinguishable from each other.
 #[test]
-fn repository_link_takes_the_frameworks_accent_text() {
+fn column_colours_resolve_to_distinct_palette_tokens() {
+    let palette = Palette::fastmd_dark();
+    assert_eq!(
+        crate_name_color(),
+        palette.text_strong,
+        "crate-name column: the row's primary label is text_strong"
+    );
+    assert_eq!(
+        authors_color(),
+        palette.text,
+        "authors column: the secondary column is the body text token"
+    );
+    // INTENTIONALLY CHANGED IN INT-5a. This line pinned `palette.accent`
+    // (= `color.accent.fill`), which measures below the WCAG 2.1 AA
+    // 4.5:1 floor against this card's `surface.overlay` background — see
+    // `the_link_colour_clears_the_floor_the_retired_accent_fill_failed`.
+    // The link now takes `color.accent.text`, the foreground §3.1d assigns
+    // a link. A change to this assertion back to `accent` is a contrast
+    // regression, not a fix.
+    assert_eq!(
+        repository_color(),
+        palette.accent_text,
+        "repository column: the link takes color.accent.text"
+    );
+    assert_ne!(
+        repository_color(),
+        palette.accent,
+        "repository column: the link must not be painted with the accent FILL"
+    );
+
     // The link colour is the hyperlink resolver's resting foreground,
     // not the `accent_fill` the cell used before.
     assert_eq!(
@@ -627,45 +675,52 @@ fn repository_link_takes_the_frameworks_accent_text() {
             crate::ui_iced::about::modal_frame().surface,
             &crate::ui::theme::Palette::pro(),
         )
-        .foreground
+        .foreground,
+        "resolver: the colour is the framework's own resting foreground"
     );
-    assert_eq!(
-        repository_color(),
-        crate::ui::theme::Palette::fastmd_dark().accent_text
+
+    assert_ne!(
+        crate_name_color(),
+        authors_color(),
+        "distinctness: the crate-name column must differ from the authors column"
     );
     assert_ne!(
+        crate_name_color(),
         repository_color(),
-        crate::ui::theme::Palette::fastmd_dark().accent,
-        "the link must not be painted with the accent FILL"
+        "distinctness: the crate-name column must differ from the repository column"
+    );
+    assert_ne!(
+        authors_color(),
+        repository_color(),
+        "distinctness: the authors column must differ from the repository column"
     );
 }
 
+/// The link colour clears the WCAG AA floor against the surface it is actually
+/// painted on, and the retired accent fill did not — the reason for the change,
+/// pinned so nobody "restores" the old colour without seeing what it cost.
 #[test]
-fn repository_link_clears_the_wcag_aa_floor_against_its_real_background() {
+fn the_link_colour_clears_the_floor_the_retired_accent_fill_failed() {
     // Measured, not transcribed: the ratio is computed here from the raw
     // sRGB of the two colours the cell actually paints — `accent_text`
     // over the modal frame's `surface.overlay`.
     let background = crate::ui_iced::about::modal_frame().surface;
-    let ratio = hoarfrost::token::contrast::contrast_ratio(repository_color(), background);
-    assert!(
-        ratio >= 4.5,
-        "the repository link must clear 4.5:1 (WCAG 2.1 AA normal text); \
-         measured {ratio:.2}:1 for accent_text on surface.overlay"
-    );
-}
 
-#[test]
-fn the_retired_accent_fill_failed_that_same_floor() {
-    // The reason for the change, pinned so nobody "restores" the old
-    // colour without seeing what it cost. Same background, same maths.
-    let background = crate::ui_iced::about::modal_frame().surface;
-    let ratio = hoarfrost::token::contrast::contrast_ratio(
+    let link = hoarfrost::token::contrast::contrast_ratio(repository_color(), background);
+    assert!(
+        link >= 4.5,
+        "accent_text on surface.overlay: the repository link must clear 4.5:1 \
+         (WCAG 2.1 AA normal text); measured {link:.2}:1"
+    );
+
+    // Same background, same maths.
+    let retired = hoarfrost::token::contrast::contrast_ratio(
         crate::ui::theme::Palette::fastmd_dark().accent,
         background,
     );
     assert!(
-        ratio < 4.5,
-        "accent_fill on surface.overlay measured {ratio:.2}:1 — if this ever \
+        retired < 4.5,
+        "accent_fill on surface.overlay: measured {retired:.2}:1 — if this ever \
          clears 4.5 the premise for the change is gone and this test should be \
          revisited, not deleted"
     );
@@ -682,54 +737,29 @@ fn repository_cells_build_for_every_catalog_entry() {
 
 // --- Deferred intents -----------------------------------------------------
 
+/// The press carries an owned copy of the URL, so the view never borrows the
+/// row it came from.
 #[test]
-fn repository_press_carries_the_url_verbatim() {
+fn repository_press_carries_an_owned_copy_of_the_url() {
     let url = "https://github.com/dtolnay/anyhow";
     assert_eq!(
         repository_press(url),
         Message::About(AboutMessage::RepositoryOpened {
             url: url.to_owned(),
-        })
+        }),
+        "borrowed url: the message carries the url verbatim"
     );
-}
 
-#[test]
-fn repository_press_copies_the_url_into_the_message() {
     // The view may not open anything, so the URL must travel with the
     // message as an owned copy.
-    let url = String::from("https://github.com/serde-rs/serde");
-    let message = repository_press(&url);
-    drop(url);
+    let owned = String::from("https://github.com/serde-rs/serde");
+    let message = repository_press(&owned);
+    drop(owned);
     assert_eq!(
         message,
         Message::About(AboutMessage::RepositoryOpened {
             url: "https://github.com/serde-rs/serde".into(),
-        })
+        }),
+        "owned url: the copy outlives the string it was made from"
     );
-}
-
-// --- Colours come from palette tokens ---------------------------------------
-
-#[test]
-fn column_colours_resolve_to_palette_tokens() {
-    let palette = Palette::fastmd_dark();
-    assert_eq!(crate_name_color(), palette.text_strong);
-    assert_eq!(authors_color(), palette.text);
-    // INTENTIONALLY CHANGED IN INT-5a. This line pinned `palette.accent`
-    // (= `color.accent.fill`), which measures below the WCAG 2.1 AA
-    // 4.5:1 floor against this card's `surface.overlay` background — see
-    // `repository_link_clears_the_wcag_aa_floor_against_its_real_background`
-    // and `the_retired_accent_fill_failed_that_same_floor`. The link now
-    // takes `color.accent.text`, the foreground §3.1d assigns a link.
-    // A change to this assertion back to `accent` is a contrast
-    // regression, not a fix.
-    assert_eq!(repository_color(), palette.accent_text);
-    assert_ne!(repository_color(), palette.accent);
-}
-
-#[test]
-fn column_colours_are_distinct() {
-    assert_ne!(crate_name_color(), authors_color());
-    assert_ne!(crate_name_color(), repository_color());
-    assert_ne!(authors_color(), repository_color());
 }

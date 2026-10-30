@@ -1,7 +1,7 @@
 //! Tests for the text input atom — `UIF-ATOM-002`, the §3.2 matrix, the
 //! zero-shift slot and the `UIF-VER-001` contrast audit over both.
 //!
-//! Five groups, in order:
+//! Groups, in order:
 //!
 //! 1. **The matrix.** Every cell of §3.2 transcribed as an expected
 //!    `(background, text, placeholder, icon, border)` quintuple and
@@ -25,6 +25,18 @@
 //! 5. **The contrast audit.** Every `(fg, bg)` pair the resolver can
 //!    paint, measured with the `INC-05` solver and classified by role,
 //!    with failures pinned rather than waived.
+//!
+//! # Tests share a renderer, never a widget tree
+//!
+//! Building iced's headless renderer costs roughly 620 ms, which dwarfs the
+//! layout pass a read-back actually performs, so [`LayoutProbe`] pays that
+//! cost once per test and rebuilds each configuration over a **fresh**
+//! [`user_interface::Cache`] — the same drive [`Host`] uses, with the cache
+//! reset instead of carried. A "this change must not move the editor" claim
+//! is only worth making if neither configuration ever saw the other's tree,
+//! so sharing is limited to the renderer. Tests that press, type or focus
+//! still own a [`Harness`] or a [`Host`] to themselves, because for those the
+//! carried state *is* the subject.
 //!
 //! # The audit's result
 //!
@@ -279,9 +291,15 @@ fn assert_cell(base: BaseState, focused: bool, want: ExpectedCell) {
     }
 }
 
+/// The five §3.2 rows, asserted as one table rather than five tests.
+///
+/// Each row is a separate `assert_cell` call with its own state and its own
+/// expected quintuple, so a drift still names the row that moved — the rows
+/// share a test body, not an expectation.
 #[test]
-fn test_rest_cell_is_the_spec_row() {
+fn test_every_spec_row_is_the_matrix_row() {
     let p = palette();
+
     assert_cell(
         BaseState::Rest,
         false,
@@ -294,11 +312,6 @@ fn test_rest_cell_is_the_spec_row() {
             border_width: shape::BORDER_HAIRLINE,
         },
     );
-}
-
-#[test]
-fn test_hovered_cell_is_the_spec_row() {
-    let p = palette();
     assert_cell(
         BaseState::Hovered,
         false,
@@ -311,11 +324,6 @@ fn test_hovered_cell_is_the_spec_row() {
             border_width: shape::BORDER_HAIRLINE,
         },
     );
-}
-
-#[test]
-fn test_focused_cell_is_the_spec_row() {
-    let p = palette();
     assert_cell(
         BaseState::Rest,
         true,
@@ -328,11 +336,6 @@ fn test_focused_cell_is_the_spec_row() {
             border_width: shape::BORDER_FOCUS,
         },
     );
-}
-
-#[test]
-fn test_invalid_cell_is_the_spec_row() {
-    let p = palette();
     assert_cell(
         BaseState::Invalid,
         false,
@@ -345,11 +348,6 @@ fn test_invalid_cell_is_the_spec_row() {
             border_width: shape::BORDER_FOCUS,
         },
     );
-}
-
-#[test]
-fn test_disabled_cell_is_the_spec_row() {
-    let p = palette();
     assert_cell(
         BaseState::Disabled,
         false,
@@ -364,44 +362,40 @@ fn test_disabled_cell_is_the_spec_row() {
     );
 }
 
+/// The two cells §3.2 does not draw, pinned to the cells it folds them into.
+///
+/// Pressed and hovered-and-focused are not invented rows: `state::resolve`
+/// can produce `Pressed`, and the resolver has to answer it with something.
+/// The answer is an existing cell, and which one is the claim.
 #[test]
-fn test_hovered_and_focused_is_the_focused_cell() {
-    let focused = style_for(InputKind::TextEntry, BaseState::Rest, true);
-    let hovered_focused = style_for(InputKind::TextEntry, BaseState::Hovered, true);
-
-    assert_eq!(
-        hovered_focused, focused,
-        "a hovered-and-focused input paints the Focused row, not a blend"
-    );
-}
-
-#[test]
-fn test_pressed_folds_into_the_hovered_cell() {
+fn test_the_unspecified_states_fold_into_the_cells_the_spec_names() {
     // §3.2 gives an input no Pressed cell, because pressing one places a
-    // caret rather than committing an action. `state::resolve` can still
-    // produce `Pressed`, so the resolver has to answer it with something,
-    // and the answer is Hovered rather than a sixth invented skin.
+    // caret rather than committing an action.
     let hovered = style_for(InputKind::Search, BaseState::Hovered, false);
     let pressed = style_for(InputKind::Search, BaseState::Pressed, false);
-
     assert_eq!(
         pressed, hovered,
         "Pressed must resolve to the Hovered cell, not to a new one"
     );
-}
 
-#[test]
-fn test_pressed_and_focused_is_the_focused_cell() {
     let focused = style_for(InputKind::TextEntry, BaseState::Rest, true);
-    let pressed_focused = style_for(InputKind::TextEntry, BaseState::Pressed, true);
+    let hovered_focused = style_for(InputKind::TextEntry, BaseState::Hovered, true);
+    assert_eq!(
+        hovered_focused, focused,
+        "a hovered-and-focused input paints the Focused row, not a blend"
+    );
 
+    let pressed_focused = style_for(InputKind::TextEntry, BaseState::Pressed, true);
     assert_eq!(pressed_focused, focused);
 }
 
+/// The precedence ranking, re-asserted at the paint level.
+///
+/// The same ruling `state::resolve` makes for buttons: clicking at an error
+/// must not visually clear it, and a disabled input is a different object
+/// rather than a dimmer one.
 #[test]
-fn test_invalid_outranks_the_pointer_states() {
-    // The same ruling `state::resolve` makes for buttons, checked at the
-    // paint level: clicking at an error must not visually clear it.
+fn test_invalid_outranks_the_pointer_states_and_disabled_outranks_everything() {
     let invalid = style_for(InputKind::TextEntry, BaseState::Invalid, false);
 
     for base in [BaseState::Hovered, BaseState::Pressed] {
@@ -411,10 +405,7 @@ fn test_invalid_outranks_the_pointer_states() {
             "the {base:?} border must not overwrite the error border"
         );
     }
-}
 
-#[test]
-fn test_disabled_outranks_everything() {
     let disabled = style_for(InputKind::TextEntry, BaseState::Disabled, false);
 
     for base in [
@@ -466,17 +457,22 @@ fn test_focus_is_a_replacement_here_not_an_addition() {
     );
 }
 
+/// The three whole-matrix claims, over one walk of the reachable states.
+///
+/// They share a walk because they ask three questions about the same
+/// resolved style: does the kind change it, is the resolver a function, and
+/// does the selection keep its locked pairing. Each question keeps its own
+/// assertion and its own message, so a failure still names which claim broke.
 #[test]
-fn test_all_three_kinds_resolve_identically_for_every_reachable_state() {
-    // The core claim of `UIF-ATOM-002`: the kind selects slot content,
-    // never paint. Every kind across every reachable state must produce a
-    // byte-identical `InputStyle`.
+fn test_the_resolver_is_pure_kind_invariant_and_locks_the_selection() {
     let p = palette();
 
     for state in reachable_states() {
         let reference = resolve_input_style(InputKind::TextEntry, state, &p);
 
         for kind in KINDS {
+            // The core claim of `UIF-ATOM-002`: the kind selects slot
+            // content, never paint.
             assert_eq!(
                 resolve_input_style(kind, state, &p),
                 reference,
@@ -484,18 +480,15 @@ fn test_all_three_kinds_resolve_identically_for_every_reachable_state() {
                  change what sits in the slot, not what the cell looks like",
                 state_name(state),
             );
-        }
-    }
-}
 
-#[test]
-fn test_the_selection_pair_is_the_lock_in_every_state() {
-    // `UIF-TOK-006` rule 3: the selection foreground is `text.strong`
-    // over `accent.fill`, in every state a selection can exist in.
-    let p = palette();
+            // Totality and purity: the same input twice, the same style.
+            let once = resolve_input_style(kind, state, &p);
+            let twice = resolve_input_style(kind, state, &p);
+            assert_eq!(once, twice, "resolver is not pure at {kind:?}");
 
-    for state in reachable_states() {
-        for kind in KINDS {
+            // `UIF-TOK-006` rule 3: the selection foreground is
+            // `text.strong` over `accent.fill`, in every state a selection
+            // can exist in.
             let style = resolve_input_style(kind, state, &p);
             assert_eq!(
                 token_name(style.selection_background),
@@ -509,19 +502,6 @@ fn test_the_selection_pair_is_the_lock_in_every_state() {
                 "{} x {kind:?} selection foreground",
                 state_name(state),
             );
-        }
-    }
-}
-
-#[test]
-fn test_resolve_input_style_is_pure_and_total() {
-    let p = palette();
-
-    for state in reachable_states() {
-        for kind in KINDS {
-            let once = resolve_input_style(kind, state, &p);
-            let twice = resolve_input_style(kind, state, &p);
-            assert_eq!(once, twice, "resolver is not pure at {kind:?}");
         }
     }
 }
@@ -560,8 +540,13 @@ fn test_every_reachable_state_projects_to_a_named_cell() {
 // 2 — the contested perimeter: invalid + focused
 // ---------------------------------------------------------------------------
 
+/// The contested perimeter, both halves of the decision at once.
+///
+/// §3.2 lets Invalid and Focused both claim a 2px stroke. The module doc
+/// argues for the error keeping the border and focus relocating outside it;
+/// this pins both halves of that ruling so neither can be quietly reversed.
 #[test]
-fn test_invalid_and_focused_keeps_the_error_border() {
+fn test_invalid_and_focused_keeps_the_error_border_and_relocates_focus_outside_it() {
     let p = palette();
     let style = style_for(InputKind::TextEntry, BaseState::Invalid, true);
 
@@ -575,12 +560,6 @@ fn test_invalid_and_focused_keeps_the_error_border() {
         style.is_error_border(&p),
         "the resolved style must still report an error border while focused"
     );
-}
-
-#[test]
-fn test_invalid_and_focused_relocates_focus_to_an_outside_ring() {
-    let style = style_for(InputKind::TextEntry, BaseState::Invalid, true);
-
     assert_eq!(
         style.focus_ring_width,
         shape::BORDER_FOCUS,
@@ -594,29 +573,13 @@ fn test_invalid_and_focused_relocates_focus_to_an_outside_ring() {
     );
 }
 
+/// When a ring exists, and what it is resolved against.
+///
+/// Not against the kind, not against a constant: against the background the
+/// same resolution produced (`UIF-TOK-006` rule 2, decision D-6). And only
+/// one state is allowed to ask for one at all.
 #[test]
-fn test_the_ring_is_resolved_against_the_background_this_function_resolved() {
-    // Not against the kind, not against a constant: against the
-    // background the same resolution produced (`UIF-TOK-006` rule 2,
-    // decision D-6).
-    let p = palette();
-
-    for state in reachable_states() {
-        let style = resolve_input_style(InputKind::Search, state, &p);
-
-        if style.focus_ring_width > 0.0 {
-            assert_eq!(
-                style.focus_ring_color,
-                focus::resolve_ring_color_for_background(style.background, &p),
-                "ring colour must come from the resolved background, not \
-                 from anywhere else"
-            );
-        }
-    }
-}
-
-#[test]
-fn test_only_invalid_and_focused_produces_a_ring() {
+fn test_only_invalid_and_focused_asks_for_a_ring_and_it_resolves_against_the_resolved_background() {
     for state in reachable_states() {
         let style = resolve_input_style(InputKind::TextEntry, state, &palette());
         let expect_ring = state.base == BaseState::Invalid && state.focused;
@@ -627,6 +590,19 @@ fn test_only_invalid_and_focused_produces_a_ring() {
             "ring presence wrong at {}",
             state_name(state),
         );
+    }
+
+    for state in reachable_states() {
+        let style = resolve_input_style(InputKind::Search, state, &palette());
+
+        if style.focus_ring_width > 0.0 {
+            assert_eq!(
+                style.focus_ring_color,
+                focus::resolve_ring_color_for_background(style.background, &palette()),
+                "ring colour must come from the resolved background, not \
+                 from anywhere else"
+            );
+        }
     }
 }
 
@@ -723,8 +699,14 @@ fn test_every_cell_paints_a_background_layer() {
 // 3 — the reserved slot
 // ---------------------------------------------------------------------------
 
+/// What each kind reserves, and why those numbers are the numbers.
+///
+/// The floor is a rule (`size.hit.target.min`), the search reservation is a
+/// §4.3.1 pin, and the two must not be confused for each other: if the
+/// search reservation ever dropped to the floor the clear button would not
+/// fit, and someone would "fix" that by moving the text.
 #[test]
-fn test_reserved_slot_width_per_kind() {
+fn test_each_kind_reserves_its_slot_and_the_reservation_clears_the_hit_target_floor() {
     assert_eq!(InputKind::Search.trailing_slot_width(), size::CONTROL_SM);
     assert_eq!(
         InputKind::TextEntry.trailing_slot_width(),
@@ -734,10 +716,7 @@ fn test_reserved_slot_width_per_kind() {
         InputKind::DropdownTrigger.trailing_slot_width(),
         size::HIT_TARGET_MIN
     );
-}
 
-#[test]
-fn test_every_reserved_slot_clears_the_hit_target_floor() {
     for kind in KINDS {
         assert!(
             kind.trailing_slot_width() >= size::HIT_TARGET_MIN,
@@ -746,15 +725,10 @@ fn test_every_reserved_slot_clears_the_hit_target_floor() {
             size::HIT_TARGET_MIN,
         );
     }
-}
 
-#[test]
-fn test_the_search_reservation_is_sized_to_the_pinned_action_button() {
     // §4.3.1's pinned search footer puts a 28 × 28 action button in this
     // slot, so the search reservation is `size.control.sm` and not the
-    // generic floor. If the reservation ever dropped to HIT_TARGET_MIN the
-    // clear button would not fit and someone would "fix" it by moving the
-    // text.
+    // generic floor.
     assert_eq!(InputKind::Search.trailing_slot_width(), HEIGHT_COMPACT);
     assert!(InputKind::Search.trailing_slot_width() > InputKind::TextEntry.trailing_slot_width());
 }
@@ -790,8 +764,14 @@ fn test_text_area_is_identical_for_every_slot_content() {
     }
 }
 
+/// How the row is divided, checked three ways over one walk of the kinds.
+///
+/// The formula says where the text area comes from, the partition says the
+/// two halves account for the row exactly, and the inset says the text clears
+/// the widest stroke the atom can paint. Each is a different failure mode, so
+/// each keeps its own message.
 #[test]
-fn test_text_area_formula_is_padding_against_the_reservation() {
+fn test_the_text_area_and_the_slot_divide_the_row_by_the_padding_formula() {
     let bounds = Rectangle::new(Point::new(5.0, 7.0), Size::new(300.0, HEIGHT_STANDARD));
 
     for kind in KINDS {
@@ -803,30 +783,44 @@ fn test_text_area_formula_is_padding_against_the_reservation() {
         assert_eq!(area.height, bounds.height);
         assert_eq!(area.width, bounds.width - HORIZONTAL_PADDING - reserved);
     }
-}
 
-#[test]
-fn test_text_area_and_slot_partition_the_row() {
     // The two functions are complements: text + gap + slot + padding must
     // account for the row exactly, with no overlap and no leftover.
-    let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(260.0, HEIGHT_COMPACT));
+    let row = Rectangle::new(Point::new(0.0, 0.0), Size::new(260.0, HEIGHT_COMPACT));
 
     for kind in KINDS {
-        let area = text_area_bounds(bounds, kind);
-        let slot = trailing_slot_bounds(bounds, kind);
+        let area = text_area_bounds(row, kind);
+        let slot = trailing_slot_bounds(row, kind);
 
         assert!(
             area.x + area.width + SLOT_GAP <= slot.x + f32::EPSILON,
             "{kind:?}: the text area overlaps the slot"
         );
         assert!(
-            slot.x + slot.width <= bounds.x + bounds.width + f32::EPSILON,
+            slot.x + slot.width <= row.x + row.width + f32::EPSILON,
             "{kind:?}: the slot escapes the field"
         );
         assert_eq!(
             slot.x + slot.width + HORIZONTAL_PADDING,
-            bounds.x + bounds.width,
+            row.x + row.width,
             "{kind:?}: the row is not fully accounted for"
+        );
+    }
+
+    // Every §3.2 cell strokes at most `shape::BORDER_FOCUS` on the
+    // inside of the box. The inset is read off the geometry rather than
+    // compared as two constants, so the check follows the function if the
+    // function ever moves.
+    let inset_box = Rectangle::new(Point::new(0.0, 0.0), Size::new(200.0, HEIGHT_STANDARD));
+
+    for kind in KINDS {
+        let inset = text_area_bounds(inset_box, kind).x - inset_box.x;
+
+        assert!(
+            inset > shape::BORDER_FOCUS,
+            "{kind:?}: the text inset {inset} does not clear the widest \
+             border the atom paints ({})",
+            shape::BORDER_FOCUS,
         );
     }
 }
@@ -852,26 +846,6 @@ fn test_a_field_narrower_than_its_chrome_collapses_rather_than_going_negative() 
             slot.x >= tight.x,
             "{kind:?} slot x escaped the field's left edge: {}",
             slot.x
-        );
-    }
-}
-
-#[test]
-fn test_the_text_area_clears_the_widest_border_it_sits_inside() {
-    // Every §3.2 cell strokes at most `shape::BORDER_FOCUS` on the
-    // inside of the box. The inset is read off the geometry rather than
-    // compared as two constants, so the check follows the function if the
-    // function ever moves.
-    let bounds = Rectangle::new(Point::new(0.0, 0.0), Size::new(200.0, HEIGHT_STANDARD));
-
-    for kind in KINDS {
-        let inset = text_area_bounds(bounds, kind).x - bounds.x;
-
-        assert!(
-            inset > shape::BORDER_FOCUS,
-            "{kind:?}: the text inset {inset} does not clear the widest \
-             border the atom paints ({})",
-            shape::BORDER_FOCUS,
         );
     }
 }
@@ -914,8 +888,14 @@ fn test_slot_content_maps_to_glyph_and_actionability() {
     assert!(SlotContent::Actionable(GLYPH_CLEAR).is_actionable());
 }
 
+/// The `slot_content` precedence table, read row by row.
+///
+/// One test because the rows are one table: what a kind shows when it is
+/// empty, when it holds a value, and when it is invalid — and the single
+/// precedence rule that decides the last of those. Each row keeps its own
+/// assertion so a drift names the kind and the combination that moved.
 #[test]
-fn test_text_entry_slot_is_empty_until_it_is_invalid() {
+fn test_slot_content_follows_the_precedence_table() {
     for has_value in [false, true] {
         assert_eq!(
             slot_content(InputKind::TextEntry, has_value, false),
@@ -926,12 +906,11 @@ fn test_text_entry_slot_is_empty_until_it_is_invalid() {
         assert_eq!(
             slot_content(InputKind::TextEntry, has_value, true),
             SlotContent::Passive(GLYPH_ERROR),
+            "a plain entry shows the error mark once it is invalid \
+             (has_value: {has_value})",
         );
     }
-}
 
-#[test]
-fn test_search_slot_is_the_search_mark_when_empty_and_clear_when_filled() {
     assert_eq!(
         slot_content(InputKind::Search, false, false),
         SlotContent::Passive(GLYPH_SEARCH)
@@ -940,10 +919,7 @@ fn test_search_slot_is_the_search_mark_when_empty_and_clear_when_filled() {
         slot_content(InputKind::Search, true, false),
         SlotContent::Actionable(GLYPH_CLEAR)
     );
-}
 
-#[test]
-fn test_dropdown_slot_always_carries_the_chevron() {
     for has_value in [false, true] {
         for invalid in [false, true] {
             let content = slot_content(InputKind::DropdownTrigger, has_value, invalid);
@@ -954,21 +930,27 @@ fn test_dropdown_slot_always_carries_the_chevron() {
             }
         }
     }
-}
 
-#[test]
-fn test_validation_outranks_the_clear_affordance() {
     // The one precedence rule in `slot_content`, pinned directly: an
     // invalid field shows the error even when it also holds a value that
     // could be cleared, because the error is why the user cannot proceed.
     let filled_and_invalid = slot_content(InputKind::Search, true, true);
-
     assert_eq!(filled_and_invalid, SlotContent::Passive(GLYPH_ERROR));
     assert!(
         !filled_and_invalid.is_actionable(),
         "an invalid search field must not offer a clear in place of its \
          error — the clear would hide the reason the value is wrong"
     );
+
+    // The glyph is a named constant rather than three literals, so a
+    // future dedicated error glyph changes one line.
+    for kind in KINDS {
+        assert_eq!(
+            slot_content(kind, true, true),
+            SlotContent::Passive(GLYPH_ERROR),
+            "{kind:?} reports a different error mark than the constant",
+        );
+    }
 }
 
 #[test]
@@ -985,19 +967,6 @@ fn test_only_the_search_clear_is_actionable() {
                 );
             }
         }
-    }
-}
-
-#[test]
-fn test_the_error_glyph_is_the_same_for_every_kind() {
-    // The glyph is a named constant rather than three literals, so a
-    // future dedicated error glyph changes one line.
-    for kind in KINDS {
-        assert_eq!(
-            slot_content(kind, true, true),
-            SlotContent::Passive(GLYPH_ERROR),
-            "{kind:?} reports a different error mark than the constant",
-        );
     }
 }
 
@@ -1055,25 +1024,109 @@ fn outer(width: f32, height: f32) -> Rectangle {
     Rectangle::new(Point::new(0.0, 0.0), Size::new(width, height))
 }
 
-/// The editor's registered bounds, which is where iced actually put it.
-fn editor_bounds(
-    kind: InputKind,
-    value: &str,
-    invalid: bool,
-    enabled: bool,
-    width: f32,
-) -> Rectangle {
-    let value = value.to_owned();
-    let mut harness =
-        Harness::headless(move || field(kind, &value, invalid, enabled, false, width));
-    let recorded = harness.recorded();
+/// One headless renderer, many independent passes over it.
+///
+/// Building iced's headless renderer is the dominant cost of this file — it
+/// is roughly 620 ms in a debug build, far more than the layout pass a probe
+/// actually performs. `Harness::headless` mints one per call, so a test that
+/// compares three configurations paid for three renderers to read three
+/// rectangles.
+///
+/// What a probe needs to keep independent is the **widget state**, not the
+/// renderer: a "this change must not move the editor" claim is only worth
+/// making if each configuration was laid out over a tree that had never seen
+/// the other one. So every probe pass builds its interface over a **fresh**
+/// [`user_interface::Cache`], exactly as a fresh `Harness` would, and shares
+/// only the renderer. This is the same drive [`Host::run`] performs, with the
+/// cache reset instead of carried because a probe has no session to keep.
+struct LayoutProbe {
+    renderer: HeadlessRenderer,
+}
 
-    assert_eq!(
-        recorded.len(),
-        1,
-        "a text input registers exactly one focusable node, got {recorded:?}"
-    );
-    recorded[0].1
+impl LayoutProbe {
+    /// Pay the renderer build once.
+    fn new() -> Self {
+        Self {
+            renderer: headless_renderer(),
+        }
+    }
+
+    /// The `(id, bounds)` pairs the router sees for `root`, from a tree
+    /// built over a fresh cache.
+    fn recorded<M>(
+        &mut self,
+        root: Element<'_, M, crate::test_helpers::Theme, HeadlessRenderer>,
+    ) -> Recorded {
+        let mut ui = UserInterface::build(
+            root,
+            VIEWPORT,
+            user_interface::Cache::default(),
+            &mut self.renderer,
+        );
+        let mut operation: Box<dyn Operation<Recorded>> = Box::<RecordFocusables>::default();
+
+        ui.operate(&self.renderer, &mut black_box(operation.as_mut()));
+
+        match operation.finish() {
+            Outcome::Some(records) => records,
+            _ => Vec::new(),
+        }
+    }
+
+    /// The editor's registered bounds — where iced actually put it — for a
+    /// [`field`] built this way.
+    fn editor_bounds(
+        &mut self,
+        kind: InputKind,
+        value: &str,
+        invalid: bool,
+        enabled: bool,
+        width: f32,
+    ) -> Rectangle {
+        let recorded = self.recorded(field(kind, value, invalid, enabled, false, width));
+
+        assert_eq!(
+            recorded.len(),
+            1,
+            "a text input registers exactly one focusable node, got {recorded:?}"
+        );
+        recorded[0].1
+    }
+
+    /// The same claim for a [`secret_field`].
+    fn secret_editor_bounds(&mut self, value: &str, masked: bool, width: f32) -> Rectangle {
+        let recorded = self.recorded(secret_field(value, masked, width));
+
+        assert_eq!(
+            recorded.len(),
+            1,
+            "a password field registers exactly one focusable node, got {recorded:?}"
+        );
+        recorded[0].1
+    }
+
+    /// Run one real draw pass over `root` over a fresh tree.
+    ///
+    /// Nothing is asserted about pixels: the claim is that `draw` runs to
+    /// completion against a real renderer — background layer, ring layer,
+    /// inner editor and slot glyph.
+    fn draw<M>(&mut self, root: Element<'_, M, crate::test_helpers::Theme, HeadlessRenderer>) {
+        let mut ui = UserInterface::build(
+            root,
+            VIEWPORT,
+            user_interface::Cache::default(),
+            &mut self.renderer,
+        );
+
+        ui.draw(
+            &mut self.renderer,
+            &crate::test_helpers::Theme::Dark,
+            &iced::advanced::renderer::Style {
+                text_color: Color::BLACK,
+            },
+            mouse::Cursor::Unavailable,
+        );
+    }
 }
 
 #[test]
@@ -1092,9 +1145,10 @@ fn test_the_input_registers_with_the_router_under_its_bridge_id() {
 #[test]
 fn test_the_editor_lays_out_in_the_text_area_not_the_whole_field() {
     let width = 240.0;
+    let mut probe = LayoutProbe::new();
 
     for kind in KINDS {
-        let bounds = editor_bounds(kind, "", false, true, width);
+        let bounds = probe.editor_bounds(kind, "", false, true, width);
         let want = text_area_bounds(outer(width, HEIGHT_STANDARD), kind);
 
         assert_eq!(
@@ -1116,17 +1170,17 @@ fn test_every_input_kind_uses_the_body_rung_for_its_inner_editor() {
     // editor's registered layout against a raw iced editor built with both
     // properties of the framework body rung; a size or line-height drift
     // changes the observable line-box height.
+    let mut probe = LayoutProbe::new();
     let body_height = {
-        let mut harness = Harness::headless(|| {
+        let recorded = probe.recorded(
             iced::widget::text_input::TextInput::new("hint", "value")
                 .id(iced_id("field"))
                 .on_input(Msg::Edit)
                 .size(typography::BODY.size)
                 .line_height(typography::BODY.iced_line_height())
                 .padding(iced::Padding::ZERO)
-                .into()
-        });
-        let recorded = harness.recorded();
+                .into(),
+        );
 
         assert_eq!(
             recorded.len(),
@@ -1143,7 +1197,7 @@ fn test_every_input_kind_uses_the_body_rung_for_its_inner_editor() {
         InputKind::Password,
         InputKind::TextArea,
     ] {
-        let bounds = editor_bounds(kind, "value", false, true, 240.0);
+        let bounds = probe.editor_bounds(kind, "value", false, true, 240.0);
 
         assert_eq!(
             bounds.height, body_height,
@@ -1152,16 +1206,23 @@ fn test_every_input_kind_uses_the_body_rung_for_its_inner_editor() {
     }
 }
 
+/// The three zero-shift claims at real-layout level, over one renderer.
+///
+/// They share a probe because each pass rebuilds over a fresh cache: the
+/// slot-content case cannot observe the tree the value-growth case left
+/// behind, which is the only reason sharing a renderer is honest here.
 #[test]
-fn test_the_editor_bounds_do_not_move_when_the_slot_content_changes() {
-    // THE zero-shift assertion, at real-layout level. Three states of a
+fn test_the_editor_bounds_do_not_move() {
+    let width = 240.0;
+    let mut probe = LayoutProbe::new();
+
+    // 1. THE zero-shift assertion, at real-layout level. Three states of a
     // search field: idle 🔍, clear ×, and error ⚠ — three different
     // glyphs of three different widths, and iced laid the editor out into
     // the same rectangle for all of them.
-    let width = 240.0;
-    let idle = editor_bounds(InputKind::Search, "", false, true, width);
-    let clear = editor_bounds(InputKind::Search, "a filter", false, true, width);
-    let error = editor_bounds(InputKind::Search, "a filter", true, true, width);
+    let idle = probe.editor_bounds(InputKind::Search, "", false, true, width);
+    let clear = probe.editor_bounds(InputKind::Search, "a filter", false, true, width);
+    let error = probe.editor_bounds(InputKind::Search, "a filter", true, true, width);
 
     assert_eq!(
         idle, clear,
@@ -1171,18 +1232,14 @@ fn test_the_editor_bounds_do_not_move_when_the_slot_content_changes() {
         idle, error,
         "swapping 🔍 for ⚠ moved the editor: {idle:?} -> {error:?}"
     );
-}
 
-#[test]
-fn test_the_editor_bounds_do_not_move_across_kinds_at_the_same_width() {
-    // Only the reservation differs between kinds, and that difference is
+    // 2. Only the reservation differs between kinds, and that difference is
     // known to the geometry: what must not vary is the *glyph*. So the
     // three kinds differ in width by exactly the difference in their
     // reservations, and by nothing else.
-    let width = 240.0;
-    let entry = editor_bounds(InputKind::TextEntry, "", false, true, width);
-    let search = editor_bounds(InputKind::Search, "", false, true, width);
-    let trigger = editor_bounds(InputKind::DropdownTrigger, "", false, true, width);
+    let entry = probe.editor_bounds(InputKind::TextEntry, "", false, true, width);
+    let search = probe.editor_bounds(InputKind::Search, "", false, true, width);
+    let trigger = probe.editor_bounds(InputKind::DropdownTrigger, "", false, true, width);
 
     assert_eq!(
         entry.width - search.width,
@@ -1195,15 +1252,11 @@ fn test_the_editor_bounds_do_not_move_across_kinds_at_the_same_width() {
         "TextEntry and DropdownTrigger reserve the \
                                same width and must lay out identically"
     );
-}
 
-#[test]
-fn test_the_editor_bounds_do_not_move_as_the_value_grows() {
-    // A long value must not push the field's geometry either: the editor
+    // 3. A long value must not push the field's geometry either: the editor
     // scrolls, the box does not resize.
-    let width = 240.0;
-    let short = editor_bounds(InputKind::TextEntry, "a", false, true, width);
-    let long = editor_bounds(
+    let short = probe.editor_bounds(InputKind::TextEntry, "a", false, true, width);
+    let long = probe.editor_bounds(
         InputKind::TextEntry,
         "a very much longer value than the field was ever sized for",
         false,
@@ -1222,11 +1275,11 @@ fn test_compact_and_standard_inputs_centre_their_editor_in_their_own_height() {
     // height over two — so the two rungs are distinguishable by the
     // editor's `y`, not by its `height`.
     let width = 200.0;
-    let standard = editor_bounds(InputKind::TextEntry, "", false, true, width);
+    let mut probe = LayoutProbe::new();
+    let standard = probe.editor_bounds(InputKind::TextEntry, "", false, true, width);
     let compact = {
-        let mut harness =
-            Harness::headless(move || field(InputKind::TextEntry, "", false, true, true, width));
-        harness.recorded()[0].1
+        let recorded = probe.recorded(field(InputKind::TextEntry, "", false, true, true, width));
+        recorded[0].1
     };
 
     let centre_of = |r: Rectangle| r.y + r.height / 2.0;
@@ -1411,14 +1464,15 @@ fn test_a_passive_slot_publishes_nothing() {
 fn test_the_widget_draws_through_the_real_paint_path_in_every_state() {
     // Nothing is asserted about pixels: the claim is that `draw` runs to
     // completion against a real renderer — background layer, ring layer,
-    // inner editor and slot glyph — for every kind in every state.
+    // inner editor and slot glyph — for every kind in every state. Each
+    // state is drawn over a fresh tree, so no state leaks from one cell of
+    // the sweep into the next; only the renderer is shared.
+    let mut probe = LayoutProbe::new();
+
     for kind in KINDS {
         for invalid in [false, true] {
             for enabled in [false, true] {
-                let mut harness = Harness::headless(move || {
-                    field(kind, "some value", invalid, enabled, false, 240.0)
-                });
-                harness.render();
+                probe.draw(field(kind, "some value", invalid, enabled, false, 240.0));
             }
         }
     }
@@ -1686,9 +1740,19 @@ fn render_audit(rows: &[AuditRow]) -> String {
     out
 }
 
+/// The audit's own bookkeeping, checked in one pass over the rows.
+///
+/// Three claims about the table rather than about any single pair: that it
+/// reached every cell, that every pair it produced is classified and
+/// cross-checked, and that the pairs it refuses to gate are exactly the
+/// resting dividers. The gate itself stays a test of its own —
+/// [`test_no_judged_pair_is_left_failing`] — so that changing what the audit
+/// accepts still has to change a name that says so.
 #[test]
-fn test_the_audit_covers_every_kind_and_reachable_state() {
+fn test_the_contrast_audit_is_complete_and_every_pair_is_classified() {
     let rows = audit_rows();
+
+    // 1. Coverage: no cell of the matrix went unmeasured.
     let cells: Vec<&str> = rows
         .iter()
         .flat_map(|r| r.cells.iter().map(String::as_str))
@@ -1703,11 +1767,9 @@ fn test_the_audit_covers_every_kind_and_reachable_state() {
             );
         }
     }
-}
 
-#[test]
-fn test_contrast_audit_reports_every_produced_pair() {
-    let rows = audit_rows();
+    // 2. Every produced pair is classified, and the role's own predicate
+    // agrees with the measurement rather than being taken on trust.
     print!("{}", render_audit(&rows));
 
     let judged = rows.iter().filter(|r| r.verdict == Verdict::Judged).count();
@@ -1739,6 +1801,33 @@ fn test_contrast_audit_reports_every_produced_pair() {
                 r.min,
             );
         }
+    }
+
+    // 3. The pairs that are reported rather than gated are exactly
+    // `border.subtle`, and they are reported because they still fail.
+    let dividers: Vec<&AuditRow> = rows
+        .iter()
+        .filter(|r| r.verdict == Verdict::RestingDivider)
+        .collect();
+
+    assert!(
+        !dividers.is_empty(),
+        "the Rest/Disabled rows stroke border.subtle; if none is \
+         classified a resting divider, the classification broke"
+    );
+
+    for r in &dividers {
+        assert_eq!(
+            r.fg, "border.subtle",
+            "only border.subtle is a resting divider"
+        );
+        assert!(
+            r.ratio < MIN_CHROME_CONTRAST,
+            "border.subtle on {} measures {:.4}:1 — if that ever clears \
+             3.0:1 the classification is stale, not the token",
+            r.bg,
+            r.ratio,
+        );
     }
 }
 
@@ -1811,29 +1900,42 @@ fn test_the_accepted_failure_ledger_is_empty_and_fully_specified() {
     }
 }
 
+/// The three ratios the spec pins by number, measured rather than trusted.
+///
+/// Each is a separate measurement with its own message: a token that moved
+/// changes one ratio, and the failure has to say which pairing and which
+/// rule it left.
 #[test]
-fn test_the_selection_lock_clears_the_text_rule() {
-    // `UIF-TOK-006` rule 4, measured rather than trusted: `text.strong`
-    // on `accent.fill` is the tightest text pair this atom produces, and
-    // the revised §2.5 values put it at 4.8020:1.
+fn test_the_pinned_ratios_still_measure_what_the_spec_records() {
     let p = palette();
-    let ratio = contrast_ratio(p.text_strong, p.accent_fill);
 
+    // `UIF-TOK-006` rule 4: `text.strong` on `accent.fill` is the tightest
+    // text pair this atom produces, and the revised §2.5 values put it at
+    // 4.8020:1.
+    let selection = contrast_ratio(p.text_strong, p.accent_fill);
     assert!(
-        (ratio - 4.8020).abs() < RATIO_EPS,
-        "the selection lock measures {ratio:.4}:1, not the 4.8020:1 the revised \
+        (selection - 4.8020).abs() < RATIO_EPS,
+        "the selection lock measures {selection:.4}:1, not the 4.8020:1 the revised \
          spec pins — a token moved"
     );
     assert!(
         meets_text_contrast(p.text_strong, p.accent_fill),
-        "the selection lock must clear 4.5:1; it measures {ratio:.4}:1"
+        "the selection lock must clear 4.5:1; it measures {selection:.4}:1"
     );
-}
 
-#[test]
-fn test_every_focus_ring_clears_the_chrome_rule() {
-    let p = palette();
+    // The error border on its own cell.
+    let style = style_for(InputKind::TextEntry, BaseState::Invalid, false);
+    assert!(
+        meets_chrome_contrast(style.border_color, style.background),
+        "status.danger.text on surface.base measures {:.4}:1",
+        contrast_ratio(style.border_color, style.background),
+    );
+    assert!(
+        (contrast_ratio(p.status_danger_text, p.surface_base) - 6.5725).abs() < RATIO_EPS,
+        "the error border's measured ratio moved off 6.5725:1"
+    );
 
+    // Every ring the resolver can ask for.
     for kind in KINDS {
         for state in reachable_states() {
             let style = resolve_input_style(kind, state, &p);
@@ -1851,51 +1953,6 @@ fn test_every_focus_ring_clears_the_chrome_rule() {
                 contrast_ratio(style.focus_ring_color, style.background),
             );
         }
-    }
-}
-
-#[test]
-fn test_the_error_border_clears_the_chrome_rule_on_its_own_cell() {
-    let p = palette();
-    let style = style_for(InputKind::TextEntry, BaseState::Invalid, false);
-
-    assert!(
-        meets_chrome_contrast(style.border_color, style.background),
-        "status.danger.text on surface.base measures {:.4}:1",
-        contrast_ratio(style.border_color, style.background),
-    );
-    assert!(
-        (contrast_ratio(p.status_danger_text, p.surface_base) - 6.5725).abs() < RATIO_EPS,
-        "the error border's measured ratio moved off 6.5725:1"
-    );
-}
-
-#[test]
-fn test_resting_dividers_are_reported_not_gated() {
-    let rows = audit_rows();
-    let dividers: Vec<&AuditRow> = rows
-        .iter()
-        .filter(|r| r.verdict == Verdict::RestingDivider)
-        .collect();
-
-    assert!(
-        !dividers.is_empty(),
-        "the Rest/Disabled rows stroke border.subtle; if none is \
-         classified a resting divider, the classification broke"
-    );
-
-    for r in &dividers {
-        assert_eq!(
-            r.fg, "border.subtle",
-            "only border.subtle is a resting divider"
-        );
-        assert!(
-            r.ratio < MIN_CHROME_CONTRAST,
-            "border.subtle on {} measures {:.4}:1 — if that ever clears \
-             3.0:1 the classification is stale, not the token",
-            r.bg,
-            r.ratio,
-        );
     }
 }
 
@@ -1919,8 +1976,14 @@ fn test_no_judged_pair_is_left_failing() {
 // 6 — iced status mapping
 // ---------------------------------------------------------------------------
 
+/// `visual_from_status`, read as a whole mapping rather than four slices.
+///
+/// The four claims are the four columns of the same function: which cell an
+/// iced status lands on, that no status invents a pressed cell, that the
+/// wrapper's own `enabled` flag outranks iced's, and that invalidity is
+/// carried in from outside. Each keeps its own assertion.
 #[test]
-fn test_visual_from_status_maps_iced_statuses() {
+fn test_visual_from_status_maps_iced_statuses_onto_the_input_cells() {
     let p = |enabled: bool, invalid: bool| {
         move |status: EditorStatus| visual_from_status(status, enabled, invalid)
     };
@@ -1954,10 +2017,7 @@ fn test_visual_from_status_maps_iced_statuses() {
             focused: true
         },
     );
-}
 
-#[test]
-fn test_visual_from_status_never_reports_pressed() {
     for status in [
         EditorStatus::Active,
         EditorStatus::Hovered,
@@ -1973,10 +2033,7 @@ fn test_visual_from_status_never_reports_pressed() {
              produce one"
         );
     }
-}
 
-#[test]
-fn test_the_wrapper_enabled_flag_is_the_authority_over_iced_status() {
     // `enabled: false` dominates `state::resolve`, so the wrapper's own
     // flag wins whether iced agrees or not.
     let live_but_disabled = visual_from_status(EditorStatus::Active, false, false);
@@ -1989,10 +2046,7 @@ fn test_the_wrapper_enabled_flag_is_the_authority_over_iced_status() {
         "iced's Disabled status carries no hover, so an enabled wrapper \
          over a dead status lands at Rest rather than at Disabled"
     );
-}
 
-#[test]
-fn test_invalid_is_carried_from_outside_regardless_of_status() {
     for status in [
         EditorStatus::Active,
         EditorStatus::Hovered,
@@ -2726,22 +2780,15 @@ fn secret_field(
     .into()
 }
 
-/// The editor node's registered bounds for a [`secret_field`].
-fn secret_editor_bounds(value: &str, masked: bool, width: f32) -> Rectangle {
-    let value = value.to_owned();
-    let mut harness = Harness::headless(move || secret_field(&value, masked, width));
-    let recorded = harness.recorded();
-
-    assert_eq!(
-        recorded.len(),
-        1,
-        "a password field registers exactly one focusable node, got {recorded:?}"
-    );
-    recorded[0].1
-}
-
+/// What the two new kinds reserve, and that it is exactly what was already
+/// reserved before them.
+///
+/// `002b`'s zero-shift slot re-proved against the new kinds: the reveal
+/// toggle and the well's error mark take the *same* width the plain entry's
+/// slot already occupied, so adding either control to a form cannot move a
+/// pixel of anything already on it.
 #[test]
-fn test_the_two_new_kinds_reserve_the_hit_target_floor() {
+fn test_the_two_new_kinds_reserve_the_floor_the_plain_entry_already_reserved() {
     assert_eq!(
         InputKind::Password.trailing_slot_width(),
         size::HIT_TARGET_MIN
@@ -2750,10 +2797,32 @@ fn test_the_two_new_kinds_reserve_the_hit_target_floor() {
         InputKind::TextArea.trailing_slot_width(),
         size::HIT_TARGET_MIN
     );
+
+    let bounds = outer(240.0, HEIGHT_STANDARD);
+
+    for kind in [InputKind::Password, InputKind::TextArea] {
+        assert_eq!(
+            text_area_bounds(bounds, kind),
+            text_area_bounds(bounds, InputKind::TextEntry),
+            "{kind:?}: the text area is not the plain entry's"
+        );
+        assert_eq!(
+            trailing_slot_bounds(bounds, kind),
+            trailing_slot_bounds(bounds, InputKind::TextEntry),
+            "{kind:?}: the trailing slot is not where the plain entry's slot was"
+        );
+    }
 }
 
+/// What the two new kinds put in that slot, and who is allowed to take the
+/// press.
+///
+/// The password's toggle outranks the invalid mark on purpose — invalidity
+/// is carried by the 2px danger border, not by stealing the slot the user
+/// needs to read what they typed — while the well shows nothing until it is
+/// invalid and never swallows a click.
 #[test]
-fn test_a_password_field_offers_the_reveal_toggle_whatever_it_holds() {
+fn test_the_two_new_kinds_fill_the_slot_on_their_own_precedence() {
     for (has_value, invalid) in [(false, false), (true, false), (false, true), (true, true)] {
         assert_eq!(
             slot_content(InputKind::Password, has_value, invalid),
@@ -2769,10 +2838,7 @@ fn test_a_password_field_offers_the_reveal_toggle_whatever_it_holds() {
              not by stealing the slot the user needs to read what they typed"
         );
     }
-}
 
-#[test]
-fn test_a_multi_line_well_shows_nothing_until_it_is_invalid() {
     assert_eq!(
         slot_content(InputKind::TextArea, false, false),
         SlotContent::Empty,
@@ -2793,10 +2859,7 @@ fn test_a_multi_line_well_shows_nothing_until_it_is_invalid() {
         slot_content(InputKind::TextArea, true, true),
         SlotContent::Passive(GLYPH_ERROR)
     );
-}
 
-#[test]
-fn test_only_an_actionable_or_toggle_slot_captures_the_press() {
     assert!(
         slot_content(InputKind::Password, true, true).captures_press(),
         "the reveal toggle must take the press, or the click falls through to \
@@ -2812,36 +2875,15 @@ fn test_only_an_actionable_or_toggle_slot_captures_the_press() {
 }
 
 #[test]
-fn test_the_new_slots_reserve_exactly_what_the_plain_entry_reserved() {
-    // `002b`'s zero-shift slot re-proved against the new kinds: the
-    // reveal toggle and the well's error mark take the *same* width the
-    // plain entry's slot already occupied, so adding either control to a
-    // form cannot move a pixel of anything already on it.
-    let bounds = outer(240.0, HEIGHT_STANDARD);
-
-    for kind in [InputKind::Password, InputKind::TextArea] {
-        assert_eq!(
-            text_area_bounds(bounds, kind),
-            text_area_bounds(bounds, InputKind::TextEntry),
-            "{kind:?}: the text area is not the plain entry's"
-        );
-        assert_eq!(
-            trailing_slot_bounds(bounds, kind),
-            trailing_slot_bounds(bounds, InputKind::TextEntry),
-            "{kind:?}: the trailing slot is not where the plain entry's slot was"
-        );
-    }
-}
-
-#[test]
 fn test_masking_moves_the_editor_not_a_single_point() {
     // The width-invariance claim, at real-layout level. Iced masks by
     // substituting one bullet per grapheme, so the *glyph run* genuinely
     // changes width when a secret is shown — which is why the invariant
     // is stated against the laid-out editor rectangle, not the run.
     let width = 240.0;
-    let masked = secret_editor_bounds("hunter2-supersecret", true, width);
-    let shown = secret_editor_bounds("hunter2-supersecret", false, width);
+    let mut probe = LayoutProbe::new();
+    let masked = probe.secret_editor_bounds("hunter2-supersecret", true, width);
+    let shown = probe.secret_editor_bounds("hunter2-supersecret", false, width);
 
     assert_eq!(
         masked, shown,
@@ -2916,15 +2958,25 @@ fn test_reveal_and_clear_are_separate_messages_on_the_same_widget() {
 // Punish-late runtime enforcement (`UIF-PRIN-009`)
 // -------------------------------------------------------------------
 
+/// A pristine field's punishment, both directions of the rule at once.
+///
+/// A validation error the user has not caused yet is withheld; a value that
+/// is *already* illegal is not, because there is no edit that could have
+/// made it worse. Both are `UIF-PRIN-009`, and both are decided before the
+/// field has been touched.
 #[test]
-fn test_pristine_invalid_field_resolves_to_rest_state() {
-    let model = TextInputModel::new("filename").with_validation("name is taken");
-    assert!(model.is_pristine());
-    assert!(model.is_invalid());
-    assert!(!model.punishment().painted());
+fn test_a_pristine_field_withholds_a_lagging_error_but_not_an_illegal_value() {
+    let pristine_validation = TextInputModel::new("filename").with_validation("name is taken");
+    assert!(pristine_validation.is_pristine());
+    assert!(pristine_validation.is_invalid());
+    assert!(!pristine_validation.punishment().painted());
 
-    let widget: LocalBoundField<'_> =
-        TextInput::controlled(InputKind::TextEntry, model.controlled(), "bound", |_| None);
+    let widget: LocalBoundField<'_> = TextInput::controlled(
+        InputKind::TextEntry,
+        pristine_validation.controlled(),
+        "bound",
+        |_| None,
+    );
     assert!(!widget.is_invalid());
 
     let tree = bound_tree(&widget);
@@ -2938,18 +2990,19 @@ fn test_pristine_invalid_field_resolves_to_rest_state() {
         BaseState::Rest,
         "a pristine field with validation error must withhold the error border (UIF-PRIN-009)"
     );
-}
 
-#[test]
-fn test_pristine_disallowed_field_immediately_resolves_to_invalid_state() {
-    let model = TextInputModel::new("bad/filename")
+    let disallowed = TextInputModel::new("bad/filename")
         .with_validation("illegal path character")
         .with_disallowed(DisallowedClass::FilenameBasename);
-    assert!(model.is_pristine());
-    assert!(model.punishment().painted());
+    assert!(disallowed.is_pristine());
+    assert!(disallowed.punishment().painted());
 
-    let widget: LocalBoundField<'_> =
-        TextInput::controlled(InputKind::TextEntry, model.controlled(), "bound", |_| None);
+    let widget: LocalBoundField<'_> = TextInput::controlled(
+        InputKind::TextEntry,
+        disallowed.controlled(),
+        "bound",
+        |_| None,
+    );
     assert!(widget.is_invalid());
 
     let tree = bound_tree(&widget);
@@ -2965,8 +3018,13 @@ fn test_pristine_disallowed_field_immediately_resolves_to_invalid_state() {
     );
 }
 
+/// What settles a withheld error, and what takes it away again.
+///
+/// Both a commit and a blur mark the field as touched, which is what makes
+/// the lagging error paint; clearing the error restores Rest on the very
+/// next pass, with no lag in either direction.
 #[test]
-fn test_touched_invalid_field_resolves_to_invalid_state() {
+fn test_touching_a_field_punishes_a_lagging_error_and_clearing_it_rewards_immediately() {
     // 1. note_commit transitions to Touched -> paints Invalid
     let mut model_commit = TextInputModel::new("filename").with_validation("name is taken");
     model_commit.note_commit();
@@ -3018,15 +3076,12 @@ fn test_touched_invalid_field_resolves_to_invalid_state() {
         BaseState::Invalid,
         "blurring an invalid field must paint the error border (UIF-PRIN-009)"
     );
-}
 
-#[test]
-fn test_clearing_error_immediately_restores_rest_state() {
+    // 3. Clearing the error restores Rest immediately (reward early).
     let mut model = TextInputModel::new("filename").with_validation("name is taken");
     model.note_commit();
     assert!(model.punishment().painted());
 
-    // Clear validation error
     model.validation = None;
     assert!(!model.is_invalid());
     assert!(!model.punishment().painted());

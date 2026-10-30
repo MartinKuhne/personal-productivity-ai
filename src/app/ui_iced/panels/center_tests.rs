@@ -1858,3 +1858,245 @@ fn the_tab_title_starts_at_its_padding_alone() {
         "nothing may be reserved between the tab's left padding and its title"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The viewer area and the agent-session band (the two branches the panel
+// routes between below the strip)
+// ---------------------------------------------------------------------------
+//
+// `center_panel_rendered` picks one of three postures — the agent-session band,
+// the document viewer, or the empty-state prompt — and `viewer_area` picks one
+// of three bodies inside the viewer. Each is a branch on the view-model
+// (AGENTS §6), so each is proven by laying the branch out and looking for what
+// it must and must not paint.
+
+/// A viewer-area snapshot with `count` tabs, the first one active.
+fn viewer_vm(count: usize) -> CenterPanelViewModel {
+    strip_with_tabs(count, if count == 0 { None } else { Some(0) })
+}
+
+/// A snapshot with the agent-session band switched on and `thinking` in the
+/// UI-048 buffer.
+fn agent_session_vm(thinking: &str) -> CenterPanelViewModel {
+    CenterPanelViewModel {
+        show_agent_session: true,
+        agent_status: "running".to_string(),
+        agent_running: true,
+        thinking: thinking.to_string(),
+        ..strip_with_tabs(1, Some(0))
+    }
+}
+
+/// Whether a container carrying `id` is mounted at all — the non-panicking
+/// counterpart of [`bounds_of`], for the assertions that something must *not*
+/// be there.
+fn has_container(ui: &mut Sim<'_>, id: iced::widget::Id) -> bool {
+    let expected = id.clone();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(found), ..
+        } if *found == expected => Some(()),
+        _ => None,
+    })
+    .is_ok()
+}
+
+/// The pane the viewer area is laid out in: tall enough that nothing the panel
+/// paints is clipped away.
+const VIEWER_VIEWPORT: iced::Size = iced::Size::new(800.0, 600.0);
+
+/// No active tab, no rendered body → the empty-state prompt, inside the
+/// always-allocated scrollable (AGENTS §6: an explicit placeholder, not a
+/// collapsed container).
+#[test]
+fn the_viewer_area_prompts_when_no_document_is_active() {
+    let vm = viewer_vm(0);
+    let mut ui = laid_out(VIEWER_VIEWPORT, viewer_area(&vm, None));
+
+    let prompt = text_bounds(&mut ui, crate::ui::strings::NO_FILE_SELECTED_PROMPT)
+        .expect("with no active tab the viewer must render the empty-state prompt");
+    assert!(
+        prompt.width > 0.0 && prompt.height > 0.0,
+        "the prompt must receive usable bounds, measured {prompt:?}"
+    );
+    assert!(
+        scrollable_bounds(&mut ui, DOCUMENT_VIEWER_SCROLLABLE_ID).is_some(),
+        "the empty state must still ride the same named scrollable"
+    );
+}
+
+/// An active tab with no rendered body → the placeholder title, and no prompt.
+#[test]
+fn the_viewer_area_falls_back_to_the_document_title_without_a_rendered_body() {
+    let mut vm = viewer_vm(1);
+    vm.tabs[0] = entry("docs/preview-target.md", true);
+    let title = vm.tabs[0].title.clone();
+    assert_eq!(
+        title, "preview-target.md",
+        "the fixture's title is what the placeholder paints"
+    );
+
+    let mut ui = laid_out(VIEWER_VIEWPORT, viewer_area(&vm, None));
+    let preview = text_bounds(&mut ui, &title)
+        .expect("an active tab with no rendered body must show the placeholder title");
+    assert!(
+        preview.height > 0.0,
+        "the placeholder title must be laid out, measured {preview:?}"
+    );
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::NO_FILE_SELECTED_PROMPT).is_none(),
+        "an active tab must not be told there is no file selected"
+    );
+}
+
+/// A rendered body replaces the placeholder entirely — the title must not be
+/// painted a second time underneath the real render.
+#[test]
+fn a_rendered_document_replaces_the_placeholder_in_the_viewer_area() {
+    const RENDERED_MARKER: &str = "rendered-body-marker";
+
+    let vm = viewer_vm(1);
+    let title = vm.tabs[0].title.clone();
+    let rendered: iced::Element<'static, Message> = iced::widget::text(RENDERED_MARKER).into();
+
+    let mut ui = laid_out(VIEWER_VIEWPORT, viewer_area(&vm, Some(rendered)));
+    assert!(
+        text_bounds(&mut ui, RENDERED_MARKER).is_some(),
+        "the body handed in by the root view must be what the viewer paints"
+    );
+    assert!(
+        text_bounds(&mut ui, &title).is_none(),
+        "the placeholder title must disappear once a real render is supplied"
+    );
+}
+
+/// The agent-session band: header, status line and the UI-048 thinking block.
+#[test]
+fn the_agent_session_band_carries_its_header_status_and_thinking() {
+    let vm = agent_session_vm("weighing the options");
+    let mut ui = laid_out(VIEWER_VIEWPORT, agent_session_area(&vm));
+
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_SESSION_HEADER).is_some(),
+        "the band must carry the agent-session header"
+    );
+    let status = format!(
+        "{}{}",
+        crate::ui::strings::AGENT_STATUS_PREFIX,
+        vm.agent_status
+    );
+    assert!(
+        text_bounds(&mut ui, &status).is_some(),
+        "the status line is the prefix plus the view-model's status, expected {status:?}"
+    );
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_THINKING_PROCESS).is_some(),
+        "a non-empty thinking buffer must mount the disclosure heading"
+    );
+    assert!(
+        text_bounds(&mut ui, "weighing the options").is_some(),
+        "the buffered thinking text must be rendered, not just gated on"
+    );
+    assert!(
+        ui.find(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
+            .is_ok(),
+        "the band must offer its own close control"
+    );
+}
+
+/// The gate the other way: an empty buffer mounts no thinking block, but the
+/// rest of the band is untouched (AGENTS §6 — the tree does not collapse).
+#[test]
+fn the_thinking_block_is_not_mounted_while_the_buffer_is_empty() {
+    let vm = agent_session_vm("");
+    assert!(
+        !vm.show_thinking(),
+        "the fixture must actually exercise the closed side of the gate"
+    );
+
+    let mut ui = laid_out(VIEWER_VIEWPORT, agent_session_area(&vm));
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_THINKING_PROCESS).is_none(),
+        "an empty thinking buffer must not mount the disclosure block"
+    );
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_SESSION_HEADER).is_some(),
+        "closing the thinking block must not take the band with it"
+    );
+}
+
+/// The panel-level routing: while the agent session owns the pane, neither the
+/// tab strip nor the document viewer is mounted at all.
+#[test]
+fn the_agent_session_band_replaces_the_strip_and_the_viewer() {
+    let vm = agent_session_vm("planning");
+    let title = vm.tabs[0].title.clone();
+    let mut ui = laid_out(VIEWER_VIEWPORT, center_panel_rendered(&vm, None));
+
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_SESSION_HEADER).is_some(),
+        "the agent band must be the pane's content"
+    );
+    assert!(
+        !has_container(&mut ui, TAB_STRIP_BAND_ID.into()),
+        "the tab strip must not be mounted behind the agent band"
+    );
+    assert!(
+        scrollable_bounds(&mut ui, DOCUMENT_VIEWER_SCROLLABLE_ID).is_none(),
+        "the document viewer must not be mounted behind the agent band"
+    );
+    assert!(
+        text_bounds(&mut ui, &title).is_none(),
+        "the open document must not be painted while the agent owns the pane"
+    );
+}
+
+/// The document posture, for contrast: strip and viewer are mounted together
+/// and no agent chrome leaks in.
+#[test]
+fn the_document_posture_mounts_the_strip_and_the_viewer_together() {
+    let vm = strip_with_tabs(2, Some(1));
+    let mut ui = laid_out(VIEWER_VIEWPORT, center_panel_rendered(&vm, None));
+
+    assert!(
+        has_container(&mut ui, TAB_STRIP_BAND_ID.into()),
+        "the document posture must carry the tab strip"
+    );
+    assert!(
+        scrollable_bounds(&mut ui, DOCUMENT_VIEWER_SCROLLABLE_ID).is_some(),
+        "the document posture must carry the viewer scrollable"
+    );
+    assert!(
+        text_bounds(&mut ui, crate::ui::strings::AGENT_SESSION_HEADER).is_none(),
+        "no agent chrome may appear while the agent session is hidden"
+    );
+}
+
+/// The three command constructors this module owns that no other test names.
+/// They are the whole contract between the panel's controls and the reducer's
+/// executor, so the mapping is pinned rather than assumed.
+#[test]
+fn the_panel_command_constructors_produce_the_intents_the_reducer_executes() {
+    assert_eq!(
+        clear_agent_session_command(),
+        crate::bus::events::user_command::UserCommand::ClearAgentSession
+    );
+    assert_eq!(
+        apply_tab_close_others_click(2),
+        crate::bus::events::user_command::UserCommand::CloseOtherTabs(2)
+    );
+    assert_eq!(
+        apply_tab_close_all_click(),
+        crate::bus::events::user_command::UserCommand::CloseAllTabs
+    );
+    assert_ne!(
+        apply_tab_close_click(1),
+        apply_tab_close_others_click(1),
+        "close-one and close-others are different intents on the same index"
+    );
+    assert_ne!(
+        apply_tab_close_all_click(),
+        apply_tab_close_others_click(0),
+        "close-all is not close-others on some index"
+    );
+}

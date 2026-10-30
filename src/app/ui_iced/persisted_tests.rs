@@ -4,6 +4,12 @@
 //! Per [RUST-006] every persistence path runs against either
 //! `InMemoryUiStateStorage` or a `tempfile::TempDir` file; no test touches a
 //! real user path.
+//!
+//! Cases that differ only in their input — the schema-version bands, the
+//! window-field combinations, and the storage handlers that all fall back to
+//! the default state — are grouped into one process each. Every check names its
+//! case in the failure message, so a merged failure still says which input
+//! broke.
 
 use super::*;
 use crate::ui::PersistedUiState;
@@ -44,21 +50,45 @@ fn populated_state() -> PersistedUiState {
 
 /// Field-by-field equality for [`PersistedUiState`] (the model has no
 /// `PartialEq` derive). `expanded_dirs` is compared by length only.
-fn assert_same_state(a: &PersistedUiState, b: &PersistedUiState) {
-    assert_eq!(a.schema_version, b.schema_version);
-    assert_eq!(a.left_panel_width, b.left_panel_width);
-    assert_eq!(a.right_panel_width, b.right_panel_width);
-    assert_eq!(a.window_width, b.window_width);
-    assert_eq!(a.window_height, b.window_height);
-    assert_eq!(a.window_x, b.window_x);
-    assert_eq!(a.window_y, b.window_y);
-    assert_eq!(a.font_size_scale, b.font_size_scale);
-    assert_eq!(a.expanded_dirs.len(), b.expanded_dirs.len());
+fn assert_same_state(label: &str, a: &PersistedUiState, b: &PersistedUiState) {
+    assert_eq!(
+        a.schema_version, b.schema_version,
+        "{label}: schema_version must match"
+    );
+    assert_eq!(
+        a.left_panel_width, b.left_panel_width,
+        "{label}: left_panel_width must match"
+    );
+    assert_eq!(
+        a.right_panel_width, b.right_panel_width,
+        "{label}: right_panel_width must match"
+    );
+    assert_eq!(
+        a.window_width, b.window_width,
+        "{label}: window_width must match"
+    );
+    assert_eq!(
+        a.window_height, b.window_height,
+        "{label}: window_height must match"
+    );
+    assert_eq!(a.window_x, b.window_x, "{label}: window_x must match");
+    assert_eq!(a.window_y, b.window_y, "{label}: window_y must match");
+    assert_eq!(
+        a.font_size_scale, b.font_size_scale,
+        "{label}: font_size_scale must match"
+    );
+    assert_eq!(
+        a.expanded_dirs.len(),
+        b.expanded_dirs.len(),
+        "{label}: the expanded-directory count must match"
+    );
 }
 
-fn assert_default_state(state: &PersistedUiState) {
-    assert_same_state(state, &PersistedUiState::default());
+fn assert_default_state(label: &str, state: &PersistedUiState) {
+    assert_same_state(label, state, &PersistedUiState::default());
 }
+
+// --- save / load through the injected handler -------------------------------
 
 #[test]
 fn test_save_and_load_roundtrip_with_in_memory_storage() {
@@ -72,7 +102,7 @@ fn test_save_and_load_roundtrip_with_in_memory_storage() {
     assert_eq!(json, serde_json::to_string(&state).unwrap());
 
     let restored = load_ui_state(&storage);
-    assert_same_state(&restored, &state);
+    assert_same_state("in-memory round trip", &restored, &state);
     assert!(
         restored
             .expanded_dirs
@@ -97,15 +127,23 @@ fn test_in_memory_storage_overwrites_previous_payload() {
     );
 }
 
+/// Every handler that cannot produce a usable payload — nothing saved, writes
+/// discarded, or an unreadable read — restores the default state rather than
+/// failing the boot.
 #[test]
-fn test_load_on_empty_in_memory_storage_returns_default() {
-    let storage = InMemoryUiStateStorage::new();
-    assert_default_state(&load_ui_state(&storage));
-}
+fn test_a_handler_without_a_usable_payload_restores_the_default() {
+    let handlers: Vec<(&str, Box<dyn UiStateStorage>)> = vec![
+        (
+            "empty in-memory storage",
+            Box::new(InMemoryUiStateStorage::new()),
+        ),
+        ("noop storage", Box::new(NoopUiStateStorage)),
+        ("unreadable payload", Box::new(FailingUiStateStorage)),
+    ];
 
-#[test]
-fn test_load_on_noop_storage_returns_default() {
-    assert_default_state(&load_ui_state(&NoopUiStateStorage));
+    for (label, handler) in &handlers {
+        assert_default_state(label, &load_ui_state(&**handler));
+    }
 }
 
 #[test]
@@ -130,7 +168,7 @@ fn test_file_storage_roundtrip_in_temp_dir() {
     assert!(storage.path().exists());
 
     let restored = load_ui_state(&storage);
-    assert_same_state(&restored, &populated_state());
+    assert_same_state("file round trip", &restored, &populated_state());
     assert!(
         restored
             .expanded_dirs
@@ -147,35 +185,31 @@ fn test_file_storage_creates_parent_directories() {
     assert!(save_ui_state(&storage, &populated_state()).is_ok());
 }
 
+/// A file that cannot yield a state — absent, or present but corrupt — reads
+/// as the default state instead of failing or panicking.
 #[test]
-fn test_file_storage_load_on_missing_file_returns_default() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let storage = FileUiStateStorage::new(temp.path().join("absent.json"));
-
+fn test_a_file_that_cannot_yield_a_state_restores_the_default() {
+    // Absent payload: nothing has ever been saved.
+    let absent_temp = tempfile::TempDir::new().unwrap();
+    let absent = FileUiStateStorage::new(absent_temp.path().join("absent.json"));
     assert!(
-        storage.load_ui_state().is_none(),
-        "absent payload must read as None (no saved state)"
+        absent.load_ui_state().is_none(),
+        "absent file: absent payload must read as None (no saved state)"
     );
-    assert_default_state(&load_ui_state(&storage));
-}
-
-#[test]
-fn test_corrupt_payload_restores_default() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let path = temp.path().join("ui_state.json");
+    assert_default_state("absent file", &load_ui_state(&absent));
 
     // A garbage payload simulates a corrupted snapshot (disk failure /
     // truncated write): loading must not panic and must restore
     // the default state, logging [NFR-001].
-    std::fs::write(&path, "this is not json{{{{").expect("temp file write");
-    let storage = FileUiStateStorage::new(path);
-
-    assert_default_state(&load_ui_state(&storage));
-}
-
-#[test]
-fn test_unreadable_payload_restores_default() {
-    assert_default_state(&load_ui_state(&FailingUiStateStorage));
+    let corrupt_temp = tempfile::TempDir::new().unwrap();
+    let corrupt_path = corrupt_temp.path().join("ui_state.json");
+    std::fs::write(&corrupt_path, "this is not json{{{{").expect("temp file write");
+    let corrupt = FileUiStateStorage::new(corrupt_path);
+    assert!(
+        corrupt.load_ui_state().is_some(),
+        "corrupt file: the bytes are readable — the defect is the parse, not the read"
+    );
+    assert_default_state("corrupt file", &load_ui_state(&corrupt));
 }
 
 #[test]
@@ -188,53 +222,83 @@ fn test_save_failure_is_returned_not_raised() {
     );
 }
 
+/// Garbage that is not JSON is classified by serde as a parse failure (not
+/// silently taken as an empty state), which is the failure mode exercised in
+/// `test_a_file_that_cannot_yield_a_state_restores_the_default`.
 #[test]
-fn test_legacy_v0_state_is_migrated() {
-    let legacy = PersistedUiState {
+fn test_raw_corrupt_json_fails_to_deserialize() {
+    assert!(serde_json::from_str::<PersistedUiState>("this is not json{{{{").is_err());
+}
+
+// --- schema migration -------------------------------------------------------
+
+/// The three version bands: below current gets the legacy scale cleared and
+/// the version bumped, current is untouched, and above current is preserved
+/// verbatim for a future migration to read.
+#[test]
+fn test_migrate_legacy_state_handles_every_schema_version_band() {
+    let current = populated_state();
+    let mut future = populated_state();
+    future.schema_version = CURRENT_SCHEMA_VERSION + 5;
+
+    let legacy_input = PersistedUiState {
         schema_version: 0,
         font_size_scale: Some(1.5),
         ..PersistedUiState::default()
     };
+    let legacy_expected = PersistedUiState {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        font_size_scale: None,
+        ..PersistedUiState::default()
+    };
 
-    let migrated = migrate_legacy_state(legacy);
-    assert_eq!(migrated.schema_version, CURRENT_SCHEMA_VERSION);
+    let cases = [
+        ("v0 legacy state", legacy_input, legacy_expected),
+        ("current-version state", current.clone(), current.clone()),
+        ("future-version state", future.clone(), future.clone()),
+    ];
+    for (label, input, expected) in cases {
+        let migrated = migrate_legacy_state(input);
+        assert_same_state(label, &migrated, &expected);
+    }
+
+    let migrated_legacy = migrate_legacy_state(PersistedUiState {
+        schema_version: 0,
+        font_size_scale: Some(1.5),
+        ..PersistedUiState::default()
+    });
     assert_eq!(
-        migrated.font_size_scale, None,
-        "v0 held the absolute OS ppp; the multiplier must be cleared"
+        migrated_legacy.font_size_scale, None,
+        "v0 legacy state: v0 held the absolute OS ppp; the multiplier must be cleared"
     );
 }
 
-#[test]
-fn test_current_version_state_is_unmigrated() {
-    let state = populated_state();
-    let migrated = migrate_legacy_state(state.clone());
-    assert_same_state(&migrated, &state);
-}
+// --- scale composition ------------------------------------------------------
 
+/// The persisted multiplier composes on top of the OS baseline; `None` keeps
+/// the baseline verbatim.
 #[test]
-fn test_future_version_state_is_preserved_verbatim() {
-    let mut state = populated_state();
-    state.schema_version = CURRENT_SCHEMA_VERSION + 5;
-    let migrated = migrate_legacy_state(state.clone());
-    assert_same_state(&migrated, &state);
-}
+fn test_compose_scale_factor_multiplies_the_baseline_by_the_multiplier() {
+    let cases: &[(&str, f32, Option<f32>, f32)] = &[
+        ("no multiplier keeps the baseline", 1.5, None, 1.5),
+        ("a 1.0 multiplier is the identity", 1.0, Some(1.0), 1.0),
+        ("no multiplier on a 1.0 baseline", 1.0, None, 1.0),
+    ];
+    for (label, baseline, multiplier, expected) in cases {
+        assert_eq!(
+            compose_scale_factor(*baseline, *multiplier),
+            *expected,
+            "{label}: the composition must be exact"
+        );
+    }
 
-#[test]
-fn test_compose_scale_factor_multiplies_baseline_and_multiplier() {
     // f32: 1.5 × 1.2 = 1.8000001 (1.2 is not exactly representable), so
     // compare with a tolerance instead of exact equality.
     let composed = compose_scale_factor(1.5, Some(1.2));
     assert!(
         (composed - 1.8).abs() < 1e-6,
-        "expected ≈1.8, got {composed}"
+        "a 1.2 multiplier on a 1.5 baseline: expected ≈1.8, got {composed}"
     );
-}
-
-#[test]
-fn test_compose_scale_factor_without_multiplier_keeps_baseline() {
-    assert_eq!(compose_scale_factor(1.5, None), 1.5);
-    assert_eq!(compose_scale_factor(1.0, Some(1.0)), 1.0);
-    assert_eq!(compose_scale_factor(1.0, None), 1.0);
 }
 
 #[test]
@@ -255,44 +319,52 @@ fn test_compose_scale_factor_does_not_compound_after_migration() {
     );
 }
 
+// --- window metrics mapping -------------------------------------------------
+
+/// The closing metrics are recorded into the model; a runtime that reports no
+/// position leaves the previously persisted coordinates untouched.
 #[test]
 fn test_apply_close_metrics_records_size_and_position() {
-    let mut state = PersistedUiState::default();
+    let mut recorded = PersistedUiState::default();
     apply_close_metrics(
-        &mut state,
+        &mut recorded,
         Size::new(1234.0, 567.0),
         Some(Point::new(12.0, 34.0)),
     );
-    assert_eq!(state.window_width, Some(1234.0));
-    assert_eq!(state.window_height, Some(567.0));
-    assert_eq!(state.window_x, Some(12.0));
-    assert_eq!(state.window_y, Some(34.0));
-}
+    assert_eq!(
+        recorded.window_width,
+        Some(1234.0),
+        "reported position: width"
+    );
+    assert_eq!(
+        recorded.window_height,
+        Some(567.0),
+        "reported position: height"
+    );
+    assert_eq!(recorded.window_x, Some(12.0), "reported position: x");
+    assert_eq!(recorded.window_y, Some(34.0), "reported position: y");
 
-#[test]
-fn test_apply_close_metrics_keeps_position_when_runtime_reports_none() {
-    let mut state = PersistedUiState {
+    let mut kept = PersistedUiState {
         window_x: Some(5.0),
         window_y: Some(6.0),
         ..Default::default()
     };
-    apply_close_metrics(&mut state, Size::new(800.0, 600.0), None);
-    assert_eq!(state.window_width, Some(800.0));
-    assert_eq!(state.window_height, Some(600.0));
-    assert_eq!(state.window_x, Some(5.0));
-    assert_eq!(state.window_y, Some(6.0));
+    apply_close_metrics(&mut kept, Size::new(800.0, 600.0), None);
+    assert_eq!(kept.window_width, Some(800.0), "absent position: width");
+    assert_eq!(kept.window_height, Some(600.0), "absent position: height");
+    assert_eq!(kept.window_x, Some(5.0), "absent position: x is kept");
+    assert_eq!(kept.window_y, Some(6.0), "absent position: y is kept");
 }
 
+/// A half-persisted size is never invented from a single axis.
 #[test]
-fn test_restore_window_size_from_persisted_fields() {
+fn test_restore_window_size_maps_only_a_complete_pair() {
     assert_eq!(
         restore_window_size(&populated_state()),
-        Some(Size::new(1200.0, 800.0))
+        Some(Size::new(1200.0, 800.0)),
+        "a fully persisted size restores exactly"
     );
-}
 
-#[test]
-fn test_restore_window_size_partial_fields_yields_none() {
     let partial = PersistedUiState {
         window_width: Some(1000.0),
         ..Default::default()
@@ -304,31 +376,32 @@ fn test_restore_window_size_partial_fields_yields_none() {
     );
 }
 
+/// Only a complete coordinate pair becomes `Position::Specific`; anything
+/// less falls back to `Position::Default`.
 #[test]
-fn test_restore_window_position_full_fields_map_to_specific() {
-    let position = restore_window_position(&populated_state());
+fn test_restore_window_position_maps_only_a_complete_pair() {
     assert!(
-        matches!(position, Position::Specific(_)),
-        "a fully persisted position rounds to Position::Specific"
+        matches!(
+            restore_window_position(&populated_state()),
+            Position::Specific(_)
+        ),
+        "full pair: a fully persisted position rounds to Position::Specific"
     );
-}
 
-#[test]
-fn test_restore_window_position_partial_or_absent_fields_map_to_default() {
     let absent = PersistedUiState::default();
-    assert!(matches!(
-        restore_window_position(&absent),
-        Position::Default
-    ));
+    assert!(
+        matches!(restore_window_position(&absent), Position::Default),
+        "absent pair: nothing persisted falls back to Position::Default"
+    );
 
     let partial = PersistedUiState {
         window_x: Some(17.0),
         ..Default::default()
     };
-    assert!(matches!(
-        restore_window_position(&partial),
-        Position::Default
-    ));
+    assert!(
+        matches!(restore_window_position(&partial), Position::Default),
+        "half pair: a partial position must not invent the missing axis"
+    );
 }
 
 /// [RUST-006] runtime shield: the platform-default constructor must panic
@@ -339,37 +412,67 @@ fn test_platform_default_constructor_is_shielded_in_tests() {
     let _ = FileUiStateStorage::platform_default();
 }
 
-/// Garbage that is not JSON is classified by serde as a parse failure (not
-/// silently taken as an empty state), which is the failure mode exercised in
-/// `test_corrupt_payload_restores_default`.
-#[test]
-fn test_raw_corrupt_json_fails_to_deserialize() {
-    assert!(serde_json::from_str::<PersistedUiState>("this is not json{{{{").is_err());
-}
-
 // ───────────────── INT-6: movable overlay geometry sink ─────────────────────
 
-/// The framework's canonical encoded form is what lands in the model, so a
-/// later reader never has to guess a format this crate invented.
+/// Saves round trip through the injected handler: the stored text is the
+/// framework's own encoding, the round trip is lossless, and two cards sharing
+/// one model do not clobber each other.
 #[test]
-fn geometry_round_trips_through_the_injected_handler() {
-    let storage = InMemoryUiStateStorage::new();
-    let mut model = PersistedUiState::default();
-    let wanted = MovableGeometry::new(Point::new(120.0, 80.0), Size::new(680.0, 440.0));
+fn geometry_saves_round_trip_through_the_injected_handler() {
+    // One card: the framework's canonical encoded form is what lands in the
+    // model, so a later reader never has to guess a format this crate invented.
+    {
+        let storage = InMemoryUiStateStorage::new();
+        let mut model = PersistedUiState::default();
+        let wanted = MovableGeometry::new(Point::new(120.0, 80.0), Size::new(680.0, 440.0));
 
-    UiStateGeometryStorage::new(&mut model, &storage).save("movable:overlay.logs", wanted);
+        UiStateGeometryStorage::new(&mut model, &storage).save("movable:overlay.logs", wanted);
 
-    assert_eq!(
-        model
-            .overlay_geometry
-            .get("movable:overlay.logs")
-            .map(String::as_str),
-        Some(wanted.encode().as_str()),
-        "the stored text must be the framework's own `x,y,width,height` form"
-    );
+        assert_eq!(
+            model
+                .overlay_geometry
+                .get("movable:overlay.logs")
+                .map(String::as_str),
+            Some(wanted.encode().as_str()),
+            "single card: the stored text must be the framework's own `x,y,width,height` form"
+        );
 
-    let restored = UiStateGeometryStorage::new(&mut model, &storage).load("movable:overlay.logs");
-    assert_eq!(restored, Some(wanted), "round trip must be lossless");
+        let restored =
+            UiStateGeometryStorage::new(&mut model, &storage).load("movable:overlay.logs");
+        assert_eq!(
+            restored,
+            Some(wanted),
+            "single card: round trip must be lossless"
+        );
+    }
+
+    // Two cards share one model and one handler: a second save must not
+    // clobber the first card's entry.
+    {
+        let storage = InMemoryUiStateStorage::new();
+        let mut model = PersistedUiState::default();
+
+        let logs = MovableGeometry::new(Point::new(10.0, 20.0), Size::new(680.0, 440.0));
+        let debug = MovableGeometry::new(Point::new(300.0, 400.0), Size::new(700.0, 500.0));
+
+        {
+            let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
+            sink.save("movable:overlay.logs", logs);
+            sink.save("movable:overlay.agent_debug", debug);
+        }
+
+        let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
+        assert_eq!(
+            sink.load("movable:overlay.logs"),
+            Some(logs),
+            "two cards: the first card's entry survives the second save"
+        );
+        assert_eq!(
+            sink.load("movable:overlay.agent_debug"),
+            Some(debug),
+            "two cards: the second card's entry lands"
+        );
+    }
 }
 
 /// A save writes through to the handler, not only into the in-memory model —
@@ -390,56 +493,41 @@ fn save_writes_through_to_the_handler() {
     );
 }
 
-/// A second card's save must not clobber the first card's entry — the two
-/// hosts share one model and one handler.
+/// Clearing a saved key forgets it; clearing a key that was never saved must
+/// not rewrite the payload — a no-op that still hit storage would turn every
+/// card close into a write.
 #[test]
-fn two_cards_share_one_model_without_clobbering() {
-    let storage = InMemoryUiStateStorage::new();
-    let mut model = PersistedUiState::default();
-
-    let logs = MovableGeometry::new(Point::new(10.0, 20.0), Size::new(680.0, 440.0));
-    let debug = MovableGeometry::new(Point::new(300.0, 400.0), Size::new(700.0, 500.0));
-
+fn clearing_a_geometry_forgets_it_without_writing_an_absent_key() {
     {
-        let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
-        sink.save("movable:overlay.logs", logs);
-        sink.save("movable:overlay.agent_debug", debug);
+        let storage = InMemoryUiStateStorage::new();
+        let mut model = PersistedUiState::default();
+        let key = "movable:overlay.logs";
+
+        UiStateGeometryStorage::new(&mut model, &storage).save(key, MovableGeometry::DEFAULT);
+        UiStateGeometryStorage::new(&mut model, &storage).clear(key);
+
+        assert_eq!(
+            UiStateGeometryStorage::new(&mut model, &storage).load(key),
+            None,
+            "saved key: the geometry is forgotten"
+        );
+        assert!(
+            model.overlay_geometry.is_empty(),
+            "saved key: the model's map is emptied too"
+        );
     }
 
-    let mut sink = UiStateGeometryStorage::new(&mut model, &storage);
-    assert_eq!(sink.load("movable:overlay.logs"), Some(logs));
-    assert_eq!(sink.load("movable:overlay.agent_debug"), Some(debug));
-}
+    {
+        let storage = InMemoryUiStateStorage::new();
+        let mut model = PersistedUiState::default();
 
-#[test]
-fn clear_forgets_a_saved_geometry() {
-    let storage = InMemoryUiStateStorage::new();
-    let mut model = PersistedUiState::default();
-    let key = "movable:overlay.logs";
+        UiStateGeometryStorage::new(&mut model, &storage).clear("movable:overlay.logs");
 
-    UiStateGeometryStorage::new(&mut model, &storage).save(key, MovableGeometry::DEFAULT);
-    UiStateGeometryStorage::new(&mut model, &storage).clear(key);
-
-    assert_eq!(
-        UiStateGeometryStorage::new(&mut model, &storage).load(key),
-        None
-    );
-    assert!(model.overlay_geometry.is_empty());
-}
-
-/// Clearing a key that was never saved must not rewrite the payload — a
-/// no-op that still hit storage would turn every card close into a write.
-#[test]
-fn clearing_an_absent_key_does_not_write() {
-    let storage = InMemoryUiStateStorage::new();
-    let mut model = PersistedUiState::default();
-
-    UiStateGeometryStorage::new(&mut model, &storage).clear("movable:overlay.logs");
-
-    assert!(
-        storage.saved_json().is_none(),
-        "clearing nothing must not produce a save"
-    );
+        assert!(
+            storage.saved_json().is_none(),
+            "absent key: clearing nothing must not produce a save"
+        );
+    }
 }
 
 /// A value that will not decode reads as absent, so a corrupt entry falls

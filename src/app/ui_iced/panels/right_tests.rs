@@ -1,4 +1,9 @@
 //! Unit tests for the iced ToC helpers in `right.rs` ([RUST-003]).
+//!
+//! The pure helpers are exercised table-first: every `resolve_anchor` rule,
+//! every indent level and every `auto_fit_width` clamp is a row of a table
+//! rather than its own process, and each row names itself in its failure
+//! message so a regression still identifies the case that broke.
 
 use super::{
     RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH, TOC_BASE_INDENT_PIXELS,
@@ -24,93 +29,87 @@ fn test_should_show_panel_requires_both_toc_and_selected_file() {
 // `resolve_anchor` — the fuzzy anchor → heading-id rule
 // ---------------------------------------------------------------------------
 
+/// Every branch of the fuzzy rule: exact id, case-insensitivity, hyphen/space
+/// equivalence in both directions, title matching, the heading-id fallback and
+/// its precedence, and the verbatim fallback.
 #[test]
-fn test_resolve_anchor_exact_id_match() {
-    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
-    assert_eq!(
-        resolve_anchor(&toc, &[], "Getting Started"),
-        "Getting Started",
-        "an exact anchor must resolve to the entry's own id"
-    );
-}
+fn test_resolve_anchor_applies_the_fuzzy_rule_in_both_directions() {
+    let spaced_id = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
+    let hyphenated_id = vec![ToCEntry::new("Getting-Started", 1, "Getting-Started")];
+    // ToC ids may be disambiguated (`Intro#1`) while the title stays plain.
+    let disambiguated = vec![ToCEntry::new("Intro", 1, "Intro#1")];
+    let heading_ids = vec!["Body".to_string(), "Body#1".to_string()];
+    // The ToC is searched first, so a ToC hit wins even when the rendered
+    // heading ids also contain a match.
+    let both_lists = vec!["Alpha".to_string()];
+    let toc_over_headings = vec![ToCEntry::new("Alpha", 1, "Alpha#0")];
 
-#[test]
-fn test_resolve_anchor_is_case_insensitive() {
-    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
-    assert_eq!(
-        resolve_anchor(&toc, &[], "getting started"),
-        "Getting Started",
-        "matching ignores case"
-    );
-}
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("exact id match", "Getting Started", "Getting Started"),
+        (
+            "case-insensitive match",
+            "getting started",
+            "Getting Started",
+        ),
+        (
+            "a hyphenated anchor matches a spaced id",
+            "getting-started",
+            "Getting Started",
+        ),
+    ];
+    for (label, anchor, expected) in cases {
+        assert_eq!(
+            resolve_anchor(&spaced_id, &[], anchor),
+            expected,
+            "{label}: the anchor must resolve to the entry's own id"
+        );
+    }
 
-#[test]
-fn test_resolve_anchor_treats_hyphen_and_space_as_equivalent() {
-    let toc = vec![ToCEntry::new("Getting Started", 1, "Getting Started")];
-    // GitHub-style `#getting-started` anchor resolves to the spaced id.
-    assert_eq!(
-        resolve_anchor(&toc, &[], "getting-started"),
-        "Getting Started",
-        "a hyphenated anchor must match a spaced id"
-    );
     // And the reverse: a spaced anchor resolves against a hyphenated id.
-    let hyphenated = vec![ToCEntry::new("Getting-Started", 1, "Getting-Started")];
     assert_eq!(
-        resolve_anchor(&hyphenated, &[], "getting started"),
+        resolve_anchor(&hyphenated_id, &[], "getting started"),
         "Getting-Started",
         "a spaced anchor must match a hyphenated id"
     );
-}
 
-#[test]
-fn test_resolve_anchor_matches_title_when_id_differs() {
-    // ToC ids may be disambiguated (`Intro#1`) while the title stays plain.
-    let toc = vec![ToCEntry::new("Intro", 1, "Intro#1")];
     assert_eq!(
-        resolve_anchor(&toc, &[], "Intro"),
+        resolve_anchor(&disambiguated, &[], "Intro"),
         "Intro#1",
-        "a title match must return the entry's disambiguated id"
+        "title match: a title match must return the entry's disambiguated id"
     );
-}
 
-#[test]
-fn test_resolve_anchor_falls_back_to_heading_ids() {
-    let heading_ids = vec!["Body".to_string(), "Body#1".to_string()];
-    assert_eq!(resolve_anchor(&[], &heading_ids, "body"), "Body");
-    // The duplicate-disambiguation suffix matches case-insensitively.
-    assert_eq!(resolve_anchor(&[], &heading_ids, "body#1"), "Body#1");
-}
-
-#[test]
-fn test_resolve_anchor_prefers_toc_over_heading_ids() {
-    // The ToC is searched first, so a ToC hit wins even when the rendered
-    // heading ids also contain a match.
-    let toc = vec![ToCEntry::new("Alpha", 1, "Alpha#0")];
-    let heading_ids = vec!["Alpha".to_string()];
     assert_eq!(
-        resolve_anchor(&toc, &heading_ids, "alpha"),
+        resolve_anchor(&[], &heading_ids, "body"),
+        "Body",
+        "heading-id fallback: an anchor with no ToC entry resolves against the rendered ids"
+    );
+    assert_eq!(
+        resolve_anchor(&[], &heading_ids, "body#1"),
+        "Body#1",
+        "heading-id fallback: the duplicate-disambiguation suffix matches case-insensitively"
+    );
+
+    assert_eq!(
+        resolve_anchor(&toc_over_headings, &both_lists, "alpha"),
         "Alpha#0",
-        "ToC entries take precedence over the rendered heading-id list"
+        "precedence: ToC entries take precedence over the rendered heading-id list"
     );
-}
 
-#[test]
-fn test_resolve_anchor_unmatched_returns_anchor_verbatim() {
-    let toc = vec![ToCEntry::new("Intro", 1, "Intro#1")];
     assert_eq!(
-        resolve_anchor(&toc, &[], "nowhere"),
+        resolve_anchor(&disambiguated, &[], "nowhere"),
         "nowhere",
-        "an unmatched anchor is returned unchanged so the scroll request still names a heading id"
+        "unmatched: an unmatched anchor is returned unchanged so the scroll request still names a heading id"
     );
-    assert_eq!(resolve_anchor(&[], &[], "nowhere"), "nowhere");
-}
+    assert_eq!(
+        resolve_anchor(&[], &[], "nowhere"),
+        "nowhere",
+        "unmatched: an unmatched anchor against empty lists is returned unchanged"
+    );
 
-#[test]
-fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
     assert_eq!(
         resolve_anchor(&[], &[], ""),
         "",
-        "the empty anchor has nothing to match and must round-trip"
+        "empty anchor: the empty anchor has nothing to match and must round-trip"
     );
 }
 
@@ -124,48 +123,42 @@ fn test_resolve_anchor_on_empty_inputs_is_empty_anchor() {
 // spacing rung moves the ToC with every other `xs`/`md` inset instead of
 // leaving this pane behind, and a retune of the ToC alone cannot silently
 // take it off the grid.
+//
+// The level rung is deliberately **not** the tree's: the ToC pane is the
+// narrowest in the layout (`RIGHT_PANE_MIN_W` = 120px). At the tree's 16px
+// step, six heading levels would spend 80px of that on indentation alone;
+// at `space.md` they spend 60px. That narrower rung is the reason this
+// constant is `md` and not `tree_row::INDENT_STEP`.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_toc_base_indent_is_bound_to_space_xs() {
+fn the_toc_indent_constants_are_bound_to_the_spacing_scale() {
     assert_eq!(
         TOC_BASE_INDENT_PIXELS,
         hoarfrost::token::space::XS,
-        "the ToC row's base pad reads off the spacing scale"
+        "base indent: the ToC row's base pad reads off the spacing scale"
     );
-}
-
-#[test]
-fn the_toc_level_indent_is_bound_to_space_md() {
     assert_eq!(
         TOC_LEVEL_INDENT_PIXELS,
         hoarfrost::token::space::MD,
-        "one heading level of ToC indent reads off the spacing scale"
+        "level indent: one heading level of ToC indent reads off the spacing scale"
     );
-}
-
-#[test]
-fn the_toc_level_indent_is_deliberately_not_the_tree_indent_step() {
-    // The ToC pane is the narrowest in the layout (RIGHT_PANE_MIN_W =
-    // 120px). At the tree's 16px step, six heading levels would spend
-    // 80px of that on indentation alone; at `space.md` they spend 60px.
-    // The narrower rung is the reason this constant is `md` and not
-    // `tree_row::INDENT_STEP`.
     assert_ne!(
         TOC_LEVEL_INDENT_PIXELS,
         hoarfrost::composite::tree_row::INDENT_STEP,
-        "the ToC indents one rung tighter than the tree on purpose: the pane \
+        "level indent: the ToC indents one rung tighter than the tree on purpose: the pane \
          is half as wide"
     );
+
     let six_levels = toc_indent_pixels(6);
     let tree_at_six = hoarfrost::composite::tree_row::INDENT_STEP * 5.0;
     assert!(
         six_levels < tree_at_six,
-        "six ToC levels must cost less indent than six tree levels"
+        "pane budget: six ToC levels must cost less indent than six tree levels"
     );
     assert!(
         six_levels < 120.0,
-        "the deepest ordinary ToC level must stay inside the pane's minimum width"
+        "pane budget: the deepest ordinary ToC level must stay inside the pane's minimum width"
     );
 }
 
@@ -178,24 +171,30 @@ fn the_toc_level_indent_is_deliberately_not_the_tree_indent_step() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_toc_indent_pixels_level_one_is_the_base_pad() {
-    assert_eq!(
-        toc_indent_pixels(1),
-        TOC_BASE_INDENT_PIXELS,
-        "a top-level heading gets the base pad and no level indent"
-    );
-}
-
-#[test]
-fn test_toc_indent_pixels_grows_by_one_step_per_level() {
-    for level in 1u32..=6 {
-        let expected = TOC_BASE_INDENT_PIXELS + (level as f32 - 1.0) * TOC_LEVEL_INDENT_PIXELS;
+fn test_toc_indent_pixels_follows_the_level_rule() {
+    for level in 0u32..=6 {
+        let expected = if level == 0 {
+            TOC_BASE_INDENT_PIXELS
+        } else {
+            TOC_BASE_INDENT_PIXELS + (level as f32 - 1.0) * TOC_LEVEL_INDENT_PIXELS
+        };
         assert_eq!(
             toc_indent_pixels(level),
             expected,
-            "level {level} must sit one step further in than the level above it"
+            "level {level}: must sit one step further in than the level above it"
         );
     }
+
+    assert_eq!(
+        toc_indent_pixels(1),
+        TOC_BASE_INDENT_PIXELS,
+        "level 1: a top-level heading gets the base pad and no level indent"
+    );
+    assert!(
+        toc_indent_pixels(0) > 0.0,
+        "level 0: a malformed level 0 saturates to the base pad and never goes negative"
+    );
+
     // Strictly increasing across the whole heading-level range.
     for level in 2u32..=6 {
         assert!(
@@ -203,25 +202,14 @@ fn test_toc_indent_pixels_grows_by_one_step_per_level() {
             "deeper levels must indent further, level {level} did not"
         );
     }
-}
 
-#[test]
-fn test_toc_indent_pixels_clamps_level_zero_to_the_base() {
-    assert_eq!(
-        toc_indent_pixels(0),
-        TOC_BASE_INDENT_PIXELS,
-        "a malformed level 0 saturates to the base pad and never goes negative"
-    );
-    assert!(toc_indent_pixels(0) > 0.0);
-}
-
-#[test]
-fn test_toc_indent_pixels_stays_finite_for_absurd_levels() {
+    // Above the heading range the rule is unclamped, so the only contract
+    // left is that the arithmetic stays sane.
     for level in [7u32, 99, 1_000, u32::MAX] {
         let pad = toc_indent_pixels(level);
         assert!(
             pad.is_finite() && pad > 0.0,
-            "level {level} must produce a finite, positive pad, got {pad}"
+            "level {level}: must produce a finite, positive pad, got {pad}"
         );
     }
 }
@@ -274,48 +262,41 @@ fn the_row_furniture_constants_are_bound_to_framework_tokens() {
 }
 
 #[test]
-fn toc_button_width_adds_the_padding_on_both_sides() {
+fn toc_button_width_adds_both_pads_and_floors_at_the_icon_only_minimum() {
     assert_eq!(
         toc_button_width(50.0),
         50.0 + 2.0 * TOC_BUTTON_H_PAD_PIXELS,
-        "a button pads its label left AND right"
+        "padded label: a button pads its label left AND right"
     );
-}
-
-#[test]
-fn toc_button_width_floors_at_the_icon_only_minimum() {
     // `# A` — a one-character heading measures a handful of pixels, but the
     // framework floors the box at `size.control.sm`.
     assert_eq!(
         toc_button_width(0.0),
         hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH,
-        "an empty label must still cost the icon-only floor the real button applies"
+        "empty label: an empty label must still cost the icon-only floor the real button applies"
     );
     assert_eq!(
         toc_button_width(-100.0),
         hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH,
-        "a negative measurement is clamped before it can shrink the row"
+        "negative measurement: a negative measurement is clamped before it can shrink the row"
     );
 }
 
 #[test]
-fn entry_width_is_indent_plus_button_plus_right_pad_plus_scrollbar_gutter() {
+fn entry_width_charges_the_furniture_and_grows_with_the_level() {
     let entry = ToCEntry::new("Intro", 1, "Intro");
     assert_eq!(
         entry_width(&entry, six_px_per_char),
         furniture(1) + 5.0 * 6.0,
-        "the row needs its indent, the padded label, its right pad and the gutter"
+        "formula: the row needs its indent, the padded label, its right pad and the gutter"
     );
-}
 
-#[test]
-fn entry_width_grows_with_the_heading_level() {
     let shallow = ToCEntry::new("Intro", 1, "Intro");
     let deep = ToCEntry::new("Intro", 4, "Intro");
     assert_eq!(
         entry_width(&deep, six_px_per_char) - entry_width(&shallow, six_px_per_char),
         3.0 * TOC_LEVEL_INDENT_PIXELS,
-        "three levels deeper cost three indent steps and nothing else"
+        "level growth: three levels deeper cost three indent steps and nothing else"
     );
 }
 
@@ -334,46 +315,74 @@ fn longest_entry_width_is_the_widest_row_and_zero_when_empty() {
     );
 }
 
+/// The UI-016 clamps: the minimum floor, the content width between the
+/// clamps, the 30% cap, and the degenerate branch where the minimum wins over
+/// a cap that fell below it.
 #[test]
-fn auto_fit_width_lands_a_short_toc_on_the_panel_minimum() {
-    let entries = [ToCEntry::new("Intro", 1, "Intro")];
-    assert_eq!(
-        auto_fit_width(&entries, 1000.0, six_px_per_char),
-        RIGHT_PANEL_MIN_WIDTH,
-        "a ToC that needs {}px still gets the UI-016 floor",
-        entry_width(&entries[0], six_px_per_char),
-    );
-}
-
-#[test]
-fn auto_fit_width_grows_to_the_content_between_the_clamps() {
+fn auto_fit_width_solves_the_content_between_the_ui_016_clamps() {
     // 30 chars -> 180px label -> 222px row, inside [150, 300] at this viewport.
-    let entries = [ToCEntry::new("x".repeat(30).as_str(), 1, "mid")];
-    let wanted = entry_width(&entries[0], six_px_per_char);
-    assert!(wanted > RIGHT_PANEL_MIN_WIDTH && wanted < 300.0);
-    assert_eq!(auto_fit_width(&entries, 1000.0, six_px_per_char), wanted);
-}
-
-#[test]
-fn auto_fit_width_respects_the_thirty_percent_cap() {
-    // A 90-character heading needs far more than 30% of a 1000px viewport.
-    let entries = [ToCEntry::new("x".repeat(90).as_str(), 1, "long")];
-    assert!(entry_width(&entries[0], six_px_per_char) > 300.0);
-    assert_eq!(
-        auto_fit_width(&entries, 1000.0, six_px_per_char),
-        1000.0 * RIGHT_PANEL_MAX_WIDTH_FRACTION,
-        "the UI-016 cap is not renegotiated by a long heading"
+    let mid_label = "x".repeat(30);
+    let wanted = entry_width(
+        &ToCEntry::new(mid_label.as_str(), 1, "mid"),
+        six_px_per_char,
     );
-}
+    // A 90-character heading needs far more than 30% of a 1000px viewport.
+    let long_label = "x".repeat(90);
+    let long_entry = ToCEntry::new(long_label.as_str(), 1, "long");
 
-#[test]
-fn auto_fit_width_lets_the_minimum_win_on_a_tiny_viewport() {
-    // 30% of 400px is 120px, BELOW the 150px minimum — the same degenerate
-    // branch `clamped_width` implements for the left pane and the drag.
-    let entries = [ToCEntry::new("Intro", 1, "Intro")];
-    assert_eq!(
-        auto_fit_width(&entries, 400.0, six_px_per_char),
-        RIGHT_PANEL_MIN_WIDTH
+    // The fixtures have to land where the cases claim they do, or the case
+    // below proves nothing.
+    assert!(
+        wanted > RIGHT_PANEL_MIN_WIDTH && wanted < 300.0,
+        "fixture: the mid-length heading must fall between the clamps, needs {wanted}px"
+    );
+    assert!(
+        entry_width(&long_entry, six_px_per_char) > 300.0,
+        "fixture: the long heading must exceed the cap this case pins"
+    );
+
+    let cases: Vec<(&str, Vec<ToCEntry>, f32, f32)> = vec![
+        (
+            "short ToC on a roomy viewport",
+            vec![ToCEntry::new("Intro", 1, "Intro")],
+            1000.0,
+            RIGHT_PANEL_MIN_WIDTH,
+        ),
+        (
+            "content-sized ToC between the clamps",
+            vec![ToCEntry::new(mid_label.as_str(), 1, "mid")],
+            1000.0,
+            wanted,
+        ),
+        (
+            "a heading longer than the cap",
+            vec![ToCEntry::new(long_label.as_str(), 1, "long")],
+            1000.0,
+            1000.0 * RIGHT_PANEL_MAX_WIDTH_FRACTION,
+        ),
+        (
+            // 30% of 400px is 120px, BELOW the 150px minimum — the same
+            // degenerate branch `clamped_width` implements for the left pane
+            // and the drag.
+            "minimum wins on a tiny viewport",
+            vec![ToCEntry::new("Intro", 1, "Intro")],
+            400.0,
+            RIGHT_PANEL_MIN_WIDTH,
+        ),
+        ("an empty ToC", vec![], 1000.0, RIGHT_PANEL_MIN_WIDTH),
+    ];
+
+    for (label, entries, viewport, expected) in &cases {
+        assert_eq!(
+            auto_fit_width(entries, *viewport, six_px_per_char),
+            *expected,
+            "{label}: the solved width must honour the UI-016 floor and cap"
+        );
+    }
+
+    assert!(
+        auto_fit_width(&[], 0.0, six_px_per_char).is_finite(),
+        "a zero viewport must not produce a non-finite width"
     );
 }
 
@@ -399,13 +408,4 @@ fn auto_fit_width_measures_real_glyphs_not_a_character_count() {
         "48 narrow glyphs must cost less pane than 48 wide ones; a flat \
          chars-per-em model cannot tell them apart ({narrow_w} vs {wide_w})"
     );
-}
-
-#[test]
-fn auto_fit_width_is_total_on_an_empty_toc_and_a_zero_viewport() {
-    assert_eq!(
-        auto_fit_width(&[], 1000.0, six_px_per_char),
-        RIGHT_PANEL_MIN_WIDTH
-    );
-    assert!(auto_fit_width(&[], 0.0, six_px_per_char).is_finite());
 }
