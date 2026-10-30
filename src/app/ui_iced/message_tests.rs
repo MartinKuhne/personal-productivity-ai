@@ -408,6 +408,24 @@ fn test_cursor_moved_is_a_clone_layout_report_that_stays_distinct() {
     );
 }
 
+/// The two auto-fit requests are distinct transitions: the tree fits the LEFT
+/// pane and the ToC fits the RIGHT one, so a replay must not be able to
+/// substitute one for the other (defect #14).
+#[test]
+fn test_toc_auto_fit_is_its_own_request() {
+    assert_eq!(
+        LayoutMessage::TocAutoFit,
+        LayoutMessage::TocAutoFit,
+        "the channel cannot derive `PartialEq`, so the hand-written impl must cover \
+         the new variant"
+    );
+    assert_ne!(
+        LayoutMessage::TocAutoFit,
+        LayoutMessage::TreeAutoFit,
+        "fitting the ToC pane is not the same transition as fitting the tree pane"
+    );
+}
+
 #[test]
 fn test_tooltip_hover_enter_can_carry_dynamic_text() {
     // ToolsError tooltip needs dynamic text from the row's error

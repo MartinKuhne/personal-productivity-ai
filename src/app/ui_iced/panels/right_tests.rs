@@ -1,8 +1,10 @@
 //! Unit tests for the iced ToC helpers in `right.rs` ([RUST-003]).
 
 use super::{
-    TOC_BASE_INDENT_PIXELS, TOC_LEVEL_INDENT_PIXELS, resolve_anchor, should_show_panel,
-    toc_indent_pixels,
+    RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH, TOC_BASE_INDENT_PIXELS,
+    TOC_BUTTON_H_PAD_PIXELS, TOC_LEVEL_INDENT_PIXELS, TOC_ROW_RIGHT_PAD_PIXELS,
+    TOC_ROW_VERTICAL_PAD_PIXELS, TOC_SCROLLBAR_GUTTER_PIXELS, auto_fit_width, entry_width,
+    longest_entry_width, resolve_anchor, should_show_panel, toc_button_width, toc_indent_pixels,
 };
 use crate::markdown::ToCEntry;
 
@@ -222,4 +224,188 @@ fn test_toc_indent_pixels_stays_finite_for_absurd_levels() {
             "level {level} must produce a finite, positive pad, got {pad}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Defect #14 — the content-sized width
+//
+// "The table of contents takes up more horizontal space than it needs to
+// display its contents." The pane used to be a bare `ratio: 0.5`; these tests
+// pin the solver that replaces it. A deterministic `chars * 6px` measurer is
+// used so the arithmetic is exact, plus one case against the real
+// `fira_sans_width` measurer the reducer actually injects.
+// ---------------------------------------------------------------------------
+
+/// A deterministic measurer: 6 logical pixels per character.
+///
+/// Exactness matters here — the point of these cases is the **formula**, so
+/// the measurement must not be the thing under test.
+fn six_px_per_char(text: &str) -> f32 {
+    text.chars().count() as f32 * 6.0
+}
+
+/// The furniture every row costs, minus the label: indent + button padding +
+/// right pad + reserved scrollbar gutter.
+fn furniture(level: u32) -> f32 {
+    toc_indent_pixels(level)
+        + 2.0 * TOC_BUTTON_H_PAD_PIXELS
+        + TOC_ROW_RIGHT_PAD_PIXELS
+        + TOC_SCROLLBAR_GUTTER_PIXELS
+}
+
+#[test]
+fn the_row_furniture_constants_are_bound_to_framework_tokens() {
+    assert_eq!(TOC_ROW_RIGHT_PAD_PIXELS, hoarfrost::token::space::XS);
+    assert_eq!(TOC_ROW_VERTICAL_PAD_PIXELS, hoarfrost::token::space::XXS);
+    assert_eq!(
+        TOC_BUTTON_H_PAD_PIXELS,
+        hoarfrost::widget::button::HORIZONTAL_PADDING,
+        "the solver must charge the button padding the row actually carries"
+    );
+    assert_eq!(
+        TOC_SCROLLBAR_GUTTER_PIXELS,
+        hoarfrost::composite::scroll_view::TRACK_WIDTH_RESERVED,
+        "the reserved ScrollView gutter is the framework's, not a number this pane invented"
+    );
+    assert_eq!(
+        TOC_SCROLLBAR_GUTTER_PIXELS,
+        hoarfrost::token::size::SPLITTER_GRAB
+    );
+}
+
+#[test]
+fn toc_button_width_adds_the_padding_on_both_sides() {
+    assert_eq!(
+        toc_button_width(50.0),
+        50.0 + 2.0 * TOC_BUTTON_H_PAD_PIXELS,
+        "a button pads its label left AND right"
+    );
+}
+
+#[test]
+fn toc_button_width_floors_at_the_icon_only_minimum() {
+    // `# A` — a one-character heading measures a handful of pixels, but the
+    // framework floors the box at `size.control.sm`.
+    assert_eq!(
+        toc_button_width(0.0),
+        hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH,
+        "an empty label must still cost the icon-only floor the real button applies"
+    );
+    assert_eq!(
+        toc_button_width(-100.0),
+        hoarfrost::widget::button::ICON_ONLY_MIN_WIDTH,
+        "a negative measurement is clamped before it can shrink the row"
+    );
+}
+
+#[test]
+fn entry_width_is_indent_plus_button_plus_right_pad_plus_scrollbar_gutter() {
+    let entry = ToCEntry::new("Intro", 1, "Intro");
+    assert_eq!(
+        entry_width(&entry, six_px_per_char),
+        furniture(1) + 5.0 * 6.0,
+        "the row needs its indent, the padded label, its right pad and the gutter"
+    );
+}
+
+#[test]
+fn entry_width_grows_with_the_heading_level() {
+    let shallow = ToCEntry::new("Intro", 1, "Intro");
+    let deep = ToCEntry::new("Intro", 4, "Intro");
+    assert_eq!(
+        entry_width(&deep, six_px_per_char) - entry_width(&shallow, six_px_per_char),
+        3.0 * TOC_LEVEL_INDENT_PIXELS,
+        "three levels deeper cost three indent steps and nothing else"
+    );
+}
+
+#[test]
+fn longest_entry_width_is_the_widest_row_and_zero_when_empty() {
+    assert_eq!(longest_entry_width([], six_px_per_char), 0.0);
+    let entries = [
+        ToCEntry::new("Intro", 1, "Intro"),
+        ToCEntry::new("A much longer heading than the first", 1, "long"),
+        ToCEntry::new("Mid", 3, "Mid"),
+    ];
+    assert_eq!(
+        longest_entry_width(&entries, six_px_per_char),
+        entry_width(&entries[1], six_px_per_char),
+        "the solve is a max over entries, not a sum and not the first row"
+    );
+}
+
+#[test]
+fn auto_fit_width_lands_a_short_toc_on_the_panel_minimum() {
+    let entries = [ToCEntry::new("Intro", 1, "Intro")];
+    assert_eq!(
+        auto_fit_width(&entries, 1000.0, six_px_per_char),
+        RIGHT_PANEL_MIN_WIDTH,
+        "a ToC that needs {}px still gets the UI-016 floor",
+        entry_width(&entries[0], six_px_per_char),
+    );
+}
+
+#[test]
+fn auto_fit_width_grows_to_the_content_between_the_clamps() {
+    // 30 chars -> 180px label -> 222px row, inside [150, 300] at this viewport.
+    let entries = [ToCEntry::new("x".repeat(30).as_str(), 1, "mid")];
+    let wanted = entry_width(&entries[0], six_px_per_char);
+    assert!(wanted > RIGHT_PANEL_MIN_WIDTH && wanted < 300.0);
+    assert_eq!(auto_fit_width(&entries, 1000.0, six_px_per_char), wanted);
+}
+
+#[test]
+fn auto_fit_width_respects_the_thirty_percent_cap() {
+    // A 90-character heading needs far more than 30% of a 1000px viewport.
+    let entries = [ToCEntry::new("x".repeat(90).as_str(), 1, "long")];
+    assert!(entry_width(&entries[0], six_px_per_char) > 300.0);
+    assert_eq!(
+        auto_fit_width(&entries, 1000.0, six_px_per_char),
+        1000.0 * RIGHT_PANEL_MAX_WIDTH_FRACTION,
+        "the UI-016 cap is not renegotiated by a long heading"
+    );
+}
+
+#[test]
+fn auto_fit_width_lets_the_minimum_win_on_a_tiny_viewport() {
+    // 30% of 400px is 120px, BELOW the 150px minimum — the same degenerate
+    // branch `clamped_width` implements for the left pane and the drag.
+    let entries = [ToCEntry::new("Intro", 1, "Intro")];
+    assert_eq!(
+        auto_fit_width(&entries, 400.0, six_px_per_char),
+        RIGHT_PANEL_MIN_WIDTH
+    );
+}
+
+#[test]
+fn auto_fit_width_measures_real_glyphs_not_a_character_count() {
+    use crate::ui_iced::table_width::fira_sans_width;
+    let measure = |text: &str| fira_sans_width(text, iced::Font::DEFAULT, 13.0);
+
+    // Long enough that neither string lands on the 150px floor nor on the
+    // 600px cap of this viewport, so the difference in glyphs is what shows.
+    let narrow = [ToCEntry::new("i".repeat(48).as_str(), 1, "narrow")];
+    let wide = [ToCEntry::new("M".repeat(48).as_str(), 1, "wide")];
+    let narrow_w = auto_fit_width(&narrow, 2000.0, measure);
+    let wide_w = auto_fit_width(&wide, 2000.0, measure);
+
+    assert!(
+        narrow_w > RIGHT_PANEL_MIN_WIDTH && wide_w < 2000.0 * RIGHT_PANEL_MAX_WIDTH_FRACTION,
+        "both cases must sit between the clamps to prove anything \
+         (narrow {narrow_w}, wide {wide_w})"
+    );
+    assert!(
+        narrow_w < wide_w,
+        "48 narrow glyphs must cost less pane than 48 wide ones; a flat \
+         chars-per-em model cannot tell them apart ({narrow_w} vs {wide_w})"
+    );
+}
+
+#[test]
+fn auto_fit_width_is_total_on_an_empty_toc_and_a_zero_viewport() {
+    assert_eq!(
+        auto_fit_width(&[], 1000.0, six_px_per_char),
+        RIGHT_PANEL_MIN_WIDTH
+    );
+    assert!(auto_fit_width(&[], 0.0, six_px_per_char).is_finite());
 }

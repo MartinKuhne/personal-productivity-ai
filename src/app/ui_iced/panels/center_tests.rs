@@ -157,15 +157,6 @@ fn tab_entries_preserve_strip_order_and_mark_only_the_active_tab() {
 }
 
 #[test]
-fn tab_entries_are_never_unsaved_without_dirty_tracking() {
-    // The app has no per-tab dirty flag, so the pure constructor reports
-    // clean. The field exists for the reducer to fill.
-    let paths = vec![PathBuf::from("a.md")];
-    let tabs = tab_entries(&paths, Some(Path::new("a.md")));
-    assert!(!tabs[0].unsaved);
-}
-
-#[test]
 fn tab_entries_with_no_paths_is_empty() {
     assert!(tab_entries(&[], None).is_empty());
 }
@@ -175,7 +166,6 @@ fn tab_entry_new_derives_its_title_from_the_path() {
     let tab = entry("work/notes.md", true);
     assert_eq!(tab.title, "notes.md");
     assert!(tab.active);
-    assert!(!tab.unsaved);
 }
 
 // --- Close Others (UI-028) ---------------------------------------------
@@ -597,187 +587,13 @@ fn vm_show_thinking_uses_the_gate() {
     assert!(vm.show_thinking());
 }
 
-// --- marker + colour tokens ---------------------------------------------
-
-// --- INT-11: the 6px unsaved dot is a shape, not a glyph ----------------
-
-/// The dot is the spec's `6px` (`size.indicator.dot`) round shape, and the
-/// §4.4.1 / §2.4 conflict INT-7c recorded against it is genuinely closed.
-///
-/// The closure is asserted structurally rather than argued: the marker's
-/// diameter is the indicator token, and that diameter sits **below** the
-/// `12px` text floor. A value under the floor cannot be a point size at all
-/// — which is the point. Under the retired glyph renderer the only way to
-/// draw a 6px marker was illegal text; here it is a box, so the floor never
-/// applies and no call-site exemption was needed to get the spec's number.
-#[test]
-fn the_unsaved_dot_is_the_specs_six_pixel_shape_not_a_glyph() {
-    use hoarfrost::token::typography;
-
-    let dirty = unsaved_dot(true, &Palette::fastmd_dark(), false, false);
-
-    assert_eq!(
-        dirty.diameter,
-        size::INDICATOR_DOT,
-        "the marker must read its size from `size.indicator.dot`"
-    );
-    assert_eq!(
-        dirty.diameter, 6.0,
-        "`size.indicator.dot` is 6px, which is what §4.4.1 draws"
-    );
-    assert_eq!(
-        dirty.radius,
-        shape::RADIUS_PILL,
-        "a pill radius on a square box is a circle: iced clamps every corner \
-         to `min(w, h) / 2` before drawing, so 999 over a 6px box renders a \
-         round dot rather than failing to"
-    );
-
-    // The load-bearing half: the marker is smaller than the type floor, so
-    // it is not in the floor's domain. If anyone routes this back through a
-    // `text(..).size(diameter)` call the floor guard's removal from
-    // `converted_runtime_sizes` becomes a hole, and this pin is what makes
-    // that visible rather than silent.
-    assert!(
-        dirty.diameter < typography::MIN_SIZE,
-        "the dot is {}px against a {}px text floor; it must be painted as a \
-         shape, because as type it would be illegal",
-        dirty.diameter,
-        typography::MIN_SIZE,
-    );
-}
-
-/// A clean document draws nothing, and a dirty one draws the dot. The slot
-/// itself is allocated either way, so a tab's shape never changes as it goes
-/// dirty.
-#[test]
-fn the_unsaved_dot_is_visible_only_for_dirty_documents() {
-    let palette = Palette::fastmd_dark();
-
-    assert!(
-        unsaved_dot(true, &palette, false, false).visible,
-        "a dirty document must show the marker"
-    );
-    assert!(
-        !unsaved_dot(false, &palette, false, false).visible,
-        "a clean document must not"
-    );
-    assert_eq!(
-        unsaved_dot(false, &palette, false, false).diameter,
-        unsaved_dot(true, &palette, false, false).diameter,
-        "visibility must not change the geometry, or the tab would resize"
-    );
-}
-
-/// The dot's contrast against the surface it actually sits on, computed from
-/// raw sRGB through the crate's solver rather than transcribed.
-///
-/// **Which floor applies.** The dot is a graphical object whose *shape*
-/// carries the state, not a glyph the user reads, so the governing number is
-/// `UIF-TOK-006` rule 3's `MIN_CHROME_CONTRAST` (`3.00:1`, WCAG 1.4.11
-/// non-text contrast) rather than rule 1's `4.50:1` text floor. Both pairings
-/// clear the chrome floor by a wide margin, and the active-tab pairing clears
-/// the text floor as well — so the choice of floor does not change the
-/// verdict, which is exactly what should be true of a resolved conflict.
-///
-/// The active-tab figure is not threshold-chosen at all: `palette.accent` *is*
-/// `accent.fill`, one of the four solid fills rule 4 locks, so the dot is
-/// promoted to `text.strong` by **role**. That is the win INT-7c bought over
-/// the retired `status.warning`-on-`accent.fill` pairing (`1.65:1`, effectively
-/// invisible on the tab the user is looking at) and this pin keeps the shape
-/// change from spending it.
-#[test]
-fn the_unsaved_dot_clears_the_chrome_floor_on_the_surface_it_actually_sits_on() {
-    use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio};
-
-    let pro = Palette::pro();
-
-    // Inactive tab: `tab_fill` paints nothing, so the dot sits on the strip's
-    // own `surface.base`.
-    let inactive = unsaved_dot(true, &Palette::fastmd_dark(), false, false);
-    assert_eq!(inactive.color, pro.status_warning);
-    let on_base = contrast_ratio(inactive.color, pro.surface_base);
-    assert!(
-        on_base >= MIN_CHROME_CONTRAST,
-        "status.warning on surface.base is {on_base:.6}:1, under the \
-         {MIN_CHROME_CONTRAST}:1 chrome floor"
-    );
-    assert!(
-        on_base >= MIN_TEXT_CONTRAST,
-        "the pairing also clears the text floor at {on_base:.6}:1"
-    );
-
-    // Active tab: the dot sits on `accent.fill` and is role-locked.
-    let active = unsaved_dot(true, &Palette::fastmd_dark(), true, false);
-    assert_eq!(
-        active.color, pro.text_strong,
-        "a marker painted inside a locked fill must promote by role"
-    );
-    let on_accent = contrast_ratio(active.color, pro.accent_fill);
-    assert!(
-        on_accent >= MIN_CHROME_CONTRAST,
-        "text_strong on accent_fill is {on_accent:.6}:1, under the \
-         {MIN_CHROME_CONTRAST}:1 chrome floor"
-    );
-    assert!(
-        on_accent >= MIN_TEXT_CONTRAST,
-        "the locked pairing also clears the 4.50:1 text floor at \
-         {on_accent:.6}:1 — the INT-7c fix must survive the shape change"
-    );
-
-    // The retired pairing stays illegal, so the promotion cannot be argued
-    // away as unnecessary.
-    let retired = contrast_ratio(pro.status_warning, pro.accent_fill);
-    assert!(
-        retired < 2.0,
-        "status.warning over accent_fill should still measure near-invisible, \
-         got {retired:.6}:1"
-    );
-}
-
-/// The dot occupies its slot without moving anything.
-///
-/// Two independent guarantees, both pinned:
-///
-/// * **Horizontally** the slot is a fixed [`UNSAVED_MARKER_WIDTH`] whether or
-///   not a dot is drawn, and the dot is strictly narrower than it, so the
-///   title's x origin cannot depend on the dirty flag.
-/// * **Vertically** the dot is smaller than the label's line box, so the
-///   marker cell can never become the tallest thing in the label row. Swapping
-///   an 18px line-box glyph for a 6px box therefore cannot raise the row, and
-///   [`TAB_HEIGHT`] — which is derived from the band, not from its contents —
-///   is untouched.
-#[test]
-fn the_unsaved_dot_occupies_its_slot_without_moving_tab_content() {
-    let palette = Palette::fastmd_dark();
-    let dirty = unsaved_dot(true, &palette, false, false);
-    let clean = unsaved_dot(false, &palette, false, false);
-
-    assert!(
-        dirty.diameter < UNSAVED_MARKER_WIDTH,
-        "a {}px dot in a {}px slot leaves the slot's width to hold the shape; \
-         if the dot ever reached the slot width the centring would be load-bearing \
-         rather than cosmetic",
-        dirty.diameter,
-        UNSAVED_MARKER_WIDTH,
-    );
-    assert_eq!(
-        dirty.diameter, clean.diameter,
-        "the clean state must reserve the same box, not a smaller one"
-    );
-    assert!(
-        dirty.diameter <= TAB_RUNG.line_height,
-        "the dot ({}px) must not exceed the label's {}px line box, or the \
-         marker cell would drive the label row's height and shift the title",
-        dirty.diameter,
-        TAB_RUNG.line_height,
-    );
-    assert_eq!(
-        TAB_HEIGHT,
-        STRIP_HEIGHT - STRIP_PADDING - STRIP_PADDING,
-        "the band closure is independent of the marker in every posture"
-    );
-}
+// --- the unsaved marker (removed) ---------------------------------------
+//
+// The INT-11 unsaved-dot tests went with the marker itself: the dot, its slot,
+// its radius and its role-locked colour no longer exist. Why the marker has no
+// reachable state is recorded in the module header and in
+// `doc/planning/tab-strip-dead-space.md`. The geometry that replaced these
+// assertions is pinned under "Tab horizontal chrome" at the end of this file.
 
 // --- INT-11: the 2px top accent indicator -------------------------------
 
@@ -1135,8 +951,6 @@ fn the_close_style_folds_iced_status_into_the_hover_highlight() {
 /// crate has no iced layout harness to measure a real frame with.
 #[test]
 fn hover_changes_colour_only_and_never_tab_geometry() {
-    let palette = Palette::fastmd_dark();
-
     // The band closure is exactly the pinned arithmetic, with no border term
     // and no hover term anywhere in it.
     assert_eq!(
@@ -1161,17 +975,8 @@ fn hover_changes_colour_only_and_never_tab_geometry() {
          would shrink by 1px per side"
     );
 
-    // The dot's geometry is identical in all four postures; only its colour
-    // may differ.
-    for (active, hovered) in [(false, false), (false, true), (true, false), (true, true)] {
-        let dot = unsaved_dot(true, &palette, active, hovered);
-        assert_eq!(dot.diameter, UNSAVED_DOT_SIZE);
-        assert_eq!(dot.radius, UNSAVED_DOT_RADIUS);
-    }
-
-    // The marker slot and the close hit target are state-free constants, so
-    // neither can breathe on hover.
-    assert_eq!(UNSAVED_MARKER_WIDTH, 12.0);
+    // The close hit target is a state-free constant, so it cannot breathe on
+    // hover.
     assert_eq!(TAB_CLOSE_HIT_TARGET, size::HIT_TARGET_MIN);
 }
 
@@ -1188,10 +993,6 @@ fn the_active_tab_styling_is_unchanged_by_int_16() {
     assert_eq!(tab_top_indicator(true, false), Some(pro.accent_border));
     assert_eq!(tab_top_indicator(true, true), Some(pro.accent_border));
     assert_eq!(tab_label_font(true).weight, Weight::SemiBold.iced());
-    assert_eq!(
-        unsaved_dot(true, &palette, true, false).color,
-        pro.text_strong
-    );
 }
 
 /// Every contrast figure §4.4.2 prints for the cells INT-16 wired, measured
@@ -1387,50 +1188,31 @@ fn the_resting_close_glyph_sits_inside_the_disabled_text_band() {
     }
 }
 
-/// The dirty dot's role lock must survive the hover thread: hovering an
-/// inactive tab changes the surface under the dot but must not unlock it,
-/// and the active tab must stay locked.
+/// The dirty dot's role lock is gone with the marker. What it proved — that a
+/// foreground painted inside `accent.fill` promotes to `text.strong` by role —
+/// is still asserted for the tab label in
+/// `the_active_tab_styling_is_unchanged_by_int_16`, so the INT-7c lock itself
+/// remains pinned even though the dot that exercised it does not.
 #[test]
-fn the_dirty_dot_role_lock_survives_the_hover_thread() {
+fn the_active_tab_foreground_stays_role_locked() {
     use hoarfrost::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 
     let palette = Palette::fastmd_dark();
     let pro = Palette::pro();
 
-    // Resting inactive: no fill, dot is plain status.warning.
-    let rest = unsaved_dot(true, &palette, false, false);
-    assert_eq!(rest.color, pro.status_warning);
-
-    // Hovered inactive: the dot now sits on surface.hover, which is NOT one
-    // of the four locked fills, so it stays status.warning.
-    let hovered = unsaved_dot(true, &palette, false, true);
     assert_eq!(
-        hovered.color, pro.status_warning,
-        "surface.hover must not trip the locked-fill rule"
+        tab_text_color(&palette, true, false),
+        pro.text_strong,
+        "a label painted inside a locked fill must promote by role"
     );
-    let on_hover = contrast_ratio(hovered.color, pro.surface_hover);
-    assert!(
-        (on_hover - 5.594287).abs() < 1e-5,
-        "status.warning on surface.hover measures {on_hover:.6}:1"
+    assert_eq!(
+        tab_text_color(&palette, true, true),
+        pro.text_strong,
+        "the active tab is hover-inert, so its role lock cannot release"
     );
     assert!(
-        on_hover >= MIN_CHROME_CONTRAST,
-        "status.warning on surface.hover is {on_hover:.6}:1"
-    );
-
-    // Active: still role-locked to text.strong over accent.fill.
-    let active = unsaved_dot(true, &palette, true, false);
-    assert_eq!(active.color, pro.text_strong);
-    assert!(
-        contrast_ratio(active.color, pro.accent_fill) >= MIN_CHROME_CONTRAST,
+        contrast_ratio(pro.text_strong, pro.accent_fill) >= MIN_CHROME_CONTRAST,
         "the INT-7c lock must not release"
-    );
-
-    // Hovering the active tab changes nothing.
-    assert_eq!(
-        unsaved_dot(true, &palette, true, true).color,
-        active.color,
-        "the active dot must be hover-inert"
     );
 }
 
@@ -1591,4 +1373,488 @@ fn document_viewer_scrollable_id_is_stable_and_named() {
 #[test]
 fn agent_session_close_button_id_is_stable_and_named() {
     assert_eq!(AGENT_SESSION_CLOSE_BUTTON_ID, "agent_session_close");
+}
+
+// --- defect #15 / #16: tab-strip geometry, measured headlessly ---------
+//
+// Both defects are layout facts, not style facts, so they are proven with
+// `iced_test`'s headless layout instead of by asserting what the builders
+// were meant to do:
+//
+// * **#15** — the tab's outer `Stack` was `Length::Fill` while the painted
+//   `surface` inside it is content-sized, so the two were only accidentally
+//   the same rectangle. **Measured before the change, the fill already
+//   conformed**: in a 1200px strip the tab's box, its fill and its accent
+//   bar all measured 169.300px. The reason is that the strip's `Row` is
+//   `Length::Shrink`, and iced turns that into a *compression* flag which
+//   forces a `Fill` child down to its intrinsic size
+//   (`iced_core-0.14.0/src/layout/limits.rs:160-170`) — so the stretch the
+//   defect described never happened. It was one `Row::width(Fill)` away from
+//   happening, though, which is why the box is now `Shrink` by construction
+//   and these tests guard it.
+// * **#16** — the strip had no `scrollable`, so once the tabs' combined
+//   minimum exceeded the band the surplus tabs were laid out past its right
+//   edge and painted over the neighbouring pane.
+//
+// Every expectation is written against the module's own constants
+// (`STRIP_HEIGHT` / `TAB_HEIGHT` / `STRIP_PADDING`) or against another
+// *measured* rectangle; no geometry literal is re-typed into an expectation
+// except the viewport the test itself supplies.
+
+use iced_test::selector::Candidate;
+
+/// Sub-pixel tolerance for comparing measured layout rectangles.
+const LAYOUT_TOLERANCE: f32 = 0.001;
+
+/// A headless iced driver over the app's `Message` (tier 2).
+type Sim<'a> = iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer>;
+
+/// Lays `element` out in a window of `size`, headless.
+fn laid_out(size: iced::Size, element: iced::Element<'_, Message>) -> Sim<'_> {
+    iced_test::Simulator::with_size(iced_test::core::Settings::default(), size, element)
+}
+
+/// The laid-out bounds of the container carrying `id`.
+fn bounds_of(ui: &mut Sim<'_>, id: iced::widget::Id) -> iced::Rectangle {
+    let for_selector = id.clone();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(found),
+            bounds,
+            ..
+        } if *found == for_selector => Some(bounds),
+        _ => None,
+    })
+    .unwrap_or_else(|err| panic!("container {id:?} should be reachable: {err:?}"))
+}
+
+/// The *visible* (clipped) bounds of the container carrying `id`.
+///
+/// The outer `Option` is "was the widget found at all"; the inner one is
+/// "did any of it survive the enclosing scrollable's viewport".
+fn visible_bounds_of(ui: &mut Sim<'_>, id: iced::widget::Id) -> Option<Option<iced::Rectangle>> {
+    let expected = id.clone();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Container {
+            id: Some(found),
+            visible_bounds,
+            ..
+        } if *found == expected => Some(visible_bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// `(viewport bounds, content bounds)` of the scrollable carrying `id`.
+fn scrollable_bounds(
+    ui: &mut Sim<'_>,
+    id: &'static str,
+) -> Option<(iced::Rectangle, iced::Rectangle)> {
+    let expected = iced::widget::Id::from(id);
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Scrollable {
+            id: Some(found),
+            bounds,
+            content_bounds,
+            ..
+        } if *found == expected => Some((bounds, content_bounds)),
+        _ => None,
+    })
+    .ok()
+}
+
+/// A tab-strip snapshot with `count` tabs, the one at `active` selected.
+fn strip_with_tabs(count: usize, active: Option<usize>) -> CenterPanelViewModel {
+    CenterPanelViewModel {
+        tabs: (0..count)
+            .map(|index| entry(&format!("docs/document-{index}.md"), Some(index) == active))
+            .collect(),
+        active_tab: active,
+        show_agent_session: false,
+        agent_status: String::new(),
+        agent_running: false,
+        thinking: String::new(),
+        active_pdf_backed: false,
+        note_skills: Vec::new(),
+        hovered_tab: None,
+    }
+}
+
+/// Defect #15 — "the blue selected-tab background does not conform to the
+/// size of the tab".
+///
+/// Laid out in a strip far wider than the tab needs, the tab's own layout
+/// box and the surface its fill is painted on must be the same width.
+#[test]
+fn defect_15_the_selected_tab_fill_conforms_to_the_tab_layout_box() {
+    let vm = strip_with_tabs(1, Some(0));
+    let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    let slot = bounds_of(&mut ui, tab_slot_id(0));
+    let surface = bounds_of(&mut ui, tab_surface_id(0));
+    let delta = (slot.width - surface.width).abs();
+
+    // The probe needs slack: if the tab already filled the strip, a `Fill`
+    // box and a shrink-wrapped fill would coincide and this pinned nothing.
+    assert!(
+        band.width > slot.width * 2.0,
+        "the strip ({band:?}) must leave the tab ({slot:?}) room to stretch, \
+         otherwise this test cannot see the defect"
+    );
+
+    assert!(
+        delta <= LAYOUT_TOLERANCE,
+        "defect #15: the tab's layout box is {:.3}px wide but the fill it paints is \
+         {:.3}px wide (delta {:.3}px) — the selected-tab background does not conform \
+         to the tab (slot {slot:?}, surface {surface:?})",
+        slot.width,
+        surface.width,
+        delta
+    );
+}
+
+/// Defect #15, second half — making the tab stop stretching must not cut
+/// the top accent bar short: it rides the tab at `Length::Fill`, so it has
+/// to resolve to the tab's own width.
+#[test]
+fn defect_15_the_top_accent_indicator_still_spans_the_whole_tab() {
+    let vm = strip_with_tabs(1, Some(0));
+    let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
+
+    let slot = bounds_of(&mut ui, tab_slot_id(0));
+    let indicator = bounds_of(&mut ui, tab_indicator_id(0));
+
+    assert!(
+        (indicator.width - slot.width).abs() <= LAYOUT_TOLERANCE,
+        "defect #15: the top accent bar is {:.3}px wide against a {:.3}px tab — it \
+         must still span the whole tab (indicator {indicator:?}, slot {slot:?})",
+        indicator.width,
+        slot.width
+    );
+    assert_eq!(
+        indicator.x, slot.x,
+        "the accent bar must start at the tab's own left edge"
+    );
+    assert_eq!(
+        indicator.height, TAB_INDICATOR_HEIGHT,
+        "the bar keeps its token height"
+    );
+}
+
+/// The band's pinned height must survive both a single tab and an
+/// overflowing stack of them — the scrollable must not grow the band.
+#[test]
+fn the_tab_strip_band_keeps_its_pinned_height_with_one_tab_and_with_many() {
+    assert_eq!(
+        STRIP_HEIGHT,
+        STRIP_PADDING + TAB_HEIGHT + STRIP_PADDING,
+        "the 36 = 4 + 28 + 4 closure the other tests pin must hold"
+    );
+
+    for count in [1usize, 8usize] {
+        let vm = strip_with_tabs(count, Some(0));
+        let mut ui = laid_out(iced::Size::new(900.0, 200.0), tab_strip(&vm));
+        let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+
+        assert_eq!(
+            band.height, STRIP_HEIGHT,
+            "the {count}-tab strip band measured {band:?}; its height must stay at \
+             STRIP_HEIGHT ({STRIP_HEIGHT}) and the scrollable must not add a rail to it"
+        );
+    }
+}
+
+/// Defect #16 — "with more tabs than fit, they render over each other".
+///
+/// The overflow must be carried by a horizontal `scrollable` with a stable
+/// id, whose scroll extent is the tabs' real total width.
+#[test]
+fn defect_16_overflowing_tabs_are_carried_by_a_named_horizontal_scrollable() {
+    let viewport_width = 300.0;
+    let vm = strip_with_tabs(8, Some(0));
+    let mut ui = laid_out(iced::Size::new(viewport_width, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    assert_eq!(
+        band.width, viewport_width,
+        "the band must take exactly the width it is given, not the tabs' total"
+    );
+
+    let (scroll, content) = scrollable_bounds(&mut ui, TAB_STRIP_SCROLL_ID).expect(
+        "defect #16: the tab strip must be wrapped in a scrollable carrying TAB_STRIP_SCROLL_ID",
+    );
+
+    assert_eq!(
+        scroll.width,
+        viewport_width - STRIP_PADDING - STRIP_PADDING,
+        "the scrollable must fill the band's content box"
+    );
+    assert!(
+        content.width > scroll.width,
+        "defect #16: 8 tabs must actually overflow the viewport (content {:.1}px vs \
+         viewport {:.1}px), otherwise this test pins nothing",
+        content.width,
+        scroll.width
+    );
+}
+
+/// Defect #16 — nothing of a tab may be painted outside the strip band.
+#[test]
+fn defect_16_no_tab_paints_past_the_strip_band() {
+    let vm = strip_with_tabs(8, Some(0));
+    let mut ui = laid_out(iced::Size::new(300.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    let band_right = band.x + band.width;
+
+    for index in 0..8 {
+        let visible = visible_bounds_of(&mut ui, tab_slot_id(index))
+            .unwrap_or_else(|| panic!("defect #16: tab {index} must be laid out and addressable"));
+
+        // A `scrollable` lays its inner `Row` out at the tabs' full width,
+        // so an off-screen tab's *raw* layout bounds legitimately extend
+        // past the band — that overflow is exactly what makes scrolling
+        // possible. What must never happen is any of it being *painted*
+        // outside the band, so this asserts against `visible_bounds`: the
+        // clip iced computes against the enclosing scrollable viewport.
+        // With no scrollable in the tree there is no viewport at all, so
+        // `visible_bounds` is the raw rectangle and the surplus tabs fail
+        // here — which is the pre-fix red.
+        let Some(visible) = visible else {
+            continue; // fully clipped out of the viewport: nothing painted
+        };
+
+        assert!(
+            visible.x + visible.width <= band_right + LAYOUT_TOLERANCE,
+            "defect #16: tab {index} paints out to x={:.1}, past the strip band's \
+             right edge at x={:.1} (visible {visible:?}, band {band:?})",
+            visible.x + visible.width,
+            band_right
+        );
+    }
+}
+
+/// The width a tab claims when it is the only thing in the strip — its
+/// intrinsic, unsquashed width, measured rather than assumed.
+fn intrinsic_tab_width(path: &str) -> f32 {
+    let mut vm = strip_with_tabs(0, None);
+    vm.tabs.push(entry(path, false));
+    let mut ui = laid_out(iced::Size::new(1200.0, STRIP_HEIGHT), tab_strip(&vm));
+    bounds_of(&mut ui, tab_slot_id(0)).width
+}
+
+/// Defect #16, the half the overpaint came from: with more tabs than fit,
+/// the strip did not merely spill past the edge — it **squeezed** the last
+/// tab down to whatever slack was left, crushing its label and its fill
+/// with it. The horizontal `scrollable` hands the row an unbounded maximum
+/// width, so every tab keeps the width it has on its own.
+#[test]
+fn defect_16_a_crowded_strip_never_squashes_a_tab_below_its_own_width() {
+    let intrinsic = intrinsic_tab_width("docs/document-2.md");
+    let vm = strip_with_tabs(3, Some(1));
+    let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
+
+    let last = bounds_of(&mut ui, tab_slot_id(2));
+    assert!(
+        last.width >= intrinsic - LAYOUT_TOLERANCE,
+        "defect #16: the last tab of a crowded strip measured {:.3}px against the \
+         {:.3}px it claims on its own — the strip squeezed it instead of scrolling it",
+        last.width,
+        intrinsic
+    );
+}
+
+/// The laid-out bounds of the rendered text `content`, wherever it sits.
+fn text_bounds(ui: &mut Sim<'_>, content: &str) -> Option<iced::Rectangle> {
+    let needle = content.to_owned();
+    ui.find(move |candidate: Candidate<'_>| match candidate {
+        Candidate::Text {
+            content: found,
+            bounds,
+            ..
+        } if *found == needle => Some(bounds),
+        _ => None,
+    })
+    .ok()
+}
+
+/// A crowded tab's painted label must stay inside its own tab rather than
+/// spilling onto its neighbour.
+///
+/// **Measured before the change this already held** — iced squeezed the tab's
+/// content along with its box instead of letting the label run over. It is
+/// kept as a guard, not as the red: the pre-fix symptom was the squash the
+/// test above measures, not an overflowing label.
+#[test]
+fn defect_16_a_crowded_tabs_label_does_not_paint_over_its_neighbour() {
+    let vm = strip_with_tabs(3, Some(1));
+    let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
+
+    let slot = bounds_of(&mut ui, tab_slot_id(2));
+    let label = text_bounds(&mut ui, "document-2.md")
+        .expect("the third tab's title must be rendered in the strip");
+
+    assert!(
+        label.x + label.width <= slot.x + slot.width + LAYOUT_TOLERANCE,
+        "defect #16: the third tab's label paints out to x={:.1} while the tab's own \
+         box ends at x={:.1} — the label is painted over the neighbouring tab",
+        label.x + label.width,
+        slot.x + slot.width
+    );
+}
+
+/// AGENTS §6 — the empty strip keeps the same widget tree, only its
+/// content is empty.
+#[test]
+fn the_strip_band_is_still_allocated_with_no_tabs() {
+    let vm = strip_with_tabs(0, None);
+    let mut ui = laid_out(iced::Size::new(300.0, 200.0), tab_strip(&vm));
+
+    let band = bounds_of(&mut ui, TAB_STRIP_BAND_ID.into());
+    assert_eq!(
+        band.height, STRIP_HEIGHT,
+        "the empty strip must not collapse: it measured {band:?}"
+    );
+    assert_eq!(band.width, 300.0, "the empty strip still fills the pane");
+    assert!(
+        scrollable_bounds(&mut ui, TAB_STRIP_SCROLL_ID).is_some(),
+        "the empty strip must still carry the same widget tree, scrollable included"
+    );
+}
+
+/// The strip's ids must be named, stable across rebuilds, and never shared
+/// (§5 id-stability rule).
+#[test]
+fn the_tab_strip_ids_are_named_stable_and_unshared() {
+    assert_eq!(TAB_STRIP_SCROLL_ID, "center.tab_strip.scroll");
+    assert_eq!(TAB_STRIP_BAND_ID, "center.tab_strip.band");
+    assert_eq!(
+        tab_slot_id(3),
+        tab_slot_id(3),
+        "an id rebuilt every frame must be the same id, or the widget loses its state"
+    );
+    assert_ne!(
+        tab_slot_id(0),
+        tab_slot_id(1),
+        "one id, one live widget: two tabs must not share a slot id"
+    );
+    assert_ne!(
+        tab_surface_id(1),
+        tab_indicator_id(1),
+        "a tab's own regions must not share an id either"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tab horizontal chrome (owner ruling recorded in
+// `doc/planning/tab-strip-dead-space.md`: the unsaved marker is removed and the
+// tab's horizontal padding drops to `space.xs`).
+// ---------------------------------------------------------------------------
+
+/// The laid-out bounds of the first text widget whose content is `content`.
+fn text_bounds_of(ui: &mut Sim<'_>, content: &str) -> iced::Rectangle {
+    let want = content.to_string();
+    let described = content.to_string();
+    ui.find(move |candidate: Candidate<'_>| {
+        let want = want.clone();
+        match candidate {
+            Candidate::Text {
+                content, bounds, ..
+            } if content == want.as_str() => Some(bounds),
+            _ => None,
+        }
+    })
+    .unwrap_or_else(|err| panic!("text {described:?} should be reachable: {err:?}"))
+}
+
+/// The laid-out bounds of the tab's close button, which is its only focusable
+/// child. Measured rather than derived, so a padding change cannot hide inside a
+/// constant that no longer describes what is drawn.
+fn focusable_bounds_of(ui: &mut Sim<'_>) -> iced::Rectangle {
+    ui.find(|candidate: Candidate<'_>| match candidate {
+        Candidate::Focusable { bounds, .. } => Some(bounds),
+        _ => None,
+    })
+    .unwrap_or_else(|err| panic!("a focusable should be reachable: {err:?}"))
+}
+
+/// Lays out one active tab for `path` and returns the laid-out bounds of its
+/// slot, its title and its close button, in that order.
+fn laid_out_tab(path: &str) -> (iced::Rectangle, iced::Rectangle, iced::Rectangle) {
+    let mut vm = strip_with_tabs(1, Some(0));
+    vm.tabs[0] = entry(path, true);
+    let title = vm.tabs[0].title.clone();
+    let mut ui = laid_out(iced::Size::new(1200.0, STRIP_HEIGHT), tab_strip(&vm));
+
+    let slot = bounds_of(&mut ui, tab_slot_id(0));
+    let text = text_bounds_of(&mut ui, &title);
+    let close = focusable_bounds_of(&mut ui);
+    (slot, text, close)
+}
+
+/// Everything a tab renders that is neither its title nor its close button.
+fn tab_chrome_outside_text_and_close(path: &str) -> f32 {
+    let (slot, text, close) = laid_out_tab(path);
+    slot.width - text.width - close.width
+}
+
+/// The tab's horizontal padding sits on the `space.xs` rung.
+///
+/// This is an owner ruling, not a spec reading: §2.1 binds `space.md` to "tabs"
+/// and the constant was `space::MD` for exactly that reason. The deviation is
+/// recorded in `doc/planning/tab-strip-dead-space.md` and flagged per [RUST-041].
+#[test]
+fn the_tab_pads_its_content_on_the_xs_rung() {
+    assert_eq!(
+        TAB_PADDING_X,
+        space::XS,
+        "the tab's horizontal padding must be the space.xs rung it was ruled onto"
+    );
+}
+
+/// The unsaved marker no longer takes any layout.
+///
+/// The chrome is left padding + close separation + right padding and nothing
+/// else: `4 + 4 + 4 = 12`. Before this change it was `42` — the same three values
+/// plus a `12px` marker slot and the `2px` spacing reserved for a dot that no
+/// code path could ever paint.
+///
+/// Measured from the laid-out tree, and asserted at two title lengths, because a
+/// shrink-wrapped tab must produce the same chrome regardless of what its title
+/// says; a figure that moved with the title would mean the measurement was
+/// picking up glyph width rather than chrome.
+#[test]
+fn the_tab_renders_no_unsaved_marker_slot() {
+    for path in ["docs/a.md", "docs/notes.md"] {
+        let expected = TAB_PADDING_X + TAB_CLOSE_SPACING + TAB_PADDING_X;
+        assert_eq!(
+            tab_chrome_outside_text_and_close(path),
+            expected,
+            "the only horizontal chrome left in a tab is its two paddings and the \
+             close separation ({path})"
+        );
+        assert_eq!(
+            expected, 12.0,
+            "the ruled geometry is space.xs + space.xs + space.xs"
+        );
+    }
+}
+
+/// The title starts at the tab's own padding, with nothing reserved in front of
+/// it.
+///
+/// The marker used to push the title `space.md + space.md + space.2xs = 26px`
+/// from the tab's left edge. Pinning the inset directly — rather than only the
+/// total chrome — means a marker that came back under a different name, or a
+/// padding change that accidentally moved the title, is caught here and not
+/// mistaken for the width assertion above.
+#[test]
+fn the_tab_title_starts_at_its_padding_alone() {
+    let (slot, text, _close) = laid_out_tab("docs/notes.md");
+    assert_eq!(
+        text.x - slot.x,
+        TAB_PADDING_X,
+        "nothing may be reserved between the tab's left padding and its title"
+    );
 }

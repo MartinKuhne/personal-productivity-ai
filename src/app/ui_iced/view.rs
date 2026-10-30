@@ -31,6 +31,7 @@
 //! Unit tests live in the sibling `view_tests.rs` sidecar.
 
 use crate::bus::events::user_command::UserCommand;
+use crate::markdown::ToCEntry;
 use crate::markdown::parse_markdown_to_events;
 use crate::ui::panel_layout::{LEFT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_DEFAULT_WIDTH};
 use crate::ui::theme::Palette;
@@ -47,11 +48,14 @@ use crate::ui_iced::overlay::modal_centered;
 use crate::ui_iced::panels::bottom::bottom_panel;
 use crate::ui_iced::panels::center::center_panel_rendered;
 use crate::ui_iced::panels::left::left_panel;
-use crate::ui_iced::panels::right::toc_indent_pixels;
+use crate::ui_iced::panels::right::{
+    TOC_ROW_RIGHT_PAD_PIXELS, TOC_ROW_VERTICAL_PAD_PIXELS, toc_indent_pixels,
+};
 use crate::ui_iced::panels::top::top_bar;
 use crate::ui_iced::render::{RenderContext, render_document};
 use hoarfrost::surface::tooltip::{TooltipAnchor, TooltipStyle};
 use hoarfrost::token::color::Palette as ProPalette;
+use hoarfrost::token::typography::{self, TypeRung};
 use hoarfrost::widget::button::ButtonVariant;
 use hoarfrost::widget::button_widget::Button;
 use iced::Length;
@@ -72,6 +76,23 @@ const MIN_DOCUMENT_WIDTH_PIXELS: f32 = 240.0;
 /// its scroll position. Named once so the view and the reducer cannot drift
 /// (§5 id-stability rule, [RUST-021]).
 pub const TOC_SCROLLABLE_ID: &str = "toc_scroll";
+
+/// The type rung a Table-of-Contents entry label sits on — `type.ui_compact`
+/// (`UIF-TOK-004`), the same 13px / 18px-line rung the left-hand file tree
+/// paints its row labels at
+/// ([`crate::ui_iced::panels::left::ROW_TEXT_SIZE`]).
+///
+/// The ToC and the tree are read side by side, so they are stated as one
+/// rung rather than two numbers that can drift ([RUST-021]). §2.4 names
+/// `type.ui_compact` for exactly this usage — "dense UI lists: directory
+/// tree rows, table of contents".
+///
+/// Held as a whole [`TypeRung`] rather than a bare point size because the
+/// row needs the line box as well, and that box must cross into iced through
+/// [`TypeRung::iced_line_height`]: `impl From<f32> for iced::LineHeight`
+/// produces `LineHeight::Relative(factor)`, so handing `.line_height(...)`
+/// the rung's raw `18.0` asks iced for 13 × 18 = **234px per line**.
+pub const TOC_TEXT_RUNG: TypeRung = typography::UI_COMPACT;
 
 /// Renders the three-band layout plus the overlay host (`ViewFn`,
 /// `iced-0.14.0/src/application.rs:628-638`).
@@ -171,6 +192,12 @@ fn document_width(state: &AppState) -> f32 {
 /// The right (TOC) pane body: one button per heading, each publishing a
 /// [`UserCommand::ScrollToHeader`]. The per-level left pad comes from
 /// [`toc_indent_pixels`].
+///
+/// The row's furniture — [`TOC_ROW_RIGHT_PAD_PIXELS`],
+/// [`TOC_ROW_VERTICAL_PAD_PIXELS`] and the button's own padding — is stated
+/// once, in [`crate::ui_iced::panels::right`], because
+/// [`auto_fit_width`](crate::ui_iced::panels::right::auto_fit_width) has to
+/// charge the pane for exactly what this function builds (defect #14).
 fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
     let rows: Vec<iced::Element<'_, Message>> = state
         .app
@@ -180,23 +207,15 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
         .iter()
         .map(|entry| {
             let indent = toc_indent_pixels(entry.level);
-            container(
-                Button::new(
-                    ButtonVariant::Ghost,
-                    text(entry.title.clone()),
-                    Message::Command(UserCommand::ScrollToHeader(entry.id.clone())),
-                    format!("toc_entry_{}", entry.id),
-                )
-                .palette(Palette::pro()),
-            )
-            .padding(iced::Padding {
-                top: 2.0,
-                right: 4.0,
-                bottom: 2.0,
-                left: indent,
-            })
-            .width(Length::Fill)
-            .into()
+            container(toc_entry_button(entry))
+                .padding(iced::Padding {
+                    top: TOC_ROW_VERTICAL_PAD_PIXELS,
+                    right: TOC_ROW_RIGHT_PAD_PIXELS,
+                    bottom: TOC_ROW_VERTICAL_PAD_PIXELS,
+                    left: indent,
+                })
+                .width(Length::Fill)
+                .into()
         })
         .collect();
 
@@ -204,6 +223,45 @@ fn toc_body(state: &AppState) -> iced::Element<'_, Message> {
         .id(TOC_SCROLLABLE_ID)
         .height(Length::Fill)
         .into()
+}
+
+/// One ToC entry row's label, at the rung the file tree paints at.
+///
+/// The single place this pane turns [`TOC_TEXT_RUNG`] into a `text` widget,
+/// so no call site restates a point size ([RUST-021], `UIF-TOK-004`).
+/// Before this, the label carried no `.size()` at all and iced painted it at
+/// its own 16px default — a rung above the tree it sits beside.
+///
+/// The line height goes through [`TypeRung::iced_line_height`], never the
+/// rung's raw `f32`: `From<f32> for iced::LineHeight` is `Relative`, so a
+/// bare `18.0` on a 13px font means 234px per line.
+fn toc_entry_label(title: String) -> iced::widget::Text<'static> {
+    text(title)
+        .size(TOC_TEXT_RUNG.size)
+        .line_height(TOC_TEXT_RUNG.iced_line_height())
+}
+
+/// The ToC entry's button, tooltiped against the icon-only rule.
+///
+/// `UIF-ATOM-001`'s icon-only cell makes a tooltip mandatory on any button
+/// whose content measures at or below `size::CONTROL_SM` (28×28), and
+/// `Button::outer_size` (`button_widget.rs:799`) `debug_assert!`s that rule
+/// the moment the box is computed. A markdown heading of one or two
+/// characters (`# A`) makes a row label that small, so scrolling a document
+/// that opens with a short heading crashed the app.
+///
+/// The tooltip is the entry's own heading, so no new user-facing copy is
+/// invented; the shape matches the movable shell's `close_action`, which was
+/// fixed the same way.
+fn toc_entry_button(entry: &ToCEntry) -> Button<'static, Message> {
+    Button::new(
+        ButtonVariant::Ghost,
+        toc_entry_label(entry.title.clone()),
+        Message::Command(UserCommand::ScrollToHeader(entry.id.clone())),
+        format!("toc_entry_{}", entry.id),
+    )
+    .palette(Palette::pro())
+    .with_tooltip(entry.title.clone())
 }
 
 /// The overlay host: the bands with every mounted floating window stacked
@@ -359,18 +417,18 @@ fn overlay_element(layer: OverlayLayer, state: &AppState) -> iced::Element<'_, M
             state.overlay.dialog_anchor,
             state.viewport,
         ),
-        // Logs still renders its pre-INT-6 body; its §4.7.1 shell is the
-        // stated follow-on. It does get the scrim-free mount and the host's
-        // geometry, which is the blocking half of `UIF-MOV-003`.
-        OverlayLayer::Logs => movable_overlay_layer(MovableCard::Logs, state, |_host| {
-            crate::ui_iced::logs::background_logs_view(&state.models.logs)
+        OverlayLayer::Logs => movable_overlay_layer(MovableCard::Logs, state, |host| {
+            crate::ui_iced::logs::background_logs_movable_card(host, &state.models.logs)
         }),
         OverlayLayer::AgentDebug => movable_overlay_layer(MovableCard::AgentDebug, state, |host| {
             crate::ui_iced::agent_debug::agent_debug_movable_card(host, &state.models.debug)
         }),
-        OverlayLayer::Tools => {
-            crate::ui_iced::tools_dialog::tools_modal(&state.models.tools, state.viewport)
-        }
+        OverlayLayer::Tools => crate::ui_iced::tools_dialog::tools_modal(
+            &state.models.tools,
+            state.viewport,
+            state.overlay.tools.size_override(),
+            state.overlay.tools.is_resizing(),
+        ),
         OverlayLayer::About => modal_centered(
             about_card(&state.models.about, state.viewport),
             Message::About(crate::ui_iced::message::AboutMessage::Absorbed),

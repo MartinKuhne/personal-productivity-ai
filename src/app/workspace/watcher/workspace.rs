@@ -46,6 +46,9 @@ pub struct Workspace {
     pub all_dirs: Vec<PathBuf>,
     /// Set for O(1) membership checks on `all_dirs`.
     all_dirs_set: HashSet<PathBuf>,
+    /// Advances whenever a file or directory is removed, so derived tree
+    /// indexes can detect that an incremental-addition cursor is stale.
+    tree_reset_revision: u64,
     /// Whether the initial indexing has finished.
     pub indexing_finished: bool,
     /// Whether the `indexing_finished` notification has been handled.
@@ -72,6 +75,7 @@ impl Workspace {
             all_files_set: HashSet::new(),
             all_dirs: Vec::new(),
             all_dirs_set: HashSet::new(),
+            tree_reset_revision: 0,
             indexing_finished: false,
             indexing_finished_handled: false,
         }
@@ -101,6 +105,7 @@ impl Workspace {
     pub fn remove_file(&mut self, path: &Path) -> bool {
         if self.all_files_set.remove(path) {
             self.all_files.retain(|fp| fp.as_path() != path);
+            self.advance_tree_reset_revision();
             true
         } else {
             false
@@ -113,6 +118,7 @@ impl Workspace {
     pub fn remove_dir(&mut self, path: &Path) -> bool {
         if self.all_dirs_set.remove(path) {
             self.all_dirs.retain(|dp| dp.as_path() != path);
+            self.advance_tree_reset_revision();
             true
         } else {
             false
@@ -129,11 +135,8 @@ impl Workspace {
             .filter(|p| p.as_path() == base || p.starts_with(base))
             .cloned()
             .collect();
-        let mut changed = false;
-        for p in to_remove {
-            self.all_dirs_set.remove(&p);
-            self.all_dirs.retain(|dp| dp.as_path() != p.as_path());
-            changed = true;
+        for p in &to_remove {
+            self.all_dirs_set.remove(p);
         }
         let files_to_remove: Vec<PathBuf> = self
             .all_files_set
@@ -141,11 +144,28 @@ impl Workspace {
             .filter(|p| p.starts_with(base))
             .cloned()
             .collect();
-        for p in files_to_remove {
-            self.remove_file(&p);
-            changed = true;
+        for path in &files_to_remove {
+            self.all_files_set.remove(path);
+        }
+
+        let changed = !to_remove.is_empty() || !files_to_remove.is_empty();
+        if changed {
+            self.all_dirs.retain(|path| !path.starts_with(base));
+            self.all_files.retain(|path| !path.starts_with(base));
+            self.advance_tree_reset_revision();
         }
         changed
+    }
+
+    /// Revision used by derived tree indexes to detect removals that require
+    /// a full rebuild rather than append-only insertion.
+    #[must_use]
+    pub fn tree_reset_revision(&self) -> u64 {
+        self.tree_reset_revision
+    }
+
+    fn advance_tree_reset_revision(&mut self) {
+        self.tree_reset_revision = self.tree_reset_revision.wrapping_add(1);
     }
 
     /// O(1) membership check for files.

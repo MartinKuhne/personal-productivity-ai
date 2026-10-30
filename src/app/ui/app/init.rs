@@ -45,6 +45,7 @@ impl FastMdApp {
             orchestrator,
             layout,
             cached_tree_rows: None,
+            workspace_tree_cache: super::WorkspaceTreeCache::default(),
             persisted_ui_state,
             search: crate::ui::TreeSearch::new(),
         }
@@ -151,6 +152,13 @@ impl FastMdApp {
                 .iter()
                 .map(|lib| PathBuf::from(&lib.root_folder))
                 .collect(),
+            // Virtual label per root, taken from the same iterator order so
+            // the index alignment holds.
+            available_dir_labels: config
+                .content_libraries
+                .iter()
+                .map(|lib| lib.name.clone())
+                .collect(),
             ..Default::default()
         };
         dialogs.batch_dialog_config = batch_dialog_config;
@@ -198,6 +206,7 @@ impl FastMdApp {
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,
+            workspace_tree_cache: super::WorkspaceTreeCache::default(),
             persisted_ui_state: PersistedUiState::default(),
             search: crate::ui::TreeSearch::new(),
         }

@@ -113,7 +113,7 @@ modules under `src/app/ui_iced/` — not from an intention list.
 | --- | --- |
 | `hamburger.rs`, `context_menu.rs`, `menu_surface.rs` | `surface::menu` — `MenuCascade` openness controller, `model::{Menu, Row}`, `view` row matrix; `geometry::anchor` solves card placement and flips |
 | `dialogs.rs` | `surface::input_dialog` — Create / Rename / Move / Delete; `widget::text_input` on the controlled path (`TextInputModel`, `TextInputEmission`), `validation::disallowed` + `validation::punish` |
-| `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
+| `about.rs`, `attributions.rs`, `batch_dialog.rs`, `editor.rs`, `tools_dialog.rs` | `surface::modal` — `ModalSizing` + `ModalFrame` for card geometry, `ResizeFloors` to bound a size the user dragged a card to, `ModalError` / `ErrorLocation` / `Recovery` for error placement and focus restoration |
 | `movable_shell.rs`, `agent_debug.rs`, `logs.rs`, `persisted.rs` | `surface::movable` — `MovableHost` / `MovableSpec` drive the title bar, resize handles, follow-scroll geometry and `GeometryStorage` persistence |
 | `panels/top.rs`, `panels/bottom.rs`, `panels/left.rs`, `agent/mod.rs`, `agent/prompt_input.rs`, `logs.rs`, `agent_debug.rs`, `batch_dialog.rs` | atoms — `widget::button_widget::Button` (+ `ButtonVariant`), `widget::text_input` (controlled `TextInputModel` / `TextInputEmission` on the bottom command field, agent prompt and left-panel search; callback `TextInput::new` on log/debug search and the Batch wildcard-pattern field, omitted in Directory mode per SPEC `BATCH-007`); Batch prompt candidates are discovered on the iced task executor when the dialog opens, and `StartBatch` carries the selected prompt body snapshot; prompt discovery errors use error code `BATCH-4001` |
 | `tools_dialog.rs`, `batch_dialog.rs` | composites and status atoms — `composite::list_tile`, `composite::form_field`, `widget::badge`, `widget::toggle`, `widget::progress` |
@@ -179,7 +179,8 @@ whose token type is `iced::Color`) and the inverted inline-editor token set
 (`EditorColors`); `ui_iced/theme.rs` maps those semantic tokens onto the iced
 palette roles and hands the resulting `iced::Theme::custom` to the launch
 builder. Repeated iced idioms — the cursor-anchored, viewport-clamped context
-menu, the blocking modal card, the confirm/cancel button pair, the
+menu, the blocking modal card, its corner resize grip and the full-area gesture
+lane that carries a drag, the confirm/cancel button pair, the
 follow-the-stream scroll rule — live in `ui_iced/overlay.rs` and
 `ui_iced/logs.rs`, which the panels, modals, tree and renderers call instead
 of hand-rolling the widget tree. Since INT-3..INT-8 the *geometry, frame
@@ -200,7 +201,7 @@ C4Component
   Component(layout, "layout", "Three-band pane-grid geometry: Configuration tree, MiddleBandPanes id discovery, resize -> PanelLayout clamping")
   Component(panels, "panels", "Pure pane view functions: top toolbar, left tree/search, center tabs/document, bottom command band, right ToC rules")
   Component(render, "render", "Markdown viewing path: RenderEvent -> RenderBlock descriptors -> iced widgets (heading, inline, code, table, yaml)")
-  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to hoarfrost modal::ModalSizing / ModalFrame")
+  Component(overlay, "overlay", "Context-menu + blocking-modal primitives: anchor clamping, scrim blocker, confirm/cancel pair; card sizing and frame now delegated to hoarfrost modal::ModalSizing / ModalFrame; modal resize grip + gesture lane shared with the movable shells")
   Component(menuui, "hamburger / context_menu / menu_surface", "Menu rendering through hoarfrost surface::menu (MenuCascade + row view) with geometry from geometry::anchor; solved card rects kept on state so the paint and the z-order registry agree")
   Component(movui, "movable_shell", "Movable card chrome driven by hoarfrost movable::MovableHost: title bar, resize handles, filter/footer bands, follow-scroll")
   Component(editor, "editor", "Inline Markdown editor modal: text_editor host, DEC-007 undo/redo history stack, pre-save GFM validation, front-matter-preserving save")

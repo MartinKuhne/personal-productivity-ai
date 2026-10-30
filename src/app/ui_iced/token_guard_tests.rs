@@ -363,13 +363,11 @@ fn converted_runtime_sizes() -> Vec<(String, f32)> {
     const NAMED: &[(&str, f32)] = &[
         // Center panel -- tab strip.
         //
-        // `center::UNSAVED_DOT_SIZE` is deliberately absent (INT-11). This
-        // list is what the floor guards walk for sizes rendered *as type*, and
-        // the unsaved marker is no longer type: it is a 6px
-        // `size.indicator.dot` box, so §2.4's 12px floor does not reach it.
-        // Leaving it here would force the constant back to 12 and re-open the
-        // §4.4.1 conflict INT-7c had to record; removing it costs the guard
-        // nothing, because a 6pt *font* still cannot appear in this list.
+        // The removed unsaved-marker constants are absent from this list and
+        // always were: it holds sizes the interface can put on screen *as type*,
+        // and the marker was a 6px box, never a point size. §2.4's 12px floor
+        // therefore never reached it, and its removal costs this guard nothing --
+        // a 6pt *font* still cannot appear here.
         ("center::TAB_TEXT_SIZE", center::TAB_TEXT_SIZE),
         ("center::TAB_CLOSE_GLYPH_SIZE", center::TAB_CLOSE_GLYPH_SIZE),
         // Center panel -- viewers.
@@ -445,9 +443,7 @@ fn every_converted_spacing_constant_is_a_rung() {
         ("center::TAB_PADDING_X", center::TAB_PADDING_X),
         ("center::TAB_PADDING_Y", center::TAB_PADDING_Y),
         ("center::TAB_SPACING", center::TAB_SPACING),
-        ("center::TAB_MARKER_SPACING", center::TAB_MARKER_SPACING),
         ("center::TAB_CLOSE_SPACING", center::TAB_CLOSE_SPACING),
-        ("center::UNSAVED_MARKER_WIDTH", center::UNSAVED_MARKER_WIDTH),
         ("center::STRIP_PADDING", center::STRIP_PADDING),
         ("center::VIEWER_PADDING", center::VIEWER_PADDING),
         ("center::VIEWER_SPACING", center::VIEWER_SPACING),
@@ -676,87 +672,12 @@ fn the_tab_close_button_clears_the_hit_target_floor() {
     );
 }
 
-/// The unsaved marker is a shape at the spec's `6px`, and it sits **outside
-/// the type floor's domain** — which is how the §4.4.1 conflict closed.
-///
-/// INT-7c held this test the other way round: `UNSAVED_DOT_SIZE >= MIN_SIZE`
-/// plus an `assert_ne!` against `INDICATOR_DOT`, because the marker was a
-/// font glyph and taking the token literally meant either breaking §2.4's
-/// floor or exempting one call site and gutting the guard. The marker is now
-/// a `container`, so the token is honoured exactly.
-///
-/// The guard keeps its teeth by **scope** rather than by compromise:
-/// `UNSAVED_DOT_SIZE` is removed from `converted_runtime_sizes`, the list of
-/// sizes the interface can put on screen *as type*. A 6pt font still fails
-/// `nothing_in_the_converted_surfaces_renders_below_the_type_floor`; a 6px
-/// box was never in that list's business.
-#[test]
-fn the_unsaved_marker_is_a_shape_outside_the_type_floor() {
-    assert_eq!(
-        center::UNSAVED_DOT_SIZE,
-        size::INDICATOR_DOT,
-        "the marker is §4.4.1's 6px `size.indicator.dot`, honoured literally \
-         rather than rounded up to the text floor"
-    );
-    assert_ne!(
-        center::UNSAVED_DOT_SIZE,
-        center::TAB_TEXT_SIZE,
-        "the dot must not borrow the label's rung"
-    );
-    assert!(
-        center::UNSAVED_DOT_SIZE < MIN_SIZE,
-        "the dot is {}px against a {}px floor: illegal as type, legal as a \
-         shape, and it is painted as a shape",
-        center::UNSAVED_DOT_SIZE,
-        MIN_SIZE,
-    );
-    assert_eq!(center::UNSAVED_MARKER_WIDTH, space::MD);
-}
-
-/// The active tab's dirty dot is role-locked against the accent fill.
-///
-/// `status.warning` on `accent.fill` measures `1.65:1`; the lock promotes it
-/// to `text.strong` (`4.80:1`). Recomputed from raw sRGB here.
-#[test]
-fn the_active_tab_dirty_dot_clears_the_fill_lock() {
-    use hoarfrost::token::contrast::contrast_ratio;
-
-    use crate::ui::theme::Palette;
-
-    let app = Palette::fastmd_dark();
-    let pro = Palette::pro();
-    let active = center::tab_unsaved_dot_color(&app, true, false);
-    let inactive = center::tab_unsaved_dot_color(&app, false, false);
-    let inactive_hovered = center::tab_unsaved_dot_color(&app, false, true);
-
-    assert_eq!(
-        active, pro.text_strong,
-        "a foreground painted on a locked fill must promote to text.strong"
-    );
-    assert_ne!(
-        active, inactive,
-        "the dot must change between the accent-filled and unfilled tab"
-    );
-    assert_eq!(
-        inactive_hovered, inactive,
-        "INT-16 gave the hovered inactive tab a `surface.hover` fill, which is \
-         not one of the four locked fills — the dot must stay `status.warning`"
-    );
-
-    let locked = contrast_ratio(active, pro.accent_fill);
-    assert!(
-        locked >= 4.5,
-        "the locked dot over accent_fill is {locked:.2}:1, below the 4.50:1 floor"
-    );
-
-    // The retired pairing is pinned as illegal with its measured number.
-    let retired = contrast_ratio(pro.status_warning, pro.accent_fill);
-    assert!(
-        retired < 2.0,
-        "status.warning over accent_fill should still measure near-invisible, got \
-         {retired:.2}:1"
-    );
-}
+// The unsaved-marker guards (`the_unsaved_marker_is_a_shape_outside_the_type_floor
+//` and `the_active_tab_dirty_dot_clears_the_fill_lock`) went with the marker
+// itself. The type floor keeps its teeth the same way it did before: nothing in
+// `converted_runtime_sizes` may render below `MIN_SIZE`, and none of the removed
+// constants was ever a point size. The fill-lock rule those tests exercised is
+// still pinned for the tab label in `center_tests.rs`
 
 /// The active tab label takes the rung's emphasis weight, the inactive its
 /// resting weight (4.4.2).

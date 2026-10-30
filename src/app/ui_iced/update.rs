@@ -58,6 +58,8 @@ use hoarfrost::surface::menu::cascade::{
 };
 use hoarfrost::surface::menu::model::{Menu, MenuId};
 use hoarfrost::surface::modal::Recovery;
+use hoarfrost::surface::movable::GeometryStorage;
+use hoarfrost::surface::movable::MovableGeometry;
 use hoarfrost::surface::movable::PointerPhase;
 use hoarfrost::surface::movable::SurfaceTarget;
 use hoarfrost::surface::tooltip::{DismissReason, TimeMs};
@@ -445,23 +447,132 @@ fn prune_hovered_row(state: &mut AppState) {
     }
 }
 
-/// Tree-row cache transition: rebuild the flattened rows only while the tree
-/// is dirty (or nothing is cached yet), then publish them as the cache and
-/// clear the flag.
+/// Tree-row cache transition: incrementally add newly discovered paths to the
+/// persistent hierarchy, flatten it while the visible tree is dirty, and
+/// rebuild the hierarchy only after removals or library-root changes.
 ///
-/// Without this the iced build re-walks the whole workspace on **every**
-/// message: nothing else in the iced path ever fills
-/// [`FastMdApp::cached_tree_rows`], so `panels::left::tree_rows` always falls
-/// through to `build_workspace_tree`. Running the transition here also makes the
-/// rows the reducer renders the authoritative cache, which is what the
-/// context-menu and move-destination reductions read back.
+/// The workspace's file and directory vectors append on additions. Their
+/// lengths therefore act as cursors: only the suffix added since the last
+/// refresh is inserted into the cached tree. A removal revision or changed
+/// library roots invalidates that append-only assumption. Tag-filtered rows
+/// keep using the existing filtered projection so pruning behavior is
+/// unchanged.
 fn refresh_tree_cache(state: &mut AppState) {
-    if !state.app.orchestrator.selection.tree_dirty && state.app.cached_tree_rows.is_some() {
+    let selected_tag = state.app.tags().selected_tag.clone();
+    let filter_changed = state.app.workspace_tree_cache.row_tag_filter != selected_tag;
+    if !state.app.orchestrator.selection.tree_dirty
+        && state.app.cached_tree_rows.is_some()
+        && !filter_changed
+    {
         return;
     }
-    let rows = crate::ui_iced::panels::left::tree_rows(&state.app);
+
+    let library_roots: Vec<(String, PathBuf)> = state
+        .app
+        .content_libraries()
+        .iter()
+        .map(|library| (library.name.clone(), PathBuf::from(&library.root_folder)))
+        .collect();
+    let (file_count, dir_count, reset_revision) = {
+        let workspace = &state.app.orchestrator.workspace;
+        (
+            workspace.all_files.len(),
+            workspace.all_dirs.len(),
+            workspace.tree_reset_revision(),
+        )
+    };
+
+    let rebuild_index = {
+        let cache = &state.app.workspace_tree_cache;
+        cache.root.is_none()
+            || cache.reset_revision != Some(reset_revision)
+            || cache.indexed_file_count > file_count
+            || cache.indexed_dir_count > dir_count
+            || cache.library_roots != library_roots
+    };
+
+    if rebuild_index {
+        let root = crate::ui_iced::panels::left::build_workspace_tree_index(&state.app);
+        let cache = &mut state.app.workspace_tree_cache;
+        cache.root = Some(Box::new(root));
+    } else {
+        let (indexed_file_count, indexed_dir_count) = {
+            let cache = &state.app.workspace_tree_cache;
+            (cache.indexed_file_count, cache.indexed_dir_count)
+        };
+        let new_files: Vec<PathBuf> = state
+            .app
+            .orchestrator
+            .workspace
+            .all_files
+            .iter()
+            .skip(indexed_file_count)
+            .cloned()
+            .collect();
+        let new_dirs: Vec<PathBuf> = state
+            .app
+            .orchestrator
+            .workspace
+            .all_dirs
+            .iter()
+            .skip(indexed_dir_count)
+            .cloned()
+            .collect();
+        if !new_files.is_empty() || !new_dirs.is_empty() {
+            let libraries = state.app.content_libraries().to_vec();
+            let root = state
+                .app
+                .workspace_tree_cache
+                .root
+                .as_mut()
+                .expect("the tree index exists when it is not being rebuilt");
+            for path in &new_files {
+                crate::ui_iced::panels::left::insert_path_into_tree(root, &libraries, path, false);
+            }
+            for path in &new_dirs {
+                crate::ui_iced::panels::left::insert_path_into_tree(root, &libraries, path, true);
+            }
+        }
+    }
+
+    {
+        let cache = &mut state.app.workspace_tree_cache;
+        cache.indexed_file_count = file_count;
+        cache.indexed_dir_count = dir_count;
+        cache.reset_revision = Some(reset_revision);
+        cache.library_roots = library_roots;
+    }
+
+    let rows = if selected_tag.is_some() {
+        let filtered_tree = crate::ui_iced::panels::left::build_workspace_tree(&state.app);
+        flatten_workspace_tree(
+            &filtered_tree,
+            &state.app.orchestrator.selection.expanded_dirs,
+        )
+    } else {
+        let root = state
+            .app
+            .workspace_tree_cache
+            .root
+            .as_deref()
+            .expect("the tree index was built above");
+        flatten_workspace_tree(root, &state.app.orchestrator.selection.expanded_dirs)
+    };
+
     state.app.cached_tree_rows = Some(rows);
+    state.app.workspace_tree_cache.row_tag_filter = selected_tag;
     state.app.orchestrator.selection.tree_dirty = false;
+}
+
+fn flatten_workspace_tree(
+    root: &crate::ui::TreeNode,
+    expanded_dirs: &std::collections::HashSet<PathBuf>,
+) -> Arc<Vec<crate::ui::tree::FlatRow>> {
+    let mut rows = Vec::new();
+    if !root.children.is_empty() {
+        crate::ui::tree::flatten_tree(root, 0, expanded_dirs, &mut rows);
+    }
+    Arc::new(rows)
 }
 
 /// Join a batch thread that has finished and drop its cancel flag.
@@ -613,6 +724,19 @@ fn route_command(state: &mut AppState, command: UserCommand) -> Vec<Task<Message
         UserCommand::OpenToolsDialog => {
             publish_and_drain(state, UserCommand::OpenToolsDialog);
             state.overlay.tools.open();
+            // Restore the size the user dragged the card to, if they ever did
+            // (defect #6). The read goes through the same injected seam the
+            // movable cards use and touches the live model only, so opening
+            // never blocks on the storage backend ([NFR-003]); a value that
+            // will not decode reads as `None`, which is "never dragged".
+            let key = crate::ui_iced::tools_dialog::resize_storage_key();
+            let remembered = UiStateGeometryStorage::new(
+                &mut state.app.persisted_ui_state,
+                state.storage.as_ref(),
+            )
+            .load(&key)
+            .map(|geometry| geometry.size);
+            state.overlay.tools.set_user_size(remembered);
             Vec::new()
         }
         UserCommand::OpenAboutDialog => {
@@ -804,6 +928,9 @@ fn reduce_layout(state: &mut AppState, message: LayoutMessage) {
         LayoutMessage::TreeAutoFit => {
             auto_fit_tree(state);
         }
+        LayoutMessage::TocAutoFit => {
+            auto_fit_toc(state);
+        }
         LayoutMessage::CursorMoved { point } => {
             state.overlay.cursor = Some(point);
         }
@@ -963,8 +1090,73 @@ fn auto_fit_tree(state: &mut AppState) {
     });
     state.app.layout.set_width(Some(width));
     state.app.persisted_ui_state.left_panel_width = state.app.layout.left_panel_width;
-    let ratio = width / viewport;
+    // The gutter-aware conversion, so the auto-fitted width is the width the
+    // grid actually lays out (defect #12).
+    let ratio = crate::ui_iced::layout::split_ratio_for_width(
+        width,
+        viewport,
+        crate::ui_iced::layout::PANE_SPACING_PIXELS,
+    );
     state.panes.resize(state.band.left_split, ratio);
+}
+
+/// The right (ToC) panel's content-fit transition (defect #14), reduced from
+/// an explicit [`LayoutMessage::TocAutoFit`] so the width change is replayable.
+///
+/// **Why the document load and not the startup replay.** [`apply_pane_widths`]
+/// (`crate::ui_iced::layout`) replays *remembered* widths onto a freshly built
+/// grid; at that moment no document is open, so the heading set is empty and a
+/// fit there could only ever measure zero entries and pin the pane to its
+/// minimum. The content exists the moment `ProcessEvent::FileLoaded` lands —
+/// `AppOrchestrator::handle_process_event` builds `tabs.toc` from the bytes it
+/// just read — so the fit belongs to the reducer that applies that event, and
+/// it re-fits per document rather than once per process.
+///
+/// The measurement uses the same production measurer as [`auto_fit_tree`]:
+/// [`fira_sans_width`] shapes against the Fira Sans bytes iced renders with,
+/// at [`TOC_TEXT_RUNG`] — the rung `view::toc_entry_label` paints the entry at.
+///
+/// The replay is the gutter-aware one defect #12 established: the right split
+/// operates on [`nested_region_width`], not on the viewport, and the ToC is
+/// its TRAILING side, so the ratio is `1 - split_ratio_for_width(..)`.
+///
+/// Purity: mutates `state.app.layout`, the persisted width and the pane grid
+/// only; publishes nothing.
+fn auto_fit_toc(state: &mut AppState) {
+    let viewport = state.viewport.width;
+    if viewport <= 0.0 {
+        return;
+    }
+    let left = crate::ui_iced::layout::current_left_width(&state.app.layout, viewport);
+    let region = crate::ui_iced::layout::nested_region_width(
+        viewport,
+        left,
+        crate::ui_iced::layout::PANE_SPACING_PIXELS,
+    );
+    if region <= 0.0 {
+        return;
+    }
+
+    let entries = state.app.orchestrator.tabs.toc.clone();
+    let width = crate::ui_iced::panels::right::auto_fit_width(&entries, viewport, |text: &str| {
+        fira_sans_width(
+            text,
+            iced::Font::DEFAULT,
+            crate::ui_iced::view::TOC_TEXT_RUNG.size,
+        )
+    });
+    state.app.layout.set_right_width(Some(width));
+    state.app.persisted_ui_state.right_panel_width = state.app.layout.right_panel_width;
+
+    let ratio = 1.0
+        - crate::ui_iced::layout::split_ratio_for_width(
+            width,
+            region,
+            crate::ui_iced::layout::PANE_SPACING_PIXELS,
+        );
+    state
+        .panes
+        .resize(state.band.right_split, ratio.clamp(0.0, 1.0));
 }
 
 // ───────────────────────────── tree / tab ─────────────────────────────
@@ -2216,9 +2408,40 @@ fn reduce_batch(state: &mut AppState, message: BatchDialogMessage) {
     }
 }
 
-/// Tools dialog dismiss reduction (UI-051..UI-060).
+/// Tools dialog reduction (UI-051..UI-060, defect #6).
+///
+/// Two passes over the same message, because the channel carries two kinds of
+/// event and each owner ignores what it does not hold:
+/// [`apply`](crate::ui_iced::tools_dialog::ToolsDialogState::apply) decides
+/// visibility,
+/// [`apply_resize`](crate::ui_iced::tools_dialog::ToolsDialogState::apply_resize)
+/// decides geometry. Neither can be folded into the other without one of them
+/// having to know the other's business.
+///
+/// # Persistence
+///
+/// The size is written **only when a drag settles**, never per frame
+/// ([NFR-002]), and only through the injected handler ([RUST-024]) — the same
+/// [`UiStateGeometryStorage`] seam the movable cards write through, so there is
+/// one place that decides when overlay geometry reaches disk.
+///
+/// The value is stored in the framework's own encoded geometry form under
+/// [`resize_storage_key`](crate::ui_iced::tools_dialog::resize_storage_key),
+/// with the position half pinned to the origin: a centred modal has no
+/// user-set position, and reusing [`MovableGeometry`] rather than inventing a
+/// second encoding is what keeps the app out of the serialisation business.
 fn reduce_tools(state: &mut AppState, message: ToolsDialogMessage) {
+    let viewport = state.viewport;
+
     state.overlay.tools.apply(message);
+    let effect = state.overlay.tools.apply_resize(message, viewport);
+
+    if let crate::ui_iced::tools_dialog::ToolsResizeEffect::Settled { size } = effect {
+        let key = crate::ui_iced::tools_dialog::resize_storage_key();
+        let mut storage =
+            UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, state.storage.as_ref());
+        storage.save(&key, MovableGeometry::new(Point::ORIGIN, size));
+    }
 }
 
 /// Agent debug window reductions (UI-048).
@@ -2374,6 +2597,20 @@ fn apply_background_event(state: &mut AppState, event: &BackgroundEvent) {
                 .app
                 .orchestrator
                 .handle_process_event(process_event.clone());
+            // Defect #14: a document load is the first moment the heading set
+            // exists, so it is the moment a content-sized right pane can be
+            // solved. Fitting here (rather than at startup) also means each
+            // document gets the width *its own* headings need.
+            //
+            // The fit is gated on the load having actually landed:
+            // `handle_process_event` drops a `FileLoaded` for a file the user
+            // has already moved on from, and re-fitting from an unchanged
+            // heading set would resize the pane behind the document on screen.
+            if let ProcessEvent::FileLoaded { path, .. } = process_event
+                && state.app.orchestrator.tabs.loaded_path.as_deref() == Some(path.as_path())
+            {
+                auto_fit_toc(state);
+            }
         }
         BackgroundEvent::McpAuth(auth_event) => {
             state
@@ -2405,6 +2642,21 @@ fn apply_config_arrival(state: &mut AppState, config: &AppConfig) {
         .content_libraries
         .iter()
         .map(|lib| PathBuf::from(&lib.root_folder))
+        .collect();
+    // The dialog shows the *virtual* label — the library's own name, which
+    // is what `ContentLibraryExt::display_label_for` returns for that
+    // library's root — while `available_dirs` keeps the real path the batch
+    // runner globs. Same iterator order as above, so the two lists stay
+    // index-aligned.
+    state
+        .app
+        .orchestrator
+        .dialogs
+        .batch_dialog_config
+        .available_dir_labels = config
+        .content_libraries
+        .iter()
+        .map(|lib| lib.name.clone())
         .collect();
     state.app.orchestrator.config = config.clone();
     tracing::info!(

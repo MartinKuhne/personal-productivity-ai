@@ -18,6 +18,7 @@
 - [REQ-010] When the application starts for the first time, it SHALL display the `About` dialog.
 
 ### Concurrent Workspace Indexer Pipeline
+
 - [REQ-301] When the application starts, the FastMD Viewer SHALL initialize a background directory crawler thread to recursively scan all content libraries for markdown files, text files and PDF files.
 - [REQ-302] The FastMD Viewer SHALL maintain a worker pool of up to four threads to for background file scanning and processing.
 - [REQ-303] While background indexing is active, the FastMD Viewer SHALL display a loading spinner and the current file count in the top menu bar.
@@ -33,9 +34,9 @@
 
 - [REQ-330] When the directory crawler enumerates a file, they shall emit a [FileChanged] event
 - [REQ-331] The [FileChanged] event notifies about one or more file events by using a [Files] list
-- [REQ-331] For each file, the [FileChanged] event shall have a [Path] property that contains the fully qualified path
-- [REQ-332] For each file, the [FileChanged] event shall have a [FileName] property that contains the file name
-- [REQ-333] For each file, the [FileChanged] event shall have a [Kind] property with values [Added, Deleted, Changed]
+- [REQ-332] The [FileChanged] event shall have a single [Kind] property with values [Added, Deleted, Changed]
+- [REQ-333] For each file, the [FileChanged] event shall have a [Path] property that contains the fully qualified path
+- [REQ-334] For each file, the [FileChanged] event shall have a [FileName] property that contains the file name
 
 ### Live Workspace File System Watcher
 - [REQ-401] For each content libray, the system SHALL maintain a file system watcher that recevies change notifications from the operating system

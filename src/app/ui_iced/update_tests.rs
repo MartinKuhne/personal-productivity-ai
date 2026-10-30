@@ -20,6 +20,7 @@ use crate::bus::events::user_command::UserCommand;
 use crate::config::{AppConfig, ContentLibrary, InMemoryConfigStorage};
 use crate::error_codes::menu as menu_codes;
 use crate::ui::CURRENT_SCHEMA_VERSION;
+use crate::ui::panel_layout::{RIGHT_PANEL_MAX_WIDTH_FRACTION, RIGHT_PANEL_MIN_WIDTH};
 use crate::ui::tree::flatten::FlatRow;
 use crate::ui_iced::app::{AppState, OverlayLayer, ViewModels, build_state};
 use crate::ui_iced::batch_dialog::BatchDialogViewModel;
@@ -340,6 +341,132 @@ fn test_tree_auto_fit_is_a_noop_on_a_non_positive_viewport() {
         state.app.layout().left_panel_width,
         Some(222.0),
         "a zero-width viewport must not clobber the remembered width"
+    );
+}
+
+// ─────────────────────── right (ToC) panel auto-fit, defect #14 ───────────────
+
+/// A ToC whose single heading is short enough that the fit lands on the
+/// right-panel minimum rather than on the content width.
+fn short_toc(state: &mut AppState) {
+    state.app.orchestrator.tabs.toc = vec![crate::markdown::ToCEntry::new("Intro", 1, "Intro")];
+}
+
+#[test]
+fn test_toc_auto_fit_sets_and_persists_the_right_panel_width() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    short_toc(&mut state);
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    let width = state
+        .app
+        .layout()
+        .right_panel_width
+        .expect("auto-fit must set a width");
+    assert!(
+        (width - RIGHT_PANEL_MIN_WIDTH).abs() < 1.0,
+        "a one-word ToC should land on the {RIGHT_PANEL_MIN_WIDTH}px floor, got {width}"
+    );
+    assert_eq!(state.app.persisted_ui_state.right_panel_width, Some(width));
+}
+
+#[test]
+fn test_toc_auto_fit_respects_the_ui_016_cap() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.orchestrator.tabs.toc = vec![crate::markdown::ToCEntry::new(
+        "Implementing the Fair Table Width Algorithm across every renderer in the workspace",
+        1,
+        "long",
+    )];
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    let width = state.app.layout().right_panel_width.unwrap_or_default();
+    assert!(
+        width <= VIEWPORT * RIGHT_PANEL_MAX_WIDTH_FRACTION + f32::EPSILON,
+        "auto-fit must not exceed the 30% cap, got {width}"
+    );
+}
+
+#[test]
+fn test_toc_auto_fit_is_a_noop_on_a_non_positive_viewport() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(0.0, 0.0);
+    state.app.layout.set_right_width(Some(222.0));
+
+    let _ = update(&mut state, Message::Layout(LayoutMessage::TocAutoFit));
+
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(222.0),
+        "a zero-width viewport must not clobber the remembered width"
+    );
+}
+
+/// Defect #14 — the production trigger: landing a `FileLoaded` result re-fits
+/// the right pane to the headings that document produced, without the caller
+/// having to ask for it.
+#[test]
+fn test_document_load_fits_the_right_panel_to_its_headings() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.layout.set_right_width(Some(400.0));
+    let path = PathBuf::from("/notes/short.md");
+    state.app.orchestrator.selection.select_file(path.clone());
+
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path,
+        content: Ok("# Intro".to_string()),
+    });
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(RIGHT_PANEL_MIN_WIDTH),
+        "a one-heading document must shrink the pane to the floor it actually needs"
+    );
+}
+
+/// A load the orchestrator drops — a file the user has already moved on from —
+/// must not re-fit: the fit follows the heading set that is actually on screen,
+/// not the mere arrival of a message.
+#[test]
+fn test_a_dropped_document_load_does_not_refit_the_right_panel() {
+    let (mut state, _storage) = fresh_state();
+    with_viewport(&mut state, VIEWPORT);
+    state.app.layout.set_right_width(Some(400.0));
+
+    let current = PathBuf::from("/notes/current.md");
+    state
+        .app
+        .orchestrator
+        .selection
+        .select_file(current.clone());
+    state.app.orchestrator.pending_file_load = Some(current);
+
+    let event = BackgroundEvent::Process(ProcessEvent::FileLoaded {
+        path: PathBuf::from("/notes/abandoned.md"),
+        content: Ok("# Intro".to_string()),
+    });
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::Background(Arc::new(event))),
+    );
+
+    assert!(
+        state.app.orchestrator.tabs.toc.is_empty(),
+        "the fixture assumes the orchestrator dropped this load"
+    );
+    assert_eq!(
+        state.app.layout().right_panel_width,
+        Some(400.0),
+        "a dropped load changes no headings, so it must not move the pane"
     );
 }
 
@@ -2642,6 +2769,106 @@ fn test_tools_close_requested_hides_the_dialog() {
     assert!(!state.overlay.tools.is_open());
 }
 
+/// Defect #6 (owner ruling D-3): a drag that settles is written through the
+/// injected geometry sink — and only when it settles.
+#[test]
+fn test_a_settled_tools_resize_is_persisted_through_the_injected_handler() {
+    let (mut state, storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+    let start = state.overlay.tools.card_size(state.viewport);
+
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeGripPressed),
+    );
+    // Mid-drag nothing has been written: a write per frame is exactly what
+    // [NFR-002] forbids.
+    assert!(
+        storage.saved_json().is_none(),
+        "a move must not touch the storage backend"
+    );
+
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeMoved {
+            at: Point::new(1_150.0, 780.0),
+        }),
+    );
+    let _ = update(
+        &mut state,
+        Message::Tools(ToolsDialogMessage::ResizeReleased),
+    );
+
+    let size = state
+        .overlay
+        .tools
+        .user_size()
+        .expect("the settled drag becomes the user's size");
+    assert_ne!(size, start, "the drag must have changed the size");
+    assert!(
+        size.width <= state.viewport.width - hoarfrost::surface::modal::VIEWPORT_GUTTER,
+        "and stayed inside the gutter: {size:?}"
+    );
+
+    let key = crate::ui_iced::tools_dialog::resize_storage_key();
+    let stored = UiStateGeometryStorage::new(&mut state.app.persisted_ui_state, storage.as_ref())
+        .load(&key)
+        .expect("the settled size must be in the live model");
+    assert_eq!(stored.size, size);
+    assert_eq!(
+        stored.position,
+        Point::ORIGIN,
+        "a centred modal has no user-set position"
+    );
+    let json = storage.saved_json().expect("the settle must write through");
+    assert!(
+        json.contains(&key),
+        "the write must reach the injected handler: {json}"
+    );
+}
+
+/// The remembered size comes back on the next open, so the card does not jump
+/// back to the fill every time the user opens it.
+#[test]
+fn test_a_reopened_tools_dialog_restores_the_dragged_size() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    let remembered = Size::new(700.0, 500.0);
+    let key = crate::ui_iced::tools_dialog::resize_storage_key();
+    state.app.persisted_ui_state.overlay_geometry.insert(
+        key,
+        MovableGeometry::new(Point::ORIGIN, remembered).encode(),
+    );
+
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+
+    assert_eq!(state.overlay.tools.user_size(), Some(remembered));
+    assert_eq!(state.overlay.tools.card_size(state.viewport), remembered);
+}
+
+/// A stored value that cannot be decoded reads as "never dragged", which is the
+/// same state a first launch is in — the card opens at the fill rather than
+/// collapsing on a corrupt number.
+#[test]
+fn test_a_corrupt_stored_tools_size_reads_as_never_dragged() {
+    let (mut state, _storage) = fresh_state();
+    state.viewport = Size::new(1200.0, 800.0);
+    state.app.persisted_ui_state.overlay_geometry.insert(
+        crate::ui_iced::tools_dialog::resize_storage_key(),
+        "nonsense,,,".to_owned(),
+    );
+
+    let _ = update(&mut state, Message::Command(UserCommand::OpenToolsDialog));
+
+    assert_eq!(state.overlay.tools.user_size(), None);
+    assert_eq!(
+        state.overlay.tools.card_size(state.viewport),
+        Size::new(960.0, 640.0),
+        "and the card is back on the defect #4 fill"
+    );
+}
+
 #[test]
 fn test_debug_entry_toggle_flips_one_row_only() {
     let (mut state, _storage) = fresh_state();
@@ -2770,6 +2997,56 @@ fn test_config_arrival_projects_onto_the_orchestrator_and_the_agent() {
             .available_dirs
             .contains(&PathBuf::from("/tmp/library"))
     );
+}
+
+#[test]
+fn test_config_arrival_labels_the_batch_dirs_with_the_library_names_in_order() {
+    // The Batch dialog must show the virtual library name, so the arrival
+    // projection has to carry the names alongside the real roots, in the
+    // same order, for every library.
+    let (mut state, _storage) = fresh_state();
+    let config = AppConfig {
+        content_libraries: vec![
+            ContentLibrary {
+                root_folder: r"C:\Users\someone\Documents\MyNotes".to_string(),
+                name: "MyNotes".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            },
+            ContentLibrary {
+                root_folder: r"D:\vault\work".to_string(),
+                name: "Work Vault".to_string(),
+                kind: "text".to_string(),
+                readonly: true,
+                priority: 1,
+            },
+        ],
+        ..Default::default()
+    };
+
+    apply_config_arrival(&mut state, &config);
+
+    let dialog = &state.app.orchestrator.dialogs.batch_dialog_config;
+    assert_eq!(
+        dialog.available_dirs,
+        vec![
+            PathBuf::from(r"C:\Users\someone\Documents\MyNotes"),
+            PathBuf::from(r"D:\vault\work"),
+        ],
+        "the real roots still travel with the labels"
+    );
+    assert_eq!(
+        dialog.available_dir_labels.len(),
+        dialog.available_dirs.len(),
+        "labels must stay index-aligned with the directories"
+    );
+    for (index, library) in config.content_libraries.iter().enumerate() {
+        assert_eq!(
+            dialog.available_dir_labels[index], library.name,
+            "label {index} must be the name of content library {index}"
+        );
+    }
 }
 
 #[test]
@@ -2977,6 +3254,121 @@ fn test_frame_tail_populates_the_tree_cache_and_clears_the_dirty_flag() {
     assert!(
         !state.app.orchestrator.selection.tree_dirty,
         "a freshly built tree is no longer dirty"
+    );
+}
+
+#[test]
+fn test_frame_tail_adds_new_paths_to_the_existing_tree_index() {
+    let (mut state, _storage) = fresh_state();
+    let library_root = PathBuf::from("/virtual/library");
+    state.app.orchestrator.content_libraries = vec![ContentLibrary {
+        root_folder: library_root.to_string_lossy().into_owned(),
+        name: "Library".to_string(),
+        kind: "text".to_string(),
+        readonly: true,
+        priority: 0,
+    }];
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(library_root.clone());
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let initial_tree = state
+        .app
+        .workspace_tree_cache
+        .root
+        .as_deref()
+        .expect("the frame tail builds the tree index") as *const _;
+
+    let docs = library_root.join("docs");
+    let note = docs.join("new.md");
+    assert!(state.app.orchestrator.workspace.add_dir(docs.clone()));
+    assert!(state.app.orchestrator.workspace.add_file(note.clone()));
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(docs.clone());
+    state.app.orchestrator.selection.tree_dirty = true;
+
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+
+    let updated_tree = state
+        .app
+        .workspace_tree_cache
+        .root
+        .as_deref()
+        .expect("the tree index remains available") as *const _;
+    assert_eq!(
+        initial_tree, updated_tree,
+        "additions must preserve the tree index"
+    );
+    assert!(state.models.left.rows.iter().any(|row| row.path == docs));
+    assert!(state.models.left.rows.iter().any(|row| row.path == note));
+}
+
+#[test]
+fn test_frame_tail_rebuilds_the_tree_index_after_a_file_removal() {
+    let (mut state, _storage) = fresh_state();
+    let library_root = PathBuf::from("/virtual/library");
+    state.app.orchestrator.content_libraries = vec![ContentLibrary {
+        root_folder: library_root.to_string_lossy().into_owned(),
+        name: "Library".to_string(),
+        kind: "text".to_string(),
+        readonly: true,
+        priority: 0,
+    }];
+    let note = library_root.join("old.md");
+    assert!(state.app.orchestrator.workspace.add_file(note.clone()));
+    state
+        .app
+        .orchestrator
+        .selection
+        .expanded_dirs
+        .insert(library_root.clone());
+    let _ = update(
+        &mut state,
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: Point::new(0.0, 0.0),
+        }),
+    );
+    let initial_reset_revision = state
+        .app
+        .workspace_tree_cache
+        .reset_revision
+        .expect("the frame tail records the tree index revision");
+    let initial_file_count = state.app.workspace_tree_cache.indexed_file_count;
+
+    let _ = update(
+        &mut state,
+        Message::Inbound(InboundMessage::FileChanged(
+            crate::bus::events::file::FileChanged::removed_one(note.clone()),
+        )),
+    );
+
+    assert_eq!(state.app.workspace_tree_cache.indexed_file_count, 0);
+    assert_ne!(
+        state.app.workspace_tree_cache.reset_revision,
+        Some(initial_reset_revision)
+    );
+    assert_eq!(initial_file_count, 1);
+    assert!(
+        state.models.left.rows.iter().all(|row| row.path != note),
+        "removed files must not remain in the flattened tree"
     );
 }
 

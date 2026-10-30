@@ -17,9 +17,10 @@
 //!   with the row's data, which is why the row payload carries its own
 //!   index — the view signature has no row index of its own, and the
 //!   striped-row parity needs it.
-//! * `Column::width(Length)` — `:650-653`; a `Length::Fixed` column
-//!   constrains its cell's layout max width to exactly that value
-//!   (`:302-311`), which is what keeps the FTWA assignment honoured.
+//! * `Column::width(Length)` — `:650-653`; a `Length::Fixed` column clamps
+//!   its cell's layout limits to that width (`:302-311`) — **but only for a
+//!   cell that is not fluid itself**, and never for the first column, which
+//!   iced rewrites (see the traps below).
 //! * `padding_x` / `separator_x` — `:162-190`; the inter-cell gap is
 //!   `2 * padding + separator` (`:258-259`), the identity this adapter's
 //!   [`COLUMN_SPACING`](crate::ui_iced::table_width::COLUMN_SPACING)
@@ -27,6 +28,37 @@
 //! * Style carries only the two separator colours — `:676-681` — so the
 //!   perimeter stroke around the grid is painted by wrapping the table in a
 //!   bordered container instead.
+//!
+//! # The two iced `Table` traps this adapter has to respect
+//!
+//! Both were found the hard way as defect #17, "a markdown table renders as an
+//! empty table", and both are invisible to a test that only *constructs* the
+//! widget — they show up in `Table::layout`, so `table_tests.rs` measures it.
+//!
+//! * **An all-`Fixed` column set is not honoured as written.** `Table::new`
+//!   folds the column widths with `Length::enclose` (`:103`), which turns
+//!   `Shrink` into a fluid length and nothing else
+//!   (`iced_core-0.14.0/src/length.rs:61-66`), so a table whose columns are
+//!   all `Fixed` folds to `Shrink` and `:129-133` then silently rewrites the
+//!   **first** column to `Length::Fill`. That column is laid out in the second
+//!   pass, whose resolved size comes from the cell's own intrinsic width
+//!   (`:399-407`: `self.width.fluid()` is `Shrink` for both `Shrink` and
+//!   `Fixed`, `iced_core-0.14.0/src/length.rs:51-56`), capped at the leftover
+//!   space — so a cell that pins itself to its column's solved width keeps
+//!   exactly that width, and [`scroll_width`] exists to make sure the leftover
+//!   really is that wide.
+//! * **A cell must never declare a fluid width under a fixed column.** The
+//!   first pass skips every cell whose own width `is_fill()` (`:293`) without
+//!   recording a measured maximum for its column, so `metrics.columns` stays
+//!   all-zero. The second pass then lays each fixed column out under
+//!   `Limits::width(Fixed(w))`, and `Limits::width` clamps the maximum **down**
+//!   to the recorded zero (`iced_core-0.14.0/src/layout/limits.rs:60-65`):
+//!   columns 1..n collapse to 0 px, column 0 swallows the viewport and the
+//!   table reads as empty. [`cell_element`] therefore hands a cell its own
+//!   column's `Length` rather than `Length::Fill`.
+//!
+//! A table with no columns must not reach the widget at all: `Table::layout`
+//! divides by the column count (`:241`) and panics.
 //!
 //! # What the document model does not carry
 //!
@@ -49,7 +81,7 @@ use crate::ui_iced::table_width::{
     solve_table_layout,
 };
 use hoarfrost::token::{shape, typography};
-use iced::widget::{container, scrollable, table, text};
+use iced::widget::{Space, container, scrollable, table, text};
 use iced::{Background, Element, Length};
 
 /// Border width of the table's perimeter frame, in logical pixels —
@@ -231,47 +263,13 @@ pub fn from_layout(layout: &TableLayout, palette: Palette) -> TableModel {
 pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
 
-    let columns = (0..model.column_count())
-        .map(|index| {
-            let header = model
-                .header_row()
-                .and_then(|row| row.get(index))
-                .cloned()
-                .unwrap_or(TableCellModel {
-                    spans: Vec::new(),
-                    width: 0.0,
-                    is_header: true,
-                });
-            table::column(
-                cell_element(Some(&header), false),
-                move |row: TableRowData| {
-                    let striped = TableModel::is_striped(row.index);
-                    cell_element(row.cells.get(index), striped)
-                },
-            )
-            .width(column_length(
-                model.column_widths.get(index).copied().unwrap_or(0.0),
-            ))
-        })
-        .collect::<Vec<_>>();
-
-    let grid = table::table(columns, model.body_rows_data())
-        .padding_x(CELL_PADDING_X)
-        .padding_y(CELL_PADDING_Y)
-        .separator_x(0.0)
-        .separator_y(0.0)
-        .width(if model.needs_horizontal_scroll {
-            Length::Fixed(model.total_width.max(0.0))
-        } else {
-            Length::Shrink
-        });
-
-    let framed: Element<'static, Message> = if model.needs_horizontal_scroll {
+    let grid = grid_element(model);
+    let framed: Element<'static, Message> = match grid {
         // `Scrollable::horizontal` sets `Direction::Horizontal` —
         // `iced_widget-0.14.2/src/scrollable.rs:133-135`.
-        scrollable(grid).horizontal().into()
-    } else {
-        grid.into()
+        Some(grid) if model.needs_horizontal_scroll => scrollable(grid).horizontal().into(),
+        Some(grid) => grid,
+        None => Space::new().height(0.0).into(),
     };
 
     container(framed)
@@ -287,12 +285,81 @@ pub fn table_widget(model: &TableModel) -> Element<'static, Message> {
         .into()
 }
 
+/// Builds the iced `Table` itself, `None` when the model has no columns.
+///
+/// Every column is pinned to its solved width **and every cell is pinned to
+/// the same `Length`** — see the module docs for why the two must agree.
+fn grid_element(model: &TableModel) -> Option<Element<'static, Message>> {
+    if model.column_count() == 0 {
+        return None;
+    }
+
+    let columns = (0..model.column_count())
+        .map(|index| {
+            let width = column_length(model.column_widths.get(index).copied().unwrap_or(0.0));
+            let header = model
+                .header_row()
+                .and_then(|row| row.get(index))
+                .cloned()
+                .unwrap_or(TableCellModel {
+                    spans: Vec::new(),
+                    width: 0.0,
+                    is_header: true,
+                });
+            table::column(
+                cell_element(Some(&header), false, width),
+                move |row: TableRowData| {
+                    let striped = TableModel::is_striped(row.index);
+                    cell_element(row.cells.get(index), striped, width)
+                },
+            )
+            .width(width)
+        })
+        .collect::<Vec<_>>();
+
+    let grid = table::table(columns, model.body_rows_data())
+        .padding_x(CELL_PADDING_X)
+        .padding_y(CELL_PADDING_Y)
+        .separator_x(0.0)
+        .separator_y(0.0)
+        .width(if model.needs_horizontal_scroll {
+            scroll_width(model)
+        } else {
+            Length::Shrink
+        });
+
+    Some(grid.into())
+}
+
+/// The width the grid is pinned to when it needs the horizontal-scroll
+/// fallback.
+///
+/// [`TableModel::total_width`] is the solver's own accounting — columns plus
+/// their gutters — and excludes the two outer padding bands the iced `Table`
+/// paints around the grid. Pinning to the bare `total_width` would leave the
+/// first column `2 * CELL_PADDING_X` narrower than it was solved for, because
+/// iced hands that column whatever the fixed table width has left over
+/// (module docs), so the bands are added back here.
+#[must_use]
+pub fn scroll_width(model: &TableModel) -> Length {
+    Length::Fixed((model.total_width + 2.0 * CELL_PADDING_X).max(0.0))
+}
+
 /// Renders one cell.
 ///
 /// A cell with no content still allocates [`EMPTY_CELL_HEIGHT`] so a blank
 /// cell holds its row open.
+///
+/// `column` is the `Length` the cell's own column is pinned to, and the cell
+/// declares exactly the same one: a cell that declared `Length::Fill` under a
+/// fixed column was silently skipped by iced's first layout pass and collapsed
+/// the whole table (defect #17 — see the module docs).
 #[must_use]
-pub fn cell_element(cell: Option<&TableCellModel>, striped: bool) -> Element<'static, Message> {
+pub fn cell_element(
+    cell: Option<&TableCellModel>,
+    striped: bool,
+    column: Length,
+) -> Element<'static, Message> {
     let palette = Palette::fastmd_dark();
     let spans: &[SpanModel] = cell.map_or(&[][..], |cell| cell.spans.as_slice());
 
@@ -303,7 +370,7 @@ pub fn cell_element(cell: Option<&TableCellModel>, striped: bool) -> Element<'st
     };
 
     container(content)
-        .width(Length::Fill)
+        .width(column)
         .height(if spans.is_empty() {
             Length::Fixed(EMPTY_CELL_HEIGHT)
         } else {

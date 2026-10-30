@@ -2875,3 +2875,99 @@ fn test_the_spec_carries_what_it_was_built_with() {
     assert_eq!(spec.controls().len(), CARD.len());
     assert!(!spec.controls()[3].enabled);
 }
+
+// ===========================================================================
+// 10. User resize (owner ruling D-3)
+// ===========================================================================
+//
+// A card the user has dragged is no longer the §4.6.2 fill: the wanted size is
+// the user's, and only the two framework bounds remain — the card's own floor
+// and the gutter. These are pure arithmetic, so they are checked directly.
+
+/// The roomy viewport every sizing test here starts from.
+const ROOMY: Size = Size::new(1200.0, 800.0);
+
+/// The floors a Tools-class card is allowed down to.
+const FLOORS: ResizeFloors = ResizeFloors::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN);
+
+#[test]
+fn test_a_user_size_that_fits_is_taken_verbatim() {
+    let size = FLOORS.resolve(Size::new(600.0, 500.0), ROOMY);
+
+    assert_eq!(size, Size::new(600.0, 500.0));
+}
+
+#[test]
+fn test_a_user_size_below_the_width_floor_is_raised_to_it() {
+    let size = FLOORS.resolve(Size::new(100.0, 500.0), ROOMY);
+
+    assert_eq!(size.width, EDITOR_WIDTH_MIN);
+    assert_eq!(size.height, 500.0);
+}
+
+#[test]
+fn test_a_user_size_below_the_height_floor_is_raised_to_it() {
+    let size = FLOORS.resolve(Size::new(600.0, 40.0), ROOMY);
+
+    assert_eq!(size.width, 600.0);
+    assert_eq!(size.height, TOOLS_HEIGHT_MIN);
+}
+
+#[test]
+fn test_a_user_size_beyond_the_gutter_is_pulled_back_to_it() {
+    for viewport in [ROOMY, Size::new(1366.0, 768.0)] {
+        let size = FLOORS.resolve(Size::new(9_000.0, 9_000.0), viewport);
+
+        assert_eq!(
+            size,
+            Size::new(
+                viewport.width - VIEWPORT_GUTTER,
+                viewport.height - VIEWPORT_GUTTER
+            ),
+            "a drag past the gutter must stop at the gutter on {viewport:?}"
+        );
+    }
+}
+
+#[test]
+fn test_the_initial_fill_is_not_a_ceiling_on_a_user_size() {
+    // The 80% fill is the card's INITIAL size, not its maximum: a dragged card
+    // is allowed past it, and only the gutter stops it. `ROOMY`'s fill is
+    // 960x640, so both numbers here are above it.
+    let size = FLOORS.resolve(Size::new(1_100.0, 780.0), ROOMY);
+
+    assert_eq!(size.width, 1_100.0, "the width may exceed the fill");
+    assert_eq!(
+        size.height,
+        ROOMY.height - VIEWPORT_GUTTER,
+        "the gutter still bounds it"
+    );
+}
+
+#[test]
+fn test_the_gutter_beats_the_floor_when_the_viewport_cannot_hold_it() {
+    // 540x300 leaves 508x268 after the gutter — below both floors. The card
+    // shrinks rather than overflow (§4.6.2 gutter rule, last).
+    let viewport = Size::new(540.0, 300.0);
+
+    let size = FLOORS.resolve(Size::new(1_000.0, 1_000.0), viewport);
+
+    assert_eq!(size, Size::new(508.0, 268.0));
+    assert!(size.width < EDITOR_WIDTH_MIN);
+    assert!(size.height < TOOLS_HEIGHT_MIN);
+}
+
+#[test]
+fn test_a_non_finite_user_size_collapses_to_the_floor() {
+    let size = FLOORS.resolve(Size::new(f32::NAN, f32::INFINITY), ROOMY);
+
+    assert_eq!(size, Size::new(EDITOR_WIDTH_MIN, TOOLS_HEIGHT_MIN));
+    assert!(size.width.is_finite() && size.height.is_finite());
+}
+
+#[test]
+fn test_a_zero_viewport_cannot_produce_a_negative_size() {
+    let size = FLOORS.resolve(Size::new(600.0, 500.0), Size::ZERO);
+
+    assert_eq!(size, Size::ZERO);
+}

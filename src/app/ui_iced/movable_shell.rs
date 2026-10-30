@@ -60,8 +60,9 @@ const DEBUG_VIEWPORT_ID: &str = "movable.agent_debug.viewport";
 /// The grip glyph shown at the leading edge of a movable title bar.
 const TITLE_GRIP_GLYPH: &str = "⣿";
 
-/// The ◢ glyph painted in the footer's resize corner (§4.7.1).
-const RESIZE_GRIP_GLYPH: &str = "◢";
+// The footer's resize corner draws [`strings::ICON_RESIZE_GRIP`], the same
+// mark the centred modals' grips draw (defect #6) — one constant, so a surface
+// that can be resized always looks like every other one that can.
 
 /// The × glyph painted in the title bar's Close button.
 const CLOSE_GLYPH: &str = "×";
@@ -76,7 +77,10 @@ const TITLE_GRIP_GAP: f32 = 6.0;
 const DOCK_BUTTON_FOCUS_ID: &str = "movable.title_bar.dock";
 
 /// Focus id for the Close button in the title bar.
-const CLOSE_BUTTON_FOCUS_ID: &str = "movable.title_bar.close";
+///
+/// Public so a card's own test can address the shell-supplied `Close ×`
+/// rather than restating the string ([RUST-021]).
+pub const CLOSE_BUTTON_FOCUS_ID: &str = "movable.title_bar.close";
 
 /// Stable iced widget id of one movable card's content viewport.
 ///
@@ -208,6 +212,13 @@ fn dock_action(card: MovableCard) -> Button<'static, Message> {
 }
 
 /// The title bar's `Close ×` trailing action (`UIF-MOV-001`).
+///
+/// The `×` glyph measures below §3.1's icon-only floor, so this control *is*
+/// an icon-only button and `UIF-ATOM-001`'s icon-only cell makes the tooltip
+/// mandatory — it is the only place the label exists. Built with
+/// [`Button::with_tooltip`] carrying [`strings::MOVABLE_CLOSE_TOOLTIP`]; the
+/// pinned test in the sidecar asserts the icon-only rule is both engaged and
+/// satisfied.
 fn close_action(card: MovableCard) -> Button<'static, Message> {
     Button::new(
         ButtonVariant::Ghost,
@@ -216,6 +227,7 @@ fn close_action(card: MovableCard) -> Button<'static, Message> {
         CLOSE_BUTTON_FOCUS_ID,
     )
     .palette(Palette::pro())
+    .with_tooltip(strings::MOVABLE_CLOSE_TOOLTIP)
 }
 
 /// The §4.7.1 filter / control bar, [`FILTER_BAR_HEIGHT`] tall.
@@ -246,7 +258,7 @@ fn footer<'a>(
     palette: Palette,
 ) -> Element<'a, Message> {
     let grip = mouse_area(
-        container(text(RESIZE_GRIP_GLYPH).color(palette.text_muted))
+        container(text(strings::ICON_RESIZE_GRIP).color(palette.text_muted))
             .width(Length::Fixed(RESIZE_HANDLE_SIZE))
             .height(Length::Fixed(RESIZE_HANDLE_SIZE))
             .align_x(Alignment::Center)

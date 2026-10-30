@@ -78,11 +78,14 @@ mod tests;
 use hoarfrost::widget::button::ButtonVariant;
 use hoarfrost::widget::button_widget::Button;
 use hoarfrost::widget::text_input::{InputKind, TextInput};
-use iced::widget::{Column, Row, checkbox, container, pick_list, rule, scrollable, table, text};
+use iced::widget::{
+    Column, Row, Space, checkbox, container, pick_list, rule, scrollable, table, text,
+};
 use iced::{Alignment, Element, Length};
 
 use crate::background::logs::BackgroundLogs;
 use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
+use crate::bus::events::user_command::UserCommand;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
@@ -216,6 +219,13 @@ pub const LOG_SEARCH_INPUT_FOCUS_ID: &str = "background_logs_search_input";
 
 /// Stable focus id for the Clear button in the log filter row.
 pub const CLEAR_BUTTON_ID: &str = "background_logs_clear_button";
+
+/// Stable focus id for the `Close` button in the movable log card's footer
+/// (§4.7.1 footer).
+///
+/// Named once here so the view and any reducer-side focus routing cannot
+/// drift apart ([RUST-021], AGENTS §5).
+pub const LOGS_CLOSE_BUTTON_ID: &str = "logs_close";
 
 /// Formatted timestamp of a log row ([`TIMESTAMP_FORMAT`]).
 ///
@@ -682,20 +692,39 @@ impl BackgroundLogsViewModel {
 /// 12:04:31.480  [Watcher]  File modified: note.md
 /// ```
 ///
+/// A plain reassembly of [`logs_controls`] and [`logs_viewport`], kept for
+/// the callers that want the bare body. The framed, movable form is
+/// [`background_logs_movable_card`].
+#[must_use]
+pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_, Message> {
+    Column::with_children(vec![
+        logs_controls(view_model).into(),
+        rule::horizontal(SEPARATOR_WIDTH).into(),
+        logs_viewport(view_model),
+    ])
+    .spacing(PANEL_PADDING)
+    .padding(PANEL_PADDING)
+    .into()
+}
+
+/// The log viewer's filter / control bar contents (§4.7.1 band 2).
+///
+/// Split out of [`background_logs_view`] so the very same row can fill the
+/// shared movable shell's control band instead of being restated there
+/// ([RUST-021], [RUST-023]).
+///
 /// Emitted messages:
 /// * search box → [`LogsMessage::SearchChanged`]
 /// * category pick → [`LogsMessage::CategoryFilterChanged`]
 /// * auto-scroll checkbox → [`LogsMessage::AutoScrollToggled`]
 /// * Clear → [`LogsMessage::Cleared`]
-/// * any scroll of the list → [`LogsMessage::ScrollReported`], the input
-///   the reducer feeds to [`should_follow`]
 ///
-/// The filter row, the rule and the scrollable table are **always
-/// allocated** — an empty list renders an empty table rather than a
-/// different widget tree, so the shape never changes across the
-/// empty/non-empty transition (AGENTS §6).
+/// Every control is **always allocated** — the row's shape never changes
+/// across the empty/non-empty transition (AGENTS §6).
+///
+/// Purity: pure view over `view_model`.
 #[must_use]
-pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_, Message> {
+pub fn logs_controls(view_model: &BackgroundLogsViewModel) -> Row<'_, Message> {
     let palette = Palette::fastmd_dark();
 
     let search_label = text(strings::SEARCH_LABEL)
@@ -736,7 +765,7 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
     )
     .palette(Palette::pro());
 
-    let filter_row = Row::with_children(vec![
+    Row::with_children(vec![
         search_label.into(),
         search_field.into(),
         text(strings::CATEGORY_LABEL)
@@ -748,28 +777,132 @@ pub fn background_logs_view(view_model: &BackgroundLogsViewModel) -> Element<'_,
         clear_button.into(),
     ])
     .spacing(FILTER_SPACING)
-    .align_y(Alignment::Center);
+    .align_y(Alignment::Center)
+}
 
-    let body: Element<'_, Message> = if view_model.access_error {
+/// The log list's viewport contents (§4.7.1 band 3).
+///
+/// The access-error branch is a **view-model** branch, not a widget-state
+/// one (AGENTS §6): an unreadable buffer says why it is empty rather than
+/// collapsing into a blank table.
+///
+/// Purity: pure view over `view_model`.
+#[must_use]
+pub fn logs_viewport(view_model: &BackgroundLogsViewModel) -> Element<'_, Message> {
+    if view_model.access_error {
         container(
             text(strings::BACKGROUND_MGR_ACCESS_ERROR)
                 .size(ROW_TEXT_SIZE)
-                .color(palette.error),
+                .color(Palette::fastmd_dark().error),
         )
         .padding(PANEL_PADDING)
         .into()
     } else {
         log_table(&view_model.entries)
-    };
+    }
+}
 
-    Column::with_children(vec![
-        filter_row.into(),
-        rule::horizontal(SEPARATOR_WIDTH).into(),
-        body,
+/// The Background Operations Log's dismiss intent.
+///
+/// Not a new message variant: this is the same [`UserCommand`] the menu
+/// entry uses, and the one the title-bar `Close ×` is translated into by
+/// the reducer, so there is exactly one path out of the window
+/// ([FMD-068]).
+///
+/// Purity: pure.
+#[must_use]
+pub fn logs_close_command() -> Message {
+    Message::Command(UserCommand::ToggleBackgroundLogs(false))
+}
+
+/// The footer `Close` label mounted in a fixed
+/// [`BUTTON_MIN_WIDTH`](hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH)
+/// box.
+///
+/// `Button::is_icon_only` is a **geometric** test — any content no wider
+/// and no taller than `size::CONTROL_SM` (28 pt) is classed icon-only, and
+/// an icon-only button carrying no tooltip trips a `debug_assert!` in
+/// `Button::outer_size`. Pinning the label box to the dialog minimum
+/// (64 pt) means the content can never fall to that floor, whatever the
+/// font measurement says; the control stays a labelled button by
+/// construction rather than by luck.
+fn close_button_label_box() -> Column<'static, Message> {
+    Column::new()
+        .width(Length::Fixed(
+            hoarfrost::surface::input_dialog::BUTTON_MIN_WIDTH,
+        ))
+        .align_x(Alignment::Center)
+        .push(
+            text(strings::CLOSE_BUTTON)
+                .size(ROW_TEXT_SIZE)
+                .color(Palette::fastmd_dark().text_strong),
+        )
+}
+
+/// The footer `Close` control as a bare [`Button`], **before** it is
+/// mounted.
+///
+/// Split out so a test can read the control's own reported state —
+/// `variant`, `focus_id`, `is_icon_only`, `tooltip_violation` — instead of
+/// digging it back out of an [`Element`], which exposes no such accessors.
+fn logs_close_button_widget() -> Button<'static, Message> {
+    Button::new(
+        ButtonVariant::Secondary,
+        close_button_label_box(),
+        logs_close_command(),
+        LOGS_CLOSE_BUTTON_ID,
+    )
+    .palette(Palette::pro())
+}
+
+/// The movable log card's footer status line (§4.7.1 footer).
+///
+/// Reads `<n> entries …… [Close]`: the shell appends its own `Fill` spacer
+/// and the ◢ grip after this element, so the finished band is
+/// `count … Close … ◢`.
+///
+/// Purity: pure view over `view_model`.
+#[must_use]
+pub fn footer_status(view_model: &BackgroundLogsViewModel) -> Element<'_, Message> {
+    let palette = Palette::fastmd_dark();
+
+    let count = text(strings::movable_row_count(view_model.entries.len()))
+        .size(ROW_TEXT_SIZE)
+        .color(palette.text_muted);
+
+    Row::with_children(vec![
+        count.into(),
+        Space::new().width(Length::Fill).into(),
+        logs_close_button_widget().into(),
     ])
-    .spacing(PANEL_PADDING)
-    .padding(PANEL_PADDING)
+    .spacing(FILTER_SPACING)
+    .align_y(Alignment::Center)
     .into()
+}
+
+/// The Background Operations Log rendered in the §4.7.1 movable Band-1
+/// silhouette (`UIF-MOV-001` … `UIF-MOV-004`).
+///
+/// Same content as [`background_logs_view`] — the filter row from
+/// [`logs_controls`], the list from [`logs_viewport`] — but framed by the
+/// shared shell, which supplies the **opaque** card background, the
+/// draggable title bar with its `Dock` / `Close ×` actions, the sunken
+/// viewport and the footer's ◢ resize grip, all sized from the host's own
+/// geometry rather than this module's constants.
+///
+/// Purity: pure view over `host` and `view_model`.
+#[must_use]
+pub fn background_logs_movable_card<'a>(
+    host: &hoarfrost::surface::movable::MovableHost,
+    view_model: &'a BackgroundLogsViewModel,
+) -> Element<'a, Message> {
+    crate::ui_iced::movable_shell::movable_shell(
+        host,
+        crate::ui_iced::message::MovableCard::Logs,
+        logs_controls(view_model),
+        logs_viewport(view_model),
+        footer_status(view_model),
+    )
 }
 
 /// The log table inside its scrollable ([`LOG_SCROLLABLE_ID`]).

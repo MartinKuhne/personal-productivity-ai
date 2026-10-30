@@ -1955,6 +1955,13 @@ pub fn build_state(
             .iter()
             .map(|lib| PathBuf::from(&lib.root_folder))
             .collect(),
+        // Virtual label per root, taken from the same iterator order so the
+        // index alignment holds.
+        available_dir_labels: config
+            .content_libraries
+            .iter()
+            .map(|lib| lib.name.clone())
+            .collect(),
         ..Default::default()
     };
     // First-run auto-show of the About window.
@@ -2000,6 +2007,17 @@ pub fn build_state(
 
     let user_file_operation_worker =
         crate::background::UserFileOperationWorker::spawn(background_task.tx.clone());
+
+    // Defect #12 / F-2: a pane width remembered by a previous session has to
+    // reach the pane grid, not just `PanelLayout`. Without this replay the
+    // grid boots at the seeded ratios of `middle_band_configuration()` every
+    // time and the restore is invisible. The replay is verbatim — the grid is
+    // told exactly what `PanelLayout` remembers.
+    let viewport = persisted::restore_window_size(&persisted)
+        .unwrap_or(Size::new(WINDOW_WIDTH_POINTS, WINDOW_HEIGHT_POINTS));
+    let (mut panes, band) = layout::middle_band_state();
+    layout::apply_pane_widths(&mut panes, &band, &layout, viewport.width);
+
     let app = FastMdApp::from_parts(
         crate::orchestrator::AppOrchestrator {
             content_libraries: config.content_libraries.clone(),
@@ -2046,10 +2064,6 @@ pub fn build_state(
         layout,
         persisted,
     );
-
-    let viewport = persisted::restore_window_size(&app.persisted_ui_state)
-        .unwrap_or(Size::new(WINDOW_WIDTH_POINTS, WINDOW_HEIGHT_POINTS));
-    let (panes, band) = layout::middle_band_state();
 
     // The view-model half is seeded here so `view` is renderable from the
     // very first frame; every later frame re-snapshots it at the end of

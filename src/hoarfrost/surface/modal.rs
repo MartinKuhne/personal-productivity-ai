@@ -119,6 +119,11 @@
 //! cannot see all of is worse than a card that is narrower than its
 //! designer wanted.
 //!
+//! A card the **user resizes** is bounded by the same machinery rather than
+//! a second copy of it: [`ResizeFloors::resolve`] hands the dragged extent
+//! to [`AxisPolicy::resolve`], so the gutter keeps exactly one owner no
+//! matter which way the size was arrived at.
+//!
 //! # Z-order integration
 //!
 //! The host registers as [`SurfaceKind::Modal`] — Band 3,
@@ -473,6 +478,70 @@ impl ModalSizing {
                 finite(viewport.y) + (height - card_height) / 2.0,
             ),
             Size::new(card_width, card_height),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// User resize (§4.6.2, owner ruling D-3)
+// ---------------------------------------------------------------------------
+
+/// The floor a **user-dragged** modal card never goes below, per axis.
+///
+/// §4.6.2 sizes a modal from the viewport and the content and has no notion
+/// of a card the reader makes smaller. Defect #6's owner ruling (D-3) added
+/// one — the initial size stays whatever [`ModalSizing`] solves and a drag
+/// overrides it — so the drag needs its own floor pair, and the clamp it is
+/// applied with has to stay the framework's rather than a second copy in
+/// whichever card installed the grip.
+///
+/// Deliberately **floors only**. The ceiling a dragged card cannot cross is
+/// [`VIEWPORT_GUTTER`], which [`AxisPolicy::resolve`] applies last and
+/// always wins; a `max` field here would be a second authority on the same
+/// window edge, which is the mistake [`AxisPolicy`] exists to prevent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResizeFloors {
+    /// Smallest width a drag may leave the card.
+    pub width: f32,
+    /// Smallest height a drag may leave the card.
+    pub height: f32,
+}
+
+impl ResizeFloors {
+    /// Both floors stated directly.
+    #[must_use]
+    pub const fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
+
+    /// Resolve a size the user dragged against the viewport.
+    ///
+    /// The order is §4.6.2's own, reused rather than restated: each axis
+    /// goes through [`AxisPolicy::resolve`] with the dragged extent as its
+    /// `Desired::Fixed` want, this policy's floor for that axis, and
+    /// [`Cap::None`] — so the shared [`VIEWPORT_GUTTER`] clamp is applied
+    /// last and wins exactly as it is for the initial policy. A floor
+    /// therefore loses to a small window for the same reason and by the same
+    /// code path as in [`ModalSizing::solve`].
+    ///
+    /// Non-finite input collapses the way [`ModalSizing::solve`] collapses a
+    /// `NaN` viewport: a `NaN` extent reads as a zero want, which the floor
+    /// lifts back to a legal card instead of poisoning every hit test
+    /// downstream.
+    #[must_use]
+    pub fn resolve(self, wanted: Size, viewport: Size) -> Size {
+        let axis = |wanted: f32, floor: f32, available: f32| {
+            AxisPolicy {
+                desired: Desired::Fixed(finite(wanted)),
+                min: floor,
+                max: Cap::None,
+            }
+            .resolve(finite(available), 0.0)
+        };
+
+        Size::new(
+            axis(wanted.width, self.width, viewport.width),
+            axis(wanted.height, self.height, viewport.height),
         )
     }
 }

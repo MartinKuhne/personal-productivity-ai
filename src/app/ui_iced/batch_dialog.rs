@@ -271,8 +271,17 @@ impl fmt::Display for BatchOption {
 /// sidecar asserts field by field.
 #[derive(Clone, Debug)]
 pub struct BatchDialogViewModel {
-    /// Directories the user may pick as the batch root.
+    /// Directories the user may pick as the batch root — the **real**
+    /// filesystem paths, index-aligned with
+    /// [`Self::available_dir_labels`].
     pub available_dirs: Vec<PathBuf>,
+    /// Virtual label for each entry in [`Self::available_dirs`], shown in
+    /// the directory combo in place of the real filesystem path.
+    ///
+    /// Index-aligned: `available_dir_labels[i]` labels `available_dirs[i]`.
+    /// A missing or empty entry means no virtual name is known for that
+    /// directory and the option falls back to its real path.
+    pub available_dir_labels: Vec<String>,
     /// Discovered prompt candidates.
     pub available_prompts: Vec<PromptInfo>,
     /// The picked directory index.
@@ -295,6 +304,7 @@ impl Default for BatchDialogViewModel {
     fn default() -> Self {
         Self {
             available_dirs: Vec::new(),
+            available_dir_labels: Vec::new(),
             available_prompts: Vec::new(),
             selected_dir_idx: None,
             selected_prompt_idx: None,
@@ -332,6 +342,7 @@ impl BatchDialogViewModel {
     pub fn from_config(config: &BatchDialogConfig) -> Self {
         Self {
             available_dirs: config.available_dirs.clone(),
+            available_dir_labels: config.available_dir_labels.clone(),
             available_prompts: config.available_prompts.clone(),
             selected_dir_idx: config.selected_dir_idx,
             selected_prompt_idx: config.selected_prompt_idx,
@@ -428,12 +439,30 @@ impl BatchDialogViewModel {
     }
 
     /// The directory pick-list options, in snapshot order.
+    ///
+    /// Each option is labelled with the **virtual** name of its library
+    /// (`LibraryName`, the same label the VFS addresses that library by),
+    /// never the real filesystem path behind it. When no virtual name is
+    /// known at that index — a missing or empty entry — the option falls
+    /// back to the real path so the row is never blank.
+    ///
+    /// The label is display-only: [`Self::build_batch_config`] keeps
+    /// carrying the real [`PathBuf`], which is what the batch runner globs.
     #[must_use]
     pub fn directory_options(&self) -> Vec<BatchOption> {
         self.available_dirs
             .iter()
             .enumerate()
-            .map(|(idx, dir)| BatchOption::new(idx, dir.display().to_string()))
+            .map(|(idx, dir)| {
+                let label = self
+                    .available_dir_labels
+                    .get(idx)
+                    .map(String::as_str)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| dir.display().to_string());
+                BatchOption::new(idx, label)
+            })
             .collect()
     }
 
@@ -744,10 +773,10 @@ fn apply_field<T: PartialEq>(field: &mut T, value: T) -> bool {
 /// │ ──────────────────────────────────────────────────────────────── │
 /// │ Directory:                                            (required) │
 /// │ [ Select directory...                                       v ]  │
-/// │ Pattern:                                                    hint │
-/// │ [ *.md                                                     | ]   │
 /// │ Mode:                                                            │
 /// │ ( ) File   ( ) Directory                                         │
+/// │ Pattern:                                                    hint │
+/// │ [ *.md                                                     | ]   │
 /// │ Concurrency:                                                     │
 /// │ [ 4 v ]                                                          │
 /// │ Prompt:                                                          │
@@ -788,6 +817,60 @@ fn card_title() -> Element<'static, Message> {
         Palette::fastmd_dark().text_strong,
     )
     .into()
+}
+
+/// Row key: the directory pick-list row.
+pub const ROW_DIRECTORY: &str = "directory";
+
+/// Row key: the wildcard-pattern input row.
+pub const ROW_PATTERN: &str = "pattern";
+
+/// Row key: the File / Directory mode radio row.
+pub const ROW_MODE: &str = "mode";
+
+/// Row key: the concurrency pick-list row.
+pub const ROW_CONCURRENCY: &str = "concurrency";
+
+/// Row key: the prompt-candidate section.
+pub const ROW_PROMPT: &str = "prompt";
+
+/// The order the configuration card stacks its labelled rows.
+///
+/// This is the single source of truth for that order: the configuration
+/// card files each assembled row under its key and mounts them by walking
+/// this list, so a test asserts the very list the view consumes rather
+/// than a re-typed copy of it.
+///
+/// `mode` comes immediately after `directory`, ahead of the conditional
+/// `pattern` row: the mode selection is what decides *whether* the
+/// pattern field exists at all, so the control that governs a row's
+/// visibility must precede the row it governs. The `pattern` row is
+/// present only in File mode.
+#[must_use]
+pub fn config_body_order(mode: BatchMode) -> &'static [&'static str] {
+    if mode == BatchMode::Directory {
+        &[ROW_DIRECTORY, ROW_MODE, ROW_CONCURRENCY, ROW_PROMPT]
+    } else {
+        &[
+            ROW_DIRECTORY,
+            ROW_MODE,
+            ROW_PATTERN,
+            ROW_CONCURRENCY,
+            ROW_PROMPT,
+        ]
+    }
+}
+
+/// Removes the row filed under `key`, so every assembled row is mounted
+/// exactly once.
+///
+/// [RUST-020]: mutates only the caller's slot list.
+fn take_row<'a>(
+    slots: &mut Vec<(&'static str, Element<'a, Message>)>,
+    key: &'static str,
+) -> Option<Element<'a, Message>> {
+    let index = slots.iter().position(|(row_key, _)| *row_key == key)?;
+    Some(slots.remove(index).1)
 }
 
 /// The idle configuration card.
@@ -884,12 +967,44 @@ fn config_card<'a>(view_model: &'a BatchDialogViewModel, viewport: Size) -> Elem
 
     let prompt = prompt_section(view_model);
 
-    let mut body_rows = vec![directory];
+    // Every row is assembled first, then mounted by walking
+    // `config_body_order`, so the stacking order lives in exactly one
+    // place that the sidecar asserts directly.
+    let mut body_slots: Vec<(&'static str, Element<'a, Message>)> = Vec::with_capacity(5);
+    body_slots.push((ROW_DIRECTORY, directory));
     if let Some(pattern) = pattern {
-        body_rows.push(pattern);
+        body_slots.push((ROW_PATTERN, pattern));
     }
-    body_rows.extend([mode, concurrency, prompt]);
-    let body = Column::with_children(body_rows).spacing(space::MD);
+    body_slots.push((ROW_MODE, mode));
+    body_slots.push((ROW_CONCURRENCY, concurrency));
+    body_slots.push((ROW_PROMPT, prompt));
+
+    let body = Column::with_children(
+        config_body_order(view_model.mode)
+            .iter()
+            .filter_map(|key| take_row(&mut body_slots, key))
+            .collect::<Vec<_>>(),
+    )
+    // The rows are stacked on `space.sm` — the rung the spacing scale
+    // documents as *form row spacing* (`token::space::SM`). The card used
+    // to spend `space.md` here, which the same scale documents as the
+    // *horizontal* padding inside a button, input, tab or menu row, so the
+    // rows were sitting on a rung that describes something else entirely
+    // and the dialog read as puffed-up next to the rest of the UI.
+    //
+    // This gap is the only vertical term this card owns. Everything inside
+    // a row — `20px` header, `4px` band gap, `32px` control slot, `4px`
+    // band gap, `16px` reserved caption band — is fixed by
+    // [`form_field`] and §3B.1, and the caption band stays reserved even on
+    // a row with nothing to say because `UIF-PRIN-003` forbids a validation
+    // message from moving the rows below it. See
+    // `compacting_the_rows_left_the_reserved_bands_intact`.
+    .spacing(space::SM);
+    debug_assert!(
+        body_slots.is_empty(),
+        "a Batch card row was assembled but never mounted: {:?}",
+        body_slots.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+    );
 
     let card = modal_card(
         Column::with_children(vec![

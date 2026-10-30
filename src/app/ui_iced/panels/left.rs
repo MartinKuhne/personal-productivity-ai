@@ -1267,7 +1267,7 @@ fn library_for_path<'a>(
 /// discovered directories); the only difference is whether the *final*
 /// component is a file or a directory, selected by `leaf_is_dir`. Paths
 /// outside every library root are ignored.
-fn insert_path_into_tree(
+pub(crate) fn insert_path_into_tree(
     root_node: &mut TreeNode,
     libraries: &[ContentLibrary],
     path: &std::path::Path,
@@ -1303,6 +1303,41 @@ fn insert_path_into_tree(
     }
 }
 
+/// Builds the complete, unfiltered directory hierarchy used as the persistent
+/// base for incremental workspace additions.
+#[must_use]
+pub(crate) fn build_workspace_tree_index(app: &FastMdApp) -> TreeNode {
+    let mut root_node = workspace_tree_root(app.content_libraries());
+
+    for path in &app.workspace().all_files {
+        insert_path_into_tree(&mut root_node, app.content_libraries(), path, false);
+    }
+    for dir in &app.workspace().all_dirs {
+        insert_path_into_tree(&mut root_node, app.content_libraries(), dir, true);
+    }
+
+    root_node
+}
+
+fn workspace_tree_root(libraries: &[ContentLibrary]) -> TreeNode {
+    let mut root_node = TreeNode::new(
+        strings::DEFAULT_WORKSPACE_NAME.to_string(),
+        std::path::PathBuf::new(),
+        true,
+    );
+
+    for lib in libraries {
+        let lib_node_name = lib.name.clone();
+        let lib_root_path = std::path::PathBuf::from(&lib.root_folder);
+        root_node
+            .children
+            .entry(lib_node_name.clone())
+            .or_insert_with(|| TreeNode::new(lib_node_name.clone(), lib_root_path, true));
+    }
+
+    root_node
+}
+
 /// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
 ///
 /// UI-017 ordering and UI-018 tag pruning are applied by [`flatten_tree`]
@@ -1310,6 +1345,10 @@ fn insert_path_into_tree(
 #[tracing::instrument(skip_all, name = "ui_iced.left.build_workspace_tree", level = "debug")]
 #[must_use]
 pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
+    if app.tags().selected_tag.is_none() {
+        return build_workspace_tree_index(app);
+    }
+
     let filtered_files: Vec<&std::path::PathBuf> = app
         .workspace()
         .all_files
@@ -1327,32 +1366,13 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
         })
         .collect();
 
-    let mut root_node = TreeNode::new(
-        strings::DEFAULT_WORKSPACE_NAME.to_string(),
-        std::path::PathBuf::new(),
-        true,
-    );
-
-    for lib in app.content_libraries() {
-        let lib_node_name = lib.name.clone();
-        let lib_root_path = std::path::PathBuf::from(&lib.root_folder);
-        root_node
-            .children
-            .entry(lib_node_name.clone())
-            .or_insert_with(|| TreeNode::new(lib_node_name.clone(), lib_root_path, true));
-    }
+    let mut root_node = workspace_tree_root(app.content_libraries());
 
     for path in filtered_files {
         insert_path_into_tree(&mut root_node, app.content_libraries(), path, false);
     }
 
-    if app.tags().selected_tag.is_none() {
-        for dir in app.workspace().all_dirs.iter() {
-            insert_path_into_tree(&mut root_node, app.content_libraries(), dir, true);
-        }
-    } else {
-        prune_empty_dirs(&mut root_node);
-    }
+    prune_empty_dirs(&mut root_node);
 
     root_node
 }

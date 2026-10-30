@@ -152,6 +152,39 @@ pub const TOOLS_ERROR_ICON: &str = "⚠";
 /// Empty-state line shown when no tool group is registered at all.
 pub const TOOLS_EMPTY_STATE: &str = "No tool groups registered.";
 
+/// Format template for the Tools card's summary line.
+///
+/// A template with a named placeholder rather than a positional `{}`, so the
+/// placeholder travels with the text and a reworded string cannot silently
+/// break the substitution ([RUST-021]).
+pub const TOOLS_GROUP_COUNT_TEMPLATE: &str = "{count} groups";
+
+/// Summary line for a Tools card that lists exactly one group.
+///
+/// Its own constant rather than a de-pluralised template: stripping a
+/// trailing `s` is the kind of rule that breaks the first time the copy is
+/// reworded.
+pub const TOOLS_GROUP_COUNT_ONE: &str = "1 group";
+
+/// Summary line for the Tools card's title band, listing `count` groups.
+///
+/// Singular for one, plural otherwise. The empty case is *not* this
+/// helper's business — the card shows [`TOOLS_EMPTY_STATE`] instead.
+#[must_use]
+pub fn tools_group_count(count: usize) -> String {
+    if count == 1 {
+        TOOLS_GROUP_COUNT_ONE.to_string()
+    } else {
+        TOOLS_GROUP_COUNT_TEMPLATE.replace("{count}", &count.to_string())
+    }
+}
+
+/// Tooltip on the Tools card's title-band `×` control.
+///
+/// The [`ICON_CLOSE`] glyph is icon-only, so the tooltip is the only place
+/// its label exists (`UIF-ATOM-001`'s icon-only cell).
+pub const TOOLS_CLOSE_TOOLTIP: &str = "Close";
+
 /// Formats one recorded tool-group error for display as `Kind: message`.
 #[must_use]
 pub fn format_tool_group_error(kind: &str, message: &str) -> String {
@@ -231,27 +264,33 @@ pub const ICON_ROBOT: &str = "\u{E762}";
 /// Phosphor icon: lightning (U+E2DE)
 pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 
-/// Unsaved-changes marker glyph (U+25CF BLACK CIRCLE) — a Unicode geometric
-/// shape rather than a Phosphor glyph, so it resolves through the system
-/// symbol font.
-///
-/// **No longer what the document tab draws.** As of INT-11 the tab's unsaved
-/// marker is a real `6px` `size.indicator.dot` **shape**
-/// (`center::unsaved_dot`), because §4.4.1's 6px cannot be reached by a
-/// glyph without breaking §2.4's 12px text floor. This constant is retained
-/// for any surface that must render the same marker as text; the tab strip
-/// does not reference it.
-pub const ICON_UNSAVED_DOT: &str = "\u{25CF}";
-
 /// Disclosure glyph for an **expanded** block (the agent thinking panel).
 /// U+25BE BLACK DOWN-POINTING SMALL TRIANGLE, chosen over a Phosphor glyph
-/// so it resolves through the system symbol font like
-/// [`ICON_UNSAVED_DOT`].
+/// so it resolves through the system symbol font.
 pub const ICON_DISCLOSE_EXPANDED: &str = "\u{25BE}";
 
 /// Disclosure glyph for a **collapsed** block (the agent thinking panel).
 /// U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE.
 pub const ICON_DISCLOSE_COLLAPSED: &str = "\u{25B8}";
+
+/// The `×` close glyph (U+00D7 MULTIPLICATION SIGN) that titles a close
+/// affordance.
+///
+/// A plain Unicode sign rather than the Phosphor [`ICON_X`], so it resolves
+/// through the text font the surrounding title band already uses. It
+/// measures below the icon-only floor, so any button drawn with it must
+/// carry a tooltip — see [`TOOLS_CLOSE_TOOLTIP`].
+pub const ICON_CLOSE: &str = "\u{00D7}";
+
+/// The resize-grip glyph (U+25E2 BLACK LOWER LEFT TRIANGLE) that marks a
+/// corner you can drag to change a surface's size.
+///
+/// A plain Unicode geometric shape rather than a Phosphor glyph, so it
+/// resolves through the text font the surrounding footer already uses. It is
+/// the same mark the movable shells draw ([`crate::ui_iced::movable_shell`])
+/// and the centred modals' footers, so a card that can be resized looks like
+/// every other surface that can be resized.
+pub const ICON_RESIZE_GRIP: &str = "\u{25E2}";
 
 /// Label for the hamburger menu button in the top toolbar.
 pub const HAMBURGER_MENU_BUTTON: &str = "☰";
@@ -1006,6 +1045,31 @@ mod tests {
         assert_eq!(TOOLS_ERROR_ICON, "⚠");
         assert_eq!(TOOLS_PARALLEL_CHIP, "✓ parallel");
         assert_eq!(TOOLS_EMPTY_STATE, "No tool groups registered.");
+    }
+
+    /// Defect #5: the summary line must pluralise, and must never fall back
+    /// to the column header's `"Group"`.
+    #[test]
+    fn test_tools_group_count_pluralises() {
+        assert_eq!(TOOLS_GROUP_COUNT_TEMPLATE, "{count} groups");
+        assert_eq!(TOOLS_GROUP_COUNT_ONE, "1 group");
+        assert_eq!(tools_group_count(0), "0 groups");
+        assert_eq!(tools_group_count(1), "1 group");
+        assert_eq!(tools_group_count(2), "2 groups");
+        assert_eq!(tools_group_count(10), "10 groups");
+        assert_ne!(
+            tools_group_count(10),
+            format!("10 {TOOLS_GROUP_COLUMN}"),
+            "the column header is not a pluralisable noun"
+        );
+    }
+
+    /// The close affordance's glyph and its mandatory tooltip.
+    #[test]
+    fn test_tools_close_glyph_and_tooltip_strings() {
+        assert_eq!(ICON_CLOSE, "\u{00D7}");
+        assert_eq!(TOOLS_CLOSE_TOOLTIP, "Close");
+        assert_eq!(CLOSE_BUTTON, "Close");
     }
 
     #[test]
