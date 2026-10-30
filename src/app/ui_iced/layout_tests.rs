@@ -13,6 +13,7 @@ use crate::ui::panel_layout::PanelLayout;
 use crate::ui_iced::app::AppState;
 use crate::ui_iced::message::{InboundMessage, LayoutMessage, Message};
 use crate::ui_iced::test_helpers::test_app_state_with;
+use crate::ui_iced::theme::{fastmd_dark_theme, iced_theme_palette};
 use crate::ui_iced::update::update;
 use iced::Size;
 use iced::widget::{container, text};
@@ -563,6 +564,175 @@ fn test_pane_gutter_fill_differs_from_the_canvas_it_divides() {
     assert_ne!(
         gutter, canvas,
         "defect #12: a gutter painted in the panes' own surface colour is invisible"
+    );
+}
+
+/// Regression shipped *by* the defect #12 fix and fixed here.
+///
+/// Backing the grid with `color.border.subtle` only reads as a seam if every
+/// pane is opaque. iced gives a pane no background of its own, so while
+/// [`fill_pane`] was an unstyled container the divider colour showed through the
+/// whole middle band and the canvas went from `surface.base` `RGB(9, 9, 11)` to
+/// `border.subtle` `RGB(40, 40, 40)`.
+///
+/// The pair invariant is what this pins: the gutter may differ from the canvas,
+/// but the pane must paint that canvas opaquely, so the gutter colour can only
+/// ever appear in the seam.
+///
+/// NOTE ON COVERAGE: `iced_test` 0.14 exposes no pixel read on `Snapshot`, so
+/// occlusion cannot be asserted by sampling the rendered frame. This pins the
+/// two style functions and the token pair; the wiring is the single `.style(..)`
+/// call in [`fill_pane`] and the TOC-hidden branch of [`pane_body`].
+#[test]
+fn defect_12_followup_the_panes_occlude_the_gutter_backing() {
+    let theme = fastmd_dark_theme();
+
+    let pane = pane_canvas_style(&theme);
+    let canvas = Palette::fastmd_dark().surface;
+    assert_eq!(
+        pane.background,
+        Some(Background::Color(canvas)),
+        "defect #12 regression: a pane that paints nothing lets the gutter \
+         backing show through it and grays out the whole middle band"
+    );
+
+    // An alpha-blended "opaque" would still let the gutter tint bleed through.
+    match pane.background {
+        Some(Background::Color(c)) => assert!(
+            c.a >= 1.0,
+            "the pane fill must be fully opaque, got alpha {}",
+            c.a
+        ),
+        other => panic!("the pane fill must be a solid colour, got {other:?}"),
+    }
+
+    assert_ne!(
+        pane_canvas_fill(),
+        pane_gutter_fill(),
+        "the pane and its gutter must not resolve to the same colour, or the \
+         seam is invisible again"
+    );
+}
+
+/// The pane fill must be the window's own canvas, not a colour chosen to
+/// "look like" it.
+///
+/// `ui_iced::theme` installs `color.surface.base` as iced's `background` role, so
+/// an opaque pane painted with the same token is a visual no-op against the
+/// window — which is the whole argument for fixing the regression by making the
+/// panes opaque rather than by dropping the gutter fill.
+#[test]
+fn defect_12_followup_the_pane_fill_is_the_window_canvas_not_a_lookalike() {
+    let window_canvas = iced_theme_palette(&Palette::pro()).background;
+    assert_eq!(
+        pane_canvas_fill(),
+        window_canvas,
+        "the pane must paint the exact colour iced paints the window with, so \
+         making panes opaque changes nothing the reader can see"
+    );
+}
+
+/// The middle band, specified independently of [`middle_band`]'s implementation.
+///
+/// This is the specification the pixel test compares against, written from the
+/// two colours the design says must appear and nothing else: the grid's backing
+/// is `color.border.subtle`, every pane paints `color.surface.base`, and the
+/// seams between panes are [`PANE_SPACING_PIXELS`] wide. It deliberately does
+/// NOT call [`pane_canvas_style`] or [`pane_gutter_fill`] — if it did, a wrong
+/// colour inside those functions would agree with itself and the test would pass
+/// while the app stayed gray ([RUST-020]: the oracle must not share the
+/// implementation's assumptions).
+fn reference_middle_band(panes: &pane_grid::State<PaneKind>) -> iced::Element<'_, Message> {
+    let canvas = Palette::fastmd_dark().surface;
+    let gutter = Palette::fastmd_dark().border;
+
+    let painted = |colour: iced::Color| {
+        move |_theme: &iced::Theme| ContainerStyle {
+            background: Some(Background::Color(colour)),
+            ..ContainerStyle::default()
+        }
+    };
+
+    let grid: iced::Element<'_, Message> =
+        pane_grid::PaneGrid::new(panes, |_pane, _kind, _is_maximized| {
+            let pane: iced::Element<'_, Message> = container(pane_fill_body())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(painted(canvas))
+                .into();
+            pane_grid::Content::new(pane)
+        })
+        .spacing(PANE_SPACING_PIXELS)
+        .into();
+
+    container(grid)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(painted(gutter))
+        .into()
+}
+
+/// An empty fill-sized pane body, so the pixel comparison is pure solid
+/// rectangles with no glyph rasterisation in them.
+fn pane_fill_body() -> iced::Element<'static, Message> {
+    iced::widget::Space::new()
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+/// Renders `element` headless and writes its frame hash to `probe`.
+fn write_frame_hash(
+    element: iced::Element<'_, Message>,
+    probe: &std::path::Path,
+    width: f32,
+) -> Result<bool, iced_test::Error> {
+    let mut sim = iced_test::Simulator::with_size(
+        iced_test::core::Settings::default(),
+        Size::new(width, 600.0),
+        element,
+    );
+    sim.snapshot(&fastmd_dark_theme())?.matches_hash(probe)
+}
+
+/// The regression guard, at the level the defect was actually visible: pixels.
+///
+/// The token tests above pin the two colours but not the wiring — the bug was
+/// that [`fill_pane`] applied no style at all, and a style-function test cannot
+/// see a missing `.style(..)` call. `iced_test`'s `Snapshot` exposes no pixel
+/// read, only `matches_hash`, so this compares the real middle band against
+/// [`reference_middle_band`] rendered in the same run: no committed baseline, no
+/// recording pass, and no vacuous first-run pass (the reference is rendered
+/// fresh every time).
+///
+/// If a pane stops painting the canvas, the gutter colour reads through it and
+/// the two frames stop matching.
+#[test]
+fn defect_12_followup_the_middle_band_renders_canvas_with_gutter_seams_only() {
+    let (panes, _band) = middle_band_state();
+    let dir = tempfile::tempdir().expect("tempdir for the frame hash probe");
+    // `Snapshot::matches_hash` rewrites the file stem to "<stem>-<renderer>", so
+    // both calls below resolve to the same path for the same renderer.
+    let probe = dir.path().join("middle-band");
+
+    let empty = || pane_fill_body();
+    let actual = middle_band(&panes, empty, empty, empty, true, true, |_| {
+        Message::Layout(LayoutMessage::CursorMoved {
+            point: iced::Point::ORIGIN,
+        })
+    });
+
+    // First call records the reference frame; the second compares the real one
+    // against it.
+    write_frame_hash(reference_middle_band(&panes), &probe, VIEWPORT)
+        .expect("reference frame should render");
+    let matched = write_frame_hash(actual, &probe, VIEWPORT).expect("band should render");
+
+    assert!(
+        matched,
+        "defect #12 regression: the middle band does not render as a \
+         border.subtle backing with surface.base panes — the gutter colour is \
+         reading through at least one pane"
     );
 }
 

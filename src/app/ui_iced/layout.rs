@@ -91,15 +91,38 @@ pub const RESIZE_LEEWAY_PIXELS: f32 = hoarfrost::token::size::SPLITTER_GRAB - PA
 /// the framework's designated colour for pane split lines (`UIF-TOK-005`,
 /// `UIF-PANE-001`).
 ///
-/// The panes themselves are transparent containers over the window canvas, and
-/// that canvas is `color.surface.base` — so an unpainted gutter would be the
-/// same colour as the panes it exists to separate. Painting the grid's backing
-/// with the pane-split colour is what makes the seam visible
-/// (`UIF-PRIN-006`: adjacent containers must differ in surface token or carry
-/// a visible divider). Resolved from the palette; no literal here.
+/// The colour of the seam between two adjacent panes.
+///
+/// `UIF-PRIN-006`: adjacent containers must differ in surface token or carry
+/// a visible divider. The gutter is that divider, so its fill must not be the
+/// canvas the panes sit on — an identical fill is exactly defect #12.
+/// Resolved from the palette; no literal here.
+///
+/// **This only reads as a divider because [`pane_canvas_fill`] makes every pane
+/// opaque.** iced's pane bodies are transparent containers, so a grid backed
+/// with this colour and panes that paint nothing shows this colour across the
+/// whole middle band rather than in the 2px seams. The two functions are a
+/// pair and must be changed together — see
+/// `defect_12_followup_the_panes_occlude_the_gutter_backing`.
 #[must_use]
 pub fn pane_gutter_fill() -> iced::Color {
     Palette::fastmd_dark().border
+}
+
+/// The colour every pane paints itself with.
+///
+/// This is the window canvas token (`color.surface.base`, the same value
+/// `ui_iced::theme` installs as iced's `background` role), so an opaque pane is
+/// visually identical to a transparent one over the window — the app looked like
+/// this before defect #12 and must keep looking like it.
+///
+/// The pane has to paint it *deliberately*, though: iced gives a pane no
+/// background of its own, so once the grid is backed with
+/// [`pane_gutter_fill`] an unpainted pane lets the divider colour through.
+/// That is the regression this function exists to prevent.
+#[must_use]
+pub fn pane_canvas_fill() -> iced::Color {
+    Palette::fastmd_dark().surface
 }
 
 /// Full-on-screen height of the stub top/bottom bands, in logical points —
@@ -514,6 +537,13 @@ pub fn clamped_width(desired: f32, min: f32, max: f32) -> f32 {
 /// [`PANE_SPACING_PIXELS`] gap iced leaves between panes reads as the
 /// pane-split divider instead of as more of the panes' own canvas
 /// (defect #12).
+///
+/// **The two fills are a pair.** iced gives a pane no background, so the
+/// panes must paint [`pane_canvas_fill`] themselves ([`fill_pane`]) or the
+/// gutter backing shows through the whole band instead of only in the seams.
+/// That is the regression this branch shipped and fixed;
+/// `defect_12_followup_the_middle_band_renders_canvas_with_gutter_seams_only`
+/// pins it at pixel level.
 pub fn middle_band<'a, Message: 'a>(
     panes: &'a pane_grid::State<PaneKind>,
     left: impl Fn() -> iced::Element<'a, Message> + 'a,
@@ -540,11 +570,35 @@ pub fn middle_band<'a, Message: 'a>(
 }
 
 /// Styles the container backing the pane grid so the inter-pane gutter paints
-/// in [`pane_gutter_fill`]. Panes are drawn on top of it, so only the gutter
-/// is ever visible.
+/// in [`pane_gutter_fill`].
+///
+/// **Correction (regression this branch shipped and then fixed).** This
+/// function's doc used to claim "panes are drawn on top of it, so only the
+/// gutter is ever visible". That was false: iced hands a pane no background of
+/// its own, and [`fill_pane`] was an unstyled container. Backing the grid with
+/// `color.border.subtle` therefore painted the divider colour across the entire
+/// middle band — the canvas went from `surface.base` `RGB(9, 9, 11)` to
+/// `border.subtle` `RGB(40, 40, 40)` everywhere the panes sit. The claim is only
+/// true once every pane is opaque, which is what [`pane_canvas_style`] does.
 fn gutter_style(_theme: &iced::Theme) -> ContainerStyle {
     ContainerStyle {
         background: Some(Background::Color(pane_gutter_fill())),
+        ..ContainerStyle::default()
+    }
+}
+
+/// Styles a pane so it paints the window canvas ([`pane_canvas_fill`]) behind its
+/// body, occluding the gutter backing that [`gutter_style`] paints beneath it.
+///
+/// Without this the gutter colour reads through every pane and the whole middle
+/// band turns gray. With it, the only place the gutter colour can appear is the
+/// [`PANE_SPACING_PIXELS`] seam, which is the entire point of the gutter.
+///
+/// Painting `surface.base` is a visual no-op against the window, which also maps
+/// to `surface.base` — the pane looks exactly as it did before defect #12.
+pub fn pane_canvas_style(_theme: &iced::Theme) -> ContainerStyle {
+    ContainerStyle {
+        background: Some(Background::Color(pane_canvas_fill())),
         ..ContainerStyle::default()
     }
 }
@@ -568,20 +622,31 @@ fn pane_body<'a, Message: 'a>(
             if toc_visible {
                 fill_pane(right)
             } else {
+                // Opaque for the same reason `fill_pane` is: with the TOC hidden
+                // this area still sits over the gutter backing, and an unpainted
+                // container here would show the divider colour instead of the
+                // canvas.
                 container(space::vertical())
                     .width(Length::Fill)
                     .height(Length::Fill)
+                    .style(pane_canvas_style)
                     .into()
             }
         }
     }
 }
 
-/// Wraps a pane body so it owns the whole pane area.
+/// Wraps a pane body so it owns the whole pane area, and makes the pane opaque.
+///
+/// The opacity is not decoration. iced gives a pane no background, and the grid
+/// is backed with the gutter colour (see [`gutter_style`]), so an unstyled pane
+/// here would let the divider colour through and gray out the whole middle band
+/// — the regression that shipped with defect #12 and is fixed here.
 fn fill_pane<'a, Message: 'a>(body: iced::Element<'a, Message>) -> iced::Element<'a, Message> {
     iced::widget::container(body)
         .width(Length::Fill)
         .height(Length::Fill)
+        .style(pane_canvas_style)
         .into()
 }
 
