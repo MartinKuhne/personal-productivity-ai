@@ -1,0 +1,91 @@
+[package]
+name = "hoarfrost"
+version = "0.2.0"
+edition = "2024"
+description = "A design system and widget framework built on Iced"
+license = "MIT"
+repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
+categories = ["gui"]
+keywords = ["iced", "ui", "widgets", "design-tokens"]
+
+[lib]
+path = "mod.rs"
+
+# The runnable UIF-VER-004 gallery. Declared explicitly because the crate's
+# library path is `mod.rs`, not `src/lib.rs`, so cargo's default
+# `src/bin/` discovery does not apply and `bin/gallery.rs` would otherwise
+# be invisible to the build.
+[[bin]]
+name = "gallery"
+path = "bin/gallery.rs"
+
+[features]
+# Publish the headless capture harness (`test_helpers`) as part of the
+# crate's normal API so a downstream crate can drive hoarfrost's widgets
+# through the real paint path in its own tests.
+#
+# The flag gates *nothing* extra. Every crate the harness needs —
+# `iced_runtime`, `iced_renderer`, `iced_futures` — is
+# already compiled as part of `iced`, so turning this on adds no crate,
+# no feature and no code to a build that does not ask for it. It exists
+# only to keep the harness out of the public surface of a consumer that
+# never asked for it.
+#
+# It deliberately has no `dep:` entries. Wiring it to `iced_test` instead
+# would be the trap: `iced_test` is a thin façade over the four crates
+# above, but it also drags in its own golden-image and selector machinery
+# (`png`, `sha2`, `nom`, `iced_selector`) that this harness never calls.
+test-helpers = []
+
+[dependencies]
+# Same feature set `fastmd` uses, minus `markdown` — this crate does not
+# render markdown, only framework widgets driven by semantic design tokens.
+#
+# `advanced` is added because it is the ONLY way a custom widget can
+# reach `iced_core`'s widget-author surface through `iced`. Without it
+# `iced::advanced` is cfg'd out (`iced-0.14.0/src/lib.rs:524`) and
+# `iced::widget::{core, renderer, graphics}` are deliberately hidden by
+# empty shadow modules (`iced-0.14.0/src/lib.rs:646-649`), so
+# `Widget`, `Tree`, `layout`, `operation::Focusable` and friends are
+# unreachable — a custom widget cannot be written at all. The feature
+# itself is `advanced = []` in both `iced_core` and `iced_widget`, so it
+# compiles in nothing new: it unlocks the re-export module and nothing
+# else. See INC-10 in `doc/planning/hoarfrost-tasks.md`.
+iced = { version = "0.14.0", features = [
+    "wgpu",
+    "tiny-skia",
+    "fira-sans",
+    "advanced-shaping",
+    "advanced",
+] }
+
+# The three crates `iced` is assembled from, named directly because
+# `test_helpers` needs three things `iced`'s public surface does not
+# reach, and `iced::advanced` is not one of them:
+#
+#   * `iced_runtime::UserInterface` — `iced::advanced` never re-exports
+#     it (`iced-0.14.0/src/advanced.rs` has no `user_interface` line), so
+#     the build/update/draw loop the harness drives has to be named here.
+#   * `iced_renderer::Renderer` — the concrete headless renderer, for the
+#     same reason: `iced::advanced::renderer` is `iced_core::renderer`,
+#     the *trait*, not the implementation.
+#   * `iced_futures::futures::executor::block_on` — building that
+#     renderer is async, and `iced` exposes no executor.
+#
+# These are **non-optional on purpose**. All three are already in this
+# crate's required graph as `iced`'s own dependencies, so optionality
+# would buy zero bytes and create one trap: a `#[cfg(test)]` module cannot
+# use an *optional* dependency under a plain `cargo test`, because the
+# feature selecting it is off. Naming them plainly makes the harness build
+# under `test`, under `test-helpers`, and under both at once, and leaves
+# `cargo tree -e normal` exactly as wide as it was.
+iced_futures = "0.14.0"
+iced_renderer = "0.14.0"
+iced_runtime = "0.14.0"
+
+[dev-dependencies]
+# Kept as a dev-dependency rather than dropped: `surface/menu/view_tests.rs`
+# still drives one `iced_test::Simulator`, and a dev-dependency never
+# enters the published graph, so it costs a consumer nothing.
+iced_test = "0.14.0"
+proptest = "1.4"

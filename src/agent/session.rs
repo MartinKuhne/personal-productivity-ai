@@ -15,6 +15,13 @@ use std::sync::{
 use std::thread::JoinHandle;
 use uuid::Uuid;
 
+/// Status text while a submitted prompt is being handed to the driver
+/// thread ([RUST-021]).
+pub const AGENT_LAUNCHING_STATUS: &str = "Initializing agent...";
+
+/// Status text when the driver channel is closed and the prompt cannot run.
+pub const AGENT_LAUNCH_FAILED_STATUS: &str = "Agent launch failed.";
+
 /// Agent state exposed to UI components.
 #[derive(Debug, Clone)]
 pub struct AgentState {
@@ -239,17 +246,32 @@ impl AgentSession {
     /// `run_agent_inner` inline (no double-spawn).
     ///
     /// This replaces the old `start_session` spawn-per-prompt entry.
+    ///
+    /// The `running` flag is committed **after** the prompt is handed to the
+    /// driver: if the send fails (the driver thread is gone, so no
+    /// `SessionFinished`/`Failed` observer event can ever clear the flag
+    /// again), `running` rolls back to `false` — otherwise the UI would
+    /// present a live Stop button over a turn that never started.
     pub fn submit_prompt(&mut self, mut prompt: AgentPrompt) {
         let session_id = prompt.session_id;
         self.current_session_id = Some(session_id);
-        self.state.running = true;
-        self.state.status = "Initializing agent...".to_string();
+        self.state.status = AGENT_LAUNCHING_STATUS.to_string();
         self.state.thinking.clear();
         self.state.response.clear();
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(cancel_flag.clone());
         prompt.cancel_flag = cancel_flag;
-        let _ = self.prompt_tx.send(prompt);
+        if self.prompt_tx.send(prompt).is_err() {
+            self.state.running = false;
+            self.state.status = AGENT_LAUNCH_FAILED_STATUS.to_string();
+            tracing::error!(
+                name = "agent.submit_prompt.channel_closed",
+                session_id = %session_id,
+                "Agent driver channel is closed; the prompt was dropped and no turn will run"
+            );
+            return;
+        }
+        self.state.running = true;
     }
 }
 

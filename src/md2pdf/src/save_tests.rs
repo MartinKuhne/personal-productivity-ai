@@ -4,7 +4,27 @@
 //! translate into syntactically valid Typst source and preserve expected content.
 
 use super::engine::TEMPLATE;
-use super::{compile_markdown_to_pdf, is_typst_available, render_markdown_to_typst};
+use super::{
+    compile_markdown_to_pdf, find_typst_binary, is_typst_available, render_markdown_to_typst,
+};
+
+/// The PATH probe is memoised process-wide ([FMD-060]): repeated calls
+/// must return the identical cached answer, and `is_typst_available` must
+/// agree with it.
+#[test]
+fn typst_probe_is_memoised_and_consistent() {
+    let first = find_typst_binary();
+    let second = find_typst_binary();
+    assert_eq!(
+        first, second,
+        "repeated probes must return the cached result, not re-walk PATH"
+    );
+    assert_eq!(
+        is_typst_available(),
+        first.is_some(),
+        "is_typst_available must agree with the cached probe"
+    );
+}
 
 /// Helper: parse Typst markup and assert that no syntax errors were produced.
 fn assert_valid_typst(typst: &str) {

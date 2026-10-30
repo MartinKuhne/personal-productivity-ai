@@ -1,0 +1,1196 @@
+//! The rendering, keyboard-focusable button — the first atom in this
+//! framework that turns the pure layers into pixels (`UIF-ATOM-001`,
+//! `UIF-PRIN-005`).
+//!
+//! # What this increment proves
+//!
+//! Everything before this was resolution without a renderer: [`state`]
+//! decides *what state a control is in*, [`button::resolve_style`] decides
+//! *what that state looks like*, [`crate::widget::focus`] decides what a
+//! ring can actually be seen against, and [`focusable::Focusable`](crate::widget::focusable::Focusable) proved a custom
+//! widget can hold keyboard focus at all. None of it painted anything.
+//!
+//! [`Button`] is where those layers meet, and the proof this module owes is
+//! that **they are sufficient** — that a real, drawing, keyboard-reachable
+//! button needs nothing from them beyond composition. It does. There is no
+//! state logic here that is not [`state::resolve`], no colour here that is not a
+//! [`Palette`] token read through [`button::resolve_style`], no ring rule
+//! here that is not the shared adaptive one, and no focus mechanism that is
+//! not the [`FocusableState`] `INC-10` proved. What is new here is only
+//! the part that could not have existed before: geometry, and the order in
+//! which quads are laid down.
+//!
+//! # The button paints layers, not a style
+//!
+//! [`draw`](Widget::draw) does not interpret [`ButtonStyle`] inline. It
+//! asks two pure functions for the layers it is about to paint —
+//! [`background_layer`] and [`focus_ring_layer`] — and feeds each straight
+//! to [`renderer::Renderer::fill_quad`]. That split exists because a
+//! focus ring is the one part of a button the renderer must place
+//! *outside* the box it fills, and a test has to be able to ask what was
+//! painted without a screen. A style struct alone cannot answer "where is
+//! the ring"; a layer list answers it exactly.
+//!
+//! Draw order is background, then ring, then content. The ring is drawn
+//! between the two rather than last so a label can never be overpainted by
+//! it, and the background is drawn first because every cell of §3.1 is a
+//! fill with a stroke on top of it.
+//!
+//! # The ring is a concentric annulus, not a fatter border
+//!
+//! iced draws a [`Border`] on the *inside* of a quad, so a ring around a
+//! button cannot be that button's own border — it would eat into the fill
+//! and move nothing but still read as a thicker edge. [`focus_ring_layer`]
+//! instead takes the button's bounds, expands them by the ring width, and
+//! strokes the *outside* of the grown quad with a transparent fill. The
+//! ring therefore occupies exactly the annulus between the button's edge
+//! and one ring-width out, and its corner radius is `RADIUS + ring width`
+//! so the two curves stay concentric instead of the ring cutting the
+//! corners harder than the box does.
+//!
+//! Because the ring lives outside the button's own bounds, a focused
+//! control grows its painted footprint without growing its layout — which
+//! is what `UIF-PRIN-003` (nothing shifts on state change) actually needs.
+//!
+//! # The Danger hot fill, end to end
+//!
+//! The hardest cell of §3.1 is a focused Danger button under the cursor.
+//! Its hover fill is [`status_danger_fill`](Palette::status_danger_fill),
+//! and the ring §3.1 names for that variant is
+//! [`accent_border`](Palette::accent_border) — indigo on red, `1.7188:1`,
+//! an invisible focus indicator at the moment a keyboard user most needs
+//! one (gap **G-9**).
+//!
+//! The button resolves that without knowing any of it happened. The chain,
+//! in the order it runs inside [`draw`](Widget::draw):
+//!
+//! 1. [`ButtonState::visual`] folds the raw observations into a
+//!    [`VisualState`] through [`state::resolve`] — here
+//!    `base: Hovered, focused: true`.
+//! 2. [`button::resolve_style`] paints the base triple from the Danger
+//!    column and then asks [`crate::widget::focus`] for a ring *against
+//!    the background it just resolved*, not against the variant.
+//!    `accent_border` cannot clear the `3.0:1` chrome floor on that red,
+//!    so the resolver returns [`text_strong`](Palette::text_strong).
+//! 3. [`focus_ring_layer`] turns that returned colour into geometry.
+//!
+//! The button never mentions Danger's ring, never special-cases a hot fill,
+//! and cannot get it wrong in one state and right in another: it asks the
+//! same resolver every frame and draws whatever comes back. A test asserts
+//! the widget's ring equals the resolver's output rather than a colour
+//! literal, so retuning the palette moves both together.
+//!
+//! # Disabled means absent, and that is the whole gate
+//!
+//! A disabled button does not refuse to register with the focus router — it
+//! is simply not there. [`operate`](Widget::operate) skips the
+//! `operation.focusable` call and clears any focus the widget was holding,
+//! exactly mirroring [`focusable::Focusable`](crate::widget::focusable::Focusable): the router cannot see the control, so
+//! it cannot traverse to it, focus it, or take it back. Clearing the
+//! focus in the same pass is not redundant. Without it a button focused
+//! while enabled and disabled afterwards would keep a lit ring on a
+//! control nothing can reach — and although [`state::resolve`] zeroes the ring
+//! for a disabled control, the *focus* would still be held, so the next
+//! `Tab` would compute its answer from a model that no longer matched the
+//! screen.
+//!
+//! The pointer side is gated the same way: a disabled button records where
+//! the cursor is but never sets `pressed`, never publishes and never
+//! captures the event. Recording the hover is deliberate — the widget
+//! reports raw observations and [`state::resolve`] judges them, which is the
+//! contract [`InteractionInput`] is built on. A button that stopped
+//! recording hover would be silently disagreeing with the cursor.
+//!
+//! # A press is committed inside the box or it is nothing
+//!
+//! [`Widget::update`] fires on release, not on press, and only when the
+//! pointer is still inside the button's bounds. Press, drag out, release:
+//! nothing happens, and the pressed skin goes away. That is the desktop
+//! convention, and it is the behaviour `UIF-ATOM-001`'s separate
+//! `Pressed` and `Hovered` cells only make sense under — if a press fired
+//! on button-down, the `Pressed` state would exist for one frame and the
+//! cell would be unreachable by a real user.
+//!
+//! # What later widgets will find hard here
+//!
+//! * **The bridge is a push, and it stays one-way.** This button never
+//!   reads focus back out of iced's router; [`crate::bridge`] projects
+//!   [`FocusState`](crate::focus::FocusState) onto it and nothing runs the
+//!   other way. `INC-10` pinned why: iced's own `focus_next` *loses* focus
+//!   at the ends instead of wrapping, so a menu that delegated `Tab` to
+//!   the router would drop focus off the bottom of the list. Every keyboard
+//!   move computes its target from the model and pushes it down. Menus and
+//!   dialogs inherit that constraint unchanged — they add traps, not a
+//!   second direction.
+//! * **The bridge is not this widget's.** It was written here in `INC-11`
+//!   because this was the first widget that needed it, and lifted into
+//!   [`crate::bridge`] in `INC-11b` because it is generic over the whole
+//!   framework rather than over buttons. What this file keeps is the
+//!   *consumer* side: [`Button::widget_id`] is
+//!   [`crate::bridge::widget_id`]'s answer for this widget's [`FocusId`],
+//!   so the widget registers at exactly the address the bridge pushes to.
+//! * **A menu row is not a button.** [`Button`] owns its content box and
+//!   centres it. A menu row sits on a shared grid with an aligned trailing
+//!   column, and a submenu parent must keep its own row open while a child
+//!   card takes focus — a state this widget has no notion of. What the row
+//!   reuses is the resolver chain and the layer shape, not this widget.
+//! * **A dialog needs the trap pushed before it paints.** Confinement is
+//!   [`FocusState::push_trap`](crate::focus::FocusState::push_trap), and a
+//!   dialog that paints before pushing has one frame in which `Tab`
+//!   reaches the background under the scrim.
+//! * **Overlay draw order is not solved here.** The ring is drawn outside
+//!   the button's bounds, which is fine inside a laid-out column and needs
+//!   rethinking once it can be clipped by a scrollable viewport or a
+//!   modal's own card edge.
+//!
+//! Unit tests live in the sibling `button_widget_tests.rs` sidecar.
+
+use crate::binding::Controlled;
+use crate::binding::Ephemeral;
+use crate::focus::FocusId;
+use crate::state;
+use crate::state::InteractionInput;
+use crate::state::VisualState;
+use crate::token::color::Palette;
+use crate::token::contrast;
+use crate::widget::button;
+use crate::widget::button::ButtonStyle;
+use crate::widget::button::ButtonVariant;
+use crate::widget::button_controller::ActivationSource;
+use crate::widget::button_controller::ButtonController;
+use crate::widget::button_controller::ButtonEmission;
+use crate::widget::button_model::ButtonModel;
+use crate::widget::button_model::SPINNER_SLOT;
+use crate::widget::focusable::FocusableState;
+use crate::widget::progress;
+
+use iced::Alignment;
+use iced::Background;
+use iced::Border;
+use iced::Color;
+use iced::Element;
+use iced::Event;
+use iced::Length;
+use iced::Padding;
+use iced::Rectangle;
+use iced::Shadow;
+use iced::Size;
+use iced::advanced::Clipboard;
+use iced::advanced::Shell;
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer;
+use iced::advanced::widget::Id;
+use iced::advanced::widget::Tree;
+use iced::advanced::widget::Widget;
+use iced::advanced::widget::operation::{self, Operation};
+use iced::advanced::widget::tree;
+use iced::keyboard;
+use iced::keyboard::Key;
+use iced::keyboard::key::Named;
+use iced::mouse;
+
+/// A stroke width that draws no stroke at all.
+///
+/// The *absence* of a property rather than a visual magnitude, which is
+/// what [`button`] allows a widget file to carry — and named, so
+/// [`background_layer`] and [`focus_ring_layer`] read as "no stroke"
+/// rather than "zero point zero".
+const NO_STROKE_WIDTH: f32 = 0.0;
+
+/// A fill that paints nothing behind what it covers.
+///
+/// Distinct from a transparent *background* token: this is the layer
+/// shape for "only the stroke is painted", which is what a focus ring is.
+const NO_FILL: Color = Color::TRANSPARENT;
+
+/// The absence of available space, used when a box may be smaller than
+/// its own padding.
+const NO_SPACE: f32 = 0.0;
+
+/// Snap painted quads to the device pixel grid.
+///
+/// A [`button::BORDER_WIDTH`] hairline that lands between pixels renders
+/// as a blurry two-pixel edge, so the framework's hairlines are snapped.
+const SNAP_TO_PIXEL_GRID: bool = true;
+
+/// One painted layer of a [`Button`], in draw order.
+///
+/// A layer is a rectangle, what is painted inside it, and the stroke drawn
+/// on its inside edge — the exact shape
+/// [`renderer::Renderer::fill_quad`] takes. Keeping the button's paint as
+/// an ordered list of these rather than as inline draw calls is what
+/// makes "what did this state actually paint" answerable without a
+/// screen, and what lets the focus ring be placed outside the box the
+/// fill covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layer {
+    /// The rectangle the layer covers.
+    pub bounds: Rectangle,
+    /// What is painted inside [`bounds`](Self::bounds). A fully transparent
+    /// `fill` paints nothing behind the stroke.
+    pub fill: Color,
+    /// The stroke drawn on the inside of [`bounds`](Self::bounds).
+    pub border: Border,
+}
+
+impl Layer {
+    /// The [`renderer::Quad`] this layer becomes.
+    ///
+    /// No shadow: §3.1 gives a button none, and a raised button would read
+    /// as a different elevation class than the token ladder defines.
+    #[must_use]
+    pub fn quad(&self) -> renderer::Quad {
+        renderer::Quad {
+            bounds: self.bounds,
+            border: self.border,
+            shadow: Shadow::default(),
+            snap: SNAP_TO_PIXEL_GRID,
+        }
+    }
+}
+
+/// The button's fill and border for a resolved style.
+///
+/// Returns `None` when neither would be painted — a
+/// [`Ghost`](ButtonVariant::Ghost) at rest, whose fill *and* border are
+/// `transparent` — so the content sits directly on whatever the button is
+/// mounted to. The box itself still exists: [`Button`] lays out the same
+/// geometry either way, because `UIF-PRIN-003` forbids a state change
+/// from moving a label.
+#[must_use]
+pub fn background_layer(bounds: Rectangle, style: &ButtonStyle) -> Option<Layer> {
+    if style.is_transparent_background() && style.border_width == NO_STROKE_WIDTH {
+        return None;
+    }
+
+    Some(Layer {
+        bounds,
+        fill: style.background,
+        border: Border::default()
+            .color(style.border_color)
+            .width(style.border_width)
+            .rounded(button::RADIUS),
+    })
+}
+
+/// The focus ring drawn around a button's bounds, if one is due.
+///
+/// The ring is *outside* the button rather than a thicker border, because
+/// iced strokes a quad on its inside: a ring drawn as the button's own
+/// border would eat into the fill the state just resolved. Growing the
+/// bounds by the ring width and stroking the grown quad leaves the fill
+/// untouched and puts the ring in the annulus one ring-width out.
+///
+/// The corner radius grows by the same amount so the ring's curve stays
+/// concentric with the button's. A ring left at `RADIUS` would cut the
+/// corners harder than the box it surrounds and read as a mistake at
+/// every corner.
+///
+/// The colour is whatever [`button::resolve_style`] resolved against this
+/// button's own background — see the [module docs](self) for why that is
+/// the only way a ring on a Danger hot fill stays visible.
+#[must_use]
+pub fn focus_ring_layer(bounds: Rectangle, style: &ButtonStyle) -> Option<Layer> {
+    if style.focus_ring_width == NO_STROKE_WIDTH {
+        return None;
+    }
+
+    Some(Layer {
+        bounds: bounds.expand(style.focus_ring_width),
+        fill: NO_FILL,
+        border: Border::default()
+            .color(style.focus_ring_color)
+            .width(style.focus_ring_width)
+            .rounded(button::RADIUS + style.focus_ring_width),
+    })
+}
+
+/// The busy indicator's layer, or `None` when nothing is in flight.
+///
+/// Returning `None` rather than a transparent quad is what keeps a
+/// non-busy frame byte-identical to the frame this widget painted before
+/// `UIF-ATOM-009` landed: the layer list gains an entry that is
+/// **absent**, not an entry that paints nothing. The
+/// [`SPINNER_SLOT`] a non-busy button reserves stays empty space, exactly
+/// as `INC-37` left it, and the snapshot of a resting button does not
+/// change by a single quad.
+///
+/// The arc colour follows §3.9's rule for a spinner inside a solid
+/// button, read off the *resolved fill* rather than off the variant
+/// name: a background that `UIF-TOK-006` rule 4 recognises as a locked
+/// solid fill takes `text.strong`, because `accent.text` on `accent.fill`
+/// is `2.5719:1` — an arc that is there and not there at the same time.
+/// Reading the fill rather than the variant means a future variant that
+/// resolves to a solid fill gets the right arc without this function
+/// being edited.
+///
+/// The spinner is the small rung (`size.spinner.sm`), because §3.0.4.3
+/// fixes the busy button's indicator at `14px` and the slot was sized by
+/// that same rung.
+#[must_use]
+pub fn busy_spinner_layer(
+    bounds: Rectangle,
+    padding: Padding,
+    style: &ButtonStyle,
+    busy: bool,
+    palette: &Palette,
+) -> Option<Layer> {
+    if !busy {
+        return None;
+    }
+
+    let spinner = progress::spinner_style(false, false, palette);
+    let arc = if contrast::fill_lock_role(style.background, palette).is_locked_fill() {
+        palette.text_strong
+    } else {
+        spinner.arc
+    };
+
+    Some(Layer {
+        bounds: spinner_slot(bounds, padding),
+        fill: NO_FILL,
+        border: Border::default()
+            .color(arc)
+            .width(spinner.stroke)
+            .rounded(spinner.diameter / 2.0),
+    })
+}
+
+/// The rectangle the busy spinner occupies.
+///
+/// The leading edge of the content box, vertically centred — where a
+/// leading icon would sit, which is what the reserved slot was sized to
+/// be. The widget paints no icons of its own, so the spinner is placed
+/// against the padding rather than against an icon run it does not own.
+fn spinner_slot(bounds: Rectangle, padding: Padding) -> Rectangle {
+    Rectangle::new(
+        iced::Point::new(
+            bounds.x + padding.left,
+            bounds.y + (bounds.height - SPINNER_SLOT) / 2.0,
+        ),
+        Size::new(SPINNER_SLOT, SPINNER_SLOT),
+    )
+}
+
+/// The **ephemeral** half of a button — everything that happened to it rather
+/// than what it is.
+///
+/// Every field is a raw signal from a different source — the pointer, the
+/// focus router — and none of them is reconciled here.
+/// [`ButtonState::visual`] hands them to [`state::resolve`], which owns the
+/// precedence. That split is what keeps a widget from inventing its own
+/// state rules, and it is why the 32-row table in `state_tests.rs` covers
+/// what this widget paints.
+///
+/// The focus half is not a `bool` of this widget's own. It is the
+/// [`FocusableState`] `INC-10` proved, so the router's protocol is the
+/// only way in and out of focus here as well, and a button cannot be
+/// focused by a path the framework has not gated.
+///
+/// [`interaction`](Self::interaction) is the [`ButtonController`] that
+/// carries the open gesture, the activation gate and the outstanding stop
+/// request. It is why this type is no longer `Copy`: a snapshot of a
+/// controller would be a snapshot of a *promise* — a copy of `in_flight`
+/// that the original could never clear. The whole point of the gate is that
+/// there is exactly one of them per control, so the type refuses to be
+/// duplicated. The tree holds it under [`Ephemeral`], which is the tag that
+/// says "this is interaction state, and a rebuild is allowed to drop it".
+#[derive(Debug, Default, PartialEq)]
+pub struct ButtonState {
+    focusable: FocusableState,
+    hovered: bool,
+    pressed: bool,
+    interaction: ButtonController,
+}
+
+impl ButtonState {
+    /// A resting, unfocused, unpressed button state.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            focusable: FocusableState::new(),
+            hovered: false,
+            pressed: false,
+            interaction: ButtonController::new(),
+        }
+    }
+
+    /// The focus state the router drives.
+    #[must_use]
+    pub const fn focusable(&self) -> &FocusableState {
+        &self.focusable
+    }
+
+    /// Whether the pointer is inside the button's bounds.
+    #[must_use]
+    pub const fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Whether a button is currently held down on this button.
+    #[must_use]
+    pub const fn is_pressed(&self) -> bool {
+        self.pressed
+    }
+
+    /// The activation engine riding with this state (`UIF-ATOM-001a`).
+    #[must_use]
+    pub const fn interaction(&self) -> &ButtonController {
+        &self.interaction
+    }
+
+    /// Resolve the raw observations into the state this button paints.
+    ///
+    /// `enabled` and `invalid` come from the widget rather than the state
+    /// because they are properties of what the button *is* this frame, not
+    /// of what has happened to it — the host sets them, the pointer and
+    /// the keyboard set the rest.
+    #[must_use]
+    pub fn visual(&self, enabled: bool, invalid: bool) -> VisualState {
+        state::resolve(InteractionInput {
+            enabled,
+            hovered: self.hovered,
+            pressed: self.pressed,
+            focused: self.focusable.is_focused(),
+            invalid,
+        })
+    }
+}
+
+/// A themed, keyboard-focusable button (`UIF-ATOM-001`).
+///
+/// [`ButtonVariant`] selects the column of §3.1, the widget's own state
+/// selects the row, and [`button::resolve_style`] turns the pair into
+/// paint. The content is any [`Element`] — a label, or a `row` a host has
+/// already spaced with [`button::ICON_LABEL_GAP`] — and the button owns
+/// the box around it: [`HORIZONTAL_PADDING`](button::HORIZONTAL_PADDING)
+/// on the sides, a fixed control height, and the content centred inside.
+///
+/// The widget is keyboard-focusable under a [`FocusId`] and disabled by
+/// the same flag that removes it from the focus router, so "greyed out"
+/// and "cannot be tabbed to" are one fact rather than two that can drift.
+pub struct Button<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    variant: ButtonVariant,
+    content: Element<'a, Message, Theme, Renderer>,
+    on_press: Option<Message>,
+    focus_id: FocusId,
+    widget_id: Id,
+    palette: Palette,
+    height: f32,
+    padding: Padding,
+    enabled: bool,
+    invalid: bool,
+    tooltip: Option<String>,
+    model: Option<Controlled<'a, ButtonModel>>,
+    emit: Option<Emit<'a, Message>>,
+}
+
+/// Where a [`Button`] sends the tiers its activation engine produces.
+///
+/// A sum-returning closure rather than three separate callbacks: one call site
+/// in the widget, and the host decides per tier what — if anything — becomes a
+/// [`Message`]. Returning `None` is how a host says "I have no `on_cancel` for
+/// this button" without the widget having to know which tiers it was told
+/// about.
+type Emit<'a, Message> = Box<dyn Fn(ButtonEmission) -> Option<Message> + 'a>;
+
+impl<'a, Message, Theme, Renderer> Button<'a, Message, Theme, Renderer> {
+    /// Whether the model driving this button reports an action in flight.
+    ///
+    /// A button with no model is never busy: nothing has told it
+    /// otherwise. The flag comes straight off [`ButtonModel::busy`] rather
+    /// than from the controller, because the controller tracks *its own*
+    /// dispatch, and a host that started an action by some other route is
+    /// still busy as far as §3.0.4.3's spinner is concerned.
+    fn busy(&self) -> bool {
+        self.model.as_ref().is_some_and(|model| model.get().busy)
+    }
+
+    /// Build a button for `variant` that publishes `on_press` when it is
+    /// pressed and released inside its own bounds, or activated with Enter
+    /// or Space while focused (`UIF-ATOM-001`).
+    ///
+    /// `focus_id` is the identity the focus router knows this button by —
+    /// the same [`FocusId`] the host registers in
+    /// [`FocusState`](crate::focus::FocusState), so a model transition and
+    /// a click address the same control.
+    #[must_use]
+    pub fn new(
+        variant: ButtonVariant,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        on_press: Message,
+        focus_id: impl Into<FocusId>,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = widget_id(&focus_id);
+
+        Self {
+            variant,
+            content: content.into(),
+            on_press: Some(on_press),
+            focus_id,
+            widget_id,
+            palette: Palette::dark(),
+            height: button::HEIGHT_STANDARD,
+            padding: Padding::ZERO.horizontal(button::HORIZONTAL_PADDING),
+            enabled: true,
+            invalid: false,
+            tooltip: None,
+            model: None,
+            emit: None,
+        }
+    }
+
+    /// The shared shape every constructor starts from: default palette,
+    /// standard height, token padding, live, valid, no model.
+    fn base(
+        variant: ButtonVariant,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        focus_id: impl Into<FocusId>,
+    ) -> Self {
+        let focus_id = focus_id.into();
+        let widget_id = widget_id(&focus_id);
+
+        Self {
+            variant,
+            content: content.into(),
+            on_press: None,
+            focus_id,
+            widget_id,
+            palette: Palette::dark(),
+            height: button::HEIGHT_STANDARD,
+            padding: Padding::ZERO.horizontal(button::HORIZONTAL_PADDING),
+            enabled: true,
+            invalid: false,
+            tooltip: None,
+            model: None,
+            emit: None,
+        }
+    }
+
+    /// Build a **controlled** button over a host-owned [`ButtonModel`]
+    /// (`UIF-ATOM-001a`).
+    ///
+    /// Unlike [`new`](Self::new), this button owns no opinion about what it
+    /// does. The model says what it is called, how busy it is, whether the
+    /// host can settle what it dispatches and how much room it was given;
+    /// the widget's [`ButtonController`] decides which of the three tiers
+    /// each user action produces, and hands every one of them to `emit`.
+    ///
+    /// | User action | Emitted tier |
+    /// |---|---|
+    /// | release inside / `Enter` / `Space` | `ButtonEmission::Activated` |
+    /// | release outside / `Escape` | `ButtonEmission::Cancelled` |
+    /// | press or `Escape` while `busy` and cancellable | `ButtonEmission::CancelRequested` |
+    ///
+    /// `emit` returns `Option<Message>`: `None` is how a host says it has no
+    /// handler for that tier. A host that only cares about activation writes
+    /// `|e| matches!(e, ButtonEmission::Activated(_)).then_some(MyMsg::Save)`
+    /// and is *provably* not handling cancel — which is a thing worth being
+    /// able to see, and is exactly what three optional callbacks hide.
+    ///
+    /// The `Controlled<'a, ButtonModel>` is a shared borrow, not a copy: the
+    /// host keeps the model and mutates it, and the button reads the current
+    /// value every frame. That is the §3.0.4.1 rule — the model is the truth,
+    /// so the widget must not have its own.
+    #[must_use]
+    pub fn controlled(
+        model: Controlled<'a, ButtonModel>,
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        focus_id: impl Into<FocusId>,
+        emit: impl Fn(ButtonEmission) -> Option<Message> + 'a,
+    ) -> Self {
+        let mut button = Self::base(model.get().variant, content, focus_id);
+        button.enabled = !model.get().disabled;
+        button.tooltip = model.get().tooltip.clone();
+        button.model = Some(model);
+        button.emit = Some(Box::new(emit));
+        button
+    }
+
+    /// Build an **icon-only** button, supplying the tooltip its label must be.
+    ///
+    /// A button whose content is an icon carries no readable text, so the pointer has no
+    /// way to find out what the control does. `UIF-ATOM-001`'s icon-only cell therefore
+    /// depends on `UIF-NAV-003`/`UIF-TAB-003`: the label lives in the tooltip. This
+    /// constructor makes that dependency a **parameter** rather than a convention — there
+    /// is no way to reach an icon-only button through this path without naming the label,
+    /// which is the enforcement the requirement needs and a comment cannot provide.
+    ///
+    /// For a labelled button use [`new`](Self::new); a tooltip there is optional, and
+    /// [`tooltip_violation`](Self::tooltip_violation) will say so.
+    #[must_use]
+    pub fn icon_only(
+        variant: ButtonVariant,
+        icon: impl Into<Element<'a, Message, Theme, Renderer>>,
+        on_press: Message,
+        focus_id: impl Into<FocusId>,
+        tooltip: impl Into<String>,
+    ) -> Self {
+        Self::new(variant, icon, on_press, focus_id).with_tooltip(tooltip)
+    }
+
+    /// Attach the tooltip text this control shows when the pointer rests on it.
+    ///
+    /// The framework owns *when* and *where* it appears — see
+    /// [`surface::tooltip`](crate::surface::tooltip); the host owns the words.
+    #[must_use]
+    pub fn with_tooltip(mut self, tooltip: impl Into<String>) -> Self {
+        self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Use the compact control height — navbar and dense toolbars
+    /// (`size.control.sm`).
+    #[must_use]
+    pub fn compact(mut self) -> Self {
+        self.height = button::HEIGHT_COMPACT;
+        self
+    }
+
+    /// Use the standard control height — dialog CTAs and forms
+    /// (`size.control.md`). This is what [`new`](Self::new) builds.
+    #[must_use]
+    pub fn standard(mut self) -> Self {
+        self.height = button::HEIGHT_STANDARD;
+        self
+    }
+
+    /// Make the button inert: the disabled skin, no message, and absent
+    /// from the focus router. See the [module docs](self) for what the
+    /// absence does and does not gate.
+    #[must_use]
+    pub fn disabled(mut self) -> Self {
+        self.enabled = false;
+        self
+    }
+
+    /// Make the button live again.
+    #[must_use]
+    pub fn enabled(mut self) -> Self {
+        self.enabled = true;
+        self
+    }
+
+    /// Mark the button's value invalid.
+    ///
+    /// §3.1 gives a button no invalid skin — validation is a §3.2 input
+    /// concern and no button in the spec validates anything — so this
+    /// paints exactly as `Rest`. The flag exists so the widget feeds the
+    /// full [`InteractionInput`] rather than hard-coding `false`, and the
+    /// sidecar pins the gap so an invalid-button requirement has to be
+    /// added deliberately.
+    #[must_use]
+    pub fn invalid(mut self) -> Self {
+        self.invalid = true;
+        self
+    }
+
+    /// Paint from a palette other than [`Palette::dark`].
+    #[must_use]
+    pub fn palette(mut self, palette: Palette) -> Self {
+        self.palette = palette;
+        self
+    }
+
+    /// The variant whose column of §3.1 this button paints.
+    #[must_use]
+    pub fn variant(&self) -> ButtonVariant {
+        self.variant
+    }
+
+    /// The framework-level identity this button answers to.
+    #[must_use]
+    pub fn focus_id(&self) -> &FocusId {
+        &self.focus_id
+    }
+
+    /// The iced [`Id`] this button registers with the focus router.
+    #[must_use]
+    pub fn widget_id(&self) -> &Id {
+        &self.widget_id
+    }
+
+    /// Whether this button accepts interaction.
+    #[must_use]
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// The tooltip text this control carries, if any.
+    #[must_use]
+    pub fn tooltip_text(&self) -> Option<&str> {
+        self.tooltip.as_deref()
+    }
+
+    /// Whether content of `content` size leaves the button icon-only.
+    ///
+    /// The test is the one the layout already applies: content small enough that
+    /// [`button::ICON_ONLY_MIN_WIDTH`] and [`button::ICON_ONLY_MIN_HEIGHT`] are what
+    /// determine the box, rather than the content itself. That is the moment a button
+    /// Convert this button into an [`Element`] with automatic [`Tooltip`](crate::surface::tooltip::Tooltip)
+    /// wrapping whenever a tooltip is configured (`UIF-ATOM-001`, `UIF-ATOM-007`).
+    #[must_use]
+    pub fn into_element(self) -> Element<'a, Message, Theme, Renderer>
+    where
+        Message: 'a + Clone,
+        Theme: 'a,
+        Renderer: 'a + renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
+    {
+        if let Some(tooltip_text) = self.tooltip.clone() {
+            let palette = self.palette;
+            let el = Element::new(self);
+            Element::new(
+                crate::surface::tooltip::Tooltip::new(el, tooltip_text).with_palette(palette),
+            )
+        } else {
+            Element::new(self)
+        }
+    }
+
+    /// Whether this button's content fits within the icon-only minimum dimensions.
+    ///
+    /// At or below this size the button stops being "a box around a label" and becomes an
+    /// icon with no readable text — so it is exactly the moment a tooltip stops being optional.
+    ///
+    /// Pure, and deliberately measured against the *content* rather than a flag: the host
+    /// never declares "this is an icon", the geometry says so.
+    #[must_use]
+    pub fn is_icon_only(&self, content: Size) -> bool {
+        content.width <= button::ICON_ONLY_MIN_WIDTH
+            && content.height <= button::ICON_ONLY_MIN_HEIGHT
+    }
+
+    /// Why this button breaks the icon-only tooltip rule for `content` size, if it does.
+    ///
+    /// `None` means the button is legal: either it carries a tooltip, or its content is
+    /// large enough to be its own label. Returns
+    /// [`TooltipViolation::MissingTooltip`] for the case the rule forbids.
+    ///
+    /// A pure predicate rather than a panic so the check can be run by a lint pass, a test,
+    /// or a host's own validation — and so `outer_size` can assert it without that being
+    /// the only way to discover the rule.
+    #[must_use]
+    pub fn tooltip_violation(&self, content: Size) -> Option<TooltipViolation> {
+        if self.is_icon_only(content) && self.tooltip.is_none() {
+            Some(TooltipViolation::MissingTooltip {
+                focus_id: self.focus_id.as_str().to_owned(),
+                content,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// The box the button occupies around a content size: the content plus
+    /// padding, floored at the icon-only minimum of §3.1 and capped by
+    /// the space the parent offered.
+    ///
+    /// The floor is [`ICON_ONLY_MIN_WIDTH`](button::ICON_ONLY_MIN_WIDTH)
+    /// rather than the general `size.hit_target.min` because §3.1's atom
+    /// rule is the stricter of the two for a control of this class
+    /// (gap **G-2**), and the cap is the viewport because a minimum that
+    /// cannot fit is a scroll bar, not a spec requirement.
+    fn outer_size(&self, content: Size, limits: &layout::Limits) -> Size {
+        // The icon-only tooltip rule, asserted at the moment the box is computed — which is
+        // the moment the button becomes icon-only. A debug-only shield: shipping a release
+        // build must not panic over a missing label, and `tooltip_violation` is the
+        // non-panicking form for hosts that want to check without risking a crash.
+        debug_assert!(
+            self.tooltip_violation(content).is_none(),
+            "an icon-only button must carry a tooltip (`UIF-ATOM-001` icon-only cell depends on \
+             `UIF-NAV-003`/`UIF-TAB-003`). Build it with `Button::icon_only(.., tooltip)` or \
+             attach one with `.with_tooltip(..)`. See the module docs."
+        );
+
+        let max = limits.max();
+
+        Size::new(
+            (content.width + self.padding.x())
+                .max(button::ICON_ONLY_MIN_WIDTH)
+                .min(max.width),
+            self.height
+                .max(content.height + self.padding.y())
+                .max(button::ICON_ONLY_MIN_HEIGHT)
+                .min(max.height),
+        )
+    }
+}
+
+/// A button built in a way the icon-only tooltip rule forbids.
+///
+/// Produced by [`Button::tooltip_violation`]. Carries enough to name the offender — the
+/// focus identity and the content size that made the button icon-only — so a host running
+/// this over a whole screen can report *which* control is missing its label rather than
+/// that one of them is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TooltipViolation {
+    /// The content is small enough that the icon-only minimum determines the box, and no
+    /// tooltip was supplied. The control renders as an icon with nothing to read.
+    MissingTooltip {
+        /// The [`FocusId`] the offending button answers to.
+        focus_id: String,
+        /// The content size that made the button icon-only.
+        content: Size,
+    },
+}
+
+impl TooltipViolation {
+    /// The focus identity of the button that broke the rule.
+    #[must_use]
+    pub fn focus_id(&self) -> &str {
+        match self {
+            Self::MissingTooltip { focus_id, .. } => focus_id,
+        }
+    }
+}
+
+/// The [`Layout`] of a button's content.
+///
+/// # Panics
+/// Never in practice: [`Widget::layout`] always produces exactly one child
+/// node for the content, and no other code path builds a button's tree.
+fn content_layout(layout: Layout<'_>) -> Layout<'_> {
+    layout
+        .children()
+        .next()
+        .expect("a button lays out exactly one content node")
+}
+
+/// The [`ButtonState`] carried by a button's tree node.
+///
+/// Reached through the [`Ephemeral`] wrapper the tag declares, so there is one
+/// obvious way to get at the ephemeral half and no silent `downcast` of a bare
+/// `ButtonState` that would panic against a tree built under the old tag.
+///
+/// # Panics
+/// Never in practice: [`Widget::state`] always builds the node this function
+/// reads, and no other code path builds a button's tree.
+fn button_state(tree: &mut Tree) -> &mut ButtonState {
+    tree.state
+        .downcast_mut::<Ephemeral<ButtonState>>()
+        .get_mut()
+}
+
+/// The read-only [`ButtonState`] carried by a button's tree node.
+///
+/// # Panics
+/// Never in practice — see [`button_state`].
+fn button_state_ref(tree: &Tree) -> &ButtonState {
+    tree.state.downcast_ref::<Ephemeral<ButtonState>>().get()
+}
+
+/// Send one tier of the activation engine's output to the host's sink.
+///
+/// A no-op when the button has no sink (it was built through
+/// [`Button::new`](Button::new), which publishes `on_press` directly) or when
+/// the engine produced nothing. Keeping both checks here rather than at each of
+/// the five call sites is what stops one of them forgetting.
+fn route<Message>(
+    emit: &Option<Emit<'_, Message>>,
+    emission: Option<ButtonEmission>,
+    shell: &mut Shell<'_, Message>,
+) {
+    let (Some(emit), Some(emission)) = (emit, emission) else {
+        return;
+    };
+    if let Some(message) = emit(emission) {
+        shell.publish(message);
+    }
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Button<'_, Message, Theme, Renderer>
+where
+    Message: Clone,
+    Renderer: renderer::Renderer,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<Ephemeral<ButtonState>>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(Ephemeral::new(ButtonState::new()))
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Shrink, Length::Fixed(self.height))
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        if let Some(model) = &self.model
+            && limits.max().width.is_finite()
+        {
+            let responsive = model.get().responsive_to(limits.max().width);
+            self.padding = Padding::ZERO.horizontal(responsive.horizontal_padding());
+        }
+
+        let content = self.content.as_widget_mut().layout(
+            &mut tree.children[0],
+            renderer,
+            &limits.shrink(Size::from(self.padding)),
+        );
+
+        let size = self.outer_size(content.size(), limits);
+        let inner = Size::new(
+            (size.width - self.padding.x()).max(NO_SPACE),
+            (size.height - self.padding.y()).max(NO_SPACE),
+        );
+
+        let content = content
+            .move_to((self.padding.left, self.padding.top))
+            .align(Alignment::Center, Alignment::Center, inner);
+
+        layout::Node::with_children(size, vec![content])
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        let state = button_state(tree);
+
+        if self.enabled {
+            operation.focusable(Some(&self.widget_id), layout.bounds(), &mut state.focusable);
+        } else {
+            // Unregistered, so the router cannot take this focus back —
+            // it cannot see the widget at all. Drop it here rather than
+            // leave a control holding a focus nothing can traverse to.
+            // Reached through the trait because `FocusableState` has no
+            // inherent `unfocus`: the router's protocol is the only way
+            // in and out of focus.
+            <FocusableState as operation::Focusable>::unfocus(&mut state.focusable);
+        }
+
+        operation.traverse(&mut |operation| {
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                operation,
+            );
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            content_layout(layout),
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+
+        if shell.is_event_captured() {
+            return;
+        }
+
+        let is_over = cursor.is_over(layout.bounds());
+        let state = button_state(tree);
+
+        // Where the pointer is, is recorded whether or not this button may
+        // act on it. The widget reports raw observations and `resolve`
+        // judges them; a button that stopped recording hover would be
+        // silently disagreeing with the cursor.
+        state.hovered = is_over;
+
+        // The controller sees the model every frame, before any gesture is
+        // handled — the gate has to know what the host reported *before* it
+        // is asked whether an activation may fire.
+        if let Some(model) = &self.model {
+            state.interaction.observe(model.get());
+        }
+
+        if !self.enabled {
+            // No press, no message, no capture — a disabled button leaves
+            // the event for anything else that wants it. A gesture left open
+            // from before the disable is dropped rather than carried into a
+            // control that can no longer settle it.
+            state.pressed = false;
+            state.interaction.reset();
+            return;
+        }
+
+        let focused = state.focusable.is_focused();
+
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) if is_over => {
+                state.pressed = true;
+                if let Some(model) = &self.model {
+                    let emission = state
+                        .interaction
+                        .begin(model.get(), ActivationSource::Pointer);
+                    route(&self.emit, emission, shell);
+                }
+                shell.capture_event();
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if state.pressed => {
+                // The press is released either way, so the pressed skin
+                // cannot stick. Only a release still inside the box fires.
+                state.pressed = false;
+
+                if let Some(model) = &self.model {
+                    let emission = if is_over {
+                        state
+                            .interaction
+                            .commit(model.get(), ActivationSource::Pointer)
+                    } else {
+                        state.interaction.cancel(model.get())
+                    };
+                    route(&self.emit, emission, shell);
+                } else if is_over {
+                    shell.publish(
+                        self.on_press
+                            .clone()
+                            .expect("a `Button::new` button always carries a press message"),
+                    );
+                }
+
+                shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) if focused => {
+                let Some(model) = &self.model else {
+                    if matches!(key, Key::Named(Named::Enter | Named::Space)) {
+                        shell.publish(
+                            self.on_press
+                                .clone()
+                                .expect("a `Button::new` button always carries a press message"),
+                        );
+                        shell.capture_event();
+                    }
+                    return;
+                };
+                match key {
+                    Key::Named(Named::Enter) | Key::Named(Named::Space) => {
+                        let emission = state
+                            .interaction
+                            .commit(model.get(), ActivationSource::Keyboard);
+                        route(&self.emit, emission, shell);
+                        shell.capture_event();
+                    }
+                    Key::Named(Named::Escape) => {
+                        // Escape abandons the press as well as the gesture.
+                        // Without this, `pressed` survives, the pointer is
+                        // still inside, and the release that follows commits
+                        // the very activation the user just cancelled.
+                        state.pressed = false;
+                        let emission = state.interaction.cancel(model.get());
+                        route(&self.emit, emission, shell);
+                        shell.capture_event();
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if self.enabled && cursor.is_over(layout.bounds()) {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::None
+        }
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let state = button_state_ref(tree);
+        let visual = state.visual(self.enabled, self.invalid);
+        let paint = button::resolve_style(self.variant, visual, &self.palette);
+        let bounds = layout.bounds();
+
+        for layer in [
+            background_layer(bounds, &paint),
+            focus_ring_layer(bounds, &paint),
+            busy_spinner_layer(bounds, self.padding, &paint, self.busy(), &self.palette),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            renderer.fill_quad(layer.quad(), Background::Color(layer.fill));
+        }
+
+        // The label inherits nothing: §3.1 fixes the foreground per cell, so
+        // the resolved colour replaces whatever text style the parent was
+        // passing down rather than blending with it.
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            &renderer::Style {
+                text_color: paint.foreground,
+            },
+            content_layout(layout),
+            cursor,
+            viewport,
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<Button<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a,
+    Renderer: 'a + renderer::Renderer,
+{
+    fn from(button: Button<'a, Message, Theme, Renderer>) -> Element<'a, Message, Theme, Renderer> {
+        Element::new(button)
+    }
+}
+
+/// The iced [`Id`] a [`FocusId`] is registered under.
+///
+/// A re-export of [`crate::bridge::widget_id`], which is the single
+/// derivation every focusable widget and every bridge push share. See the
+/// bridge's own docs for why both sides must agree.
+pub use crate::bridge::widget_id;
+
+#[cfg(test)]
+#[path = "button_widget_tests.rs"]
+mod button_widget_tests;

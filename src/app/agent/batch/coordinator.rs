@@ -4,7 +4,7 @@ use super::discoverer::Discoverer;
 use super::executor::BatchJobExecutor;
 use super::types::{BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
+use crate::bus::events::file::FileChanged;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub struct BatchCoordinator {
     config: BatchConfig,
     app_config: AppConfig,
     tx_gui: crate::bus::events::typed::BackgroundEventSender,
-    file_event_bus: Bus<FileEvent>,
+    file_event_bus: Bus<FileChanged>,
     prompt_text: String,
     cancel_flag: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
@@ -26,7 +26,7 @@ impl BatchCoordinator {
         config: BatchConfig,
         app_config: AppConfig,
         tx_gui: crate::bus::events::typed::BackgroundEventSender,
-        file_event_bus: Bus<FileEvent>,
+        file_event_bus: Bus<FileChanged>,
         prompt_text: String,
         clock: Arc<dyn Clock>,
     ) -> (Self, Arc<AtomicBool>) {
@@ -148,14 +148,14 @@ mod tests {
     use super::*;
     use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::AppConfig;
-    use std::sync::mpsc;
+    use tokio::sync::broadcast;
 
     #[test]
     fn test_coordinator_new_and_execute() {
         let dir = tempfile::tempdir().unwrap();
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),
@@ -186,9 +186,9 @@ mod tests {
     #[test]
     fn test_coordinator_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),
@@ -222,9 +222,9 @@ mod tests {
         std::fs::write(dir.path().join("test2.md"), "").unwrap();
         std::fs::write(dir.path().join("test3.md"), "").unwrap();
 
-        let (tx, _rx) = mpsc::channel();
+        let (tx, _rx) = broadcast::channel(16);
         let tx = BackgroundEventSender::new(tx);
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus: Bus<FileChanged> = Bus::new();
 
         let config = BatchConfig {
             directory: dir.path().to_path_buf(),

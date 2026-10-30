@@ -130,8 +130,13 @@ pub enum UserCommand {
     ConfirmCreateDocument { parent: PathBuf, name: String },
     /// Confirm a rename operation.
     ConfirmRename { path: PathBuf, new_name: String },
-    /// Start a batch processing run.
-    StartBatch(BatchConfig),
+    /// Start a batch run from its selected configuration and prompt snapshot.
+    StartBatch {
+        /// Batch targets and execution parameters.
+        config: BatchConfig,
+        /// Prompt body captured when the user committed the selection.
+        prompt_text: String,
+    },
     /// Cancel a batch processing run.
     CancelBatch,
 

@@ -2,18 +2,23 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-/// The Document + Bolt logo is painted separately via [`crate::ui::logo::paint_logo`] —
-///
-/// the title itself is plain text so it remains searchable and accessible.
+/// The Document + Bolt logo is rendered separately via
+/// [`crate::ui_iced::logo::logo_mark`]; the title itself is plain text so it
+/// remains searchable and accessible.
 pub const APP_TITLE: &str = "FastMD Viewer";
 
-/// Label for the batch prompt processing button (now in the hamburger menu).
+/// Title of the OS window title bar ("FastMD AI").
+/// Distinct from [`APP_TITLE`]: the top toolbar keeps showing [`APP_TITLE`]
+/// and the About dialog keeps [`ABOUT_APP_NAME`].
+pub const WINDOW_TITLE: &str = "FastMD AI";
+
+/// Label for the batch prompt processing button.
 pub const BATCH_BUTTON: &str = "Batch...";
 
 /// Label for the batch prompt processing entry in the hamburger menu.
 pub const MENU_BATCH: &str = "Batch...";
 
-/// Label for the tools dialog button (now in the hamburger menu).
+/// Label for the tools dialog button.
 pub const TOOLS_BUTTON: &str = "Tools...";
 
 /// Label for the tools dialog entry in the hamburger menu.
@@ -74,6 +79,31 @@ pub const ABOUT_COL_REPO: &str = "Repository";
 /// `on_click` event name fired when the user clicks About FastMD from the hamburger menu.
 pub const ABOUT_EVENT: &str = "about_button";
 
+/// Label for the version row in the About window.
+pub const ABOUT_VERSION_LABEL: &str = "Version:";
+
+/// One-line product description shown in the About window.
+/// Read from the `fastmd` package manifest description so the two can
+/// never drift.
+pub const ABOUT_DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
+
+/// Button in the About window that opens the third-party attributions
+/// window.
+pub const ABOUT_VIEW_ATTRIBUTIONS_BUTTON: &str = "View third-party attributions...";
+
+/// Empty-state line for the attributions list.
+pub const ABOUT_ATTRIBUTIONS_EMPTY: &str = "No third-party dependencies recorded.";
+
+/// Formats the third-party dependency counter shown under the About
+/// window's attributions teaser and the credits window title.
+pub fn format_attribution_count(count: usize) -> String {
+    if count == 1 {
+        format!("{count} direct third-party dependency")
+    } else {
+        format!("{count} direct third-party dependencies")
+    }
+}
+
 /// Kind label for an internal (built-in) tool group row.
 pub const TOOLS_KIND_INTERNAL: &str = "Internal";
 
@@ -89,6 +119,11 @@ pub const TOOLS_LIST_COLUMN: &str = "Tools";
 /// Caption for the per-group prompt char count column header.
 pub const TOOLS_CHAR_COUNT_COLUMN: &str = "Prompt";
 
+/// Chip shown beside a tool-group row's char count when every tool in the
+/// group is `ReadOnly` and therefore parallel-safe ([UI-058], TOOL-020).
+/// Informational only — a row without the chip is *not* marked unsafe.
+pub const TOOLS_PARALLEL_CHIP: &str = "✓ parallel";
+
 /// Button label that triggers the OAuth flow for an eligible MCP server.
 pub const TOOLS_AUTH_BUTTON: &str = "Authenticate";
 
@@ -102,10 +137,75 @@ pub const TOOLS_RESTART: &str = "Restart";
 /// tell the manager to forget that the server once required auth).
 pub const TOOLS_FORGET: &str = "Forget";
 
+/// Caption for the tool-group name column header.
+pub const TOOLS_GROUP_COLUMN: &str = "Group";
+
+/// Caption for the tool-group kind column header.
+pub const TOOLS_KIND_COLUMN: &str = "Kind";
+
+/// Caption for the per-group actions column header.
+pub const TOOLS_ACTIONS_COLUMN: &str = "Actions";
+
+/// Marker glyph rendered on a tool-group row that carries a recorded error.
+pub const TOOLS_ERROR_ICON: &str = "⚠";
+
+/// Empty-state line shown when no tool group is registered at all.
+pub const TOOLS_EMPTY_STATE: &str = "No tool groups registered.";
+
+/// Format template for the Tools card's summary line.
+///
+/// A template with a named placeholder rather than a positional `{}`, so the
+/// placeholder travels with the text and a reworded string cannot silently
+/// break the substitution ([RUST-021]).
+pub const TOOLS_GROUP_COUNT_TEMPLATE: &str = "{count} groups";
+
+/// Summary line for a Tools card that lists exactly one group.
+///
+/// Its own constant rather than a de-pluralised template: stripping a
+/// trailing `s` is the kind of rule that breaks the first time the copy is
+/// reworded.
+pub const TOOLS_GROUP_COUNT_ONE: &str = "1 group";
+
+/// Summary line for the Tools card's title band, listing `count` groups.
+///
+/// Singular for one, plural otherwise. The empty case is *not* this
+/// helper's business — the card shows [`TOOLS_EMPTY_STATE`] instead.
+#[must_use]
+pub fn tools_group_count(count: usize) -> String {
+    if count == 1 {
+        TOOLS_GROUP_COUNT_ONE.to_string()
+    } else {
+        TOOLS_GROUP_COUNT_TEMPLATE.replace("{count}", &count.to_string())
+    }
+}
+
+/// Tooltip on the Tools card's title-band `×` control.
+///
+/// The [`ICON_CLOSE`] glyph is icon-only, so the tooltip is the only place
+/// its label exists (`UIF-ATOM-001`'s icon-only cell).
+pub const TOOLS_CLOSE_TOOLTIP: &str = "Close";
+
+/// Formats one recorded tool-group error for display as `Kind: message`.
+#[must_use]
+pub fn format_tool_group_error(kind: &str, message: &str) -> String {
+    format!("{kind}: {message}")
+}
+
+/// Banner button that re-runs the action that failed (`UIF-MOD-003`'s
+/// `Recovery::Retry`).
+pub const TOOLS_RETRY_BUTTON: &str = "Retry";
+
+/// Card-level banner line for a failed MCP authentication, naming the
+/// server the flow was for.
+#[must_use]
+pub fn format_tools_auth_error(server: &str) -> String {
+    format!("Authentication for {server} failed.")
+}
+
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 
-/// ID salt for the tag filter combobox in egui.
+/// ID salt for the tag filter combobox.
 pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 
 /// Default label shown when no tag is selected in the tag filter.
@@ -125,6 +225,14 @@ pub const SEARCH_NO_RESULTS: &str = "No matching files found";
 
 /// Header label for the search result list.
 pub const SEARCH_RESULTS_HEADER: &str = "Search Results";
+
+/// Formats the per-file match counter shown next to a content-search
+/// result's file name (UI-050).
+///
+/// User-facing formatting lives here rather than in a panel.
+pub fn format_match_count(match_count: usize) -> String {
+    format!("({match_count})")
+}
 
 /// Phosphor icon: caret down (U+E136)
 pub const ICON_CARET_DOWN: &str = "\u{E136}";
@@ -156,17 +264,92 @@ pub const ICON_ROBOT: &str = "\u{E762}";
 /// Phosphor icon: lightning (U+E2DE)
 pub const ICON_LIGHTNING: &str = "\u{E2DE}";
 
-/// Label for the hamburger menu button in the top toolbar.
-pub const HAMBURGER_MENU_BUTTON: &str = ICON_LIST;
+/// Disclosure glyph for an **expanded** block (the agent thinking panel).
+/// U+25BE BLACK DOWN-POINTING SMALL TRIANGLE, chosen over a Phosphor glyph
+/// so it resolves through the system symbol font.
+pub const ICON_DISCLOSE_EXPANDED: &str = "\u{25BE}";
 
-/// ID salt for the hamburger menu in egui.
+/// Disclosure glyph for a **collapsed** block (the agent thinking panel).
+/// U+25B8 BLACK RIGHT-POINTING SMALL TRIANGLE.
+pub const ICON_DISCLOSE_COLLAPSED: &str = "\u{25B8}";
+
+/// The `×` close glyph (U+00D7 MULTIPLICATION SIGN) that titles a close
+/// affordance.
+///
+/// A plain Unicode sign rather than the Phosphor [`ICON_X`], so it resolves
+/// through the text font the surrounding title band already uses. It
+/// measures below the icon-only floor, so any button drawn with it must
+/// carry a tooltip — see [`TOOLS_CLOSE_TOOLTIP`].
+pub const ICON_CLOSE: &str = "\u{00D7}";
+
+/// The resize-grip glyph (U+25E2 BLACK LOWER LEFT TRIANGLE) that marks a
+/// corner you can drag to change a surface's size.
+///
+/// A plain Unicode geometric shape rather than a Phosphor glyph, so it
+/// resolves through the text font the surrounding footer already uses. It is
+/// the same mark the movable shells draw ([`crate::ui_iced::movable_shell`])
+/// and the centred modals' footers, so a card that can be resized looks like
+/// every other surface that can be resized.
+pub const ICON_RESIZE_GRIP: &str = "\u{25E2}";
+
+/// Label for the hamburger menu button in the top toolbar.
+pub const HAMBURGER_MENU_BUTTON: &str = "☰";
+
+/// Tooltip for the icon-only hamburger menu button (`UIF-NAV-003`).
+///
+/// The ☰ glyph carries no readable text, so `UIF-ATOM-001`'s icon-only
+/// cell requires the words to live in the tooltip; the framework's
+/// `Button::icon_only` constructor makes supplying them a parameter
+/// rather than a convention.
+pub const HAMBURGER_MENU_TOOLTIP: &str = "Open menu";
+
+/// ID salt for the hamburger menu.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
+
+/// Glyph drawn in the check slot of an active top-bar hamburger menu row
+/// (UI-065, UI-066). U+2713 CHECK MARK.
+const MENU_CHECK_GLYPH: char = '\u{2713}';
+
+/// ASCII arrow appended to submenu names in the top-bar hamburger menu.
+const MENU_SUBMENU_ARROW: &str = ">";
+
+/// Label for returning from a hamburger submenu to the top-level menu.
+pub const MENU_BACK_TO_MAIN: &str = "< Main menu";
+
+/// Formats one row of the top-bar hamburger menu.
+///
+/// The layout is `"<check slot> <submenu> > <label>"`, with the submenu
+/// segment omitted for top-level rows. The check slot is always present
+/// (blank when unchecked) so checked and unchecked rows stay
+/// column-aligned.
+pub fn format_menu_row_label(submenu: Option<&str>, label: &str, checked: bool) -> String {
+    let mut out = String::with_capacity(label.len() + 16);
+    out.push(if checked { MENU_CHECK_GLYPH } else { ' ' });
+    out.push(' ');
+    if let Some(submenu) = submenu {
+        out.push_str(submenu);
+        out.push(' ');
+        out.push_str(MENU_SUBMENU_ARROW);
+        out.push(' ');
+    }
+    out.push_str(label);
+    out
+}
+
+/// Formats a top-level submenu button with the visible `>` navigation cue.
+#[must_use]
+pub fn format_menu_submenu_label(label: &str) -> String {
+    format!("{label} {MENU_SUBMENU_ARROW}")
+}
 
 /// Submenu label for the Table Wrap Algorithm submenu in the top hamburger menu.
 pub const MENU_TABLE_WRAP_ALGORITHM: &str = "Table wrap algorithm";
 
-/// Submenu label for the Windows submenu in the top hamburger menu.
-pub const MENU_WINDOWS: &str = "Windows";
+/// Top-level label for the Windows submenu in the top hamburger menu.
+pub const MENU_WINDOWS: &str = "Windows...";
+
+/// Heading shown inside the Windows submenu and in its row descriptions.
+pub const MENU_WINDOWS_TITLE: &str = "Windows";
 
 /// Menu item label for opening/toggling the Background Operations (processes/logs) window.
 pub const MENU_BACKGROUND_OPERATIONS: &str = "Background operations";
@@ -189,42 +372,54 @@ pub const NO_CHAT_MODELS_CONFIGURED: &str = "No models configured";
 /// `on_click` event name fired when the user selects a chat model from the menu.
 pub const CHAT_MODEL_SELECTION_EVENT: &str = "chat_model_selection";
 
+/// Placeholder shown where a model's price is not configured (`cost: None`).
+///
+/// A missing price means "unknown", not "free"; printing `0` for it reads as a
+/// model that costs nothing.
+pub const COST_LABEL_UNKNOWN: &str = "unknown";
+
 /// Formats a model entry for the Chat Models dropdown menu.
-pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
-    format!("{} (Cost: {})", name, cost)
+///
+/// A model with no configured price is labelled [`COST_LABEL_UNKNOWN`] rather
+/// than `0`, so an unpriced model never reads as a free one.
+pub fn format_chat_model_menu_label(name: &str, cost: Option<i32>) -> String {
+    match cost {
+        Some(cost) => format!("{name} (Cost: {cost})"),
+        None => format!("{name} (Cost: {COST_LABEL_UNKNOWN})"),
+    }
 }
 
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
 pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
 
-/// ID salt for the table-width-strategy combobox in egui. Kept stable
+/// ID salt for the table-width-strategy combobox. Kept stable
 /// across releases so the widget's persistent id and any open/closed
 /// state survive a config save round-trip.
 pub const TABLE_WIDTH_STRATEGY_ID_SALT: &str = "table_width_strategy_combobox";
 
-/// Display label for the [`ProportionalToSlack`](crate::ui::table_width::DeficitStrategy::ProportionalToSlack)
+/// Display label for the [`ProportionalToSlack`](crate::markdown::table_width::DeficitStrategy::ProportionalToSlack)
 /// deficit strategy in the top-bar dropdown. Fast (O(|S|)) but may
 /// produce suboptimal G1 (total wrapped lines) on very wide tables.
 pub const TABLE_WIDTH_STRATEGY_PROPORTIONAL: &str = "Proportional";
 
-/// Display label for the [`BreakpointWaterFill`](crate::ui::table_width::DeficitStrategy::BreakpointWaterFill)
+/// Display label for the [`BreakpointWaterFill`](crate::markdown::table_width::DeficitStrategy::BreakpointWaterFill)
 /// deficit strategy in the top-bar dropdown. Greedy marginal-cost
 /// water-fill (O(K log |S|)) — minimizes G1 more aggressively.
 pub const TABLE_WIDTH_STRATEGY_WATERFILL: &str = "Water-fill";
 
-/// Display label for the [`WaterFillRatio`](crate::ui::table_width::DeficitStrategy::WaterFillRatio)
+/// Display label for the [`WaterFillRatio`](crate::markdown::table_width::DeficitStrategy::WaterFillRatio)
 /// survey algorithm (doc §2.10) in the top-bar dropdown. Equalizes the
 /// `max_j / w_j` ratio across columns — the "fair" baseline that
 /// equalizes wrap pressure.
 pub const TABLE_WIDTH_STRATEGY_RATIO: &str = "Ratio-equalize";
 
-/// Display label for the [`LagrangePenalty`](crate::ui::table_width::DeficitStrategy::LagrangePenalty)
+/// Display label for the [`LagrangePenalty`](crate::markdown::table_width::DeficitStrategy::LagrangePenalty)
 /// survey algorithm (doc §2.13) in the top-bar dropdown. Minimizes
 /// total wrap via a global Lagrange-multiplier bisection on per-column
 /// wrap cost.
 pub const TABLE_WIDTH_STRATEGY_LAGRANGE: &str = "Lagrange-penalty";
 
-/// Display label for the [`HybridMinPenaltyWaterFill`](crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
+/// Display label for the [`HybridMinPenaltyWaterFill`](crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
 /// survey algorithm (doc §2.14) in the top-bar dropdown. Per-column
 /// "first-wrap boundary" target plus residual water-fill — the
 /// production pattern.
@@ -292,7 +487,7 @@ pub const TABLE_OF_CONTENTS_HEADER: &str = "Table of Contents";
 /// Uses Phosphor [`ICON_ROBOT`] icon.
 pub const AGENT_SESSION_HEADER: &str = "\u{E762} FastMD Agent Session";
 
-/// Button label to close the agent session view (replaces "Back to document").
+/// Button label to close the agent session view.
 pub const AGENT_SESSION_CLOSE_BUTTON: &str = "Close";
 
 /// Prefix label for agent status text.
@@ -309,6 +504,30 @@ pub const AGENT_THINKING_LABEL: &str = "Agent is thinking...";
 
 /// Label for tool call parameter payload string in agent view.
 pub const AGENT_TOOL_CALL_PARAM: &str = "Tool call parameter string";
+
+/// Markdown prefix the orchestrator injects ahead of a user prompt when it
+/// appends the prompt to a continuing agent transcript. The agent panel
+/// parses this marker back out to render the user turn as themed text
+/// rather than assistant markdown (UI-048 turn model).
+pub const AGENT_USER_TURN_MARKER: &str = "**User:** ";
+
+/// Send-button label in the agent prompt row.
+pub const AGENT_SEND_BUTTON: &str = "Send";
+
+/// Queue-button label shown while the agent is running, behind which the
+/// prompt is parked until the current turn finishes.
+pub const AGENT_QUEUE_BUTTON: &str = "Queue";
+
+/// Prefix for the queued-prompt count badge in the agent prompt row.
+/// Pair with [`format_queued_prompts_label`].
+pub const AGENT_QUEUED_PREFIX: &str = "Queued: ";
+
+/// Formats the queued-prompt count badge label
+/// (`Queued: 3`) from the number of parked prompts.
+#[must_use]
+pub fn format_queued_prompts_label(count: usize) -> String {
+    format!("{AGENT_QUEUED_PREFIX}{count}")
+}
 
 /// Button text for copying rendered agent markdown.
 pub const COPY_MARKDOWN_BUTTON: &str = "Copy markdown";
@@ -378,6 +597,9 @@ pub const SELECT_DESTINATION_FOLDER: &str = "Select destination folder:";
 /// Generic OK button label.
 pub const OK_BUTTON: &str = "Ok";
 
+/// Generic Close button label (the About and attributions window footers).
+pub const CLOSE_BUTTON: &str = "Close";
+
 /// Window title for create directory dialog.
 pub const CREATE_DIRECTORY_WINDOW: &str = "Create Directory";
 
@@ -395,6 +617,33 @@ pub const RENAME_WINDOW: &str = "Rename";
 
 /// Label prompt in rename dialog.
 pub const ENTER_NEW_NAME: &str = "Enter new name:";
+
+/// Window title for the delete-confirmation dialog.
+pub const DELETE_CONFIRM_WINDOW: &str = "Delete";
+
+/// Delete-confirmation prompt naming the target.
+///
+/// Formatting helper rather than a bare constant because the target name is
+/// interpolated into the sentence.
+#[must_use]
+pub fn format_delete_confirm_prompt(name: &str) -> String {
+    format!("Delete \"{name}\"?")
+}
+
+/// Error shown when a name-entry dialog is submitted with no name.
+pub const DIALOG_NAME_EMPTY_ERROR: &str = "Name must not be empty.";
+
+/// Error shown when a name-entry dialog holds a name that is not a safe
+/// single path segment (separators or `..`).
+pub const DIALOG_NAME_UNSAFE_ERROR: &str = "Name contains invalid characters.";
+
+/// Error shown when the move dialog is confirmed with no destination
+/// selected.
+pub const DIALOG_MOVE_NO_DESTINATION_ERROR: &str = "Select a destination folder.";
+
+/// Error returned when a submit arrives while no dialog is open. Defensive:
+/// the view never renders a card when closed.
+pub const DIALOG_NOT_OPEN_ERROR: &str = "No dialog is open.";
 
 // Batch Dialog
 /// Window title for the batch prompt processing dialog.
@@ -452,6 +701,21 @@ pub const BATCH_RUNNING_CANCEL_HINT: &str =
 
 /// Button label to close the batch dialog after processing completes.
 pub const BATCH_CLOSE_BUTTON: &str = "Close";
+
+/// Helper caption under the wildcard-pattern field while it is editable.
+pub const BATCH_PATTERN_FIELD_HELPER: &str = "Glob matched against the chosen directory.";
+
+/// Helper caption under the concurrency selector.
+pub const BATCH_CONCURRENCY_HELPER: &str = "Concurrent LLM calls, 1 to 8.";
+
+/// Hint shown on the prompt-candidate field's header row.
+pub const BATCH_PROMPT_FIELD_HINT: &str = "Pick one prompt";
+
+/// Validation caption for a wildcard-pattern field left blank in File mode.
+pub const BATCH_PATTERN_REQUIRED_ERROR: &str = "A glob pattern is required in File mode.";
+
+/// Validation caption for a wildcard-pattern field that is not a valid glob.
+pub const BATCH_PATTERN_INVALID_ERROR: &str = "That is not a valid glob pattern.";
 
 // Tree Widget Actions
 /// Context menu item to open file location in OS file explorer.
@@ -536,6 +800,42 @@ pub const LOG_CATEGORY_LLM_TOOLS: &str = "LLM Tools";
 /// Error label when background manager lock fails.
 pub const BACKGROUND_MGR_ACCESS_ERROR: &str = "Error: could not access background manager";
 
+/// Format template for a movable card's footer row count (§4.7.1 footer).
+///
+/// A template with a named placeholder rather than a positional `{}`, so the
+/// placeholder travels with the text and a reworded string cannot silently
+/// break the substitution ([RUST-021]).
+pub const MOVABLE_ROW_COUNT_TEMPLATE: &str = "{count} entries";
+
+/// Footer status text for a movable card that shows `count` rows.
+#[must_use]
+pub fn movable_row_count(count: usize) -> String {
+    MOVABLE_ROW_COUNT_TEMPLATE.replace("{count}", &count.to_string())
+}
+
+/// Title of the Background Operations Log's movable Band-1 card
+/// (`UIF-MOV-001`, §4.7.1).
+///
+/// Distinct from [`MENU_BACKGROUND_OPERATIONS`],
+/// which is the *menu* entry that opens it. The card's own title bar names
+/// the surface, not the command.
+pub const BACKGROUND_LOGS_WINDOW: &str = "Background Operations Log";
+
+/// Label of the `Dock` trailing action in a movable card's title bar
+/// (§4.7.1, `UIF-MOV-001`).
+pub const MOVABLE_DOCK_BUTTON: &str = "Dock";
+
+/// Tooltip on a movable card's title bar, naming the drag affordance
+/// (`UIF-MOV-001`).
+pub const MOVABLE_TITLE_DRAG_TOOLTIP: &str = "Drag to move";
+
+/// Tooltip on the ◢ resize grip in a movable card's footer
+/// (§4.7.1, `UIF-MOV-002`).
+pub const MOVABLE_RESIZE_TOOLTIP: &str = "Drag to resize";
+
+/// Tooltip on the `Close` action in a movable card's title bar.
+pub const MOVABLE_CLOSE_TOOLTIP: &str = "Close";
+
 // Agent Debug Window
 /// Window title for the agent debug window.
 pub const AGENT_DEBUG_WINDOW: &str = "Agent Debug";
@@ -555,6 +855,11 @@ pub const DEBUG_JSON_ROWS_LABEL: &str = "JSON rows:";
 /// Label for the copy-JSON button in a debug entry's expanded body.
 pub const DEBUG_COPY_JSON_BUTTON: &str = "Copy JSON";
 
+/// Placeholder that replaces a `tools` array an earlier entry in the same
+/// session already showed, so the same catalog is not repeated on every
+/// turn of the agent debug window.
+pub const DEBUG_OMITTED_TOOLS_PLACEHOLDER: &str = "[omitted - see earlier turn]";
+
 // Inline Editor Widget
 /// Title-bar text of the inline text editor window.
 pub const INLINE_EDITOR_WINDOW_TITLE: &str = "Inline Editor";
@@ -568,9 +873,119 @@ pub const SAVE_BUTTON: &str = "Save";
 pub const PDF_BACKED_ERROR: &str = "Cannot modify this file. The system generates the file from a PDF. \
      Use write_yaml_header to modify front-matter.";
 
+/// Badge marking a tree row's file as PDF-backed (`UIF-PANE-003`,
+/// §4.3.2 "Single & Range Selection").
+///
+/// The section requires it because the selection lock strips the row's
+/// colour cue: on selection the label repaints `color.text.strong`, so a
+/// PDF-backed row and an ordinary row become identical in colour.
+///
+/// **This string's own survival is not the same as the cue surviving.**
+/// The word `[PDF]` does pass through the lock unchanged, but the lock
+/// takes its *salience* with it — at rest the mark is `status.danger.text`
+/// and on selection it is `text_strong`, i.e. the same ink as the label
+/// beside it. What is left is a content difference, not a visual-role one.
+/// `§3B.6:883` therefore does not accept a word-only cue: it requires the
+/// distinction to be carried by a chip **fill** (`status.danger.fill`
+/// behind `text.strong`) precisely so that something other than the glyphs
+/// survives the lock. See `left::pdf_badge_colour` for the current
+/// rendering and why it does not yet meet that rule.
+///
+/// **Sentence-case: exempt, and the exemption is the section's own.**
+/// `UIF-PRIN-007` capitalises the first word plus "proper nouns or
+/// acronyms (`Markdown`, `PDF`, `MCP`, `JSON`)" — it names `PDF` as one
+/// of its own examples of the exempt form. So `[PDF]` in caps is the
+/// *correct* rendering, not an ALL-CAPS violation.
+///
+/// **The brackets are rendered literally.** §4.4.1 uses bracketed
+/// notations for slots (`[●]`, `[Icon]`, `[×]`), so `[PDF]` could be read
+/// as "a badge reading PDF" rather than a literal. It is kept verbatim
+/// because the brackets make the mark read as a tag rather than as part
+/// of the file name — which is the disambiguation the badge exists to do
+/// for a file like `report.pdf.md`.
+pub const TREE_PDF_BADGE: &str = "[PDF]";
+
+/// Status-bar text in the inline editor showing the cursor position
+/// (UI-038), e.g. `Line: 3 | Col: 12`.
+pub fn build_editor_status_text(line: usize, column: usize) -> String {
+    format!("Line: {line} | Col: {column}")
+}
+
+/// Validation-error text shown in the inline editor when the Markdown body
+/// cannot be saved (UI-043), e.g.
+/// `Markdown validation failed: unterminated code fence (line 3, column 1)`.
+pub fn build_editor_validation_error(reason: &str, line: usize, column: usize) -> String {
+    format!("Markdown validation failed: {reason} (line {line}, column {column})")
+}
+
+/// Validation reason for a fenced code block that is opened and never closed
+/// (UI-043, [`MarkdownErrorKind::UnterminatedCodeFence`]).
+///
+/// [`MarkdownErrorKind::UnterminatedCodeFence`]: crate::markdown::MarkdownErrorKind::UnterminatedCodeFence
+pub const EDITOR_ERR_UNTERMINATED_FENCE: &str = "unterminated code fence";
+
+/// Placeholder shown in the inline editor's text area while the body is empty
+/// (UI-038).
+pub const EDITOR_INPUT_PLACEHOLDER: &str = "Start typing Markdown…";
+
+/// Title of the confirmation raised when the user tries to leave the inline
+/// editor with unsaved edits (`UIF-MOD-002`).
+pub const DISCARD_CHANGES_WINDOW: &str = "Unsaved Changes";
+
+/// Confirm-button label for [`DISCARD_CHANGES_WINDOW`] — the destructive
+/// half of the unsaved-edit guard: throw the buffer away and close.
+pub const DISCARD_ACTION: &str = "Discard";
+
+/// Asks the user whether the unsaved edits in `name` should be thrown away,
+/// e.g. `Discard unsaved changes to "note.md"?`.
+///
+/// A formatting helper rather than a bare constant because the file name is
+/// interpolated into the sentence — the same shape as
+/// [`format_delete_confirm_prompt`].
+#[must_use]
+pub fn format_discard_changes_prompt(name: &str) -> String {
+    format!("Discard unsaved changes to \"{name}\"?")
+}
+
+/// Recovery-button label for a validation failure the user must fix in the
+/// buffer, e.g. `Fix line 3`.
+///
+/// The line number is the one the structured error carries
+/// (`UIF-MOD-003`'s "where"), so the button says what pressing it is for
+/// rather than showing a generic "OK".
+#[must_use]
+pub fn format_editor_recovery_label(line: u32) -> String {
+    format!("Fix line {line}")
+}
+
+/// Error surfaced when the editor's save could not even be queued for
+/// background execution (`UIF-MOD-003`: a failing action must be shown,
+/// not swallowed).
+pub const EDITOR_SAVE_QUEUE_ERROR: &str = "Could not queue the save. Try again.";
+
+/// Recovery-button label for a save that failed and can be re-run.
+pub const EDITOR_RETRY_LABEL: &str = "Retry";
+
+/// Recovery-button label when the failure names a region rather than a
+/// line, so the button still says what it is for.
+pub const EDITOR_FIX_LABEL: &str = "Fix the buffer";
+
+/// Marker glyph rendered in front of an unordered markdown list item
+/// (U+2022 BULLET).
+pub const LIST_BULLET: &str = "\u{2022}";
+
+/// Separator rendered between an ordered list item's ordinal and its text.
+pub const ORDERED_LIST_MARKER_SUFFIX: &str = ". ";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_markdown_render_marker_strings() {
+        assert_eq!(LIST_BULLET, "\u{2022}");
+        assert_eq!(ORDERED_LIST_MARKER_SUFFIX, ". ");
+    }
 
     #[test]
     fn test_agent_session_close_button_is_close() {
@@ -586,6 +1001,16 @@ mod tests {
         assert_eq!(
             build_indexing_progress_text(12),
             "Indexing workspace (found 12 files)..."
+        );
+    }
+
+    #[test]
+    fn test_editor_status_and_validation_text_builders() {
+        assert_eq!(build_editor_status_text(1, 1), "Line: 1 | Col: 1");
+        assert_eq!(build_editor_status_text(42, 7), "Line: 42 | Col: 7");
+        assert_eq!(
+            build_editor_validation_error(EDITOR_ERR_UNTERMINATED_FENCE, 3, 1),
+            "Markdown validation failed: unterminated code fence (line 3, column 1)"
         );
     }
 
@@ -621,6 +1046,51 @@ mod tests {
     }
 
     #[test]
+    fn test_tools_dialog_column_and_marker_strings() {
+        assert_eq!(TOOLS_GROUP_COLUMN, "Group");
+        assert_eq!(TOOLS_KIND_COLUMN, "Kind");
+        assert_eq!(TOOLS_ACTIONS_COLUMN, "Actions");
+        assert_eq!(TOOLS_ERROR_ICON, "⚠");
+        assert_eq!(TOOLS_PARALLEL_CHIP, "✓ parallel");
+        assert_eq!(TOOLS_EMPTY_STATE, "No tool groups registered.");
+    }
+
+    /// Defect #5: the summary line must pluralise, and must never fall back
+    /// to the column header's `"Group"`.
+    #[test]
+    fn test_tools_group_count_pluralises() {
+        assert_eq!(TOOLS_GROUP_COUNT_TEMPLATE, "{count} groups");
+        assert_eq!(TOOLS_GROUP_COUNT_ONE, "1 group");
+        assert_eq!(tools_group_count(0), "0 groups");
+        assert_eq!(tools_group_count(1), "1 group");
+        assert_eq!(tools_group_count(2), "2 groups");
+        assert_eq!(tools_group_count(10), "10 groups");
+        assert_ne!(
+            tools_group_count(10),
+            format!("10 {TOOLS_GROUP_COLUMN}"),
+            "the column header is not a pluralisable noun"
+        );
+    }
+
+    /// The close affordance's glyph and its mandatory tooltip.
+    #[test]
+    fn test_tools_close_glyph_and_tooltip_strings() {
+        assert_eq!(ICON_CLOSE, "\u{00D7}");
+        assert_eq!(TOOLS_CLOSE_TOOLTIP, "Close");
+        assert_eq!(CLOSE_BUTTON, "Close");
+    }
+
+    #[test]
+    fn test_format_tool_group_error_joins_kind_and_message() {
+        assert_eq!(
+            format_tool_group_error("Execution", "Permission denied"),
+            "Execution: Permission denied"
+        );
+        // Empty message still yields the `Kind: ` shape, never an empty line.
+        assert_eq!(format_tool_group_error("Discovery", ""), "Discovery: ");
+    }
+
+    #[test]
     fn test_save_as_pdf_dialog_strings() {
         assert_eq!(SAVE_AS_PDF_ACTION, "Save as PDF...");
         assert_eq!(SAVE_AS_PDF_DIALOG_TITLE, "Save as PDF");
@@ -634,34 +1104,101 @@ mod tests {
         assert_eq!(DEBUG_KIND_OUTGOING, "Outgoing");
         assert_eq!(DEBUG_KIND_INCOMING, "Incoming");
         assert_eq!(DEBUG_KIND_TOOL_RESULTS, "ToolResults");
+        assert_eq!(DEBUG_JSON_ROWS_LABEL, "JSON rows:");
+        assert_eq!(DEBUG_COPY_JSON_BUTTON, "Copy JSON");
+        assert_eq!(
+            DEBUG_OMITTED_TOOLS_PLACEHOLDER,
+            "[omitted - see earlier turn]"
+        );
+    }
+
+    #[test]
+    fn test_about_window_strings() {
+        assert_eq!(ABOUT_VERSION_LABEL, "Version:");
+        assert_eq!(
+            ABOUT_VIEW_ATTRIBUTIONS_BUTTON,
+            "View third-party attributions..."
+        );
+        assert_eq!(
+            ABOUT_ATTRIBUTIONS_EMPTY,
+            "No third-party dependencies recorded."
+        );
+        assert_eq!(CLOSE_BUTTON, "Close");
+    }
+
+    #[test]
+    fn test_about_description_comes_from_the_manifest() {
+        assert!(
+            !ABOUT_DESCRIPTION.trim().is_empty(),
+            "the manifest description must not be empty"
+        );
+        assert!(
+            ABOUT_DESCRIPTION.to_lowercase().contains("markdown"),
+            "ABOUT_DESCRIPTION is `CARGO_PKG_DESCRIPTION`; got {ABOUT_DESCRIPTION:?}"
+        );
+    }
+
+    #[test]
+    fn test_format_attribution_count() {
+        assert_eq!(
+            format_attribution_count(0),
+            "0 direct third-party dependencies"
+        );
+        assert_eq!(
+            format_attribution_count(1),
+            "1 direct third-party dependency"
+        );
+        assert_eq!(
+            format_attribution_count(57),
+            "57 direct third-party dependencies"
+        );
     }
 
     #[test]
     fn test_hamburger_menu_strings() {
-        assert_eq!(HAMBURGER_MENU_BUTTON, ICON_LIST);
+        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
         assert_eq!(MENU_ABOUT, "About FastMD...");
         assert_eq!(ABOUT_EVENT, "about_button");
         assert_eq!(ABOUT_DIALOG_TITLE, "About FastMD");
         assert_eq!(ABOUT_APP_NAME, "FastMD Viewer");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
-        assert_eq!(MENU_WINDOWS, "Windows");
+        assert_eq!(MENU_WINDOWS, "Windows...");
+        assert_eq!(MENU_WINDOWS_TITLE, "Windows");
+        assert_eq!(MENU_BACK_TO_MAIN, "< Main menu");
         assert_eq!(MENU_BACKGROUND_OPERATIONS, "Background operations");
         assert_eq!(MENU_AGENT_DEBUG, "Agent debug");
         assert_eq!(MENU_CHAT_MODELS, "Chat models");
         assert_eq!(NO_CHAT_MODELS_CONFIGURED, "No models configured");
         assert_eq!(CHAT_MODEL_SELECTION_EVENT, "chat_model_selection");
+        assert_eq!(format_menu_submenu_label(MENU_WINDOWS), "Windows... >");
         assert_eq!(
-            format_chat_model_menu_label("gpt-4o", 15),
+            format_chat_model_menu_label("gpt-4o", Some(15)),
             "gpt-4o (Cost: 15)"
         );
+        assert_eq!(
+            format_chat_model_menu_label("gpt-4o", None),
+            "gpt-4o (Cost: unknown)",
+            "an unconfigured price is unknown, never 0"
+        );
+        assert_eq!(COST_LABEL_UNKNOWN, "unknown");
+    }
+
+    #[test]
+    fn test_agent_panel_prompt_strings() {
+        assert_eq!(AGENT_USER_TURN_MARKER, "**User:** ");
+        assert_eq!(AGENT_SEND_BUTTON, "Send");
+        assert_eq!(AGENT_QUEUE_BUTTON, "Queue");
+        assert_eq!(AGENT_QUEUED_PREFIX, "Queued: ");
+        assert_eq!(format_queued_prompts_label(0), "Queued: 0");
+        assert_eq!(format_queued_prompts_label(3), "Queued: 3");
     }
 
     #[test]
     fn test_ui_strings_use_phosphor_icons() {
         assert_eq!(
             APP_TITLE, "FastMD Viewer",
-            "APP_TITLE is plain text; logo is painted via ui::logo::paint_logo"
+            "APP_TITLE is plain text; logo is rendered by the logo module"
         );
         assert!(
             !APP_TITLE.contains(ICON_LIGHTNING),
@@ -672,10 +1209,7 @@ mod tests {
             "APP_TITLE should not use raw lightning emoji"
         );
 
-        assert_eq!(
-            HAMBURGER_MENU_BUTTON, ICON_LIST,
-            "HAMBURGER_MENU_BUTTON should use Phosphor LIST icon"
-        );
+        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
 
         assert!(
             STOP_AGENT_BUTTON.contains(ICON_STOP),

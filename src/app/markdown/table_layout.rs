@@ -3,7 +3,9 @@
 //!
 //! Unit tests live in the sibling `table_layout_tests.rs` sidecar.
 use crate::markdown::model::InlineElem;
-use crate::markdown::table_width::{CellTokens, DeficitStrategy, compute_column_breakpoints, ftwa};
+use crate::markdown::table_width::{
+    CellTokens, DeficitStrategy, compute_column_breakpoints, ftwa, greedy_line_count,
+};
 
 /// A trait for measuring text widths in a UI-agnostic way.
 pub trait TextMeasurer {
@@ -176,24 +178,6 @@ impl<'a, M: TextMeasurer> TableLayoutBuilder<'a, M> {
             needs_horizontal_scroll: decision.needs_horizontal_scroll,
         }
     }
-}
-
-fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> i32 {
-    if token_widths.is_empty() {
-        return 1;
-    }
-    let mut lines = 1;
-    let mut line_w = 0.0;
-    for (i, &tw) in token_widths.iter().enumerate() {
-        let token_w = if i == 0 { tw } else { space_width + tw };
-        if line_w + token_w > col_width + 1e-6 {
-            lines += 1;
-            line_w = tw;
-        } else {
-            line_w += token_w;
-        }
-    }
-    lines
 }
 
 #[cfg(test)]

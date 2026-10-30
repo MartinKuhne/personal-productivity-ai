@@ -2,7 +2,7 @@
 //! pre-built by the caller, but the *construction* of those prompts
 //! (security header, current date, user info, system-prompt extension,
 //! active file/dir, selected files, USER.md content from content
-//! libraries) lives here. The agent module no longer reads
+//! libraries) lives here. The agent module itself does not read
 //! `AppConfig::user_*` / `system_prompt_extension` / `content_libraries`
 //! — those fields stay on the global config for users to edit, and the
 //! prompt assembler reads them at submit time.

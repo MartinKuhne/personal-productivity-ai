@@ -4,7 +4,7 @@
 //!
 //! The tracker stores the set in an `Arc<RwLock<HashSet>>` so it can be
 //! cheaply cloned and shared across threads. The UI thread drains
-//! `FileEvent` bus events and updates the set via `process_discovered` /
+//! `FileChanged` bus events and updates the set via `process_discovered` /
 //! `process_removed`. Tool executors read the set via `is_pdf_backed`
 //! under a read lock.
 //!
@@ -39,7 +39,7 @@ impl PdfBackingTracker {
         }
     }
 
-    /// Process `FileEvent::Discovered` paths and update the internal set.
+    /// Process `[FileChanged][Added]` paths and update the internal set.
     ///
     /// This should be called on the UI thread after draining the bus.
     /// Returns `true` if any PDF-backing membership changed.
@@ -57,7 +57,7 @@ impl PdfBackingTracker {
         changed
     }
 
-    /// Process `FileEvent::Removed` paths.
+    /// Process `[FileChanged][Deleted]` paths.
     ///
     /// Call on the UI thread after draining the bus for `Removed` events.
     pub fn process_removed(&self, paths: &[PathBuf]) -> bool {

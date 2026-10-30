@@ -132,7 +132,7 @@ pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry> {
             }
             let occurrence = seen.entry(trimmed.clone()).or_insert(0);
             // Stable string identifier — the UI layer converts
-            // this to an `egui::Id` at render time.
+            // this to an `Id` at render time.
             let id = if *occurrence == 0 {
                 trimmed.clone()
             } else {

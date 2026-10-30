@@ -1,4 +1,4 @@
-//! Pure Markdown and YAML parsing logic isolated from egui rendering.
+//! Pure Markdown and YAML parsing logic isolated from UI rendering.
 //!
 //! # Implementation note: pulldown-cmark inline-parser fragmentation
 //!
@@ -187,10 +187,16 @@ fn push_scanned_text(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyle
     }
 }
 
-/// Parses markdown text into a sequence of render events.
-#[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
-pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
-    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+/// The GFM option set FastMD parses with — MD-001's feature list, and the
+/// exact set [UI-043] names for the editor's pre-save validation.
+///
+/// Single source of truth so the renderer and [`super::validation::validate_markdown`]
+/// cannot drift apart: UI-043 requires the editor to validate "with the same
+/// GFM parser used for rendering", which structurally means the same option set.
+///
+/// [UI-043]: `src/app/ui/SPEC.md`
+pub fn gfm_options() -> pulldown_cmark::Options {
+    use pulldown_cmark::Options;
 
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
@@ -204,7 +210,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     // explanation and the regression test for the fix.
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    options
+}
 
+/// Parses markdown text into a sequence of render events.
+#[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
+pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
+    use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+
+    let options = gfm_options();
     let parser = Parser::new_ext(markdown_text, options);
     let mut events = Vec::new();
 
@@ -885,7 +899,7 @@ mod tests {
     /// text. `Visit <https://example.com> for more.` must yield a
     /// three-element inline run (`Text`, `Link`, `Text`) with no
     /// spurious `Html` variant — the clickable middle element is
-    /// what the renderer turns into an egui `Link` widget.
+    /// what the renderer turns into a clickable link.
     #[test]
     fn autolink_mixed_with_plain_text_keeps_text_runs() {
         let md = "Visit <https://example.com> for more.";
@@ -1364,6 +1378,524 @@ mod tests {
             &flush[0],
             InlineElem::Link(url, text) if url == "https://example.com" && text == "run()"
         ));
+    }
+
+    // ---------------------------------------------------------------
+    //  Block-level structure: headings, code blocks, lists, rules
+    // ---------------------------------------------------------------
+
+    /// Snapshot of one `FlushInline` event, so list/task assertions can name
+    /// each field instead of indexing a tuple.
+    #[derive(Debug)]
+    struct Flush {
+        elems: Vec<InlineElem>,
+        needs_bullet: bool,
+        task_checked: Option<bool>,
+        indent: usize,
+        list_ordinal: Option<u64>,
+    }
+
+    /// Collect every `FlushInline` payload in emission order.
+    fn flushes(events: &[RenderEvent]) -> Vec<Flush> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                RenderEvent::FlushInline {
+                    elems,
+                    needs_bullet,
+                    task_checked,
+                    indent,
+                    list_ordinal,
+                } => Some(Flush {
+                    elems: elems.clone(),
+                    needs_bullet: *needs_bullet,
+                    task_checked: *task_checked,
+                    indent: *indent,
+                    list_ordinal: *list_ordinal,
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Pull the single `CodeBlock` event out of a parse result.
+    fn only_code_block(events: &[RenderEvent]) -> (Option<String>, String) {
+        events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::CodeBlock { language, content } => {
+                    Some((language.clone(), content.clone()))
+                }
+                _ => None,
+            })
+            .expect("must produce a CodeBlock event")
+    }
+
+    #[test]
+    fn atx_headings_map_to_levels_one_through_six() {
+        for level in 1u32..=6 {
+            let md = format!("{} Title", "#".repeat(level as usize));
+            let events = parse_markdown_to_events(&md);
+            let heading = events
+                .iter()
+                .find_map(|e| match e {
+                    RenderEvent::Heading { level, elems } => Some((*level, elems.clone())),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("H{level} must produce a Heading event for {md:?}"));
+            assert_eq!(heading.0, level, "heading level for {md:?}");
+            assert_eq!(
+                heading.1.len(),
+                1,
+                "H{level} body must be a single coalesced text element"
+            );
+            assert_eq!(cell_text(&heading.1), "Title", "H{level} body text");
+        }
+    }
+
+    /// A heading inside a link goes through the link coalescer on the heading
+    /// buffer (`in_heading && in_link`), not the paragraph buffer.
+    #[test]
+    fn heading_containing_a_link_uses_the_link_coalescer() {
+        let events = parse_markdown_to_events("# [Docs](https://example.com)");
+        let heading = events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::Heading { level, elems } => Some((*level, elems.clone())),
+                _ => None,
+            })
+            .expect("heading event");
+        assert_eq!(heading.0, 1, "level");
+        assert_eq!(
+            heading.1,
+            vec![InlineElem::Link(
+                "https://example.com".to_string(),
+                "Docs".to_string()
+            )],
+            "the link must land in the heading element list"
+        );
+    }
+
+    /// A setext heading may span lines; the soft break between them is dropped
+    /// (headings are single-line in the renderer) rather than emitted as a
+    /// `SoftBreak` element.
+    #[test]
+    fn soft_break_inside_heading_is_dropped() {
+        let events = parse_markdown_to_events("Title\nLine\n===\n");
+        let elems = events
+            .iter()
+            .find_map(|e| match e {
+                RenderEvent::Heading { level, elems } => {
+                    assert_eq!(*level, 1, "a '===' underline is an H1");
+                    Some(elems.clone())
+                }
+                _ => None,
+            })
+            .expect("setext heading event");
+        assert!(
+            !elems.iter().any(|e| matches!(e, InlineElem::SoftBreak)),
+            "no SoftBreak element may appear inside a heading: {elems:?}"
+        );
+        let text = cell_text(&elems);
+        assert!(
+            text.contains("Title") && text.contains("Line"),
+            "got {text:?}"
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_keeps_language_and_content() {
+        let md = "```rust\nfn main() {\n    let x = 1;\n}\n```\n";
+        let (language, content) = only_code_block(&parse_markdown_to_events(md));
+        assert_eq!(
+            language.as_deref(),
+            Some("rust"),
+            "the fence info string becomes the language"
+        );
+        assert_eq!(
+            content, "fn main() {\n    let x = 1;\n}\n",
+            "code content keeps every line including its newline"
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_without_info_has_no_language() {
+        let (language, content) = only_code_block(&parse_markdown_to_events("```\nplain\n```\n"));
+        assert_eq!(language, None, "an info-less fence has no language");
+        assert_eq!(content, "plain\n", "content is preserved verbatim");
+    }
+
+    #[test]
+    fn indented_code_block_has_no_language() {
+        let (language, content) = only_code_block(&parse_markdown_to_events("    indented\n"));
+        assert_eq!(language, None, "indented code has no info string");
+        assert_eq!(content, "indented\n", "content is preserved verbatim");
+    }
+
+    /// The code-block buffer is filled by direct string append, never by the
+    /// inline coalescers, so nothing inside a fence is ever link-scanned.
+    #[test]
+    fn code_block_content_is_never_link_scanned() {
+        let md = "```\nhttps://example.com and [[Note]]\n```\n";
+        let (language, content) = only_code_block(&parse_markdown_to_events(md));
+        assert_eq!(language, None, "info-less fence");
+        assert_eq!(
+            content, "https://example.com and [[Note]]\n",
+            "code content must never be link-scanned"
+        );
+    }
+
+    #[test]
+    fn task_list_markers_report_checked_state_without_a_bullet() {
+        let cases = [
+            ("- [x] done\n", true, "done"),
+            ("- [ ] todo\n", false, "todo"),
+        ];
+        for (md, checked, want) in cases {
+            let flushes = flushes(&parse_markdown_to_events(md));
+            assert_eq!(flushes.len(), 1, "exactly one flush for {md:?}");
+            let f = &flushes[0];
+            assert_eq!(f.task_checked, Some(checked), "task_checked for {md:?}");
+            assert!(
+                !f.needs_bullet,
+                "a task marker replaces the bullet for {md:?}"
+            );
+            assert_eq!(f.indent, 1, "indent for {md:?}");
+            assert_eq!(
+                f.list_ordinal, None,
+                "unordered list has no ordinal for {md:?}"
+            );
+            assert_eq!(cell_text(&f.elems).trim(), want, "item text for {md:?}");
+        }
+    }
+
+    #[test]
+    fn ordered_list_items_get_increasing_ordinals() {
+        let flushes = flushes(&parse_markdown_to_events("1. one\n2. two\n3. three\n"));
+        assert_eq!(flushes.len(), 3, "one flush per item");
+        for (i, f) in flushes.iter().enumerate() {
+            assert_eq!(
+                f.list_ordinal,
+                Some((i + 1) as u64),
+                "item {} must carry ordinal {}",
+                i + 1,
+                i + 1
+            );
+            assert!(f.needs_bullet, "item {} still needs its marker", i + 1);
+            assert_eq!(f.task_checked, None, "item {} is not a task", i + 1);
+            assert_eq!(f.indent, 1, "item {} indent", i + 1);
+        }
+        assert_eq!(
+            cell_text(&flushes[2].elems).trim(),
+            "three",
+            "third item text"
+        );
+    }
+
+    /// An ordered list that does not start at 1 keeps the author's start value
+    /// and counts up from there.
+    #[test]
+    fn ordered_list_starting_offset_is_preserved() {
+        let flushes = flushes(&parse_markdown_to_events("7. seven\n8. eight\n"));
+        assert_eq!(flushes.len(), 2, "one flush per item");
+        assert_eq!(flushes[0].list_ordinal, Some(7), "first ordinal");
+        assert_eq!(flushes[1].list_ordinal, Some(8), "second ordinal");
+    }
+
+    #[test]
+    fn nested_lists_increase_indent_and_flush_the_parent_item() {
+        let flushes = flushes(&parse_markdown_to_events("- a\n  - b\n"));
+        assert_eq!(
+            flushes.len(),
+            2,
+            "parent item flushes before the nested list"
+        );
+        assert_eq!(cell_text(&flushes[0].elems).trim(), "a", "parent text");
+        assert_eq!(flushes[0].indent, 1, "parent indent");
+        assert_eq!(cell_text(&flushes[1].elems).trim(), "b", "child text");
+        assert_eq!(flushes[1].indent, 2, "child indent");
+    }
+
+    #[test]
+    fn thematic_break_becomes_a_separator() {
+        let events = parse_markdown_to_events("before\n\n---\n\nafter\n");
+        let separators = events
+            .iter()
+            .filter(|e| matches!(e, RenderEvent::Separator))
+            .count();
+        assert_eq!(
+            separators, 1,
+            "one '---' must produce exactly one Separator"
+        );
+        let texts: Vec<String> = flushes(&events)
+            .iter()
+            .map(|f| cell_text(&f.elems))
+            .collect();
+        assert_eq!(texts, vec!["before", "after"], "text around the rule");
+    }
+
+    #[test]
+    fn image_becomes_an_image_element() {
+        let flushes = flushes(&parse_markdown_to_events("![alt text](pic.png)"));
+        assert_eq!(flushes.len(), 1, "one flush");
+        assert!(
+            matches!(&flushes[0].elems[0], InlineElem::Image(url) if url == "pic.png"),
+            "the destination must become InlineElem::Image: {:?}",
+            flushes[0].elems
+        );
+        assert!(
+            cell_text(&flushes[0].elems).contains("alt text"),
+            "the alt text stays visible: {:?}",
+            flushes[0].elems
+        );
+    }
+
+    /// `<a@b.c>` is parsed as an email autolink whose destination has no
+    /// `mailto:` scheme, so the parser has to add it.
+    #[test]
+    fn email_autolink_gets_a_mailto_prefix() {
+        let flushes = flushes(&parse_markdown_to_events("Mail <mkuhn@example.com> please"));
+        assert_eq!(flushes.len(), 1, "one flush");
+        assert_eq!(
+            flushes[0].elems,
+            vec![
+                InlineElem::Text("Mail ".to_string(), TextStyle::default()),
+                InlineElem::Link(
+                    "mailto:mkuhn@example.com".to_string(),
+                    "mkuhn@example.com".to_string()
+                ),
+                InlineElem::Text(" please".to_string(), TextStyle::default()),
+            ],
+            "the bare address must be prefixed with mailto:"
+        );
+    }
+
+    #[test]
+    fn html_block_and_inline_html_become_html_elements() {
+        let block = flushes(&parse_markdown_to_events("<div>\nhello\n</div>\n"));
+        let block_html: String = html_of(&block).concat();
+        assert!(
+            block_html.contains("<div>") && block_html.contains("hello"),
+            "block HTML must survive as Html elements, got {block_html:?}"
+        );
+
+        let inline = flushes(&parse_markdown_to_events("a <b>bold</b> c"));
+        let bold_tags = html_of(&inline).contains(&"<b>");
+        assert!(bold_tags, "inline HTML must survive as an Html element");
+        let joined: String = inline.iter().map(|f| cell_text(&f.elems)).collect();
+        assert_eq!(
+            joined.trim(),
+            "a <b>bold</b> c",
+            "the inline text must stay in order"
+        );
+    }
+
+    /// Gather the raw HTML fragments of every flush so HTML assertions do not
+    /// have to re-walk the element tree.
+    fn html_of(flushes: &[Flush]) -> Vec<&str> {
+        let mut out = Vec::new();
+        for f in flushes {
+            for e in &f.elems {
+                if let InlineElem::Html(h) = e {
+                    out.push(h.as_str());
+                }
+            }
+        }
+        out
+    }
+
+    /// A hard break (two trailing spaces) outside a table ends the inline run,
+    /// so the renderer starts a new line block instead of a soft break.
+    #[test]
+    fn hard_break_outside_table_flushes_the_inline_run() {
+        let events = parse_markdown_to_events("line one  \nline two\n");
+        let flushes = flushes(&events);
+        assert_eq!(
+            flushes.len(),
+            2,
+            "a hard break must split the paragraph into two flushes"
+        );
+        assert_eq!(cell_text(&flushes[0].elems), "line one", "first line");
+        assert_eq!(cell_text(&flushes[1].elems), "line two", "second line");
+        assert!(
+            !flushes[0]
+                .elems
+                .iter()
+                .any(|e| matches!(e, InlineElem::SoftBreak)),
+            "the break must not be inlined as a SoftBreak: {:?}",
+            flushes[0].elems
+        );
+    }
+
+    #[test]
+    fn footnote_reference_and_definition_are_marked_up() {
+        let events = parse_markdown_to_events("Ref[^1] here\n\n[^1]: the note\n");
+        assert!(
+            events.iter().any(|e| matches!(e, RenderEvent::Separator)),
+            "a footnote definition must start with a Separator"
+        );
+        let texts: Vec<(String, TextStyle)> = text_of(&flushes(&events));
+        let debug = format!("{texts:?}");
+        assert!(
+            texts.iter().any(|(t, s)| t == "[^1]" && s.code),
+            "the reference must render as a code-styled [^1] marker: {debug}"
+        );
+        assert!(
+            texts.iter().any(|(t, s)| t == "[^1]: " && s.bold),
+            "the definition must render a bold [^1]: label: {debug}"
+        );
+        let body = flushes(&events)
+            .iter()
+            .any(|f| cell_text(&f.elems) == "the note");
+        assert!(body, "the definition body must be rendered");
+    }
+
+    /// Gather the `(text, style)` pairs of every flush.
+    fn text_of(flushes: &[Flush]) -> Vec<(String, TextStyle)> {
+        let mut out = Vec::new();
+        for f in flushes {
+            for e in &f.elems {
+                if let InlineElem::Text(t, s) = e {
+                    out.push((t.clone(), s.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn gfm_options_are_the_documented_feature_set() {
+        // The renderer and the editor's pre-save validation ([UI-043]) must
+        // parse with the same option set; pinning the exact set here is what
+        // stops the two from drifting apart silently.
+        use pulldown_cmark::Options;
+        let expected = Options::ENABLE_TABLES
+            | Options::ENABLE_FOOTNOTES
+            | Options::ENABLE_STRIKETHROUGH
+            | Options::ENABLE_TASKLISTS;
+        assert_eq!(gfm_options(), expected, "GFM option set drifted");
+    }
+
+    // ---------------------------------------------------------------
+    //  push_scanned_text
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn push_scanned_text_appends_to_an_empty_buffer() {
+        let style = TextStyle::default();
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_scanned_text(&mut buf, "hello", &style);
+        assert_eq!(buf, vec![InlineElem::Text("hello".to_string(), style)]);
+    }
+
+    /// The point of the combine: a URL split across two `Text` events is only
+    /// recognised because the previous same-style run is re-scanned as one.
+    #[test]
+    fn push_scanned_text_rescans_a_same_style_run_so_split_urls_are_found() {
+        let style = TextStyle::default();
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_scanned_text(&mut buf, "visit www", &style);
+        assert_eq!(
+            buf,
+            vec![InlineElem::Text("visit www".to_string(), style.clone())],
+            "the first fragment alone is not a URL"
+        );
+        push_scanned_text(&mut buf, ".example.com", &style);
+        assert_eq!(
+            buf,
+            vec![
+                InlineElem::Text("visit ".to_string(), style.clone()),
+                InlineElem::Link(
+                    "https://www.example.com".to_string(),
+                    "www.example.com".to_string()
+                ),
+            ],
+            "the combined run must expose the URL that neither fragment contains"
+        );
+    }
+
+    #[test]
+    fn push_scanned_text_does_not_combine_across_styles() {
+        let bold = TextStyle {
+            bold: true,
+            ..Default::default()
+        };
+        let plain = TextStyle::default();
+        let mut buf = vec![InlineElem::Text("hi".to_string(), bold.clone())];
+        push_scanned_text(&mut buf, "plain", &plain);
+        assert_eq!(
+            buf,
+            vec![
+                InlineElem::Text("hi".to_string(), bold),
+                InlineElem::Text("plain".to_string(), plain),
+            ],
+            "a style change must start a new element"
+        );
+    }
+
+    #[test]
+    fn push_scanned_text_starts_a_new_element_after_a_non_text_element() {
+        let style = TextStyle::default();
+        let mut buf = vec![InlineElem::Image("x.png".to_string())];
+        push_scanned_text(&mut buf, "after", &style);
+        assert_eq!(
+            buf,
+            vec![
+                InlineElem::Image("x.png".to_string()),
+                InlineElem::Text("after".to_string(), style),
+            ],
+            "an image must not absorb following text"
+        );
+    }
+
+    /// Code-styled text is never link-scanned, so a URL inside inline code
+    /// stays literal.
+    #[test]
+    fn push_scanned_text_leaves_code_styled_text_unscanned() {
+        let code = TextStyle {
+            code: true,
+            ..Default::default()
+        };
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_scanned_text(&mut buf, "https://example.com", &code);
+        assert_eq!(
+            buf,
+            vec![InlineElem::Text("https://example.com".to_string(), code)],
+            "code-styled text must not become a link"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    //  parse_yaml_to_pairs
+    // ---------------------------------------------------------------
+
+    /// Front-matter sequences are the one shape users write most often after
+    /// scalars: string items are joined, non-strings are serialised first.
+    #[test]
+    fn parse_yaml_to_pairs_joins_sequence_values() {
+        let yaml: serde_norway::Value =
+            serde_norway::from_str("tags:\n  - alpha\n  - beta\ncounts:\n  - 1\n  - true\n")
+                .unwrap();
+        let pairs = parse_yaml_to_pairs(&yaml).expect("mapping");
+        let find = |key: &str| {
+            pairs
+                .iter()
+                .find(|(k, _)| k.trim_matches('"') == key)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(find("tags").as_deref(), Some("alpha, beta"), "string items");
+        assert_eq!(
+            find("counts").as_deref(),
+            Some("1, true"),
+            "non-string items"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_to_pairs_empty_mapping_is_some() {
+        let yaml: serde_norway::Value = serde_norway::from_str("{}").unwrap();
+        let pairs = parse_yaml_to_pairs(&yaml).expect("an empty mapping is still a mapping");
+        assert!(pairs.is_empty(), "no pairs for an empty mapping");
     }
 }
 

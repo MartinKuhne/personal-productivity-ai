@@ -276,18 +276,12 @@ fn test_debug_impls() {
     assert!(s2.contains("AppConfig"));
 }
 
-/// Regression: previously the three `test_load_config_*` tests mutated
-/// the process-wide `APPDATA` env var, and `load_config()` read it
-/// back. Under the parallel test runner, another test could overwrite
-/// `APPDATA` between the `set_var` and the `load_config` call, so
-/// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see another test's value instead of
-/// the expected `None`.
-///
-/// The refactor that moved the file I/O behind a path parameter
-/// removed the shared state; this test pins that property by loading
-/// N independent config files from N threads simultaneously and
-/// asserting every thread sees its own data.
+/// Regression: `load_config_from_path` takes the path as an argument
+/// and never reads the process-wide `APPDATA` env var, so tests cannot
+/// interfere with one another through shared environment state. This
+/// test pins that isolation by loading N independent config files
+/// from N threads simultaneously and asserting every thread sees its
+/// own data.
 #[test]
 fn test_load_config_from_path_is_isolated() {
     use std::sync::{Arc, Barrier};
@@ -424,16 +418,16 @@ fn deficit_strategy_default_is_hybrid() {
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
     // Round-trip: to_config and from_config compose back to the same
     // variant, so a persisted config with the default value
     // deserialises to the same strategy.
-    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    let s = crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
     assert_eq!(s, "hybrid");
     assert_eq!(
-        crate::ui::table_width::DeficitStrategy::from_config(s),
-        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+        crate::markdown::table_width::DeficitStrategy::from_config(s),
+        crate::markdown::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -529,7 +523,7 @@ fn deficit_strategy_respects_config_value() {
     };
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        crate::markdown::table_width::DeficitStrategy::ProportionalToSlack
     );
 }
 
@@ -538,7 +532,7 @@ fn deficit_strategy_parses_survey_algorithm_strings() {
     // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
     // must parse from its canonical config string. This guards the
     // round-trip with the top-bar combobox.
-    use crate::ui::table_width::DeficitStrategy;
+    use crate::markdown::table_width::DeficitStrategy;
     for (raw, expected) in [
         ("ratio", DeficitStrategy::WaterFillRatio),
         ("lagrange", DeficitStrategy::LagrangePenalty),
@@ -1387,8 +1381,10 @@ fn test_file_config_storage_saves_to_path() {
     let storage = FileConfigStorage::new(path.clone());
     assert_eq!(storage.path(), path.as_path());
 
-    let mut cfg = AppConfig::default();
-    cfg.table_width_strategy = "waterfill".to_string();
+    let cfg = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     let written = storage.save_config(&cfg).unwrap();
     assert_eq!(written, path);
     assert!(path.exists());
@@ -1411,12 +1407,16 @@ fn test_in_memory_config_storage_records_history() {
     assert!(storage.saved_configs().is_empty());
     assert!(storage.latest_config().is_none());
 
-    let mut cfg1 = AppConfig::default();
-    cfg1.table_width_strategy = "waterfill".to_string();
+    let cfg1 = AppConfig {
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg1).unwrap();
 
-    let mut cfg2 = AppConfig::default();
-    cfg2.table_width_strategy = "lagrange".to_string();
+    let cfg2 = AppConfig {
+        table_width_strategy: "lagrange".to_string(),
+        ..AppConfig::default()
+    };
     storage.save_config(&cfg2).unwrap();
 
     let history = storage.saved_configs();
@@ -1427,4 +1427,611 @@ fn test_in_memory_config_storage_records_history() {
         storage.latest_config().unwrap().table_width_strategy,
         "lagrange"
     );
+}
+
+// ---- models_for_use_case_min_cost ----
+
+fn chat_model(model: &str, cost: Option<i32>) -> LlmConfig {
+    LlmConfig {
+        model: model.to_string(),
+        api_url: "http://localhost".to_string(),
+        api_key: "k".to_string(),
+        cost,
+        use_case: vec!["chat".to_string()],
+    }
+}
+
+/// Every model tied at the lowest cost is returned, so the UI can offer the
+/// whole tie instead of picking one arbitrarily.
+#[test]
+fn test_models_for_use_case_min_cost_returns_every_tied_model() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap-a".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("cheap-b".to_string(), chat_model("b", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("c", Some(7)));
+
+    let mut keys: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    keys.sort_unstable();
+
+    assert_eq!(
+        keys,
+        vec!["cheap-a", "cheap-b"],
+        "only the models tied at the minimum cost may be returned"
+    );
+}
+
+/// **Defect 02, fixed.** An unpriced model (`cost: None`) means "price unknown",
+/// not "free". [`LlmConfig::get_cost`] still reports `0` for display, but
+/// `model_for_use_case` and `models_for_use_case_min_cost` rank on
+/// [`LlmConfig::cost_rank`], so an unpriced model comes *after* every priced
+/// model and no longer ties with a genuinely free (`Some(0)`) one.
+#[test]
+fn defect_02_app_config_ranks_an_unpriced_model_after_every_priced_one() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("b", Some(9)));
+    config
+        .models
+        .insert("unpriced".to_string(), chat_model("c", None));
+
+    let mut keys: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    keys.sort_unstable();
+
+    assert_eq!(
+        keys,
+        vec!["cheap"],
+        "an unknown price must not beat a configured one"
+    );
+
+    // An explicitly free model wins outright; the unpriced one no longer ties.
+    config
+        .models
+        .insert("free".to_string(), chat_model("d", Some(0)));
+    let mut tied: Vec<&str> = config
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    tied.sort_unstable();
+    assert_eq!(
+        tied,
+        vec!["free"],
+        "only a genuinely free model is the minimum-cost match"
+    );
+
+    // With no priced model at all the unpriced ones still win, so a config
+    // without any `cost:` entries keeps selecting a model.
+    let mut unpriced_only = AppConfig::default();
+    unpriced_only
+        .models
+        .insert("one".to_string(), chat_model("a", None));
+    unpriced_only
+        .models
+        .insert("two".to_string(), chat_model("b", None));
+    let mut all_unknown: Vec<&str> = unpriced_only
+        .models_for_use_case_min_cost("chat")
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect();
+    all_unknown.sort_unstable();
+    assert_eq!(
+        all_unknown,
+        vec!["one", "two"],
+        "when nothing is priced, everything is tied and still selectable"
+    );
+}
+
+#[test]
+fn test_models_for_use_case_min_cost_single_winner() {
+    let mut config = AppConfig::default();
+    config
+        .models
+        .insert("cheap".to_string(), chat_model("a", Some(1)));
+    config
+        .models
+        .insert("pricier".to_string(), chat_model("b", Some(9)));
+
+    let matches = config.models_for_use_case_min_cost("chat");
+
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].0, "cheap");
+    assert_eq!(matches[0].1.model, "a");
+}
+
+/// A use case nothing is configured for yields an empty list rather than a
+/// fallback to an unrelated model.
+#[test]
+fn test_models_for_use_case_min_cost_empty_when_nothing_matches() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "vision_only".to_string(),
+        LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(1),
+            use_case: vec!["vision".to_string()],
+        },
+    );
+
+    assert!(config.models_for_use_case_min_cost("chat").is_empty());
+    assert!(
+        AppConfig::default()
+            .models_for_use_case_min_cost("chat")
+            .is_empty()
+    );
+}
+
+// ---- get_or_create_system_library_at ----
+
+/// The path-taking variant must create the system folders and label the
+/// library with the configured display name — without touching the platform
+/// default locations ([RUST-024]).
+#[test]
+fn test_get_or_create_system_library_at_creates_folders_and_labels_library() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system-root");
+    let config = AppConfig {
+        system_library_name: Some("My Library".to_string()),
+        ..AppConfig::default()
+    };
+
+    let library = config.get_or_create_system_library_at(&sys_path);
+
+    assert_eq!(
+        library.root_folder,
+        sys_path.to_string_lossy().to_string(),
+        "the library must be rooted at the requested path, not a platform default"
+    );
+    assert_eq!(library.name, "My Library");
+    assert_eq!(library.kind, "text");
+    assert!(!library.readonly);
+    assert_eq!(library.priority, 0);
+    assert!(
+        sys_path.join("Skills").join("Note").exists(),
+        "the system folders must be created as a side effect"
+    );
+}
+
+#[test]
+fn test_get_or_create_system_library_at_falls_back_to_default_display_name() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system-root");
+    let config = AppConfig::default();
+
+    let library = config.get_or_create_system_library_at(&sys_path);
+
+    assert_eq!(library.name, "System");
+}
+
+// ---- list_skill_files_in ----
+
+/// `list_skill_files_in` must degrade to an empty list for anything that is not
+/// a readable directory, skip dotfiles, and sort case-insensitively by name.
+#[test]
+fn test_list_skill_files_in_edge_cases() {
+    let dir = tempdir().unwrap();
+    let skills = dir.path().join("skills");
+    std::fs::create_dir_all(&skills).unwrap();
+    std::fs::write(skills.join("beta.md"), "b").unwrap();
+    std::fs::write(skills.join("Alpha.md"), "a").unwrap();
+    std::fs::write(skills.join(".hidden.md"), "h").unwrap();
+    std::fs::write(skills.join("no_extension"), "n").unwrap();
+    std::fs::create_dir(skills.join("nested")).unwrap();
+    std::fs::create_dir(dir.path().join("empty")).unwrap();
+    let a_file = dir.path().join("a-file.md");
+    std::fs::write(&a_file, "not a dir").unwrap();
+
+    struct Case {
+        name: &'static str,
+        dir: PathBuf,
+        expected: Vec<&'static str>,
+    }
+    let cases = [
+        Case {
+            name: "missing directory",
+            dir: dir.path().join("does-not-exist"),
+            expected: vec![],
+        },
+        Case {
+            name: "path is a file, not a directory",
+            dir: a_file.clone(),
+            expected: vec![],
+        },
+        Case {
+            name: "empty directory",
+            dir: dir.path().join("empty"),
+            expected: vec![],
+        },
+        Case {
+            name: "dotfiles and subdirectories are skipped and names sort case-insensitively",
+            dir: skills.clone(),
+            expected: vec!["Alpha", "beta", "no_extension"],
+        },
+    ];
+
+    for case in cases {
+        let found = AppConfig::list_skill_files_in(&case.dir);
+        let names: Vec<&str> = found.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, case.expected, "case: {}", case.name);
+    }
+
+    // The stem of a Markdown file is the display name; the full path is kept.
+    let found = AppConfig::list_skill_files_in(&skills);
+    assert_eq!(
+        found[0].path,
+        skills.join("Alpha.md"),
+        "the skill must carry the path it was discovered at"
+    );
+    assert_eq!(
+        found[2].name, "no_extension",
+        "a file without an extension falls back to its file name"
+    );
+}
+
+// ---- save_config_to_path ----
+
+/// A missing parent chain is created, and the written YAML reloads identically.
+#[test]
+fn test_save_config_to_path_creates_parents_and_round_trips() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("deep").join("nested").join("config.yaml");
+    let config = AppConfig {
+        system_prompt_extension: Some("be terse".to_string()),
+        table_width_strategy: "waterfill".to_string(),
+        ..AppConfig::default()
+    };
+
+    let written = save_config_to_path(&config, &path).unwrap();
+
+    assert_eq!(written, path);
+    assert!(path.exists());
+    let reloaded = load_config_from_path(&path, Some(&dir.path().join("system")));
+    assert_eq!(
+        reloaded.system_prompt_extension.as_deref(),
+        Some("be terse")
+    );
+    assert_eq!(reloaded.table_width_strategy, "waterfill");
+}
+
+/// When the parent cannot be created the error must name the directory that
+/// failed instead of surfacing a bare write error.
+#[test]
+fn test_save_config_to_path_reports_an_uncreatable_parent() {
+    let dir = tempdir().unwrap();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "i am a file").unwrap();
+    let path = blocker.join("config.yaml");
+
+    let err = save_config_to_path(&AppConfig::default(), &path)
+        .expect_err("a parent blocked by a regular file cannot be created");
+
+    assert!(
+        err.contains("failed to create config parent dir"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !path.exists(),
+        "no config file may be written under an uncreatable parent"
+    );
+}
+
+// ---- load_config_from_path fallbacks ----
+
+/// A path that exists but cannot be read (here: a directory) must fall back to
+/// the default config with the system library projected in, and must not
+/// overwrite the offending path.
+#[test]
+fn test_load_config_from_path_falls_back_when_the_file_is_unreadable() {
+    let dir = tempdir().unwrap();
+    let system_path = dir.path().join("system");
+    let config_path = dir.path().join("config.yaml");
+    std::fs::create_dir(&config_path).unwrap();
+
+    let config = load_config_from_path(&config_path, Some(&system_path));
+
+    assert_eq!(
+        config.system_prompt_extension,
+        AppConfig::default().system_prompt_extension
+    );
+    assert!(
+        config_path.is_dir(),
+        "the fallback must not replace the unreadable path with a file"
+    );
+    assert!(
+        config
+            .content_libraries
+            .iter()
+            .any(|lib| lib.name == "System"),
+        "the system library must still be projected onto the fallback config"
+    );
+}
+
+/// An unparseable file must also leave the file untouched — the fallback path
+/// does not rewrite it, so the user's broken YAML stays visible for repair.
+#[test]
+fn test_load_config_from_path_does_not_rewrite_an_unparseable_file() {
+    let dir = tempdir().unwrap();
+    let system_path = dir.path().join("system");
+    let config_path = dir.path().join("config.yaml");
+    std::fs::write(&config_path, "invalid: yaml: [").unwrap();
+
+    let config = load_config_from_path(&config_path, Some(&system_path));
+
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        "invalid: yaml: [",
+        "a broken config file must not be silently overwritten"
+    );
+    assert_eq!(config.table_width_strategy, "hybrid");
+}
+
+// ---- validate ----
+
+/// Several independent problems must all be reported in one pass so the user
+/// can fix the file in a single edit.
+#[test]
+fn test_validate_collects_multiple_warnings() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "odd".to_string(),
+        LlmConfig {
+            model: "m".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["summarise".to_string(), "embeddings".to_string()],
+        },
+    );
+    config.models.insert(
+        "also-odd".to_string(),
+        LlmConfig {
+            model: "m2".to_string(),
+            api_url: "http://b".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["chat-ish".to_string()],
+        },
+    );
+
+    let warnings = config.validate();
+
+    assert_eq!(
+        warnings.len(),
+        3,
+        "two unknown use_cases plus the missing chat model: {warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("odd") && w.contains("summarise"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("also-odd") && w.contains("chat-ish"))
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w == "No model configured with 'chat' use_case")
+    );
+}
+
+// ---- DiscordConfig serde defaults ----
+
+/// A bare `discord:` block must fill in the documented defaults rather than
+/// failing to deserialise.
+#[test]
+fn test_discord_config_serde_defaults() {
+    let parsed: DiscordConfig = serde_norway::from_str("{}").unwrap();
+
+    assert!(parsed.bot_token.is_none());
+    assert!(parsed.allowed_channels.is_empty());
+    assert!(parsed.allowed_guilds.is_empty());
+    assert!(
+        parsed.register_commands,
+        "slash-command registration is on by default"
+    );
+    assert!(parsed.system_prompt.is_none());
+    assert_eq!(parsed.max_history, 20);
+    assert_eq!(parsed.rate_limit_per_minute, 10);
+    assert!(parsed.blocked_patterns.is_empty());
+
+    // Explicit values must win over the defaults.
+    let parsed: DiscordConfig = serde_norway::from_str(
+        "register_commands: false\nmax_history: 3\nrate_limit_per_minute: 1\nblocked_patterns: [\"secret\"]\n",
+    )
+    .unwrap();
+    assert!(!parsed.register_commands);
+    assert_eq!(parsed.max_history, 3);
+    assert_eq!(parsed.rate_limit_per_minute, 1);
+    assert_eq!(parsed.blocked_patterns, vec!["secret".to_string()]);
+}
+
+// ---- DiscordConfig secret redaction (NFR-009) ----
+
+/// A Discord configuration with every field populated, so a redaction test can
+/// tell "the secret is hidden" apart from "the whole struct prints nothing".
+fn discord_config_with_token(token: &str) -> DiscordConfig {
+    DiscordConfig {
+        bot_token: Some(token.to_string()),
+        allowed_channels: vec!["channel-123".to_string()],
+        allowed_guilds: vec!["guild-456".to_string()],
+        register_commands: true,
+        system_prompt: Some("Answer briefly.".to_string()),
+        max_history: 7,
+        rate_limit_per_minute: 3,
+        blocked_patterns: vec!["internal-only".to_string()],
+    }
+}
+
+/// **Regression test for the Discord bot token leaking through `Debug` (defect D2).**
+///
+/// `DiscordConfig` used to derive `Debug`, so `{:?}` printed `bot_token:
+/// Some("<the real token>")` — and because `AppConfig`'s `Debug` forwards to it,
+/// any `tracing::debug!("{config:?}")` wrote the credential to the log, which
+/// [NFR-009] forbids. The token is now rendered as the repo-wide `[REDACTED]`
+/// placeholder while every other field stays readable.
+#[test]
+fn defect_02_discord_config_debug_redacts_the_bot_token() {
+    const SECRET: &str = "MTA5NDIyOTc0MzY3OTAwMDcwNg.GbRaZx.supersecrettokenvalue";
+    let config = discord_config_with_token(SECRET);
+
+    let rendered = format!("{config:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "Debug must never print the bot token, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("supersecret"),
+        "no fragment of the token may survive, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("[REDACTED]"),
+        "the token must be replaced by the repo-wide redaction placeholder, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("Some(\"[REDACTED]\")"),
+        "a configured token must still be visible as *configured*, got: {rendered}"
+    );
+
+    // Every non-secret field must remain readable, otherwise redaction has
+    // quietly turned the diagnostic into a black box.
+    for expected in [
+        "channel-123",
+        "guild-456",
+        "register_commands: true",
+        "Answer briefly.",
+        "max_history: 7",
+        "rate_limit_per_minute: 3",
+        "internal-only",
+    ] {
+        assert!(
+            rendered.contains(expected),
+            "Debug must keep `{expected}` readable, got: {rendered}"
+        );
+    }
+    assert!(
+        rendered.starts_with("DiscordConfig"),
+        "the struct name must still head the dump, got: {rendered}"
+    );
+}
+
+/// An unconfigured token must not be dressed up as a redacted one: `None` stays
+/// `None` so an operator can tell "no token" from "token set".
+#[test]
+fn defect_02_discord_config_debug_keeps_an_absent_token_as_none() {
+    let rendered = format!("{:?}", DiscordConfig::default());
+
+    assert!(
+        rendered.contains("bot_token: None"),
+        "an absent token must print as None, got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("[REDACTED]"),
+        "nothing is redacted when nothing was configured, got: {rendered}"
+    );
+}
+
+/// An empty configured token is still a configured value: its *presence* is
+/// reported, its content is not.
+#[test]
+fn defect_02_discord_config_debug_redacts_an_empty_token_too() {
+    let rendered = format!("{:?}", discord_config_with_token(""));
+
+    assert!(
+        rendered.contains("Some(\"[REDACTED]\")"),
+        "an empty token must be reported as configured-but-redacted, got: {rendered}"
+    );
+}
+
+/// The leak that actually mattered: `AppConfig` is what gets logged, and its
+/// `Debug` forwards to the Discord config.
+#[test]
+fn defect_02_app_config_debug_does_not_leak_the_discord_token() {
+    const SECRET: &str = "Bot.s3cr3t-t0k3n-value-do-not-log";
+    let config = AppConfig {
+        discord: Some(discord_config_with_token(SECRET)),
+        ..AppConfig::default()
+    };
+
+    let rendered = format!("{config:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "AppConfig's Debug must not carry the Discord token, got: {rendered}"
+    );
+    assert!(
+        rendered.contains("discord: Some(") && rendered.contains("[REDACTED]"),
+        "the Discord section must still be present and redacted, got: {rendered}"
+    );
+}
+
+/// `AppConfig`'s hand-written `Debug` must name every field an operator needs
+/// when triaging a bad config — a missing `.field(...)` silently hides a field
+/// from diagnostics.
+#[test]
+fn test_app_config_debug_lists_every_field() {
+    let config = AppConfig {
+        discord: Some(DiscordConfig {
+            bot_token: Some("token".to_string()),
+            ..DiscordConfig::default()
+        }),
+        qdrant_url: Some("http://qdrant:6333".to_string()),
+        qdrant_collection: Some("notes".to_string()),
+        csv_db_path: Some("C:/db".to_string()),
+        pdf_converter_command: Some(vec!["pandoc".to_string(), "{input}".to_string()]),
+        ..AppConfig::default()
+    };
+
+    let rendered = format!("{config:?}");
+
+    for field in [
+        "system_prompt_extension",
+        "models",
+        "selected_chat_model",
+        "searxng_url",
+        "jmap_clients",
+        "caldav_clients",
+        "content_libraries",
+        "system_library_name",
+        "pdf_converter_command",
+        "inline_editor_enabled",
+        "csv_db_path",
+        "feature_flags",
+        "max_tokens",
+        "tool_groups",
+        "mcp_servers",
+        "table_width_strategy",
+        "trello_client",
+        "discord",
+        "qdrant_url",
+        "qdrant_collection",
+    ] {
+        assert!(
+            rendered.contains(field),
+            "Debug must list the `{field}` field, got: {rendered}"
+        );
+    }
+    assert!(rendered.starts_with("AppConfig"));
 }

@@ -87,6 +87,12 @@ impl Tags {
             }
         }
     }
+
+    /// Replace the tag index with a full background resynchronization snapshot.
+    pub fn replace_all(&mut self, files: Vec<(PathBuf, Vec<String>)>) {
+        self.file_tags = files.into_iter().collect();
+        self.rebuild();
+    }
 }
 
 impl Default for Tags {

@@ -65,7 +65,7 @@ pub(crate) fn validate_batch_params(
 }
 
 /// Discovered prompt file available for selection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptInfo {
     /// Full path to prompt markdown file
     pub path: PathBuf,
@@ -222,8 +222,30 @@ impl BatchHandle {
 /// Dialog configuration state
 #[derive(Debug, Clone)]
 pub struct BatchDialogConfig {
-    /// Available directories sourced from DirectoryTracker (all discovered directories, not just top-level libraries)
+    /// Candidate batch roots, one per content library.
+    ///
+    /// Drift correction ([RUST-041]): this doc used to claim "all
+    /// discovered directories, not just top-level libraries". That never
+    /// matched the implementation — every population site
+    /// (`orchestrator.rs`'s config drain, `ui/app/init.rs`,
+    /// `ui_iced/app.rs`'s state builder and `ui_iced/update.rs`'s
+    /// config-arrival projection) supplies exactly one entry per content
+    /// library, taken from `ContentLibrary::root_folder`. Nothing here
+    /// walks the workspace for nested directories.
     pub available_dirs: Vec<PathBuf>,
+    /// Virtual label for each entry in [`Self::available_dirs`], shown to the
+    /// user in place of the real filesystem path.
+    ///
+    /// Index-aligned: `available_dir_labels[i]` labels `available_dirs[i]`.
+    /// A missing or empty entry means "no virtual name known" and the caller
+    /// falls back to the real path.
+    ///
+    /// The label is the content library's `name`, i.e. the virtual path the
+    /// VFS addresses that library by (`ContentLibraryExt::display_label_for`
+    /// maps a library's own root to exactly that). The real path stays in
+    /// [`Self::available_dirs`] so the batch runner can still glob the
+    /// filesystem.
+    pub available_dir_labels: Vec<String>,
     /// Discovered prompt files
     pub available_prompts: Vec<PromptInfo>,
     /// Currently selected directory index
@@ -242,6 +264,7 @@ impl Default for BatchDialogConfig {
     fn default() -> Self {
         Self {
             available_dirs: Vec::new(),
+            available_dir_labels: Vec::new(),
             available_prompts: Vec::new(),
             selected_dir_idx: None,
             pattern: "*.md".to_string(),
@@ -432,6 +455,10 @@ mod tests {
     fn test_batch_dialog_config_default() {
         let config = BatchDialogConfig::default();
         assert!(config.available_dirs.is_empty());
+        assert!(
+            config.available_dir_labels.is_empty(),
+            "no virtual labels are known until a config arrival populates them"
+        );
         assert!(config.available_prompts.is_empty());
         assert_eq!(config.pattern, "*.md");
         assert_eq!(config.mode, BatchMode::File);

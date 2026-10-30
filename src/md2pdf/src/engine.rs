@@ -4,6 +4,7 @@
 //! Unit tests live in the sibling `save_tests.rs` sidecar.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -67,7 +68,22 @@ fn build_typst_document(title: &str, body: &str) -> String {
 }
 
 /// Search for the official `typst` binary in system PATH.
+///
+/// The result is memoised for the process lifetime ([FMD-060]): the walk
+/// stats every PATH entry (three extensions on Windows) and the iced
+/// view-model rebuild called it once per inbound message, which is pure
+/// waste during a workspace scan. A binary installed after launch is
+/// picked up on the next launch.
 pub fn find_typst_binary() -> Option<PathBuf> {
+    TYPST_BINARY.get_or_init(probe_typst_binary).clone()
+}
+
+/// Cached PATH-probe result shared by [`find_typst_binary`] and
+/// [`is_typst_available`].
+static TYPST_BINARY: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// The uncached PATH walk behind [`find_typst_binary`].
+fn probe_typst_binary() -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_var) {
         #[cfg(windows)]
@@ -88,6 +104,8 @@ pub fn find_typst_binary() -> Option<PathBuf> {
 }
 
 /// Check if the official `typst` binary is available in system PATH.
+///
+/// Memoised through [`find_typst_binary`]; see its docs for the trade-off.
 pub fn is_typst_available() -> bool {
     find_typst_binary().is_some()
 }

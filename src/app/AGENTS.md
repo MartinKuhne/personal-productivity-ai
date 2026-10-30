@@ -17,50 +17,51 @@
 - [FMD-072] Dropped or delayed events SHOULD be reported as warnings with count, not silently ignored.
 
 ## 3. Required Review and Implementation Rules
-- You MUST consult [doc/distill/egui.md](../../../doc/distill/egui.md) before you write or review UI code.
-- You MUST consult [doc/distill/egui-kittest.md](../../../doc/distill/egui-kittest.md) before you write or review snapshot tests.
-
-- Keep `update` methods side-effect free where possible.
-- Keep pane layout ownership with `ui::panel_layout::PanelLayout` and do not add ad-hoc side panels in `FastMdApp::update`.
-- Keep cross-cutting UI state on `FastMdApp` in [app/mod.rs](app/mod.rs). Split new UI concerns into a dedicated manager when the state grows.
+- You MUST consult [doc/distill/iced.md](../../doc/distill/iced.md) before you write or review UI code. It covers the Elm loop, the widget set this app actually uses, the four test tiers, the theme/palette mapping and the conventions below.
+- The live UI lives in [`ui_iced/`](ui_iced/mod.rs). The [`ui/`](ui/mod.rs) tree is the framework-free domain the iced UI builds on (view-models, strings, palette tokens, tab/selection/tree/persisted state) — no rendering code goes there.
+- Keep `update` side-effect free where possible: mutate state, return `iced::Task`s. Never publish to a bus, read the filesystem, or spawn work from `view`.
+- `AppState::rebuild_view_models()` MUST run at the end of every `update` entry point, or the view renders a stale frame.
+- Keep pane layout ownership with `ui::panel_layout::PanelLayout` plus `ui_iced::layout` and do not add ad-hoc side panels in the top-level view.
+- Keep cross-cutting UI state on `AppState` in [ui_iced/app.rs](ui_iced/app.rs): domain state on `app`, view-model snapshots in `models`, floating-window state in `overlay`. Split new UI concerns into a dedicated module when the state grows.
+- Panels are pure view functions: they take an immutable view-model snapshot and emit `Message::Command(UserCommand)`; the reducer performs the publish and execution ([FMD-068]).
 
 ## 4. User Interface Text String Rules
-- Isolate all user-facing text into [strings.rs](strings.rs) as `pub const` values or formatting helpers.
+- Isolate all user-facing text into [ui/strings.rs](ui/strings.rs) as `pub const` values or formatting helpers.
 - Do not hardcode UI literals in panel, modal, tree, or editor modules.
 - Reference strings through `crate::ui::strings::<CONST_NAME>`.
-- Add a `///` doc comment to every `pub const` or helper in [strings.rs](strings.rs).
+- Add a `///` doc comment to every `pub const` or helper in [ui/strings.rs](ui/strings.rs).
 
 ## 4a. Colour Palette Rules
-- All numeric colours (`Color32::from_rgb`, `from_gray`, `from_rgba_*`, `from_white_alpha`) MUST live in [theme.rs](ui/theme.rs) as [`Palette`](ui/theme.rs) tokens or [`EditorColors`](ui/theme.rs).
-- Do not hardcode numeric colours in panel, modal, tree, renderer, or editor modules. Resolve them via `ui.palette().<token>` (import `crate::ui::theme::PaletteExt`) or `Palette::fastmd_dark()` when no `Ui` is available.
+- All numeric colours (`iced::Color::from_rgb`, `from_rgb8`, `from_rgba*`) MUST live in [ui/theme.rs](ui/theme.rs) as [`Palette`](ui/theme.rs) tokens or [`EditorColors`](ui/theme.rs). The token type is `iced::Color` ([GUD-003]).
+- Do not hardcode numeric colours in panel, modal, tree, renderer, or editor modules. Resolve them via `Palette::fastmd_dark().<token>`.
+- The mapping from FastMD tokens to iced palette roles lives in [ui_iced/theme.rs](ui_iced/theme.rs) and adds no literals of its own.
 - Add a `///` doc comment to every `Palette` field describing the role it serves.
-- Named egui constants (`Color32::GRAY`, `Color32::WHITE`, `Color32::TRANSPARENT`) remain acceptable for non-brand, self-describing uses.
-- The one exception is self-contained brand artwork in [logo.rs](ui/logo.rs), whose tints are local to the mark and not part of the UI palette.
+- Named iced constants (`iced::Color::WHITE`, `BLACK`, `TRANSPARENT`) remain acceptable for non-brand, self-describing uses.
+- The one exception is self-contained brand artwork in [ui_iced/logo.rs](ui_iced/logo.rs), whose tints are local to the mark and not part of the UI palette.
 
-## 5. `egui::Id` Stability Rules
-- Keep widget IDs stable across layout passes.
-- Do not reuse the same key for sibling widgets. Salt each key with a label tuple when a loop renders multiple widgets for one item.
-- Wrap dynamic rows, lists, and tree rows in a salted scope so child auto-IDs stay stable.
-- Assign explicit string keys to top-level containers when a block has structural variation.
+## 5. `iced::widget::Id` Stability Rules
+- Give every stateful widget (scrollable, text editor, pane grid) an explicit `iced::widget::Id` so the reducer can address it and the widget keeps its state across tree rebuilds.
+- Define the id as a `pub const &str` in the module that owns the widget and pass it through `.id(...)`; `iced::widget::Id` is `From<&'static str>`.
+- Do not reuse the same id for two live widgets. One id, one live widget.
+- `Id::unique()` produces a different id on every call — never use it for anything the reducer must address later, and never call it from `view` (the id would change every frame).
+- Pane and split ids are **discovered** from the built `pane_grid::State`, never constructed: the wrapper ints on `pane_grid::{Pane, Split}` are not publicly constructible.
 
-Use this pattern for sibling widgets:
+Use this pattern for an addressable scrollable:
 ```rust
-ui.push_id((tab_path, "tab_label"), |ui| ui.selectable_label(is_selected, &title));
-ui.push_id((tab_path, "tab_close"), |ui| ui.button("×"));
+/// Stable id for the background-log scrollable.
+pub const LOG_SCROLLABLE_ID: &str = "background_logs_scroll";
+
+scrollable(content).id(LOG_SCROLLABLE_ID).on_scroll(Reported)
 ```
-Use this pattern for dynamic rows:
+And to drive it from the reducer:
 ```rust
-ui.push_id((&item_key, item_type), |ui| {
-    // render row contents
-});
+operation::snap_to_end(LOG_SCROLLABLE_ID)
 ```
 
 ## 6. Conditional Rendering Rules
-- Always allocate the widget tree shape. Toggle visibility instead of removing the whole branch.
-- Replace `if` / `else` branches with an always-allocated structure when the branches differ in widget count.
-- Pad the shorter branch with `ui.add_visible(visible, ...)` or `ui.allocate_space(...)` when needed.
-- Replace `if let Some(x) = maybe` with the same shape. Allocate the body and toggle visibility at the `Some` / `None` boundary.
-- Do not wrap an entire `Panel::*::show(...)` block in a conditional. Keep the panel allocated and call `ui.set_invisible()` inside the closure when the panel is hidden.
-- Keep `ui.collapsing(...)` blocks valid. The body may remain allocated. Do not add a second conditional that changes widget count inside the body.
-- Use `egui::Ui::add_visible(visible, widget)` for a single widget and `ui.scope(...)` with `ui.set_invisible()` for a block.
-
+- Branch on the **view-model**, never on live widget state. The tree is rebuilt from state every frame, so a branch that changes widget count is fine — the state behind it is what must be stable.
+- Prefer `button(...).on_press_maybe(option)` over removing a control when the action is merely unavailable; the control stays visible and disabled.
+- Keep the **ids** of stateful widgets stable across a branch: a scrollable that disappears and returns under a different id loses its scroll position, and a `text_editor` whose `Content` is rebuilt loses the caret.
+- Mount floating surfaces only through the overlay host's `OverlayLayer` z-order ([ui_iced/app.rs](ui_iced/app.rs)); never stack an ad-hoc layer inside a panel.
+- Gate whole panes with the pure rule functions (e.g. `ui_iced::panels::right::should_show_panel`) rather than ad-hoc conditionals at the call site.
+- For empty/loading states, render an explicit placeholder element rather than an empty container, so the layout does not collapse silently.

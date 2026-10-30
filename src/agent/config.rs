@@ -120,9 +120,32 @@ pub fn default_use_case() -> Vec<String> {
 }
 
 impl LlmConfig {
+    /// Declared price for auto-model selection, or `0` when no price was set.
+    ///
+    /// The `0` fallback is a display/compare convenience only: it makes an
+    /// unpriced model look free. Use [`LlmConfig::cost_rank`] when a model has
+    /// to be *selected* by price.
     pub fn get_cost(&self) -> i32 {
         self.cost.unwrap_or(0)
     }
+
+    /// Ranking key that treats a missing price as **unknown**, never as free.
+    ///
+    /// `cost: None` means the user never declared a price, so the model must
+    /// not win a cheapest-first selection against a model with an explicit
+    /// price — `get_cost` would coerce the missing price to `0` and rank it
+    /// as the cheapest model in the set. The tuple puts every priced model at
+    /// `(0, cost)` and every unpriced one at `(1, 0)`, so all priced models
+    /// sort before all unpriced ones while priced models keep exactly the
+    /// relative order `get_cost()` gives them.
+    #[must_use]
+    pub fn cost_rank(&self) -> (u8, i32) {
+        match self.cost {
+            Some(cost) => (0, cost),
+            None => (1, 0),
+        }
+    }
+
     pub fn has_use_case(&self, use_case: impl AsRef<str>) -> bool {
         let uc_ref = use_case.as_ref();
         self.use_case.iter().any(|u| u == uc_ref)
@@ -554,12 +577,18 @@ impl AgentConfig {
         self.system_library_name.as_deref().unwrap_or("System")
     }
 
+    /// Cheapest configured model that declares `use_case`, if any.
+    ///
+    /// Ranking uses [`LlmConfig::cost_rank`], so a model with no declared
+    /// price never beats an explicitly priced one. Among candidates that rank
+    /// equally, `HashMap` iteration order decides — the map has no defined
+    /// order, so callers must not depend on which tied model is returned.
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
-            .min_by_key(|(_, cfg)| cfg.get_cost())
+            .min_by_key(|(_, cfg)| cfg.cost_rank())
     }
 
     pub fn select_chat_model(&self) -> Result<&LlmConfig, String> {

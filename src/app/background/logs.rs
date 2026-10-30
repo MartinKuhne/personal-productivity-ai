@@ -57,27 +57,37 @@ pub fn parse_log_category(s: &str) -> Option<LogCategory> {
     }
 }
 
+/// Treat an environment variable that is set but empty as *unset*.
+///
+/// `std::env::var` returns `Ok(String::new())` for `FOO=`, and an empty path
+/// fragment would otherwise produce a bogus relative directory such as
+/// `fastmd\logs` or `.fastmd/logs`.
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.filter(|value| !value.is_empty())
+}
+
 /// Pure helper resolving log directory from environment variables without mutating global state.
+///
+/// Every input follows the same rule: `None` **and** `Some("")` mean "not
+/// configured" and fall through to the next source, so an empty environment
+/// variable can never contribute an empty path component.
 pub fn log_dir_from_env(
     log_dir_override: Option<&str>,
     config_path_override: Option<&str>,
     appdata: Option<&str>,
     userprofile: Option<&str>,
 ) -> PathBuf {
-    if let Some(dir) = log_dir_override
-        && !dir.is_empty()
-    {
+    if let Some(dir) = non_empty(log_dir_override) {
         return PathBuf::from(dir);
     }
-    if let Some(config_path) = config_path_override
-        && !config_path.is_empty()
+    if let Some(config_path) = non_empty(config_path_override)
         && let Some(parent) = Path::new(config_path).parent()
     {
         return parent.join("logs");
     }
-    if let Some(app_data) = appdata {
+    if let Some(app_data) = non_empty(appdata) {
         PathBuf::from(app_data).join("fastmd").join("logs")
-    } else if let Some(user_profile) = userprofile {
+    } else if let Some(user_profile) = non_empty(userprofile) {
         PathBuf::from(user_profile).join(".fastmd").join("logs")
     } else {
         PathBuf::from("logs")
