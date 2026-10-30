@@ -68,16 +68,56 @@ assumed:
 So 14.000px of every tab — the 12px slot plus the 2px spacing reserved for it —
 is paid for a signal that is unreachable in every frame of the shipped build.
 
-**But the app is not read-only, and that matters for the fix.** `ui_iced/editor.rs`
-is a full inline markdown editor (UI-037…UI-044: front-matter-preserving save,
-undo, pre-save GFM validation) with its own `is_dirty()` and a discard-confirmation
-guard (`UIF-MOD-002`, wired at `app.rs:1458`). The dirty state exists and is
-correctly guarded — it simply never reaches the tab strip. The marker is therefore
-*unwired*, not *wrong*, and `UIF-TAB-003`'s dirty-close guard (`spec.md:1354`)
-cannot be implemented at all until it is.
+**The tab strip is read-only by construction, and the marker has no reachable
+state.** The editor is **not a tab and never was**. Tracing it:
 
-Conclusion: the slot should not be deleted outright. It should stop costing
-layout, and the signal should be connected.
+- `ui_iced/editor.rs` renders `editor_modal` — a **modal overlay surface**,
+  registered as `SURFACE_ID_EDITOR = "overlay.editor"` and documented as "the
+  inline editor modal (`Modal`)" (`app.rs:1552-1553`). It is mounted through the
+  overlay host's z-ordered `OverlayLayer::Editor` (`app.rs:1597-1599`), not
+  through the pane grid.
+- It is *opened from* a tab, never *as* one: the tab's context menu emits
+  `UserCommand::OpenInEditor(path)` (`center.rs:1130-1141`), the reducer queues
+  `UserFileOperation::OpenEditor`, and the result lands on
+  `state.overlay.editor` (`update.rs:838`).
+- The tab's own document view is a **read-only render**. `document_preview`
+  (`center.rs:1593`) and the render handed to `center_panel_rendered` draw
+  markdown, the YAML front-matter table and FTWA tables. No tab ever hosts an
+  editable buffer.
+- `inline_editor_enabled` (CONFIG-001) does **not** mean "docked in the pane". It
+  selects FastMD's modal editor versus the **external system editor**
+  (`user_file_operation.rs:236-237`) — and in the external case the app holds no
+  dirty signal whatsoever.
+
+So can a tab ever be dirty *while the strip is visible and interactive*? Following
+the modal host: hoarfrost's `Modal` is a scrim whose "bounds are the viewport",
+with a focus trap and card-level click absorption (`surface/modal.rs:1,31-37`),
+and `guard_leave` (`UIF-MOD-002`) refuses `Escape`, the scrim and `Cancel` while
+dirty, permitting only an explicit discard (`app.rs:1452-1458`). Therefore:
+
+| state | is the dot observable? |
+|---|---|
+| editor open, dirty | no — the scrim covers the viewport and focus is trapped |
+| editor closed after save | no — the buffer is clean |
+| editor closed after discard | no — the buffer was explicitly thrown away |
+| external system editor | no — the app has no dirty signal at all |
+
+**There is no reachable state in which a tab is dirty and the marker could be
+seen.** It is not merely unwired; under this app's modal editing model it is
+structurally unobservable. `UIF-TAB-003`'s dirty-close guard (`spec.md:1354`) is
+subsumed by the modal's own `UIF-MOD-002` guard: a tab cannot be reached to be
+closed while its editor is up and dirty.
+
+Conclusion: the marker should be **removed**, not reserved and not wired. §4.4.1
+slot 2 is not implementable in this architecture, and the drift note at
+`center.rs:95-100` should say so with the reason instead of promising that "the
+reducer populates it when dirty tracking lands".
+
+> Correction to an earlier draft of this document: it asserted "the app is not
+> read-only" and cited `editor.rs` as if the tab's document were editable. That
+> was wrong — `editor.rs` is a modal surface, not a tab, and the tab strip is
+> read-only by construction. The consequence is that P1 got *stronger*, not
+> weaker: the field should go rather than be connected.
 
 ---
 
@@ -122,31 +162,39 @@ lint is not compliance here.** The real gates are `UIF-VER-002` (hit bounds) and
 
 ## 4. Proposals
 
-### P1 — Stop the status slot from costing layout, and wire the signal it marks
+### P1 — Remove the unsaved marker from the tab
 **Reclaims 14.000px per tab.**
 
-The spec's slot is `12px` (§4.4.1 slot 2). The tab's left padding is *already*
-`space.md` = 12px. **The leading padding already is the leading status slot** —
-it is the same width, in the same position, for the same reason. So the slot does
-not need its own layout box:
+Per §2 the marker has no reachable state, so the honest change is deletion rather
+than rearrangement:
 
-- Delete the reserved `UNSAVED_MARKER_WIDTH` container and `TAB_MARKER_SPACING`.
-- Paint the `6px` dot into the existing left padding through the `Stack` the tab
-  already uses for its top accent indicator. That pattern is established in the
-  same function and is documented as taking no layout (`center.rs:1414-1416`:
-  "the indicator rides in a `Stack` and takes no layout").
-- Connect the editor's dirty flag to `TabEntry::unsaved` so the dot can actually
-  appear, closing the drift the module admits at `center.rs:95-100` and making
-  `UIF-TAB-003` implementable.
+- Drop the reserved `UNSAVED_MARKER_WIDTH` container and `TAB_MARKER_SPACING`
+  from `tab_widget`.
+- Retire `TabEntry::unsaved`, `unsaved_dot`, `UnsavedDot`, `UNSAVED_DOT_SIZE`,
+  `UNSAVED_DOT_RADIUS` and `tab_unsaved_dot_color` — a field that is written
+  `false` in one place and read in one place is not state, it is decoration.
+- Replace the drift note at `center.rs:95-100` with the actual finding: §4.4.1
+  slot 2 is **not implementable under the app's modal editing model**, because the
+  only thing that could set dirty is a scrimmed modal that cannot be dismissed
+  while dirty. That is a reasoned `UIF-PRIN` deviation, not an unfinished task.
 
-Why this over the two obvious readings: `UIF-PRIN-003` demands zero layout shift
-on state transitions, and the spec's own tab wording — "reserved/collapsed
-cleanly when saved" (`spec.md:1333`) — is genuinely ambiguous between them. A
-`Stack`-painted dot satisfies both readings at once: the 12px slot exists as
-specified, and a dirty toggle moves nothing by 0px. Reserving a real 12px box
-would cost 14px on every tab forever to describe a state true on at most one tab
-at a time; collapsing it (what hoarfrost's own composite does,
-`tab_strip.rs:385-394`) shifts the title the moment the user starts typing.
+**Contingency, and the reason the layout work still matters.** If a *docked*
+(non-modal) editor ever lands — and the `inline` naming in CONFIG-001 suggests
+that was once the intent — the dot becomes observable again, and then it should
+return **without taking layout**: the tab's left padding is *already* `space.md`
+= 12px, which is exactly §4.4.1 slot 2's `12px` leading status slot, same width,
+same position. Painting a `6px` dot into that padding through the `Stack` the tab
+already uses for its top accent indicator satisfies both readings of the spec's
+ambiguous "reserved/collapsed cleanly when saved": the slot exists as specified,
+and a dirty toggle moves 0px. The pattern is established in the same function and
+is documented as taking no layout (`center.rs:1414-1416`: "the indicator rides in
+a `Stack` and takes no layout").
+
+Reserving a real 12px box would cost 14px on every tab forever to describe a state
+that is unreachable today; collapsing it (what hoarfrost's own composite does,
+`tab_strip.rs:385-394`) would shift the title the moment a user starts typing.
+Removing it avoids both, and the `Stack` route is the recorded answer for when —
+and only when — a non-modal editor makes it meaningful.
 
 ### P2 — Make the close control the 24 × 24 target the spec describes
 **Reclaims 9.037px per tab.**
@@ -257,9 +305,14 @@ not a value a host picks at will. Note hoarfrost's own composite already uses
 `space::SM` here (`tab_strip.rs:450`), which is drift, not precedent. If the
 owner wants this, it should enter as a spec amendment with a width trigger.
 
-**Delete the unsaved marker outright.** Rejected. The editor is real and
-`UIF-TAB-003`'s dirty-close guard is specified; the signal is unwired, not
-unwanted. P1 removes the cost without removing the capability.
+**Wire the editor's `is_dirty()` through to `TabEntry::unsaved`.** Rejected, and
+this document originally recommended it — see the correction in §2. Wiring would
+populate a field that can never be *seen*: the only thing that sets dirty is a
+scrimmed, focus-trapped modal that refuses to close while dirty, so the strip is
+never visible-and-interactive with a dirty buffer. Connecting it would add a
+cross-subsystem dependency (`overlay` → tab view-model) to light an indicator no
+one can observe, and would leave `UIF-TAB-003` still unimplemented because the
+modal's own `UIF-MOD-002` guard already prevents the close it describes.
 
 **Reduce the close target to 24 × 24 *and* drop the tooltip.** Rejected —
 `UIF-ATOM-001` requires the tooltip on an icon-only control, and
@@ -269,14 +322,18 @@ unwanted. P1 removes the cost without removing the capability.
 
 ## 7. Decisions needed from the owner
 
-- **D-1 (P1):** is the `Stack`-painted dot acceptable, or must the 12px slot be a
-  real reserved box per the "reserved" reading of `spec.md:1333`? The Stack
-  reading costs 0px and shifts 0px; the reserved reading costs 14px/tab.
+- **D-1 (P1):** confirm removal. §4.4.1 slot 2 is specified and the app would stop
+  implementing it. The argument for removal is §2's state table — there is no
+  reachable dirty state the dot could describe. The alternative is keeping a
+  reserved 12px box purely to stay literally conformant to a clause the editing
+  model makes moot, at 14px per tab.
 - **D-2 (P4):** end-truncation or middle-truncation for the tab title, given
   §4.4.1 slot 3 and `UIF-PRIN-007` disagree about filenames?
-- **D-3:** confirm wiring the editor's `is_dirty()` to `TabEntry::unsaved` is in
-  scope now, or whether P1 ships as layout-only and the wiring lands with the
-  `UIF-TAB-003` dirty-close guard.
+- **D-3:** is a docked (non-modal) editor on the roadmap? If yes, P1 should ship as
+  "slot stops costing layout, field retained" and the `Stack`-painted dot comes
+  back with that editor; if no, P1 ships as full removal and `UIF-TAB-003`'s
+  dirty-close guard should be recorded as satisfied-by-substitution by
+  `UIF-MOD-002`.
 - **D-4:** is the 96px floor accepted as the limit on short-tab recovery (§5), or
   does the owner want a spec amendment against §2.2?
 
@@ -289,9 +346,12 @@ Per [RUST-005], each change starts from a failing measurement test.
   this document (`Candidate::Container` / `Text` / `Focusable` bounds).
 - `UIF-VER-002`: assert the close hit rectangle is ≥ 24 × 24 and disjoint from
   the tab body by ≥ 2px, measured, not asserted from constants.
-- P1: assert a dirty toggle moves the title by exactly 0px, and that the dot is
-  painted when `unsaved` is true — which requires a construction path that can
-  set it, i.e. the wiring in D-3.
+- P1: assert the strip renders no unsaved-marker slot at all — i.e. the measured
+  chrome drops by exactly 14.000px — and that removing `TabEntry::unsaved` leaves
+  no dead references. If D-3 comes back as "docked editor is on the roadmap", the
+  replacement assertion is that a dirty toggle moves the title by exactly **0px**,
+  which is what makes the `Stack` route the required implementation rather than a
+  stylistic preference.
 - P4: assert the clamp at both ends (a 1-char title lands on 96, a long one on
   220), that the truncated label carries a tooltip, and that `check_truncation_tooltip`
   reports no violation for the strip.
