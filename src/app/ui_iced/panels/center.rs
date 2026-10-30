@@ -92,12 +92,20 @@
 //!   that render path.
 //! * **Agent session body.** Header, close intent and the UI-048 gate are
 //!   here; the streaming response view is not.
-//! * **Unsaved-changes confirmation (UI-027/UI-029).** The app has **no**
-//!   per-tab dirty tracking anywhere (`Tabs` has no dirty flag and no
-//!   editor-modified signal reaches the tab strip), so [`TabEntry::unsaved`]
-//!   is reported `false` by `from_app`. The field and its marker exist so
-//!   the view is ready for it; the reducer populates it when dirty tracking
-//!   lands. Flagged as spec drift per [RUST-041].
+//! * **Unsaved-changes marker and dirty-close guard (UI-027/UI-029, §4.4.1 slot
+//!   2, `UIF-TAB-003`).** Not implementable under this app's editing model, and
+//!   removed rather than left as a placeholder. Nothing in the crate can mark a
+//!   tab dirty: the only thing that edits a document is [`editor`](crate::ui_iced::editor),
+//!   which is a scrimmed, focus-trapped **modal** surface
+//!   (`SURFACE_ID_EDITOR`) that [`guard_leave`](crate::ui_iced::editor::guard_leave)
+//!   refuses to close while dirty — so while a buffer is dirty the tab strip is
+//!   behind the scrim, and when the modal closes the buffer is saved or
+//!   explicitly discarded. There is no reachable state in which a dot could be
+//!   observed, and `UIF-TAB-003`'s dirty-close guard is satisfied by substitution
+//!   through `UIF-MOD-002`: a tab cannot be reached to close while its editor is
+//!   up and dirty. Flagged as spec drift per [RUST-041]; reasoning and the
+//!   contingency for a future docked editor are in
+//!   `doc/planning/tab-strip-dead-space.md`.
 //!
 //! # Framework-free `UserCommand` constructors
 //!
@@ -180,7 +188,6 @@ use std::path::{Path, PathBuf};
 use iced::widget::{Column, Row, Space, Stack, button, container, scrollable, text};
 use iced::{Alignment, Background, Element, Length, Padding};
 
-use hoarfrost::token::contrast;
 use hoarfrost::token::typography::{self, TypeRung};
 use hoarfrost::token::{shape, size, space};
 use hoarfrost::widget::button::ButtonVariant;
@@ -263,16 +270,22 @@ pub const TAB_RUNG: TypeRung = typography::UI_COMPACT;
 /// the binding, not the pixels.
 pub const TAB_TEXT_SIZE: f32 = TAB_RUNG.size;
 
-/// Horizontal padding inside one tab — `space.md` (`UIF-TOK-001`).
+/// Horizontal padding inside one tab — `space.xs` (`UIF-TOK-001`).
 ///
-/// **Movement: 10 → 12 (+2 per side, +4 pt per tab).** `10` is not on the
-/// base-4 grid, and `UIF-TOK-001` states that a spacing value which is not
-/// one of the rungs must not appear in layout code. The tie between `SM` (8)
-/// and `MD` (12) is not a coin flip here: `space.md`'s own doc names itself
-/// as the "standard horizontal padding inside buttons, inputs, **tabs** and
-/// menu rows", so the tab is the token's stated role and the old `10` was an
-/// unowned number sitting 2 pt off the rung that was drawn for it.
-pub const TAB_PADDING_X: f32 = space::MD;
+/// **Movement: 12 → 4 (−8 per side, −16 pt per tab), by owner ruling.** This is
+/// a recorded **deviation from §2.1**, not a reading of it: §2.1 binds
+/// `space.md` to "standard horizontal padding inside buttons, inputs, **tabs**
+/// and menu rows", and the constant was `space::MD` for exactly that reason. The
+/// owner ruled the tab strip down to `space.xs` to recover the horizontal space
+/// the strip was spending on chrome; the ruling and its reasoning live in
+/// `doc/planning/tab-strip-dead-space.md`, and the drift is flagged here per
+/// [RUST-041].
+///
+/// `space.xs` is still a rung on the base-4 grid, so `UIF-TOK-001`'s
+/// "no off-rung spacing in layout code" rule is honoured even though the role
+/// binding is not. The earlier history is preserved for context: the value before
+/// `space.md` was a hand-written `10`, which was off the grid entirely.
+pub const TAB_PADDING_X: f32 = space::XS;
 
 /// Vertical padding inside one tab — **derived**, not picked.
 ///
@@ -304,10 +317,6 @@ pub const TAB_PADDING_Y: f32 = space::XXS;
 /// the dense inline micro-gap rung. Value unchanged at `2`.
 pub const TAB_SPACING: f32 = space::XXS;
 
-/// Gap between a tab's unsaved marker and its title — `space.2xs`
-/// (`UIF-TOK-001`). Value unchanged at `2`.
-pub const TAB_MARKER_SPACING: f32 = space::XXS;
-
 /// Gap between a tab's label and its `×` close button — `space.xs`
 /// (`UIF-TOK-001`).
 ///
@@ -316,50 +325,22 @@ pub const TAB_MARKER_SPACING: f32 = space::XXS;
 /// `UIF-PRIN-008`) with room to spare.
 pub const TAB_CLOSE_SPACING: f32 = space::XS;
 
-/// Fixed width of the unsaved-changes marker slot — `space.md`
-/// (`UIF-TOK-001`), which is exactly §4.4.1's "Leading Status Slot
-/// (`12px`)".
-///
-/// Value unchanged at `12`. Kept as a fixed slot rather than shrink-to-fit so
-/// a tab keeps the same shape whether or not its document is dirty (the
-/// conditional-rendering rule: allocate, then toggle the content).
-pub const UNSAVED_MARKER_WIDTH: f32 = space::MD;
-
-/// Rendered diameter of the unsaved dot inside that slot — `size.indicator.dot`
-/// (`UIF-TOK-002`), i.e. §4.4.1's `6px` marker taken literally.
-///
-/// **Movement: 12 → 6 (−6), and the §4.4.1 conflict this constant carried is
-/// genuinely closed rather than re-worked-around.** INT-7c pinned it at
-/// [`typography::MIN_SIZE`] because the marker was painted with a **font
-/// glyph** (`strings::ICON_UNSAVED_DOT`) and §2.4's floor is absolute — no
-/// *text* may render under 12px. Under a glyph renderer the spec's 6px was
-/// therefore unreachable, and the recorded compromise ("the smallest size
-/// that is still legal text") was the best available answer to a real
-/// conflict.
-///
-/// The conflict was only real because a 6px **shape** was believed
-/// unavailable. It is not: the marker is now a `container` with a fixed
-/// width and height, so §2.4 never reaches it and the token is honoured
-/// exactly. The floor guard keeps its teeth for precisely that reason —
-/// this constant is removed from `converted_runtime_sizes`, the list of
-/// sizes the interface can put on screen *as type*, so "nothing renders
-/// below 12pt" still means what it says and no 6pt font can hide behind
-/// this call site. What remains here is a diameter, not a point size.
-///
-/// [`typography::MIN_SIZE`]: hoarfrost::token::typography::MIN_SIZE
-pub const UNSAVED_DOT_SIZE: f32 = size::INDICATOR_DOT;
-
-/// Corner radius of the unsaved dot — `shape.radius.pill` (`UIF-TOK-003`).
-///
-/// A pill radius on a square box is a circle: iced clamps every corner to
-/// `min(width, height) / 2` before drawing
-/// (`iced_graphics-0.14.0/src/geometry/path/builder.rs:173`), so
-/// [`UNSAVED_DOT_SIZE`] over `RADIUS_PILL` renders the `6px` round dot §4.4.1
-/// draws. The token is read inline at the call site rather than restated as
-/// a `*_RADIUS` constant on purpose: Rule B reads visually-named `pub const`
-/// declarations, and `999.0` has no business being registered as a layout
-/// bound when the thing it means is "fully round".
-pub const UNSAVED_DOT_RADIUS: f32 = shape::RADIUS_PILL;
+// The unsaved-changes marker (§4.4.1 slot 2) is removed. Its slot, dot, radius
+// and colour helpers used to live here.
+//
+// `TabEntry::unsaved` was written `false` in exactly one place and read in one
+// place, and no code path in the crate could set it — the only thing that edits a
+// document is `ui_iced/editor.rs`, which is a scrimmed, focus-trapped **modal**
+// surface (`SURFACE_ID_EDITOR`, `app.rs:1552`) that `guard_leave` (`UIF-MOD-002`)
+// refuses to close while dirty. A tab therefore has no reachable state in which a
+// dirty dot could be observed: while the editor is dirty the strip is behind the
+// scrim, and when the editor closes the buffer is either saved or explicitly
+// discarded. §4.4.1 slot 2 is consequently not implementable under this editing
+// model, and `UIF-TAB-003`'s dirty-close guard is satisfied by substitution
+// through `UIF-MOD-002` — flagged per [RUST-041].
+//
+// Reasoning and the contingency for a future *docked* editor:
+// `doc/planning/tab-strip-dead-space.md`.
 
 /// Height of a tab's top accent indicator — `shape.border.focus`
 /// (`UIF-TOK-003`), the weight §2's border table names against the "active
@@ -607,10 +588,6 @@ pub fn active_tab_index(paths: &[PathBuf], selected: Option<&Path>) -> Option<us
 /// Builds the tab-strip entries for `paths`, marking the one holding
 /// `selected` active.
 ///
-/// Every tab starts **not** unsaved: the shipped build tracks no dirty state
-/// (see the module header), so this is the honest default rather than a
-/// placeholder.
-///
 /// Purity: pure.
 #[must_use]
 pub fn tab_entries(paths: &[PathBuf], selected: Option<&Path>) -> Vec<TabEntry> {
@@ -621,7 +598,6 @@ pub fn tab_entries(paths: &[PathBuf], selected: Option<&Path>) -> Vec<TabEntry> 
         .map(|(index, path)| TabEntry {
             path: path.clone(),
             title: tab_title(path),
-            unsaved: false,
             active: active == Some(index),
         })
         .collect()
@@ -701,53 +677,6 @@ pub fn agent_session_close_message() -> Message {
 #[must_use]
 pub fn thinking_section_visible(thinking: &str) -> bool {
     !thinking.is_empty()
-}
-
-/// One tab's unsaved marker, as a paintable shape rather than a glyph.
-///
-/// Held as data so the diameter, the roundness and the fill can be asserted
-/// without a renderer, and so the render path cannot quietly fall back to a
-/// text run — which is the regression this whole type exists to make
-/// impossible.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UnsavedDot {
-    /// Whether a dot is drawn at all. A clean document draws nothing.
-    pub visible: bool,
-    /// The dot's diameter — [`UNSAVED_DOT_SIZE`], i.e. `size.indicator.dot`.
-    pub diameter: f32,
-    /// Corner radius — [`UNSAVED_DOT_RADIUS`], i.e. `shape.radius.pill`.
-    pub radius: f32,
-    /// The dot's fill, already run through the locked-fill rule.
-    pub color: iced::Color,
-}
-
-/// The unsaved marker for a tab: a real `6px` (`size.indicator.dot`) round
-/// shape, filled through the same role lock [`tab_unsaved_dot_color`]
-/// applies.
-///
-/// **A shape, not a glyph.** The retired `unsaved_marker` returned
-/// `strings::ICON_UNSAVED_DOT` at the type floor, which is the only reason
-/// §4.4.1's 6px ever had to be recorded as unreachable. See
-/// [`UNSAVED_DOT_SIZE`] for how the conflict closed.
-///
-/// The dot is invisible rather than absent when the document is clean: the
-/// [`UNSAVED_MARKER_WIDTH`] slot is allocated either way, so a tab's shape
-/// never changes as it goes dirty (the conditional-rendering rule).
-///
-/// `hovered` selects the surface the dot sits on, and therefore whether the
-/// locked-fill rule fires. It changes the dot's **colour** only — never its
-/// diameter, radius or slot, so hovering cannot move tab geometry.
-///
-/// Purity: pure function of `unsaved`, and of `(active, hovered)` through
-/// the fill lock.
-#[must_use]
-pub fn unsaved_dot(unsaved: bool, palette: &Palette, active: bool, hovered: bool) -> UnsavedDot {
-    UnsavedDot {
-        visible: unsaved,
-        diameter: UNSAVED_DOT_SIZE,
-        radius: UNSAVED_DOT_RADIUS,
-        color: tab_unsaved_dot_color(palette, active, hovered),
-    }
 }
 
 /// Colour of a tab's `2px` top accent indicator, or `None` when it paints
@@ -869,7 +798,8 @@ pub fn tab_label_font(active: bool) -> iced::Font {
 /// | Inactive (Rest) | `surface.raised` | `None` — **left unwired, see below** |
 ///
 /// Extracted so the dot-colour rule below can ask *what is behind the dot*
-/// rather than assume — which is exactly what [`contrast::fill_lock`] says a
+/// rather than assume - which is exactly what
+/// [`hoarfrost::token::contrast::fill_lock`] says a
 /// foreground audit has to do, because the style itself does not know.
 ///
 /// # The active rung is a deviation, not an oversight
@@ -886,8 +816,8 @@ pub fn tab_label_font(active: bool) -> iced::Font {
 ///
 /// The last two are effectively invisible against `accent.fill`. This is
 /// reported rather than changed: the accent fill is a recorded INT-11 decision
-/// and the unsaved-dot role lock hangs off it, so moving it is a spec decision
-/// that cascades, not a local edit.
+/// with a role lock that used to hang off the unsaved dot (since removed), so
+/// moving it is a spec decision that cascades, not a local edit.
 ///
 /// # The rest rung is deliberately not painted
 ///
@@ -982,8 +912,8 @@ pub fn tab_perimeter(active: bool, hovered: bool) -> iced::Color {
 ///   §4.4.1 slot 4 prints. ✓
 /// * `text.disabled` / the unpainted strip = **`5.916514:1`**, and
 ///   `5.564263:1` on the spec's `surface.raised`. Both sit inside
-///   [`contrast::DISABLED_TEXT_MIN_CONTRAST`] ..
-///   [`contrast::DISABLED_TEXT_MAX_CONTRAST`] (`4.0 .. 6.05`), the band a
+///   [`hoarfrost::token::contrast::DISABLED_TEXT_MIN_CONTRAST`] ..
+///   [`hoarfrost::token::contrast::DISABLED_TEXT_MAX_CONTRAST`] (`4.0 .. 6.05`), the band a
 ///   disabled-looking control is required to fall in — so the resting glyph is
 ///   legible without reading as enabled.
 /// * `text.strong` / `surface.hover` = **`16.235083:1`** for the
@@ -1056,40 +986,6 @@ pub fn tab_close_style(active: bool, tab_hovered: bool, status: button::Status) 
         border: iced::Border::default(),
         shadow: iced::Shadow::default(),
         snap: false,
-    }
-}
-
-/// Colour of a tab's unsaved dot, given that tab's fill state.
-///
-/// **A real contrast fix, not a rename.** On an inactive tab the dot is
-/// `status.warning` over the pane surface — `6.86:1` on `surface.base`,
-/// `6.45:1` on `surface.raised`, comfortably legal. On the **active** tab
-/// the app paints `palette.accent` behind it, and `palette.accent` *is*
-/// `color.accent.fill` — one of the four solid fills `UIF-TOK-006` rule 4
-/// locks. `status.warning` on `accent.fill` measures **`1.65:1`**, so the
-/// dirty marker was effectively invisible on precisely the tab the user is
-/// looking at.
-///
-/// Rule 4's answer is role-based rather than threshold-based: every
-/// foreground painted inside a locked fill promotes to `color.text.strong`
-/// (`4.80:1` against `accent.fill`). That is what this does — the same
-/// `locked_over` shape INT-7b put on the file tree's row label, so the lock
-/// cannot release on an arithmetic accident.
-///
-/// `hovered` is threaded through because INT-16 gave the inactive tab a
-/// `surface.hover` fill, which changes *what is behind the dot*. The rule is
-/// unchanged by it — `surface.hover` is not one of the four locked fills, so
-/// the dot stays `status.warning` at `5.594287:1` on the hovered surface —
-/// but the rule must be asked about the real surface rather than the resting
-/// one, which is the entire reason [`tab_fill`] exists.
-///
-/// Purity: pure function of `(active, hovered)` for a given palette.
-#[must_use]
-pub fn tab_unsaved_dot_color(palette: &Palette, active: bool, hovered: bool) -> iced::Color {
-    let pro = Palette::pro();
-    match tab_fill(palette, active, hovered) {
-        Some(fill) if contrast::fill_lock_role(fill, &pro).is_locked_fill() => palette.text_strong,
-        _ => palette.warning,
     }
 }
 
@@ -1166,15 +1062,17 @@ pub fn tab_context_menu_items(
 }
 
 /// One open document in the tab strip.
+///
+/// There is no unsaved-changes field: §4.4.1 slot 2 is not implementable under
+/// this app's modal editing model, so the field would be permanently `false`
+/// state nothing could observe. See the note at the module header and
+/// `doc/planning/tab-strip-dead-space.md`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabEntry {
     /// The document's full path — what every tab command carries.
     pub path: PathBuf,
     /// The rendered label (the file name).
     pub title: String,
-    /// Whether the document has unsaved changes (UI-027). Reported `false`
-    /// until dirty tracking lands — see the module header.
-    pub unsaved: bool,
     /// Whether this is the active document.
     pub active: bool,
 }
@@ -1186,7 +1084,6 @@ impl TabEntry {
         Self {
             title: tab_title(&path),
             path,
-            unsaved: false,
             active,
         }
     }
@@ -1403,8 +1300,8 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
         .into()
 }
 
-/// One tab: the unsaved marker slot, the title, the `×` close button, and
-/// the full select / middle-close / right-menu / cursor-motion interaction.
+/// One tab: the title, the `×` close button, and the full select /
+/// middle-close / right-menu / cursor-motion interaction.
 ///
 /// `hovered` is the INT-12 pointer state, resolved by
 /// [`tab_is_hovered`] against the tab's **path**. INT-12 routed it to
@@ -1417,39 +1314,11 @@ fn tab_strip(view_model: &CenterPanelViewModel) -> Element<'_, Message> {
 fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a, Message> {
     let palette = Palette::fastmd_dark();
 
-    let dot = unsaved_dot(tab.unsaved, &palette, tab.active, hovered);
-    let marker = container(
-        container(Space::new())
-            .width(Length::Fixed(dot.diameter))
-            .height(Length::Fixed(dot.diameter))
-            // iced 0.14 has no `border_radius` builder on a container; the
-            // radius lives on the style's `Border`, and `draw_background`
-            // hands that whole `Border` to the fill quad
-            // (`iced_widget-0.14.2/src/container.rs:446`), so the fill is
-            // rounded even at a zero border width.
-            .style(move |_theme| container::Style {
-                background: dot.visible.then_some(Background::Color(dot.color)),
-                border: iced::Border {
-                    width: 0.0,
-                    radius: dot.radius.into(),
-                    ..Default::default()
-                },
-                ..container::Style::default()
-            }),
-    )
-    .width(Length::Fixed(UNSAVED_MARKER_WIDTH))
-    .align_x(Alignment::Center)
-    .align_y(Alignment::Center);
-
     let label = text(&tab.title)
         .size(TAB_TEXT_SIZE)
         .line_height(TAB_RUNG.iced_line_height())
         .font(tab_label_font(tab.active))
         .color(tab_text_color(&palette, tab.active, hovered));
-
-    let label_row = Row::with_children(vec![marker.into(), label.into()])
-        .spacing(TAB_MARKER_SPACING)
-        .align_y(Alignment::Center);
 
     // iced's `Button` lays its content at the top-left of its padding box, so
     // the glyph is centred by the container that fills the hit target.
@@ -1466,7 +1335,7 @@ fn tab_widget<'a>(tab: &'a TabEntry, index: usize, hovered: bool) -> Element<'a,
     .palette(Palette::pro());
 
     let surface = container(
-        Row::with_children(vec![label_row.into(), close.into()])
+        Row::with_children(vec![label.into(), close.into()])
             .spacing(TAB_CLOSE_SPACING)
             .align_y(Alignment::Center),
     )
