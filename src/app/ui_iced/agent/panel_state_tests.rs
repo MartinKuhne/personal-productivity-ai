@@ -3,46 +3,18 @@
 //! Covers the turn→render-model mapping (user vs assistant, Markdown
 //! passthrough, the `**User:** ` marker convention), the UI-048
 //! thinking-delimiter gate (and its agreement with the center panel's copy),
-//! the waiting-for-first-response decision, and the chat-model option
-//! builder.
+//! and the waiting-for-first-response decision.
 //!
-//! Fixtures build plain strings and [`AppConfig`]/[`LlmConfig`] values
-//! directly — no files, no bus, no agent threads and no user paths
-//! ([RUST-006]).
+//! Fixtures build plain strings and view models directly — no files, no bus,
+//! no agent threads and no user paths ([RUST-006]).
 
-use std::collections::HashMap;
-
-use crate::config::{AppConfig, LlmConfig};
 use crate::ui::strings;
 use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
-    AgentPanelViewModel, TranscriptTurn, TurnRole, chat_model_options, split_user_turn,
-    thinking_section_visible, transcript_is_empty, turns_from_content, waiting_for_first_response,
+    AgentPanelViewModel, TranscriptTurn, TurnRole, split_user_turn, thinking_section_visible,
+    transcript_is_empty, turns_from_content, waiting_for_first_response,
 };
-
-/// A model config with the given cost and use cases.
-fn llm(cost: i32, use_cases: &[&str]) -> LlmConfig {
-    LlmConfig {
-        model: "test-model".to_string(),
-        api_url: "https://example.test".to_string(),
-        api_key: "k".to_string(),
-        cost: Some(cost),
-        use_case: use_cases.iter().map(|s| s.to_string()).collect(),
-    }
-}
-
-/// An AppConfig whose `models` map is exactly `models`.
-fn config_with(models: &[(&str, LlmConfig)]) -> AppConfig {
-    let mut map = HashMap::new();
-    for (name, cfg) in models {
-        map.insert((*name).to_string(), cfg.clone());
-    }
-    AppConfig {
-        models: map,
-        ..AppConfig::default()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // split_user_turn
@@ -261,50 +233,6 @@ fn never_waiting_when_idle() {
 }
 
 // ---------------------------------------------------------------------------
-// chat_model_options
-// ---------------------------------------------------------------------------
-
-#[test]
-fn chat_model_options_empty_config_is_empty() {
-    assert!(chat_model_options(&config_with(&[])).is_empty());
-}
-
-#[test]
-fn chat_model_options_filters_to_chat_use_case() {
-    let config = config_with(&[
-        ("chatA", llm(10, &["chat"])),
-        ("visionOnly", llm(5, &["vision"])),
-        ("chatB", llm(20, &["chat", "vision"])),
-    ]);
-    let options = chat_model_options(&config);
-    let names: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(names, vec!["chatA", "chatB"]);
-}
-
-#[test]
-fn chat_model_options_falls_back_to_all_when_no_chat_use_case() {
-    let config = config_with(&[
-        ("vision", llm(5, &["vision"])),
-        ("embed", llm(1, &["embeddings"])),
-    ]);
-    let options = chat_model_options(&config);
-    let names: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(names, vec!["embed", "vision"]);
-}
-
-#[test]
-fn chat_model_options_sorted_by_name() {
-    let config = config_with(&[
-        ("zeta", llm(1, &["chat"])),
-        ("alpha", llm(2, &["chat"])),
-        ("mid", llm(3, &["chat"])),
-    ]);
-    let options = chat_model_options(&config);
-    let names: Vec<&str> = options.iter().map(|o| o.name.as_str()).collect();
-    assert_eq!(names, vec!["alpha", "mid", "zeta"]);
-}
-
-// ---------------------------------------------------------------------------
 // AgentPanelViewModel helpers (constructed directly, no FastMdApp)
 // ---------------------------------------------------------------------------
 
@@ -317,8 +245,6 @@ fn base_vm() -> AgentPanelViewModel {
         status: "Idle".to_string(),
         running: false,
         queued_prompts: Vec::new(),
-        chat_models: Vec::new(),
-        current_chat_model: None,
         command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }

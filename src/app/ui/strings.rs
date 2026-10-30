@@ -506,10 +506,6 @@ pub const AGENT_SEND_BUTTON: &str = "Send";
 /// prompt is parked until the current turn finishes.
 pub const AGENT_QUEUE_BUTTON: &str = "Queue";
 
-/// Label prefix for the chat-model selector in the agent prompt row
-/// (UI-064/065 selection).
-pub const AGENT_MODEL_LABEL: &str = "Model:";
-
 /// Prefix for the queued-prompt count badge in the agent prompt row.
 /// Pair with [`format_queued_prompts_label`].
 pub const AGENT_QUEUED_PREFIX: &str = "Queued: ";
@@ -1175,7 +1171,6 @@ mod tests {
         assert_eq!(AGENT_USER_TURN_MARKER, "**User:** ");
         assert_eq!(AGENT_SEND_BUTTON, "Send");
         assert_eq!(AGENT_QUEUE_BUTTON, "Queue");
-        assert_eq!(AGENT_MODEL_LABEL, "Model:");
         assert_eq!(AGENT_QUEUED_PREFIX, "Queued: ");
         assert_eq!(format_queued_prompts_label(0), "Queued: 0");
         assert_eq!(format_queued_prompts_label(3), "Queued: 3");

@@ -1,5 +1,4 @@
-//! The agent panel — the streaming conversation view, prompt row and
-//! chat-model selector (UI-048).
+//! The agent panel — the streaming conversation view and prompt row (UI-048).
 //!
 //! The module is split by concern ([RUST-051]): the framework-free pieces are
 //! reused as they are, and only what the render layer needs is re-typed.
@@ -11,9 +10,8 @@
 //!   disclosure, user turns as themed text, assistant turns through iced's
 //!   built-in Markdown widget, the "Agent is thinking…" placeholder, and
 //!   the reused follow-the-stream report.
-//! * [`prompt_input`] — the prompt box with send / queue / cancel controls
-//!   and the chat-model `pick_list`, riding the shared submit solver and the
-//!   command channel.
+//! * [`prompt_input`] — the prompt box with send / queue / cancel controls,
+//!   riding the shared submit solver and the command channel.
 //!
 //! # What is NOT here
 //!
@@ -55,12 +53,12 @@ use crate::ui_iced::message::Message;
 
 pub use panel_state::{
     AgentPanelState, AgentPanelViewModel, AgentTranscript, TranscriptBlock, TranscriptTurn,
-    TurnRole, chat_model_options, split_user_turn, thinking_section_visible, transcript_is_empty,
-    turns_from_content, waiting_for_first_response,
+    TurnRole, split_user_turn, thinking_section_visible, transcript_is_empty, turns_from_content,
+    waiting_for_first_response,
 };
 pub use prompt_input::{
-    agent_prompt_row, cancel_enabled, clear_session_message, current_model_option, queue_display,
-    queue_enabled, select_model_message, send_enabled,
+    agent_prompt_row, cancel_enabled, clear_session_message, queue_display, queue_enabled,
+    send_enabled,
 };
 pub use transcript::{
     AGENT_TRANSCRIPT_SCROLLABLE_ID, agent_transcript_view, link_activated_message,
@@ -135,7 +133,8 @@ pub fn close_message() -> Message {
 /// │ [▾ Thinking Process]                          │  (gated, disclosable)
 /// │ <user turn>  <assistant markdown>  …          │  (scrollable, follows)
 /// └───────────────────────────────────────────────┘
-/// [ prompt ______________ ] [Send][Queue][Stop]  Model:[▾] [Queued: n]
+/// [ prompt ______________ ] [Send][Queue][Stop]
+/// [Queued: n] [Clear session]
 /// ```
 ///
 /// The header, status band and prompt row are always allocated; the

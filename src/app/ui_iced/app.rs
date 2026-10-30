@@ -592,7 +592,7 @@ pub struct OverlayState {
     /// The `hoarfrost` cascade that owns the hamburger tree's openness
     /// (`UIF-FMENU-001/002`, `UIF-CMENU-002/003`) — INT-3a.
     ///
-    /// It holds a **copy** of each open card's [`Menu`](hoarfrost::surface::menu::model::Menu)
+    /// It holds a **copy** of each open card's [`Menu`]
     /// with the selection the user just made, which is why the view renders
     /// from `open_cards()` rather than rebuilding the tree from the view
     /// model: the view model is still stale for one frame after a pick.

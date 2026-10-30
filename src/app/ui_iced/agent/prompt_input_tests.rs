@@ -1,35 +1,24 @@
-//! Sidecar tests for [`crate::ui_iced::agent::prompt_input`]
-//! (UI-001 / UI-064 / UI-065).
+//! Sidecar tests for [`crate::ui_iced::agent::prompt_input`].
 //!
 //! Covers the send / queue / cancel gating predicates, the queued-prompt
-//! badge, the model-pick and clear-session message constructors, the
-//! current-model option lookup, the reused submit solver, and a smoke build
-//! of the prompt row.
+//! badge, the clear-session message constructor, the reused submit solver,
+//! and a smoke build of the prompt row.
 //!
 //! No files, no bus, no agent threads and no user paths ([RUST-006]).
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui_iced::message::{AgentMessage, Message};
-use crate::ui_iced::panels::top::ChatModelEntry;
 use hoarfrost::binding::{Cancel, Commit, Live};
 use hoarfrost::widget::text_input_controller::TextInputController;
 use hoarfrost::widget::text_input_controller::TextInputEmission;
 use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
-    PROMPT_INPUT_ID, agent_prompt_row, cancel_enabled, clear_session_message, current_model_option,
-    prompt_field_emit, queue_display, queue_enabled, select_model_message, send_enabled,
-    submit_commands,
+    PROMPT_INPUT_ID, agent_prompt_row, cancel_enabled, clear_session_message, prompt_field_emit,
+    queue_display, queue_enabled, send_enabled, submit_commands,
 };
 use crate::ui_iced::agent::panel_state::AgentPanelViewModel;
-
-fn entry(name: &str, cost: i32) -> ChatModelEntry {
-    ChatModelEntry {
-        name: name.to_string(),
-        cost,
-    }
-}
 
 fn base_vm() -> AgentPanelViewModel {
     AgentPanelViewModel {
@@ -40,8 +29,6 @@ fn base_vm() -> AgentPanelViewModel {
         status: "Idle".to_string(),
         running: false,
         queued_prompts: Vec::new(),
-        chat_models: Vec::new(),
-        current_chat_model: None,
         command_input: prompt_model(""),
         auto_scroll: true,
     }
@@ -133,42 +120,11 @@ fn queue_display_counts_parked_prompts() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn select_model_message_carries_name() {
-    assert_eq!(
-        select_model_message("gpt-4o"),
-        Message::Command(UserCommand::SelectChatModel("gpt-4o".to_string()))
-    );
-}
-
-#[test]
 fn clear_session_message_is_clear_agent_session() {
     assert_eq!(
         clear_session_message(),
         Message::Command(UserCommand::ClearAgentSession)
     );
-}
-
-// ---------------------------------------------------------------------------
-// Current-model lookup
-// ---------------------------------------------------------------------------
-
-#[test]
-fn current_model_option_matches_by_name() {
-    let options = vec![entry("a", 1), entry("b", 2)];
-    let found = current_model_option(&options, Some("b")).unwrap();
-    assert_eq!(found.name, "b");
-}
-
-#[test]
-fn current_model_option_none_when_absent() {
-    let options = vec![entry("a", 1)];
-    assert!(current_model_option(&options, Some("missing")).is_none());
-}
-
-#[test]
-fn current_model_option_none_when_no_current() {
-    let options = vec![entry("a", 1)];
-    assert!(current_model_option(&options, None).is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -213,8 +169,6 @@ fn submit_blank_produces_nothing() {
 fn prompt_row_builds_idle() {
     let mut vm = base_vm();
     vm.command_input = prompt_model("hello");
-    vm.chat_models = vec![entry("a", 1), entry("b", 2)];
-    vm.current_chat_model = Some("a".to_string());
     let _ = agent_prompt_row(&vm);
 }
 
@@ -228,9 +182,20 @@ fn prompt_row_builds_running_with_queue() {
 }
 
 #[test]
-fn prompt_row_builds_with_no_models() {
-    let vm = base_vm();
-    let _ = agent_prompt_row(&vm);
+fn prompt_row_does_not_render_inline_model_selector() {
+    let mut vm = base_vm();
+    vm.queued_prompts = vec!["queued".to_string()];
+    let mut ui = iced_test::simulator(agent_prompt_row(&vm));
+
+    assert!(ui.find("Model:").is_err());
+    assert!(ui.find(strings::AGENT_SEND_BUTTON).is_ok());
+    assert!(ui.find(strings::AGENT_QUEUE_BUTTON).is_ok());
+    assert!(ui.find(strings::STOP_AGENT_BUTTON).is_ok());
+    assert!(
+        ui.find(strings::format_queued_prompts_label(1).as_str())
+            .is_ok()
+    );
+    assert!(ui.find(strings::AGENT_SESSION_CLOSE_BUTTON).is_ok());
 }
 
 #[test]

@@ -36,8 +36,6 @@ fn base_vm() -> AgentPanelViewModel {
         status: "Idle".to_string(),
         running: false,
         queued_prompts: Vec::new(),
-        chat_models: Vec::new(),
-        current_chat_model: None,
         command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }

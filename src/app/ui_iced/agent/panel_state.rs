@@ -40,10 +40,8 @@
 //!
 //! Unit tests live in the sibling `panel_state_tests.rs` sidecar.
 
-use crate::config::AppConfig;
 use crate::ui::app::FastMdApp;
 use crate::ui::strings;
-use crate::ui_iced::panels::top::{CHAT_USE_CASE, ChatModelEntry};
 use hoarfrost::widget::text_input_model::TextInputModel;
 
 /// The UI-owned panel state — widget toggles and command input — reused
@@ -294,11 +292,6 @@ pub struct AgentPanelViewModel {
     pub running: bool,
     /// Prompts parked behind the current turn (`AgentState::pending_prompts`).
     pub queued_prompts: Vec<String>,
-    /// The chat-model selector options (UI-064), filtered to the chat use
-    /// case exactly as the top bar does.
-    pub chat_models: Vec<ChatModelEntry>,
-    /// The currently active chat-model key (`AppConfig::current_chat_model_key`).
-    pub current_chat_model: Option<String>,
     /// The derived prompt-field view model. Its value snapshots the
     /// source-of-truth `AgentPanelState::command_input`; it is not an
     /// independently mutated copy, and is the only prompt value the view
@@ -314,8 +307,7 @@ impl AgentPanelViewModel {
     /// Snapshots the agent panel's inputs off `app`:
     /// `agent_panel_state.show_results` / `command_input`,
     /// `agent_transcript.content` / `.thinking`,
-    /// `agent().state().status` / `.running` / `.pending_prompts`, and the
-    /// chat-model list off `config()`.
+    /// `agent().state().status` / `.running` / `.pending_prompts`.
     pub fn from_app(app: &FastMdApp) -> Self {
         let panel = &app.orchestrator.agent_panel_state;
         let transcript = &app.orchestrator.agent_transcript;
@@ -343,8 +335,6 @@ impl AgentPanelViewModel {
             status: state.status.clone(),
             running: state.running,
             queued_prompts: state.pending_prompts.clone(),
-            chat_models: chat_model_options(app.config()),
-            current_chat_model: app.config().current_chat_model_key(),
             command_input: TextInputModel::new(panel.command_input.clone())
                 .with_placeholder(strings::COMMAND_INPUT_HINT)
                 .with_clearable(false),
@@ -379,36 +369,6 @@ impl AgentPanelViewModel {
         self.thinking_expanded = expanded;
         self
     }
-}
-
-/// Builds the chat-model selector options off `config`, mirroring the top
-/// bar's filter ([`crate::ui_iced::panels::top`]): chat-use-case models
-/// first, falling back to every configured model when none declare the chat
-/// use case, sorted by name.
-///
-/// Purity: pure function of `config`.
-#[must_use]
-pub fn chat_model_options(config: &AppConfig) -> Vec<ChatModelEntry> {
-    let to_entry = |name: &str, cfg: &crate::config::LlmConfig| ChatModelEntry {
-        name: name.to_string(),
-        cost: cfg.get_cost(),
-    };
-
-    let mut models: Vec<ChatModelEntry> = config
-        .models
-        .iter()
-        .filter(|(_, cfg)| cfg.has_use_case(CHAT_USE_CASE))
-        .map(|(name, cfg)| to_entry(name, cfg))
-        .collect();
-    if models.is_empty() {
-        models = config
-            .models
-            .iter()
-            .map(|(name, cfg)| to_entry(name, cfg))
-            .collect();
-    }
-    models.sort_by(|a, b| a.name.cmp(&b.name));
-    models
 }
 
 // ---------------------------------------------------------------------------

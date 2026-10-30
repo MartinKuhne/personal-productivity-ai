@@ -9,7 +9,6 @@
 
 use crate::bus::events::user_command::UserCommand;
 use crate::ui_iced::message::Message;
-use crate::ui_iced::panels::top::ChatModelEntry;
 use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{AgentPanelViewModel, TranscriptTurn, agent_panel, close_message};
@@ -23,8 +22,6 @@ fn base_vm() -> AgentPanelViewModel {
         status: "Idle".to_string(),
         running: false,
         queued_prompts: Vec::new(),
-        chat_models: Vec::new(),
-        current_chat_model: None,
         command_input: TextInputModel::empty().with_clearable(false),
         auto_scroll: true,
     }
@@ -56,17 +53,6 @@ fn agent_panel_builds_with_conversation() {
     vm.thinking = "considering the request".to_string();
     vm.status = "Streaming".to_string();
     vm.running = true;
-    vm.chat_models = vec![
-        ChatModelEntry {
-            name: "a".into(),
-            cost: 1,
-        },
-        ChatModelEntry {
-            name: "b".into(),
-            cost: 2,
-        },
-    ];
-    vm.current_chat_model = Some("a".into());
     vm.command_input = TextInputModel::new("next").with_clearable(false);
     vm.queued_prompts = vec!["q1".into()];
     let _ = agent_panel(&vm);

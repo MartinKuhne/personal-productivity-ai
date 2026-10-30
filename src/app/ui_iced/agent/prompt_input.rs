@@ -1,5 +1,4 @@
-//! The iced agent prompt row — prompt box, send / queue / cancel controls and
-//! the chat-model selector (UI-001 / UI-064 / UI-065).
+//! The iced agent prompt row — prompt box, send / queue / cancel controls.
 //!
 //! This is the agent-panel-composed prompt surface. It shares its intent
 //! vocabulary with the pane-level command band
@@ -8,8 +7,7 @@
 //! reducer runs the shared [`submit_commands`] helper to decide
 //! `RunAgent` (idle) vs `QueueAgentPrompt` (running), so the running-vs-idle
 //! branch lives in one place instead of per widget. Cancel emits
-//! [`UserCommand::CancelAgent`]; the model pick emits
-//! [`UserCommand::SelectChatModel`]; Clear session emits
+//! [`UserCommand::CancelAgent`]; Clear session emits
 //! [`UserCommand::ClearAgentSession`].
 //!
 //! # Shared, not reimplemented ([RUST-051])
@@ -17,9 +15,6 @@
 //! * [`submit_commands`] and [`clear_command_input_command`] — the
 //!   framework-free submit solver, re-exported from
 //!   [`crate::ui_iced::panels::bottom`].
-//! * [`ChatModelEntry`] — the top bar's model row type, reused for the
-//!   selector so both surfaces format and carry the model identically.
-//!
 //! # Send / queue gating
 //!
 //! The two buttons are **always allocated** and toggled by
@@ -30,7 +25,7 @@
 //!
 //! Unit tests live in the sibling `prompt_input_tests.rs` sidecar.
 
-use iced::widget::{Column, Row, pick_list, text};
+use iced::widget::{Column, Row, text};
 use iced::{Alignment, Element, Length};
 
 use hoarfrost::token::space;
@@ -44,7 +39,6 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::message::{AgentMessage, Message};
-use crate::ui_iced::panels::top::ChatModelEntry;
 
 use super::panel_state::AgentPanelViewModel;
 
@@ -167,14 +161,6 @@ pub fn queue_display(queued: &[String]) -> Option<String> {
     }
 }
 
-/// The [`Message`] a chat-model pick produces (UI-065).
-///
-/// Purity: pure function of `name`.
-#[must_use]
-pub fn select_model_message(name: &str) -> Message {
-    Message::Command(UserCommand::SelectChatModel(name.to_string()))
-}
-
 /// The [`Message`] the Clear-session control produces — the same
 /// `ClearAgentSession` intent the agent header's Close button carries.
 ///
@@ -182,22 +168,6 @@ pub fn select_model_message(name: &str) -> Message {
 #[must_use]
 pub fn clear_session_message() -> Message {
     Message::Command(crate::ui_iced::panels::center::clear_agent_session_command())
-}
-
-/// The [`ChatModelEntry`] in `options` matching `current`, if still offered.
-///
-/// Borrows out of the snapshot's owned list so the reference is valid for
-/// the view's lifetime — what `pick_list` needs (`V: Borrow<T> + 'a`,
-/// `iced_widget-0.14.2/src/pick_list.rs:179-195`).
-///
-/// Purity: pure.
-#[must_use]
-pub fn current_model_option<'a>(
-    options: &'a [ChatModelEntry],
-    current: Option<&str>,
-) -> Option<&'a ChatModelEntry> {
-    let current = current?;
-    options.iter().find(|entry| entry.name == current)
 }
 
 /// Maps the controlled prompt field's tiers onto its existing message channel.
@@ -236,7 +206,6 @@ fn prompt_field_emit(emission: TextInputEmission) -> Option<Message> {
 ///   [`submit_commands`])
 /// * Queue while running → [`AgentMessage::Submit`] (reducer queues)
 /// * Stop while running → [`UserCommand::CancelAgent`]
-/// * model pick → [`UserCommand::SelectChatModel`]
 /// * Clear session → [`UserCommand::ClearAgentSession`]
 /// * blur → [`AgentMessage::InputChanged`] with the settled value, never Submit
 /// * focus edges and clear tiers → no message
@@ -244,7 +213,7 @@ fn prompt_field_emit(emission: TextInputEmission) -> Option<Message> {
 /// Every control is always allocated and gated with `on_press_maybe`, so the
 /// prompt block's widget shape is stable across the idle ⇄ running and empty
 /// ⇄ filled transitions (AGENTS §6). The editable prompt and its action gates
-/// share the first row; model/session controls occupy the second row so they
+/// share the first row; queue/session controls occupy the second row so they
 /// do not starve labeled buttons of width in the center pane.
 #[must_use]
 pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
@@ -289,22 +258,6 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
         cancel_enabled(view_model.running),
     );
 
-    let model_label = text(strings::AGENT_MODEL_LABEL)
-        .size(CONTROL_TEXT_SIZE)
-        .line_height(CONTROL_RUNG.iced_line_height())
-        .color(palette.text_muted);
-
-    let model_pick: Element<'_, Message> = pick_list(
-        view_model.chat_models.clone(),
-        current_model_option(
-            &view_model.chat_models,
-            view_model.current_chat_model.as_deref(),
-        ),
-        |entry: ChatModelEntry| select_model_message(&entry.name),
-    )
-    .placeholder(strings::NO_CHAT_MODELS_CONFIGURED)
-    .into();
-
     let clear_button = gated_button(
         ButtonVariant::Ghost,
         strings::AGENT_SESSION_CLOSE_BUTTON,
@@ -331,18 +284,12 @@ pub fn agent_prompt_row(view_model: &AgentPanelViewModel) -> Element<'_, Message
     .spacing(ROW_SPACING)
     .align_y(Alignment::Center);
 
-    let session_controls = Row::with_children(vec![
-        model_label.into(),
-        model_pick,
-        queue_badge,
-        clear_button.into(),
-    ])
-    .spacing(ROW_SPACING)
-    .align_y(Alignment::Center);
+    let session_controls = Row::with_children(vec![queue_badge, clear_button.into()])
+        .spacing(ROW_SPACING)
+        .align_y(Alignment::Center);
 
     // Keep the prompt and its action gates in the center pane's available
-    // width. A single row also contains the model selector and session
-    // controls; at ordinary center-pane widths, iced can otherwise allocate
+    // width. At ordinary center-pane widths, iced can otherwise allocate
     // zero width to a labeled button while laying the row out.
     Column::with_children(vec![actions.into(), session_controls.into()])
         .spacing(ROW_SPACING)

@@ -26,7 +26,7 @@
 //! before it returns, so the faces are in the system before the first frame
 //! resolves anything.
 //!
-//! Registration is idempotent: [`REGISTRATION`] latches the outcome, so
+//! Registration is idempotent: `REGISTRATION` latches the outcome, so
 //! the production boot plus every headless test fixture add each face
 //! exactly once. That latch is load-bearing — `FontSystem::load_font`
 //! de-duplicates only `Cow::Borrowed` bytes, by pointer
@@ -99,7 +99,7 @@ pub fn font_load_error_message(result: &Result<(), iced::font::Error>) -> Option
 /// rather than deferring through `iced::font::load`, so the faces are
 /// present the moment this returns — see the module note for why the
 /// deferred form cannot guarantee that. The whole registration runs inside
-/// [`REGISTRATION`]'s `get_or_init`, so it happens exactly once per
+/// `REGISTRATION`'s `get_or_init`, so it happens exactly once per
 /// process: a second caller blocks until the first finishes and then
 /// receives the same outcome instead of re-adding faces.
 ///
