@@ -70,10 +70,10 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 #### CSV Database Tools
 
-* [TOOL-001] The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) SHALL only be offered to the LLM if the user's query contains any of the tool names, "table", "csv", or "database".
+* [TOOL-001] The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) SHALL only be offered to the LLM if the user's prompt contains any of the tool names, "table", "csv", or "database".
 * [TOOL-002] The `query` tool SHALL parse and execute query predicates as dynamic expressions against CSV rows.
 * [TOOL-003] The query system SHALL allow `sum` and `average` as aggregate functions over a specified column.
-* [TOOL-004] The system SHALL store all CSV databases in a user-specified location. If not configured, the system SHALL use `%APPDATA%\fastmd\db\` as the default.
+* [TOOL-004] The system SHALL store all CSV databases in a user configured location. If not configured, the system SHALL use `%APPDATA%\fastmd\db\` as the default.
 
 ### Web Fetch Pagination & Caching
 
@@ -108,7 +108,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Tool Pagination (cursor, shared cache)
 
-* [TOOL-033] The `search_email`, `web_fetch`, `search_notes`, `list_notes_by_tag`, `web_search`, `search_calendar`, `get_calendar`, `search_contact` and `vector_search` tools SHALL be cursor paginated.
+* [TOOL-049] The `search_email`, `web_fetch`, `search_notes`, `list_notes_by_tag`, `web_search`, `search_calendar`, `get_calendar`, `search_contact` and `vector_search` tools SHALL be cursor paginated.
 * [TOOL-025] Every cursor paginated tool SHALL return a `hint` field on its response. `hint` SHALL be set to "Final page." when the response has no `cursor`. `hint` SHALL be absent (or `null`) otherwise.
 * [TOOL-026a] The page size SHALL be fixed at 32 results for `search_email`
 * [TOOL-026b] The page size SHALL be fixed at 64 markdown lines for `web_fetch`.

@@ -1,0 +1,78 @@
+# viewport 600.00 x 900.00
+# named 76 / anonymous 840
+demo.composites.form.valid [focusable] | 16.00 3760.00 78.93 24.00 | -
+demo.composites.form.valid [container] | 16.00 3762.00 36.00 20.00 | -
+demo.composites.form.valid.label [text] | 60.00 3760.00 34.93 24.00 | -
+demo.composites.menu.m-dark [focusable] | 16.00 4270.00 568.00 32.00 | -
+demo.composites.menu.m-dark [container] | 16.00 4270.00 568.00 32.00 | -
+demo.composites.menu.m-dark.label [text] | 50.00 4270.00 524.00 32.00 | -
+demo.composites.menu.m-light [focusable] | 16.00 4238.00 568.00 32.00 | -
+demo.composites.menu.m-light [container] | 16.00 4238.00 568.00 32.00 | -
+demo.composites.menu.m-light.label [text] | 50.00 4238.00 524.00 32.00 | -
+demo.composites.menu.m-new [focusable] | 16.00 4124.00 568.00 32.00 | -
+demo.composites.menu.m-new [container] | 16.00 4124.00 568.00 32.00 | -
+demo.composites.menu.m-new.label [text] | 50.00 4124.00 483.10 32.00 | -
+demo.composites.menu.m-save [focusable] | 16.00 4156.00 568.00 32.00 | -
+demo.composites.menu.m-save [container] | 16.00 4156.00 568.00 32.00 | -
+demo.composites.menu.m-save.label [text] | 50.00 4156.00 485.23 32.00 | -
+demo.composites.menu.m-sep-1 [container] | 16.00 4188.00 568.00 9.00 | -
+demo.composites.menu.m-sep-2 [container] | 16.00 4229.00 568.00 9.00 | -
+demo.composites.menu.m-wrap [focusable] | 16.00 4197.00 568.00 32.00 | -
+demo.composites.menu.m-wrap [container] | 16.00 4197.00 568.00 32.00 | -
+demo.composites.menu.m-wrap.label [text] | 50.00 4197.00 489.01 32.00 | -
+demo.composites.scroll [scrollable] | 0.00 0.00 600.00 900.00 | 0.00 0.00 600.00 900.00
+demo.composites.setting-row.0.row [container] | 16.00 3860.00 568.00 60.00 | -
+demo.composites.setting-row.1.row [container] | 16.00 3924.00 568.00 60.00 | -
+demo.composites.setting-row.2.row [container] | 16.00 3988.00 568.00 60.00 | -
+demo.composites.setting.0 [focusable] | 464.80 3878.00 103.20 24.00 | -
+demo.composites.setting.0 [container] | 464.80 3880.00 36.00 20.00 | -
+demo.composites.setting.0.label [text] | 508.80 3878.00 59.20 24.00 | -
+demo.composites.setting.1 [focusable] | 464.80 3942.00 103.20 24.00 | -
+demo.composites.setting.1 [container] | 464.80 3944.00 36.00 20.00 | -
+demo.composites.setting.1.label [text] | 508.80 3942.00 59.20 24.00 | -
+demo.composites.setting.2 [container] | 464.80 4008.00 36.00 20.00 | -
+demo.composites.setting.2.label [text] | 508.80 4006.00 59.20 24.00 | -
+demo.section.breadcrumb-resolver-uif-comp-004 [container] | 0.00 6074.00 600.00 252.00 | -
+demo.section.breadcrumb-resolver-uif-comp-004.caption [container] | 16.00 6090.00 269.30 24.00 | -
+demo.section.card-resolver-uif-comp-005 [container] | 0.00 4330.00 600.00 252.00 | -
+demo.section.card-resolver-uif-comp-005.caption [container] | 16.00 4346.00 212.96 24.00 | -
+demo.section.code-block-uif-comp-015 [container] | 0.00 904.00 600.00 218.00 | -
+demo.section.code-block-uif-comp-015.caption [container] | 16.00 920.00 194.90 24.00 | -
+demo.section.command-palette-uif-comp-010 [container] | 0.00 3116.00 600.00 504.00 | -
+demo.section.command-palette-uif-comp-010.caption [container] | 16.00 3132.00 244.54 24.00 | -
+demo.section.diff-viewer-uif-comp-015 [container] | 0.00 1134.00 600.00 296.00 | -
+demo.section.diff-viewer-uif-comp-015.caption [container] | 16.00 1150.00 192.34 24.00 | -
+demo.section.empty-states-uif-comp-014 [container] | 0.00 1442.00 600.00 668.00 | -
+demo.section.empty-states-uif-comp-014.caption [container] | 16.00 1458.00 208.58 24.00 | -
+demo.section.form-field-uif-comp-016 [container] | 0.00 3632.00 600.00 168.00 | -
+demo.section.form-field-uif-comp-016.caption [container] | 16.00 3648.00 188.46 24.00 | -
+demo.section.grid-view-uif-comp-013 [container] | 0.00 2122.00 600.00 336.00 | -
+demo.section.grid-view-uif-comp-013.caption [container] | 16.00 2138.00 182.22 24.00 | -
+demo.section.keybind-recorder-uif-comp-015 [container] | 0.00 2470.00 600.00 134.00 | -
+demo.section.keybind-recorder-uif-comp-015.caption [container] | 16.00 2486.00 239.26 24.00 | -
+demo.section.list-tile-resolver-uif-comp-006 [container] | 0.00 4594.00 600.00 510.00 | -
+demo.section.list-tile-resolver-uif-comp-006.caption [container] | 16.00 4610.00 234.29 24.00 | -
+demo.section.menu-rows-uif-fmenu-uif-cmenu [container] | 0.00 4076.00 600.00 242.00 | -
+demo.section.menu-rows-uif-fmenu-uif-cmenu.caption [container] | 16.00 4092.00 269.89 24.00 | -
+demo.section.navigation-rail-uif-comp-009 [container] | 0.00 128.00 600.00 364.00 | 0.00 128.00 600.00 364.00
+demo.section.navigation-rail-uif-comp-009.caption [container] | 16.00 144.00 222.98 24.00 | 16.00 144.00 222.98 24.00
+demo.section.overflow-toolbar-resolver-uif-comp-008 [container] | 0.00 6338.00 600.00 252.00 | -
+demo.section.overflow-toolbar-resolver-uif-comp-008.caption [container] | 16.00 6354.00 302.35 24.00 | -
+demo.section.pagination-bar-uif-comp-012 [container] | 0.00 656.00 600.00 116.00 | 0.00 656.00 600.00 116.00
+demo.section.pagination-bar-uif-comp-012.caption [container] | 16.00 672.00 220.34 24.00 | 16.00 672.00 220.34 24.00
+demo.section.pips-pager-uif-comp-013 [container] | 0.00 784.00 600.00 108.00 | 0.00 784.00 600.00 108.00
+demo.section.pips-pager-uif-comp-013.caption [container] | 16.00 800.00 190.93 24.00 | 16.00 800.00 190.93 24.00
+demo.section.settings-rows-uif-comp-017 [container] | 0.00 3812.00 600.00 252.00 | -
+demo.section.settings-rows-uif-comp-017.caption [container] | 16.00 3828.00 210.96 24.00 | -
+demo.section.side-sheet-uif-comp-012 [container] | 0.00 2780.00 600.00 324.00 | -
+demo.section.side-sheet-uif-comp-012.caption [container] | 16.00 2796.00 190.82 24.00 | -
+demo.section.skeleton-uif-comp-015 [container] | 0.00 2616.00 600.00 152.00 | -
+demo.section.skeleton-uif-comp-015.caption [container] | 16.00 2632.00 178.16 24.00 | -
+demo.section.stepper-wizard-footer-uif-comp-011 [container] | 0.00 504.00 600.00 140.00 | 0.00 504.00 600.00 140.00
+demo.section.stepper-wizard-footer-uif-comp-011.caption [container] | 16.00 520.00 282.38 24.00 | 16.00 520.00 282.38 24.00
+demo.section.tab-strip-uif-tab-003 [container] | 0.00 0.00 600.00 116.00 | 0.00 0.00 600.00 116.00
+demo.section.tab-strip-uif-tab-003.caption [container] | 16.00 16.00 165.92 24.00 | 16.00 16.00 165.92 24.00
+demo.section.table-resolver-uif-comp-011 [container] | 0.00 5116.00 600.00 510.00 | -
+demo.section.table-resolver-uif-comp-011.caption [container] | 16.00 5132.00 215.49 24.00 | -
+demo.section.toast-notification-resolver-uif-comp-009 [container] | 0.00 5638.00 600.00 424.00 | -
+demo.section.toast-notification-resolver-uif-comp-009.caption [container] | 16.00 5654.00 318.99 24.00 | -

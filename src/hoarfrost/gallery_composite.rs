@@ -1,0 +1,1232 @@
+//! The composite cells of the `UIF-VER-004` matrix (§3B,
+//! `UIF-COMP-001`, `UIF-COMP-005`).
+//!
+//! Split out of [`gallery`] because that file is already past the
+//! `RUST-053` line limit. These cells are built through `gallery`'s own
+//! vocabulary and [`gallery::matrix`] calls the producers back, so the
+//! matrix is still one list in one fixed order — the split moved the code,
+//! not the artifact.
+//!
+//! # What a composite cell proves that an atom cell cannot
+//!
+//! An atom cell asks "what colour is this control in this state". A
+//! composite cell asks "where is the band, and does it move". That is why
+//! every cell here records its geometry channels alongside its colours, and
+//! why the form field's three caption postures are emitted as three cells
+//! whose `geometry.*` entries are byte-identical: the zero-shift
+//! requirement is checked by diffing the cells against each other rather
+//! than by trusting that a layout happened to hold.
+//!
+//! # The frame paints the reservation, not a picture of one
+//!
+//! A composite owns layout, and mostly owns no fill of its own — a form
+//! field's control brings its own chrome, and a caption is text rather
+//! than a quad. So the frame draws each reserved band as a
+//! transparent-filled, hairline-stroked marker layer. Every quad in these
+//! frames is a rectangle the resolver actually computed and a stroke in a
+//! colour the resolver actually resolved; nothing is painted to make the
+//! picture look complete. Where a composite *does* own a fill — the card's
+//! surface, the settings row's card, a list tile's selected background —
+//! the real layer builder's output is what goes in.
+//!
+//! # The audit mount is stated, not assumed
+//!
+//! A caption on a transparent band has no contrast against "nothing", so
+//! each cell names the surface it is mounted on and measures against that:
+//! `surface.raised`, the lightest of the three surfaces §4 mounts these
+//! composites on and therefore the one that gives the *lowest* ratio for a
+//! light foreground. A selected tile is measured against its own
+//! `accent.fill`, which is where the subtitle promotion is caught.
+//!
+//! [`gallery`]: crate::gallery
+//! [`gallery::matrix`]: crate::gallery::matrix
+//!
+//! Unit tests live in the sibling `gallery_composite_tests.rs` sidecar.
+
+use crate::composite::card::{self, CardElevation};
+use crate::composite::expander;
+
+use crate::composite::form_field::{self, CaptionKind};
+use crate::composite::info_bar::{self, BarSurface};
+use crate::composite::list_tile::{self, Leading, TileLines};
+use crate::composite::notification::{
+    DEFAULT_AUTO_DISMISS_MS, NotificationAction, NotificationModel, Severity,
+    effective_auto_dismiss_ms,
+};
+use crate::composite::scroll_view::{self, Axis, LayoutMode, ScrollTick, TickKind, TrackPhase};
+use crate::composite::settings_row::{self, DEFAULT_CONTROL_HEIGHT};
+use crate::composite::toast;
+use crate::gallery::{AuditPair, Cell, CellKind, ContrastRole, Namer, StyleEntry, paint_frame};
+use crate::state::BaseState;
+use crate::surface::tooltip::TimeMs;
+use crate::token::color::Palette;
+use crate::token::{shape, size, space};
+use crate::widget::button_widget::Layer;
+use iced::{Color, Point, Rectangle};
+
+/// A sample width for the composite cells, composed from tokens so the
+/// harness carries no bare visual magnitude.
+const SAMPLE_WIDTH: f32 = space::XL * 12.0;
+
+/// A sample height for the card cell.
+const CARD_SAMPLE_HEIGHT: f32 = space::XL * 6.0 + space::LG;
+
+/// The surface every composite here is mounted on.
+///
+/// Stated because it decides every text audit below: `surface.raised` is
+/// the lightest of the surfaces §4 mounts forms, settings rows and lists
+/// on, so it is the conservative choice for a light foreground.
+const MOUNT: &str = "surface.raised";
+
+/// A transparent, hairline-stroked marker for a band the resolver
+/// reserved but does not paint.
+fn marker(bounds: Rectangle, colour: Color) -> Layer {
+    Layer {
+        bounds,
+        fill: Color::TRANSPARENT,
+        border: iced::Border {
+            color: colour,
+            width: shape::BORDER_HAIRLINE,
+            radius: 0.0_f32.into(),
+        },
+    }
+}
+
+fn sample(height: f32) -> Rectangle {
+    Rectangle::new(Point::ORIGIN, iced::Size::new(SAMPLE_WIDTH, height))
+}
+
+// ---------------------------------------------------------------------------
+// FormField — UIF-COMP-001
+// ---------------------------------------------------------------------------
+
+/// The stacked form field in one caption posture (`UIF-COMP-001`).
+///
+/// The three caption postures are three cells, and their `geometry.*`
+/// channels are the same three numbers in all three. That equality is the
+/// zero-shift evidence: it holds because
+/// [`form_field::bands`] cannot see the caption, not because a layout
+/// happened to come out level.
+#[must_use]
+pub fn form_field_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let bounds = sample(form_field::stacked_height());
+    let bands = form_field::bands(bounds);
+    let mount = palette.surface_raised;
+
+    let caption = match state {
+        "error" => {
+            form_field::resolve_caption(false, Some("helper"), Some("Name is taken"), &palette)
+        }
+        "helper" => form_field::resolve_caption(true, Some("Shown at the top"), None, &palette),
+        _ => form_field::resolve_caption(true, None, None, &palette),
+    };
+    let header = form_field::resolve_header("Display name", true, None, &palette);
+
+    let layers: Vec<(&'static str, Layer)> = vec![
+        ("band.header", marker(bands.header, palette.border_subtle)),
+        ("band.control", marker(bands.control, palette.border_strong)),
+        ("band.caption", marker(bands.caption, caption.colour)),
+    ];
+
+    Cell {
+        id: format!("form-field/{state}"),
+        kind: CellKind::Composite,
+        subject: "form-field",
+        spec: "UIF-COMP-001",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::number("geometry.total-height", form_field::stacked_height()),
+            StyleEntry::number("geometry.header.height", bands.header.height),
+            StyleEntry::number("geometry.control.height", bands.control.height),
+            StyleEntry::number("geometry.caption.height", bands.caption.height),
+            StyleEntry::number("geometry.gap", form_field::BAND_GAP),
+            StyleEntry::text("caption.kind", caption_kind_slug(caption.kind)),
+            StyleEntry::colour("caption.colour", caption.colour),
+            StyleEntry::text(
+                "caption.glyph",
+                caption.glyph.map_or("none", |_| "warning").to_string(),
+            ),
+            StyleEntry::colour("header.label", header.label_colour),
+            StyleEntry::colour("header.marker", header.marker_colour),
+            StyleEntry::text("overflow.policy", "clip-single-line"),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "header.label",
+                foreground: header.label_colour,
+                background: mount,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "header.marker",
+                foreground: header.marker_colour,
+                background: mount,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "caption",
+                foreground: caption.colour,
+                background: mount,
+                role: ContrastRole::Text,
+            },
+        ],
+        note: None,
+    }
+}
+
+fn caption_kind_slug(kind: CaptionKind) -> &'static str {
+    match kind {
+        CaptionKind::Empty => "empty",
+        CaptionKind::Helper => "helper",
+        CaptionKind::Error => "error",
+    }
+}
+
+/// The same control slot hosting three different atom kinds
+/// (`UIF-COMP-001`).
+///
+/// The slot is one rectangle whatever goes into it, and the three atoms'
+/// own natural heights differ — `32`, `28` and `20` — so the cell records
+/// that the field did not resize to fit any of them.
+#[must_use]
+pub fn form_field_host_cell(kind: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let bounds = sample(form_field::stacked_height());
+    let bands = form_field::bands(bounds);
+    let mount = palette.surface_raised;
+
+    let (hosted, hosted_height) = match kind {
+        "input" => ("text-input", size::CONTROL_SM),
+        "row" => ("focusable-row", size::HIT_TARGET_MIN),
+        _ => ("button", size::CONTROL_MD),
+    };
+
+    let layers: Vec<(&'static str, Layer)> = vec![
+        ("band.header", marker(bands.header, palette.border_subtle)),
+        ("band.control", marker(bands.control, palette.border_strong)),
+        ("band.caption", marker(bands.caption, palette.border_subtle)),
+    ];
+
+    Cell {
+        id: format!("form-field/host/{kind}"),
+        kind: CellKind::Composite,
+        subject: "form-field",
+        spec: "UIF-COMP-001",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::text("host.kind", hosted.to_string()),
+            StyleEntry::number("host.natural-height", hosted_height),
+            StyleEntry::number("geometry.control.height", bands.control.height),
+            StyleEntry::number("geometry.total-height", form_field::stacked_height()),
+            StyleEntry::text("host.slot-depends-on-control", "no"),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![AuditPair {
+            channel: "slot.border",
+            foreground: palette.border_strong,
+            background: mount,
+            role: ContrastRole::Chrome,
+        }],
+        note: None,
+    }
+}
+
+/// Every form-field cell: the three caption postures, then the three hosts.
+#[must_use]
+pub fn form_field_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for state in ["empty", "helper", "error"] {
+        cells.push(form_field_cell(state));
+    }
+    for kind in ["button", "input", "row"] {
+        cells.push(form_field_host_cell(kind));
+    }
+    cells
+}
+
+// ---------------------------------------------------------------------------
+// SettingsRow — UIF-COMP-001
+// ---------------------------------------------------------------------------
+
+/// The horizontal settings row in one content shape (`UIF-COMP-001`).
+#[must_use]
+pub fn settings_row_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let disabled = state == "disabled";
+    let has_description = state == "with-description";
+    let height = settings_row::row_height(has_description, DEFAULT_CONTROL_HEIGHT);
+    let bounds = sample(height);
+    let split = settings_row::bands(bounds, size::CONTROL_LG);
+    let style = settings_row::resolve_style(disabled, &palette);
+
+    let layers: Vec<(&'static str, Layer)> = vec![
+        ("card", settings_row::card_layer(bounds, &style)),
+        ("slot.control", marker(split.control, palette.border_strong)),
+    ];
+
+    Cell {
+        id: format!("settings-row/{state}"),
+        kind: CellKind::Composite,
+        subject: "settings-row",
+        spec: "UIF-COMP-001",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::number("geometry.height", height),
+            StyleEntry::number("geometry.min-height", settings_row::MIN_HEIGHT),
+            StyleEntry::number("geometry.padding.vertical", settings_row::PADDING_VERTICAL),
+            StyleEntry::number(
+                "geometry.padding.horizontal",
+                settings_row::PADDING_HORIZONTAL,
+            ),
+            StyleEntry::number("geometry.column-gap", settings_row::COLUMN_GAP),
+            StyleEntry::number("geometry.text.width", split.text.width),
+            StyleEntry::number("geometry.control.width", split.control.width),
+            StyleEntry::colour("background", style.background),
+            StyleEntry::colour("border.color", style.border_color),
+            StyleEntry::number("border.width", style.border_width),
+            StyleEntry::number("radius", style.radius),
+            StyleEntry::colour("title", style.title_colour),
+            StyleEntry::colour("description", style.description_colour),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "title",
+                foreground: style.title_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "description",
+                foreground: style.description_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "border",
+                foreground: style.border_color,
+                background: style.background,
+                role: ContrastRole::Chrome,
+            },
+        ],
+        note: None,
+    }
+}
+
+/// Every settings-row cell.
+#[must_use]
+pub fn settings_row_cells() -> Vec<Cell> {
+    ["title-only", "with-description", "disabled"]
+        .iter()
+        .map(|state| settings_row_cell(state))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Card — UIF-COMP-005
+// ---------------------------------------------------------------------------
+
+/// The card container at one elevation (`UIF-COMP-005`).
+#[must_use]
+pub fn card_cell(elevation: CardElevation) -> Cell {
+    let palette = Palette::dark();
+    let style = card::resolve_style(elevation, &palette);
+    let bounds = Rectangle::new(
+        Point::ORIGIN,
+        iced::Size::new(SAMPLE_WIDTH + space::LG, CARD_SAMPLE_HEIGHT),
+    );
+    let content = card::content_bounds(bounds, &style);
+
+    let layers: Vec<(&'static str, Layer)> = vec![
+        ("card", card::card_layer(bounds, &style)),
+        ("content", marker(content, palette.border_subtle)),
+    ];
+
+    Cell {
+        id: format!("card/{}", elevation_slug(elevation)),
+        kind: CellKind::Composite,
+        subject: "card",
+        spec: "UIF-COMP-005",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::colour("background", style.background),
+            StyleEntry::colour("border.color", style.border_color),
+            StyleEntry::number("border.width", style.border_width),
+            StyleEntry::number("radius", style.radius),
+            StyleEntry::number("padding", style.padding),
+            StyleEntry::number("content.width", content.width),
+            StyleEntry::number("content.height", content.height),
+            StyleEntry::text(
+                "border.role",
+                if elevation.is_active_indicator() {
+                    "active-indicator"
+                } else {
+                    "resting-separation"
+                }
+                .to_string(),
+            ),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![AuditPair {
+            channel: "border",
+            foreground: style.border_color,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        }],
+        note: None,
+    }
+}
+
+fn elevation_slug(elevation: CardElevation) -> &'static str {
+    match elevation {
+        CardElevation::Rest => "rest",
+        CardElevation::Elevated => "elevated",
+    }
+}
+
+/// Every card cell.
+#[must_use]
+pub fn card_cells() -> Vec<Cell> {
+    [CardElevation::Rest, CardElevation::Elevated]
+        .iter()
+        .map(|elevation| card_cell(*elevation))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// ListTile — UIF-COMP-005
+// ---------------------------------------------------------------------------
+
+/// One list-tile cell: a rung, a selection posture and a pointer state
+/// (`UIF-COMP-005`, decision **D-8**).
+#[must_use]
+pub fn list_tile_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let lines = if state.contains("two-line") {
+        TileLines::Two
+    } else {
+        TileLines::Single
+    };
+    let selected = state.contains("selected");
+    let disabled = state == "disabled";
+    let interactive = state != "non-interactive";
+    let base = match state {
+        "hovered" => BaseState::Hovered,
+        "pressed" => BaseState::Pressed,
+        _ => BaseState::Rest,
+    };
+
+    let height = list_tile::tile_height(lines);
+    let bounds = sample(height);
+    let trailing_width = list_tile::TRAILING_TARGET * 2.0 + list_tile::SLOT_GAP;
+    let grid = list_tile::slots(bounds, Leading::Checkbox, interactive, trailing_width);
+    let targets = list_tile::trailing_targets(bounds, 2);
+    let hit = list_tile::hit_target(bounds, interactive);
+    let style = list_tile::resolve_style(selected, disabled, base, &palette);
+
+    let audit_background = if style.background.a == 0.0 {
+        palette.surface_raised
+    } else {
+        style.background
+    };
+
+    let mut layers: Vec<(&'static str, Layer)> = Vec::new();
+    if let Some(row) = list_tile::row_layer(bounds, &style) {
+        layers.push(("row", row));
+    }
+    layers.push(("slot.leading", marker(grid.leading, palette.border_strong)));
+    layers.push(("slot.center", marker(grid.center, palette.border_subtle)));
+    layers.push((
+        "slot.trailing",
+        marker(grid.trailing, palette.border_subtle),
+    ));
+    for (index, target) in targets.iter().enumerate() {
+        let _ = index;
+        layers.push((
+            "slot.trailing-target",
+            marker(*target, palette.border_strong),
+        ));
+    }
+
+    Cell {
+        id: format!("list-tile/{state}"),
+        kind: CellKind::Composite,
+        subject: "list-tile",
+        spec: "UIF-COMP-005",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::number("geometry.height", height),
+            StyleEntry::number("geometry.padding.vertical", list_tile::PADDING_VERTICAL),
+            StyleEntry::number("geometry.padding.horizontal", list_tile::PADDING_HORIZONTAL),
+            StyleEntry::number("geometry.slot.gap", list_tile::SLOT_GAP),
+            StyleEntry::number("geometry.slot.leading.width", grid.leading.width),
+            StyleEntry::number("geometry.slot.center.width", grid.center.width),
+            StyleEntry::number("geometry.slot.trailing.width", grid.trailing.width),
+            StyleEntry::number("geometry.trailing.target", list_tile::TRAILING_TARGET),
+            StyleEntry::number("geometry.hit.height", hit.map_or(0.0, |rect| rect.height)),
+            StyleEntry::text("interactive", interactive.to_string()),
+            StyleEntry::colour("background", style.background),
+            StyleEntry::colour("title", style.title_colour),
+            StyleEntry::colour("subtitle", style.subtitle_colour),
+            StyleEntry::colour("leading", style.leading_colour),
+            StyleEntry::colour("trailing", style.trailing_colour),
+            StyleEntry::text("audit.background", token_label(audit_background)),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "title",
+                foreground: style.title_colour,
+                background: audit_background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "subtitle",
+                foreground: style.subtitle_colour,
+                background: audit_background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "leading",
+                foreground: style.leading_colour,
+                background: audit_background,
+                role: ContrastRole::Chrome,
+            },
+        ],
+        note: None,
+    }
+}
+
+fn token_label(colour: Color) -> String {
+    Namer::Standard.name(colour)
+}
+
+/// Every list-tile cell.
+#[must_use]
+pub fn list_tile_cells() -> Vec<Cell> {
+    [
+        "single",
+        "two-line",
+        "single-selected",
+        "two-line-selected",
+        "hovered",
+        "pressed",
+        "disabled",
+        "non-interactive",
+    ]
+    .iter()
+    .map(|state| list_tile_cell(state))
+    .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Expander — UIF-COMP-003
+// ---------------------------------------------------------------------------
+
+/// The disclosure in one posture (`UIF-COMP-003`).
+///
+/// The `geometry.header.*` channels are the same in every posture, open or
+/// closed, and that equality is the zero-shift evidence: it holds because
+/// [`expander::header_bounds`] cannot see the open state, not because a
+/// layout happened to come out level.
+#[must_use]
+pub fn expander_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let open =
+        state != "collapsed" && state != "hovered" && state != "pressed" && state != "disabled";
+    let compact = state.starts_with("compact");
+    let disabled = state == "disabled";
+    let rung = if compact {
+        expander::HeaderRung::Compact
+    } else {
+        expander::HeaderRung::Standard
+    };
+
+    let base = if disabled {
+        BaseState::Disabled
+    } else if state == "pressed" {
+        BaseState::Pressed
+    } else if state == "hovered" {
+        BaseState::Hovered
+    } else {
+        BaseState::Rest
+    };
+
+    let content_height = space::XL * 4.0;
+    let bounds = sample(expander::total_height_at(rung, open, content_height));
+    let header = expander::header_bounds_at(bounds, rung);
+    let chevron = expander::chevron_bounds(header);
+    let title = expander::title_bounds(header, 0.0);
+    let header_style = expander::resolve_header_style(base, &palette);
+    let body_style = expander::body_style(&palette);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("header", expander::header_layer(header, &header_style)),
+        ("chevron", marker(chevron, palette.border_strong)),
+        ("title", marker(title, palette.border_subtle)),
+    ];
+    if let Some(body) = expander::body_bounds_at(bounds, rung, open, content_height) {
+        layers.push(("body", expander::body_layer(body, &body_style)));
+    }
+
+    Cell {
+        id: format!("expander/{state}"),
+        kind: CellKind::Composite,
+        subject: "expander",
+        spec: "UIF-COMP-003",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::text("rung", if compact { "compact" } else { "standard" }),
+            StyleEntry::number("geometry.header.height", header.height),
+            StyleEntry::number("geometry.chevron.box", expander::CHEVRON_BOX),
+            StyleEntry::number(
+                "geometry.chevron.rotation",
+                expander::chevron_rotation(open),
+            ),
+            StyleEntry::number("geometry.title.width", title.width),
+            StyleEntry::number(
+                "geometry.body.height",
+                expander::body_bounds_at(bounds, rung, open, content_height)
+                    .map_or(0.0, |b| b.height),
+            ),
+            StyleEntry::text("body.mounted", if open { "yes" } else { "no" }.to_string()),
+            StyleEntry::text(
+                "body.tab-reachable",
+                if open { "yes" } else { "no" }.to_string(),
+            ),
+            StyleEntry::colour("header.fill", header_style.background),
+            StyleEntry::colour("header.title", header_style.title_colour),
+            StyleEntry::colour("header.chevron", header_style.chevron_colour),
+            StyleEntry::colour("body.fill", body_style.background),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "header.title",
+                foreground: header_style.title_colour,
+                background: header_style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "header.chevron",
+                foreground: header_style.chevron_colour,
+                background: header_style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "body.text",
+                foreground: palette.text_primary,
+                background: body_style.background,
+                role: ContrastRole::Text,
+            },
+        ],
+        note: None,
+    }
+}
+
+/// Every expander cell.
+#[must_use]
+pub fn expander_cells() -> Vec<Cell> {
+    [
+        "collapsed",
+        "open",
+        "hovered",
+        "pressed",
+        "disabled",
+        "compact-collapsed",
+        "compact-open",
+    ]
+    .iter()
+    .map(|state| expander_cell(state))
+    .collect()
+}
+
+// ---------------------------------------------------------------------------
+// ScrollView — UIF-COMP-004
+// ---------------------------------------------------------------------------
+
+/// The sample viewport a scroll cell is measured in.
+const SCROLL_VIEWPORT: f32 = space::XL * 8.0;
+
+/// The scroll view and its annotated scrollbar in one phase (`UIF-COMP-004`).
+///
+/// `content.width` is the layout-shift channel: it is the same number at
+/// every phase because [`scroll_view::content_bounds`] takes no phase.
+#[must_use]
+pub fn scroll_view_cell(state: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let reserved = state.starts_with("reserved");
+    let unscrollable = state == "hidden-unscrollable";
+    let extreme = state == "extreme-ratio";
+
+    let mode = if reserved {
+        LayoutMode::Reserved
+    } else {
+        LayoutMode::Overlay
+    };
+    let content_len = if unscrollable {
+        SCROLL_VIEWPORT
+    } else if extreme {
+        SCROLL_VIEWPORT * 40.0
+    } else {
+        SCROLL_VIEWPORT * 3.0
+    };
+    let scrollable = scroll_view::is_scrollable(content_len, SCROLL_VIEWPORT);
+    let dragging = state.ends_with("dragged");
+    let hovering = state.ends_with("hovered");
+    let phase = scroll_view::resolve_phase(scrollable, hovering, dragging);
+
+    let bounds = sample(SCROLL_VIEWPORT);
+    let content = scroll_view::content_bounds(bounds, mode, Axis::Vertical);
+    let track = scroll_view::track_bounds(bounds, phase, mode, Axis::Vertical);
+    let thumb = scroll_view::thumb_rect(
+        track,
+        content_len * 0.25,
+        content_len,
+        SCROLL_VIEWPORT,
+        Axis::Vertical,
+    );
+    let thumb_colour = scroll_view::thumb_color(phase, &palette);
+    let surface = if reserved {
+        palette.surface_base
+    } else {
+        palette.surface_raised
+    };
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("content", marker(content, palette.border_subtle)),
+        ("track", marker(track, palette.border_strong)),
+    ];
+    let mut audit = vec![AuditPair {
+        channel: "track.boundary",
+        foreground: palette.border_strong,
+        background: surface,
+        role: ContrastRole::Chrome,
+    }];
+    if phase != TrackPhase::Hidden {
+        layers.push((
+            "thumb",
+            Layer {
+                bounds: thumb,
+                fill: thumb_colour,
+                border: iced::Border {
+                    color: Color::TRANSPARENT,
+                    width: 0.0,
+                    radius: scroll_view::THUMB_RADIUS.into(),
+                },
+            },
+        ));
+        audit.push(AuditPair {
+            channel: "thumb.fill",
+            foreground: thumb_colour,
+            background: surface,
+            role: ContrastRole::Chrome,
+        });
+    }
+    if state == "annotated" {
+        for (index, kind) in [TickKind::SearchHit, TickKind::Heading, TickKind::Error]
+            .iter()
+            .enumerate()
+        {
+            let tick = ScrollTick {
+                position: content_len * (index as f32 + 1.0) / 5.0,
+                kind: *kind,
+            };
+            layers.push((
+                "tick",
+                Layer {
+                    bounds: scroll_view::tick_rect(track, &tick, content_len, Axis::Vertical),
+                    fill: palette.accent_border,
+                    border: iced::Border {
+                        color: Color::TRANSPARENT,
+                        width: 0.0,
+                        radius: 0.0_f32.into(),
+                    },
+                },
+            ));
+        }
+    }
+
+    Cell {
+        id: format!("scroll-view/{state}"),
+        kind: CellKind::Composite,
+        subject: "scroll-view",
+        spec: "UIF-COMP-004",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::text("mode", if reserved { "reserved" } else { "overlay" }),
+            StyleEntry::text("phase", phase_slug(phase)),
+            StyleEntry::number("geometry.content.width", content.width),
+            StyleEntry::number("geometry.track.width", track.width),
+            StyleEntry::number("geometry.thumb.length", thumb.height),
+            StyleEntry::number("geometry.thumb.min-length", scroll_view::THUMB_MIN_LENGTH),
+            StyleEntry::number("geometry.tick.width", scroll_view::TICK_WIDTH),
+            StyleEntry::number("keyboard.arrow-step", scroll_view::ARROW_STEP),
+            StyleEntry::number(
+                "keyboard.page-step",
+                scroll_view::page_step(SCROLL_VIEWPORT),
+            ),
+            StyleEntry::number("trigger.reach-end", scroll_view::REACH_END_DISTANCE),
+            StyleEntry::text(
+                "scrollable",
+                if scrollable { "yes" } else { "no" }.to_string(),
+            ),
+            StyleEntry::colour("thumb.fill", thumb_colour),
+            StyleEntry::text("track.fill", "none"),
+            StyleEntry::text("mount", MOUNT),
+        ],
+        frame: paint_frame(Namer::Standard, bounds, &layers),
+        audit,
+        note: None,
+    }
+}
+
+fn phase_slug(phase: TrackPhase) -> &'static str {
+    match phase {
+        TrackPhase::Hidden => "hidden",
+        TrackPhase::Rest => "rest",
+        TrackPhase::Hovered => "hovered",
+        TrackPhase::Dragged => "dragged",
+    }
+}
+
+/// Every scroll-view cell.
+#[must_use]
+pub fn scroll_view_cells() -> Vec<Cell> {
+    [
+        "overlay-rest",
+        "overlay-hovered",
+        "overlay-dragged",
+        "reserved-rest",
+        "reserved-hovered",
+        "extreme-ratio",
+        "hidden-unscrollable",
+        "annotated",
+    ]
+    .iter()
+    .map(|state| scroll_view_cell(state))
+    .collect()
+}
+
+// ---------------------------------------------------------------------------
+// InfoBar — UIF-COMP-002
+// ---------------------------------------------------------------------------
+
+/// A stand-in action label width for the docked-posture cells, composed
+/// from tokens so the harness carries no bare visual magnitude.
+const ACTION_SAMPLE_WIDTH: f32 = space::XL * 4.0;
+
+/// The docked inline banner in one severity, on one permitted fill, with
+/// one docked posture (`UIF-COMP-002`).
+///
+/// Every channel is audited against the bar's **own** background rather
+/// than a generic surface, because the stripe and the icon sit *on* the
+/// fill. §2.5 prints contrast against `surface.base`, `surface.overlay`
+/// and `surface.active` only — there is no `surface.raised` column — so a
+/// bar's ratios are recomputed here rather than looked up.
+///
+/// The title and body keep `text.strong` and `text.primary` at every
+/// severity: §3B.2 colours only the stripe and the icon, so the four
+/// severity cells must report four identical text ratios. That equality
+/// is the `UIF-PRIN-005` evidence — severity is never colour-only.
+#[must_use]
+pub fn info_bar_cell(severity: Severity, surface: BarSurface, posture: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let style = info_bar::resolve_style(severity, surface, &palette);
+    let action = NotificationAction::new("Open file", "open-file");
+    let has_action = posture != "bare";
+    let has_dismiss = posture == "action-dismiss";
+    let slots = info_bar::slots(
+        sample(info_bar::MIN_HEIGHT),
+        has_action.then_some(&action),
+        ACTION_SAMPLE_WIDTH,
+        has_dismiss,
+    );
+    let docked = info_bar::trailing_width(has_action, ACTION_SAMPLE_WIDTH, has_dismiss);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("bar", info_bar::background_layer(slots.bar, &style)),
+        ("stripe", info_bar::stripe_layer(slots.stripe, &style)),
+        ("icon", marker(slots.icon, style.icon_colour)),
+        ("text", marker(slots.text, style.title_colour)),
+    ];
+    if let Some(bounds) = slots.action {
+        layers.push(("action", marker(bounds, style.title_colour)));
+    }
+    if let Some(bounds) = slots.dismiss {
+        layers.push(("dismiss", marker(bounds, style.dismiss_colour)));
+    }
+
+    let mut resolved = vec![
+        StyleEntry::colour("background", style.background),
+        StyleEntry::colour("border.color", style.border_colour),
+        StyleEntry::number("border.width", style.border_width),
+        StyleEntry::number("radius", info_bar::RADIUS),
+        StyleEntry::colour("stripe.color", style.stripe_colour),
+        StyleEntry::number("stripe.width", info_bar::STRIPE_WIDTH),
+        StyleEntry::colour("icon.color", style.icon_colour),
+        StyleEntry::number("icon.size", info_bar::ICON_BOX),
+        StyleEntry::colour("title.color", style.title_colour),
+        StyleEntry::colour("body.color", style.body_colour),
+        StyleEntry::text("severity", severity.slug().to_string()),
+        StyleEntry::text("surface", surface.slug().to_string()),
+        StyleEntry::text("posture", posture.to_string()),
+        StyleEntry::number("geometry.bar.height", slots.bar.height),
+        StyleEntry::number("geometry.text.width", slots.text.width),
+        StyleEntry::number("geometry.trailing.width", docked),
+    ];
+    resolved.push(StyleEntry::text(
+        "geometry.action.present",
+        slots.action.is_some().to_string(),
+    ));
+    resolved.push(StyleEntry::text(
+        "geometry.dismiss.present",
+        slots.dismiss.is_some().to_string(),
+    ));
+
+    let mut audit = vec![
+        AuditPair {
+            channel: "border",
+            foreground: style.border_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "stripe",
+            foreground: style.stripe_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "icon",
+            foreground: style.icon_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        },
+        AuditPair {
+            channel: "title",
+            foreground: style.title_colour,
+            background: style.background,
+            role: ContrastRole::Text,
+        },
+        AuditPair {
+            channel: "body",
+            foreground: style.body_colour,
+            background: style.background,
+            role: ContrastRole::Text,
+        },
+    ];
+    if slots.dismiss.is_some() {
+        audit.push(AuditPair {
+            channel: "dismiss",
+            foreground: style.dismiss_colour,
+            background: style.background,
+            role: ContrastRole::Chrome,
+        });
+    }
+
+    Cell {
+        id: format!(
+            "info-bar/{}/{}/{}",
+            severity.slug(),
+            surface.slug(),
+            posture
+        ),
+        kind: CellKind::Composite,
+        subject: "info-bar",
+        spec: "UIF-COMP-002",
+        namer: Namer::Standard,
+        resolved,
+        frame: paint_frame(Namer::Standard, slots.bar, &layers),
+        audit,
+        note: None,
+    }
+}
+
+/// Every InfoBar cell: four severities on two permitted fills in three
+/// docked postures (`UIF-COMP-002`).
+#[must_use]
+pub fn info_bar_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for surface in [BarSurface::Raised, BarSurface::Overlay] {
+        for posture in ["bare", "action", "action-dismiss"] {
+            for severity in Severity::ALL {
+                cells.push(info_bar_cell(severity, surface, posture));
+            }
+        }
+    }
+    cells
+}
+
+// ---------------------------------------------------------------------------
+// Toast — UIF-COMP-002
+// ---------------------------------------------------------------------------
+
+/// A toast's sample height, composed from tokens.
+const TOAST_SAMPLE_HEIGHT: f32 = space::XL * 2.0 + space::LG;
+
+/// The clock reading a toast cell samples its timer at.
+const TOAST_SAMPLE_NOW: u64 = 4_000;
+
+/// A dismissible toast that *asks* for the default window.
+///
+/// It asks even for the severities that will refuse, so the cell shows the
+/// refusal (`auto-dismiss: "refused"`) as plainly as it shows the grant.
+fn toast_model(severity: Severity, id: String) -> NotificationModel<String> {
+    NotificationModel::new(
+        id,
+        severity,
+        format!("{} title", severity.slug()),
+        "toast body text",
+    )
+    .with_action("Open file", "open-file".to_string())
+    .with_dismissible(true)
+    .with_auto_dismiss(DEFAULT_AUTO_DISMISS_MS)
+}
+
+/// The viewport a posture is laid out in.
+fn toast_viewport(posture: &str) -> Rectangle {
+    let width = if posture == "narrow-viewport" {
+        space::XL * 12.0
+    } else {
+        space::XL * 40.0
+    };
+    Rectangle::new(Point::ORIGIN, iced::Size::new(width, space::XL * 30.0))
+}
+
+/// Build and drive a real [`toast::ToastStack`] into the named posture.
+///
+/// Every hold is applied with a host-supplied [`TimeMs`]. Nothing here
+/// reads a clock, so the timer state the cell records is the stack's own
+/// answer rather than a label the gallery wrote.
+fn toast_stack_in(posture: &'static str) -> toast::ToastStack<String> {
+    let mut stack = toast::ToastStack::new();
+    match posture {
+        "persistent-warning" | "persistent-danger" => {
+            let severity = if posture.ends_with("warning") {
+                Severity::Warning
+            } else {
+                Severity::Danger
+            };
+            let _ = stack.push(toast_model(severity, "t0".into()), TimeMs::millis(0));
+        }
+        "stack-three" => {
+            for index in 0..3_u64 {
+                let _ = stack.push(
+                    toast_model(Severity::Info, format!("t{index}")),
+                    TimeMs::millis(index),
+                );
+            }
+        }
+        "queued" => {
+            // Three undismissible toasts occupy every slot, so the
+            // newcomer waits rather than replacing an unacknowledged one.
+            for index in 0..3_u64 {
+                let _ = stack.push(
+                    NotificationModel::new(
+                        format!("w{index}"),
+                        Severity::Warning,
+                        "needs you",
+                        "occupies a slot",
+                    )
+                    .with_action("Acknowledge", "ack".to_string())
+                    .with_dismissible(true),
+                    TimeMs::millis(index),
+                );
+            }
+            let _ = stack.push(
+                toast_model(Severity::Info, "queued".into()),
+                TimeMs::millis(3),
+            );
+        }
+        _ => {
+            let _ = stack.push(toast_model(Severity::Info, "t0".into()), TimeMs::millis(0));
+        }
+    }
+    if posture == "hover-held" || posture == "focus-held" {
+        let id = stack.visible()[stack.visible().len() - 1].id().clone();
+        if posture == "hover-held" {
+            stack.set_hovered(&id, true, TimeMs::millis(1_500));
+        } else {
+            stack.set_focused(&id, true, TimeMs::millis(1_000));
+        }
+    }
+    stack
+}
+
+/// The transient notification in one timer posture (`UIF-COMP-002`).
+///
+/// A toast owns no layout, so the cell records where the box *is* rather
+/// than what it pushed aside: the anchor, the width after the viewport
+/// clamp, and the timer's own reported state at a fixed clock reading.
+/// The stack is real and driven by host-supplied [`TimeMs`], so a
+/// "hover-held" cell means the stack was actually hovered at 1500ms.
+///
+/// The fill is `surface.overlay` and every channel is audited against it,
+/// which is the same recomputation the InfoBar cell does — §2.5 has no
+/// column for the surface a Band-1 toast actually paints.
+#[must_use]
+pub fn toast_cell(posture: &'static str) -> Cell {
+    let palette = Palette::dark();
+    let viewport = toast_viewport(posture);
+    let barrier_top = viewport.y + viewport.height - space::XL;
+    let stack = toast_stack_in(posture);
+    let count = stack.visible().len().max(1);
+    let severity = stack
+        .visible()
+        .last()
+        .map(toast::ToastEntry::severity)
+        .unwrap_or(Severity::Info);
+
+    let width = toast::toast_width(viewport.width);
+    let boxes = toast::stack_bounds(viewport, barrier_top, TOAST_SAMPLE_HEIGHT, count);
+    let anchor = *boxes.last().unwrap_or(&viewport);
+    let style = info_bar::resolve_style(severity, BarSurface::Overlay, &palette);
+    let docked = info_bar::trailing_width(true, ACTION_SAMPLE_WIDTH, true);
+
+    let mut layers: Vec<(&'static str, Layer)> = vec![
+        ("toast", info_bar::background_layer(anchor, &style)),
+        (
+            "stripe",
+            info_bar::stripe_layer(info_bar::stripe_bounds(anchor), &style),
+        ),
+        (
+            "icon",
+            marker(info_bar::icon_bounds(anchor), style.icon_colour),
+        ),
+        (
+            "text",
+            marker(info_bar::text_bounds(anchor, docked), style.title_colour),
+        ),
+    ];
+    for (offset, bounds) in boxes.iter().enumerate().take(count) {
+        if *bounds != anchor {
+            layers.push((
+                if offset == 0 {
+                    "stacked-1"
+                } else {
+                    "stacked-2"
+                },
+                marker(*bounds, style.border_colour),
+            ));
+        }
+    }
+
+    let timer = stack
+        .visible()
+        .last()
+        .map(|entry| entry.timer_state(TimeMs::millis(TOAST_SAMPLE_NOW)));
+    let granted = effective_auto_dismiss_ms(severity, Some(DEFAULT_AUTO_DISMISS_MS));
+
+    Cell {
+        id: format!("toast/{posture}"),
+        kind: CellKind::Composite,
+        subject: "toast",
+        spec: "UIF-COMP-002",
+        namer: Namer::Standard,
+        resolved: vec![
+            StyleEntry::colour("background", style.background),
+            StyleEntry::colour("border.color", style.border_colour),
+            StyleEntry::colour("stripe.color", style.stripe_colour),
+            StyleEntry::colour("icon.color", style.icon_colour),
+            StyleEntry::colour("title.color", style.title_colour),
+            StyleEntry::colour("body.color", style.body_colour),
+            StyleEntry::text("severity", severity.slug().to_string()),
+            StyleEntry::text("posture", posture.to_string()),
+            StyleEntry::number("geometry.width", width),
+            StyleEntry::number("geometry.height", TOAST_SAMPLE_HEIGHT),
+            StyleEntry::number("geometry.anchor.x", anchor.x),
+            StyleEntry::number("geometry.anchor.y", anchor.y),
+            StyleEntry::number("geometry.gutter.right", toast::ANCHOR_GUTTER),
+            StyleEntry::number("geometry.gutter.barrier", toast::BARRIER_GUTTER),
+            StyleEntry::number("geometry.stack.gap", toast::STACK_GAP),
+            StyleEntry::number("policy.max-visible", toast::MAX_VISIBLE as f32),
+            StyleEntry::number("policy.visible", stack.visible().len() as f32),
+            StyleEntry::number("policy.pending", stack.pending_count() as f32),
+            StyleEntry::text("timer", format!("{timer:?}")),
+            StyleEntry::text(
+                "auto-dismiss",
+                granted.map_or_else(|| "refused".to_string(), |ms| format!("{ms}ms")),
+            ),
+            StyleEntry::text(
+                "band",
+                format!(
+                    "{:?}",
+                    crate::surface::zorder::SurfaceKind::ToastStack.band()
+                ),
+            ),
+        ],
+        frame: paint_frame(Namer::Standard, viewport, &layers),
+        audit: vec![
+            AuditPair {
+                channel: "stripe",
+                foreground: style.stripe_colour,
+                background: style.background,
+                role: ContrastRole::Chrome,
+            },
+            AuditPair {
+                channel: "icon",
+                foreground: style.icon_colour,
+                background: style.background,
+                role: ContrastRole::Chrome,
+            },
+            AuditPair {
+                channel: "title",
+                foreground: style.title_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+            AuditPair {
+                channel: "body",
+                foreground: style.body_colour,
+                background: style.background,
+                role: ContrastRole::Text,
+            },
+        ],
+        note: None,
+    }
+}
+
+/// Every toast posture cell (`UIF-COMP-002`).
+#[must_use]
+pub fn toast_cells() -> Vec<Cell> {
+    [
+        "armed",
+        "hover-held",
+        "focus-held",
+        "persistent-warning",
+        "persistent-danger",
+        "stack-three",
+        "queued",
+        "narrow-viewport",
+    ]
+    .iter()
+    .map(|posture| toast_cell(posture))
+    .collect()
+}
+
+/// Every `UIF-COMP-001`, `UIF-COMP-002` and `UIF-COMP-005` cell, in
+/// spec order.
+#[must_use]
+pub fn composite_cells() -> Vec<Cell> {
+    let mut cells = Vec::new();
+    cells.extend(form_field_cells());
+    cells.extend(settings_row_cells());
+    cells.extend(info_bar_cells());
+    cells.extend(toast_cells());
+    cells.extend(expander_cells());
+    cells.extend(scroll_view_cells());
+    cells.extend(card_cells());
+    cells.extend(list_tile_cells());
+    cells
+}
+
+#[cfg(test)]
+#[path = "gallery_composite_tests.rs"]
+mod gallery_composite_tests;

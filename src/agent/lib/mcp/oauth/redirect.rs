@@ -19,9 +19,14 @@
 //!
 //! The server is single-shot: it serves one request, returns a
 //! "you can close this window now" HTML page, and shuts itself
-//! down. It also serves a `/healthz` endpoint for tests and a
-//! pre-flight `/` that gives a 404 — anything other than the
-//! configured callback path is rejected.
+//! down. Anything other than the configured callback path gets a
+//! 404 so the browser prefetches (`/`, `/favicon.ico`) do not
+//! consume the one-shot; the server keeps listening until the
+//! callback arrives or the timeout elapses. Every reply is framed
+//! with the `Content-Length` of the HTML document it actually
+//! writes (RFC 9110 §8.6), so the browser receives the complete
+//! page rather than a truncated one.
+//! Unit tests live in the sibling `redirect_tests.rs` sidecar.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
@@ -39,6 +44,15 @@ pub const DEFAULT_CALLBACK_PATH: &str = "/callback";
 /// How long we'll wait for the browser to hit the callback. The
 /// user could be in a slow WebAuthn flow, so this is generous.
 pub const DEFAULT_CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Status-line reason phrases and HTML headings, and the body copy shown to the
+/// user, come from the crate catalogue ([`crate::strings`]) so every string this
+/// server can put in front of a user is defined in one place.
+use crate::strings::{
+    MESSAGE_METHOD_REQUIRED, MESSAGE_MISSING_CODE, MESSAGE_MISSING_STATE, MESSAGE_SUCCESS,
+    MESSAGE_WAITING_FOR_CALLBACK, REASON_BAD_REQUEST, REASON_METHOD_NOT_ALLOWED, REASON_NOT_FOUND,
+    REASON_OK,
+};
 
 /// A bound loopback HTTP server ready to accept one redirect
 /// request. The actual server lives on a background thread; this
@@ -348,8 +362,8 @@ fn handle_connection(
         send_response(
             &mut stream,
             405,
-            "Method Not Allowed",
-            "GET or POST required",
+            REASON_METHOD_NOT_ALLOWED,
+            MESSAGE_METHOD_REQUIRED,
         )?;
         return Ok(None);
     }
@@ -372,7 +386,12 @@ fn handle_connection(
     if path != callback_path {
         // Browser probably hit `/` or `/favicon.ico`. Reply with
         // a 404 and keep listening.
-        send_response(&mut stream, 404, "Not Found", "waiting for OAuth callback")?;
+        send_response(
+            &mut stream,
+            404,
+            REASON_NOT_FOUND,
+            MESSAGE_WAITING_FOR_CALLBACK,
+        )?;
         return Ok(None);
     }
     // Parse the query string. We accept the standard `code` and
@@ -387,17 +406,12 @@ fn handle_connection(
                 send_response(
                     &mut stream,
                     400,
-                    "Bad Request",
+                    REASON_BAD_REQUEST,
                     &format!("Authorization server returned error='{err}'; description='{desc}'"),
                 )?;
                 return Err(OAuthError::AuthorizationDenied(format!("{err}: {desc}")));
             }
-            send_response(
-                &mut stream,
-                400,
-                "Bad Request",
-                "missing 'code' parameter on redirect",
-            )?;
+            send_response(&mut stream, 400, REASON_BAD_REQUEST, MESSAGE_MISSING_CODE)?;
             return Err(OAuthError::AuthorizationDenied(
                 "redirect missing 'code'".to_owned(),
             ));
@@ -406,12 +420,7 @@ fn handle_connection(
     let state = match params.get("state") {
         Some(s) if !s.is_empty() => s.clone(),
         _ => {
-            send_response(
-                &mut stream,
-                400,
-                "Bad Request",
-                "missing 'state' parameter on redirect",
-            )?;
+            send_response(&mut stream, 400, REASON_BAD_REQUEST, MESSAGE_MISSING_STATE)?;
             return Err(OAuthError::AuthorizationDenied(
                 "redirect missing 'state'".to_owned(),
             ));
@@ -424,12 +433,7 @@ fn handle_connection(
             extras.push((k.clone(), v.clone()));
         }
     }
-    send_response(
-        &mut stream,
-        200,
-        "OK",
-        "You may now close this window and return to the application.",
-    )?;
+    send_response(&mut stream, 200, REASON_OK, MESSAGE_SUCCESS)?;
     Ok(Some(CallbackParams {
         code,
         state,
@@ -486,25 +490,37 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+/// Build the HTML document every reply carries: the status reason as the
+/// heading and the diagnostic message as the body text.
+fn html_document(reason: &str, message: &str) -> String {
+    format!(
+        "<!doctype html><html><head><title>{reason}</title></head>\
+         <body><h1>{reason}</h1><p>{message}</p></body></html>"
+    )
+}
+
+/// Write one complete HTTP reply (status line, headers, blank line, HTML
+/// document).
+///
+/// `Content-Length` is counted from the document bytes that are actually
+/// written — RFC 9110 §8.6 defines it as the size of the message body — so a
+/// conforming client keeps the whole page instead of stopping at the end of
+/// the plain-text message.
 fn send_response(
     stream: &mut TcpStream,
     code: u16,
     reason: &str,
-    body: &str,
+    message: &str,
 ) -> Result<(), OAuthError> {
-    let body_bytes = body.as_bytes();
-    let response = format!(
+    let document = html_document(reason, message);
+    let headers = format!(
         "HTTP/1.1 {code} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n\
-         Content-Length: {len}\r\nConnection: close\r\n\r\n",
-        len = body_bytes.len()
-    );
-    let html = format!(
-        "<!doctype html><html><head><title>{reason}</title></head>\
-         <body><h1>{reason}</h1><p>{body}</p></body></html>"
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
+        document.len()
     );
     stream
-        .write_all(response.as_bytes())
-        .and_then(|_| stream.write_all(html.as_bytes()))
+        .write_all(headers.as_bytes())
+        .and_then(|_| stream.write_all(document.as_bytes()))
         .and_then(|_| stream.flush())
         .map_err(|e| OAuthError::Transport(format!("loopback write failed: {e}")))?;
     Ok(())
@@ -524,130 +540,5 @@ pub fn open_browser(url: &str) -> Result<(), OAuthError> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use std::net::TcpStream;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn start_binds_to_loopback_and_reports_redirect_uri() {
-        let server = start(Some("/cb"), None).expect("bind");
-        assert!(server.redirect_uri.starts_with("http://127.0.0.1:"));
-        assert!(server.redirect_uri.ends_with("/cb"));
-        assert!(server.port > 0);
-    }
-
-    #[test]
-    fn wait_for_code_returns_code_and_state_on_hit() {
-        let server = start(Some("/cb"), Some(Duration::from_secs(5))).expect("bind");
-        let url = server.redirect_uri.clone();
-        let port = server.port;
-        let redirect = server.redirect_uri.clone();
-        let handle = std::thread::spawn(move || server.wait_for_code());
-
-        // Send a synthetic GET request.
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        write!(
-            stream,
-            "GET {redirect}?code=abc&state=xyz&other=zzz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-        )
-        .expect("write");
-        // Drain the response so the server can close the socket.
-        let mut buf = Vec::new();
-        use std::io::Read;
-        let _ = stream.read_to_end(&mut buf);
-
-        let params = handle.join().expect("join").expect("callback");
-        assert_eq!(params.code, "abc");
-        assert_eq!(params.state, "xyz");
-        assert_eq!(params.extras, vec![("other".to_owned(), "zzz".to_owned())]);
-        // URL was just an example; touch it to silence "unused".
-        let _ = url;
-    }
-
-    #[test]
-    fn non_callback_path_keeps_listening() {
-        let server = start(Some("/cb"), Some(Duration::from_secs(5))).expect("bind");
-        let port = server.port;
-        let redirect = server.redirect_uri.clone();
-        let handle = std::thread::spawn(move || server.wait_for_code());
-
-        // First request: hit `/` with a 404. Server should keep
-        // listening.
-        {
-            let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-            write!(
-                stream,
-                "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-            )
-            .expect("write");
-            let mut buf = Vec::new();
-            let _ = stream.read_to_end(&mut buf);
-        }
-        // Give the server a moment to loop back to accept().
-        std::thread::sleep(Duration::from_millis(50));
-
-        // Second request: hit the real callback.
-        {
-            let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-            write!(
-                stream,
-                "GET {redirect}?code=the-code&state=the-state HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-            )
-            .expect("write");
-            let mut buf = Vec::new();
-            let _ = stream.read_to_end(&mut buf);
-        }
-
-        let params = handle.join().expect("join").expect("callback");
-        assert_eq!(params.code, "the-code");
-        assert_eq!(params.state, "the-state");
-    }
-
-    #[test]
-    fn missing_code_returns_authorization_denied() {
-        let server = start(Some("/cb"), Some(Duration::from_secs(5))).expect("bind");
-        let port = server.port;
-        let redirect = server.redirect_uri.clone();
-        let handle = std::thread::spawn(move || server.wait_for_code());
-
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-        write!(
-            stream,
-            "GET {redirect}?error=access_denied&error_description=user+said+no HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-        )
-        .expect("write");
-        let mut buf = Vec::new();
-        let _ = stream.read_to_end(&mut buf);
-
-        let err = handle.join().expect("join").expect_err("must error");
-        match err {
-            OAuthError::AuthorizationDenied(msg) => {
-                assert!(msg.contains("access_denied"));
-                assert!(msg.contains("user said no"));
-            }
-            other => panic!("expected AuthorizationDenied, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn wait_for_code_times_out() {
-        let server = start(Some("/cb"), Some(Duration::from_millis(100))).expect("bind");
-        let started = Instant::now();
-        let result = server.wait_for_code();
-        let elapsed = started.elapsed();
-        assert!(matches!(result, Err(OAuthError::CallbackTimeout(_))));
-        // We shouldn't be more than ~250ms late.
-        assert!(elapsed < Duration::from_millis(500));
-    }
-
-    #[test]
-    fn form_decode_handles_plus_and_percent() {
-        assert_eq!(form_decode("a+b"), "a b");
-        assert_eq!(form_decode("a%20b"), "a b");
-        assert_eq!(form_decode("a%2Bb"), "a+b");
-        assert_eq!(form_decode("plain"), "plain");
-        assert_eq!(form_decode(""), "");
-    }
-}
+#[path = "redirect_tests.rs"]
+mod tests;

@@ -25,12 +25,69 @@ fn spawn_mock_server(body: impl Into<String>) -> String {
     format!("http://127.0.0.1:{}", port)
 }
 
+/// Install the ring crypto provider once per process. The mock servers speak
+/// plain HTTP, but the HTTP client is built with TLS support regardless.
+fn ensure_rustls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+/// A stub LLM that answers each request with the next body in `bodies`. Once
+/// only one body is left it is repeated, so a test can script "first the model
+/// asks for a tool, then it answers".
+fn spawn_sequential_mock_server(bodies: Vec<String>) -> String {
+    use std::io::{Read, Write};
+    use std::sync::Mutex;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let pending = Mutex::new(bodies);
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0; 65536];
+            let _ = stream.read(&mut buf);
+            let body_str = {
+                let mut queued = pending.lock().unwrap();
+                if queued.len() > 1 {
+                    queued.remove(0)
+                } else {
+                    queued[0].clone()
+                }
+            };
+            let response_str = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body_str.len(),
+                body_str
+            );
+            let _ = stream.write_all(response_str.as_bytes());
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+    format!("http://127.0.0.1:{}", port)
+}
+
+/// Chat config for the delegate, with `web_search` disabled so only `web_fetch`
+/// is offered to the model.
+fn delegate_config(api_url: &str) -> AgentConfig {
+    let mut config = AgentConfig::default();
+    config.models.insert(
+        "chat".to_string(),
+        LlmConfig {
+            model: "test-model".to_string(),
+            api_url: api_url.to_string(),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    config.searxng_url = None;
+    config
+}
+
 #[test]
 fn test_tool_web_fetch_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
         url: Some(server_url.clone()),
@@ -55,9 +112,7 @@ fn test_tool_web_fetch_mock() {
 #[test]
 fn test_tool_web_fetch_error() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let input = crate::tools::dtos::WebFetchInput {
         url: Some("http://127.0.0.1:1".to_string()),
         headers: false,
@@ -71,9 +126,7 @@ fn test_tool_web_fetch_error() {
 #[test]
 fn test_tool_web_fetch_pagination() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let html =
         "<html><body><p>line1</p><p>line2</p><p>line3</p><p>line4</p><p>line5</p></body></html>";
     let server_url = spawn_mock_server(html);
@@ -99,9 +152,7 @@ fn test_tool_web_fetch_pagination() {
 #[test]
 fn test_tool_web_fetch_cursor_pagination() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     // 150 <p> tags -> 300 markdown lines, well past the 64-line page size.
     let mut html = String::from("<html><body>");
     for i in 0..150 {
@@ -184,9 +235,7 @@ fn test_tool_web_fetch_cursor_pagination() {
 #[test]
 fn test_tool_web_fetch_headers() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("<html><body><h1>Test</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
         url: Some(server_url.clone()),
@@ -203,9 +252,7 @@ fn test_tool_web_fetch_headers() {
 #[test]
 fn test_tool_web_fetch_cache_hit() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("<html><body><h1>Cached</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
         url: Some(server_url.clone()),
@@ -223,9 +270,7 @@ fn test_tool_web_fetch_cache_hit() {
 #[test]
 fn test_tool_web_fetch_force_refetch() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("<html><body><h1>Force</h1></body></html>");
     let input = crate::tools::dtos::WebFetchInput {
         url: Some(server_url.clone()),
@@ -288,9 +333,7 @@ fn test_tool_web_fetch_chrome_happy_path() {
 #[test]
 fn test_tool_web_fetch_fallback_when_browser_absent() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("<html><body><p>Static Fallback</p></body></html>");
 
     let input = crate::tools::dtos::WebFetchInput {
@@ -314,65 +357,56 @@ fn test_tool_web_fetch_fallback_when_browser_absent() {
     assert!(!result.from_cache);
 }
 
+/// When the browser runner cannot deliver a page — it either fails outright or
+/// times out — the fetch falls back to plain HTTP instead of erroring out.
 #[test]
-fn test_tool_web_fetch_fallback_on_browser_crash_or_error() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-    let server_url = spawn_mock_server("<html><body><p>HTTP Content After Crash</p></body></html>");
+fn test_tool_web_fetch_falls_back_to_http_when_the_browser_runner_fails() {
+    use crate::tools::browser_runner::tests::MockBrowserRunner;
 
-    let failing_runner =
-        crate::tools::browser_runner::tests::MockBrowserRunner::new().with_failure(1);
+    let cases: Vec<(&str, MockBrowserRunner, &str, &str)> = vec![
+        (
+            "the runner reports a failure",
+            MockBrowserRunner::new().with_failure(1),
+            "<html><body><p>HTTP Content After Crash</p></body></html>",
+            "HTTP Content After Crash",
+        ),
+        (
+            "the runner times out",
+            MockBrowserRunner::new().with_timeout(),
+            "<html><body><p>HTTP Content After Timeout</p></body></html>",
+            "HTTP Content After Timeout",
+        ),
+    ];
+    for (label, runner, html, expected) in cases {
+        let cache = crate::tools::registry::cache::ToolCache::new();
+        ensure_rustls_provider();
+        let server_url = spawn_mock_server(html);
 
-    let input = crate::tools::dtos::WebFetchInput {
-        url: Some(server_url),
-        headers: false,
-        force_refetch: true,
-        cursor: None,
-    };
+        let input = crate::tools::dtos::WebFetchInput {
+            url: Some(server_url),
+            headers: false,
+            force_refetch: true,
+            cursor: None,
+        };
 
-    let result = tool_web_fetch_with_runner(
-        &input,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-        Some(&failing_runner),
-    )
-    .unwrap();
+        let result = tool_web_fetch_with_runner(
+            &input,
+            &cache,
+            &crate::utils::uuid::SystemUuidGenerator,
+            Some(&runner),
+        )
+        .unwrap();
 
-    assert!(result.content.contains("HTTP Content After Crash"));
-    assert!(!result.from_cache);
-}
-
-#[test]
-fn test_tool_web_fetch_fallback_on_timeout() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-    let server_url =
-        spawn_mock_server("<html><body><p>HTTP Content After Timeout</p></body></html>");
-
-    let timing_out_runner =
-        crate::tools::browser_runner::tests::MockBrowserRunner::new().with_timeout();
-
-    let input = crate::tools::dtos::WebFetchInput {
-        url: Some(server_url),
-        headers: false,
-        force_refetch: true,
-        cursor: None,
-    };
-
-    let result = tool_web_fetch_with_runner(
-        &input,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-        Some(&timing_out_runner),
-    )
-    .unwrap();
-
-    assert!(result.content.contains("HTTP Content After Timeout"));
-    assert!(!result.from_cache);
+        assert!(
+            result.content.contains(expected),
+            "case '{label}': expected the HTTP fallback content, got: {}",
+            result.content
+        );
+        assert!(
+            !result.from_cache,
+            "case '{label}': a forced fresh fetch must not be served from cache"
+        );
+    }
 }
 
 #[test]
@@ -550,9 +584,7 @@ fn test_tool_web_fetch_browser_markdown_conversion() {
 #[test]
 fn test_tool_web_fetch_http_markdown_conversion() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let html = "<html><body><h1>Title Heading</h1><p>Text with <strong>bold</strong> and <a href=\"https://example.com/target\">link text</a>.</p><ul><li>Item A</li><li>Item B</li></ul></body></html>";
     let server_url = spawn_mock_server(html);
 
@@ -584,62 +616,60 @@ fn test_tool_web_fetch_http_markdown_conversion() {
     assert!(!result.content.contains("<a href="));
 }
 
+/// Inline `data:` images are stripped from a browser-rendered page and replaced
+/// by the image's alt text, or a bare `[Image]` placeholder when there is none.
 #[test]
-fn test_tool_web_fetch_replaces_inline_data_uri_with_alt_text() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    let html = r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="Sample Logo"> After</p></body></html>"#;
-    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
+fn test_tool_web_fetch_replaces_inline_data_uris_via_browser_runner() {
+    let cases: Vec<(&str, &str, &str, &str)> = vec![
+        (
+            "alt text becomes the placeholder label",
+            "https://example.com/data-uri-test",
+            r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="Sample Logo"> After</p></body></html>"#,
+            "[Image: Sample Logo]",
+        ),
+        (
+            "no alt text falls back to a bare placeholder",
+            "https://example.com/data-uri-no-alt",
+            r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="> After</p></body></html>"#,
+            "[Image]",
+        ),
+    ];
+    for (label, url, html, expected) in cases {
+        let cache = crate::tools::registry::cache::ToolCache::new();
+        let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
 
-    let input = crate::tools::dtos::WebFetchInput {
-        url: Some("https://example.com/data-uri-test".to_string()),
-        headers: false,
-        force_refetch: true,
-        cursor: None,
-    };
+        let input = crate::tools::dtos::WebFetchInput {
+            url: Some(url.to_string()),
+            headers: false,
+            force_refetch: true,
+            cursor: None,
+        };
 
-    let result = tool_web_fetch_with_runner(
-        &input,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-        Some(&runner),
-    )
-    .unwrap();
+        let result = tool_web_fetch_with_runner(
+            &input,
+            &cache,
+            &crate::utils::uuid::SystemUuidGenerator,
+            Some(&runner),
+        )
+        .unwrap();
 
-    assert!(!result.content.contains("data:image/png;base64"));
-    assert!(result.content.contains("[Image: Sample Logo]"));
-}
-
-#[test]
-fn test_tool_web_fetch_replaces_inline_data_uri_without_alt_text() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    let html = r#"<html><body><p>Before <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="> After</p></body></html>"#;
-    let runner = crate::tools::browser_runner::tests::MockBrowserRunner::new().with_html(html);
-
-    let input = crate::tools::dtos::WebFetchInput {
-        url: Some("https://example.com/data-uri-no-alt".to_string()),
-        headers: false,
-        force_refetch: true,
-        cursor: None,
-    };
-
-    let result = tool_web_fetch_with_runner(
-        &input,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-        Some(&runner),
-    )
-    .unwrap();
-
-    assert!(!result.content.contains("data:image/png;base64"));
-    assert!(result.content.contains("[Image]"));
+        assert!(
+            !result.content.contains("data:image/png;base64"),
+            "case '{label}': the inline data URI must be stripped, got: {}",
+            result.content
+        );
+        assert!(
+            result.content.contains(expected),
+            "case '{label}': expected {expected:?}, got: {}",
+            result.content
+        );
+    }
 }
 
 #[test]
 fn test_tool_web_fetch_replaces_inline_data_uri_http_fallback() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let html = r#"<html><body><p>Text <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="Http Icon"> End</p></body></html>"#;
     let server_url = spawn_mock_server(html);
 
@@ -663,153 +693,160 @@ fn test_tool_web_fetch_replaces_inline_data_uri_http_fallback() {
     assert!(result.content.contains("[Image: Http Icon]"));
 }
 
+/// `replace_inline_image_data_uris` rewrites inline `data:` images to an
+/// `[Image: …]` placeholder while leaving every other link construct untouched.
 #[test]
 fn test_replace_inline_image_data_uris_pure_unit_tests() {
     use crate::tools::web::replace_inline_image_data_uris;
 
-    // 1. Basic with alt text
-    assert_eq!(
-        replace_inline_image_data_uris("![Logo](data:image/png;base64,AAAA)"),
-        "[Image: Logo]"
-    );
-
-    // 2. Empty alt text
-    assert_eq!(
-        replace_inline_image_data_uris("![](data:image/png;base64,AAAA)"),
-        "[Image]"
-    );
-
-    // 3. Whitespace-only alt text
-    assert_eq!(
-        replace_inline_image_data_uris("![   ](data:image/png;base64,AAAA)"),
-        "[Image]"
-    );
-
-    // 4. Title fallback when alt text is empty
-    assert_eq!(
-        replace_inline_image_data_uris(r#"![](data:image/png;base64,AAAA "Company Diagram")"#),
-        "[Image: Company Diagram]"
-    );
-
-    // 5. Alt text prioritized over title
-    assert_eq!(
-        replace_inline_image_data_uris(r#"![Chart](data:image/png;base64,AAAA "Company Diagram")"#),
-        "[Image: Chart]"
-    );
-
-    // 6. Angle bracket wrapped URI
-    assert_eq!(
-        replace_inline_image_data_uris("![SVG](<data:image/svg+xml;utf8,<svg></svg>> )"),
-        "[Image: SVG]"
-    );
-
-    // 7. Regular web image preserved
-    assert_eq!(
-        replace_inline_image_data_uris("![Photo](https://example.com/pic.png)"),
-        "![Photo](https://example.com/pic.png)"
-    );
-
-    // 8. Relative image preserved
-    assert_eq!(
-        replace_inline_image_data_uris("![Logo](/assets/logo.png)"),
-        "![Logo](/assets/logo.png)"
-    );
-
-    // 9. Regular hyperlink with data URI preserved
-    assert_eq!(
-        replace_inline_image_data_uris("[Download](data:application/pdf;base64,AAAA)"),
-        "[Download](data:application/pdf;base64,AAAA)"
-    );
-
-    // 10. Image nested inside a link
-    assert_eq!(
-        replace_inline_image_data_uris(
-            "[![Thumb](data:image/png;base64,AAAA)](https://example.com)"
+    let cases: Vec<(&str, &str, &str)> = vec![
+        (
+            "basic with alt text",
+            "![Logo](data:image/png;base64,AAAA)",
+            "[Image: Logo]",
         ),
-        "[[Image: Thumb]](https://example.com)"
-    );
-
-    // 11. Multiple images mixed with text
-    let mixed = "Intro ![A](data:image/png;base64,111) middle ![Remote](https://example.com/b.jpg) end ![](data:image/jpeg;base64,222).";
-    let expected = "Intro [Image: A] middle ![Remote](https://example.com/b.jpg) end [Image].";
-    assert_eq!(replace_inline_image_data_uris(mixed), expected);
-
-    // 12. Edge cases: empty, plain text, malformed unclosed constructs
-    assert_eq!(replace_inline_image_data_uris(""), "");
-    assert_eq!(replace_inline_image_data_uris("Hello World"), "Hello World");
-    assert_eq!(
-        replace_inline_image_data_uris("![unclosed alt"),
-        "![unclosed alt"
-    );
-    assert_eq!(replace_inline_image_data_uris("![alt]"), "![alt]");
-    assert_eq!(
-        replace_inline_image_data_uris("![alt](unclosed url"),
-        "![alt](unclosed url"
-    );
+        (
+            "empty alt text",
+            "![](data:image/png;base64,AAAA)",
+            "[Image]",
+        ),
+        (
+            "whitespace-only alt text",
+            "![   ](data:image/png;base64,AAAA)",
+            "[Image]",
+        ),
+        (
+            "title fallback when alt text is empty",
+            r#"![](data:image/png;base64,AAAA "Company Diagram")"#,
+            "[Image: Company Diagram]",
+        ),
+        (
+            "alt text prioritized over title",
+            r#"![Chart](data:image/png;base64,AAAA "Company Diagram")"#,
+            "[Image: Chart]",
+        ),
+        (
+            "angle bracket wrapped URI",
+            "![SVG](<data:image/svg+xml;utf8,<svg></svg>> )",
+            "[Image: SVG]",
+        ),
+        (
+            "regular web image preserved",
+            "![Photo](https://example.com/pic.png)",
+            "![Photo](https://example.com/pic.png)",
+        ),
+        (
+            "relative image preserved",
+            "![Logo](/assets/logo.png)",
+            "![Logo](/assets/logo.png)",
+        ),
+        (
+            "regular hyperlink with data URI preserved",
+            "[Download](data:application/pdf;base64,AAAA)",
+            "[Download](data:application/pdf;base64,AAAA)",
+        ),
+        (
+            "image nested inside a link",
+            "[![Thumb](data:image/png;base64,AAAA)](https://example.com)",
+            "[[Image: Thumb]](https://example.com)",
+        ),
+        (
+            "multiple images mixed with text",
+            "Intro ![A](data:image/png;base64,111) middle ![Remote](https://example.com/b.jpg) end ![](data:image/jpeg;base64,222).",
+            "Intro [Image: A] middle ![Remote](https://example.com/b.jpg) end [Image].",
+        ),
+        ("empty input", "", ""),
+        ("plain text", "Hello World", "Hello World"),
+        ("unclosed alt text", "![unclosed alt", "![unclosed alt"),
+        ("alt without url", "![alt]", "![alt]"),
+        ("unclosed url", "![alt](unclosed url", "![alt](unclosed url"),
+    ];
+    for (label, input, expected) in cases {
+        assert_eq!(
+            replace_inline_image_data_uris(input),
+            expected,
+            "case '{label}': input {input:?}"
+        );
+    }
 }
 
+/// `tool_web_search` renders every hit with its title, url and content, and a
+/// result set that fits on one page always reports the final-page hint.
 #[test]
-fn test_tool_web_search_mock() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-    let mock_json = serde_json::json!({
-        "results": [
-            {
-                "title": "Test Title",
-                "url": "https://test.com",
-                "content": "Test content"
-            }
-        ]
-    });
-    let server_url = spawn_mock_server(mock_json.to_string());
-    let result = tool_web_search(
-        &server_url,
-        Some("test query"),
-        None,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-    )
-    .unwrap();
-    assert!(result.results.contains("Test Title"));
-    assert!(result.results.contains("https://test.com"));
-    assert!(result.results.contains("Test content"));
-    assert_eq!(result.total, 1);
-    assert!(result.cursor.is_none());
-    assert_eq!(result.hint.as_deref(), Some("Final page."));
-}
+fn test_tool_web_search_renders_hits_and_reports_the_final_page() {
+    /// One web-search rendering case: `(label, response, expected hit count,
+    /// expected substrings, expected final-page hint)`.
+    type SearchCase<'a> = (
+        &'a str,
+        serde_json::Value,
+        usize,
+        &'a [&'a str],
+        Option<&'a str>,
+    );
+    let cases: Vec<SearchCase<'_>> = vec![
+        (
+            "one hit is rendered in full",
+            serde_json::json!({
+                "results": [
+                    {
+                        "title": "Test Title",
+                        "url": "https://test.com",
+                        "content": "Test content"
+                    }
+                ]
+            }),
+            1,
+            &["Test Title", "https://test.com", "Test content"],
+            None,
+        ),
+        (
+            "an empty result set reports the sentinel",
+            serde_json::json!({ "results": [] }),
+            0,
+            &["No results found."],
+            Some("No results found."),
+        ),
+    ];
+    for (label, mock_json, expected_total, expected_parts, expected_exact) in cases {
+        let cache = crate::tools::registry::cache::ToolCache::new();
+        ensure_rustls_provider();
+        let server_url = spawn_mock_server(mock_json.to_string());
+        let result = tool_web_search(
+            &server_url,
+            Some("test query"),
+            None,
+            &cache,
+            &crate::utils::uuid::SystemUuidGenerator,
+        )
+        .unwrap();
 
-#[test]
-fn test_tool_web_search_empty() {
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-    let mock_json = serde_json::json!({
-        "results": []
-    });
-    let server_url = spawn_mock_server(mock_json.to_string());
-    let result = tool_web_search(
-        &server_url,
-        Some("test query"),
-        None,
-        &cache,
-        &crate::utils::uuid::SystemUuidGenerator,
-    )
-    .unwrap();
-    assert_eq!(result.results, "No results found.");
-    assert_eq!(result.total, 0);
-    assert!(result.cursor.is_none());
-    assert_eq!(result.hint.as_deref(), Some("Final page."));
+        for part in expected_parts {
+            assert!(
+                result.results.contains(part),
+                "case '{label}': expected the result text to contain {part:?}, got: {}",
+                result.results
+            );
+        }
+        if let Some(exact) = expected_exact {
+            assert_eq!(result.results, exact, "case '{label}': full result text");
+        }
+        assert_eq!(result.total, expected_total, "case '{label}'");
+        assert!(
+            result.cursor.is_none(),
+            "case '{label}': a single-page result must omit the cursor"
+        );
+        assert_eq!(
+            result.hint.as_deref(),
+            Some("Final page."),
+            "case '{label}'"
+        );
+    }
 }
 
 #[test]
 fn test_tool_web_search_cursor_pagination_32_page_size() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let total = 70;
     let results: Vec<serde_json::Value> = (1..=total)
         .map(|i| {
@@ -868,9 +905,7 @@ fn test_tool_web_search_cursor_pagination_32_page_size() {
 #[test]
 fn test_tool_web_search_invalid_json() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let server_url = spawn_mock_server("invalid json");
     let result = tool_web_search(
         &server_url,
@@ -905,9 +940,7 @@ fn test_tool_web_delegate_missing_api_key() {
 #[test]
 fn test_tool_web_delegate_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
     let mock_response = serde_json::json!({
         "choices": [
             {
@@ -937,15 +970,18 @@ fn test_tool_web_delegate_mock() {
     assert_eq!(result.result, "Final summarized answer");
 }
 
+/// Contract: a tool call the delegate cannot resolve ends the delegation after
+/// that round, so the delegation returns the error envelopes it collected
+/// instead of burning the whole `max_loops = 10` budget. (Was: the unknown tool
+/// was retried ten times, ten identical error envelopes were collected, and the
+/// caller could not tell the failure from an empty success.)
 #[test]
-fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
+fn tool_web_delegate_ends_the_delegation_on_an_unresolvable_tool_call() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
 
-    // Mock server returns a tool_call with unknown function name
-    // The delegate should handle this gracefully and continue
+    // The stub answers every request with the same unresolvable tool call, so
+    // the only way the delegation can end before the budget is by rejecting it.
     let mock_response = serde_json::json!({
         "choices": [{
             "message": {
@@ -962,32 +998,97 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
     });
 
     let server_url = spawn_mock_server(mock_response.to_string());
+    let config = delegate_config(&server_url);
 
-    let mut config = AgentConfig::default();
-    config.models.insert(
-        "chat".to_string(),
-        LlmConfig {
-            model: "test-model".to_string(),
-            api_url: server_url.clone(),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        },
+    let response = tool_web_delegate(&config, "do something", &cache)
+        .expect("the delegate reports the failure through its tool-call trace");
+
+    assert_eq!(
+        response.tool_calls.len(),
+        1,
+        "the unresolvable call must end the delegation after the first round"
     );
-    config.searxng_url = None;
+    let call = &response.tool_calls[0];
+    assert_eq!(call.name, "unknown_function");
+    assert_eq!(
+        call.result.get("status").and_then(|v| v.as_str()),
+        Some("error"),
+        "the unresolvable call reports an error status"
+    );
+    assert_eq!(
+        call.result.get("message").and_then(|v| v.as_str()),
+        Some("Unknown tool"),
+        "the unresolvable call reports the unknown-tool message"
+    );
+    assert!(
+        response.result.is_empty(),
+        "an unresolvable delegation produces no answer, got: {:?}",
+        response.result
+    );
+}
 
-    // Should not panic - handles unknown tool gracefully
-    let result = tool_web_delegate(&config, "do something", &cache);
-    // Either succeeds or returns an error we can handle
-    assert!(result.is_ok() || result.is_err());
+/// Contract: a tool call the delegate *can* resolve is executed and the loop
+/// continues until the model delivers its final answer — the early exit above
+/// must not shorten a healthy delegation.
+#[test]
+fn tool_web_delegate_keeps_looping_while_the_tool_call_is_resolvable() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    ensure_rustls_provider();
+
+    // Round 1 asks for `web_fetch` (a tool the delegate offers), round 2 emits
+    // the final answer.
+    let page_url = spawn_mock_server("<html><body><h1>Fetched page</h1></body></html>");
+    let first_round = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": format!("{{\"url\":\"{page_url}\"}}")
+                    }
+                }]
+            }
+        }]
+    });
+    let second_round = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "Final summarized answer",
+                "tool_calls": []
+            }
+        }]
+    });
+
+    let server_url =
+        spawn_sequential_mock_server(vec![first_round.to_string(), second_round.to_string()]);
+    let config = delegate_config(&server_url);
+
+    let response = tool_web_delegate(&config, "fetch the page", &cache)
+        .expect("a resolvable delegation succeeds");
+
+    assert_eq!(response.result, "Final summarized answer");
+    assert_eq!(
+        response.tool_calls.len(),
+        1,
+        "the single tool call of the first round is recorded, got: {:?}",
+        response.tool_calls
+    );
+    let call = &response.tool_calls[0];
+    assert_eq!(call.name, "web_fetch");
+    assert_eq!(
+        call.result.get("status").and_then(|v| v.as_str()),
+        Some("success"),
+        "the resolvable call is executed, got: {}",
+        call.result
+    );
 }
 
 #[test]
 fn test_tool_web_delegate_handles_api_error_gracefully() {
     let cache = crate::tools::registry::cache::ToolCache::new();
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
+    ensure_rustls_provider();
 
     // Mock server that returns an error status
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

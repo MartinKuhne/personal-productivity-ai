@@ -20,6 +20,7 @@
 //!
 //! The probe order in the spec is the order we try them. The first
 //! URL that returns a parseable `application/json` body is used.
+//! Unit tests live in the sibling `discovery_tests.rs` sidecar.
 
 use super::types::{
     AuthorizationServerMetadata, OAuthError, ProtectedResourceMetadata, WwwAuthenticateChallenge,
@@ -354,133 +355,8 @@ fn origin_of(p: &ParsedUrl) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn well_known_resource_metadata_candidates_with_path() {
-        let v = well_known_resource_metadata_candidates("https://mcp.example.com/mcp");
-        assert_eq!(
-            v,
-            vec![
-                "https://mcp.example.com/.well-known/oauth-protected-resource/mcp".to_owned(),
-                "https://mcp.example.com/.well-known/oauth-protected-resource".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn well_known_resource_metadata_candidates_host_only() {
-        let v = well_known_resource_metadata_candidates("https://mcp.example.com");
-        assert_eq!(
-            v,
-            vec!["https://mcp.example.com/.well-known/oauth-protected-resource".to_owned()]
-        );
-    }
-
-    #[test]
-    fn well_known_resource_metadata_candidates_strips_trailing_slash() {
-        let v = well_known_resource_metadata_candidates("https://mcp.example.com/mcp/");
-        // Trailing slash should be trimmed so the resulting candidate is "/mcp", not "//mcp".
-        assert_eq!(
-            v,
-            vec![
-                "https://mcp.example.com/.well-known/oauth-protected-resource/mcp".to_owned(),
-                "https://mcp.example.com/.well-known/oauth-protected-resource".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn well_known_resource_metadata_candidates_with_port() {
-        let v = well_known_resource_metadata_candidates("https://mcp.example.com:8443/mcp");
-        assert_eq!(
-            v[0],
-            "https://mcp.example.com:8443/.well-known/oauth-protected-resource/mcp"
-        );
-    }
-
-    #[test]
-    fn well_known_as_metadata_candidates_with_path() {
-        let v = well_known_as_metadata_candidates("https://auth.example.com/tenant1");
-        assert_eq!(
-            v,
-            vec![
-                "https://auth.example.com/.well-known/oauth-authorization-server/tenant1"
-                    .to_owned(),
-                "https://auth.example.com/.well-known/openid-configuration/tenant1".to_owned(),
-                "https://auth.example.com/tenant1/.well-known/openid-configuration".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn well_known_as_metadata_candidates_host_only() {
-        let v = well_known_as_metadata_candidates("https://auth.example.com");
-        assert_eq!(
-            v,
-            vec![
-                "https://auth.example.com/.well-known/oauth-authorization-server".to_owned(),
-                "https://auth.example.com/.well-known/openid-configuration".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn well_known_as_metadata_candidates_with_port() {
-        let v = well_known_as_metadata_candidates("https://auth.example.com:8443/tenant1");
-        // Non-default port must be preserved on all three candidates.
-        for c in &v {
-            assert!(c.starts_with("https://auth.example.com:8443/"), "bad: {c}");
-        }
-    }
-
-    #[test]
-    fn well_known_as_metadata_candidates_nested_path() {
-        // /tenants/a/b — the "first path segment" is "tenants"; spec
-        // §4.3.1 only shows one path segment but the rule is
-        // "leading path components", so we treat the whole path
-        // (minus leading/trailing slashes) as the suffix.
-        let v = well_known_as_metadata_candidates("https://auth.example.com/tenants/a");
-        assert_eq!(
-            v,
-            vec![
-                "https://auth.example.com/.well-known/oauth-authorization-server/tenants/a"
-                    .to_owned(),
-                "https://auth.example.com/.well-known/openid-configuration/tenants/a".to_owned(),
-                "https://auth.example.com/tenants/a/.well-known/openid-configuration".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_url_basic() {
-        let p = url_parse("https://mcp.example.com/mcp").unwrap();
-        assert_eq!(p.scheme, "https");
-        assert_eq!(p.host, "mcp.example.com");
-        assert_eq!(p.path, "/mcp");
-        assert_eq!(origin_of(&p).as_deref(), Some("https://mcp.example.com"));
-    }
-
-    #[test]
-    fn parse_url_with_port() {
-        let p = url_parse("https://mcp.example.com:8443/mcp").unwrap();
-        assert_eq!(
-            origin_of(&p).as_deref(),
-            Some("https://mcp.example.com:8443")
-        );
-    }
-
-    #[test]
-    fn parse_url_rejects_missing_scheme() {
-        assert!(url_parse("mcp.example.com").is_err());
-    }
-
-    #[test]
-    fn parse_url_rejects_empty() {
-        assert!(url_parse("").is_err());
-    }
-}
+#[path = "discovery_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "discovery_proptests.rs"]

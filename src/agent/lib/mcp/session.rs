@@ -31,6 +31,8 @@
 //!   to a tracing logger. SSE-framed HTTP response bodies are
 //!   handled by [`super::sse`]. See the module-level docs on
 //!   [`super`] for the full compliance matrix.
+//!
+//! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use super::error::McpError;
 use super::oauth::{
@@ -41,6 +43,12 @@ use crate::config::McpServerConfig;
 use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
+
+/// Diagnostic for a stdin pipe that is already gone — the child closed it, or
+/// the transport was torn down while a request was still pending.
+const STDIN_CLOSED: &str = "stdin closed";
+/// Diagnostic for a stdin mutex whose owning thread panicked.
+const STDIN_LOCK_POISONED: &str = "stdin lock poisoned";
 
 /// Build a [`reqwest::Client`] for MCP HTTP requests (async).
 ///
@@ -927,21 +935,17 @@ impl McpClientSession {
         // Write the request. We hold only the stdin mutex for the
         // duration of the write so concurrent writers (e.g. a
         // cancellation notification while a read is pending) don't
-        // interleave bytes.
+        // interleave bytes. Every failure inside the write — including
+        // a stdin that is already gone — is reported as an `io::Error`
+        // so it reaches the teardown below instead of returning early
+        // and leaving a dead transport installed.
         let write_result = {
             let state = self.lock_state()?;
             let transport = state
                 .stdio
                 .as_ref()
                 .expect("ensure_stdio_transport_locked just installed one");
-            let mut stdin_guard = transport
-                .stdin
-                .lock()
-                .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
-            let stdin = stdin_guard
-                .as_mut()
-                .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
-            Self::write_json_line(&mut *stdin, &payload)
+            Self::write_stdio_frame(transport, &payload)
         };
         if let Err(e) = write_result {
             return Err(self.mark_stdio_dead("write", e));
@@ -1132,10 +1136,10 @@ impl McpClientSession {
         };
         let mut stdin_guard = transport
             .lock()
-            .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
+            .map_err(|_| McpError::transport("stdio", STDIN_LOCK_POISONED))?;
         let stdin = stdin_guard
             .as_mut()
-            .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
+            .ok_or_else(|| McpError::transport("stdio", STDIN_CLOSED))?;
         if let Err(e) = Self::write_json_line(&mut *stdin, payload) {
             tracing::warn!(
                 server = %self.config_label(),
@@ -1270,6 +1274,26 @@ impl McpClientSession {
             format!("stdio server '{}' {op}", self.config_label()),
             e.to_string(),
         )
+    }
+
+    /// Write one request frame to the transport's stdin.
+    ///
+    /// Every failure is reported as an [`std::io::Error`] — a poisoned
+    /// stdin mutex and a stdin that has already been taken both mean the
+    /// transport can never carry a request again — so the caller can route
+    /// all of them through [`Self::mark_stdio_dead`] instead of returning
+    /// early with a live-but-useless transport still installed.
+    fn write_stdio_frame(
+        transport: &StdioTransport,
+        payload: &serde_json::Value,
+    ) -> std::io::Result<()> {
+        let mut stdin_guard = transport.stdin.lock().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, STDIN_LOCK_POISONED)
+        })?;
+        let stdin = stdin_guard
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, STDIN_CLOSED))?;
+        Self::write_json_line(&mut *stdin, payload)
     }
 
     fn write_json_line<W: Write>(w: &mut W, value: &serde_json::Value) -> std::io::Result<()> {
@@ -1759,9 +1783,12 @@ impl McpClientSession {
     /// `progressToken` is registered on first sight and the
     /// highest `progress` value seen is remembered so we can
     /// detect the spec violation "progress values MUST increase
-    /// with each notification". Tokens are not removed here —
-    /// they're cleared when the originating request's response
-    /// arrives (see [`McpClientSession::drop_progress_tokens`]).
+    /// with each notification": a regressed frame is logged and
+    /// the stored value stays at that high-water mark, so later
+    /// frames are still judged against the furthest progress
+    /// reached. Tokens are not removed here — they're cleared
+    /// when the originating request's response arrives (see
+    /// [`McpClientSession::drop_progress_tokens`]).
     fn track_progress(&self, params: &serde_json::Value) {
         let token = match params.get("progressToken") {
             Some(serde_json::Value::String(s)) => s.clone(),
@@ -1799,6 +1826,13 @@ impl McpClientSession {
             }
         };
         if let Ok(mut state) = self.state.lock() {
+            // Spec §5.3: "Progress values MUST increase with each
+            // notification." A frame that goes backwards is a
+            // server-side violation: we log it and keep the
+            // high-water mark instead of the regressed value, so
+            // the check for the next frame still compares against
+            // the furthest progress seen.
+            let mut stored = progress;
             if let Some(prev) = state.progress_tokens.get(&token).copied()
                 && progress < prev
             {
@@ -1809,8 +1843,9 @@ impl McpClientSession {
                     now = progress,
                     "progress notification went backwards (spec §5.3 says progress MUST increase)"
                 );
+                stored = prev;
             }
-            state.progress_tokens.insert(token.clone(), progress);
+            state.progress_tokens.insert(token.clone(), stored);
         }
         tracing::debug!(
             server = %self.config_label(),
@@ -2099,304 +2134,8 @@ fn spawn_stdio_reader_thread(
 }
 
 #[cfg(test)]
-mod tests {
-    //! Unit tests for the stdio MCP subprocess transport.
-    //!
-    //! The "no visible console window" assertion cannot be observed
-    //! programmatically without Win32 FFI (the std API exposes a
-    //! [`CommandExt::creation_flags`] setter but no public getter).
-    //! Per `AGENTS.md` §10 ("If the issue cannot be reproduced at
-    //! the unit or integration level ... document why ... and add
-    //! the closest possible deterministic test"), we cover the
-    //! helper's contract — program/args/env/stdio set correctly and
-    //! the command is spawnable — and rely on a manual visual check
-    //! on Windows for the actual no-window behaviour. The
-    //! `cmd.creation_flags(CREATE_NO_WINDOW)` line itself is the
-    //! contract; see `doc/adr/cmd-substitution.md` for rationale.
-
-    use super::*;
-    use std::collections::HashMap;
-
-    #[test]
-    fn build_stdio_command_sets_program_args_env_and_pipes_stdio() {
-        let env: HashMap<String, String> =
-            std::iter::once(("FASTMD_MCP_TEST_VAR".to_string(), "hello".to_string())).collect();
-        let args = vec!["--version".to_string()];
-        let cmd = build_stdio_command("cargo", &args, &env);
-
-        assert_eq!(cmd.get_program(), "cargo");
-        let got_args: Vec<std::ffi::OsString> =
-            cmd.get_args().map(std::ffi::OsString::from).collect();
-        assert_eq!(
-            got_args,
-            vec![std::ffi::OsString::from("--version")],
-            "args should pass through verbatim",
-        );
-
-        // The env we explicitly set must be present. Other entries
-        // from the inherited environment are also expected and we
-        // don't enumerate them.
-        let envs: Vec<(String, String)> = cmd
-            .get_envs()
-            .filter_map(|(k, v)| {
-                // `Command::get_envs` yields `(&OsStr, Option<&OsStr>)`;
-                // `v` is `None` for an explicit unset. Apply `?` only
-                // to the outer Option so the closure returns
-                // `Option<(String, String)>` and `filter_map` drops
-                // entries with non-UTF-8 keys or unset values.
-                let key = k.to_str()?.to_owned();
-                let val = v?.to_str()?.to_owned();
-                Some((key, val))
-            })
-            .collect();
-        assert!(
-            envs.iter()
-                .any(|(k, v)| k == "FASTMD_MCP_TEST_VAR" && v == "hello"),
-            "env override should be present, got {envs:?}",
-        );
-    }
-
-    #[test]
-    fn build_stdio_command_produces_a_spawnable_command() {
-        // `cargo --version` is available on every CI/dev environment
-        // for this Rust project and exits quickly with a known banner.
-        // It is the closest portable "long-lived enough to spawn and
-        // reap" smoke target without taking a hard dependency on a
-        // particular shell.
-        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
-        let output = cmd
-            .output()
-            .expect("cargo --version should spawn successfully");
-        assert!(
-            output.status.success(),
-            "cargo --version should exit 0; got {:?}",
-            output.status,
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("cargo"),
-            "cargo --version should print a 'cargo' banner; got: {stdout}",
-        );
-    }
-
-    #[test]
-    fn build_stdio_command_is_idempotent_under_repeated_calls() {
-        // Defends against a future refactor that accidentally caches
-        // or mutates a shared Command between calls. Each call must
-        // return a fresh Command with the requested program/args.
-        let env = HashMap::new();
-        let cmd_a = build_stdio_command("cargo", &["--version".to_string()], &env);
-        let cmd_b = build_stdio_command("node", &[], &env);
-        assert_eq!(cmd_a.get_program(), "cargo");
-        assert_eq!(cmd_b.get_program(), "node");
-    }
-
-    #[test]
-    fn is_valid_session_id_accepts_visible_ascii() {
-        assert!(is_valid_session_id("abc123-XYZ_~"));
-        assert!(is_valid_session_id("!\"#$%&'()*+,-./012"));
-        assert!(!is_valid_session_id(""));
-        assert!(!is_valid_session_id("has space"));
-        assert!(!is_valid_session_id("has\tdelimiter"));
-        assert!(!is_valid_session_id("has\u{7f}del"));
-    }
-
-    #[test]
-    fn redact_session_id_shows_len_and_prefix() {
-        assert_eq!(redact_session_id("abcdefgh"), "len=8:abcd");
-        assert_eq!(redact_session_id("ab"), "len=2:ab");
-        assert_eq!(redact_session_id(""), "len=0:");
-    }
-
-    #[test]
-    fn extract_result_success_and_error_branches() {
-        let ok = serde_json::json!({"jsonrpc":"2.0","result":{"x":1},"id":1});
-        assert_eq!(
-            McpClientSession::extract_result("srv", "m", ok).unwrap(),
-            serde_json::json!({"x":1})
-        );
-        let bad_jsonrpc = serde_json::json!({"result":{}});
-        assert!(
-            McpClientSession::extract_result("srv", "m", bad_jsonrpc)
-                .unwrap_err()
-                .to_string()
-                .contains("not a JSON-RPC")
-        );
-        let with_error =
-            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32600,"message":"oops"}});
-        let err = McpClientSession::extract_result("srv", "m", with_error).unwrap_err();
-        assert!(err.to_string().contains("oops"));
-        let missing_both = serde_json::json!({"jsonrpc":"2.0","id":1});
-        assert!(
-            McpClientSession::extract_result("srv", "m", missing_both)
-                .unwrap_err()
-                .to_string()
-                .contains("neither result nor error")
-        );
-    }
-
-    #[test]
-    fn session_pure_helpers_resource_uri_and_auth() {
-        let sse = McpServerConfig::Sse {
-            url: "https://example.com/mcp".to_string(),
-            headers: HashMap::new(),
-            oauth: None,
-        };
-        let sess = McpClientSession::new(sse, None);
-        assert_eq!(
-            sess.resource_uri().as_deref(),
-            Some("https://example.com/mcp")
-        );
-        assert!(!sess.has_static_authorization());
-        assert!(sess.oauth_config_scopes().is_empty());
-        assert_eq!(sess.config_label(), "http:https://example.com/mcp");
-        // case-insensitive Authorization header
-        let mut h = HashMap::new();
-        h.insert("Authorization".to_string(), "Bearer x".to_string());
-        let sse_auth = McpServerConfig::Sse {
-            url: "https://example.com/mcp".to_string(),
-            headers: h,
-            oauth: None,
-        };
-        let sess2 = McpClientSession::new(sse_auth, None);
-        assert!(sess2.has_static_authorization());
-        let h2: HashMap<String, String> = [("authorization".to_string(), "Bearer y".to_string())]
-            .into_iter()
-            .collect();
-        let sse_auth2 = McpServerConfig::Sse {
-            url: "https://example.com/mcp".to_string(),
-            headers: h2,
-            oauth: None,
-        };
-        let sess3 = McpClientSession::new(sse_auth2, None);
-        assert!(sess3.has_static_authorization(), "case-insensitive");
-        let stdio = McpServerConfig::Stdio {
-            command: "echo".to_string(),
-            args: vec![],
-            env: HashMap::new(),
-        };
-        let sess_stdio = McpClientSession::new(stdio, None);
-        assert_eq!(sess_stdio.resource_uri(), None);
-        assert_eq!(sess_stdio.config_label(), "stdio:echo");
-        assert!(!sess_stdio.has_static_authorization());
-    }
-
-    #[test]
-    fn take_unauthorized_flag_resets() {
-        let sse = McpServerConfig::Sse {
-            url: "https://example.com/mcp".to_string(),
-            headers: HashMap::new(),
-            oauth: None,
-        };
-        let sess = McpClientSession::new(sse, None);
-        assert!(!sess.take_unauthorized_flag());
-        {
-            let mut st = sess.state.lock().unwrap();
-            st.last_call_saw_unauthorized = true;
-        }
-        assert!(sess.take_unauthorized_flag());
-        assert!(!sess.take_unauthorized_flag(), "reset after take");
-    }
-
-    #[test]
-    fn protocol_version_and_server_info_initially_none() {
-        let sse = McpServerConfig::Sse {
-            url: "https://example.com/mcp".to_string(),
-            headers: HashMap::new(),
-            oauth: None,
-        };
-        let sess = McpClientSession::new(sse, None);
-        assert!(sess.protocol_version().is_none());
-        assert!(sess.server_capabilities().is_none());
-        assert!(sess.server_info().is_none());
-    }
-
-    #[test]
-    fn wait_for_exit_returns_true_early_on_fast_process() {
-        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
-        let mut child = cmd.spawn().expect("spawn cargo --version");
-        let start = std::time::Instant::now();
-        let exited = wait_for_exit(&mut child, std::time::Duration::from_secs(1));
-        let elapsed = start.elapsed();
-        assert!(exited, "process should have exited cleanly");
-        assert!(
-            elapsed < std::time::Duration::from_millis(800),
-            "should return as soon as child exits, not sleep full 1s; elapsed={elapsed:?}"
-        );
-    }
-
-    #[test]
-    fn wait_for_exit_returns_false_when_child_keeps_running() {
-        #[cfg(windows)]
-        let mut cmd = std::process::Command::new("ping");
-        #[cfg(windows)]
-        cmd.args(["127.0.0.1", "-n", "4"]);
-        #[cfg(not(windows))]
-        let mut cmd = std::process::Command::new("sleep");
-        #[cfg(not(windows))]
-        cmd.arg("4");
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-
-        let mut child = cmd.spawn().expect("spawn long-running process");
-        let start = std::time::Instant::now();
-        let exited = wait_for_exit(&mut child, std::time::Duration::from_millis(100));
-        let elapsed = start.elapsed();
-        assert!(!exited, "process should still be running");
-        assert!(
-            elapsed >= std::time::Duration::from_millis(90),
-            "should poll until timeout; elapsed={elapsed:?}"
-        );
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-
-    #[test]
-    fn shutdown_stdio_transport_fast_exit() {
-        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
-        let child = cmd.spawn().expect("spawn cargo --version");
-        let line_rx = Arc::new(Mutex::new(std::sync::mpsc::channel().1));
-        let transport = StdioTransport {
-            child: Arc::new(Mutex::new(Some(child))),
-            stdin: Arc::new(Mutex::new(None)),
-            line_rx,
-        };
-        let start = std::time::Instant::now();
-        McpClientSession::shutdown_stdio_transport(transport);
-        assert!(
-            start.elapsed() < std::time::Duration::from_millis(800),
-            "clean exit should complete well before 1s"
-        );
-    }
-
-    #[test]
-    fn shutdown_stdio_transport_times_out_and_terminates() {
-        #[cfg(windows)]
-        let mut cmd = std::process::Command::new("ping");
-        #[cfg(windows)]
-        cmd.args(["127.0.0.1", "-n", "6"]);
-        #[cfg(not(windows))]
-        let mut cmd = std::process::Command::new("sleep");
-        #[cfg(not(windows))]
-        cmd.arg("6");
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-
-        let child = cmd.spawn().expect("spawn sleep process");
-        let line_rx = Arc::new(Mutex::new(std::sync::mpsc::channel().1));
-        let transport = StdioTransport {
-            child: Arc::new(Mutex::new(Some(child))),
-            stdin: Arc::new(Mutex::new(None)),
-            line_rx,
-        };
-        let start = std::time::Instant::now();
-        McpClientSession::shutdown_stdio_transport(transport);
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed >= std::time::Duration::from_millis(950)
-                && elapsed < std::time::Duration::from_millis(2500),
-            "shutdown should wait ~1s then terminate immediately without waiting further; elapsed={elapsed:?}"
-        );
-    }
-}
+#[path = "session_tests.rs"]
+mod tests;
 
 /// A tool advertised by an MCP server. Returned by
 /// [`McpClientSession::list_tools`] and consumed by the tool registry

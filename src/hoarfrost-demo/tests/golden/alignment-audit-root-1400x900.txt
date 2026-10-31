@@ -1,0 +1,5 @@
+hoarfrost alignment audit
+findings 0 | skipped 5 | orphan labels 662 | clean yes
+by rule: R1-column-alignment=0 R2-gap-tokens=0 R3-section-frames=0 R4-density-homogeneity=0 R5-vertical-rhythm=0 R6-label-vertical-alignment=0 R8-label-control-gap=0 R9-label-control-overlap=0 R10-label-column-alignment=0
+by attribution: demo=0 framework=0 tooling-blindspot=0 undetermined=0
+no findings

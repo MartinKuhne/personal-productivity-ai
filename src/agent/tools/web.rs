@@ -464,7 +464,16 @@ pub fn tool_web_search(
     }
 }
 
+/// Error code logged when the delegate model asks for a tool the delegate does
+/// not offer (NFR-004).
+const WEB_DELEGATE_UNKNOWN_TOOL_ERROR: &str = "WEB-4001";
+
 /// Delegates web research tasks to a dedicated sub-agent turn loop using LLM completions.
+///
+/// The loop stops when the model delivers its answer, when a turn returns no
+/// tool calls, or when a tool call cannot be resolved: a tool the delegate does
+/// not offer is recorded as an error envelope and the delegation ends there
+/// instead of being retried for the whole `max_loops` budget.
 pub fn tool_web_delegate(
     config: &AgentConfig,
     instruction: &str,
@@ -598,6 +607,11 @@ pub fn tool_web_delegate(
             }
             messages.push(message.clone());
 
+            // Set when the model named a tool the delegate does not offer. Asking
+            // again cannot resolve it — the model repeats the same call — so the
+            // loop ends after this round instead of burning the remaining budget.
+            let mut unresolved_tool_call = false;
+
             for tool_call in tool_calls {
                 let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("");
                 let func_name = tool_call
@@ -668,6 +682,16 @@ pub fn tool_web_delegate(
                         r#"{"status":"error","message":"Invalid input"}"#.to_string()
                     }
                 } else {
+                    tracing::error!(
+                        name = "tool.web_delegate.unresolvable_tool",
+                        error_code = WEB_DELEGATE_UNKNOWN_TOOL_ERROR,
+                        model = %model_name,
+                        loop = loop_count,
+                        tool = %func_name,
+                        tool_call_id = %call_id,
+                        "Delegate requested a tool it does not offer; ending the delegation instead of retrying it."
+                    );
+                    unresolved_tool_call = true;
                     r#"{"status":"error","message":"Unknown tool"}"#.to_string()
                 };
 
@@ -695,6 +719,10 @@ pub fn tool_web_delegate(
                     "tool_call_id": call_id,
                     "content": wrapped
                 }));
+            }
+
+            if unresolved_tool_call {
+                break;
             }
         } else {
             if final_content.is_empty() {

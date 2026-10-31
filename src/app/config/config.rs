@@ -1,6 +1,6 @@
 //! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
 //!
-//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008; CONFIG-009 superseded by VFS-004/009) for the full specification.
+//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008, plus VFS-004/VFS-009 for virtual path resolution) for the full specification.
 //!
 //! The VFS domain types ([`VirtualPath`], [`VirtualPathError`], and the
 //! behaviour on [`ContentLibrary`]) now live under
@@ -18,7 +18,17 @@ pub use crate::agent::config::{
     McpOAuthConfig, McpServerConfig, McpServerEntry, ResolvedBrowserConfig, ToolGroupsConfig,
     TrelloClient, default_use_case,
 };
+use crate::background::logs::non_empty;
 pub use crate::workspace::vfs::{VirtualPath, VirtualPathError, library_display_label};
+
+/// Placeholder that stands in for a credential value in every `Debug` rendering
+/// of a configuration type in this module ([NFR-009]).
+const REDACTED: &str = "[REDACTED]";
+
+/// Documented default SearXNG endpoint (see `SETUP.md`). Shared by the
+/// `Default` impl of `AppConfig` and `default_searxng_url` so the struct default
+/// and the deserialised default can never drift apart again.
+const DEFAULT_SEARXNG_URL: &str = "http://localhost:8090";
 
 fn default_feature_flags() -> HashMap<String, bool> {
     let mut m = HashMap::new();
@@ -32,6 +42,14 @@ fn default_max_tokens() -> u32 {
     32768
 }
 
+/// Serde default for [`AppConfig::searxng_url`]: the documented endpoint, *not*
+/// `Option::default()`. A bare `#[serde(default)]` would resolve to `None` and
+/// silently disable the web-search integration for every config file that omits
+/// the key.
+fn default_searxng_url() -> Option<String> {
+    Some(DEFAULT_SEARXNG_URL.to_string())
+}
+
 fn default_true() -> bool {
     true
 }
@@ -41,7 +59,13 @@ fn default_table_width_strategy() -> String {
 }
 
 /// Discord bot configuration.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+///
+/// `Debug` is hand-written, not derived: the bot token is a credential and must
+/// never reach a log line, panic payload or diagnostic dump ([NFR-009]). It is
+/// rendered as the repo-wide `[REDACTED]` placeholder — the same convention the
+/// other credential fields in [`crate::config`] use — while every non-secret
+/// field stays readable so diagnostics remain useful.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct DiscordConfig {
     /// Bot token from the Discord Developer Portal.
     #[serde(default)]
@@ -70,6 +94,23 @@ pub struct DiscordConfig {
     pub blocked_patterns: Vec<String>,
 }
 
+impl std::fmt::Debug for DiscordConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiscordConfig")
+            // Presence is preserved, the secret is not: `Some("[REDACTED]")`
+            // tells an operator the token is configured without revealing it.
+            .field("bot_token", &self.bot_token.as_ref().map(|_| REDACTED))
+            .field("allowed_channels", &self.allowed_channels)
+            .field("allowed_guilds", &self.allowed_guilds)
+            .field("register_commands", &self.register_commands)
+            .field("system_prompt", &self.system_prompt)
+            .field("max_history", &self.max_history)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
+            .field("blocked_patterns", &self.blocked_patterns)
+            .finish()
+    }
+}
+
 fn default_discord_history_len() -> usize {
     20
 }
@@ -89,7 +130,10 @@ pub struct AppConfig {
     /// In-memory runtime state only; not persisted to configuration file.
     #[serde(skip)]
     pub selected_chat_model: Option<String>,
-    #[serde(default)]
+    /// SearXNG web-search endpoint. Defaults to the documented local endpoint
+    /// (`http://localhost:8090`); an explicit `searxng_url:` key set to `null`
+    /// is the opt-out that disables the integration.
+    #[serde(default = "default_searxng_url")]
     pub searxng_url: Option<String>,
     #[serde(default)]
     pub jmap_clients: HashMap<String, JmapClient>,
@@ -185,6 +229,12 @@ impl std::fmt::Debug for AppConfig {
             .field("trello_client", &self.trello_client)
             .field("discord", &self.discord)
             .field("qdrant_url", &self.qdrant_url)
+            // Credential fields are listed but never printed: the operator can
+            // see that a key is configured without the value leaking (NFR-009).
+            .field(
+                "qdrant_api_key",
+                &self.qdrant_api_key.as_ref().map(|_| REDACTED),
+            )
             .field("qdrant_collection", &self.qdrant_collection)
             .finish()
     }
@@ -196,7 +246,7 @@ impl Default for AppConfig {
             system_prompt_extension: None,
             models: HashMap::new(),
             selected_chat_model: None,
-            searxng_url: Some("http://localhost:8090".to_string()),
+            searxng_url: default_searxng_url(),
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
             content_libraries: Vec::new(),
@@ -232,8 +282,8 @@ impl AppConfig {
     /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
     /// Unknown values fall back to `DeficitStrategy::HybridMinPenaltyWaterFill`
     /// (the default set by `default_table_width_strategy` in `config.rs`).
-    pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
-        crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
+    pub fn deficit_strategy(&self) -> crate::markdown::table_width::DeficitStrategy {
+        crate::markdown::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
     }
 
     /// Project the global `AppConfig` into the agent's domain slice.
@@ -277,10 +327,14 @@ impl AppConfig {
     /// Extracted from [`get_system_library_path`] so the three branches
     /// (APPDATA, USERPROFILE fallback, relative) are testable without
     /// mutating process-global environment variables (VFS-103).
+    ///
+    /// An empty variable counts as *unset* — the same rule the log directory
+    /// uses ([`non_empty`]) — so `APPDATA=` can neither shadow a usable
+    /// `USERPROFILE` nor yield a path relative to the current directory.
     fn system_library_path_from_env(appdata: Option<&str>, userprofile: Option<&str>) -> PathBuf {
-        if let Some(app_data) = appdata {
+        if let Some(app_data) = non_empty(appdata) {
             PathBuf::from(app_data).join("fastmd").join("system")
-        } else if let Some(user_profile) = userprofile {
+        } else if let Some(user_profile) = non_empty(userprofile) {
             PathBuf::from(user_profile).join(".fastmd").join("system")
         } else {
             PathBuf::from("system")
@@ -563,6 +617,10 @@ impl AppConfig {
     }
 
     /// Find the best model for a given use_case (lowest cost among matches).
+    ///
+    /// A model with no configured price counts as free: `cost` defaults to `0`
+    /// ([CONFIG-006], [CONFIG-008]), so an unpriced model ranks ahead of every
+    /// priced one and ties with a declared `cost: 0`.
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
@@ -572,6 +630,10 @@ impl AppConfig {
     }
 
     /// Find all models tied for the minimum cost for a given use_case.
+    ///
+    /// An unpriced model defaults to a cost of `0` ([CONFIG-006]), so it is
+    /// returned alongside any explicitly free model whenever either is the
+    /// cheapest match.
     pub fn models_for_use_case_min_cost(
         &self,
         use_case: impl AsRef<str>,

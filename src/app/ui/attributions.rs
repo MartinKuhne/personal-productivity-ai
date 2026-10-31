@@ -63,19 +63,14 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         github_url: "https://github.com/chronotope/chrono",
     },
     Attribution {
+        name: "cosmic-text",
+        authors: "Jeremy Soller, System76 contributors",
+        github_url: "https://github.com/pop-os/cosmic-text",
+    },
+    Attribution {
         name: "csv",
         authors: "Andrew Gallant",
         github_url: "https://github.com/BurntSushi/rust-csv",
-    },
-    Attribution {
-        name: "eframe",
-        authors: "Emil Ernerfeldt",
-        github_url: "https://github.com/emilk/egui",
-    },
-    Attribution {
-        name: "egui_extras",
-        authors: "Dominik Rössler, Emil Ernerfeldt, René Rössler",
-        github_url: "https://github.com/emilk/egui",
     },
     Attribution {
         name: "encoding_rs",
@@ -86,6 +81,11 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         name: "fast_h2m",
         authors: "Na'aman Hirschfeld, Yehor Smoliakov",
         github_url: "https://github.com/MartinKuhne/fast_h2m",
+    },
+    Attribution {
+        name: "futures",
+        authors: "Tokio Contributors, Rust Project Developers",
+        github_url: "https://github.com/rust-lang/futures-rs",
     },
     Attribution {
         name: "futures-util",
@@ -116,6 +116,31 @@ pub const DIRECT_DEPENDENCIES: &[Attribution] = &[
         name: "html-escape",
         authors: "Magic Len",
         github_url: "https://github.com/magiclen/html-escape",
+    },
+    Attribution {
+        name: "iced",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_futures",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_graphics",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_renderer",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
+    },
+    Attribution {
+        name: "iced_runtime",
+        authors: "Héctor Ramón Jiménez, iced contributors",
+        github_url: "https://github.com/iced-rs/iced",
     },
     Attribution {
         name: "image",
