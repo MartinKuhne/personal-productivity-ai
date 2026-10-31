@@ -20,69 +20,93 @@ fn test_parse_vcard_basic() {
     assert!(contact.vcard.contains("BEGIN:VCARD"));
 }
 
-#[test]
-fn test_parse_vcard_with_property_parameters() {
-    // EMAIL;TYPE=INTERNET and TEL;TYPE=CELL should still parse
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bob\r\nEMAIL;TYPE=INTERNET,WORK:bob@example.com\r\nTEL;TYPE=CELL,VOICE:+9876543210\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/b.vcf", data);
-
-    assert_eq!(contact.fn_name, Some("Bob".to_string()));
-    assert_eq!(contact.email, Some("bob@example.com".to_string()));
-    assert_eq!(contact.tel, Some("+9876543210".to_string()));
-}
-
-#[test]
-fn test_parse_vcard_folded_lines() {
-    // vCard spec allows line folding with leading space/tab
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Very Long Name\r\n That Is Folded\r\nEMAIL:long@example.com\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/h", data);
-
-    // The unfold logic removes leading whitespace and concatenates
-    assert_eq!(
-        contact.fn_name,
-        Some("Very Long NameThat Is Folded".to_string())
-    );
-    assert_eq!(contact.email, Some("long@example.com".to_string()));
-}
+/// `(label, vCard body, FN, EMAIL, TEL, ORG)` — the canonical scalar fields
+/// `parse_vcard` must read back out of a vCard body.
+type VcardScalarCase<'a> = (
+    &'a str,
+    &'a str,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+);
 
 #[test]
-fn test_parse_vcard_missing_fields() {
-    // Only FN present
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:No Contact Info\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/h", data);
+fn test_parse_vcard_reads_the_canonical_scalar_fields() {
+    let cases: Vec<VcardScalarCase<'_>> = vec![
+        (
+            "property parameters on EMAIL/TEL are ignored",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bob\r\nEMAIL;TYPE=INTERNET,WORK:bob@example.com\r\nTEL;TYPE=CELL,VOICE:+9876543210\r\nEND:VCARD",
+            Some("Bob"),
+            Some("bob@example.com"),
+            Some("+9876543210"),
+            None,
+        ),
+        (
+            "folded lines are concatenated without a separator",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Very Long Name\r\n That Is Folded\r\nEMAIL:long@example.com\r\nEND:VCARD",
+            Some("Very Long NameThat Is Folded"),
+            Some("long@example.com"),
+            None,
+            None,
+        ),
+        (
+            "absent optional fields stay None",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:No Contact Info\r\nEND:VCARD",
+            Some("No Contact Info"),
+            None,
+            None,
+            None,
+        ),
+        (
+            "empty values are kept as empty strings",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:\r\nEMAIL:\r\nEND:VCARD",
+            Some(""),
+            Some(""),
+            None,
+            None,
+        ),
+        (
+            "a line without a colon is skipped",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nNOCOLON\r\nFN:Valid Name\r\nEND:VCARD",
+            Some("Valid Name"),
+            None,
+            None,
+            None,
+        ),
+        (
+            "whitespace-only lines are skipped",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\n \r\n\t\r\nEMAIL:test@test.com\r\nEND:VCARD",
+            Some("Test"),
+            Some("test@test.com"),
+            None,
+            None,
+        ),
+    ];
 
-    assert_eq!(contact.fn_name, Some("No Contact Info".to_string()));
-    assert_eq!(contact.email, None);
-    assert_eq!(contact.tel, None);
-    assert_eq!(contact.org, None);
-}
-
-#[test]
-fn test_parse_vcard_empty_values() {
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:\r\nEMAIL:\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/h", data);
-
-    assert_eq!(contact.fn_name, Some("".to_string()));
-    assert_eq!(contact.email, Some("".to_string()));
-}
-
-#[test]
-fn test_parse_vcard_malformed_no_colon() {
-    // Lines without colon should be skipped
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nNOCOLON\r\nFN:Valid Name\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/h", data);
-
-    assert_eq!(contact.fn_name, Some("Valid Name".to_string()));
-}
-
-#[test]
-fn test_parse_vcard_with_whitespace_only_lines() {
-    let data =
-        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\n \r\n\t\r\nEMAIL:test@test.com\r\nEND:VCARD";
-    let contact = parse_vcard("c", "/h", data);
-
-    assert_eq!(contact.fn_name, Some("Test".to_string()));
-    assert_eq!(contact.email, Some("test@test.com".to_string()));
+    for (label, data, fn_name, email, tel, org) in cases {
+        let contact = parse_vcard("c", "/h", data);
+        assert_eq!(
+            contact.fn_name.as_deref(),
+            fn_name,
+            "case '{label}': FN must be read back"
+        );
+        assert_eq!(
+            contact.email.as_deref(),
+            email,
+            "case '{label}': EMAIL must be read back"
+        );
+        assert_eq!(
+            contact.tel.as_deref(),
+            tel,
+            "case '{label}': TEL must be read back"
+        );
+        assert_eq!(
+            contact.org.as_deref(),
+            org,
+            "case '{label}': ORG must be read back"
+        );
+    }
 }
 
 // =====================================================================
@@ -90,108 +114,137 @@ fn test_parse_vcard_with_whitespace_only_lines() {
 // =====================================================================
 
 #[test]
-fn test_escape_vcard_text_basic() {
-    assert_eq!(escape_vcard_text("Hello World"), "Hello World");
-}
+fn test_escape_vcard_text_escapes_every_special_character() {
+    // One case per vCard 3.0 escape rule, plus the pass-through case and a
+    // combined input that exercises all of them at once.
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("plain text is untouched", "Hello World", "Hello World"),
+        ("semicolon", "Hello;World", "Hello\\;World"),
+        ("comma", "Hello,World", "Hello\\,World"),
+        ("newline", "Line1\nLine2", "Line1\\nLine2"),
+        ("carriage return is dropped", "Line1\rLine2", "Line1Line2"),
+        ("backslash", "Path\\to\\file", "Path\\\\to\\\\file"),
+        (
+            "all special characters at once",
+            "Hello; World,\nLine2\rEnd\\",
+            "Hello\\; World\\,\\nLine2End\\\\",
+        ),
+    ];
 
-#[test]
-fn test_escape_vcard_text_semicolon() {
-    assert_eq!(escape_vcard_text("Hello;World"), "Hello\\;World");
-}
-
-#[test]
-fn test_escape_vcard_text_comma() {
-    assert_eq!(escape_vcard_text("Hello,World"), "Hello\\,World");
-}
-
-#[test]
-fn test_escape_vcard_text_newline() {
-    assert_eq!(escape_vcard_text("Line1\nLine2"), "Line1\\nLine2");
-}
-
-#[test]
-fn test_escape_vcard_text_carriage_return() {
-    assert_eq!(escape_vcard_text("Line1\rLine2"), "Line1Line2");
-}
-
-#[test]
-fn test_escape_vcard_text_backslash() {
-    assert_eq!(escape_vcard_text("Path\\to\\file"), "Path\\\\to\\\\file");
-}
-
-#[test]
-fn test_escape_vcard_text_all_special_chars() {
-    assert_eq!(
-        escape_vcard_text("Hello; World,\nLine2\rEnd\\"),
-        "Hello\\; World\\,\\nLine2End\\\\"
-    );
+    for (label, input, expected) in cases {
+        assert_eq!(
+            escape_vcard_text(input),
+            expected,
+            "case '{label}': escape_vcard_text must produce the escaped value"
+        );
+    }
 }
 
 // =====================================================================
 // json_to_vcard tests
 // =====================================================================
 
-#[test]
-fn test_json_to_vcard_basic() {
-    let input = r#"{"fn":"John Doe","email":"john@example.com","tel":"+1234567890","org":"Acme"}"#;
-    let vcard = json_to_vcard(input, None);
+/// One `json_to_vcard` render assertion set: the JSON payload and UID override
+/// plus the fragments that must and must not appear in the produced vCard.
+struct VcardRenderCase<'a> {
+    label: &'a str,
+    json: &'a str,
+    uid: Option<&'a str>,
+    must_contain: &'a [&'a str],
+    must_not_contain: &'a [&'a str],
+}
 
-    assert!(vcard.starts_with("BEGIN:VCARD"));
-    assert!(vcard.contains("VERSION:3.0"));
-    assert!(vcard.contains("FN:John Doe"));
-    assert!(vcard.contains("EMAIL;TYPE=INTERNET:john@example.com"));
-    assert!(vcard.contains("TEL;TYPE=CELL:+1234567890"));
-    assert!(vcard.contains("ORG:Acme"));
-    assert!(vcard.contains("END:VCARD"));
+/// Assert one `json_to_vcard` render case set: every listed fragment must be
+/// present in the produced vCard and every forbidden one must be absent.
+fn assert_vcard_render(cases: Vec<VcardRenderCase<'_>>) {
+    for case in cases {
+        let VcardRenderCase {
+            label,
+            json,
+            uid,
+            must_contain,
+            must_not_contain,
+        } = case;
+        let vcard = json_to_vcard(json, uid);
+        for fragment in must_contain {
+            assert!(
+                vcard.contains(fragment),
+                "case '{label}': expected the vCard to contain '{fragment}', got:\n{vcard}"
+            );
+        }
+        for fragment in must_not_contain {
+            assert!(
+                !vcard.contains(fragment),
+                "case '{label}': expected the vCard NOT to contain '{fragment}', got:\n{vcard}"
+            );
+        }
+    }
 }
 
 #[test]
-fn test_json_to_vcard_minimal() {
-    // Only FN required, rest optional
-    let input = r#"{"fn":"Anonymous"}"#;
-    let vcard = json_to_vcard(input, None);
-
-    assert!(vcard.contains("BEGIN:VCARD"));
-    assert!(vcard.contains("VERSION:3.0"));
-    assert!(vcard.contains("FN:Anonymous"));
-    assert!(vcard.contains("END:VCARD"));
-    // Should NOT contain empty EMAIL/TEL lines when not provided
-    assert!(!vcard.contains("EMAIL;"));
-    assert!(!vcard.contains("TEL;"));
-    assert!(!vcard.contains("ORG:"));
-}
-
-#[test]
-fn test_json_to_vcard_missing_fn_defaults_to_unknown() {
-    let input = r#"{"email":"test@example.com"}"#;
-    let vcard = json_to_vcard(input, None);
-
-    assert!(vcard.contains("FN:Unknown"));
-}
-
-#[test]
-fn test_json_to_vcard_invalid_json() {
-    // Invalid JSON should use defaults
-    let vcard = json_to_vcard("not json", None);
-
-    assert!(vcard.starts_with("BEGIN:VCARD"));
-    assert!(vcard.contains("FN:Unknown")); // Default
-}
-
-#[test]
-fn test_json_to_vcard_with_uid_override() {
-    let input = r#"{"fn":"Test"}"#;
-    let vcard = json_to_vcard(input, Some("custom-uid-12345"));
-
-    assert!(vcard.contains("UID:custom-uid-12345"));
-}
-
-#[test]
-fn test_json_to_vcard_escapes_special_chars() {
-    let input = r#"{"fn":"John; Doe","email":"test@example.com"}"#;
-    let vcard = json_to_vcard(input, None);
-
-    assert!(vcard.contains("FN:John\\; Doe"));
+fn test_json_to_vcard_renders_the_expected_lines_for_each_payload() {
+    assert_vcard_render(vec![
+        VcardRenderCase {
+            label: "the full legacy payload",
+            json: r#"{"fn":"John Doe","email":"john@example.com","tel":"+1234567890","org":"Acme"}"#,
+            uid: None,
+            must_contain: &[
+                "BEGIN:VCARD",
+                "VERSION:3.0",
+                "FN:John Doe",
+                "EMAIL;TYPE=INTERNET:john@example.com",
+                "TEL;TYPE=CELL:+1234567890",
+                "ORG:Acme",
+                "END:VCARD",
+            ],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "only FN is provided",
+            json: r#"{"fn":"Anonymous"}"#,
+            uid: None,
+            must_contain: &["BEGIN:VCARD", "VERSION:3.0", "FN:Anonymous", "END:VCARD"],
+            // No empty EMAIL/TEL/ORG lines for fields that were not provided.
+            must_not_contain: &["EMAIL;", "TEL;", "ORG:"],
+        },
+        VcardRenderCase {
+            label: "a missing FN defaults to Unknown",
+            json: r#"{"email":"test@example.com"}"#,
+            uid: None,
+            must_contain: &["FN:Unknown"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "invalid JSON falls back to the defaults",
+            json: "not json",
+            uid: None,
+            must_contain: &["BEGIN:VCARD", "FN:Unknown"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "an explicit UID override is emitted",
+            json: r#"{"fn":"Test"}"#,
+            uid: Some("custom-uid-12345"),
+            must_contain: &["UID:custom-uid-12345"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "FN is vCard-escaped",
+            json: r#"{"fn":"John; Doe","email":"test@example.com"}"#,
+            uid: None,
+            must_contain: &["FN:John\\; Doe"],
+            must_not_contain: &[],
+        },
+        // Numbers/booleans are not strings, so `first_str` skips them and the
+        // "Unknown" FN default kicks in.
+        VcardRenderCase {
+            label: "non-string field values are skipped by first_str",
+            json: r#"{"name": 123, "email": 5, "phone": true}"#,
+            uid: Some("u"),
+            must_contain: &["FN:Unknown"],
+            must_not_contain: &["EMAIL;", "TEL;"],
+        },
+    ]);
 }
 
 #[test]
@@ -222,113 +275,111 @@ fn test_json_to_vcard_generates_timestamp_based_uid() {
 // =====================================================================
 
 #[test]
-fn test_json_to_vcard_natural_field_names_round_trip() {
-    // Exactly the payload the LLM sends today: name, email, phone,
-    // company, title, notes. Every field must be preserved.
-    let input = r#"{
+fn test_json_to_vcard_maps_natural_and_alias_field_names_to_vcard_lines() {
+    // The LLM naturally sends `name`/`phone`/`company`/`title`/`notes`; the
+    // original `fn`/`tel`/`org` names remain valid aliases, the canonical name
+    // wins over its alias, empty strings count as "not provided", and TITLE /
+    // NOTE / ORG / TEL are only emitted when a value exists (some CalDAV
+    // servers reject empty lines).
+    assert_vcard_render(vec![
+        // Exactly the payload the LLM sends today: name, email, phone,
+        // company, title, notes. Every field must be preserved.
+        VcardRenderCase {
+            label: "natural LLM payload keeps every field",
+            json: r#"{
         "name": "Test User",
         "email": "test.user@example.com",
         "phone": "(555) 000-1111",
         "company": "Example Corp",
         "title": "Controller",
         "notes": "Handles payroll, timesheets, and compensation matters."
-    }"#;
-    let vcard = json_to_vcard(input, Some("test-uid"));
-
-    assert!(
-        vcard.contains("FN:Test User"),
-        "FN must use the name field, got:\n{vcard}"
-    );
-    assert!(vcard.contains("EMAIL;TYPE=INTERNET:test.user@example.com"));
-    assert!(vcard.contains("TEL;TYPE=CELL:(555) 000-1111"));
-    assert!(vcard.contains("ORG:Example Corp"));
-    assert!(
-        vcard.contains("TITLE:Controller"),
-        "TITLE line missing, got:\n{vcard}"
-    );
-    assert!(
-        vcard.contains(r"NOTE:Handles payroll\, timesheets\, and compensation matters."),
-        "NOTE line missing or not escaped, got:\n{vcard}"
-    );
-    assert!(vcard.contains("UID:test-uid"));
-}
-
-#[test]
-fn test_json_to_vcard_accepts_legacy_field_aliases() {
-    // Original schema: `fn`, `tel`, `org`. Must still work for back-compat.
-    let input = r#"{"fn":"Jane Doe","email":"jane@example.com","tel":"+15551234567","org":"Acme"}"#;
-    let vcard = json_to_vcard(input, None);
-
-    assert!(vcard.contains("FN:Jane Doe"));
-    assert!(vcard.contains("EMAIL;TYPE=INTERNET:jane@example.com"));
-    assert!(vcard.contains("TEL;TYPE=CELL:+15551234567"));
-    assert!(vcard.contains("ORG:Acme"));
-    // No empty TITLE/NOTE when those fields weren't provided.
-    assert!(!vcard.contains("TITLE:"));
-    assert!(!vcard.contains("NOTE:"));
-}
-
-#[test]
-fn test_json_to_vcard_accepts_field_aliases_for_phone_org() {
-    // Alternate names that the LLM might pick.
-    let input = r#"{"name":"Bob","mobile":"+1 555 9999","organization":"Initech","title":"PE"}"#;
-    let vcard = json_to_vcard(input, None);
-    assert!(vcard.contains("TEL;TYPE=CELL:+1 555 9999"));
-    assert!(vcard.contains("ORG:Initech"));
-    assert!(vcard.contains("TITLE:PE"));
-}
-
-#[test]
-fn test_json_to_vcard_canonical_name_takes_precedence_over_alias() {
-    // If both `name` and `fn` are present, `name` (canonical) wins.
-    let input = r#"{"name":"Canonical Name","fn":"Legacy Name"}"#;
-    let vcard = json_to_vcard(input, None);
-    assert!(vcard.contains("FN:Canonical Name"));
-    assert!(!vcard.contains("Legacy Name"));
-}
-
-#[test]
-fn test_json_to_vcard_skips_empty_string_fields() {
-    // Empty strings should be treated as "not provided" — we don't want
-    // a contact with `ORG:` (empty) in the addressbook.
-    let input = r#"{"name":"X","email":"x@y.com","phone":"","company":""}"#;
-    let vcard = json_to_vcard(input, None);
-    assert!(vcard.contains("FN:X"));
-    assert!(vcard.contains("EMAIL;TYPE=INTERNET:x@y.com"));
-    assert!(!vcard.contains("TEL;"));
-    assert!(!vcard.contains("ORG:"));
-    assert!(!vcard.contains("TITLE:"));
-    assert!(!vcard.contains("NOTE:"));
-}
-
-#[test]
-fn test_json_to_vcard_escapes_special_chars_in_title_and_note() {
-    // vCard 3.0 escaping: `;` `,` `\n` `\\` all need backslash-escapes.
-    let input = r#"{"name":"E","title":"VP, Eng; Platform","notes":"Line1\nLine2; back\\slash"}"#;
-    let vcard = json_to_vcard(input, None);
-    assert!(vcard.contains(r"TITLE:VP\, Eng\; Platform"));
-    assert!(vcard.contains(r"NOTE:Line1\nLine2\; back\\slash"));
-}
-
-#[test]
-fn test_json_to_vcard_emits_title_and_note_only_when_provided() {
-    // Defensive: ensure we don't accidentally emit empty TITLE: or NOTE:
-    // lines for missing fields (some CalDAV servers reject them).
-    let input = r#"{"name":"Plain","email":"p@e.com"}"#;
-    let vcard = json_to_vcard(input, None);
-    assert!(!vcard.contains("TITLE:"));
-    assert!(!vcard.contains("NOTE:"));
-    assert!(!vcard.contains("ORG:"));
-    assert!(!vcard.contains("TEL;"));
-}
-
-#[test]
-fn test_json_to_vcard_accepts_notes_and_note_aliases() {
-    let v_notes = json_to_vcard(r#"{"name":"N","notes":"via notes"}"#, None);
-    assert!(v_notes.contains("NOTE:via notes"));
-
-    let v_note = json_to_vcard(r#"{"name":"N","note":"via note"}"#, None);
-    assert!(v_note.contains("NOTE:via note"));
+    }"#,
+            uid: Some("test-uid"),
+            must_contain: &[
+                "FN:Test User",
+                "EMAIL;TYPE=INTERNET:test.user@example.com",
+                "TEL;TYPE=CELL:(555) 000-1111",
+                "ORG:Example Corp",
+                "TITLE:Controller",
+                r"NOTE:Handles payroll\, timesheets\, and compensation matters.",
+                "UID:test-uid",
+            ],
+            must_not_contain: &[],
+        },
+        // Original schema: `fn`, `tel`, `org`. Must still work for back-compat.
+        VcardRenderCase {
+            label: "legacy fn/tel/org aliases",
+            json: r#"{"fn":"Jane Doe","email":"jane@example.com","tel":"+15551234567","org":"Acme"}"#,
+            uid: None,
+            must_contain: &[
+                "FN:Jane Doe",
+                "EMAIL;TYPE=INTERNET:jane@example.com",
+                "TEL;TYPE=CELL:+15551234567",
+                "ORG:Acme",
+            ],
+            // No empty TITLE/NOTE when those fields weren't provided.
+            must_not_contain: &["TITLE:", "NOTE:"],
+        },
+        // Alternate names that the LLM might pick.
+        VcardRenderCase {
+            label: "mobile/organization/title aliases",
+            json: r#"{"name":"Bob","mobile":"+1 555 9999","organization":"Initech","title":"PE"}"#,
+            uid: None,
+            must_contain: &["TEL;TYPE=CELL:+1 555 9999", "ORG:Initech", "TITLE:PE"],
+            must_not_contain: &[],
+        },
+        // If both `name` and `fn` are present, `name` (canonical) wins.
+        VcardRenderCase {
+            label: "canonical name wins over the fn alias",
+            json: r#"{"name":"Canonical Name","fn":"Legacy Name"}"#,
+            uid: None,
+            must_contain: &["FN:Canonical Name"],
+            must_not_contain: &["Legacy Name"],
+        },
+        // Empty strings should be treated as "not provided" — we don't want
+        // a contact with `ORG:` (empty) in the addressbook.
+        VcardRenderCase {
+            label: "empty strings are treated as not provided",
+            json: r#"{"name":"X","email":"x@y.com","phone":"","company":""}"#,
+            uid: None,
+            must_contain: &["FN:X", "EMAIL;TYPE=INTERNET:x@y.com"],
+            must_not_contain: &["TEL;", "ORG:", "TITLE:", "NOTE:"],
+        },
+        // vCard 3.0 escaping: `;` `,` `\n` `\\` all need backslash-escapes.
+        VcardRenderCase {
+            label: "special chars in title and note are escaped",
+            json: r#"{"name":"E","title":"VP, Eng; Platform","notes":"Line1\nLine2; back\\slash"}"#,
+            uid: None,
+            must_contain: &[
+                r"TITLE:VP\, Eng\; Platform",
+                r"NOTE:Line1\nLine2\; back\\slash",
+            ],
+            must_not_contain: &[],
+        },
+        // Defensive: ensure we don't accidentally emit empty TITLE: or NOTE:
+        // lines for missing fields (some CalDAV servers reject them).
+        VcardRenderCase {
+            label: "absent optional fields emit no lines",
+            json: r#"{"name":"Plain","email":"p@e.com"}"#,
+            uid: None,
+            must_contain: &[],
+            must_not_contain: &["TITLE:", "NOTE:", "ORG:", "TEL;"],
+        },
+        VcardRenderCase {
+            label: "notes alias",
+            json: r#"{"name":"N","notes":"via notes"}"#,
+            uid: None,
+            must_contain: &["NOTE:via notes"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "note alias",
+            json: r#"{"name":"N","note":"via note"}"#,
+            uid: None,
+            must_contain: &["NOTE:via note"],
+            must_not_contain: &[],
+        },
+    ]);
 }
 
 // =====================================================================
@@ -392,12 +443,21 @@ fn test_tool_search_contact_uses_cursor_and_ignores_keyword() {
 }
 
 #[test]
-fn test_tool_search_contact_rejects_missing_keyword_and_cursor() {
+fn test_tool_search_contact_rejects_a_missing_or_blank_keyword() {
     let config = crate::config::AgentConfig::default();
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
-    let err = tool_search_contact(&config, None, None, &cache, &uuid_gen).unwrap_err();
-    assert!(err.contains("Give `keyword`"), "unexpected error: {err}");
+    let cases = [
+        ("no keyword at all", None),
+        ("a whitespace-only keyword", Some("   ")),
+    ];
+    for (label, keyword) in cases {
+        let err = tool_search_contact(&config, keyword, None, &cache, &uuid_gen).unwrap_err();
+        assert!(
+            err.contains("Give `keyword`"),
+            "case '{label}': unexpected error: {err}"
+        );
+    }
 }
 
 #[test]
@@ -476,48 +536,38 @@ fn test_search_contact_cursor_sessions() {
 // =====================================================================
 
 #[test]
-fn test_build_contact_put_path_with_trailing_slash() {
-    // FastMail-style addressbook href: ends with `/`.
-    let path = build_contact_put_path(
-        "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/",
-        "1234567890",
-    );
-    assert_eq!(
-        path,
-        "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/1234567890.vcf"
-    );
-}
-
-#[test]
-fn test_build_contact_put_path_without_trailing_slash() {
-    // Some servers / clients return hrefs without a trailing slash; the
-    // helper must still produce a well-formed URL.
-    let path = build_contact_put_path(
-        "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default",
-        "1234567890",
-    );
-    assert_eq!(
-        path,
-        "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/1234567890.vcf"
-    );
-}
-
-#[test]
-fn test_build_contact_put_path_collapses_multiple_trailing_slashes() {
-    // Defensive: tolerate accidental double trailing slashes.
-    let path = build_contact_put_path("https://example.com/dav/user/me/Default//", "1234567890");
-    assert_eq!(
-        path,
-        "https://example.com/dav/user/me/Default/1234567890.vcf"
-    );
-}
-
-#[test]
-fn test_build_contact_put_path_empty_addressbook_falls_back_safely() {
-    // An empty collection is pathological, but the helper should not
-    // produce a leading `/` and confuse the underlying HTTP client.
-    let path = build_contact_put_path("", "1234567890");
-    assert_eq!(path, "/1234567890.vcf");
+fn test_build_contact_put_path_always_inserts_exactly_one_separator() {
+    let cases = [
+        // FastMail-style addressbook href: ends with `/`.
+        (
+            "trailing slash",
+            "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/",
+            "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/1234567890.vcf",
+        ),
+        // Some servers / clients return hrefs without a trailing slash; the
+        // helper must still produce a well-formed URL.
+        (
+            "no trailing slash",
+            "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default",
+            "https://caldav.fastmail.com/dav/addressbooks/user/me@example.com/Default/1234567890.vcf",
+        ),
+        // Defensive: tolerate accidental double trailing slashes.
+        (
+            "multiple trailing slashes",
+            "https://example.com/dav/user/me/Default//",
+            "https://example.com/dav/user/me/Default/1234567890.vcf",
+        ),
+        // An empty collection is pathological, but the helper should not
+        // produce a leading `/` and confuse the underlying HTTP client.
+        ("empty addressbook", "", "/1234567890.vcf"),
+    ];
+    for (label, book, expected) in cases {
+        assert_eq!(
+            build_contact_put_path(book, "1234567890"),
+            expected,
+            "case '{label}'"
+        );
+    }
 }
 
 #[test]
@@ -568,40 +618,68 @@ fn test_log_truncate_invalid_utf8_does_not_panic() {
 // behavior including line folding and missing-UID.
 // =====================================================================
 
-#[test]
-fn test_extract_vcard_uid_basic() {
-    let body =
-        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice\r\nUID:abc-123\r\nEMAIL:a@e.com\r\nEND:VCARD";
-    assert_eq!(extract_vcard_uid(body), Some("abc-123".to_string()));
-}
+/// One `extract_vcard_uid` case: the vCard body and the expected UID.
+type UidCase<'a> = (&'a str, &'a str, Option<&'a str>);
 
 #[test]
-fn test_extract_vcard_uid_with_property_parameters() {
-    // UID;X-OTHER=foo:value — the parameters must not confuse the
-    // property-name parser.
-    let body = "BEGIN:VCARD\r\nUID;X-OTHER=foo:abc-456\r\nEND:VCARD";
-    assert_eq!(extract_vcard_uid(body), Some("abc-456".to_string()));
-}
-
-#[test]
-fn test_extract_vcard_uid_with_folded_line() {
-    // vCard 3.0 line folding: continuation lines start with a space.
-    let body = "BEGIN:VCARD\r\nUID:abc-789-second-line-here\r\nEND:VCARD";
-    assert_eq!(
-        extract_vcard_uid(body),
-        Some("abc-789-second-line-here".to_string())
-    );
-}
-
-#[test]
-fn test_extract_vcard_uid_missing() {
-    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:No UID\r\nEND:VCARD";
-    assert_eq!(extract_vcard_uid(body), None);
-}
-
-#[test]
-fn test_extract_vcard_uid_empty() {
-    assert_eq!(extract_vcard_uid(""), None);
+fn test_extract_vcard_uid_reads_the_uid_line_in_all_its_shapes() {
+    // The value is unescaped on the way out (`UID:abc\,def` -> `abc,def`),
+    // surrounding whitespace is trimmed, an empty value is still `Some("")`
+    // (distinct from a missing UID), and only the first UID line wins.
+    // NOTE: the "long value" case is labelled as folding in the original
+    // test but its body carries no continuation line.
+    let cases: Vec<UidCase<'_>> = vec![
+        (
+            "bare UID line",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice\r\nUID:abc-123\r\nEMAIL:a@e.com\r\nEND:VCARD",
+            Some("abc-123"),
+        ),
+        // UID;X-OTHER=foo:value — the parameters must not confuse the
+        // property-name parser.
+        (
+            "property parameters before the colon",
+            "BEGIN:VCARD\r\nUID;X-OTHER=foo:abc-456\r\nEND:VCARD",
+            Some("abc-456"),
+        ),
+        (
+            "long value",
+            "BEGIN:VCARD\r\nUID:abc-789-second-line-here\r\nEND:VCARD",
+            Some("abc-789-second-line-here"),
+        ),
+        (
+            "no UID line",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:No UID\r\nEND:VCARD",
+            None,
+        ),
+        ("empty body", "", None),
+        (
+            "unescapes the value",
+            "BEGIN:VCARD\r\nUID:abc\\,def\r\nEND:VCARD",
+            Some("abc,def"),
+        ),
+        (
+            "returns the first of duplicates",
+            "BEGIN:VCARD\r\nUID:first\r\nUID:second\r\nEND:VCARD",
+            Some("first"),
+        ),
+        (
+            "empty value is Some(\"\")",
+            "BEGIN:VCARD\r\nUID:\r\nEND:VCARD",
+            Some(""),
+        ),
+        (
+            "trims surrounding whitespace",
+            "UID:  spaced-uid  \r\n",
+            Some("spaced-uid"),
+        ),
+    ];
+    for (label, body, expected) in cases {
+        assert_eq!(
+            extract_vcard_uid(body).as_deref(),
+            expected,
+            "case '{label}'"
+        );
+    }
 }
 
 // =====================================================================
@@ -609,31 +687,23 @@ fn test_extract_vcard_uid_empty() {
 // =====================================================================
 
 #[test]
-fn test_unescape_vcard_text_basic() {
-    assert_eq!(unescape_vcard_text("plain text"), "plain text");
-}
-
-#[test]
-fn test_unescape_vcard_text_inverts_escape() {
-    // Every escape rule in RFC 2426 must round-trip.
-    assert_eq!(unescape_vcard_text(r"Back\\slash"), r"Back\slash");
-    assert_eq!(unescape_vcard_text(r"Semi\;colon"), "Semi;colon");
-    assert_eq!(unescape_vcard_text(r"Comma\,here"), "Comma,here");
-    assert_eq!(unescape_vcard_text(r"New\nline"), "New\nline");
-    assert_eq!(unescape_vcard_text(r"Big\Nline"), "Big\nline");
-}
-
-#[test]
-fn test_unescape_vcard_text_unknown_escape_preserved() {
-    // Unknown escape sequences keep the backslash literal so we don't
-    // silently mangle a value.
-    assert_eq!(unescape_vcard_text(r"weird\x"), r"weird\x");
-}
-
-#[test]
-fn test_unescape_vcard_text_trailing_backslash_preserved() {
-    // A trailing `\` with no follow-up character must not panic.
-    assert_eq!(unescape_vcard_text(r"trailing\"), r"trailing\");
+fn test_unescape_vcard_text_unescapes_every_documented_case() {
+    // Every escape rule in RFC 2426 must round-trip; unknown escapes and a
+    // trailing `\` keep the backslash literal so no value is mangled or
+    // panics.
+    let cases = [
+        ("plain text", "plain text"),
+        (r"Back\\slash", r"Back\slash"),
+        (r"Semi\;colon", "Semi;colon"),
+        (r"Comma\,here", "Comma,here"),
+        (r"New\nline", "New\nline"),
+        (r"Big\Nline", "Big\nline"),
+        (r"weird\x", r"weird\x"),
+        (r"trailing\", r"trailing\"),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(unescape_vcard_text(input), expected, "input '{input}'");
+    }
 }
 
 // =====================================================================
@@ -664,14 +734,6 @@ fn test_json_to_vcard_preserves_explicit_uid() {
 // =====================================================================
 // parse_vcard_properties tests
 // =====================================================================
-
-#[test]
-fn test_parse_vcard_properties_drops_structural_lines() {
-    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:abc\r\nFN:Alice\r\nEND:VCARD";
-    let props = parse_vcard_properties(body);
-    let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, vec!["FN"]);
-}
 
 #[test]
 fn test_parse_vcard_properties_preserves_prefix() {
@@ -942,26 +1004,46 @@ fn test_parse_vcard_missing_bday_is_none() {
 }
 
 #[test]
-fn test_json_to_vcard_emits_bday_when_provided() {
-    let vcard = json_to_vcard(r#"{"name":"A","birthday":"1990-01-15"}"#, Some("u"));
-    assert!(vcard.contains("BDAY:1990-01-15"));
-}
-
-#[test]
-fn test_json_to_vcard_bday_aliases() {
-    // LLM might send any of: birthday, bday, dob, date_of_birth.
-    assert!(json_to_vcard(r#"{"name":"A","bday":"1990-01-15"}"#, None).contains("BDAY:1990-01-15"));
-    assert!(json_to_vcard(r#"{"name":"A","dob":"1990-01-15"}"#, None).contains("BDAY:1990-01-15"));
-    assert!(
-        json_to_vcard(r#"{"name":"A","date_of_birth":"1990-01-15"}"#, None)
-            .contains("BDAY:1990-01-15")
-    );
-}
-
-#[test]
-fn test_json_to_vcard_no_bday_no_line() {
-    let vcard = json_to_vcard(r#"{"name":"A"}"#, None);
-    assert!(!vcard.contains("BDAY:"));
+fn test_json_to_vcard_emits_bday_for_every_accepted_key() {
+    // The LLM might send any of: birthday, bday, dob, date_of_birth. Without
+    // one of those keys no BDAY line may appear.
+    assert_vcard_render(vec![
+        VcardRenderCase {
+            label: "birthday",
+            json: r#"{"name":"A","birthday":"1990-01-15"}"#,
+            uid: Some("u"),
+            must_contain: &["BDAY:1990-01-15"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "bday",
+            json: r#"{"name":"A","bday":"1990-01-15"}"#,
+            uid: None,
+            must_contain: &["BDAY:1990-01-15"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "dob",
+            json: r#"{"name":"A","dob":"1990-01-15"}"#,
+            uid: None,
+            must_contain: &["BDAY:1990-01-15"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "date_of_birth",
+            json: r#"{"name":"A","date_of_birth":"1990-01-15"}"#,
+            uid: None,
+            must_contain: &["BDAY:1990-01-15"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "no bday key emits no line",
+            json: r#"{"name":"A"}"#,
+            uid: None,
+            must_contain: &[],
+            must_not_contain: &["BDAY:"],
+        },
+    ]);
 }
 
 #[test]
@@ -1077,72 +1159,107 @@ fn test_parse_vcard_adr_no_type_prefix() {
 }
 
 #[test]
-fn test_json_to_vcard_emits_addresses_array() {
-    let input = r#"{
+fn test_json_to_vcard_renders_addresses_as_adr_lines() {
+    assert_vcard_render(vec![
+        VcardRenderCase {
+            label: "addresses array",
+            json: r#"{
         "name": "Alice",
         "addresses": [
             {"type": "home", "street": "1 Main", "city": "Town", "region": "ST", "postal_code": "00000", "country": "US"}
         ]
-    }"#;
-    let vcard = json_to_vcard(input, Some("u"));
-    assert!(vcard.contains("ADR;TYPE=HOME:;;1 Main;Town;ST;00000;US"));
-}
-
-#[test]
-fn test_json_to_vcard_emits_address_object_alias() {
-    let input = r#"{
+    }"#,
+            uid: Some("u"),
+            must_contain: &["ADR;TYPE=HOME:;;1 Main;Town;ST;00000;US"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "address object alias",
+            json: r#"{
         "name": "Alice",
         "address": {"type": "work", "city": "Metropolis"}
-    }"#;
-    let vcard = json_to_vcard(input, Some("u"));
-    // Only `city` is set; the other 6 ADR components are empty.
-    assert!(vcard.contains("ADR;TYPE=WORK:;;;Metropolis;;;"));
-}
-
-#[test]
-fn test_json_to_vcard_emits_address_string_form() {
-    // Convenience: a single-line address string is heuristically split
-    // into the 5 standard components (street, city, region, postal_code,
-    // country). The vCard ADR has 7 components (po-box, ext, then the 5
-    // standard ones), so the first two are empty.
-    let input = r#"{
+    }"#,
+            uid: Some("u"),
+            // Only `city` is set; the other 6 ADR components are empty.
+            must_contain: &["ADR;TYPE=WORK:;;;Metropolis;;;"],
+            must_not_contain: &[],
+        },
+        // Convenience: a single-line address string is heuristically split
+        // into the 5 standard components (street, city, region, postal_code,
+        // country). The vCard ADR has 7 components (po-box, ext, then the 5
+        // standard ones), so the first two are empty.
+        VcardRenderCase {
+            label: "address string form",
+            json: r#"{
         "name": "Alice",
         "address": "123 Main St, Springfield, IL, 62701, USA"
-    }"#;
-    let vcard = json_to_vcard(input, Some("u"));
-    assert!(vcard.contains("ADR:;;123 Main St;Springfield;IL;62701;USA"));
-}
-
-#[test]
-fn test_json_to_vcard_emits_multiple_addresses() {
-    let input = r#"{
+    }"#,
+            uid: Some("u"),
+            must_contain: &["ADR:;;123 Main St;Springfield;IL;62701;USA"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "multiple addresses",
+            json: r#"{
         "name": "Alice",
         "addresses": [
             {"type": "home", "city": "Springfield"},
             {"type": "work", "city": "Metropolis"}
         ]
-    }"#;
-    let vcard = json_to_vcard(input, Some("u"));
-    assert!(vcard.contains("ADR;TYPE=HOME:;;;Springfield;;;"));
-    assert!(vcard.contains("ADR;TYPE=WORK:;;;Metropolis;;;"));
-}
-
-#[test]
-fn test_json_to_vcard_address_without_type_has_no_type_prefix() {
-    let input = r#"{
+    }"#,
+            uid: Some("u"),
+            must_contain: &[
+                "ADR;TYPE=HOME:;;;Springfield;;;",
+                "ADR;TYPE=WORK:;;;Metropolis;;;",
+            ],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "address without a type has no TYPE prefix",
+            json: r#"{
         "name": "Alice",
         "address": {"city": "Springfield"}
-    }"#;
-    let vcard = json_to_vcard(input, Some("u"));
-    // No TYPE= since the JSON didn't include a type.
-    assert!(vcard.contains("ADR:;;;Springfield;;;"));
-    assert!(!vcard.contains("ADR;TYPE"));
-}
-
-#[test]
-fn test_json_to_vcard_no_address_no_adr_line() {
-    let vcard = json_to_vcard(r#"{"name":"A"}"#, None);
-    assert!(!vcard.contains("ADR"));
+    }"#,
+            uid: Some("u"),
+            // No TYPE= since the JSON didn't include a type.
+            must_contain: &["ADR:;;;Springfield;;;"],
+            must_not_contain: &["ADR;TYPE"],
+        },
+        VcardRenderCase {
+            label: "no address emits no ADR line",
+            json: r#"{"name":"A"}"#,
+            uid: None,
+            must_contain: &[],
+            must_not_contain: &["ADR"],
+        },
+        VcardRenderCase {
+            label: "empty addresses array emits no ADR line",
+            json: r#"{"name":"A","addresses":[]}"#,
+            uid: Some("u"),
+            must_contain: &[],
+            must_not_contain: &["ADR"],
+        },
+        VcardRenderCase {
+            label: "blank-only address object emits an empty ADR",
+            json: r#"{"name":"A","address":{"type":"  "}}"#,
+            uid: Some("u"),
+            // Seven empty components, no TYPE= parameter.
+            must_contain: &["ADR:;;;;;;\r\n"],
+            must_not_contain: &[],
+        },
+        VcardRenderCase {
+            label: "every component of an address is escaped",
+            json: r#"{"name":"A","addresses":[{"type":"home","street":"1; Main","city":"Town, TX"}]}"#,
+            uid: Some("u"),
+            // vCard 3.0 §3.2.2 orders ADR as
+            // po-box;extended-address;street-address;locality;region;postal-code;country,
+            // so street is the *third* slot: exactly two empty components precede
+            // it and the four trailing ones are empty. The `;` inside the street
+            // and the `,` inside the locality must both come back escaped.
+            must_contain: &[r"ADR;TYPE=HOME:;;1\; Main;Town\, TX;;;"],
+            must_not_contain: &[],
+        },
+    ]);
 }
 
 #[test]
@@ -1286,20 +1403,37 @@ fn test_structured_address_serialize_full() {
 // =====================================================================
 
 #[test]
-fn test_split_vcard_value_respects_escaped_separator() {
-    // The vCard ADR value uses `;` as the component separator AND
-    // uses `\;` to embed a literal `;` inside a component. The split
-    // helper must not break on the escaped one.
-    let parts = split_vcard_value(r"a\;b;c", ';');
-    assert_eq!(parts, vec![r"a\;b", "c"]);
-}
-
-#[test]
-fn test_split_vcard_value_pads_short_input() {
-    // An ADR with fewer than 7 components is valid (missing
-    // components are empty). The split must not crash.
-    let parts = split_vcard_value(";;only street", ';');
-    assert_eq!(parts, vec!["", "", "only street"]);
+fn test_split_vcard_value_splits_on_unescaped_separators_only() {
+    // The vCard ADR value uses `;` as the component separator AND uses `\;` to
+    // embed a literal `;` inside a component, so the helper must not break on
+    // the escaped one. An ADR with fewer than 7 components is valid, so the
+    // split must not crash on short input.
+    let cases: Vec<(&str, &str, Vec<&str>)> = vec![
+        (
+            "escaped separator stays inside a part",
+            r"a\;b;c",
+            vec![r"a\;b", "c"],
+        ),
+        (
+            "short input is not padded",
+            ";;only street",
+            vec!["", "", "only street"],
+        ),
+        (
+            "trailing backslash has no character to consume",
+            "abc\\",
+            vec!["abc\\"],
+        ),
+        (
+            "escape consumes the next char even if it is the separator",
+            r"a\;b;c\;d",
+            vec![r"a\;b", r"c\;d"],
+        ),
+        ("empty string yields one empty part", "", vec![""]),
+    ];
+    for (label, input, expected) in cases {
+        assert_eq!(split_vcard_value(input, ';'), expected, "case '{label}'");
+    }
 }
 
 // =====================================================================
@@ -1664,4 +1798,761 @@ fn test_carddav_tools_multi_server_404_suppression() {
         tool_update_contact(&config, "/notfound.vcf", None, r#"{"email":"x@x.com"}"#).unwrap();
     assert!(update_all_fail.result.contains("found_client"));
     assert!(update_all_fail.result.contains("missing_client"));
+}
+
+// =====================================================================
+// extract_vcard_uid — remaining branches
+// =====================================================================
+
+/// Apparent bug: `extract_vcard_uid` scans with `line.split_once(':')?`,
+/// so the **first** line that has no colon aborts the whole scan and the
+/// function reports "no UID" even when a UID appears later. The sibling
+/// parser `parse_vcard_properties` handles the same input correctly by
+/// `continue`-ing. Pinned here so a future fix is a deliberate change.
+#[test]
+fn defect_extract_vcard_uid_aborts_on_first_colonless_line() {
+    let body = "BEGIN:VCARD\r\nGARBAGE WITHOUT COLON\r\nUID:abc-123\r\nEND:VCARD";
+    assert_eq!(extract_vcard_uid(body), None);
+
+    // The same body with a well-formed filler line does find the UID.
+    let clean = "BEGIN:VCARD\r\nFN:x\r\nUID:abc-123\r\nEND:VCARD";
+    assert_eq!(extract_vcard_uid(clean), Some("abc-123".to_string()));
+}
+
+// =====================================================================
+// parse_vcard_properties — remaining branches
+// =====================================================================
+
+#[test]
+fn test_parse_vcard_properties_keeps_only_named_non_structural_lines() {
+    // Both the BEGIN/VERSION/END envelope and a line with no property name
+    // at all (`:novalue`) must be dropped rather than becoming a property.
+    let cases: Vec<(&str, &str, &[&str])> = vec![
+        (
+            "structural lines",
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:abc\r\nFN:Alice\r\nEND:VCARD",
+            &["FN"],
+        ),
+        (
+            "line with an empty name",
+            "BEGIN:VCARD\r\n:novalue\r\nFN:Alice\r\nEND:VCARD",
+            &["FN"],
+        ),
+    ];
+    for (label, body, expected) in cases {
+        let props = parse_vcard_properties(body);
+        let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names.as_slice(), expected, "case '{label}'");
+    }
+}
+
+#[test]
+fn test_parse_vcard_properties_trims_and_uppercases_the_name() {
+    // The name is taken before the first `;`, trimmed and upper-cased,
+    // while the prefix keeps the original spacing and parameters.
+    let body = "BEGIN:VCARD\r\nfn :Alice\r\nemail ;TYPE=WORK:a@b.com\r\nEND:VCARD";
+    let props = parse_vcard_properties(body);
+    assert_eq!(props.len(), 2, "got: {props:?}");
+    assert_eq!(props[0].name, "FN");
+    assert_eq!(props[0].prefix, "fn ");
+    assert_eq!(props[1].name, "EMAIL");
+    assert_eq!(props[1].prefix, "email ;TYPE=WORK");
+}
+
+#[test]
+fn test_parse_vcard_properties_merges_folded_continuations() {
+    let body = "BEGIN:VCARD\r\nNOTE:Line1\r\n Line2\r\nEND:VCARD";
+    let props = parse_vcard_properties(body);
+    assert_eq!(props.len(), 1);
+    assert_eq!(props[0].name, "NOTE");
+    assert_eq!(props[0].line, "NOTE:Line1Line2");
+}
+
+#[test]
+fn test_parse_vcard_properties_on_empty_body() {
+    assert!(parse_vcard_properties("").is_empty());
+}
+
+// =====================================================================
+// unfold_vcard — remaining branches
+// =====================================================================
+
+#[test]
+fn test_unfold_vcard_returns_the_expected_text_for_each_body() {
+    let cases = [
+        // A body that *starts* with a fold marker has nothing to fold into; the
+        // helper must not emit a stray leading newline. Unfolding removes exactly
+        // ONE whitespace as the fold marker (vCard 3.0 §2.6, per `unfold_vcard`),
+        // so the second space is payload and is kept.
+        ("leading continuation", "  orphan", " orphan"),
+        ("empty body", "", ""),
+        // `str::lines` already drops `\r` before the `\n`.
+        ("carriage returns", "A:1\r\nB:2\r\n", "A:1\nB:2"),
+    ];
+    for (label, body, expected) in cases {
+        assert_eq!(unfold_vcard(body), expected, "case '{label}'");
+    }
+}
+
+// =====================================================================
+// log_truncate — boundary
+// =====================================================================
+
+#[test]
+fn test_log_truncate_at_exactly_the_limit_is_not_truncated() {
+    let body = vec![b'a'; LOG_BODY_LIMIT];
+    let out = log_truncate(&body);
+    assert_eq!(out.len(), LOG_BODY_LIMIT);
+    assert!(!out.contains("truncated"), "got: {out}");
+}
+
+#[test]
+fn test_log_truncate_one_byte_over_the_limit_reports_the_total() {
+    let body = vec![b'b'; LOG_BODY_LIMIT + 1];
+    let out = log_truncate(&body);
+    assert!(
+        out.ends_with(&format!(
+            "...<truncated, total {} bytes>",
+            LOG_BODY_LIMIT + 1
+        )),
+        "got: {out}"
+    );
+    assert!(
+        out.starts_with(&"b".repeat(LOG_BODY_LIMIT)),
+        "the first {LOG_BODY_LIMIT} bytes must survive verbatim"
+    );
+}
+
+// =====================================================================
+// parse_address_from_string tests
+// =====================================================================
+
+#[test]
+fn test_parse_address_from_string_uses_only_the_first_five_parts() {
+    let addr = parse_address_from_string("a, b, c, d, e, f");
+    assert_eq!(addr.street.as_deref(), Some("a"));
+    assert_eq!(addr.city.as_deref(), Some("b"));
+    assert_eq!(addr.region.as_deref(), Some("c"));
+    assert_eq!(addr.postal_code.as_deref(), Some("d"));
+    assert_eq!(addr.country.as_deref(), Some("e"));
+    assert_eq!(addr.kind, None);
+    assert_eq!(addr.po_box, None);
+    assert_eq!(addr.ext, None);
+}
+
+#[test]
+fn test_parse_address_from_string_single_part_fills_street_only() {
+    let addr = parse_address_from_string("123 Main St");
+    assert_eq!(addr.street.as_deref(), Some("123 Main St"));
+    assert_eq!(addr.city, None);
+    assert_eq!(addr.region, None);
+    assert_eq!(addr.postal_code, None);
+    assert_eq!(addr.country, None);
+}
+
+#[test]
+fn test_parse_address_from_string_all_empty_parts_yield_no_components() {
+    let addr = parse_address_from_string(",,,");
+    assert_eq!(addr.street, None);
+    assert_eq!(addr.city, None);
+    assert_eq!(addr.region, None);
+    assert_eq!(addr.postal_code, None);
+    assert_eq!(addr.country, None);
+}
+
+// =====================================================================
+// parse_addresses_from_json tests
+// =====================================================================
+
+#[test]
+fn test_parse_addresses_from_json_returns_none_when_no_address_can_be_read() {
+    // Every case must report "nothing provided" (`None`) so the caller leaves
+    // existing ADR lines alone.
+    let cases: Vec<(&str, serde_json::Value)> = vec![
+        ("no address keys", serde_json::json!({ "name": "A" })),
+        // Every element is filtered out, the array result stays empty and the
+        // helper falls through to the other accepted forms — of which there
+        // are none, so the answer is `None` (leave existing ADRs alone).
+        (
+            "non-object array items",
+            serde_json::json!({ "addresses": ["just a string", 7] }),
+        ),
+        (
+            "a non-array addresses value",
+            serde_json::json!({ "addresses": "123 Main St" }),
+        ),
+        (
+            "a blank address string",
+            serde_json::json!({ "address": "   " }),
+        ),
+    ];
+    for (label, parsed) in cases {
+        assert_eq!(parse_addresses_from_json(&parsed), None, "case '{label}'");
+    }
+}
+
+#[test]
+fn test_parse_addresses_from_json_empty_array_is_an_explicit_clear() {
+    // An explicit `[]` wins over a sibling `address` string.
+    let parsed = serde_json::json!({ "addresses": [], "address": "1 Main" });
+    assert_eq!(
+        parse_addresses_from_json(&parsed),
+        Some(Vec::<StructuredAddress>::new())
+    );
+}
+
+#[test]
+fn test_parse_addresses_from_json_object_with_only_blank_fields_yields_an_empty_address() {
+    let parsed = serde_json::json!({ "address": { "type": "  ", "city": "" } });
+    let out = parse_addresses_from_json(&parsed).expect("object form yields one address");
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        out[0],
+        StructuredAddress {
+            kind: None,
+            po_box: None,
+            ext: None,
+            street: None,
+            city: None,
+            region: None,
+            postal_code: None,
+            country: None,
+        }
+    );
+}
+
+#[test]
+fn test_parse_addresses_from_json_object_form_uppercases_the_type() {
+    let parsed = serde_json::json!({ "address": { "type": "home", "street": "1 Main" } });
+    let out = parse_addresses_from_json(&parsed).expect("one address");
+    assert_eq!(out[0].kind.as_deref(), Some("HOME"));
+    assert_eq!(out[0].street.as_deref(), Some("1 Main"));
+}
+
+#[test]
+fn test_parse_addresses_from_json_array_form_skips_the_blank_entries() {
+    // A non-object element is dropped, the object element survives.
+    let parsed = serde_json::json!({ "addresses": [ "junk", { "city": "Town" } ] });
+    let out = parse_addresses_from_json(&parsed).expect("one address");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].city.as_deref(), Some("Town"));
+}
+
+// =====================================================================
+// merge_vcard_update — remaining branches
+// =====================================================================
+
+#[test]
+fn test_merge_vcard_update_invalid_json_preserves_everything() {
+    let body = "BEGIN:VCARD\r\n\
+                VERSION:3.0\r\n\
+                FN:Alice\r\n\
+                EMAIL;a@b.com\r\n\
+                X-CUSTOM:keep\r\n\
+                END:VCARD";
+    let existing = parse_vcard_properties(body);
+    let merged = merge_vcard_update(&existing, "this is not json", Some("u"));
+    assert!(merged.contains("FN:Alice"), "got:\n{merged}");
+    assert!(merged.contains("X-CUSTOM:keep"), "got:\n{merged}");
+    assert!(merged.contains("UID:u"), "got:\n{merged}");
+}
+
+#[test]
+fn test_merge_vcard_update_appends_new_canonical_fields_with_plain_prefixes() {
+    // None of these existed, so each gets its bare name as prefix —
+    // except EMAIL and TEL which get the standard TYPE defaults.
+    let merged = merge_vcard_update(
+        &[],
+        r#"{"name":"A","email":"a@b.com","phone":"+1","company":"Acme",
+            "title":"Boss","notes":"hi","birthday":"1990-01-01"}"#,
+        None,
+    );
+    assert!(merged.contains("FN:A\r\n"), "got:\n{merged}");
+    assert!(
+        merged.contains("EMAIL;TYPE=INTERNET:a@b.com\r\n"),
+        "got:\n{merged}"
+    );
+    assert!(merged.contains("TEL;TYPE=CELL:+1\r\n"), "got:\n{merged}");
+    assert!(merged.contains("ORG:Acme\r\n"), "got:\n{merged}");
+    assert!(merged.contains("TITLE:Boss\r\n"), "got:\n{merged}");
+    assert!(merged.contains("NOTE:hi\r\n"), "got:\n{merged}");
+    assert!(merged.contains("BDAY:1990-01-01\r\n"), "got:\n{merged}");
+    // No UID line when the caller passes None.
+    assert!(!merged.contains("UID:"), "got:\n{merged}");
+}
+
+#[test]
+fn test_merge_vcard_update_collapses_duplicates_for_every_canonical_name() {
+    let body = "BEGIN:VCARD\r\n\
+                FN:one\r\nFN:two\r\n\
+                TEL:1\r\nTEL:2\r\n\
+                ORG:o1\r\nORG:o2\r\n\
+                TITLE:t1\r\nTITLE:t2\r\n\
+                NOTE:n1\r\nNOTE:n2\r\n\
+                END:VCARD";
+    let existing = parse_vcard_properties(body);
+    let merged = merge_vcard_update(
+        &existing,
+        r#"{"name":"NEWFN","phone":"NEWTEL","company":"NEWORG",
+            "title":"NEWTITLE","notes":"NEWNOTE"}"#,
+        Some("u"),
+    );
+    for (case, line) in [
+        ("FN", "FN:NEWFN"),
+        ("TEL", "TEL:NEWTEL"),
+        ("ORG", "ORG:NEWORG"),
+        ("TITLE", "TITLE:NEWTITLE"),
+        ("NOTE", "NOTE:NEWNOTE"),
+    ] {
+        let hits = merged.lines().filter(|l| l.starts_with(line)).count();
+        assert_eq!(hits, 1, "{case} should appear exactly once, got:\n{merged}");
+    }
+    // The first original prefix is reused, so the TYPE= parameters stay.
+    assert!(!merged.contains("two"), "got:\n{merged}");
+}
+
+#[test]
+fn test_merge_vcard_update_keeps_adrs_when_addresses_is_not_a_list() {
+    // `"addresses": "x"` is not an array, so no replacement happens and
+    // the existing ADR survives.
+    let body = "BEGIN:VCARD\r\nFN:A\r\nADR;TYPE=HOME:;;1 Main;Town;;;Country\r\nEND:VCARD";
+    let existing = parse_vcard_properties(body);
+    let merged = merge_vcard_update(&existing, r#"{"addresses":"x"}"#, Some("u"));
+    assert!(
+        merged.contains("ADR;TYPE=HOME:;;1 Main;Town;;;Country"),
+        "got:\n{merged}"
+    );
+}
+
+#[test]
+fn test_merge_vcard_update_escapes_values_it_appends() {
+    let merged = merge_vcard_update(&[], r#"{"name":"A; B","notes":"x\ny"}"#, Some("u"));
+    assert!(merged.contains("FN:A\\; B"), "got:\n{merged}");
+    assert!(merged.contains(r"NOTE:x\ny"), "got:\n{merged}");
+}
+
+// =====================================================================
+// StructuredAddress <-> AddressInput conversions
+// =====================================================================
+
+#[test]
+fn test_structured_address_converts_into_address_input() {
+    let addr = StructuredAddress {
+        kind: Some("HOME".to_string()),
+        po_box: Some("PO 1".to_string()),
+        ext: Some("Ext 2".to_string()),
+        street: Some("1 Main".to_string()),
+        city: Some("Town".to_string()),
+        region: Some("ST".to_string()),
+        postal_code: Some("00000".to_string()),
+        country: Some("Country".to_string()),
+    };
+    let input: crate::tools::dtos::AddressInput = addr.into();
+    assert_eq!(input.addr_type.as_deref(), Some("HOME"));
+    assert_eq!(input.po_box.as_deref(), Some("PO 1"));
+    assert_eq!(input.ext.as_deref(), Some("Ext 2"));
+    assert_eq!(input.street.as_deref(), Some("1 Main"));
+    assert_eq!(input.city.as_deref(), Some("Town"));
+    assert_eq!(input.region.as_deref(), Some("ST"));
+    assert_eq!(input.postal_code.as_deref(), Some("00000"));
+    assert_eq!(input.country.as_deref(), Some("Country"));
+}
+
+#[test]
+fn test_address_input_converts_into_structured_address() {
+    let input = crate::tools::dtos::AddressInput {
+        addr_type: Some("WORK".to_string()),
+        street: Some("2 Office".to_string()),
+        city: Some("City".to_string()),
+        region: Some("NY".to_string()),
+        postal_code: Some("10001".to_string()),
+        country: Some("USA".to_string()),
+        po_box: None,
+        ext: None,
+    };
+    let addr = StructuredAddress::from(input);
+    assert_eq!(addr.kind.as_deref(), Some("WORK"));
+    assert_eq!(addr.street.as_deref(), Some("2 Office"));
+    assert_eq!(addr.city.as_deref(), Some("City"));
+    assert_eq!(addr.region.as_deref(), Some("NY"));
+    assert_eq!(addr.postal_code.as_deref(), Some("10001"));
+    assert_eq!(addr.country.as_deref(), Some("USA"));
+    assert_eq!(addr.po_box, None);
+    assert_eq!(addr.ext, None);
+}
+
+#[test]
+fn test_structured_address_round_trips_through_address_input() {
+    let original = StructuredAddress {
+        kind: Some("HOME".to_string()),
+        po_box: None,
+        ext: Some("Apt 3".to_string()),
+        street: Some("1 Main".to_string()),
+        city: None,
+        region: Some("ST".to_string()),
+        postal_code: None,
+        country: Some("Country".to_string()),
+    };
+    let back = StructuredAddress::from(crate::tools::dtos::AddressInput::from(original.clone()));
+    assert_eq!(back, original);
+}
+
+// =====================================================================
+// get_all_addressbooks discovery strategies
+//
+// The helper walks four strategies in order: direct PROPFIND on the base
+// URL, addressbook-home-set on the base URL, current-user-principal, and
+// finally a Fastmail-style `/dav/principals/user/{username}/` guess.
+// =====================================================================
+
+use crate::tools::blocking::block_on;
+
+/// A multistatus with no `<d:response>` children: every collection
+// parser returns an empty list for it.
+const EMPTY_MULTISTATUS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+</d:multistatus>"#;
+
+fn xml_207(body: &str) -> ResponseTemplate {
+    ResponseTemplate::new(207)
+        .insert_header("content-type", "application/xml")
+        .set_body_string(body.to_string())
+}
+
+fn propfind_at(mock: &WiremockGuard, path: &str, body: &str) {
+    mock.register(
+        Mock::given(method("PROPFIND"))
+            .and(wm_path(path))
+            .respond_with(xml_207(body)),
+    );
+}
+
+fn addressbook_home_set(href: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response><d:propstat><d:prop>
+  <c:addressbook-home-set><d:href>{href}</d:href></c:addressbook-home-set>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+fn current_user_principal(href: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response><d:propstat><d:prop>
+  <d:current-user-principal><d:href>{href}</d:href></d:current-user-principal>
+ </d:prop></d:propstat></d:response>
+</d:multistatus>"#
+    )
+}
+
+fn client_at(uri: String) -> crate::lib::dav::client::DavClient {
+    let cfg = crate::config::CalDavClient {
+        url: uri,
+        username: "user".to_string(),
+        password: "password".to_string(),
+    };
+    crate::lib::dav::client::DavClient::new("mock_card".to_string(), &cfg).expect("build client")
+}
+
+#[test]
+fn test_get_all_addressbooks_direct_propfind_strategy() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", CARD_PROPFIND_BODY);
+    let client = client_at(mock.uri());
+
+    let books = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap();
+    assert_eq!(books, vec!["/addressbooks/primary/".to_string()]);
+}
+
+#[test]
+fn test_get_all_addressbooks_home_set_strategy() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // Base URL advertises a home set but is not itself an addressbook.
+    propfind_at(&mock, "/", &addressbook_home_set("/addressbooks/user/"));
+    propfind_at(&mock, "/addressbooks/user/", CARD_PROPFIND_BODY);
+    let client = client_at(mock.uri());
+
+    let books = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap();
+    assert_eq!(books, vec!["/addressbooks/primary/".to_string()]);
+}
+
+#[test]
+fn test_get_all_addressbooks_principal_strategy() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // Base URL yields neither an addressbook nor a home set, only a principal.
+    propfind_at(&mock, "/", &current_user_principal("/principals/user/"));
+    propfind_at(
+        &mock,
+        "/principals/user/",
+        &addressbook_home_set("/addressbooks/user/"),
+    );
+    propfind_at(&mock, "/addressbooks/user/", CARD_PROPFIND_BODY);
+    let client = client_at(mock.uri());
+
+    let books = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap();
+    assert_eq!(books, vec!["/addressbooks/primary/".to_string()]);
+}
+
+#[test]
+fn test_get_all_addressbooks_fastmail_guess_strategy() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // Nothing discoverable on the base URL, but the guessed
+    // /dav/principals/user/{username}/ path advertises a home set.
+    propfind_at(&mock, "/", EMPTY_MULTISTATUS);
+    propfind_at(
+        &mock,
+        "/dav/principals/user/user/",
+        &addressbook_home_set("/addressbooks/user/"),
+    );
+    propfind_at(&mock, "/addressbooks/user/", CARD_PROPFIND_BODY);
+    let client = client_at(mock.uri());
+
+    let books = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap();
+    assert_eq!(books, vec!["/addressbooks/primary/".to_string()]);
+}
+
+#[test]
+fn test_get_all_addressbooks_errors_when_no_principal_is_found() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", EMPTY_MULTISTATUS);
+    propfind_at(&mock, "/dav/principals/user/user/", EMPTY_MULTISTATUS);
+    let client = client_at(mock.uri());
+
+    let err = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap_err();
+    assert_eq!(err.to_string(), "No principal found");
+}
+
+#[test]
+fn test_get_all_addressbooks_errors_when_home_set_is_empty() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // A principal exists but has no addressbook-home-set.
+    propfind_at(&mock, "/", &current_user_principal("/principals/user/"));
+    propfind_at(&mock, "/principals/user/", EMPTY_MULTISTATUS);
+    let client = client_at(mock.uri());
+
+    let err = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap_err();
+    assert_eq!(err.to_string(), "No addressbook home found");
+}
+
+#[test]
+fn test_get_all_addressbooks_returns_an_empty_list_when_the_home_has_no_books() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    propfind_at(&mock, "/", &current_user_principal("/principals/user/"));
+    propfind_at(
+        &mock,
+        "/principals/user/",
+        &addressbook_home_set("/addressbooks/user/"),
+    );
+    propfind_at(&mock, "/addressbooks/user/", EMPTY_MULTISTATUS);
+    let client = client_at(mock.uri());
+
+    let books = block_on(get_all_addressbooks(&client, &mock.uri(), "user")).unwrap();
+    assert!(books.is_empty(), "got: {books:?}");
+}
+
+#[test]
+fn test_fetch_contacts_from_book_wrapper_delegates_to_the_client() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    mock.register(Mock::given(method("REPORT")).respond_with(xml_207(CARD_REPORT_BODY)));
+    let client = client_at(mock.uri());
+
+    let contacts = block_on(fetch_contacts_from_book(&client, "/addressbooks/primary/")).unwrap();
+    assert_eq!(contacts.len(), 1);
+    assert_eq!(contacts[0].0, "/addressbooks/primary/alice.vcf");
+    assert!(contacts[0].1.contains("FN:Alice Example"));
+}
+
+// =====================================================================
+// tool_* aggregation branches
+// =====================================================================
+
+#[test]
+fn test_for_each_card_client_records_invalid_url_as_a_client_error() {
+    // `DavClient::new` rejects a non-HTTP URL, and the aggregation helper
+    // must surface that as a per-server error rather than panicking.
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "broken".to_string(),
+        crate::config::CalDavClient {
+            url: "ftp://example.invalid/dav".to_string(),
+            username: "u".to_string(),
+            password: "p".to_string(),
+        },
+    );
+
+    let res = tool_get_contact(&config, "/c.vcf").unwrap();
+    assert_eq!(res.contact, None);
+    assert_eq!(res.errors.len(), 1, "got: {:?}", res.errors);
+    assert_eq!(
+        res.errors[0],
+        "Error on client broken: Client config error: invalid URL 'ftp://example.invalid/dav'"
+    );
+}
+
+#[test]
+fn test_tool_search_contact_reports_client_errors_on_an_empty_result_set() {
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "broken".to_string(),
+        crate::config::CalDavClient {
+            url: "ftp://example.invalid/dav".to_string(),
+            username: "u".to_string(),
+            password: "p".to_string(),
+        },
+    );
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+
+    let res = tool_search_contact(&config, Some("alice"), None, &cache, &uuid_gen).unwrap();
+    assert!(res.results.is_empty());
+    assert_eq!(res.total, 0);
+    assert_eq!(res.hint.as_deref(), Some("Final page."));
+    assert_eq!(res.errors.len(), 1, "got: {:?}", res.errors);
+    assert!(res.errors[0].starts_with("Error on client broken: "));
+}
+
+#[test]
+fn test_tool_add_contact_targeted_client_error_is_fatal() {
+    // A targeted add cannot fall back to another server, so the per-client
+    // failure is returned as the tool error.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_carddav_put_failure_stub(&mock);
+    let mut config = crate::config::AgentConfig::default();
+    config.caldav_clients.insert(
+        "work".to_string(),
+        crate::config::CalDavClient {
+            url: mock.uri(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        },
+    );
+
+    let err = tool_add_contact(&config, Some("work"), r#"{"name":"Bob"}"#).unwrap_err();
+    assert!(
+        err.starts_with("Error on client work: Failed to PUT contact"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_tool_add_contact_untargeted_error_is_reported_in_the_result() {
+    // Without a target the failure is collected rather than returned, so
+    // the tool still answers with Ok.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_carddav_put_failure_stub(&mock);
+    let config = card_config_for(mock.uri());
+
+    let res = tool_add_contact(&config, None, r#"{"name":"Bob"}"#).unwrap();
+    assert!(
+        res.result.contains("Error on client mock_card"),
+        "got: {}",
+        res.result
+    );
+    assert!(
+        res.result.contains("Failed to PUT contact"),
+        "got: {}",
+        res.result
+    );
+}
+
+/// A CardDAV service whose discovery succeeds but whose PUT returns 500.
+fn register_carddav_put_failure_stub(mock: &WiremockGuard) {
+    mock.register(Mock::given(method("PROPFIND")).respond_with(xml_207(CARD_PROPFIND_BODY)));
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("put failed"),
+        ),
+    );
+}
+
+#[test]
+fn test_tool_delete_contact_keeps_already_absent_when_nothing_was_deleted() {
+    // Every server answers 404: `has_actual_delete` is false, so the
+    // "Already absent" lines are kept instead of being filtered out.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("DELETE"))
+            .respond_with(ResponseTemplate::new(404).set_body_string("no")),
+    );
+    let config = card_config_for(mock.uri());
+
+    let res = tool_delete_contact(&config, "/gone.vcf", None).unwrap();
+    assert!(
+        res.result.contains("Already absent (404)"),
+        "got: {}",
+        res.result
+    );
+}
+
+#[test]
+fn test_tool_update_contact_reports_a_failed_get_for_every_client() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("GET")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("boom"),
+        ),
+    );
+    let config = card_config_for(mock.uri());
+
+    let res = tool_update_contact(&config, "/c.vcf", None, r#"{"email":"a@b.com"}"#).unwrap();
+    assert!(
+        res.result.contains("Failed to fetch contact for update"),
+        "got: {}",
+        res.result
+    );
+    assert!(res.result.contains("500"), "got: {}", res.result);
+}
+
+#[test]
+fn test_tool_update_contact_uses_if_match_when_the_server_returns_an_etag() {
+    // The GET carries an ETag; the merged vCard must still be PUT back
+    // successfully and the summary must report the status.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("GET")).respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/vcard")
+                .insert_header("ETag", "\"etag-value\"")
+                .set_body_string(ALICE_VCARD_BODY),
+        ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(204)
+                .insert_header("ETag", "\"etag-value-2\"")
+                .set_body_string(""),
+        ),
+    );
+    let config = card_config_for(mock.uri());
+
+    let res =
+        tool_update_contact(&config, "/c.vcf", None, r#"{"email":"new@example.com"}"#).unwrap();
+    // `reqwest::StatusCode`'s Display includes the canonical reason phrase,
+    // so the summary reads "Updated (status 204 No Content)".
+    assert!(
+        res.result.contains("Updated (status 204 No Content)"),
+        "got: {}",
+        res.result
+    );
 }

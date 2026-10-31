@@ -205,46 +205,56 @@ fn longest_row_width_is_the_maximum_and_zero_when_empty() {
     assert_eq!(longest_row_width(&[], measure), 0.0);
 }
 
+/// [`auto_fit_width`] stays inside its band: never below the panel minimum,
+/// never above 20 % of the viewport, and exactly the longest row in between.
 #[test]
-fn auto_fit_caps_at_twenty_percent_of_the_viewport() {
-    let rows = vec![file_row(&"a".repeat(500), "/lib/long.md", 0)];
-    let viewport = 2000.0;
-    assert_eq!(
-        auto_fit_width(&rows, viewport, measure),
-        viewport * LEFT_PANEL_MAX_WIDTH_FRACTION,
-        "UI-016: the left panel may never exceed 20 % of the viewport"
-    );
-}
-
-#[test]
-fn auto_fit_floors_at_the_minimum_panel_width() {
-    let rows = vec![file_row("a.md", "/lib/a.md", 0)];
-    let viewport = 4000.0;
-    assert_eq!(
-        auto_fit_width(&rows, viewport, measure),
-        LEFT_PANEL_MIN_WIDTH
-    );
-}
-
-#[test]
-fn auto_fit_minimum_wins_when_the_cap_falls_below_it() {
-    // 500 px viewport → 20 % cap is 100 px, below the 180 px minimum.
+fn auto_fit_stays_inside_the_band_between_the_minimum_and_twenty_percent() {
+    // 500 px viewport → the 20 % cap is 100 px, below the 180 px minimum.
     const { assert!(LEFT_PANEL_MAX_WIDTH_FRACTION * 500.0 < LEFT_PANEL_MIN_WIDTH) } // fixture sanity
-    let rows = vec![file_row("a.md", "/lib/a.md", 0)];
-    assert_eq!(auto_fit_width(&rows, 500.0, measure), LEFT_PANEL_MIN_WIDTH);
-}
 
-#[test]
-fn auto_fit_tracks_the_longest_row_inside_the_band() {
-    // 10 000 px viewport → 2 000 px cap, so the raw longest row fits.
-    let rows = vec![
+    let short_rows = vec![file_row("a.md", "/lib/a.md", 0)];
+    let long_rows = vec![file_row(&"a".repeat(500), "/lib/long.md", 0)];
+    // A 10 000 px viewport → a 2 000 px cap, so this longest row fits outright.
+    let banded_rows = vec![
         file_row("a.md", "/lib/a.md", 0),
         file_row(&"b".repeat(120), "/lib/wide.md", 3),
     ];
-    assert_eq!(
-        auto_fit_width(&rows, 10_000.0, measure),
-        row_width(&rows[1], measure)
-    );
+
+    let cases: Vec<(&str, Vec<FlatRow>, f32, f32)> = vec![
+        (
+            "UI-016: a 500-character name is capped at 20 % of the viewport",
+            long_rows,
+            2000.0,
+            2000.0 * LEFT_PANEL_MAX_WIDTH_FRACTION,
+        ),
+        (
+            "a short row in a wide viewport floors at the minimum panel width",
+            short_rows.clone(),
+            4000.0,
+            LEFT_PANEL_MIN_WIDTH,
+        ),
+        (
+            "the minimum wins when the cap falls below it",
+            short_rows,
+            500.0,
+            LEFT_PANEL_MIN_WIDTH,
+        ),
+        (
+            "a row that fits inside the band is tracked exactly",
+            banded_rows.clone(),
+            10_000.0,
+            row_width(&banded_rows[1], measure),
+        ),
+    ];
+
+    for (label, rows, viewport, expected) in cases {
+        assert_eq!(
+            auto_fit_width(&rows, viewport, measure),
+            expected,
+            "case '{label}' (viewport {viewport}): the fitted width must stay between \
+             the panel minimum and 20 % of the viewport"
+        );
+    }
 }
 
 #[test]
@@ -260,30 +270,57 @@ fn panel_width_falls_back_to_the_default_and_respects_the_band() {
 
 // --- selection --------------------------------------------------------
 
-#[test]
-fn directory_rows_are_never_highlighted() {
-    let row = dir_row("Work", "/lib/Work", 0);
-    let selected = vec![PathBuf::from("/lib/Work")];
-    assert!(!is_row_selected(
-        &row,
-        Some(Path::new("/lib/Work")),
-        &selected
-    ));
-}
+/// One `is_row_selected` case: `(label, row under test, single-selected path,
+/// multi-selection, expected highlight)`.
+type IsSelectedCase<'a> = (&'a str, &'a FlatRow, Option<&'a Path>, Vec<PathBuf>, bool);
 
+/// Which rows the panel highlights: a file is selected by **either** the single
+/// or the multi selection, and a directory row never is.
 #[test]
-fn file_row_is_selected_by_either_the_single_or_the_multi_selection() {
-    let row = file_row("note.md", "/lib/note.md", 1);
+fn is_row_selected_highlights_files_by_either_selection_and_never_a_directory() {
+    let work = dir_row("Work", "/lib/Work", 0);
+    let note = file_row("note.md", "/lib/note.md", 1);
     let other = file_row("other.md", "/lib/other.md", 1);
     let multi = vec![PathBuf::from("/lib/note.md"), PathBuf::from("/lib/x.md")];
 
-    assert!(is_row_selected(&row, Some(Path::new("/lib/note.md")), &[]));
-    assert!(is_row_selected(&row, None, &multi));
-    assert!(!is_row_selected(
-        &other,
-        Some(Path::new("/lib/note.md")),
-        &multi
-    ));
+    let cases: Vec<IsSelectedCase<'_>> = vec![
+        (
+            "a directory named by both selections is still never highlighted",
+            &work,
+            Some(Path::new("/lib/Work")),
+            vec![PathBuf::from("/lib/Work")],
+            false,
+        ),
+        (
+            "a file named by the single selection",
+            &note,
+            Some(Path::new("/lib/note.md")),
+            Vec::new(),
+            true,
+        ),
+        (
+            "a file named by the multi selection alone",
+            &note,
+            None,
+            multi.clone(),
+            true,
+        ),
+        (
+            "a file named by neither selection",
+            &other,
+            Some(Path::new("/lib/note.md")),
+            multi.clone(),
+            false,
+        ),
+    ];
+
+    for (label, row, single, selected_files, expected) in cases {
+        assert_eq!(
+            is_row_selected(row, single, &selected_files),
+            expected,
+            "case '{label}': the row's own path decides against both selections"
+        );
+    }
 }
 
 // --- click mapping ----------------------------------------------------
@@ -514,56 +551,65 @@ fn a_single_selection_still_gets_the_full_file_menu() {
 // --- skill directory resolution ---------------------------------------
 
 #[test]
-fn skill_dir_prefers_the_system_library_root() {
-    let libraries = vec![
-        ContentLibrary {
-            root_folder: "D:/other".to_string(),
-            name: "Other".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        },
-        ContentLibrary {
-            root_folder: "D:/system".to_string(),
-            name: SYSTEM_LIBRARY_NAME.to_string(),
-            kind: "system".to_string(),
-            readonly: false,
-            priority: 0,
-        },
-    ];
-    assert_eq!(
-        skill_dir(&libraries, FOLDER_SKILLS_SUBDIR, || PathBuf::from("unused")),
-        PathBuf::from("D:/system")
-            .join(SKILLS_SUBDIR)
-            .join(FOLDER_SKILLS_SUBDIR)
-    );
-    assert_eq!(
-        skill_dir(&libraries, NOTE_SKILLS_SUBDIR, || PathBuf::from("unused")),
-        PathBuf::from("D:/system")
-            .join(SKILLS_SUBDIR)
-            .join(NOTE_SKILLS_SUBDIR)
-    );
-}
-
-#[test]
-fn skill_dir_falls_back_when_no_system_library_is_configured() {
-    let libraries = vec![ContentLibrary {
-        root_folder: "D:/other".to_string(),
-        name: "Other".to_string(),
-        kind: "text".to_string(),
+fn skill_dir_prefers_the_system_library_root_and_otherwise_falls_back() {
+    let library = |root: &str, name: &str, kind: &str| ContentLibrary {
+        root_folder: root.to_string(),
+        name: name.to_string(),
+        kind: kind.to_string(),
         readonly: false,
         priority: 0,
-    }];
-    assert_eq!(
-        skill_dir(&libraries, FOLDER_SKILLS_SUBDIR, || PathBuf::from(
-            "fallback"
-        )),
-        PathBuf::from("fallback")
-    );
-    assert_eq!(
-        skill_dir(&[], NOTE_SKILLS_SUBDIR, || PathBuf::from("fallback")),
-        PathBuf::from("fallback")
-    );
+    };
+    // The system library is deliberately listed **second**, so a lookup that
+    // took the first library would fail these cases.
+    let libraries = vec![
+        library("D:/other", "Other", "text"),
+        library("D:/system", SYSTEM_LIBRARY_NAME, "system"),
+    ];
+    let only_other = vec![library("D:/other", "Other", "text")];
+
+    let cases: Vec<(&str, Vec<ContentLibrary>, &str, PathBuf, PathBuf)> = vec![
+        (
+            "folder skills under a configured system library",
+            libraries.clone(),
+            FOLDER_SKILLS_SUBDIR,
+            PathBuf::from("unused"),
+            PathBuf::from("D:/system")
+                .join(SKILLS_SUBDIR)
+                .join(FOLDER_SKILLS_SUBDIR),
+        ),
+        (
+            "note skills under a configured system library",
+            libraries.clone(),
+            NOTE_SKILLS_SUBDIR,
+            PathBuf::from("unused"),
+            PathBuf::from("D:/system")
+                .join(SKILLS_SUBDIR)
+                .join(NOTE_SKILLS_SUBDIR),
+        ),
+        (
+            "folder skills with no system library configured",
+            only_other,
+            FOLDER_SKILLS_SUBDIR,
+            PathBuf::from("fallback"),
+            PathBuf::from("fallback"),
+        ),
+        (
+            "note skills with no libraries at all",
+            Vec::new(),
+            NOTE_SKILLS_SUBDIR,
+            PathBuf::from("fallback"),
+            PathBuf::from("fallback"),
+        ),
+    ];
+
+    for (label, libraries, sub, fallback, expected) in cases {
+        assert_eq!(
+            skill_dir(&libraries, sub, || fallback.clone()),
+            expected,
+            "case '{label}': the skill folder must come from the system library \
+             when one is configured, and from the fallback when none is"
+        );
+    }
 }
 
 // --- view model: tree rows (UI-017 / UI-018) --------------------------
@@ -2087,66 +2133,78 @@ fn deep_chain(depth: usize) -> (TreeNode, HashSet<PathBuf>) {
     (root, expanded)
 }
 
+/// The flattener stops at the depth guard instead of overflowing the stack,
+/// and is unaffected by chains that stay inside it.
 #[test]
-fn tree_flatten_stops_at_the_depth_guard_instead_of_overflowing() {
+fn tree_flatten_stops_at_the_depth_guard_and_is_unaffected_below_it() {
     let depth_guard = crate::ui::tree::flatten::MAX_TREE_DEPTH;
-    let (root, expanded) = deep_chain(depth_guard + 50);
 
-    let mut rows = Vec::new();
-    flatten_tree(&root, 0, &expanded, &mut rows);
+    // Each case names the depths the flattener is expected to emit, so the
+    // guard case pins the whole cut, not just its length.
+    let cases: Vec<(&str, usize, Vec<usize>)> = vec![
+        (
+            "a chain past the guard is cut at MAX_TREE_DEPTH rows",
+            depth_guard + 50,
+            (0..depth_guard).collect(),
+        ),
+        (
+            "a chain inside the guard flattens every level",
+            4,
+            vec![0, 1, 2, 3],
+        ),
+    ];
 
-    assert_eq!(
-        rows.len(),
-        depth_guard,
-        "the guard must cut the walk at MAX_TREE_DEPTH rows, not recurse further"
-    );
-    assert_eq!(
-        rows.last().map(|row| row.depth),
-        Some(depth_guard - 1),
-        "the deepest emitted row is the last level inside the guard"
-    );
-}
+    for (label, depth, expected_depths) in cases {
+        let (root, expanded) = deep_chain(depth);
 
-#[test]
-fn tree_flatten_is_unaffected_below_the_depth_guard() {
-    let (root, expanded) = deep_chain(4);
+        let mut rows = Vec::new();
+        flatten_tree(&root, 0, &expanded, &mut rows);
 
-    let mut rows = Vec::new();
-    flatten_tree(&root, 0, &expanded, &mut rows);
-
-    assert_eq!(
-        rows.len(),
-        4,
-        "a chain inside the guard flattens every level"
-    );
-    assert_eq!(
-        rows.iter().map(|row| row.depth).collect::<Vec<_>>(),
-        vec![0, 1, 2, 3]
-    );
+        assert_eq!(
+            rows.len(),
+            expected_depths.len(),
+            "case '{label}': unexpected row count, got {:?}",
+            rows.iter().map(|row| row.depth).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.depth).collect::<Vec<_>>(),
+            expected_depths,
+            "case '{label}': the emitted depths must be the levels the guard allows"
+        );
+        assert_eq!(
+            rows.last().map(|row| row.depth),
+            expected_depths.last().copied(),
+            "case '{label}': the deepest emitted row is the last level inside the guard"
+        );
+    }
 }
 
 // --- UI-050 search-result branch -------------------------------------
 //
 // The state gate is covered by
-// `from_app_carries_query_search_state_and_selection`; the tests below
-// assert that both branches of the panel body actually build.
+// `from_app_carries_query_search_state_and_selection`; the test below asserts
+// that both branches of the panel body actually build.
 
+/// Both postures of the search-result branch build: the no-results placeholder
+/// and a list holding a full card plus a sparse one.
+///
+/// The state gate is covered by
+/// `from_app_carries_query_search_state_and_selection`; this asserts that the
+/// branch actually builds in each posture (and that the empty posture does not
+/// fall through to the tree).
 #[test]
-fn search_result_branch_builds_the_empty_state() {
+fn search_result_branch_builds_the_empty_state_and_populated_cards() {
     let (app, _dir) = app_with_system_lib();
     let mut view_model = LeftPanelViewModel::from_app(&app);
     view_model.is_searching = true;
+
     view_model.results = Arc::new(Vec::new());
+    {
+        // Scoped so the element's borrow of `view_model` ends before the
+        // populated case reassigns `results`.
+        let _no_results = search_results(&view_model);
+    }
 
-    // The no-results branch must build (and not fall through to the tree).
-    let _element = search_results(&view_model);
-}
-
-#[test]
-fn search_result_branch_builds_populated_and_sparse_cards() {
-    let (app, _dir) = app_with_system_lib();
-    let mut view_model = LeftPanelViewModel::from_app(&app);
-    view_model.is_searching = true;
     view_model.results = Arc::new(vec![
         SearchResultEntry {
             path: PathBuf::from("/lib/notes.md"),
@@ -2165,8 +2223,7 @@ fn search_result_branch_builds_populated_and_sparse_cards() {
             match_count: 1,
         },
     ]);
-
-    let _element = search_results(&view_model);
+    let _cards = search_results(&view_model);
 }
 
 // ---------------------------------------------------------------------------
@@ -2366,46 +2423,72 @@ fn hovering_moves_no_part_of_the_row_box_at_any_depth_or_posture() {
     }
 }
 
+/// Hover is keyed by **path**, which is the only thing standing between a
+/// re-flattened list and a highlight on the wrong file.
+///
+/// iced matches widget state by position, so a row that moves to another slot
+/// must still carry its own highlight — and a stale path left behind by a
+/// deleted or filtered-out file must match nothing rather than light up a
+/// surviving neighbour. Both halves are the same comparison, so they are
+/// pinned as one table.
 #[test]
-fn hover_is_keyed_by_path_so_a_recycled_slot_cannot_borrow_a_highlight() {
-    // The highest-risk property. iced matches widget state by position,
-    // so the only thing standing between a re-flattened list and a
-    // highlight on the wrong file is this comparison.
+fn hover_is_keyed_by_path_so_only_the_entered_row_lights_up() {
     let alpha = file_row("alpha.md", "/ws/alpha.md", 0);
     let beta = file_row("beta.md", "/ws/beta.md", 0);
-
-    assert!(
-        row_is_hovered(&alpha, Some(Path::new("/ws/alpha.md"))),
-        "the row the pointer entered reads as hovered"
-    );
-    assert!(
-        !row_is_hovered(&beta, Some(Path::new("/ws/alpha.md"))),
-        "a different file in the same slot must NOT inherit the highlight"
-    );
-    assert!(
-        !row_is_hovered(&alpha, Some(Path::new("/ws/beta.md"))),
-        "alpha must not light up because beta is hovered"
-    );
-    assert!(
-        !row_is_hovered(&alpha, None),
-        "nothing is hovered when the pointer is off the tree"
-    );
-}
-
-#[test]
-fn a_stale_hover_path_paints_no_row_at_all() {
-    // A deleted or filtered-out file leaves its path behind in the
-    // reducer until the prune runs. Because the key is the path, the
-    // worst a stale entry can do is match nothing, never light up a
-    // surviving neighbour.
-    let rows = [
-        file_row("beta.md", "/ws/beta.md", 0),
-        file_row("gamma.md", "/ws/gamma.md", 0),
-    ];
+    let gamma = file_row("gamma.md", "/ws/gamma.md", 0);
     let ghost = PathBuf::from("/ws/deleted.md");
 
-    let lit: Vec<&str> = rows
-        .iter()
+    let cases: Vec<(&str, &FlatRow, Option<PathBuf>, bool)> = vec![
+        (
+            "the row the pointer entered reads as hovered",
+            &alpha,
+            Some(PathBuf::from("/ws/alpha.md")),
+            true,
+        ),
+        (
+            "a different file in the same slot must NOT inherit the highlight",
+            &beta,
+            Some(PathBuf::from("/ws/alpha.md")),
+            false,
+        ),
+        (
+            "alpha must not light up because beta is hovered",
+            &alpha,
+            Some(PathBuf::from("/ws/beta.md")),
+            false,
+        ),
+        (
+            "nothing is hovered when the pointer is off the tree",
+            &alpha,
+            None,
+            false,
+        ),
+        (
+            "a stale path naming a deleted file lights no row out: beta",
+            &beta,
+            Some(ghost.clone()),
+            false,
+        ),
+        (
+            "a stale path naming a deleted file lights no row out: gamma",
+            &gamma,
+            Some(ghost.clone()),
+            false,
+        ),
+    ];
+
+    for (label, row, hovered, expected) in cases {
+        assert_eq!(
+            row_is_hovered(row, hovered.as_deref()),
+            expected,
+            "case '{label}': hover is the row's own path against the reducer's path"
+        );
+    }
+
+    // The same property stated over the whole row set: a hover path naming a
+    // gone file paints nothing at all.
+    let lit: Vec<&str> = [&alpha, &beta, &gamma]
+        .into_iter()
         .filter(|row| row_is_hovered(row, Some(ghost.as_path())))
         .map(|row| row.name.as_str())
         .collect();
@@ -2690,21 +2773,6 @@ fn hover_moves_guide_geometry_never_colour_only_the_band() {
     }
 }
 
-/// A resting, unindented row carries no overlay, so it pays no `Stack`.
-#[test]
-fn a_resting_unindented_row_carries_no_overlay_at_all() {
-    let overlay = row_overlay(0, WIDE_ROW, false, false);
-    assert!(
-        overlay.is_empty(),
-        "depth 0 has no guides and an unselected row has no bar"
-    );
-    assert_eq!(
-        overlay.widget_cost(),
-        0,
-        "nothing to paint means nothing to build"
-    );
-}
-
 /// The overlay's per-row widget cost, stated rather than discovered later.
 ///
 /// One `Stack`, one widget for the selection bar (it needs no offset wrapper at
@@ -2713,9 +2781,22 @@ fn a_resting_unindented_row_carries_no_overlay_at_all() {
 /// its own top-left origin and `Container` has no `margin`. The tree is not
 /// virtualised, so this is paid per visible row per frame; the bound is what
 /// [FMD-060] / [FMD-061] are measured against.
+///
+/// The empty overlay is the exception that proves the rule: a resting,
+/// unindented row carries no overlay at all and therefore pays no `Stack`.
 #[test]
 fn the_overlay_widget_cost_is_stated_and_bounded() {
-    assert_eq!(row_overlay(0, WIDE_ROW, false, false).widget_cost(), 0);
+    let resting = row_overlay(0, WIDE_ROW, false, false);
+    assert!(
+        resting.is_empty(),
+        "depth 0 has no guides and an unselected row has no bar"
+    );
+    assert_eq!(
+        resting.widget_cost(),
+        0,
+        "nothing to paint means nothing to build"
+    );
+
     assert_eq!(row_overlay(0, WIDE_ROW, true, false).widget_cost(), 2);
     assert_eq!(row_overlay(1, WIDE_ROW, false, false).widget_cost(), 3);
     assert_eq!(row_overlay(1, WIDE_ROW, true, false).widget_cost(), 4);
@@ -2734,8 +2815,14 @@ fn the_overlay_widget_cost_is_stated_and_bounded() {
             assert_eq!(
                 overlay.widget_cost(),
                 expected,
-                "cost at depth {depth}, selected={selected} must be \
+                "case 'depth {depth}, selected={selected}': cost must be \
                  1 Stack + the bar + 2 per guide"
+            );
+            assert_eq!(
+                overlay.is_empty(),
+                expected == 0,
+                "case 'depth {depth}, selected={selected}': only an overlay with \
+                 nothing to paint may report an empty cost"
             );
         }
     }
@@ -2751,17 +2838,1104 @@ fn the_overlay_widget_cost_is_stated_and_bounded() {
 
 // --- scrollable widget ids (AGENTS §5) ----------------------------------
 
-/// The file-tree scrollable's id is the named constant, not a generated
-/// one, so the reducer can address it across tree rebuilds.
+/// Both scrollables carry their own named id, and the two ids differ.
+///
+/// The panel swaps one scrollable for the other on `is_searching`, so they
+/// must never share an address — and neither may be `Id::unique()`, or the
+/// reducer could not address it across a tree rebuild.
 #[test]
-fn file_tree_scrollable_id_is_stable_and_named() {
-    assert_eq!(FILE_TREE_SCROLLABLE_ID, "file_tree_scroll");
+fn the_two_scrollable_ids_are_stable_named_and_distinct() {
+    assert_eq!(
+        FILE_TREE_SCROLLABLE_ID, "file_tree_scroll",
+        "the file-tree scrollable's id is the named constant, not a generated one"
+    );
+    assert_eq!(
+        SEARCH_RESULTS_SCROLLABLE_ID, "search_results_scroll",
+        "the search-result scrollable's id is the named constant"
+    );
+    assert_ne!(
+        FILE_TREE_SCROLLABLE_ID, SEARCH_RESULTS_SCROLLABLE_ID,
+        "one live widget per id: the panel shows either the tree or the results, \
+         never both under one address"
+    );
 }
 
-/// The search-result scrollable's id is the named constant, and a
-/// different one from the tree's — the panel swaps one scrollable for the
-/// other on `is_searching`, so they must never share an address.
+// ---------------------------------------------------------------------------
+// Coverage pass — the parts of the panel that had no test at all: the rich-text
+// span runs, the row-width floor, the context-target resolver, the search
+// field's style mapping, the widget builders (which build fine without a
+// renderer), and the tree-insertion helpers.
+// ---------------------------------------------------------------------------
+
+/// A hand-built snapshot for the widget-builder tests.
+///
+/// Deliberately **not** `from_app`: the builders under test need only the
+/// snapshot's own fields, and constructing it directly keeps every path in
+/// the fixture synthetic ([RUST-006]) while letting the test pick exactly
+/// the postures it wants to build.
+fn snapshot(rows: Vec<FlatRow>) -> LeftPanelViewModel {
+    LeftPanelViewModel {
+        rows: Arc::new(rows),
+        query: search_input_model("needle"),
+        is_searching: false,
+        results: Arc::new(Vec::new()),
+        selected_file: None,
+        selected_files: Vec::new(),
+        pdf_backed: HashSet::new(),
+        folder_skills: Vec::new(),
+        note_skills: Vec::new(),
+        typst_available: false,
+        multi_select: false,
+        hovered_row: None,
+        row_width: row_width_for(Some(LEFT_PANEL_DEFAULT_WIDTH)),
+    }
+}
+
+/// A content library list holding exactly one library.
+fn one_library(root: &str, name: &str) -> Vec<ContentLibrary> {
+    vec![ContentLibrary {
+        root_folder: root.to_string(),
+        name: name.to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }]
+}
+
+// --- the directory label's three runs -------------------------------------
+
+/// The directory label is three runs, and **only** the caret leaves the
+/// widget's own font.
+///
+/// The point of the rich-text split is that the disclosure glyph selects
+/// Phosphor while the name keeps the row's text face; if the name run ever
+/// picked up a font, the tree's names would silently change face. The
+/// concatenation is pinned against [`row_label`] because that is the exact
+/// string the auto-fit pass measures — a run that drifted would desync the
+/// rendered label from the measured one.
+///
+/// The function has no file-row path: a file row is the plain-text branch of
+/// `tree_row`, and that branch is exercised by
+/// [`the_panel_builds_every_row_and_body_posture`].
 #[test]
-fn search_results_scrollable_id_is_stable_and_named() {
-    assert_eq!(SEARCH_RESULTS_SCROLLABLE_ID, "search_results_scroll");
+fn directory_label_spans_are_caret_space_name_with_phosphor_on_the_caret_only() {
+    let cases = [
+        (
+            "collapsed dir at depth 0",
+            dir_row("Work", "/lib/Work", 0),
+            strings::ICON_CARET_RIGHT,
+        ),
+        (
+            "expanded dir at depth 0",
+            expanded_dir_row("Work", "/lib/Work", 0),
+            strings::ICON_CARET_DOWN,
+        ),
+        (
+            "collapsed dir at depth 7",
+            dir_row("nested", "/lib/a/b/c/d/e/f/nested", 7),
+            strings::ICON_CARET_RIGHT,
+        ),
+        (
+            "expanded dir at depth 7",
+            expanded_dir_row("nested", "/lib/a/b/c/d/e/f/nested", 7),
+            strings::ICON_CARET_DOWN,
+        ),
+        (
+            "a name with no extension",
+            dir_row("inbox", "/lib/inbox", 1),
+            strings::ICON_CARET_RIGHT,
+        ),
+    ];
+
+    for (label, row, caret) in cases {
+        let spans = directory_label_spans(&row);
+
+        assert_eq!(
+            spans.len(),
+            3,
+            "case '{label}': a directory label is exactly three runs"
+        );
+        assert_eq!(
+            spans[0].text.as_ref(),
+            caret,
+            "case '{label}': the caret run must carry the disclosure glyph for this expansion state"
+        );
+        assert_eq!(
+            spans[0].font,
+            Some(phosphor_font()),
+            "case '{label}': the caret must select the embedded Phosphor face"
+        );
+        assert_eq!(
+            spans[1].text.as_ref(),
+            " ",
+            "case '{label}': the separator is one space, matching the measured label"
+        );
+        assert_eq!(
+            spans[1].font, None,
+            "case '{label}': the separator must not select a font"
+        );
+        assert_eq!(
+            spans[2].text.as_ref(),
+            row.name.as_str(),
+            "case '{label}': the name run is the row name verbatim"
+        );
+        assert_eq!(
+            spans[2].font, None,
+            "case '{label}': the name must stay on the widget's own face, or the tree's names change font"
+        );
+        for (index, span) in spans.iter().enumerate() {
+            assert_eq!(
+                span.color, None,
+                "case '{label}': run {index} must carry no per-span colour — the row's own \
+                 `row_label_colour` is the only label colour"
+            );
+        }
+
+        let joined: String = spans.iter().map(|span| span.text.as_ref()).collect();
+        assert_eq!(
+            joined,
+            row_label(&row),
+            "case '{label}': the three runs must concatenate to the exact string the width pass measures"
+        );
+    }
+
+    // Depth is not an input to the spans at all — indent is padding, not text.
+    let shallow_row = dir_row("same", "/lib/same", 0);
+    let deep_row = dir_row("same", "/lib/same", 42);
+    let shallow = directory_label_spans(&shallow_row);
+    let deep = directory_label_spans(&deep_row);
+    for (index, (shallow_span, deep_span)) in shallow.iter().zip(&deep).enumerate() {
+        assert_eq!(
+            shallow_span.text.as_ref(),
+            deep_span.text.as_ref(),
+            "run {index}: depth must not change the label text"
+        );
+        assert_eq!(
+            shallow_span.font, deep_span.font,
+            "run {index}: depth must not change the label font"
+        );
+    }
+}
+
+// --- the row's laid-out width ---------------------------------------------
+
+/// [`row_width_for`] floors the **pane** at the panel minimum, then removes
+/// the panel's own padding.
+///
+/// The `.max(0.0)` guard on the subtraction is unreachable for any width the
+/// app allows — `LEFT_PANEL_MIN_WIDTH` is far larger than `2 × PANEL_PADDING`
+/// — so the negative and zero cases below pin the *floor* rather than the
+/// guard, which is the rule that actually protects the indent policy.
+#[test]
+fn row_width_for_strips_the_panel_padding_and_floors_at_the_minimum_pane() {
+    let floored = LEFT_PANEL_MIN_WIDTH - PANEL_PADDING - PANEL_PADDING;
+    let cases: Vec<(&str, Option<f32>, f32)> = vec![
+        (
+            "never dragged → the default pane",
+            None,
+            LEFT_PANEL_DEFAULT_WIDTH - PANEL_PADDING - PANEL_PADDING,
+        ),
+        (
+            "the default pane explicitly",
+            Some(LEFT_PANEL_DEFAULT_WIDTH),
+            LEFT_PANEL_DEFAULT_WIDTH - PANEL_PADDING - PANEL_PADDING,
+        ),
+        (
+            "exactly the minimum pane",
+            Some(LEFT_PANEL_MIN_WIDTH),
+            floored,
+        ),
+        ("below the minimum is floored up", Some(120.0), floored),
+        ("a zero remembered width", Some(0.0), floored),
+        ("a negative remembered width", Some(-64.0), floored),
+        ("a wide pane loses only the padding", Some(1_000.0), 992.0),
+    ];
+
+    for (label, remembered, expected) in cases {
+        let actual = row_width_for(remembered);
+        assert_eq!(
+            actual, expected,
+            "case '{label}' (remembered {remembered:?}): expected {expected}, got {actual}"
+        );
+        assert!(
+            actual > 0.0,
+            "case '{label}': a row must always have positive width, got {actual}"
+        );
+        assert!(
+            actual >= floored - f32::EPSILON,
+            "case '{label}': the row must never be narrower than the minimum pane less its \
+             padding ({floored}), got {actual}"
+        );
+    }
+}
+
+// --- the context target resolver ------------------------------------------
+
+/// [`context_target_for`] is the single place the multi-select rule lives.
+///
+/// The two halves of the rule are pinned separately: a directory is **always**
+/// a directory target whatever the selection says, and a file only joins the
+/// multi target when the selection holds more than one file *and* names it.
+#[test]
+fn context_target_for_names_the_target_a_menu_is_built_from() {
+    let multi = vec![PathBuf::from("/lib/a.md"), PathBuf::from("/lib/b.md")];
+    let cases: Vec<(&str, FlatRow, Vec<PathBuf>, ContextTarget)> = vec![
+        (
+            "a directory with nothing selected",
+            dir_row("Work", "/lib/Work", 0),
+            Vec::new(),
+            ContextTarget::TreeDirectory {
+                path: PathBuf::from("/lib/Work"),
+            },
+        ),
+        (
+            "a directory inside a multi-selection is still a directory",
+            dir_row("Work", "/lib/Work", 0),
+            multi.clone(),
+            ContextTarget::TreeDirectory {
+                path: PathBuf::from("/lib/Work"),
+            },
+        ),
+        (
+            "a file with nothing selected",
+            file_row("a.md", "/lib/a.md", 0),
+            Vec::new(),
+            ContextTarget::TreeFile {
+                path: PathBuf::from("/lib/a.md"),
+            },
+        ),
+        (
+            "the only selected file is a single selection, not a multi one",
+            file_row("a.md", "/lib/a.md", 0),
+            vec![PathBuf::from("/lib/a.md")],
+            ContextTarget::TreeFile {
+                path: PathBuf::from("/lib/a.md"),
+            },
+        ),
+        (
+            "a file named by a multi-selection",
+            file_row("a.md", "/lib/a.md", 0),
+            multi.clone(),
+            ContextTarget::TreeMultiSelect {
+                paths: multi.clone(),
+            },
+        ),
+        (
+            "a file outside a multi-selection keeps its own menu",
+            file_row("z.md", "/lib/z.md", 0),
+            multi.clone(),
+            ContextTarget::TreeFile {
+                path: PathBuf::from("/lib/z.md"),
+            },
+        ),
+    ];
+
+    for (label, row, selected, expected) in cases {
+        assert_eq!(
+            context_target_for(&row, &selected),
+            expected,
+            "case '{label}': the resolved target must be the one the menu is built from"
+        );
+    }
+}
+
+/// The view-model's target accessor is a thin delegate, not a second rule.
+///
+/// If the two ever diverged, the surface would record one target while
+/// rendering another, and `root_id` would refuse to replace a live card.
+#[test]
+fn menu_target_for_delegates_to_context_target_for() {
+    let (mut app, _dir) = app_with_system_lib();
+    select_files(&mut app, &["/lib/a.md", "/lib/b.md"]);
+    let view_model = LeftPanelViewModel::from_app(&app);
+
+    let rows = [
+        file_row("a.md", "/lib/a.md", 0),
+        file_row("z.md", "/lib/z.md", 0),
+        dir_row("Work", "/lib/Work", 0),
+    ];
+    for row in rows {
+        assert_eq!(
+            view_model.menu_target_for(&row),
+            context_target_for(&row, &view_model.selected_files),
+            "row '{}': the accessor must delegate, not re-decide the rule",
+            row.name
+        );
+        assert_eq!(
+            view_model.menu_items_for(&row),
+            context_menu_items(
+                &row,
+                &view_model.selected_files,
+                MenuContext {
+                    folder_skills: &view_model.folder_skills,
+                    note_skills: &view_model.note_skills,
+                    typst_available: view_model.typst_available,
+                },
+            ),
+            "row '{}': the rendered menu must be the menu the resolved target names",
+            row.name
+        );
+    }
+}
+
+/// The multi-select menu is built for an empty selection too, and both of its
+/// rows still carry the (empty) selection verbatim.
+///
+/// The builder has no empty-input branch, so this pins that it degrades to a
+/// well-formed two-row menu rather than a panic or a dropped row.
+#[test]
+fn multi_select_menu_items_still_offers_both_rows_for_an_empty_selection() {
+    let items = multi_select_menu_items(&[]);
+
+    assert_eq!(
+        row_labels(&items),
+        vec![strings::MERGE_ACTION, strings::DELETE_ACTION],
+        "an empty selection must not drop a menu row"
+    );
+    assert_eq!(
+        items[0].message,
+        Message::Command(UserCommand::MergePrompt(Vec::new())),
+        "the merge row must carry the empty selection, not a synthesised one"
+    );
+    assert_eq!(
+        items[1].message,
+        Message::Tree(TreeMessage::DeleteSelectedRequested { paths: Vec::new() }),
+        "the delete row must carry the empty selection, not a synthesised one"
+    );
+    assert!(
+        !items[0].is_destructive(),
+        "merge is a batch action, not a destructive one"
+    );
+    assert!(
+        items[1].is_destructive(),
+        "§4.9.1 keeps the destructive row in the destructive group"
+    );
+}
+
+/// Every menu declares its §4.9.1 runs in order, with unique keys and the
+/// destructive row last.
+///
+/// This is the structural rule `menu_from_rows` consumes: a separator is
+/// emitted wherever the group changes, and `Menu::validate` requires the
+/// destructive run to be last. A menu that interleaved groups would render
+/// separators in the wrong places without any single row looking wrong.
+#[test]
+fn every_menu_declares_its_groups_in_spec_order_with_unique_keys() {
+    let skill = SkillFile {
+        name: "run-it".to_string(),
+        path: PathBuf::from("/sys/Skills/Note/run-it.md"),
+    };
+    let rank = |group: ContextGroup| match group {
+        ContextGroup::Primary => 0,
+        ContextGroup::Automation => 1,
+        ContextGroup::Management => 2,
+        ContextGroup::Destructive => 3,
+    };
+
+    let menus: Vec<(&str, Vec<ContextRow>)> = vec![
+        (
+            "directory without skills",
+            directory_menu_items(Path::new("/lib/Work"), &[]),
+        ),
+        (
+            "directory with a folder skill",
+            directory_menu_items(Path::new("/lib/Work"), std::slice::from_ref(&skill)),
+        ),
+        (
+            "file without typst",
+            file_menu_items(Path::new("/lib/n.md"), std::slice::from_ref(&skill), false),
+        ),
+        (
+            "file with typst",
+            file_menu_items(Path::new("/lib/n.md"), std::slice::from_ref(&skill), true),
+        ),
+        (
+            "multi-selection",
+            multi_select_menu_items(&[PathBuf::from("/lib/a.md"), PathBuf::from("/lib/b.md")]),
+        ),
+    ];
+
+    for (label, items) in menus {
+        assert!(
+            !items.is_empty(),
+            "case '{label}': a menu must never come back empty"
+        );
+
+        let mut keys: Vec<&str> = items.iter().map(|item| item.key.as_str()).collect();
+        let total = keys.len();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(
+            keys.len(),
+            total,
+            "case '{label}': menu keys must be unique within a card, got {:?}",
+            items
+                .iter()
+                .map(|item| item.key.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        for pair in items.windows(2) {
+            assert!(
+                rank(pair[0].group) <= rank(pair[1].group),
+                "case '{label}': the runs must appear in §4.9.1 order — {:?} came after {:?}",
+                pair[0].group,
+                pair[1].group
+            );
+        }
+
+        assert!(
+            items.last().expect("non-empty menu").is_destructive(),
+            "case '{label}': the destructive row must be the menu's last row, got {:?}",
+            row_labels(&items)
+        );
+    }
+}
+
+// --- the search field's paint ---------------------------------------------
+
+/// Every iced `Status` reaches the framework's search atom, and the panel adds
+/// no paint of its own.
+///
+/// iced styles a `text_input` from `(Theme, Status)` while the atom resolves
+/// from `(InputKind, VisualState, Palette)`; this function is the whole
+/// translation, so each arm is pinned against the atom's own output rather
+/// than against a copied colour.
+#[test]
+fn search_field_style_maps_every_iced_status_onto_the_framework_search_cell() {
+    use iced::widget::text_input::Status;
+
+    let pro = Palette::pro();
+    let cases: Vec<(&str, Status, BaseState, bool)> = vec![
+        ("Active", Status::Active, BaseState::Rest, false),
+        ("Hovered", Status::Hovered, BaseState::Hovered, false),
+        (
+            "Focused",
+            Status::Focused { is_hovered: false },
+            BaseState::Rest,
+            true,
+        ),
+        (
+            "Focused while hovered",
+            Status::Focused { is_hovered: true },
+            BaseState::Rest,
+            true,
+        ),
+        ("Disabled", Status::Disabled, BaseState::Disabled, false),
+    ];
+
+    for (label, status, base, focused) in cases {
+        let style = search_field_style(status);
+        let resolved = pro_text_input::resolve_input_style(
+            InputKind::Search,
+            VisualState { base, focused },
+            &pro,
+        );
+
+        assert_eq!(
+            style.background,
+            Background::Color(resolved.background),
+            "case '{label}': the fill must come from the atom, not from iced's theme"
+        );
+        assert_eq!(
+            style.border,
+            Border {
+                color: resolved.border_color,
+                width: resolved.border_width,
+                radius: pro_text_input::RADIUS.into(),
+            },
+            "case '{label}': the perimeter must be the atom's colour and stroke on the \
+             input atom's own radius"
+        );
+        assert_eq!(
+            style.icon, resolved.icon,
+            "case '{label}': the slot glyph colour must come from the atom"
+        );
+        assert_eq!(
+            style.placeholder, resolved.placeholder,
+            "case '{label}': the placeholder colour must come from the atom"
+        );
+        assert_eq!(
+            style.value, resolved.text,
+            "case '{label}': the value colour must come from the atom"
+        );
+        assert_eq!(
+            style.selection, resolved.selection_background,
+            "case '{label}': the selection fill must come from the atom"
+        );
+        assert_eq!(
+            style.selection, pro.accent_fill,
+            "case '{label}': the selection fill is accent.fill in every posture"
+        );
+    }
+
+    // Non-vacuity: the arms really do resolve to different paints, so the
+    // per-case equalities above are not all comparing one style to itself.
+    assert_ne!(
+        search_field_style(Status::Active),
+        search_field_style(Status::Hovered),
+        "hover must move the perimeter, or the Hovered arm is dead weight"
+    );
+    assert_ne!(
+        search_field_style(Status::Active),
+        search_field_style(Status::Focused { is_hovered: false }),
+        "focus must move the cell, or the Focused arm is dead weight"
+    );
+    assert_ne!(
+        search_field_style(Status::Active),
+        search_field_style(Status::Disabled),
+        "a dead input must look dead, or the Disabled arm is dead weight"
+    );
+    // Focus ignores the pointer: `is_hovered` is not part of the resolved state.
+    assert_eq!(
+        search_field_style(Status::Focused { is_hovered: false }),
+        search_field_style(Status::Focused { is_hovered: true }),
+        "the panel folds every focused status onto `Rest + focused`, so the pointer cannot change it"
+    );
+}
+
+// --- the widget builders --------------------------------------------------
+
+/// Every row posture and both body branches build.
+///
+/// Widget construction needs no renderer — iced builds a widget tree lazily —
+/// so the branches inside `tree_row` / `tree_body` / `left_panel` are
+/// reachable from a unit test even though nothing can be laid out. The row
+/// set is chosen to hit each branch once: directory vs file label, chip shown
+/// vs chip suppressed, double-click armed vs not, and an empty overlay vs a
+/// bar-only, guide-only and bar-plus-guide overlay.
+#[test]
+fn the_panel_builds_every_row_and_body_posture() {
+    let mut view_model = snapshot(vec![
+        // depth 0, unselected, directory → the empty-overlay early return
+        dir_row("Work", "/lib/Work", 0),
+        // depth 2, expanded directory → guides only, no double-click
+        expanded_dir_row("Projects", "/lib/Work/Projects", 2),
+        // depth 0 selected file → selection bar only, double-click armed
+        file_row("note.md", "/lib/note.md", 0),
+        // depth 4 selected file, PDF-backed and affordable → chip + bar + guides
+        file_row("deep.md", "/lib/a/b/c/d/deep.md", 4),
+        // depth 8 PDF-backed file at a 272px row → chip suppressed by the floor gate
+        file_row("deeper.md", "/lib/a/b/c/d/e/f/g/h/deeper.md", 8),
+        // hovered file → the hover band, guides only
+        file_row("hover.md", "/lib/hover.md", 1),
+    ]);
+    view_model.selected_file = Some(PathBuf::from("/lib/note.md"));
+    view_model.selected_files = vec![
+        PathBuf::from("/lib/note.md"),
+        PathBuf::from("/lib/a/b/c/d/deep.md"),
+    ];
+    view_model.pdf_backed = HashSet::from([
+        PathBuf::from("/lib/a/b/c/d/deep.md"),
+        PathBuf::from("/lib/a/b/c/d/e/f/g/h/deeper.md"),
+    ]);
+    view_model.hovered_row = Some(PathBuf::from("/lib/hover.md"));
+    view_model.multi_select = true;
+
+    // The fixture must actually straddle the chip gate, or the test would
+    // silently exercise only one of its two branches.
+    assert!(
+        pdf_badge_fits(4, view_model.row_width),
+        "fixture: depth 4 at row width {} must afford the chip",
+        view_model.row_width
+    );
+    assert!(
+        !pdf_badge_fits(8, view_model.row_width),
+        "fixture: depth 8 at row width {} must suppress the chip",
+        view_model.row_width
+    );
+
+    let _tree_body = tree_body(&view_model);
+    let _tree_panel = left_panel(&view_model);
+
+    // The empty-workspace placeholder branch.
+    let empty = snapshot(Vec::new());
+    let _empty_body = tree_body(&empty);
+    let _empty_panel = left_panel(&empty);
+
+    // The search branch, with and without results, and the inert clear button
+    // that becomes live once a search is running.
+    let mut searching = snapshot(Vec::new());
+    searching.is_searching = true;
+    {
+        // Scoped so the element's borrow of `searching` ends before the
+        // populated case reassigns `results`.
+        let _no_results_panel = left_panel(&searching);
+    }
+
+    searching.results = Arc::new(vec![
+        SearchResultEntry {
+            path: PathBuf::from("/lib/notes.md"),
+            file_name: "notes.md".to_string(),
+            relative_path: "Work / notes.md".to_string(),
+            snippet: "…the matching line…".to_string(),
+            line_number: 7,
+            match_count: 3,
+        },
+        SearchResultEntry {
+            path: PathBuf::from("/lib/bare.md"),
+            file_name: "bare.md".to_string(),
+            relative_path: "bare.md".to_string(),
+            snippet: String::new(),
+            line_number: 1,
+            match_count: 0,
+        },
+    ]);
+    let _results_panel = left_panel(&searching);
+}
+
+/// A stripe at `x = 0` skips the offset wrapper; one at `x > 0` needs it.
+///
+/// iced's `Stack` places every child at its own top-left origin and
+/// `Container` has no `margin`, so the wrapper is the only way to push a
+/// guide right. The selection bar sits at the row's own left edge and must
+/// not pay for one — that asymmetry is what `widget_cost` reports as
+/// `1` for the bar and `2` per guide.
+#[test]
+fn a_stripe_at_the_left_edge_skips_the_offset_wrapper_and_an_offset_one_uses_it() {
+    let bar = RowStripe {
+        x: 0.0,
+        width: tree_row::SELECTION_BAR_WIDTH,
+        color: iced::Color::WHITE,
+    };
+    let guide = RowStripe {
+        x: ROW_PADDING_X + tree_row::INDENT_STEP / 2.0,
+        width: tree_row::GUIDE_WIDTH,
+        color: iced::Color::BLACK,
+    };
+
+    let _bar_element = stripe_element(bar, ROW_MIN_HEIGHT);
+    let _guide_element = stripe_element(guide, ROW_MIN_HEIGHT);
+
+    // The asymmetry the wrapper exists to create, pinned on the data the
+    // builder consumes rather than on the widgets it produces.
+    assert_eq!(bar.x, 0.0, "the selection bar is the row's left edge");
+    assert!(guide.x > 0.0, "a guide must be offset, got {}", guide.x);
+    assert_eq!(
+        RowOverlay {
+            selection_bar: Some(bar),
+            guides: vec![guide],
+        }
+        .widget_cost(),
+        1 + 1 + 2,
+        "one Stack, one widget for the bar, two for the offset guide"
+    );
+}
+
+/// The search-result card's optional lines, including the case where the
+/// relative path merely repeats the title.
+///
+/// The card suppresses a path line that adds nothing: an empty one, or one
+/// identical to the file name. Neither suppression has its own test today,
+/// and the second is the `&&` half of the guard.
+#[test]
+fn a_search_card_drops_the_lines_it_has_nothing_to_show() {
+    // The card slot has to hold its title line box whatever it drops, and
+    // that floor does not depend on the entry — it is pinned once here rather
+    // than repeated per case.
+    assert!(
+        SEARCH_ROW_HEIGHT >= tree_row::LABEL_RUNG.line_height,
+        "the card slot ({SEARCH_ROW_HEIGHT}) must at least hold its title's line box"
+    );
+
+    // Each case also names which of the card's three optional lines it is
+    // meant to reach, so the table stays an honest map of the branches the
+    // build below exercises.
+    let cases: Vec<(&str, SearchResultEntry, bool, bool, bool)> = vec![
+        (
+            "title only — empty path line and empty snippet",
+            SearchResultEntry {
+                path: PathBuf::from("/lib/bare.md"),
+                file_name: "bare.md".to_string(),
+                relative_path: String::new(),
+                snippet: String::new(),
+                line_number: 1,
+                match_count: 1,
+            },
+            false,
+            false,
+            false,
+        ),
+        (
+            "path line identical to the title is not a second line",
+            SearchResultEntry {
+                path: PathBuf::from("/lib/notes.md"),
+                file_name: "notes.md".to_string(),
+                relative_path: "notes.md".to_string(),
+                snippet: String::new(),
+                line_number: 1,
+                match_count: 0,
+            },
+            false,
+            false,
+            false,
+        ),
+        (
+            "full card — distinct path, snippet and a match-count suffix",
+            SearchResultEntry {
+                path: PathBuf::from("/lib/notes.md"),
+                file_name: "notes.md".to_string(),
+                relative_path: "Work / notes.md".to_string(),
+                snippet: "…the matching line…".to_string(),
+                line_number: 7,
+                match_count: 3,
+            },
+            true,
+            true,
+            true,
+        ),
+        (
+            "snippet but no match-count suffix at exactly one match",
+            SearchResultEntry {
+                path: PathBuf::from("/lib/one.md"),
+                file_name: "one.md".to_string(),
+                relative_path: "one.md".to_string(),
+                snippet: "the only match".to_string(),
+                line_number: 1,
+                match_count: 1,
+            },
+            false,
+            true,
+            false,
+        ),
+    ];
+
+    for (label, entry, shows_path_line, shows_snippet_line, shows_count_suffix) in cases {
+        let _card = search_result_card(&entry);
+
+        assert_eq!(
+            !entry.relative_path.is_empty() && entry.relative_path != entry.file_name,
+            shows_path_line,
+            "case '{label}': the path line is shown only when it is neither empty nor a \
+             repeat of the title ('{}' vs '{}')",
+            entry.relative_path,
+            entry.file_name
+        );
+        assert_eq!(
+            !entry.snippet.is_empty(),
+            shows_snippet_line,
+            "case '{label}': the snippet line is shown only when there is a snippet"
+        );
+        assert_eq!(
+            entry.match_count > 1,
+            shows_count_suffix,
+            "case '{label}': the match-count suffix needs more than one match, got {}",
+            entry.match_count
+        );
+    }
+}
+
+// --- workspace-tree construction ------------------------------------------
+
+/// A path outside every library root, and a library with no node in the tree,
+/// are both ignored rather than inserted somewhere wrong.
+///
+/// These are the two early returns of `insert_path_into_tree`. The first is
+/// the ordinary case of a stale watcher event naming a file the user removed
+/// from a library; the second guards against a tree built from a different
+/// library list than the one being inserted against.
+#[test]
+fn insert_path_into_tree_ignores_paths_it_cannot_place() {
+    let libraries = one_library("D:/system", SYSTEM_LIBRARY_NAME);
+
+    // A path under no library root.
+    let mut root = workspace_tree_root(&libraries);
+    insert_path_into_tree(&mut root, &libraries, Path::new("E:/elsewhere/x.md"), false);
+    let system = root
+        .children
+        .get(SYSTEM_LIBRARY_NAME)
+        .expect("the library node is built by workspace_tree_root");
+    assert!(
+        system.children.is_empty(),
+        "a path outside every library root must not be inserted anywhere, got {:?}",
+        system.children.keys().collect::<Vec<_>>()
+    );
+
+    // A library whose node is missing from the tree.
+    let mut bare = TreeNode::new("workspace".to_string(), PathBuf::new(), true);
+    insert_path_into_tree(&mut bare, &libraries, Path::new("D:/system/x.md"), false);
+    assert!(
+        bare.children.is_empty(),
+        "a path whose library has no node must be dropped, got {:?}",
+        bare.children.keys().collect::<Vec<_>>()
+    );
+}
+
+/// Inserting a path creates every intermediate directory it walks through and
+/// marks only the final component by `leaf_is_dir`.
+#[test]
+fn insert_path_into_tree_creates_the_intermediate_directories_it_walks_through() {
+    let libraries = one_library("D:/lib", "Lib");
+
+    let mut root = workspace_tree_root(&libraries);
+    insert_path_into_tree(
+        &mut root,
+        &libraries,
+        Path::new("D:/lib/a/b/note.md"),
+        false,
+    );
+
+    {
+        // Scoped so every read of `root` ends before the second walk mutates it.
+        let library = root.children.get("Lib").expect("library node");
+        assert_eq!(
+            library.path,
+            PathBuf::from("D:/lib"),
+            "the library node carries the library's own root"
+        );
+        let level_a = library.children.get("a").expect("intermediate 'a'");
+        assert!(
+            level_a.is_dir,
+            "'a' is a walked-through component, so it is a directory"
+        );
+        let level_b = level_a.children.get("b").expect("intermediate 'b'");
+        assert!(
+            level_b.is_dir,
+            "'b' is a walked-through component, so it is a directory"
+        );
+        assert_eq!(
+            level_b.path,
+            PathBuf::from("D:/lib").join("a").join("b"),
+            "each created node carries the joined path to itself"
+        );
+        let leaf = level_b.children.get("note.md").expect("the leaf");
+        assert!(
+            !leaf.is_dir,
+            "the final component follows `leaf_is_dir`, and it was `false`"
+        );
+    }
+
+    // The same walk with a directory leaf.
+    insert_path_into_tree(&mut root, &libraries, Path::new("D:/lib/a/b/inner"), true);
+    let inner = root
+        .children
+        .get("Lib")
+        .expect("library node")
+        .children
+        .get("a")
+        .expect("intermediate 'a'")
+        .children
+        .get("b")
+        .expect("intermediate 'b'")
+        .children
+        .get("inner")
+        .expect("the directory leaf");
+    assert!(
+        inner.is_dir,
+        "the final component follows `leaf_is_dir`, and it was `true`"
+    );
+
+    // Re-inserting an existing path is idempotent — the watcher reports the
+    // same file many times and the tree must not grow each time.
+    let before = root
+        .children
+        .get("Lib")
+        .expect("library node")
+        .children
+        .len();
+    insert_path_into_tree(
+        &mut root,
+        &libraries,
+        Path::new("D:/lib/a/b/note.md"),
+        false,
+    );
+    assert_eq!(
+        root.children
+            .get("Lib")
+            .expect("library node")
+            .children
+            .len(),
+        before,
+        "re-inserting an existing path must not add a top-level child"
+    );
+}
+
+/// A file with no tag record at all is excluded by the tag filter.
+///
+/// The filter's inner `else` — "this file has no tags, so it cannot carry the
+/// active one" — is a different arm from "it has tags, but not this one", and
+/// the existing UI-018 test only exercises the second.
+#[test]
+fn a_file_with_no_tag_record_at_all_is_excluded_by_the_tag_filter() {
+    let (mut app, dir) = app_with_system_lib();
+    let lib_root = dir.path().to_path_buf();
+    let tagged = lib_root.join("tagged.md");
+    let untagged = lib_root.join("untagged.md");
+
+    app.workspace_mut().all_files = vec![tagged.clone(), untagged.clone()];
+    app.tags_mut()
+        .add_tags(tagged.clone(), vec!["keep".to_string()]);
+    app.tags_mut().selected_tag = Some("keep".to_string());
+    app.selection_mut().expanded_dirs.insert(lib_root.clone());
+
+    let paths: Vec<PathBuf> = tree_rows(&app).iter().map(|row| row.path.clone()).collect();
+    assert!(
+        paths.contains(&tagged),
+        "the file carrying the active tag stays, got {paths:?}"
+    );
+    assert!(
+        !paths.contains(&untagged),
+        "UI-018: a file with no tag record cannot carry the active tag and must be \
+         filtered out, got {paths:?}"
+    );
+}
+
+/// With no tag selected the filtered builder is the plain index, directories
+/// and all.
+#[test]
+fn build_workspace_tree_without_a_tag_is_the_unfiltered_index() {
+    let (mut app, dir) = app_with_system_lib();
+    let lib_root = dir.path().to_path_buf();
+    let sub = lib_root.join("middle");
+
+    app.workspace_mut().all_files = vec![sub.join("inner.md")];
+    app.workspace_mut().all_dirs = vec![sub.clone()];
+
+    let index_paths = node_paths(&build_workspace_tree_index(&app));
+    let built_paths = node_paths(&build_workspace_tree(&app));
+    assert_eq!(
+        built_paths, index_paths,
+        "with no active tag the two builders must agree exactly"
+    );
+    assert!(
+        index_paths.contains(&sub),
+        "fixture: the unfiltered index keeps an empty directory, so the comparison above \
+         is not two empty lists agreeing"
+    );
+}
+
+/// Every path held by a `TreeNode`, flattened for comparison.
+fn node_paths(node: &TreeNode) -> Vec<PathBuf> {
+    let mut paths = vec![node.path.clone()];
+    for child in node.children.values() {
+        paths.extend(node_paths(child));
+    }
+    paths.sort();
+    paths
+}
+
+/// A configured library with an empty index still contributes its own row: the
+/// unfiltered index is built from `workspace_tree_root`, which seeds one node per
+/// content library and is never pruned. Only a tag filter prunes the bare library
+/// node away.
+#[test]
+fn a_configured_library_with_an_empty_index_keeps_its_own_row_until_a_tag_prunes_it() {
+    // The no-library case is covered by
+    // `tree_rows_are_empty_when_the_index_has_no_paths`. This is the *second*
+    // way the builder can come back: a library IS configured, so the first
+    // guard does not fire, and the index has no paths under it.
+    let (mut app, _dir) = app_with_system_lib();
+    assert!(
+        app.content_libraries()
+            .iter()
+            .any(|lib| lib.name == SYSTEM_LIBRARY_NAME),
+        "fixture: the library has to exist, otherwise this repeats the \
+         no-library guard"
+    );
+
+    // Unfiltered: `build_workspace_tree` returns the index untouched, so the
+    // library node survives even with nothing beneath it.
+    let rows = tree_rows(&app);
+    assert_eq!(
+        rows.len(),
+        1,
+        "an empty index leaves exactly the library node, got: {:?}",
+        rows.iter().map(|r| &r.name).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        rows[0].name, SYSTEM_LIBRARY_NAME,
+        "the single row is the library root itself"
+    );
+    assert!(rows[0].is_dir, "a library root renders as a directory");
+
+    // Tag-filtered: `prune_empty_dirs` drops a directory with no children, so
+    // the bare library node is pruned and nothing is left to render.
+    app.tags_mut().selected_tag = Some("keep".to_string());
+    let pruned = tree_rows(&app);
+    assert!(
+        pruned.is_empty(),
+        "a tag filter prunes a library node that holds no tagged files, got: {:?}",
+        pruned.iter().map(|r| &r.name).collect::<Vec<_>>()
+    );
+}
+
+/// The note-skill listing reads the seeded note folder and nothing else.
+///
+/// This is the read-only path shared with the tab strip: `list_note_skills()`
+/// `create_dir_all`s, which a per-frame view must not do ([RUST-006]).
+#[test]
+fn note_skill_files_lists_the_seeded_note_folder_read_only() {
+    let (app, dir) = app_with_system_lib();
+    seed_skills(dir.path());
+
+    let skills = note_skill_files(&app);
+    assert_eq!(
+        skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["summarize"],
+        "only the note folder's skills are listed, never the folder ones"
+    );
+    assert_eq!(
+        skills[0].path,
+        dir.path()
+            .join(SKILLS_SUBDIR)
+            .join(NOTE_SKILLS_SUBDIR)
+            .join("summarize.md"),
+        "the skill path is resolved under the system library root"
+    );
+    assert!(
+        !skills.iter().any(|skill| skill.name == "tidy"),
+        "the folder skill must not leak into the note listing"
+    );
+}
+
+/// With no skill folder on disk the listing is empty and nothing is created.
+#[test]
+fn note_skill_files_is_empty_when_the_skill_folder_does_not_exist() {
+    let (app, dir) = app_with_system_lib();
+    assert!(
+        note_skill_files(&app).is_empty(),
+        "a missing skill folder must read as an empty listing"
+    );
+    assert!(
+        !dir.path()
+            .join(SKILLS_SUBDIR)
+            .join(NOTE_SKILLS_SUBDIR)
+            .exists(),
+        "the read-only path must not create the skill folder as a side effect"
+    );
+}
+
+/// The remaining derived constants are bound to their tokens.
+///
+/// Every other constant in the module is pinned where it is used; these four
+/// had no assertion anywhere, so a retune of the token they read from would
+/// have gone unnoticed.
+#[test]
+fn the_remaining_derived_constants_read_their_tokens() {
+    assert_eq!(
+        PDF_BADGE_TEXT_ALLOWANCE,
+        space::LG + space::XS,
+        "the badge's text room is space.lg + space.xs"
+    );
+    assert_eq!(
+        PDF_BADGE_GAP,
+        space::XS,
+        "the label-to-badge gap is space.xs"
+    );
+    assert_eq!(
+        SEARCH_CARD_PADDING,
+        space::XS,
+        "the search card's inner padding is space.xs"
+    );
+    assert_eq!(
+        MAX_ROW_INDENT_DEPTH, 50,
+        "the auto-fit indent clamp is an app-owned 50, not the framework's 1000 stack guard"
+    );
+    assert_eq!(SEARCH_INPUT_ID, "left_panel_search_input");
+    assert_eq!(SEARCH_TRIGGER_FOCUS_ID, "left_search_trigger");
+    assert_eq!(SEARCH_CLEAR_FOCUS_ID, "left_search_clear");
+    assert_eq!(NOTE_SKILLS_SUBDIR, "Note");
 }

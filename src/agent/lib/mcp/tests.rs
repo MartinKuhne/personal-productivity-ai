@@ -1964,3 +1964,922 @@ fn tempfile_in_target(name: &str) -> std::path::PathBuf {
     p.push(format!("fastmd_mcp_{nanos}_{name}"));
     p
 }
+
+// ---------------------------------------------------------------------------
+// McpClients manager state machine
+// ---------------------------------------------------------------------------
+
+/// An HTTP server entry with no static headers (i.e. OAuth-eligible).
+fn sse_entry(url: &str) -> crate::config::McpServerEntry {
+    McpServerConfig::Sse {
+        url: url.to_owned(),
+        headers: HashMap::new(),
+        oauth: None,
+    }
+    .into()
+}
+
+/// Names of the sessions the manager currently holds.
+///
+/// `tests` is a child module of `mcp`, so it may read the manager's
+/// private state directly — that keeps these assertions about the
+/// session cache exact instead of inferred from behaviour.
+fn manager_sessions(manager: &McpClients) -> Vec<String> {
+    let state = manager.state.lock().expect("manager state lock");
+    let mut names: Vec<String> = state.sessions.keys().cloned().collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn default_creates_an_empty_manager_without_a_token_store() {
+    let manager = McpClients::default();
+    assert!(
+        manager.configured_servers().is_empty(),
+        "a fresh manager has no servers"
+    );
+    assert!(
+        manager.token_store().is_none(),
+        "OAuth stays off until a token store is installed"
+    );
+    assert!(
+        !manager.needs_auth_now("anything"),
+        "an unknown server never reports needs_auth"
+    );
+}
+
+#[test]
+fn set_token_store_installs_replaces_and_disables() {
+    let manager = McpClients::new();
+    let first = Arc::new(TokenStore::in_memory());
+    manager.set_token_store(Some(first.clone()));
+    assert!(
+        manager
+            .token_store()
+            .is_some_and(|s| Arc::ptr_eq(&s, &first)),
+        "the installed store is handed back"
+    );
+
+    let second = Arc::new(TokenStore::in_memory());
+    manager.set_token_store(Some(second.clone()));
+    assert!(
+        manager
+            .token_store()
+            .is_some_and(|s| Arc::ptr_eq(&s, &second)),
+        "a later store replaces the previous one"
+    );
+
+    manager.set_token_store(None);
+    assert!(
+        manager.token_store().is_none(),
+        "passing None disables OAuth again"
+    );
+}
+
+/// MCP-020: only HTTP servers without a static `Authorization`
+/// header are eligible for the OAuth flow. The check is on the
+/// header *name* (case-insensitive), not on its value.
+#[test]
+fn needs_authentication_only_for_http_servers_without_static_authorization() {
+    let stdio = McpServerConfig::Stdio {
+        command: "server".to_string(),
+        args: vec![],
+        env: HashMap::new(),
+    };
+    assert!(
+        !McpClients::needs_authentication(&stdio),
+        "stdio servers cannot run OAuth (MCP-020)"
+    );
+
+    let plain = McpServerConfig::Sse {
+        url: "https://example.invalid/mcp".to_string(),
+        headers: HashMap::new(),
+        oauth: None,
+    };
+    assert!(
+        McpClients::needs_authentication(&plain),
+        "an unauthenticated HTTP server is OAuth-eligible"
+    );
+
+    for name in [
+        "Authorization",
+        "authorization",
+        "AUTHORIZATION",
+        "AuthorIzAtIoN",
+    ] {
+        let mut headers = HashMap::new();
+        headers.insert(name.to_string(), "Bearer static".to_string());
+        let cfg = McpServerConfig::Sse {
+            url: "https://example.invalid/mcp".to_string(),
+            headers,
+            oauth: None,
+        };
+        assert!(
+            !McpClients::needs_authentication(&cfg),
+            "a static {name} header opts out of OAuth"
+        );
+    }
+
+    let mut empty_value = HashMap::new();
+    empty_value.insert("Authorization".to_string(), String::new());
+    let blank = McpServerConfig::Sse {
+        url: "https://example.invalid/mcp".to_string(),
+        headers: empty_value,
+        oauth: None,
+    };
+    assert!(
+        !McpClients::needs_authentication(&blank),
+        "the opt-out is keyed on the header name, even with an empty value"
+    );
+
+    let mut other = HashMap::new();
+    other.insert("X-Api-Key".to_string(), "k".to_string());
+    let keyed = McpServerConfig::Sse {
+        url: "https://example.invalid/mcp".to_string(),
+        headers: other,
+        oauth: None,
+    };
+    assert!(
+        McpClients::needs_authentication(&keyed),
+        "a non-Authorization header does not opt out of OAuth"
+    );
+}
+
+#[test]
+fn needs_auth_flags_track_the_configured_servers() {
+    let manager = McpClients::new();
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("alpha".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    config
+        .mcp_servers
+        .insert("beta".to_string(), sse_entry("http://127.0.0.1:2/mcp"));
+    manager.update_config(&config);
+
+    assert_eq!(
+        manager.configured_servers().len(),
+        2,
+        "both servers are configured"
+    );
+    assert!(
+        !manager.needs_auth_now("alpha"),
+        "a newly configured server starts with the flag cleared"
+    );
+
+    manager.mark_needs_auth("alpha", true);
+    assert!(
+        manager.needs_auth_now("alpha"),
+        "the flag is readable after being set"
+    );
+    assert!(
+        !manager.needs_auth_now("beta"),
+        "marking one server does not affect another"
+    );
+
+    // A config update keeps flags for servers that survived...
+    let mut only_alpha = AgentConfig::default();
+    only_alpha
+        .mcp_servers
+        .insert("alpha".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    manager.update_config(&only_alpha);
+    assert!(
+        manager.needs_auth_now("alpha"),
+        "the flag survives an update that keeps the server"
+    );
+    assert_eq!(
+        manager.configured_servers(),
+        vec!["alpha".to_string()],
+        "beta was removed from the config"
+    );
+
+    // ...and drops flags for servers that went away.
+    manager.update_config(&AgentConfig::default());
+    assert!(
+        manager.configured_servers().is_empty(),
+        "every server was removed"
+    );
+    assert!(
+        !manager.needs_auth_now("alpha"),
+        "removing a server drops its runtime flag"
+    );
+}
+
+#[test]
+fn mark_needs_auth_accepts_a_server_that_is_not_configured() {
+    let manager = McpClients::new();
+    manager.mark_needs_auth("ghost", true);
+    assert!(
+        manager.needs_auth_now("ghost"),
+        "the flag map is not restricted to configured servers"
+    );
+    manager.mark_needs_auth("ghost", false);
+    assert!(
+        !manager.needs_auth_now("ghost"),
+        "the dialog's Forget link can clear the flag again"
+    );
+}
+
+#[tokio::test]
+async fn update_config_drops_sessions_for_removed_and_changed_servers() {
+    let manager = McpClients::new();
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("keep".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    config
+        .mcp_servers
+        .insert("gone".to_string(), sse_entry("http://127.0.0.1:2/mcp"));
+    config
+        .mcp_servers
+        .insert("moved".to_string(), sse_entry("http://127.0.0.1:3/mcp"));
+    manager.update_config(&config);
+
+    // Populate the session cache without performing any I/O.
+    for name in ["keep", "gone", "moved"] {
+        manager
+            .get_or_create_session(name)
+            .expect("session created for a configured server");
+    }
+    assert_eq!(
+        manager_sessions(&manager),
+        vec!["gone", "keep", "moved"],
+        "one session per server"
+    );
+
+    manager.update_config(&config);
+    assert_eq!(
+        manager_sessions(&manager),
+        vec!["gone", "keep", "moved"],
+        "an unchanged config must not disturb cached sessions"
+    );
+
+    let mut changed = AgentConfig::default();
+    changed
+        .mcp_servers
+        .insert("keep".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    changed
+        .mcp_servers
+        .insert("moved".to_string(), sse_entry("http://127.0.0.1:9/mcp"));
+    manager.update_config(&changed);
+    assert_eq!(
+        manager_sessions(&manager),
+        vec!["keep"],
+        "a removed server and a changed config both drop their session"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_drains_sessions_and_is_idempotent() {
+    let manager = McpClients::new();
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("a".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    manager.update_config(&config);
+    manager.get_or_create_session("a").expect("session created");
+    assert_eq!(manager_sessions(&manager), vec!["a"]);
+
+    manager.shutdown();
+    assert!(
+        manager_sessions(&manager).is_empty(),
+        "shutdown drops every session"
+    );
+    manager.shutdown();
+    assert_eq!(
+        manager.configured_servers(),
+        vec!["a".to_string()],
+        "shutdown does not clear the configuration"
+    );
+
+    manager
+        .get_or_create_session("a")
+        .expect("a session is recreated on demand");
+    assert_eq!(
+        manager_sessions(&manager),
+        vec!["a"],
+        "sessions are lazily rebuilt after shutdown"
+    );
+}
+
+#[tokio::test]
+async fn dropping_the_manager_releases_its_sessions() {
+    let manager = McpClients::new();
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("a".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    manager.update_config(&config);
+    let session = manager.get_or_create_session("a").expect("session");
+    assert_eq!(
+        Arc::strong_count(&session),
+        2,
+        "the manager and this test each hold one reference"
+    );
+
+    drop(manager);
+    assert_eq!(
+        Arc::strong_count(&session),
+        1,
+        "Drop must shut down and release the session cache"
+    );
+}
+
+#[tokio::test]
+async fn manager_methods_reject_unknown_servers() {
+    let manager = McpClients::new();
+
+    // `McpClientSession` is not `Debug`, so this cannot use `expect_err`.
+    let init = match manager.initialize_server("nope").await {
+        Ok(_) => panic!("an unknown server cannot be initialised"),
+        Err(err) => err,
+    };
+    assert!(
+        init.contains("is not configured"),
+        "initialize_server: {init}"
+    );
+
+    let ping = manager
+        .ping("nope")
+        .await
+        .expect_err("an unknown server cannot be pinged");
+    assert!(ping.contains("is not configured"), "ping: {ping}");
+
+    let list = manager
+        .discover_tools("nope")
+        .await
+        .expect_err("an unknown server has no tools");
+    assert!(list.contains("is not configured"), "discover_tools: {list}");
+
+    let call = manager
+        .call_tool("nope", "t", serde_json::json!({}))
+        .await
+        .expect_err("an unknown server cannot be called");
+    assert!(call.contains("is not configured"), "call_tool: {call}");
+
+    let timed = manager
+        .call_tool_with_timeout(
+            "nope",
+            "t",
+            serde_json::json!({}),
+            std::time::Duration::from_millis(5),
+        )
+        .await
+        .expect_err("an unknown server cannot be called with a timeout");
+    assert!(
+        timed.contains("is not configured"),
+        "call_tool_with_timeout: {timed}"
+    );
+
+    assert!(
+        manager_sessions(&manager).is_empty(),
+        "a rejected call must not leave a session behind"
+    );
+}
+
+/// A poisoned manager mutex must never panic the application: every
+/// entry point degrades to an early return or a reported error.
+#[tokio::test]
+async fn a_poisoned_manager_state_degrades_instead_of_panicking() {
+    let manager = McpClients::new();
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let _guard = manager.state.lock().expect("lock");
+                panic!("poison the manager mutex on purpose");
+            });
+        });
+    }));
+    assert!(
+        poisoned.is_err(),
+        "the poisoning thread's panic must propagate out of scope()"
+    );
+
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("a".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    manager.update_config(&config);
+    assert!(
+        manager.configured_servers().is_empty(),
+        "a poisoned manager ignores config updates"
+    );
+
+    manager.set_token_store(Some(Arc::new(TokenStore::in_memory())));
+    assert!(
+        manager.token_store().is_none(),
+        "a poisoned manager ignores the token store"
+    );
+
+    manager.mark_needs_auth("a", true);
+    assert!(
+        !manager.needs_auth_now("a"),
+        "a poisoned manager ignores flag updates"
+    );
+
+    manager.shutdown();
+
+    let err = manager
+        .ping("a")
+        .await
+        .expect_err("ping must report the poisoned lock");
+    assert!(
+        err.contains("Failed to lock MCP manager state"),
+        "ping: {err}"
+    );
+
+    let auth = manager
+        .authenticate("a")
+        .await
+        .expect_err("authenticate must report the poisoned lock");
+    assert!(
+        auth.contains("Failed to lock MCP manager state"),
+        "authenticate: {auth}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// authenticate (MCP-020 / MCP-021)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn authenticate_rejects_unknown_and_ineligible_servers() {
+    let manager = McpClients::new();
+    let mut config = AgentConfig::default();
+    config.mcp_servers.insert(
+        "stdio".to_string(),
+        McpServerConfig::Stdio {
+            command: "server".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+        }
+        .into(),
+    );
+    let mut headers = HashMap::new();
+    headers.insert("Authorization".to_string(), "Bearer static".to_string());
+    config.mcp_servers.insert(
+        "static".to_string(),
+        McpServerConfig::Sse {
+            url: "http://127.0.0.1:1/mcp".to_string(),
+            headers,
+            oauth: None,
+        }
+        .into(),
+    );
+    manager.update_config(&config);
+
+    let unknown = manager
+        .authenticate("ghost")
+        .await
+        .expect_err("an unknown server cannot be authenticated");
+    assert!(
+        unknown.contains("is not configured"),
+        "unknown server: {unknown}"
+    );
+
+    let stdio_err = manager
+        .authenticate("stdio")
+        .await
+        .expect_err("stdio is not OAuth-eligible");
+    assert!(
+        stdio_err.contains("does not require authentication"),
+        "stdio transport: {stdio_err}"
+    );
+
+    let static_err = manager
+        .authenticate("static")
+        .await
+        .expect_err("a static Authorization header is not OAuth-eligible");
+    assert!(
+        static_err.contains("does not require authentication"),
+        "static header: {static_err}"
+    );
+
+    assert!(
+        manager.token_store().is_none(),
+        "an ineligible server must not install a token store"
+    );
+}
+
+/// A failed probe must leave `needs_auth` set so the Tools dialog
+/// keeps offering the Authenticate button (MCP-021).
+#[tokio::test]
+async fn authenticate_flags_the_server_when_the_probe_fails() {
+    let manager = McpClients::new();
+    // Pre-install an in-memory store so `authenticate` never reaches
+    // for the real config directory (RUST-006).
+    manager.set_token_store(Some(Arc::new(TokenStore::in_memory())));
+
+    let mut config = AgentConfig::default();
+    // An empty URL fails before a socket is ever opened.
+    config
+        .mcp_servers
+        .insert("broken".to_string(), sse_entry(""));
+    manager.update_config(&config);
+    let session = manager
+        .get_or_create_session("broken")
+        .expect("session created");
+    assert_eq!(
+        Arc::strong_count(&session),
+        2,
+        "the manager holds the session before the probe"
+    );
+
+    let err = manager
+        .authenticate("broken")
+        .await
+        .expect_err("the probe must fail against an unusable URL");
+    assert!(
+        err.contains("OAuth flow for 'broken' failed"),
+        "error: {err}"
+    );
+    assert!(
+        err.contains("empty endpoint URL"),
+        "the underlying reason is preserved: {err}"
+    );
+    assert!(
+        manager.needs_auth_now("broken"),
+        "a failed flow keeps the Authenticate button visible"
+    );
+    assert_eq!(
+        Arc::strong_count(&session),
+        1,
+        "authenticate drops the pre-existing session so the next call re-authenticates"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DynamicToolSource delegation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dynamic_tool_source_delegates_to_the_manager() {
+    let manager = McpClients::new();
+    let source: &dyn DynamicToolSource = &manager;
+    assert!(
+        source.configured_servers().is_empty(),
+        "nothing is configured yet"
+    );
+
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("svc".to_string(), sse_entry("http://127.0.0.1:1/mcp"));
+    source.update_config(&config);
+    assert_eq!(
+        source.configured_servers(),
+        vec!["svc".to_string()],
+        "update_config reaches the manager"
+    );
+
+    let err = source
+        .discover_tools("ghost")
+        .await
+        .expect_err("an unknown server has no tools");
+    assert!(
+        err.contains("is not configured"),
+        "discover_tools delegates: {err}"
+    );
+
+    let err = source
+        .call_tool("ghost", "t", serde_json::json!({}))
+        .await
+        .expect_err("an unknown server cannot be called");
+    assert!(
+        err.contains("is not configured"),
+        "call_tool delegates: {err}"
+    );
+
+    assert_eq!(
+        manager.configured_servers(),
+        source.configured_servers(),
+        "the trait view and the inherent view agree"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Streamable HTTP round-trips through the manager
+// ---------------------------------------------------------------------------
+
+/// A recorded request from [`CannedHttp`].
+#[derive(Clone, Debug)]
+struct CannedRequest {
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+impl CannedRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+}
+
+/// A loopback HTTP double that answers every request with a
+/// caller-supplied reply. Deliberately dependency-free: the wiremock
+/// helper in `oauth::test_support` enters a current-thread runtime on
+/// the test thread, which dead-locks the blocking reqwest calls.
+/// A scripted reply for [`CannedHttp`]: the zero-based request index and the
+/// request body, mapped to the `(status, body)` to answer with.
+type CannedResponder = Arc<dyn Fn(usize, &str) -> (u16, String) + Send + Sync>;
+
+struct CannedHttp {
+    url: String,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    seen: Arc<std::sync::Mutex<Vec<CannedRequest>>>,
+}
+
+impl CannedHttp {
+    fn start(responder: impl Fn(usize, &str) -> (u16, String) + Send + Sync + 'static) -> Self {
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("local addr").port();
+        listener.set_nonblocking(true).expect("non-blocking accept");
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let responder: CannedResponder = Arc::new(responder);
+
+        let thread_stop = stop.clone();
+        let thread_seen = seen.clone();
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            let mut index = 0usize;
+            while !thread_stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let Some(req) = read_canned_request(&mut stream) else {
+                            continue;
+                        };
+                        let (status, body) = responder(index, &req.body);
+                        let reply = render_canned_response(status, &body);
+                        let _ = stream.write_all(reply.as_bytes());
+                        let _ = stream.flush();
+                        thread_seen.lock().expect("record lock").push(req);
+                        index += 1;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Self {
+            url: format!("http://127.0.0.1:{port}/mcp"),
+            stop,
+            handle: Some(handle),
+            seen,
+        }
+    }
+
+    fn requests(&self) -> Vec<CannedRequest> {
+        self.seen.lock().expect("record lock").clone()
+    }
+}
+
+impl Drop for CannedHttp {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Read one HTTP/1.1 request from a loopback client.
+fn read_canned_request(stream: &mut std::net::TcpStream) -> Option<CannedRequest> {
+    use std::io::{BufRead, BufReader, Read};
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
+    let mut reader = BufReader::new(stream.try_clone().ok()?);
+
+    let mut first_line = String::new();
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let mut content_length = 0usize;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if first_line.is_empty() {
+            // The first line is always the request line, even when the
+            // target is absolute-form and therefore contains a colon.
+            first_line = trimmed.to_string();
+            continue;
+        }
+        let Some((name, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let name = name.trim().to_ascii_lowercase();
+        let value = value.trim().to_owned();
+        if name == "content-length" {
+            content_length = value.parse().unwrap_or(0);
+        }
+        headers.push((name, value));
+    }
+
+    let mut body = vec![0u8; content_length];
+    reader.read_exact(&mut body).ok()?;
+    let mut parts = first_line.split_whitespace();
+    Some(CannedRequest {
+        method: parts.next().unwrap_or_default().to_owned(),
+        path: parts.next().unwrap_or_default().to_owned(),
+        headers,
+        body: String::from_utf8_lossy(&body).into_owned(),
+    })
+}
+
+/// Render a minimal `Connection: close` HTTP/1.1 response.
+fn render_canned_response(status: u16, body: &str) -> String {
+    let phrase = match status {
+        200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        _ => "Internal Server Error",
+    };
+    format!(
+        "HTTP/1.1 {status} {phrase}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {body}",
+        body.len()
+    )
+}
+
+/// Answer JSON-RPC over Streamable HTTP the way a spec-conformant
+/// server does: `202 Accepted` for notifications, a result envelope
+/// echoing the request id for requests.
+fn canned_rpc_router(_index: usize, body: &str) -> (u16, String) {
+    let Ok(request) = serde_json::from_str::<serde_json::Value>(body) else {
+        return (400, "{}".to_string());
+    };
+    let Some(id) = request.get("id").filter(|v| !v.is_null()).cloned() else {
+        return (202, String::new());
+    };
+    let result = match request.get("method").and_then(|m| m.as_str()) {
+        Some("initialize") => serde_json::json!({
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {"listChanged": false}},
+            "serverInfo": {"name": "canned", "version": "0.0.1"},
+        }),
+        Some("tools/list") => serde_json::json!({
+            "tools": [{
+                "name": "echo",
+                "description": "Echoes its input.",
+                "inputSchema": {"type": "object"},
+            }],
+        }),
+        Some("tools/call") => serde_json::json!({
+            "content": [{"type": "text", "text": "echoed"}],
+        }),
+        _ => serde_json::json!({}),
+    };
+    (
+        200,
+        serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string(),
+    )
+}
+
+#[tokio::test]
+async fn initialize_server_caches_one_session_per_server() {
+    let mock = CannedHttp::start(canned_rpc_router);
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("init".to_string(), sse_entry(&mock.url));
+
+    let manager = McpClients::new();
+    manager.update_config(&config);
+
+    let session = manager
+        .initialize_server("init")
+        .await
+        .expect("the handshake against the canned server succeeds");
+    assert_eq!(
+        session.protocol_version().as_deref(),
+        Some("2025-11-25"),
+        "the negotiated version is cached"
+    );
+    let server_info = session
+        .server_info()
+        .expect("serverInfo is cached after the handshake");
+    assert_eq!(
+        server_info["name"], "canned",
+        "serverInfo is cached from the init result"
+    );
+
+    let again = manager
+        .initialize_server("init")
+        .await
+        .expect("initializing twice is idempotent");
+    assert!(
+        Arc::ptr_eq(&session, &again),
+        "the manager hands back the cached session"
+    );
+    assert_eq!(
+        manager_sessions(&manager),
+        vec!["init".to_string()],
+        "exactly one session per server"
+    );
+
+    let requests = mock.requests();
+    assert!(
+        requests.iter().any(|r| r.body.contains("initialize")),
+        "the handshake POST reached the server: {requests:?}"
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.body.contains("notifications/initialized")),
+        "the initialized notification must follow the handshake"
+    );
+}
+
+#[tokio::test]
+async fn call_tool_and_discover_tools_round_trip_over_http() {
+    let mock = CannedHttp::start(canned_rpc_router);
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("svc".to_string(), sse_entry(&mock.url));
+
+    let manager = McpClients::new();
+    manager.update_config(&config);
+
+    let tools = manager
+        .discover_tools("svc")
+        .await
+        .expect("tools/list should round-trip");
+    assert_eq!(tools.len(), 1, "one tool is advertised: {tools:?}");
+    assert_eq!(tools[0].name, "echo");
+
+    let result = manager
+        .call_tool("svc", "echo", serde_json::json!({"x": 1}))
+        .await
+        .expect("tools/call should round-trip");
+    assert_eq!(
+        result["content"][0]["text"], "echoed",
+        "the server payload is handed back verbatim"
+    );
+
+    manager
+        .ping("svc")
+        .await
+        .expect("ping should round-trip over HTTP");
+
+    let call = mock
+        .requests()
+        .into_iter()
+        .find(|r| r.body.contains("tools/call"))
+        .expect("a tools/call request must have been recorded");
+    assert_eq!(call.method, "POST", "requests are POSTs");
+    assert_eq!(call.path, "/mcp", "the configured path is used");
+    assert!(
+        call.body.contains("\"name\":\"echo\"") && call.body.contains("\"x\":1"),
+        "the tool name and arguments are serialised: {}",
+        call.body
+    );
+    assert_eq!(
+        call.header("mcp-protocol-version"),
+        Some("2025-11-25"),
+        "the negotiated protocol version is replayed on later requests"
+    );
+}
+
+#[tokio::test]
+async fn authenticate_succeeds_when_the_server_needs_no_token() {
+    let mock = CannedHttp::start(canned_rpc_router);
+    let manager = McpClients::new();
+    manager.set_token_store(Some(Arc::new(TokenStore::in_memory())));
+
+    let mut config = AgentConfig::default();
+    config
+        .mcp_servers
+        .insert("open".to_string(), sse_entry(&mock.url));
+    manager.update_config(&config);
+
+    manager
+        .authenticate("open")
+        .await
+        .expect("a server that answers tools/list needs no interactive flow");
+    assert!(
+        !manager.needs_auth_now("open"),
+        "a successful probe must not flag the server as needing auth"
+    );
+}

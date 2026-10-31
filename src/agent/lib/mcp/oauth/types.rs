@@ -10,6 +10,7 @@
 //! server URL(s) from the protected resource metadata, then fetches
 //! the authorization server metadata using the well-known URL rules
 //! in §4.3.1 of `doc/distill/mcp.md`.
+//! Unit tests live in the sibling `types_tests.rs` sidecar.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -608,127 +609,5 @@ impl From<OAuthError> for String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_bearer_challenge_with_resource_metadata() {
-        let header = r#"Bearer realm="example", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource""#;
-        let ch = parse_bearer_challenge(header).expect("must parse");
-        assert_eq!(ch.scheme, "Bearer");
-        assert_eq!(ch.get("realm"), Some("example"));
-        assert_eq!(
-            ch.get("resource_metadata"),
-            Some("https://mcp.example.com/.well-known/oauth-protected-resource")
-        );
-    }
-
-    #[test]
-    fn parses_challenge_with_scope_and_error() {
-        // Step-up scenario (MCP spec §4.7).
-        let header = r#"Bearer error="insufficient_scope", scope="read write", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource""#;
-        let ch = parse_bearer_challenge(header).expect("must parse");
-        assert_eq!(ch.get("error"), Some("insufficient_scope"));
-        assert_eq!(ch.get("scope"), Some("read write"));
-        assert!(ch.get("resource_metadata").is_some());
-    }
-
-    #[test]
-    fn parses_bare_token_value() {
-        let header = r#"Bearer realm=api, scope=read""#;
-        let ch = parse_bearer_challenge(header).expect("must parse");
-        assert_eq!(ch.get("realm"), Some("api"));
-        assert_eq!(ch.get("scope"), Some("read"));
-    }
-
-    #[test]
-    fn ignores_non_bearer_challenges() {
-        let header = r#"Basic realm="api", Bearer realm="mcp", scope="tools/read""#;
-        let ch = parse_bearer_challenge(header).expect("must parse");
-        assert_eq!(ch.scheme, "Bearer");
-        assert_eq!(ch.get("scope"), Some("tools/read"));
-    }
-
-    #[test]
-    fn handles_value_with_comma_in_quotes() {
-        let header = r#"Bearer error="invalid_token", error_description="a, b, c""#;
-        let ch = parse_bearer_challenge(header).expect("must parse");
-        assert_eq!(ch.get("error"), Some("invalid_token"));
-        assert_eq!(ch.get("error_description"), Some("a, b, c"));
-    }
-
-    #[test]
-    fn returns_none_when_no_bearer_challenge() {
-        assert!(parse_bearer_challenge(r#"Basic realm="api""#).is_none());
-    }
-
-    #[test]
-    fn empty_header_returns_none() {
-        assert!(parse_bearer_challenge("").is_none());
-        assert!(parse_bearer_challenge("   ").is_none());
-    }
-
-    #[test]
-    fn token_response_accepts_string_scope() {
-        let v = serde_json::json!({
-            "access_token": "abc",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "refresh_token": "rt",
-            "scope": "read write tools/call",
-        });
-        let t: TokenResponse = serde_json::from_value(v).expect("parse");
-        assert_eq!(t.access_token, "abc");
-        assert!(t.is_bearer());
-        assert_eq!(t.expires_in, Some(3600));
-        assert_eq!(t.refresh_token.as_deref(), Some("rt"));
-        assert_eq!(t.scope, vec!["read", "write", "tools/call"]);
-    }
-
-    #[test]
-    fn token_response_accepts_array_scope() {
-        let v = serde_json::json!({
-            "access_token": "abc",
-            "token_type": "Bearer",
-            "scope": ["read", "write"],
-        });
-        let t: TokenResponse = serde_json::from_value(v).expect("parse");
-        assert_eq!(t.scope, vec!["read", "write"]);
-    }
-
-    #[test]
-    fn oauth_error_body_from_json() {
-        let v = serde_json::json!({
-            "error": "invalid_grant",
-            "error_description": "refresh token expired",
-        });
-        let body = OAuthErrorBody::from_json(&v).expect("parse");
-        assert_eq!(body.error, "invalid_grant");
-        assert_eq!(
-            body.error_description.as_deref(),
-            Some("refresh token expired")
-        );
-        assert_eq!(body.error_uri, None);
-    }
-
-    #[test]
-    fn oauth_error_body_requires_error_field() {
-        let v = serde_json::json!({ "error_description": "no error code" });
-        assert!(OAuthErrorBody::from_json(&v).is_none());
-    }
-
-    #[test]
-    fn display_includes_error_description() {
-        let err = OAuthError::OAuth {
-            endpoint: "token",
-            body: OAuthErrorBody {
-                error: "invalid_grant".to_owned(),
-                error_description: Some("expired".to_owned()),
-                error_uri: None,
-            },
-        };
-        let s = err.to_string();
-        assert!(s.contains("invalid_grant"));
-        assert!(s.contains("expired"));
-    }
-}
+#[path = "types_tests.rs"]
+mod tests;
