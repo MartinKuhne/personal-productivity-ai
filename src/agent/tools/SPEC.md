@@ -108,7 +108,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Tool Pagination (cursor, shared cache)
 
-* [TOOL-033] The `search_email`, `web_fetch`, `search_notes`, `list_notes_by_tag`, `web_search`, `search_calendar`, `get_calendar`, `search_contact` and `vector_search` tools SHALL be cursor paginated.
+* [TOOL-049] The `search_email`, `web_fetch`, `search_notes`, `list_notes_by_tag`, `web_search`, `search_calendar`, `get_calendar`, `search_contact` and `vector_search` tools SHALL be cursor paginated.
 * [TOOL-025] Every cursor paginated tool SHALL return a `hint` field on its response. `hint` SHALL be set to "Final page." when the response has no `cursor`. `hint` SHALL be absent (or `null`) otherwise.
 * [TOOL-026a] The page size SHALL be fixed at 32 results for `search_email`
 * [TOOL-026b] The page size SHALL be fixed at 64 markdown lines for `web_fetch`.

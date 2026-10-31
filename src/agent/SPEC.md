@@ -48,7 +48,3 @@ This module owns the Local LLM Interface, Tool-Call Agent Loop, and Agent Behavi
 ### Agent sessions
 
 * [AGENT-100] When the user first enters an agent prompt, the system SHALL start a new agent session.
-* [AGENT-100] 
-* [AGENT-100] 
-* [AGENT-100] 
-* [AGENT-100] 

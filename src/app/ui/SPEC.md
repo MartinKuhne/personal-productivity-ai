@@ -63,7 +63,6 @@ This module owns the user interface layer: pane layout and styling, directory tr
     * [UI-032] [Open in Editor] - Opens the tab's file in the system default editor (same behavior as double-click in directory tree).
     * [UI-033] [Format Markdown] - Executes the Format Markdown quick task on the tab's file.
 * [UI-034] The tab context menu items [Copy Path], [Show in File Explorer], [Open in Editor], [Format Markdown] shall also be available when right-clicking on a file in the directory tree (see UI-007 through UI-019), providing consistent behavior across both UI locations.
-* [UI-051] When a file with an open tab is deleted — either via [Delete] from a directory-tree context menu or from outside the application (e.g. through the file system) — the system shall close that file's tab automatically in response to the removal event. If the closed tab was the active document, the viewer shall select the last remaining open tab, or show the empty state if no tabs remain.
 
 ### Inline Text Editor
 
@@ -91,6 +90,7 @@ This module owns the user interface layer: pane layout and styling, directory tr
 ### Tabbed Document Interface
 
 * [UI-049] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
+* [UI-067] Deleted File Closes Its Tab: When a file with an open tab is deleted — either via [Delete] from a directory-tree context menu or from outside the application (e.g. through the file system) — the system shall close that file's tab automatically in response to the removal event. If the closed tab was the active document, the viewer shall select the last remaining open tab, or show the empty state if no tabs remain.
 
 ### Tools Dialog
 
@@ -181,3 +181,4 @@ This module owns the user interface layer: pane layout and styling, directory tr
 - UI-049 — Tab management in [`src/app/tab_manager.rs`](../../app/tab_manager.rs).
 - UI-050 — Tree content-search state in [`src/app/tree_search.rs`](../../app/tree_search.rs); search box UI in [`src/ui/panels/left.rs`](../ui/panels/left.rs).
 - UI-004 / UI-026..UI-034 — Tab context menu and file actions in [`src/ui/panels/center.rs`](../ui/panels/center.rs).
+- UI-067 — Tab closure on external file removal is driven by the watcher in [`src/workspace/watcher/`](../workspace/watcher/) through [`src/app/tab_manager.rs`](../../app/tab_manager.rs).

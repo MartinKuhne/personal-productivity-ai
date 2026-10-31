@@ -48,7 +48,7 @@ pub struct CachedWebDocument {
     pub response_headers: HashMap<String, String>,
 }
 
-/// Shared in-memory tool cache holding document caches and cursor pagination sessions (TOOL-030, TOOL-033).
+/// Shared in-memory tool cache holding document caches and cursor pagination sessions (TOOL-030, TOOL-049).
 ///
 /// `Clone` is a cheap shallow clone of the internal `mini_moka` handles.
 #[derive(Clone, Debug)]
