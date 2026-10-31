@@ -69,11 +69,9 @@ pub const PADDING_X: f32 = space::SM;
 /// Glyph displayed on the clear button — `"×"` (§3B.15).
 pub const GLYPH_CLEAR: &str = "×";
 
-/// Prompt displayed while listening for shortcut keys — `"Press shortcut keys..."` (§3B.15).
-pub const LABEL_RECORDING: &str = "Press shortcut keys...";
-
-/// Prompt displayed when no chord is recorded and not listening — `"Record shortcut"` (§3B.15).
-pub const LABEL_EMPTY: &str = "Record shortcut";
+// The two prompts come from the crate catalogue ([`crate::strings`]); re-exported
+// here so the historical paths stay valid (§3B.15).
+pub use crate::strings::{LABEL_EMPTY, LABEL_RECORDING};
 
 /// Plus separator between keycaps — `"+"` (§3B.15).
 pub const PLUS_SEPARATOR: &str = "+";

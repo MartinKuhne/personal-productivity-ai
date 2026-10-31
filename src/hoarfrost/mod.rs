@@ -63,6 +63,7 @@ pub mod layout;
 pub mod microcopy;
 pub mod spec_coverage;
 pub mod state;
+pub mod strings;
 pub mod surface;
 pub mod token;
 pub mod token_lint;

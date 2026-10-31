@@ -94,8 +94,9 @@ pub const NAV_PREV: &str = "<";
 /// Next navigation glyph.
 pub const NAV_NEXT: &str = ">";
 
-/// Default date placeholder string (§3.10).
-pub const PLACEHOLDER_DATE: &str = "YYYY-MM-DD";
+// The empty-field placeholder comes from the crate catalogue ([`crate::strings`]);
+// re-exported here so the historical path stays valid (§3.10).
+pub use crate::strings::PLACEHOLDER_DATE;
 
 /// Date range separator string (§3.10).
 pub const RANGE_SEPARATOR: &str = " - ";

@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::strings::{ERR_API_KEY_INVALID, ERR_NO_MODELS_CONFIGURED};
+
 // ---------------------------------------------------------------------------
 // Integration Clients
 // ---------------------------------------------------------------------------
@@ -592,18 +594,18 @@ impl AgentConfig {
             } else if let Some(model_cfg) = self.models.values().next() {
                 model_cfg
             } else {
-                return Err("No LLM models are configured.".to_string());
+                return Err(ERR_NO_MODELS_CONFIGURED.to_string());
             }
         } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
             model_cfg
         } else if let Some(model_cfg) = self.models.values().next() {
             model_cfg
         } else {
-            return Err("No LLM models are configured.".to_string());
+            return Err(ERR_NO_MODELS_CONFIGURED.to_string());
         };
 
         if model_cfg.api_key == "your-api-key-here" || model_cfg.api_key.is_empty() {
-            return Err("API key not set or invalid.".to_string());
+            return Err(ERR_API_KEY_INVALID.to_string());
         }
 
         Ok(model_cfg)

@@ -51,14 +51,9 @@ pub const GLYPH_UNPINNED: &str = "📍";
 /// Glyph for the close button — `"×"` (§3B.12).
 pub const GLYPH_CLOSE: &str = "×";
 
-/// Label for the pin button — `"Pin"` (§3B.12).
-pub const LABEL_PIN: &str = "Pin";
-
-/// Label for the unpin button — `"Unpin"` (§3B.12).
-pub const LABEL_UNPIN: &str = "Unpin";
-
-/// Label for the close button — `"Close"` (§3B.12).
-pub const LABEL_CLOSE: &str = "Close";
+// The three control labels come from the crate catalogue ([`crate::strings`]);
+// re-exported here so the historical paths stay valid (§3B.12).
+pub use crate::strings::{LABEL_CLOSE, LABEL_PIN, LABEL_UNPIN};
 
 // ---------------------------------------------------------------------------
 // Surface Geometry Constants & Tokens (§3B.12)

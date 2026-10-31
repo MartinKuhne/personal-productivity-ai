@@ -172,7 +172,13 @@ use crate::token_lint::{
 /// the crate root. It is pure id/string plumbing — no colour literal anywhere —
 /// and sits outside `widget/`, `surface/` and `composite/`, so like the two
 /// harnesses above it adds a scanned file without adding a governed one.
-const PIN_FILES_SCANNED: usize = 183;
+/// 184 as of `strings`: the crate text catalogue joins the scan at the crate
+/// root. It is `pub const &str` only — no colour literal, no visual scalar — and
+/// sits outside `widget/`, `surface/` and `composite/`, so on the same basis as
+/// `identity.rs` it adds a scanned file without adding a governed one. The
+/// labels it absorbed were *moved*, not added, so Rule B's governed count is
+/// unchanged.
+const PIN_FILES_SCANNED: usize = 184;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.

@@ -45,25 +45,14 @@ pub const DEFAULT_CALLBACK_PATH: &str = "/callback";
 /// user could be in a slow WebAuthn flow, so this is generous.
 pub const DEFAULT_CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Status-line reason phrase and HTML heading for a successful callback.
-const REASON_OK: &str = "OK";
-/// Status-line reason phrase and HTML heading for a disallowed method.
-const REASON_METHOD_NOT_ALLOWED: &str = "Method Not Allowed";
-/// Status-line reason phrase and HTML heading for a non-callback path.
-const REASON_NOT_FOUND: &str = "Not Found";
-/// Status-line reason phrase and HTML heading for a malformed callback.
-const REASON_BAD_REQUEST: &str = "Bad Request";
-
-/// Text shown to the user on a successful callback.
-const MESSAGE_SUCCESS: &str = "You may now close this window and return to the application.";
-/// Text shown to the user when the request uses a method we do not accept.
-const MESSAGE_METHOD_REQUIRED: &str = "GET or POST required";
-/// Text shown to the user when they hit a path that is not the callback.
-const MESSAGE_WAITING_FOR_CALLBACK: &str = "waiting for OAuth callback";
-/// Text shown to the user when the redirect carries no `code`.
-const MESSAGE_MISSING_CODE: &str = "missing 'code' parameter on redirect";
-/// Text shown to the user when the redirect carries no `state`.
-const MESSAGE_MISSING_STATE: &str = "missing 'state' parameter on redirect";
+/// Status-line reason phrases and HTML headings, and the body copy shown to the
+/// user, come from the crate catalogue ([`crate::strings`]) so every string this
+/// server can put in front of a user is defined in one place.
+use crate::strings::{
+    MESSAGE_METHOD_REQUIRED, MESSAGE_MISSING_CODE, MESSAGE_MISSING_STATE, MESSAGE_SUCCESS,
+    MESSAGE_WAITING_FOR_CALLBACK, REASON_BAD_REQUEST, REASON_METHOD_NOT_ALLOWED, REASON_NOT_FOUND,
+    REASON_OK,
+};
 
 /// A bound loopback HTTP server ready to accept one redirect
 /// request. The actual server lives on a background thread; this

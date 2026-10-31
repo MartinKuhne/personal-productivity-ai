@@ -47,17 +47,9 @@ pub const HEX_PREFIX: &str = "#";
 /// Monospace font family string (§3.12, `UIF-ATOM-012`).
 pub const FONT_FAMILY_MONO: &str = "monospace";
 
-/// Apply action button label (§3.12, `UIF-ATOM-012`).
-pub const LABEL_APPLY: &str = "✓ Apply";
-
-/// Cancel action button label (§3.12, `UIF-ATOM-012`).
-pub const LABEL_CANCEL: &str = "Cancel";
-
-/// Hex input placeholder label (§3.12, `UIF-ATOM-012`).
-pub const LABEL_HEX: &str = "Hex";
-
-/// Preset swatches header label (§3.12, `UIF-ATOM-012`).
-pub const LABEL_PRESETS: &str = "Presets";
+// User-facing labels are defined in the crate catalogue ([`crate::strings`]) and
+// re-exported here so the historical path stays valid (§3.12, `UIF-ATOM-012`).
+pub use crate::strings::{LABEL_APPLY, LABEL_CANCEL, LABEL_HEX, LABEL_PRESETS};
 
 /// WCAG AA compliance mark (§3.12, `UIF-ATOM-012`, `UIF-TOK-006`).
 pub const BADGE_AA: &str = "AA";
@@ -81,7 +73,7 @@ pub const CHEVRON_DOWN: &str = "▾";
 pub const CHEVRON_UP: &str = "▴";
 
 /// Error message string for invalid hex syntax (§3.12, `UIF-ATOM-012`).
-pub const ERR_INVALID_HEX: &str = "Invalid hex color";
+pub use crate::strings::ERR_INVALID_HEX;
 
 // ---------------------------------------------------------------------------
 // Layout & geometry constants (§3.12, UIF-ATOM-012, UIF-TOK-002, UIF-PRIN-001 §1.1)

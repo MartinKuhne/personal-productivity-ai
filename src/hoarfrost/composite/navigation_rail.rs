@@ -49,8 +49,9 @@ use iced::{Element, Length, Pixels, Point, Rectangle, Size};
 /// Default glyph for the navigation rail expand/collapse toggle button — `"☰"` ([RUST-021]).
 pub const GLYPH_TOGGLE: &str = "☰";
 
-/// Accessibility label for the navigation rail expand/collapse toggle button ([RUST-021]).
-pub const LABEL_TOGGLE: &str = "Toggle navigation rail";
+// The toggle's accessibility label comes from the crate catalogue
+// ([`crate::strings`]); re-exported here so the historical path stays valid.
+pub use crate::strings::LABEL_TOGGLE;
 
 // ---------------------------------------------------------------------------
 // Surface Geometry Constants & Tokens (§3B.9)

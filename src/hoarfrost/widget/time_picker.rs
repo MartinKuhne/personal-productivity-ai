@@ -49,41 +49,14 @@ pub const TIME_SEP_SPACED: &str = " : ";
 /// Space separator string (§3.11).
 pub const SPACE_SEP: &str = " ";
 
-/// Column header label for Hours (§3.11).
-pub const LABEL_HR: &str = "Hr";
-
-/// Column header label for Minutes (§3.11).
-pub const LABEL_MIN: &str = "Min";
-
-/// Column header label for Seconds (§3.11).
-pub const LABEL_SEC: &str = "Sec";
-
-/// Column header label for AM/PM (§3.11).
-pub const LABEL_AM_PM: &str = "AM/PM";
-
-/// String literal for AM (§3.11).
-pub const LABEL_AM: &str = "AM";
-
-/// String literal for PM (§3.11).
-pub const LABEL_PM: &str = "PM";
-
-/// String literal for Cancel action button (§3.11).
-pub const LABEL_CANCEL: &str = "Cancel";
-
-/// String literal for Apply action button (§3.11).
-pub const LABEL_APPLY: &str = "✓ Apply";
-
-/// Placeholder string for 24-hour time without seconds (§3.11).
-pub const PLACEHOLDER_24H: &str = "--:--";
-
-/// Placeholder string for 24-hour time with seconds (§3.11).
-pub const PLACEHOLDER_24H_SEC: &str = "--:--:--";
-
-/// Placeholder string for 12-hour time without seconds (§3.11).
-pub const PLACEHOLDER_12H: &str = "--:-- --";
-
-/// Placeholder string for 12-hour time with seconds (§3.11).
-pub const PLACEHOLDER_12H_SEC: &str = "--:--:-- --";
+// The column headers, meridiem strings, action labels and field placeholders come
+// from the crate catalogue ([`crate::strings`]); re-exported here so the
+// historical paths stay valid (§3.11). `LABEL_APPLY` and `LABEL_CANCEL` are shared
+// with the colour picker.
+pub use crate::strings::{
+    LABEL_AM, LABEL_AM_PM, LABEL_APPLY, LABEL_CANCEL, LABEL_HR, LABEL_MIN, LABEL_PM, LABEL_SEC,
+    PLACEHOLDER_12H, PLACEHOLDER_12H_SEC, PLACEHOLDER_24H, PLACEHOLDER_24H_SEC,
+};
 
 // ---------------------------------------------------------------------------
 // Layout & geometry constants (§3.11, UIF-ATOM-011, UIF-TOK-002, UIF-PRIN-001 §1.1)

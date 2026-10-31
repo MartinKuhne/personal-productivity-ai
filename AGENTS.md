@@ -84,6 +84,10 @@ Before marking any task as complete, run the following from `/` and ensure they 
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
 | [`src/app`](src/app/AGENTS.md) | Main user facing application                |
+| [`src/agent`](src/agent/AGENTS.md) | Core agent engine, LLM client, tools & protocol clients |
+| [`src/agent/tools`](src/agent/tools/AGENTS.md) | Tool trait, registry and tool families |
+| [`src/hoarfrost`](src/hoarfrost/AGENTS.md) | UI widget library and design tokens |
+| [`src/app/integrations`](src/app/integrations/AGENTS.md) | Application external service integrations |
 | [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
 | [`test/wiki/AGENTS.md`](test/wiki/AGENTS.md)                   | Test wiki fixtures.                                                                   |

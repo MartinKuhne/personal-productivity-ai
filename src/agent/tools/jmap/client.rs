@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 
 use crate::config::JmapClient;
+use crate::strings::ERR_JMAP_JSON_PARSE_PREFIX;
 
 /// Attempt to extract a human-readable error detail from a response body.
 ///
@@ -207,7 +208,7 @@ impl JmapSession {
                 body = %snippet,
                 "Failed to parse JMAP response as JSON"
             );
-            format!("Failed to parse response as JSON: {e}: {snippet}")
+            format!("{ERR_JMAP_JSON_PARSE_PREFIX}: {e}: {snippet}")
         })?;
         Ok(json)
     }

@@ -81,20 +81,11 @@ pub const GLYPH_SEARCH: &str = "\u{1F50D}";
 /// Keyboard legend text displayed in the 24px footer bar.
 pub const LEGEND_KEYBOARD: &str = "↑↓ Navigate · ↵ Run · Esc Close";
 
-/// Label displayed on the trailing Escape hint chip.
-pub const LABEL_ESC: &str = "Esc";
-
-/// Placeholder shown in Files mode when query is empty.
-pub const PLACEHOLDER_FILES: &str = "Search files by name...";
-
-/// Placeholder shown in Commands mode when query is empty.
-pub const PLACEHOLDER_COMMANDS: &str = "Type a command...";
-
-/// Placeholder shown in Symbols mode when query is empty.
-pub const PLACEHOLDER_SYMBOLS: &str = "Search symbols...";
-
-/// Placeholder shown in Tags mode when query is empty.
-pub const PLACEHOLDER_TAGS: &str = "Search by tag...";
+// The chip label and the per-mode placeholders come from the crate catalogue
+// ([`crate::strings`]); re-exported here so the historical paths stay valid.
+pub use crate::strings::{
+    LABEL_ESC, PLACEHOLDER_COMMANDS, PLACEHOLDER_FILES, PLACEHOLDER_SYMBOLS, PLACEHOLDER_TAGS,
+};
 
 /// Empty state message displayed when query yields no results.
 pub const NO_RESULTS: &str = "No matching results";

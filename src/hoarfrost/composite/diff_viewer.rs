@@ -65,17 +65,10 @@ pub const BUTTON_GAP: f32 = space::XS;
 /// Line height for mono diff text — `typography::UI_COMPACT.line_height` (18px, §3B.15).
 pub const LINE_HEIGHT: f32 = typography::UI_COMPACT.line_height;
 
-/// Label for accepting a hunk — `"Accept hunk"` (§3B.15).
-pub const LABEL_ACCEPT_HUNK: &str = "Accept hunk";
-
-/// Label for rejecting a hunk — `"Reject hunk"` (§3B.15).
-pub const LABEL_REJECT_HUNK: &str = "Reject hunk";
-
-/// Label for Unified mode toggle — `"Unified"` (§3B.15).
-pub const LABEL_UNIFIED: &str = "Unified";
-
-/// Label for Side-by-Side mode toggle — `"Side-by-Side"` (§3B.15).
-pub const LABEL_SIDE_BY_SIDE: &str = "Side-by-Side";
+// The four control labels are defined in the crate catalogue
+// ([`crate::strings`]) and re-exported here so the historical path stays valid
+// (§3B.15).
+pub use crate::strings::{LABEL_ACCEPT_HUNK, LABEL_REJECT_HUNK, LABEL_SIDE_BY_SIDE, LABEL_UNIFIED};
 
 /// Glyph prefix for added lines — `"+"` (§3B.15, `UIF-PRIN-005`).
 pub const GLYPH_ADDED: &str = "+";

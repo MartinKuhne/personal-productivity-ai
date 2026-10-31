@@ -31,17 +31,10 @@ pub const GLYPH_COMPLETED: &str = "✓";
 /// Exclamation mark glyph for error steps — `'!'` (`UIF-PRIN-005`).
 pub const GLYPH_ERROR: &str = "!";
 
-/// Default previous button label — `"← Previous"` (`UIF-PRIN-004`).
-pub const LABEL_PREVIOUS: &str = "← Previous";
-
-/// Default next button label — `"Next →"`.
-pub const LABEL_NEXT: &str = "Next →";
-
-/// Default finish button label — `"Finish ✓"`.
-pub const LABEL_FINISH: &str = "Finish ✓";
-
-/// Default cancel button label — `"Cancel"`.
-pub const LABEL_CANCEL: &str = "Cancel";
+// The four step-action labels come from the crate catalogue ([`crate::strings`]);
+// re-exported here so the historical paths stay valid (`UIF-PRIN-004`).
+// `LABEL_CANCEL` is shared with the colour and time pickers.
+pub use crate::strings::{LABEL_CANCEL, LABEL_FINISH, LABEL_NEXT, LABEL_PREVIOUS};
 
 /// Height of the horizontal stepper bar — `size::CONTROL_LG` (36px, §3B.11).
 pub const BAR_HEIGHT: f32 = size::CONTROL_LG;
