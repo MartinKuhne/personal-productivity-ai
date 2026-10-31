@@ -464,6 +464,9 @@ fn test_file_link_absolute_path_is_used_verbatim() {
     );
 }
 
+/// Both spellings of a local `file:` URI name the same file: `file:///tmp/x`
+/// (POSIX canonical) and `file://` + an already-absolute path must each resolve
+/// to that file, not to a path relative to the working directory.
 #[test]
 fn test_file_link_file_scheme_prefixes_are_stripped() {
     let dir = tempdir().expect("tempdir");
@@ -490,10 +493,16 @@ fn test_file_link_file_scheme_prefixes_are_stripped() {
 ///
 /// Was: the prefix was compared byte-for-byte, so `FILE://…` fell through to
 /// workspace-path resolution and a live file was reported as missing.
+///
+/// The links are built from the absolute temp path because that is what a real
+/// `file:` URI carries. A relative body would make this assertion depend on the
+/// root-slash rule instead of on the case of the scheme, and the root-slash rule
+/// is pinned separately by `test_strip_file_scheme_keeps_an_absolute_roots_slash`.
 #[test]
 fn test_file_scheme_prefix_is_stripped_case_insensitively() {
     let dir = tempdir().expect("tempdir");
     let target = touch(dir.path(), "Docs/a.md");
+    let raw = target.to_str().expect("utf-8 temp path");
 
     for (name, prefix) in [
         ("two slashes, upper case", "FILE://"),
@@ -501,15 +510,70 @@ fn test_file_scheme_prefix_is_stripped_case_insensitively() {
         ("three slashes, upper case", "FILE:///"),
         ("mixed case, three slashes", "File:///"),
     ] {
-        let link = format!("{prefix}Docs/a.md");
+        let link = format!("{prefix}{raw}");
         assert_eq!(
-            resolve_link(&link, None, &[], &[dir.path().to_path_buf()]),
+            resolve_link(&link, None, &[], &[]),
             LinkAction::OpenWorkspaceFile {
                 path: normalize_path(&target),
                 anchor: None,
             },
             "[{name}] {link}"
         );
+    }
+}
+
+/// A `file://` target with a relative body stays relative and still resolves
+/// against a content root - only the scheme is removed, nothing else.
+#[test]
+fn test_file_scheme_relative_body_still_resolves_against_a_content_root() {
+    let dir = tempdir().expect("tempdir");
+    let target = touch(dir.path(), "Docs/a.md");
+
+    assert_eq!(
+        resolve_link("File://Docs/a.md", None, &[], &[dir.path().to_path_buf()],),
+        LinkAction::OpenWorkspaceFile {
+            path: normalize_path(&target),
+            anchor: None,
+        },
+        "file:// plus a relative body resolves under the content root"
+    );
+}
+
+/// The slash rule of the pure prefix helper, pinned on the string so it holds on
+/// every platform: after `file://` the authority is empty, so a slash that opens
+/// a path is the root and is kept, while the single slash that Windows canonical
+/// URIs put in front of a drive spec is dropped.
+///
+/// Was: one leading slash was always consumed with the prefix, so the POSIX URI
+/// `file:///tmp/x` came back as the relative `tmp/x` and a live file was
+/// reported as missing.
+#[test]
+fn test_strip_file_scheme_keeps_an_absolute_roots_slash() {
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("posix canonical", "file:///tmp/x.md", "/tmp/x.md"),
+        ("posix upper case", "FILE:///tmp/x.md", "/tmp/x.md"),
+        (
+            "posix with a redundant slash",
+            "file:////tmp/x.md",
+            "/tmp/x.md",
+        ),
+        ("windows canonical", "file:///C:/x.md", "C:/x.md"),
+        ("windows lower drive", "file:///c:/x.md", "c:/x.md"),
+        ("windows two slashes", r"file://C:\x.md", r"C:\x.md"),
+        ("relative body", "file://tmp/x.md", "tmp/x.md"),
+        ("root only", "file://///", ""),
+        ("drive spec only", "file://C:", "C:"),
+        ("slash and drive spec", "file:///C:", "C:"),
+        (
+            "a posix path that merely looks like a drive",
+            "file:///Docs/a.md",
+            "/Docs/a.md",
+        ),
+        ("a non-ascii body", "file://é/x", "é/x"),
+    ];
+
+    for (name, input, expected) in cases {
+        assert_eq!(strip_file_scheme(input), expected, "[{name}] {input:?}");
     }
 }
 

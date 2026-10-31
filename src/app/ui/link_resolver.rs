@@ -95,13 +95,29 @@ fn is_external_scheme(s: &str) -> bool {
 /// The `file:` URI prefix recognised by [`strip_file_scheme`].
 const FILE_SCHEME_PREFIX: &str = "file://";
 
+/// Whether `body` opens with a Windows drive spec such as `C:` or `c:`.
+///
+/// Purity: pure.
+fn is_drive_spec(body: &str) -> bool {
+    let bytes = body.as_bytes();
+    matches!(bytes, [first, b':', ..] if first.is_ascii_alphabetic())
+}
+
 /// Strip a leading `file://` URI prefix from a link target.
 ///
 /// Like every other scheme in this module the prefix is matched
 /// case-insensitively (RFC 3986 §6.2.1), so `FILE://` and `File://` name the
-/// same local URI as `file://`. A third slash is the root of an absolute path
-/// and is consumed with the prefix, so `file:///a/b` yields `a/b`. A target
+/// same local URI as `file://`.
+///
+/// What follows the prefix is an authority and then a path, and for a local
+/// file the authority is empty - so every further slash already belongs to the
+/// path. `file:///tmp/x` is `/tmp/x` and its root slash must survive; a Windows
+/// path in canonical URI form carries one extra slash ahead of the drive spec
+/// (`file:///C:/x` yields `C:/x`), and that slash is the only one consumed with
+/// the prefix. Redundant extra slashes collapse to a single root, and a target
 /// without the prefix is returned unchanged.
+///
+/// Purity: pure function of `path_part`.
 fn strip_file_scheme(path_part: &str) -> &str {
     let Some(head) = path_part.get(..FILE_SCHEME_PREFIX.len()) else {
         return path_part;
@@ -110,7 +126,18 @@ fn strip_file_scheme(path_part: &str) -> &str {
         return path_part;
     }
     let rest = &path_part[FILE_SCHEME_PREFIX.len()..];
-    rest.strip_prefix('/').unwrap_or(rest)
+    let slashes = rest.bytes().take_while(|b| *b == b'/').count();
+    let body = &rest[slashes..];
+    if body.is_empty() {
+        // `file://` and `file:///` name no file at all.
+        return "";
+    }
+    if slashes == 0 || is_drive_spec(body) {
+        return body;
+    }
+    // Keep exactly one root slash, otherwise an absolute POSIX path would be
+    // turned into a relative one and resolve against the wrong directory.
+    &rest[slashes - 1..]
 }
 
 /// Resolves a wikilink target name into a workspace file path.
