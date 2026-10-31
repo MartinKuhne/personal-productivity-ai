@@ -1,4 +1,6 @@
 //! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
+//!
+//! Unit tests live in the sibling `executor_tests.rs` sidecar.
 
 use super::types::{BatchJob, BatchJobStatus, BatchResult};
 use crate::bus::events::typed::BackgroundEvent;
@@ -35,6 +37,20 @@ impl BatchJobExecutor {
         }
     }
 
+    /// Number of permits the semaphore must be created with for a requested
+    /// concurrency level.
+    ///
+    /// A zero-permit semaphore can never be acquired, so a caller asking for
+    /// `0` would otherwise hang the batch forever ([FMD-064]). Zero is therefore
+    /// treated as "as little parallelism as is possible", i.e. serial execution.
+    fn effective_concurrency(concurrency: u8) -> usize {
+        (concurrency as usize).max(1)
+    }
+
+    /// Runs every job against the agent, at most `concurrency` at a time, and
+    /// reports the aggregate outcome.
+    ///
+    /// `concurrency` is clamped to at least 1 (see `effective_concurrency`).
     #[tracing::instrument(skip(self, jobs), name = "batch.execute_concurrent", fields(total_jobs = jobs.len(), concurrency))]
     pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
         let start_time = self.clock.now();
@@ -64,7 +80,7 @@ impl BatchJobExecutor {
         let model_count = min_cost_models.len();
         let rr_counter = Arc::new(AtomicUsize::new(0));
 
-        let semaphore = Arc::new(Semaphore::new(concurrency as usize));
+        let semaphore = Arc::new(Semaphore::new(Self::effective_concurrency(concurrency)));
         let mut join_set = tokio::task::JoinSet::new();
         let cancel_flag = self.cancel_flag.clone();
 
@@ -278,65 +294,5 @@ pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Optio
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::bus::events::typed::BackgroundEventSender;
-    use std::sync::atomic::AtomicBool;
-    use tokio::sync::broadcast;
-
-    #[test]
-    fn test_execute_concurrent_empty() {
-        let (tx, _rx) = broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
-        let cancel_flag = Arc::new(AtomicBool::new(false));
-
-        let executor = BatchJobExecutor::new(
-            AppConfig::default(),
-            bus,
-            tx,
-            "test prompt".to_string(),
-            cancel_flag,
-            Arc::new(crate::utils::clock::SystemClock),
-        );
-
-        let result = executor.execute_concurrent(vec![], 4);
-        assert_eq!(result.total_jobs, 0);
-        assert_eq!(result.completed, 0);
-        assert_eq!(result.failed, 0);
-        assert_eq!(result.cancelled, 0);
-    }
-
-    #[test]
-    fn test_execute_concurrent_cancellation() {
-        let (tx, _rx) = broadcast::channel(16);
-        let tx = BackgroundEventSender::new(tx);
-        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
-        let cancel_flag = Arc::new(AtomicBool::new(true));
-
-        let executor = BatchJobExecutor::new(
-            AppConfig::default(),
-            bus,
-            tx,
-            "test prompt".to_string(),
-            cancel_flag,
-            Arc::new(crate::utils::clock::SystemClock),
-        );
-
-        let jobs = vec![BatchJob {
-            id: 0,
-            target_path: PathBuf::from("/tmp/test1.md"),
-            active_file: Some(PathBuf::from("/tmp/test1.md")),
-            active_dir: None,
-            prompt_text: "test".to_string(),
-            status: BatchJobStatus::Pending,
-            start_time: None,
-            end_time: None,
-            error: None,
-        }];
-
-        let result = executor.execute_concurrent(jobs, 4);
-        assert_eq!(result.total_jobs, 1);
-        assert_eq!(result.cancelled, 1);
-    }
-}
+#[path = "executor_tests.rs"]
+mod tests;
