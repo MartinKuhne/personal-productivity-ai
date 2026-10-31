@@ -17,29 +17,14 @@ use crate::ui::strings;
 use crate::ui::theme::Palette;
 use crate::ui_iced::logs::{self, ScrollSnapshot};
 use crate::ui_iced::message::{AgentMessage, Message, RenderMessage};
-use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
     AGENT_TRANSCRIPT_SCROLLABLE_ID, TRANSCRIPT_SPACING, TRANSCRIPT_TEXT_SIZE,
     agent_transcript_view, link_activated_message, markdown_settings, markdown_style,
     render_markdown_items, render_turn, scroll_reported_message, thinking_block, transcript_body,
 };
-use crate::ui_iced::agent::panel_state::{AgentPanelViewModel, TranscriptTurn};
-
-/// A base snapshot with no content, for view-builder smoke tests.
-fn base_vm() -> AgentPanelViewModel {
-    AgentPanelViewModel {
-        visible: true,
-        turns: Vec::new(),
-        thinking: String::new(),
-        thinking_expanded: true,
-        status: "Idle".to_string(),
-        running: false,
-        queued_prompts: Vec::new(),
-        command_input: TextInputModel::empty().with_clearable(false),
-        auto_scroll: true,
-    }
-}
+use crate::ui_iced::agent::panel_state::TranscriptTurn;
+use crate::ui_iced::agent::test_support::base_vm;
 
 // ---------------------------------------------------------------------------
 // Message constructors

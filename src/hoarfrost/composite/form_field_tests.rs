@@ -8,6 +8,7 @@ use crate::composite::form_field::{
     WARNING_GLYPH, bands, reserved_band_height, resolve_caption, resolve_header, slot_marker,
     stacked, stacked_height,
 };
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{MIN_TEXT_CONTRAST, contrast_ratio};
 use crate::token::{shape, size, space, typography};
@@ -38,12 +39,6 @@ fn surface(name: &str) -> Color {
         "overlay" => palette.surface_overlay,
         other => panic!("no surface named {other}"),
     }
-}
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to; `f32` does not reproduce a printed decimal exactly.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
 }
 
 /// Every surface a form field is mounted on in §4.

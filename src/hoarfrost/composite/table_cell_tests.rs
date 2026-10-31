@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::composite::table_column::{ColumnSpec, WidthPolicy, resolve_widths};
+use crate::test_support::rect;
 use crate::token::color::Palette;
 use crate::token::contrast::{contrast_ratio, meets_chrome_contrast};
 use crate::token::{shape, space};
@@ -12,15 +13,6 @@ const TOL: f32 = 1e-3;
 
 fn approx(actual: f32, expected: f32) -> bool {
     (actual - expected).abs() < TOL
-}
-
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
-    Rectangle {
-        x,
-        y,
-        width,
-        height,
-    }
 }
 
 fn palette() -> Palette {

@@ -15,16 +15,11 @@ use crate::composite::expander::{
 };
 use crate::focus::{FocusId, FocusState, GroupId};
 use crate::state::BaseState;
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{contrast_ratio, meets_disabled_text_band};
 use crate::token::{shape, size, space};
 use iced::{Point, Rectangle};
-
-/// A contrast ratio compared at the four decimal places the pinned figures are
-/// written to.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
-}
 
 /// Whether a header rung clears the crate's hit-target floor.
 ///

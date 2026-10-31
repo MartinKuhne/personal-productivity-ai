@@ -195,3 +195,7 @@ pub fn agent_panel(view_model: &AgentPanelViewModel) -> Element<'_, Message> {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+/// Fixtures shared by the agent panel's test sidecars. Test-only.
+#[cfg(test)]
+pub(crate) mod test_support;

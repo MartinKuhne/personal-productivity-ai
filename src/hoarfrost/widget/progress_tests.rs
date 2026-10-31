@@ -15,6 +15,7 @@
 //!    frame — the property the whole no-clock rule exists to buy.
 
 use super::*;
+use crate::test_support::assert_ratio;
 use crate::token::contrast;
 
 /// Every status, in declaration order.
@@ -23,16 +24,6 @@ const STATUSES: [ProgressStatus; 3] = [
     ProgressStatus::Paused,
     ProgressStatus::Error,
 ];
-
-/// Assert a measured ratio against its true value to four places.
-fn assert_ratio(actual: f32, expected: f32, what: &str) {
-    let measured = f64::from(actual);
-    let wanted = f64::from(expected);
-    assert!(
-        (measured - wanted).abs() < 0.000_5,
-        "{what}: expected {wanted:.4}, measured {measured:.4}"
-    );
-}
 
 /// A track of a known size for the layer tests.
 fn track() -> Rectangle {

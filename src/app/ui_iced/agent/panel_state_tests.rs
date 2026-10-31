@@ -9,12 +9,12 @@
 //! no agent threads and no user paths ([RUST-006]).
 
 use crate::ui::strings;
-use hoarfrost::widget::text_input_model::TextInputModel;
 
 use super::{
     AgentPanelViewModel, TranscriptTurn, TurnRole, split_user_turn, thinking_section_visible,
     transcript_is_empty, turns_from_content, waiting_for_first_response,
 };
+use crate::ui_iced::agent::test_support::base_vm;
 
 // ---------------------------------------------------------------------------
 // split_user_turn
@@ -235,20 +235,6 @@ fn never_waiting_when_idle() {
 // ---------------------------------------------------------------------------
 // AgentPanelViewModel helpers (constructed directly, no FastMdApp)
 // ---------------------------------------------------------------------------
-
-fn base_vm() -> AgentPanelViewModel {
-    AgentPanelViewModel {
-        visible: true,
-        turns: Vec::new(),
-        thinking: String::new(),
-        thinking_expanded: true,
-        status: "Idle".to_string(),
-        running: false,
-        queued_prompts: Vec::new(),
-        command_input: TextInputModel::empty().with_clearable(false),
-        auto_scroll: true,
-    }
-}
 
 #[test]
 fn vm_show_thinking_tracks_thinking_field() {

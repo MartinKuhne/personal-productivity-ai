@@ -8,6 +8,7 @@ use super::*;
 use crate::composite::table_column::{ColumnSpec, resolve_widths};
 use crate::composite::table_header::SortDirection;
 use crate::composite::tree_view::{Modifiers, SelectionMode};
+use crate::test_support::rect;
 use iced::{Point, Rectangle};
 
 type Id = u32;
@@ -16,15 +17,6 @@ const TOL: f32 = 1e-3;
 
 fn approx(actual: f32, expected: f32) -> bool {
     (actual - expected).abs() < TOL
-}
-
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
-    Rectangle {
-        x,
-        y,
-        width,
-        height,
-    }
 }
 
 fn specs() -> Vec<ColumnSpec> {

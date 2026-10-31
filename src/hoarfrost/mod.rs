@@ -103,6 +103,9 @@ pub use widget::{
 pub mod checkbox_ink_probe;
 #[cfg(test)]
 pub mod geometry_gallery;
+/// Helpers shared by this crate's test sidecars. Test-only; see the module doc.
+#[cfg(test)]
+pub(crate) mod test_support;
 // Downstream crates get the same headless capture harness this crate's own
 // tests run on, by turning on the `test-helpers` feature. Under `test` it
 // is here regardless, so `cargo test` needs no flag. See the `[features]`

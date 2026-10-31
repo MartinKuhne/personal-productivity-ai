@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::composite::table_column::resolve_widths;
+use crate::test_support::rect;
 use crate::token::typography::Weight;
 use iced::{Point, Rectangle};
 
@@ -10,15 +11,6 @@ const TOL: f32 = 1e-3;
 
 fn approx(actual: f32, expected: f32) -> bool {
     (actual - expected).abs() < TOL
-}
-
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
-    Rectangle {
-        x,
-        y,
-        width,
-        height,
-    }
 }
 
 /// The header band the tests press against.

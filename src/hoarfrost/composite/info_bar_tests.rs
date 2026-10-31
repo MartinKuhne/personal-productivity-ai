@@ -13,6 +13,7 @@ use crate::composite::info_bar::{
 };
 use crate::composite::notification::{NotificationAction, NotificationId, Severity};
 use crate::focus::{FocusId, FocusState, GroupId};
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{contrast_ratio, meets_chrome_contrast, meets_text_contrast};
 use crate::token::{shape, size, space, typography};
@@ -23,12 +24,6 @@ const NO_ACTION: Option<&NotificationAction<&str>> = None;
 
 fn palette() -> Palette {
     Palette::dark()
-}
-
-/// A contrast ratio compared at the four decimal places the pinned
-/// figures are written to.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
 }
 
 fn container(width: f32, height: f32) -> Rectangle {

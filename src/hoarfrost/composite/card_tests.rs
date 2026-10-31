@@ -5,6 +5,7 @@ use crate::composite::card::{
     BACKGROUND_TOKEN, BORDER_WIDTH, CardElevation, PADDING, RADIUS, card_layer, content_bounds,
     resolve_style,
 };
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio, meets_chrome_contrast,
@@ -14,12 +15,6 @@ use iced::{Color, Point, Rectangle};
 
 fn bounds() -> Rectangle {
     Rectangle::new(Point::new(4.0, 4.0), iced::Size::new(320.0, 200.0))
-}
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to; `f32` does not reproduce a printed decimal exactly.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
 }
 
 // ---------------------------------------------------------------------------

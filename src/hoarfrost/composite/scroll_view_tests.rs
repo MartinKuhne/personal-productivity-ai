@@ -12,16 +12,11 @@ use crate::composite::scroll_view::{
     resolve_phase, scroll_to_key, thumb_clears_chrome_floor, thumb_color, thumb_length,
     thumb_offset, thumb_rect, tick_rect, track_bounds, track_width,
 };
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{ChromeClass, contrast_ratio};
 use crate::token::{shape, size, space};
 use iced::{Color, Point, Rectangle};
-
-/// A contrast ratio compared at the four decimal places the pinned figures are
-/// written to.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
-}
 
 /// Whether a resolved distance is a real, positive measure.
 ///

@@ -52,6 +52,7 @@ use crate::test_helpers::Harness;
 use crate::test_helpers::assert_agree;
 use crate::test_helpers::iced_id;
 use crate::test_helpers::mixed_focusable_tree;
+use crate::test_support::rect;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,10 +68,6 @@ const CARD: [&str; 4] = ["card.field", "card.option", "card.cancel", "card.prima
 
 fn pt(x: f32, y: f32) -> Point {
     Point::new(x, y)
-}
-
-fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
-    Rectangle::new(pt(x, y), Size::new(w, h))
 }
 
 fn sid(name: &str) -> SurfaceId {

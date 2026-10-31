@@ -44,6 +44,15 @@ use crate::ui_iced::token_lint_gate::{
 /// 159 after the font-bootstrap work added `ui_iced/glyph_resolution.rs`,
 /// a `#[cfg(test)]` glyph probe that declares only shaping metrics and no
 /// colour, so neither bound moves with it either.
+/// 158 after `utils/markdown.rs` was deleted: the re-export shim it used to
+/// hold had already been removed, leaving a module whose entire body was a doc
+/// comment plus a test declaration. Its tests moved to `markdown/document.rs`,
+/// the module that owns `parse_front_matter`. It declared no colour, so neither
+/// bound moves with it either.
+/// 159 after `ui_iced/agent/test_support.rs` was added: a `#[cfg(test)]`
+/// fixture module holding the `base_vm` view model that three agent sidecars
+/// defined identically. It declares no colour and no visual scalar, so neither
+/// bound moves with it.
 const PIN_APP_FILES_SCANNED: usize = 159;
 /// Files treated as the app's colour-definition layer.
 const PIN_APP_RULE_A_FILES: usize = 1;
@@ -53,8 +62,10 @@ const PIN_APP_RULE_A_FILES: usize = 1;
 /// the scope. The count is files-in-scope, not files-with-findings: the
 /// new module contributes a scanned file and no violation. 46 after
 /// `ui_iced/glyph_resolution.rs` landed in the same scope, again with no
-/// violation.
-const PIN_APP_RULE_B_FILES: usize = 46;
+/// violation. 47 after `ui_iced/agent/test_support.rs`, the `#[cfg(test)]`
+/// fixture module that holds the `base_vm` view model three agent sidecars
+/// defined identically — no colour, no visual scalar, no violation.
+const PIN_APP_RULE_B_FILES: usize = 47;
 /// Colour constructors found inside `ui/theme.rs`.
 ///
 /// The anti-vacuity half of Rule A: without this, "zero colour literals

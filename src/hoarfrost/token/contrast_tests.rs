@@ -88,6 +88,7 @@ use crate::surface::menu::model::Row;
 use crate::surface::menu::view::{RowState, resolve_row_style};
 use crate::surface::modal::ModalFrame;
 use crate::surface::movable::MovableAnatomy;
+use crate::test_support::rgb8;
 use crate::token::color::{EditorPalette, Palette};
 use crate::token::typography;
 use crate::widget::button::{ButtonVariant, resolve_style as resolve_button_style};
@@ -181,16 +182,6 @@ fn pairing(contract: impl Into<String>, fg: Color, bg: Color, min: f32) -> Pairi
         bg,
         min,
     }
-}
-
-/// A colour as the spec writes it, for assertion messages.
-fn rgb8(color: Color) -> String {
-    format!(
-        "RGB({}, {}, {})",
-        (color.r * 255.0).round(),
-        (color.g * 255.0).round(),
-        (color.b * 255.0).round()
-    )
 }
 
 /// Assert a pairing clears its threshold, naming the contract, the two

@@ -13,25 +13,11 @@ use crate::composite::tree_row::{
     selection_bar_layer, warning_colour,
 };
 use crate::state::BaseState;
+use crate::test_support::{approx, rect};
 use crate::token::color::Palette;
 use crate::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio, meets_chrome_contrast};
 use crate::token::{shape, size, space};
-use iced::{Color, Rectangle};
-
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
-    Rectangle {
-        x,
-        y,
-        width,
-        height,
-    }
-}
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to; `f32` does not reproduce a printed decimal exactly.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
-}
+use iced::Color;
 
 fn palette() -> Palette {
     Palette::dark()

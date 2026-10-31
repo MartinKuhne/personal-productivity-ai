@@ -8,17 +8,8 @@ use crate::composite::virtual_list::{
     ACCUMULATION_ILLUSTRATION, ACCUMULATION_TARGET, COMPACT_ROW_HEIGHT, DEFAULT_OVERSCAN_ROWS,
     RowRung, STANDARD_ROW_HEIGHT, VirtualMetrics,
 };
+use crate::test_support::rect;
 use crate::token::size;
-use iced::Rectangle;
-
-fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
-    Rectangle {
-        x,
-        y,
-        width,
-        height,
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 1 — token bindings

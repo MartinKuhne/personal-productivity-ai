@@ -28,6 +28,7 @@ use super::{
     FocusIndicator, FocusPlacement, resolve_focus_indicator_for_background,
     resolve_inset_outline_for_background, resolve_ring_color, resolve_ring_color_for_background,
 };
+use crate::test_support::rgb8;
 use crate::token::color::Palette;
 use crate::token::contrast::{MIN_CHROME_CONTRAST, contrast_ratio};
 use crate::token::shape;
@@ -40,16 +41,6 @@ const RATIO_EPS: f32 = 1e-3;
 /// The dark palette, taken once so every table reads as token names.
 fn palette() -> Palette {
     Palette::dark()
-}
-
-/// A colour as the spec writes it, for assertion messages.
-fn rgb8(color: Color) -> String {
-    format!(
-        "RGB({}, {}, {})",
-        (color.r * 255.0).round(),
-        (color.g * 255.0).round(),
-        (color.b * 255.0).round()
-    )
 }
 
 /// Every surface in the elevation ladder — the backgrounds a ring is

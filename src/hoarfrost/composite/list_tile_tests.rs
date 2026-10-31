@@ -12,22 +12,13 @@ use crate::composite::list_tile::{
     trailing_targets,
 };
 use crate::state::BaseState;
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio, meets_text_contrast,
 };
 use crate::token::{shape, size, space};
 use iced::{Color, Point, Rectangle};
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to.
-///
-/// `f32` arithmetic does not reproduce a printed decimal exactly, so an
-/// exact `==` on a ratio tests the representation rather than the
-/// measurement.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
-}
 
 fn tile(lines: TileLines, width: f32) -> Rectangle {
     Rectangle::new(

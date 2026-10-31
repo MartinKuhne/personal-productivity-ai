@@ -57,6 +57,7 @@ use crate::test_helpers::Harness;
 use crate::test_helpers::assert_agree;
 use crate::test_helpers::iced_id;
 use crate::test_helpers::mixed_focusable_tree;
+use crate::test_support::rect;
 use crate::token::shape;
 use crate::token::size;
 use crate::token::space;
@@ -78,10 +79,6 @@ fn pt(x: f32, y: f32) -> Point {
 
 fn vec(dx: f32, dy: f32) -> Vector {
     Vector::new(dx, dy)
-}
-
-fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
-    Rectangle::new(pt(x, y), Size::new(w, h))
 }
 
 fn geo(x: f32, y: f32, w: f32, h: f32) -> MovableGeometry {

@@ -11,21 +11,8 @@ use crate::bus::events::user_command::UserCommand;
 use crate::ui_iced::message::Message;
 use hoarfrost::widget::text_input_model::TextInputModel;
 
-use super::{AgentPanelViewModel, TranscriptTurn, agent_panel, close_message};
-
-fn base_vm() -> AgentPanelViewModel {
-    AgentPanelViewModel {
-        visible: true,
-        turns: Vec::new(),
-        thinking: String::new(),
-        thinking_expanded: true,
-        status: "Idle".to_string(),
-        running: false,
-        queued_prompts: Vec::new(),
-        command_input: TextInputModel::empty().with_clearable(false),
-        auto_scroll: true,
-    }
-}
+use super::{TranscriptTurn, agent_panel, close_message};
+use crate::ui_iced::agent::test_support::base_vm;
 
 #[test]
 fn close_message_is_clear_agent_session() {

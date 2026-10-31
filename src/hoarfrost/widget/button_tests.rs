@@ -85,6 +85,7 @@
 
 use super::*;
 use crate::state::{BaseState, InteractionInput, VisualState, resolve};
+use crate::test_support::rgb8;
 use crate::token::contrast::{
     MIN_CHROME_CONTRAST, MIN_TEXT_CONTRAST, composite_over, contrast_ratio, meets_chrome_contrast,
     meets_text_contrast,
@@ -139,16 +140,6 @@ fn all_surfaces() -> [(&'static str, Color); 7] {
         ("surface.hover", p.surface_hover),
         ("surface.active", p.surface_active),
     ]
-}
-
-/// A colour as the spec writes it, for assertion messages.
-fn rgb8(color: Color) -> String {
-    format!(
-        "RGB({}, {}, {})",
-        (color.r * 255.0).round(),
-        (color.g * 255.0).round(),
-        (color.b * 255.0).round()
-    )
 }
 
 /// Do two colours share their channels, ignoring alpha?

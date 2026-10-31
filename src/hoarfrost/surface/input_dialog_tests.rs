@@ -39,6 +39,7 @@ use crate::surface::menu::cascade::MenuTreeKind;
 use crate::surface::menu::model::Menu;
 use crate::surface::menu::model::MenuId;
 use crate::surface::menu::model::Row;
+use crate::test_support::rect;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,10 +50,6 @@ const BACKGROUND: [&str; 3] = ["bg.navbar", "bg.tree", "bg.tabs"];
 
 fn pt(x: f32, y: f32) -> Point {
     Point::new(x, y)
-}
-
-fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
-    Rectangle::new(pt(x, y), Size::new(w, h))
 }
 
 fn sid(name: &str) -> SurfaceId {

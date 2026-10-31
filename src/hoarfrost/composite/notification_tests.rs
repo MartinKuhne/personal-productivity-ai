@@ -7,17 +7,12 @@ use crate::composite::notification::{
     DEFAULT_AUTO_DISMISS_MS, DismissReason, NotificationAction, NotificationId, NotificationModel,
     Severity, effective_auto_dismiss_ms,
 };
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{contrast_ratio, meets_text_contrast};
 
 fn palette() -> Palette {
     Palette::dark()
-}
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
 }
 
 // ---------------------------------------------------------------------------

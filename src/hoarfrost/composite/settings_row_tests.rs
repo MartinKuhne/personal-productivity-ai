@@ -8,6 +8,7 @@ use crate::composite::settings_row::{
     TITLE_RUNG, bands, card_layer, description_present, horizontal, resolve_style, row_height,
     text_column_height,
 };
+use crate::test_support::approx;
 use crate::token::color::Palette;
 use crate::token::contrast::{
     DISABLED_TEXT_MAX_CONTRAST, DISABLED_TEXT_MIN_CONTRAST, MIN_TEXT_CONTRAST, contrast_ratio,
@@ -18,12 +19,6 @@ use iced::{Point, Rectangle, widget::text};
 #[derive(Clone, Debug, PartialEq)]
 enum Msg {
     Toggled(bool),
-}
-
-/// A contrast ratio compared at the four decimal places the pinned figures
-/// are written to; `f32` does not reproduce a printed decimal exactly.
-fn approx(actual: f32, expected: f32) -> bool {
-    (actual - expected).abs() < 5e-4
 }
 
 // ---------------------------------------------------------------------------

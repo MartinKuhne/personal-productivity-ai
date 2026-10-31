@@ -178,7 +178,12 @@ use crate::token_lint::{
 /// `identity.rs` it adds a scanned file without adding a governed one. The
 /// labels it absorbed were *moved*, not added, so Rule B's governed count is
 /// unchanged.
-const PIN_FILES_SCANNED: usize = 184;
+/// 185 as of `test_support`: the shared test-helper module joins the scan at
+/// the crate root. It is `#[cfg(test)]` and declares no colour and no visual
+/// scalar — its body is a tolerance comparison, a ratio assertion, a colour
+/// formatter and a rectangle constructor — so like the entries above it adds a
+/// scanned file without adding a governed one.
+const PIN_FILES_SCANNED: usize = 185;
 /// Files Rule A treats as the colour-definition layer.
 const PIN_RULE_A_FILES: usize = 1;
 /// Files Rule B treats as widget/surface code.
