@@ -475,7 +475,7 @@ fn test_from_rating_control_for_element() {
 /// `focus(id)` landed nowhere. It now claims a stable default name, like the
 /// pickers do.
 #[test]
-fn defect_03_the_rating_control_keeps_one_id_across_rebuilds() {
+fn the_rating_control_keeps_one_id_across_rebuilds() {
     let mut harness = Harness::<(), _>::headless(|| {
         rating_control::<()>(RatingModel::new(5).with_value(Some(3.0))).into()
     });
@@ -506,8 +506,9 @@ fn defect_03_the_rating_control_keeps_one_id_across_rebuilds() {
     );
 }
 
+/// Regression test for defect 03 (fixed).
 #[test]
-fn defect_03_id_names_the_rating_control_for_the_focus_router() {
+fn id_names_the_rating_control_for_the_focus_router() {
     assert_eq!(
         rating_control::<()>(RatingModel::new(5)).widget_id(),
         &iced::advanced::widget::Id::new(DEFAULT_RATING_CONTROL_ID),

@@ -2385,7 +2385,7 @@ fn test_escape_during_a_drag_restores_the_grab_geometry_and_keeps_the_card_open(
 /// see and keep using. The tests above prove the revert through `unwind_answer`
 /// directly; this one drives the real key entry point, which nothing covered.
 #[test]
-fn defect_12_escape_during_a_drag_reports_the_cancel_not_a_close() {
+fn escape_during_a_drag_reports_the_cancel_not_a_close() {
     let mut scenario = Scenario::at(120.0, 90.0);
     scenario.focus_card();
     let grabbed = scenario.host.geometry();
@@ -3131,7 +3131,7 @@ fn indexed_rect(registry: &SurfaceRegistry, name: &str) -> Rectangle {
 /// centre of the card's *new* home — a point the stale index routes past the
 /// card to the workspace.
 #[test]
-fn defect_01_a_dragged_card_owns_the_ground_it_moved_to() {
+fn a_dragged_card_owns_the_ground_it_moved_to() {
     let mut scenario = Scenario::at(200.0, 200.0);
     let before = scenario.host.card();
     assert_eq!(
@@ -3168,7 +3168,7 @@ fn defect_01_a_dragged_card_owns_the_ground_it_moved_to() {
 /// underneath stays unreachable there. A workspace-band pane is placed under
 /// the card to make "unreachable" observable rather than rhetorical.
 #[test]
-fn defect_02_the_ground_a_card_vacated_stops_belonging_to_it() {
+fn the_ground_a_card_vacated_stops_belonging_to_it() {
     let mut scenario = Scenario::at(200.0, 200.0);
     scenario.registry.register(
         sid("pane"),
@@ -3201,7 +3201,7 @@ fn defect_02_the_ground_a_card_vacated_stops_belonging_to_it() {
 /// handed that ground to the card, so the newly covered area kept routing
 /// past it.
 #[test]
-fn defect_03_a_resized_card_owns_the_ground_it_grew_onto() {
+fn a_resized_card_owns_the_ground_it_grew_onto() {
     let mut scenario = Scenario::at(200.0, 200.0);
     scenario.pointer(
         PointerPhase::Pressed,
@@ -3254,9 +3254,10 @@ fn defect_03_a_resized_card_owns_the_ground_it_grew_onto() {
 /// Corner case: the pointer is released far outside the viewport. The card
 /// itself is clamped back inside, and the index must publish the clamped
 /// rectangle — not the off-screen position the pointer ended at, and not the
+/// Regression test for defect 04 (fixed).
 /// position the drag started from.
 #[test]
-fn defect_04_a_drag_released_outside_the_viewport_still_settles_the_index() {
+fn a_drag_released_outside_the_viewport_still_settles_the_index() {
     let mut scenario = Scenario::at(200.0, 200.0);
     let before = scenario.host.card();
 
@@ -3305,9 +3306,10 @@ fn defect_04_a_drag_released_outside_the_viewport_still_settles_the_index() {
 
 /// Corner case: press and release without moving. Nothing moved, so the index
 /// must be byte-for-byte what it was — the fix must not turn a no-op release
+/// Regression test for defect 05 (fixed).
 /// into a re-publish that changes anything.
 #[test]
-fn defect_05_a_zero_movement_drag_leaves_the_index_exactly_where_it_was() {
+fn a_zero_movement_drag_leaves_the_index_exactly_where_it_was() {
     let mut scenario = Scenario::at(200.0, 200.0);
     let untouched = scenario.host.card();
     scenario.registry.register(
@@ -3340,9 +3342,10 @@ fn defect_05_a_zero_movement_drag_leaves_the_index_exactly_where_it_was() {
 
 /// Corner case: a resize driven past the size floor. The card stops at the
 /// policy minimum, and the index must publish that minimum rectangle rather
+/// Regression test for defect 06 (fixed).
 /// than the opening one.
 #[test]
-fn defect_06_a_resize_held_at_the_size_floor_publishes_the_minimum_rect() {
+fn a_resize_held_at_the_size_floor_publishes_the_minimum_rect() {
     let mut scenario = Scenario::at(200.0, 200.0);
 
     scenario.pointer(
@@ -3389,9 +3392,10 @@ fn defect_06_a_resize_held_at_the_size_floor_publishes_the_minimum_rect() {
 /// Corner case: a card dragged on top of a second card. The card that moved
 /// must end up owning the overlap (the press promoted it), the card beneath
 /// must stay reachable wherever it is still uncovered, and the ground the
+/// Regression test for defect 07 (fixed).
 /// moving card vacated must belong to neither.
 #[test]
-fn defect_07_a_card_dragged_onto_another_card_leaves_the_one_beneath_reachable() {
+fn a_card_dragged_onto_another_card_leaves_the_one_beneath_reachable() {
     let mut scenario = Scenario::at(200.0, 200.0);
     scenario.registry.register(
         sid("debug"),
@@ -3452,9 +3456,10 @@ fn defect_07_a_card_dragged_onto_another_card_leaves_the_one_beneath_reachable()
 /// The card returns to the rectangle it was grabbed at, and the index must
 /// agree with the restored card. That agreement is only possible because a
 /// drag's frames never published a rectangle in the first place, so there is
+/// Regression test for defect 08 (fixed).
 /// nothing for the rollback to undo in the index.
 #[test]
-fn defect_08_a_cancelled_drag_leaves_the_index_with_the_restored_card() {
+fn a_cancelled_drag_leaves_the_index_with_the_restored_card() {
     let mut scenario = Scenario::at(200.0, 200.0);
     let grabbed = scenario.host.card();
 
@@ -3505,9 +3510,10 @@ fn defect_08_a_cancelled_drag_leaves_the_index_with_the_restored_card() {
 /// The same rollback reached through the chain's answer directly, which is
 /// how the escape walk calls it. Called on its own — with no caller to repair
 /// anything — it must leave the index still agreeing with the card, and must
+/// Regression test for defect 09 (fixed).
 /// neither add a region nor drop the card's own.
 #[test]
-fn defect_09_unwinding_the_answer_alone_never_touches_the_registry() {
+fn unwinding_the_answer_alone_never_touches_the_registry() {
     let mut scenario = Scenario::at(200.0, 200.0);
     let grabbed = scenario.host.card();
 
@@ -3546,9 +3552,10 @@ fn defect_09_unwinding_the_answer_alone_never_touches_the_registry() {
 
 /// The direct gesture API — the entry points a host that drives its own
 /// pointer events uses instead of [`on_pointer`](MovableHost::on_pointer) —
+/// Regression test for defect 10 (fixed).
 /// owes the same invariant: every settle republishes the rectangle.
 #[test]
-fn defect_10_a_settled_gesture_publishes_through_the_direct_api() {
+fn a_settled_gesture_publishes_through_the_direct_api() {
     let mut scenario = Scenario::at(200.0, 200.0);
 
     scenario.host.drag_by(vec(150.0, 90.0));
@@ -3595,9 +3602,10 @@ fn defect_10_a_settled_gesture_publishes_through_the_direct_api() {
 
 /// Failure mode for the publish guard: a card that is no longer open must
 /// never be put back into the index by a stray settle. `close` unregisters,
+/// Regression test for defect 11 (fixed).
 /// and every later geometry call has to respect that.
 #[test]
-fn defect_11_a_closed_card_is_never_published_back_into_the_index() {
+fn a_closed_card_is_never_published_back_into_the_index() {
     let mut scenario = Scenario::at(200.0, 200.0);
     scenario.host.close(
         &mut scenario.focus,

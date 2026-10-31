@@ -1957,7 +1957,7 @@ fn expect_file_modified(ev: FsEvent, case: &str) -> (PathBuf, Vec<String>) {
 /// background channel — the transport `FsEvent` actually travels on — where the
 /// UI's update loop feeds it to [`AppOrchestrator::handle_fs_event`].
 #[test]
-fn defect_04_tool_side_effect_is_reissued_as_fs_file_modified() {
+fn tool_side_effect_is_reissued_as_fs_file_modified() {
     let mut orch = harness();
     // Subscribe before the drain so the published event is observable.
     let mut background = orch.tx.subscribe();
@@ -1990,9 +1990,10 @@ fn defect_04_tool_side_effect_is_reissued_as_fs_file_modified() {
 
 /// The re-issued event must be *consumed*, not merely published: feeding it to
 /// `handle_fs_event` the way the UI loop does has to update the tag index, the
+/// Regression test for defect 04 (fixed).
 /// prompt set and the tree-dirty flag.
 #[test]
-fn defect_04_reissued_side_effect_updates_the_tag_index_when_handled() {
+fn reissued_side_effect_updates_the_tag_index_when_handled() {
     let mut orch = harness();
     let mut background = orch.tx.subscribe();
     let path = PathBuf::from("/lib/created.md");
@@ -2038,9 +2039,10 @@ fn defect_04_reissued_side_effect_updates_the_tag_index_when_handled() {
 
 /// A `FileChanged` carries no tags, and `Tags::add_tags` *replaces* the entry a
 /// path already has — so the index's known tags are carried forward instead of
+/// Regression test for defect 04 (fixed).
 /// being wiped by an empty list.
 #[test]
-fn defect_04_a_changed_file_keeps_its_known_tags_instead_of_being_wiped() {
+fn a_changed_file_keeps_its_known_tags_instead_of_being_wiped() {
     let mut orch = harness();
     let path = PathBuf::from("/lib/known.md");
     orch.tags
@@ -2068,9 +2070,10 @@ fn defect_04_a_changed_file_keeps_its_known_tags_instead_of_being_wiped() {
 }
 
 /// A changed file the index has never seen is still a real change: the event is
+/// Regression test for defect 04 (fixed).
 /// published with an empty tag list rather than being suppressed.
 #[test]
-fn defect_04_a_changed_file_with_no_known_tags_publishes_an_empty_tag_list() {
+fn a_changed_file_with_no_known_tags_publishes_an_empty_tag_list() {
     let mut orch = harness();
     let path = PathBuf::from("/lib/unknown.md");
     let mut background = orch.tx.subscribe();
@@ -2098,9 +2101,10 @@ fn defect_04_a_changed_file_with_no_known_tags_publishes_an_empty_tag_list() {
 }
 
 /// Several side effects drained in one pass must be re-published in the order
+/// Regression test for defect 04 (fixed).
 /// the agent produced them ([FMD-066]).
 #[test]
-fn defect_04_side_effects_keep_their_order_within_one_drain() {
+fn side_effects_keep_their_order_within_one_drain() {
     let mut orch = harness();
     let mut background = orch.tx.subscribe();
     let first = PathBuf::from("/lib/first.md");
@@ -2137,9 +2141,10 @@ fn defect_04_side_effects_keep_their_order_within_one_drain() {
 
 /// A background channel with no subscriber must not take the agent drain down:
 /// the failure is logged with an error code and recorded for the UI log panel
+/// Regression test for defect 04 (fixed).
 /// ([NFR-001], [NFR-003], [NFR-004]).
 #[test]
-fn defect_04_a_failed_publish_is_logged_instead_of_panicking() {
+fn a_failed_publish_is_logged_instead_of_panicking() {
     let mut orch = harness();
     // A sender whose only receiver has been dropped: every `send` fails.
     let (dead_tx, dead_rx) = tokio::sync::broadcast::channel::<BackgroundEvent>(4);

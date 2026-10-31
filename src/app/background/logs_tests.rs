@@ -413,7 +413,7 @@ fn test_log_dir_from_env_resolution() {
 /// Every value here is a synthetic literal; no real user directory is read
 /// ([RUST-006]).
 #[test]
-fn defect_05_log_dir_from_env_treats_an_empty_variable_as_unset() {
+fn log_dir_from_env_treats_an_empty_variable_as_unset() {
     struct Case {
         name: &'static str,
         log_dir: Option<&'static str>,
@@ -553,9 +553,10 @@ fn defect_05_log_dir_from_env_treats_an_empty_variable_as_unset() {
 }
 
 /// An empty override must not shadow a usable lower-priority source, and an
+/// Regression test for defect 05 (fixed).
 /// empty variable must never contribute an empty leading path component.
 #[test]
-fn defect_05_empty_overrides_never_contribute_an_empty_path_component() {
+fn empty_overrides_never_contribute_an_empty_path_component() {
     for appdata in [None, Some("")] {
         for userprofile in [None, Some("")] {
             let resolved = log_dir_from_env(None, None, appdata, userprofile);
@@ -679,7 +680,7 @@ fn test_default_field_values() {
 /// two *overrides* (`log_dir_override`, `config_path_override`) and for the two
 /// *fallbacks* (`appdata`, `userprofile`) alike, so a cleared-but-present
 /// `APPDATA` falls through to `USERPROFILE` instead of yielding the relative
-/// `fastmd/logs`. See `defect_05_log_dir_from_env_treats_an_empty_variable_as_unset`
+/// `fastmd/logs`. See `log_dir_from_env_treats_an_empty_variable_as_unset`
 /// for the per-input sweep.
 #[test]
 fn test_log_dir_from_env_ignores_empty_overrides() {

@@ -244,7 +244,7 @@ fn test_hex_parsing_and_formatting_edges() {
     // byte length: `aé` is three bytes (no arm), `ééé` is six bytes and every
     // boundary lands on a char edge, and `aébcd` is six bytes that cut through
     // `é` — the case that used to panic, pinned by
-    // `defect_02_from_hex_rejects_a_non_ascii_string_of_a_valid_byte_length`.
+    // `from_hex_rejects_a_non_ascii_string_of_a_valid_byte_length`.
     assert!(Rgba8::from_hex("aé").is_none());
     assert!(Rgba8::from_hex("ééé").is_none());
 
@@ -304,7 +304,7 @@ fn test_hex_parsing_and_formatting_edges() {
 /// is the case that used to abort its own process; the history reads better
 /// next to the input that caused it.
 #[test]
-fn defect_02_from_hex_rejects_a_non_ascii_string_of_a_valid_byte_length() {
+fn from_hex_rejects_a_non_ascii_string_of_a_valid_byte_length() {
     assert_eq!(
         Rgba8::from_hex("aébcd"),
         None,
@@ -314,9 +314,10 @@ fn defect_02_from_hex_rejects_a_non_ascii_string_of_a_valid_byte_length() {
 
 /// Every shape `from_hex` must answer with `None` — the byte-length traps that
 /// used to slice through a character, the `+` sign `u8::from_str_radix` would
+/// Regression test for defect 02 (fixed).
 /// otherwise swallow, and the ordinary malformed shapes.
 #[test]
-fn defect_02_from_hex_answers_none_for_every_shape_it_cannot_parse() {
+fn from_hex_answers_none_for_every_shape_it_cannot_parse() {
     const REJECTED: &[(&str, &str)] = &[
         ("non-ASCII across a byte boundary, 6 bytes", "aébcd"),
         ("non-ASCII across a byte boundary, 8 bytes", "aébcdef"),
@@ -347,9 +348,10 @@ fn defect_02_from_hex_answers_none_for_every_shape_it_cannot_parse() {
 }
 
 /// The shapes `from_hex` must still accept, so the new guard did not narrow the
+/// Regression test for defect 02 (fixed).
 /// language the colour field actually speaks.
 #[test]
-fn defect_02_from_hex_still_accepts_every_valid_hex_shape() {
+fn from_hex_still_accepts_every_valid_hex_shape() {
     let upper = Rgba8::from_hex("#FF5722").expect("defect 02: uppercase with # must parse");
     assert_eq!(upper, Rgba8::from_rgb(255, 87, 34), "defect 02: #RRGGBB");
 
@@ -386,9 +388,10 @@ fn defect_02_from_hex_still_accepts_every_valid_hex_shape() {
 
 /// The reachable path to the panic: the hex field feeds `from_hex` whatever the
 /// user pasted, so a rejected paste must be reported as a validation error and
+/// Regression test for defect 02 (fixed).
 /// leave the colour alone — not unwind the frame.
 #[test]
-fn defect_02_the_hex_field_reports_a_non_ascii_paste_instead_of_panicking() {
+fn the_hex_field_reports_a_non_ascii_paste_instead_of_panicking() {
     let mut model = ColorPickerModel::new(Rgba8::from_rgb(1, 2, 3));
     let before = model.value;
 
@@ -1812,7 +1815,7 @@ fn test_enter_and_space_open_a_focused_closed_picker() {
     );
     // Focus is taken by traversal here, though an id-addressed request would now
     // reach it too: the picker registers under a stable name, which
-    // `defect_03_the_color_picker_trigger_keeps_one_id_across_rebuilds` pins.
+    // `the_color_picker_trigger_keeps_one_id_across_rebuilds` pins.
     // Traversal focuses whatever the current tree actually holds, and the flag
     // lives in the widget's own tree state, which the cache carries forward.
     harness.iced_focus_next();
@@ -1981,7 +1984,7 @@ fn test_swatch_button_answers_the_press_and_the_keyboard_but_not_the_release() {
     // Focused by traversal, as in
     // `test_enter_and_space_open_a_focused_closed_picker`; the button's own id is
     // stable across rebuilds now, which
-    // `defect_03_the_swatch_button_keeps_one_id_across_rebuilds` pins.
+    // `the_swatch_button_keeps_one_id_across_rebuilds` pins.
     harness.iced_focus_next();
     assert!(harness.focused().is_some(), "the button must hold focus");
     assert_eq!(
@@ -2036,7 +2039,7 @@ fn test_swatch_button_answers_the_press_and_the_keyboard_but_not_the_release() {
 /// harness rebuilds the tree on every step, which makes two reads from one
 /// harness exactly two constructions of the widget.
 #[test]
-fn defect_03_the_color_picker_trigger_keeps_one_id_across_rebuilds() {
+fn the_color_picker_trigger_keeps_one_id_across_rebuilds() {
     let model = ColorPickerModel::new(DISTINCT);
     let mut harness = Harness::headless(move || picker(model.clone()).into());
 
@@ -2075,7 +2078,7 @@ fn defect_03_the_color_picker_trigger_keeps_one_id_across_rebuilds() {
 /// more than one picker on a screen needs: two controls sharing one id cannot be
 /// told apart by an id-addressed focus request.
 #[test]
-fn defect_03_with_id_names_the_color_picker_for_the_focus_router() {
+fn with_id_names_the_color_picker_for_the_focus_router() {
     let mut foreground = Harness::headless(move || {
         picker(ColorPickerModel::new(DISTINCT))
             .with_id("field.foreground")
@@ -2117,9 +2120,9 @@ fn defect_03_with_id_names_the_color_picker_for_the_focus_router() {
 
 /// **Defect 03, fixed.** The standalone swatch button keeps one id across
 /// rebuilds, for the same reason and by the same mechanism as
-/// [`defect_03_the_color_picker_trigger_keeps_one_id_across_rebuilds`].
+/// [`the_color_picker_trigger_keeps_one_id_across_rebuilds`].
 #[test]
-fn defect_03_the_swatch_button_keeps_one_id_across_rebuilds() {
+fn the_swatch_button_keeps_one_id_across_rebuilds() {
     let model = ColorPickerModel::new(DISTINCT);
     let mut harness = Harness::headless(move || color_swatch_button::<PickerMsg>(&model).into());
 
@@ -2146,7 +2149,7 @@ fn defect_03_the_swatch_button_keeps_one_id_across_rebuilds() {
 /// **Defect 03, fixed.** `with_id` names the swatch button, so a host with a
 /// row of swatches can address each one on its own.
 #[test]
-fn defect_03_with_id_names_the_swatch_button_for_the_focus_router() {
+fn with_id_names_the_swatch_button_for_the_focus_router() {
     let accent_model = ColorPickerModel::new(DISTINCT);
     let mut accent = Harness::headless(move || {
         color_swatch_button::<PickerMsg>(&accent_model)

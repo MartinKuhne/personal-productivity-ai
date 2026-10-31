@@ -1422,7 +1422,7 @@ fn set_tool_group_enabled_is_visible_through_the_registry_group_state() {
 /// pre-existing assertion read `orch.config` — the app-side copy that *was*
 /// always updated — which is why none of them caught it.
 #[test]
-fn defect_01_set_tool_group_enabled_reaches_the_live_agent_projection() {
+fn set_tool_group_enabled_reaches_the_live_agent_projection() {
     let mut orch = harness();
     let id = ToolGroupId::Internal(InternalToolGroup::Web);
 
@@ -1478,9 +1478,10 @@ fn defect_01_set_tool_group_enabled_reaches_the_live_agent_projection() {
 }
 
 /// The MCP branch reads its flag from the projected config's server entry, so
+/// Regression test for defect 01 (fixed).
 /// it must propagate through the same swap.
 #[test]
-fn defect_01_disabling_an_mcp_group_reaches_the_live_agent_projection() {
+fn disabling_an_mcp_group_reaches_the_live_agent_projection() {
     let mut orch = with_mcp_server(harness(), "known-server");
     let id = ToolGroupId::Mcp("known-server".to_string());
 
@@ -1511,9 +1512,10 @@ fn defect_01_disabling_an_mcp_group_reaches_the_live_agent_projection() {
 }
 
 /// A command that matches no group is a no-op: it must not disturb the live
+/// Regression test for defect 01 (fixed).
 /// projection either.
 #[test]
-fn defect_01_an_unknown_mcp_group_leaves_the_live_projection_untouched() {
+fn an_unknown_mcp_group_leaves_the_live_projection_untouched() {
     let mut orch = harness();
     let before = orch.agent.agent_config();
 

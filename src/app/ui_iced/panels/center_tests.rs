@@ -1486,7 +1486,7 @@ fn strip_with_tabs(count: usize, active: Option<usize>) -> CenterPanelViewModel 
 /// Laid out in a strip far wider than the tab needs, the tab's own layout
 /// box and the surface its fill is painted on must be the same width.
 #[test]
-fn defect_15_the_selected_tab_fill_conforms_to_the_tab_layout_box() {
+fn the_selected_tab_fill_conforms_to_the_tab_layout_box() {
     let vm = strip_with_tabs(1, Some(0));
     let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
 
@@ -1518,7 +1518,7 @@ fn defect_15_the_selected_tab_fill_conforms_to_the_tab_layout_box() {
 /// the top accent bar short: it rides the tab at `Length::Fill`, so it has
 /// to resolve to the tab's own width.
 #[test]
-fn defect_15_the_top_accent_indicator_still_spans_the_whole_tab() {
+fn the_top_accent_indicator_still_spans_the_whole_tab() {
     let vm = strip_with_tabs(1, Some(0));
     let mut ui = laid_out(iced::Size::new(1200.0, 200.0), tab_strip(&vm));
 
@@ -1570,7 +1570,7 @@ fn the_tab_strip_band_keeps_its_pinned_height_with_one_tab_and_with_many() {
 /// The overflow must be carried by a horizontal `scrollable` with a stable
 /// id, whose scroll extent is the tabs' real total width.
 #[test]
-fn defect_16_overflowing_tabs_are_carried_by_a_named_horizontal_scrollable() {
+fn overflowing_tabs_are_carried_by_a_named_horizontal_scrollable() {
     let viewport_width = 300.0;
     let vm = strip_with_tabs(8, Some(0));
     let mut ui = laid_out(iced::Size::new(viewport_width, 200.0), tab_strip(&vm));
@@ -1601,7 +1601,7 @@ fn defect_16_overflowing_tabs_are_carried_by_a_named_horizontal_scrollable() {
 
 /// Defect #16 — nothing of a tab may be painted outside the strip band.
 #[test]
-fn defect_16_no_tab_paints_past_the_strip_band() {
+fn no_tab_paints_past_the_strip_band() {
     let vm = strip_with_tabs(8, Some(0));
     let mut ui = laid_out(iced::Size::new(300.0, 200.0), tab_strip(&vm));
 
@@ -1650,7 +1650,7 @@ fn intrinsic_tab_width(path: &str) -> f32 {
 /// with it. The horizontal `scrollable` hands the row an unbounded maximum
 /// width, so every tab keeps the width it has on its own.
 #[test]
-fn defect_16_a_crowded_strip_never_squashes_a_tab_below_its_own_width() {
+fn a_crowded_strip_never_squashes_a_tab_below_its_own_width() {
     let intrinsic = intrinsic_tab_width("docs/document-2.md");
     let vm = strip_with_tabs(3, Some(1));
     let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
@@ -1685,9 +1685,10 @@ fn text_bounds(ui: &mut Sim<'_>, content: &str) -> Option<iced::Rectangle> {
 /// **Measured before the change this already held** — iced squeezed the tab's
 /// content along with its box instead of letting the label run over. It is
 /// kept as a guard, not as the red: the pre-fix symptom was the squash the
+/// Regression test for defect 16 (fixed).
 /// test above measures, not an overflowing label.
 #[test]
-fn defect_16_a_crowded_tabs_label_does_not_paint_over_its_neighbour() {
+fn a_crowded_tabs_label_does_not_paint_over_its_neighbour() {
     let vm = strip_with_tabs(3, Some(1));
     let mut ui = laid_out(iced::Size::new(400.0, STRIP_HEIGHT), tab_strip(&vm));
 

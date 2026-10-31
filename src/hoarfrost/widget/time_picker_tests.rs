@@ -1141,7 +1141,7 @@ fn test_time_picker_registers_with_focus_router_unless_disabled() {
 /// The harness rebuilds the tree on every step, which makes two reads from one
 /// harness exactly two constructions of the widget.
 #[test]
-fn defect_03_the_time_picker_trigger_keeps_one_id_across_rebuilds() {
+fn the_time_picker_trigger_keeps_one_id_across_rebuilds() {
     let value = CivilTime::new(9, 15, 0).unwrap();
     let mut harness = Harness::<(), _>::headless(move || {
         time_picker::<()>(TimePickerModel::new(Some(value))).into()
@@ -1184,7 +1184,7 @@ fn defect_03_the_time_picker_trigger_keeps_one_id_across_rebuilds() {
 /// more than one picker on a screen needs: two controls sharing one id cannot be
 /// told apart by an id-addressed focus request.
 #[test]
-fn defect_03_with_id_names_the_time_picker_for_the_focus_router() {
+fn with_id_names_the_time_picker_for_the_focus_router() {
     let value = CivilTime::new(9, 15, 0).unwrap();
     let mut meeting = Harness::<(), _>::headless(move || {
         time_picker::<()>(TimePickerModel::new(Some(value)))
@@ -1622,7 +1622,7 @@ fn test_time_picker_cancel_button_rolls_the_edit_back() {
 ///
 /// `with_open` now captures the snapshot exactly as `open_flyout` does.
 #[test]
-fn defect_04_a_card_the_host_declared_open_rolls_back_on_cancel() {
+fn a_card_the_host_declared_open_rolls_back_on_cancel() {
     let value = CivilTime::new(10, 0, 0).unwrap();
     let mut driver = Driver::new(wired(
         TimePickerModel::new(Some(value))
@@ -1663,9 +1663,10 @@ fn defect_04_a_card_the_host_declared_open_rolls_back_on_cancel() {
 }
 
 /// The other half of the rollback contract: a card the host declared open still
+/// Regression test for defect 04 (fixed).
 /// commits what the user left in it when they confirm instead of cancelling.
 #[test]
-fn defect_04_a_card_the_host_declared_open_keeps_what_apply_confirms() {
+fn a_card_the_host_declared_open_keeps_what_apply_confirms() {
     let value = CivilTime::new(10, 0, 0).unwrap();
     let mut driver = Driver::new(wired(
         TimePickerModel::new(Some(value))
@@ -1704,9 +1705,10 @@ fn defect_04_a_card_the_host_declared_open_keeps_what_apply_confirms() {
 
 /// The model-level contract, without a widget in the way: `with_open` and
 /// `open_flyout` must record the same thing, and `with_open(false)` must
+/// Regression test for defect 04 (fixed).
 /// record nothing.
 #[test]
-fn defect_04_with_open_records_the_snapshot_open_flyout_records() {
+fn with_open_records_the_snapshot_open_flyout_records() {
     let value = CivilTime::new(10, 0, 0).unwrap();
     let later = CivilTime::new(11, 30, 0).unwrap();
 

@@ -1756,7 +1756,7 @@ fn test_date_picker_registers_with_focus_router_unless_disabled() {
 /// The harness rebuilds the tree on every step, which makes two reads from one
 /// harness exactly two constructions of the widget.
 #[test]
-fn defect_03_the_date_picker_trigger_keeps_one_id_across_rebuilds() {
+fn the_date_picker_trigger_keeps_one_id_across_rebuilds() {
     let today = CivilDate::new(2026, 10, 26).unwrap();
     let mut harness =
         Harness::<(), _>::headless(move || date_picker::<()>(DatePickerModel::new(today)).into());
@@ -1798,7 +1798,7 @@ fn defect_03_the_date_picker_trigger_keeps_one_id_across_rebuilds() {
 /// more than one picker on a screen needs: two controls sharing one id cannot be
 /// told apart by an id-addressed focus request.
 #[test]
-fn defect_03_with_id_names_the_date_picker_for_the_focus_router() {
+fn with_id_names_the_date_picker_for_the_focus_router() {
     let today = CivilDate::new(2026, 10, 26).unwrap();
     let mut start = Harness::<(), _>::headless(move || {
         date_picker::<()>(DatePickerModel::new(today))

@@ -166,7 +166,7 @@ fn test_relative_file_links_resolve_against_the_current_file() {
 /// phantom path or launched the system editor on a missing file. It now reports
 /// [`LinkAction::NotFound`] carrying the best-guess path.
 #[test]
-fn defect_01b_a_dead_link_reports_not_found_instead_of_a_phantom_file() {
+fn a_dead_link_reports_not_found_instead_of_a_phantom_file() {
     let dir = tempdir().expect("tempdir");
     std::fs::create_dir_all(dir.path().join("Docs")).expect("create fixture directories");
     let current = touch(dir.path(), "Docs/Chapter1.md");
@@ -299,9 +299,10 @@ fn test_resolve_link_dispatches_on_the_link_shape() {
 /// `HTTPS://example.com` tried to open a file instead of a browser.
 ///
 /// The corner case is a Windows drive path: a single letter followed by `:`
+/// Regression test for defect 01a (fixed).
 /// is a drive letter, not a scheme, so it must stay a workspace path.
 #[test]
-fn defect_01a_scheme_detection_is_case_insensitive_but_drive_safe() {
+fn scheme_detection_is_case_insensitive_but_drive_safe() {
     let cases: Vec<(&str, bool)> = vec![
         ("HTTPS://example.com", true),
         ("Http://example.com", true),

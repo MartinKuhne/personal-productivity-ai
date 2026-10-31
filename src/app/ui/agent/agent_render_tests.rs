@@ -813,9 +813,10 @@ fn test_format_result_search_notes_appends_the_truncation_note() {
 /// D1c: the file key was cut at the **first** `':'`, so every Windows path
 /// collapsed to its drive letter, and the `.md:` probe cut at the **last**
 /// occurrence, so a `other.md:9` reference quoted inside a matching line was
+/// Regression test for defect 01c (fixed).
 /// taken for the path. Both made the distinct-file count wrong.
 #[test]
-fn defect_01c_search_notes_counts_windows_paths_and_quoted_references_correctly() {
+fn search_notes_counts_windows_paths_and_quoted_references_correctly() {
     let cases: Vec<(&str, serde_json::Value, &str)> = vec![
         (
             "two drive-letter matches in different files are two files",
@@ -874,9 +875,10 @@ fn defect_01c_search_notes_counts_windows_paths_and_quoted_references_correctly(
 }
 
 /// D1c: the path part of a match line ends at the first `':'` that is followed
+/// Regression test for defect 01c (fixed).
 /// by an ASCII digit — the line-number separator of `{path}:{line} - {text}`.
 #[test]
-fn defect_01c_match_path_part_splits_at_the_line_number_separator() {
+fn match_path_part_splits_at_the_line_number_separator() {
     let cases: Vec<(&str, &str)> = vec![
         ("Docs/a.md:3 - hit", "Docs/a.md"),
         ("notes/a.markdown:3: hit", "notes/a.markdown"),

@@ -1503,7 +1503,7 @@ fn test_models_for_use_case_min_cost_returns_every_tied_model() {
 /// [`LlmConfig::cost_rank`], so an unpriced model comes *after* every priced
 /// model and no longer ties with a genuinely free (`Some(0)`) one.
 #[test]
-fn defect_02_app_config_ranks_an_unpriced_model_after_every_priced_one() {
+fn app_config_ranks_an_unpriced_model_after_every_priced_one() {
     let mut config = AppConfig::default();
     config
         .models
@@ -1919,7 +1919,7 @@ fn discord_config_with_token(token: &str) -> DiscordConfig {
 /// [NFR-009] forbids. The token is now rendered as the repo-wide `[REDACTED]`
 /// placeholder while every other field stays readable.
 #[test]
-fn defect_02_discord_config_debug_redacts_the_bot_token() {
+fn discord_config_debug_redacts_the_bot_token() {
     const SECRET: &str = "MTA5NDIyOTc0MzY3OTAwMDcwNg.GbRaZx.supersecrettokenvalue";
     let config = discord_config_with_token(SECRET);
 
@@ -1965,9 +1965,10 @@ fn defect_02_discord_config_debug_redacts_the_bot_token() {
 }
 
 /// An unconfigured token must not be dressed up as a redacted one: `None` stays
+/// Regression test for defect 02 (fixed).
 /// `None` so an operator can tell "no token" from "token set".
 #[test]
-fn defect_02_discord_config_debug_keeps_an_absent_token_as_none() {
+fn discord_config_debug_keeps_an_absent_token_as_none() {
     let rendered = format!("{:?}", DiscordConfig::default());
 
     assert!(
@@ -1981,9 +1982,10 @@ fn defect_02_discord_config_debug_keeps_an_absent_token_as_none() {
 }
 
 /// An empty configured token is still a configured value: its *presence* is
+/// Regression test for defect 02 (fixed).
 /// reported, its content is not.
 #[test]
-fn defect_02_discord_config_debug_redacts_an_empty_token_too() {
+fn discord_config_debug_redacts_an_empty_token_too() {
     let rendered = format!("{:?}", discord_config_with_token(""));
 
     assert!(
@@ -1993,9 +1995,10 @@ fn defect_02_discord_config_debug_redacts_an_empty_token_too() {
 }
 
 /// The leak that actually mattered: `AppConfig` is what gets logged, and its
+/// Regression test for defect 02 (fixed).
 /// `Debug` forwards to the Discord config.
 #[test]
-fn defect_02_app_config_debug_does_not_leak_the_discord_token() {
+fn app_config_debug_does_not_leak_the_discord_token() {
     const SECRET: &str = "Bot.s3cr3t-t0k3n-value-do-not-log";
     let config = AppConfig {
         discord: Some(discord_config_with_token(SECRET)),
@@ -2718,9 +2721,10 @@ fn test_full_config_round_trips_through_serialised_yaml() {
 /// of merging into it, so any built-in flag the user did not repeat disappears.
 ///
 /// KNOWN DRIFT (reported, not fixed): partial flag maps are not merged with
+/// Regression test for the defect pinned as `defect_feature_flags_in_a_document_replace_the_built_in_default_map` (fixed).
 /// `default_feature_flags()`.
 #[test]
-fn defect_feature_flags_in_a_document_replace_the_built_in_default_map() {
+fn feature_flags_in_a_document_replace_the_built_in_default_map() {
     let config: AppConfig = serde_norway::from_str("feature_flags:\n  onlyFlag: true\n")
         .expect("a single-key flag map must parse");
 

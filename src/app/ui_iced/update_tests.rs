@@ -5438,7 +5438,7 @@ fn test_a_gesture_on_one_card_never_moves_the_other() {
 /// area kept pointing at the card that had moved, and the card beneath was
 /// ungrabbable for the rest of the session.)
 #[test]
-fn defect_01_a_dragged_card_releases_the_ground_it_vacated() {
+fn a_dragged_card_releases_the_ground_it_vacated() {
     let (mut state, _storage) = fresh_state();
     state.viewport = ROOMY_VIEWPORT;
     open_logs_card(&mut state);

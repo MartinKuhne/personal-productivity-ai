@@ -217,8 +217,9 @@ fn cost_rank_orders_an_unknown_price_after_every_priced_model() {
     );
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_an_unpriced_model_ranks_after_every_priced_model() {
+fn an_unpriced_model_ranks_after_every_priced_model() {
     let mut models = HashMap::new();
     models.insert(
         "cheap".to_string(),
@@ -245,8 +246,9 @@ fn defect_02_an_unpriced_model_ranks_after_every_priced_model() {
     assert_eq!(chosen.model, "cheap-model");
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_an_explicit_zero_cost_beats_an_unpriced_model() {
+fn an_explicit_zero_cost_beats_an_unpriced_model() {
     let mut models = HashMap::new();
     models.insert(
         "free".to_string(),
@@ -265,8 +267,9 @@ fn defect_02_an_explicit_zero_cost_beats_an_unpriced_model() {
     assert_eq!(key, "free", "only a declared price of 0 is free");
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_select_chat_model_skips_an_unpriced_model_when_one_is_priced() {
+fn select_chat_model_skips_an_unpriced_model_when_one_is_priced() {
     let mut models = HashMap::new();
     models.insert(
         "unknown".to_string(),
@@ -286,8 +289,9 @@ fn defect_02_select_chat_model_skips_an_unpriced_model_when_one_is_priced() {
     );
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_all_unpriced_models_rank_equally() {
+fn all_unpriced_models_rank_equally() {
     let mut models = HashMap::new();
     for name in ["a", "b", "c"] {
         models.insert(name.to_string(), model_with_cost(name, None, "chat"));
@@ -312,8 +316,9 @@ fn defect_02_all_unpriced_models_rank_equally() {
     assert_eq!(chosen.cost, None, "the winner must be an unpriced model");
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_ties_still_select_the_lowest_priced_group() {
+fn ties_still_select_the_lowest_priced_group() {
     let mut models = HashMap::new();
     models.insert("a".to_string(), model_with_cost("a-model", Some(7), "chat"));
     models.insert("b".to_string(), model_with_cost("b-model", Some(7), "chat"));
@@ -331,8 +336,9 @@ fn defect_02_ties_still_select_the_lowest_priced_group() {
     );
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_a_pure_tie_resolves_to_one_of_the_tied_models() {
+fn a_pure_tie_resolves_to_one_of_the_tied_models() {
     let mut models = HashMap::new();
     models.insert("a".to_string(), model_with_cost("a-model", Some(7), "chat"));
     models.insert("b".to_string(), model_with_cost("b-model", Some(7), "chat"));
@@ -348,8 +354,9 @@ fn defect_02_a_pure_tie_resolves_to_one_of_the_tied_models() {
     );
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_the_use_case_filter_is_applied_before_the_cost_ranking() {
+fn the_use_case_filter_is_applied_before_the_cost_ranking() {
     let mut models = HashMap::new();
     models.insert(
         "vision".to_string(),
@@ -384,8 +391,9 @@ fn defect_02_the_use_case_filter_is_applied_before_the_cost_ranking() {
     );
 }
 
+/// Regression test for defect 02 (fixed).
 #[test]
-fn defect_02_an_empty_model_map_has_no_cheapest_model() {
+fn an_empty_model_map_has_no_cheapest_model() {
     let cfg = AgentConfigBuilder::new().build();
     assert!(
         cfg.model_for_use_case("chat").is_none(),

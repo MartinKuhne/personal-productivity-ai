@@ -410,7 +410,7 @@ fn test_right_resize_without_persisted_left_width_uses_the_seeded_ratio() {
 /// A drag replay is a ratio replay, so it reads the same
 /// [`current_left_width`] rule as [`apply_pane_widths`] and the ToC auto-fit.
 #[test]
-fn defect_12_a_right_drag_round_trips_before_any_left_width_is_remembered() {
+fn a_right_drag_round_trips_before_any_left_width_is_remembered() {
     let (mut panes, band_panes) = middle_band_state();
     let mut layout = PanelLayout::new();
     assert!(layout.left_panel_width.is_none());
@@ -584,7 +584,7 @@ fn test_pane_gutter_fill_differs_from_the_canvas_it_divides() {
 /// two style functions and the token pair; the wiring is the single `.style(..)`
 /// call in [`fill_pane`] and the TOC-hidden branch of [`pane_body`].
 #[test]
-fn defect_12_followup_the_panes_occlude_the_gutter_backing() {
+fn followup_the_panes_occlude_the_gutter_backing() {
     let theme = fastmd_dark_theme();
 
     let pane = pane_canvas_style(&theme);
@@ -620,9 +620,10 @@ fn defect_12_followup_the_panes_occlude_the_gutter_backing() {
 /// `ui_iced::theme` installs `color.surface.base` as iced's `background` role, so
 /// an opaque pane painted with the same token is a visual no-op against the
 /// window — which is the whole argument for fixing the regression by making the
+/// Regression test for defect 12 (fixed).
 /// panes opaque rather than by dropping the gutter fill.
 #[test]
-fn defect_12_followup_the_pane_fill_is_the_window_canvas_not_a_lookalike() {
+fn followup_the_pane_fill_is_the_window_canvas_not_a_lookalike() {
     let window_canvas = iced_theme_palette(&Palette::pro()).background;
     assert_eq!(
         pane_canvas_fill(),
@@ -708,7 +709,7 @@ fn write_frame_hash(
 /// If a pane stops painting the canvas, the gutter colour reads through it and
 /// the two frames stop matching.
 #[test]
-fn defect_12_followup_the_middle_band_renders_canvas_with_gutter_seams_only() {
+fn followup_the_middle_band_renders_canvas_with_gutter_seams_only() {
     let (panes, _band) = middle_band_state();
     let dir = tempfile::tempdir().expect("tempdir for the frame hash probe");
     // `Snapshot::matches_hash` rewrites the file stem to "<stem>-<renderer>", so
@@ -972,7 +973,7 @@ fn test_seeded_split_ratios_are_named() {
 /// Defect #12 — the three panes must not butt up against each other: a real
 /// gutter of window canvas has to separate each adjacent pair.
 #[test]
-fn defect_12_the_pane_grid_separates_each_pair_of_panes_by_a_gutter() {
+fn the_pane_grid_separates_each_pair_of_panes_by_a_gutter() {
     let (panes, _band) = middle_band_state();
     let mut ui = laid_out_middle_band(&panes, 1200.0);
 
@@ -1005,7 +1006,7 @@ fn defect_12_the_pane_grid_separates_each_pair_of_panes_by_a_gutter() {
 /// edges, at more than one viewport, and no pane overlaps its neighbour. The
 /// measurement is the panes' own laid-out rectangles.
 #[test]
-fn defect_12_the_gutter_is_exactly_one_spacing_wide_at_every_viewport() {
+fn the_gutter_is_exactly_one_spacing_wide_at_every_viewport() {
     for viewport in [800.0f32, 1200.0, 2000.0] {
         let (panes, _band) = middle_band_state();
         let mut ui = laid_out_middle_band(&panes, viewport);
@@ -1042,9 +1043,10 @@ fn defect_12_the_gutter_is_exactly_one_spacing_wide_at_every_viewport() {
 }
 
 /// F-2 — a width remembered from the previous session must actually reach the
+/// Regression test for defect 12 (fixed).
 /// pane grid at startup, not just `PanelLayout`.
 #[test]
-fn defect_12_f2_restored_pane_widths_take_effect_at_startup() {
+fn f2_restored_pane_widths_take_effect_at_startup() {
     let viewport_width = 2000.0;
     let remembered_left = 320.0;
     let remembered_right = 220.0;
@@ -1156,7 +1158,7 @@ fn load_document(state: &mut AppState, markdown: &str) {
 /// width than the entry needs. The floor it lands on is the UI-016 right-panel
 /// minimum, which is the smallest width the pane is allowed to have at all.
 #[test]
-fn defect_14_a_short_toc_is_not_given_more_width_than_it_needs() {
+fn a_short_toc_is_not_given_more_width_than_it_needs() {
     for viewport in [800.0f32, 1200.0, 2000.0] {
         let mut state = booted_at(viewport);
         load_document(&mut state, SHORT_TOC_DOC);
@@ -1189,7 +1191,7 @@ fn needed_toc_width(entries: &[crate::markdown::ToCEntry]) -> f32 {
 /// row's own required width, computed with the same real metrics the solver
 /// uses.
 #[test]
-fn defect_14_a_long_heading_still_fits_inside_the_pane() {
+fn a_long_heading_still_fits_inside_the_pane() {
     for viewport in [1200.0f32, 2000.0] {
         let mut state = booted_at(viewport);
         load_document(&mut state, LONG_TOC_DOC);
@@ -1223,7 +1225,7 @@ fn defect_14_a_long_heading_still_fits_inside_the_pane() {
 /// test pins the ceiling — `laid out == min(needed, cap)` — at a viewport where
 /// the cap genuinely binds and one where it does not.
 #[test]
-fn defect_14_a_heading_beyond_the_ui_016_cap_is_clamped_not_overflowed() {
+fn a_heading_beyond_the_ui_016_cap_is_clamped_not_overflowed() {
     for viewport in [1200.0f32, 2000.0] {
         let mut state = booted_at(viewport);
         load_document(&mut state, OVERLONG_TOC_DOC);
@@ -1255,7 +1257,7 @@ fn defect_14_a_heading_beyond_the_ui_016_cap_is_clamped_not_overflowed() {
 /// after a long one shrinks the pane again instead of leaving the widest
 /// width latched for the session.
 #[test]
-fn defect_14_the_fit_follows_the_document_being_loaded() {
+fn the_fit_follows_the_document_being_loaded() {
     let mut state = booted_at(1200.0);
     load_document(&mut state, OVERLONG_TOC_DOC);
     let wide = laid_out_grid_widths(&state.panes, 1200.0)[2];

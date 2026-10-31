@@ -932,7 +932,7 @@ fn greedy_line_count_empty_tokens_is_one_line() {
 /// but *not* inside [`cell_breakpoints`], whose candidate list contains
 /// single-token widths smaller than the first token.
 #[test]
-fn defect_06_first_token_wider_than_column_costs_exactly_one_line() {
+fn first_token_wider_than_column_costs_exactly_one_line() {
     assert_eq!(
         greedy_line_count(&[200.0], 10.0, 50.0),
         1,
@@ -974,9 +974,10 @@ fn defect_06_first_token_wider_than_column_costs_exactly_one_line() {
 
 /// An over-wide token **mid-run** already landed on a non-empty line, so it was
 /// never charged the phantom line; this pins that the fix did not disturb the
+/// Regression test for defect 06 (fixed).
 /// already-correct mid-run packing.
 #[test]
-fn defect_06_over_wide_token_mid_run_packs_one_token_per_line() {
+fn over_wide_token_mid_run_packs_one_token_per_line() {
     assert_eq!(
         greedy_line_count(&[10.0, 200.0, 10.0], 10.0, 50.0),
         3,
@@ -1000,9 +1001,10 @@ fn defect_06_over_wide_token_mid_run_packs_one_token_per_line() {
 /// i.e. widths *below* an over-wide first token. That is where the phantom line
 /// used to show up: the curve claimed a cell needed more extra lines than it
 /// physically does, and claimed a *narrower* width cost *more* extra lines than
+/// Regression test for defect 06 (fixed).
 /// a wider one in a way that broke the curve's monotonicity.
 #[test]
-fn defect_06_cell_breakpoints_curve_is_monotone_for_an_over_wide_first_token() {
+fn cell_breakpoints_curve_is_monotone_for_an_over_wide_first_token() {
     // `[200, 10]` with a 10-wide space needs 2 lines below 220 and 1 line at
     // or above it, so exactly one transition exists.
     let bps = cell_breakpoints(&[200.0, 10.0], 10.0);
@@ -1038,9 +1040,10 @@ fn defect_06_cell_breakpoints_curve_is_monotone_for_an_over_wide_first_token() {
 
 /// A column-level curve merges several cells, so the phantom line used to be
 /// summed across every cell whose first token was over-wide. With the fix, a
+/// Regression test for defect 06 (fixed).
 /// column of two identical over-wide cells reports one extra line, not two.
 #[test]
-fn defect_06_column_curve_does_not_inflate_over_wide_cells() {
+fn column_curve_does_not_inflate_over_wide_cells() {
     let cells = vec![
         CellTokens {
             token_widths: vec![200.0, 10.0],

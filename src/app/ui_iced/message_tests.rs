@@ -1408,7 +1408,7 @@ fn test_inbound_background_batch_is_compared_arc_by_arc() {
 /// its original. The arm now mirrors `BackgroundBatch`: same length, each pair
 /// the same shared delivery.
 #[test]
-fn defect_03_inbound_agent_batch_compares_by_delivery_identity() {
+fn inbound_agent_batch_compares_by_delivery_identity() {
     let event = Arc::new(agent_event(Uuid::new_v4(), "planning"));
     let batch = InboundMessage::AgentBatch(vec![Arc::clone(&event)]);
     let replay = InboundMessage::AgentBatch(vec![Arc::clone(&event)]);
@@ -1480,7 +1480,7 @@ fn defect_03_inbound_agent_batch_compares_by_delivery_identity() {
 #[test]
 fn test_inbound_variants_are_pairwise_distinct() {
     // `AgentBatch` now has its equality arm (see
-    // [`defect_03_inbound_agent_batch_compares_by_delivery_identity`]) and takes
+    // [`inbound_agent_batch_compares_by_delivery_identity`]) and takes
     // part in the sweep like every other variant.
     let representatives = [
         InboundMessage::ConfigArrived(Arc::new(AppConfig::default())),

@@ -1572,7 +1572,7 @@ fn open_a_select(
 /// `ComboOverlay::layout` puts the card on the trigger's bottom edge; inside it
 /// are [`space::XS`] paddings, rows [`size::CONTROL_MD`] tall with
 /// [`space::XXS`] between them.
-/// `defect_01_an_open_select_mounts_a_card_the_host_can_measure` checks this
+/// `an_open_select_mounts_a_card_the_host_can_measure` checks this
 /// against the box the mounted card actually publishes, so the helper cannot
 /// drift away from the layout it describes.
 fn select_card_below(trigger: Rectangle) -> Rectangle {
@@ -1640,7 +1640,7 @@ fn a_shut_select_publishes_its_box_and_no_message() {
 /// publishes a row inside it. Before the fix this read-back panicked inside
 /// iced's scrollable, because the card had no widget tree to lay out against.
 #[test]
-fn defect_01_an_open_select_mounts_a_card_the_host_can_measure() {
+fn an_open_select_mounts_a_card_the_host_can_measure() {
     let options = languages();
     let (mut harness, trigger) = open_a_select(&options);
 
@@ -1685,7 +1685,7 @@ fn defect_01_an_open_select_mounts_a_card_the_host_can_measure() {
 /// because an iced button answers on release and the card would already have been
 /// gone by then.
 #[test]
-fn defect_01_a_row_press_publishes_that_options_message() {
+fn a_row_press_publishes_that_options_message() {
     let options = languages();
     let (mut harness, trigger) = open_a_select(&options);
     let card = flyout_of(&harness.candidates(), trigger);
@@ -1713,7 +1713,7 @@ fn defect_01_a_row_press_publishes_that_options_message() {
 /// nothing, because a `Select` owns its own openness and has no dismiss message
 /// to report it through.
 #[test]
-fn defect_01_a_press_away_shuts_an_open_select_and_publishes_nothing() {
+fn a_press_away_shuts_an_open_select_and_publishes_nothing() {
     let options = languages();
     let (mut harness, trigger) = open_a_select(&options);
     let card = flyout_of(&harness.candidates(), trigger);
@@ -1743,7 +1743,7 @@ fn defect_01_a_press_away_shuts_an_open_select_and_publishes_nothing() {
 /// first assertion a guard rather than a tautology: it proves the silence comes
 /// from the card being open, not from type-ahead being broken.
 #[test]
-fn defect_01_a_keystroke_while_the_card_is_open_is_not_type_ahead() {
+fn a_keystroke_while_the_card_is_open_is_not_type_ahead() {
     let options = languages();
     let (mut harness, trigger) = open_a_select(&options);
 
@@ -1782,11 +1782,11 @@ fn defect_01_a_keystroke_while_the_card_is_open_is_not_type_ahead() {
 
 // The four capabilities defect 01 locked behind a panic are pinned one apiece:
 // measuring the mounted card by
-// `defect_01_an_open_select_mounts_a_card_the_host_can_measure`, picking a row by
-// `defect_01_a_row_press_publishes_that_options_message`, dismissing with a click
-// away by `defect_01_a_press_away_shuts_an_open_select_and_publishes_nothing`, and
+// `an_open_select_mounts_a_card_the_host_can_measure`, picking a row by
+// `a_row_press_publishes_that_options_message`, dismissing with a click
+// away by `a_press_away_shuts_an_open_select_and_publishes_nothing`, and
 // type-ahead while open by
-// `defect_01_a_keystroke_while_the_card_is_open_is_not_type_ahead`. The shut-state
+// `a_keystroke_while_the_card_is_open_is_not_type_ahead`. The shut-state
 // half of the first claim lives in `a_shut_select_publishes_its_box_and_no_message`.
 
 #[test]
