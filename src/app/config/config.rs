@@ -18,7 +18,17 @@ pub use crate::agent::config::{
     McpOAuthConfig, McpServerConfig, McpServerEntry, ResolvedBrowserConfig, ToolGroupsConfig,
     TrelloClient, default_use_case,
 };
+use crate::background::logs::non_empty;
 pub use crate::workspace::vfs::{VirtualPath, VirtualPathError, library_display_label};
+
+/// Placeholder that stands in for a credential value in every `Debug` rendering
+/// of a configuration type in this module ([NFR-009]).
+const REDACTED: &str = "[REDACTED]";
+
+/// Documented default SearXNG endpoint (see `SETUP.md`). Shared by the
+/// `Default` impl of `AppConfig` and `default_searxng_url` so the struct default
+/// and the deserialised default can never drift apart again.
+const DEFAULT_SEARXNG_URL: &str = "http://localhost:8090";
 
 fn default_feature_flags() -> HashMap<String, bool> {
     let mut m = HashMap::new();
@@ -30,6 +40,14 @@ fn default_feature_flags() -> HashMap<String, bool> {
 
 fn default_max_tokens() -> u32 {
     32768
+}
+
+/// Serde default for [`AppConfig::searxng_url`]: the documented endpoint, *not*
+/// `Option::default()`. A bare `#[serde(default)]` would resolve to `None` and
+/// silently disable the web-search integration for every config file that omits
+/// the key.
+fn default_searxng_url() -> Option<String> {
+    Some(DEFAULT_SEARXNG_URL.to_string())
 }
 
 fn default_true() -> bool {
@@ -81,7 +99,7 @@ impl std::fmt::Debug for DiscordConfig {
         f.debug_struct("DiscordConfig")
             // Presence is preserved, the secret is not: `Some("[REDACTED]")`
             // tells an operator the token is configured without revealing it.
-            .field("bot_token", &self.bot_token.as_ref().map(|_| "[REDACTED]"))
+            .field("bot_token", &self.bot_token.as_ref().map(|_| REDACTED))
             .field("allowed_channels", &self.allowed_channels)
             .field("allowed_guilds", &self.allowed_guilds)
             .field("register_commands", &self.register_commands)
@@ -112,7 +130,10 @@ pub struct AppConfig {
     /// In-memory runtime state only; not persisted to configuration file.
     #[serde(skip)]
     pub selected_chat_model: Option<String>,
-    #[serde(default)]
+    /// SearXNG web-search endpoint. Defaults to the documented local endpoint
+    /// (`http://localhost:8090`); an explicit `searxng_url:` key set to `null`
+    /// is the opt-out that disables the integration.
+    #[serde(default = "default_searxng_url")]
     pub searxng_url: Option<String>,
     #[serde(default)]
     pub jmap_clients: HashMap<String, JmapClient>,
@@ -208,6 +229,12 @@ impl std::fmt::Debug for AppConfig {
             .field("trello_client", &self.trello_client)
             .field("discord", &self.discord)
             .field("qdrant_url", &self.qdrant_url)
+            // Credential fields are listed but never printed: the operator can
+            // see that a key is configured without the value leaking (NFR-009).
+            .field(
+                "qdrant_api_key",
+                &self.qdrant_api_key.as_ref().map(|_| REDACTED),
+            )
             .field("qdrant_collection", &self.qdrant_collection)
             .finish()
     }
@@ -219,7 +246,7 @@ impl Default for AppConfig {
             system_prompt_extension: None,
             models: HashMap::new(),
             selected_chat_model: None,
-            searxng_url: Some("http://localhost:8090".to_string()),
+            searxng_url: default_searxng_url(),
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
             content_libraries: Vec::new(),
@@ -300,10 +327,14 @@ impl AppConfig {
     /// Extracted from [`get_system_library_path`] so the three branches
     /// (APPDATA, USERPROFILE fallback, relative) are testable without
     /// mutating process-global environment variables (VFS-103).
+    ///
+    /// An empty variable counts as *unset* — the same rule the log directory
+    /// uses ([`non_empty`]) — so `APPDATA=` can neither shadow a usable
+    /// `USERPROFILE` nor yield a path relative to the current directory.
     fn system_library_path_from_env(appdata: Option<&str>, userprofile: Option<&str>) -> PathBuf {
-        if let Some(app_data) = appdata {
+        if let Some(app_data) = non_empty(appdata) {
             PathBuf::from(app_data).join("fastmd").join("system")
-        } else if let Some(user_profile) = userprofile {
+        } else if let Some(user_profile) = non_empty(userprofile) {
             PathBuf::from(user_profile).join(".fastmd").join("system")
         } else {
             PathBuf::from("system")

@@ -216,11 +216,10 @@ fn published_boxes<Message, Theme, Renderer: renderer::Renderer>(
 // ---------------------------------------------------------------------------
 //
 // The bar needs ~443px to lay out everything §3B.14 asks for at once, and the
-// harness's viewport is 400px wide, so a harness-built bar is already squeezing
-// its navigation group (see
-// `defect_the_trailing_navigation_slots_collapse_when_the_bar_is_narrow`). The
+// harness's viewport is 400px wide, so a harness-built bar has to give something
+// up (see `navigation_slots_keep_their_hit_targets_when_the_bar_is_narrow`). The
 // behavioural legs below therefore lay the bar out, and click it, at a width
-// where its own geometry contract holds; the collapse is pinned separately.
+// where its whole geometry contract holds.
 
 /// The width the behavioural legs lay the bar out and click it at.
 const WIDE: Size = Size::new(900.0, 60.0);
@@ -359,23 +358,20 @@ fn test_the_navigation_group_does_not_move_between_the_first_and_last_page() {
     harness.render();
 }
 
+/// §3B.14 pins the navigation buttons as "each 28x28px" and says boundary buttons
+/// "render as Disabled rather than disappearing" — and they do that at every page
+/// index, so the bar must not take that away at an ordinary footer width either.
+///
+/// The bar used to put the range summary and the navigation group in two
+/// `Length::Fill` columns, so each took half the width the page-size options left
+/// over however little it actually needed. In the harness's 400px viewport the
+/// right column got 138.4px while the group needs 221.3px, iced's row layout
+/// handed the shortfall to the children it reaches last, and `[▶ Next]` and
+/// `[⏭ Last]` — the two *live* buttons on page 0 — were trimmed to a sliver and to
+/// nothing at all. The right column now shrink-wraps the group, so the range
+/// summary is what gives way (`UIF-COMP-014`, `UIF-PRIN-003`).
 #[test]
-fn defect_the_trailing_navigation_slots_collapse_when_the_bar_is_narrow() {
-    // DEFECT. §3B.14 and this module's own header pin the navigation buttons as
-    // "each 28x28px" and say boundary buttons "render as Disabled rather than
-    // disappearing". They do that at every page index — but the *bar* makes two
-    // of them disappear at an ordinary footer width.
-    //
-    // `PaginationBar::new` puts the range summary in a `Length::Fill` column and
-    // the navigation group in a second `Length::Fill` column, so each takes half
-    // the width the page-size options leave over however little it actually
-    // needs. In the harness's 400px viewport the right column gets 138.4px while
-    // the group needs 221.3px, and iced's row layout hands the shortfall to the
-    // children it reaches last: `[▶ Next]` is squeezed to a sliver and `[⏭ Last]`
-    // to nothing at all. They are the two *live* buttons on page 0, so this is
-    // not the disabled state hiding them — the bar never reserves the group's
-    // natural width. The right column should shrink-wrap the group (or the row
-    // should carry a minimum width) so the range summary is what gives way.
+fn navigation_slots_keep_their_hit_targets_when_the_bar_is_narrow() {
     let mut harness =
         Harness::headless(move || pagination_bar(three_pages(0), page_commit, size_commit));
 
@@ -383,36 +379,40 @@ fn defect_the_trailing_navigation_slots_collapse_when_the_bar_is_narrow() {
     assert_eq!(
         slots.len(),
         4,
-        "all four slots stay published at a narrow width — it is their boxes that go"
+        "all four slots stay published at a narrow width"
     );
     assert_eq!(
-        (slots[0].width, slots[1].width),
-        (BUTTON_SIZE, BUTTON_SIZE),
-        "[⏮ First] and [◀ Prev] keep their 28x28 hit target"
+        slots.iter().map(|bounds| bounds.width).collect::<Vec<_>>(),
+        vec![BUTTON_SIZE; 4],
+        "every navigation slot keeps its 28px hit target at the narrow width: the \
+         group is shrink-wrapped, so the range summary is what gives way"
     );
-    assert!(
-        slots[2].width < BUTTON_SIZE,
-        "actual: [▶ Next] is squeezed to {}px, below its {}px target — the group \
-         overflowed its column and iced trimmed the trailing children",
-        slots[2].width,
-        BUTTON_SIZE
+    assert_eq!(
+        slots[1].x - (slots[0].x + BUTTON_SIZE),
+        NAV_SPACING,
+        "[⏮ First] and [◀ Prev] keep the spec's 8px gap"
     );
-    assert!(
-        slots[3].width < BUTTON_SIZE,
-        "actual: [⏭ Last] is squeezed to {}px — at that width it cannot be seen, \
-         let alone clicked, whatever §3B.14 promises",
-        slots[3].width
+    assert_eq!(
+        slots[3].x - (slots[2].x + BUTTON_SIZE),
+        NAV_SPACING,
+        "[▶ Next] and [⏭ Last] keep the spec's 8px gap — the pair that used to be \
+         trimmed to a sliver and to nothing"
+    );
+    assert_eq!(
+        slots[3].x + slots[3].width,
+        400.0 - PADDING_X,
+        "the group is still right-aligned against the bar's own padding"
     );
 
-    // The same bar with room to spare keeps all four boxes, which is what pins
-    // the collapse to the bar's own width allocation rather than to the model.
+    // The same bar with room to spare is unchanged, which is what pins the fix to
+    // the bar's own width allocation rather than to the model.
     let capture = Capture::new();
     let wide = nav_slots_at(&three_pages(0), capture.renderer(), WIDE.width);
     assert_eq!(
         wide.iter().map(|bounds| bounds.width).collect::<Vec<_>>(),
         vec![BUTTON_SIZE; 4],
         "the four slots are each 28px wide once the bar is given the width the \
-         group needs, so the squeeze above is the allocation, not the state"
+         group needs"
     );
 }
 
@@ -577,9 +577,9 @@ fn test_the_bar_asks_for_a_pointer_only_over_its_buttons_and_offers_no_overlay()
 
     let mut widget = PaginationBar::new(model, page_commit, size_commit);
     let renderer = headless_renderer();
-    // Laid out at [`WIDE`], not at the harness's 400px: a squeezed `[⏭ Last]` is 0px
-    // wide, so a cursor "over" it would be over nothing and the cursor read-back
-    // below would be measuring the collapse rather than the cursor.
+    // Laid out at [`WIDE`]: the cursor read-back below needs every navigation
+    // box at its full size, and 900px is the width the bar's whole geometry
+    // contract holds at.
     let limits = layout::Limits::new(Size::ZERO, WIDE);
     let node = widget.layout(&mut tree, &renderer, &limits);
     let layout = Layout::new(&node);

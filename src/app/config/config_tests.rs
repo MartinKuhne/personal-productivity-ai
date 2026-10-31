@@ -2053,6 +2053,7 @@ fn test_app_config_debug_lists_every_field() {
         "trello_client",
         "discord",
         "qdrant_url",
+        "qdrant_api_key",
         "qdrant_collection",
     ] {
         assert!(
@@ -2313,15 +2314,15 @@ fn test_empty_yaml_document_uses_the_serialised_defaults() {
     );
 }
 
-/// `searxng_url` carries a field-level `#[serde(default)]`, which resolves to
-/// `Option::default()` (i.e. `None`) instead of the value `AppConfig::default()`
-/// installs. A config file that omits the key therefore silently disables the
-/// web-search integration that a freshly constructed config has enabled.
+/// The documented SearXNG endpoint survives deserialisation: a config file that
+/// omits `searxng_url` keeps the web-search integration enabled, exactly like a
+/// freshly constructed `AppConfig` (`SETUP.md` documents the default).
 ///
-/// KNOWN DRIFT (reported, not fixed): the struct default and the deserialised
-/// default disagree for this one field.
+/// Was: the field carried a bare `#[serde(default)]`, which resolved to
+/// `Option::default()` (`None`) and silently disabled the integration for every
+/// file that omitted the key.
 #[test]
-fn defect_searxng_url_struct_default_is_lost_when_the_key_is_absent() {
+fn searxng_url_default_survives_deserialisation_when_the_key_is_absent() {
     assert_eq!(
         AppConfig::default().searxng_url.as_deref(),
         Some("http://localhost:8090"),
@@ -2336,18 +2337,36 @@ fn defect_searxng_url_struct_default_is_lost_when_the_key_is_absent() {
         "the supplied key must still be applied"
     );
     assert_eq!(
-        from_file.searxng_url, None,
-        "drift: a file without `searxng_url` yields None, losing the Some(...) struct default"
+        from_file.searxng_url.as_deref(),
+        Some("http://localhost:8090"),
+        "a file without `searxng_url` keeps the documented default"
     );
 }
 
-/// The hand-written `Debug` impl must never print a credential value. Note that
-/// `qdrant_api_key` is not listed at all, so it can never leak — but it is also
-/// invisible in diagnostics (reported drift).
+/// The opt-out stays available: the key being *present* with a null value is an
+/// explicit "no search engine", not a missing key.
 #[test]
-fn defect_app_config_debug_never_prints_the_qdrant_api_key() {
+fn searxng_url_explicit_null_disables_the_integration() {
+    let from_file: AppConfig =
+        serde_norway::from_str("searxng_url:").expect("a null-valued key must parse");
+
+    assert_eq!(
+        from_file.searxng_url, None,
+        "an explicit `searxng_url: null` must disable the integration"
+    );
+}
+
+/// The hand-written `Debug` impl renders a credential as `[REDACTED]` rather
+/// than omitting the field, so an operator can see that a key is configured
+/// without the value ever reaching a log line ([NFR-009]).
+///
+/// Was: `qdrant_api_key` was left out of the field list entirely, which is safe
+/// but invisible in diagnostics — unlike every other credential in this module.
+#[test]
+fn app_config_debug_redacts_the_qdrant_api_key() {
+    const SECRET: &str = "qdrant-super-secret";
     let config = AppConfig {
-        qdrant_api_key: Some("qdrant-super-secret".to_string()),
+        qdrant_api_key: Some(SECRET.to_string()),
         qdrant_url: Some("http://localhost:6334".to_string()),
         ..Default::default()
     };
@@ -2355,7 +2374,7 @@ fn defect_app_config_debug_never_prints_the_qdrant_api_key() {
     let rendered = format!("{config:?}");
 
     assert!(
-        !rendered.contains("qdrant-super-secret"),
+        !rendered.contains(SECRET),
         "Debug must not print the Qdrant API key, got: {rendered}"
     );
     assert!(
@@ -2363,8 +2382,20 @@ fn defect_app_config_debug_never_prints_the_qdrant_api_key() {
         "the non-secret Qdrant URL must stay visible in diagnostics, got: {rendered}"
     );
     assert!(
-        !rendered.contains("qdrant_api_key"),
-        "drift: `qdrant_api_key` is omitted from the Debug field list entirely, so operators cannot see that it is set"
+        rendered.contains("qdrant_api_key: Some(\"[REDACTED]\")"),
+        "a configured key must be reported as configured-but-redacted, got: {rendered}"
+    );
+}
+
+/// An unconfigured Qdrant key must not be dressed up as a redacted one: `None`
+/// stays `None` so "no key" is distinguishable from "key set".
+#[test]
+fn app_config_debug_keeps_an_absent_qdrant_api_key_as_none() {
+    let rendered = format!("{:?}", AppConfig::default());
+
+    assert!(
+        rendered.contains("qdrant_api_key: None"),
+        "an absent key must print as None, got: {rendered}"
     );
 }
 
@@ -2808,18 +2839,33 @@ fn test_ensure_system_library_present_at_matches_the_raw_path_when_canonicalisin
     assert_eq!(library.priority, 0);
 }
 
-/// An empty `APPDATA` counts as "configured", so the USERPROFILE fallback is
-/// never reached and the library resolves to a relative path.
+/// An empty `APPDATA` counts as *unset*, so the `USERPROFILE` fallback is
+/// reached instead of resolving under an empty root. Shares the
+/// `logs.rs::non_empty` rule with the log-directory resolution (VFS-103).
 ///
-/// KNOWN DRIFT (reported, not fixed): unlike `logs.rs::non_empty`, this helper
-/// does not treat an empty environment value as absent.
+/// Was: `APPDATA=` was treated as a configured root and yielded the relative
+/// `fastmd/system` instead of falling through to `USERPROFILE/.fastmd/system`.
 #[test]
-fn defect_system_library_path_treats_an_empty_appdata_as_a_configured_root() {
+fn system_library_path_treats_an_empty_appdata_as_unset() {
     let path = AppConfig::system_library_path_from_env(Some(""), Some("C:\\Users\\tester"));
 
     assert_eq!(
         path,
-        PathBuf::from("fastmd").join("system"),
-        "drift: an empty APPDATA yields the relative `fastmd/system` instead of falling through to USERPROFILE/.fastmd/system"
+        PathBuf::from("C:\\Users\\tester")
+            .join(".fastmd")
+            .join("system"),
+        "an empty APPDATA must fall through to USERPROFILE/.fastmd/system"
+    );
+}
+
+/// An empty `USERPROFILE` is unset as well, so two empty variables behave
+/// exactly like two missing ones and never contribute an empty leading
+/// path component.
+#[test]
+fn system_library_path_treats_an_empty_userprofile_as_unset_too() {
+    assert_eq!(
+        AppConfig::system_library_path_from_env(Some(""), Some("")),
+        PathBuf::from("system"),
+        "empty APPDATA and USERPROFILE behave like both being unset"
     );
 }

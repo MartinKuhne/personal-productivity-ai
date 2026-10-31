@@ -92,6 +92,27 @@ fn is_external_scheme(s: &str) -> bool {
         || head.starts_with("ftp://")
 }
 
+/// The `file:` URI prefix recognised by [`strip_file_scheme`].
+const FILE_SCHEME_PREFIX: &str = "file://";
+
+/// Strip a leading `file://` URI prefix from a link target.
+///
+/// Like every other scheme in this module the prefix is matched
+/// case-insensitively (RFC 3986 §6.2.1), so `FILE://` and `File://` name the
+/// same local URI as `file://`. A third slash is the root of an absolute path
+/// and is consumed with the prefix, so `file:///a/b` yields `a/b`. A target
+/// without the prefix is returned unchanged.
+fn strip_file_scheme(path_part: &str) -> &str {
+    let Some(head) = path_part.get(..FILE_SCHEME_PREFIX.len()) else {
+        return path_part;
+    };
+    if !head.eq_ignore_ascii_case(FILE_SCHEME_PREFIX) {
+        return path_part;
+    }
+    let rest = &path_part[FILE_SCHEME_PREFIX.len()..];
+    rest.strip_prefix('/').unwrap_or(rest)
+}
+
 /// Resolves a wikilink target name into a workspace file path.
 fn resolve_wikilink(
     wiki_content: &str,
@@ -213,14 +234,8 @@ fn resolve_file_link(
         return LinkAction::OpenExternal(link.to_string());
     }
 
-    // Strip `file://` or `file:///` prefix if present
-    let raw_path = if let Some(stripped) = path_part.strip_prefix("file:///") {
-        stripped
-    } else if let Some(stripped) = path_part.strip_prefix("file://") {
-        stripped
-    } else {
-        path_part
-    };
+    // Strip a `file://` (or `file:///`) prefix if present.
+    let raw_path = strip_file_scheme(path_part);
 
     let target_path = Path::new(raw_path);
 

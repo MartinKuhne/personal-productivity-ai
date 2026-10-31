@@ -14,6 +14,8 @@
 //!   - `SideBySide`: two equal 50%/50% panes (old left, new right), each with 40px gutter
 //!     ([`GUTTER_WIDTH`]), `surface.raised`, `text.disabled`, `1px border.subtle` right seam,
 //!     separated by `1px border.strong` ([`DIVIDER_WIDTH`], 4.17:1 on `surface.code`) center divider.
+//!     Both modes carry one [`LINE_HEIGHT`] row per diff line, so side-by-side is exactly as
+//!     tall as unified for the same hunk and never grows into height the host only offered it.
 //!
 //! Unit tests live in the sibling `diff_viewer_tests.rs` sidecar.
 
@@ -205,6 +207,19 @@ impl<HunkId> DiffViewerModel<HunkId> {
 // ---------------------------------------------------------------------------
 // Content Builder (§3B.15, `UIF-COMP-015`, `UIF-PRIN-005`, `UIF-PRIN-006`)
 // ---------------------------------------------------------------------------
+
+/// The height a hunk's body occupies: exactly one [`LINE_HEIGHT`] row per diff
+/// line, in both display modes.
+///
+/// Unified gets this for free — its body is a column of fixed-height rows and
+/// nothing in it stretches. Side-by-side has to state it explicitly, because its
+/// center divider is a `Length::Fill` child and iced hands a `Fill` child inside
+/// a `Shrink` parent the whole height that parent was offered: the divider would
+/// otherwise span the offer and drag the whole viewer up to it, painting a band
+/// of empty `surface.code` under a diff that only has rows for 72px.
+fn body_height(lines: usize) -> f32 {
+    lines as f32 * LINE_HEIGHT
+}
 
 fn build_diff_viewer_content<'a, Message: 'a + Clone, HunkId: 'a + Clone + PartialEq>(
     model: &DiffViewerModel<HunkId>,
@@ -676,6 +691,10 @@ fn build_diff_viewer_content<'a, Message: 'a + Clone, HunkId: 'a + Clone + Parti
 
                 iced::widget::row![old_col, center_divider, new_col]
                     .width(Length::Fill)
+                    // One row per diff line on each side, so the body is exactly
+                    // as tall as unified's for the same hunk and the `Fill`
+                    // divider spans the rows instead of the offer.
+                    .height(body_height(hunk.lines.len()))
                     .into()
             }
         };

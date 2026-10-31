@@ -2550,7 +2550,7 @@ fn tool_search_email_skips_emails_that_cannot_be_fetched() {
 /// `JmapSession::post` turns an HTTP error status into a readable message: the
 /// RFC 7807 `detail` when the body is structured, otherwise the raw body,
 /// `(empty body)` when the body is missing, and a snippet capped at 500 bytes
-/// for long bodies.
+/// (cut on a `char` boundary) for long bodies.
 #[test]
 fn jmap_post_reports_http_errors_with_the_server_message() {
     ensure_rustls_provider();
@@ -2629,18 +2629,51 @@ fn jmap_post_reports_a_malformed_success_body() {
     assert!(err.ends_with(": this is not json"), "got: {err}");
 }
 
-/// Defect pin: the 500-byte error snippet is taken with a byte-index slice, so
-/// a multi-byte UTF-8 error body that crosses byte 500 panics instead of being
-/// truncated. A safe fix truncates on a `char_indices` boundary.
+/// Contract: an over-long error body is clipped at the snippet limit on a
+/// `char` boundary, never at a raw byte index. (Was: `&body[..500]` panicked
+/// when byte 500 fell inside a multi-byte UTF-8 character.)
 #[test]
-#[should_panic(expected = "not a char boundary")]
-fn defect_post_error_snippet_panics_on_a_multibyte_boundary() {
+fn jmap_post_clips_a_multibyte_error_body_on_a_char_boundary() {
     ensure_rustls_provider();
-    // 200 x 3 bytes = 600 bytes; byte index 500 falls inside a character.
+    // 200 x 3 bytes = 600 bytes. Byte index 500 sits inside the 167th character
+    // (bytes 498..501), so the last boundary at or before the limit is byte 498,
+    // i.e. the snippet keeps 166 characters.
     let body = "世".repeat(200);
     let url = spawn_fixed_response_mock_server(500, &body);
     let session = session_at(&url);
-    let _ = session.post(&[], json!([]));
+    let err = session
+        .post(&[], json!([]))
+        .expect_err("an error status must be reported as an error");
+    assert_eq!(
+        err,
+        format!(
+            "Server returned 500 Internal Server Error: {}...",
+            "世".repeat(166)
+        ),
+        "the snippet must stop on a char boundary below the byte limit"
+    );
+}
+
+/// The malformed-success-body message uses the same clipping helper, so a
+/// multi-byte body must not panic there either.
+#[test]
+fn jmap_post_clips_a_multibyte_malformed_body_on_a_char_boundary() {
+    ensure_rustls_provider();
+    let body = "世".repeat(200);
+    let url = spawn_fixed_response_mock_server(200, &body);
+    let session = session_at(&url);
+    let err = session
+        .post(&[], json!([]))
+        .expect_err("a body that is not JSON must be reported as an error");
+    let snippet = "世".repeat(166);
+    assert!(
+        err.starts_with("Failed to parse response as JSON: "),
+        "got: {err}"
+    );
+    assert!(
+        err.ends_with(&format!(": {snippet}...")),
+        "the echoed snippet must stop on a char boundary, got: {err}"
+    );
 }
 
 #[test]

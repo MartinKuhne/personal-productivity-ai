@@ -34,6 +34,10 @@ pub const LAG_TRUNCATION_MARKER: &str = "[output truncated — UI fell behind th
 /// re-published as `FsEvent::FileModified` ([NFR-004]).
 const SIDE_EFFECT_PUBLISH_ERROR_CODE: &str = "FILE-4013";
 
+/// Error code for the log line emitted when a file's content could not be read
+/// ([NFR-001], [NFR-004]).
+const FILE_LOAD_ERROR_CODE: &str = "FILE-4014";
+
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundEvent>,
@@ -624,70 +628,75 @@ impl AppOrchestrator {
                 // the read runs on its own thread, so this result may belong to a
                 // file the user has already moved on from. Release our own marker
                 // either way — leaving it set would block a later re-selection of
-                // the same path behind a load that no longer exists — but only
-                // project the bytes onto the document the user is actually looking
-                // at. A stale landing otherwise overwrites `loaded_path` and `toc`
-                // with a document nobody asked for, which is what made the ToC
-                // pane flip between two files' heading sets with no user action.
+                // the same path behind a load that no longer exists.
                 if self.pending_file_load.as_deref() == Some(path.as_path()) {
                     self.pending_file_load = None;
                 }
-                if self.selection.selected_file().map(PathBuf::as_path) != Some(path.as_path()) {
-                    tracing::debug!(
-                        name = "orchestrator.file_load.stale_dropped",
-                        path = %path.display(),
-                        "Dropped FileLoaded for a file that is no longer selected"
-                    );
-                    return;
-                }
+                // The split comes *before* any staleness decision: a failure is a
+                // property of the path that was read, so it is reported even when
+                // the user has already moved on. Only the successful projection
+                // onto the document on screen needs the stale guard (RUST-023).
                 match content {
-                    Ok(content) => {
-                        // Parse the file once into a `Document` and
-                        // pull both the front matter and the body
-                        // from it. Avoids the previous two-step
-                        // `parse_front_matter` + manual body copy.
-                        let doc = Document::new(content);
-                        self.tabs.current_yaml = doc.yaml().cloned();
-                        self.tabs.current_markdown = doc.body().to_string();
-                        self.tabs.invalidate_heading_ids_cache();
-                        self.tabs.loaded_path = Some(path.clone());
-                        self.tabs.toc = crate::markdown::build_toc(&self.tabs.current_markdown);
-                        self.tabs.scroll_to_header_id = None;
-                    }
-                    Err(err) => {
-                        // Load failed — do not leave stale content or an open tab.
-                        self.tabs.close_tab(&path);
-                        if self.selection.selected_file() == Some(&path) {
-                            *self.selection.selected_file_mut() = None;
-                        }
-                        self.selection.selected_files_mut().remove(&path);
-                        self.tabs.current_yaml = None;
-                        self.tabs.current_markdown = String::new();
-                        self.tabs.invalidate_heading_ids_cache();
-                        self.tabs.toc.clear();
-                        self.tabs.scroll_to_header_id = None;
-                        self.tabs.scroll_to_search = None;
-
-                        // Log the failure to the background log.
-                        let msg = format!("Failed to load file {}: {}", path.display(), err);
-                        if let Ok(mut mgr) = self.background_manager.lock() {
-                            mgr.push_log(BackgroundLogEntry::new(
-                                LogCategory::Watcher,
-                                msg.clone(),
-                            ));
-                        }
-                        tracing::error!(
-                            target: crate::background::logs::TARGET_BACKGROUND_CHANNEL,
-                            category = "Watcher",
-                            "{}",
-                            msg
-                        );
-                    }
+                    Ok(content) => self.apply_loaded_document(&path, content),
+                    Err(err) => self.apply_failed_load(&path, &err),
                 }
             }
             ProcessEvent::UserFileOperationCompleted(result) => {
                 self.handle_user_file_operation_result(result);
             }
+        }
+    }
+
+    /// Project one successfully read file onto the document the user is looking
+    /// at.
+    ///
+    /// The stale-landing guard belongs to the projection alone: a read that was
+    /// still in flight when the user moved on must not overwrite `loaded_path`
+    /// and `toc` with a document nobody asked for, which is what made the ToC
+    /// pane flip between two files' heading sets with no user action.
+    fn apply_loaded_document(&mut self, path: &Path, content: String) {
+        if self.selection.selected_file().map(PathBuf::as_path) != Some(path) {
+            tracing::debug!(
+                name = "orchestrator.file_load.stale_dropped",
+                path = %path.display(),
+                "Dropped FileLoaded for a file that is no longer selected"
+            );
+            return;
+        }
+        // Parse the file once into a `Document` and pull both the front matter
+        // and the body from it. Avoids the previous two-step
+        // `parse_front_matter` + manual body copy.
+        let doc = Document::new(content);
+        self.tabs.current_yaml = doc.yaml().cloned();
+        self.tabs.current_markdown = doc.body().to_string();
+        self.tabs.invalidate_heading_ids_cache();
+        self.tabs.loaded_path = Some(path.to_path_buf());
+        self.tabs.toc = crate::markdown::build_toc(&self.tabs.current_markdown);
+        self.tabs.scroll_to_header_id = None;
+    }
+
+    /// Surface a failed read ([NFR-001], [NFR-004]): report it with an error
+    /// code, close the tab of the file that could not be read, and drop every
+    /// selection that pointed at it.
+    ///
+    /// The document on screen is only discarded when it *is* the file that failed
+    /// — and then through [`Tabs::clear_content`], which releases `loaded_path`
+    /// together with the content so the state can never name a document whose
+    /// body it has just thrown away. A failure on some other path leaves the
+    /// document being viewed exactly as it was.
+    fn apply_failed_load(&mut self, path: &Path, error: &str) {
+        self.log_file_operation_error(
+            FILE_LOAD_ERROR_CODE,
+            &format!("Failed to load file {}", path.display()),
+            error,
+        );
+        self.tabs.close_tab(&path.to_path_buf());
+        if self.selection.selected_file().map(PathBuf::as_path) == Some(path) {
+            *self.selection.selected_file_mut() = None;
+        }
+        self.selection.selected_files_mut().remove(path);
+        if self.tabs.loaded_path.as_deref() == Some(path) {
+            self.tabs.clear_content();
         }
     }
 

@@ -375,9 +375,15 @@ impl<'a, Message: 'a + Clone> PaginationBar<'a, Message, iced::Theme, iced::Rend
             .spacing(NAV_SPACING)
             .align_y(iced::alignment::Vertical::Center);
 
+        // The navigation group shrink-wraps instead of taking a `Fill` share of
+        // the leftover: §3B.14 fixes every button at `BUTTON_SIZE` and says a
+        // boundary button renders `Disabled` rather than disappearing, so the
+        // group's natural width is not negotiable. A `Fill` column here used to
+        // hand the shortfall to the children iced reaches last, which trimmed
+        // `[▶ Next]` to a sliver and `[⏭ Last]` to nothing at an ordinary footer
+        // width. The range summary is the flexible part (`UIF-PRIN-003`).
         let right = iced::widget::container(right_row)
-            .width(Length::Fill)
-            .align_x(iced::alignment::Horizontal::Right)
+            .width(Length::Shrink)
             .align_y(iced::alignment::Vertical::Center);
 
         let bar_content = iced::widget::row![left, center, right]

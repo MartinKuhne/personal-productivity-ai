@@ -555,19 +555,19 @@ fn test_side_by_side_splits_the_width_and_keeps_one_row_per_diff_line() {
     );
 }
 
-/// The center divider is built with `Length::Fill` height (`diff_viewer.rs`,
-/// `center_divider`), and iced hands a `Fill` child inside a `Shrink` parent the
-/// whole height that parent was offered. The viewer therefore *requests*
-/// `Length::Shrink` (`size()`, pinned by
-/// `test_the_viewer_asks_to_fill_the_width_and_shrink_to_its_hunks`) but *takes*
-/// every pixel of height the host offers it in side-by-side mode, so a diff pane
-/// that only has 72px of rows stretches to 272px of empty `surface.code`.
+/// Side-by-side lays out at the height of its rows — the same height unified
+/// occupies for the same hunk — and the center divider spans those rows rather
+/// than the height the host happened to offer (`UIF-COMP-015`).
 ///
-/// It should lay out at the height of its rows, the way unified does; the
-/// divider should span the rows rather than the offer. Pinned here until the
-/// product code is decided.
+/// The divider used to be a `Length::Fill` child of a `Shrink` row, and iced
+/// hands a `Fill` child inside a `Shrink` parent the whole height that parent
+/// was offered: a 72px diff stretched to 272px of empty `surface.code`, and the
+/// viewer *requested* `Length::Shrink` (`size()`, pinned by
+/// `test_the_viewer_asks_to_fill_the_width_and_shrink_to_its_hunks`) while
+/// *taking* everything it was offered. The side-by-side row now carries the
+/// height of its own rows, so the divider spans the rows it separates.
 #[test]
-fn defect_side_by_side_stretches_to_every_pixel_of_height_it_is_offered() {
+fn side_by_side_lays_out_at_the_height_of_its_rows_not_the_offer() {
     let renderer = headless_renderer();
     let limits = layout::Limits::new(Size::ZERO, OFFERED);
 
@@ -592,9 +592,16 @@ fn defect_side_by_side_stretches_to_every_pixel_of_height_it_is_offered() {
     );
     assert_eq!(
         paired_node.size().height,
-        OFFERED.height,
-        "defect: side-by-side takes the whole height it was offered instead of the \
-         height of its rows"
+        HEADER_HEIGHT + body_height(SAMPLE_LINES),
+        "side-by-side takes the height of its rows — the same height unified \
+         occupies for the same hunk — not the height it was offered"
+    );
+    assert!(
+        paired_node.size().height < OFFERED.height,
+        "the viewer must leave the height it does not use alone: it took {} of \
+         the {} it was offered",
+        paired_node.size().height,
+        OFFERED.height
     );
 
     let divider = published
@@ -604,23 +611,21 @@ fn defect_side_by_side_stretches_to_every_pixel_of_height_it_is_offered() {
         .expect("side-by-side publishes its 1px center divider");
     assert_eq!(
         divider.height,
-        OFFERED.height - HEADER_HEIGHT,
-        "defect: the divider spans the offer, not the rows"
+        body_height(SAMPLE_LINES),
+        "the divider spans the rows it separates, not the offer"
     );
 
     let panes = side_by_side_panes(&published, OFFERED.width, SAMPLE_LINES);
     assert_eq!(
         panes.len(),
         2,
-        "the rows themselves are still only tall enough for one row per diff line, \
-         which is what makes the stretched divider visible as empty space"
+        "the rows themselves are still only tall enough for one row per diff line"
     );
-    assert!(
-        divider.height > panes[0].height,
-        "defect: the divider outgrows the rows it is meant to separate: divider \
-         {}, pane {}",
-        divider.height,
-        panes[0].height
+    assert_eq!(
+        divider.height, panes[0].height,
+        "the divider is exactly as tall as the rows it is meant to separate: \
+         divider {}, pane {}",
+        divider.height, panes[0].height
     );
 }
 

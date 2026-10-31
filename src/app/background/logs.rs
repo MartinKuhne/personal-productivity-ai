@@ -62,7 +62,10 @@ pub fn parse_log_category(s: &str) -> Option<LogCategory> {
 /// `std::env::var` returns `Ok(String::new())` for `FOO=`, and an empty path
 /// fragment would otherwise produce a bogus relative directory such as
 /// `fastmd\logs` or `.fastmd/logs`.
-fn non_empty(value: Option<&str>) -> Option<&str> {
+///
+/// Crate-visible because the system-library resolution in [`crate::config`]
+/// applies the same rule to `APPDATA`/`USERPROFILE`; one rule, one helper.
+pub(crate) fn non_empty(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.is_empty())
 }
 

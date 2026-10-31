@@ -44,6 +44,12 @@ use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
 
+/// Diagnostic for a stdin pipe that is already gone — the child closed it, or
+/// the transport was torn down while a request was still pending.
+const STDIN_CLOSED: &str = "stdin closed";
+/// Diagnostic for a stdin mutex whose owning thread panicked.
+const STDIN_LOCK_POISONED: &str = "stdin lock poisoned";
+
 /// Build a [`reqwest::Client`] for MCP HTTP requests (async).
 ///
 /// * Default 4xx/5xx handling — reqwest's async client does not
@@ -929,21 +935,17 @@ impl McpClientSession {
         // Write the request. We hold only the stdin mutex for the
         // duration of the write so concurrent writers (e.g. a
         // cancellation notification while a read is pending) don't
-        // interleave bytes.
+        // interleave bytes. Every failure inside the write — including
+        // a stdin that is already gone — is reported as an `io::Error`
+        // so it reaches the teardown below instead of returning early
+        // and leaving a dead transport installed.
         let write_result = {
             let state = self.lock_state()?;
             let transport = state
                 .stdio
                 .as_ref()
                 .expect("ensure_stdio_transport_locked just installed one");
-            let mut stdin_guard = transport
-                .stdin
-                .lock()
-                .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
-            let stdin = stdin_guard
-                .as_mut()
-                .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
-            Self::write_json_line(&mut *stdin, &payload)
+            Self::write_stdio_frame(transport, &payload)
         };
         if let Err(e) = write_result {
             return Err(self.mark_stdio_dead("write", e));
@@ -1134,10 +1136,10 @@ impl McpClientSession {
         };
         let mut stdin_guard = transport
             .lock()
-            .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
+            .map_err(|_| McpError::transport("stdio", STDIN_LOCK_POISONED))?;
         let stdin = stdin_guard
             .as_mut()
-            .ok_or_else(|| McpError::transport("stdio", "stdin closed"))?;
+            .ok_or_else(|| McpError::transport("stdio", STDIN_CLOSED))?;
         if let Err(e) = Self::write_json_line(&mut *stdin, payload) {
             tracing::warn!(
                 server = %self.config_label(),
@@ -1272,6 +1274,26 @@ impl McpClientSession {
             format!("stdio server '{}' {op}", self.config_label()),
             e.to_string(),
         )
+    }
+
+    /// Write one request frame to the transport's stdin.
+    ///
+    /// Every failure is reported as an [`std::io::Error`] — a poisoned
+    /// stdin mutex and a stdin that has already been taken both mean the
+    /// transport can never carry a request again — so the caller can route
+    /// all of them through [`Self::mark_stdio_dead`] instead of returning
+    /// early with a live-but-useless transport still installed.
+    fn write_stdio_frame(
+        transport: &StdioTransport,
+        payload: &serde_json::Value,
+    ) -> std::io::Result<()> {
+        let mut stdin_guard = transport.stdin.lock().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, STDIN_LOCK_POISONED)
+        })?;
+        let stdin = stdin_guard
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, STDIN_CLOSED))?;
+        Self::write_json_line(&mut *stdin, payload)
     }
 
     fn write_json_line<W: Write>(w: &mut W, value: &serde_json::Value) -> std::io::Result<()> {
@@ -1761,9 +1783,12 @@ impl McpClientSession {
     /// `progressToken` is registered on first sight and the
     /// highest `progress` value seen is remembered so we can
     /// detect the spec violation "progress values MUST increase
-    /// with each notification". Tokens are not removed here —
-    /// they're cleared when the originating request's response
-    /// arrives (see [`McpClientSession::drop_progress_tokens`]).
+    /// with each notification": a regressed frame is logged and
+    /// the stored value stays at that high-water mark, so later
+    /// frames are still judged against the furthest progress
+    /// reached. Tokens are not removed here — they're cleared
+    /// when the originating request's response arrives (see
+    /// [`McpClientSession::drop_progress_tokens`]).
     fn track_progress(&self, params: &serde_json::Value) {
         let token = match params.get("progressToken") {
             Some(serde_json::Value::String(s)) => s.clone(),
@@ -1801,6 +1826,13 @@ impl McpClientSession {
             }
         };
         if let Ok(mut state) = self.state.lock() {
+            // Spec §5.3: "Progress values MUST increase with each
+            // notification." A frame that goes backwards is a
+            // server-side violation: we log it and keep the
+            // high-water mark instead of the regressed value, so
+            // the check for the next frame still compares against
+            // the furthest progress seen.
+            let mut stored = progress;
             if let Some(prev) = state.progress_tokens.get(&token).copied()
                 && progress < prev
             {
@@ -1811,8 +1843,9 @@ impl McpClientSession {
                     now = progress,
                     "progress notification went backwards (spec §5.3 says progress MUST increase)"
                 );
+                stored = prev;
             }
-            state.progress_tokens.insert(token.clone(), progress);
+            state.progress_tokens.insert(token.clone(), stored);
         }
         tracing::debug!(
             server = %self.config_label(),

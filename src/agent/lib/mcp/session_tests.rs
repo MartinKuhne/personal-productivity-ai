@@ -1532,13 +1532,13 @@ fn progress_notifications_are_tracked_per_token() {
 }
 
 #[test]
-fn defect_progress_notification_going_backwards_overwrites_the_stored_value() {
-    // Spec §5.3: "Progress values MUST increase with each notification."
-    // The client only logs a warning in that case and still stores the
-    // lower value, so a later monotonic notification is compared against
-    // the regression rather than the high-water mark. Pinned here because
-    // the current behaviour is observable but arguably wrong; changing it
-    // needs a product decision (ignore the frame vs. record it).
+fn progress_notification_going_backwards_keeps_the_high_water_mark() {
+    // Spec §5.3: "Progress values MUST increase with each notification." A
+    // regressed frame is a server-side violation: it is logged and the stored
+    // value stays at the highest `progress` seen, so the monotonicity check for
+    // later frames still compares against the furthest progress reached.
+    // (Was: the regressed value overwrote the high-water mark, so the next
+    // frame was judged against the regression.)
     let sess = http_session("https://example.com/mcp");
     sess.handle_server_notification(&notification(
         "notifications/progress",
@@ -1550,8 +1550,28 @@ fn defect_progress_notification_going_backwards_overwrites_the_stored_value() {
     ));
     assert_eq!(
         tracked(&sess, "t1"),
-        Some(1.0),
-        "actual behaviour: the regressed value wins"
+        Some(9.0),
+        "the regressed frame is rejected but the token stays tracked at the mark"
+    );
+
+    sess.handle_server_notification(&notification(
+        "notifications/progress",
+        serde_json::json!({ "progressToken": "t1", "progress": 9.0 }),
+    ));
+    assert_eq!(
+        tracked(&sess, "t1"),
+        Some(9.0),
+        "a frame that merely repeats the mark is not an increase"
+    );
+
+    sess.handle_server_notification(&notification(
+        "notifications/progress",
+        serde_json::json!({ "progressToken": "t1", "progress": 12.0 }),
+    ));
+    assert_eq!(
+        tracked(&sess, "t1"),
+        Some(12.0),
+        "a frame past the mark advances it"
     );
 }
 
@@ -2035,49 +2055,80 @@ fn stdio_request_matches_string_ids() {
     );
 }
 
-// DEFECT: `stdio_request` reports the missing stdin but never marks the
-// transport dead. Inside the write block, `stdin_guard.as_mut().ok_or_else(
-// || McpError::transport("stdio", "stdin closed"))?` uses `?`, which returns
-// from `stdio_request` itself instead of producing an `io::Error` for
-// `write_result`. The `if let Err(e) = write_result { self.mark_stdio_dead(…) }`
-// guard below is therefore never reached, so `mark_stdio_dead` (session.rs,
-// "Drops the transport … and resets the session to Uninitialized so the next
-// call re-initializes against a freshly-spawned server") is skipped.
-// Every other stdio failure path (write, timeout, parse) does route through
-// `mark_stdio_dead`. Consequence: a transport whose stdin is gone stays
-// installed forever, the subprocess is never killed, and every later call
-// fails with the same "stdin closed" instead of re-spawning.
-// Expected (correct) behaviour: `state.stdio` is `None` after the failure.
 #[test]
-fn defect_stdio_request_without_stdin_marks_the_transport_dead() {
+fn stdio_request_without_stdin_marks_the_transport_dead() {
+    // Contract: a request whose stdin is already gone is a transport failure,
+    // so it goes through `mark_stdio_dead` ("Drops the transport … and resets
+    // the session to Uninitialized so the next call re-initializes against a
+    // freshly-spawned server") like every other stdio failure path (write,
+    // timeout, parse). The subprocess is taken and killed, not left running.
+    // (Was: the missing-stdin guard used `?` inside the write block, returning
+    // from `stdio_request` before the teardown ran, so the dead transport
+    // stayed installed forever.)
     let (transport, _tx) = hand_built_transport(Vec::new());
+    let child = Arc::clone(&transport.child);
     transport.stdin.lock().expect("stdin lock").take();
     let sess = stdio_session_with(transport);
 
     let err = sess
         .stdio_request(1, ping_payload(1), std::time::Duration::from_millis(200))
         .expect_err("a closed stdin cannot carry a request");
-    assert!(
-        err.to_string().contains("stdin closed"),
-        "the write failure is reported: {err}"
+    assert_eq!(
+        err.to_string(),
+        "stdio server 'stdio:test-server' write (code -1): stdin closed",
+        "the write failure is reported as a transport failure: {err}"
     );
     let state = sess.state.lock().expect("state lock");
     assert!(
-        state.stdio.is_some(),
-        "DEFECT: the dead transport is still installed, so the next call reuses \
-         it instead of re-spawning a server"
+        state.stdio.is_none(),
+        "the dead transport is dropped so the next call re-spawns a server"
+    );
+    assert_eq!(
+        state.phase,
+        SessionPhase::Uninitialized,
+        "the session is flagged for re-initialization"
     );
     assert!(
-        state
-            .stdio
-            .as_ref()
-            .expect("transport still installed")
-            .child
-            .lock()
-            .expect("child lock")
-            .is_some(),
-        "DEFECT: the subprocess handle is still held — `mark_stdio_dead` would \
-         have taken and killed it"
+        child.lock().expect("child lock").is_none(),
+        "`mark_stdio_dead` takes the child out to kill it"
+    );
+}
+
+#[test]
+fn stdio_request_with_a_poisoned_stdin_lock_marks_the_transport_dead() {
+    // Contract: a poisoned stdin mutex means the transport can never carry a
+    // request again, so it is torn down like any other write failure.
+    let (transport, _tx) = hand_built_transport(Vec::new());
+    let poison = Arc::clone(&transport.stdin);
+    let handle = std::thread::spawn(move || {
+        let _guard = poison.lock().expect("lock");
+        panic!("poison the stdio stdin lock");
+    });
+    assert!(
+        handle.join().is_err(),
+        "the poisoning thread must panic to poison the mutex"
+    );
+    let child = Arc::clone(&transport.child);
+    let sess = stdio_session_with(transport);
+
+    let err = sess
+        .stdio_request(1, ping_payload(1), std::time::Duration::from_millis(200))
+        .expect_err("a poisoned stdin lock cannot carry a request");
+    assert_eq!(
+        err.to_string(),
+        "stdio server 'stdio:test-server' write (code -1): stdin lock poisoned",
+        "the lock failure is reported as a transport failure: {err}"
+    );
+    let state = sess.state.lock().expect("state lock");
+    assert!(state.stdio.is_none(), "the unusable transport is dropped");
+    assert_eq!(
+        state.phase,
+        SessionPhase::Uninitialized,
+        "the next call re-initializes"
+    );
+    assert!(
+        child.lock().expect("child lock").is_none(),
+        "the subprocess is taken out to be killed"
     );
 }
 

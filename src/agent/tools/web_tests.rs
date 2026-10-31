@@ -31,6 +31,59 @@ fn ensure_rustls_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
+/// A stub LLM that answers each request with the next body in `bodies`. Once
+/// only one body is left it is repeated, so a test can script "first the model
+/// asks for a tool, then it answers".
+fn spawn_sequential_mock_server(bodies: Vec<String>) -> String {
+    use std::io::{Read, Write};
+    use std::sync::Mutex;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let pending = Mutex::new(bodies);
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0; 65536];
+            let _ = stream.read(&mut buf);
+            let body_str = {
+                let mut queued = pending.lock().unwrap();
+                if queued.len() > 1 {
+                    queued.remove(0)
+                } else {
+                    queued[0].clone()
+                }
+            };
+            let response_str = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body_str.len(),
+                body_str
+            );
+            let _ = stream.write_all(response_str.as_bytes());
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+    format!("http://127.0.0.1:{}", port)
+}
+
+/// Chat config for the delegate, with `web_search` disabled so only `web_fetch`
+/// is offered to the model.
+fn delegate_config(api_url: &str) -> AgentConfig {
+    let mut config = AgentConfig::default();
+    config.models.insert(
+        "chat".to_string(),
+        LlmConfig {
+            model: "test-model".to_string(),
+            api_url: api_url.to_string(),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    config.searxng_url = None;
+    config
+}
+
 #[test]
 fn test_tool_web_fetch_mock() {
     let cache = crate::tools::registry::cache::ToolCache::new();
@@ -917,13 +970,18 @@ fn test_tool_web_delegate_mock() {
     assert_eq!(result.result, "Final summarized answer");
 }
 
+/// Contract: a tool call the delegate cannot resolve ends the delegation after
+/// that round, so the delegation returns the error envelopes it collected
+/// instead of burning the whole `max_loops = 10` budget. (Was: the unknown tool
+/// was retried ten times, ten identical error envelopes were collected, and the
+/// caller could not tell the failure from an empty success.)
 #[test]
-fn defect_tool_web_delegate_retries_an_unknown_tool_for_the_whole_loop_budget() {
+fn tool_web_delegate_ends_the_delegation_on_an_unresolvable_tool_call() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     ensure_rustls_provider();
 
-    // Mock server returns a tool_call with unknown function name
-    // The delegate should handle this gracefully and continue
+    // The stub answers every request with the same unresolvable tool call, so
+    // the only way the delegation can end before the budget is by rejecting it.
     let mock_response = serde_json::json!({
         "choices": [{
             "message": {
@@ -940,60 +998,91 @@ fn defect_tool_web_delegate_retries_an_unknown_tool_for_the_whole_loop_budget() 
     });
 
     let server_url = spawn_mock_server(mock_response.to_string());
+    let config = delegate_config(&server_url);
 
-    let mut config = AgentConfig::default();
-    config.models.insert(
-        "chat".to_string(),
-        LlmConfig {
-            model: "test-model".to_string(),
-            api_url: server_url.clone(),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        },
+    let response = tool_web_delegate(&config, "do something", &cache)
+        .expect("the delegate reports the failure through its tool-call trace");
+
+    assert_eq!(
+        response.tool_calls.len(),
+        1,
+        "the unresolvable call must end the delegation after the first round"
     );
-    config.searxng_url = None;
-
-    // DEFECT: an unknown tool is retried until the loop budget runs out instead
-    // of ending the delegation. `web.rs:533` sets `max_loops = 10`; because the
-    // model keeps answering with the same unresolvable tool call, the loop runs
-    // the full budget, appends one error envelope per round, and the call still
-    // returns `Ok` with an empty `result` — so a caller cannot tell a failed
-    // delegation from a successful one that produced nothing. The old assertion
-    // here (`result.is_ok() || result.is_err()`) could never fail and hid this.
-    // Fixing it means breaking out of the loop when no tool could be resolved
-    // (or surfacing the failure as `Err`); product code was left untouched.
-    let result = tool_web_delegate(&config, "do something", &cache);
-    let response = match result {
-        Ok(response) => response,
-        Err(err) => panic!("the delegate reports Ok, got: {err}"),
-    };
+    let call = &response.tool_calls[0];
+    assert_eq!(call.name, "unknown_function");
+    assert_eq!(
+        call.result.get("status").and_then(|v| v.as_str()),
+        Some("error"),
+        "the unresolvable call reports an error status"
+    );
+    assert_eq!(
+        call.result.get("message").and_then(|v| v.as_str()),
+        Some("Unknown tool"),
+        "the unresolvable call reports the unknown-tool message"
+    );
     assert!(
         response.result.is_empty(),
         "an unresolvable delegation produces no answer, got: {:?}",
         response.result
     );
+}
+
+/// Contract: a tool call the delegate *can* resolve is executed and the loop
+/// continues until the model delivers its final answer — the early exit above
+/// must not shorten a healthy delegation.
+#[test]
+fn tool_web_delegate_keeps_looping_while_the_tool_call_is_resolvable() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    ensure_rustls_provider();
+
+    // Round 1 asks for `web_fetch` (a tool the delegate offers), round 2 emits
+    // the final answer.
+    let page_url = spawn_mock_server("<html><body><h1>Fetched page</h1></body></html>");
+    let first_round = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": format!("{{\"url\":\"{page_url}\"}}")
+                    }
+                }]
+            }
+        }]
+    });
+    let second_round = serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": "Final summarized answer",
+                "tool_calls": []
+            }
+        }]
+    });
+
+    let server_url =
+        spawn_sequential_mock_server(vec![first_round.to_string(), second_round.to_string()]);
+    let config = delegate_config(&server_url);
+
+    let response = tool_web_delegate(&config, "fetch the page", &cache)
+        .expect("a resolvable delegation succeeds");
+
+    assert_eq!(response.result, "Final summarized answer");
     assert_eq!(
         response.tool_calls.len(),
-        10,
-        "the unknown tool is retried for the whole `max_loops = 10` budget"
+        1,
+        "the single tool call of the first round is recorded, got: {:?}",
+        response.tool_calls
     );
-    for (index, call) in response.tool_calls.iter().enumerate() {
-        assert_eq!(
-            call.name, "unknown_function",
-            "retry #{index} repeats the same unresolvable tool"
-        );
-        assert_eq!(
-            call.result.get("status").and_then(|v| v.as_str()),
-            Some("error"),
-            "retry #{index} reports an error status"
-        );
-        assert_eq!(
-            call.result.get("message").and_then(|v| v.as_str()),
-            Some("Unknown tool"),
-            "retry #{index} reports the unknown-tool message"
-        );
-    }
+    let call = &response.tool_calls[0];
+    assert_eq!(call.name, "web_fetch");
+    assert_eq!(
+        call.result.get("status").and_then(|v| v.as_str()),
+        Some("success"),
+        "the resolvable call is executed, got: {}",
+        call.result
+    );
 }
 
 #[test]

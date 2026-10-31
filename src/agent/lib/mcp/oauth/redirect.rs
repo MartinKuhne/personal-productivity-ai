@@ -19,9 +19,13 @@
 //!
 //! The server is single-shot: it serves one request, returns a
 //! "you can close this window now" HTML page, and shuts itself
-//! down. It also serves a `/healthz` endpoint for tests and a
-//! pre-flight `/` that gives a 404 — anything other than the
-//! configured callback path is rejected.
+//! down. Anything other than the configured callback path gets a
+//! 404 so the browser prefetches (`/`, `/favicon.ico`) do not
+//! consume the one-shot; the server keeps listening until the
+//! callback arrives or the timeout elapses. Every reply is framed
+//! with the `Content-Length` of the HTML document it actually
+//! writes (RFC 9110 §8.6), so the browser receives the complete
+//! page rather than a truncated one.
 //! Unit tests live in the sibling `redirect_tests.rs` sidecar.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -40,6 +44,26 @@ pub const DEFAULT_CALLBACK_PATH: &str = "/callback";
 /// How long we'll wait for the browser to hit the callback. The
 /// user could be in a slow WebAuthn flow, so this is generous.
 pub const DEFAULT_CALLBACK_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Status-line reason phrase and HTML heading for a successful callback.
+const REASON_OK: &str = "OK";
+/// Status-line reason phrase and HTML heading for a disallowed method.
+const REASON_METHOD_NOT_ALLOWED: &str = "Method Not Allowed";
+/// Status-line reason phrase and HTML heading for a non-callback path.
+const REASON_NOT_FOUND: &str = "Not Found";
+/// Status-line reason phrase and HTML heading for a malformed callback.
+const REASON_BAD_REQUEST: &str = "Bad Request";
+
+/// Text shown to the user on a successful callback.
+const MESSAGE_SUCCESS: &str = "You may now close this window and return to the application.";
+/// Text shown to the user when the request uses a method we do not accept.
+const MESSAGE_METHOD_REQUIRED: &str = "GET or POST required";
+/// Text shown to the user when they hit a path that is not the callback.
+const MESSAGE_WAITING_FOR_CALLBACK: &str = "waiting for OAuth callback";
+/// Text shown to the user when the redirect carries no `code`.
+const MESSAGE_MISSING_CODE: &str = "missing 'code' parameter on redirect";
+/// Text shown to the user when the redirect carries no `state`.
+const MESSAGE_MISSING_STATE: &str = "missing 'state' parameter on redirect";
 
 /// A bound loopback HTTP server ready to accept one redirect
 /// request. The actual server lives on a background thread; this
@@ -349,8 +373,8 @@ fn handle_connection(
         send_response(
             &mut stream,
             405,
-            "Method Not Allowed",
-            "GET or POST required",
+            REASON_METHOD_NOT_ALLOWED,
+            MESSAGE_METHOD_REQUIRED,
         )?;
         return Ok(None);
     }
@@ -373,7 +397,12 @@ fn handle_connection(
     if path != callback_path {
         // Browser probably hit `/` or `/favicon.ico`. Reply with
         // a 404 and keep listening.
-        send_response(&mut stream, 404, "Not Found", "waiting for OAuth callback")?;
+        send_response(
+            &mut stream,
+            404,
+            REASON_NOT_FOUND,
+            MESSAGE_WAITING_FOR_CALLBACK,
+        )?;
         return Ok(None);
     }
     // Parse the query string. We accept the standard `code` and
@@ -388,17 +417,12 @@ fn handle_connection(
                 send_response(
                     &mut stream,
                     400,
-                    "Bad Request",
+                    REASON_BAD_REQUEST,
                     &format!("Authorization server returned error='{err}'; description='{desc}'"),
                 )?;
                 return Err(OAuthError::AuthorizationDenied(format!("{err}: {desc}")));
             }
-            send_response(
-                &mut stream,
-                400,
-                "Bad Request",
-                "missing 'code' parameter on redirect",
-            )?;
+            send_response(&mut stream, 400, REASON_BAD_REQUEST, MESSAGE_MISSING_CODE)?;
             return Err(OAuthError::AuthorizationDenied(
                 "redirect missing 'code'".to_owned(),
             ));
@@ -407,12 +431,7 @@ fn handle_connection(
     let state = match params.get("state") {
         Some(s) if !s.is_empty() => s.clone(),
         _ => {
-            send_response(
-                &mut stream,
-                400,
-                "Bad Request",
-                "missing 'state' parameter on redirect",
-            )?;
+            send_response(&mut stream, 400, REASON_BAD_REQUEST, MESSAGE_MISSING_STATE)?;
             return Err(OAuthError::AuthorizationDenied(
                 "redirect missing 'state'".to_owned(),
             ));
@@ -425,12 +444,7 @@ fn handle_connection(
             extras.push((k.clone(), v.clone()));
         }
     }
-    send_response(
-        &mut stream,
-        200,
-        "OK",
-        "You may now close this window and return to the application.",
-    )?;
+    send_response(&mut stream, 200, REASON_OK, MESSAGE_SUCCESS)?;
     Ok(Some(CallbackParams {
         code,
         state,
@@ -487,25 +501,37 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+/// Build the HTML document every reply carries: the status reason as the
+/// heading and the diagnostic message as the body text.
+fn html_document(reason: &str, message: &str) -> String {
+    format!(
+        "<!doctype html><html><head><title>{reason}</title></head>\
+         <body><h1>{reason}</h1><p>{message}</p></body></html>"
+    )
+}
+
+/// Write one complete HTTP reply (status line, headers, blank line, HTML
+/// document).
+///
+/// `Content-Length` is counted from the document bytes that are actually
+/// written — RFC 9110 §8.6 defines it as the size of the message body — so a
+/// conforming client keeps the whole page instead of stopping at the end of
+/// the plain-text message.
 fn send_response(
     stream: &mut TcpStream,
     code: u16,
     reason: &str,
-    body: &str,
+    message: &str,
 ) -> Result<(), OAuthError> {
-    let body_bytes = body.as_bytes();
-    let response = format!(
+    let document = html_document(reason, message);
+    let headers = format!(
         "HTTP/1.1 {code} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n\
-         Content-Length: {len}\r\nConnection: close\r\n\r\n",
-        len = body_bytes.len()
-    );
-    let html = format!(
-        "<!doctype html><html><head><title>{reason}</title></head>\
-         <body><h1>{reason}</h1><p>{body}</p></body></html>"
+         Content-Length: {}\r\nConnection: close\r\n\r\n",
+        document.len()
     );
     stream
-        .write_all(response.as_bytes())
-        .and_then(|_| stream.write_all(html.as_bytes()))
+        .write_all(headers.as_bytes())
+        .and_then(|_| stream.write_all(document.as_bytes()))
         .and_then(|_| stream.flush())
         .map_err(|e| OAuthError::Transport(format!("loopback write failed: {e}")))?;
     Ok(())

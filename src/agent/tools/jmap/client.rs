@@ -37,6 +37,27 @@ fn parse_error_detail(body: &str) -> Option<String> {
     }
 }
 
+/// Maximum number of bytes of an unexpected response body that an error message
+/// echoes back.
+const MAX_ERROR_SNIPPET_BYTES: usize = 500;
+
+/// Clip `body` to [`MAX_ERROR_SNIPPET_BYTES`] and mark the cut with an ellipsis.
+///
+/// The cut is moved back to the nearest `char` boundary: `str` is indexed by
+/// byte, so a plain `&body[..500]` panics whenever byte 500 falls inside a
+/// multi-byte UTF-8 character — and a server's error body is not under our
+/// control. Byte 0 is always a boundary, so the search always terminates.
+fn truncate_error_snippet(body: &str) -> String {
+    if body.len() <= MAX_ERROR_SNIPPET_BYTES {
+        return body.to_string();
+    }
+    let mut end = MAX_ERROR_SNIPPET_BYTES;
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &body[..end])
+}
+
 /// Opaque handle to a connected JMAP session.
 ///
 /// Wraps `jmap_client::Client` and provides:
@@ -159,11 +180,7 @@ impl JmapSession {
             let msg = match detail {
                 Some(ref d) => format!("Server returned {status}: {d}"),
                 None => {
-                    let snippet = if body.len() > 500 {
-                        format!("{}...", &body[..500])
-                    } else {
-                        body.clone()
-                    };
+                    let snippet = truncate_error_snippet(&body);
                     if snippet.is_empty() {
                         format!("Server returned {status} (empty body)")
                     } else {
@@ -173,6 +190,7 @@ impl JmapSession {
             };
             tracing::error!(
                 name = "jmap.post.http_error",
+                error_code = "JMAP-4001",
                 status = %status.as_u16(),
                 body = %body,
                 "JMAP POST returned non-success HTTP status"
@@ -181,13 +199,10 @@ impl JmapSession {
         }
 
         let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-            let snippet = if body.len() > 500 {
-                format!("{}...", &body[..500])
-            } else {
-                body.clone()
-            };
+            let snippet = truncate_error_snippet(&body);
             tracing::error!(
                 name = "jmap.post.parse_error",
+                error_code = "JMAP-4002",
                 error = %e,
                 body = %snippet,
                 "Failed to parse JMAP response as JSON"

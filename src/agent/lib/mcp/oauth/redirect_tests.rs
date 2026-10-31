@@ -376,8 +376,14 @@ fn connected_pair() -> (TcpStream, TcpStream) {
 
 /// One HTTP reply as it actually landed on the wire.
 struct Reply {
+    /// The status line verbatim, minus its line terminator, e.g.
+    /// `HTTP/1.1 404 Not Found`.
+    status_line: String,
     /// Status code parsed from the `HTTP/1.1 <code> <reason>` status line.
     status: u16,
+    /// Every header line below the status line, verbatim (line terminators
+    /// trimmed) and in the order the server sent them.
+    headers: Vec<String>,
     /// The `Content-Length` the server declared.
     declared_len: usize,
     /// The payload a spec-conforming client keeps: the first `declared_len`
@@ -397,37 +403,93 @@ fn read_reply(client: &mut TcpStream) -> Reply {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .expect("read timeout");
     let mut reader = BufReader::new(client.try_clone().expect("clone"));
-    let mut status = 0u16;
+
+    let mut raw_status_line = String::new();
+    assert!(
+        reader
+            .read_line(&mut raw_status_line)
+            .expect("read status line")
+            > 0,
+        "the server must send a status line"
+    );
+    let status_line = raw_status_line.trim_end().to_owned();
+    let status = status_line
+        .strip_prefix("HTTP/1.1 ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+
+    let mut headers: Vec<String> = Vec::new();
     let mut content_length = 0usize;
     loop {
         let mut line = String::new();
-        if reader.read_line(&mut line).expect("read line") == 0 {
+        if reader.read_line(&mut line).expect("read header line") == 0 {
             break;
         }
         let trimmed = line.trim_end();
         if trimmed.is_empty() {
             break;
         }
-        if let Some(rest) = trimmed.strip_prefix("HTTP/1.1 ") {
-            status = rest
-                .split_whitespace()
-                .next()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
-        }
         if let Some(rest) = trimmed.to_ascii_lowercase().strip_prefix("content-length:") {
             content_length = rest.trim().parse().unwrap_or(0);
         }
+        headers.push(trimmed.to_owned());
     }
+
     let mut payload = Vec::new();
     reader.read_to_end(&mut payload).expect("read payload");
     let kept = payload.len().min(content_length);
     Reply {
+        status_line,
         status,
+        headers,
         declared_len: content_length,
         body: String::from_utf8_lossy(&payload[..kept]).into_owned(),
         full_payload: String::from_utf8_lossy(&payload).into_owned(),
     }
+}
+
+/// Assert the complete reply contract for one HTML page: the status line, the
+/// exact header block, and a `Content-Length` that matches the document the
+/// server actually wrote — so the client-visible body is the whole page and
+/// nothing is written past the declared length (RFC 9110 §8.6).
+fn assert_html_reply(reply: &Reply, status: u16, reason: &str, message: &str) {
+    let document = format!(
+        "<!doctype html><html><head><title>{reason}</title></head>\
+         <body><h1>{reason}</h1><p>{message}</p></body></html>"
+    );
+    assert_eq!(
+        reply.status_line,
+        format!("HTTP/1.1 {status} {reason}"),
+        "the status line carries the code and reason, got: {}",
+        reply.status_line
+    );
+    assert_eq!(
+        reply.headers,
+        vec![
+            "Content-Type: text/html; charset=utf-8".to_owned(),
+            format!("Content-Length: {}", document.len()),
+            "Connection: close".to_owned(),
+        ],
+        "the header block must declare the length of the document, got: {:?}",
+        reply.headers
+    );
+    assert_eq!(
+        reply.declared_len,
+        document.len(),
+        "Content-Length must be the size of the payload, got: {}",
+        reply.declared_len
+    );
+    assert_eq!(
+        reply.body, document,
+        "the client sees the complete document, got: {}",
+        reply.body
+    );
+    assert_eq!(
+        reply.full_payload, document,
+        "nothing may be written past the declared length, got: {}",
+        reply.full_payload
+    );
 }
 
 /// Send one request through [`handle_connection`] and collect both the HTTP
@@ -462,29 +524,22 @@ fn callback(params: Result<Option<CallbackParams>, OAuthError>) -> CallbackParam
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DEFECT (shared root cause for the `defect_*` tests below): every reply is
-// truncated. `send_response` sizes `Content-Length` from the plain-text
-// message it is handed but then writes a full HTML document as the payload:
-//
-//     len = body_bytes.len()          // length of the message only
-//     ...write(header block)          // "Content-Length: <message length>"
-//     ...write(html)                  // "<!doctype html>…</html>"
-//
-// RFC 9110 §8.6 requires Content-Length to be the size of the message payload,
-// so a conforming client stops reading at the message length and receives an
-// unterminated document — the browser the module doc promises ("returns a
-// 'you can close this window now' HTML page", redirect.rs §20-22) never sees
-// the message or the closing tags. The tests pin the actual behaviour: the
-// declared length equals the message length and `body` is the truncated HTML
-// prefix, while `full_payload` shows what the server really wrote.
+// Reply framing. Every reply declares the `Content-Length` of the HTML document
+// it actually writes, so a conforming client receives the complete page — the
+// "you can close this window now" page the module docs promise.
+// RFC 9110 §8.6: Content-Length is the size of the message body.
+// (Was: `send_response` sized Content-Length from the plain-text message it was
+// handed and then wrote the HTML document, so every page arrived truncated.)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn defect_handle_connection_accepts_post_with_form_body() {
-    // DEFECT: the 200 reply declares Content-Length = 60 (the length of
-    // "You may now close this window and return to the application.") while
-    // the HTML document is far longer, so the client-visible body is cut off
-    // mid-tag and the promise text is never delivered.
+fn handle_connection_accepts_post_with_form_body() {
+    // Contract: a POST whose form body follows the headers is a legal redirect
+    // (RFC 6749 §3.1.2.3 response_mode=form_post), the body is drained, and the
+    // 200 reply is framed exactly as written.
+    // (Was: Content-Length was 60 — the length of the plain message — so the
+    // client-visible page was cut off mid-tag and the promise text never
+    // arrived.)
     let (reply, result) = drive_reply(
         "POST /cb?code=posted&state=st HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
@@ -494,27 +549,11 @@ fn defect_handle_connection_accepts_post_with_form_body() {
         "/cb",
     );
 
-    assert_eq!(reply.status, 200);
-    assert_eq!(
-        reply.declared_len, 60,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html><head><title>OK</title></head><body><h1",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("close this window"),
-        "the promised text sits past the declared length, got: {}",
-        reply.body
-    );
-    assert_eq!(
-        reply.full_payload,
-        "<!doctype html><html><head><title>OK</title></head><body><h1>OK</h1>\
-         <p>You may now close this window and return to the application.</p>\
-         </body></html>",
-        "the server does write the whole document, it is just miscounted"
+    assert_html_reply(
+        &reply,
+        200,
+        "OK",
+        "You may now close this window and return to the application.",
     );
     let params = callback(result);
     assert_eq!(params.code, "posted");
@@ -546,34 +585,17 @@ fn handle_connection_ignores_a_non_numeric_content_length() {
 }
 
 #[test]
-fn defect_handle_connection_rejects_other_methods_with_405() {
-    // DEFECT: Content-Length is declared as 20 ("GET or POST required") while
-    // the HTML document is longer, so the client-visible body is the first 20
-    // bytes of the document and the explanation is lost.
+fn handle_connection_rejects_other_methods_with_405() {
+    // Contract: a method other than GET/POST gets a fully framed 405 that
+    // explains the requirement, and the server keeps listening (RFC 6749
+    // §3.1.2.3 only mandates GET; some servers POST the response).
+    // (Was: Content-Length was 20 — the length of "GET or POST required" — so
+    // the client-visible page was the first 20 bytes of the document.)
     let (reply, result) = drive_reply(
         "DELETE /cb?code=a&state=b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
         "/cb",
     );
-    assert_eq!(reply.status, 405);
-    assert_eq!(
-        reply.declared_len, 20,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("GET or POST required"),
-        "the reason text sits past the declared length, got: {}",
-        reply.body
-    );
-    assert!(
-        reply.full_payload.contains("GET or POST required"),
-        "the server does write the reason, it is just miscounted, got: {}",
-        reply.full_payload
-    );
+    assert_html_reply(&reply, 405, "Method Not Allowed", "GET or POST required");
     assert!(
         matches!(result, Ok(None)),
         "a wrong method must keep the server listening"
@@ -581,31 +603,14 @@ fn defect_handle_connection_rejects_other_methods_with_405() {
 }
 
 #[test]
-fn defect_handle_connection_rejects_other_paths_with_404() {
-    // DEFECT: Content-Length is declared as 26 ("waiting for OAuth callback")
-    // while the HTML document is longer, so the client-visible body stops
-    // inside the `<head>` and the message is never delivered.
+fn handle_connection_rejects_other_paths_with_404() {
+    // Contract: a request for any other path (browser prefetches such as
+    // `/favicon.ico`) gets a fully framed 404 and the server keeps listening
+    // for the real callback (RFC 8252 §7.3).
+    // (Was: Content-Length was 26 — the length of "waiting for OAuth callback"
+    // — so the client-visible page stopped inside the `<head>`.)
     let (reply, result) = drive_reply("GET /favicon.ico HTTP/1.1\r\nHost: h\r\n\r\n", "/cb");
-    assert_eq!(reply.status, 404);
-    assert_eq!(
-        reply.declared_len, 26,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html><head",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("waiting for OAuth callback"),
-        "the reason text sits past the declared length, got: {}",
-        reply.body
-    );
-    assert!(
-        reply.full_payload.contains("waiting for OAuth callback"),
-        "the server does write the reason, it is just miscounted, got: {}",
-        reply.full_payload
-    );
+    assert_html_reply(&reply, 404, "Not Found", "waiting for OAuth callback");
     assert!(matches!(result, Ok(None)));
 }
 
@@ -643,35 +648,22 @@ fn handle_connection_percent_decodes_query_parameters() {
 }
 
 #[test]
-fn defect_handle_connection_rejects_a_missing_code() {
-    // DEFECT: Content-Length is declared as 36 ("missing 'code' parameter on
-    // redirect") while the HTML document is longer, so the client-visible body
-    // is cut off inside the `<title>` and the diagnostic never arrives.
+fn handle_connection_rejects_a_missing_code() {
+    // Contract: a callback without `code` (and without an `error` envelope)
+    // fails the flow with a fully framed 400 naming the missing parameter.
+    // (Was: Content-Length was 36 — the length of "missing 'code' parameter on
+    // redirect" — so the page was cut off inside the `<title>`.)
     let (reply, result) = drive_reply("GET /cb?state=st HTTP/1.1\r\nHost: h\r\n\r\n", "/cb");
-    assert_eq!(reply.status, 400);
-    assert_eq!(
-        reply.declared_len, 36,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html><head><title>Ba",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("missing 'code' parameter"),
-        "the reason text sits past the declared length, got: {}",
-        reply.body
-    );
-    assert!(
-        reply
-            .full_payload
-            .contains("missing 'code' parameter on redirect"),
-        "the server does write the reason, it is just miscounted, got: {}",
-        reply.full_payload
+    assert_html_reply(
+        &reply,
+        400,
+        "Bad Request",
+        "missing 'code' parameter on redirect",
     );
     match result {
-        Err(OAuthError::AuthorizationDenied(msg)) => assert!(msg.contains("missing 'code'")),
+        Err(OAuthError::AuthorizationDenied(msg)) => {
+            assert_eq!(msg, "redirect missing 'code'", "got: {msg}");
+        }
         other => panic!("expected AuthorizationDenied, got {other:?}"),
     }
 }
@@ -687,35 +679,22 @@ fn handle_connection_rejects_an_empty_code() {
 }
 
 #[test]
-fn defect_handle_connection_rejects_a_missing_state() {
-    // DEFECT: Content-Length is declared as 37 ("missing 'state' parameter on
-    // redirect") while the HTML document is longer, so the client-visible body
-    // is cut off inside the `<title>` and the diagnostic never arrives.
+fn handle_connection_rejects_a_missing_state() {
+    // Contract: a callback without `state` fails the flow — the state is the
+    // CSRF binding (RFC 6749 §10.12) — with a fully framed 400 naming it.
+    // (Was: Content-Length was 37 — the length of "missing 'state' parameter
+    // on redirect" — so the page was cut off inside the `<title>`.)
     let (reply, result) = drive_reply("GET /cb?code=c HTTP/1.1\r\nHost: h\r\n\r\n", "/cb");
-    assert_eq!(reply.status, 400);
-    assert_eq!(
-        reply.declared_len, 37,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html><head><title>Bad",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("missing 'state' parameter"),
-        "the reason text sits past the declared length, got: {}",
-        reply.body
-    );
-    assert!(
-        reply
-            .full_payload
-            .contains("missing 'state' parameter on redirect"),
-        "the server does write the reason, it is just miscounted, got: {}",
-        reply.full_payload
+    assert_html_reply(
+        &reply,
+        400,
+        "Bad Request",
+        "missing 'state' parameter on redirect",
     );
     match result {
-        Err(OAuthError::AuthorizationDenied(msg)) => assert!(msg.contains("missing 'state'")),
+        Err(OAuthError::AuthorizationDenied(msg)) => {
+            assert_eq!(msg, "redirect missing 'state'", "got: {msg}");
+        }
         other => panic!("expected AuthorizationDenied, got {other:?}"),
     }
 }
@@ -731,41 +710,27 @@ fn handle_connection_rejects_an_empty_state() {
 }
 
 #[test]
-fn defect_handle_connection_relays_authorization_server_error_envelope() {
-    // DEFECT: Content-Length is declared as 70 (the length of
-    // "Authorization server returned error='server_error'; description='oops'")
-    // while the HTML document is longer, so the client-visible body ends right
-    // after `<h1>` and the error envelope is never shown to the user. The
-    // in-band `OAuthError` still carries the envelope, which is why the flow
-    // itself works — but the browser window shows a broken page.
+fn handle_connection_relays_authorization_server_error_envelope() {
+    // Contract: an authorization-server error envelope (RFC 6749 §4.1.2.1) is
+    // shown to the user as a complete 400 page AND surfaced in-band as an
+    // `OAuthError::AuthorizationDenied`.
+    // (Was: Content-Length was 70 — the length of the plain envelope message —
+    // so the page ended right after `<h1>` and the envelope was never shown,
+    // even though the in-band error made the flow work.)
     let (reply, result) = drive_reply(
         "GET /cb?error=server_error&error_description=oops HTTP/1.1\r\nHost: h\r\n\r\n",
         "/cb",
     );
-    assert_eq!(reply.status, 400);
-    assert_eq!(
-        reply.declared_len, 70,
-        "Content-Length is the length of the plain message, not the HTML"
-    );
-    assert_eq!(
-        reply.body, "<!doctype html><html><head><title>Bad Request</title></head><body><h1>",
-        "the client sees the HTML truncated at the message length, got: {}",
-        reply.body
-    );
-    assert!(
-        !reply.body.contains("error='server_error'"),
-        "the envelope sits past the declared length, got: {}",
-        reply.body
+    assert_html_reply(
+        &reply,
+        400,
+        "Bad Request",
+        "Authorization server returned error='server_error'; description='oops'",
     );
     assert_eq!(
         reply.full_payload.matches("description='oops'").count(),
         1,
         "the description is written exactly once in the document, got: {}",
-        reply.full_payload
-    );
-    assert!(
-        reply.full_payload.contains("error='server_error'"),
-        "the server does write the error, it is just miscounted, got: {}",
         reply.full_payload
     );
     match result {

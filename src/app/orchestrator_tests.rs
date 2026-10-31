@@ -2455,26 +2455,15 @@ fn handle_user_file_operation_result_prompt_loaded_starts_the_skill_session() {
     );
 }
 
-/// DEFECT (pinned, deliberately NOT fixed): a `FileLoaded { Err }` for a path
-/// the user has already moved on from is dropped *before* the error arm runs, so
-/// the unreadable file keeps its tab and the failure is never reported.
+/// A `FileLoaded { Err }` is reported for the path that failed to read even when
+/// the user has already moved on: the unreadable file's tab is closed and the
+/// failure reaches the background log with its cause ([NFR-001], [NFR-004]).
 ///
-/// What the code does (`AppOrchestrator::handle_process_event`): the `FileLoaded`
-/// arm opens with the stale-landing guard that compares the landing path with
-/// `selection.selected_file()` and `return`s for any other path. That guard sits
-/// *above* the `Ok`/`Err` split, so for a non-selected path the `Err` arm is
-/// unreachable — `tabs.close_tab(&path)` never runs and the `Watcher` background
-/// log is never pushed. Only a `tracing::debug!`
-/// (`orchestrator.file_load.stale_dropped`) is emitted, which no user sees.
-///
-/// What it should do: the `Err` arm's own comment states the contract — "Load
-/// failed — do not leave stale content or an open tab" — and [NFR-001] requires
-/// every application failure to produce an ERROR log. Closing the tab of, and
-/// logging for, the path that failed to read is a property of *that path*, not of
-/// the document on screen; only the document projection (`current_markdown`,
-/// `current_yaml`, `toc`, scroll targets) needs the stale guard.
+/// Was: the stale-landing guard sat *above* the `Ok`/`Err` split and returned for
+/// any non-selected path, so the `Err` arm was unreachable — the tab of the
+/// unreadable file survived and the failure was logged nowhere the user can see.
 #[test]
-fn defect_file_loaded_err_for_a_deslected_path_is_dropped_before_the_error_arm() {
+fn file_loaded_err_for_a_deslected_path_is_still_reported_and_its_tab_closed() {
     let mut orch = harness();
     let failing = PathBuf::from("/lib/broken.md");
     let viewed = PathBuf::from("/lib/viewed.md");
@@ -2485,13 +2474,16 @@ fn defect_file_loaded_err_for_a_deslected_path_is_dropped_before_the_error_arm()
     orch.tabs.loaded_path = Some(viewed.clone());
     orch.pending_file_load = Some(failing.clone());
 
-    orch.handle_process_event(ProcessEvent::FileLoaded {
-        path: failing.clone(),
-        content: Err("device not ready".to_string()),
+    let capture = crate::ui_iced::menu_surface::log_capture::Capture::new();
+    crate::ui_iced::menu_surface::log_capture::with_capture(&capture, || {
+        orch.handle_process_event(ProcessEvent::FileLoaded {
+            path: failing.clone(),
+            content: Err("device not ready".to_string()),
+        });
     });
 
-    // What the guard does get right: it releases the abandoned read's own marker
-    // and leaves the document the user is looking at untouched.
+    // The failure is closed out for the path it is really about, and the document
+    // the user is looking at is left untouched.
     assert_eq!(
         orch.pending_file_load, None,
         "the marker for the returned path must be released so a later \
@@ -2507,44 +2499,54 @@ fn defect_file_loaded_err_for_a_deslected_path_is_dropped_before_the_error_arm()
         Some(viewed.clone()),
         "the document being viewed must stay marked as loaded"
     );
-    // Pinned: the tab of the unreadable file survives the failure.
     assert!(
-        orch.tabs.tabs.contains(&failing),
-        "DEFECT: the stale guard returns before the `Err` arm, so the tab for \
-         the unreadable file is never closed"
+        !orch.tabs.tabs.contains(&failing),
+        "the tab of the unreadable file must be closed"
     );
-    // Pinned: the read failure is reported nowhere the user can see.
-    assert!(
-        !orch
-            .background_manager
-            .lock()
-            .unwrap()
-            .get_logs()
-            .iter()
-            .any(|entry| entry.message.contains("broken.md")),
-        "DEFECT: an unreadable file fails silently — the failure never reaches \
-         the background log with its cause ([NFR-001])"
+    {
+        let logs = orch.background_manager.lock().unwrap();
+        assert!(
+            logs.get_logs()
+                .iter()
+                .any(|entry| entry.message.contains("broken.md")
+                    && entry.message.contains("device not ready")),
+            "an unreadable file must reach the background log with its cause ([NFR-001])"
+        );
+    }
+    let event = capture.with_code("FILE-4014").expect(
+        "a failed read is an application failure and must report an ERROR with a \
+         stable code ([NFR-001], [NFR-004])",
+    );
+    assert_eq!(
+        event.level,
+        tracing::Level::ERROR,
+        "an application failure is an ERROR, got {:?}",
+        event.level
+    );
+    assert_eq!(
+        event.message,
+        format!("Failed to load file {}", failing.display()),
+        "the message must name the file that could not be read"
+    );
+    assert_eq!(
+        event.field("error"),
+        Some("device not ready"),
+        "the underlying cause must be carried verbatim ([NFR-005])"
     );
 }
 
-/// DEFECT (pinned, deliberately NOT fixed): when the failing path *is* the
-/// selected file but a different document is loaded, the `Err` arm throws that
-/// document's content away while still claiming it is loaded — and the re-read
-/// guard then makes the loss permanent.
+/// A failed read discards only the document that *is* the file which failed. When
+/// the failing path is the selected file but a different document is loaded, that
+/// document keeps its body, ToC and pending scroll and `loaded_path` keeps naming
+/// it, so the content on screen and the path claimed to be loaded stay mutually
+/// consistent.
 ///
-/// What the code does: once the user selects the unreadable file the stale guard
-/// lets the `Err` arm through, and it clears `current_markdown`, `current_yaml`,
-/// `toc` and both scroll targets unconditionally while leaving `loaded_path`
-/// pointing at the previously loaded document. `handle_file_selection` only
-/// spawns a read when `loaded_path != selected`, so clicking that document again
-/// cannot bring the text back: the centre panel renders the now-empty
-/// `tabs.current_markdown` until the app restarts.
-///
-/// What it should do: either guard the projection the way the `Ok` arm projects it
-/// (only clear when `loaded_path == path`), or clear `loaded_path` together with
-/// the content so the state never names a document it has just discarded.
+/// Was: the `Err` arm cleared `current_markdown`, `current_yaml`, `toc` and both
+/// scroll targets unconditionally while leaving `loaded_path` on the previously
+/// loaded document — and because `handle_file_selection` only reads when
+/// `loaded_path != selected`, the blanked document could never be brought back.
 #[test]
-fn defect_file_loaded_err_blanks_the_loaded_document_and_keeps_its_loaded_path() {
+fn file_loaded_err_keeps_the_document_on_screen_when_another_path_fails() {
     let mut orch = harness();
     let viewed = PathBuf::from("/lib/viewed.md");
     let failing = PathBuf::from("/lib/broken.md");
@@ -2571,7 +2573,7 @@ fn defect_file_loaded_err_blanks_the_loaded_document_and_keeps_its_loaded_path()
         content: Err("device not ready".to_string()),
     });
 
-    // What the `Err` arm does get right for the path it is really about.
+    // The failure is closed out for the path it is really about.
     assert!(
         !orch.tabs.tabs.contains(&failing),
         "the failing file's own tab must be closed"
@@ -2591,22 +2593,73 @@ fn defect_file_loaded_err_blanks_the_loaded_document_and_keeps_its_loaded_path()
                 && entry.message.contains("device not ready")),
         "the read failure must reach the background log with its cause ([NFR-001])"
     );
-    // Pinned: the document that was on screen is thrown away...
-    assert!(
-        orch.tabs.current_markdown.is_empty(),
-        "DEFECT: the viewed document's body is wiped although its own read \
-         succeeded"
+    // The document that was on screen is untouched — its own read succeeded.
+    assert_eq!(
+        orch.tabs.current_markdown, "# Viewed\n\nStill here",
+        "the viewed document's body must survive a failure on another file"
     );
     assert!(
-        orch.tabs.toc.is_empty() && orch.tabs.scroll_to_header_id.is_none(),
-        "DEFECT: its ToC and pending scroll go with it"
+        !orch.tabs.toc.is_empty() && orch.tabs.scroll_to_header_id.is_some(),
+        "its ToC and pending scroll must survive as well"
     );
-    // ...while the state still claims it is loaded, which is what makes it stuck.
     assert_eq!(
         orch.tabs.loaded_path,
         Some(viewed),
-        "DEFECT: `loaded_path` still names the wiped document, so \
-         `handle_file_selection` refuses to read it again"
+        "`loaded_path` must keep naming the document whose content is still on \
+         screen, never a document whose content was discarded"
+    );
+}
+
+/// The other half of the contract: when the file that failed *is* the document on
+/// screen, its content is discarded together with `loaded_path` — the state never
+/// names a document as loaded while its body is blank.
+#[test]
+fn file_loaded_err_clears_the_document_when_that_file_is_the_loaded_one() {
+    let mut orch = harness();
+    let path = PathBuf::from("/lib/broken.md");
+
+    orch.tabs.open_tab(path.clone());
+    orch.selection.select_file(path.clone());
+    orch.tabs.loaded_path = Some(path.clone());
+    orch.tabs.current_markdown = "# Gone\n\nBody".to_string();
+    orch.tabs.toc = crate::markdown::build_toc(&orch.tabs.current_markdown);
+    orch.tabs.scroll_to_header_id = Some("Gone".to_string());
+    orch.tabs.scroll_to_search = Some("needle".to_string());
+    orch.pending_file_load = Some(path.clone());
+    assert!(
+        !orch.tabs.toc.is_empty(),
+        "the fixture must put the unreadable document on screen"
+    );
+
+    orch.handle_process_event(ProcessEvent::FileLoaded {
+        path: path.clone(),
+        content: Err("device not ready".to_string()),
+    });
+
+    assert_eq!(
+        orch.pending_file_load, None,
+        "the marker for the returned path must be released"
+    );
+    assert!(
+        !orch.tabs.tabs.contains(&path),
+        "the failing file's own tab must be closed"
+    );
+    assert_eq!(
+        orch.selection.selected_file(),
+        None,
+        "the file that failed to load must not stay selected"
+    );
+    assert!(
+        orch.tabs.current_markdown.is_empty() && orch.tabs.toc.is_empty(),
+        "the discarded document must not keep a body or a ToC"
+    );
+    assert_eq!(
+        orch.tabs.loaded_path, None,
+        "`loaded_path` is released together with the content it belongs to"
+    );
+    assert!(
+        orch.tabs.scroll_to_header_id.is_none() && orch.tabs.scroll_to_search.is_none(),
+        "pending scroll targets for a document that is gone must go with it"
     );
 }
 

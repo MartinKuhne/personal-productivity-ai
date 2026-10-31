@@ -73,7 +73,11 @@ pub struct LlmConfig {
     /// API endpoint URL.
     pub api_url: String,
     pub api_key: String,
-    /// Cost for auto-model selection (lower = preferred). Default 0.
+    /// Declared price for auto-model selection (lower = preferred).
+    ///
+    /// An absent price means *unknown*, never free — see [`LlmConfig::cost_rank`].
+    /// [`LlmConfig::get_cost`] still reports `0` for an absent price, but only
+    /// as a display convenience.
     #[serde(default)]
     pub cost: Option<i32>,
     /// Use cases for this model (e.g. "chat", "vision", "embeddings").
@@ -138,6 +142,12 @@ impl LlmConfig {
     /// `(0, cost)` and every unpriced one at `(1, 0)`, so all priced models
     /// sort before all unpriced ones while priced models keep exactly the
     /// relative order `get_cost()` gives them.
+    ///
+    /// Spec drift (RUST-041): `AGENT-005` words this field as "optional
+    /// integer, default 0", which would make an absent price free and let it
+    /// tie with a declared `cost: 0`. Selection deliberately treats it as
+    /// unknown instead; the spec has not been amended (RUST-043), so the
+    /// divergence stands until a product decision resolves it.
     #[must_use]
     pub fn cost_rank(&self) -> (u8, i32) {
         match self.cost {

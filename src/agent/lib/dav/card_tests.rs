@@ -1804,19 +1804,23 @@ fn test_carddav_tools_multi_server_404_suppression() {
 // extract_vcard_uid — remaining branches
 // =====================================================================
 
-/// Apparent bug: `extract_vcard_uid` scans with `line.split_once(':')?`,
-/// so the **first** line that has no colon aborts the whole scan and the
-/// function reports "no UID" even when a UID appears later. The sibling
-/// parser `parse_vcard_properties` handles the same input correctly by
-/// `continue`-ing. Pinned here so a future fix is a deliberate change.
+/// Contract: a line without a colon is not a vCard property, so it is skipped and
+/// the scan keeps going — a `UID` later in the body is still found. (Was: the
+/// first colonless line aborted the whole scan and the function reported "no
+/// UID", unlike the sibling parser `parse_vcard_properties`.)
 #[test]
-fn defect_extract_vcard_uid_aborts_on_first_colonless_line() {
+fn extract_vcard_uid_skips_colonless_lines_and_finds_a_later_uid() {
     let body = "BEGIN:VCARD\r\nGARBAGE WITHOUT COLON\r\nUID:abc-123\r\nEND:VCARD";
-    assert_eq!(extract_vcard_uid(body), None);
+    assert_eq!(extract_vcard_uid(body), Some("abc-123".to_string()));
 
-    // The same body with a well-formed filler line does find the UID.
+    // The same body with a well-formed filler line finds the UID as well.
     let clean = "BEGIN:VCARD\r\nFN:x\r\nUID:abc-123\r\nEND:VCARD";
     assert_eq!(extract_vcard_uid(clean), Some("abc-123".to_string()));
+
+    // Skipping is not inventing: a body without any UID stays `None` even when
+    // every line is unusable.
+    let no_uid = "BEGIN:VCARD\r\nGARBAGE WITHOUT COLON\r\nMORE GARBAGE\r\nEND:VCARD";
+    assert_eq!(extract_vcard_uid(no_uid), None);
 }
 
 // =====================================================================

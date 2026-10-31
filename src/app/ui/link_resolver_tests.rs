@@ -484,6 +484,53 @@ fn test_file_link_file_scheme_prefixes_are_stripped() {
     }
 }
 
+/// The `file:` scheme is case-insensitive (RFC 3986 §6.2.1), so an upper-cased
+/// `FILE://` URI must resolve exactly like its lower-case form.
+///
+/// Was: the prefix was compared byte-for-byte, so `FILE://…` fell through to
+/// workspace-path resolution and a live file was reported as missing.
+#[test]
+fn test_file_scheme_prefix_is_stripped_case_insensitively() {
+    let dir = tempdir().expect("tempdir");
+    let target = touch(dir.path(), "Docs/a.md");
+
+    for (name, prefix) in [
+        ("two slashes, upper case", "FILE://"),
+        ("mixed case, two slashes", "File://"),
+        ("three slashes, upper case", "FILE:///"),
+        ("mixed case, three slashes", "File:///"),
+    ] {
+        let link = format!("{prefix}Docs/a.md");
+        assert_eq!(
+            resolve_link(&link, None, &[], &[dir.path().to_path_buf()]),
+            LinkAction::OpenWorkspaceFile {
+                path: normalize_path(&target),
+                anchor: None,
+            },
+            "[{name}] {link}"
+        );
+    }
+}
+
+/// Edge cases of the pure prefix helper: a target that cannot carry the prefix
+/// is returned verbatim, and a short or multi-byte head never panics.
+#[test]
+fn test_strip_file_scheme_leaves_a_non_prefixed_target_verbatim() {
+    let cases: Vec<(&str, &str, &str)> = vec![
+        ("empty target", "", ""),
+        ("shorter than the prefix", "a.md", "a.md"),
+        ("a single-slash file URI", "file:/C:/x.md", "file:/C:/x.md"),
+        ("a bare drive path", r"C:\notes\x.md", r"C:\notes\x.md"),
+        ("a multi-byte head", "abcdef\u{e9}", "abcdef\u{e9}"),
+        ("the prefix and its root slash", "file:///", ""),
+        ("the bare prefix", "file://", ""),
+    ];
+
+    for (name, input, expected) in cases {
+        assert_eq!(strip_file_scheme(input), expected, "[{name}] {input:?}");
+    }
+}
+
 #[test]
 fn test_file_link_with_an_empty_path_resolves_to_the_parent_directory() {
     let dir = tempdir().expect("tempdir");

@@ -166,6 +166,12 @@ fn test_agent_config_select_chat_model_explicit() {
 
 // ---------------------------------------------------------------------------
 // D2: cost ranking — an unpriced model is unknown, never free
+//
+// Contract: `AgentConfig::model_for_use_case` ranks candidates on
+// `LlmConfig::cost_rank()`, so every explicitly priced model sorts before
+// every unpriced one and only a declared `cost: Some(0)` counts as free.
+// Used to be wrong: `cost: None` was coerced to 0 by `get_cost()`, so a model
+// nobody priced beat an explicitly cheap one and tied with a genuinely free one.
 // ---------------------------------------------------------------------------
 
 /// A model with an explicit (`Some`) or missing (`None`) price for one use case.
