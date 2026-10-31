@@ -90,7 +90,29 @@ fn message_for(items: &[ContextRow], label: &str) -> Message {
 #[test]
 fn tab_title_uses_the_file_name() {
     assert_eq!(tab_title(Path::new("docs/notes.md")), "notes.md");
+    // `/` separates on every platform, so this case holds on the CI runner too.
+    assert_eq!(tab_title(Path::new("/lib/a/b/Todo.MD")), "Todo.MD");
+}
+
+/// A drive-letter path only exposes a file name where drive prefixes exist. Off
+/// Windows `tab_title` follows `std::path`, which sees one file name containing
+/// backslashes - and a backslash is a legal POSIX file-name character, so
+/// splitting on it would truncate real POSIX file names.
+#[cfg(windows)]
+#[test]
+fn tab_title_of_a_windows_path_uses_the_file_name() {
     assert_eq!(tab_title(Path::new("C:\\lib\\a\\b\\Todo.MD")), "Todo.MD");
+}
+
+/// The off-Windows half of the same contract, pinned rather than left untested.
+#[cfg(not(windows))]
+#[test]
+fn tab_title_of_a_windows_path_is_the_whole_name_off_windows() {
+    assert_eq!(
+        tab_title(Path::new("C:\\lib\\a\\b\\Todo.MD")),
+        "C:\\lib\\a\\b\\Todo.MD",
+        "off Windows the whole string is one file name"
+    );
 }
 
 #[test]

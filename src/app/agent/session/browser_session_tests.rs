@@ -343,14 +343,16 @@ fn test_new_from_app_config_falls_back_to_non_empty_default_paths() {
 #[test]
 fn test_new_from_app_config_derives_screenshot_dir_from_first_library() {
     let tmp = tempdir();
-    let mut app = AppConfig::default();
-    app.content_libraries = vec![ContentLibrary {
-        root_folder: tmp.path().display().to_string(),
-        name: "wiki".to_string(),
-        kind: "markdown".to_string(),
-        readonly: true,
-        priority: 0,
-    }];
+    let app = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: tmp.path().display().to_string(),
+            name: "wiki".to_string(),
+            kind: "markdown".to_string(),
+            readonly: true,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
     let session = BrowserSession::new(&app);
     assert_eq!(
         session.config().screenshot_dir,

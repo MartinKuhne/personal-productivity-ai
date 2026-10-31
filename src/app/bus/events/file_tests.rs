@@ -28,10 +28,46 @@ fn test_file_changed_carries_per_file_properties() {
     );
 }
 
+/// A filesystem root has no final component, so its `FileName` ([REQ-334]) is
+/// empty. `/` is a root on every platform and so is the empty path, which is what
+/// makes this assertion portable; a Windows drive root is covered by the
+/// platform-specific sibling below.
 #[test]
 fn test_file_entry_unnamed_path_is_empty_file_name() {
+    let root = FileEntry::from_path(PathBuf::from("/"));
+    assert_eq!(root.file_name, "", "a root path has no file name component");
+
+    let empty = FileEntry::from_path(PathBuf::new());
+    assert_eq!(
+        empty.file_name, "",
+        "an empty path has no file name component"
+    );
+}
+
+/// A drive root is a prefix plus a root dir, so `from_path`'s root rule names it
+/// unnamed - but only where drive prefixes and `\` separators mean what they mean.
+#[cfg(windows)]
+#[test]
+fn test_file_entry_windows_drive_root_is_empty_file_name() {
     let entry = FileEntry::from_path(PathBuf::from("C:\\"));
-    assert_eq!(entry.file_name, "");
+    assert_eq!(
+        entry.file_name, "",
+        "a drive root has no file name component"
+    );
+}
+
+/// Off Windows the same text is an ordinary single-component file name literally
+/// named `C:\`, so the entry keeps it. Pinned rather than skipped: `from_path`
+/// defers to `std::path`, and a backslash is a legal POSIX file-name character,
+/// so normalising it away would truncate real POSIX file names.
+#[cfg(not(windows))]
+#[test]
+fn test_file_entry_keeps_a_windows_style_name_off_windows() {
+    let entry = FileEntry::from_path(PathBuf::from("C:\\"));
+    assert_eq!(
+        entry.file_name, "C:\\",
+        "off Windows `C:\\` is one ordinary file name, not a root"
+    );
 }
 
 #[test]
