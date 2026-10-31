@@ -150,6 +150,26 @@ fn row_label_uses_the_icon_space_name_format() {
     );
 }
 
+#[test]
+fn tree_row_caret_uses_phosphor_without_changing_label_or_width() {
+    for row in [
+        dir_row("Work", "/lib/Work", 0),
+        expanded_dir_row("Work", "/lib/Work", 0),
+    ] {
+        let spans = directory_label_spans(&row);
+        let rendered_label: String = spans.iter().map(|span| span.text.as_ref()).collect();
+
+        assert_eq!(spans[0].text.as_ref(), row_icon(true, row.is_expanded));
+        assert_eq!(spans[0].font, Some(phosphor_font()));
+        assert_eq!(rendered_label, row_label(&row));
+        assert_eq!(
+            row_width(&row, measure),
+            tree_row::content_width(row.depth, measure(&row_label(&row))),
+            "explicit caret font selection must not change auto-fit width"
+        );
+    }
+}
+
 // --- UI-016 width solver ------------------------------------------------
 
 #[test]

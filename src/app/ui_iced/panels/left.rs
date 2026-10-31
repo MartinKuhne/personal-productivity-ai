@@ -583,15 +583,30 @@ pub fn row_icon(is_dir: bool, is_expanded: bool) -> &'static str {
     }
 }
 
-/// The label a row renders: `"<icon> <name>"`.
+/// The plain-text label a row renders: `"<icon> <name>"`.
 ///
-/// The auto-fit pass measures this exact string, so any measurer swapped in
-/// produces the same width for the same rows.
+/// Directory rows build this same sequence as font-aware rich-text spans so
+/// the disclosure glyph can select Phosphor without moving the name. File
+/// rows remain ordinary text widgets. The auto-fit pass measures this exact
+/// string, preserving its existing width behavior for any injected measurer.
 ///
 /// Purity: pure function of `row`.
 #[must_use]
 pub fn row_label(row: &FlatRow) -> String {
     format!("{} {}", row_icon(row.is_dir, row.is_expanded), row.name)
+}
+
+/// A directory row's three visual runs: caret, separating space, and name.
+///
+/// The caret selects the embedded Phosphor face explicitly. Keeping these runs
+/// in one rich-text widget preserves the original single-line alignment and
+/// exact plain-text sequence measured by [`row_label`].
+fn directory_label_spans(row: &FlatRow) -> [iced::widget::text::Span<'_, (), Font>; 3] {
+    [
+        iced::widget::text::Span::new(row_icon(true, row.is_expanded)).font(phosphor_font()),
+        iced::widget::text::Span::new(" "),
+        iced::widget::text::Span::new(row.name.as_str()),
+    ]
 }
 
 /// The pixel width one tree row is laid out at, given the pane's
@@ -1772,10 +1787,19 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
     let paint = row_paint(selected, hovered);
     let row_box = row_box(row.depth, view_model.row_width, selected, hovered);
 
-    let label = text(row_label(row))
-        .size(ROW_TEXT_SIZE)
-        .line_height(tree_row::LABEL_RUNG.iced_line_height())
-        .color(row_label_colour(selected, hovered));
+    let label: Element<'a, Message> = if row.is_dir {
+        iced::widget::text::Rich::<(), Message>::with_spans(directory_label_spans(row))
+            .size(ROW_TEXT_SIZE)
+            .line_height(tree_row::LABEL_RUNG.iced_line_height())
+            .color(row_label_colour(selected, hovered))
+            .into()
+    } else {
+        text(row_label(row))
+            .size(ROW_TEXT_SIZE)
+            .line_height(tree_row::LABEL_RUNG.iced_line_height())
+            .color(row_label_colour(selected, hovered))
+            .into()
+    };
 
     // The `[PDF]` chip rides **after** the label, never before it. The
     // label's left edge is the line every row in the tree aligns to; a
@@ -1821,12 +1845,12 @@ fn tree_row<'a>(row: &'a FlatRow, view_model: &'a LeftPanelViewModel) -> Element
             })
             .into();
 
-            Row::with_children(vec![label.into(), mark])
+            Row::with_children(vec![label, mark])
                 .spacing(PDF_BADGE_GAP)
                 .align_y(Alignment::Center)
                 .into()
         } else {
-            label.into()
+            label
         };
 
     let row_surface = container(content)
